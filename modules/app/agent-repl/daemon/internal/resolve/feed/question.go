@@ -32,18 +32,18 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 	card := &frontendv1.FeedQuestion{}
 	served, known := s.questionAsks[askID]
 	if !known {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!known"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !known", dlog.Context{"function": "feed", "condition": "!known"})
 		served = &questionState{}
 		s.questionAsks[askID] = served
 	}
 	if agent.GetValue() != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "agent.GetValue() != \"\""})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: agent.GetValue() != \"\"", dlog.Context{"function": "feed", "condition": "agent.GetValue() != \"\""})
 		served.agent = agent
 	}
 
 	switch frame := q.GetResult().(type) {
 	case *conversationv1.AgentQuestion_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentQuestion_Start", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Start"})
 		// A SETTLED ASK NEVER REOPENS. The ask is one tool call's, so a start
 		// arriving after its success or failure is a stale restatement — a
 		// history page read before the answer was stored — and redrawing it
@@ -71,7 +71,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		card.State = &frontendv1.FeedQuestion_Open{Open: openState(served)}
 		card.Clock = runningClock(served.startedAtMs)
 	case *conversationv1.AgentQuestion_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentQuestion_Success", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Success"})
 		// AN ABANDONED SETTLE NEVER OVERRIDES ONE ALREADY DRAWN: it says only
 		// that the session holding the ask is gone, and an ask that already
 		// settled was not left waiting on it.
@@ -87,37 +87,37 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		served.delivering = false
 		switch outcome := frame.Success.GetOutcome().(type) {
 		case *conversationv1.AgentQuestionSuccess_Answered:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Answered"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentQuestionSuccess_Answered", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Answered"})
 			card.State = &frontendv1.FeedQuestion_Answered{Answered: &frontendv1.FeedQuestionAnswered{
 				Answers: givenAnswers(frame.Success.GetBatch(), outcome.Answered),
 			}}
 			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		case *conversationv1.AgentQuestionSuccess_Unanswered:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Unanswered"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentQuestionSuccess_Unanswered", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Unanswered"})
 			// NOBODY ANSWERING IS AN ANSWER to a legitimate ask: the agent
 			// proceeded without a choice, so the card is expired rather than
 			// pending forever.
 			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{}}
 			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		case *conversationv1.AgentQuestionSuccess_Abandoned:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Abandoned"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentQuestionSuccess_Abandoned", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Abandoned"})
 			// THE SESSION THAT ASKED IS GONE: nothing can be answered, so the
 			// card is expired rather than standing forever.
 			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{}}
 			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		case *conversationv1.AgentQuestionSuccess_AnsweredRemotely:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_AnsweredRemotely"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentQuestionSuccess_AnsweredRemotely", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_AnsweredRemotely"})
 			// ANSWERED ON claude.ai: settled, with no answers to draw because
 			// the vendor relays none, under the neutral marker a permission
 			// answered there carries.
 			card.State = &frontendv1.FeedQuestion_AnsweredRemotely{AnsweredRemotely: &frontendv1.FeedQuestionAnsweredRemotely{Marker: answeredRemotelyMarker()}}
 			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		default:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "default"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "draw", "branch": "default"})
 			return
 		}
 	case *conversationv1.AgentQuestion_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentQuestion_Failure", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Failure"})
 		served.open = false
 		served.settled = true
 		served.delivering = false

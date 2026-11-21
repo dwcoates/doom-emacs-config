@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -348,7 +349,8 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 	if err := r.recordInterval(context.WithoutCancel(ctx), wsm.TabInterval{
 		Round: round.n, Kind: kind, StartedAt: started,
 	}); err != nil {
-		r.tabRecordFailed(ctx, "daemon.merge.tab_open", "could not record a tab interval", round, err)
+		r.tabRecordFailed(ctx, "daemon.merge.tab_open", logsite.Msg("could not record a tab interval"),
+			logsite.Msg("could not record a tab interval: the run's context ended under the write"), round, err)
 	}
 	r.o.log(ctx, r.ws).Debug("daemon.merge.tab_open", "opened a merge tab",
 		dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round.n})
@@ -417,7 +419,8 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 	if err := r.recordInterval(context.WithoutCancel(ctx), wsm.TabInterval{
 		Round: round.n, Kind: round.kind, StartedAt: round.started, EndedAt: &ended, Outcome: outcome,
 	}); err != nil {
-		r.tabRecordFailed(ctx, "daemon.merge.tab_close", "could not record a tab interval's end; the round stays open", round, err)
+		r.tabRecordFailed(ctx, "daemon.merge.tab_close", logsite.Msg("could not record a tab interval's end; the round stays open"),
+			logsite.Msg("could not record a tab interval's end; the round stays open: the run's context ended under the write"), round, err)
 		return
 	}
 	r.o.deps.Meter.ObserveMergeRound(round.kind, outcome, ended.Sub(round.started))
@@ -447,9 +450,9 @@ func (r *run) recordInterval(ctx context.Context, interval wsm.TabInterval) erro
 // run's context ended under it (the daemon's orderly exit suspending the run,
 // or an abandon), which the store has already recorded as an abandoned write
 // and the run's end settles, and at ERROR when anything else broke it.
-func (r *run) tabRecordFailed(ctx context.Context, op, message string, round tabRound, err error) {
+func (r *run) tabRecordFailed(ctx context.Context, op string, failed, cut logsite.Message, round tabRound, err error) {
 	fields := dlog.Context{"workspace": string(r.ws), "tab": round.kind, "round": round.n}
-	recordFailed(r.o.log(ctx, r.ws), op, message, message+": the run's context ended under the write", fields, err)
+	recordFailed(r.o.log(ctx, r.ws), op, failed, cut, fields, err)
 }
 
 // recordFailed records a step that answered err, at the level its cause
@@ -457,13 +460,13 @@ func (r *run) tabRecordFailed(ctx context.Context, op, message string, round tab
 // abandon, the daemon's exit, a request that ended) and records at INFO as
 // cut; anything else broke it and records at ERROR as failed. The error is
 // stamped on a copy of fields.
-func recordFailed(log dlog.Logger, op, failed, cut string, fields dlog.Context, err error) {
+func recordFailed(log dlog.Logger, op string, failed logsite.Message, cut logsite.Message, fields dlog.Context, err error) {
 	stamped := make(dlog.Context, len(fields)+1)
 	for k, v := range fields {
 		stamped[k] = v
 	}
 	stamped["error"] = err.Error()
-	ctxend.Log(err, log.Info, log.Error, op, cut, failed, stamped)
+	ctxend.Log(err, log, dlog.LevelInfo, op, cut, failed, stamped)
 }
 
 // address stands one tab row as where the merge's OWN turns draw: the prompt

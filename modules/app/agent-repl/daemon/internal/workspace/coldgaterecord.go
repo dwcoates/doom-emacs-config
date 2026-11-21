@@ -84,7 +84,7 @@ func (f *Fleet) retireRecordedGate(ctx context.Context, ws ids.WorkspaceID, why 
 		return fmt.Errorf("retire the recorded cold gate of %q: %w", ws, err)
 	}
 	if cleared {
-		f.logFor(ctx, ws).Info(opColdGate, "retired the workspace's recorded cold gate: "+why, nil)
+		f.logFor(ctx, ws).Info(opColdGate, "retired the workspace's recorded cold gate: {why}", dlog.Context{"why": why})
 	}
 	// THE MERGE QUEUE IS TOLD EVERY RETIREMENT, a record found or not: a gate
 	// whose record could not be written (recordGate) still kept its merge at

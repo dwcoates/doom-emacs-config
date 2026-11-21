@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -367,8 +368,8 @@ func (r *run) untilCommitted(ctx context.Context, tip, targetBranch string, firs
 			reading:   "before its rebase starts again",
 			origin:    conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
 			vars:      r.commitBriefVars(targetBranch),
-			prompted:  "the worktree the merge rebases has uncommitted changes; the workspace is prompted to commit them",
-			committed: "the worktree's changes are committed; the rebase starts again",
+			prompted:  logsite.Msg("the worktree the merge rebases has uncommitted changes; the workspace is prompted to commit them"),
+			committed: logsite.Msg("the worktree's changes are committed; the rebase starts again"),
 		}, &used)
 		if err != nil {
 			return nil, err
@@ -957,8 +958,8 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 		r.settleAgentic()
 		r.settleConflictAttempt(p, cut+" cut this resolution short; it is prompted again")
 		r.closeTab(ctx, round, "restarted")
-		r.o.log(ctx, r.ws).Info(op, cut+" cut the conflict resolution short; it is prompted again and spends no attempt", dlog.Context{
-			"workspace": string(r.ws), "commit": commit.SHA, "close": close.String(), "attempt": r.conflictAttempts, "of": MaxConflictAttempts})
+		r.o.log(ctx, r.ws).Info(op, "{cut} cut the conflict resolution short; it is prompted again and spends no attempt", dlog.Context{
+			"cut": cut, "workspace": string(r.ws), "commit": commit.SHA, "close": close.String(), "attempt": r.conflictAttempts, "of": MaxConflictAttempts})
 		return r.promptConflict(ctx, p, commit, remaining, targetBranch)
 	}
 	why := ""
@@ -1315,8 +1316,8 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 		r.settleAgentic()
 		r.publishFixing(n, round.settled(r.o.nowMS(), cut+" cut this fixing attempt short; it is prompted again"), attempt)
 		r.closeTab(ctx, round, "restarted")
-		r.o.log(ctx, r.ws).Info(op, cut+" cut the fixing attempt short; it is prompted again and spends no attempt", dlog.Context{
-			"workspace": string(r.ws), "attempt": attempt, "of": MaxFixAttempts, "close": close.String()})
+		r.o.log(ctx, r.ws).Info(op, "{cut} cut the fixing attempt short; it is prompted again and spends no attempt", dlog.Context{
+			"cut": cut, "workspace": string(r.ws), "attempt": attempt, "of": MaxFixAttempts, "close": close.String()})
 		return r.promptFix(ctx, attempt, suites, archive, tail, targetBranch)
 	}
 	if line, refused, err := r.machineryChanged(ctx, targetBranch); err != nil {
@@ -1352,8 +1353,8 @@ func (r *run) requireCommitted(ctx context.Context, round tabRound, n, attempt i
 		tab:       TabFixes,
 		fields:    dlog.Context{"attempt": attempt},
 		vars:      r.commitBriefVars(targetBranch),
-		prompted:  "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place",
-		committed: "the fixing attempt's changes are committed; the merge goes on",
+		prompted:  logsite.Msg("the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place"),
+		committed: logsite.Msg("the fixing attempt's changes are committed; the merge goes on"),
 	}, new(int))
 	if err != nil || clean {
 		return nil, err
@@ -1383,7 +1384,7 @@ type commitAsk struct {
 	origin              conversationv1.PromptOrigin
 	tab                 string
 	fields              dlog.Context
-	prompted, committed string
+	prompted, committed logsite.Message
 }
 
 // promptUntilCommitted is THE ONE commit prompt of a merge that met
@@ -1407,7 +1408,7 @@ func (r *run) promptUntilCommitted(ctx context.Context, ask commitAsk, used *int
 		if clean {
 			if prompted {
 				fields["prompts"] = *used
-				r.o.log(ctx, r.ws).Info(ask.op, ask.committed, fields)
+				r.o.log(ctx, r.ws).Log(dlog.LevelInfo, ask.op, ask.committed, fields)
 			}
 			return true, nil
 		}
@@ -1417,7 +1418,7 @@ func (r *run) promptUntilCommitted(ctx context.Context, ask commitAsk, used *int
 		*used++
 		prompted = true
 		fields["prompt"], fields["of"] = *used, MaxCommitPrompts
-		r.o.log(ctx, r.ws).Info(ask.op, ask.prompted, fields)
+		r.o.log(ctx, r.ws).Log(dlog.LevelInfo, ask.op, ask.prompted, fields)
 		vars := map[string]string{"prompt": fmt.Sprintf("%d", *used), "max_prompts": fmt.Sprintf("%d", MaxCommitPrompts)}
 		for k, v := range ask.vars {
 			vars[k] = v

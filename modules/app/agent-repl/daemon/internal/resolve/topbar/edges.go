@@ -1,6 +1,7 @@
 package topbar
 
 import (
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -9,7 +10,7 @@ import (
 // sourceEdge is one record of where a drawn fact now comes from.
 type sourceEdge struct {
 	operation string
-	message   string
+	message   logsite.Message
 	ctx       dlog.Context
 }
 
@@ -30,7 +31,7 @@ func sourceEdges(s *wsState, view *frontendv1.TopbarView) []sourceEdge {
 		s.effortStandingLogged = standing
 		edges = append(edges, sourceEdge{
 			operation: "daemon.topbar.effort_source",
-			message:   "the effort selector's standing changed",
+			message:   logsite.Msg("the effort selector's standing changed"),
 			ctx: dlog.Context{
 				"standing":      standing,
 				"drawn":         view.GetEffortSelector() != nil,
@@ -44,7 +45,7 @@ func sourceEdges(s *wsState, view *frontendv1.TopbarView) []sourceEdge {
 		s.windowSourceLogged = source
 		edges = append(edges, sourceEdge{
 			operation: "daemon.topbar.context_window_source",
-			message:   "the context chip's window size changed source",
+			message:   logsite.Msg("the context chip's window size changed source"),
 			ctx:       dlog.Context{"source": source, "window_tokens": window},
 		})
 	}

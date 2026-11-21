@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"agentrepl/logging/logsite"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/bringup"
@@ -30,8 +31,8 @@ import (
 func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceID, error) {
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		readFailed(c.log, opSweep, "could not list the workspaces to sweep",
-			"the workspace list ended when the drain loop's context was cancelled", nil, err)
+		readFailed(c.log, opSweep, logsite.Msg("could not list the workspaces to sweep"),
+			logsite.Msg("the workspace list ended when the drain loop's context was cancelled"), nil, err)
 		return nil, fmt.Errorf("drain: sweep: %w", err)
 	}
 	queued, err := c.queuedSince(ctx)
@@ -42,8 +43,8 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 	// other reader on the store's one connection, every pass.
 	sessions, err := wsm.SessionsByWorkspace(ctx, c.deps.DB)
 	if err != nil {
-		readFailed(c.log, opSweep, "could not read the workspaces' sessions",
-			"the session read ended when the drain loop's context was cancelled", nil, err)
+		readFailed(c.log, opSweep, logsite.Msg("could not read the workspaces' sessions"),
+			logsite.Msg("the session read ended when the drain loop's context was cancelled"), nil, err)
 		return nil, fmt.Errorf("drain: sweep: %w", err)
 	}
 	var parked []ids.WorkspaceID
@@ -238,7 +239,7 @@ const remoteSpared = "remote control is on; the shim stays up for claude.ai"
 type standDownReason struct {
 	op     string
 	detail string
-	done   string
+	done   logsite.Message
 	// life is the reason the shim lifecycle series counts it under.
 	life shimlife.StandDownReason
 	// trigger names what asked for the stand-down; every record park writes
@@ -284,7 +285,7 @@ func (c *controller) idleReason() standDownReason {
 	return standDownReason{
 		op:      opSweep,
 		detail:  fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
-		done:    "parked a session idle past the cutoff",
+		done:    logsite.Msg("parked a session idle past the cutoff"),
 		life:    shimlife.StandDownHibernate,
 		trigger: triggerIdle,
 		remote:  remoteParks,
@@ -480,7 +481,7 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 				dlog.WithCause(fields, err))
 		}
 	}
-	log.Info(why.op, why.done, fields)
+	log.Log(dlog.LevelInfo, why.op, why.done, fields)
 	return parkDone
 }
 
@@ -519,8 +520,8 @@ func (c *controller) Run(ctx context.Context) error {
 	for {
 		schedule, err := c.deps.DB.DrainSchedule(ctx)
 		if err != nil {
-			readFailed(c.log, opRun, "could not read the standing drain schedule",
-				"the schedule read ended when the drain loop's context was cancelled", nil, err)
+			readFailed(c.log, opRun, logsite.Msg("could not read the standing drain schedule"),
+				logsite.Msg("the schedule read ended when the drain loop's context was cancelled"), nil, err)
 			return fmt.Errorf("drain: run: %w", err)
 		}
 		now := c.deps.Clock.Now()
@@ -564,8 +565,8 @@ func (c *controller) claimFire() bool {
 func (c *controller) queuedSince(ctx context.Context) (map[ids.WorkspaceID]time.Time, error) {
 	queues, err := c.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
-		readFailed(c.log, opSweep, "could not read the merge queues to sweep",
-			"the merge queues' read ended when the drain loop's context was cancelled", nil, err)
+		readFailed(c.log, opSweep, logsite.Msg("could not read the merge queues to sweep"),
+			logsite.Msg("the merge queues' read ended when the drain loop's context was cancelled"), nil, err)
 		return nil, fmt.Errorf("drain: sweep: read the merge queues: %w", err)
 	}
 	since := map[ids.WorkspaceID]time.Time{}

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -13,7 +14,7 @@ import (
 // the row.
 type unclonable struct {
 	operation string
-	message   string
+	message   logsite.Message
 	context   dlog.Context
 }
 
@@ -40,7 +41,7 @@ func (r *resolver) restateRow(s *wsState, at placement, stored *frontendv1.FeedR
 func (r *resolver) snapshotRow(s *wsState, stored *frontendv1.FeedRow, why unclonable) (*frontendv1.FeedRow, bool) {
 	snapshot, ok := proto.Clone(stored).(*frontendv1.FeedRow)
 	if !ok {
-		r.logger(s.id).Error(why.operation, why.message, why.context)
+		r.logger(s.id).Log(dlog.LevelError, why.operation, why.message, why.context)
 		return nil, false
 	}
 	return snapshot, true

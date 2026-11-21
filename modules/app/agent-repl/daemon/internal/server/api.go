@@ -1305,7 +1305,7 @@ func UnlandedArm(log dlog.Logger, rpc, arm, reason string, notFound bool) *conne
 		code = connect.CodeNotFound
 	}
 	if log != nil {
-		log.Warn(opUnlandedArm, message, dlog.Context{
+		log.Warn(opUnlandedArm, "intended arm: {rpc}Error.{arm}: {reason}", dlog.Context{
 			"rpc": rpc, "arm": arm, "reason": reason, "not_found": notFound,
 		})
 	}
@@ -1341,7 +1341,7 @@ func transportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool, 
 		ctx["address"] = address
 	}
 	if log != nil {
-		log.Info(opTransportClosed, message, ctx)
+		log.With(ctx).Info(opTransportClosed, "{rpc} closed the stream: {cause}: {reason}", dlog.Context{"rpc": rpc, "cause": cause, "reason": reason})
 	}
 	err := connect.NewError(code, fmt.Errorf("%s", message))
 	if address != "" {

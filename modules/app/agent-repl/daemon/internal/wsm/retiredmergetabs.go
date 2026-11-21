@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -28,7 +29,7 @@ const (
 
 // dropRetiredMergeTabRows is layout 79's row edit.
 func dropRetiredMergeTabRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
-	return dropDurableRows(ctx, tx, log, "dropped the stored merge tabs of retired kinds", isRetiredMergeTabRow)
+	return dropDurableRows(ctx, tx, log, logsite.Msg("dropped the stored merge tabs of retired kinds"), isRetiredMergeTabRow)
 }
 
 // isRetiredMergeTabRow reports whether RAW is a merge tab row whose kind is

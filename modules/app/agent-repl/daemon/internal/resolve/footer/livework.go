@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -46,7 +47,7 @@ type LiveWorkSet = sessionwatcher.LiveWorkSet
 func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 	var dropped, added, readded, ranAgain []string
 	var minted *mintedFocus
-	r.mutate(ws, "daemon.footer.on_live_work_changed", "the footer took the live-work set",
+	r.mutate(ws, "daemon.footer.on_live_work_changed", logsite.Msg("the footer took the live-work set"),
 		dlog.Context{
 			"agents": len(live.Agents), "shells": len(live.Shells), "monitors": len(live.Monitors),
 		}, func(s *wsState) {

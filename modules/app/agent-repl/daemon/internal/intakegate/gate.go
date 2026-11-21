@@ -67,9 +67,9 @@ func (g *Gate) Admits() bool {
 	g.mu.Unlock()
 	if changed {
 		if open {
-			g.log.Info(g.op, "this daemon serves, so it takes "+g.duty, nil)
+			g.log.Info(g.op, "this daemon serves, so it takes {duty}", dlog.Context{"duty": g.duty})
 		} else {
-			g.log.Info(g.op, "this daemon does not serve (a successor still joining, or a handover in flight), so it leaves "+g.duty+" for the daemon that does", nil)
+			g.log.Info(g.op, "this daemon does not serve (a successor still joining, or a handover in flight), so it leaves {duty} for the daemon that does", dlog.Context{"duty": g.duty})
 		}
 	}
 	return open

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -212,7 +213,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	r.mu.Unlock()
 	for _, edge := range edges {
-		log.Info(edge.operation, edge.message, edge.ctx)
+		log.Log(dlog.LevelInfo, edge.operation, edge.message, edge.ctx)
 	}
 
 	if ctx == nil {
@@ -734,7 +735,7 @@ func (r *resolver) SetAccount(ws ids.WorkspaceID, account Account) {
 // SetLoginDefaultModel moves the login's default model on every strip that
 // spends as it. A strip on another login is republished unchanged.
 func (r *resolver) SetLoginDefaultModel(configDir, model string) {
-	r.eachStrip("daemon.topbar.set_login_default_model", "the topbar took a login's default model",
+	r.eachStrip("daemon.topbar.set_login_default_model", logsite.Msg("the topbar took a login's default model"),
 		dlog.Context{"config_dir": configDir, "model": model},
 		func() {},
 		func(s *wsState) {
@@ -761,7 +762,7 @@ func (r *resolver) RequestSignIn(ws ids.WorkspaceID) {
 		return
 	}
 	var id string
-	r.eachStrip("daemon.topbar.request_sign_in", "the account must sign in again; every strip spending as it asks for the login",
+	r.eachStrip("daemon.topbar.request_sign_in", logsite.Msg("the account must sign in again; every strip spending as it asks for the login"),
 		dlog.Context{"config_dir": root, "workspace": string(ws)},
 		func() {
 			r.signInSeq++
@@ -782,7 +783,7 @@ func (r *resolver) SignInAnswered(configDir string) {
 	if !standing {
 		return
 	}
-	r.eachStrip("daemon.topbar.sign_in_answered", "the account's login flow ended; no strip asks for the login any more",
+	r.eachStrip("daemon.topbar.sign_in_answered", logsite.Msg("the account's login flow ended; no strip asks for the login any more"),
 		dlog.Context{"config_dir": configDir},
 		func() { delete(r.signInRequests, configDir) },
 		func(*wsState) {})
@@ -817,7 +818,7 @@ func (r *resolver) RaiseWarning(ws ids.WorkspaceID, key, line string) {
 // already raised keeps its place in each list and takes the new sentence and
 // overlay.
 func (r *resolver) RaiseDaemonWarning(key string, warning DaemonWarning) {
-	r.eachStrip("daemon.topbar.raise_daemon_warning", "the topbar took a warning the daemon raised on every strip",
+	r.eachStrip("daemon.topbar.raise_daemon_warning", logsite.Msg("the topbar took a warning the daemon raised on every strip"),
 		dlog.Context{"key": key, "line": warning.Line, "overlay": warning.DeployFailed != nil},
 		func() { r.daemonRaised[key] = warning },
 		func(s *wsState) {
@@ -831,7 +832,7 @@ func (r *resolver) RaiseDaemonWarning(key string, warning DaemonWarning) {
 
 // RetractDaemonWarning takes a daemon-scoped condition off every strip.
 func (r *resolver) RetractDaemonWarning(key string) {
-	r.eachStrip("daemon.topbar.retract_daemon_warning", "the topbar retracted a warning the daemon raised on every strip",
+	r.eachStrip("daemon.topbar.retract_daemon_warning", logsite.Msg("the topbar retracted a warning the daemon raised on every strip"),
 		dlog.Context{"key": key},
 		func() { delete(r.daemonRaised, key) },
 		func(s *wsState) { delete(s.daemonRaised, key) })
@@ -841,7 +842,7 @@ func (r *resolver) RetractDaemonWarning(key string) {
 // workspace's accumulation and republishes each one bound to its sink. An
 // unbound accumulation takes the change without a publication, which its
 // binding's first mutation makes.
-func (r *resolver) eachStrip(operation, message string, ctx dlog.Context, daemon func(), apply func(*wsState)) {
+func (r *resolver) eachStrip(operation string, message logsite.Message, ctx dlog.Context, daemon func(), apply func(*wsState)) {
 	r.mu.Lock()
 	daemon()
 	var bound []ids.WorkspaceID
@@ -854,9 +855,9 @@ func (r *resolver) eachStrip(operation, message string, ctx dlog.Context, daemon
 	}
 	r.mu.Unlock()
 	ctx["workspaces"] = len(bound)
-	r.log.Global().Info(operation, message, ctx)
+	r.log.Global().Log(dlog.LevelInfo, operation, message, ctx)
 	for _, ws := range bound {
-		r.mutate(ws, operation, message, dlog.Context{"key": ctx["key"]}, apply)
+		r.mutate(ws, operation, message.Template(), dlog.Context{"key": ctx["key"]}, apply)
 	}
 }
 

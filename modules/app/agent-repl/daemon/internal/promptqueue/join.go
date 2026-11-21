@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -219,7 +220,7 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		// the running turn, and the entry retires as delivered
 		// (alreadyRecorded, without the pop: the running turn's end pops).
 		q.closeRecorded(ctx, sub.WS, sub.Turn, err, opJoin,
-			"the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing joins", log)
+			logsite.Msg("the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing joins"), log)
 		_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
 		return joinGone
 	default:

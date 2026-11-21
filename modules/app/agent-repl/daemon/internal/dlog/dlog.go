@@ -58,6 +58,12 @@ type Logger interface {
 	// addition to the per-record ones. It is how a workspace-bound component
 	// carries its workspace and session identity.
 	With(ctx Context) Logger
+	// logAt records the call written as TEMPLATE in FUNCTION (a normalized
+	// function name) at LEVEL. It is how a wrapper in this package replays a
+	// record it held back, still keyed by the call that wrote it; being
+	// unexported, it also keeps every Logger inside this package, since no
+	// other could name the template type anyway.
+	logAt(level, operation, template, function string, ctx Context)
 }
 
 // Surfaces is the set of sinks the daemon opens at boot and hands to every

@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/sourcescan"
+	"agentrepl/logging/logsite"
 )
 
 // commitLine renders one line of commitFormat output.
@@ -356,7 +357,7 @@ func TestYesNoReadsTheExitCodeAsTheAnswer(t *testing.T) {
 			fake := newFakeGit(t, tc.fixture)
 
 			// Act.
-			got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", "cannot tell", "probe", "x")
+			got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", logsite.Msg("cannot tell"), "probe", "x")
 
 			// Assert.
 			if err != nil || got != tc.want {
@@ -376,7 +377,7 @@ func TestYesNoThatCannotTellFailsAndRecordsOnce(t *testing.T) {
 	newFakeGit(t, fails(128, "fatal: broken\n", "probe"))
 
 	// Act.
-	got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", "cannot tell", "probe", "x")
+	got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", logsite.Msg("cannot tell"), "probe", "x")
 
 	// Assert.
 	var failure *Error

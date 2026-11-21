@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -108,7 +109,7 @@ func (r *resolver) senderHeader(s *wsState, turn ids.TurnID, sender *ids.Workspa
 // headed by a workspace the daemon cannot name until the next replay.
 func (r *resolver) recordedSenders(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]ids.WorkspaceID {
 	return readRecorded(r, ws, turns, r.deps.TurnSenders, "daemon.feed.turn_senders_unreadable",
-		"the replayed turns' recorded senders could not be read; their agent-sent prompts are headed by a workspace the daemon cannot name")
+		logsite.Msg("the replayed turns' recorded senders could not be read; their agent-sent prompts are headed by a workspace the daemon cannot name"))
 }
 
 // THE SENDER'S END OF A PROMPT ITS AGENT SENT ANOTHER WORKSPACE. The daemon

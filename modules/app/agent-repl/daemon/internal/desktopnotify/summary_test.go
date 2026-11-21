@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agentrepl/logging/logsite"
 )
 
 // fakeHeadless answers one scripted response and records the request.
@@ -315,7 +316,7 @@ func TestTheShippedBriefAsksForOneDeclarativeSentence(t *testing.T) {
 func TestSentenceRecordsInItsCallsOwnWords(t *testing.T) {
 	// Arrange
 	call := sentenceCall{brief: BriefSummary, placeholder: "answer", site: "probe_site", what: "probe-summary",
-		unmade: "the probe was not summarized", made: "summarized the probe"}
+		unmade: "the probe was not summarized", made: logsite.Msg("summarized the probe")}
 	tests := []struct {
 		name  string
 		h     *fakeHeadless

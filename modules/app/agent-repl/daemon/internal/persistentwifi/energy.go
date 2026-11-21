@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
@@ -136,14 +137,14 @@ func (c *Controller) holdEnergyLocked(ctx context.Context, energy, trigger strin
 // because is energyWanted's reason. Caller holds mu.
 func (c *Controller) setQuietEnergyLocked(ctx context.Context, energy, trigger, because, target string, outcome func() *agentreplv1.UpdatePersistentWifiModeEnergyMode, targetName string) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 	if energy == "" {
-		c.log.Debug(opEnergy, "the energy mode in use is unread or the machine names none; "+targetName+" is not set",
-			dlog.Context{"trigger": trigger})
+		c.log.Debug(opEnergy, "the energy mode in use is unread or the machine names none; {target} is not set",
+			dlog.Context{"trigger": trigger, "target": targetName})
 		return energyUnchanged()
 	}
 	kept, err := c.keepEnergyLocked(energy, trigger)
 	if err != nil {
 		return c.energyFailedLocked(ctx, trigger,
-			"the energy mode in use could not be recorded, so "+targetName+" was not set; it is tried again on the next beat", err)
+			logsite.Msg("the energy mode in use could not be recorded, so {target} was not set; it is tried again on the next beat"), err, dlog.Context{"target": targetName})
 	}
 	if energy == target {
 		c.energyCause = ""
@@ -151,11 +152,11 @@ func (c *Controller) setQuietEnergyLocked(ctx context.Context, energy, trigger, 
 	}
 	if err := c.host.SetEnergy(ctx, target); err != nil {
 		return c.energyFailedLocked(ctx, trigger,
-			targetName+" could not be set for the lid-closed quiet state; it is tried again on the next beat", err)
+			logsite.Msg("{target} could not be set for the lid-closed quiet state; it is tried again on the next beat"), err, dlog.Context{"target": targetName})
 	}
 	c.energyCause = ""
-	c.log.Info(opEnergy, "the lid-closed quiet state put the machine in "+targetName,
-		dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "was": energy, "recorded": kept})
+	c.log.Info(opEnergy, "the lid-closed quiet state put the machine in {target}",
+		dlog.Context{"target": targetName, "trigger": trigger, "because": because, "power_source": c.powerSource.name(), "was": energy, "recorded": kept})
 	return outcome()
 }
 
@@ -190,14 +191,14 @@ func (c *Controller) keepEnergyLocked(energy, trigger string) (string, error) {
 		c.energyKept = rec.Mode
 		return rec.Mode, nil
 	}
-	kept, why := energy, "the energy mode in use was recorded for the lid-closed quiet state"
+	kept, why := energy, logsite.Msg("the energy mode in use was recorded for the lid-closed quiet state")
 	if c.energyKept != "" {
-		kept, why = c.energyKept, "the recorded energy mode had left its store; it was kept again"
+		kept, why = c.energyKept, logsite.Msg("the recorded energy mode had left its store; it was kept again")
 	}
 	if err := c.energyStore.Save(EnergyRecord{Mode: kept}); err != nil {
 		return "", err
 	}
-	c.log.Info(opEnergy, why, dlog.Context{"trigger": trigger, "recorded": kept})
+	c.log.Log(dlog.LevelInfo, opEnergy, why, dlog.Context{"trigger": trigger, "recorded": kept})
 	c.energyKept = kept
 	return kept, nil
 }
@@ -210,7 +211,7 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger, b
 	rec, ok, err := c.energyStore.Load()
 	if err != nil {
 		return c.energyFailedLocked(ctx, trigger,
-			"the recorded energy mode could not be read; nothing was restored, and it is tried again on the next beat", err)
+			logsite.Msg("the recorded energy mode could not be read; nothing was restored, and it is tried again on the next beat"), err, nil)
 	}
 	kept := c.energyKept
 	if ok {
@@ -230,17 +231,17 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger, b
 			dlog.Context{"trigger": trigger, "recorded": kept})
 		return energyUnchanged()
 	case restoreAlready:
-		c.forgetEnergyLocked(ctx, trigger, because, "the machine already runs the recorded energy mode; the record is forgotten", energy, kept)
+		c.forgetEnergyLocked(ctx, trigger, because, logsite.Msg("the machine already runs the recorded energy mode; the record is forgotten"), energy, kept)
 		return energyUnchanged()
 	case restoreUserMoved:
-		c.forgetEnergyLocked(ctx, trigger, because, "the energy mode was changed after the lid-closed quiet state set Low Power Mode; that choice stands and the recorded mode is forgotten", energy, kept)
+		c.forgetEnergyLocked(ctx, trigger, because, logsite.Msg("the energy mode was changed after the lid-closed quiet state set Low Power Mode; that choice stands and the recorded mode is forgotten"), energy, kept)
 		return energyUnchanged()
 	}
 	if err := c.host.SetEnergy(ctx, kept); err != nil {
 		return c.energyFailedLocked(ctx, trigger,
-			"the recorded energy mode could not be restored; the record is kept and the restore tried again on the next beat", err)
+			logsite.Msg("the recorded energy mode could not be restored; the record is kept and the restore tried again on the next beat"), err, nil)
 	}
-	c.forgetEnergyLocked(ctx, trigger, because, "the recorded energy mode was restored", energy, kept)
+	c.forgetEnergyLocked(ctx, trigger, because, logsite.Msg("the recorded energy mode was restored"), energy, kept)
 	return &agentreplv1.UpdatePersistentWifiModeEnergyMode{
 		Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_Restored{
 			Restored: &agentreplv1.UpdatePersistentWifiModeEnergyModeRestored{PowerMode: kept},
@@ -251,23 +252,27 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger, b
 // forgetEnergyLocked clears the record once nothing is owed on it, recording
 // why at INFO with because, the reason the restore was asked. A record that cannot be cleared stays held, so the next beat
 // forgets it again. Caller holds mu.
-func (c *Controller) forgetEnergyLocked(ctx context.Context, trigger, because, why, energy, kept string) {
+func (c *Controller) forgetEnergyLocked(ctx context.Context, trigger, because string, why logsite.Message, energy, kept string) {
 	if err := c.energyStore.Clear(); err != nil {
-		c.energyFailedLocked(ctx, trigger, "the recorded energy mode could not be cleared; it is cleared again on the next beat", err)
+		c.energyFailedLocked(ctx, trigger, logsite.Msg("the recorded energy mode could not be cleared; it is cleared again on the next beat"), err, nil)
 		return
 	}
 	c.energyKept = ""
 	c.energyCause = ""
-	c.log.Info(opEnergy, why, dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "was": energy, "recorded": kept})
+	c.log.Log(dlog.LevelInfo, opEnergy, why, dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "was": energy, "recorded": kept})
 }
 
 // energyFailedLocked records a failed energy step at ERROR, once per
 // distinct cause (energyCause), and answers its failed outcome. A step its
 // caller abandoned records nothing. Caller holds mu.
-func (c *Controller) energyFailedLocked(ctx context.Context, trigger, msg string, err error) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
+func (c *Controller) energyFailedLocked(ctx context.Context, trigger string, msg logsite.Message, err error, values dlog.Context) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 	if ctx.Err() == nil {
 		if cause := err.Error(); cause != c.energyCause {
-			c.log.Error(opEnergy, msg, dlog.Context{"trigger": trigger, "lid": c.lid.name(), "power_source": c.powerSource.name(), "quiet": c.quiet, "cause": cause})
+			fields := dlog.Context{"trigger": trigger, "lid": c.lid.name(), "power_source": c.powerSource.name(), "quiet": c.quiet, "cause": cause}
+			for k, v := range values {
+				fields[k] = v
+			}
+			c.log.Log(dlog.LevelError, opEnergy, msg, fields)
 			c.energyCause = cause
 		}
 	}

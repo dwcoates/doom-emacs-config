@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -187,7 +188,7 @@ func (r *resolver) answerFaultLine(why string) string {
 // `message` is the ERROR record's explanatory sentence; the footer's line is
 // composed from `why` by answerFaultLine, so the strip stays terse and the log
 // stays readable without either wording the other.
-func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string) {
+func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why string, message logsite.Message) {
 	log := r.logger(s.id)
 	if why != whyStalled && r.answerVerdictRecorded(s, turn, unit, why) {
 		log.Info("daemon.feed.final_answer_verdict_recorded",
@@ -199,7 +200,7 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string)
 	// replayed from history ahead of the response it names, and a response
 	// drawn under another id, read the same from `why` alone.
 	_, drawn := s.answerRows[unit]
-	log.Error("daemon.feed.final_answer_unresolved", message,
+	log.Log(dlog.LevelError, "daemon.feed.final_answer_unresolved", message,
 		dlog.Context{"turn": turn, "unit": unit, "why": why, "plane": s.plane.String(), "answer_row_known": drawn})
 	if s.answerFault != nil && s.answerFault.why == why && s.answerFault.unit == unit {
 		log.Debug("daemon.feed.final_answer_fault_already_standing",
@@ -221,7 +222,7 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string)
 	id, err := r.deps.Faults.OpenFault(context.Background(), wsm.Fault{
 		Workspace: &ws,
 		Kind:      health.KindFinalAnswerUnresolved,
-		Detail:    message,
+		Detail:    message.Template(),
 		Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why, "detail": line},
 		OpenedAt:  openedAt,
 	})
@@ -387,7 +388,7 @@ func (r *resolver) answerStallFired(ws ids.WorkspaceID, unit, turn string, seq u
 	}
 	delete(s.stalls, unit)
 	r.raiseAnswerFault(s, turn, unit, whyStalled,
-		"an open response has had no frame and no terminal for the stall window")
+		logsite.Msg("an open response has had no frame and no terminal for the stall window"))
 }
 
 // turnDrewProse answers whether this turn drew any response prose at all, and

@@ -505,35 +505,16 @@ func (f *fakeWithdrawer) Withdraw() (daemonaddr.Withdrawal, error) {
 	return wd, o.err
 }
 
-// spyLogger records the operation, level and message of each record so a test
-// asserts what a withdrawal wrote.
+// spyLogger captures each record so a test asserts what a withdrawal wrote:
+// a dlog.TestLogger, usable as its zero value.
 type spyLogger struct {
-	records []spyRecord
+	dlog.TestLogger
 }
-
-type spyRecord struct {
-	level, operation, message string
-	context                   dlog.Context
-}
-
-func (s *spyLogger) Debug(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelDebug, operation, message, ctx})
-}
-func (s *spyLogger) Info(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelInfo, operation, message, ctx})
-}
-func (s *spyLogger) Warn(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelWarn, operation, message, ctx})
-}
-func (s *spyLogger) Error(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelError, operation, message, ctx})
-}
-func (s *spyLogger) With(dlog.Context) dlog.Logger { return s }
 
 func (s *spyLogger) message(level string) (string, bool) {
-	for _, r := range s.records {
-		if r.level == level {
-			return r.message, true
+	for _, r := range s.Records() {
+		if r.Level == level {
+			return r.Message, true
 		}
 	}
 	return "", false
@@ -577,7 +558,7 @@ func TestAddrWithdrawalBeginDoesNotMarkAnUntouchedFile(t *testing.T) {
 		t.Fatal("begin marked an early withdrawal it never performed")
 	}
 	if _, ok := log.message(dlog.LevelInfo); ok {
-		t.Fatalf("begin recorded a withdrawal it never performed: %v", log.records)
+		t.Fatalf("begin recorded a withdrawal it never performed: %v", log.Records())
 	}
 }
 
@@ -596,9 +577,9 @@ func TestAddrWithdrawalFinishIsANoOpAfterAnEarlyWithdrawal(t *testing.T) {
 	w.finish()
 
 	// Assert.
-	for _, r := range log.records {
-		if strings.Contains(r.message, "left alone") {
-			t.Fatalf("finish recorded a misleading 'left alone' after an early withdrawal: %v", log.records)
+	for _, r := range log.Records() {
+		if strings.Contains(r.Message, "left alone") {
+			t.Fatalf("finish recorded a misleading 'left alone' after an early withdrawal: %v", log.Records())
 		}
 	}
 	if msg, ok := log.message(dlog.LevelDebug); !ok || !strings.Contains(msg, "already withdrawn") {
@@ -733,17 +714,18 @@ func TestEveryWithdrawalRecordNamesWhatTheFileHeld(t *testing.T) {
 			tt.act(w)
 
 			// Assert
-			var got *spyRecord
-			for i := range log.records {
-				if r := log.records[i]; r.level == tt.level && r.message == tt.message {
-					got = &log.records[i]
+			var got *dlog.Record
+			records := log.Records()
+			for i := range records {
+				if r := records[i]; r.Level == tt.level && r.Message == tt.message {
+					got = &records[i]
 				}
 			}
 			if got == nil {
-				t.Fatalf("records = %+v, want %s %q", log.records, tt.level, tt.message)
+				t.Fatalf("records = %+v, want %s %q", records, tt.level, tt.message)
 			}
-			if !maps.Equal(got.context, tt.want) {
-				t.Fatalf("fields = %v, want %v", got.context, tt.want)
+			if !maps.Equal(got.Context, tt.want) {
+				t.Fatalf("fields = %v, want %v", got.Context, tt.want)
 			}
 		})
 	}
@@ -1874,7 +1856,7 @@ func TestBeginShutdownReportsAFailedDepartureAndStillWithdraws(t *testing.T) {
 	// Assert.
 	msg, ok := log.message(dlog.LevelError)
 	if !ok || !strings.Contains(msg, "serving lock") {
-		t.Fatalf("records = %+v, want an ERROR naming the serving lock", log.records)
+		t.Fatalf("records = %+v, want an ERROR naming the serving lock", log.Records())
 	}
 	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
 		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
@@ -2416,7 +2398,7 @@ func TestBeginShutdownReportsAFailedSharedStopAndStillDeparts(t *testing.T) {
 	// Assert.
 	msg, ok := log.message(dlog.LevelError)
 	if !ok || !strings.Contains(msg, "shared listener") {
-		t.Fatalf("records = %+v, want an ERROR naming the shared listener", log.records)
+		t.Fatalf("records = %+v, want an ERROR naming the shared listener", log.Records())
 	}
 	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
 		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)

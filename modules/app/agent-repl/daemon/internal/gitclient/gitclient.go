@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // fieldSep separates the fields of one commit in a --format template. It is
@@ -185,14 +186,14 @@ func (c *client) BranchExists(ctx context.Context, repoDir, branch string) (bool
 // which is never read as either answer.
 func (c *client) RefExists(ctx context.Context, repoDir, ref string) (bool, error) {
 	const operation = "daemon.gitclient.ref_exists"
-	return c.yesNo(ctx, operation, repoDir, "git could not tell whether a ref names a commit",
+	return c.yesNo(ctx, operation, repoDir, logsite.Msg("git could not tell whether a ref names a commit"),
 		"rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
 }
 
 // yesNo runs a git command whose exit code IS its answer: exit 0 is yes and
 // exit 1 is no. Any other exit is git failing to tell, recorded once at ERROR
 // under operation with cannotTell, and never read as either answer.
-func (c *client) yesNo(ctx context.Context, operation, dir, cannotTell string, args ...string) (bool, error) {
+func (c *client) yesNo(ctx context.Context, operation, dir string, cannotTell logsite.Message, args ...string) (bool, error) {
 	in, err := c.runRaw(ctx, operation, dir, args...)
 	if err != nil {
 		return false, err
@@ -204,7 +205,7 @@ func (c *client) yesNo(ctx context.Context, operation, dir, cannotTell string, a
 		return false, nil
 	}
 	failure := in.fail()
-	c.log.Global().Error(operation, cannotTell, in.logContext())
+	c.log.Global().Log(dlog.LevelError, operation, cannotTell, in.logContext())
 	return false, failure
 }
 
@@ -352,7 +353,7 @@ func lines(out string) []string {
 // which is never read as either answer.
 func (c *client) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
 	const operation = "daemon.gitclient.is_ancestor"
-	return c.yesNo(ctx, operation, dir, "git could not tell whether one commit is an ancestor of another",
+	return c.yesNo(ctx, operation, dir, logsite.Msg("git could not tell whether one commit is an ancestor of another"),
 		"merge-base", "--is-ancestor", ancestor, descendant)
 }
 
@@ -523,7 +524,8 @@ func (c *client) removeAt(ctx context.Context, log dlog.Logger, operation, repoD
 		return nil
 	}
 	if removeFailure != nil {
-		log.Error(operation, "the worktree survived `git "+strings.Join(command[:len(command)-1], " ")+"`", dlog.Context{
+		log.Error(operation, "the worktree survived `git {command}`", dlog.Context{
+			"command":      strings.Join(command[:len(command)-1], " "),
 			"dir":          repoDir,
 			"worktree_dir": worktreeDir,
 			"force":        force,

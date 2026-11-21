@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -298,21 +299,21 @@ func (s *lifecycleSink) OnWatchOpenRefused(ws ids.WorkspaceID, refusal sessionwa
 // OnWatchOpened closes the workspace's standing watch-open refusal: the watch
 // the shim had refused opened after all.
 func (s *lifecycleSink) OnWatchOpened(ws ids.WorkspaceID) {
-	s.closeOnEdge(ws, health.EdgeWatchOpened, "a watch opened before the health reporter existed; its refusal fault was not closed")
+	s.closeOnEdge(ws, health.EdgeWatchOpened, logsite.Msg("a watch opened before the health reporter existed; its refusal fault was not closed"))
 }
 
 // OnLinkRestored closes the workspace's standing link severing: an agent
 // watch opened again under the same live shim, so the link serves again.
 func (s *lifecycleSink) OnLinkRestored(ws ids.WorkspaceID) {
-	s.closeOnEdge(ws, health.EdgeLinkRestored, "a link was restored before the health reporter existed; its severing fault was not closed")
+	s.closeOnEdge(ws, health.EdgeLinkRestored, logsite.Msg("a link was restored before the health reporter existed; its severing fault was not closed"))
 }
 
 // closeOnEdge closes every standing fault of WS that EDGE ends. With no
 // health reporter yet, UNBOUND is recorded at ERROR and nothing closes.
-func (s *lifecycleSink) closeOnEdge(ws ids.WorkspaceID, edge health.Edge, unbound string) {
+func (s *lifecycleSink) closeOnEdge(ws ids.WorkspaceID, edge health.Edge, unbound logsite.Message) {
 	reporter, ok := s.health.reporter()
 	if !ok {
-		s.log.Error("daemon.cmd.lifecycle", unbound, dlog.Context{"workspace": string(ws), "edge": string(edge)})
+		s.log.Log(dlog.LevelError, "daemon.cmd.lifecycle", unbound, dlog.Context{"workspace": string(ws), "edge": string(edge)})
 		return
 	}
 	health.CloseOnEdge(context.Background(), health.ReporterFaults(reporter), s.log, edge,
@@ -416,8 +417,8 @@ func (s *lifecycleSink) OnVendorSessionID(ws ids.WorkspaceID, vendorSessionID st
 // replacement already asked for.
 func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
 	s.replaceShim(ws, rollout.ReasonQueryDied, dlog.Context{},
-		"a session's query died before the rollout controller existed; nothing restarts it",
-		"the session's vendor query died; its shim is replaced through the bounce registry")
+		logsite.Msg("a session's query died before the rollout controller existed; nothing restarts it"),
+		logsite.Msg("the session's vendor query died; its shim is replaced through the bounce registry"))
 }
 
 // OnSkillsChanged replaces a session whose vendor's skill set went stale on
@@ -429,8 +430,8 @@ func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
 // restated level joins the replacement already asked for.
 func (s *lifecycleSink) OnSkillsChanged(ws ids.WorkspaceID, paths []string) {
 	s.replaceShim(ws, rollout.ReasonSkillsChanged, dlog.Context{"paths": paths},
-		"a session's skill set went stale before the rollout controller existed; nothing replaces its shim",
-		"the session's vendor skill set went stale; its shim is replaced at its next idle point through the bounce registry")
+		logsite.Msg("a session's skill set went stale before the rollout controller existed; nothing replaces its shim"),
+		logsite.Msg("the session's vendor skill set went stale; its shim is replaced at its next idle point through the bounce registry"))
 }
 
 // replaceShim asks the bounce registry to replace WS's shim for REASON,
@@ -440,12 +441,12 @@ func (s *lifecycleSink) OnSkillsChanged(ws ids.WorkspaceID, paths []string) {
 // dropped. THE OUTCOME IS RECORDED ONCE, by BounceShim itself under the
 // replacement's reason: nothing here waits on it, and a refusal BounceShim
 // already recorded at ERROR states nothing more.
-func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchReason, fields dlog.Context, unbound, stated string) {
+func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchReason, fields dlog.Context, unbound logsite.Message, stated logsite.Message) {
 	fields["workspace"] = string(ws)
 	fields["reason"] = string(reason)
 	controller, ok := s.builds.controller()
 	if !ok {
-		s.log.Error("daemon.cmd.lifecycle", unbound, fields)
+		s.log.Log(dlog.LevelError, "daemon.cmd.lifecycle", unbound, fields)
 		return
 	}
 	decision, err := controller.BounceShim(context.Background(), ws, reason, false, nil, nil)
@@ -454,7 +455,7 @@ func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchR
 	}
 	fields["bounced_now"] = decision.Now
 	fields["already_pending"] = decision.AlreadyPending
-	s.log.Info("daemon.cmd.lifecycle", stated, fields)
+	s.log.Log(dlog.LevelInfo, "daemon.cmd.lifecycle", stated, fields)
 }
 
 // OnFree is the freeness edge, which a turn's end raises: the queue bounces a

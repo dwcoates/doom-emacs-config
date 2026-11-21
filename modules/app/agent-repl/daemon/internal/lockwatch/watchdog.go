@@ -308,11 +308,11 @@ func (w *Watchdog) recordRelease(f *finding) {
 	if f.ws != "" {
 		ctx["workspace_id"] = string(f.ws)
 	}
-	message := "a stalled lock was released"
 	if f.unwatched {
-		message = "a stalled lock's owner was retired; the lock is no longer watched"
+		f.log.Info(opRelease, "a stalled lock's owner was retired; the lock is no longer watched", ctx)
+		return
 	}
-	f.log.Info(opRelease, message, ctx)
+	f.log.Info(opRelease, "a stalled lock was released", ctx)
 }
 
 // stallsFound counts the stalls in this tick's findings.

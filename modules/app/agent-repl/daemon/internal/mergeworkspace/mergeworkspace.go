@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -241,7 +242,7 @@ func (s *Service) submit(ctx context.Context, requester ids.WorkspaceID, label, 
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(text), key,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
-		failedUnlessStoodDown(ctx, log, log.Error, "handback", "could not submit a detached merge's handback to its requester", fields, err)
+		failedUnlessStoodDown(ctx, log, dlog.LevelError, "handback", logsite.Msg("could not submit a detached merge's handback to its requester"), fields, err)
 		return err
 	}
 	fields["turn"] = string(outcome.Turn)
@@ -297,14 +298,14 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 	// undeployed_landings).
 	landings, err := s.deps.DB.TakeDeployedLandings(ctx, coveredOnly)
 	if err != nil {
-		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not take the landings the deploy carries; its notice names none of them", dlog.Context{"covered_only": coveredOnly}, err)
+		failedUnlessStoodDown(ctx, log, dlog.LevelError, "payment", logsite.Msg("could not take the landings the deploy carries; its notice names none of them"), dlog.Context{"covered_only": coveredOnly}, err)
 	}
 	for _, landing := range landings {
 		end.Landed = append(end.Landed, landing.MergeWorkspace)
 	}
 	owed, err := s.deps.DB.OwedHandBacks(ctx, coveredOnly)
 	if err != nil {
-		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not read the owed landing reports; they stay owed", dlog.Context{"covered_only": coveredOnly}, err)
+		failedUnlessStoodDown(ctx, log, dlog.LevelError, "payment", logsite.Msg("could not read the owed landing reports; they stay owed"), dlog.Context{"covered_only": coveredOnly}, err)
 		return
 	}
 	for _, report := range owed {
@@ -315,7 +316,7 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 			continue
 		}
 		if _, err := s.deps.DB.PayHandBack(ctx, report.MergeWorkspace); err != nil {
-			failedUnlessStoodDown(ctx, log, log.Error, "payment", "handed a landed merge's report back but could not mark it paid; the next payment hands it back again under the same key", fields, err)
+			failedUnlessStoodDown(ctx, log, dlog.LevelError, "payment", logsite.Msg("handed a landed merge's report back but could not mark it paid; the next payment hands it back again under the same key"), fields, err)
 		}
 	}
 }
@@ -495,12 +496,12 @@ func (s *Service) Sweep(ctx context.Context) SweepReport {
 	log := s.deps.Log.Global()
 	all, err := s.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		sweepFailed(ctx, log, log.Error, "could not list the workspaces; no merge workspace is swept", dlog.Context{}, err)
+		sweepFailed(ctx, log, dlog.LevelError, logsite.Msg("could not list the workspaces; no merge workspace is swept"), dlog.Context{}, err)
 		return SweepReport{}
 	}
 	queued, err := s.inAnyQueue(ctx)
 	if err != nil {
-		sweepFailed(ctx, log, log.Error, "could not read the merge queues; no merge workspace is swept", dlog.Context{}, err)
+		sweepFailed(ctx, log, dlog.LevelError, logsite.Msg("could not read the merge queues; no merge workspace is swept"), dlog.Context{}, err)
 		return SweepReport{}
 	}
 	now := s.deps.Now()
@@ -539,7 +540,7 @@ func (s *Service) retireLanded(ctx context.Context, landed []wsm.Workspace, now 
 	lockFields := dlog.Context{"lock": s.deps.WorktreeLock, "requesters": len(landed)}
 	lock, held, err := recordlock.Hold(s.deps.WorktreeLock)
 	if err != nil {
-		sweepFailed(ctx, log, log.Error, "could not take the worktree lock; no idle landed requester is retired", lockFields, err)
+		sweepFailed(ctx, log, dlog.LevelError, logsite.Msg("could not take the worktree lock; no idle landed requester is retired"), lockFields, err)
 		return 0
 	}
 	if !held {
@@ -548,7 +549,7 @@ func (s *Service) retireLanded(ctx context.Context, landed []wsm.Workspace, now 
 	}
 	defer func() {
 		if err := lock.Release(); err != nil {
-			sweepFailed(ctx, log, log.Error, "could not release the worktree lock", lockFields, err)
+			sweepFailed(ctx, log, dlog.LevelError, logsite.Msg("could not release the worktree lock"), lockFields, err)
 		}
 	}()
 	retired := 0
@@ -560,7 +561,7 @@ func (s *Service) retireLanded(ctx context.Context, landed []wsm.Workspace, now 
 		switch {
 		case err != nil:
 			// The verb records its own failures at their site.
-			sweepFailed(ctx, log, log.Debug, "an idle landed requester was not retired; the next sweep tries again", fields, err)
+			sweepFailed(ctx, log, dlog.LevelDebug, logsite.Msg("an idle landed requester was not retired; the next sweep tries again"), fields, err)
 		case kept != "":
 			fields["kept"] = kept
 			log.Debug(op, "kept an idle landed requester", fields)
@@ -578,17 +579,17 @@ func (s *Service) remove(ctx context.Context, ws wsm.Workspace, last, now time.T
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"merge_workspace": string(ws.ID), "requester": string(ws.MergeOf.Requester), "last_active": last, "idle_limit": IdleLimit.String()}
 	if err := s.deps.DB.RecordMergeWorkspaceRemoved(ctx, ws.ID, ws.MergeOf.Requester, now); err != nil {
-		sweepFailed(ctx, log, log.Error, "could not record an idle merge workspace's removal; it is left in place", fields, err)
+		sweepFailed(ctx, log, dlog.LevelError, logsite.Msg("could not record an idle merge workspace's removal; it is left in place"), fields, err)
 		return false
 	}
 	at, _, err := s.deps.DB.MergeWorkspaceRemovedAt(ctx, ws.ID)
 	if err != nil {
-		sweepFailed(ctx, log, log.Error, "could not read back an idle merge workspace's removal; it is left in place", fields, err)
+		sweepFailed(ctx, log, dlog.LevelError, logsite.Msg("could not read back an idle merge workspace's removal; it is left in place"), fields, err)
 		return false
 	}
 	// The nuke records its own failures at their site.
 	if err := s.deps.Workspaces.Nuke(ctx, ws.ID); err != nil {
-		sweepFailed(ctx, log, log.Warn, "an idle merge workspace could not be destroyed; the next sweep tries again", fields, err)
+		sweepFailed(ctx, log, dlog.LevelWarn, logsite.Msg("an idle merge workspace could not be destroyed; the next sweep tries again"), fields, err)
 		return false
 	}
 	// A REQUESTER THAT IS ITSELF GONE has no feed to restate.
@@ -597,7 +598,7 @@ func (s *Service) remove(ctx context.Context, ws wsm.Workspace, last, now time.T
 			log.Info(op, "removed an idle merge workspace whose requester is gone", fields)
 			return true
 		}
-		sweepFailed(ctx, log, log.Error, "could not read an idle merge workspace's requester; its switches still offer the removed workspace", fields, err)
+		sweepFailed(ctx, log, dlog.LevelError, logsite.Msg("could not read an idle merge workspace's requester; its switches still offer the removed workspace"), fields, err)
 		return true
 	}
 	fields["rows"] = s.deps.Feed.MarkMergeWorkspaceRemoved(ws.MergeOf.Requester, ws.ID, at.UnixMilli())
@@ -644,7 +645,7 @@ func lastActive(ws wsm.Workspace) time.Time {
 }
 
 // sweepFailed records a sweep step that failed (failedUnlessStoodDown).
-func sweepFailed(ctx context.Context, log dlog.Logger, level func(operation, message string, ctx dlog.Context), message string, fields dlog.Context, err error) {
+func sweepFailed(ctx context.Context, log dlog.Logger, level string, message logsite.Message, fields dlog.Context, err error) {
 	failedUnlessStoodDown(ctx, log, level, "sweep", message, fields, err)
 }
 
@@ -652,12 +653,12 @@ func sweepFailed(ctx context.Context, log dlog.Logger, level func(operation, mes
 // failed with err at level, unless the daemon was standing down: the step runs
 // on the daemon's lifetime, so a step its end cut short is the orderly exit it
 // is, recorded at INFO with what it left undone.
-func failedUnlessStoodDown(ctx context.Context, log dlog.Logger, level func(operation, message string, ctx dlog.Context), during, message string, fields dlog.Context, err error) {
+func failedUnlessStoodDown(ctx context.Context, log dlog.Logger, level, during string, message logsite.Message, fields dlog.Context, err error) {
 	if standdown.CutShort(ctx, err) {
 		stood := dlog.WithCause(fields, err)
-		stood["left_undone"] = message
-		log.Info(op, "the daemon stood down mid-"+during, stood)
+		stood["left_undone"] = message.Template()
+		log.With(stood).Info(op, "the daemon stood down mid-{during}", dlog.Context{"during": during})
 		return
 	}
-	level(op, message, dlog.WithCause(fields, err))
+	log.Log(level, op, message, dlog.WithCause(fields, err))
 }

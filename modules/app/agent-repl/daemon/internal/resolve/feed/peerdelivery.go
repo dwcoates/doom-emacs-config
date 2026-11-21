@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -177,17 +178,18 @@ func (r *resolver) workspaceName(ws, from ids.WorkspaceID) (string, bool) {
 	return r.namedWorkspace(ws, from, nameRead{
 		failedKey: "daemon.feed.peer_workspace_name_failed",
 		emptyKey:  "daemon.feed.peer_workspace_name_empty",
-		role:      "the workspace at the other end of an agent-to-agent message",
-		outcome:   "its row draws that end unresolved",
+		failed:    logsite.Msg("the workspace at the other end of an agent-to-agent message could not be named; its row draws that end unresolved"),
+		empty:     logsite.Msg("the workspace at the other end of an agent-to-agent message has an empty name; its row draws that end unresolved"),
 	})
 }
 
 // nameRead words the records of one kind of workspace-name read.
 type nameRead struct {
 	failedKey, emptyKey string
-	// role says which workspace was being named, outcome what its row does
-	// without the name.
-	role, outcome string
+	// failed and empty are the records' whole sentences, each the caller's
+	// own: which workspace was being named, and what its row does without
+	// the name.
+	failed, empty logsite.Message
 }
 
 // namedWorkspace is WS's display name, or reports none known. A name that
@@ -200,14 +202,14 @@ func (r *resolver) namedWorkspace(ws, from ids.WorkspaceID, read nameRead) (stri
 	}
 	name, err := r.deps.WorkspaceName(ws)
 	if err != nil {
-		r.logger(from).Error(read.failedKey,
-			read.role+" could not be named; "+read.outcome,
+		r.logger(from).Log(dlog.LevelError, read.failedKey,
+			read.failed,
 			dlog.Context{"other_workspace": string(ws), "cause": err.Error()})
 		return "", false
 	}
 	if name == "" {
-		r.logger(from).Error(read.emptyKey,
-			read.role+" has an empty name; "+read.outcome,
+		r.logger(from).Log(dlog.LevelError, read.emptyKey,
+			read.empty,
 			dlog.Context{"other_workspace": string(ws)})
 		return "", false
 	}

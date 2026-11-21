@@ -777,7 +777,7 @@ func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
 func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 	s, ok := r.workspaces[ws]
 	if ok {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "ok"})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: ok", dlog.Context{"function": "feed", "condition": "ok"})
 		return s
 	}
 	s = newWSState(ws, r.deps.Now())
@@ -884,7 +884,7 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 	key := r.feedKey(s.id, addr)
 	f, ok := s.feeds[key]
 	if ok {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "ok"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: ok", dlog.Context{"function": "feed", "condition": "ok"})
 		return f
 	}
 	f = &feedState{
@@ -992,7 +992,7 @@ func (r *resolver) recordRepublication(s *wsState, f *feedState, id string, rank
 func (r *resolver) feedKey(ws ids.WorkspaceID, addr feedid.Feed) string {
 	id := r.deps.EncodeFeed(ws, addr)
 	if id.GetValue() != "" {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id.GetValue() != \"\""})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: id.GetValue() != \"\"", dlog.Context{"function": "feed", "condition": "id.GetValue() != \"\""})
 		return id.GetValue()
 	}
 	// A feedid implementation that has not landed yet encodes to the empty
@@ -1115,7 +1115,7 @@ func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
 	if at, addressed := r.addressedPlacement(s, turn); addressed {
 		return at
 	}
-	r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "the turn is not addressed"})
+	r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: the turn is not addressed", dlog.Context{"function": "feed", "condition": "the turn is not addressed"})
 	return placement{feed: feedid.Feed{Root: true}}
 }
 
@@ -1137,7 +1137,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		return
 	}
 	if at.parent != nil && row.Parent == nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "at.parent != nil && row.Parent == nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: at.parent != nil && row.Parent == nil", dlog.Context{"function": "feed", "condition": "at.parent != nil && row.Parent == nil"})
 		row.Parent = at.parent
 	}
 	// A ROW IS PUBLISHED AS A SNAPSHOT. A family composes its row from
@@ -1218,7 +1218,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		r.recordRepublication(s, f, id, rank, existing, snapshot)
 	}
 	if !seen {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!seen"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !seen", dlog.Context{"function": "feed", "condition": "!seen"})
 		f.insert(id, rank)
 		r.noteAnswered(s, f, rank, snapshot)
 		// THE ORDERING TRACE. A row's order key is fixed HERE, at first draw,
@@ -1267,7 +1267,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// A ROW OF A MIRRORED TURN IS DRAWN AT THE MIRROR TOO (turnmirror.go).
 	r.mirrorRow(s, snapshot)
 	if !durable {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!durable"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !durable", dlog.Context{"function": "feed", "condition": "!durable"})
 		f.nonDurable[id] = true
 	}
 	if quiet {
@@ -1507,7 +1507,7 @@ func (r *resolver) retireRolledBack(s *wsState, addr feedid.Feed, id string) boo
 func (r *resolver) retireAs(s *wsState, addr feedid.Feed, id string, removed *frontendv1.FeedRowRemoved) bool {
 	f := r.feed(s, addr)
 	if _, ok := f.rows[id]; !ok {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: _, ok := f.rows[id]; !ok", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
 		return false
 	}
 	r.announceMergeRowRetired(s, addr, f.rows[id])
@@ -1530,7 +1530,7 @@ func (r *resolver) retireAs(s *wsState, addr feedid.Feed, id string, removed *fr
 	at := -1
 	for i, existing := range f.order {
 		if existing == id {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "existing == id"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: existing == id", dlog.Context{"function": "feed", "condition": "existing == id"})
 			f.order = append(f.order[:i], f.order[i+1:]...)
 			at = i
 			break
@@ -1579,7 +1579,7 @@ func removalRow(id, key string, removed *frontendv1.FeedRowRemoved) *frontendv1.
 func (r *resolver) rowID(ws ids.WorkspaceID, addr feedid.Feed, key feedid.RowKey) *frontendv1.FeedId {
 	id := r.deps.Encode(feedid.Ref{WS: ws, Feed: addr, Row: key})
 	if id.GetValue() != "" {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id.GetValue() != \"\""})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: id.GetValue() != \"\"", dlog.Context{"function": "feed", "condition": "id.GetValue() != \"\""})
 		return id
 	}
 	// The same fallback the feed key takes, and for the same reason: an
@@ -1599,7 +1599,7 @@ func (r *resolver) SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.Out
 	s.address = addr
 	target := "root"
 	if addr != nil {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "addr != nil"})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: addr != nil", dlog.Context{"function": "feed", "condition": "addr != nil"})
 		target = r.feedKey(ws, addr.Feed)
 	}
 	r.logger(ws).Debug("daemon.feed.output_address",
@@ -1723,7 +1723,7 @@ func (r *resolver) UpsertCommandRefused(ws ids.WorkspaceID, command, reason stri
 		Reason:  &frontendv1.FeedCommandRefusedReason{Text: reason},
 	}
 	if addSupport {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "addSupport"})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: addSupport", dlog.Context{"function": "feed", "condition": "addSupport"})
 		refused.AddSupport = &frontendv1.FeedCommandAddSupportOffer{}
 	}
 	row := &frontendv1.FeedRow{Id: id, Row: &frontendv1.FeedRow_CommandRefused{CommandRefused: refused}}
@@ -1775,7 +1775,7 @@ func (r *resolver) ServedPermission(ws ids.WorkspaceID, ask string) (*conversati
 	s := r.state(ws)
 	state, ok := s.permissionRows[ask]
 	if !ok {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: !ok", dlog.Context{"function": "feed", "condition": "!ok"})
 		return nil, nil, false
 	}
 	return state.agent, s.standing[state.row.GetValue()], true
@@ -1790,7 +1790,7 @@ func (r *resolver) ServedQuestion(ws ids.WorkspaceID, ask string) (*conversation
 	s := r.state(ws)
 	state, ok := s.questionAsks[ask]
 	if !ok {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: !ok", dlog.Context{"function": "feed", "condition": "!ok"})
 		return nil, nil, false
 	}
 	return state.agent, state.batch, true
@@ -1817,7 +1817,7 @@ func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, headFeed fee
 	parentKey := r.feedKey(s.id, headFeed)
 	s.subFeeds[key] = &subFeedHead{row: head, parentFeed: parentKey, label: label}
 	if sub.Agent != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sub.Agent != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: sub.Agent != nil", dlog.Context{"function": "feed", "condition": "sub.Agent != nil"})
 		s.agentFeeds[sub.Agent.GetValue()] = key
 	}
 	r.feed(s, sub)

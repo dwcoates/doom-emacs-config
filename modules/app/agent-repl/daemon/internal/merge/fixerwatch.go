@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -81,7 +82,7 @@ func (o *orchestrator) FixerTurnEnded(ctx context.Context, ws wsm.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
 	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
 	if err != nil {
-		o.mediationFailed(ctx, fields, "could not read whether the workspace whose turn ended is a deploy mediator; its check is settled by the next pass", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("could not read whether the workspace whose turn ended is a deploy mediator; its check is settled by the next pass"), err)
 		return
 	}
 	if !isMediator {
@@ -89,7 +90,7 @@ func (o *orchestrator) FixerTurnEnded(ctx context.Context, ws wsm.WorkspaceID) {
 	}
 	m, err := o.deps.DB.MediationOf(ctx, repo)
 	if err != nil {
-		o.mediationFailed(ctx, withField(fields, "repo", string(repo)), "could not read the mediator's check after its turn ended; it is settled by the next pass", err)
+		o.mediationFailed(ctx, withField(fields, "repo", string(repo)), logsite.Msg("could not read the mediator's check after its turn ended; it is settled by the next pass"), err)
 		return
 	}
 	// A FINISH SENT BACK TO FIX FOR NO DISPATCHED CHECK has no fixer watch

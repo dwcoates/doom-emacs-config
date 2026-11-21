@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -668,7 +669,7 @@ func (w *Watcher) recordReadFailure(ctx context.Context, op, subject string, err
 	f := failureOf(err, w.deps.Clock.Now())
 	began, rerr := record(f)
 	if rerr != nil {
-		w.deps.Log.Error(op, "could not record the "+subject+"'s failed read", dlog.WithCause(dlog.Merge(fields, dlog.Context{"read_error": err.Error()}), rerr))
+		w.deps.Log.With(fields).Error(op, "could not record the {subject}'s failed read", dlog.Context{"subject": subject, "read_error": err.Error(), "cause": rerr.Error()})
 		return
 	}
 	if f.Kind == wsm.PullRequestFailureUnauthorized {
@@ -681,7 +682,7 @@ func (w *Watcher) recordReadFailure(ctx context.Context, op, subject string, err
 		return
 	}
 	// The leaf recorded a GitHub failure itself; this records what it cost.
-	w.deps.Log.Info(op, "the "+subject+" could not be read; its subscriptions are failing, and no subscriber is told", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began), "cause": err.Error()}))
+	w.deps.Log.With(fields).Info(op, "the {subject} could not be read; its subscriptions are failing, and no subscriber is told", dlog.Context{"subject": subject, "kind": string(f.Kind), "began": len(began), "cause": err.Error()})
 }
 
 // credentialRejectedSentence is the one sentence a subscriber is owed when
@@ -735,7 +736,7 @@ func deliverKind[T any](ctx context.Context, w *Watcher, prompts prompthandler.S
 		return false
 	}
 	if err != nil {
-		w.deps.Log.Error(opNotice, "could not read the owed "+noun+" notices; none is told this tick", dlog.WithCause(nil, err))
+		w.deps.Log.Error(opNotice, "could not read the owed {noun} notices; none is told this tick", dlog.Context{"noun": noun, "cause": err.Error()})
 		return false
 	}
 	for _, o := range owed {
@@ -784,14 +785,14 @@ func pullRequestNotice(store Store, o wsm.PullRequestOwed) owedNotice {
 
 // deliver submits N to its subscriber and records what was submitted.
 func (w *Watcher) deliver(ctx context.Context, prompts prompthandler.Submitter, n owedNotice) {
-	fields := dlog.Merge(n.fields, dlog.Context{"pending": len(n.pending)})
+	fields := dlog.Merge(n.fields, dlog.Context{"pending": len(n.pending), "noun": n.noun})
 	prev := untoldnotice.Notice{Turn: n.turn, Sentences: n.sentences}
 	carried := untoldnotice.Carried(ctx, w.deps.Holds, w.deps.Log, opNotice, n.subscriber, prev, n.turn != "" || len(n.sentences) > 0, fields)
 	sentences := append(append([]string{}, carried...), n.pending...)
 	fields["sentences"] = len(sentences)
 	turn, failure, err := w.submit(ctx, prompts, n, sentences)
 	if err != nil {
-		w.deps.Log.Error(opNotice, failure, dlog.WithCause(fields, err))
+		w.deps.Log.Log(dlog.LevelError, opNotice, failure, dlog.WithCause(fields, err))
 		// What the superseded notice said is kept to be said again; the
 		// pending sentences stay pending for the next tick.
 		if len(carried) > 0 {
@@ -805,12 +806,12 @@ func (w *Watcher) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 		w.deps.Log.Error(opNotice, "could not record the submitted notice; its sentences may be told again", dlog.WithCause(fields, err))
 		return
 	}
-	w.deps.Log.Info(opNotice, "told a subscriber about its "+n.subject, dlog.Merge(fields, dlog.Context{"turn": string(turn)}))
+	w.deps.Log.With(fields).Info(opNotice, "told a subscriber about its {subject}", dlog.Context{"turn": string(turn), "subject": n.subject})
 }
 
 // submit composes and submits one notice, answering its turn, or the record a
 // failure is written with and why.
-func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, n owedNotice, sentences []string) (ids.TurnID, string, error) {
+func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, n owedNotice, sentences []string) (ids.TurnID, logsite.Message, error) {
 	turn, err := briefprompt.Composer{Briefs: w.deps.Briefs, MintKey: w.deps.MintKey, Meter: w.deps.Notices}.Submit(ctx, prompts, n.subscriber, n.brief, map[string]string{
 		"label":    n.label,
 		"activity": untoldnotice.Sentences(sentences),
@@ -818,11 +819,11 @@ func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, n
 	}, n.brief, n.origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
-		return "", "could not compose a " + n.noun + " notice; the subscriber is told on a later tick", err
+		return "", logsite.Msg("could not compose a {noun} notice; the subscriber is told on a later tick"), err
 	case briefprompt.StepMint:
-		return "", "could not mint a " + n.noun + " notice's idempotency key; the subscriber is told on a later tick", err
+		return "", logsite.Msg("could not mint a {noun} notice's idempotency key; the subscriber is told on a later tick"), err
 	case briefprompt.StepSubmit:
-		return "", "could not submit a " + n.noun + " notice to its subscriber; it is told on a later tick", err
+		return "", logsite.Msg("could not submit a {noun} notice to its subscriber; it is told on a later tick"), err
 	}
-	return turn, "", nil
+	return turn, logsite.Message{}, nil
 }

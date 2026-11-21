@@ -20,13 +20,10 @@ func startRuntimeProfiling(log dlog.Logger, level profiling.LevelWindow, getenv 
 	return stop, nil
 }
 
-// recordProfilingEvent records one profiling event as profiling.Describe words
-// it, under the daemon's namespace.
+// recordProfilingEvent records one profiling event as profiling.Describe
+// words it (its operation, level, message and fields), under the daemon's
+// namespace.
 func recordProfilingEvent(log dlog.Logger, e profiling.Event) {
 	d := profiling.Describe("daemon", e)
-	if d.Level == dlog.LevelError {
-		log.Error("daemon."+d.Operation, d.Message, dlog.Context(d.Context()))
-		return
-	}
-	log.Info("daemon."+d.Operation, d.Message, dlog.Context(d.Context()))
+	log.Log(d.Level, "daemon."+d.Operation, d.Message, dlog.Context(d.Context()))
 }

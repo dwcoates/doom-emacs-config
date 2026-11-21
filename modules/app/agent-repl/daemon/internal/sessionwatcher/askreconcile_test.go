@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"google.golang.org/protobuf/proto"
@@ -236,5 +237,5 @@ func TestSettleAbandonedAskPanicsOnAnAskOfNeitherKind(t *testing.T) {
 	// Act
 	h.w.mu.Lock()
 	defer h.w.mu.Unlock()
-	h.w.settleAbandonedAskLocked(&conversationv1.SessionOpenAsk{}, "op", "msg")
+	h.w.settleAbandonedAskLocked(&conversationv1.SessionOpenAsk{}, "op", logsite.Msg("msg"))
 }

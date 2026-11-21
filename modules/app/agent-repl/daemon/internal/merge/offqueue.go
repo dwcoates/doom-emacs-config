@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
@@ -238,7 +239,7 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 	fields["cause"] = rec.Cause
 	if req.Version != nil && !rec.Adopted {
 		refusal := refuse(ArmVersionAlreadyRecorded, ws, "the request recorded its own version increment, which a requeue keeps")
-		logRefusal(log, op, "refused a requeue that would change a recorded version increment", fields, refusal)
+		logRefusal(log, op, logsite.Msg("refused a requeue that would change a recorded version increment"), fields, refusal)
 		return Requeued{}, refusal
 	}
 	branch := requestBranch(record, rec.Source)
@@ -251,7 +252,7 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 	if !exists {
 		refusal := refuse(ArmBranchGone, ws, "no branch %q exists in the repository", branch)
 		refusal.Fields = map[string]any{"branch": branch}
-		logRefusal(log, op, "refused a requeue whose branch is gone", fields, refusal)
+		logRefusal(log, op, logsite.Msg("refused a requeue whose branch is gone"), fields, refusal)
 		return Requeued{}, refusal
 	}
 	source := rec.Source
@@ -265,14 +266,14 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 	deploy, err := o.requestDeploy(ctx, record, asked)
 	if err != nil {
 		if _, refused := Refused(err); refused {
-			logRefusal(log, op, "refused a requeue for its repository's deploy config", fields, err)
+			logRefusal(log, op, logsite.Msg("refused a requeue for its repository's deploy config"), fields, err)
 		} else {
 			log.Error(op, "could not read the repository's deploy config", withField(fields, "error", err.Error()))
 		}
 		return Requeued{}, err
 	}
 	if err := checkVersion(ws, asked, deploy); err != nil {
-		logRefusal(log, op, "refused a requeue for its version increment", fields, err)
+		logRefusal(log, op, logsite.Msg("refused a requeue for its version increment"), fields, err)
 		return Requeued{}, err
 	}
 	place := wsm.RequeuePlacement{Front: req.Front}
@@ -280,7 +281,7 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 		behind, err := o.placeBehind(ctx, record, Request{Workspace: ws, PlaceBehind: req.PlaceBehind})
 		if err != nil {
 			if _, refused := Refused(err); refused {
-				logRefusal(log, op, "refused a requeue placed behind a merge not in its queue", fields, err)
+				logRefusal(log, op, logsite.Msg("refused a requeue placed behind a merge not in its queue"), fields, err)
 			} else {
 				log.Error(op, "could not read the queue a requeue is placed in", withField(fields, "error", err.Error()))
 			}
@@ -332,7 +333,7 @@ func (o *orchestrator) offQueueRecord(ctx context.Context, op string, log dlog.L
 		if record.Closure != nil && record.Closure.By == wsm.CloseByMerge {
 			refusal = refuse(ArmAlreadyLanded, ws, "the merge landed, and its landing closed its workspace")
 		}
-		logRefusal(log, op, "refused a closed workspace's merge", fields, refusal)
+		logRefusal(log, op, logsite.Msg("refused a closed workspace's merge"), fields, refusal)
 		return wsm.OffQueueMerge{}, refusal
 	}
 	rec, found, err := o.deps.DB.OffQueueMergeOf(ctx, ws)
@@ -345,7 +346,7 @@ func (o *orchestrator) offQueueRecord(ctx context.Context, op string, log dlog.L
 	}
 	if _, err := o.queueOf(ctx, ws); err == nil {
 		refusal := refuse(ArmStillQueued, ws, "the merge stands in its queue")
-		logRefusal(log, op, "refused a merge that stands in its queue", fields, refusal)
+		logRefusal(log, op, logsite.Msg("refused a merge that stands in its queue"), fields, refusal)
 		return wsm.OffQueueMerge{}, refusal
 	} else if _, refused := Refused(err); !refused {
 		log.Error(op, "could not read whether the merge stands in its queue", withField(fields, "error", err.Error()))
@@ -355,7 +356,7 @@ func (o *orchestrator) offQueueRecord(ctx context.Context, op string, log dlog.L
 	if record.MergedAt != nil {
 		refusal = refuse(ArmAlreadyLanded, ws, "the merge landed")
 	}
-	logRefusal(log, op, "refused a workspace whose merge holds no request", fields, refusal)
+	logRefusal(log, op, logsite.Msg("refused a workspace whose merge holds no request"), fields, refusal)
 	return wsm.OffQueueMerge{}, refusal
 }
 
@@ -387,7 +388,7 @@ func (o *orchestrator) Discard(ctx context.Context, ws ids.WorkspaceID, close fu
 	// request it held.
 	if record.Closed {
 		refusal := refuse(ArmUnknownMerge, ws, "the merge's workspace is closed, and a closed workspace holds no request")
-		logRefusal(log, op, "refused a discard of a closed workspace's merge", fields, refusal)
+		logRefusal(log, op, logsite.Msg("refused a discard of a closed workspace's merge"), fields, refusal)
 		return Discarded{}, refusal
 	}
 	rec, err := o.offQueueRecord(ctx, op, log, record, fields)
@@ -413,7 +414,7 @@ func (o *orchestrator) Discard(ctx context.Context, ws ids.WorkspaceID, close fu
 	}
 	if err := close(ctx); err != nil {
 		if _, refused := Refused(err); refused {
-			logRefusal(log, op, "the merge workspace's close was refused; the request stands", fields, err)
+			logRefusal(log, op, logsite.Msg("the merge workspace's close was refused; the request stands"), fields, err)
 		} else {
 			log.Error(op, "could not close the discarded async merge's merge workspace; the request stands", withField(fields, "error", err.Error()))
 		}

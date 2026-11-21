@@ -3,6 +3,7 @@ package footer
 import (
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -82,7 +83,7 @@ func (s *wsState) recordQueryDeath(died *conversationv1.SessionQueryDied) {
 // turn — the very call the roster takes beside it — and raises the turn fault
 // that close and the recorded failure resolve to (ladder.ResolveTurnFault).
 func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how wsm.TurnClose) {
-	r.mutate(ws, "daemon.footer.set_turn_ended", "the footer took the turn's close",
+	r.mutate(ws, "daemon.footer.set_turn_ended", logsite.Msg("the footer took the turn's close"),
 		dlog.Context{"close": how.String()}, func(s *wsState) {
 			log := r.logOf(ws, s)
 			ending := s.pendingEnding
@@ -176,7 +177,7 @@ func (s *wsState) turnEndedLine() *frontendv1.FooterStatusActivityTurnEnded {
 // status returns to whatever the rest of the workspace resolves to — `idle`
 // for a session that is simply waiting. Every other fault stands.
 func (r *resolver) OnSignedIn(ws ids.WorkspaceID) {
-	r.mutate(ws, "daemon.footer.on_signed_in", "the footer took a completed sign-in",
+	r.mutate(ws, "daemon.footer.on_signed_in", logsite.Msg("the footer took a completed sign-in"),
 		nil, func(s *wsState) {
 			log := r.logOf(ws, s)
 			fields := dlog.Context{

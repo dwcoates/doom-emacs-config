@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -204,22 +205,22 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	defer o.rosterQueue.mu.Unlock()
 	entries, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read the merge queue, so the roster is not told the queue",
-			"the merge queue's read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read the merge queue, so the roster is not told the queue"),
+			logsite.Msg("the merge queue's read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo)}, err)
 		return
 	}
 	pause, err := o.deps.DB.MergeQueuePause(ctx, repo)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read whether the merge queue is paused, so the roster is not told the queue",
-			"the pause's read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read whether the merge queue is paused, so the roster is not told the queue"),
+			logsite.Msg("the pause's read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
 	requesters, err := o.asyncRequesters(ctx, repo, entries)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not resolve the requester of a merge workspace on the queue, so the roster is not told the queue",
-			"the requesters' read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not resolve the requester of a merge workspace on the queue, so the roster is not told the queue"),
+			logsite.Msg("the requesters' read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
@@ -227,8 +228,8 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	// TAKES (deployHoldOf), so the paused drawing and the hold never disagree.
 	hold, err := o.deployHoldOf(ctx, repo)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read whether the deploy check holds the merge queue, so the roster is not told the queue",
-			"the deploy check hold's read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read whether the deploy check holds the merge queue, so the roster is not told the queue"),
+			logsite.Msg("the deploy check hold's read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
@@ -240,15 +241,15 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	// the repository's status and every stage of the head alike.
 	queueHeld, err := o.queueHeld(ctx, repo)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read whether the merge queue is held, so the roster is not told the queue",
-			"the hold's read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read whether the merge queue is held, so the roster is not told the queue"),
+			logsite.Msg("the hold's read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
 	heldRounds, err := o.deps.DB.HeldMergeRounds(ctx)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read which merges are held, so the roster is not told the queue",
-			"the holds' read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read which merges are held, so the roster is not told the queue"),
+			logsite.Msg("the holds' read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
@@ -259,24 +260,24 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	o.republishBubbles(ctx, entries, queueHeld, held)
 	line, err := o.rosterLine(ctx, inLine(entries), true, queueHeld)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges in line as the roster draws them, so the roster is not told the queue",
-			"the line's read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not resolve the merges in line as the roster draws them, so the roster is not told the queue"),
+			logsite.Msg("the line's read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
 	queue.Line = line
 	remediating, err := o.rosterLine(ctx, outOfLine(entries), false, queueHeld)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges remediating out of line as the roster draws them, so the roster is not told the queue",
-			"the remediating merges' read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not resolve the merges remediating out of line as the roster draws them, so the roster is not told the queue"),
+			logsite.Msg("the remediating merges' read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
 	queue.Remediating = remediating
 	mediation, err := o.rosterMediation(ctx, repo)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read the deploy mediation the queue waits on, so the roster is not told the queue",
-			"the mediation's read ended when its context was cancelled; the roster is not told the queue",
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read the deploy mediation the queue waits on, so the roster is not told the queue"),
+			logsite.Msg("the mediation's read ended when its context was cancelled; the roster is not told the queue"),
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
@@ -314,8 +315,8 @@ func (o *orchestrator) publishOffQueueLocked(ctx context.Context) {
 	const op = "daemon.merge.roster_off_queue"
 	records, err := o.deps.DB.OffQueueMerges(ctx)
 	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read the merges off their queues, so the roster is not told them",
-			"the read of the merges off their queues ended when its context was cancelled; the roster is not told them", dlog.Context{}, err)
+		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read the merges off their queues, so the roster is not told them"),
+			logsite.Msg("the read of the merges off their queues ended when its context was cancelled; the roster is not told them"), dlog.Context{}, err)
 		return
 	}
 	// A MERGE NOT JUDGED YET IS DRAWN, and judged off this lock
@@ -330,8 +331,8 @@ func (o *orchestrator) publishOffQueueLocked(ctx context.Context) {
 		}
 		ws, err := o.deps.DB.Workspace(ctx, record.Workspace)
 		if err != nil {
-			recordFailed(o.deps.Log.Global(), op, "could not read the workspace of a merge off its queue, so the roster is not told them",
-				"the workspace read ended when its context was cancelled; the roster is not told the merges off their queues",
+			recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read the workspace of a merge off its queue, so the roster is not told them"),
+				logsite.Msg("the workspace read ended when its context was cancelled; the roster is not told the merges off their queues"),
 				dlog.Context{"workspace": string(record.Workspace)}, err)
 			return
 		}

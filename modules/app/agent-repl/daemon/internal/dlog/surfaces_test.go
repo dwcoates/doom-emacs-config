@@ -18,6 +18,7 @@ import (
 
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/sourcescan"
+	"agentrepl/logging/logsite"
 )
 
 // mintedIDWidth is wsm.IDLength. It is spelled out rather than imported: wsm
@@ -2404,9 +2405,7 @@ func TestWorkspaceRecordLandsInTheSinkItsLevelPicks(t *testing.T) {
 			}
 
 			// Act.
-			map[string]func(string, string, Context){
-				LevelInfo: log.Info, LevelWarn: log.Warn, LevelError: log.Error,
-			}[tt.level]("daemon.test.record", "a record", nil)
+			log.Log(tt.level, "daemon.test.record", logsite.Msg("a record"), nil)
 
 			// Assert.
 			if !hasOperation(readFileRecords(t, filepath.Join(dir, ".claude", "emacs", tt.sink+".log")), "daemon.test.record") {
@@ -2532,4 +2531,28 @@ func TestAWarningAfterTheWorkspaceDirectoryWentStaysTheWorkspaces(t *testing.T) 
 	if hasOperation(readRecords(t, logging.WarningsPath(runLogPath)), "daemon.test.after_removal") {
 		t.Fatalf("the warning fell back to the central sink")
 	}
+}
+
+func TestClientLogPersistsTheClientsSiteAndTemplate(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	err := s.ClientLog(dir, ClientRecord{ClientKind: RuntimeWebapp, Level: LevelInfo, Operation: "webapp.test.sited",
+		Message: "drew 3 rows", Site: "0123456789ab", Template: "drew {rows} rows", Context: Context{"rows": 3}})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+	for _, rec := range workspaceRecords(t, dir, "webapp") {
+		if rec["operation"] == "webapp.test.sited" {
+			if rec["site"] != "0123456789ab" || rec["template"] != "drew {rows} rows" || rec["message"] != "drew 3 rows" {
+				t.Fatalf("record = %v, want the client's site, template and rendered message as sent", rec)
+			}
+			return
+		}
+	}
+	t.Fatal("the forwarded record was not persisted")
 }

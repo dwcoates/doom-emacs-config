@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
@@ -1424,7 +1425,7 @@ func TestReadFailedLevelsByTheCause(t *testing.T) {
 			fields := dlog.Context{"workspace": "ws-1"}
 
 			// Act
-			readFailed(h.c.log, "daemon.drain.test", "failed", "cut", fields, tt.err)
+			readFailed(h.c.log, "daemon.drain.test", logsite.Msg("failed"), logsite.Msg("cut"), fields, tt.err)
 
 			// Assert
 			got := records(h.log, "daemon.drain.test")

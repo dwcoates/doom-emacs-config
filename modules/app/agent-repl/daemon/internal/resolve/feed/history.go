@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -241,16 +242,16 @@ func (r *resolver) reportUnstampedReplay(s *wsState, agent *conversationv1.Agent
 func (r *resolver) replayEntry(s *wsState, agent *conversationv1.AgentId, entry *conversationv1.HistoryEntry, at *conversationv1.HistoryPointer) {
 	switch arm := entry.GetEntry().(type) {
 	case *conversationv1.HistoryEntry_UserPrompt:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_UserPrompt"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.HistoryEntry_UserPrompt", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_UserPrompt"})
 		r.drawAgentPrompt(s, agent, arm.UserPrompt)
 	case *conversationv1.HistoryEntry_AgentFrame:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_AgentFrame"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.HistoryEntry_AgentFrame", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_AgentFrame"})
 		r.replayFrame(s, arm.AgentFrame, at)
 	case *conversationv1.HistoryEntry_PeerMessage:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_PeerMessage"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.HistoryEntry_PeerMessage", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_PeerMessage"})
 		r.drawPeerMessage(s, arm.PeerMessage)
 	default:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "default"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "replayEntry", "branch": "default"})
 		r.logger(s.id).Warn("daemon.feed.history_entry_unset",
 			"a replayed history entry carried no arm",
 			dlog.Context{"agent": agent.GetValue()})
@@ -266,46 +267,46 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 	case *conversationv1.AgentFrame_Update:
 		switch update := arm.Update.GetUpdate().(type) {
 		case *conversationv1.AgentUpdate_Activity:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Activity"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_Activity", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Activity"})
 			r.drawActivity(s, agent, update.Activity, nil)
 		case *conversationv1.AgentUpdate_Question:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Question"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_Question", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Question"})
 			r.drawQuestion(s, agent, update.Question)
 		case *conversationv1.AgentUpdate_Permission:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Permission"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_Permission", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_Permission"})
 			r.drawPermission(s, agent, update.Permission)
 		case *conversationv1.AgentUpdate_ContextCut:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ContextCut"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_ContextCut", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ContextCut"})
 			r.drawContextCut(s, agent, update.ContextCut, at)
 		case *conversationv1.AgentUpdate_ResponseRevision:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ResponseRevision"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_ResponseRevision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ResponseRevision"})
 			// A REPLAYED REVISION IS DRAWN WHOLE: it was typed out when it
 			// landed, and a reload re-reads what the bubble says now.
 			r.applyRevision(s, agent, update.ResponseRevision, false)
 		case *conversationv1.AgentUpdate_ApiError:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ApiError"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentUpdate_ApiError", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ApiError"})
 			// Mid-turn evidence, replayed as evidence: it was never a terminal
 			// and replaying it as one would invent a turn ending. The wording
 			// is the live sink's own, so a replayed turn reads exactly as the
 			// watched one did.
 			r.addEvidence(s, apiErrorEvidence(update.ApiError))
 		default:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "default"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "replayFrame", "branch": "default"})
 			r.logger(s.id).Warn("daemon.feed.history_update_unset",
 				"a replayed update carried no arm",
 				dlog.Context{"agent": agent.GetValue()})
 		}
 	case *conversationv1.AgentFrame_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentFrame_Success", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_Success"})
 		r.replayTerminal(s, agent, arm.Success, nil)
 	case *conversationv1.AgentFrame_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentFrame_Failure", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_Failure"})
 		r.replayTerminal(s, agent, nil, arm.Failure)
 	case *conversationv1.AgentFrame_DetachedWork:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_DetachedWork"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentFrame_DetachedWork", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_DetachedWork"})
 		r.drawDetachedWork(s, agent, arm.DetachedWork, detachmentSourceOf(s.plane))
 	default:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "default"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default (an unknown frame arm)", dlog.Context{"function": "replayFrame", "branch": "default"})
 		r.logger(s.id).Warn("daemon.feed.history_frame_unset",
 			"a replayed frame carried no arm",
 			dlog.Context{"agent": agent.GetValue()})
@@ -405,13 +406,13 @@ func boundaryName(page *conversationv1.HistoryPage) string {
 // draws, without the fact. It is the one body every replayed per-turn read
 // shares (recordedAddresses, recordedMirrors, recordedSenders,
 // recordedCloses).
-func readRecorded[T any](r *resolver, ws ids.WorkspaceID, turns []ids.TurnID, read func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]T, error), op, message string) map[ids.TurnID]T {
+func readRecorded[T any](r *resolver, ws ids.WorkspaceID, turns []ids.TurnID, read func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]T, error), op string, message logsite.Message) map[ids.TurnID]T {
 	if read == nil || len(turns) == 0 {
 		return nil
 	}
 	facts, err := read(context.Background(), ws, turns)
 	if err != nil {
-		r.logger(ws).Error(op, message, dlog.Context{"turns": len(turns), "cause": err.Error()})
+		r.logger(ws).Log(dlog.LevelError, op, message, dlog.Context{"turns": len(turns), "cause": err.Error()})
 		return nil
 	}
 	return facts
@@ -424,5 +425,5 @@ func readRecorded[T any](r *resolver, ws ids.WorkspaceID, turns []ids.TurnID, re
 // part of it goes.
 func (r *resolver) recordedAddresses(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]*wsm.OutputAddress {
 	return readRecorded(r, ws, turns, r.deps.TurnAddresses, "daemon.feed.turn_addresses_unreadable",
-		"the replayed turns' recorded output addresses could not be read; the page is drawn at the addresses the feed already holds")
+		logsite.Msg("the replayed turns' recorded output addresses could not be read; the page is drawn at the addresses the feed already holds"))
 }

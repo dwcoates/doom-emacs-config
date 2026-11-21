@@ -2848,12 +2848,12 @@ func (silentOpenProgress) Stage(workspace.OpenStage) {}
 func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent bool, log dlog.Logger) (externalbrowser.Opener, error) {
 	switch {
 	case noBrowser:
-		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+		log.Warn(graphOperation, "no external browser is configured for this daemon: --no-browser was given", dlog.Context{
 			"reason": "--no-browser",
 		})
 		return nil, nil
 	case getenv(externalbrowser.EnvBrowserCmd) == "" && !defaultPresent:
-		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+		log.Warn(graphOperation, "no external browser is configured for this daemon: no launcher is set and the pinned default is absent", dlog.Context{
 			"reason":  "neither $" + externalbrowser.EnvBrowserCmd + " nor the pinned default launcher is present",
 			"default": externalbrowser.Host.Binary,
 		})

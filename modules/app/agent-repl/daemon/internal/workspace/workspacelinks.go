@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
@@ -50,7 +51,7 @@ type PullRequestFollower interface {
 // answers every link the workspace then holds.
 func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool, announces string) ([]wsm.WorkspaceLink, error) {
 	fields := dlog.Context{"url": url, "label": label, "owned": owned, "announces": announces}
-	return v.changeLinks(ctx, ws, fields, "set a link", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
+	return v.changeLinks(ctx, ws, fields, logsite.Msg("set a link"), func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		if err := externalbrowser.Validate(url); err != nil {
 			return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmInvalidLink,
 				fmt.Sprintf("%q is not a link the external browser opens: %v", url, err), false,
@@ -98,7 +99,7 @@ func (v *verbs) ownedSubscription(ctx context.Context, log dlog.Logger, ws ids.W
 // RemoveLink removes one stored link (agentrepl.v1.ChangeWorkspaceLinksRemove);
 // a url the workspace does not hold is refused unknown_link.
 func (v *verbs) RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error) {
-	return v.changeLinks(ctx, ws, dlog.Context{"url": url}, "removed a link", func(dlog.Logger) ([]wsm.WorkspaceLink, error) {
+	return v.changeLinks(ctx, ws, dlog.Context{"url": url}, logsite.Msg("removed a link"), func(dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		return v.deps.DB.RemoveWorkspaceLink(ctx, ws, url)
 	})
 }
@@ -109,7 +110,7 @@ func (v *verbs) RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) 
 // leaving an owned link out while it shows a reference owned_link_unshown
 // (wsm.OwnedLinkUnshownError), with nothing changed.
 func (v *verbs) ShowLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) ([]wsm.WorkspaceLink, error) {
-	return v.changeLinks(ctx, ws, dlog.Context{"urls": urls}, "chose the shown links", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
+	return v.changeLinks(ctx, ws, dlog.Context{"urls": urls}, logsite.Msg("chose the shown links"), func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		if len(urls) > wsm.ShownLinkLimit {
 			return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmTooManyShown,
 				fmt.Sprintf("a show names at most %d links, not %d", wsm.ShownLinkLimit, len(urls)), false,
@@ -121,7 +122,7 @@ func (v *verbs) ShowLinks(ctx context.Context, ws ids.WorkspaceID, urls []string
 
 // ClearLinks removes every stored link (agentrepl.v1.ChangeWorkspaceLinksClear).
 func (v *verbs) ClearLinks(ctx context.Context, ws ids.WorkspaceID) ([]wsm.WorkspaceLink, error) {
-	return v.changeLinks(ctx, ws, dlog.Context{}, "cleared the links", func(dlog.Logger) ([]wsm.WorkspaceLink, error) {
+	return v.changeLinks(ctx, ws, dlog.Context{}, logsite.Msg("cleared the links"), func(dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		return nil, v.deps.DB.ClearWorkspaceLinks(ctx, ws)
 	})
 }
@@ -130,7 +131,7 @@ func (v *verbs) ClearLinks(ctx context.Context, ws ids.WorkspaceID) ([]wsm.Works
 // workspace, run CHANGE (which refuses or writes), turn the store's unknown
 // link into the rpc's arm, republish the topbar with the shown links, and
 // record the outcome once.
-func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context, done string,
+func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context, done logsite.Message,
 	change func(log dlog.Logger) ([]wsm.WorkspaceLink, error)) ([]wsm.WorkspaceLink, error) {
 	_, log, err := v.owned(ctx, rpcChangeWorkspaceLinks, ws)
 	if err != nil {
@@ -168,7 +169,7 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 	}
 	v.publishLinks(ws, links)
 	fields["links"], fields["shown"] = len(links), len(ShownLinks(links))
-	log.Info(opChangeLinks, done, fields)
+	log.Log(dlog.LevelInfo, opChangeLinks, done, fields)
 	return links, nil
 }
 

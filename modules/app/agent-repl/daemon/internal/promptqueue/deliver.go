@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -129,7 +130,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 // caller holds the delivery lock (d) and has already retired the opening.
 func (q *queue) alreadyRecorded(ctx context.Context, d *delivery, ws ids.WorkspaceID, turn ids.TurnID, cause error, log dlog.Logger) Disposition {
 	q.closeRecorded(ctx, ws, turn, cause, opDeliver,
-		"the vendor already recorded the prompt, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing is started", log)
+		logsite.Msg("the vendor already recorded the prompt, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing is started"), log)
 	d.afterUnlock(func() {
 		next := q.lockDelivery(ws)
 		defer next.unlock()
@@ -142,8 +143,8 @@ func (q *queue) alreadyRecorded(ctx context.Context, d *delivery, ws ids.Workspa
 // recorded (ErrPromptRecorded) owes, whichever path delivered it: the lost
 // delivery recorded at ERROR under OP with MESSAGE, and the turn row recorded
 // for this delivery closed as withdrawn, since nothing runs for it.
-func (q *queue) closeRecorded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, cause error, op, message string, log dlog.Logger) {
-	log.Error(op, message, dlog.Context{
+func (q *queue) closeRecorded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, cause error, op string, message logsite.Message, log dlog.Logger) {
+	log.Log(dlog.LevelError, op, message, dlog.Context{
 		"turn":                string(turn),
 		"cause":               cause.Error(),
 		"invariant_violation": "a delivered prompt's hold is retired with its delivery",
@@ -406,17 +407,17 @@ func (q *queue) startTurn(ctx context.Context, sender Sender, sub Submission, lo
 // new one recorded -- for the session's coming up to deliver it.
 func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause error, log dlog.Logger) (Disposition, error) {
 	q.retractAccepted(sub.WS, sub.Turn)
-	why := "the shim holds no session; the prompt is held until the session reconnects"
+	why := logsite.Msg("the shim holds no session; the prompt is held until the session reconnects")
 	switch {
 	case errors.Is(cause, ErrShimDied):
-		why = "the shim died under the delivery; the prompt is held until the revived session comes up"
+		why = logsite.Msg("the shim died under the delivery; the prompt is held until the revived session comes up")
 	case errors.Is(cause, ErrSessionNotWatched):
-		why = "no watch stood to see the turn; the prompt is held until the session comes up again"
+		why = logsite.Msg("no watch stood to see the turn; the prompt is held until the session comes up again")
 	}
-	log.Info(opDeliver, why, dlog.Context{"cause": cause.Error()})
+	log.Log(dlog.LevelInfo, opDeliver, why, dlog.Context{"cause": cause.Error()})
 	// A PROMPT DELIVERED ON ARRIVAL IS NEVER HELD: it waits for the session.
 	if deliveredOnArrival(sub) {
-		return q.awaitArrival(ctx, sub, wsm.WaitSession, why, log)
+		return q.awaitArrival(ctx, sub, wsm.WaitSession, why.Template(), log)
 	}
 	if !sub.fromHold {
 		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)

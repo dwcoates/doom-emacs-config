@@ -37,6 +37,7 @@ import (
 	"agent-repld/internal/headless"
 	"agent-repld/internal/mdfence"
 	"agent-repld/internal/prompts"
+	"agentrepl/logging/logsite"
 )
 
 // The rewrite call.
@@ -182,7 +183,7 @@ func (u *Updater) Update(ctx context.Context, req Request) (Result, error) {
 	path := prompts.Path(u.promptsDir, classifier.BriefRouting)
 	log := u.log.With(dlog.Context{"path": path, "route": req.Example.Route.String()})
 	if !u.running.TryLock() {
-		return Result{}, refuse(log, dlog.Logger.Info, ArmInProgress, "another classifier update is already running", nil)
+		return Result{}, refuse(log, dlog.LevelInfo, ArmInProgress, "another classifier update is already running", nil)
 	}
 	defer u.running.Unlock()
 
@@ -191,7 +192,7 @@ func (u *Updater) Update(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("classifierupdate: probe %s for uncommitted changes: %w", path, err)
 	}
 	if !clean {
-		return Result{}, refuse(log, dlog.Logger.Info, ArmUncommittedChanges,
+		return Result{}, refuse(log, dlog.LevelInfo, ArmUncommittedChanges,
 			fmt.Sprintf("%s carries uncommitted changes; commit or revert them first", path),
 			map[string]any{"path": path})
 	}
@@ -216,15 +217,15 @@ func (u *Updater) Update(ctx context.Context, req Request) (Result, error) {
 		Timeout: RunTimeout,
 	})
 	if err != nil {
-		return Result{}, refuse(log, dlog.Logger.Error, ArmRewriteFailed,
+		return Result{}, refuse(log, dlog.LevelError, ArmRewriteFailed,
 			fmt.Sprintf("the rewrite did not answer (%s): %v", headless.CauseOf(err), err), nil)
 	}
 	rewritten, reason := rebuild(header, resp.Text)
 	if reason != "" {
-		return Result{}, refuse(log, dlog.Logger.Error, ArmRewriteRejected, reason, nil)
+		return Result{}, refuse(log, dlog.LevelError, ArmRewriteRejected, reason, nil)
 	}
 	if rewritten == string(original) {
-		return Result{}, refuse(log, dlog.Logger.Info, ArmUnchanged, "the rewrite left the brief unchanged", nil)
+		return Result{}, refuse(log, dlog.LevelInfo, ArmUnchanged, "the rewrite left the brief unchanged", nil)
 	}
 
 	current, err := u.files.Read(path)
@@ -232,7 +233,7 @@ func (u *Updater) Update(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("classifierupdate: re-read %s before writing: %w", path, err)
 	}
 	if string(current) != string(original) {
-		return Result{}, refuse(log, dlog.Logger.Info, ArmChangedDuringRewrite,
+		return Result{}, refuse(log, dlog.LevelInfo, ArmChangedDuringRewrite,
 			fmt.Sprintf("%s changed on disk while the rewrite ran", path), nil)
 	}
 	if err := u.files.Write(path, []byte(rewritten)); err != nil {
@@ -244,7 +245,7 @@ func (u *Updater) Update(ctx context.Context, req Request) (Result, error) {
 			return Result{}, fmt.Errorf("classifierupdate: the commit of %s failed (%v) and putting the file back failed too: %w",
 				path, err, restoreErr)
 		}
-		return Result{}, refuse(log, dlog.Logger.Error, ArmCommitFailed,
+		return Result{}, refuse(log, dlog.LevelError, ArmCommitFailed,
 			fmt.Sprintf("git refused the commit, and %s was put back: %v", path, err), nil)
 	}
 	log.Info(op, "rewrote and committed the routing classifier's brief", dlog.Context{
@@ -343,8 +344,8 @@ func commitMessage(instruction string) string {
 }
 
 // refuse records one refusal at LEVEL and answers it.
-func refuse(log dlog.Logger, level func(dlog.Logger, string, string, dlog.Context), arm, reason string, fields map[string]any) *Refusal {
-	level(log, op, "refused a classifier update", dlog.Context{"arm": arm, "reason": reason})
+func refuse(log dlog.Logger, level, arm, reason string, fields map[string]any) *Refusal {
+	log.Log(level, op, logsite.Msg("refused a classifier update"), dlog.Context{"arm": arm, "reason": reason})
 	return &Refusal{Arm: arm, Reason: reason, Fields: fields}
 }
 

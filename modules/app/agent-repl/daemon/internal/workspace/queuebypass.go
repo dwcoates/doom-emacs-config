@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -459,8 +460,8 @@ const opBypassTurnEnd = "daemon.workspace.queue_bypass_turn_end"
 // mode, over CARRY, the verbs' LetQueueThroughAfterBypassTurn.
 func NewBypassTurnEnds(carry func(ctx context.Context, ws ids.WorkspaceID) error, log dlog.Logger) *TurnEdgeRunner {
 	return newTurnEdgeRunner(turnEnds, opBypassTurnEnd,
-		"a turn ended after the queue bypass runner stopped, as the daemon stood down; the queue stays as it stands",
-		"could not let the merge queue through at the end of a turn", carry, log)
+		logsite.Msg("a turn ended after the queue bypass runner stopped, as the daemon stood down; the queue stays as it stands"),
+		logsite.Msg("could not let the merge queue through at the end of a turn"), carry, log)
 }
 
 // LetQueueThroughAfterBypassTurn implements Verbs.

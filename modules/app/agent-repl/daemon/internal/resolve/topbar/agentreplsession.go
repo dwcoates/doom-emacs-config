@@ -3,6 +3,7 @@ package topbar
 import (
 	"time"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -15,7 +16,7 @@ import (
 // internal/agentreplsession calls it when a session begins and when a
 // persisted one is carried across a daemon restart.
 func (r *resolver) SetAgentReplSession(session *frontendv1.TopbarAgentReplSession) {
-	r.eachStrip("daemon.topbar.agent_repl_session", "the topbar took agent-repl's session on every strip",
+	r.eachStrip("daemon.topbar.agent_repl_session", logsite.Msg("the topbar took agent-repl's session on every strip"),
 		dlog.Context{"started_at": time.UnixMilli(session.GetStartedAtMs()).UTC().Format(time.RFC3339Nano)},
 		func() { r.agentReplSession = session },
 		func(*wsState) {})

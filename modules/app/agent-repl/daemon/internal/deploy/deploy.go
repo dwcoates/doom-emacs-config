@@ -1216,11 +1216,11 @@ func (d *Deployer) restartOnto(ctx context.Context, component Component, failed,
 	ask()
 	d.deps.HotReload.ServiceRestarting(hotReloadService(component))
 	if err := restart(ctx); err != nil {
-		d.log.Error(opDecide, failed+" restart failed", dlog.WithCause(dlog.Context{"component": string(component)}, err))
+		d.log.Error(opDecide, "{failed} restart failed", dlog.Context{"failed": failed, "component": string(component), "cause": err.Error()})
 		return &ServiceRestartFailed{Component: component, Detail: err.Error()}
 	}
 	d.deps.HotReload.ServiceRestarted(hotReloadService(component))
-	d.log.Info(opDecide, "restarted "+what+" onto the fresh build", done)
+	d.log.With(done).Info(opDecide, "restarted {what} onto the fresh build", dlog.Context{"what": what})
 	return nil
 }
 

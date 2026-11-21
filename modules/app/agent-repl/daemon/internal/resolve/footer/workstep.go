@@ -3,6 +3,7 @@ package footer
 import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -158,7 +159,7 @@ func (m *feedMotion) step() workStep {
 
 // OnMainAgent names the session's main agent. See sessionwatcher.FooterSink.
 func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId) {
-	r.mutate(ws, "daemon.footer.on_main_agent", "the footer was told the session's main agent",
+	r.mutate(ws, "daemon.footer.on_main_agent", logsite.Msg("the footer was told the session's main agent"),
 		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) {
 			s.mainAgent = agent.GetValue()
 		})

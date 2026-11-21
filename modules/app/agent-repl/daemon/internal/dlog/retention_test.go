@@ -330,7 +330,8 @@ func TestEveryMintedTargetIsADaemonLogFamily(t *testing.T) {
 func TestEveryRunLogRetentionFailureGoesThroughRetentionFailed(t *testing.T) {
 	// Act.
 	viaHelper := sourcescan.Count(t, "s.retentionFailed(")
-	byHand := sourcescan.Count(t, `Global().Error("daemon.dlog.retention_failed"`)
+	byHand := sourcescan.Count(t, `Global().Error("daemon.dlog.retention_failed"`) +
+		sourcescan.Count(t, `Global().Log(LevelError, "daemon.dlog.retention_failed"`)
 
 	// Assert: the run log, a directory and the stdio log call the helper, and the only hand-written record is the helper's own.
 	if viaHelper != 3 || byHand != 1 {

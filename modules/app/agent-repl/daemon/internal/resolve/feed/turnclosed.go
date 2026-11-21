@@ -3,6 +3,7 @@ package feed
 import (
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -165,7 +166,7 @@ func (r *resolver) recordedCloses(ws ids.WorkspaceID, page *conversationv1.Histo
 		}
 	}
 	return readRecorded(r, ws, turns, r.deps.TurnCloses, "daemon.feed.turn_closes_unreadable",
-		"the replayed turns' recorded closes could not be read; a turn with no terminal on the page replays as running")
+		logsite.Msg("the replayed turns' recorded closes could not be read; a turn with no terminal on the page replays as running"))
 }
 
 // endReplayedTurn ends the turn the replay stood in, when its page carried no

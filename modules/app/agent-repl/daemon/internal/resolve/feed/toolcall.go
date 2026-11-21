@@ -183,7 +183,7 @@ func (r *resolver) failureForm(s *wsState, failure *conversationv1.AgentToolFail
 // for the record an unresolvable image leaves.
 func (r *resolver) contentForm(s *wsState, content *conversationv1.ToolResultContent, failed bool) returnedForm {
 	if text := contentText(content); text != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "text := contentText(content); text != \"\""})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: text := contentText(content); text != \"\"", dlog.Context{"function": "feed", "condition": "text := contentText(content); text != \"\""})
 		return textForm(text)
 	}
 	return r.contentImageForm(s, content, failed)
@@ -197,7 +197,7 @@ func (r *resolver) contentImageForm(s *wsState, content *conversationv1.ToolResu
 	for _, block := range content.GetBlocks() {
 		image, ok := block.GetBlock().(*conversationv1.ToolResultContentBlock_Image)
 		if !ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !ok", dlog.Context{"function": "feed", "condition": "!ok"})
 			continue
 		}
 		src, alt, err := r.resolveImage(image.Image)
@@ -372,34 +372,34 @@ func (r *resolver) drawRead(s *wsState, at placement, act *conversationv1.AgentA
 
 	switch state := read.GetResult().(type) {
 	case *conversationv1.AgentRead_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentRead_Start", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetPath().GetPath()
 		u.inputForm = inputFormPath
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Read", deniedOutcome()), nil
 		}
 		return r.toolRow(s, at, unitID, "Read", runningOutcome(u)), nil
 	case *conversationv1.AgentRead_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentRead_Progress", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Read", runningOutcome(u)), nil
 	case *conversationv1.AgentRead_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentRead_Success", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Success"})
 		path := state.Success.GetPath().GetPath()
 		u.input = path
 		u.inputForm = inputFormPath
 		form, err := r.readForm(s, path, state.Success)
 		if err != nil {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "err != nil"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: err != nil", dlog.Context{"function": "feed", "condition": "err != nil"})
 			return nil, err
 		}
 		return r.toolRow(s, at, unitID, "Read",
 			r.settledOutcome(s, act, u, "read", true, form, state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentRead_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentRead_Failure", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Failure"})
 		input, err := r.restatedOrHeld(s, act, u, "read", state.Failure.GetPath().GetPath(), u.input)
 		if err != nil {
 			return nil, err
@@ -421,23 +421,23 @@ func (r *resolver) readForm(s *wsState, path string, success *conversationv1.Age
 	)
 	switch extent := success.GetExtent().(type) {
 	case *conversationv1.AgentReadSuccess_Whole:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "readForm", "branch": "case *conversationv1.AgentReadSuccess_Whole"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentReadSuccess_Whole", dlog.Context{"function": "readForm", "branch": "case *conversationv1.AgentReadSuccess_Whole"})
 		contents = extent.Whole.GetContents()
 	case *conversationv1.AgentReadSuccess_Head:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "readForm", "branch": "case *conversationv1.AgentReadSuccess_Head"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentReadSuccess_Head", dlog.Context{"function": "readForm", "branch": "case *conversationv1.AgentReadSuccess_Head"})
 		contents = extent.Head.GetContents()
 		omitted = &frontendv1.FeedToolCallOmitted{
 			Text: formatShowingOf(countLines(contents), uint64(extent.Head.GetTotalLines())),
 		}
 	case *conversationv1.AgentReadSuccess_Range:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "readForm", "branch": "case *conversationv1.AgentReadSuccess_Range"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentReadSuccess_Range", dlog.Context{"function": "readForm", "branch": "case *conversationv1.AgentReadSuccess_Range"})
 		contents = extent.Range.GetContents()
 		omitted = &frontendv1.FeedToolCallOmitted{
 			Text: formatLineRange(uint64(extent.Range.GetFirstLine()),
 				uint64(extent.Range.GetLineCount()), uint64(extent.Range.GetTotalLines())),
 		}
 	default:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "readForm", "branch": "default"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "readForm", "branch": "default"})
 		// A read that came back with no extent has nothing to draw; the card
 		// still says it returned.
 		return nil, nil
@@ -445,7 +445,7 @@ func (r *resolver) readForm(s *wsState, path string, success *conversationv1.Age
 
 	spans, err := r.highlight(s, path, contents)
 	if err != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "err != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: err != nil", dlog.Context{"function": "feed", "condition": "err != nil"})
 		return nil, err
 	}
 	return func(returned *frontendv1.FeedToolCallReturned) {
@@ -461,7 +461,7 @@ func (r *resolver) readForm(s *wsState, path string, success *conversationv1.Age
 func (r *resolver) highlight(s *wsState, path, code string) ([]*frontendv1.FeedCodeSpan, error) {
 	painter := r.painter()
 	if painter == nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "painter == nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: painter == nil", dlog.Context{"function": "feed", "condition": "painter == nil"})
 		return []*frontendv1.FeedCodeSpan{{Text: code}}, nil
 	}
 	lang := langFromPath(path)
@@ -500,22 +500,22 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 
 	switch state := write.GetResult().(type) {
 	case *conversationv1.AgentWrite_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWrite_Start", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetPath().GetPath()
 		u.inputForm = inputFormPath
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Write", deniedOutcome()), nil
 		}
 		return r.toolRow(s, at, unitID, "Write", runningOutcome(u)), nil
 	case *conversationv1.AgentWrite_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWrite_Progress", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Write", runningOutcome(u)), nil
 	case *conversationv1.AgentWrite_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWrite_Success", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Success"})
 		// The path form's text is the PATH, bare. Whether the write created or
 		// replaced the file is the diff's story (a creation's every hunk line
 		// is an addition), not the input line's.
@@ -525,7 +525,7 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 			r.settledOutcome(s, act, u, "write", true, diffForm(state.Success.GetPatch()),
 				state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentWrite_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWrite_Failure", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Failure"})
 		input, err := r.restatedOrHeld(s, act, u, "write", state.Failure.GetPath().GetPath(), u.input)
 		if err != nil {
 			return nil, err
@@ -536,7 +536,7 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 			r.settledOutcome(s, act, u, "write", false, r.failureForm(s, state.Failure.GetError()),
 				state.Failure.GetError().GetSettledAt())), nil
 	case *conversationv1.AgentWrite_Diagnostics:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Diagnostics"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWrite_Diagnostics", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Diagnostics"})
 		return r.applyDiagnostics(s, unitID, state.Diagnostics)
 	}
 	return nil, errNotARow
@@ -549,29 +549,29 @@ func (r *resolver) drawEdit(s *wsState, at placement, act *conversationv1.AgentA
 
 	switch state := edit.GetResult().(type) {
 	case *conversationv1.AgentEdit_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentEdit_Start", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetPath().GetPath()
 		u.inputForm = inputFormPath
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Edit", deniedOutcome()), nil
 		}
 		return r.toolRow(s, at, unitID, "Edit", runningOutcome(u)), nil
 	case *conversationv1.AgentEdit_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentEdit_Progress", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Edit", runningOutcome(u)), nil
 	case *conversationv1.AgentEdit_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentEdit_Success", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Success"})
 		u.input = state.Success.GetPath().GetPath()
 		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Edit",
 			r.settledOutcome(s, act, u, "edit", true, diffForm(state.Success.GetPatch()),
 				state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentEdit_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentEdit_Failure", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Failure"})
 		input, err := r.restatedOrHeld(s, act, u, "edit", state.Failure.GetPath().GetPath(), u.input)
 		if err != nil {
 			return nil, err
@@ -582,7 +582,7 @@ func (r *resolver) drawEdit(s *wsState, at placement, act *conversationv1.AgentA
 			r.settledOutcome(s, act, u, "edit", false, r.failureForm(s, state.Failure.GetError()),
 				state.Failure.GetError().GetSettledAt())), nil
 	case *conversationv1.AgentEdit_Diagnostics:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Diagnostics"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentEdit_Diagnostics", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Diagnostics"})
 		return r.applyDiagnostics(s, unitID, state.Diagnostics)
 	}
 	return nil, errNotARow
@@ -724,28 +724,28 @@ func (r *resolver) drawGrep(s *wsState, at placement, act *conversationv1.AgentA
 
 	switch state := grep.GetResult().(type) {
 	case *conversationv1.AgentGrep_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGrep_Start", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Grep", deniedOutcome()), nil
 		}
 		return r.toolRow(s, at, unitID, "Grep", runningOutcome(u)), nil
 	case *conversationv1.AgentGrep_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGrep_Progress", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Grep", runningOutcome(u)), nil
 	case *conversationv1.AgentGrep_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGrep_Success", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Success"})
 		u.input = state.Success.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Grep",
 			r.settledOutcome(s, act, u, "grep", true, grepForm(state.Success), state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentGrep_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGrep_Failure", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Failure"})
 		input, err := r.restatedOrHeld(s, act, u, "grep", state.Failure.GetQuery().GetPattern(), u.input)
 		if err != nil {
 			return nil, err
@@ -799,28 +799,28 @@ func (r *resolver) drawGlob(s *wsState, at placement, act *conversationv1.AgentA
 
 	switch state := glob.GetResult().(type) {
 	case *conversationv1.AgentGlob_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGlob_Start", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Glob", deniedOutcome()), nil
 		}
 		return r.toolRow(s, at, unitID, "Glob", runningOutcome(u)), nil
 	case *conversationv1.AgentGlob_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGlob_Progress", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Glob", runningOutcome(u)), nil
 	case *conversationv1.AgentGlob_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGlob_Success", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Success"})
 		u.input = state.Success.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Glob",
 			r.settledOutcome(s, act, u, "glob", true, globForm(state.Success), state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentGlob_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentGlob_Failure", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Failure"})
 		input, err := r.restatedOrHeld(s, act, u, "glob", state.Failure.GetQuery().GetPattern(), u.input)
 		if err != nil {
 			return nil, err
@@ -885,7 +885,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 	// the head the card became. Dropping it left the head running forever when
 	// no other source ended the run -- the store holding no rows for it.
 	if u.moved {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.moved"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.moved", dlog.Context{"function": "feed", "condition": "u.moved"})
 		if bash.GetSuccess() != nil || bash.GetFailure() != nil {
 			r.drawDetachedShell(s, &conversationv1.DetachedWorkId{Value: u.movedTo}, bash)
 			r.logger(s.id).Debug("daemon.feed.detached_shell_settled_by_call",
@@ -897,27 +897,27 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 
 	switch state := bash.GetResult().(type) {
 	case *conversationv1.AgentBash_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBash_Start", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetCommand().GetLine()
 		u.inputForm = inputFormCommand
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Bash", deniedOutcome()), nil
 		}
 		return r.toolRow(s, at, unitID, "Bash", withEdits(runningOutcome(u), r.unitBashEdits(s, unitID, u))), nil
 	case *conversationv1.AgentBash_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBash_Progress", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Bash", withEdits(runningOutcome(u), r.unitBashEdits(s, unitID, u))), nil
 	case *conversationv1.AgentBash_Tail:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Tail"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBash_Tail", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Tail"})
 		// A foreground call reports no growth; a tail here belongs to the
 		// work's own detached stream and is drawn there.
 		return nil, errNotARow
 	case *conversationv1.AgentBash_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBash_Success", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Success"})
 		u.input = state.Success.GetCommand().GetLine()
 		u.inputForm = inputFormCommand
 		u.ending = bash
@@ -931,7 +931,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 			withEdits(withExit(r.settledOutcome(s, act, u, "bash", ok, form, state.Success.GetSettledAt()),
 				bashExit(state.Success)), r.unitBashEdits(s, unitID, u))), nil
 	case *conversationv1.AgentBash_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBash_Failure", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Failure"})
 		input, err := r.restatedOrHeld(s, act, u, "bash", state.Failure.GetCommand().GetLine(), u.input)
 		if err != nil {
 			return nil, err
@@ -1013,27 +1013,27 @@ func (r *resolver) bashImageForm(s *wsState, command string, image *conversation
 func (r *resolver) bashOutcomeForm(s *wsState, command string, success *conversationv1.AgentBashSuccess) (bool, returnedForm) {
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentBashSuccess_Completed:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashSuccess_Completed"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBashSuccess_Completed", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashSuccess_Completed"})
 		output := outcome.Completed.GetOutput()
 		if image, ok := output.GetForm().(*conversationv1.AgentBashOutput_Image); ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "image, ok := output.GetForm().(*conversationv1.AgentBashOutput_Image); ok"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: image, ok := output.GetForm().(*conversationv1.AgentBashOutput_Image); ok", dlog.Context{"function": "feed", "condition": "image, ok := output.GetForm().(*conversationv1.AgentBashOutput_Image); ok"})
 			return true, r.bashImageForm(s, command, image.Image)
 		}
 		return true, textForm(bashOutputText(output))
 	case *conversationv1.AgentBashSuccess_Interrupted:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashSuccess_Interrupted"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBashSuccess_Interrupted", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashSuccess_Interrupted"})
 		lead := "interrupted"
 		switch cause := outcome.Interrupted.GetCause().(type) {
 		case *conversationv1.AgentBashInterrupted_ByUser:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashInterrupted_ByUser"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBashInterrupted_ByUser", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashInterrupted_ByUser"})
 			lead = "interrupted by the user"
 		case *conversationv1.AgentBashInterrupted_TimedOut:
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashInterrupted_TimedOut"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentBashInterrupted_TimedOut", dlog.Context{"function": "bashOutcomeForm", "branch": "case *conversationv1.AgentBashInterrupted_TimedOut"})
 			lead = "timed out after " + formatDuration(int64(cause.TimedOut.GetTimeoutMs()))
 		}
 		body := bashOutputText(outcome.Interrupted.GetOutput())
 		if body == "" {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "body == \"\""})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: body == \"\"", dlog.Context{"function": "feed", "condition": "body == \"\""})
 			return true, textForm(lead)
 		}
 		return true, textForm(lead + "\n" + body)
@@ -1077,7 +1077,7 @@ func (r *resolver) drawWebFetch(s *wsState, at placement, act *conversationv1.Ag
 	var url string
 	switch state := fetch.GetResult().(type) {
 	case *conversationv1.AgentWebFetch_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebFetch_Start", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Start"})
 		u.startedAtMs = state.Start.GetStartedAtMs()
 		url = state.Start.GetTarget().GetUrl()
 		u.input = url
@@ -1086,13 +1086,13 @@ func (r *resolver) drawWebFetch(s *wsState, at placement, act *conversationv1.Ag
 		linkInput(row, url)
 		return row, nil
 	case *conversationv1.AgentWebFetch_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebFetch_Progress", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		row := r.toolRow(s, at, unitID, "WebFetch", runningOutcome(u))
 		linkInput(row, u.input)
 		return row, nil
 	case *conversationv1.AgentWebFetch_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebFetch_Success", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Success"})
 		url = state.Success.GetTarget().GetUrl()
 		u.input = url
 		u.inputForm = inputFormPath
@@ -1103,7 +1103,7 @@ func (r *resolver) drawWebFetch(s *wsState, at placement, act *conversationv1.Ag
 		linkInput(row, url)
 		return row, nil
 	case *conversationv1.AgentWebFetch_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebFetch_Failure", dlog.Context{"function": "drawWebFetch", "branch": "case *conversationv1.AgentWebFetch_Failure"})
 		url = state.Failure.GetTarget().GetUrl()
 		u.input = url
 		u.inputForm = inputFormPath
@@ -1128,7 +1128,7 @@ func (r *resolver) drawMcpToolCall(s *wsState, at placement, act *conversationv1
 
 	switch state := call.GetResult().(type) {
 	case *conversationv1.AgentMcpToolCall_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentMcpToolCall_Start", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		input, err := mcpInputLine(state.Start.GetArguments())
@@ -1142,7 +1142,7 @@ func (r *resolver) drawMcpToolCall(s *wsState, at placement, act *conversationv1
 		}
 		return r.toolRow(s, at, unitID, name, runningOutcome(u)), nil
 	case *conversationv1.AgentMcpToolCall_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentMcpToolCall_Progress", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		if u.name == "" {
 			// A beat names no tool, and no frame of this unit has drawn one:
@@ -1151,7 +1151,7 @@ func (r *resolver) drawMcpToolCall(s *wsState, at placement, act *conversationv1
 		}
 		return r.toolRow(s, at, unitID, u.name, runningOutcome(u)), nil
 	case *conversationv1.AgentMcpToolCall_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentMcpToolCall_Success", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Success"})
 		name, err := r.restatedMcpCall(s, act, u, state.Success.GetTool(), state.Success.GetArguments())
 		if err != nil {
 			return nil, err
@@ -1160,7 +1160,7 @@ func (r *resolver) drawMcpToolCall(s *wsState, at placement, act *conversationv1
 			r.settledOutcome(s, act, u, "mcp_tool_call", true, r.contentForm(s, state.Success.GetContent(), false),
 				state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentMcpToolCall_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentMcpToolCall_Failure", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Failure"})
 		name, err := r.restatedMcpCall(s, act, u, state.Failure.GetTool(), state.Failure.GetArguments())
 		if err != nil {
 			return nil, err
@@ -1226,24 +1226,24 @@ func (r *resolver) drawWebSearch(s *wsState, at placement, act *conversationv1.A
 
 	switch state := search.GetResult().(type) {
 	case *conversationv1.AgentWebSearch_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebSearch_Start", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAtMs()
 		u.input = state.Start.GetQuery().GetTerms()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "WebSearch", runningOutcome(u)), nil
 	case *conversationv1.AgentWebSearch_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebSearch_Progress", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "WebSearch", runningOutcome(u)), nil
 	case *conversationv1.AgentWebSearch_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebSearch_Success", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Success"})
 		u.input = state.Success.GetQuery().GetTerms()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "WebSearch",
 			returnedOutcome(u, true, linksForm(state.Success.GetResults()), 0)), nil
 	case *conversationv1.AgentWebSearch_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWebSearch_Failure", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Failure"})
 		// The failure RESTATES the query (it always has); drawing it rather
 		// than only what a held start said is what lets a replayed failure name
 		// its search.

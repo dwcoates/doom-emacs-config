@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // remove deletes path (a directory with everything under it, or a file) and
@@ -27,11 +28,11 @@ func (s *Sweeper) remove(op, path string, reason Reason, report *Report) {
 		}
 	}
 	report.Removed = append(report.Removed, Removal{Path: path, Reason: reason, Bytes: bytes})
-	message := "deleted stored data nothing will read again"
+	message := logsite.Msg("deleted stored data nothing will read again")
 	if report.DryRun {
-		message = "would delete stored data nothing will read again"
+		message = logsite.Msg("would delete stored data nothing will read again")
 	}
-	s.deps.Log.Info(op, message, dlog.Context{"path": path, "reason": reason, "bytes": bytes, "dry_run": report.DryRun})
+	s.deps.Log.Log(dlog.LevelInfo, op, message, dlog.Context{"path": path, "reason": reason, "bytes": bytes, "dry_run": report.DryRun})
 }
 
 // sizeOf is what path holds on disk: every regular file under it.

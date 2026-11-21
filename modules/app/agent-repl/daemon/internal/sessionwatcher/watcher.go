@@ -10,6 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -790,7 +791,7 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 	if w.waitBehindAdoptedLocked(turn, false) {
 		return
 	}
-	if w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", "a turn is going to the shim") {
+	if w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", logsite.Msg("a turn is going to the shim")) {
 		w.turnAccepted = false
 	}
 }
@@ -813,7 +814,7 @@ func (w *watcher) OnTurnJoining(ws ids.WorkspaceID, turn ids.TurnID) bool {
 	if w.turn == nil {
 		// THE TURN IT WAS TO JOIN ALREADY ENDED, so the shim starts the prompt
 		// as its own turn: it stands in flight exactly as an opening turn does.
-		if w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", "a joining turn is going to the shim with no turn left to join") {
+		if w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", logsite.Msg("a joining turn is going to the shim with no turn left to join")) {
 			w.turnAccepted = false
 		}
 		return true
@@ -938,7 +939,7 @@ func (w *watcher) waitBehindAdoptedLocked(turn ids.TurnID, accepted bool) bool {
 // A TURN THAT ALREADY ENDED STAYS ENDED. Its end was already handed to every
 // observer, and nothing would ever end it a second time. It reports whether
 // the turn now stands in flight.
-func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bool {
+func (w *watcher) standTurnLocked(turn ids.TurnID, operation string, message logsite.Message) bool {
 	if _, ended := w.closedTurns[turn]; ended {
 		w.log.Debug("daemon.sessionwatcher.turn_already_ended", "a turn that already ended was offered as in flight; it stays ended", dlog.Context{
 			"turn_id": string(turn), "source": operation,
@@ -952,7 +953,7 @@ func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bo
 		w.adopted = nil
 	}
 	w.knownTurns[turn] = struct{}{}
-	w.log.Debug(operation, message, dlog.Context{
+	w.log.Log(dlog.LevelDebug, operation, message, dlog.Context{
 		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": string(turn),
 	})
 	// A TURN STANDING IN FLIGHT IS A FREENESS JUDGEMENT: it makes the session
@@ -973,7 +974,7 @@ func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	if ws != w.ws {
 		return
 	}
-	if w.dropWaitingLocked(turn, "the shim refused a turn waiting behind the adopted turn") {
+	if w.dropWaitingLocked(turn, logsite.Msg("the shim refused a turn waiting behind the adopted turn")) {
 		w.flushHeldTerminalLocked()
 		w.signalFreenessLocked()
 		return
@@ -1031,7 +1032,7 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 		// response back — the very race OnTurnOpening exists for — and
 		// re-recording it would stand a dead turn back up in flight, with no
 		// edge left to take it down again.
-		if !w.standTurnLocked(turn, "daemon.sessionwatcher.state_transition", "the accepted turn became the turn in flight") {
+		if !w.standTurnLocked(turn, "daemon.sessionwatcher.state_transition", logsite.Msg("the accepted turn became the turn in flight")) {
 			return
 		}
 		// The TURN-OPEN EDGE reaches the footer here and nowhere else: no
@@ -2222,10 +2223,10 @@ func (w *watcher) runSession(gen, openedAt uint64, stream shimclient.Stream[*shi
 		w.retryRefusedMainLocked()
 		switch {
 		case frame.GetUpdate() != nil:
-			w.log.Debug("daemon.sessionwatcher.transition_decision", "selected a watcher transition branch", dlog.Context{"function": "watcher", "branch": "case frame.GetUpdate() != nil"})
+			w.log.Debug("daemon.sessionwatcher.transition_decision", "selected a watcher transition branch: case frame.GetUpdate() != nil", dlog.Context{"function": "watcher", "branch": "case frame.GetUpdate() != nil"})
 			w.routeSessionUpdateLocked(frame.GetUpdate())
 		case frame.GetSessionStarted() != nil:
-			w.log.Debug("daemon.sessionwatcher.transition_decision", "selected a watcher transition branch", dlog.Context{"function": "watcher", "branch": "case frame.GetSessionStarted() != nil"})
+			w.log.Debug("daemon.sessionwatcher.transition_decision", "selected a watcher transition branch: case frame.GetSessionStarted() != nil", dlog.Context{"function": "watcher", "branch": "case frame.GetSessionStarted() != nil"})
 			w.reannouncedLocked(frame.GetSessionStarted(), openedAt)
 		default:
 			// The shim client validates the oneof before a frame ever reaches
@@ -2350,7 +2351,7 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	if t := started.GetTurnInFlight(); t != nil {
 		ahead := ids.TurnID(t.GetValue())
 		ownTurn := w.turn != nil && *w.turn == ahead
-		if w.standTurnLocked(ahead, "daemon.sessionwatcher.state_transition", "the session's facts name the turn already in flight") {
+		if w.standTurnLocked(ahead, "daemon.sessionwatcher.state_transition", logsite.Msg("the session's facts name the turn already in flight")) {
 			if !ownTurn {
 				w.standRunningAtAttachLocked(ahead)
 			}

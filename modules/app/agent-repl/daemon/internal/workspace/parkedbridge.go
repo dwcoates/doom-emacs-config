@@ -302,7 +302,7 @@ func standingDown(ctx context.Context, err error) bool {
 // parkedBridgeFailed states a bridge that cannot be held: at ERROR and on the
 // warning strip, the reader's one error surface. The gate keeps no shim.
 func (f *Fleet) parkedBridgeFailed(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, what, cause string) {
-	log.Error(opParkedBridge, what+"; claude.ai cannot reach the parked workspace", dlog.Context{"cause": cause})
+	log.Error(opParkedBridge, "{what}; claude.ai cannot reach the parked workspace", dlog.Context{"what": what, "cause": cause})
 	f.deps.Topbar.RaiseWarning(ws, remoteControlWarning, fmt.Sprintf("this parked session cannot be reached from claude.ai: %s: %s", what, cause))
 	f.standDownAtGate(ctx, ws)
 }
@@ -324,7 +324,7 @@ func (f *Fleet) standDownBridge(ctx context.Context, log dlog.Logger, ws ids.Wor
 		log.Error(opParkedBridge, "the parked bridge's shim could not be stood down for the answer", dlog.Context{"why": why, "cause": err.Error()})
 		return fmt.Errorf("stand the parked bridge's shim down: %w", err)
 	}
-	log.Info(opParkedBridge, "stood the parked bridge's shim down: "+why, nil)
+	log.Info(opParkedBridge, "stood the parked bridge's shim down: {why}", dlog.Context{"why": why})
 	return nil
 }
 

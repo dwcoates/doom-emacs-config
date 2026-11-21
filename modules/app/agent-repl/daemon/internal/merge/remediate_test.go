@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -775,7 +776,7 @@ func (c *chain) lineOrder(t *testing.T) []ids.WorkspaceID {
 func (c *chain) steppedAsideFor(ws ids.WorkspaceID, why AsideReason) int {
 	n := 0
 	for _, rec := range c.h.logs.Records() {
-		if rec.Level == "info" && rec.Operation == opRemediate && rec.Message == why.suspension().moved &&
+		if rec.Level == "info" && rec.Operation == opRemediate && rec.Message == why.suspension().moved.Template() &&
 			rec.Context["workspace"] == string(ws) && rec.Context["reason"] == why.String() {
 			n++
 		}
@@ -1291,7 +1292,7 @@ func TestARequeuedMergeBackFromItsConflictsContinuesItsResolvedRebase(t *testing
 		t.Fatalf("admitFront = %s, %v, %v; want the returner admitted at the head", front, admitted, err)
 	}
 	if err := c.h.o.requeueAdmitted(context.Background(), "daemon.merge.resume", c.h.repoKey(), theWorkspace, requeueWhy{
-		unleased: "unleased", failed: "failed", done: "requeued to start over",
+		unleased: logsite.Msg("unleased"), failed: logsite.Msg("failed"), done: logsite.Msg("requeued to start over"),
 	}); err != nil {
 		t.Fatalf("requeueAdmitted: %v", err)
 	}
@@ -1512,7 +1513,7 @@ func TestARequeuedMergeBackFromItsConflictsWhoseTargetMovedKeepsItsResolution(t 
 		t.Fatalf("admitFront = %s, %v, %v; want the returner admitted at the head", front, admitted, err)
 	}
 	if err := c.h.o.requeueAdmitted(context.Background(), "daemon.merge.resume", c.h.repoKey(), theWorkspace, requeueWhy{
-		unleased: "unleased", failed: "failed", done: "requeued to start over",
+		unleased: logsite.Msg("unleased"), failed: logsite.Msg("failed"), done: logsite.Msg("requeued to start over"),
 	}); err != nil {
 		t.Fatalf("requeueAdmitted: %v", err)
 	}

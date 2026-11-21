@@ -190,7 +190,7 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 	separation := &frontendv1.FeedSessionSeparation{}
 	switch arm := cut.GetCut().(type) {
 	case *conversationv1.ContextCut_Cleared:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_Cleared"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.ContextCut_Cleared", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_Cleared"})
 		// The vendor's conversation-reset record carries NO token delta, so
 		// none is drawn: an invented figure would be worse than none.
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "context cleared"}
@@ -205,7 +205,7 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 			confirmsClear = true
 		}
 	case *conversationv1.ContextCut_Compacted:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_Compacted"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.ContextCut_Compacted", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_Compacted"})
 		compacted := arm.Compacted
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: compactionLabel(compacted)}
 		separation.Kind = &frontendv1.FeedSessionSeparation_Compacted{Compacted: &frontendv1.FeedContextCutCompacted{
@@ -214,14 +214,14 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		// BOTH SIDES ARE FORMATTED HERE. The client renders them verbatim and
 		// does no arithmetic and no unit rounding of its own.
 		if tokens := compacted.GetTokens(); tokens != nil {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "tokens := compacted.GetTokens(); tokens != nil"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: tokens := compacted.GetTokens(); tokens != nil", dlog.Context{"function": "feed", "condition": "tokens := compacted.GetTokens(); tokens != nil"})
 			separation.Tokens = &frontendv1.FeedContextCutTokens{
 				BeforeText: figures.Tokens(uint64(tokens.GetTokensBefore())),
 				AfterText:  figures.Tokens(uint64(tokens.GetTokensAfter())),
 			}
 		}
 	case *conversationv1.ContextCut_CompactionFailed:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_CompactionFailed"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.ContextCut_CompactionFailed", dlog.Context{"function": "drawContextCut", "branch": "case *conversationv1.ContextCut_CompactionFailed"})
 		// NOTHING WAS CUT, and the row says so as its OUTCOME MARKER ALONE
 		// (owner ruling, 2026-10-06): no divider, which would read as a cut,
 		// and no rider on the turn's headline. `tokens` stays UNSET — no size
@@ -288,12 +288,12 @@ func (r *resolver) recordCutMoved(s *wsState, addr feedid.Feed, row *frontendv1.
 	above := cutIndex(f, durableOrder(f))
 	ctx := dlog.Context{"feed": f.key, "row": row.GetId().GetValue(), "kind": separationArm(row.GetSeparation()), "above": above}
 	if endsHistory(row) {
-		r.logger(s.id).Info("daemon.feed.delivery_bound_moved",
-			what+" moved the feed's delivery bound: nothing above this divider is served or pushed from here on", ctx)
+		r.logger(s.id).With(ctx).Info("daemon.feed.delivery_bound_moved",
+			"{what} moved the feed's delivery bound: nothing above this divider is served or pushed from here on", dlog.Context{"what": what})
 		return
 	}
-	r.logger(s.id).Info("daemon.feed.opening_moved",
-		what+" moved where the feed opens: an opening starts at this divider, and the rows above it are reached only by paging back", ctx)
+	r.logger(s.id).With(ctx).Info("daemon.feed.opening_moved",
+		"{what} moved where the feed opens: an opening starts at this divider, and the rows above it are reached only by paging back", dlog.Context{"what": what})
 }
 
 // compactionLabel words a compaction's divider. A MANUAL compaction is
@@ -341,14 +341,14 @@ func (r *resolver) drawWorktree(s *wsState, at placement, act *conversationv1.Ag
 	unitID := act.GetActivityId().GetValue()
 	success, ok := worktree.GetState().(*conversationv1.AgentWorktree_Success)
 	if !ok {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !ok", dlog.Context{"function": "feed", "condition": "!ok"})
 		return nil, errNotARow
 	}
 
 	separation := &frontendv1.FeedSessionSeparation{}
 	switch outcome := success.Success.GetAct().(type) {
 	case *conversationv1.AgentWorktreeSuccess_Entered:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWorktree", "branch": "case *conversationv1.AgentWorktreeSuccess_Entered"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWorktreeSuccess_Entered", dlog.Context{"function": "drawWorktree", "branch": "case *conversationv1.AgentWorktreeSuccess_Entered"})
 		entered := outcome.Entered
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{
 			Text: "entered worktree " + entered.GetPath(),
@@ -357,12 +357,12 @@ func (r *resolver) drawWorktree(s *wsState, at placement, act *conversationv1.Ag
 			Path: &frontendv1.FeedWorktreePath{Text: entered.GetPath()},
 		}
 		if entered.Branch != nil && entered.GetBranch() != "" {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "entered.Branch != nil && entered.GetBranch() != \"\""})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: entered.Branch != nil && entered.GetBranch() != \"\"", dlog.Context{"function": "feed", "condition": "entered.Branch != nil && entered.GetBranch() != \"\""})
 			payload.Branch = &frontendv1.FeedWorktreeBranch{Text: entered.GetBranch()}
 		}
 		separation.Kind = &frontendv1.FeedSessionSeparation_WorktreeEntered{WorktreeEntered: payload}
 	case *conversationv1.AgentWorktreeSuccess_Exited:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWorktree", "branch": "case *conversationv1.AgentWorktreeSuccess_Exited"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentWorktreeSuccess_Exited", dlog.Context{"function": "drawWorktree", "branch": "case *conversationv1.AgentWorktreeSuccess_Exited"})
 		exited := outcome.Exited
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "left the worktree"}
 		separation.Kind = &frontendv1.FeedSessionSeparation_WorktreeLeft{WorktreeLeft: worktreeLeft(exited)}

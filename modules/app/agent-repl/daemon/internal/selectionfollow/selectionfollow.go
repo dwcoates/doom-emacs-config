@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/kernelevent"
+	"agentrepl/logging/logsite"
 )
 
 const (
@@ -112,8 +113,8 @@ func (f *Follower) Run(ctx context.Context) error {
 func (f *Follower) Check(ctx context.Context) {
 	version, err := f.deps.Versions.DataVersion(ctx)
 	if err != nil {
-		ctxend.Log(err, f.deps.Log.Debug, f.deps.Log.Error, opCheck, "the data_version read ended with its context",
-			"could not read the state file's data_version; another daemon's selection is not followed on this commit",
+		ctxend.Log(err, f.deps.Log, dlog.LevelDebug, opCheck, logsite.Msg("the data_version read ended with its context"),
+			logsite.Msg("could not read the state file's data_version; another daemon's selection is not followed on this commit"),
 			dlog.Context{"cause": err.Error()})
 		return
 	}

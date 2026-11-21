@@ -23,13 +23,13 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 	card := &frontendv1.FeedSkill{}
 	switch state := skill.GetResult().(type) {
 	case *conversationv1.AgentSkillUse_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSkillUse_Start", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = composeInvocation(state.Start.GetSkill().GetName(), state.Start.GetArgs(), state.Start.Args != nil)
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "feed", "condition": "u.denied"})
 			card.Outcome = &frontendv1.FeedSkill_Denied{Denied: &frontendv1.FeedSkillDenied{}}
 			break
 		}
@@ -48,14 +48,14 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 			card.Clock = prior.GetClock()
 		}
 	case *conversationv1.AgentSkillUse_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSkillUse_Progress", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Progress"})
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		card.Outcome = &frontendv1.FeedSkill_Running{Running: &frontendv1.FeedSkillRunning{}}
 		card.Clock = runningClock(u.startedAtMs)
 	case *conversationv1.AgentSkillUse_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSkillUse_Success", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Success"})
 		if u.input == "" {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.input == \"\""})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.input == \"\"", dlog.Context{"function": "feed", "condition": "u.input == \"\""})
 			u.input = composeInvocation(state.Success.GetSkill().GetName(), "", false)
 		}
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
@@ -66,14 +66,14 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		// The consent line: WHAT INVOKING IT PERMITS. Absent when the skill
 		// declared none — absence draws no line, never an empty one.
 		if allowed := state.Success.GetAllowedTools().GetToolNames(); len(allowed) > 0 {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "allowed := state.Success.GetAllowedTools().GetToolNames(); len(allowed) > 0"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: allowed := state.Success.GetAllowedTools().GetToolNames(); len(allowed) > 0", dlog.Context{"function": "feed", "condition": "allowed := state.Success.GetAllowedTools().GetToolNames(); len(allowed) > 0"})
 			loaded.Allowances = &frontendv1.FeedSkillAllowances{
 				Text: "allows: " + strings.Join(allowed, ", "),
 			}
 		}
 		card.Outcome = &frontendv1.FeedSkill_Loaded{Loaded: loaded}
 	case *conversationv1.AgentSkillUse_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSkillUse_Failure", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Failure"})
 		// The failure restates the skill so a replayed failure names it. A
 		// start this process held stays the drawn line: it carries the
 		// invocation's arguments, which no settled arm restates.
@@ -94,7 +94,7 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		}}
 		card.Clock = settledClock(u.startedAtMs, state.Failure.GetError().GetSettledAt())
 	default:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "default"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "drawSkill", "branch": "default"})
 		return nil, errNotARow
 	}
 

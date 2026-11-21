@@ -13,6 +13,7 @@ import (
 
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -176,7 +177,7 @@ func (o *orchestrator) pauseRepos(ctx context.Context, op string, repos []wsm.Re
 		changed = append(changed, repo)
 	}
 	if len(changed) == 0 {
-		return o.refuseNoopPause(op, paused, "refused a pause change that would not change anything", "the merge queue is not paused", "the merge queue is already paused")
+		return o.refuseNoopPause(op, paused, logsite.Msg("refused a pause change that would not change anything"), "the merge queue is not paused", "the merge queue is already paused")
 	}
 	// EVERY PAUSE CHANGE IS RECORDED WITH WHO MADE IT AND WHY, at INFO: a
 	// queue found paused must say by whom from the log alone (2026-11-21: a
@@ -405,7 +406,7 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 		keys = append(keys, repo)
 	}
 	if len(keys) == 0 {
-		return nil, o.refuseNoopPause(op, paused, "refused a pause change with no queue to change", "no repository has a merge queue to resume", "no repository has a merge queue to pause")
+		return nil, o.refuseNoopPause(op, paused, logsite.Msg("refused a pause change with no queue to change"), "no repository has a merge queue to resume", "no repository has a merge queue to pause")
 	}
 	return keys, nil
 }
@@ -437,7 +438,7 @@ func (o *orchestrator) readScopedRepository(ctx context.Context, op, what string
 // repository SCOPE names as well as its queue key.
 func (o *orchestrator) scopedRepository(ctx context.Context, op, what string, scope RepositoryScope) (wsm.Repository, wsm.RepoKey, error) {
 	if scope.ID == "" && scope.Dir == "" {
-		o.deps.Log.Global().Warn(op, "refused "+what+" scoped by an empty repository ref", dlog.Context{"arm": ArmUnknownRepository})
+		o.deps.Log.Global().Warn(op, "refused {what} scoped by an empty repository ref", dlog.Context{"what": what, "arm": ArmUnknownRepository})
 		return wsm.Repository{}, "", &RefusalError{Arm: ArmUnknownRepository, Reason: "the request's repository ref names neither an id nor a dir"}
 	}
 	repos, err := o.deps.DB.ListRepositories(ctx)
@@ -455,7 +456,7 @@ func (o *orchestrator) scopedRepository(ctx context.Context, op, what string, sc
 		}
 		return repo, wsm.RepoKey(common), nil
 	}
-	o.deps.Log.Global().Warn(op, "refused "+what+" for a repository the registry does not hold", dlog.Context{"arm": ArmUnknownRepository, "repository": string(scope.ID), "dir": scope.Dir})
+	o.deps.Log.Global().Warn(op, "refused {what} for a repository the registry does not hold", dlog.Context{"what": what, "arm": ArmUnknownRepository, "repository": string(scope.ID), "dir": scope.Dir})
 	return wsm.Repository{}, "", &RefusalError{Arm: ArmUnknownRepository, Reason: "no registered repository matches the request's repository ref"}
 }
 
@@ -608,8 +609,8 @@ func (o *orchestrator) Move(ctx context.Context, ws ids.WorkspaceID, move wsm.Me
 	_, err := o.reorder(ctx, ws, reordering{
 		op:     "daemon.merge.move",
 		fields: dlog.Context{"move": move.String()},
-		failed: "could not move a merge in its queue",
-		moved:  "moved a merge one place in its queue",
+		failed: logsite.Msg("could not move a merge in its queue"),
+		moved:  logsite.Msg("moved a merge one place in its queue"),
 		do: func(repo wsm.RepoKey) (bool, error) {
 			var err error
 			outcome, err = o.deps.DB.MoveMerge(ctx, repo, ws, move)
@@ -661,7 +662,7 @@ func (o *orchestrator) moveBlocked(ctx context.Context, ws ids.WorkspaceID, move
 	default:
 		panic(fmt.Sprintf("merge: the move of %s was refused for %s, which is no reason a move stays", ws, outcome.Result))
 	}
-	logRefusal(log, op, "a merge asked to move one place stays where it is; the move is refused", fields, refusal)
+	logRefusal(log, op, logsite.Msg("a merge asked to move one place stays where it is; the move is refused"), fields, refusal)
 	return refusal
 }
 
@@ -671,9 +672,9 @@ func (o *orchestrator) MoveTo(ctx context.Context, ws, anchor ids.WorkspaceID, s
 	return o.reorder(ctx, ws, reordering{
 		op:      "daemon.merge.move_to",
 		fields:  dlog.Context{"anchor": string(anchor), "side": side.String()},
-		failed:  "could not move a merge to a place in its queue",
-		unmoved: "a merge asked to move to a place already stands there, or it or its anchor is not waiting, and it stays where it is",
-		moved:   "moved a merge to a place in its queue",
+		failed:  logsite.Msg("could not move a merge to a place in its queue"),
+		unmoved: logsite.Msg("a merge asked to move to a place already stands there, or it or its anchor is not waiting, and it stays where it is"),
+		moved:   logsite.Msg("moved a merge to a place in its queue"),
 		do: func(repo wsm.RepoKey) (bool, error) {
 			return o.deps.DB.MoveMergeTo(ctx, repo, ws, anchor, side)
 		},
@@ -715,9 +716,9 @@ func (o *orchestrator) Place(ctx context.Context, ws ids.WorkspaceID, place Move
 	return o.reorder(ctx, ws, reordering{
 		op:      "daemon.merge.place",
 		fields:  place.fields(),
-		failed:  "could not move a merge to a place in its queue",
-		unmoved: "a merge asked to move already stands on that place, and stays where it is",
-		moved:   "moved a merge to a place in its queue",
+		failed:  logsite.Msg("could not move a merge to a place in its queue"),
+		unmoved: logsite.Msg("a merge asked to move already stands on that place, and stays where it is"),
+		moved:   logsite.Msg("moved a merge to a place in its queue"),
 		refusal: func(err error) *RefusalError { return placeRefusal(ws, place, err) },
 		do: func(repo wsm.RepoKey) (bool, error) {
 			stored := wsm.MergePlace{Kind: place.Kind, Index: place.Index}
@@ -763,9 +764,9 @@ type reordering struct {
 	// fields are the reordering's own context, beside the workspace and the
 	// repository every record carries.
 	fields  dlog.Context
-	failed  string
-	unmoved string
-	moved   string
+	failed  logsite.Message
+	unmoved logsite.Message
+	moved   logsite.Message
 	// refusal answers the typed refusal a store error is, nil for a store
 	// failure. Unset, every store error is a failure.
 	refusal func(error) *RefusalError
@@ -802,10 +803,10 @@ func (o *orchestrator) reorder(ctx context.Context, ws ids.WorkspaceID, r reorde
 		if r.refuseUnmoved != nil {
 			return false, r.refuseUnmoved(fields)
 		}
-		log.Info(r.op, r.unmoved, fields)
+		log.Log(dlog.LevelInfo, r.op, r.unmoved, fields)
 		return false, nil
 	}
-	log.Info(r.op, r.moved, fields)
+	log.Log(dlog.LevelInfo, r.op, r.moved, fields)
 	return true, o.republishQueue(ctx, repo)
 }
 
@@ -819,7 +820,7 @@ func (o *orchestrator) reorderFailed(log dlog.Logger, r reordering, fields dlog.
 		return err
 	}
 	fields["error"] = err.Error()
-	log.Error(r.op, r.failed, fields)
+	log.Log(dlog.LevelError, r.op, r.failed, fields)
 	return err
 }
 
@@ -1226,6 +1227,7 @@ func (o *orchestrator) queueOf(ctx context.Context, ws ids.WorkspaceID) (wsm.Rep
 // A REQUESTED MERGE IS IN NOBODY'S LINE: its requesting turn has not ended, so
 // it is on no snapshot and has no facts.
 func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) error {
+	noQueuedTime := logsite.Msg("a queued merge carries no queued time; the queue is not drawn")
 	o.publishRosterQueue(ctx, repo)
 	stored, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
@@ -1269,7 +1271,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 			// settled at its first admission and is not drawn again.
 			queuedMS, err := enqueuedMS(entry)
 			if err != nil {
-				o.deps.Log.Global().Error("daemon.merge.queue", "a queued merge carries no queued time; the queue is not drawn",
+				o.deps.Log.Global().Log(dlog.LevelError, "daemon.merge.queue", noQueuedTime,
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
 				return err
 			}
@@ -1277,7 +1279,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		} else if ok {
 			clock, stage, clocked, err := o.headClockMS(entry)
 			if err != nil {
-				o.deps.Log.Global().Error("daemon.merge.queue", "a queued merge carries no queued time; the queue is not drawn",
+				o.deps.Log.Global().Log(dlog.LevelError, "daemon.merge.queue", noQueuedTime,
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
 				return err
 			}
@@ -1768,6 +1770,7 @@ func (o *orchestrator) leaveAdmission() {
 // daemon's lock). The repository's kernel lock is held from here
 // (holdRepoLock) for as long as any run of its chain stands.
 func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, *run, bool, error) {
+	heldElsewhere := logsite.Msg("another daemon holds this repository's merge queue")
 	const op = "daemon.merge.admit"
 	// The pump loop re-enters this every iteration: a drain that began while a
 	// burst was mid-flight stops the burst here rather than after it has taken
@@ -1810,7 +1813,7 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 			return "", nil, false, err
 		}
 		if !taken {
-			o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
+			o.deps.Log.Global().Log(dlog.LevelWarn, op, heldElsewhere, dlog.Context{"repo": string(repo)})
 			return "", nil, false, nil
 		}
 		return ws, nil, true, nil
@@ -1878,7 +1881,7 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, err
 	}
 	if !taken {
-		o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
+		o.deps.Log.Global().Log(dlog.LevelWarn, op, heldElsewhere, dlog.Context{"repo": string(repo)})
 		return "", nil, false, nil
 	}
 	// A MERGE WORKSPACE'S PICK RUNS AT THE HEAD, holding the slot: the merge
@@ -2035,9 +2038,9 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 	}); waiting != "" {
 		for _, ws := range behind {
 			if err := o.requeueAdmitted(ctx, op, repo, ws, requeueWhy{
-				unleased: "the merge to resume behind a merge that starts over has no merge lease to drop; nothing of the repository is admitted until it is settled",
-				failed:   "the merge to resume behind a merge that starts over could not be put back in line; nothing of the repository is admitted until it is settled",
-				done:     "a merge to resume stands behind a merge the restart put back in line, so it goes back to its own place and starts again behind it",
+				unleased: logsite.Msg("the merge to resume behind a merge that starts over has no merge lease to drop; nothing of the repository is admitted until it is settled"),
+				failed:   logsite.Msg("the merge to resume behind a merge that starts over could not be put back in line; nothing of the repository is admitted until it is settled"),
+				done:     logsite.Msg("a merge to resume stands behind a merge the restart put back in line, so it goes back to its own place and starts again behind it"),
 			}); err != nil {
 				return "", false, err
 			}
@@ -2394,11 +2397,11 @@ func heldByAnother(err error) (*wsm.LeaseHeldError, bool) {
 // names the asked-for state, so a pause refuses as already_paused and a resume
 // as not_paused, with the matching reason. The refusal is the asker's typed
 // answer rather than a daemon fault, so it is recorded at INFO under OP.
-func (o *orchestrator) refuseNoopPause(op string, paused bool, message, notPausedReason, alreadyPausedReason string) *RefusalError {
+func (o *orchestrator) refuseNoopPause(op string, paused bool, message logsite.Message, notPausedReason, alreadyPausedReason string) *RefusalError {
 	arm, reason := ArmNotPaused, notPausedReason
 	if paused {
 		arm, reason = ArmAlreadyPaused, alreadyPausedReason
 	}
-	o.deps.Log.Global().Info(op, message, dlog.Context{"arm": arm})
+	o.deps.Log.Global().Log(dlog.LevelInfo, op, message, dlog.Context{"arm": arm})
 	return &RefusalError{Arm: arm, Reason: reason}
 }

@@ -158,7 +158,7 @@ func (s *session) write(p []byte) error {
 func (s *session) resize(size Resize) error {
 	if size.Rows <= 0 || size.Cols <= 0 {
 		err := fmt.Errorf("login: refusing a %dx%d geometry (rows and columns must be positive)", size.Rows, size.Cols)
-		s.log.Error("daemon.login.send_resize", "resize refused", dlog.Context{
+		s.log.Error("daemon.login.send_resize", "resize refused: the geometry is not positive", dlog.Context{
 			"config_dir": s.configDir,
 			"rows":       size.Rows,
 			"cols":       size.Cols,
@@ -169,7 +169,7 @@ func (s *session) resize(size Resize) error {
 	}
 	if s.Exited() {
 		err := fmt.Errorf("login: the login session under %s has exited", s.configDir)
-		s.log.Error("daemon.login.send_resize", "resize refused", dlog.Context{
+		s.log.Error("daemon.login.send_resize", "resize refused: the login session has exited", dlog.Context{
 			"config_dir": s.configDir,
 			"branch":     "exited",
 			"error":      err.Error(),

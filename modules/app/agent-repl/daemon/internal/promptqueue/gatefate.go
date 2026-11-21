@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // A COLD GATE'S ANSWER DOES EXACTLY WHAT ITS BUTTON SAYS (owner ruling,
@@ -116,9 +117,9 @@ func (q *queue) ColdGateAnswered(ctx context.Context, ws ids.WorkspaceID, fate G
 	case GateDiscard:
 		return q.discardAtGate(ctx, d, at, log)
 	case GateKeep:
-		return q.restampAtGate(ctx, d, at, wsm.HoldColdGateAnswered, "the prompts held at the cold gate are kept until the user sends them", log)
+		return q.restampAtGate(ctx, d, at, wsm.HoldColdGateAnswered, logsite.Msg("the prompts held at the cold gate are kept until the user sends them"), log)
 	case GateSend:
-		return q.restampAtGate(ctx, d, at, wsm.HoldColdGate, "the prompts held at the cold gate are sent once the remediated session is up", log)
+		return q.restampAtGate(ctx, d, at, wsm.HoldColdGate, logsite.Msg("the prompts held at the cold gate are sent once the remediated session is up"), log)
 	default:
 		log.Error(opColdGate, "the cold gate's answer named no fate for its held prompts", dlog.Context{
 			"invariant_violation": "GateFate is not one of the declared fates",
@@ -153,7 +154,7 @@ func (q *queue) discardAtGate(ctx context.Context, d *delivery, at []wsm.HeldPro
 // restampAtGate puts every entry of AT on KIND. A store failure refuses the
 // answer: the caller does not bring the session back, so an entry left on
 // the other hold is never delivered by a release the answer caused.
-func (q *queue) restampAtGate(ctx context.Context, d *delivery, at []wsm.HeldPrompt, kind wsm.HoldKind, said string, log dlog.Logger) error {
+func (q *queue) restampAtGate(ctx context.Context, d *delivery, at []wsm.HeldPrompt, kind wsm.HoldKind, said logsite.Message, log dlog.Logger) error {
 	moved := 0
 	for _, h := range at {
 		if *h.Hold == kind {
@@ -167,7 +168,7 @@ func (q *queue) restampAtGate(ctx context.Context, d *delivery, at []wsm.HeldPro
 		}
 		moved++
 	}
-	log.Info(opColdGate, said, dlog.Context{"held": len(at), "moved": moved, "hold": kind.String()})
+	log.Log(dlog.LevelInfo, opColdGate, said, dlog.Context{"held": len(at), "moved": moved, "hold": kind.String()})
 	if moved == 0 {
 		return nil
 	}

@@ -3,6 +3,7 @@ package footer
 import (
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -44,7 +45,7 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 		r.observeUntimedRetry(ws, s, untimedRetry{
 			attempt: attempting.GetAttempt(), status: attempting.GetStatus(), now: true,
 			what:  "a vendor-error retry being made",
-			drawn: "agent-repl is making its vendor-error retry now; the line says so",
+			drawn: logsite.Msg("agent-repl is making its vendor-error retry now; the line says so"),
 		})
 		return
 	}
@@ -54,7 +55,7 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 		r.observeUntimedRetry(ws, s, untimedRetry{
 			attempt: awaiting.GetAttempt(), status: awaiting.GetStatus(), awaitingNetwork: true,
 			what:  "a vendor-error retry waiting for the network",
-			drawn: "agent-repl's vendor-error retry waits for the network; the line counts down to nothing",
+			drawn: logsite.Msg("agent-repl's vendor-error retry waits for the network; the line counts down to nothing"),
 		})
 		return
 	}
@@ -97,7 +98,8 @@ type untimedRetry struct {
 	// now and awaitingNetwork pick the clause the line draws; exactly one is set.
 	now, awaitingNetwork bool
 	// what names the statement in its refusal; drawn is the record of its drawing.
-	what, drawn string
+	what  string
+	drawn logsite.Message
 }
 
 // observeUntimedRetry takes one untimed retry statement. One naming no
@@ -106,8 +108,8 @@ type untimedRetry struct {
 func (r *resolver) observeUntimedRetry(ws ids.WorkspaceID, s *wsState, u untimedRetry) {
 	if u.attempt == 0 {
 		r.logOf(ws, s).Error("daemon.footer.vendor_retry_refused",
-			u.what+" names no attempt; the statement is refused and the schedule on hand stands",
-			dlog.Context{"invariant_violation": u.what + " names its attempt"})
+			"{what} names no attempt; the statement is refused and the schedule on hand stands",
+			dlog.Context{"what": u.what, "invariant_violation": u.what + " names its attempt"})
 		return
 	}
 	s.vendorRetry = &retryState{
@@ -117,7 +119,7 @@ func (r *resolver) observeUntimedRetry(ws ids.WorkspaceID, s *wsState, u untimed
 		now:             u.now,
 		awaitingNetwork: u.awaitingNetwork,
 	}
-	r.logOf(ws, s).Info("daemon.footer.vendor_retry", u.drawn, dlog.Context{"attempt": u.attempt})
+	r.logOf(ws, s).Log(dlog.LevelInfo, "daemon.footer.vendor_retry", u.drawn, dlog.Context{"attempt": u.attempt})
 }
 
 // attemptOfRetry is the footer's attempt number for the RETRY-th retry

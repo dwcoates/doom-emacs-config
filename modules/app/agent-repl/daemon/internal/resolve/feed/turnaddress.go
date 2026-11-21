@@ -75,7 +75,7 @@ func (r *resolver) addressedPlacement(s *wsState, turn *ids.TurnID) (placement, 
 			"a frame of an addressed turn arrived after the address it was recorded at was withdrawn; it is drawn at the turn's recorded address",
 			dlog.Context{"turn": string(*turn), "feed": r.feedKey(s.id, addr.Feed)})
 	}
-	r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "the turn is addressed"})
+	r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: the turn is addressed", dlog.Context{"function": "feed", "condition": "the turn is addressed"})
 	at := placement{feed: addr.Feed}
 	if addr.Parent != nil {
 		at.parent = &frontendv1.FeedRowParent{Row: r.deps.Encode(*addr.Parent)}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // TestRecordGoroutineDumpLandsAtError pins that the dump reaches the run log at
@@ -15,7 +16,7 @@ func TestRecordGoroutineDumpLandsAtError(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	recordGoroutineDump(log, "daemon.cmd.sigquit", "dumping", nil)
+	recordGoroutineDump(log, "daemon.cmd.sigquit", logsite.Msg("dumping"), nil)
 
 	// Assert.
 	records := log.Records()
@@ -38,7 +39,7 @@ func TestRecordGoroutineDumpCountsTheGoroutines(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	recordGoroutineDump(log, "daemon.cmd.sigquit", "dumping", nil)
+	recordGoroutineDump(log, "daemon.cmd.sigquit", logsite.Msg("dumping"), nil)
 
 	// Assert.
 	count, ok := log.Records()[0].Context["goroutines"].(int)
@@ -54,7 +55,7 @@ func TestRecordGoroutineDumpKeepsTheCallersContext(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	recordGoroutineDump(log, "daemon.cmd.boot", "stalled", dlog.Context{"bound_ms": int64(90000)})
+	recordGoroutineDump(log, "daemon.cmd.boot", logsite.Msg("stalled"), dlog.Context{"bound_ms": int64(90000)})
 
 	// Assert.
 	if got := log.Records()[0].Context["bound_ms"]; got != int64(90000) {

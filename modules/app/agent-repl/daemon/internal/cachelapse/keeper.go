@@ -71,6 +71,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -889,13 +890,13 @@ type shimFailure struct {
 	// keep-alive cadence").
 	doing string
 	// died is the INFO record of a shim that died under the call.
-	died string
+	died logsite.Message
 	// stoodDown is the INFO record of a shim this daemon was already standing
 	// down (a kill marks the row closed before its teardown, so the close's
 	// last round meets the shim the kill is stopping).
-	stoodDown string
+	stoodDown logsite.Message
 	// failed is the ERROR record of any other failure.
-	failed string
+	failed logsite.Message
 }
 
 // shimCallFailed records a shim call that failed for a reason other than the
@@ -911,12 +912,12 @@ type shimFailure struct {
 func shimCallFailed(ctx context.Context, log dlog.Logger, op string, words shimFailure, fields dlog.Context, err error) bool {
 	switch {
 	case errors.Is(err, shimclient.ErrStandDownOrdered):
-		log.Info(op, words.stoodDown, dlog.WithCause(fields, err))
+		log.Log(dlog.LevelInfo, op, words.stoodDown, dlog.WithCause(fields, err))
 	case errors.Is(err, shimclient.ErrShimDied):
-		log.Info(op, words.died, dlog.WithCause(fields, err))
+		log.Log(dlog.LevelInfo, op, words.died, dlog.WithCause(fields, err))
 	case leaving(ctx, log, op, words.doing, err):
 	default:
-		log.Error(op, words.failed, dlog.WithCause(fields, err))
+		log.Log(dlog.LevelError, op, words.failed, dlog.WithCause(fields, err))
 		return true
 	}
 	return false
@@ -929,7 +930,7 @@ func leaving(ctx context.Context, log dlog.Logger, op, doing string, err error) 
 	if ctx.Err() == nil {
 		return false
 	}
-	log.Info(op, "the daemon is leaving; "+doing+" ended with it", dlog.Context{"cause": err.Error()})
+	log.Info(op, "the daemon is leaving; {doing} ended with it", dlog.Context{"doing": doing, "cause": err.Error()})
 	return true
 }
 

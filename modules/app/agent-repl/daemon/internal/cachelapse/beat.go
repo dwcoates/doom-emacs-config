@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -108,9 +109,9 @@ func (k *Keeper) beatFailure(ctx context.Context, log dlog.Logger, out *agentrep
 	}
 	shimCallFailed(ctx, log, opBeat, shimFailure{
 		doing:     "sending a hidden workspace its keep-alive",
-		died:      "the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit",
-		stoodDown: "the shim was being stood down by this daemon under the keep-alive call",
-		failed:    "could not send the hidden workspace its keep-alive",
+		died:      logsite.Msg("the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit"),
+		stoodDown: logsite.Msg("the shim was being stood down by this daemon under the keep-alive call"),
+		failed:    logsite.Msg("could not send the hidden workspace its keep-alive"),
 	}, nil, err)
 	var submit *BeatSubmitFailed
 	detail := err.Error()

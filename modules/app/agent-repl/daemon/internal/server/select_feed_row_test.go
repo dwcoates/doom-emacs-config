@@ -608,7 +608,7 @@ func TestSelectFeedRowBubbleLogsTheRefusal(t *testing.T) {
 	clickRow(t, h, "streaming-1")
 
 	// Assert.
-	for _, rec := range log.records {
+	for _, rec := range log.records() {
 		if rec.Context["arm"] == "not_selectable" {
 			if reason, _ := rec.Context["reason"].(string); !strings.Contains(reason, "streaming-1") {
 				t.Fatalf("reason = %q, want it to name streaming-1", reason)
@@ -616,7 +616,7 @@ func TestSelectFeedRowBubbleLogsTheRefusal(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("records = %v, want the not_selectable refusal", log.records)
+	t.Fatalf("records = %v, want the not_selectable refusal", log.records())
 }
 
 // TestSelectFeedRowNewerFromNothingLandsOnTheOldest pins that a NEWER step
@@ -750,7 +750,7 @@ func TestSelectFeedRowNewerPastTheNewestIsRecordedAtInfo(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("records = %v, want the end at INFO", log.records)
+	t.Fatalf("records = %v, want the end at INFO", log.records())
 }
 
 // TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithHold pins the click
@@ -836,7 +836,7 @@ func TestSelectFeedRowBubbleDeselectIsRecordedAtInfo(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("records = %v, want the deselect at INFO", log.records)
+	t.Fatalf("records = %v, want the deselect at INFO", log.records())
 }
 
 // TestSelectFeedRowStepFailsOnAnUnreadableFinal pins the invariant: a final
@@ -856,7 +856,7 @@ func TestSelectFeedRowStepFailsOnAnUnreadableFinal(t *testing.T) {
 		t.Fatalf("code = %v, want Internal", connectCode(t, err))
 	}
 	if len(log.at("ERROR")) == 0 {
-		t.Fatalf("records = %v, want the failure at ERROR", log.records)
+		t.Fatalf("records = %v, want the failure at ERROR", log.records())
 	}
 	if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
 		t.Fatalf("a selection was stored for an unreadable final")
@@ -1156,7 +1156,7 @@ func TestNewLoggedHarnessRecordsTheWorkspaceLog(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("records = %v, want the move under %q", log.records, opSelectFeedRow)
+	t.Fatalf("records = %v, want the move under %q", log.records(), opSelectFeedRow)
 }
 
 // TestSelectFeedRowTestsBuildTheirLoggedHarnessThroughTheHelper pins that the
@@ -1285,7 +1285,7 @@ func TestSelectFeedRowFinalResponseClickIsRecordedAtInfo(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("records = %v, want the focus request at INFO", log.records)
+	t.Fatalf("records = %v, want the focus request at INFO", log.records())
 }
 
 // answerMove builds a SelectFeedRow request for a click on a response's label

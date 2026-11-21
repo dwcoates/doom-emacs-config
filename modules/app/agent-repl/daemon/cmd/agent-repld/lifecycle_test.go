@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -401,7 +402,7 @@ func TestCloseOnEdgeClosesTheWorkspacesFaultsTheEdgeEnds(t *testing.T) {
 			sink := newDiagnosticsSink(t, reporter)
 
 			// Act
-			sink.closeOnEdge("ws-1", health.EdgeLinkRestored, "unbound")
+			sink.closeOnEdge("ws-1", health.EdgeLinkRestored, logsite.Msg("unbound"))
 
 			// Assert
 			closed := len(reporter.closed) == 1 && reporter.closed[0] == "f-standing"
@@ -777,7 +778,7 @@ func TestReplaceShimStatesNothingOverARefusal(t *testing.T) {
 	sink, log := queryDiedSink(bouncer)
 
 	// Act
-	sink.replaceShim("ws-1", rollout.ReasonSkillsChanged, dlog.Context{}, "unbound", "stated")
+	sink.replaceShim("ws-1", rollout.ReasonSkillsChanged, dlog.Context{}, logsite.Msg("unbound"), logsite.Msg("stated"))
 
 	// Assert
 	if hasLifecycleRecord(log, "info", "stated") || hasLifecycleRecord(log, "error", "unbound") {
@@ -791,7 +792,7 @@ func TestReplaceShimWithNoRolloutSaysUnboundAtError(t *testing.T) {
 	sink := &lifecycleSink{health: &healthForwarder{}, builds: &rolloutForwarder{}, log: log}
 
 	// Act
-	sink.replaceShim("ws-1", rollout.ReasonQueryDied, dlog.Context{"extra": 1}, "unbound", "stated")
+	sink.replaceShim("ws-1", rollout.ReasonQueryDied, dlog.Context{"extra": 1}, logsite.Msg("unbound"), logsite.Msg("stated"))
 
 	// Assert
 	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Message: "unbound"})

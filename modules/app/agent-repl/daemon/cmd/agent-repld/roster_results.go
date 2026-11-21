@@ -6,6 +6,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // resultWriter is the one write the roster's result sink makes.
@@ -19,7 +20,7 @@ type resultWriter interface {
 // is recorded at ERROR; the roster already draws the result it reported, and
 // only the next daemon's restore misses it.
 func rosterResults(db resultWriter, log dlog.Logger) sidebar.ResultSink {
-	return rosterWrite(log, "daemon.cmd.roster_results", "could not keep the workspace's last turn result durable",
+	return rosterWrite(log, "daemon.cmd.roster_results", logsite.Msg("could not keep the workspace's last turn result durable"),
 		db.SetResult,
 		func(result *wsm.TurnResult) dlog.Context {
 			ctx := dlog.Context{"cleared": result == nil}

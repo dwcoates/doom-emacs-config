@@ -541,10 +541,10 @@ func TestAQuestionWhoseBypassStandingCannotBeReadFailsAndIsLogged(t *testing.T) 
 	if h.Prompts.submits != 0 || len(h.Verbs.intakeQuestions) != 0 {
 		t.Fatalf("submits = %d, intake questions = %+v, want nothing delivered", h.Prompts.submits, h.Verbs.intakeQuestions)
 	}
-	for _, rec := range log.records {
+	for _, rec := range log.records() {
 		if strings.Contains(rec.Message, "queue bypass standing to route its question") && rec.Context["workspace"] == string(testWorkspaceID) {
 			return
 		}
 	}
-	t.Fatalf("records = %v, want the routing read failure with the workspace", log.records)
+	t.Fatalf("records = %v, want the routing read failure with the workspace", log.records())
 }

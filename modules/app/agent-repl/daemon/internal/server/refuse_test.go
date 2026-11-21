@@ -235,7 +235,7 @@ func TestUnlandedArmSpellsTheLedgerMessage(t *testing.T) {
 	const want = "intended arm: WatchFeedError.unknown_token: the token was never minted"
 
 	// Act.
-	cerr := UnlandedArm(fakeLogger{}, "WatchFeed", "unknown_token", "the token was never minted", false)
+	cerr := UnlandedArm(dlog.Nowhere(), "WatchFeed", "unknown_token", "the token was never minted", false)
 
 	// Assert.
 	if got := cerr.Message(); got != want {
@@ -247,7 +247,7 @@ func TestUnlandedArmSpellsTheLedgerMessage(t *testing.T) {
 // answers NotFound, a state refusal answers FailedPrecondition.
 func TestUnlandedArmUsesNotFoundForAnUnknownID(t *testing.T) {
 	// Arrange, Act.
-	cerr := UnlandedArm(fakeLogger{}, "WatchFeed", "unknown_token", "no such token", true)
+	cerr := UnlandedArm(dlog.Nowhere(), "WatchFeed", "unknown_token", "no such token", true)
 
 	// Assert.
 	if got := cerr.Code().String(); got != "not_found" {
@@ -601,7 +601,7 @@ func TestATypedStandingRefusalIsRecordedOnceAtInfo(t *testing.T) {
 				}
 			}
 			if infos != 1 {
-				t.Fatalf("OpenFeed recorded %d INFO records naming %s, want 1: %+v", infos, test.arm, log.records)
+				t.Fatalf("OpenFeed recorded %d INFO records naming %s, want 1: %+v", infos, test.arm, log.records())
 			}
 		})
 	}

@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // opOrphans is the operation the takeover's orphan recovery is recorded under.
@@ -48,6 +49,7 @@ const opOrphans = "daemon.rollout.orphans"
 // bring-up (sessionless.go), exactly as a fresh boot starts a client-less
 // workspace.
 func (c *controller) recoverOrphans(fields dlog.Context) {
+	probeUntold := logsite.Msg("the workspace lock probe could not tell; a shim that may be running is not recovered")
 	if c.deps.LockProbe == nil || c.deps.Shims == nil {
 		return
 	}
@@ -90,9 +92,9 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 		switch {
 		case probeErr != nil:
 			// "Could not tell" is never read as held or free.
-			c.log.Warn(opOrphans, "the workspace lock probe could not tell; a shim that may be running is not recovered", dlog.WithCause(wsFields, probeErr))
+			c.log.Log(dlog.LevelWarn, opOrphans, probeUntold, dlog.WithCause(wsFields, probeErr))
 		case state == sessionlock.StateUnknown:
-			c.log.Warn(opOrphans, "the workspace lock probe could not tell; a shim that may be running is not recovered", wsFields)
+			c.log.Log(dlog.LevelWarn, opOrphans, probeUntold, wsFields)
 		case state == sessionlock.StateHeld:
 			orphans = append(orphans, ws.ID)
 		default:

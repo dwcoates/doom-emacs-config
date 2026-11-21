@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/figures"
+
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

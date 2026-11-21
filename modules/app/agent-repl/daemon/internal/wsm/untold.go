@@ -65,12 +65,12 @@ func (s *store) recordUntold(ctx context.Context, t untoldTable, op string, subs
 	fields := dlog.Context{"subscriber": string(subscriber), t.subject: subject, "turn": string(turn), "sentences": len(sentences)}
 	if len(sentences) == 0 {
 		err := fmt.Errorf("wsm: the %s of %s about %q says no change", t.noun, subscriber, subject)
-		s.log.Error(op, "refused an "+t.noun+" that says no change", withError(fields, err))
+		s.log.With(withError(fields, err)).Error(op, "refused an {noun} that says no change", dlog.Context{"noun": t.noun})
 		return err
 	}
 	said, err := json.Marshal(sentences)
 	if err != nil {
-		s.log.Error(op, "refused an "+t.noun+" whose sentences cannot be encoded", withError(fields, err))
+		s.log.With(withError(fields, err)).Error(op, "refused an {noun} whose sentences cannot be encoded", dlog.Context{"noun": t.noun})
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {

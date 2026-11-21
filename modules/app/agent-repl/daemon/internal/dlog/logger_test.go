@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agentrepl/logging/logsite"
 )
 
 func TestLoggerRecordsEachLevel(t *testing.T) {
@@ -384,5 +386,75 @@ func TestRecordTeeUnboundTakesNothing(t *testing.T) {
 	}
 	if !hasOperation(workspaceRecords(t, dir, "daemon"), "daemon.pkg.verb") {
 		t.Fatal("the record was not persisted with no tee bound")
+	}
+}
+
+func TestLoggerStampsEachRecordsSiteAndTemplate(t *testing.T) {
+	tests := []struct {
+		name         string
+		level        string
+		message      logsite.Message
+		ctx          Context
+		wantMessage  string
+		wantTemplate string
+	}{
+		{name: "a plain template", level: LevelInfo, message: logsite.Msg("the queue moved"),
+			wantMessage: "the queue moved", wantTemplate: "the queue moved"},
+		{name: "a template with a placeholder", level: LevelError, message: logsite.Msg("shim {shim} timed out"), ctx: Context{"shim": "s-1"},
+			wantMessage: "shim s-1 timed out", wantTemplate: "shim {shim} timed out"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, runLogPath := testSurfaces(t)
+
+			// Act.
+			s.Global().Log(tc.level, "daemon.pkg.verb", tc.message, tc.ctx)
+
+			// Assert.
+			records := readRecords(t, runLogPath)
+			if len(records) != 1 {
+				t.Fatalf("records = %d, want 1", len(records))
+			}
+			wantSite := logsite.Key(RuntimeDaemon, "agent-repld/internal/dlog.TestLoggerStampsEachRecordsSiteAndTemplate", tc.wantTemplate)
+			got := records[0]
+			if got["site"] != wantSite || got["template"] != tc.wantTemplate || got["message"] != tc.wantMessage || got["level"] != tc.level {
+				t.Fatalf("record = %v, want site %s, template %q, message %q at %s", got, wantSite, tc.wantTemplate, tc.wantMessage, tc.level)
+			}
+		})
+	}
+}
+
+func TestLoggerPanicsOnAPlaceholderTheRecordDoesNotHold(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+
+	// Act.
+	got := func() (got any) {
+		defer func() { got = recover() }()
+		s.Global().Info("daemon.pkg.unfilled", "shim {shim} timed out", nil)
+		return nil
+	}()
+
+	// Assert.
+	if text, _ := got.(string); !strings.Contains(text, "daemon.pkg.unfilled") {
+		t.Fatalf("panic = %v, want one naming the operation", got)
+	}
+}
+
+func TestLoggerRefusesAMessageNoMsgMade(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+
+	// Act.
+	got := func() (got any) {
+		defer func() { got = recover() }()
+		s.Global().Log(LevelInfo, "daemon.pkg.verb", logsite.Message{}, nil)
+		return nil
+	}()
+
+	// Assert.
+	if text, _ := got.(string); !strings.Contains(text, "logsite.Msg") {
+		t.Fatalf("panic = %v, want one naming logsite.Msg", got)
 	}
 }

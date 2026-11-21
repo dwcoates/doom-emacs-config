@@ -3,6 +3,7 @@ package feed
 import (
 	"errors"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -103,7 +104,7 @@ func (r *resolver) RefreshChessBoards(sessions []chessboard.Session) {
 			bubble := r.deps.ChessBoards.View(board.session)
 			r.restateRow(s, board.at, stored, true, unclonable{
 				operation: "daemon.feed.row_not_clonable",
-				message:   "a chess board row could not be snapshotted to re-publish its board",
+				message:   logsite.Msg("a chess board row could not be snapshotted to re-publish its board"),
 				context:   dlog.Context{"feed": f.key, "row": board.row.GetValue(), "unit": unit},
 			}, func(restated *frontendv1.FeedRow) {
 				restated.GetActivity().Unit = &frontendv1.FeedTurnActivity_ChessBoard{ChessBoard: bubble}

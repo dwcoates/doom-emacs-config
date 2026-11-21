@@ -2,6 +2,7 @@ package feed
 
 import (
 	"agent-repld/internal/prose"
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -43,21 +44,21 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 
 	switch state := send.GetResult().(type) {
 	case *conversationv1.AgentSendMessage_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSendMessage_Start", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Start"})
 		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.sendAddressedTo = state.Start.GetAddressedTo()
 		// The summary is OPTIONAL on the wire; its absence is a fact, not a
 		// reason to reach for the body.
 		if state.Start.Summary != nil {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.Start.Summary != nil"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: state.Start.Summary != nil", dlog.Context{"function": "feed", "condition": "state.Start.Summary != nil"})
 			u.sendSummary = state.Start.GetSummary().GetText()
 		}
 	case *conversationv1.AgentSendMessage_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSendMessage_Progress", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 	case *conversationv1.AgentSendMessage_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSendMessage_Success", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Success"})
 		if err := r.restateSend(s, act, u, state.Success.GetAddressedTo(), state.Success.GetSummary()); err != nil {
 			return nil, err
 		}
@@ -81,7 +82,7 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		}
 		u.sendDelivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSendMessage_Failure", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Failure"})
 		if err := r.restateSend(s, act, u, state.Failure.GetAddressedTo(), state.Failure.GetSummary()); err != nil {
 			return nil, err
 		}
@@ -91,7 +92,7 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		// reader cannot tell apart from a producer that stated nothing.
 		u.sendDelivery = refusedOf(state.Failure)
 	default:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "default"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "drawSendMessage", "branch": "default"})
 		return nil, errNotARow
 	}
 
@@ -105,7 +106,7 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	// THE DELIVERY IS THE UNIT'S, NOT THIS FRAME'S. See unitState.sendDelivery
 	// for the replay that made the difference matter.
 	if u.sendDelivery != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.sendDelivery != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.sendDelivery != nil", dlog.Context{"function": "feed", "condition": "u.sendDelivery != nil"})
 		u.sendDelivery(row.GetAgentPrompt())
 	}
 	u.row = row
@@ -147,7 +148,7 @@ func (r *resolver) redrawSendAddress(s *wsState, unitID string) {
 	address := r.sendAddress(s, u)
 	r.restateRow(s, u.at, stored, true, unclonable{
 		operation: "daemon.feed.send_address_unclonable",
-		message:   "a send's row could not be copied to name the session it reached; its header stays as drawn",
+		message:   logsite.Msg("a send's row could not be copied to name the session it reached; its header stays as drawn"),
 		context:   dlog.Context{"unit": unitID, "row": id},
 	}, func(row *frontendv1.FeedRow) {
 		row.GetAgentPrompt().Address = address

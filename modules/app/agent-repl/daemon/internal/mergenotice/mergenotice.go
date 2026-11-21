@@ -65,6 +65,7 @@ import (
 	"strings"
 	"sync"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/briefprompt"
@@ -311,7 +312,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 	fields["changes"] = len(sentences)
 	turn, failure, err := s.submit(ctx, prompts, subscriber, ended, sentences, change)
 	if err != nil {
-		log.Error(op, failure, dlog.WithCause(fields, err))
+		log.Log(dlog.LevelError, op, failure, dlog.WithCause(fields, err))
 	} else {
 		fields["turn"] = string(turn)
 		log.Info(op, "told a subscriber's agent of a merge queue change", fields)
@@ -325,18 +326,18 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 // submit composes the notice of SENTENCES, the latest being CHANGE's, and
 // submits it to SUBSCRIBER, answering the turn it was submitted as, or the
 // record a failure is written with and why.
-func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, subscriber ids.WorkspaceID, ended bool, sentences []string, change merge.QueueChange) (ids.TurnID, string, error) {
+func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, subscriber ids.WorkspaceID, ended bool, sentences []string, change merge.QueueChange) (ids.TurnID, logsite.Message, error) {
 	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
 		Submit(ctx, prompts, subscriber, BriefNotice, Values(ended, sentences, change), "merge-queue-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
-		return "", "could not compose a merge queue notice; the subscriber is not told of the change", err
+		return "", logsite.Msg("could not compose a merge queue notice; the subscriber is not told of the change"), err
 	case briefprompt.StepMint:
-		return "", "could not mint a merge queue notice's idempotency key; the subscriber is not told of the change", err
+		return "", logsite.Msg("could not mint a merge queue notice's idempotency key; the subscriber is not told of the change"), err
 	case briefprompt.StepSubmit:
-		return "", "could not submit a merge queue notice to its subscriber", err
+		return "", logsite.Msg("could not submit a merge queue notice to its subscriber"), err
 	}
-	return turn, "", nil
+	return turn, logsite.Message{}, nil
 }
 
 // carried answers the sentences the subscriber's untold notice of REPO's queue

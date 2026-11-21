@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -75,7 +76,7 @@ func (c *ConfirmRequired) Error() string {
 func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target InterruptTarget, confirm bool) (InterruptOutcome, error) {
 	_, log, err := v.owned(ctx, "Interrupt", ws)
 	if err != nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: err != nil", dlog.Context{"function": "workspace", "condition": "err != nil"})
 		return InterruptOutcome{}, err
 	}
 
@@ -205,8 +206,9 @@ func (v *verbs) interruptRollingBack(ctx context.Context, log dlog.Logger, ws id
 // interruptTurn kills the open turn, raising the confirm challenge first when
 // detached agents would go with it.
 func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running, confirm bool) (InterruptOutcome, error) {
+	nothingRunning := logsite.Msg("nothing is running")
 	if running.Turn == nil {
-		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "turn"})
+		log.Log(dlog.LevelDebug, opInterrupt, nothingRunning, dlog.Context{"target": "turn"})
 		return InterruptOutcome{NothingRunning: true}, nil
 	}
 
@@ -231,9 +233,9 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 	// stop is what makes that answer true rather than relying on the vendor to
 	// reap the detached units as a side effect of the query dying.
 	if detached > 0 {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "detached > 0"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: detached > 0", dlog.Context{"function": "workspace", "condition": "detached > 0"})
 		if _, err := v.stopEveryDetached(ctx, log, ws, shim, running); err != nil {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "_, err := v.stopEveryDetached(ctx, log, ws, shim, running); err != nil"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: _, err := v.stopEveryDetached(ctx, log, ws, shim, running); err != nil", dlog.Context{"function": "workspace", "condition": "_, err := v.stopEveryDetached(ctx, log, ws, shim, running); err != nil"})
 			return InterruptOutcome{}, err
 		}
 	}
@@ -257,7 +259,7 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 			if refusal.Benign() {
 				// The turn ended between the freeness read and the kill. That
 				// is an ANSWER, not a failure.
-				log.Debug(opInterrupt, "nothing is running", dlog.Context{
+				log.Log(dlog.LevelDebug, opInterrupt, nothingRunning, dlog.Context{
 					"target": "turn", "shim_arm": refusal.Arm,
 				})
 				return InterruptOutcome{NothingRunning: true}, nil
@@ -278,7 +280,7 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 				return InterruptOutcome{}, refuse(log, "Interrupt", ArmShimRefused, refusal.Detail, false)
 			}
 			if refusal.Arm == ArmShimUnspecified {
-				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "refusal.Arm == ArmShimUnspecified"})
+				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: refusal.Arm == ArmShimUnspecified", dlog.Context{"function": "workspace", "condition": "refusal.Arm == ArmShimUnspecified"})
 				// A failure whose kind oneof is unset names no landed arm. The
 				// contract has a home for exactly that — shim_refused, "a typed
 				// shim refusal relayed" — so the refusal is answered rather
@@ -371,12 +373,12 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 	fields := dlog.Context{"row_kind": string(ref.Row.Kind), "row_id": ref.Row.ID}
 	switch {
 	case ref.Row.Kind == feedid.KindDetachedSubagent || subagentBubble(ref.Row):
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case ref.Row.Kind == feedid.KindDetachedSubagent || subagentBubble(ref.Row)"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: case ref.Row.Kind == feedid.KindDetachedSubagent || subagentBubble(ref.Row)", dlog.Context{"function": "workspace", "branch": "case ref.Row.Kind == feedid.KindDetachedSubagent || subagentBubble(ref.Row)"})
 		agent := &conversationv1.AgentId{Value: subagentOf(ref.Row)}
 		fields["agent"] = agent.GetValue()
 		if err := shim.StopAgent(ctx, agent); err != nil {
 			if outcome, refusal, handled := v.shimOutcome(log, running, "Interrupt", fields, err); handled {
-				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled"})
+				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled"})
 				return outcome, refusal
 			}
 			log.Error(opInterrupt, "could not stop the detached agent", dlog.WithCause(fields, err))
@@ -388,11 +390,11 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		// THE STOP LIVES ON THE HEAD. A detached shell's stop button is drawn on
 		// its bubble HEAD (KindShellHead), whose ID is the run's own work id; the
 		// spool BODY row (KindDetachedShell) on the sub-feed carries no control.
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case ref.Row.Kind == feedid.KindShellHead"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: case ref.Row.Kind == feedid.KindShellHead", dlog.Context{"function": "workspace", "branch": "case ref.Row.Kind == feedid.KindShellHead"})
 		work := &conversationv1.DetachedWorkId{Value: ref.Row.ID}
 		if err := shim.StopBash(ctx, work); err != nil {
 			if outcome, refusal, handled := v.shimOutcome(log, running, "Interrupt", fields, err); handled {
-				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled"})
+				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch (stopping the detached bash): outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled"})
 				return outcome, refusal
 			}
 			log.Error(opInterrupt, "could not stop the detached shell", dlog.WithCause(fields, err))
@@ -401,7 +403,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		log.Info(opInterrupt, "stopped a detached shell", fields)
 		return InterruptOutcome{DetachedCount: 1}, nil
 	default:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "default"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: default", dlog.Context{"function": "workspace", "branch": "default"})
 		return InterruptOutcome{}, refuse(log, "Interrupt", ArmNotDetachedWork,
 			fmt.Sprintf("row kind %q addresses no detached work", ref.Row.Kind), true)
 	}
@@ -476,7 +478,7 @@ func noDetachedWork(log dlog.Logger, turn *ids.TurnID, fields dlog.Context) Inte
 func (v *verbs) shimOutcome(log dlog.Logger, running Running, rpc string, fields dlog.Context, err error) (InterruptOutcome, error, bool) {
 	refusal, ok := AsShimRefusal(err)
 	if !ok {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: !ok", dlog.Context{"function": "workspace", "condition": "!ok"})
 		return InterruptOutcome{}, nil, false
 	}
 	if refusal.Benign() {

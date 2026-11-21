@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/sourcescan"
+	"agentrepl/logging/logsite"
 )
 
 func TestClaimServingRecordsTheOwner(t *testing.T) {
@@ -256,7 +257,7 @@ func TestRequireInstance(t *testing.T) {
 			s, log := testStore(t)
 
 			// Act
-			err := s.requireInstance("daemon.wsm.test_write", dlog.Context{"workspace": "w1"}, tt.daemon, "refused a test write with no instance")
+			err := s.requireInstance("daemon.wsm.test_write", dlog.Context{"workspace": "w1"}, tt.daemon, logsite.Msg("refused a test write with no instance"))
 
 			// Assert
 			if gotErr := err != nil; gotErr != tt.wantErr {

@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 func TestTurnEdgeRunnerCarriesOutOnlyItsOwnEdge(t *testing.T) {
@@ -33,7 +34,7 @@ func TestTurnEdgeRunnerCarriesOutOnlyItsOwnEdge(t *testing.T) {
 			t.Run(tt.name+"/"+edgeName, func(t *testing.T) {
 				// Arrange
 				var carried []ids.WorkspaceID
-				r := newTurnEdgeRunner(tt.edge, "test.op", "untold", "failed", func(_ context.Context, ws ids.WorkspaceID) error {
+				r := newTurnEdgeRunner(tt.edge, "test.op", logsite.Msg("untold"), logsite.Msg("failed"), func(_ context.Context, ws ids.WorkspaceID) error {
 					carried = append(carried, ws)
 					return nil
 				}, dlog.NewTestLogger())
@@ -60,7 +61,7 @@ func TestTurnEdgeRunnerCarriesOutOnlyItsOwnEdge(t *testing.T) {
 func TestTurnEdgeRunnerRecordsWorkItCannotCarryOut(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	r := newTurnEdgeRunner(turnEnds, "test.op", "untold", "could not carry it out", func(context.Context, ids.WorkspaceID) error {
+	r := newTurnEdgeRunner(turnEnds, "test.op", logsite.Msg("untold"), logsite.Msg("could not carry it out"), func(context.Context, ids.WorkspaceID) error {
 		return errors.New("db gone")
 	}, log)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,7 +81,7 @@ func TestTurnEdgeRunnerRecordsWorkItCannotCarryOut(t *testing.T) {
 func TestTurnEdgeRunnerRecordsAnEdgeAfterItStopped(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	r := newTurnEdgeRunner(turnEnds, "test.op", "reported after the runner stopped", "failed", func(context.Context, ids.WorkspaceID) error {
+	r := newTurnEdgeRunner(turnEnds, "test.op", logsite.Msg("reported after the runner stopped"), logsite.Msg("failed"), func(context.Context, ids.WorkspaceID) error {
 		t.Fatal("work carried out after the runner stopped")
 		return nil
 	}, log)

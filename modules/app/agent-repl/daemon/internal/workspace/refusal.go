@@ -8,6 +8,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/wsm"
@@ -381,11 +382,16 @@ type Refusal struct {
 
 // Error renders the exact message ERROR-ARMS.md prescribes.
 func (r *Refusal) Error() string {
-	rpc := r.Rpc
-	if rpc == "" {
-		rpc = "<Rpc>"
+	return fmt.Sprintf("intended arm: %sError.%s: %s", r.rpcLabel(), r.Arm, r.Reason)
+}
+
+// rpcLabel is the rpc the refusal names, or "<Rpc>" for one not yet named
+// (WithRpc).
+func (r *Refusal) rpcLabel() string {
+	if r.Rpc == "" {
+		return "<Rpc>"
 	}
-	return fmt.Sprintf("intended arm: %sError.%s: %s", rpc, r.Arm, r.Reason)
+	return r.Rpc
 }
 
 // WithRpc names the rpc a shared refusal surfaced under. It returns a copy, so
@@ -449,7 +455,7 @@ func temporaryRefusal(log dlog.Logger, rpc string, err error) *Refusal {
 		// passed silently: the e2e-emacs layer's workspaces simply never
 		// appeared (2026-10-06). At ERROR every harness's warning sweep fails
 		// the run that hit it, naming the variable to set.
-		log.Error(opTemporarySeam, inside.MissingSeam(), dlog.Context{
+		log.Error(opTemporarySeam, "a test-run daemon ("+envc.EnvForbidVendorCalls+" set) refused {dir} with no "+tempdirs.EnvTestRoot+": the harness that launched it must name its run's root there", dlog.Context{
 			"rpc": rpc, "dir": inside.Dir, "temporary_root": inside.Root,
 		})
 	}
@@ -519,6 +525,6 @@ func refuseWith(log dlog.Logger, rpc, arm, reason string, notFound bool, fields 
 	for name, value := range r.Fields {
 		ctx["arm_"+name] = value
 	}
-	log.Info(opRefusal, r.Error(), ctx)
+	log.With(ctx).Info(opRefusal, "intended arm: {rpc_label}Error.{arm}: {reason}", dlog.Context{"rpc_label": r.rpcLabel(), "arm": arm, "reason": reason})
 	return r
 }

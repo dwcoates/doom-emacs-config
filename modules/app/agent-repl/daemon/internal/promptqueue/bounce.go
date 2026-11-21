@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // opBounce is the bounce registry's operation. Every decision the registry
@@ -1170,11 +1171,11 @@ func (q *queue) deferReplacementLocked(d *delivery, pending *pendingBounce, edge
 	// watcher reads as free is the two ledgers disagreeing, and this record is
 	// where that shows.
 	turn, detached, free := q.inFlight(ws)
-	message := "the shim refused to stand down over live work; the bounce is re-registered behind that work and dispatch resumes on the shim that keeps serving"
+	message := logsite.Msg("the shim refused to stand down over live work; the bounce is re-registered behind that work and dispatch resumes on the shim that keeps serving")
 	if errors.Is(runErr, bounce.ErrDeferredBehindLease) {
-		message = "another holder's lease holds the workspace; the bounce is re-registered behind it and dispatch resumes on the shim that keeps serving"
+		message = logsite.Msg("another holder's lease holds the workspace; the bounce is re-registered behind it and dispatch resumes on the shim that keeps serving")
 	}
-	log.Info(opBounce, message, dlog.Context{
+	log.Log(dlog.LevelInfo, opBounce, message, dlog.Context{
 		"reason": reason, "cause": runErr.Error(), "edge_while_running": edge,
 		"watcher_turn_in_flight": turn, "watcher_detached_work": detached, "watcher_free": free,
 		"state": "draining", "before": true, "after": false,

@@ -8,6 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 
@@ -840,6 +841,7 @@ func (s *server) pageWatchFor(
 // planned ending, where its rpc has one), then sends the page's own ending.
 // A page whose client goes away meanwhile is owed nothing more.
 func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Context, out streamSink[agentreplv1.WatchPageResponse]) {
+	clientGone := logsite.Msg("the page's client went away while its exit drained")
 	page.mu.Lock()
 	page.closing = true
 	page.mu.Unlock()
@@ -853,7 +855,7 @@ func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Cont
 		select {
 		case msg := <-page.out:
 			if err := out.Send(msg); err != nil {
-				s.log.Debug(rpc, "the page's client went away while its exit drained",
+				s.log.Log(dlog.LevelDebug, rpc, clientGone,
 					dlog.Context{"page": page.id, "cause": err.Error()})
 				return
 			}
@@ -863,7 +865,7 @@ func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Cont
 				dlog.Context{"page": page.id})
 			return
 		case <-ctx.Done():
-			s.log.Debug(rpc, "the page's client went away while its exit drained",
+			s.log.Log(dlog.LevelDebug, rpc, clientGone,
 				dlog.Context{"page": page.id})
 			return
 		}

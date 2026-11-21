@@ -3,6 +3,7 @@ package topbar
 import (
 	"strings"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -14,7 +15,7 @@ import (
 // the resolver holds the one standing and every workspace's view projects it.
 func (r *resolver) SetPersistentWifi(state *agentreplv1.PersistentWifiState) {
 	chip := persistentWifiChip(state)
-	r.eachStrip("daemon.topbar.persistent_wifi", "the topbar took the persistent-wifi standing on every strip",
+	r.eachStrip("daemon.topbar.persistent_wifi", logsite.Msg("the topbar took the persistent-wifi standing on every strip"),
 		dlog.Context{"tooltip": chip.GetTooltip().GetText()},
 		func() { r.persistentWifi = state },
 		func(*wsState) {})

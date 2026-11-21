@@ -24,6 +24,7 @@ func webhostRecord(t *testing.T, operation, timestamp string, ctx map[string]any
 	return connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Webhost{Webhost: &agentreplv1.ClientLogWebhost{}},
 		Record: &agentreplv1.ClientLogRecord{
+			Site: "0123456789ab", Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: operation,
 			Message:   "a record",

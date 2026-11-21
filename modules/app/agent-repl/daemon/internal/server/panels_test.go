@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/topbar"
 )
@@ -42,7 +43,7 @@ func stamp(sha string) VersionFunc { return func() (string, error) { return sha,
 // TestPanelsAnswersTheContextPanel pins the context-tree producer.
 func TestPanelsAnswersTheContextPanel(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, stamp("abc123"), fakeLogger{})
+	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	panel, err := source(context.Background(), testWorkspaceID,
@@ -63,7 +64,7 @@ func TestPanelsAnswersTheStatusPanel(t *testing.T) {
 		facts: topbar.StatusFacts{
 			Account: "someone@example.com", Model: "opus", PermissionMode: "default",
 		},
-	}, stamp("abc123"), fakeLogger{})
+	}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	panel, err := source(context.Background(), testWorkspaceID,
@@ -97,7 +98,7 @@ func TestStatusPanelOmitsARowTheSessionHasNotStated(t *testing.T) {
 	source := Panels(&panelTopbar{
 		factsHeld: true,
 		facts:     topbar.StatusFacts{Model: "opus", PermissionMode: "plan"},
-	}, stamp("abc123"), fakeLogger{})
+	}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	panel, err := source(context.Background(), testWorkspaceID,
@@ -118,7 +119,7 @@ func TestStatusPanelOmitsARowTheSessionHasNotStated(t *testing.T) {
 // session never opened fails loudly rather than drawing a version-only card.
 func TestStatusPanelRefusesWhenNoSessionFactsStand(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{}, stamp("abc123"), fakeLogger{})
+	source := Panels(&panelTopbar{}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	_, err := source(context.Background(), testWorkspaceID,
@@ -136,7 +137,7 @@ func TestStatusPanelRefusesAnUnreadableBuildStamp(t *testing.T) {
 	// Arrange.
 	source := Panels(&panelTopbar{factsHeld: true}, func() (string, error) {
 		return "", errors.New("the deploy stamp is empty")
-	}, fakeLogger{})
+	}, dlog.Nowhere())
 
 	// Act.
 	_, err := source(context.Background(), testWorkspaceID,
@@ -152,7 +153,7 @@ func TestStatusPanelRefusesAnUnreadableBuildStamp(t *testing.T) {
 // assembles fails LOUDLY rather than drawing an empty card.
 func TestPanelsRefusesAPanelWithNoProducer(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, stamp("abc123"), fakeLogger{})
+	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	_, err := source(context.Background(), testWorkspaceID,
@@ -168,7 +169,7 @@ func TestPanelsRefusesAPanelWithNoProducer(t *testing.T) {
 // failure rather than an empty one.
 func TestPanelsRefusesWhenNoContextPanelStands(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{}, stamp("abc123"), fakeLogger{})
+	source := Panels(&panelTopbar{}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	_, err := source(context.Background(), testWorkspaceID,
@@ -189,7 +190,7 @@ func TestStatusPanelOmitsTheVersionRowWhenNoStampWasWritten(t *testing.T) {
 	source := Panels(&panelTopbar{
 		factsHeld: true,
 		facts:     topbar.StatusFacts{Model: "opus", PermissionMode: "plan"},
-	}, stamp(""), fakeLogger{})
+	}, stamp(""), dlog.Nowhere())
 
 	// Act.
 	panel, err := source(context.Background(), testWorkspaceID,
@@ -212,7 +213,7 @@ func TestPanelsAnswersTheMcpPanel(t *testing.T) {
 	// Arrange.
 	source := Panels(&panelTopbar{mcp: &frontendv1.McpPanelView{
 		Rows: []*frontendv1.McpPanelRow{{Name: "github"}},
-	}}, stamp("abc123"), fakeLogger{})
+	}}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	panel, err := source(context.Background(), testWorkspaceID,
@@ -232,7 +233,7 @@ func TestPanelsAnswersTheMcpPanel(t *testing.T) {
 // MCP server stated is an empty panel, never a refusal.
 func TestMcpPanelAnswersAnEmptyCatalogAsAnEmptyPanel(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{}, stamp("abc123"), fakeLogger{})
+	source := Panels(&panelTopbar{}, stamp("abc123"), dlog.Nowhere())
 
 	// Act.
 	panel, err := source(context.Background(), testWorkspaceID,

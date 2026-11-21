@@ -3,6 +3,7 @@ package feed
 import (
 	"math"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -54,8 +55,8 @@ func (r *resolver) forkSourceName(s *wsState, source ids.WorkspaceID) string {
 	name, _ := r.namedWorkspace(source, s.id, nameRead{
 		failedKey: "daemon.feed.fork_source_name_failed",
 		emptyKey:  "daemon.feed.fork_source_name_empty",
-		role:      "the workspace a fork's inherited context came from",
-		outcome:   "the fork-point divider names no workspace and links nothing",
+		failed:    logsite.Msg("the workspace a fork's inherited context came from could not be named; the fork-point divider names no workspace and links nothing"),
+		empty:     logsite.Msg("the workspace a fork's inherited context came from has an empty name; the fork-point divider names no workspace and links nothing"),
 	})
 	return name
 }

@@ -3,6 +3,7 @@ package feed
 import (
 	"strings"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -111,7 +112,7 @@ func (r *resolver) restampFinalAnswer(s *wsState, id *frontendv1.FeedId, unit st
 	}
 	return r.restateRow(s, placement{feed: fold.feed}, existing, true, unclonable{
 		operation: "daemon.feed.final_answer_restamp_unclonable",
-		message:   "the recorded answer row could not be cloned to stamp final_answer",
+		message:   logsite.Msg("the recorded answer row could not be cloned to stamp final_answer"),
 		context:   dlog.Context{"unit": unit, "row": fold.row.GetValue()},
 	}, func(clone *frontendv1.FeedRow) {
 		bubble := clone.GetActivity().GetResponse()

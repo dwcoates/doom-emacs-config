@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/sessionwatcher"
+	"agentrepl/logging/logsite"
 )
 
 // mediationLife is the lifetime of the deploy mediation's work in this
@@ -101,26 +102,26 @@ const mediationNotRun = "the mediations were not run: this daemon is stopping; t
 // CTX under it, since the next boot's pass runs it again, or when a handover
 // took the mediator's session away (cutByHandover), since the daemon that
 // serves the queues next runs it again; and at ERROR as MESSAGE otherwise.
-func (o *orchestrator) mediationFailed(ctx context.Context, fields dlog.Context, message string, err error) bool {
-	if o.mediationCut(ctx, fields, message, err) {
+func (o *orchestrator) mediationFailed(ctx context.Context, fields dlog.Context, message logsite.Message, err error) bool {
+	if o.mediationCut(ctx, fields, message.Template(), err) {
 		return true
 	}
-	o.deps.Log.Global().Error(opMediation, message, withField(fields, "error", err.Error()))
+	o.deps.Log.Global().Log(dlog.LevelError, opMediation, message, withField(fields, "error", err.Error()))
 	return false
 }
 
 // mediationCut is mediationFailed's cut half: it answers whether ERR, the
-// failure of what MESSAGE says, was the daemon's exit (or the caller) cutting
+// failure of what WHAT says, was the daemon's exit (or the caller) cutting
 // CTX, or a handover taking the mediator's session away (cutByHandover), and
 // records such a cut at INFO. Any other failure is left to the caller to
 // record.
-func (o *orchestrator) mediationCut(ctx context.Context, fields dlog.Context, message string, err error) bool {
+func (o *orchestrator) mediationCut(ctx context.Context, fields dlog.Context, what string, err error) bool {
 	if cutUnder(ctx, err) {
-		o.deps.Log.Global().Info(opMediation, "the mediation was cut by the daemon's exit; the next boot's pass runs it again", withField(withField(fields, "cut", message), "cause", err.Error()))
+		o.deps.Log.Global().Info(opMediation, "the mediation was cut by the daemon's exit; the next boot's pass runs it again", withField(withField(fields, "cut", what), "cause", err.Error()))
 		return true
 	}
 	if o.cutByHandover(err) {
-		o.deps.Log.Global().Info(opMediation, mediationHandedOver, withField(withField(fields, "cut", message), "cause", err.Error()))
+		o.deps.Log.Global().Info(opMediation, mediationHandedOver, withField(withField(fields, "cut", what), "cause", err.Error()))
 		return true
 	}
 	return false

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/ctxend"
@@ -132,9 +133,9 @@ func (f *Fleet) historyBook(ctx context.Context, ws ids.WorkspaceID, target *con
 	own, has, err := f.deps.DB.WorkspaceBook(ctx, ws)
 	if err != nil {
 		log := f.deps.Log.Global()
-		ctxend.Log(err, log.Info, log.Error, "daemon.workspace.history_book",
-			"the workspace's recorded book was not read: the read's request ended first",
-			"could not read the workspace's recorded book; its history is not read",
+		ctxend.Log(err, log, dlog.LevelInfo, "daemon.workspace.history_book",
+			logsite.Msg("the workspace's recorded book was not read: the read's request ended first"),
+			logsite.Msg("could not read the workspace's recorded book; its history is not read"),
 			dlog.Context{"workspace": string(ws), "cause": err.Error()})
 		return "", false, false, fmt.Errorf("read the recorded book of %q: %w", ws, err)
 	}

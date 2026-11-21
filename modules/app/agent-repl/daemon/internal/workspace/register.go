@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // Register records a workspace Emacs announced. It is IDEMPOTENT by normalized
@@ -87,6 +88,7 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 // EVERY FAILURE IS RECORDED HERE, once: a fault at ERROR, a refusal at INFO
 // through its typed refusal. A caller wraps it and records nothing more.
 func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, bool, error) {
+	noDefaultBranch := logsite.Msg("could not resolve the repository default branch")
 	global := v.deps.Log.Global().With(dlog.Context{"dir": dir})
 
 	normalized, err := normalizeDir(dir)
@@ -175,7 +177,7 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	if facts.ParentBranch == "" {
 		parent, err := v.deps.Git.DefaultBranch(ctx, facts.RepoDir)
 		if err != nil {
-			global.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
+			global.Log(dlog.LevelError, opRegister, noDefaultBranch, dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, false, fmt.Errorf("register %q: default branch: %w", normalized, err)
 		}
 		facts.ParentBranch = parent
@@ -184,7 +186,7 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	if facts.DefaultBranch == "" {
 		branch, err := v.deps.Git.DefaultBranch(ctx, facts.RepoDir)
 		if err != nil {
-			global.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
+			global.Log(dlog.LevelError, opRegister, noDefaultBranch, dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, false, fmt.Errorf("register %q: default branch: %w", normalized, err)
 		}
 		facts.DefaultBranch = branch

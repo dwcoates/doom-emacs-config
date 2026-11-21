@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -27,7 +28,7 @@ const retiredRebaseCommitConflictTag protowire.Number = 7 // FeedMergeTabRebaseC
 
 // dropRetiredConflictSectionRows is layout 112's row rewrite.
 func dropRetiredConflictSectionRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
-	return rewriteDurableRows(ctx, tx, log, "dropped the stored commit tabs' retired conflict sections", dropRetiredConflictSection)
+	return rewriteDurableRows(ctx, tx, log, logsite.Msg("dropped the stored commit tabs' retired conflict sections"), dropRetiredConflictSection)
 }
 
 // dropRetiredConflictSection re-encodes one stored frontend.v1.FeedRow whose

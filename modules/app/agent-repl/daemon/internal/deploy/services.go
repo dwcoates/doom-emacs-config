@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agentrepl/logging/buildreport"
+	"agentrepl/logging/logsite"
 
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/deployprogress"
@@ -267,7 +268,7 @@ func (r *Restarter) restartStore(ctx context.Context, reload bool) error {
 	}
 	r.Log.Info(opServices, "restarting the store", dlog.Merge(fields, dlog.Context{"definition_changed": changed, "reload": reload}))
 	if err := r.restartOn(ctx, StoreLabel, changed || reload, fields); err != nil {
-		r.failed("the store restart failed; the sidecar is down and was NOT started again", fields, err)
+		r.failed(logsite.Msg("the store restart failed; the sidecar is down and was NOT started again"), fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", StoreLabel, err)
 	}
 	if err := r.awaitStoreSocket(ctx, fields); err != nil {
@@ -275,7 +276,7 @@ func (r *Restarter) restartStore(ctx context.Context, reload bool) error {
 	}
 	r.Log.Info(opServices, "the store is serving; starting the sidecar", fields)
 	if err := r.Services.Start(ctx, SidecarLabel); err != nil {
-		r.failed("the sidecar could not be started back", fields, err)
+		r.failed(logsite.Msg("the sidecar could not be started back"), fields, err)
 		return fmt.Errorf("deploy: start %s: %w", SidecarLabel, err)
 	}
 	r.Log.Info(opServices, "restarted the store and the sidecar in the safe order", fields)
@@ -335,7 +336,7 @@ func (r *Restarter) RestartLauncher(ctx context.Context) error {
 		return err
 	}
 	if err := r.RegisterApp(ctx, r.LauncherApp); err != nil {
-		r.failed("registering the launcher with LaunchServices failed", fields, err)
+		r.failed(logsite.Msg("registering the launcher with LaunchServices failed"), fields, err)
 		return fmt.Errorf("deploy: register %s: %w", r.LauncherApp, err)
 	}
 	// A SERVICE THAT IS NOT LOADED IS STARTED from its installed definition,
@@ -350,7 +351,7 @@ func (r *Restarter) RestartLauncher(ctx context.Context) error {
 		return nil
 	}
 	if err := r.Services.Restart(ctx, LauncherLabel); err != nil {
-		r.failed("the launcher restart failed", fields, err)
+		r.failed(logsite.Msg("the launcher restart failed"), fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", LauncherLabel, err)
 	}
 	r.Log.Info(opServices, "registered and restarted the launcher", fields)
@@ -382,7 +383,7 @@ func (r *Restarter) restartStandalone(ctx context.Context, s Standalone) error {
 		return err
 	}
 	if bootstrapped {
-		r.Log.Info(opServices, s.Display+" was not loaded; it was started from the installed build, so it is not restarted", fields)
+		r.Log.With(fields).Info(opServices, "{display} was not loaded; it was started from the installed build, so it is not restarted", dlog.Context{"display": s.Display})
 		return nil
 	}
 	changed, err := r.redefine(ctx, s.Label, fields)
@@ -390,10 +391,10 @@ func (r *Restarter) restartStandalone(ctx context.Context, s Standalone) error {
 		return err
 	}
 	if err := r.restartOn(ctx, s.Label, changed, fields); err != nil {
-		r.failed("the "+s.Short+" restart failed", fields, err)
+		r.failed(logsite.Msg("the {short} restart failed"), dlog.Merge(fields, dlog.Context{"short": s.Short}), err)
 		return fmt.Errorf("deploy: restart %s: %w", s.Label, err)
 	}
-	r.Log.Info(opServices, "restarted "+s.Display, fields)
+	r.Log.With(fields).Info(opServices, "restarted {display}", dlog.Context{"display": s.Display})
 	return nil
 }
 
@@ -412,10 +413,10 @@ func (r *Restarter) EnsureStandaloneCurrent(ctx context.Context, s Standalone) e
 		return err
 	}
 	if stale {
-		r.Log.Info(opServices, "the running "+s.Short+" is not the installed build; restarting it", nil)
+		r.Log.Info(opServices, "the running {short} is not the installed build; restarting it", dlog.Context{"short": s.Short})
 		return r.RestartStandalone(ctx, s)
 	}
-	r.Log.Debug(opServices, s.Short+" runs the installed build", nil)
+	r.Log.Debug(opServices, "{short} runs the installed build", dlog.Context{"short": s.Short})
 	return nil
 }
 
@@ -577,7 +578,7 @@ func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, compone
 	}
 	_, pid, err := r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read a service's service-manager state to judge its build", fields, err)
+		r.failed(logsite.Msg("could not read a service's service-manager state to judge its build"), fields, err)
 		return false, fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if pid == 0 {
@@ -605,7 +606,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 	fields = dlog.Merge(fields, dlog.Context{"label": label, "definition": definition})
 	loaded, _, err := r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read a service's service-manager state", fields, err)
+		r.failed(logsite.Msg("could not read a service's service-manager state"), fields, err)
 		return false, fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if loaded {
@@ -618,7 +619,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 		// the same renderer install uses, before it is started.
 		r.Log.Info(opServices, "a service is not loaded and has no definition; writing it from its requirements entry", fields)
 		if err := r.Define(ctx, label); err != nil {
-			r.failed("a service's definition could not be written from its requirements entry", fields, err)
+			r.failed(logsite.Msg("a service's definition could not be written from its requirements entry"), fields, err)
 			return false, fmt.Errorf("deploy: write the definition of %s: %w", label, err)
 		}
 		if _, err := os.Stat(definition); err != nil {
@@ -636,7 +637,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 	}
 	r.Log.Info(opServices, "a service was not loaded; starting it", fields)
 	if err := r.Services.Start(ctx, label); err != nil {
-		r.failed("a service could not be started", fields, err)
+		r.failed(logsite.Msg("a service could not be started"), fields, err)
 		return false, fmt.Errorf("deploy: start %s: %w", label, err)
 	}
 	return true, nil
@@ -653,7 +654,7 @@ func (r *Restarter) ensureStoreHolder(ctx context.Context, fields dlog.Context) 
 // socket no declared holder holds, which the service binds itself.
 func (r *Restarter) ensureHolderOf(ctx context.Context, service, holder string, fields dlog.Context) error {
 	if holder == "" {
-		r.Log.Debug(opServices, "no declared holder holds "+service+"'s socket; "+service+" binds its own", fields)
+		r.Log.With(fields).Debug(opServices, "no declared holder holds {service}'s socket; it binds its own", dlog.Context{"service": service})
 		return nil
 	}
 	if err := r.EnsureHolder(ctx, holder); err != nil {
@@ -678,7 +679,7 @@ func (r *Restarter) redefine(ctx context.Context, label string, fields dlog.Cont
 		return false, fmt.Errorf("deploy: read %s: %w", definition, err)
 	}
 	if err := r.Define(ctx, label); err != nil {
-		r.failed("a service's definition could not be written from its requirements entry; nothing was restarted", fields, err)
+		r.failed(logsite.Msg("a service's definition could not be written from its requirements entry; nothing was restarted"), fields, err)
 		return false, fmt.Errorf("deploy: write the definition of %s: %w", label, err)
 	}
 	after, err := os.ReadFile(definition)
@@ -731,7 +732,7 @@ func (r *Restarter) restartOn(ctx context.Context, label string, changed bool, f
 func (r *Restarter) RestartHolder(ctx context.Context, h holderensure.Holder) error {
 	fields := dlog.Context{"holder": h.ID, "label": h.Label}
 	if err := r.restartOn(ctx, h.Label, false, fields); err != nil {
-		r.failed("the socket holder's restart failed", fields, err)
+		r.failed(logsite.Msg("the socket holder's restart failed"), fields, err)
 		return fmt.Errorf("deploy: restart the socket holder %s: %w", h.Label, err)
 	}
 	if err := r.EnsureHolder(ctx, h.ID); err != nil {
@@ -755,7 +756,7 @@ func (r *Restarter) restartSidecar(ctx context.Context) error {
 		return err
 	}
 	if err := r.restartOn(ctx, SidecarLabel, changed, fields); err != nil {
-		r.failed("the sidecar restart failed", fields, err)
+		r.failed(logsite.Msg("the sidecar restart failed"), fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", SidecarLabel, err)
 	}
 	r.Log.Info(opServices, "restarted the sidecar", fields)
@@ -767,48 +768,48 @@ func (r *Restarter) restartSidecar(ctx context.Context) error {
 // which let go of the label in the stop, must then no longer hold it. A stop
 // that cannot be confirmed is a failure whose record says CONSEQUENCE.
 func (r *Restarter) stopService(ctx context.Context, label, what, consequence string, fields dlog.Context) error {
-	fields = dlog.Merge(fields, dlog.Context{"label": label})
+	fields = dlog.Merge(fields, dlog.Context{"label": label, "what": what})
 	loaded, pid, err := r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read "+what+"'s service-manager state; nothing was stopped", fields, err)
+		r.failed(logsite.Msg("could not read {what}'s service-manager state; nothing was stopped"), fields, err)
 		return fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if !loaded {
-		r.Log.Info(opServices, what+" is already stopped", fields)
+		r.Log.With(fields).Info(opServices, "{what} is already stopped", dlog.Context{"what": what})
 		return nil
 	}
 	fields = dlog.Merge(fields, dlog.Context{"pid": pid})
-	r.Log.Info(opServices, "stopping "+what, fields)
+	r.Log.With(fields).Info(opServices, "stopping {what}", dlog.Context{"what": what})
 	if err := r.Services.Stop(ctx, label); errors.Is(err, ErrServiceNotLoaded) {
 		// THE SERVICE LEFT BETWEEN THE LOOK AND THE STOP: the domain no longer
 		// holds it, which is the state the stop was asked to reach.
-		r.Log.Info(opServices, what+" had already stopped when it was stopped", dlog.WithCause(fields, err))
+		r.Log.With(dlog.WithCause(fields, err)).Info(opServices, "{what} had already stopped when it was stopped", dlog.Context{"what": what})
 	} else if err != nil {
 		// A stop that errs may still have taken effect; the exit and the
 		// service manager's view below are the authority on whether it did.
-		r.Log.Warn(opServices, what+"'s stop answered an error; waiting on its process's exit", dlog.WithCause(fields, err))
+		r.Log.With(dlog.WithCause(fields, err)).Warn(opServices, "{what}'s stop answered an error; waiting on its process's exit", dlog.Context{"what": what})
 	}
 	if pid != 0 {
 		if err := r.awaitExit(ctx, pid); err != nil {
 			if ctx.Err() == nil {
-				r.Log.Error(opServices, what+"'s process did not exit within the upper bound; "+consequence,
-					dlog.Merge(fields, dlog.Context{"max": r.Windows.Max.String(), "cause": err.Error()}))
+				r.Log.With(fields).Error(opServices, "{what}'s process did not exit within the upper bound; {consequence}",
+					dlog.Context{"what": what, "consequence": consequence, "max": r.Windows.Max.String(), "cause": err.Error()})
 			} else {
-				r.failed(what+"'s stop ended with its context", fields, ctx.Err())
+				r.failed(logsite.Msg("{what}'s stop ended with its context"), fields, ctx.Err())
 			}
 			return fmt.Errorf("deploy: %s (pid %d) did not exit: %w", label, pid, err)
 		}
 	}
 	loaded, _, err = r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read "+what+"'s service-manager state once it stopped", fields, err)
+		r.failed(logsite.Msg("could not read {what}'s service-manager state once it stopped"), fields, err)
 		return fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if loaded {
-		r.Log.Error(opServices, "the service manager still holds "+what+" after its stop and its process's exit; "+consequence, fields)
+		r.Log.With(fields).Error(opServices, "the service manager still holds {what} after its stop and its process's exit; {consequence}", dlog.Context{"what": what, "consequence": consequence})
 		return fmt.Errorf("deploy: the service manager still holds %s after its stop", label)
 	}
-	r.Log.Info(opServices, what+" is stopped", fields)
+	r.Log.With(fields).Info(opServices, "{what} is stopped", dlog.Context{"what": what})
 	return nil
 }
 
@@ -864,7 +865,7 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 	}
 	_, pid, err := r.Services.Status(ctx, StoreLabel)
 	if err != nil {
-		r.failed("could not read the store's service-manager state while it boots", fields, err)
+		r.failed(logsite.Msg("could not read the store's service-manager state while it boots"), fields, err)
 		return fmt.Errorf("deploy: read %s: %w", StoreLabel, err)
 	}
 	died := func() error {
@@ -893,7 +894,7 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 		}
 		select {
 		case <-ctx.Done():
-			r.failed("a service restart ended with its context", fields, ctx.Err())
+			r.failed(logsite.Msg("a service restart ended with its context"), fields, ctx.Err())
 			return fmt.Errorf("deploy: service restart: %w", ctx.Err())
 		case err := <-exited:
 			if err != nil && ctx.Err() == nil {
@@ -927,12 +928,25 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 // purpose; that is the caller's decision, not a failure of the step, so it is
 // INFO (as scriptrunner records the cancelled script under it). A deadline
 // that passed stays an ERROR: the step ran out of the time it was given.
-func (r *Restarter) failed(message string, fields dlog.Context, err error) {
+func (r *Restarter) failed(message logsite.Message, fields dlog.Context, err error) {
 	if errors.Is(err, context.Canceled) {
-		r.Log.Info(opServices, "a service step was cut short by its caller: "+message, dlog.WithCause(fields, err))
+		r.Log.With(dlog.WithCause(fields, err)).Info(opServices, "a service step was cut short by its caller: {step}",
+			dlog.Context{"step": stepText(message, fields)})
 		return
 	}
-	r.Log.Error(opServices, message, dlog.WithCause(fields, err))
+	r.Log.Log(dlog.LevelError, opServices, message, dlog.WithCause(fields, err))
+}
+
+// stepText is MESSAGE rendered from FIELDS, the step a cut record names. Its
+// placeholders are the fields' as the failure record's would be, so a
+// template naming a value the fields do not hold is the same defect of its
+// call as it is there (dlog renders it the same way): it panics.
+func stepText(message logsite.Message, fields dlog.Context) string {
+	text, err := logsite.RenderFields(message.Template(), fields)
+	if err != nil {
+		panic(fmt.Sprintf("deploy: the cut step's message cannot be rendered: %v", err))
+	}
+	return text
 }
 
 // storeLogSize is how much the store has written: a boot still emitting

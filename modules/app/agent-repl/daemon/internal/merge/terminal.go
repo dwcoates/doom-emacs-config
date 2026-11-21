@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -908,8 +909,8 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	// (2026-11-13: a judgement kicked during an exit read a closed database).
 	if judged := o.stopOffQueueLanded(); judged != nil {
 		if !drainStep(ctx, log, op, expired.C, judged,
-			"the judgement of the merges off their queues outlived the drain's bound; the state client closes under it",
-			"the drain was cancelled while the merges off their queues were being judged; the state client closes under it",
+			logsite.Msg("the judgement of the merges off their queues outlived the drain's bound; the state client closes under it"),
+			logsite.Msg("the drain was cancelled while the merges off their queues were being judged; the state client closes under it"),
 			dlog.Context{"bound": bound.String()}) {
 			return
 		}
@@ -919,8 +920,8 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	// state client, which closes once the drain returns.
 	if mediated := o.stopMediation(); mediated != nil {
 		if !drainStep(ctx, log, op, expired.C, mediated,
-			"the deploy mediation outlived the drain's bound; the state client closes under it",
-			"the drain was cancelled while the deploy mediation was ending; the state client closes under it",
+			logsite.Msg("the deploy mediation outlived the drain's bound; the state client closes under it"),
+			logsite.Msg("the drain was cancelled while the deploy mediation was ending; the state client closes under it"),
 			dlog.Context{"bound": bound.String()}) {
 			return
 		}
@@ -932,8 +933,8 @@ func (o *orchestrator) Drain(ctx context.Context) {
 		log.Debug(op, "the merge drain waits for the admission steps already in flight",
 			dlog.Context{"bound": bound.String(), "in_flight": inFlight})
 		if !drainStep(ctx, log, op, expired.C, admitted,
-			"an admission step outlived the drain's bound; the state client closes under it",
-			"the drain was cancelled while an admission step was in flight; the state client closes under it",
+			logsite.Msg("an admission step outlived the drain's bound; the state client closes under it"),
+			logsite.Msg("the drain was cancelled while an admission step was in flight; the state client closes under it"),
 			dlog.Context{"bound": bound.String(), "in_flight": inFlight}) {
 			return
 		}
@@ -942,8 +943,8 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	// run does on its way out is in-process only.
 	for _, r := range suspended {
 		if !drainStep(ctx, log, op, expired.C, r.finished,
-			"a suspended merge did not let go before the drain's bound; the state client closes under it",
-			"the drain was cancelled while a suspended merge was letting go; the state client closes under it",
+			logsite.Msg("a suspended merge did not let go before the drain's bound; the state client closes under it"),
+			logsite.Msg("the drain was cancelled while a suspended merge was letting go; the state client closes under it"),
 			dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "bound": bound.String()}) {
 			return
 		}
@@ -979,14 +980,14 @@ func (o *orchestrator) Drain(ctx context.Context) {
 // drain goes on. A step that outlives the bound is recorded at ERROR as
 // OVERRAN, and one the drain's cancellation cut as CANCELLED: either way the
 // state client closes under it, so the drain returns.
-func drainStep(ctx context.Context, log dlog.Logger, op string, expired <-chan time.Time, done <-chan struct{}, overran, cancelled string, fields dlog.Context) bool {
+func drainStep(ctx context.Context, log dlog.Logger, op string, expired <-chan time.Time, done <-chan struct{}, overran logsite.Message, cancelled logsite.Message, fields dlog.Context) bool {
 	select {
 	case <-done:
 		return true
 	case <-expired:
-		log.Error(op, overran, fields)
+		log.Log(dlog.LevelError, op, overran, fields)
 	case <-ctx.Done():
-		log.Error(op, cancelled, fields)
+		log.Log(dlog.LevelError, op, cancelled, fields)
 	}
 	return false
 }
@@ -1392,9 +1393,9 @@ func (o *orchestrator) AnswerQueueOffer(ctx context.Context, ws ids.WorkspaceID,
 func (o *orchestrator) prioritize(ctx context.Context, ws ids.WorkspaceID) error {
 	_, err := o.reorder(ctx, ws, reordering{
 		op:      "daemon.merge.prioritize",
-		failed:  "could not move a merge to the front of the merges waiting in its queue",
-		unmoved: "a merge asked to run next is running or already first in line, and stays where it is",
-		moved:   "moved a merge to the front of the merges waiting in its queue",
+		failed:  logsite.Msg("could not move a merge to the front of the merges waiting in its queue"),
+		unmoved: logsite.Msg("a merge asked to run next is running or already first in line, and stays where it is"),
+		moved:   logsite.Msg("moved a merge to the front of the merges waiting in its queue"),
 		do: func(repo wsm.RepoKey) (bool, error) {
 			return o.deps.DB.PrioritizeMerge(ctx, repo, ws)
 		},

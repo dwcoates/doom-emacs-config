@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -1145,7 +1146,7 @@ func TestReadRecordedAnswersWhatItsReaderAnswers(t *testing.T) {
 	}
 
 	// Act
-	got := readRecorded(h.resolver, testWorkspace, []ids.TurnID{"t1"}, read, "daemon.feed.test_unreadable", "unread")
+	got := readRecorded(h.resolver, testWorkspace, []ids.TurnID{"t1"}, read, "daemon.feed.test_unreadable", logsite.Msg("unread"))
 
 	// Assert
 	if len(got) != 1 || got["t1"] != string(testWorkspace) {
@@ -1171,7 +1172,7 @@ func TestReadRecordedReadsNothingWithoutAReaderOrTurns(t *testing.T) {
 			h := newHarness(t)
 
 			// Act
-			got := readRecorded(h.resolver, testWorkspace, tt.turns, tt.read, "daemon.feed.test_unreadable", "unread")
+			got := readRecorded(h.resolver, testWorkspace, tt.turns, tt.read, "daemon.feed.test_unreadable", logsite.Msg("unread"))
 
 			// Assert
 			if got != nil {
@@ -1189,7 +1190,7 @@ func TestReadRecordedRecordsAFailedReadAndAnswersNothing(t *testing.T) {
 	}
 
 	// Act
-	got := readRecorded(h.resolver, testWorkspace, []ids.TurnID{"t1", "t2"}, read, "daemon.feed.test_unreadable", "unread")
+	got := readRecorded(h.resolver, testWorkspace, []ids.TurnID{"t1", "t2"}, read, "daemon.feed.test_unreadable", logsite.Msg("unread"))
 
 	// Assert
 	if got != nil {

@@ -148,7 +148,7 @@ func (v *verbs) relationshipOf(ctx context.Context, record wsm.Workspace, out *a
 func (v *verbs) refOf(ctx context.Context, id ids.WorkspaceID, what string) (*workspacev1.WorkspaceRef, error) {
 	record, err := v.deps.DB.Workspace(ctx, id)
 	if err != nil {
-		v.deps.Log.Global().Error(opStatus, "could not read "+what+" to name it in a workspace's status", dlog.WithCause(dlog.Context{"workspace": string(id)}, err))
+		v.deps.Log.Global().With(dlog.WithCause(dlog.Context{"workspace": string(id)}, err)).Error(opStatus, "could not read {what} to name it in a workspace's status", dlog.Context{"what": what})
 		return nil, fmt.Errorf("status: read %s %q: %w", what, id, err)
 	}
 	return record.Ref(), nil

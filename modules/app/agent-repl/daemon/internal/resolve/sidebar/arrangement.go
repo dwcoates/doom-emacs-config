@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // THE ARRANGEMENT IS ONE ORDER, walked by two surfaces (agentrepl.v1
@@ -144,7 +145,7 @@ func (r *resolver) assertArrangement(reg Registry) {
 	subsections := map[ids.SubsectionID]wsm.Subsection{}
 	for _, sub := range reg.Subsections {
 		if !repos[sub.Repo] {
-			r.failArrangement("a subsection names a repository the registry does not carry",
+			r.failArrangement(logsite.Msg("a subsection names a repository the registry does not carry"),
 				dlog.Context{"subsection": string(sub.ID), "repo_id": string(sub.Repo)})
 		}
 		subsections[sub.ID] = sub
@@ -156,11 +157,11 @@ func (r *resolver) assertArrangement(reg Registry) {
 		}
 		sub, ok := subsections[*ws.Subsection]
 		if !ok {
-			r.failArrangement("a workspace names a subsection the registry does not carry",
+			r.failArrangement(logsite.Msg("a workspace names a subsection the registry does not carry"),
 				dlog.Context{"row_workspace": string(ws.ID), "subsection": string(*ws.Subsection)})
 		}
 		if sub.Repo != family[ws.ID] {
-			r.failArrangement("a workspace sits in another repository's subsection",
+			r.failArrangement(logsite.Msg("a workspace sits in another repository's subsection"),
 				dlog.Context{"row_workspace": string(ws.ID), "subsection": string(sub.ID), "repo_id": string(ws.Repo), "family_repo_id": string(family[ws.ID]), "subsection_repo_id": string(sub.Repo)})
 		}
 	}
@@ -168,9 +169,9 @@ func (r *resolver) assertArrangement(reg Registry) {
 
 // failArrangement records an arrangement invariant violation once, at ERROR,
 // and panics with MESSAGE.
-func (r *resolver) failArrangement(message string, ctx dlog.Context) {
+func (r *resolver) failArrangement(message logsite.Message, ctx dlog.Context) {
 	ctx["invariant_violation"] = "every subsection a workspace names is one of its family root's repository's, read in the same snapshot"
 	ctx["remediation"] = "compose the registry from one wsm.ReadArrangement"
-	r.log.Global().Error("daemon.sidebar.set_registry", message, ctx)
-	panic(fmt.Sprintf("sidebar: %s: %v", message, ctx))
+	r.log.Global().Log(dlog.LevelError, "daemon.sidebar.set_registry", message, ctx)
+	panic(fmt.Sprintf("sidebar: %s: %v", message.Template(), ctx))
 }

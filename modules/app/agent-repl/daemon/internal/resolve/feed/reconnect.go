@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -98,10 +99,10 @@ func (r *resolver) NetworkFaultClosed(ws ids.WorkspaceID, id string) {
 		retires:  unreachableEnding,
 		into:     s.reconnected,
 		fields:   dlog.Context{"fault": id},
-		nothing:  "the connection came back and no connection-failed card was drawn; nothing was retired",
-		failed:   "the connection came back and its connection-failed cards were removed but could not be recorded; a daemon restart will draw them again",
+		nothing:  logsite.Msg("the connection came back and no connection-failed card was drawn; nothing was retired"),
+		failed:   logsite.Msg("the connection came back and its connection-failed cards were removed but could not be recorded; a daemon restart will draw them again"),
 		warning:  "the answered connection failures could not be saved and will reappear after a daemon restart",
-		answered: "the connection came back; the connection-failed cards drawn before it were retired and recorded",
+		answered: logsite.Msg("the connection came back; the connection-failed cards drawn before it were retired and recorded"),
 	}
 	if r.deps.Reconnected != nil {
 		answer.record = r.deps.Reconnected.RecordReconnectedTurns
@@ -151,8 +152,8 @@ func (r *resolver) restoreReconnected(s *wsState) {
 	r.restoreTurnSet(s, turnSetRestore{
 		op:      opReconnectedRestore,
 		load:    r.deps.Reconnected.ReconnectedTurns,
-		failed:  "the workspace's reconnection-answered turns could not be loaded; their connection-failed cards may be drawn again",
+		failed:  logsite.Msg("the workspace's reconnection-answered turns could not be loaded; their connection-failed cards may be drawn again"),
 		warning: "answered connection failures could not be loaded and may be drawn again",
-		loaded:  "the workspace's reconnection-answered turns were loaded; their connection-failed cards are not drawn",
+		loaded:  logsite.Msg("the workspace's reconnection-answered turns were loaded; their connection-failed cards are not drawn"),
 	}, s.reconnected)
 }

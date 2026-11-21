@@ -1,16 +1,11 @@
 package dlog
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
 	"agentrepl/logging/logsite"
 )
-
-// callers resolves the function each log call is written in, skipping the
-// frames of this package (every Logger wrapper lives here).
-var callers = logsite.NewCallers("agent-repld/internal/dlog")
 
 // destination is one durable sink a logger writes to: a workspace sink or the
 // run log. Both are authoritative and synchronous. LEVEL is the record's, and
@@ -40,22 +35,22 @@ type logger struct {
 
 // Debug implements Logger.
 func (l *logger) Debug(operation string, message template, ctx Context) {
-	l.emit(LevelDebug, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelDebug, operation, string(message), logsite.Caller(), ctx)
 }
 
 // Info implements Logger.
 func (l *logger) Info(operation string, message template, ctx Context) {
-	l.emit(LevelInfo, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelInfo, operation, string(message), logsite.Caller(), ctx)
 }
 
 // Warn implements Logger.
 func (l *logger) Warn(operation string, message template, ctx Context) {
-	l.emit(LevelWarn, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelWarn, operation, string(message), logsite.Caller(), ctx)
 }
 
 // Error implements Logger.
 func (l *logger) Error(operation string, message template, ctx Context) {
-	l.emit(LevelError, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelError, operation, string(message), logsite.Caller(), ctx)
 }
 
 // Log implements Logger.
@@ -66,6 +61,11 @@ func (l *logger) Log(level, operation string, message logsite.Message, ctx Conte
 // With implements Logger.
 func (l *logger) With(ctx Context) Logger {
 	return &logger{s: l.s, dest: l.dest, runtime: l.runtime, base: merge(l.base, ctx), workspaceID: l.workspaceID}
+}
+
+// logAt implements Logger.
+func (l *logger) logAt(level, operation, template, function string, ctx Context) {
+	l.emit(level, operation, template, function, ctx)
 }
 
 // emit renders one record of the call written as TEMPLATE in FUNCTION and
@@ -80,27 +80,6 @@ func (l *logger) emit(level, operation, template, function string, ctx Context) 
 	l.deliver(rec)
 	l.s.count(l.runtime, level, operation)
 	l.tee(level, operation, text)
-}
-
-// mustRender answers TEMPLATE rendered from the record's named values
-// FIELDS. A template naming a value the record does not hold, or one whose
-// braces do not parse, is a defect of the call that wrote it, which the
-// static scan test (logsite_scan_test.go) exists to catch: it panics.
-func mustRender(operation, template string, fields Context) string {
-	text, err := logsite.RenderFields(template, fields)
-	if err != nil {
-		panic(fmt.Sprintf("dlog: the record of operation %s cannot be rendered: %v", operation, err))
-	}
-	return text
-}
-
-// forwarded answers the function MESSAGE was written in. A Message no Msg
-// made names no call: it panics.
-func forwarded(message logsite.Message) string {
-	if message.IsZero() {
-		panic("dlog: a forwarded message must be made by logsite.Msg")
-	}
-	return message.Function()
 }
 
 // tee hands a workspace logger's Warn or Error record to the bound record tee,

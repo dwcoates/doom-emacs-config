@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/recordlock"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // The operation names this package's records carry.
@@ -327,11 +328,11 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 	}
 	if lookupErr != nil {
 		sw.waiting[dir] = true
-		level, kind := log.Error, kindLookupFailed
+		level, kind := dlog.LevelError, kindLookupFailed
 		if errors.Is(lookupErr, wsm.ErrNotFound) {
-			level, kind = log.Warn, kindUnregistered
+			level, kind = dlog.LevelWarn, kindUnregistered
 		}
-		i.deferEntry(log, level, path, kind, "no workspace is registered at the entry's directory", lookupErr)
+		i.deferEntry(log, level, path, kind, logsite.Msg("no workspace is registered at the entry's directory"), lookupErr)
 		return
 	}
 	wlog := i.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{
@@ -343,7 +344,7 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 	// daemon is still that daemon's.
 	if !i.deps.ServesWorkspace(record.ID) {
 		sw.waiting[dir] = true
-		i.deferEntry(wlog, wlog.Info, path, kindNotServed, "this daemon does not serve the entry's workspace yet; it waits for the workspace's adoption",
+		i.deferEntry(wlog, dlog.LevelInfo, path, kindNotServed, logsite.Msg("this daemon does not serve the entry's workspace yet; it waits for the workspace's adoption"),
 			fmt.Errorf("heldingress: workspace %s is not served by this daemon", record.ID))
 		leavePending(sw, record.ID, entry, i.retries[path].wait)
 		return
@@ -365,11 +366,11 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 	case err != nil:
 		sw.waiting[dir] = true
 		kind := refusalKind(err)
-		level := wlog.Error
+		level := dlog.LevelError
 		if kind != kindFault {
-			level = wlog.Info
+			level = dlog.LevelInfo
 		}
-		i.deferEntry(wlog, level, path, kind, "the queue did not accept the held prompt; it stays for a later sweep", err)
+		i.deferEntry(wlog, level, path, kind, logsite.Msg("the queue did not accept the held prompt; it stays for a later sweep"), err)
 		leavePending(sw, record.ID, entry, i.retries[path].wait)
 		return
 	default:
@@ -442,7 +443,7 @@ func refusalKind(err error) string {
 // KIND is recorded at the given level; a repeat of a kind already stated is
 // DEBUG, because the standing condition was already said once and a record
 // per retry would only repeat it.
-func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Context), path, kind, message string, cause error) {
+func (i *ingress) deferEntry(log dlog.Logger, level, path, kind string, message logsite.Message, cause error) {
 	standing := i.retries[path]
 	standing.attempts++
 	standing.wait = waitOf(kind)
@@ -456,10 +457,10 @@ func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Co
 	i.retries[path] = standing
 	fields := dlog.Context{"cause": cause.Error(), "kind": kind, "attempts": standing.attempts}
 	if first {
-		level(opDefer, message, fields)
+		log.Log(level, opDefer, message, fields)
 		return
 	}
-	log.Debug(opDefer, message, fields)
+	log.Log(dlog.LevelDebug, opDefer, message, fields)
 }
 
 // quarantine moves a malformed entry aside, where a person can still read what

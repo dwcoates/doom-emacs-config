@@ -132,7 +132,7 @@ func (s *Sampler) Sample(context.Context) {
 	s.mu.Lock()
 	s.latest, s.read = reading, true
 	s.mu.Unlock()
-	s.deps.Log.Info(op, fmt.Sprintf("the largest web content process's footprint is %d MB", largest), dlog.Context{
+	s.deps.Log.Info(op, "the largest web content process's footprint is {largest_footprint_mb} MB", dlog.Context{
 		"processes": listed, "largest_footprint_mb": largest,
 	})
 }

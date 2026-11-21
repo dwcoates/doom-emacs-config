@@ -20,15 +20,15 @@ type withoutDebug struct{ base Logger }
 func (withoutDebug) Debug(string, template, Context) {}
 
 func (w withoutDebug) Info(operation string, message template, ctx Context) {
-	w.base.Info(operation, message, ctx)
+	w.base.logAt(LevelInfo, operation, string(message), logsite.Caller(), ctx)
 }
 
 func (w withoutDebug) Warn(operation string, message template, ctx Context) {
-	w.base.Warn(operation, message, ctx)
+	w.base.logAt(LevelWarn, operation, string(message), logsite.Caller(), ctx)
 }
 
 func (w withoutDebug) Error(operation string, message template, ctx Context) {
-	w.base.Error(operation, message, ctx)
+	w.base.logAt(LevelError, operation, string(message), logsite.Caller(), ctx)
 }
 
 func (w withoutDebug) Log(level, operation string, message logsite.Message, ctx Context) {
@@ -36,6 +36,13 @@ func (w withoutDebug) Log(level, operation string, message logsite.Message, ctx 
 		return
 	}
 	w.base.Log(level, operation, message, ctx)
+}
+
+func (w withoutDebug) logAt(level, operation, template, function string, ctx Context) {
+	if level == LevelDebug {
+		return
+	}
+	w.base.logAt(level, operation, template, function, ctx)
 }
 
 func (w withoutDebug) With(ctx Context) Logger {

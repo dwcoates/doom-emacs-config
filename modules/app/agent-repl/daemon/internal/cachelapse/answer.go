@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -65,9 +66,9 @@ func (k *Keeper) answered(ctx context.Context, ws ids.WorkspaceID, stated *conve
 		log.Debug(opDrive, "a lapse restated from the anchor before the keep-alive; its answer is still awaited", fields)
 		return
 	}
-	log.Info(opDrive, k.answerWords(ws,
-		"the vendor answered the keep-alive and the cache is re-anchored; its session is stood down until the next one",
-		"the vendor answered the keep-alive and the cache is re-anchored; its session stays up"), fields)
+	log.Log(dlog.LevelInfo, opDrive, k.answerWords(ws,
+		logsite.Msg("the vendor answered the keep-alive and the cache is re-anchored; its session is stood down until the next one"),
+		logsite.Msg("the vendor answered the keep-alive and the cache is re-anchored; its session stays up")), fields)
 	k.settleAnswer(ctx, ws, sent, answeredAck(lapsesAt))
 }
 
@@ -90,9 +91,9 @@ func (k *Keeper) answeredFailed(ctx context.Context, ws ids.WorkspaceID, failed 
 		})
 		return
 	}
-	k.deps.Log.Global().Info(opDrive, k.answerWords(ws,
-		"the keep-alive's request failed; its session is stood down, and the cache lapses at its old anchor",
-		"the keep-alive's request failed; its session stays up, and the cache lapses at its old anchor"), dlog.Context{
+	k.deps.Log.Global().Log(dlog.LevelInfo, opDrive, k.answerWords(ws,
+		logsite.Msg("the keep-alive's request failed; its session is stood down, and the cache lapses at its old anchor"),
+		logsite.Msg("the keep-alive's request failed; its session stays up, and the cache lapses at its old anchor")), dlog.Context{
 		"workspace": string(ws), "trigger": k.triggerOf(ws), "sent": sent, "detail": failed.GetDetail(),
 	})
 	k.settleAnswer(ctx, ws, sent, failedAck(failed.GetDetail()))
@@ -109,9 +110,9 @@ func (k *Keeper) answersDue(ctx context.Context) {
 		sent := k.answering[ws]
 		// warn: a keep-alive the vendor never answered leaves the cache to
 		// lapse at its old anchor, and the next restore may meet a cold gate.
-		k.deps.Log.Global().Warn(opDrive, k.answerWords(ws,
-			"the keep-alive went unanswered past its bound; its session is stood down, and the cache lapses at its old anchor",
-			"the keep-alive went unanswered past its bound; its session stays up, and the cache lapses at its old anchor"),
+		k.deps.Log.Global().Log(dlog.LevelWarn, opDrive, k.answerWords(ws,
+			logsite.Msg("the keep-alive went unanswered past its bound; its session is stood down, and the cache lapses at its old anchor"),
+			logsite.Msg("the keep-alive went unanswered past its bound; its session stays up, and the cache lapses at its old anchor")),
 			dlog.Context{"workspace": string(ws), "trigger": k.triggerOf(ws), "sent": sent, "bound": AnswerBound.String()})
 		k.settleAnswer(ctx, ws, sent, nil)
 	}
@@ -139,7 +140,7 @@ func (k *Keeper) settleAnswer(ctx context.Context, ws ids.WorkspaceID, sent time
 // answerWords is the record of WS's settled answer: DOWN when its session is
 // stood down after it, UP when the wait keeps it up (a keep-live on a session
 // within its grace).
-func (k *Keeper) answerWords(ws ids.WorkspaceID, down, up string) string {
+func (k *Keeper) answerWords(ws ids.WorkspaceID, down, up logsite.Message) logsite.Message {
 	if k.answerKeepsUp[ws] {
 		return up
 	}

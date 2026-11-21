@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -117,7 +118,7 @@ func (r *resolver) followQuiet(quiet bool) {
 	}
 	r.mu.Unlock()
 	for _, ws := range stale {
-		r.mutate(ws, "daemon.footer.quiet_resync", "the lid opened; the strip was resolved and published at its current state", nil, func(*wsState) {})
+		r.mutate(ws, "daemon.footer.quiet_resync", logsite.Msg("the lid opened; the strip was resolved and published at its current state"), nil, func(*wsState) {})
 	}
 }
 
@@ -142,7 +143,7 @@ func (r *resolver) followQuiet(quiet bool) {
 // regresses a live footer to idle.
 func (r *resolver) Prime(ws ids.WorkspaceID) {
 	r.mutate(ws, "daemon.footer.prime",
-		"the footer primed the workspace's view at registration so a reconnecting subscriber replays it",
+		logsite.Msg("the footer primed the workspace's view at registration so a reconnecting subscriber replays it"),
 		nil, func(*wsState) {})
 }
 
@@ -266,7 +267,7 @@ func (r *resolver) resolveUnboundLocked(ws ids.WorkspaceID, s *wsState) (dlog.Lo
 // mutate runs one accumulation change under the lock and republishes the whole
 // view. Every sink method and every setter goes through it, so there is
 // exactly one publication site.
-func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState)) {
+func (r *resolver) mutate(ws ids.WorkspaceID, operation string, message logsite.Message, ctx dlog.Context, apply func(*wsState)) {
 	r.mutateTelling(ws, operation, message, ctx, apply, true)
 }
 
@@ -291,12 +292,12 @@ func (r *resolver) awaitersLocked(ws ids.WorkspaceID) []ids.WorkspaceID {
 // record), and the status edge redraws the roster under that lock: telling
 // it from here would take the roster's lock twice. A line moves no status, so
 // nothing is withheld by not telling it.
-func (r *resolver) mutateLine(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState)) {
+func (r *resolver) mutateLine(ws ids.WorkspaceID, operation string, message logsite.Message, ctx dlog.Context, apply func(*wsState)) {
 	r.mutateTelling(ws, operation, message, ctx, apply, false)
 }
 
 // mutateTelling is mutate, telling the status edge only when tell is set.
-func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState), tell bool) {
+func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation string, message logsite.Message, ctx dlog.Context, apply func(*wsState), tell bool) {
 	r.mu.Lock()
 	s := r.stateLocked(ws)
 	s.seen = true
@@ -346,10 +347,10 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 	}
 	own.log(operation, message, ctx)
 	for _, peer := range peers {
-		peer.log(operation, "the footer redrew the account's usage another workspace on the root learned", ctx)
+		peer.log(operation, logsite.Msg("the footer redrew the account's usage another workspace on the root learned"), ctx)
 	}
 	for _, awaiter := range awaiters {
-		awaiter.log(operation, "the footer redrew a merge waiting for this workspace to fall free", ctx)
+		awaiter.log(operation, logsite.Msg("the footer redrew a merge waiting for this workspace to fall free"), ctx)
 	}
 	if usageMoved {
 		record := log.Debug
@@ -545,8 +546,8 @@ func publishedOrResolved[T any](r *resolver, ws ids.WorkspaceID, published func(
 }
 
 // log writes the publication's records, after the lock is released.
-func (p publication) log(operation, message string, ctx dlog.Context) {
-	p.logger.Debug(operation, message, ctx)
+func (p publication) log(operation string, message logsite.Message, ctx dlog.Context) {
+	p.logger.Log(dlog.LevelDebug, operation, message, ctx)
 	logArmChange(p.logger, operation, p.arm, p.armChanged, p.previousArm)
 	logSubstatusChange(p.logger, operation, p.arm, p.sub, p.subChanged, p.previousSub)
 	logLineChange(p.logger, operation, p.arm, p.line, p.lineChanged, p.previousLine)
@@ -612,7 +613,7 @@ func logLineChange(log dlog.Logger, operation, arm string, line activityLine, ch
 // workspace that has observed nothing yet is left alone: its footer is not
 // published at all until its first fact, and a daemon fault is not the fact
 // that makes a workspace's strip exist.
-func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply func(*wsState), global func()) {
+func (r *resolver) mutateAll(operation string, message logsite.Message, ctx dlog.Context, apply func(*wsState), global func()) {
 	r.mu.Lock()
 	global()
 	out := make([]publication, 0, len(r.states))
@@ -635,7 +636,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 	if ctx == nil {
 		ctx = dlog.Context{}
 	}
-	r.log.Global().Debug(operation, message, ctx)
+	r.log.Global().Log(dlog.LevelDebug, operation, message, ctx)
 	for _, p := range out {
 		p.log(operation, message, ctx)
 	}
@@ -721,7 +722,7 @@ func (r *resolver) clockCell(s *wsState) *frontendv1.FooterClock {
 // shim is asked, so it precedes every frame of the turn by construction. The
 // edge re-takes only the context baseline, which is what it always owned.
 func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
-	r.mutate(ws, "daemon.footer.on_turn_opened", "the footer took the turn-open edge",
+	r.mutate(ws, "daemon.footer.on_turn_opened", logsite.Msg("the footer took the turn-open edge"),
 		dlog.Context{"turn_id": string(turn)}, func(s *wsState) {
 			if s.turn != nil {
 				s.tok.ctx = s.tok.ctx.rebased()
@@ -738,7 +739,7 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 // it ends the agent's push notification. The delivery draws no activity line:
 // the `submitting` substatus states the step (owner ruling, 2026-10-06).
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
-	r.mutate(ws, "daemon.footer.set_turn", "the footer took the accepted turn",
+	r.mutate(ws, "daemon.footer.set_turn", logsite.Msg("the footer took the accepted turn"),
 		dlog.Context{"in_flight": turn != nil}, func(s *wsState) {
 			r.applyTurnStarted(ws, s, turn)
 			if turn != nil {
@@ -752,7 +753,7 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
 // The move draws no activity line (owner ruling, 2026-10-06); it is recorded.
 func (r *resolver) OnSubmission(ws ids.WorkspaceID, sub Submission) {
 	stage, declared := stageName(sub.Stage)
-	r.mutate(ws, "daemon.footer.on_submission", "the footer took a move of a prompt's delivery",
+	r.mutate(ws, "daemon.footer.on_submission", logsite.Msg("the footer took a move of a prompt's delivery"),
 		dlog.Context{"stage": stage, "position": sub.Position, "queued": sub.Queued}, func(s *wsState) {
 			r.endNotification(ws, s, "daemon.footer.on_submission")
 			if !declared {
@@ -767,7 +768,7 @@ func (r *resolver) OnSubmission(ws ids.WorkspaceID, sub Submission) {
 // and a turn that then produces no activity would otherwise stand in it for
 // its whole life.
 func (r *resolver) AckTurn(ws ids.WorkspaceID) {
-	r.mutate(ws, "daemon.footer.ack_turn", "the footer took the turn's ack", nil,
+	r.mutate(ws, "daemon.footer.ack_turn", logsite.Msg("the footer took the turn's ack"), nil,
 		func(s *wsState) {
 			if s.turn != nil {
 				s.sawActivity = true
@@ -784,7 +785,7 @@ func (r *resolver) AckTurn(ws ids.WorkspaceID) {
 // past its submission and delivered; its clock counts from its row's start, or
 // from now when the daemon holds no row for it.
 func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
-	r.mutate(ws, "daemon.footer.on_turn_running_at_attach", "the footer took a turn the adopted shim is running",
+	r.mutate(ws, "daemon.footer.on_turn_running_at_attach", logsite.Msg("the footer took a turn the adopted shim is running"),
 		dlog.Context{"turn_id": string(turn), "row_known": startedAt != nil}, func(s *wsState) {
 			if s.turn != nil {
 				r.logOf(ws, s).Debug("daemon.footer.on_turn_running_at_attach",
@@ -893,7 +894,7 @@ func liveDetachedAgents(s *wsState) map[string]struct{} {
 // merging status, substatus and activity line, and the merge bubble carries
 // the rest, so no merge fact mints a focus.
 func (r *resolver) SetMerge(ws ids.WorkspaceID, facts MergeFacts) {
-	r.mutate(ws, "daemon.footer.set_merge", "the footer took the merge facts",
+	r.mutate(ws, "daemon.footer.set_merge", logsite.Msg("the footer took the merge facts"),
 		dlog.Context{"state": facts.State, "step": string(facts.Step), "failed_area": string(facts.FailedArea)},
 		func(s *wsState) { s.merge = facts })
 }
@@ -901,21 +902,21 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts MergeFacts) {
 // SetBringingUp raises, or lowers, the fact that a bring-up of the session is
 // under way.
 func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
-	r.mutate(ws, "daemon.footer.set_bringing_up", "the footer took whether a bring-up of the session is under way",
+	r.mutate(ws, "daemon.footer.set_bringing_up", logsite.Msg("the footer took whether a bring-up of the session is under way"),
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
 // SetUpdating raises, or lowers, the fact that a final response is being
 // rewritten from words highlighted in it.
 func (r *resolver) SetUpdating(ws ids.WorkspaceID, updating bool) {
-	r.mutate(ws, "daemon.footer.set_updating", "the footer took whether a final response is being updated",
+	r.mutate(ws, "daemon.footer.set_updating", logsite.Msg("the footer took whether a final response is being updated"),
 		dlog.Context{"updating": updating}, func(s *wsState) { s.updating = updating })
 }
 
 // SetParked installs, or lifts, the daemon's park. A park draws an idle
 // status, never a dead link.
 func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
-	r.mutate(ws, "daemon.footer.set_parked", "the footer took the daemon's park",
+	r.mutate(ws, "daemon.footer.set_parked", logsite.Msg("the footer took the daemon's park"),
 		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
 }
 
@@ -939,7 +940,7 @@ func (r *resolver) parkLocked(ws ids.WorkspaceID, s *wsState) wsm.Park {
 // SetAwaiting installs, or lifts with an empty name, the workspace this one
 // awaits correspondence from.
 func (r *resolver) SetAwaiting(ws ids.WorkspaceID, awaitedName string) {
-	r.mutate(ws, "daemon.footer.set_awaiting", "the footer took what the workspace awaits",
+	r.mutate(ws, "daemon.footer.set_awaiting", logsite.Msg("the footer took what the workspace awaits"),
 		dlog.Context{"awaited": awaitedName}, func(s *wsState) { s.awaiting = awaitedName })
 }
 
@@ -947,7 +948,7 @@ func (r *resolver) SetAwaiting(ws ids.WorkspaceID, awaitedName string) {
 // a failed handover has not re-reported its session state. A session start
 // lifts it too (OnSessionStarted), which is the re-report it waits for.
 func (r *resolver) SetStateUnreported(ws ids.WorkspaceID, unreported bool) {
-	r.mutate(ws, "daemon.footer.set_state_unreported", "the footer took whether the shim's session state is unreported",
+	r.mutate(ws, "daemon.footer.set_state_unreported", logsite.Msg("the footer took whether the shim's session state is unreported"),
 		dlog.Context{"unreported": unreported}, func(s *wsState) { s.stateUnreported = unreported })
 }
 
@@ -957,7 +958,7 @@ func (r *resolver) SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked) {
 	if blocked != nil {
 		ctx["reason"] = blocked.Reason
 	}
-	r.mutate(ws, "daemon.footer.set_closing", "the footer took the close refusal", ctx,
+	r.mutate(ws, "daemon.footer.set_closing", logsite.Msg("the footer took the close refusal"), ctx,
 		func(s *wsState) {
 			s.closing = blocked
 			// Each refusal is a line of its own, standing from when it was
@@ -974,7 +975,7 @@ func (r *resolver) SetStartFailed(ws ids.WorkspaceID, failure *StartFailed) {
 	if failure != nil {
 		ctx["detail"] = failure.Detail
 	}
-	r.mutate(ws, "daemon.footer.set_start_failed", "the footer took the bring-up failure", ctx,
+	r.mutate(ws, "daemon.footer.set_start_failed", logsite.Msg("the footer took the bring-up failure"), ctx,
 		func(s *wsState) {
 			if failure == nil {
 				s.startFailed = nil
@@ -986,7 +987,7 @@ func (r *resolver) SetStartFailed(ws ids.WorkspaceID, failure *StartFailed) {
 
 // SetColdGate installs the standing cold gate.
 func (r *resolver) SetColdGate(ws ids.WorkspaceID, gate ColdGate) {
-	r.mutate(ws, "daemon.footer.set_cold_gate", "the footer took the cold gate",
+	r.mutate(ws, "daemon.footer.set_cold_gate", logsite.Msg("the footer took the cold gate"),
 		dlog.Context{"standing": gate.Standing}, func(s *wsState) {
 			// The gate's line stands from when the gate OPENED; restating a
 			// standing gate keeps that instant.
@@ -999,7 +1000,7 @@ func (r *resolver) SetColdGate(ws ids.WorkspaceID, gate ColdGate) {
 
 // SetColdGateAnswer installs the gate answer in flight, nil to clear it.
 func (r *resolver) SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer) {
-	r.mutate(ws, "daemon.footer.set_cold_gate_answer", "the footer took the cold gate's answer",
+	r.mutate(ws, "daemon.footer.set_cold_gate_answer", logsite.Msg("the footer took the cold gate's answer"),
 		dlog.Context{"in_flight": answer != nil, "choice": choiceOf(answer), "line": lineOf(answer)},
 		func(s *wsState) {
 			s.coldAnswer = answer
@@ -1070,7 +1071,7 @@ func (r *resolver) coldAnswerLine(ws ids.WorkspaceID, s *wsState, answer *ColdGa
 
 // SetInterrupting fires waiting·interrupting the moment an interrupt registers.
 func (r *resolver) SetInterrupting(ws ids.WorkspaceID, on bool) {
-	r.mutate(ws, "daemon.footer.set_interrupting", "the footer took the interrupt registration",
+	r.mutate(ws, "daemon.footer.set_interrupting", logsite.Msg("the footer took the interrupt registration"),
 		dlog.Context{"interrupting": on}, func(s *wsState) {
 			if on && !s.interrupting {
 				s.interruptingAt = r.opts.clock.Now()
@@ -1100,7 +1101,7 @@ func (r *resolver) cancelMomentary(s *wsState) {
 // retireMomentary clears the momentary statuses and republishes the successor.
 func (r *resolver) retireMomentary(ws ids.WorkspaceID) {
 	r.mutate(ws, "daemon.footer.retire_momentary",
-		"the R1 dwell elapsed and the footer published the momentary status's successor",
+		logsite.Msg("the R1 dwell elapsed and the footer published the momentary status's successor"),
 		nil, func(s *wsState) {
 			s.interrupted = nil
 			s.loading = nil
@@ -1112,7 +1113,7 @@ func (r *resolver) retireMomentary(ws ids.WorkspaceID) {
 
 // OnLink is the connectivity change the footer reflects.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
-	r.mutate(ws, "daemon.footer.on_link", "the footer took a link state",
+	r.mutate(ws, "daemon.footer.on_link", logsite.Msg("the footer took a link state"),
 		dlog.Context{"link": linkName(link)}, func(s *wsState) {
 			s.link = link
 			s.linkSeen = true
@@ -1147,7 +1148,7 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 // roster's rule for its vendor_blocked on the same event, so the strip and
 // the dot lift together.
 func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted) {
-	r.mutate(ws, "daemon.footer.on_session_started", "the footer took a session start",
+	r.mutate(ws, "daemon.footer.on_session_started", logsite.Msg("the footer took a session start"),
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.sessionStarted = true
 			s.blocked = nil
@@ -1169,7 +1170,7 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 		return
 	}
 	arm, apply := r.sessionArm(ws, update)
-	r.mutate(ws, "daemon.footer.on_session_update", "the footer took a session update",
+	r.mutate(ws, "daemon.footer.on_session_update", logsite.Msg("the footer took a session update"),
 		dlog.Context{"arm": arm}, apply)
 }
 
@@ -1466,7 +1467,7 @@ func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	id := q.GetId().GetValue()
 	switch res := q.GetResult().(type) {
 	case *conversationv1.AgentQuestion_Start:
-		r.mutate(ws, "daemon.footer.on_question", "the footer opened a question batch",
+		r.mutate(ws, "daemon.footer.on_question", logsite.Msg("the footer opened a question batch"),
 			dlog.Context{"question_id": id}, func(s *wsState) {
 				batch, seen := s.questions[id]
 				if !seen {
@@ -1478,7 +1479,7 @@ func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 				r.askOpened(ws, s)
 			})
 	default:
-		r.mutate(ws, "daemon.footer.on_question", "the footer closed a question batch",
+		r.mutate(ws, "daemon.footer.on_question", logsite.Msg("the footer closed a question batch"),
 			dlog.Context{"question_id": id}, func(s *wsState) {
 				r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected the question-close transition",
 					dlog.Context{"question_id": id})
@@ -1515,7 +1516,7 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	id := p.GetId().GetValue()
 	switch res := p.GetResult().(type) {
 	case *conversationv1.AgentPermission_Start:
-		r.mutate(ws, "daemon.footer.on_permission", "the footer opened a consent ask",
+		r.mutate(ws, "daemon.footer.on_permission", logsite.Msg("the footer opened a consent ask"),
 			dlog.Context{"permission_id": id}, func(s *wsState) {
 				ask, seen := s.permissions[id]
 				if !seen {
@@ -1527,7 +1528,7 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 				r.askOpened(ws, s)
 			})
 	default:
-		r.mutate(ws, "daemon.footer.on_permission", "the footer closed a consent ask",
+		r.mutate(ws, "daemon.footer.on_permission", logsite.Msg("the footer closed a consent ask"),
 			dlog.Context{"permission_id": id}, func(s *wsState) {
 				r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected the permission-close transition",
 					dlog.Context{"permission_id": id})
@@ -1562,7 +1563,7 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	if failed == nil {
 		return
 	}
-	r.mutate(ws, "daemon.footer.on_api_error", "the footer took mid-turn api failure evidence",
+	r.mutate(ws, "daemon.footer.on_api_error", logsite.Msg("the footer took mid-turn api failure evidence"),
 		dlog.Context{"kind": turnfault.OfApiFailure(failed).Cause, "agent_id": agent.GetValue()}, func(s *wsState) {
 			next := &retryState{
 				agent:  agent.GetValue(),
@@ -1696,7 +1697,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	// the status (the compaction's sub-status goes) and the activity line (the
 	// compaction's line goes), and a change published past mutate is a change
 	// no record states.
-	r.mutate(ws, "daemon.footer.on_context_cut", "the footer took a context cut",
+	r.mutate(ws, "daemon.footer.on_context_cut", logsite.Msg("the footer took a context cut"),
 		dlog.Context{"arm": arm, "compaction_id": cutCompactionID(cut)}, func(s *wsState) {
 			s.turnEverRan = true
 			s.compacting = false
@@ -1738,7 +1739,7 @@ func (r *resolver) OnContextCutRestated(ws ids.WorkspaceID, cut *conversationv1.
 	if id == "" {
 		return
 	}
-	r.mutate(ws, "daemon.footer.on_context_cut_restated", "the footer took a served-again cut's compaction identity",
+	r.mutate(ws, "daemon.footer.on_context_cut_restated", logsite.Msg("the footer took a served-again cut's compaction identity"),
 		dlog.Context{"compaction_id": id}, func(s *wsState) {
 			if !compactionConcluded(s, id) {
 				concludeCompactionID(s, id)
@@ -1769,7 +1770,7 @@ func contextCutArm(cut *conversationv1.ContextCut) string {
 // held. It is the other two hops of connectivity truth (daemon.md invariant
 // 11); the footer draws not-connected while either is down.
 func (r *resolver) SetParticipants(ws ids.WorkspaceID, host, web bool) {
-	r.mutate(ws, "daemon.footer.set_participants", "the footer took the participant streams' liveness",
+	r.mutate(ws, "daemon.footer.set_participants", logsite.Msg("the footer took the participant streams' liveness"),
 		dlog.Context{"host_stream": host, "web_stream": web}, func(s *wsState) {
 			wasDown := s.hostStream != s.webStream
 			s.hostStream = host

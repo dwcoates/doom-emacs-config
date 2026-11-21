@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -138,8 +139,10 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 		// is cancelled the moment the client goes away or the daemon exits in
 		// an orderly way. The view is simply not published; there is nobody
 		// left to publish it to, and it is not a fault.
-		logHostWorkspaceRecordRead(s.log, op, "the host view was not published",
-			"could not resolve the workspace", err, dlog.Context{"workspace": string(ws)})
+		logHostWorkspaceRecordRead(s.log, op,
+			logsite.Msg("the host view was not published; the workspace was forgotten before this read"),
+			logsite.Msg("the host view was not published; the stream's context was cancelled"),
+			logsite.Msg("could not resolve the workspace"), err, dlog.Context{"workspace": string(ws)})
 		return
 	}
 	// THE WEB LINK'S IDENTITY MOVES ON EXACTLY THESE EDGES. It is composed
@@ -178,12 +181,15 @@ func (s *server) composeHostWorkspace(
 
 	record, err := s.deps.DB.Workspace(ctx, ws)
 	if err != nil {
-		logHostWorkspaceRecordRead(log, op, "the host view was not composed", "could not read the workspace record", err, nil)
+		logHostWorkspaceRecordRead(log, op,
+			logsite.Msg("the host view was not composed; the workspace was forgotten before this read"),
+			logsite.Msg("the host view was not composed, its workspace record unread; the stream's context was cancelled"),
+			logsite.Msg("could not read the workspace record"), err, nil)
 		return nil, false
 	}
 	session, hasSession, err := s.deps.DB.Session(ctx, ws)
 	if err != nil {
-		logHostStreamRead(log, op, "the host view was not composed", "could not read the session record", err, nil)
+		logHostStreamRead(log, op, logsite.Msg("the host view was not composed, its session record unread; the stream's context was cancelled"), logsite.Msg("could not read the session record"), err, nil)
 		return nil, false
 	}
 
@@ -441,8 +447,8 @@ func (s *server) setHostComposer(
 	const op = "daemon.server.compose_host_workspace"
 	lease, held, err := s.deps.DB.Lease(ctx, ws)
 	if err != nil {
-		logHostStreamRead(log, op, "the occupancy lease was not read",
-			"could not read the occupancy lease", err, nil)
+		logHostStreamRead(log, op, logsite.Msg("the occupancy lease was not read; the stream's context was cancelled"),
+			logsite.Msg("could not read the occupancy lease"), err, nil)
 		return false
 	}
 	if !held {
@@ -488,8 +494,8 @@ func (s *server) hostFaults(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	scope := ws
 	open, err := s.deps.Health.OpenFaults(ctx, wsm.FaultScope{Workspace: &scope})
 	if err != nil {
-		logHostStreamRead(log, op, "the open faults were not read",
-			"could not read the workspace's open faults", err, nil)
+		logHostStreamRead(log, op, logsite.Msg("the open faults were not read; the stream's context was cancelled"),
+			logsite.Msg("could not read the workspace's open faults"), err, nil)
 		return nil
 	}
 	out := make([]*agentreplv1.HostFault, 0, len(open))
@@ -651,7 +657,7 @@ func (s *server) hostInitialPrompt(
 	const op = "daemon.server.compose_host_workspace"
 	job, found, err := s.deps.DB.CreationJob(ctx, ws)
 	if err != nil {
-		logHostStreamRead(log, op, "the host view was not composed", "could not read the creation job", err, nil)
+		logHostStreamRead(log, op, logsite.Msg("the host view was not composed; the stream's context was cancelled"), logsite.Msg("could not read the creation job"), err, nil)
 		return nil, false
 	}
 	if !found || strings.TrimSpace(job.InitialPrompt) == "" {
@@ -665,8 +671,14 @@ func (s *server) hostInitialPrompt(
 // CLIENT LEAVING (or an orderly exit): INFO, saying what was not done
 // (`skipped`) and naming the stream. Any other cause is a fault: ERROR, saying
 // what could not be read (`failed`). Both carry `fields` and the cause.
-func logHostStreamRead(log dlog.Logger, op, skipped, failed string, err error, fields dlog.Context) {
-	logHostRead(log, op, skipped, failed, err, fields, false)
+func logHostStreamRead(log dlog.Logger, op string, skipped, failed logsite.Message, err error, fields dlog.Context) {
+	out := hostReadFields(err, fields)
+	if ctxend.Is(err) {
+		out["stream"] = "WatchHostWorkspace"
+		log.Log(dlog.LevelInfo, op, skipped, out)
+		return
+	}
+	log.Log(dlog.LevelError, op, failed, out)
 }
 
 // logHostWorkspaceRecordRead is logHostStreamRead for a read of the
@@ -674,34 +686,27 @@ func logHostStreamRead(log dlog.Logger, op, skipped, failed string, err error, f
 // edge-triggered and runs concurrently with a forget, so a record that is gone
 // by the time the composition reads it means the workspace was forgotten
 // between the edge and the read: there is no view to publish, and that is not
-// a fault. It is INFO, naming the outcome. Reads of anything else a live
+// a fault. It is INFO, `forgotten` naming the outcome. Any other cause is
+// recorded as logHostStreamRead records it. Reads of anything else a live
 // workspace owns keep logHostStreamRead, where a not-found stays a fault.
-func logHostWorkspaceRecordRead(log dlog.Logger, op, skipped, failed string, err error, fields dlog.Context) {
-	logHostRead(log, op, skipped, failed, err, fields, true)
+func logHostWorkspaceRecordRead(log dlog.Logger, op string, forgotten, skipped, failed logsite.Message, err error, fields dlog.Context) {
+	if errors.Is(err, wsm.ErrNotFound) {
+		out := hostReadFields(err, fields)
+		out["workspace_record"] = "forgotten"
+		log.Log(dlog.LevelInfo, op, forgotten, out)
+		return
+	}
+	logHostStreamRead(log, op, skipped, failed, err, fields)
 }
 
-func logHostRead(
-	log dlog.Logger,
-	op, skipped, failed string,
-	err error,
-	fields dlog.Context,
-	workspaceRecord bool,
-) {
+// hostReadFields is a failed host read's record context: FIELDS and ERR's
+// cause, in a map of its own.
+func hostReadFields(err error, fields dlog.Context) dlog.Context {
 	out := dlog.Context{"cause": err.Error()}
 	for k, v := range fields {
 		out[k] = v
 	}
-	if workspaceRecord && errors.Is(err, wsm.ErrNotFound) {
-		out["workspace_record"] = "forgotten"
-		log.Info(op, skipped+"; the workspace was forgotten before this read", out)
-		return
-	}
-	if ctxend.Is(err) {
-		out["stream"] = "WatchHostWorkspace"
-		log.Info(op, skipped+"; the stream's context was cancelled", out)
-		return
-	}
-	log.Error(op, failed, out)
+	return out
 }
 
 func hostNaming(record wsm.Workspace) *agentreplv1.HostWorkspaceNaming {

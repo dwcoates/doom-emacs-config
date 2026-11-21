@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -226,11 +227,11 @@ func (r *resolver) servePage(s *wsState, f *feedState, w *walk, order []string, 
 	} else if w.top && !more {
 		w.top = false
 	}
-	op, sentence := "daemon.feed.next_page", "a reader was served the next older page"
+	op, sentence := "daemon.feed.next_page", logsite.Msg("a reader was served the next older page")
 	if open {
-		op, sentence = "daemon.feed.open_page", "a reader was served a feed's newest page and its tail was pinned"
+		op, sentence = "daemon.feed.open_page", logsite.Msg("a reader was served a feed's newest page and its tail was pinned")
 	}
-	r.logger(s.id).Debug(op, sentence, dlog.Context{
+	r.logger(s.id).Log(dlog.LevelDebug, op, sentence, dlog.Context{
 		"feed": f.key, "rows": end - start,
 		"at_start": !more, "pinned_after": f.seq, "loaded_pages": len(f.book.bounds),
 	})
@@ -438,7 +439,7 @@ func (r *resolver) composePageRange(s *wsState, f *feedState, order []string, st
 		Breadcrumbs: r.breadcrumbs(s, f.key),
 	}
 	if more {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "more"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: more", dlog.Context{"function": "feed", "condition": "more"})
 		success.Edge = &frontendv1.FeedPageSuccess_HasMore{HasMore: &frontendv1.FeedPageHasMore{}}
 	} else {
 		success.Edge = &frontendv1.FeedPageSuccess_AtStart{AtStart: &frontendv1.FeedPageAtStart{}}
@@ -454,7 +455,7 @@ func (r *resolver) breadcrumbs(s *wsState, feedKey string) *frontendv1.FeedBread
 	for depth := 0; depth < len(s.subFeeds)+1; depth++ {
 		head, ok := s.subFeeds[key]
 		if !ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !ok", dlog.Context{"function": "feed", "condition": "!ok"})
 			break
 		}
 		reversed = append(reversed, &frontendv1.FeedBreadcrumb{Target: head.row, Label: head.label})
@@ -482,7 +483,7 @@ func (r *resolver) awaitSource(plan loadPlan) {
 		// A SOURCE CAME UP WHILE THE READ WAS IN FLIGHT, after its kick (if
 		// any) had already cleared the mark: waiting for the next one would
 		// leave the reader without its history until then.
-		r.kickWaitingFeed(plan.state, f, plan.addr, "a history source came up while a read found none; the newest page is loaded for its reader at once")
+		r.kickWaitingFeed(plan.state, f, plan.addr, logsite.Msg("a history source came up while a read found none; the newest page is loaded for its reader at once"))
 		return
 	}
 	f.book.awaitingSource = true

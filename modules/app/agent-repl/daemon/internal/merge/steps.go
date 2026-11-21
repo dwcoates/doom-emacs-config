@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -47,8 +48,8 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 	r.o.publish(r.repo, r.ws, facts)
 	if changed && step != footer.StepEnqueued {
 		if err := r.o.republishQueue(ctx, r.repo); err != nil {
-			recordFailed(r.o.log(ctx, r.ws), "daemon.merge.step", "could not tell the merges waiting behind this one its new step",
-				"the merges waiting behind this one were not told its new step: its context ended under the read",
+			recordFailed(r.o.log(ctx, r.ws), "daemon.merge.step", logsite.Msg("could not tell the merges waiting behind this one its new step"),
+				logsite.Msg("the merges waiting behind this one were not told its new step: its context ended under the read"),
 				dlog.Context{"workspace": string(r.ws), "step": string(step)}, err)
 		}
 	}

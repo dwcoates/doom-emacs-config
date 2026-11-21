@@ -3,13 +3,13 @@ package dlog
 import (
 	"context"
 
-	"agentrepl/logging/logsite"
-
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"sync"
+
+	"agentrepl/logging/logsite"
 )
 
 // Record is one captured record, for tests that assert the canonical log line
@@ -86,27 +86,32 @@ func NewTestLogger() *TestLogger { return &TestLogger{} }
 
 // Debug implements Logger.
 func (l *TestLogger) Debug(operation string, message template, ctx Context) {
-	l.append("debug", operation, string(message), callers.Function(), ctx)
+	l.append("debug", operation, string(message), logsite.Caller(), ctx)
 }
 
 // Info implements Logger.
 func (l *TestLogger) Info(operation string, message template, ctx Context) {
-	l.append("info", operation, string(message), callers.Function(), ctx)
+	l.append("info", operation, string(message), logsite.Caller(), ctx)
 }
 
 // Warn implements Logger.
 func (l *TestLogger) Warn(operation string, message template, ctx Context) {
-	l.append("warn", operation, string(message), callers.Function(), ctx)
+	l.append("warn", operation, string(message), logsite.Caller(), ctx)
 }
 
 // Error implements Logger.
 func (l *TestLogger) Error(operation string, message template, ctx Context) {
-	l.append("error", operation, string(message), callers.Function(), ctx)
+	l.append("error", operation, string(message), logsite.Caller(), ctx)
 }
 
 // Log implements Logger.
 func (l *TestLogger) Log(level, operation string, message logsite.Message, ctx Context) {
 	l.append(level, operation, message.Template(), forwarded(message), ctx)
+}
+
+// logAt implements Logger.
+func (l *TestLogger) logAt(level, operation, template, function string, ctx Context) {
+	l.append(level, operation, template, function, ctx)
 }
 
 // With implements Logger, returning a logger that shares this one's capture
@@ -203,23 +208,27 @@ type derivedTestLogger struct {
 }
 
 func (l *derivedTestLogger) Debug(operation string, message template, ctx Context) {
-	l.emit(LevelDebug, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelDebug, operation, string(message), logsite.Caller(), ctx)
 }
 
 func (l *derivedTestLogger) Info(operation string, message template, ctx Context) {
-	l.emit(LevelInfo, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelInfo, operation, string(message), logsite.Caller(), ctx)
 }
 
 func (l *derivedTestLogger) Warn(operation string, message template, ctx Context) {
-	l.emit(LevelWarn, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelWarn, operation, string(message), logsite.Caller(), ctx)
 }
 
 func (l *derivedTestLogger) Error(operation string, message template, ctx Context) {
-	l.emit(LevelError, operation, string(message), callers.Function(), ctx)
+	l.emit(LevelError, operation, string(message), logsite.Caller(), ctx)
 }
 
 func (l *derivedTestLogger) Log(level, operation string, message logsite.Message, ctx Context) {
 	l.emit(level, operation, message.Template(), forwarded(message), ctx)
+}
+
+func (l *derivedTestLogger) logAt(level, operation, template, function string, ctx Context) {
+	l.emit(level, operation, template, function, ctx)
 }
 
 // emit captures the record in the parent and tees a warn or error.

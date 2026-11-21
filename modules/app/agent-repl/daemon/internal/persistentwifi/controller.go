@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"google.golang.org/protobuf/proto"
@@ -459,7 +460,7 @@ func (c *Controller) WatchLid(ctx context.Context) error {
 	// A LID NOBODY HEARS IS NEVER CLOSED: a quiet state standing is left, so
 	// nothing stays frozen, and no Low Power Mode stays set, behind a watch
 	// that ended.
-	c.watchEnded(ctx, err, opLid, "the lid is not heard; a closed lid no longer quiets the machine until the daemon restarts",
+	c.watchEnded(ctx, err, opLid, logsite.Msg("the lid is not heard; a closed lid no longer quiets the machine until the daemon restarts"),
 		"lid_unwatched", func(cause string) string {
 			was := c.lid.name()
 			c.lid = lidFact{kind: lidUnwatched, cause: cause}
@@ -473,7 +474,7 @@ func (c *Controller) WatchLid(ctx context.Context) error {
 // unwatch (which answers what the fact was), recorded once at ERROR under op
 // with msg, and the quiet state held to it, the standing read afresh for the
 // energy mode to restore over. trigger names the hold for its records.
-func (c *Controller) watchEnded(ctx context.Context, err error, op, msg, trigger string, unwatch func(cause string) (was string)) {
+func (c *Controller) watchEnded(ctx context.Context, err error, op string, msg logsite.Message, trigger string, unwatch func(cause string) (was string)) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -483,7 +484,7 @@ func (c *Controller) watchEnded(ctx context.Context, err error, op, msg, trigger
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	was := unwatch(err.Error())
-	c.log.Error(op, msg, dlog.Context{"was": was, "cause": err.Error()})
+	c.log.Log(dlog.LevelError, op, msg, dlog.Context{"was": was, "cause": err.Error()})
 	rd := c.readLocked(ctx)
 	c.holdQuietLocked(ctx, modeOf(c.last), rd.energy, trigger)
 	c.republishLocked()
@@ -492,7 +493,7 @@ func (c *Controller) watchEnded(ctx context.Context, err error, op, msg, trigger
 // lidHeard takes one lid state: the one read at subscription or a change
 // (factHeard), moving the quiet state to it.
 func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
-	c.factHeard(ctx, opLid, "the lid changed", "lid_"+lid.name(), func() (bool, dlog.Context) {
+	c.factHeard(ctx, opLid, logsite.Msg("the lid changed"), "lid_"+lid.name(), func() (bool, dlog.Context) {
 		was := c.lid
 		c.lid = lid
 		return was != lid, dlog.Context{"was": was.name(), "lid": lid.name()}
@@ -506,7 +507,7 @@ func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
 // the mode as it is now, not as the last beat left it) and holds the quiet
 // state to it, trigger naming the hold. A state already held is taken again
 // idempotently: the decision depends on states, never on transitions.
-func (c *Controller) factHeard(ctx context.Context, op, msg, trigger string, take func() (changed bool, fields dlog.Context)) {
+func (c *Controller) factHeard(ctx context.Context, op string, msg logsite.Message, trigger string, take func() (changed bool, fields dlog.Context)) {
 	// THE WAIT FOR THE LOCK IS RECORDED: a fact held behind the lock keeps
 	// the quiet state, and every page view it gates, as it was after the
 	// fact changed (2026-11-13: six minutes behind a failover attempt).
@@ -515,7 +516,7 @@ func (c *Controller) factHeard(ctx context.Context, op, msg, trigger string, tak
 	defer c.mu.Unlock()
 	if changed, fields := take(); changed {
 		fields["lock_wait_ms"] = c.clock.Now().Sub(asked).Milliseconds()
-		c.log.Info(op, msg, fields)
+		c.log.Log(dlog.LevelInfo, op, msg, fields)
 	}
 	rd := c.readLocked(ctx)
 	if ctx.Err() != nil {
@@ -536,7 +537,7 @@ func (c *Controller) WatchPowerSource(ctx context.Context) error {
 	err := c.sourceWatch.Watch(ctx, func(p PowerSource) { c.powerSourceHeard(ctx, heardPowerSource(p)) })
 	// A POWER SOURCE NOBODY HEARS IS NEVER A BATTERY: Low Power Mode is
 	// never held behind a watch that ended (energyWanted).
-	c.watchEnded(ctx, err, opPowerSource, "the power source is not heard; a closed lid no longer sets Low Power Mode on battery until the daemon restarts",
+	c.watchEnded(ctx, err, opPowerSource, logsite.Msg("the power source is not heard; a closed lid no longer sets Low Power Mode on battery until the daemon restarts"),
 		"power_source_unwatched", func(cause string) string {
 			was := c.powerSource.name()
 			c.powerSource = powerSourceFact{kind: powerSourceUnwatched, cause: cause}
@@ -548,7 +549,7 @@ func (c *Controller) WatchPowerSource(ctx context.Context) error {
 // powerSourceHeard takes one power source: the one read at subscription or
 // a change (factHeard), holding the quiet state's energy step to it.
 func (c *Controller) powerSourceHeard(ctx context.Context, source powerSourceFact) {
-	c.factHeard(ctx, opPowerSource, "the power source changed", "power_source_"+source.name(), func() (bool, dlog.Context) {
+	c.factHeard(ctx, opPowerSource, logsite.Msg("the power source changed"), "power_source_"+source.name(), func() (bool, dlog.Context) {
 		was := c.powerSource
 		c.powerSource = source
 		return was != source, dlog.Context{"was": was.name(), "power_source": source.name(), "lid": c.lid.name(), "quiet": c.quiet}

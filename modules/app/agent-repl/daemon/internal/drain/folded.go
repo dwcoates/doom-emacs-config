@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // opFolded is the operation a folded workspace's wait records under.
@@ -85,20 +86,20 @@ func (c *controller) ResumeFolded(ctx context.Context) {
 	log := c.log
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		readFailed(log, opFolded, "could not list the workspaces to resume the folds' stand-downs; none is resumed",
-			"the workspaces' list for the folds' stand-downs ended with this daemon's context; none is resumed", nil, err)
+		readFailed(log, opFolded, logsite.Msg("could not list the workspaces to resume the folds' stand-downs; none is resumed"),
+			logsite.Msg("the workspaces' list for the folds' stand-downs ended with this daemon's context; none is resumed"), nil, err)
 		return
 	}
 	folded, err := bringup.Folds(ctx, c.deps.DB, log)
 	if err != nil {
-		readFailed(log, opFolded, "could not read the folds to resume their stand-downs; none is resumed",
-			"the folds' read for the folds' stand-downs ended with this daemon's context; none is resumed", nil, err)
+		readFailed(log, opFolded, logsite.Msg("could not read the folds to resume their stand-downs; none is resumed"),
+			logsite.Msg("the folds' read for the folds' stand-downs ended with this daemon's context; none is resumed"), nil, err)
 		return
 	}
 	sessions, err := wsm.SessionsByWorkspace(ctx, c.deps.DB)
 	if err != nil {
-		readFailed(log, opFolded, "could not read the sessions to resume the folds' stand-downs; none is resumed",
-			"the sessions' read for the folds' stand-downs ended with this daemon's context; none is resumed", nil, err)
+		readFailed(log, opFolded, logsite.Msg("could not read the sessions to resume the folds' stand-downs; none is resumed"),
+			logsite.Msg("the sessions' read for the folds' stand-downs ended with this daemon's context; none is resumed"), nil, err)
 		return
 	}
 	resumed, spared := []string{}, map[string]string{}

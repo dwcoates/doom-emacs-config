@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // statusChangeWriter is the one write the roster's status change sink makes.
@@ -21,7 +22,7 @@ type statusChangeWriter interface {
 // ERROR; the roster already ranks by the live instant, and only the next
 // daemon's ranking misses it.
 func rosterStatusChanges(db statusChangeWriter, log dlog.Logger) sidebar.StatusChangeSink {
-	return rosterWrite(log, "daemon.cmd.roster_status_changes", "could not keep the workspace's status change instant durable",
+	return rosterWrite(log, "daemon.cmd.roster_status_changes", logsite.Msg("could not keep the workspace's status change instant durable"),
 		db.SetStatusChangedAt,
 		func(at time.Time) dlog.Context { return dlog.Context{"status_changed_at": at} })
 }

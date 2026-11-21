@@ -60,20 +60,20 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// BUBBLE LANDED (usage.go): growing while the bubble arrives, frozen once it
 	// settles. The sink tallied this frame's usage before the draw.
 	if stamp, fresh := s.openStamp(fold, agent); stamp != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "stamp := s.openStamp(fold, agent); stamp != \"\""})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: stamp := s.openStamp(fold, agent); stamp != \"\"", dlog.Context{"function": "feed", "condition": "stamp := s.openStamp(fold, agent); stamp != \"\""})
 		fold.usage, fold.fresh = stamp, fresh
 	}
 
 	bubble := &frontendv1.FeedResponse{}
 	pace := r.revealSourceOf(s, agent, wsm.RevealKindProse)
 	if fold.usage != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "fold.usage != \"\""})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: fold.usage != \"\"", dlog.Context{"function": "feed", "condition": "fold.usage != \"\""})
 		bubble.Usage = usageStamp(fold, 0)
 	}
 
 	switch state := response.GetResult().(type) {
 	case *conversationv1.AgentResponse_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawResponse", "branch": "case *conversationv1.AgentResponse_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentResponse_Start", dlog.Context{"function": "drawResponse", "branch": "case *conversationv1.AgentResponse_Start"})
 		fold.markdown = ""
 		fold.settled = false
 		fold.notice = false
@@ -213,7 +213,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: broken}
 	default:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawResponse", "branch": "default"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "drawResponse", "branch": "default"})
 		return nil, errNotARow
 	}
 

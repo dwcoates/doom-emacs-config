@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -116,7 +117,7 @@ func TestMediationFailed(t *testing.T) {
 			}
 
 			// Act
-			cut := h.o.mediationFailed(ctx, dlog.Context{"repo": "r"}, "could not read it", tt.err)
+			cut := h.o.mediationFailed(ctx, dlog.Context{"repo": "r"}, logsite.Msg("could not read it"), tt.err)
 
 			// Assert
 			if cut != tt.wantCut {

@@ -122,7 +122,7 @@ func (s *store) recordGithubNoticeSubmitted(ctx context.Context, op string, t gi
 	fields := dlog.Context{"subscriber": string(subscriber), t.subject: subject, "turn": string(turn), "sentences": len(sentences), "took": took}
 	if len(sentences) == 0 {
 		err := fmt.Errorf("wsm: the untold %s notice of %s about %s says no change", t.noun, subscriber, subject)
-		s.log.Error(op, "refused an untold "+t.noun+" notice that says no change", withError(fields, err))
+		s.log.With(withError(fields, err)).Error(op, "refused an untold {noun} notice that says no change", dlog.Context{"noun": t.noun})
 		return err
 	}
 	said, err := json.Marshal(sentences)

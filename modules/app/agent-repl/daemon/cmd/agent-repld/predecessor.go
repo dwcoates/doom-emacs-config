@@ -3,6 +3,7 @@ package main
 import (
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // opPredecessorDied is the operation a daemon files another's disorderly
@@ -47,10 +48,10 @@ func readPredecessorDeath(logsDir string, death daemonaddr.Death, log dlog.Logge
 			fields["panic"], fields["site"] = p.Message, p.Site
 		}
 	}
-	message := "the daemon before this one died without its orderly exit, leaving its life lock standing, and its stdio log holds no panic of its (killed, or its output lost)"
+	message := logsite.Msg("the daemon before this one died without its orderly exit, leaving its life lock standing, and its stdio log holds no panic of its (killed, or its output lost)")
 	if d.Panicked {
-		message = "the daemon before this one died of a panic, leaving its life lock standing"
+		message = logsite.Msg("the daemon before this one died of a panic, leaving its life lock standing")
 	}
-	log.Error(opPredecessorDied, message, fields)
+	log.Log(dlog.LevelError, opPredecessorDied, message, fields)
 	return d
 }

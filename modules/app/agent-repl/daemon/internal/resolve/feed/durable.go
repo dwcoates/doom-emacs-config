@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
@@ -55,6 +56,7 @@ func (r *resolver) recordDurable(s *wsState, feed feedid.Feed, id, settledFrom s
 // A ROW THAT CANNOT BE READ BACK IS AN ERROR and is drawn nowhere; the others
 // are still drawn.
 func (r *resolver) restoreDurable(s *wsState) {
+	undecodable := logsite.Msg("a durable row could not be decoded and is drawn nowhere")
 	if r.deps.DurableRows == nil {
 		return
 	}
@@ -73,7 +75,7 @@ func (r *resolver) restoreDurable(s *wsState) {
 		row, raw, err := wsm.DecodeDurableFeedRow(stored.Row)
 		if err != nil {
 			fields["cause"] = err.Error()
-			log.Error(opDurable, "a durable row could not be decoded and is drawn nowhere", fields)
+			log.Log(dlog.LevelError, opDurable, undecodable, fields)
 			continue
 		}
 		if retiredMergeTab(row) {

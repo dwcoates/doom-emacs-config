@@ -33,17 +33,17 @@ func (r *resolver) drawMonitor(s *wsState, at placement, act *conversationv1.Age
 	var row *frontendv1.FeedRow
 	switch state := monitor.GetResult().(type) {
 	case *conversationv1.AgentMonitor_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentMonitor_Start", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Start"})
 		u.startHeld = true
 		armMonitor(u, state.Start)
 		if u.denied {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "drawMonitor", "condition": "u.denied"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: u.denied", dlog.Context{"function": "drawMonitor", "condition": "u.denied"})
 			row = r.toolRow(s, at, unitID, monitorName, deniedOutcome())
 		} else {
 			row = r.toolRow(s, at, unitID, monitorName, runningOutcome(u))
 		}
 	case *conversationv1.AgentMonitor_Ended:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Ended"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentMonitor_Ended", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Ended"})
 		if err := r.restateMonitor(s, act, u, state.Ended.GetCall(), standsAlone(act)); err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func (r *resolver) drawMonitor(s *wsState, at placement, act *conversationv1.Age
 		// stated.
 		row = r.toolRow(s, at, unitID, monitorName, returnedOutcome(u, true, nil, 0))
 	case *conversationv1.AgentMonitor_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentMonitor_Failure", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Failure"})
 		// A FAILURE'S RESTATEMENT BINDS FROM REVISION 3: below it the transcript
 		// plane wrote the failure bare (monitorFailureStandsAlone).
 		if err := r.restateMonitor(s, act, u, state.Failure.GetCall(), monitorFailureStandsAlone(act)); err != nil {
@@ -125,11 +125,11 @@ func (r *resolver) settleMonitorsLeftLive(s *wsState, live sessionwatcher.LiveWo
 		delete(s.liveMonitors, unitID)
 		u, drawn := s.units[unitID]
 		if !drawn || !u.monitor || u.row == nil {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleMonitorsLeftLive", "condition": "!drawn || !u.monitor || u.row == nil"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: !drawn || !u.monitor || u.row == nil", dlog.Context{"function": "settleMonitorsLeftLive", "condition": "!drawn || !u.monitor || u.row == nil"})
 			continue
 		}
 		if u.row.GetActivity().GetSimpleToolCall().GetRunning() == nil {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleMonitorsLeftLive", "condition": "card not running"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: card not running", dlog.Context{"function": "settleMonitorsLeftLive", "condition": "card not running"})
 			continue
 		}
 		row := r.toolRow(s, u.at, unitID, monitorName, returnedOutcome(u, true, nil, r.deps.Now().UnixMilli()))

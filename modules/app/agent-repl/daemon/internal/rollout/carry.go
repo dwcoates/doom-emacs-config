@@ -547,8 +547,8 @@ func (c *controller) refuseMidWork(ws ids.WorkspaceID, why string, fields dlog.C
 // recordRefusal states a refused mid-work adoption and writes the marker the
 // incumbent takes the workspace back on.
 func (c *controller) recordRefusal(ws ids.WorkspaceID, r refusal, fields dlog.Context) error {
-	c.log.Info(opAdopt, "refused the mid-work adoption; the incumbent takes the workspace back and "+r.Kind.next(),
-		dlog.Merge(fields, dlog.Context{"why": r.Why, "kind": string(r.Kind)}))
+	c.log.With(fields).Info(opAdopt, "refused the mid-work adoption; the incumbent takes the workspace back and {next}",
+		dlog.Context{"why": r.Why, "kind": string(r.Kind), "next": r.Kind.next()})
 	return c.writeRefusal(ws, r)
 }
 

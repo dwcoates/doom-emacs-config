@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -156,7 +157,7 @@ func (d *Digester) locked(ctx context.Context, log dlog.Logger, onlyIfDue bool) 
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return outcome{}, contextEnded(log, ctxErr)
 		}
-		return outcome{}, d.modelFailed(ctx, log, "the model could not condense the news digest", newEntries, err)
+		return outcome{}, d.modelFailed(ctx, log, logsite.Msg("the model could not condense the news digest"), newEntries, err)
 	}
 	ended := d.deps.Clock.Now()
 	if len(sections) == 0 {
@@ -177,7 +178,7 @@ func (d *Digester) locked(ctx context.Context, log dlog.Logger, onlyIfDue bool) 
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return outcome{}, contextEnded(log, ctxErr)
 		}
-		return outcome{}, d.modelFailed(ctx, log, "the model could not give the news digest's IPO outlook", newEntries, err)
+		return outcome{}, d.modelFailed(ctx, log, logsite.Msg("the model could not give the news digest's IPO outlook"), newEntries, err)
 	}
 	log.Info(opIpo, "the news digest's IPO outlook", dlog.Context{
 		"anthropic": ipo.GetAnthropic().GetEstimate().GetText(), "openai": ipo.GetOpenai().GetEstimate().GetText(),
@@ -197,7 +198,7 @@ func (d *Digester) locked(ctx context.Context, log dlog.Logger, onlyIfDue bool) 
 		if !errors.As(err, &modelFailed) {
 			return outcome{}, err
 		}
-		return outcome{}, d.modelFailed(ctx, log, "the model could not merge the week's news digest risks", newEntries, err)
+		return outcome{}, d.modelFailed(ctx, log, logsite.Msg("the model could not merge the week's news digest risks"), newEntries, err)
 	}
 	history, err := keptHistory(sections, marked, from, ended)
 	if err != nil {
@@ -261,8 +262,8 @@ func (d *Digester) sdkVersion() *frontendv1.NewsDigestSdkVersion {
 // modelFailed records a run whose model call failed: only its end is kept,
 // so the next run reads the same material again. It answers err, or the
 // record's own failure.
-func (d *Digester) modelFailed(ctx context.Context, log dlog.Logger, message string, newEntries int, err error) error {
-	log.Error(opModel, message, dlog.Context{"model": Model, "new_entries": newEntries, "cause": err.Error()})
+func (d *Digester) modelFailed(ctx context.Context, log dlog.Logger, message logsite.Message, newEntries int, err error) error {
+	log.Log(dlog.LevelError, opModel, message, dlog.Context{"model": Model, "new_entries": newEntries, "cause": err.Error()})
 	if recErr := d.recordLocked(ctx, wsm.NewsDigestRun{EndedAt: d.deps.Clock.Now()}, nil); recErr != nil {
 		return recErr
 	}

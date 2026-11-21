@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -116,7 +117,7 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 		// THE MOVE HAS SEALED WHAT IT CARRIES: an act held here now would be
 		// run by no daemon. It is refused so the caller asks the daemon the
 		// workspace moves to.
-		refusalLevel(ctx, log, log.Info)(opAct, "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to", nil)
+		log.Log(refusalLevel(ctx, dlog.LevelInfo), opAct, logsite.Msg("the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to"), nil)
 		return fmt.Errorf("session act %q on %q: %w", act.Kind, ws, bounce.ErrMovedAway)
 	}
 	sub := heldActSubmission(ws, act)
@@ -139,7 +140,7 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 // lock.
 func (q *queue) holdActForRevival(ctx context.Context, ws ids.WorkspaceID, act Act, cut bool, log dlog.Logger) error {
 	if q.deps.Revive == nil {
-		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on and none can be started", dlog.Context{"cause": causeNoRevival})
+		log.Log(refusalLevel(ctx, dlog.LevelWarn), opAct, logsite.Msg("the workspace has no session to act on and none can be started"), dlog.Context{"cause": causeNoRevival})
 		return noSession(causeNoRevival)
 	}
 	if err := q.refuseAtColdGate(ctx, ws, opAct, "the act", log); err != nil {
@@ -257,13 +258,13 @@ func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.T
 	ws := d.ws
 	sender, ok := q.deps.Client(ws)
 	if !ok {
-		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on", dlog.Context{"cause": causeShimGone})
+		log.Log(refusalLevel(ctx, dlog.LevelWarn), opAct, logsite.Msg("the workspace has no session to act on"), dlog.Context{"cause": causeShimGone})
 		return noSession(causeShimGone)
 	}
 
 	switch act.Kind {
 	case ActSetModel:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActSetModel"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case ActSetModel", dlog.Context{"function": "queue", "branch": "case ActSetModel"})
 		var err error
 		d.outside(shimCall{what: "session_act", turn: act.Turn, holds: claims}, log, func() {
 			err = sender.SetModel(ctx, act.Value)
@@ -273,7 +274,7 @@ func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.T
 			return fmt.Errorf("set model on %q: %w", ws, err)
 		}
 	case ActSetPermissionMode:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActSetPermissionMode"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case ActSetPermissionMode", dlog.Context{"function": "queue", "branch": "case ActSetPermissionMode"})
 		var err error
 		d.outside(shimCall{what: "session_act", turn: act.Turn, holds: claims}, log, func() {
 			err = sender.SetPermissionMode(ctx, act.Value)
@@ -283,7 +284,7 @@ func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.T
 			return fmt.Errorf("set permission mode on %q: %w", ws, err)
 		}
 	case ActClear, ActCompact:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case ActClear, ActCompact"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case ActClear, ActCompact", dlog.Context{"function": "queue", "branch": "case ActClear, ActCompact"})
 		if err := q.runContextCut(ctx, d, act, sender, claims, log); err != nil {
 			return err
 		}

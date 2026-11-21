@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // A "SEND NOW" THAT CANNOT GO AT ONCE WAITS, AND SAYS WHAT IT WAITS FOR
@@ -90,14 +91,14 @@ func (q *queue) settleRelease(ctx context.Context, d *delivery, held wsm.HeldPro
 		log.Info(opRelease, msgReleaseWaits, dlog.Context{"waits_for": decision.waitsFor, "replay": replay})
 		return nil
 	case releaseRefused:
-		message := msgReleaseRefused
+		message := logsite.Msg(msgReleaseRefused)
 		if held.SentNow != nil {
-			message = msgReleaseWithdrawn
+			message = logsite.Msg(msgReleaseWithdrawn)
 			if err := q.markSentNow(ctx, d, held, nil, log); err != nil {
 				return err
 			}
 		}
-		log.Info(opRelease, message, dlog.Context{"cause": string(decision.refusal), "replay": replay})
+		log.Log(dlog.LevelInfo, opRelease, message, dlog.Context{"cause": string(decision.refusal), "replay": replay})
 		return &ReleaseRefusedError{Cause: decision.refusal}
 	default:
 		panic("promptqueue: unknown release verdict")

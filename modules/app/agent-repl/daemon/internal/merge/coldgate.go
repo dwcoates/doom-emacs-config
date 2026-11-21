@@ -513,7 +513,7 @@ func (o *orchestrator) unmarkColdGated(ctx context.Context, repo wsm.RepoKey, ws
 		log.Debug(opColdGate, "the workspace's merge was not kept at a cold gate", fields)
 		return
 	}
-	log.Info(opColdGate, "the merge resumes at its place in line: "+why, fields)
+	log.With(fields).Info(opColdGate, "the merge resumes at its place in line: {why}", dlog.Context{"why": why})
 	if err := o.republishQueue(ctx, repo); err != nil {
 		log.Error(opColdGate, "could not republish the queue of a merge resumed past its cold gate", withField(fields, "error", err.Error()))
 	}

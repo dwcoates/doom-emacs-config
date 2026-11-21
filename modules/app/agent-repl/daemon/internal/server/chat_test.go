@@ -653,7 +653,7 @@ func TestWatchChatReplaysTheThreadsNewestPageForItsAnswers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			records := &signalLogger{records: make(chan dlog.Record, 64)}
+			records := dlog.NewTestLogger()
 			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{workspace: records} })
 			thread := withThread(h)
 			read := make(chan ids.WorkspaceID, 1)
@@ -671,30 +671,16 @@ func TestWatchChatReplaysTheThreadsNewestPageForItsAnswers(t *testing.T) {
 			if got := <-read; got != testThreadID {
 				t.Fatalf("read %s, want the thread", got)
 			}
-			for rec := range records.records {
-				if rec.Operation == "daemon.server.chat_replay" {
-					if rec.Level != tc.level {
-						t.Fatalf("record = %+v, want level %s", rec, tc.level)
-					}
-					return
-				}
+			rec, err := records.Await(context.Background(), dlog.RecordQuery{Operation: "daemon.server.chat_replay"})
+			if err != nil {
+				t.Fatalf("await the replay's record: %v", err)
+			}
+			if rec.Level != tc.level {
+				t.Fatalf("record = %+v, want level %s", rec, tc.level)
 			}
 		})
 	}
 }
-
-// signalLogger hands every record to a channel, so a test waits for the one
-// it is about instead of for time to pass.
-type signalLogger struct{ records chan dlog.Record }
-
-func (l *signalLogger) send(level, op, msg string, ctx dlog.Context) {
-	l.records <- dlog.Record{Level: level, Operation: op, Message: msg, Context: ctx}
-}
-func (l *signalLogger) Debug(op, msg string, ctx dlog.Context) { l.send(dlog.LevelDebug, op, msg, ctx) }
-func (l *signalLogger) Info(op, msg string, ctx dlog.Context)  { l.send(dlog.LevelInfo, op, msg, ctx) }
-func (l *signalLogger) Warn(op, msg string, ctx dlog.Context)  { l.send(dlog.LevelWarn, op, msg, ctx) }
-func (l *signalLogger) Error(op, msg string, ctx dlog.Context) { l.send(dlog.LevelError, op, msg, ctx) }
-func (l *signalLogger) With(dlog.Context) dlog.Logger          { return l }
 
 func TestThePlainBootsAnswerNamesThePageToo(t *testing.T) {
 	cases := []struct {

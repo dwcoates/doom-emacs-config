@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -189,8 +190,9 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 	var decodeErr *wsm.DecodeError
 	if errors.As(jobErr, &decodeErr) {
 		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
-		o.log(ctx, ws).Error(op, "refusing the boot: a queued merge's creation_jobs row will not decode", fields)
-		o.deps.Log.Global().Error(op, "refusing the boot: a queued merge's creation_jobs row will not decode", fields)
+		said := logsite.Msg("refusing the boot: a queued merge's creation_jobs row will not decode")
+		o.log(ctx, ws).Log(dlog.LevelError, op, said, fields)
+		o.deps.Log.Global().Log(dlog.LevelError, op, said, fields)
 		return false, fmt.Errorf("merge: recover %q: %w", ws, decodeErr)
 	}
 	if err := o.releaseWaitingRebaseLease(ctx, repo, ws); err != nil {
@@ -323,10 +325,11 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	var decodeErr *wsm.DecodeError
 	if errors.As(jobErr, &decodeErr) {
 		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
-		log.Error(op, "refusing the boot: a merge's creation_jobs row will not decode", fields)
+		said := logsite.Msg("refusing the boot: a merge's creation_jobs row will not decode")
+		log.Log(dlog.LevelError, op, said, fields)
 		// AND IN THE RUN LOG: a boot that refuses is a fact about the restart,
 		// and the durable run log is where the boot sequence is read.
-		o.deps.Log.Global().Error(op, "refusing the boot: a merge's creation_jobs row will not decode", fields)
+		o.deps.Log.Global().Log(dlog.LevelError, op, said, fields)
 		return fmt.Errorf("merge: recover %q: %w", ws, decodeErr)
 	}
 	if held {
@@ -416,8 +419,9 @@ func (o *orchestrator) loadProgress(ctx context.Context, ws ids.WorkspaceID, lea
 	doc, err := decodeProgress(stored)
 	if err != nil {
 		fields := dlog.Context{"workspace": string(ws), "lease": string(stored.Lease), "error": err.Error()}
-		o.log(ctx, ws).Error(op, "refusing the boot: a merge's progress record will not decode", fields)
-		o.deps.Log.Global().Error(op, "refusing the boot: a merge's progress record will not decode", fields)
+		said := logsite.Msg("refusing the boot: a merge's progress record will not decode")
+		o.log(ctx, ws).Log(dlog.LevelError, op, said, fields)
+		o.deps.Log.Global().Log(dlog.LevelError, op, said, fields)
 		return progressDoc{}, false, fmt.Errorf("merge: recover %q: %w", ws, err)
 	}
 	return doc, true, nil
@@ -456,18 +460,18 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// restart, and the durable run log is where a boot sequence is read.
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
 		"round": doc.Active.N, "turn": doc.Turn, "paused": paused}
-	message := "a merge a restart interrupted resumes at the step it recorded"
+	message := logsite.Msg("a merge a restart interrupted resumes at the step it recorded")
 	switch {
 	case doc.BackInLine:
-		message = "a merge back in line from its repair is taken back waiting; it resumes at the step it recorded once it heads the queue"
+		message = logsite.Msg("a merge back in line from its repair is taken back waiting; it resumes at the step it recorded once it heads the queue")
 	case aside != 0:
-		message = "a merge remediating out of line is taken back; it returns to the line once its repairing turn ends"
+		message = logsite.Msg("a merge remediating out of line is taken back; it returns to the line once its repairing turn ends")
 		fields["reason"] = aside.String()
 	case paused:
-		message = "a suspended merge is taken back at the step it recorded; its queue is paused, so it stays suspended until the queue is resumed"
+		message = logsite.Msg("a suspended merge is taken back at the step it recorded; its queue is paused, so it stays suspended until the queue is resumed")
 	}
-	o.log(ctx, ws).Info(op, message, fields)
-	o.deps.Log.Global().Info(op, message, fields)
+	o.log(ctx, ws).Log(dlog.LevelInfo, op, message, fields)
+	o.deps.Log.Global().Log(dlog.LevelInfo, op, message, fields)
 	return nil
 }
 
@@ -514,14 +518,14 @@ func (o *orchestrator) recoverBackInLine(ctx context.Context, repo wsm.RepoKey, 
 	stored, found, err := o.deps.DB.MergeProgressOf(ctx, ws)
 	// A REFUSAL IS A FACT ABOUT THE BOOT OR THE ADOPTION too, so it goes to
 	// the run log beside the workspace's, as recoverAdmitted's refusals do.
-	refuse := func(message string, err error) error {
+	refuse := func(message logsite.Message, err error) error {
 		withErr := withField(fields, "error", err.Error())
-		o.log(ctx, ws).Error(op, message, withErr)
-		o.deps.Log.Global().Error(op, message, withErr)
+		o.log(ctx, ws).Log(dlog.LevelError, op, message, withErr)
+		o.deps.Log.Global().Log(dlog.LevelError, op, message, withErr)
 		return err
 	}
 	if err != nil {
-		return refuse("could not read whether a waiting merge is back in line from its repair", fmt.Errorf("merge: read the progress of waiting %q: %w", ws, err))
+		return refuse(logsite.Msg("could not read whether a waiting merge is back in line from its repair"), fmt.Errorf("merge: read the progress of waiting %q: %w", ws, err))
 	}
 	if !found {
 		return nil
@@ -529,11 +533,11 @@ func (o *orchestrator) recoverBackInLine(ctx context.Context, repo wsm.RepoKey, 
 	fields["lease"] = string(stored.Lease)
 	doc, err := decodeProgress(stored)
 	if err != nil {
-		return refuse("refusing the take-back: a waiting merge's progress record will not decode", fmt.Errorf("merge: recover waiting %q: %w", ws, err))
+		return refuse(logsite.Msg("refusing the take-back: a waiting merge's progress record will not decode"), fmt.Errorf("merge: recover waiting %q: %w", ws, err))
 	}
 	if !doc.BackInLine || stored.Lease != entry.Ledger {
 		fields["invariant_violation"] = "a waiting merge's record is its return's, back in line under its ledger"
-		return refuse("refusing the take-back: a waiting merge carries a record its return did not write",
+		return refuse(logsite.Msg("refusing the take-back: a waiting merge carries a record its return did not write"),
 			fmt.Errorf("merge: the waiting merge of %q carries a record (back in line %v, lease %s) that is no return's under its ledger %s",
 				ws, doc.BackInLine, stored.Lease, entry.Ledger))
 	}
@@ -711,12 +715,14 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 			continue
 		}
 		if _, err := o.deps.Queue.Submit(ctx, displacedResubmission(t.Workspace, again, t.Text)); err != nil {
-			o.log(ctx, t.Workspace).Error(op, "could not resubmit a turn a merge displaced", withField(fields, "error", err.Error()))
-			o.deps.Log.Global().Error(op, "could not resubmit a turn a merge displaced", withField(fields, "error", err.Error()))
+			said := logsite.Msg("could not resubmit a turn a merge displaced")
+			o.log(ctx, t.Workspace).Log(dlog.LevelError, op, said, withField(fields, "error", err.Error()))
+			o.deps.Log.Global().Log(dlog.LevelError, op, said, withField(fields, "error", err.Error()))
 			continue
 		}
-		o.log(ctx, t.Workspace).Info(op, "resubmitted a turn a merge displaced and never put back", fields)
-		o.deps.Log.Global().Info(op, "resubmitted a turn a merge displaced and never put back", fields)
+		said := logsite.Msg("resubmitted a turn a merge displaced and never put back")
+		o.log(ctx, t.Workspace).Log(dlog.LevelInfo, op, said, fields)
+		o.deps.Log.Global().Log(dlog.LevelInfo, op, said, fields)
 	}
 	return nil
 }
@@ -749,8 +755,9 @@ func (o *orchestrator) sweepOrphanedState(ctx context.Context) {
 	// the record is what says the boot healed it.
 	for _, l := range swept.ReleasedLeases {
 		fields := dlog.Context{"workspace": string(l.Workspace), "lease": string(l.ID), "acquired_at": l.AcquiredAt.UTC().Format(time.RFC3339Nano)}
-		o.log(ctx, l.Workspace).Info(op, "released a merge lease no queue entry names any more; the workspace takes prompts again", fields)
-		o.deps.Log.Global().Info(op, "released a merge lease no queue entry names any more; the workspace takes prompts again", fields)
+		said := logsite.Msg("released a merge lease no queue entry names any more; the workspace takes prompts again")
+		o.log(ctx, l.Workspace).Log(dlog.LevelInfo, op, said, fields)
+		o.deps.Log.Global().Log(dlog.LevelInfo, op, said, fields)
 		o.deps.Queue.OnLeaseChanged(l.Workspace)
 	}
 	// EACH ROUND SETTLED IS ITS OWN RECORD, with its ledger, its round and
@@ -761,8 +768,9 @@ func (o *orchestrator) sweepOrphanedState(ctx context.Context) {
 		if r.HeldSince != nil {
 			fields["held_since"] = r.HeldSince.UTC().Format(time.RFC3339Nano)
 		}
-		o.log(ctx, r.Workspace).Info(op, "settled a live merge round no queue entry names any more as abandoned, clearing its hold", fields)
-		o.deps.Log.Global().Info(op, "settled a live merge round no queue entry names any more as abandoned, clearing its hold", fields)
+		said := logsite.Msg("settled a live merge round no queue entry names any more as abandoned, clearing its hold")
+		o.log(ctx, r.Workspace).Log(dlog.LevelInfo, op, said, fields)
+		o.deps.Log.Global().Log(dlog.LevelInfo, op, said, fields)
 	}
 	if swept.ProgressRecords+len(swept.ClosedRounds)+len(swept.ReleasedLeases) > 0 {
 		o.deps.Log.Global().Info(op, "swept the merge state no queue entry names any more", dlog.Context{

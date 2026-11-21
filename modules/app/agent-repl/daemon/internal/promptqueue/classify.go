@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/classifier"
@@ -99,7 +100,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	}
 	if underCut {
 		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
-			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
+			logsite.Msg("the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs"))
 		q.reportHeld(ctx, sub, log)
 		return disposition, nil
 	}
@@ -166,7 +167,7 @@ func (q *queue) startJudge(ctx context.Context, sub Submission, running ids.Turn
 func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
 	if cut, ok := q.runningCut(sub.WS); ok {
 		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
-			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
+			logsite.Msg("the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs"))
 		q.record(ctx, sub, *uninterruptibleVerdict(cut, q.deps.Now()), log)
 		return
 	}
@@ -328,7 +329,7 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 	// context cut cannot be interrupted, so there is nothing to judge.
 	if cut, ok := q.runningCut(sub.WS); ok {
 		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
-			"a context cut began while the prompt waited for its verdict; it is stamped uninterruptible and the model is not asked")
+			logsite.Msg("a context cut began while the prompt waited for its verdict; it is stamped uninterruptible and the model is not asked"))
 		return *uninterruptibleVerdict(cut, q.deps.Now()), classifier.RouteQueue
 	}
 
@@ -637,7 +638,7 @@ func (q *queue) registerInterjection(ctx context.Context, sub Submission, runnin
 		cut := *state.cut
 		q.mu.Unlock()
 		keptBehindSessionAct(log, opInterject, cut, sub.Turn,
-			"a session act is running; the held prompt is kept from interjecting and waits for the act to end")
+			logsite.Msg("a session act is running; the held prompt is kept from interjecting and waits for the act to end"))
 		q.record(ctx, sub, *uninterruptibleVerdict(cut, q.deps.Now()), log)
 		return false
 	}
@@ -671,8 +672,8 @@ func (q *queue) sendInterrupt(ctx context.Context, sub Submission, running ids.T
 
 // keptBehindSessionAct records, at INFO, a held prompt a running session act
 // kept from interjecting: the act's turn, the act, and the held prompt's turn.
-func keptBehindSessionAct(log dlog.Logger, op string, cut runningCut, held ids.TurnID, message string) {
-	log.Info(op, message, dlog.Context{
+func keptBehindSessionAct(log dlog.Logger, op string, cut runningCut, held ids.TurnID, message logsite.Message) {
+	log.Log(dlog.LevelInfo, op, message, dlog.Context{
 		"session_act_turn": string(cut.turn),
 		"session_act":      cut.command.String(),
 		"held_turn":        string(held),

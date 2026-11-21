@@ -422,7 +422,7 @@ func TestSetWorkspaceLinkFailsHardOnASubscriptionForAnUnownedLink(t *testing.T) 
 	_, err := s.SetWorkspaceLink(context.Background(), ws, set)
 
 	// Assert
-	if err == nil || len(linksNow(t, s, ws)) != 0 || !hasRecord(log, "error", "daemon.wsm.set_workspace_link", "refused a link its caller should never have made") {
+	if err == nil || len(linksNow(t, s, ws)) != 0 || !hasRecord(log, "error", "daemon.wsm.set_workspace_link", "refused a link its caller should never have made: its subscription is not for the owned pull request it names") {
 		t.Fatalf("SetWorkspaceLink = %v, want refused, recorded and nothing written", err)
 	}
 }

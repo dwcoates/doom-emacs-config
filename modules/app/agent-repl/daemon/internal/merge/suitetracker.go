@@ -82,10 +82,10 @@ func recordUnreadLine(log dlog.Logger, op, line string, err error, fields dlog.C
 		record[k] = v
 	}
 	if errors.Is(err, errSeatLine) {
-		log.Error(op, errSeatLine.Error(), record)
+		log.Error(op, "a test runner's RAM disk seat line could not be read", record)
 		return
 	}
-	log.Warn(op, errCountLine.Error(), record)
+	log.Warn(op, "a test runner line could not be counted", record)
 }
 
 // take follows LINE: a seat line stands or clears the seat wait, a unit's

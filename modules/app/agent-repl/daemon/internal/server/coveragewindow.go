@@ -6,6 +6,7 @@ import (
 	"runtime/coverage"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // THE COVERAGE WINDOW ROUTE is the test-only request a test harness sends a
@@ -56,18 +57,18 @@ func newCoverageWindowHandler(api coverageAPI, log dlog.Logger) http.Handler {
 }
 
 func (h coverageWindowHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	fail := func(status int, message string, err error) {
+	fail := func(status int, message logsite.Message, err error) {
 		cause := ""
 		if err != nil {
 			cause = err.Error()
 		}
-		h.log.Error(opCoverageWindow, message, dlog.Context{
+		h.log.Log(dlog.LevelError, opCoverageWindow, message, dlog.Context{
 			"method": r.Method, "op": r.URL.Query().Get("op"), "dir": r.URL.Query().Get("dir"), "cause": cause,
 		})
-		http.Error(w, fmt.Sprintf("%s: %s", message, cause), status)
+		http.Error(w, fmt.Sprintf("%s: %s", message.Template(), cause), status)
 	}
 	if r.Method != http.MethodPost {
-		fail(http.StatusMethodNotAllowed, "refused a coverage window request that is not a POST", nil)
+		fail(http.StatusMethodNotAllowed, logsite.Msg("refused a coverage window request that is not a POST"), nil)
 		return
 	}
 	op, dir := r.URL.Query().Get("op"), r.URL.Query().Get("dir")
@@ -75,7 +76,7 @@ func (h coverageWindowHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	switch op {
 	case "meta", "counters":
 		if dir == "" {
-			fail(http.StatusBadRequest, "refused a coverage window request with no dir", nil)
+			fail(http.StatusBadRequest, logsite.Msg("refused a coverage window request with no dir"), nil)
 			return
 		}
 		if op == "meta" {
@@ -86,11 +87,11 @@ func (h coverageWindowHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	case "clear":
 		err = h.api.ClearCounters()
 	default:
-		fail(http.StatusBadRequest, "refused a coverage window request with an unknown op", nil)
+		fail(http.StatusBadRequest, logsite.Msg("refused a coverage window request with an unknown op"), nil)
 		return
 	}
 	if err != nil {
-		fail(http.StatusInternalServerError, "the coverage window operation failed", err)
+		fail(http.StatusInternalServerError, logsite.Msg("the coverage window operation failed"), err)
 		return
 	}
 	h.log.Debug(opCoverageWindow, "served a coverage window operation", dlog.Context{"op": op, "dir": dir})

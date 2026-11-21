@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -63,10 +64,10 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 
 	switch {
 	case success != nil:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawTerminal", "branch": "case success != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case success != nil", dlog.Context{"function": "drawTerminal", "branch": "case success != nil"})
 		r.concludedOutcome(s, string(*turn), success)(ended)
 	case failure != nil:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawTerminal", "branch": "case failure != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case failure != nil", dlog.Context{"function": "drawTerminal", "branch": "case failure != nil"})
 		ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: r.erroredOutcome(s, string(*turn), ended.GetEndedAtMs(), failure)}
 	default:
 		log.Error("daemon.feed.terminal_without_outcome",
@@ -204,14 +205,14 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	delete(s.turnEvidence, string(*turn))
 	delete(s.turnRefusals, string(*turn))
 	if s.turnInFlight != nil && *s.turnInFlight == *turn {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnInFlight != nil && *s.turnInFlight == *turn"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: s.turnInFlight != nil && *s.turnInFlight == *turn", dlog.Context{"function": "feed", "condition": "s.turnInFlight != nil && *s.turnInFlight == *turn"})
 		s.turnInFlight = nil
 	}
 	// A QUERY DEATH STILL OWES ROWS (wsState.turnStamp), and its terminal is
 	// the death as much as the session's push is: whichever of the two lands
 	// first, the stamp stands for the stand-down's denials still to come.
 	if s.turnStamp != nil && *s.turnStamp == *turn && !diedOfQuery(failure) {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnStamp != nil && *s.turnStamp == *turn && !diedOfQuery(failure)"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: s.turnStamp != nil && *s.turnStamp == *turn && !diedOfQuery(failure)", dlog.Context{"function": "feed", "condition": "s.turnStamp != nil && *s.turnStamp == *turn && !diedOfQuery(failure)"})
 		s.turnStamp = nil
 	}
 }
@@ -234,7 +235,7 @@ func terminalArm(ended *frontendv1.FeedTurnEnded) string {
 func (r *resolver) concludedOutcome(s *wsState, turn string, success *conversationv1.AgentSuccess) turnOutcome {
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentSuccess_Completed:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Completed"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSuccess_Completed", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Completed"})
 		concluded := &frontendv1.FeedTurnEndedConcluded{}
 		// THE ANSWERING RESPONSE, named by the producer rather than derived
 		// from position.
@@ -255,7 +256,7 @@ func (r *resolver) concludedOutcome(s *wsState, turn string, success *conversati
 			// prose was drawn, so the words on screen belong to no answer.
 			if unit, drew := r.turnDrewProse(s, turn); drew {
 				r.raiseAnswerFault(s, turn, unit, whyNoAnswerNamed,
-					"the turn concluded naming no answering response while its prose was drawn")
+					logsite.Msg("the turn concluded naming no answering response while its prose was drawn"))
 			}
 		default:
 			id, known := s.answerRows[answer]
@@ -291,17 +292,17 @@ func (r *resolver) concludedOutcome(s *wsState, turn string, success *conversati
 			// NOT LANDED (b): the producer named an answer this resolver
 			// resolves to no drawn response row.
 			r.raiseAnswerFault(s, turn, answer, whyAnswerRowUnresolved,
-				"the turn's named answering response resolves to no drawn response row")
+				logsite.Msg("the turn's named answering response resolves to no drawn response row"))
 		}
 		return concludedArm(concluded)
 	case *conversationv1.AgentSuccess_Interrupted:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSuccess_Interrupted", dlog.Context{
 			"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Interrupted",
 			"turn": turn, "command": byUserCommandWord(outcome.Interrupted.GetByUser()),
 		})
 		return interruptedArm(outcome.Interrupted.GetByUser())
 	case *conversationv1.AgentSuccess_Backgrounded:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Backgrounded"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSuccess_Backgrounded", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Backgrounded"})
 		// The stream ended while the work did not. It is what was asked for,
 		// so the turn concluded — with no answering prose to point at.
 		return concludedArm(&frontendv1.FeedTurnEndedConcluded{})
@@ -376,13 +377,13 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, endedAtMs int64, fail
 	// replayed turn has only this one, so the row is the same whichever of
 	// them drew it -- live in either order, and on replay.
 	if died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok", dlog.Context{"function": "feed", "condition": "died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok"})
 		return r.queryDiedErrored(s, ids.TurnID(turn), endedAtMs, died.QueryDied)
 	}
 
 	var endedOn *conversationv1.ApiRequestFailed
 	if api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok", dlog.Context{"function": "feed", "condition": "api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok"})
 		endedOn = api.ApiRequestFailed
 		vendorMessage = endedOn.GetMessage()
 		sentence = apiErrorArm(errored, endedOn)
@@ -416,7 +417,7 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, endedAtMs int64, fail
 			dlog.Context{"dropped": dropped, "turn": turn})
 	}
 	if len(evidence) > 0 {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(evidence) > 0"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: len(evidence) > 0", dlog.Context{"function": "feed", "condition": "len(evidence) > 0"})
 		sentence = sentence + " (" + strings.Join(evidence, "; ") + ")"
 	}
 	applyHeadline(errored, headline{Text: sentence}, vendorMessage)

@@ -107,9 +107,9 @@ func Retire(ctx context.Context, git Git, log dlog.Logger, op, repoDir, branch s
 	}
 	fail := func(what string, err error) (Outcome, error) {
 		if gitclient.StoppedBy(ctx, err) {
-			log.Info(op, "stopped retiring the landed branch with the daemon: "+what+"; the branch is kept", dlog.WithCause(record, err))
+			log.With(dlog.WithCause(record, err)).Info(op, "stopped retiring the landed branch with the daemon: {what}; the branch is kept", dlog.Context{"what": what})
 		} else {
-			log.Error(op, "could not retire the landed branch: "+what+"; the branch is kept", dlog.WithCause(record, err))
+			log.With(dlog.WithCause(record, err)).Error(op, "could not retire the landed branch: {what}; the branch is kept", dlog.Context{"what": what})
 		}
 		return "", fmt.Errorf("landedbranch: %s %s in %s: %w", what, branch, repoDir, err)
 	}

@@ -103,7 +103,7 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 	replayed, withheld := 0, 0
 	for _, entry := range f.log {
 		if entry.seq <= minted.afterSeq {
-			r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "entry.seq <= minted.afterSeq"})
+			r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition: entry.seq <= minted.afterSeq", dlog.Context{"function": "feed", "condition": "entry.seq <= minted.afterSeq"})
 			continue
 		}
 		if r.withheldPublication(s, f, entry.pub) {

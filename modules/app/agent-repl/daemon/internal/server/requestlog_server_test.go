@@ -152,8 +152,8 @@ func TestRepresentativeRPCHandlersRecordRequestBoundaries(t *testing.T) {
 				t.Fatal("the deliberately incomplete request succeeded")
 			}
 			var entry, completion *logRecord
-			for i := range log.records {
-				record := &log.records[i]
+			for i := range log.records() {
+				record := &log.records()[i]
 				if record.Operation != test.operation {
 					continue
 				}
@@ -165,7 +165,7 @@ func TestRepresentativeRPCHandlersRecordRequestBoundaries(t *testing.T) {
 				}
 			}
 			if entry == nil || completion == nil {
-				t.Fatalf("records = %v, want entry and completion for %s", log.records, test.operation)
+				t.Fatalf("records = %v, want entry and completion for %s", log.records(), test.operation)
 			}
 			if entry.Level != "DEBUG" || entry.Context["request_id"] != requestID {
 				t.Fatalf("entry = %+v, want debug with request_id %q", entry, requestID)
@@ -266,16 +266,16 @@ func TestBoundaryEnterRecordsEntryAndCompletionUnderTheRPCsOperation(t *testing.
 
 	// Assert.
 	want := []string{"entered the rpc handler", "completed the rpc handler"}
-	if len(log.records) != len(want) {
-		t.Fatalf("records = %+v, want %d", log.records, len(want))
+	if len(log.records()) != len(want) {
+		t.Fatalf("records = %+v, want %d", log.records(), len(want))
 	}
-	for i, record := range log.records {
+	for i, record := range log.records() {
 		if record.Operation != "daemon.server.set_workspace_parent" || record.Message != want[i] || record.Level != "DEBUG" {
 			t.Fatalf("record %d = %+v, want DEBUG %q under daemon.server.set_workspace_parent", i, record, want[i])
 		}
 	}
-	if log.records[1].Context["outcome"] != "error" {
-		t.Fatalf("completion = %+v, want the error outcome", log.records[1])
+	if log.records()[1].Context["outcome"] != "error" {
+		t.Fatalf("completion = %+v, want the error outcome", log.records()[1])
 	}
 }
 
@@ -291,8 +291,8 @@ func TestAnUnrecordedRPCsBoundaryRecordsNothing(t *testing.T) {
 	boundary.enter()(&failed)
 
 	// Assert.
-	if len(log.records) != 0 {
-		t.Fatalf("records = %+v, want none", log.records)
+	if len(log.records()) != 0 {
+		t.Fatalf("records = %+v, want none", log.records())
 	}
 }
 
@@ -363,13 +363,13 @@ func TestRecordAbandoned(t *testing.T) {
 			recordAbandoned(log, tt.ctx, "SelectWorkspace", "emacs-1-2", tt.phase, 10*time.Second)
 
 			// Assert.
-			if len(log.records) != tt.want {
-				t.Fatalf("records = %+v, want %d", log.records, tt.want)
+			if len(log.records()) != tt.want {
+				t.Fatalf("records = %+v, want %d", log.records(), tt.want)
 			}
 			if tt.want == 0 {
 				return
 			}
-			rec := log.records[0]
+			rec := log.records()[0]
 			if rec.Level != "INFO" || rec.Operation != "daemon.server.request_abandoned" {
 				t.Fatalf("record = %+v, want INFO daemon.server.request_abandoned", rec)
 			}

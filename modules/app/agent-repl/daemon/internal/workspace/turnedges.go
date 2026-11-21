@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // turnEdge is which edge of a turn moves a TurnEdgeRunner.
@@ -29,7 +30,7 @@ const (
 type TurnEdgeRunner struct {
 	edge   turnEdge
 	op     string
-	failed string
+	failed logsite.Message
 	carry  func(ctx context.Context, ws ids.WorkspaceID) error
 	log    dlog.Logger
 	loop   *noticeloop.Loop[ids.WorkspaceID]
@@ -39,10 +40,10 @@ type TurnEdgeRunner struct {
 // files its records: UNTOLD is the record of an edge reported after Run
 // returned, as the daemon stood down, and FAILED is the record of a CARRY
 // that failed.
-func newTurnEdgeRunner(edge turnEdge, op, untold, failed string, carry func(ctx context.Context, ws ids.WorkspaceID) error, log dlog.Logger) *TurnEdgeRunner {
+func newTurnEdgeRunner(edge turnEdge, op string, untold logsite.Message, failed logsite.Message, carry func(ctx context.Context, ws ids.WorkspaceID) error, log dlog.Logger) *TurnEdgeRunner {
 	r := &TurnEdgeRunner{edge: edge, op: op, failed: failed, carry: carry, log: log}
 	r.loop = noticeloop.New(func(ws ids.WorkspaceID) {
-		log.Info(op, untold, dlog.Context{"workspace": string(ws)})
+		log.Log(dlog.LevelInfo, op, untold, dlog.Context{"workspace": string(ws)})
 	})
 	return r
 }
@@ -91,7 +92,7 @@ func (r *TurnEdgeRunner) ColdGated(ids.WorkspaceID) {}
 func (r *TurnEdgeRunner) Run(ctx context.Context) {
 	r.loop.Run(ctx, func(ctx context.Context, ws ids.WorkspaceID) {
 		if err := r.carry(ctx, ws); err != nil {
-			r.log.Error(r.op, r.failed, dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
+			r.log.Log(dlog.LevelError, r.op, r.failed, dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		}
 	})
 }

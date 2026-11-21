@@ -33,6 +33,7 @@ import (
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/hostpower"
+	"agentrepl/logging/logsite"
 	"agentrepl/logging/sockethold"
 )
 
@@ -490,7 +491,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 				pid = strconv.Itoa(ad.PID)
 				fields["pid"] = ad.PID
 			}
-			log.Info("daemon.cmd.claim", "a standing advertisement naming pid "+pid+" is replaced under the boot claim", fields)
+			log.With(fields).Info("daemon.cmd.claim", "a standing advertisement naming pid {advertised_pid} is replaced under the boot claim", dlog.Context{"advertised_pid": pid})
 		}
 		if err := publishOwnership(claim, metricsSurface, shared); err != nil {
 			log.Error("daemon.cmd.claim", "the daemon's advertisement could not be published", dlog.Context{
@@ -934,7 +935,7 @@ func reconcile(ctx context.Context, log dlog.Logger, sequence boot.Sequence, bou
 		return done.report, done.err
 	case <-watchdog.C:
 		recordGoroutineDump(log, "daemon.cmd.boot",
-			"the boot reconciliation did not finish within its bound; exiting rather than listening on a socket nothing accepts",
+			logsite.Msg("the boot reconciliation did not finish within its bound; exiting rather than listening on a socket nothing accepts"),
 			dlog.Context{"bound_ms": bound.Milliseconds()})
 		return boot.Report{}, fmt.Errorf("agent-repld: the boot reconciliation did not finish within %s", bound)
 	}
@@ -1688,7 +1689,7 @@ func joinBackgroundLoops(loops *runningLoops, bound time.Duration, log dlog.Logg
 	case <-left:
 		log.Debug("daemon.cmd.serve", "every background loop left before the teardown", nil)
 	case <-time.After(bound):
-		recordGoroutineDump(log, "daemon.cmd.serve", "a background loop outlived its serving context; tearing down under it", dlog.Context{
+		recordGoroutineDump(log, "daemon.cmd.serve", logsite.Msg("a background loop outlived its serving context; tearing down under it"), dlog.Context{
 			"bound_ms": bound.Milliseconds(),
 			"loops":    loops.outstanding(),
 		})

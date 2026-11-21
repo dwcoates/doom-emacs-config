@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // opWithheld is the operation a withheld workspace's stand-down records under.
@@ -171,7 +172,7 @@ func withheldReason(trigger WithheldTrigger) standDownReason {
 	return standDownReason{
 		op:      opWithheld,
 		detail:  "hidden, collapsed or closed by the user; the transcript was left as it stood",
-		done:    "stood a withheld workspace's session down",
+		done:    logsite.Msg("stood a withheld workspace's session down"),
 		life:    shimlife.StandDownCacheLapse,
 		trigger: trigger.String(),
 		remote:  remoteSpares,

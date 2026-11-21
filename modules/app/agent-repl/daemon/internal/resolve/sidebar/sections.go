@@ -794,8 +794,9 @@ func repoDivergence(measure repodivergence.Measure) *frontendv1.RosterRepoDiverg
 func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspace, operation, leftOutOf string, log dlog.Logger) {
 	for repo, orphans := range byRepo {
 		log.Error(operation,
-			"workspaces name a repository the registry does not carry and were left out of "+leftOutOf,
+			"workspaces name a repository the registry does not carry and were left out of {left_out_of}",
 			dlog.Context{
+				"left_out_of":         leftOutOf,
 				"repo_id":             string(repo),
 				"workspaces":          len(orphans),
 				"invariant_violation": "workspace.Repo names no registered repository",

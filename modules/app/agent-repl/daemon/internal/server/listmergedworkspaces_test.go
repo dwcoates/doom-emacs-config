@@ -206,24 +206,14 @@ func TestListMergedWorkspacesRefusesAMalformedRequest(t *testing.T) {
 
 // ---- the endpoint's latency, measured over the real Connect transport ----
 
-// infoLogger is a Logger at the daemon's default threshold, info: it drops
-// every debug record, as a production daemon does, and keeps the rest in
-// BASE.
-type infoLogger struct{ base dlog.Logger }
-
-func (l infoLogger) Debug(string, string, dlog.Context) {}
-func (l infoLogger) Info(o, m string, c dlog.Context)   { l.base.Info(o, m, c) }
-func (l infoLogger) Warn(o, m string, c dlog.Context)   { l.base.Warn(o, m, c) }
-func (l infoLogger) Error(o, m string, c dlog.Context)  { l.base.Error(o, m, c) }
-func (l infoLogger) With(c dlog.Context) dlog.Logger    { return infoLogger{base: l.base.With(c)} }
-func (l infoLogger) Enabled(level string) bool          { return level != dlog.LevelDebug }
-
-// infoSurfaces are test surfaces whose loggers are infoLoggers.
+// infoSurfaces are test surfaces at the daemon's default threshold, info:
+// their loggers drop every debug record, as a production daemon's do
+// (dlog.WithoutDebug), and keep the rest.
 type infoSurfaces struct{ *dlog.TestSurfaces }
 
-func (s infoSurfaces) Global() dlog.Logger { return infoLogger{base: s.TestSurfaces.Global()} }
+func (s infoSurfaces) Global() dlog.Logger { return dlog.WithoutDebug(s.TestSurfaces.Global()) }
 func (s infoSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
-	return infoLogger{base: s.TestSurfaces.WorkspaceOrCentral(dir)}
+	return dlog.WithoutDebug(s.TestSurfaces.WorkspaceOrCentral(dir))
 }
 
 // liveShapeRegistry is the owner's live registry shape (2026-11-16): about

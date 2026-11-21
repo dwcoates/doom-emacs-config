@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/tempdirs"
+	"agentrepl/logging/logsite"
 )
 
 // LayoutVersion is the schema version this build writes. The file carries its
@@ -368,7 +369,7 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 		handle.Close()
 		return nil, fmt.Errorf("wsm: open %q: %w", path, err)
 	}
-	s := &store{path: path, log: discardLogger{}, canonicalDir: dirpath.Canonical, now: time.Now}
+	s := &store{path: path, log: dlog.Nowhere(), canonicalDir: dirpath.Canonical, now: time.Now}
 	s.current.Store(&handleState{db: handle, readOnly: readOnly})
 	s.promoted = make(chan struct{})
 	if !readOnly {
@@ -617,6 +618,14 @@ func (s *store) Promote(ctx context.Context) error {
 // writeCancelledMessage is the one record of a write its caller abandoned.
 const writeCancelledMessage = "the write ended when its caller's context was cancelled; nothing was written"
 
+// writeEnded records a write step that answered err through the one split
+// (ctxend.Log): its caller abandoning it is the one cancelled-write record,
+// whichever step it struck, and any other error is the step's own FAILED
+// record.
+func (s *store) writeEnded(err error, op string, failed logsite.Message, fields dlog.Context) {
+	ctxend.Log(err, s.log, dlog.LevelInfo, op, logsite.Msg(writeCancelledMessage), failed, fields)
+}
+
 // write runs fn inside one immediate transaction and logs the operation
 // exactly once: DEBUG when it commits, ERROR when it refuses or fails.
 // EVERY write in this package goes through it, so no mutation can escape the
@@ -642,7 +651,7 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 	})
 	if !acquired {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
-		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not begin the transaction", withError(fields, wrapped))
+		s.writeEnded(err, op, logsite.Msg("could not begin the transaction"), withError(fields, wrapped))
 		return wrapped
 	}
 	if err == nil {
@@ -657,7 +666,7 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 	tx, err := s.q(ctx).BeginTx(ctx, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
-		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not begin the transaction", withError(fields, wrapped))
+		s.writeEnded(err, op, logsite.Msg("could not begin the transaction"), withError(fields, wrapped))
 		return wrapped
 	}
 	if err := fn(ctx, tx); err != nil {
@@ -791,7 +800,7 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 			s.log.Debug(op, "the thread directory is already registered; nothing was written", withError(fields, err))
 			return err
 		}
-		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "refused the write", withError(fields, err))
+		s.writeEnded(err, op, logsite.Msg("refused the write"), withError(fields, err))
 		return err
 	}
 	// EVERY WRITE LEAVES NO EMPTY AGENT-CREATED SUBSECTION behind it
@@ -800,12 +809,12 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 	if err != nil {
 		s.endTx(tx, op, fields)
 		wrapped := fmt.Errorf("wsm: remove the agent-created subsections left empty: %w", err)
-		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not remove the agent-created subsections the write left empty", withError(fields, wrapped))
+		s.writeEnded(err, op, logsite.Msg("could not remove the agent-created subsections the write left empty"), withError(fields, wrapped))
 		return wrapped
 	}
 	if err := committed(ctx, tx.Commit()); err != nil {
 		wrapped := fmt.Errorf("wsm: commit transaction: %w", err)
-		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not commit the transaction", withError(fields, wrapped))
+		s.writeEnded(err, op, logsite.Msg("could not commit the transaction"), withError(fields, wrapped))
 		return wrapped
 	}
 	s.recordPruned(op, pruned)
@@ -851,7 +860,7 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 			s.log.Debug(op, "the read found no such record", withError(fields, err))
 			return err
 		}
-		ctxend.Log(err, s.log.Info, s.log.Error, op, "the read ended when its caller's context was cancelled", "refused the read", withError(fields, err))
+		ctxend.Log(err, s.log, dlog.LevelInfo, op, logsite.Msg("the read ended when its caller's context was cancelled"), logsite.Msg("refused the read"), withError(fields, err))
 		return err
 	}
 	return nil
@@ -884,25 +893,6 @@ func withError(fields dlog.Context, err error) dlog.Context {
 	out["error"] = err.Error()
 	return out
 }
-
-// discardLogger is the default sink: an opened handle logs nowhere until a
-// WithLogger option supplies a real one.
-type discardLogger struct{}
-
-// Debug implements dlog.Logger.
-func (discardLogger) Debug(string, string, dlog.Context) {}
-
-// Info implements dlog.Logger.
-func (discardLogger) Info(string, string, dlog.Context) {}
-
-// Warn implements dlog.Logger.
-func (discardLogger) Warn(string, string, dlog.Context) {}
-
-// Error implements dlog.Logger.
-func (discardLogger) Error(string, string, dlog.Context) {}
-
-// With implements dlog.Logger.
-func (d discardLogger) With(dlog.Context) dlog.Logger { return d }
 
 // nanos renders an instant as the integer this store keeps time in.
 func nanos(t time.Time) int64 { return t.UTC().UnixNano() }

@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -76,7 +77,7 @@ func (r *resolver) noteSignInEnding(s *wsState, turn ids.TurnID) {
 		}
 		why := unclonable{
 			operation: opSignedIn,
-			message:   "a broken bubble could not be copied to carry the sign-in action",
+			message:   logsite.Msg("a broken bubble could not be copied to carry the sign-in action"),
 			context:   dlog.Context{"turn": string(turn), "row": id},
 		}
 		if r.restateRow(s, placement{feed: addr}, row, !f.nonDurable[id], why, func(stamped *frontendv1.FeedRow) {
@@ -117,10 +118,10 @@ func (r *resolver) OnSignedIn(ws ids.WorkspaceID) error {
 		retires:  leavesOnSignIn,
 		retired:  r.logSignInAnswer,
 		into:     s.signedIn,
-		nothing:  "a sign-in completed and no drawn turn ending offered it; nothing was retired",
-		failed:   "a sign-in's answered failures were removed from the feed but could not be recorded; a daemon restart will draw them again",
+		nothing:  logsite.Msg("a sign-in completed and no drawn turn ending offered it; nothing was retired"),
+		failed:   logsite.Msg("a sign-in's answered failures were removed from the feed but could not be recorded; a daemon restart will draw them again"),
 		warning:  "the answered sign-in failures could not be saved and will reappear after a daemon restart",
-		answered: "a sign-in answered the account failures drawn in the feed; their rows were retired and recorded",
+		answered: logsite.Msg("a sign-in answered the account failures drawn in the feed; their rows were retired and recorded"),
 	}
 	if r.deps.SignedIn != nil {
 		answer.record = r.deps.SignedIn.RecordSignedInTurns
@@ -148,8 +149,8 @@ func (r *resolver) restoreSignedIn(s *wsState) {
 	r.restoreTurnSet(s, turnSetRestore{
 		op:      opSignedInRestore,
 		load:    r.deps.SignedIn.SignedInTurns,
-		failed:  "the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again",
+		failed:  logsite.Msg("the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again"),
 		warning: "answered sign-in failures could not be loaded and may be drawn again",
-		loaded:  "the workspace's sign-in-answered turns were loaded; their failures are not drawn",
+		loaded:  logsite.Msg("the workspace's sign-in-answered turns were loaded; their failures are not drawn"),
 	}, s.signedIn)
 }

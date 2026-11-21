@@ -3,6 +3,7 @@ package feed
 import (
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -157,7 +158,7 @@ func (r *resolver) SetMergeFold(ws ids.WorkspaceID, id *frontendv1.FeedId, folde
 	}
 	restated := r.restateRow(s, placement{feed: root}, stored, !f.nonDurable[id.GetValue()], unclonable{
 		operation: "daemon.feed.merge_fold_unclonable",
-		message:   "a merge bubble's head could not be cloned; the reader's fold was not recorded",
+		message:   logsite.Msg("a merge bubble's head could not be cloned; the reader's fold was not recorded"),
 		context:   dlog.Context{"row": id.GetValue()},
 	}, func(row *frontendv1.FeedRow) {
 		row.GetActivity().GetMerge().GetHead().Fold = readerFoldOf(folded)

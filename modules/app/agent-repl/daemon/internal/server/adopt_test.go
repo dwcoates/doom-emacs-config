@@ -269,7 +269,7 @@ func TestAnAdoptionOfAnUnknownWorkspaceIsRecordedAtInfo(t *testing.T) {
 				}
 			}
 			if !seen {
-				t.Fatalf("%s(ws-nope) recorded %+v, want an INFO naming the unknown_workspace arm", tc.rpc, log.records)
+				t.Fatalf("%s(ws-nope) recorded %+v, want an INFO naming the unknown_workspace arm", tc.rpc, log.records())
 			}
 		})
 	}
@@ -396,7 +396,7 @@ func TestARolloutRefusalOfAnAdoptionIsRecordedAtInfo(t *testing.T) {
 				}
 			}
 			if !seen {
-				t.Fatalf("%s recorded %+v, want an INFO naming the not_yet_adopted arm", tc.rpc, log.records)
+				t.Fatalf("%s recorded %+v, want an INFO naming the not_yet_adopted arm", tc.rpc, log.records())
 			}
 		})
 	}
@@ -445,13 +445,13 @@ func TestAdoptionAnswerRecordNamesItsCall(t *testing.T) {
 				t.Fatalf("adoption call: %v", err)
 			}
 			var answer *logRecord
-			for i := range log.records {
-				if log.records[i].Operation == test.operation {
-					answer = &log.records[i]
+			for i := range log.records() {
+				if log.records()[i].Operation == test.operation {
+					answer = &log.records()[i]
 				}
 			}
 			if answer == nil {
-				t.Fatalf("records = %v, want one %s", log.records, test.operation)
+				t.Fatalf("records = %v, want one %s", log.records(), test.operation)
 			}
 			if answer.Context["request_id"] != requestID {
 				t.Errorf("request_id = %v, want %q", answer.Context["request_id"], requestID)

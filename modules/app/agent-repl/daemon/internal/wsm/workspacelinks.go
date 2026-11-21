@@ -176,17 +176,17 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 	fields := dlog.Context{"workspace": string(id), "url": url, "label": label, "owned": set.Owned, "announces": set.Announces}
 	if set.Subscribe != nil && (!set.Owned || set.PullRequest == nil || set.Subscribe.PullRequest != *set.PullRequest || set.Subscribe.Subscriber != id) {
 		err := fmt.Errorf("wsm: link of %s: a subscription is taken only for the owned pull request the link names", id)
-		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
+		s.log.Error(op, "refused a link its caller should never have made: its subscription is not for the owned pull request it names", withError(fields, err))
 		return nil, err
 	}
 	if set.Announces != "" && (!set.Owned || set.Announces == url) {
 		err := fmt.Errorf("wsm: link of %s: only an owned link announces, and never itself", id)
-		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
+		s.log.Error(op, "refused a link its caller should never have made: it announces while unowned, or announces itself", withError(fields, err))
 		return nil, err
 	}
 	if url == "" || label == "" {
 		err := fmt.Errorf("wsm: link of %s: a link names its url and its label", id)
-		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
+		s.log.Error(op, "refused a link its caller should never have made: it names no url or no label", withError(fields, err))
 		return nil, err
 	}
 	var out []WorkspaceLink

@@ -240,7 +240,7 @@ func (s *server) mintRollbackToken(plan rollbackPlan) string {
 func (s *server) planLatestPrompt(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, situation string) (rollbackPlan, bool, error) {
 	prompts := s.deps.Feed.RollbackPrompts(ws)
 	if len(prompts) == 0 {
-		log.Info(opRollback, situation+" and no prompt to roll back", nil)
+		log.Info(opRollback, "{situation} and no prompt to roll back", dlog.Context{"situation": situation})
 		return rollbackPlan{}, false, nil
 	}
 	latest := prompts[len(prompts)-1]
@@ -249,7 +249,7 @@ func (s *server) planLatestPrompt(ctx context.Context, ws ids.WorkspaceID, log d
 		return rollbackPlan{}, false, err
 	}
 	if !ok {
-		log.Info(opRollback, situation+" and the latest prompt could not be planned", dlog.Context{"row": latest.GetValue()})
+		log.Info(opRollback, "{situation} and the latest prompt could not be planned", dlog.Context{"situation": situation, "row": latest.GetValue()})
 		return rollbackPlan{}, false, nil
 	}
 	return plan, true, nil

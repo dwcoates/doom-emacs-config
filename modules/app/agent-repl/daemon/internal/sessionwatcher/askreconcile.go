@@ -1,6 +1,7 @@
 package sessionwatcher
 
 import (
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -90,7 +91,7 @@ func (w *watcher) retireAsksAbsentFromFactsLocked(open []*conversationv1.Session
 			continue
 		}
 		w.settleAbandonedAskLocked(ask, "daemon.sessionwatcher.ask_abandoned_at_attach",
-			"an ask the views stand is not open in the session's facts: the session that asked it is gone, so it is settled abandoned")
+			logsite.Msg("an ask the views stand is not open in the session's facts: the session that asked it is gone, so it is settled abandoned"))
 	}
 }
 
@@ -108,7 +109,7 @@ func (w *watcher) AbandonRefusedAsk(kind AskKind, id string) bool {
 			continue
 		}
 		w.settleAbandonedAskLocked(ask, "daemon.sessionwatcher.ask_abandoned_on_refusal",
-			"the shim refused an answer to an ask the views stand, as no longer open: the session that asked it is gone, so it is settled abandoned")
+			logsite.Msg("the shim refused an answer to an ask the views stand, as no longer open: the session that asked it is gone, so it is settled abandoned"))
 		return true
 	}
 	w.log.Debug("daemon.sessionwatcher.ask_abandoned_on_refusal", "the shim refused an answer to an ask the views no longer stand; nothing is retired", dlog.Context{
@@ -120,19 +121,19 @@ func (w *watcher) AbandonRefusedAsk(kind AskKind, id string) bool {
 // settleAbandonedAskLocked routes an abandoned settle of ASK (a start, as the
 // feed stood it) down the path a live settle of it takes, recording the
 // retirement at INFO under OPERATION.
-func (w *watcher) settleAbandonedAskLocked(ask *conversationv1.SessionOpenAsk, operation, message string) {
+func (w *watcher) settleAbandonedAskLocked(ask *conversationv1.SessionOpenAsk, operation string, message logsite.Message) {
 	agent := ask.GetAgent()
 	ctx := dlog.Context{"agent_id": agent.GetValue(), "ask": openAskKey(ask), "turn_in_flight": ids.Optional(w.turn)}
 	switch {
 	case ask.GetQuestion() != nil:
 		start := ask.GetQuestion()
 		ctx["question_id"] = start.GetId().GetValue()
-		w.log.Info(operation, message, ctx)
+		w.log.Log(dlog.LevelInfo, operation, message, ctx)
 		w.routeQuestionLocked(agent, abandonedQuestion(start), nil, nil)
 	case ask.GetPermission() != nil:
 		start := ask.GetPermission()
 		ctx["permission_id"] = start.GetId().GetValue()
-		w.log.Info(operation, message, ctx)
+		w.log.Log(dlog.LevelInfo, operation, message, ctx)
 		w.routePermissionLocked(agent, abandonedPermission(start), nil, nil)
 	default:
 		panic("sessionwatcher: an ask the feed stands is neither a question nor a consent ask")

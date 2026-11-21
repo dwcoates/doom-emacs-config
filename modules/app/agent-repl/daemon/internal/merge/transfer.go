@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // This file is a merge MOVING WITH ITS WORKSPACE across a blue-green handover.
@@ -104,7 +105,7 @@ type suspension struct {
 	op    string
 	cause error
 	// moved is said once a suspended run let go.
-	moved string
+	moved logsite.Message
 	// by names the suspension in a record, as what stopped the merge.
 	by string
 	// resumes says what becomes of the suspended merge from here.
@@ -134,17 +135,17 @@ func (s suspension) takenBack() bool { return !s.handedOn }
 
 var (
 	suspendTransfer = suspension{headExit: HeadExitTransferred, op: "daemon.merge.transfer", cause: errHandedOver, handedOn: true,
-		moved:     "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded",
+		moved:     logsite.Msg("a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded"),
 		by:        "its workspace's transfer",
 		resumes:   "the successor resumes it at the step it recorded",
 		gateRerun: "its run goes on on the test service, and the successor watches it again when it resumes the merge", keepsGateRun: true}
 	suspendPause = suspension{headExit: HeadExitPaused, op: "daemon.merge.pause", cause: errPaused,
-		moved:     "a merge is suspended for its queue's pause; it resumes at the step it recorded once the queue is resumed",
+		moved:     logsite.Msg("a merge is suspended for its queue's pause; it resumes at the step it recorded once the queue is resumed"),
 		by:        "its queue's pause",
 		resumes:   "it stays suspended at the step it recorded until the queue is resumed",
 		gateRerun: "its run goes on on the test service, and the merge watches it again once the queue is resumed", keepsGateRun: true}
 	suspendRestart = suspension{headExit: HeadExitRestarted, op: "daemon.merge.restart", cause: errRestarting, stepBoundary: true,
-		moved:     "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished",
+		moved:     logsite.Msg("a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished"),
 		by:        "its workspace's restart",
 		resumes:   "it resumes at the step it recorded once the restart finished",
 		gateRerun: "its run goes on on the test service, and the merge watches it again once the restart finished", keepsGateRun: true}
@@ -153,7 +154,7 @@ var (
 	// this daemon takes the merge straight back, and the queue's release by
 	// the mediator's approval of the fix's deploy kicks it on.
 	suspendDeployCheck = suspension{headExit: HeadExitDeployCheck, op: opRemediationFinish, cause: errHeldForDeployCheck,
-		moved:     "a merge is suspended for the deploy mediator's remediation finish; it resumes at the step it recorded once the mediator approves a deploy",
+		moved:     logsite.Msg("a merge is suspended for the deploy mediator's remediation finish; it resumes at the step it recorded once the mediator approves a deploy"),
 		by:        "the deploy mediator's remediation finish",
 		resumes:   "it stays suspended at the step it recorded until the mediator approves a deploy",
 		gateRerun: "its run goes on on the test service, and the merge watches it again once the mediator approves a deploy", keepsGateRun: true}
@@ -162,7 +163,7 @@ var (
 	// back, so a handover that does not finish leaves it here to go on, and
 	// the daemon that serves its workspace next resumes it.
 	suspendHandover = suspension{headExit: HeadExitHandover, op: "daemon.merge.transfer", cause: errHandingOver,
-		moved:     "a merge is suspended for the handover; the daemon that serves its workspace next resumes it at the step it recorded",
+		moved:     logsite.Msg("a merge is suspended for the handover; the daemon that serves its workspace next resumes it at the step it recorded"),
 		by:        "the handover",
 		resumes:   "the daemon that serves its workspace next resumes it at the step it recorded",
 		gateRerun: "its run goes on on the test service, and the merge watches it again when it is resumed after the handover", keepsGateRun: true}
@@ -245,8 +246,8 @@ func (o *orchestrator) suspendHeldOne(ctx context.Context, ws ids.WorkspaceID, w
 		return nil
 	}
 	if err != nil {
-		o.deps.Log.Global().Error(why.op, "could not suspend a running merge for "+why.by, dlog.Context{
-			"workspace": string(ws), "error": err.Error()})
+		o.deps.Log.Global().Error(why.op, "could not suspend a running merge for {by}", dlog.Context{
+			"by": why.by, "workspace": string(ws), "error": err.Error()})
 		return err
 	}
 	_, err = o.takeBackOwnLocked(ctx, ws, why)
@@ -270,8 +271,8 @@ func (o *orchestrator) takeBackOwnLocked(ctx context.Context, ws ids.WorkspaceID
 	prior, away := o.takenAway[ws]
 	o.mu.Unlock()
 	if away && !prior.takenBack() {
-		o.deps.Log.Global().Info(why.op, "the workspace's merges were handed on by "+prior.by+" after "+why.by+" took them; they are not taken back here",
-			dlog.Context{"workspace": string(ws), "handed_on_by": prior.by})
+		o.deps.Log.Global().Info(why.op, "the workspace's merges were handed on by {handed_on_by} after {by} took them; they are not taken back here",
+			dlog.Context{"workspace": string(ws), "handed_on_by": prior.by, "by": why.by})
 		return false, nil
 	}
 	return true, o.adoptWorkspace(ctx, ws)
@@ -289,8 +290,8 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	// takes nothing (errAlreadyHandedOn).
 	if prior, away := o.takenAway[ws]; away && !prior.takenBack() && why.takenBack() {
 		o.mu.Unlock()
-		o.deps.Log.Global().Info(op, "the workspace's merges were already handed on by "+prior.by+"; "+why.by+" neither suspends nor takes back anything of them",
-			dlog.Context{"workspace": string(ws), "handed_on_by": prior.by})
+		o.deps.Log.Global().Info(op, "the workspace's merges were already handed on by {handed_on_by}; {by} neither suspends nor takes back anything of them",
+			dlog.Context{"workspace": string(ws), "handed_on_by": prior.by, "by": why.by})
 		return errAlreadyHandedOn
 	}
 	o.takenAway[ws] = why
@@ -344,8 +345,8 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	if abandoned {
 		return o.awaitOwnEnd(log, op, ws, withField(fields, "cause", string(r.abandonedFor())), r.finished, ownEnd{
 			refusal: "merge: the abandoned merge of %s did not end within %s",
-			late:    "an abandoned merge did not end before the suspension's bound; the suspension is refused",
-			ended:   "the merge was abandoned before the suspension took it; nothing is left to suspend",
+			late:    logsite.Msg("an abandoned merge did not end before the suspension's bound; the suspension is refused"),
+			ended:   logsite.Msg("the merge was abandoned before the suspension took it; nothing is left to suspend"),
 		})
 	}
 	if terminal {
@@ -353,8 +354,8 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		// local, and what it releases is the merge's end, not a step to move.
 		return o.awaitOwnEnd(log, op, ws, fields, mark.done, ownEnd{
 			refusal: "merge: the merge of %s did not finish its terminal within %s",
-			late:    "a merge in its terminal did not finish before the transfer's bound; the transfer is refused",
-			ended:   "a merge finished its terminal before its workspace moved",
+			late:    logsite.Msg("a merge in its terminal did not finish before the transfer's bound; the transfer is refused"),
+			ended:   logsite.Msg("a merge finished its terminal before its workspace moved"),
 		})
 	}
 	if atBoundary {
@@ -385,7 +386,7 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 			return ctx.Err()
 		}
 		fields["step"] = r.progressStep()
-		log.Info(op, why.moved, fields)
+		log.Log(dlog.LevelInfo, op, why.moved, fields)
 	} else {
 		o.cutSuspended(log, r, why, fields)
 	}
@@ -398,7 +399,7 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 func (o *orchestrator) cutSuspended(log dlog.Logger, r *run, why suspension, fields dlog.Context) {
 	o.awaitStoppingPoints(why.op, []*run{r})
 	fields["step"] = r.progressStep()
-	log.Info(why.op, why.moved, fields)
+	log.Log(dlog.LevelInfo, why.op, why.moved, fields)
 	r.cancel(why.cause)
 }
 
@@ -439,7 +440,10 @@ func (o *orchestrator) letGoBound(r *run) time.Duration {
 // ownEnd is what awaitOwnEnd says of one way a run ends by itself: the
 // refusal's error (formatted with the workspace and the bound), the record of
 // a run that outlived the bound, and the record of one that ended.
-type ownEnd struct{ refusal, late, ended string }
+type ownEnd struct {
+	refusal     string
+	late, ended logsite.Message
+}
 
 // awaitOwnEnd waits, within the terminal drain's bound, for a run a
 // suspension leaves to end by itself -- one in its terminal, or abandoned --
@@ -451,11 +455,11 @@ func (o *orchestrator) awaitOwnEnd(log dlog.Logger, op string, ws ids.WorkspaceI
 	case <-done:
 	case <-time.After(bound):
 		err := fmt.Errorf(says.refusal, ws, bound)
-		log.Error(op, says.late, withField(fields, "error", err.Error()))
+		log.Log(dlog.LevelError, op, says.late, withField(fields, "error", err.Error()))
 		return err
 	}
 	o.forgetMoved(ws)
-	log.Info(op, says.ended, fields)
+	log.Log(dlog.LevelInfo, op, says.ended, fields)
 	return nil
 }
 
@@ -647,9 +651,9 @@ func (o *orchestrator) ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceI
 				continue
 			}
 			if err := o.requeueAdmitted(ctx, op, repo, ws, requeueWhy{
-				unleased: "the paused merge's lease could not be read; it holds its queue until the workspace moves",
-				failed:   "the paused merge could not be put back in line; it holds its queue until the workspace moves",
-				done:     "the workspace waits here for its work to end, so the merge a handover paused goes back to its place in line; it starts again once its workspace moves",
+				unleased: logsite.Msg("the paused merge's lease could not be read; it holds its queue until the workspace moves"),
+				failed:   logsite.Msg("the paused merge could not be put back in line; it holds its queue until the workspace moves"),
+				done:     logsite.Msg("the workspace waits here for its work to end, so the merge a handover paused goes back to its place in line; it starts again once its workspace moves"),
 			}); err != nil {
 				return err
 			}
@@ -664,7 +668,7 @@ type requeueWhy struct {
 	// unleased is recorded when the merge's lease cannot be read or stands
 	// not as a merge's, failed when the requeue's write fails, and done on
 	// the requeue.
-	unleased, failed, done string
+	unleased, failed, done logsite.Message
 }
 
 // requeueAdmitted puts WS's ADMITTED merge in REPO back at its own place in
@@ -682,22 +686,22 @@ func (o *orchestrator) requeueAdmitted(ctx context.Context, op string, repo wsm.
 		fields["invariant_violation"] = "an admitted merge holds its merge lease"
 	}
 	if err != nil {
-		o.deps.Log.Global().Error(op, why.unleased, withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Log(dlog.LevelError, op, why.unleased, withField(fields, "error", err.Error()))
 		return err
 	}
 	entry, err := o.entryOf(ctx, repo, ws)
 	if err != nil {
-		o.deps.Log.Global().Error(op, why.failed, withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Log(dlog.LevelError, op, why.failed, withField(fields, "error", err.Error()))
 		return err
 	}
 	ledger := o.ledgerOfEntry(entry)
 	if err := o.deps.DB.RequeuePausedMerge(ctx, repo, ws, lease.ID, ledger); err != nil {
-		o.deps.Log.Global().Error(op, why.failed, withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Log(dlog.LevelError, op, why.failed, withField(fields, "error", err.Error()))
 		return err
 	}
 	o.mu.Lock()
 	delete(o.resumes, ws)
 	o.mu.Unlock()
-	o.deps.Log.Global().Info(op, why.done, withField(fields, "ledger", string(ledger)))
+	o.deps.Log.Global().Log(dlog.LevelInfo, op, why.done, withField(fields, "ledger", string(ledger)))
 	return o.republishQueue(ctx, repo)
 }

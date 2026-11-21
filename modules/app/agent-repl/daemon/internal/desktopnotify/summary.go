@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/runecap"
 	"agent-repld/internal/standdown"
 	"agent-repld/internal/textline"
+	"agentrepl/logging/logsite"
 )
 
 // opSummary is the operation the turn summary's records carry.
@@ -115,19 +116,19 @@ type sentenceCall struct {
 	// turn was not summarized").
 	unmade string
 	// made is the record of a summary made.
-	made string
+	made logsite.Message
 }
 
 // turnSummary is the completed-turn banner's call.
 var turnSummary = sentenceCall{
 	brief: BriefSummary, placeholder: "answer", site: SummarySite, what: "turn-summary",
-	unmade: "the turn was not summarized", made: "summarized the turn's final answer",
+	unmade: "the turn was not summarized", made: logsite.Msg("summarized the turn's final answer"),
 }
 
 // commentSummary is the pull-request comment banner's call.
 var commentSummary = sentenceCall{
 	brief: BriefCommentSummary, placeholder: "comment", site: CommentSummarySite, what: "comment-summary",
-	unmade: "the pull-request comment was not summarized", made: "summarized the pull-request comment",
+	unmade: "the pull-request comment was not summarized", made: logsite.Msg("summarized the pull-request comment"),
 }
 
 // sentence makes CALL over INPUT, answering the banner body: the summary, or
@@ -145,15 +146,15 @@ func (s Summarizer) sentence(ctx context.Context, ws ids.WorkspaceID, call sente
 func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, call sentenceCall, input string, log dlog.Logger) (string, string) {
 	brief, err := prompts.Load(s.PromptsDir, call.brief)
 	if err != nil {
-		log.Error(opSummary, "the "+call.what+" brief could not be read", dlog.Context{
-			"brief": call.brief, "cause": err.Error(),
+		log.Error(opSummary, "the {what} brief could not be read", dlog.Context{
+			"what": call.what, "brief": call.brief, "cause": err.Error(),
 		})
 		return "", "the summary brief could not be read"
 	}
 	question, err := brief.Splice(map[string]string{call.placeholder: input})
 	if err != nil {
-		log.Error(opSummary, "the "+call.what+" brief could not be spliced", dlog.Context{
-			"brief": call.brief, "cause": err.Error(),
+		log.Error(opSummary, "the {what} brief could not be spliced", dlog.Context{
+			"what": call.what, "brief": call.brief, "cause": err.Error(),
 		})
 		return "", "the summary brief could not be spliced"
 	}
@@ -168,7 +169,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, call sent
 		return "", StoodDownCause
 	}
 	if err != nil {
-		log.Error(opSummary, "no account root for this workspace; "+call.unmade, dlog.Context{"cause": err.Error()})
+		log.Error(opSummary, "no account root for this workspace; {unmade}", dlog.Context{"unmade": call.unmade, "cause": err.Error()})
 		return "", "no account for this workspace"
 	}
 	timeout := s.Timeout
@@ -186,24 +187,24 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, call sent
 	if standdown.CutShort(ctx, err) {
 		// ctx is the notifier's lifetime: the daemon stood down mid-call and
 		// killed the child, which is the stand-down working, not a failure.
-		log.Info(opSummary, "the daemon stood down during the "+call.what+" call", dlog.Context{
-			"model": SummaryModel, "cause": ctx.Err().Error(), "detail": err.Error(),
+		log.Info(opSummary, "the daemon stood down during the {what} call", dlog.Context{
+			"what": call.what, "model": SummaryModel, "cause": ctx.Err().Error(), "detail": err.Error(),
 		})
 		return "", StoodDownCause
 	}
 	if err != nil {
 		cause := headless.CauseOf(err)
-		log.Error(opSummary, "the "+call.what+" model call failed", dlog.Context{
-			"model": SummaryModel, "cause": cause, "detail": err.Error(),
+		log.Error(opSummary, "the {what} model call failed", dlog.Context{
+			"what": call.what, "model": SummaryModel, "cause": cause, "detail": err.Error(),
 		})
 		return "", cause
 	}
 	summary := textline.FirstNonBlank(resp.Text)
 	if summary == "" {
-		log.Error(opSummary, "the "+call.what+" model call answered empty", dlog.Context{"model": SummaryModel})
+		log.Error(opSummary, "the {what} model call answered empty", dlog.Context{"what": call.what, "model": SummaryModel})
 		return "", "the model answered empty"
 	}
-	log.Info(opSummary, call.made, dlog.Context{
+	log.Log(dlog.LevelInfo, opSummary, call.made, dlog.Context{
 		"model": SummaryModel, "duration_ms": resp.Duration.Milliseconds(),
 	})
 	return summary, ""

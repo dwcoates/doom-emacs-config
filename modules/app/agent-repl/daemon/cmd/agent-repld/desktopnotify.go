@@ -92,13 +92,13 @@ func (f *wifiStandingForwarder) Latest() (*agentreplv1.PersistentWifiState, bool
 func resolveNotifyProgram[T interface{ Program() string }](log dlog.Logger, role, env string, build func(goos, override string) (T, error)) (T, error) {
 	program, err := build(runtime.GOOS, os.Getenv(env))
 	if err != nil {
-		log.Error(opDesktopNotify, "no desktop "+role+" program; it will not run", dlog.Context{
+		log.Error(opDesktopNotify, "no desktop {role} program; it will not run", dlog.Context{
 			"role": role, "goos": runtime.GOOS, "cause": err.Error(), "override_env": env,
 		})
 		var none T
 		return none, err
 	}
-	log.Info(opDesktopNotify, "resolved the desktop "+role+" program", dlog.Context{
+	log.Info(opDesktopNotify, "resolved the desktop {role} program", dlog.Context{
 		"role": role, "program": program.Program(), "goos": runtime.GOOS,
 	})
 	return program, nil
