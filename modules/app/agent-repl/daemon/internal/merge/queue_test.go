@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"sort"
@@ -19,6 +18,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -3209,23 +3209,9 @@ func TestReadScopedRepositoryRecordsOnlyAFailureThatIsNoRefusal(t *testing.T) {
 func TestEveryScopedReadSharesReadScopedRepository(t *testing.T) {
 	// Arrange
 	const message = "could not resolve the scoped repository's queue key"
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Act
-	count := 0
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		count += strings.Count(string(body), message)
-	}
+	count := sourcescan.Count(t, message)
 
 	// Assert
 	if count != 1 {

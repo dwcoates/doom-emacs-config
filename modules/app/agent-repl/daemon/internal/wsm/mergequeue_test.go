@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 	"context"
 	"database/sql"
 	"errors"
@@ -2983,28 +2984,12 @@ func TestNormalizedRepoKeyRecordsAKeyThatCannotBeNormalizedOnce(t *testing.T) {
 func TestRepoKeyRefusalIsRecordedOnlyByTheHelper(t *testing.T) {
 	// Arrange
 	const message = "refused a merge queue key that cannot be normalized"
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
 
 	// Act
-	var sites []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("ReadFile(%s): %v", file, err)
-		}
-		if n := strings.Count(string(src), message); n > 0 {
-			sites = append(sites, fmt.Sprintf("%s x%d", file, n))
-		}
-	}
+	sites := sourcescan.Sites(t, message)
 
 	// Assert
-	if want := []string{"mergequeue.go x1"}; !slices.Equal(sites, want) {
+	if want := []string{"mergequeue.go"}; !slices.Equal(sites, want) {
 		t.Errorf("files recording %q = %v, want %v (only normalizedRepoKey records it)", message, sites, want)
 	}
 }
