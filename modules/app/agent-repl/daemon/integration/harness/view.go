@@ -108,9 +108,52 @@ func (d *Daemon) retireSlice() {
 	d.mu.Lock()
 	slice := append([]*workspacev1.WorkspaceRef(nil), d.slice...)
 	d.mu.Unlock()
+	if len(slice) == 0 {
+		return
+	}
+	// Read before anything is forgotten: a forgotten workspace no longer
+	// names its repository.
+	mains := d.unclaimedMainWorktrees(slice)
 	for i := len(slice) - 1; i >= 0; i-- {
 		d.retire(slice[i], true)
 	}
+	for _, main := range mains {
+		d.retire(main, true)
+	}
+}
+
+// unclaimedMainWorktrees answers the main worktree of every repository a
+// workspace of SLICE is in, where that main worktree is not itself in SLICE:
+// the one registering a linked worktree registers beside it, closed. The
+// case minted the repository, so its main worktree is the case's too, and a
+// main worktree left behind keeps its repository on every later case's
+// sidebar.
+func (d *Daemon) unclaimedMainWorktrees(slice []*workspacev1.WorkspaceRef) []*workspacev1.WorkspaceRef {
+	d.t.Helper()
+	return mainWorktreesBeside(d.everyWorkspace("retire the slice"), slice)
+}
+
+// mainWorktreesBeside is unclaimedMainWorktrees' choice among FOUND, every
+// workspace the daemon holds.
+func mainWorktreesBeside(found []*agentreplv1.FoundWorkspace, slice []*workspacev1.WorkspaceRef) []*workspacev1.WorkspaceRef {
+	inSlice := make(map[string]bool, len(slice))
+	for _, ws := range slice {
+		inSlice[ws.GetId()] = true
+	}
+	repos := map[string]bool{}
+	for _, w := range found {
+		if inSlice[w.GetWorkspace().GetId()] {
+			repos[canonicalDir(w.GetRepository().GetDir())] = true
+		}
+	}
+	var mains []*workspacev1.WorkspaceRef
+	for _, w := range found {
+		repo := canonicalDir(w.GetRepository().GetDir())
+		if repos[repo] && !inSlice[w.GetWorkspace().GetId()] && canonicalDir(w.GetWorkspace().GetDir()) == repo {
+			mains = append(mains, w.GetWorkspace())
+		}
+	}
+	return mains
 }
 
 // retire kills and forgets one workspace of the slice. A workspace with open

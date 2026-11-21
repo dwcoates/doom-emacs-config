@@ -769,3 +769,133 @@ func TestTheBarrierAsksAboutAViewsOwnWorkspacesOnly(t *testing.T) {
 		t.Fatalf("barrier scopes = %v, want %v", asked, want)
 	}
 }
+
+func TestMainWorktreesBesideTheSlice(t *testing.T) {
+	// Every directory is a plain path no symlink resolves, so canonicalDir
+	// answers it as given.
+	found := func(id, dir, repo string) *agentreplv1.FoundWorkspace {
+		return &agentreplv1.FoundWorkspace{
+			Workspace:  &workspacev1.WorkspaceRef{Id: id, Dir: dir},
+			Repository: &workspacev1.RepositoryRef{Dir: repo},
+		}
+	}
+	ref := func(id string) *workspacev1.WorkspaceRef { return &workspacev1.WorkspaceRef{Id: id} }
+	cases := []struct {
+		name  string
+		found []*agentreplv1.FoundWorkspace
+		slice []*workspacev1.WorkspaceRef
+		want  []string
+	}{
+		{
+			name:  "a linked worktree's main worktree is taken",
+			found: []*agentreplv1.FoundWorkspace{found("main", "/r/a", "/r/a"), found("linked", "/r/a-one", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("linked")},
+			want:  []string{"main"},
+		},
+		{
+			name:  "a main worktree in the slice is not taken twice",
+			found: []*agentreplv1.FoundWorkspace{found("main", "/r/a", "/r/a"), found("linked", "/r/a-one", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("main"), ref("linked")},
+			want:  nil,
+		},
+		{
+			name:  "another repository's main worktree is left alone",
+			found: []*agentreplv1.FoundWorkspace{found("other", "/r/b", "/r/b"), found("linked", "/r/a-one", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("linked")},
+			want:  nil,
+		},
+		{
+			name:  "a linked worktree beside the slice's is no main worktree",
+			found: []*agentreplv1.FoundWorkspace{found("linked", "/r/a-one", "/r/a"), found("created", "/r/a-two", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("linked")},
+			want:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := mainWorktreesBeside(tc.found, tc.slice)
+
+			// Assert.
+			var ids []string
+			for _, ws := range got {
+				ids = append(ids, ws.GetId())
+			}
+			if !reflect.DeepEqual(ids, tc.want) {
+				t.Fatalf("mainWorktreesBeside = %v, want %v", ids, tc.want)
+			}
+		})
+	}
+}
+
+// findingClient answers FindWorkspaces with resp or err; every other call is
+// unexpected.
+type findingClient struct {
+	agentreplv1connect.AgentReplClient
+	resp *agentreplv1.FindWorkspacesResponse
+	err  error
+}
+
+func (c findingClient) FindWorkspaces(context.Context, *connect.Request[agentreplv1.FindWorkspacesRequest]) (*connect.Response[agentreplv1.FindWorkspacesResponse], error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return connect.NewResponse(c.resp), nil
+}
+
+func TestEveryWorkspaceTakesOnlyACompleteAnswer(t *testing.T) {
+	one := &agentreplv1.FoundWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: "w1"}}
+	success := func(s *agentreplv1.FindWorkspacesSuccess) *agentreplv1.FindWorkspacesResponse {
+		return &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: s}}
+	}
+	cases := []struct {
+		name       string
+		client     findingClient
+		wantIDs    []string
+		wantFailed bool
+	}{
+		{
+			name: "a complete answer is every workspace",
+			client: findingClient{resp: success(&agentreplv1.FindWorkspacesSuccess{Extent: &agentreplv1.FindWorkspacesSuccess_Complete{
+				Complete: &agentreplv1.FindWorkspacesSuccessComplete{Workspaces: []*agentreplv1.FoundWorkspace{one}}}})},
+			wantIDs: []string{"w1"},
+		},
+		{
+			name: "a partial answer fails the retirement",
+			client: findingClient{resp: success(&agentreplv1.FindWorkspacesSuccess{Extent: &agentreplv1.FindWorkspacesSuccess_Partial{
+				Partial: &agentreplv1.FindWorkspacesSuccessPartial{}}})},
+			wantFailed: true,
+		},
+		{
+			name:       "a transport error fails the retirement",
+			client:     findingClient{err: errors.New("connection refused")},
+			wantFailed: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			rec := NewRecordingTB(t, "TestRetiring")
+			owner := newOwnerForViews(t, rec)
+			owner.client = tc.client
+
+			// Act.
+			got := owner.everyWorkspace("retire the slice")
+
+			// Assert.
+			var ids []string
+			for _, w := range got {
+				ids = append(ids, w.GetWorkspace().GetId())
+			}
+			if !reflect.DeepEqual(ids, tc.wantIDs) {
+				t.Fatalf("everyWorkspace = %v, want %v", ids, tc.wantIDs)
+			}
+			if rec.Failed() != tc.wantFailed {
+				t.Fatalf("failed = %v (%q), want %v", rec.Failed(), rec.Failures(), tc.wantFailed)
+			}
+			if tc.wantFailed && !strings.Contains(rec.Failures(), "retire the slice from the shared daemon: FindWorkspaces") {
+				t.Fatalf("failure = %q, want it to name the retirement step", rec.Failures())
+			}
+		})
+	}
+}
