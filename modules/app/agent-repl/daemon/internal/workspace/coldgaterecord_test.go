@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -339,5 +340,28 @@ func TestSpawnAtGateWhoseSpawnFailsHoldsNothing(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), errFake.Error()) || f.fleet.Held(ws) {
 		t.Fatalf("err = %v, held %v; want the spawn's failure and nothing held", err, f.fleet.Held(ws))
+	}
+}
+
+// A WORKSPACE WHOSE DIRECTORY IS GONE NEVER RAISES ITS RECORDED GATE: it has
+// no log sink and was never bound to the views, so its start fails before the
+// gate reaches them (2026-11-21: a revival at boot raised such a gate on an
+// unbound topbar, and every boot panicked).
+func TestAStartOfAWorkspaceWithNoLogSinkRaisesNoRecordedGate(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.gates[ws] = recordedGate()
+	f.log.workspaceErr = errors.New("the workspace directory is gone")
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "resolve log sink") || !errors.Is(err, f.log.workspaceErr) {
+		t.Fatalf("Start = %v, want the missing log sink surfaced", err)
+	}
+	if _, raised := f.fleet.ColdGate(ws); raised || f.footer.coldGates[ws].Standing || f.supervisor.spawnAttempts != 0 {
+		t.Fatalf("gate raised %v, footer %+v, %d spawn attempts; want nothing raised or spawned", raised, f.footer.coldGates[ws], f.supervisor.spawnAttempts)
 	}
 }

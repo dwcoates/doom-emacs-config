@@ -1367,6 +1367,22 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	if f.Live(ws) {
 		return nil
 	}
+	// THE WORKSPACE AND ITS LOG ARE RESOLVED BEFORE ANYTHING IS RAISED FOR
+	// IT. A workspace whose directory is gone has no log sink and was never
+	// bound to the views, so it fails its start here, before its recorded
+	// cold gate is raised on views that do not know it (2026-11-21 15:22: a
+	// held prompt of a workspace whose worktree was deleted revived it at
+	// boot, its recorded gate reached the topbar unbound, and every boot of
+	// the daemon panicked).
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("start session for %q: %w", ws, err)
+	}
+	log, err := f.deps.Log.Workspace(record.Dir)
+	if err != nil {
+		return fmt.Errorf("start session for %q: resolve log sink: %w", ws, err)
+	}
+	log = log.With(dlog.Context{"workspace": string(ws)})
 	// A RECORDED COLD GATE IS RAISED, NEVER SPAWNED FOR (owner ruling,
 	// 2026-10-27: a workspace at its cold gate runs no shim until the user
 	// answers it). A rebind points the workspace at another conversation, so
@@ -1387,7 +1403,7 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	f.markStarting(ws, true)
 	defer f.markStarting(ws, false)
 	began := f.now()
-	err := f.startUp(ctx, ws, rebind)
+	err = f.startUp(ctx, ws, record, log, rebind)
 	f.noteStartEnded(ws, err)
 	f.observeShimStart(ctx, ws, began, err)
 	return err
@@ -1421,7 +1437,7 @@ func (f *Fleet) noteStartEnded(ws ids.WorkspaceID, err error) {
 
 // startUp is start's body, under the start gate, with the bring-up marker
 // raised.
-func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) error {
+func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, log dlog.Logger, rebind bool) error {
 	began := f.now()
 	// A SELECTED TRANSCRIPT IS A DIFFERENT CONVERSATION: the watcher this
 	// start opens replays its first page, and the previous watcher's pointers,
@@ -1429,15 +1445,6 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	if rebind {
 		f.noteTranscriptSelected(ws)
 	}
-	record, err := f.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		return fmt.Errorf("start session for %q: %w", ws, err)
-	}
-	log, err := f.deps.Log.Workspace(record.Dir)
-	if err != nil {
-		return fmt.Errorf("start session for %q: resolve log sink: %w", ws, err)
-	}
-	log = log.With(dlog.Context{"workspace": string(ws)})
 
 	session, exists, err := f.deps.DB.Session(ctx, ws)
 	if err != nil {
