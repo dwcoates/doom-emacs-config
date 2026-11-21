@@ -467,8 +467,8 @@ func TestRegisteredRefAnswersTheRecordARefNames(t *testing.T) {
 	}
 }
 
-// BOTH REF CRITERIA RESOLVE THROUGH registeredRef: a handler that resolves
-// created_by or caller by hand fails here.
+// EVERY REF CRITERION RESOLVES THROUGH registeredRef: a handler that resolves
+// created_by, caller or login.of_workspace by hand fails here.
 func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.T) {
 	// Arrange
 	src, err := os.ReadFile("findworkspaces.go")
@@ -481,8 +481,8 @@ func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.
 	byHand := strings.Count(string(src), "byID[wsm.WorkspaceID(ref.GetId())]")
 
 	// Assert
-	if calls != 2 || byHand != 1 {
-		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want both refs through the helper and its own one lookup", calls, byHand)
+	if calls != 3 || byHand != 1 {
+		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want all three refs through the helper and its own one lookup", calls, byHand)
 	}
 }
 
