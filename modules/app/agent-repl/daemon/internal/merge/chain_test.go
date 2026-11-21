@@ -69,13 +69,17 @@ type chainGit struct {
 	// cleanHolds parks the next cleanliness read in a worktree, ignoring its
 	// caller's cancellation as a git command mid-flight does.
 	cleanHolds holdSet
+	// starts are the commits each rebase started in a worktree replays, in
+	// order, and aborts how many rebases were aborted.
+	starts map[string][][]string
+	aborts int
 }
 
 func newChainGit(inner *fakeGit) *chainGit {
 	g := &chainGit{
 		fakeGit: inner, commits: map[string]*chainCommit{}, refs: map[string]string{},
 		rebases: map[string]*chainRebase{}, conflicts: map[[2]string][]string{}, recorded: map[[2]string]bool{},
-		trees: map[string]string{}, stubborn: map[string]bool{}, refusedDirty: map[string]int{},
+		trees: map[string]string{}, stubborn: map[string]bool{}, refusedDirty: map[string]int{}, starts: map[string][][]string{},
 	}
 	root := g.mintLocked(nil, "base")
 	g.refs["master"] = root
@@ -321,6 +325,7 @@ func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []
 	if err != nil {
 		return gitclient.RebaseStep{}, err
 	}
+	g.starts[dir] = append(g.starts[dir], append([]string(nil), commits...))
 	g.rebases[dir] = &chainRebase{branch: g.dirBranch(dir), head: base, todo: append([]string(nil), commits...)}
 	return g.replayLocked(dir), nil
 }
@@ -336,7 +341,38 @@ func (g *chainGit) AbortRebase(_ context.Context, dir string) error {
 		return fmt.Errorf("chain git: no rebase stands in %s", dir)
 	}
 	delete(g.rebases, dir)
+	g.aborts++
 	return nil
+}
+
+// standResolved stands, in dir, the rebase of the branch's own commits onto
+// onto that its session resolved: stopped on the first commit, its conflict
+// staged, so continuing it replays the commit.
+func (g *chainGit) standResolved(dir, onto string) {
+	g.cmu.Lock()
+	defer g.cmu.Unlock()
+	branch := g.dirBranch(dir)
+	commits, _ := g.betweenLocked(onto, g.refs[branch])
+	todo := make([]string, len(commits))
+	for i, c := range commits {
+		todo[i] = c.SHA
+	}
+	g.rebases[dir] = &chainRebase{branch: branch, head: onto, todo: todo, stopped: &[2]string{g.commits[todo[0]].patch, "resolved"}}
+}
+
+// lastStart answers the commits the last rebase started in dir replayed,
+// and the parent each was made on.
+func (g *chainGit) lastStart(dir string) (commits, parents []string) {
+	g.cmu.Lock()
+	defer g.cmu.Unlock()
+	if len(g.starts[dir]) == 0 {
+		return nil, nil
+	}
+	commits = g.starts[dir][len(g.starts[dir])-1]
+	for _, c := range commits {
+		parents = append(parents, g.commits[c].parents[0])
+	}
+	return commits, parents
 }
 
 func (g *chainGit) ContinueRebase(_ context.Context, dir string) (gitclient.RebaseStep, error) {

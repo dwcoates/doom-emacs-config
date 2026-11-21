@@ -647,10 +647,13 @@ type DB interface {
 	// being worked on, waiting in line or not, dropping LEASE (its merge
 	// lease, empty for a merge that stepped aside from its waiting place)
 	// and keeping its progress record, releasing its repair slot to the
-	// next merge awaiting it, and answers where it now stands. RESOLVED,
-	// when not nil, is the rebase the merge's own conflict repair worked on,
-	// recorded on its entry in the same write.
-	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, workedOn []WorkspaceID, resolved *ResolvedRebase) (MergeReturn, error)
+	// next merge awaiting it, and answers where it now stands. The resolved
+	// rebase its entry carries stands as it was.
+	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, workedOn []WorkspaceID) (MergeReturn, error)
+	// RecordResolvedRebase records RESOLVED on a merge's entry: the rebase
+	// its own conflict repair works on, written as the repairing turn is
+	// handed over. Only a merge resolving its rebase's conflicts records one.
+	RecordResolvedRebase(ctx context.Context, repo RepoKey, id WorkspaceID, resolved ResolvedRebase) error
 	// ClearResolvedRebase retires the resolved rebase a merge's entry
 	// carries, answering whether it carried one.
 	ClearResolvedRebase(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)

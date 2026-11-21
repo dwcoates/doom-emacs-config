@@ -635,10 +635,16 @@ func TestAbortStandingRebase(t *testing.T) {
 		standingErr error
 		abortErr    error
 		busy        bool
-		want        bool
-		wantAbort   bool
-		wantError   string
-		wantInfo    string
+		// keep is abortStandingRebase's keepResolved; carries puts the
+		// merge's entry in line carrying a resolved rebase, and queueErr
+		// fails reading the queue.
+		keep      bool
+		carries   bool
+		queueErr  error
+		want      bool
+		wantAbort bool
+		wantError string
+		wantInfo  string
 	}{
 		{name: "a run with no worktree yet aborts nothing", noDir: true, standing: true},
 		{name: "a worktree with no rebase standing aborts nothing"},
@@ -647,6 +653,12 @@ func TestAbortStandingRebase(t *testing.T) {
 			wantInfo: "the rebase is left standing for the next run to clear once the turn ended"},
 		{name: "an unreadable worktree is left as git left it", standingErr: failure, wantError: "could not read whether a rebase stands in the merge's worktree"},
 		{name: "a rebase that will not abort is left as git left it", standing: true, abortErr: failure, wantError: "could not abort the rebase standing in the merge's worktree"},
+		{name: "a rebase the merge's own repair resolved is left standing for the merge that keeps its entry", standing: true, keep: true, carries: true,
+			wantInfo: "the rebase standing in the merge's worktree is the one its own conflict repair worked on; it is left standing for the next run to continue"},
+		{name: "a rebase no repair resolved is aborted for the merge that keeps its entry", standing: true, keep: true, want: true, wantAbort: true},
+		{name: "a resolved rebase of a merge that leaves its queue is aborted", standing: true, carries: true, want: true, wantAbort: true},
+		{name: "an entry that cannot be read leaves the rebase as git left it", standing: true, keep: true, queueErr: failure,
+			wantError: "could not read whether the merge's own repair resolved the rebase standing in its worktree"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -660,9 +672,18 @@ func TestAbortStandingRebase(t *testing.T) {
 			h.git.standing, h.git.standingErr, h.git.abortErr = tt.standing, tt.standingErr, tt.abortErr
 			h.git.mu.Unlock()
 			h.freeness.busy = tt.busy
+			if tt.keep || tt.carries {
+				enqueue(t, h)
+			}
+			if tt.carries {
+				h.db.carryResolved(t, h.repoKey(), theWorkspace, &wsm.ResolvedRebase{Tip: "tip-1", BranchHead: "head-1", Turn: "turn-1"})
+			}
+			h.db.mu.Lock()
+			h.db.queueReadErr = tt.queueErr
+			h.db.mu.Unlock()
 
 			// Act.
-			got := r.abortStandingRebase(context.Background(), "daemon.merge.abandoned", dlog.Context{"workspace": string(theWorkspace)})
+			got := r.abortStandingRebase(context.Background(), "daemon.merge.abandoned", dlog.Context{"workspace": string(theWorkspace)}, tt.keep)
 
 			// Assert.
 			if got != tt.want {
@@ -697,7 +718,7 @@ func TestDecideStandingRebase(t *testing.T) {
 		{name: "nothing standing with a stale resolved rebase rebases afresh", resolved: resolved, tip: "tip-1", want: noRebaseStanding},
 		{name: "a rebase no repair of the merge's own worked on is a cut run's leftover", standing: true, tip: "tip-1", want: abortCutLeftover},
 		{name: "the merge's own resolved rebase on the same tip is continued", standing: true, resolved: resolved, tip: "tip-1", want: continueResolved},
-		{name: "the merge's own resolved rebase whose target moved is aborted", standing: true, resolved: resolved, tip: "tip-2", want: abortTargetMoved},
+		{name: "the merge's own resolved rebase whose target moved is continued, then rebased", standing: true, resolved: resolved, tip: "tip-2", want: continueThenRebase},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -750,8 +771,8 @@ func TestSettleStandingRebase(t *testing.T) {
 			wantContinue: true, wantKept: true, wantVerdict: "continue_resolved", wantText: "it is continued, never started over"},
 		{name: "a cut run's leftover is aborted", standing: true,
 			wantAbort: true, wantVerdict: "abort_cut_leftover", wantText: "a rebase a cut run left standing for its turn was aborted"},
-		{name: "a resolved rebase whose target moved is aborted and cleared", standing: true, resolved: resolvedOn("tip-0"),
-			wantAbort: true, wantVerdict: "abort_target_moved", wantText: "the target moved since the merge's own conflict repair worked on the rebase"},
+		{name: "a resolved rebase whose target moved is continued and kept, never aborted", standing: true, resolved: resolvedOn("tip-0"),
+			wantContinue: true, wantKept: true, wantVerdict: "continue_then_rebase", wantText: "it is continued and kept, never aborted, and the branch then rebases onto the new tip"},
 		{name: "a resolved rebase no longer standing is cleared", resolved: resolvedOn("tip-1")},
 	}
 	for _, tc := range tests {
@@ -791,26 +812,33 @@ func TestSettleStandingRebaseFailures(t *testing.T) {
 	failure := errors.New("broke")
 	resolved := &wsm.ResolvedRebase{Tip: "tip-0", BranchHead: "head-1", Turn: "turn-1"}
 	tests := []struct {
-		name      string
-		arrange   func(h *harness)
-		wantText  string
-		wantKept  bool
-		wantAbort bool
+		name string
+		// carries is whether the entry records a resolved rebase, and
+		// standing whether a rebase stands in the worktree.
+		carries  bool
+		standing bool
+		arrange  func(h *harness)
+		wantText string
+		wantKept bool
 	}{
-		{name: "a rebase that cannot be read fails and changes nothing", arrange: func(h *harness) { h.git.standingErr = failure },
+		{name: "a rebase that cannot be read fails and changes nothing", carries: true, standing: true, arrange: func(h *harness) { h.git.standingErr = failure },
 			wantText: "reading whether a rebase stands", wantKept: true},
-		{name: "an entry that cannot be read fails and changes nothing", arrange: func(h *harness) { h.db.queueReadErr = failure },
+		{name: "an entry that cannot be read fails and changes nothing", carries: true, standing: true, arrange: func(h *harness) { h.db.queueReadErr = failure },
 			wantText: "reading whether the merge's own repair resolved", wantKept: true},
-		{name: "a resolved rebase that cannot be cleared fails before any abort", arrange: func(h *harness) { h.db.clearResolvedErr = failure },
-			wantText: "clearing the resolved rebase", wantKept: true},
-		{name: "an abort that fails is surfaced", arrange: func(h *harness) { h.git.abortErr = failure },
-			wantText: "aborting the resolved rebase standing", wantAbort: false},
+		{name: "a resolved rebase no longer standing that cannot be cleared fails", carries: true, arrange: func(h *harness) { h.db.clearResolvedErr = failure },
+			wantText: "clearing the resolved rebase recorded", wantKept: true},
+		{name: "a cut run's leftover whose abort fails is surfaced", standing: true, arrange: func(h *harness) { h.git.abortErr = failure },
+			wantText: "aborting the rebase a cut run left standing"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			h, r := settleWorld(t, resolved)
-			h.git.leftStanding = true
+			var carried *wsm.ResolvedRebase
+			if tc.carries {
+				carried = resolved
+			}
+			h, r := settleWorld(t, carried)
+			h.git.leftStanding = tc.standing
 			tc.arrange(h)
 
 			// Act
@@ -830,37 +858,78 @@ func TestSettleStandingRebaseFailures(t *testing.T) {
 			aborted := slices.Contains(h.git.rebaseCommands, "abort")
 			standing := h.git.leftStanding
 			h.git.mu.Unlock()
-			if aborted != tc.wantAbort || !standing {
-				t.Fatalf("aborted = %v, still standing = %v; want no abort, the rebase left as it stood", aborted, standing)
+			if aborted || standing != tc.standing {
+				t.Fatalf("aborted = %v, still standing = %v; want no abort, the worktree left as it stood", aborted, standing)
 			}
 		})
 	}
 }
 
-func TestAWaitingMergeKeepsTheRebaseItsOwnRepairResolvedOnTheTip(t *testing.T) {
-	// Arrange: C's worktree holds the rebase its own conflict repair worked
-	// on, onto the target's tip as it stands.
+func TestAWaitingMergeContinuesAndKeepsTheRebaseItsOwnRepairResolvedOnceTheTargetMoved(t *testing.T) {
+	// Arrange: C's worktree holds the rebase its own conflict repair
+	// resolved onto the target's tip, which the head's landing then moves.
 	w := newWaitingWorld(t, "ws-c")
-	w.land(t)
-	w.awaitPass(t)
-	tip := w.git.ref("master")
-	dir := w.dirs["ws-c"]
-	w.git.cmu.Lock()
-	w.git.rebases[dir] = &chainRebase{branch: "b-ws-c", head: tip}
-	w.git.cmu.Unlock()
-	w.h.db.carryResolved(t, w.h.repoKey(), "ws-c", &wsm.ResolvedRebase{Tip: tip, BranchHead: "head-c", Turn: "turn-c"})
+	dir, resolvedOn := w.dirs["ws-c"], w.git.ref("master")
+	original := w.git.ref("b-ws-c")
+	w.git.standResolved(dir, resolvedOn)
+	w.h.db.carryResolved(t, w.h.repoKey(), "ws-c", &wsm.ResolvedRebase{Tip: resolvedOn, BranchHead: original, Turn: "turn-c"})
 
 	// Act
-	w.h.o.rebaseWaitingMember(context.Background(), w.h.repoKey(), w.entryOf(t, "ws-c"))
+	w.land(t)
+	w.awaitPass(t)
 
 	// Assert
-	if standing, _ := w.git.RebaseInProgress(context.Background(), dir); !standing {
-		t.Fatal("the waiting pass aborted the rebase C's own repair resolved")
+	if standing, _ := w.git.RebaseInProgress(context.Background(), dir); standing {
+		t.Fatal("a rebase still stands in C's worktree")
 	}
-	if !w.recorded("info", "daemon.merge.rebase_waiting", "holds the rebase its own conflict repair worked on, on the target's tip; it keeps it this round") {
-		t.Fatal("keeping the resolved rebase was not recorded")
+	w.git.cmu.Lock()
+	aborts := w.git.aborts
+	w.git.cmu.Unlock()
+	if aborts != 0 {
+		t.Fatalf("aborts = %d, want the resolved rebase never aborted", aborts)
 	}
-	if got := w.entryOf(t, "ws-c").Resolved; got == nil {
-		t.Fatal("the waiting pass cleared the resolved rebase it kept")
+	commits, parents := w.git.lastStart(dir)
+	if len(commits) != 1 || commits[0] == original || parents[0] != resolvedOn {
+		t.Fatalf("the rebase onto the new tip replays %v (made on %v), want the resolved commit made on %s, not the original %s", commits, parents, resolvedOn, original)
+	}
+	if got := w.git.own(w.git.ref("master"), "b-ws-c"); !slices.Equal(got, []string{"w1"}) {
+		t.Fatalf("C carries %v on the new tip, want its one resolved commit", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase", "it is continued and kept, never aborted") ||
+		!w.recorded("info", "daemon.merge.rebase_waiting", "the waiting merge stands on the target's new tip") {
+		t.Fatal("the continuation and the rebase onto the new tip were not recorded")
+	}
+	if got := w.entryOf(t, "ws-c").Resolved; got != nil {
+		t.Fatalf("resolved = %+v, want it retired once its rebase finished", got)
+	}
+	if n := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); n != 0 {
+		t.Fatalf("C's session got %d conflict prompts, want none", n)
+	}
+}
+
+func TestAWaitingMergeWhoseResolvedRebaseMeetsAConflictGitOnlyLeavesItStanding(t *testing.T) {
+	// Arrange: C's resolved rebase stands with a later commit that
+	// conflicts, which a git-only pass cannot resolve.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.commitOn("b-ws-c", "w2")
+	w.git.conflict("w2", "base", "y.go")
+	dir, resolvedOn := w.dirs["ws-c"], w.git.ref("master")
+	w.git.standResolved(dir, resolvedOn)
+	w.h.db.carryResolved(t, w.h.repoKey(), "ws-c", &wsm.ResolvedRebase{Tip: resolvedOn, BranchHead: w.git.ref("b-ws-c"), Turn: "turn-c"})
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert
+	w.git.cmu.Lock()
+	aborts := w.git.aborts
+	w.git.cmu.Unlock()
+	if aborts != 0 {
+		t.Fatalf("aborts = %d, want the resolved rebase left standing", aborts)
+	}
+	if !loggedLike(w.h, logLike{level: "info", op: "daemon.merge.rebase_waiting", text: "the rebase its own repair resolved is left standing with its resolution",
+		context: map[string]string{"workspace": "ws-c", "kept": "true"}}) {
+		t.Fatal("leaving the resolved rebase standing was not recorded with its context")
 	}
 }

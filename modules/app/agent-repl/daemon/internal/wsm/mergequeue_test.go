@@ -3026,15 +3026,8 @@ func holdAsideLeaseErr(ctx context.Context, s *store, ws WorkspaceID, aside Merg
 }
 
 // returnRemediated returns WS to REPO's line with the merge lease it holds,
-// none when it holds none, as the orchestrator does, carrying no resolved
-// rebase.
+// none when it holds none, as the orchestrator does.
 func returnRemediated(ctx context.Context, s *store, repo RepoKey, ws WorkspaceID, workedOn []WorkspaceID) (MergeReturn, error) {
-	return returnRemediatedWith(ctx, s, repo, ws, workedOn, nil)
-}
-
-// returnRemediatedWith is returnRemediated carrying RESOLVED, the rebase the
-// merge's conflict repair worked on.
-func returnRemediatedWith(ctx context.Context, s *store, repo RepoKey, ws WorkspaceID, workedOn []WorkspaceID, resolved *ResolvedRebase) (MergeReturn, error) {
 	lease, held, err := s.Lease(ctx, ws)
 	if err != nil {
 		return MergeReturn{}, err
@@ -3043,7 +3036,7 @@ func returnRemediatedWith(ctx context.Context, s *store, repo RepoKey, ws Worksp
 	if held && lease.Holder == HolderMerge {
 		id = lease.ID
 	}
-	return s.ReturnRemediatedMerge(ctx, repo, ws, id, workedOn, resolved)
+	return s.ReturnRemediatedMerge(ctx, repo, ws, id, workedOn)
 }
 
 // returnedFixture is a queue of a head being worked on (merge 1), a merge
@@ -3280,7 +3273,7 @@ func TestReturnRemediatedMergeRefusesAWrongLease(t *testing.T) {
 			}
 
 			// Act
-			_, err = q.s.ReturnRemediatedMerge(ctx, q.repo, q.ws[2], tt.lease(held), nil, nil)
+			_, err = q.s.ReturnRemediatedMerge(ctx, q.repo, q.ws[2], tt.lease(held), nil)
 
 			// Assert
 			if err == nil {

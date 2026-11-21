@@ -19,12 +19,18 @@ import (
 // rebase as a cut run's leftover, aborted the resolution, and met the same
 // conflict on the same tip again, forever.
 //
-// So the return writes the fact on the queue entry itself, in the same
-// transaction (ReturnRemediatedMerge): the tip the rebase replays onto, the
-// branch's head before it, and the repairing turn. The entry outlives every
-// requeue, so whichever run takes the merge up next reads the fact rather
-// than guessing from the worktree, and the fact goes with the entry.
-// ClearResolvedRebase retires it once a run decided on the standing rebase.
+// So the fact is written on the queue entry itself, the moment the repairing
+// turn is handed over (RecordResolvedRebase): the tip the rebase replays
+// onto, the branch's head before it, and the repairing turn. It is the
+// merge's own state from then on, whatever cuts the run that prompted it --
+// a step aside, a requeue, a handover or the daemon's exit (2026-11-20:
+// gh-workflow-run-subscribe's waiting merge had its resolving rebase cut by a
+// handover while its turn resolved it, returned to the line carrying
+// nothing, and the next landing aborted the resolution as a cut run's
+// leftover). The entry outlives every requeue, so whichever run takes the
+// merge up next reads the fact rather than guessing from the worktree, and
+// the fact goes with the entry. ClearResolvedRebase retires it once the
+// rebase it names has finished, or no longer stands.
 
 // mergeQueueResolvedRebaseDDL is the layout-179 addition: the rebase a
 // merge's own conflict repair worked on (ResolvedRebase). IT IS ADDITIVE: the
@@ -77,9 +83,60 @@ func decodeResolvedRebase(row string, tip, head, turn sql.NullString) (*Resolved
 	return &r, nil
 }
 
-// errResolvedRebaseAside refuses a resolved rebase written on a return from
-// any repair but a step aside for the head's conflicts.
-var errResolvedRebaseAside = errors.New("wsm: only a merge returning from resolving its own rebase's conflicts carries a resolved rebase")
+// errResolvedRebaseRefused refuses a resolved rebase recorded on a merge
+// that is resolving no conflicts of its own rebase.
+var errResolvedRebaseRefused = errors.New("wsm: only a merge resolving its own rebase's conflicts records a resolved rebase")
+
+// resolvesConflicts reports whether an entry in STATE, stepped aside for
+// ASIDE, may be resolving its own rebase's conflicts: the merge at work
+// (resolving in place, before any step aside), or one stepped aside for its
+// conflicts, from the head or from its waiting place. A merge waiting in
+// line runs a git-only rebase, which prompts nothing.
+func resolvesConflicts(state MergeQueueState, aside MergeAside) bool {
+	switch {
+	case state == MergeAdmitted && aside == MergeAsideNone:
+		return true
+	case state == MergeRemediating:
+		return aside == MergeAsideConflicts || aside == MergeAsideWaitingConflicts
+	}
+	return false
+}
+
+// RecordResolvedRebase records RESOLVED on ID's entry in REPO's queue,
+// replacing any it carried. A malformed resolved rebase and an entry
+// resolving no conflicts (errResolvedRebaseRefused) are refusals recorded at
+// ERROR; a workspace with no entry is ErrNotFound. None of them writes
+// anything.
+func (s *store) RecordResolvedRebase(ctx context.Context, repo RepoKey, id WorkspaceID, resolved ResolvedRebase) error {
+	const op = "daemon.wsm.record_resolved_rebase"
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
+	if err != nil {
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "resolved_tip": resolved.Tip,
+		"resolved_branch_head": resolved.BranchHead, "resolved_turn": string(resolved.Turn)}
+	if err := resolved.validate(); err != nil {
+		s.log.Error(op, "refused a malformed resolved rebase", withError(fields, err))
+		return err
+	}
+	tip, head, turn := resolvedRebaseColumns(&resolved)
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+		_, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil {
+			return err
+		}
+		var aside int64
+		if err := tx.QueryRowContext(ctx, `SELECT aside FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).Scan(&aside); err != nil {
+			return err
+		}
+		if !resolvesConflicts(state, MergeAside(aside)) {
+			return fmt.Errorf("%w: workspace %s in repo %q is %s, stepped aside for %s", errResolvedRebaseRefused, id, key, state, MergeAside(aside))
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET resolved_tip = ?, resolved_branch_head = ?, resolved_turn = ?
+WHERE repo_key = ? AND workspace_id = ?`, tip, head, turn, key, id)
+		return err
+	})
+}
 
 // ClearResolvedRebase retires the resolved rebase ID's entry in REPO's queue
 // carries, answering whether it carried one. A workspace with no entry is

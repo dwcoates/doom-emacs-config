@@ -213,20 +213,19 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	if err != nil {
 		return backgroundEnd{err: fmt.Errorf("merge: resolving %s's tip: %w", subject.targetDir, err)}
 	}
-	// A REBASE THE MERGE'S OWN REPAIR RESOLVED ON THIS TIP IS KEPT: the
-	// merge continues it once it heads the queue, where its conflicts are
-	// prompted, never in a git-only rebase that would abort it.
+	// A REBASE THE MERGE'S OWN REPAIR RESOLVED IS CONTINUED AND KEPT, before
+	// the branch rebases onto the tip from its resolved commits (rebaseFrom).
+	// Its worktree stands mid-rebase, so the requester's-own checks below
+	// read only a worktree with no rebase standing.
 	resolved, err := r.settleStandingRebase(ctx, tip)
 	if err != nil {
 		return backgroundEnd{err: err}
 	}
-	if resolved != nil {
-		log.Info(op, "a waiting merge's worktree holds the rebase its own conflict repair worked on, on the target's tip; it keeps it this round and continues it when it heads the queue", withField(fields, "onto", tip))
-		return backgroundEnd{}
-	}
-	if skip := r.backgroundSkip(ctx); skip != "" {
-		log.Info(op, "a waiting merge's worktree is not ready to rebase; it keeps its base this round", withField(fields, "why", skip))
-		return backgroundEnd{}
+	if resolved == nil {
+		if skip := r.backgroundSkip(ctx); skip != "" {
+			log.Info(op, "a waiting merge's worktree is not ready to rebase; it keeps its base this round", withField(fields, "why", skip))
+			return backgroundEnd{}
+		}
 	}
 	if err := r.takeSession(ctx); err != nil {
 		return backgroundEnd{err: err}
@@ -234,21 +233,26 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	if err := r.openLedger(ctx); err != nil {
 		return backgroundEnd{err: err}
 	}
-	// A BRANCH THE TARGET ALREADY CONTAINS is left to the front, which
-	// concludes it with nothing to land (alreadyOn).
-	contained, err := r.landedOn(ctx, tip, targetBranch)
-	if err != nil {
-		return backgroundEnd{err: err}
+	if resolved == nil {
+		// A BRANCH THE TARGET ALREADY CONTAINS is left to the front, which
+		// concludes it with nothing to land (alreadyOn).
+		contained, err := r.landedOn(ctx, tip, targetBranch)
+		if err != nil {
+			return backgroundEnd{err: err}
+		}
+		if contained {
+			return backgroundEnd{}
+		}
 	}
-	if contained {
-		return backgroundEnd{}
-	}
-	if r.resolving {
+	switch {
+	case r.resolving:
 		log.Info(op, "the merge holds the resolving-conflicts slot; it rebases onto the target's tip, its session resolving the conflicts", withField(fields, "onto", tip))
-	} else {
+	case resolved != nil:
+		log.Info(op, "a waiting merge's worktree holds the rebase its own conflict repair worked on; it is continued and kept, then rebased onto the target's tip", withField(fields, "onto", tip))
+	default:
 		log.Info(op, "a landing moved the target; the waiting merge rebases onto its new tip", withField(fields, "onto", tip))
 	}
-	gaveUp, err := r.rebase(ctx, tip, targetBranch)
+	gaveUp, err := r.untilCommitted(ctx, tip, targetBranch, func() (*outcome, error) { return r.rebaseFrom(ctx, tip, targetBranch, resolved) })
 	var conflicted *waitingConflict
 	if errors.As(err, &conflicted) {
 		return backgroundEnd{conflict: conflicted}
@@ -267,10 +271,13 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 }
 
 // waitingConflict is the end of a git-only background rebase that met a
-// conflict: the commit it conflicted on and the files.
+// conflict: the commit it conflicted on and the files. KEPT is a conflict met
+// continuing the rebase the merge's own conflict repair worked on, which is
+// left standing rather than aborted, so its resolution is never lost.
 type waitingConflict struct {
 	commit string
 	files  []string
+	kept   bool
 }
 
 func (c *waitingConflict) Error() string {
@@ -316,19 +323,23 @@ func (r *run) settleBackground(ctx context.Context, end backgroundEnd) {
 }
 
 // stepAsideWaiting ends a git-only background rebase that met CONFLICT: the
-// rebase is aborted so the branch keeps its base, the merge gives back what
-// the rebase held, and it steps aside out of line for the resolving-conflicts
-// slot, holding it or waiting for it (wsm.StepAsideMerge,
-// MergeAsideWaitingConflicts). A step that fails is recorded at ERROR, and
-// the merge keeps its base and its place, meeting the conflict at the head.
+// rebase is aborted so the branch keeps its base -- or, for the rebase the
+// merge's own repair worked on (kept), left standing with its resolution --
+// the merge gives back what the rebase held, and it steps aside out of line
+// for the resolving-conflicts slot, holding it or waiting for it
+// (wsm.StepAsideMerge, MergeAsideWaitingConflicts), whose resolving rebase
+// goes on with whatever stands. A step that fails is recorded at ERROR, and
+// the merge keeps its place, meeting the conflict at the head.
 func (r *run) stepAsideWaiting(ctx context.Context, conflict *waitingConflict) {
 	const op = "daemon.merge.rebase_waiting"
 	o, log := r.o, r.o.log(ctx, r.ws)
-	fields := dlog.Context{"workspace": string(r.ws), "repo": string(r.repo), "commit": conflict.commit, "files": len(conflict.files)}
-	if err := r.git.AbortRebase(ctx, r.subject.dir); err != nil {
-		log.Error(op, "could not abort the waiting merge's conflicted rebase; it is left as git left it", withField(fields, "error", err.Error()))
-		r.giveBack(ctx)
-		return
+	fields := dlog.Context{"workspace": string(r.ws), "repo": string(r.repo), "commit": conflict.commit, "files": len(conflict.files), "kept": conflict.kept}
+	if !conflict.kept {
+		if err := r.git.AbortRebase(ctx, r.subject.dir); err != nil {
+			log.Error(op, "could not abort the waiting merge's conflicted rebase; it is left as git left it", withField(fields, "error", err.Error()))
+			r.giveBack(ctx)
+			return
+		}
 	}
 	r.giveBack(ctx)
 	var slot wsm.MergeSlot
@@ -342,10 +353,14 @@ func (r *run) stepAsideWaiting(ctx context.Context, conflict *waitingConflict) {
 	}
 	fields["slot"] = slot.String()
 	o.registerRemediation(r.ws, &remediation{repo: r.repo, waiting: true})
+	settled := "it was aborted"
+	if conflict.kept {
+		settled = "the rebase its own repair resolved is left standing with its resolution"
+	}
 	if slot.Awaiting() {
-		log.Info(op, "the waiting merge's rebase conflicted; it was aborted, and the merge waits out of line for the resolving-conflicts slot, in order", fields)
+		log.Info(op, "the waiting merge's rebase conflicted; "+settled+", and the merge waits out of line for the resolving-conflicts slot, in order", fields)
 	} else {
-		log.Info(op, "the waiting merge's rebase conflicted; it was aborted, and the merge holds the resolving-conflicts slot", fields)
+		log.Info(op, "the waiting merge's rebase conflicted; "+settled+", and the merge holds the resolving-conflicts slot", fields)
 	}
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		log.Error(op, "could not republish the queue", withField(fields, "error", err.Error()))
@@ -429,7 +444,7 @@ func (r *run) standDownBackground(ctx context.Context) {
 	const op = "daemon.merge.rebase_waiting"
 	log := r.o.log(ctx, r.ws)
 	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID)}
-	if r.abortStandingRebase(ctx, op, fields) {
+	if r.abortStandingRebase(ctx, op, fields, true) {
 		log.Info(op, "the daemon's exit cut a waiting merge's rebase; it was aborted, and the branch keeps its base", fields)
 	}
 	r.giveBack(ctx)
@@ -440,9 +455,12 @@ func (r *run) standDownBackground(ctx context.Context) {
 // through the git client itself, because the run's own gate is stopped by the
 // time a run is let go. A rebase the workspace's own turn still works under is
 // left standing, recorded at INFO, for the next run to settle
-// (settleStandingRebase). A rebase that cannot be read or aborted is recorded at
-// ERROR under OP with FIELDS, and left as git left it.
-func (r *run) abortStandingRebase(ctx context.Context, op string, fields dlog.Context) bool {
+// (settleStandingRebase). So is, when KEEPRESOLVED (the merge keeps its queue
+// entry), the rebase its own conflict repair worked on, as its entry records
+// it: only a rebase no repair worked on is a cut run's to abort. A rebase or
+// an entry that cannot be read, and a rebase that cannot be aborted, are
+// recorded at ERROR under OP with FIELDS, and left as git left them.
+func (r *run) abortStandingRebase(ctx context.Context, op string, fields dlog.Context, keepResolved bool) bool {
 	log := r.o.log(ctx, r.ws)
 	r.mu.Lock()
 	dir := r.subject.dir
@@ -469,6 +487,18 @@ func (r *run) abortStandingRebase(ctx context.Context, op string, fields dlog.Co
 			withField(withField(fields, "dir", dir), "blockers", r.o.deps.Freeness.Blockers(r.ws)))
 		return false
 	}
+	if keepResolved {
+		entry, err := r.o.entryOf(ctx, r.repo, r.ws)
+		if err != nil {
+			log.Error(op, "could not read whether the merge's own repair resolved the rebase standing in its worktree; it is left as git left it", withField(withField(fields, "dir", dir), "error", err.Error()))
+			return false
+		}
+		if resolved := entry.Resolved; resolved != nil {
+			log.Info(op, "the rebase standing in the merge's worktree is the one its own conflict repair worked on; it is left standing for the next run to continue",
+				withField(withField(withField(fields, "dir", dir), "resolved_tip", resolved.Tip), "resolved_turn", string(resolved.Turn)))
+			return false
+		}
+	}
 	if err := r.o.deps.Git.AbortRebase(ctx, dir); err != nil {
 		log.Error(op, "could not abort the rebase standing in the merge's worktree; it is left as git left it", withField(withField(fields, "dir", dir), "error", err.Error()))
 		return false
@@ -486,13 +516,14 @@ const (
 	// continueResolved: the rebase is the one the merge's own conflict repair
 	// worked on, onto the tip the run would rebase onto; it is continued.
 	continueResolved
+	// continueThenRebase: the merge's own repair worked on the rebase, and
+	// the target moved since; it is continued onto the tip it was resolved
+	// on and kept, and the branch then rebases onto the new tip from its
+	// resolved commits.
+	continueThenRebase
 	// abortCutLeftover: no repair of the merge's own worked on the rebase,
 	// so a cut run left it standing; it is aborted.
 	abortCutLeftover
-	// abortTargetMoved: the merge's own repair worked on the rebase, but the
-	// target moved since; it is aborted and the branch rebases onto the new
-	// tip.
-	abortTargetMoved
 )
 
 // String names the verdict in records.
@@ -502,10 +533,10 @@ func (v standingVerdict) String() string {
 		return "none_standing"
 	case continueResolved:
 		return "continue_resolved"
+	case continueThenRebase:
+		return "continue_then_rebase"
 	case abortCutLeftover:
 		return "abort_cut_leftover"
-	case abortTargetMoved:
-		return "abort_target_moved"
 	}
 	panic(fmt.Sprintf("merge: standingVerdict(%d) names no verdict", int(v)))
 }
@@ -518,8 +549,10 @@ func (v standingVerdict) String() string {
 // "RESOLVED BY THIS MERGE'S REPAIR" IS A RECORDED FACT, never read off the
 // worktree (2026-11-20: sidebar-roster-streams' resolved rebase was taken for
 // a cut run's leftover, aborted at every start, and its conflict met again on
-// the same tip, forever). A resolved rebase is continued unless the target
-// moved since; any other standing rebase is a cut run's, and aborted.
+// the same tip, forever). A resolved rebase is ALWAYS continued, and a moved
+// target only adds the rebase onto its new tip after it (2026-11-20:
+// gh-workflow-run-subscribe's resolution was aborted at every landing); any
+// other standing rebase is a cut run's, and aborted.
 func decideStandingRebase(standing bool, resolved *wsm.ResolvedRebase, tip string) standingVerdict {
 	switch {
 	case !standing:
@@ -527,7 +560,7 @@ func decideStandingRebase(standing bool, resolved *wsm.ResolvedRebase, tip strin
 	case resolved == nil:
 		return abortCutLeftover
 	case resolved.Tip != tip:
-		return abortTargetMoved
+		return continueThenRebase
 	}
 	return continueResolved
 }
@@ -537,10 +570,9 @@ func decideStandingRebase(standing bool, resolved *wsm.ResolvedRebase, tip strin
 // rebase to continue, nil when the run rebases afresh. It is called only by a
 // run that holds the workspace's lease with the workspace free -- no turn and
 // no detached work, so no writer -- and before the run reads or rebases the
-// tree: a fresh rebase never starts over another's. A resolved rebase the run
-// does not continue is cleared from the entry, since nothing of it stands
-// once the run rebases afresh. The decision is recorded at INFO with its
-// context.
+// tree: a fresh rebase never starts over another's. A resolved rebase that no
+// longer stands is cleared from the entry. The decision is recorded at INFO
+// with its context.
 func (r *run) settleStandingRebase(ctx context.Context, tip string) (*wsm.ResolvedRebase, error) {
 	const op = "daemon.merge.rebase"
 	dir := r.subject.dir
@@ -560,26 +592,24 @@ func (r *run) settleStandingRebase(ctx context.Context, tip string) (*wsm.Resolv
 		fields["resolved_tip"], fields["resolved_branch_head"], fields["resolved_turn"] = resolved.Tip, resolved.BranchHead, string(resolved.Turn)
 	}
 	log := r.o.log(ctx, r.ws)
-	if verdict == continueResolved {
+	switch verdict {
+	case continueResolved:
 		log.Info(op, "the rebase the merge's own conflict repair worked on stands on the tip it rebases onto; it is continued, never started over", fields)
 		return resolved, nil
-	}
-	if resolved != nil {
-		if _, err := r.o.deps.DB.ClearResolvedRebase(ctx, r.repo, r.ws); err != nil {
-			return nil, fmt.Errorf("merge: clearing the resolved rebase recorded for %s: %w", dir, err)
-		}
-	}
-	switch verdict {
+	case continueThenRebase:
+		log.Info(op, "the target moved since the merge's own conflict repair worked on the rebase standing; it is continued and kept, never aborted, and the branch then rebases onto the new tip", fields)
+		return resolved, nil
 	case abortCutLeftover:
 		if err := r.git.AbortRebase(ctx, dir); err != nil {
 			return nil, fmt.Errorf("merge: aborting the rebase a cut run left standing in %s: %w", dir, err)
 		}
 		log.Info(op, "a rebase a cut run left standing for its turn was aborted now that the workspace is free; the branch is back at its base", fields)
-	case abortTargetMoved:
-		if err := r.git.AbortRebase(ctx, dir); err != nil {
-			return nil, fmt.Errorf("merge: aborting the resolved rebase standing in %s, whose target moved: %w", dir, err)
+	case noRebaseStanding:
+		if resolved != nil {
+			if _, err := r.o.deps.DB.ClearResolvedRebase(ctx, r.repo, r.ws); err != nil {
+				return nil, fmt.Errorf("merge: clearing the resolved rebase recorded for %s, which no longer stands: %w", dir, err)
+			}
 		}
-		log.Info(op, "the target moved since the merge's own conflict repair worked on the rebase standing; it was aborted, and the branch rebases onto the new tip", fields)
 	}
 	return nil, nil
 }
