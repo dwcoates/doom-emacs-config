@@ -1512,3 +1512,20 @@ func TestTheGithubWorkflowRunsStepIsAdditiveAndCreatesBothTables(t *testing.T) {
 		}
 	}
 }
+
+func TestTheUserAttentionStepIsAdditiveAndCreatesItsTable(t *testing.T) {
+	// Arrange
+	step := migrationTo(t, 186)
+	path := fixtureAt(t, 185)
+
+	// Act
+	execRaw(t, path, step.DDL)
+
+	// Assert
+	if step.Name != "user_attention" || step.Kind != MigrationAdditive {
+		t.Fatalf("migration 186 = %+v, want the user attention, additive", step)
+	}
+	if got := rawScalar[int](t, path, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'user_attention'`); got != 1 {
+		t.Fatalf("table user_attention exists %d times, want once", got)
+	}
+}
