@@ -154,6 +154,19 @@ func TestBaselineRefuses(t *testing.T) {
 			want:    "the suites e2e-kit measured no coverage system",
 		},
 		{
+			name: "a run of every suite with no cover root",
+			root: func(*testing.T) string { return "" },
+			tool: func(c *[][]string) Runner { return profileTool(mergedProfile, c) },
+			want: "cover: a coverage run of every suite has no cover root",
+		},
+		{
+			name: "a selection with no cover root that ran a Go suite",
+			root: func(*testing.T) string { return "" },
+			tool: func(c *[][]string) Runner { return profileTool(mergedProfile, c) },
+			sel:  Selection{Suites: []string{"daemon", "webapp"}},
+			want: "cover: the run wrote no cover root, though it ran the Go suites of daemon, webapp",
+		},
+		{
 			name: "a merged profile without its mode line",
 			root: counterTree,
 			tool: func(c *[][]string) Runner { return profileTool("agent-repld/a.go:1.1,2.1 1 1\n", c) },
@@ -729,5 +742,118 @@ func TestSelectionOf(t *testing.T) {
 				t.Fatalf("SelectionOf = %+v, args %v; want %+v, %v", got, got.Args(), tt.want, tt.wantArgs)
 			}
 		})
+	}
+}
+
+func TestCoverRoot(t *testing.T) {
+	tests := []struct {
+		name string
+		// work makes the run's work directory.
+		work     func(t *testing.T) string
+		sel      Selection
+		wantRoot bool
+		want     string
+	}{
+		{name: "a run that wrote its cover root", work: func(t *testing.T) string {
+			w := t.TempDir()
+			if err := os.Mkdir(filepath.Join(w, "cover"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			return w
+		}, sel: Selection{Every: true}, wantRoot: true},
+		{name: "a selection that wrote none", work: func(t *testing.T) string { return t.TempDir() }, sel: Selection{Suites: []string{"webapp"}}},
+		{name: "a run of every suite that wrote none", work: func(t *testing.T) string { return t.TempDir() }, sel: Selection{Every: true},
+			want: "cover: a coverage run of every suite wrote no cover root at "},
+		{name: "a cover root that cannot be read", work: func(t *testing.T) string {
+			w := filepath.Join(t.TempDir(), "work")
+			if err := os.WriteFile(w, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return w
+		}, sel: Selection{Suites: []string{"webapp"}}, want: "cover: read the run's cover root: "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			work := tt.work(t)
+
+			// Act
+			root, err := CoverRoot(BaselineArgs{Work: work, Selection: tt.sel})
+
+			// Assert
+			if tt.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.want) || root != "" {
+					t.Fatalf("root %q, err %v; want no root and %q", root, err, tt.want)
+				}
+				return
+			}
+			want := ""
+			if tt.wantRoot {
+				want = filepath.Join(work, "cover")
+			}
+			if err != nil || root != want {
+				t.Fatalf("root %q, err %v; want %q", root, err, want)
+			}
+		})
+	}
+}
+
+// webappOnlyWork is a run's work directory as a webapp-only coverage
+// selection leaves it: the webapp's unit report, and no cover root.
+func webappOnlyWork(t *testing.T) string {
+	t.Helper()
+	work := t.TempDir()
+	writeReport(t, VitestCoverage(work, "webapp"), statementsJSON("/w/src/a.ts", 1, 1, 0))
+	return work
+}
+
+// The run of 2026-11-20 that failed: `-suite webapp -coverage` wrote no
+// work/cover, and the baseline failed walking it for the e2e webapp layer.
+func TestRunBaselineOfAWebappSelectionWithoutACoverRoot(t *testing.T) {
+	// Arrange
+	work := webappOnlyWork(t)
+	out := filepath.Join(t.TempDir(), "coverage-baseline.json")
+	var calls [][]string
+	a := BaselineArgs{Module: "/m", Work: work, Commit: "c", Out: out, Selection: Selection{Suites: []string{"webapp"}}}
+
+	// Act
+	_, err := RunBaseline(profileTool(mergedProfile, &calls), a, map[string]string{"agent-repld": "daemon"}, []string{"webapp", "shim"}, time.Now())
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("merged Go counters %v of a run that wrote none", calls)
+	}
+	got, err := redundancy.ReadBaseline(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, ok := got.Systems["webapp"]
+	if len(got.Systems) != 1 || !ok {
+		t.Fatalf("baseline = %+v, want the webapp alone", got.Systems)
+	}
+	if !w.Provisional || !strings.Contains(w.Reason, "no e2e webapp layer") || !strings.Contains(w.Reason, "a partial measurement") {
+		t.Fatalf("webapp = %+v, want provisional for its missing layer and the selection", w)
+	}
+}
+
+func TestRunBaselineOfEverySuiteWithoutACoverRootFails(t *testing.T) {
+	// Arrange
+	work := webappOnlyWork(t)
+	out := filepath.Join(t.TempDir(), "coverage-baseline.json")
+	var calls [][]string
+	a := BaselineArgs{Module: "/m", Work: work, Commit: "c", Out: out, Selection: Selection{Every: true}}
+
+	// Act
+	_, err := RunBaseline(profileTool(mergedProfile, &calls), a, map[string]string{"agent-repld": "daemon"}, []string{"webapp"}, time.Now())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "a coverage run of every suite wrote no cover root at "+filepath.Join(work, "cover")) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(out); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("a failed merge wrote %s (stat: %v)", out, statErr)
 	}
 }

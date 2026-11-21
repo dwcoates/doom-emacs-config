@@ -10,8 +10,10 @@ package cover
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -82,7 +84,8 @@ func (s Selection) goTiers() string {
 
 // BaselineInput is what one merge needs.
 type BaselineInput struct {
-	// CoverRoot holds every Go counter directory of the run, at any depth.
+	// CoverRoot holds every Go counter directory of the run, at any depth;
+	// "" when the run wrote none, which only a selection may (CoverRoot).
 	CoverRoot string
 	// GoSystems maps each Go coverage system's module path to its suite.
 	GoSystems map[string]string
@@ -100,13 +103,22 @@ type BaselineInput struct {
 // run is reported when some selected suite's counters reach it.
 func Baseline(goTool Runner, in BaselineInput) (*redundancy.BaselineFile, error) {
 	out := &redundancy.BaselineFile{Commit: in.Commit, Measured: in.Now.UTC().Format(time.RFC3339), Systems: map[string]redundancy.SystemBaseline{}}
-	dirs, err := goprofile.CounterDirs(in.CoverRoot)
-	if err != nil {
-		return nil, err
+	if in.CoverRoot == "" && in.Selection.Every {
+		return nil, errors.New("cover: a coverage run of every suite has no cover root")
+	}
+	var dirs []string
+	if in.CoverRoot != "" {
+		var err error
+		if dirs, err = goprofile.CounterDirs(in.CoverRoot); err != nil {
+			return nil, err
+		}
 	}
 	expected := false
 	for _, suite := range in.GoSystems {
 		expected = expected || in.Selection.Ran(suite)
+	}
+	if in.CoverRoot == "" && expected {
+		return nil, fmt.Errorf("cover: the run wrote no cover root, though it ran the Go suites of %s", strings.Join(in.Selection.Suites, ", "))
 	}
 	if len(dirs) == 0 && expected {
 		return nil, fmt.Errorf("cover: %s holds no coverage counters", in.CoverRoot)
@@ -407,9 +419,13 @@ func vitestReports(work, coverRoot, name string, sel Selection) (VitestReports, 
 		}
 	}
 	if name == "webapp" {
-		layer, err := webappLayerReports(coverRoot)
-		if err != nil {
-			return VitestReports{}, false, err
+		// A run with no cover root ("", CoverRoot) measured no layer.
+		var layer []string
+		if coverRoot != "" {
+			var err error
+			if layer, err = webappLayerReports(coverRoot); err != nil {
+				return VitestReports{}, false, err
+			}
 		}
 		r.Tiers["e2e webapp layer"] = layer
 		if len(layer) == 0 && sel.Ran(name) {
@@ -428,6 +444,26 @@ func vitestReports(work, coverRoot, name string, sel Selection) (VitestReports, 
 	}
 	r.Missing = joinReasons(missing...)
 	return r, true, nil
+}
+
+// CoverRoot is where a finished coverage run left its Go counters, the e2e
+// webapp layer's reports and the shim's v8 profiles: the work directory's
+// cover/, or "" when the run wrote none. A selection that ran no Go suite and
+// no e2e suite (a webapp-only run) never creates it, and then has no Go or e2e
+// reach to report; its lines stay provisional (Selection.partial). A run of
+// every suite always writes it, so a missing one fails that run.
+func CoverRoot(a BaselineArgs) (string, error) {
+	root := filepath.Join(a.Work, "cover")
+	_, err := os.Stat(root)
+	switch {
+	case err == nil:
+		return root, nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return "", fmt.Errorf("cover: read the run's cover root: %w", err)
+	case a.Selection.Every:
+		return "", fmt.Errorf("cover: a coverage run of every suite wrote no cover root at %s: its Go counters and e2e reports are missing", root)
+	}
+	return "", nil
 }
 
 // webappLayerReports is every run-*.json under every WebappLayerDir/driver-*
@@ -471,7 +507,11 @@ func SystemLines(f *redundancy.BaselineFile) []string {
 
 // RunBaseline merges a finished coverage run into a baseline file at a.Out.
 func RunBaseline(goTool Runner, a BaselineArgs, goSystems map[string]string, vitest []string, now time.Time) (*redundancy.BaselineFile, error) {
-	in := BaselineInput{CoverRoot: filepath.Join(a.Work, "cover"), GoSystems: goSystems, Vitest: map[string]VitestReports{}, Selection: a.Selection, Commit: a.Commit, Now: now}
+	root, err := CoverRoot(a)
+	if err != nil {
+		return nil, err
+	}
+	in := BaselineInput{CoverRoot: root, GoSystems: goSystems, Vitest: map[string]VitestReports{}, Selection: a.Selection, Commit: a.Commit, Now: now}
 	for _, name := range vitest {
 		r, ok, err := vitestReports(a.Work, in.CoverRoot, name, a.Selection)
 		if err != nil {

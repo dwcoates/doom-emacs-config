@@ -125,3 +125,17 @@ func TestShimE2EReachRefuses(t *testing.T) {
 		})
 	}
 }
+
+func TestShimE2EReachOfARunWithNoCoverRootAnswersNone(t *testing.T) {
+	// Arrange
+	ran := false
+	run := func(string, string, ...string) ([]byte, error) { ran = true; return nil, nil }
+
+	// Act
+	lines, err := ShimE2EReach(run, "/no/c8", "", t.TempDir())
+
+	// Assert
+	if err != nil || lines != nil || ran {
+		t.Fatalf("lines %v, err %v, ran c8 %t; want none of them", lines, err, ran)
+	}
+}
