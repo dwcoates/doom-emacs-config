@@ -790,7 +790,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * first vendor reply is timed by the send ledger below, and every watch
    * carries the figures as its measurements frames.
    */
-  const measurements = new Measurements(deps.nowMs, processHeap);
+  const measurements = new Measurements(deps.nowMs, processHeap, deps.env.configDir);
   if (deps.eventLoopSampling !== undefined) {
     const { wait, monoMs, signal } = deps.eventLoopSampling;
     void sampleEventLoop(measurements, wait, monoMs, signal);

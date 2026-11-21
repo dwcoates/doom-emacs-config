@@ -44,7 +44,10 @@ type ReportVendorSpendRequest struct {
 	// The run's calls, by what they were. At least one; every entry names its
 	// model, agent, cause and cache outcome, a cold reason exactly when its
 	// outcome is not WARM, and at least one call.
-	Spend         []*v11.VendorSpend `protobuf:"bytes,2,rep,name=spend,proto3" json:"spend,omitempty"`
+	Spend []*v11.VendorSpend `protobuf:"bytes,2,rep,name=spend,proto3" json:"spend,omitempty"`
+	// The account root the run billed to: the `CLAUDE_CONFIG_DIR` it ran
+	// under. Required; the daemon labels the spend with the account it names.
+	ConfigDir     string `protobuf:"bytes,3,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -91,6 +94,13 @@ func (x *ReportVendorSpendRequest) GetSpend() []*v11.VendorSpend {
 		return x.Spend
 	}
 	return nil
+}
+
+func (x *ReportVendorSpendRequest) GetConfigDir() string {
+	if x != nil {
+		return x.ConfigDir
+	}
+	return ""
 }
 
 type ReportVendorSpendResponse struct {
@@ -446,10 +456,12 @@ var File_agentrepl_v1_endpoint_report_vendor_spend_proto protoreflect.FileDescri
 
 const file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDesc = "" +
 	"\n" +
-	"/agentrepl/v1/endpoint_report_vendor_spend.proto\x12\fagentrepl.v1\x1a\"conversation/v1/vendor_spend.proto\x1a\x1cworkspace/v1/workspace.proto\"\x88\x01\n" +
+	"/agentrepl/v1/endpoint_report_vendor_spend.proto\x12\fagentrepl.v1\x1a\"conversation/v1/vendor_spend.proto\x1a\x1cworkspace/v1/workspace.proto\"\xa7\x01\n" +
 	"\x18ReportVendorSpendRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x122\n" +
-	"\x05spend\x18\x02 \x03(\v2\x1c.conversation.v1.VendorSpendR\x05spend\"\xa7\x01\n" +
+	"\x05spend\x18\x02 \x03(\v2\x1c.conversation.v1.VendorSpendR\x05spend\x12\x1d\n" +
+	"\n" +
+	"config_dir\x18\x03 \x01(\tR\tconfigDir\"\xa7\x01\n" +
 	"\x19ReportVendorSpendResponse\x12B\n" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.ReportVendorSpendSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.ReportVendorSpendErrorH\x00R\x05errorB\b\n" +

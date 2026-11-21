@@ -274,7 +274,11 @@ type ShimMeasurements struct {
 	// measurements frame stating it (after the opening frames), so whatever
 	// the daemon learns from a later frame (a keep-alive's answer, a turn's
 	// end) it learns with that call's spend already folded.
-	VendorSpend   []*v1.VendorSpend `protobuf:"bytes,5,rep,name=vendor_spend,json=vendorSpend,proto3" json:"vendor_spend,omitempty"`
+	VendorSpend []*v1.VendorSpend `protobuf:"bytes,5,rep,name=vendor_spend,json=vendorSpend,proto3" json:"vendor_spend,omitempty"`
+	// The account root this shim's vendor calls bill to: its
+	// `CLAUDE_CONFIG_DIR`. The same in every frame of one process's lifetime;
+	// the daemon labels the spend with the account it names.
+	ConfigDir     string `protobuf:"bytes,6,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -342,6 +346,13 @@ func (x *ShimMeasurements) GetVendorSpend() []*v1.VendorSpend {
 		return x.VendorSpend
 	}
 	return nil
+}
+
+func (x *ShimMeasurements) GetConfigDir() string {
+	if x != nil {
+		return x.ConfigDir
+	}
+	return ""
 }
 
 // The shim process's JavaScript heap, as Node's process.memoryUsage() reads
@@ -613,13 +624,15 @@ const file_shim_v1_endpoint_watch_session_proto_rawDesc = "" +
 	"\x06update\x18\x01 \x01(\v2\x1e.conversation.v1.SessionUpdateH\x00R\x06update\x12J\n" +
 	"\x0fsession_started\x18\x02 \x01(\v2\x1f.conversation.v1.SessionStartedH\x00R\x0esessionStarted\x12?\n" +
 	"\fmeasurements\x18\x03 \x01(\v2\x19.shim.v1.ShimMeasurementsH\x00R\fmeasurementsB\a\n" +
-	"\x05frame\"\xd3\x02\n" +
+	"\x05frame\"\xf2\x02\n" +
 	"\x10ShimMeasurements\x121\n" +
 	"\x15counted_since_unix_ms\x18\x01 \x01(\x03R\x12countedSinceUnixMs\x12F\n" +
 	"\x0evendor_traffic\x18\x02 \x01(\v2\x1a.shim.v1.ShimVendorTrafficH\x00R\rvendorTraffic\x88\x01\x01\x12;\n" +
 	"\tlatencies\x18\x03 \x03(\v2\x1d.shim.v1.ShimLatencyHistogramR\tlatencies\x12*\n" +
 	"\x04heap\x18\x04 \x01(\v2\x11.shim.v1.ShimHeapH\x01R\x04heap\x88\x01\x01\x12?\n" +
-	"\fvendor_spend\x18\x05 \x03(\v2\x1c.conversation.v1.VendorSpendR\vvendorSpendB\x11\n" +
+	"\fvendor_spend\x18\x05 \x03(\v2\x1c.conversation.v1.VendorSpendR\vvendorSpend\x12\x1d\n" +
+	"\n" +
+	"config_dir\x18\x06 \x01(\tR\tconfigDirB\x11\n" +
 	"\x0f_vendor_trafficB\a\n" +
 	"\x05_heap\"q\n" +
 	"\bShimHeap\x12\x1d\n" +

@@ -133,6 +133,8 @@ export class Measurements {
   constructor(
     nowMs: () => number,
     private readonly readHeap: ReadHeap,
+    /** The account root this shim's vendor calls bill to (`CLAUDE_CONFIG_DIR`). */
+    private readonly configDir = "",
   ) {
     this.countedSinceMs = nextCountingInstant(nowMs());
   }
@@ -167,6 +169,7 @@ export class Measurements {
       countedSinceUnixMs: BigInt(this.countedSinceMs),
       latencies,
       vendorSpend: this.vendorSpend.snapshot(),
+      configDir: this.configDir,
       heap: create(shimv1.ShimHeapSchema, {
         usedBytes: BigInt(Math.trunc(heap.heapUsed)),
         totalBytes: BigInt(Math.trunc(heap.heapTotal)),

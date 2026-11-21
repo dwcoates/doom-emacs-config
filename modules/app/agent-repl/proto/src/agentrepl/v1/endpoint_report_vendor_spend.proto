@@ -27,6 +27,9 @@ message ReportVendorSpendRequest {
   // model, agent, cause and cache outcome, a cold reason exactly when its
   // outcome is not WARM, and at least one call.
   repeated conversation.v1.VendorSpend spend = 2;
+  // The account root the run billed to: the `CLAUDE_CONFIG_DIR` it ran
+  // under. Required; the daemon labels the spend with the account it names.
+  string config_dir = 3;
 }
 
 message ReportVendorSpendResponse {

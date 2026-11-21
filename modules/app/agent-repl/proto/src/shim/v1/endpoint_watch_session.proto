@@ -78,6 +78,10 @@ message ShimMeasurements {
   // the daemon learns from a later frame (a keep-alive's answer, a turn's
   // end) it learns with that call's spend already folded.
   repeated conversation.v1.VendorSpend vendor_spend = 5;
+  // The account root this shim's vendor calls bill to: its
+  // `CLAUDE_CONFIG_DIR`. The same in every frame of one process's lifetime;
+  // the daemon labels the spend with the account it names.
+  string config_dir = 6;
 }
 
 // The shim process's JavaScript heap, as Node's process.memoryUsage() reads

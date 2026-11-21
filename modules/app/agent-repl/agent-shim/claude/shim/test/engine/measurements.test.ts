@@ -369,6 +369,15 @@ describe("the vendor spend", () => {
     );
   }
 
+  it("states the account root its calls bill to in every frame", () => {
+    // Arrange
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap, "/home/u/.claude");
+    // Act
+    const snap = m.snapshot();
+    // Assert
+    expect(snap.configDir).toBe("/home/u/.claude");
+  });
+
   it("states the counted calls in every frame's vendor_spend", () => {
     // Arrange
     const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
