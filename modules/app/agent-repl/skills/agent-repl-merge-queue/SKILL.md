@@ -167,6 +167,10 @@ Either kind:
   - `otherwise` lists, with its `count`, every other landing, each with its
     `path`: `queueBypass`, `deployMediator`, or `direct` (`land-direct.sh` run
     by a caller holding neither role).
+  - `land-direct.sh` records each landing it makes itself, with
+    `merge-queue record-landing -repository DIR -branch BRANCH -head COMMIT`
+    from the caller's worktree. Run it by hand only as the one command the
+    script prints when it exits 5, a landing the daemon did not record.
   - CRITICAL: "merged through the queue" is the `throughQueue` list ONLY.
     Report the `otherwise` list separately, and NEVER fold it into the
     queue's count.
