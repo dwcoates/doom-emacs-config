@@ -15,6 +15,7 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
@@ -1039,14 +1040,18 @@ func TestSessionUpBeforeTheCacheKeeperIsWiredIsRecordedAtError(t *testing.T) {
 func TestStandDownsFuncForwardsTheWorkspace(t *testing.T) {
 	// Arrange
 	var got ids.WorkspaceID
-	standDowns := standDownsFunc(func(ws ids.WorkspaceID) { got = ws })
+	var trigger drain.WithheldTrigger
+	standDowns := standDownsFunc(func(ws ids.WorkspaceID, why drain.WithheldTrigger) { got, trigger = ws, why })
 
 	// Act
-	standDowns.StandDownWithheld("ws-1")
+	standDowns.StandDownWithheld("ws-1", drain.WithheldCacheLapse)
 
 	// Assert
 	if got != "ws-1" {
 		t.Fatalf("stood down %q, want ws-1", got)
+	}
+	if trigger != drain.WithheldCacheLapse {
+		t.Fatalf("trigger = %s, want cache_lapse", trigger)
 	}
 }
 

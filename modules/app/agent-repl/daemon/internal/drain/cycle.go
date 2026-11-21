@@ -50,10 +50,12 @@ const opVisit = "daemon.drain.settings_visit"
 
 // visitReason is a settings visit's stand-down reason.
 var visitReason = standDownReason{
-	op:     opVisit,
-	detail: "stood down on the switch away from a settings pick; the transcript was left as it stood",
-	done:   "stood down the shim a settings pick started",
-	life:   shimlife.StandDownSettingsVisit,
+	op:      opVisit,
+	detail:  "stood down on the switch away from a settings pick; the transcript was left as it stood",
+	done:    "stood down the shim a settings pick started",
+	life:    shimlife.StandDownSettingsVisit,
+	trigger: "settings_visit",
+	remote:  remoteSpares,
 }
 
 // A SESSION WHOSE CACHE GOES COLD IS PARKED AT ONCE (owner ruling,
@@ -70,10 +72,12 @@ const opCold = "daemon.drain.cold_park"
 
 // coldReason is a cold cache's stand-down reason.
 var coldReason = standDownReason{
-	op:     opCold,
-	detail: "parked the moment its cache was known cold; the transcript was left as it stood",
-	done:   "parked an idle session whose cache went cold",
-	life:   shimlife.StandDownCacheCold,
+	op:      opCold,
+	detail:  "parked the moment its cache was known cold; the transcript was left as it stood",
+	done:    "parked an idle session whose cache went cold",
+	life:    shimlife.StandDownCacheCold,
+	trigger: "cold_park",
+	remote:  remoteSpares,
 }
 
 // A FINISHED WORKSPACE IS PARKED THE MOMENT ITS SYNC MERGE IS IN LINE (owner
@@ -145,10 +149,12 @@ type CycleOutcome struct {
 
 // cycleReason is a keep-alive cycle's stand-down reason.
 var cycleReason = standDownReason{
-	op:     opCycle,
-	detail: "stood down between keep-alives with its cache warm; the transcript was left as it stood",
-	done:   "stood an idle session down until its next keep-alive",
-	life:   shimlife.StandDownKeepaliveCycle,
+	op:      opCycle,
+	detail:  "stood down between keep-alives with its cache warm; the transcript was left as it stood",
+	done:    "stood an idle session down until its next keep-alive",
+	life:    shimlife.StandDownKeepaliveCycle,
+	trigger: "keepalive_cycle",
+	remote:  remoteSpares,
 }
 
 // CycleDown asks for the stand-down of WS's session after the keep-alive asked
@@ -326,22 +332,6 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 			return withheldSettled, CycleOutcome{Why: "the workspace is closed; its cache's lapse stands it down"}
 		}
 	}
-	// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP (owner ruling,
-	// 2026-10-31): claude.ai reaches the session only through a shim that is
-	// up, so neither a keep-alive's park nor a settings visit's stand-down is
-	// taken, and so no pre-beat restore is ever owed. The mode is read HERE,
-	// at the attempt, so one turned off since the ask parks at the next beat
-	// as usual. The idle sweep is not this path and still
-	// stands it down.
-	remote, err := c.deps.DB.RemoteControl(ctx, ws)
-	if err != nil {
-		log.Error(op, "could not read the workspace's remote-control mode; its stand-down is dropped", dlog.WithCause(fields, err))
-		return withheldSettled, CycleOutcome{Failed: true, Why: "could not read the workspace's remote-control mode; its stand-down is dropped"}
-	}
-	if remote.On {
-		log.Info(op, "remote control is on; the shim stays up for claude.ai", dlog.Merge(fields, dlog.Context{"remote_control_recorded": remote.Recorded}))
-		return withheldSettled, CycleOutcome{Why: "remote control is on; the shim stays up for claude.ai"}
-	}
 	visible := true
 	if lapseOwnsWithheld {
 		visible, err = bringup.Visible(ctx, c.deps.DB, log, ws)
@@ -395,9 +385,17 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 		return withheldSettled, CycleOutcome{Failed: true, Why: "the stand-down gate answered a value this stand-down cannot read; it is dropped"}
 	}
+	// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP (owner ruling,
+	// 2026-10-31): claude.ai reaches the session only through a shim that is
+	// up, so neither a keep-alive's park, a cold park nor a settings visit's
+	// stand-down is taken, and so no pre-beat restore is ever owed. The mode
+	// is read at the act, under its gate (park), so one turned off since the
+	// ask parks at the next beat as usual.
 	switch c.park(ctx, log, ws, fields, reason) {
 	case parkDone:
 		return withheldSettled, CycleOutcome{Down: true, Why: reason.done}
+	case parkSpared:
+		return withheldSettled, CycleOutcome{Why: remoteSpared}
 	case parkDeferred:
 		log.Info(op, "the stand-down was deferred; it is taken when the session falls free", fields)
 		return withheldPending, CycleOutcome{}

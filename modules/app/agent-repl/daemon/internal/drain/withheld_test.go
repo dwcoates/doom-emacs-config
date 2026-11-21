@@ -69,7 +69,7 @@ func TestAHiddenFreeWorkspaceIsStoodDownAsTheSweepDoes(t *testing.T) {
 	ws := h.hidden(t)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	killed := h.stand.Killed()
@@ -87,7 +87,7 @@ func TestAWithheldStandDownRecordsItsOwnReason(t *testing.T) {
 	ws := h.hidden(t)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if term := h.terminal(t, ws); term == nil || !strings.Contains(term.Detail, "hidden, collapsed or closed") {
@@ -101,7 +101,7 @@ func TestAWithheldStandDownClearsTheShimPids(t *testing.T) {
 	ws := h.hidden(t)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	session, _, err := h.db.Session(context.Background(), ws)
@@ -119,7 +119,7 @@ func TestACollapsedWorkspaceIsStoodDown(t *testing.T) {
 	ws := h.collapsed(t)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 1 {
@@ -136,7 +136,7 @@ func TestAClosedWorkspaceIsStoodDown(t *testing.T) {
 	}
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 1 || killed[0].WS != ws || killed[0].Force {
@@ -166,7 +166,7 @@ func TestTheSelectedHiddenWorkspaceIsNotStoodDown(t *testing.T) {
 			}
 
 			// Act
-			h.c.StandDownWithheld(ws)
+			h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 			// Assert
 			if killed := h.stand.Killed(); len(killed) != 0 {
@@ -185,7 +185,7 @@ func TestAWorkspaceShownAgainIsNotStoodDown(t *testing.T) {
 	ws := h.workspace(t, instant)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 0 {
@@ -203,7 +203,7 @@ func TestABusyWorkspaceIsNotStoodDownUnderItsTurn(t *testing.T) {
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 0 {
@@ -219,7 +219,7 @@ func TestADeferredStandDownIsTakenOnTheTurnEndEdge(t *testing.T) {
 	h := newHarness(t)
 	ws := h.hidden(t)
 	h.freeness.SetFree(ws, false)
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 	h.freeness.SetFree(ws, true)
 
 	// Act
@@ -239,7 +239,7 @@ func TestADeferredStandDownOfAWorkspaceShownAgainIsDropped(t *testing.T) {
 	h := newHarness(t)
 	ws := h.hidden(t)
 	h.freeness.SetFree(ws, false)
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 	if err := h.db.SetHidden(context.Background(), ws, false, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestATurnInFlightRefusalKeepsTheStandDownPending(t *testing.T) {
 		Error: &shimv1.HibernateError{Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}}}}}
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if !h.pending(ws) {
@@ -294,7 +294,7 @@ func TestAStartUnderWayKeepsTheStandDownPending(t *testing.T) {
 	h.stand.startUnderWay(ws)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if !h.pending(ws) || len(h.stand.Killed()) != 0 {
@@ -309,7 +309,7 @@ func TestARevivalKeepsTheStandDownPending(t *testing.T) {
 	h.reviving.Set(ws, true)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if !h.pending(ws) || len(h.stand.Killed()) != 0 {
@@ -326,7 +326,7 @@ func TestAWithheldWorkspaceWithNoSessionHasNothingToStandDown(t *testing.T) {
 	}
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if h.pending(ws) || len(h.stand.Killed()) != 0 {
@@ -341,7 +341,7 @@ func TestAWithheldWorkspaceWithNoShimHasNothingToStandDown(t *testing.T) {
 	h.stand.standDown(ws)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if h.pending(ws) || len(h.stand.Killed()) != 0 {
@@ -356,7 +356,7 @@ func TestAFailedWithheldStandDownIsRecordedAndDropped(t *testing.T) {
 	h.stand.failKill(ws, errFake)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	errs := 0
@@ -377,7 +377,7 @@ func TestADeferredStandDownIsStatedAtInfo(t *testing.T) {
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	for _, r := range records(h.log, opWithheld) {
@@ -396,7 +396,7 @@ func TestAnEdgeDuringARunningAttemptRunsOneMore(t *testing.T) {
 	})
 	ws := h.hidden(t)
 	h.freeness.SetFree(ws, false)
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 	h.freeness.SetFree(ws, true)
 
 	// Act: the edge arrives while the first attempt has not run yet.
@@ -477,7 +477,7 @@ func TestAFoldSparesWhatTheRecordSpares(t *testing.T) {
 			ws := tt.spared(h, t)
 
 			// Act
-			h.c.StandDownWithheld(ws)
+			h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 			// Assert
 			if killed := h.stand.Killed(); len(killed) != 0 {
@@ -509,7 +509,7 @@ func TestAHiddenOneShotIsStillStoodDown(t *testing.T) {
 	h.oneShot(t, ws)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 1 {
@@ -523,7 +523,7 @@ func TestAFoldedWorkspaceHeldBackWhileBusyIsStoodDownOnceFree(t *testing.T) {
 	h := newHarness(t)
 	ws := h.collapsed(t)
 	h.freeness.SetFree(ws, false)
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 	if killed := h.stand.Killed(); len(killed) != 0 {
 		t.Fatalf("kills = %+v, want none while busy", killed)
 	}
@@ -543,7 +543,7 @@ func TestAFoldedWorkspaceThatQueuedAMergeWhileBusyIsSparedOnceFree(t *testing.T)
 	h := newHarness(t)
 	ws := h.collapsed(t)
 	h.freeness.SetFree(ws, false)
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 	h.mergePending(t, ws)
 	h.freeness.SetFree(ws, true)
 
@@ -581,7 +581,7 @@ func TestAWorkspaceWithAMergeQueuedIsNeverStoodDown(t *testing.T) {
 			queuedAt(t, h, ws, instant)
 
 			// Act
-			h.c.StandDownWithheld(ws)
+			h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 			// Assert
 			if killed := h.stand.Killed(); len(killed) != 0 {
@@ -601,7 +601,7 @@ func TestAWithheldStandDownWhoseQueuesCannotBeReadIsDropped(t *testing.T) {
 	h.c.deps.DB = sweepReadErrDB{DB: h.c.deps.DB, read: "queues", err: errors.New("database is locked")}
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opWithheld})

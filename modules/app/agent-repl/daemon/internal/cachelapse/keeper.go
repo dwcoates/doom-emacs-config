@@ -163,7 +163,7 @@ var ErrNoSession = errors.New("cachelapse: the shim holds no session")
 // StandDowns stands a withheld workspace's session down as the idle sweep
 // does, never under a turn (drain.Controller).
 type StandDowns interface {
-	StandDownWithheld(ws ids.WorkspaceID)
+	StandDownWithheld(ws ids.WorkspaceID, trigger drain.WithheldTrigger)
 }
 
 // Deps are the Keeper's collaborators. Every one is REQUIRED.
@@ -805,7 +805,7 @@ func (k *Keeper) mergeEnded(ctx context.Context, log dlog.Logger, record wsm.Wor
 		return false
 	}
 	log.Info(opMergeEnded, "the merge workspace's merge has left every queue; its session is stood down", nil)
-	k.deps.StandDowns.StandDownWithheld(record.ID)
+	k.deps.StandDowns.StandDownWithheld(record.ID, drain.WithheldMergeEnded)
 	return true
 }
 
@@ -870,7 +870,7 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 	}
 	k.deps.Telemetry.CountLapse(ws, LapseStoodDown)
 	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed}))
-	k.deps.StandDowns.StandDownWithheld(ws)
+	k.deps.StandDowns.StandDownWithheld(ws, drain.WithheldCacheLapse)
 	return true
 }
 

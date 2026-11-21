@@ -386,6 +386,17 @@ func (f *Fleet) remoteControlGate(ws ids.WorkspaceID) *sync.Mutex {
 	return gate
 }
 
+// HoldRemoteControl takes workspace WS's remote-control gate and answers its
+// release: the drain reads the mode and stands the session down under it
+// (drain.Deps.HoldRemoteControl), so a change of the mode, recorded and put
+// in force under the same gate (SetRemoteControl), never lands between that
+// reading and the stand-down.
+func (f *Fleet) HoldRemoteControl(ws ids.WorkspaceID) (release func()) {
+	gate := f.remoteControlGate(ws)
+	gate.Lock()
+	return gate.Unlock
+}
+
 // onOff spells a mode for a sentence.
 func onOff(on bool) string {
 	if on {

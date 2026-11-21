@@ -61,7 +61,7 @@ func (c *controller) StandDownFolded(ws ids.WorkspaceID) {
 			return
 		}
 		c.log.Info(opFolded, "a folded workspace's delay is over; its stand-down is asked for", fields)
-		c.StandDownWithheld(ws)
+		c.StandDownWithheld(ws, WithheldCollapse)
 	})
 }
 
@@ -104,7 +104,7 @@ func (c *controller) ResumeFolded(ctx context.Context) {
 	resumed, spared := []string{}, map[string]string{}
 	for _, ws := range workspaces {
 		session, found := sessions[ws.ID]
-		if !folded[ws.ID] || ws.Closed || !found || session.Terminal != nil {
+		if _, isFolded := folded[ws.ID]; !isFolded || ws.Closed || !found || session.Terminal != nil {
 			continue
 		}
 		if spare, ok := ws.FoldSpare(); ok {

@@ -66,9 +66,10 @@ type Controller interface {
 	Run(ctx context.Context) error
 	// StandDownWithheld stands the session of a workspace the user hid, or
 	// whose repository section was collapsed, down as the sweep does — never
-	// under a turn: a busy one is stood down once its turn ends (withheld.go).
-	// It returns at once.
-	StandDownWithheld(ws ids.WorkspaceID)
+	// under a turn: a busy one is stood down once its turn ends (withheld.go),
+	// and never while its remote control is on. TRIGGER names what asked, on
+	// every record. It returns at once.
+	StandDownWithheld(ws ids.WorkspaceID, trigger WithheldTrigger)
 	// StandDownFolded asks for StandDownWithheld FoldStandDownDelay after the
 	// latest collapse that folded the workspace (folded.go). It returns at
 	// once.
@@ -165,6 +166,12 @@ type Deps struct {
 	// under, so a park never takes a workspace a bounce is replacing the
 	// shim of (see park).
 	Bouncing func(ws ids.WorkspaceID) bool
+	// HoldRemoteControl takes workspace WS's remote-control gate, the lock
+	// every change of its mode is recorded and put in force under
+	// (workspace.Fleet.HoldRemoteControl), and answers its release. REQUIRED:
+	// every stand-down reads the mode under it and holds it through the
+	// shim's stand-down (park), so a turn-on never lands between the two.
+	HoldRemoteControl func(ws ids.WorkspaceID) (release func())
 	// Announcer publishes the WatchDaemon pushes: the standing drain schedule,
 	// its cancellation, and the shutdown announcement.
 	Announcer Announcer
@@ -404,6 +411,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Bouncing == nil {
 		return nil, errors.New("drain: a bounce answer is required")
+	}
+	if deps.HoldRemoteControl == nil {
+		return nil, errors.New("drain: a remote-control gate is required")
 	}
 	if deps.Announcer == nil {
 		return nil, errors.New("drain: an announcer is required")

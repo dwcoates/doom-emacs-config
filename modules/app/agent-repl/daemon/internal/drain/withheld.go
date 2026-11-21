@@ -3,6 +3,7 @@ package drain
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
@@ -21,6 +22,12 @@ const opWithheld = "daemon.drain.withheld"
 // KillSession, parked terminal and cleared pids (park) — with its own reason
 // on the records and the terminal's detail.
 //
+// REMOTE CONTROL SPARES IT TOO (owner ruling, 2026-10-31): claude.ai reaches
+// the session only through its shim, so a workspace whose mode is on, read
+// at the act (park), keeps it whichever trigger asked (2026-11-21 09:45:14:
+// a fold's delay stood test-build-cpu-investigation down 56 seconds after
+// its new shim was put in remote control).
+//
 // A FOLD SPARES WHAT THE RECORD SPARES (owner ruling, 2026-10-25): a one-shot,
 // or a workspace with a merge pending (wsm.Workspace.FoldSpare), is never
 // stood down for a collapse, whichever attempt reads it.
@@ -33,8 +40,43 @@ const opWithheld = "daemon.drain.withheld"
 // attempt first re-reads the workspace's visibility, so one the user showed
 // again in the meantime is dropped, not stood down.
 
+// WithheldTrigger is what asked for a withheld workspace's stand-down. Every
+// record of the attempt names it, so the log says which trigger stood a
+// session down (2026-11-21 09:45:14: a record naming only the workspace left
+// a stood-down remote-control session's cause to be pieced together).
+type WithheldTrigger int
+
+const (
+	// WithheldCollapse: a fold's delay ended (StandDownFolded): a collapsed
+	// repository section or subsection, or a parent's folded children. The
+	// attempt's record names the fold it read (sidebar.Fold).
+	WithheldCollapse WithheldTrigger = iota + 1
+	// WithheldCacheLapse: a hidden or closed workspace's cache lapsed
+	// (cachelapse.Keeper.lapse).
+	WithheldCacheLapse
+	// WithheldMergeEnded: a hidden merge workspace's merge left every queue
+	// (cachelapse.Keeper.mergeEnded).
+	WithheldMergeEnded
+)
+
+// String names the trigger for a record.
+func (t WithheldTrigger) String() string {
+	switch t {
+	case WithheldCollapse:
+		return "collapse"
+	case WithheldCacheLapse:
+		return "cache_lapse"
+	case WithheldMergeEnded:
+		return "merge_ended"
+	default:
+		return fmt.Sprintf("WithheldTrigger(%d)", int(t))
+	}
+}
+
 // withheldState is one pending stand-down's bookkeeping, under c.mu.
 type withheldState struct {
+	// trigger is what asked last: a later ask's replaces an earlier one's.
+	trigger WithheldTrigger
 	// running is an attempt in flight on the detached lifetime.
 	running bool
 	// again is an edge that arrived while an attempt ran: one more attempt
@@ -57,7 +99,10 @@ const (
 // section the user collapsed, or a hidden or closed one whose cache has
 // lapsed. It
 // returns at once; the attempt runs on the detached lifetime.
-func (c *controller) StandDownWithheld(ws ids.WorkspaceID) {
+func (c *controller) StandDownWithheld(ws ids.WorkspaceID, trigger WithheldTrigger) {
+	if trigger < WithheldCollapse || trigger > WithheldMergeEnded {
+		panic(fmt.Sprintf("drain: a withheld stand-down of %s names no trigger (%s)", ws, trigger))
+	}
 	c.mu.Lock()
 	if c.withheld == nil {
 		c.withheld = map[ids.WorkspaceID]*withheldState{}
@@ -67,8 +112,9 @@ func (c *controller) StandDownWithheld(ws ids.WorkspaceID) {
 		st = &withheldState{}
 		c.withheld[ws] = st
 	}
+	st.trigger = trigger
 	c.mu.Unlock()
-	c.log.Debug(opWithheld, "a withheld workspace's stand-down was asked for", dlog.Context{"workspace": string(ws)})
+	c.log.Debug(opWithheld, "a withheld workspace's stand-down was asked for", dlog.Context{"workspace": string(ws), "trigger": trigger.String()})
 	c.kick(ws, st)
 }
 
@@ -100,7 +146,10 @@ func (c *controller) kick(ws ids.WorkspaceID, st *withheldState) {
 	c.mu.Unlock()
 	c.deps.Detach(ws, func(ctx context.Context) {
 		for {
-			outcome := c.standDownWithheld(ctx, ws)
+			c.mu.Lock()
+			trigger := st.trigger
+			c.mu.Unlock()
+			outcome := c.standDownWithheld(ctx, ws, trigger)
 			c.mu.Lock()
 			if st.again && ctx.Err() == nil {
 				st.again = false
@@ -117,17 +166,21 @@ func (c *controller) kick(ws ids.WorkspaceID, st *withheldState) {
 	})
 }
 
-// withheldReason is a withheld workspace's stand-down reason.
-var withheldReason = standDownReason{
-	op:     opWithheld,
-	detail: "hidden, collapsed or closed by the user; the transcript was left as it stood",
-	done:   "stood a withheld workspace's session down",
-	life:   shimlife.StandDownCacheLapse,
+// withheldReason is a withheld workspace's stand-down reason for TRIGGER.
+func withheldReason(trigger WithheldTrigger) standDownReason {
+	return standDownReason{
+		op:      opWithheld,
+		detail:  "hidden, collapsed or closed by the user; the transcript was left as it stood",
+		done:    "stood a withheld workspace's session down",
+		life:    shimlife.StandDownCacheLapse,
+		trigger: trigger.String(),
+		remote:  remoteSpares,
+	}
 }
 
 // standDownWithheld is one attempt.
-func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) withheldOutcome {
-	fields := dlog.Context{"workspace": string(ws)}
+func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID, trigger WithheldTrigger) withheldOutcome {
+	fields := dlog.Context{"workspace": string(ws), "trigger": trigger.String()}
 	if err := ctx.Err(); err != nil {
 		c.log.Info(opWithheld, "the daemon is leaving; a withheld workspace's stand-down is not taken", dlog.WithCause(fields, err))
 		return withheldPending
@@ -166,12 +219,18 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 	// close are read afresh on every attempt. A CLOSED workspace is withheld
 	// whatever its visibility: its cache lapsed after its last keep-alive
 	// round (cachelapse.Keeper).
-	visible, err := bringup.Visible(ctx, c.deps.DB, log, ws)
+	visibility, err := bringup.VisibilityOf(ctx, c.deps.DB, log, ws)
 	if err != nil {
 		log.Error(opWithheld, "could not read whether the workspace is still withheld; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
-	if visible && !record.Closed {
+	// THE FOLD IT DECIDED ON rides every record below, whatever the trigger:
+	// which section, subsection or parent withholds the workspace now.
+	if visibility.Fold != nil {
+		fields = dlog.Merge(fields, visibility.Fold.Fields())
+	}
+	fields = dlog.Merge(fields, dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed})
+	if visibility.Runs && !record.Closed {
 		log.Info(opWithheld, "the workspace was shown or reopened before its session was stood down; it keeps running", fields)
 		return withheldSettled
 	}
@@ -198,8 +257,8 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 		return withheldSettled
 	}
-	switch c.park(ctx, log, ws, fields, withheldReason) {
-	case parkDone:
+	switch c.park(ctx, log, ws, fields, withheldReason(trigger)) {
+	case parkDone, parkSpared:
 		return withheldSettled
 	case parkDeferred:
 		log.Info(opWithheld, "a withheld workspace's stand-down was deferred; it is taken on the next turn end", fields)
