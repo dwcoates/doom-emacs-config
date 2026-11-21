@@ -569,7 +569,7 @@ var webappUnitInputs = func() map[string][]string {
 	}
 	// The scans over the webapp's own tests and their helpers.
 	for _, f := range []string{
-		"test/agent-only-arms.test.ts", "test/bubble/still.test.ts", "test/deferred-animation.test.ts",
+		"test/agent-only-arms.test.ts", "test/bubble/still.test.ts", "test/computed-style.test.ts", "test/deferred-animation.test.ts",
 		"test/dom-rect.test.ts", "test/drag-pointer.test.ts", "test/failure-sink.test.ts",
 		"test/feed/harness.test.ts", "test/files-under.test.ts", "test/frame-queue.test.ts",
 		"test/host/popup-channel.test.ts", "test/integration/harness.self.test.ts",
