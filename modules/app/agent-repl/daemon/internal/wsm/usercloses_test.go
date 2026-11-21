@@ -22,55 +22,54 @@ func userSubsectionPair(t *testing.T, s *store) (Workspace, Workspace, Subsectio
 }
 
 func TestTheUsersCloseOfTheLastOpenWorkspaceRemovesItsSubsection(t *testing.T) {
-	tests := []struct {
-		name string
-		// arrange files a and b into a subsection, answering it and whether
-		// an agent created it.
-		arrange func(t *testing.T, s *store) (Workspace, Workspace, Subsection, bool)
-	}{
-		{name: "a subsection the user created", arrange: func(t *testing.T, s *store) (Workspace, Workspace, Subsection, bool) {
-			a, b, sub := userSubsectionPair(t, s)
-			return a, b, sub, false
-		}},
-		{name: "a subsection an agent created", arrange: func(t *testing.T, s *store) (Workspace, Workspace, Subsection, bool) {
-			repoDir := arrangeRepo(t, "repo")
-			a := registerIn(t, s, repoDir, "a", nil)
-			b := registerIn(t, s, repoDir, "b", nil)
-			sub, err := s.CreateAgentSubsection(context.Background(), a.ID, "pair", []WorkspaceID{a.ID, b.ID})
-			if err != nil {
-				t.Fatalf("CreateAgentSubsection: %v", err)
-			}
-			return a, b, sub, true
-		}},
+	// Arrange
+	s, log := testStore(t)
+	a, b, sub := userSubsectionPair(t, s)
+	closeWorkspaceBy(t, s, a.ID, CloseByAgent)
+
+	// Act
+	closeWorkspace(t, s, b.ID)
+
+	// Assert
+	if _, ok := listedSubsection(t, s, sub.ID); ok {
+		t.Fatal("the subsection the user's close emptied is still there")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, log := testStore(t)
-			a, b, sub, byAgent := tt.arrange(t, s)
-			closeWorkspaceBy(t, s, a.ID, CloseByAgent)
+	for _, ws := range []WorkspaceID{a.ID, b.ID} {
+		if got := subsectionOf(t, s, ws); got != nil {
+			t.Errorf("%s still names subsection %s", ws, *got)
+		}
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRemoveUserClosedSubsection})
+	if !ok || record.Context["subsection"] != string(sub.ID) || record.Context["workspace"] != string(b.ID) ||
+		record.Context["name"] != "pair" || record.Context["write"] != "daemon.wsm.mark_closed" {
+		t.Fatalf("removal record = %+v (found %v), want one naming %s emptied by %s's close", record, ok, sub.ID, b.ID)
+	}
+}
 
-			// Act
-			closeWorkspace(t, s, b.ID)
+func TestTheUsersCloseLeavesAnAgentSubsectionToThePrune(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	a := registerIn(t, s, repoDir, "a", nil)
+	b := registerIn(t, s, repoDir, "b", nil)
+	sub, err := s.CreateAgentSubsection(context.Background(), a.ID, "pair", []WorkspaceID{a.ID, b.ID})
+	if err != nil {
+		t.Fatalf("CreateAgentSubsection: %v", err)
+	}
+	closeWorkspaceBy(t, s, a.ID, CloseByAgent)
 
-			// Assert
-			if _, ok := listedSubsection(t, s, sub.ID); ok {
-				t.Fatal("the subsection the user's close emptied is still there")
-			}
-			for _, ws := range []WorkspaceID{a.ID, b.ID} {
-				if got := subsectionOf(t, s, ws); got != nil {
-					t.Errorf("%s still names subsection %s", ws, *got)
-				}
-			}
-			record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRemoveUserClosedSubsection})
-			if !ok || record.Context["subsection"] != string(sub.ID) || record.Context["workspace"] != string(b.ID) ||
-				record.Context["name"] != "pair" || record.Context["write"] != "daemon.wsm.mark_closed" {
-				t.Fatalf("removal record = %+v (found %v), want one naming %s emptied by %s's close", record, ok, sub.ID, b.ID)
-			}
-			if _, hasCreator := record.Context["created_by"]; hasCreator != byAgent {
-				t.Errorf("removal record created_by present = %v, want %v", hasCreator, byAgent)
-			}
-		})
+	// Act
+	closeWorkspace(t, s, b.ID)
+
+	// Assert
+	if _, ok := listedSubsection(t, s, sub.ID); ok {
+		t.Fatal("the agent subsection the user's close emptied is still there")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opPruneAgentSubsection}); !ok {
+		t.Fatal("the agent subsection was not removed by the write's prune")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: opRemoveUserClosedSubsection}); ok {
+		t.Error("the user's close recorded removing an agent subsection the prune owns")
 	}
 }
 

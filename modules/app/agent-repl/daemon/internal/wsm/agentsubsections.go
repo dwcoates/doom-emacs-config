@@ -51,6 +51,10 @@ WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE NOT workspaces.closed AND ` + r
 // workspace sits in.
 const emptyAgentSubsectionsQuery = emptySubsectionsQuery + ` AND created_by IS NOT NULL`
 
+// emptyUserSubsectionsQuery selects every subsection the user created that no
+// open workspace sits in: the ones the user's close removes (usercloses.go).
+const emptyUserSubsectionsQuery = emptySubsectionsQuery + ` AND created_by IS NULL`
+
 // CreateAgentSubsection records a subsection named NAME (trimmed), created by
 // workspace CREATOR's agent, after the members' repository's other
 // subsections, and places the families of MEMBERS in it, in that order, as

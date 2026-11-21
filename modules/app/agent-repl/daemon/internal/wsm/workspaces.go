@@ -887,9 +887,6 @@ func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects)
 	}
 	if sub := effects.removedSubsection; sub != nil {
 		fields := dlog.Context{"workspace": string(id), "subsection": string(sub.ID), "name": sub.Name, "repo_id": string(sub.Repo), "write": op}
-		if sub.CreatedBy != nil {
-			fields["created_by"] = string(*sub.CreatedBy)
-		}
 		s.log.Info(opRemoveUserClosedSubsection, "removed the subsection the user's close left with no open workspace", fields)
 	}
 }

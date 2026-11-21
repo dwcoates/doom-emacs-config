@@ -12,8 +12,9 @@ import (
 // hand (2026-11-18: `GR Monthly Limit`, a subsection with no recorded
 // creator, deleted four seconds after its last workspace was killed). An
 // agent-created subsection is removed by every write that empties it
-// (agentsubsections.go); this one rule extends that removal to the user's
-// subsections, for the user's close alone. A user's subsection emptied any
+// (agentsubsections.go), the user's close among them, and that prune stays its
+// one remover; this one rule extends the removal to the user's subsections,
+// for the user's close alone. A user's subsection emptied any
 // other way (a drag out, an agent's or a merge's close) still survives empty.
 //
 // THE REMOVAL RIDES THE ONE CLOSE WRITE (markClosedInTx), so a close, a kill
@@ -24,19 +25,20 @@ import (
 // empty and so removed.
 const opRemoveUserClosedSubsection = "daemon.wsm.remove_user_closed_subsection"
 
-// removeSubsectionUserCloseEmptied removes, inside TX, the subsection
-// workspace ID sits in (its root's, for a child) when no open workspace is
-// left in it, and answers it; nil when ID sits in no subsection or one still
-// has an open workspace. ID's close is already written.
+// removeSubsectionUserCloseEmptied removes, inside TX, the user-created
+// subsection workspace ID sits in (its root's, for a child) when no open
+// workspace is left in it, and answers it; nil when ID sits in no subsection,
+// in an agent's (the write's prune removes that one), or in one that still has
+// an open workspace. ID's close is already written.
 func removeSubsectionUserCloseEmptied(ctx context.Context, tx *sql.Tx, id WorkspaceID) (*Subsection, error) {
 	var sub sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?`, id).Scan(&sub); err != nil {
+	if err := scanWorkspaceRow(ctx, tx, id, rootSubsectionColumn, &sub); err != nil {
 		return nil, err
 	}
 	if !sub.Valid {
 		return nil, nil
 	}
-	empty, err := listRows(ctx, tx, emptySubsectionsQuery+` AND id = ?`, scanSubsection, sub.String)
+	empty, err := listRows(ctx, tx, emptyUserSubsectionsQuery+` AND id = ?`, scanSubsection, sub.String)
 	if err != nil || len(empty) == 0 {
 		return nil, err
 	}

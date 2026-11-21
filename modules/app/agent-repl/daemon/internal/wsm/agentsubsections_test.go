@@ -273,3 +273,24 @@ func TestTheAgentSubsectionQueryNarrowsTheEmptySubsectionQuery(t *testing.T) {
 		t.Fatalf("empty subsections = %+v, want only %s, whoever created it", empty, user.ID)
 	}
 }
+
+func TestTheUserSubsectionQueryNarrowsTheEmptySubsectionQuery(t *testing.T) {
+	// Arrange -- an empty subsection the user created.
+	s, _ := testStore(t)
+	ws := registerIn(t, s, arrangeRepo(t, "repo"), "one", nil)
+	user := mustSubsection(t, s, ws.Repo, "user's")
+	if !strings.HasPrefix(emptyUserSubsectionsQuery, emptySubsectionsQuery) {
+		t.Fatal("the user subsection query does not narrow the shared empty subsection query")
+	}
+
+	// Act
+	empty, err := listRows(context.Background(), s.db(), emptyUserSubsectionsQuery, scanSubsection)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("list the empty user subsections: %v", err)
+	}
+	if len(empty) != 1 || empty[0].ID != user.ID {
+		t.Fatalf("empty user subsections = %+v, want only %s", empty, user.ID)
+	}
+}
