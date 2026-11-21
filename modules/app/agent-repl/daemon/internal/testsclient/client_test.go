@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,5 +190,55 @@ func TestAStopOfAnUnknownRunIsErrUnknownRun(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrUnknownRun) {
 		t.Fatalf("Stop = %v, want ErrUnknownRun", err)
+	}
+}
+
+func TestAnswers(t *testing.T) {
+	refusal := &testservicev1.WatchRunResponse{Event: &testservicev1.WatchRunResponse_Failure{Failure: &testservicev1.WatchRunFailure{
+		Kind: &testservicev1.WatchRunFailure_InvalidRequest{InvalidRequest: &testservicev1.WatchRunInvalidRequest{Field: "run"}}}}}
+	unknown := &testservicev1.WatchRunResponse{Event: &testservicev1.WatchRunResponse_Failure{Failure: &testservicev1.WatchRunFailure{
+		Kind: &testservicev1.WatchRunFailure_UnknownRun{UnknownRun: &testservicev1.WatchRunUnknownRun{}}}}}
+	cases := []struct {
+		name string
+		// client is the client the probe calls through.
+		client      func(t *testing.T, f *fakeTests) Client
+		watch       []*testservicev1.WatchRunResponse
+		unavailable bool
+		wantErr     string
+	}{
+		{name: "the service's refusal of a watch naming no run is its answer", watch: []*testservicev1.WatchRunResponse{refusal}},
+		{name: "no service at the socket is unavailable", unavailable: true,
+			client: func(t *testing.T, _ *fakeTests) Client { return New(filepath.Join(t.TempDir(), "nobody.sock")) }},
+		{name: "a stream that ends with no answer is unavailable", unavailable: true},
+		{name: "any answer but the refusal is the protocol broken", watch: []*testservicev1.WatchRunResponse{unknown}, wantErr: "not its refusal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := &fakeTests{watch: tc.watch}
+			c := serve(t, f)
+			if tc.client != nil {
+				c = tc.client(t, f)
+			}
+
+			// Act
+			err := c.Answers(context.Background())
+
+			// Assert
+			switch {
+			case tc.unavailable:
+				if !errors.Is(err, ErrUnavailable) {
+					t.Fatalf("Answers = %v, want ErrUnavailable", err)
+				}
+			case tc.wantErr != "":
+				if err == nil || errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Answers = %v, want an error naming %q", err, tc.wantErr)
+				}
+			case err != nil:
+				t.Fatalf("Answers = %v, want the service's answer", err)
+			case f.watched.GetRun().GetValue() != "":
+				t.Fatalf("watched %v, want a watch naming no run", f.watched)
+			}
+		})
 	}
 }
