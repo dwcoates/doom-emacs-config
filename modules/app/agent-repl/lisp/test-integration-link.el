@@ -745,6 +745,26 @@ expires a schedule on its own."
                                     "the drain schedule to be retracted")
       (should (null agent-repl-link-drain)))))
 
+(ert-deftest agent-repl-itest-link-notification-click-activates-its-workspace ()
+  "A daemon stream `notification_clicked' activates the workspace it names.
+The daemon posts every banner and reads its click back on this stream,
+since a banner may name a workspace this editor holds no host stream for."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      (let ((activated nil))
+        (cl-letf (((symbol-function 'agent-repl--notification-activate)
+                   (lambda (ref) (push ref activated))))
+          ;; Act.
+          (agent-repl-itest--push
+           daemon "daemon"
+           '((notificationClicked . ((workspace . ((id . "ws-banner") (dir . "/w/banner")))))))
+          ;; Assert.
+          (agent-repl-itest--wait-until (lambda () activated) nil
+                                        "the banner's workspace to be activated")
+          (should (equal activated '((:id "ws-banner" :dir "/w/banner"))))
+          (should (agent-repl-itest--logged-p daemon "elisp.host.notification-clicked" "info")))))))
+
 (ert-deftest agent-repl-itest-link-late-subscriber-gets-the-standing-schedule ()
   "A link connecting AFTER the schedule was set still learns it — the
 FULL schedule (deadline, reason arm) and the drawn indicator, not merely

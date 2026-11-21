@@ -70,7 +70,6 @@
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-view-dwell "rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-report-page-residency "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-unloading "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-answer-editor-evaluation "rpc" (conn request &rest keys))
@@ -169,7 +168,7 @@ daemon that serves WS, so work held for WS while it had none may go.")
   "Return the name of the workspace this editor holds whose ref id is ID, or nil.
 Read from the host table (`agent-repl-host--by-name'), the one record of
 which workspaces hold a host stream here: a workspace the roster does not
-mark held (frontend.v1.RosterRowHeld) has no entry, so it answers nil."
+mark visible (frontend.v1.RosterRowVisibility) has no entry, so it answers nil."
   (let ((found nil))
     (maphash (lambda (name entry)
                (when (and (null found) (equal (plist-get (plist-get entry :ref) :id) id))
@@ -189,15 +188,6 @@ The ref is an ECHO TOKEN: it is obtained from RegisterWorkspace or the
 roster and handed back verbatim.  Nil means the workspace has not been
 registered on the current daemon yet."
   (plist-get (agent-repl-host--entry ws) :ref))
-
-(defun agent-repl-host-last-known-page (ws)
-  "Return whether the daemon last knew WS\='s page loaded, or nil.
-`:loaded' or `:not-loaded', as the registration answered it
-\(`RegisterWorkspaceSuccess.last_known_page') and every residency report
-since has kept it; nil when no report was ever made.  THE DAEMON KEEPS IT
-ACROSS RESTARTS, so after a bounce it says which pages Emacs held before
-\(`agent-repl-page-unload-wanted-p')."
-  (plist-get (agent-repl-host--entry ws) :last-known-page))
 
 (defun agent-repl-host--recorded-conn (ws)
   "Return the connection recorded for WS, dead or alive, or nil.
@@ -519,9 +509,7 @@ there to say it."
   "Record on SCOPE how DIR\='s registration ended; answer its ref, or nil.
 ARM is `:registered' (VALUE the decoded `RegisterWorkspaceSuccess'),
 `:refused' (VALUE the daemon\='s `RegisterWorkspaceError') or `:failed'
-\(VALUE what broke).  A registration of the existing workspace WS also
-records the page the daemon last knew it to hold
-\(`agent-repl-host-last-known-page').
+\(VALUE what broke).
 A registration of WS refused `transferring_away' is HANDOVER NEWS, not a
 failure: the daemon handed WS to the successor it names, so it is
 recorded at INFO and handed to `agent-repl-host-handle-refusal', which
@@ -533,12 +521,9 @@ THE ONE RECORD of a registration\='s fate, a lone RegisterWorkspace
 registration\='s outcome the same way however it was sent."
   (pcase arm
     (:registered
-     (let ((ref (plist-get value :workspace))
-           (page (plist-get value :last-known-page)))
-       (when ws
-         (agent-repl-host--put ws :last-known-page page))
-       (agent-repl--info scope "elisp.host.registered dir=%S id=%S last-known-page=%S"
-                         dir (plist-get ref :id) page)
+     (let ((ref (plist-get value :workspace)))
+       (agent-repl--info scope "elisp.host.registered dir=%S id=%S"
+                         dir (plist-get ref :id))
        ref))
     (:refused
      (let ((cause (plist-get value :cause)))
@@ -720,7 +705,7 @@ one place the handover walk lives."
 (defvar agent-repl-host--select-in-flight nil
   "The `WorkspaceRef' whose SelectWorkspace awaits its answer, or nil.
 A REF, NEVER A NAME: a workspace this editor does not hold (a folded or
-hidden one, frontend.v1.RosterRowHeld) is selected through the same one
+hidden one, frontend.v1.RosterRowVisibility) is selected through the same one
 queue as a held one, and it has no name here until its tab opens.
 EMACS SENDS ONE SELECTION AT A TIME.  Every unary call rides its own
 socket, so two selects sent back to back -- `s-}' pressed twice -- reach
@@ -856,7 +841,7 @@ walk is armed on (`agent-repl-host--register-settled')."
 (defun agent-repl-host-select-ref (ref &optional on-settled keep-history switch-started-ms)
   "Tell the daemon the user switched to the workspace REF names.
 `agent-repl-host-select', by the workspace\='s identity: the one way to
-select a workspace this editor does not hold (frontend.v1.RosterRowHeld),
+select a workspace this editor does not hold (frontend.v1.RosterRowVisibility),
 whose roster push then opens it and lands the frame on it
 \(`agent-repl-roster-apply-current').  ON-SETTLED, KEEP-HISTORY and
 SWITCH-STARTED-MS are as `agent-repl-host-select' documents; so is the one
@@ -1162,7 +1147,7 @@ Answers t when the request was sent or queued, nil otherwise."
   "Ask the daemon to make the workspace REF names current, whether held or not.
 TRIGGER is as `agent-repl-host-request-switch' takes it.  A workspace this
 editor holds is switched to by name, the frame moving at once.  One it
-does not hold (frontend.v1.RosterRowHeld) has no perspective to move to:
+does not hold (frontend.v1.RosterRowVisibility) has no perspective to move to:
 the daemon is asked to select it (`agent-repl-host-select-ref'), the
 roster push that marks it held opens it, and the roster\='s follow lands
 the frame on it (`agent-repl-roster-apply-current', owner ruling
@@ -1226,8 +1211,7 @@ decision is recorded at INFO, as the roster's follow records its own."
                             (- gcs-done gcs)
                             (round (* 1000 (- gc-elapsed gc-seconds))))))))))
 
-(defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent
-                                               &optional timeout)
+(defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent)
   "Send workspace WS\='s ref through the workspace-subject verb RPC.
 OP is the verb\='s record slug (`elisp.host.<op>\=', `<op>-skipped\=',
 `<op>-refused\=', `<op>-unknown-arm\=', `<op>-failed\=').  ON-SUCCESS is
@@ -1235,8 +1219,6 @@ called with no argument once the daemon answers success, and ON-NOT-SENT
 with no argument on every other outcome: no ref or no connection yet (WS
 is not sent), a refusal (recorded by `agent-repl-host--on-refused\='), an
 arm the verb does not know, or a transport failure (both at ERROR).
-TIMEOUT, when given, bounds the call in place of
-`agent-repl-connect-unary-timeout-seconds\='.
 Answers t when the call was made, nil when it was not."
   (let ((ref (agent-repl-host-ref ws))
         (conn (agent-repl-host-conn-or-primary ws)))
@@ -1263,8 +1245,7 @@ Answers t when the call was made, nil when it was not."
        :on-failure
        (lambda (detail)
          (agent-repl--error ws (format "elisp.host.%s-failed ws=%%s detail=%%S" op) ws detail)
-         (funcall on-not-sent))
-       :timeout timeout)
+         (funcall on-not-sent)))
       t))))
 
 (defun agent-repl-host-report-page-unloading (ws on-reported on-not-reported)
@@ -1282,43 +1263,6 @@ The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
      (agent-repl--log ws "elisp.host.page-unloading-reported ws=%s" ws)
      (funcall on-reported))
    on-not-reported))
-
-(defconst agent-repl-host-page-residency-timeout-seconds 30
-  "How long a ReportPageResidency call may wait for the daemon\='s answer.
-Every link-up forgets each workspace\='s last report, so a handover sends
-one report per workspace while the successor is still adopting the rest
-\=(`agent-repl-page-unload-start\=').  Measured over the 14:52 deploy of
-2026-11-16 (120 workspaces): each report reached its handler up to 2.7s
-after its workspace\='s adopt, the handler took up to 5s
-\=(agentrepl_rpc_seconds), and Emacs itself stalled 4.1s before reading
-the answers, so a round trip ran to some 12s.  The generic
-`agent-repl-connect-unary-timeout-seconds\=' (10s) sat below that, and
-ten workspaces recorded their report at ERROR though the daemon had taken
-every one.  30s is two and a half times the worst, the same bound the
-adopt they follow waits (`agent-repl-host-adopt-timeout-seconds\=').")
-
-(defun agent-repl-host-report-page-residency (ws residency on-reported)
-  "Tell the daemon what Emacs holds of workspace WS\='s page: RESIDENCY.
-RESIDENCY is a `PageResidency' plist (`agent-repl-wire-encode-page-residency').
-ON-REPORTED is called with no argument once the daemon has answered
-success, and the daemon stores whether the page is loaded, which the
-registration after a bounce answers (`agent-repl-host-last-known-page').
-FIRE AND FORGET otherwise: a report that does not land is recorded and
-the next change, or the next link-up, reports again.  Answers nil without
-calling anything when WS has no ref or no connection yet."
-  (agent-repl-host--send-subject-verb
-   ws "page-residency"
-   (lambda (conn request &rest args)
-     (apply #'agent-repl-rpc-report-page-residency conn
-            (append request (list :residency residency)) args))
-   (lambda ()
-     (agent-repl--log ws "elisp.host.page-residency-reported ws=%s residency=%S" ws residency)
-     ;; The daemon now knows what this report said, and keeps it.
-     (agent-repl-host--put ws :last-known-page
-                           (plist-get residency :arm))
-     (funcall on-reported))
-   #'ignore
-   agent-repl-host-page-residency-timeout-seconds))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.
@@ -2289,7 +2233,7 @@ the successor was already in flight when the old stream ended planned."
 ;; is answered (`agent-repl-host--adopt-onto'), so every call about WS made
 ;; in that window reached a daemon that had not adopted WS yet and was
 ;; refused `not_yet_adopted', and what it reported was lost: in the
-;; 2026-11-13 14:42 deploy, ReportPageResidency, ReportPageUnloading,
+;; 2026-11-13 14:42 deploy, ReportPageUnloading,
 ;; MarkWorkspaceViewed and SelectWorkspace for the four workspaces with a
 ;; loaded page, 1-3s before their adopt was answered (24 WARN records at the
 ;; successor).  So every async unary call goes through ONE gate
@@ -2724,7 +2668,7 @@ The workspace\='s composer when this editor holds it and its composer is
 live, the buffer the agent\='s workspace types into.  Otherwise the
 editor\='s own evaluation buffer, whose `default-directory' is the
 workspace\='s directory: a workspace this editor does not hold
-\(frontend.v1.RosterRowHeld) has no buffer of its own, and the
+\(frontend.v1.RosterRowVisibility) has no buffer of its own, and the
 evaluation must not run in whatever buffer the user happens to be in."
   (let* ((ws (agent-repl-host--held-name (plist-get ref :id)))
          (composer (and ws (agent-repl--ws-get ws :input-buffer))))

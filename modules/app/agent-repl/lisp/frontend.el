@@ -131,7 +131,6 @@
 (declare-function agent-repl-sidebar-view-show "sidebar-view" ())
 (declare-function agent-repl-sidebar-view-hide "sidebar-view" ())
 (declare-function agent-repl-webhost-xwidget "webhost" ())
-(declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
 (declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
@@ -946,7 +945,7 @@ window's background its page's gate wears.
 
 Either way the host is asked to hold WS's page
 \(`agent-repl-webhost-ensure-page') when it is wanted
-\(`agent-repl-page-unload-wanted-p': on screen, or working), which is
+\(`agent-repl-page-unload-wanted-p': unless cold-gated), which is
 idempotent: a page already held at WS's URL is left alone, so this is safe
 on every open and show.  A slot that is not wanted is made with no page.
 
@@ -975,12 +974,11 @@ webview window resolves against the worktree the REPL is attached to."
                     (agent-repl--ws-put ws :frontend-buffer buf)
                     (agent-repl--info ws "elisp.frontend.slot-mounted ws=%s buffer=%s" ws name)
                     buf)))))
-    ;; A PAGE IS LOADED ONLY WHERE IT IS WANTED (owner ruling, 2026-10-29):
-    ;; on screen, or working.  Any other slot is made with no page, and its
-    ;; show loads it (`agent-repl-page-unload-note-shown').
+    ;; A PAGE IS LOADED FOR EVERY WORKSPACE HELD HERE, which the daemon
+    ;; calls visible (owner ruling, 2026-11-21), but a cold-gated one: its
+    ;; slot is made with no page, and its show holds the page back
+    ;; (`agent-repl-page-unload-note-shown').
     (when (agent-repl-page-unload-wanted-p ws)
-      (unless (agent-repl-webhost-has-page-p ws)
-        (agent-repl-page-unload-note-mounted ws))
       (agent-repl-webhost-ensure-page ws))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))

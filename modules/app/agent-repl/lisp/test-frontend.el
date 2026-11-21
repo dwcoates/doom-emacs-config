@@ -163,13 +163,12 @@ test is the mount's own binding of the slot to its workspace."
 
 (defmacro agent-repl-test-frontend--with-host-pages (wanted &rest body)
   "Run BODY with page-unload answering WANTED, and a host holding `held'.
-`held' lists every page ensured, newest first; `noted' every mount noted."
+`held' lists every page ensured, newest first."
   (declare (indent 1))
-  `(let ((held nil) (noted nil))
+  `(let ((held nil))
      (cl-letf (((symbol-function 'agent-repl-page-unload-wanted-p) (lambda (_ws) ,wanted))
                ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (ws) (member ws held)))
-               ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (ws) (push ws held)))
-               ((symbol-function 'agent-repl-page-unload-note-mounted) (lambda (ws) (push ws noted))))
+               ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (ws) (push ws held))))
        ,@body)))
 
 (ert-deftest agent-repl-test-frontend-ensure-webview-holds-a-wanted-page-in-the-host ()
@@ -198,22 +197,7 @@ test is the mount's own binding of the slot to its workspace."
               ;; Act
               (let ((slot (agent-repl--frontend-ensure-webview-buffer "ws1")))
                 ;; Assert
-                (should (equal (list (eq slot buf) held noted) '(t nil nil))))))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-frontend-a-page-newly-held-is-noted-mounted-once ()
-  "A page the host did not hold is noted to page-unload.el when held, and only then."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*")))
-      (unwind-protect
-          (agent-repl-test-frontend--with-slot-mount buf
-            (agent-repl-test-frontend--with-host-pages t
-              ;; Act
-              (agent-repl--frontend-ensure-webview-buffer "ws1")
-              (agent-repl--frontend-ensure-webview-buffer "ws1")
-              ;; Assert
-              (should (equal noted '("ws1")))))
+                (should (equal (list (eq slot buf) held) '(t nil))))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 ;;;; ---- The slot ---------------------------------------------------------------

@@ -7676,7 +7676,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 
 (ert-deftest agent-repl-test-core-vocab-read-reads-the-checked-in-files ()
   "The real vocabulary directory resolves beside the module."
-  (should (natnump (agent-repl-vocab-read "page-hold.json" "hold_seconds"))))
+  (should (natnump (agent-repl-vocab-read "name-fade.json" "hold_seconds"))))
 
 (ert-deftest agent-repl-test-core-every-vocab-file-is-read-through-the-reader ()
   "No source outside core.el resolves a proto/vocab path by hand."

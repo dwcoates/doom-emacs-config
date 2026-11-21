@@ -1143,8 +1143,8 @@ Returns a plist (:command STRING)."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending notificationClicked selection evaluate
-       finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
+     '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending selection
+       finalResponseClicked loadPageRequested composeEntry chatTextHighlighted
        transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets linkFollowed))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
@@ -1164,39 +1164,16 @@ A PATH, not an identity: the daemon normalizes it and mints the identity."
   "Decode `RegisterWorkspaceSuccess''s `workspace' field VALUE."
   (agent-repl-wire-decode-workspace-ref value))
 
-(defun agent-repl-wire-decode-last-known-page-loaded (value)
-  "Decode VALUE as the empty message `LastKnownPageLoaded'."
-  (agent-repl-wire--decode-empty "LastKnownPageLoaded" value))
-
-(defun agent-repl-wire-decode-last-known-page-not-loaded (value)
-  "Decode VALUE as the empty message `LastKnownPageNotLoaded'."
-  (agent-repl-wire--decode-empty "LastKnownPageNotLoaded" value))
-
-(defun agent-repl-wire-decode-last-known-page (value)
-  "Decode VALUE as `LastKnownPage': `:loaded' or `:not-loaded'.
-A LastKnownPage with no state set is a contract breach."
-  (let ((object (agent-repl-wire--object "LastKnownPage" value)))
-    (agent-repl-wire--check-keys "LastKnownPage" object '(loaded notLoaded))
-    (plist-get (agent-repl-wire--decode-oneof
-                "LastKnownPage" 'state object
-                '((loaded :loaded agent-repl-wire-decode-last-known-page-loaded)
-                  (notLoaded :not-loaded agent-repl-wire-decode-last-known-page-not-loaded)))
-               :arm)))
-
 (defun agent-repl-wire-decode-register-workspace-success (value)
   "Decode VALUE as `RegisterWorkspaceSuccess'.
-A plist `(:workspace REF :last-known-page PAGE)', PAGE `:loaded',
-`:not-loaded', or nil when Emacs never reported the page."
+A plist `(:workspace REF)'."
   (let ((object (agent-repl-wire--object "RegisterWorkspaceSuccess" value)))
-    (agent-repl-wire--check-keys "RegisterWorkspaceSuccess" object '(workspace lastKnownPage))
+    (agent-repl-wire--check-keys "RegisterWorkspaceSuccess" object '(workspace))
     (agent-repl-wire--decoded
      "RegisterWorkspaceSuccess"
      (list :workspace (agent-repl-wire--decode-message
                        "RegisterWorkspaceSuccess" 'workspace object
-                       #'agent-repl-wire-decode-register-workspace-success-workspace)
-           :last-known-page (agent-repl-wire--decode-optional-message
-                             "RegisterWorkspaceSuccess" 'lastKnownPage object
-                             #'agent-repl-wire-decode-last-known-page)))))
+                       #'agent-repl-wire-decode-register-workspace-success-workspace)))))
 
 (defun agent-repl-wire-decode-register-workspace-not-a-worktree (value)
   "Decode VALUE as the empty message `RegisterWorkspaceNotAWorktree'.
@@ -1520,54 +1497,6 @@ Emacs's report that it is about to unload the workspace's page on purpose."
 (defun agent-repl-wire-decode-report-page-unloading-response (value)
   "Decode VALUE as `ReportPageUnloadingResponse'.  THE ARM IS THE OUTCOME."
   (agent-repl-wire--decode-subject-response "ReportPageUnloading" value))
-
-;;;; ---- ReportPageResidency ----
-
-(defun agent-repl-wire-encode-page-residency-release (value)
-  "Encode VALUE as `PageResidencyRelease': the oneof `when', as
-`(:arm :held|:on-leave|:at :value V)', V being `(:unix-ms MS)' for `:at'
-and nil for the empty arms."
-  (agent-repl-wire--encoded
-   "PageResidencyRelease"
-   (agent-repl-wire--encode-oneof
-    "PageResidencyRelease" 'when value
-    `((:held held ,(lambda (v) (agent-repl-wire--encode-empty "PageResidencyReleaseHeld" v)))
-      (:on-leave onLeave ,(lambda (v) (agent-repl-wire--encode-empty "PageResidencyReleaseOnLeave" v)))
-      (:at at ,(lambda (v)
-                 (let ((ms (plist-get v :unix-ms)))
-                   (unless (integerp ms)
-                     (agent-repl-wire--fail "PageResidencyReleaseAt" 'unix_ms "expected an integer"))
-                   (agent-repl-wire--encoded "PageResidencyReleaseAt" (list (cons 'unixMs ms))))))))))
-
-(defun agent-repl-wire-encode-page-residency (value)
-  "Encode VALUE as `PageResidency': the oneof `state', as
-`(:arm :loaded :value (:release RELEASE))' or `(:arm :not-loaded :value nil)'."
-  (agent-repl-wire--encoded
-   "PageResidency"
-   (agent-repl-wire--encode-oneof
-    "PageResidency" 'state value
-    `((:loaded loaded
-               ,(lambda (v)
-                  (agent-repl-wire--require-fields "PageResidencyLoaded" v '(:release))
-                  (agent-repl-wire--encoded
-                   "PageResidencyLoaded"
-                   (list (cons 'release (agent-repl-wire-encode-page-residency-release
-                                         (plist-get v :release)))))))
-      (:not-loaded notLoaded ,(lambda (v) (agent-repl-wire--encode-empty "PageResidencyNotLoaded" v)))))))
-
-(defun agent-repl-wire-encode-report-page-residency-request (value)
-  "Encode ReportPageResidencyRequest VALUE `(:workspace REF :residency R)'.
-Emacs's statement of what it holds of the workspace's page and when it
-lets go (page-unload.el)."
-  (agent-repl-wire--require-fields "ReportPageResidencyRequest" value '(:workspace :residency))
-  (agent-repl-wire--encoded
-   "ReportPageResidencyRequest"
-   (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
-         (cons 'residency (agent-repl-wire-encode-page-residency (plist-get value :residency))))))
-
-(defun agent-repl-wire-decode-report-page-residency-response (value)
-  "Decode VALUE as `ReportPageResidencyResponse'.  THE ARM IS THE OUTCOME."
-  (agent-repl-wire--decode-subject-response "ReportPageResidency" value))
 
 ;;;; ---- MarkWorkspaceViewed ----
 

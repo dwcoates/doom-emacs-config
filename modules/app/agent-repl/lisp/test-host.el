@@ -130,9 +130,6 @@ and a transport failure or a held call is the batch\='s own."
 (defvar agent-repl-test-host--unloading-answer nil
   "What the stubbed ReportPageUnloading answers; see the harness.")
 
-(defvar agent-repl-test-host--residency-answer nil
-  "What the stubbed ReportPageResidency answers; see the harness.")
-
 (defvar agent-repl-test-host--effects nil
   "W2-B surface calls, newest first: `(NAME . ARGS)'.")
 
@@ -290,8 +287,6 @@ unary rpc can produce, which the contract never collapses into one."
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--view-dwell-answer
           (list :response (list :arm :success :value nil)))
-         (agent-repl-test-host--residency-answer
-          (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--evaluation-answer
@@ -326,12 +321,6 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (conn request &rest keys)
                   (push (list "ReportViewDwell" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--view-dwell-answer
-                                                (plist-get keys :on-response)
-                                                (plist-get keys :on-failure))))
-               ((symbol-function 'agent-repl-rpc-report-page-residency)
-                (lambda (conn request &rest keys)
-                  (push (list "ReportPageResidency" conn request) agent-repl-test-host--calls)
-                  (agent-repl-test-host--answer agent-repl-test-host--residency-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-report-page-unloading)
@@ -821,101 +810,9 @@ A hand-rolled copy of either would not be recorded here."
                  (lambda (_ws op &rest _) (push op ops) t)))
         ;; Act
         (agent-repl-host-mark-viewed "ws-1")
-        (agent-repl-host-report-page-unloading "ws-1" #'ignore #'ignore)
-        (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) #'ignore))
+        (agent-repl-host-report-page-unloading "ws-1" #'ignore #'ignore))
       ;; Assert
-      (should (equal (reverse ops) '("mark-viewed" "page-unloading" "page-residency"))))))
-
-;;;; ---- Report page residency ----
-
-(ert-deftest agent-repl-test-host-page-residency-carries-the-ref-and-the-residency ()
-  "ReportPageResidency carries the daemon-minted ref and the residency, and success is reported."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--calls nil)
-    (let ((residency '(:arm :not-loaded :value nil))
-          reported)
-      ;; Act
-      (agent-repl-host-report-page-residency "ws-1" residency (lambda () (setq reported t)))
-      ;; Assert
-      (should reported)
-      (should (equal (nth 2 (car agent-repl-test-host--calls))
-                     (list :workspace (agent-repl-test-host--ref) :residency residency))))))
-
-(ert-deftest agent-repl-test-host-page-residency-reported-is-the-last-known-page ()
-  "A residency the daemon took is the page it last knows."
-  (dolist (residency '((:arm :not-loaded :value nil)
-                       (:arm :loaded :value (:release (:arm :held :value nil)))))
-    (agent-repl-test-host--with-harness
-      ;; Arrange
-      (agent-repl-test-host--subscribe "ws-1")
-      ;; Act
-      (agent-repl-host-report-page-residency "ws-1" residency #'ignore)
-      ;; Assert
-      (should (eq (agent-repl-host-last-known-page "ws-1") (plist-get residency :arm))))))
-
-(ert-deftest agent-repl-test-host-page-residency-refused-is-not-reported ()
-  "A refused residency report is surfaced and does not count as reported."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--residency-answer
-          (list :response (list :arm :error :value nil)))
-    (let (reported)
-      ;; Act
-      (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) (lambda () (setq reported t)))
-      ;; Assert
-      (should-not reported)
-      (should-not (agent-repl-host-last-known-page "ws-1"))
-      (should (agent-repl-test-host--logged-p :error "elisp.host.page-residency-refused")))))
-
-(ert-deftest agent-repl-test-host-page-residency-waits-out-its-own-bound ()
-  "The residency report waits `agent-repl-host-page-residency-timeout-seconds'."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (let ((timeout :unset))
-      (cl-letf (((symbol-function 'agent-repl-rpc-report-page-residency)
-                 (lambda (_conn _request &rest keys) (setq timeout (plist-get keys :timeout)))))
-        ;; Act
-        (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) #'ignore)
-        ;; Assert
-        (should (equal timeout agent-repl-host-page-residency-timeout-seconds))))))
-
-(ert-deftest agent-repl-test-host-page-residency-bound-exceeds-the-unary-default ()
-  "The residency report's bound sits above the generic unary timeout."
-  ;; Assert
-  (should (> agent-repl-host-page-residency-timeout-seconds
-             agent-repl-connect-unary-timeout-seconds)))
-
-(ert-deftest agent-repl-test-host-subject-verb-without-a-bound-keeps-the-default ()
-  "A subject verb given no TIMEOUT passes nil, so the unary default applies."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (let ((timeout :unset))
-      (cl-letf (((symbol-function 'agent-repl-rpc-mark-workspace-viewed)
-                 (lambda (_conn _request &rest keys) (setq timeout (plist-get keys :timeout)))))
-        ;; Act
-        (agent-repl-host-mark-viewed "ws-1")
-        ;; Assert
-        (should (null timeout))))))
-
-(ert-deftest agent-repl-test-host-page-residency-timeout-is-recorded-at-error ()
-  "A residency report that times out is recorded at ERROR and not reported."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--residency-answer
-          (list :failure (list :kind :timeout :message "ReportPageResidency timed out after 30s")))
-    (let (reported)
-      ;; Act
-      (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) (lambda () (setq reported t)))
-      ;; Assert
-      (should-not reported)
-      (should-not (agent-repl-host-last-known-page "ws-1"))
-      (should (agent-repl-test-host--logged-p :error "elisp.host.page-residency-failed")))))
+      (should (equal (reverse ops) '("mark-viewed" "page-unloading"))))))
 
 ;;;; ---- Report page unloading ----
 
@@ -1656,7 +1553,7 @@ an echo would race a newer request and take the frame back."
 ;;;; ---- A selection of a workspace this editor does not hold ----
 
 (defconst agent-repl-test-host--unheld-ref '(:id "ws-id-folded" :dir "/tmp/folded")
-  "The ref of a workspace the roster does not mark held: no host entry here.")
+  "The ref of a workspace the roster does not mark visible: no host entry here.")
 
 (defun agent-repl-test-host--stand-primary ()
   "Stand the primary link an unheld workspace's selection is sent on; answer it."
@@ -6169,33 +6066,10 @@ address."
   (agent-repl-test-host--with-harness
     ;; Act
     (let ((ref (agent-repl-host--record-registration
-                nil "/w" :registered '(:workspace (:id "ws-7" :dir "/w") :last-known-page nil))))
+                nil "/w" :registered '(:workspace (:id "ws-7" :dir "/w")))))
       ;; Assert
       (should (equal ref '(:id "ws-7" :dir "/w")))
       (should (agent-repl-test-host--logged-p :info "elisp.host.registered dir=\"/w\" id=\"ws-7\"")))))
-
-(ert-deftest agent-repl-test-host-record-registration-records-the-last-known-page ()
-  "A workspace's registration records the page the daemon last knew it to hold."
-  (dolist (page '(:loaded :not-loaded nil))
-    (agent-repl-test-host--with-harness
-      ;; Arrange
-      (agent-repl-host--put "ws-1" :last-known-page :stale)
-      ;; Act
-      (agent-repl-host--record-registration
-       "ws-1" "/w" :registered (list :workspace '(:id "ws-7" :dir "/w") :last-known-page page) "ws-1")
-      ;; Assert
-      (should (eq (agent-repl-host-last-known-page "ws-1") page))
-      (should (agent-repl-test-host--logged-p
-               :info (format "elisp.host.registered dir=\"/w\" id=\"ws-7\" last-known-page=%S" page))))))
-
-(ert-deftest agent-repl-test-host-record-registration-without-a-workspace-records-no-page ()
-  "A registration made before any workspace exists records no last-known page."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-host--record-registration
-     nil "/w" :registered '(:workspace (:id "ws-7" :dir "/w") :last-known-page :loaded))
-    ;; Assert
-    (should (= 0 (hash-table-count agent-repl-host--by-name)))))
 
 (ert-deftest agent-repl-test-host-record-registration-records-a-refusal-and-answers-nil ()
   "A refused dir is recorded at ERROR with the refusal, and answers no ref."
