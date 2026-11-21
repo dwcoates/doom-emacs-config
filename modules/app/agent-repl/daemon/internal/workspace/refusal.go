@@ -286,6 +286,14 @@ const (
 	// pull request another open workspace owns. Its `owner` and `owner_name`
 	// fields name that workspace.
 	ArmPullRequestOwnedElsewhere = "pull_request_owned_elsewhere"
+	// ArmSubpageOfOwnedLink is a ChangeWorkspaceLinks set owning a GNS
+	// subpage of a GNS page the workspace already owns as a link. Its `url`
+	// and `owned_page_url` fields name the two.
+	ArmSubpageOfOwnedLink = "subpage_of_owned_link"
+	// ArmOwnedLinkUnshown is a ChangeWorkspaceLinks show leaving an owned
+	// link unshown while it shows a reference, when the owned links alone fit
+	// the menu. Its `owned_url` and `reference_url` fields name the two.
+	ArmOwnedLinkUnshown = "owned_link_unshown"
 	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
 	// external browser launcher at all.
 	ArmNoBrowserConfigured = "no_browser_configured"

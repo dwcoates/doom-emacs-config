@@ -960,8 +960,9 @@ func (d *fakeDB) WorkspaceLinks(_ context.Context, id ids.WorkspaceID) ([]wsm.Wo
 }
 
 // SetWorkspaceLink stores or relabels a link at the front, shown while fewer
-// than wsm.ShownLinkLimit are, as the store does, and records the set it was
-// given; linksErr fails it.
+// than wsm.ShownLinkLimit are, and records the set it was given; linksErr
+// fails it. The store's owned-first placement once the menu is full is the
+// store's own tests' (wsm), never modeled here.
 func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, set wsm.LinkSet) ([]wsm.WorkspaceLink, error) {
 	if d.linksErr != nil {
 		return nil, d.linksErr

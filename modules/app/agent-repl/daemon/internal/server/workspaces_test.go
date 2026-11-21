@@ -1090,6 +1090,18 @@ func TestChangeWorkspaceLinksMapsTheVerbsRefusals(t *testing.T) {
 				got := e.GetPullRequestOwnedElsewhere()
 				return got.GetUrl() == "https://github.com/o/r/pull/7" && got.GetOwner().GetId() == "w2" && got.GetOwnerName() == "owner"
 			}},
+		{name: "subpage_of_owned_link", refusal: &workspace.Refusal{Arm: workspace.ArmSubpageOfOwnedLink,
+			Fields: map[string]any{"url": "https://gns.example.com/key/a.b", "owned_page_url": "https://gns.example.com/key/a"}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				got := e.GetSubpageOfOwnedLink()
+				return got.GetUrl() == "https://gns.example.com/key/a.b" && got.GetOwnedPageUrl() == "https://gns.example.com/key/a"
+			}},
+		{name: "owned_link_unshown", refusal: &workspace.Refusal{Arm: workspace.ArmOwnedLinkUnshown,
+			Fields: map[string]any{"owned_url": "https://example.com/owned", "reference_url": "https://example.com/reference"}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				got := e.GetOwnedLinkUnshown()
+				return got.GetOwnedUrl() == "https://example.com/owned" && got.GetReferenceUrl() == "https://example.com/reference"
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

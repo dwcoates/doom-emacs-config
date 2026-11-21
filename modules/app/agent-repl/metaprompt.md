@@ -334,18 +334,26 @@
   - The daemon follows an owned pull request, telling the workspace about every comment, review and finished check on it until it merges or closes.
 - A link the workspace was created to investigate or act on MUST be stored before any other work on it begins.
   - Examples are a Slack thread, a Jira ticket, an issue, or a pull request to review.
-- Every pull request an agent makes MUST be stored as the workspace's owned and canonical link, through `agent-repld workspace link`.
-  - It is stored owned the moment its URL is known.
-    - The URL comes from the creating command's output or from `gh pr view --json url`, never a guessed one.
-  - This holds whoever opened it: the workspace's own agent, a skill such as `create-or-update-pr`, or a subagent working for the workspace.
+- Every resource the workspace's work creates MUST be stored as one of its owned links, through `agent-repld workspace link`.
+  - Examples are a pull request, a GNS page, a doc, a ticket, or a Slack post.
+  - It is stored owned the moment its URL is known, before any other work.
+    - The URL comes from the creating command's output, or for a pull request from `gh pr view --json url`, never a guessed one.
+  - This holds whoever made it: the workspace's own agent, a skill such as `create-or-update-pr`, or a subagent working for the workspace.
   - It holds in every repository, not only agent-repl's own.
+  - A GNS subpage the work adds under a GNS page the workspace already owns as a link is never stored separately, because the owned page stands for it.
+  - A GNS subpage the work adds under a page the workspace does not own is stored owned, like any other resource it creates.
+- Every pull request an agent makes is also the workspace's canonical link.
   - Canonical means that while the pull request is open, it is one of the menu's shown links.
     - The workspace shows it with `-show` in the same turn it is stored, whenever storing it left it unshown.
     - So the owner can always reach every open pull request the workspace asked them to review or merge from the topbar.
 - The menu shows at most five links, so once it is full the workspace chooses which five it shows.
+  - Owned links come before references.
+    - The daemon shows a newly stored owned link in place of the oldest shown reference.
+    - It refuses a show that leaves an owned link unshown while it shows a reference, unless the owned links alone are more than five.
   - First come the open pull requests the workspace's agents made, newest first.
-  - Then the links the workspace was created to act on.
-  - A merged or closed pull request, and any other reference, gives up its place to these first.
+  - Then the workspace's other owned links.
+  - Then the links the workspace was created to act on, before any other reference.
+  - When the owned links alone are more than five, a merged or closed pull request gives up its place to the links the workspace was created to act on.
   - Among the rest, it ranks them by relevance to the project, as seen by the developer working with the agent.
   - It ranks them by the same lens for the stakeholders the developer reports the work to.
   - The workspace checks the menu again whenever one of its pull requests merges or closes, and whenever it stores a new one.

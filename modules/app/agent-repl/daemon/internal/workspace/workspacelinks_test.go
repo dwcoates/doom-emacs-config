@@ -507,6 +507,56 @@ func TestAnAnnouncementOfAnUnheldLinkIsRefused(t *testing.T) {
 	}
 }
 
+func TestAnOwnedSubpageOfAnOwnedGNSPageIsRefusedNamingThePage(t *testing.T) {
+	// Arrange
+	const page, subpage = "https://gns.example.com/key/teams.core", "https://gns.example.com/key/teams.core.notes"
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": {{URL: page, Label: "The team's page", Owned: true, Shown: true}}}
+	f.db.linksErr = &wsm.SubpageOfOwnedLinkError{URL: subpage, OwnedPageURL: page}
+
+	// Act
+	got, err := f.verbs.SetLink(context.Background(), "w1", subpage, "The team's notes page", true, "")
+
+	// Assert
+	refusal := asRefusal(t, err, ArmSubpageOfOwnedLink)
+	if refusal.Fields["url"] != subpage || refusal.Fields["owned_page_url"] != page {
+		t.Errorf("refusal fields = %v, want the subpage and the owned page", refusal.Fields)
+	}
+	if got != nil || len(f.db.links["w1"]) != 1 || len(f.topbarLinks) != 0 {
+		t.Errorf("answered %+v, links %+v, published %+v; want nothing stored or published", got, f.db.links["w1"], f.topbarLinks)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
+	if !ok || r.Context["arm"] != ArmSubpageOfOwnedLink || r.Context["arm_owned_page_url"] != page {
+		t.Errorf("refusal record = %+v, want an INFO refusal naming the owned page", r)
+	}
+}
+
+func TestAShowLeavingAnOwnedLinkOutIsRefusedNamingBoth(t *testing.T) {
+	// Arrange
+	const owned, reference = "https://example.com/owned", "https://example.com/reference"
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": {docLink}}
+	f.db.linksErr = &wsm.OwnedLinkUnshownError{OwnedURL: owned, ReferenceURL: reference}
+
+	// Act
+	got, err := f.verbs.ShowLinks(context.Background(), "w1", []string{reference})
+
+	// Assert
+	refusal := asRefusal(t, err, ArmOwnedLinkUnshown)
+	if refusal.Fields["owned_url"] != owned || refusal.Fields["reference_url"] != reference {
+		t.Errorf("refusal fields = %v, want the owned link and the reference", refusal.Fields)
+	}
+	if got != nil || len(f.topbarLinks) != 0 {
+		t.Errorf("answered %+v, published %+v; want nothing", got, f.topbarLinks)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
+	if !ok || r.Context["arm"] != ArmOwnedLinkUnshown || r.Context["arm_owned_url"] != owned {
+		t.Errorf("refusal record = %+v, want an INFO refusal naming the owned link", r)
+	}
+}
+
 func TestAnOwnedLinkFollowedForItsMergeAloneShowsItsNarrowedEvents(t *testing.T) {
 	// Arrange
 	pr := &wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 1}

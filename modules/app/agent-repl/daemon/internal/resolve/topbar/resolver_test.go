@@ -14,6 +14,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gnsurl"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
@@ -1964,6 +1965,23 @@ func TestTheTotalSessionContextSumsTheContextEveryCutDiscarded(t *testing.T) {
 			chip := h.view(t).GetContext()
 			if chip.GetSessionTotalText() != tt.wantTotal || chip.GetText() != tt.wantChip {
 				t.Fatalf("chip %q total %q, want %q total %q", chip.GetText(), chip.GetSessionTotalText(), tt.wantChip, tt.wantTotal)
+			}
+		})
+	}
+}
+
+// TestLinkIconDrawsGNSForExactlyTheHostsGNSURLRecognizes pins the icon to the
+// one GNS host test (gnsurl.IsHost), so the icon never disagrees with every
+// other reading of a GNS url.
+func TestLinkIconDrawsGNSForExactlyTheHostsGNSURLRecognizes(t *testing.T) {
+	for _, host := range []string{"gns.int.sgns.chess-platform.com", "GNS.EXAMPLE.COM", "knowledge.gns.example.com", "example.com"} {
+		t.Run(host, func(t *testing.T) {
+			// Act
+			got := linkIcon("https://" + host + "/key/teams.x")
+
+			// Assert
+			if gotGNS := got == frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS; gotGNS != gnsurl.IsHost(host) {
+				t.Errorf("linkIcon on %q = %v, but gnsurl.IsHost = %v", host, got, gnsurl.IsHost(host))
 			}
 		})
 	}

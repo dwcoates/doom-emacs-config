@@ -5,11 +5,14 @@
 // and a later read describe the links identically.
 //
 // UNLIMITED STORAGE, A CAPPED MENU. A workspace holds any number of links, but
-// the summary's menu shows at most five of them. While the menu has room, a newly set link is shown; once it is full,
-// a new link is stored unshown, the answer's `menu` is `full`, and the agent
-// chooses which links the menu shows (ChangeWorkspaceLinksShow), most relevant
-// first to the developer working with the agent and to the stakeholders the
-// developer reports the work to.
+// the summary's menu shows at most five of them. While the menu has room, a
+// newly set link is shown. Once it is full, a newly set OWNED link takes the
+// place of the oldest shown reference, a new reference is stored unshown, the
+// answer's `menu` is `full`, and the agent chooses which links the menu shows
+// (ChangeWorkspaceLinksShow): owned links before references, unless the owned
+// links alone are more than five, then most relevant first to the developer
+// working with the agent and to the stakeholders the developer reports the
+// work to.
 //
 // OWNED OR REFERENCED. Every link says whether the workspace's work MADE the
 // thing it points at (a pull request it opened, a doc it wrote) or only
@@ -313,9 +316,11 @@ export type WorkspaceLinksMenu = Message<"agentrepl.v1.WorkspaceLinksMenu"> & {
     case: "room";
   } | {
     /**
-     * The menu shows as many links as the cap allows, so the next new link is
-     * stored unshown. While any link is unshown, the agent chooses which
-     * links the menu shows (ChangeWorkspaceLinksShow).
+     * The menu shows as many links as the cap allows, so the next new
+     * reference is stored unshown, and the next new owned link takes the
+     * place of the oldest shown reference, if any is shown. While any link is
+     * unshown, the agent chooses which links the menu shows
+     * (ChangeWorkspaceLinksShow).
      *
      * @generated from field: agentrepl.v1.WorkspaceLinksMenuFull full = 2;
      */

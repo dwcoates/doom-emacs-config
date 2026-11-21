@@ -44,7 +44,9 @@ type PullRequestFollower interface {
 // that is not two to eight words in one sentence invalid_label, before
 // anything is written. An owned link may name ANNOUNCES, a link the workspace
 // already holds that it announces (agentrepl.v1.WorkspaceLinkOwned.announces);
-// an announced url it does not hold is refused unknown_announced_link. It
+// an announced url it does not hold is refused unknown_announced_link. An
+// owned GNS subpage of a GNS page the workspace already owns is refused
+// subpage_of_owned_link (wsm.SubpageOfOwnedLinkError), nothing stored. It
 // answers every link the workspace then holds.
 func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool, announces string) ([]wsm.WorkspaceLink, error) {
 	fields := dlog.Context{"url": url, "label": label, "owned": owned, "announces": announces}
@@ -103,8 +105,9 @@ func (v *verbs) RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) 
 
 // ShowLinks names exactly the links the summary's menu shows
 // (agentrepl.v1.ChangeWorkspaceLinksShow). More than the menu shows is refused
-// too_many_shown, and a url the workspace does not hold unknown_link, with
-// nothing changed.
+// too_many_shown, a url the workspace does not hold unknown_link, and a show
+// leaving an owned link out while it shows a reference owned_link_unshown
+// (wsm.OwnedLinkUnshownError), with nothing changed.
 func (v *verbs) ShowLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) ([]wsm.WorkspaceLink, error) {
 	return v.changeLinks(ctx, ws, dlog.Context{"urls": urls}, "chose the shown links", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		if len(urls) > wsm.ShownLinkLimit {
@@ -137,6 +140,8 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 	var unknown *wsm.UnknownLinkError
 	var unannounced *wsm.UnknownAnnouncedLinkError
 	var ownedElsewhere *wsm.PullRequestOwnedElsewhereError
+	var subpage *wsm.SubpageOfOwnedLinkError
+	var ownedUnshown *wsm.OwnedLinkUnshownError
 	_, refused := AsRefusal(err)
 	switch {
 	case errors.As(err, &ownedElsewhere):
@@ -147,6 +152,14 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 	case errors.As(err, &unannounced):
 		return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmUnknownAnnouncedLink,
 			fmt.Sprintf("the workspace holds no link %q for this one to announce", unannounced.URL), false, map[string]any{"url": unannounced.URL})
+	case errors.As(err, &subpage):
+		return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmSubpageOfOwnedLink,
+			fmt.Sprintf("%q is a GNS subpage of the owned link %q, which already stands for it", subpage.URL, subpage.OwnedPageURL), false,
+			map[string]any{"url": subpage.URL, "owned_page_url": subpage.OwnedPageURL})
+	case errors.As(err, &ownedUnshown):
+		return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmOwnedLinkUnshown,
+			fmt.Sprintf("the show leaves the owned link %q unshown while it shows the reference %q; owned links come first", ownedUnshown.OwnedURL, ownedUnshown.ReferenceURL), false,
+			map[string]any{"owned_url": ownedUnshown.OwnedURL, "reference_url": ownedUnshown.ReferenceURL})
 	case refused:
 		return nil, err
 	case err != nil:

@@ -532,10 +532,24 @@ creating workspaces there with `-repository DIR`.
     - A pull request has ONE owning workspace. Storing it `-owned` while
       another open workspace owns it is refused `pull_request_owned_elsewhere`,
       naming the owner; store it `-reference` instead.
-  - The menu shows at most five links. While it has room a new link is
-    shown; once it is full a new link is stored unshown, and the answer's
-    `links.menu` is `full` with `unshown` above zero. Then name the five the
-    menu shows with `workspace link here -show URL -show URL ...`.
+    - A GNS page (`https://<gns host>/key/<key>`, `/keys/<key>` or
+      `/app/<key>`) whose dotted key extends the key of a GNS page this
+      workspace already holds `-owned` (`teams.x.notes` under `teams.x`) is
+      a subpage of it. Storing such a subpage `-owned` is refused
+      `subpage_of_owned_link`, naming the owned page as `owned_page_url`,
+      and nothing is stored.
+  - The menu shows at most five links, and a new link is shown while the
+    menu has room. Once it is full, a newly set `-owned` link, or a relabel
+    to `-owned` of an unshown one, is shown in place of the oldest shown
+    reference (the least recently set). It is stored unshown only when the
+    menu shows no reference. A new `-reference` link is stored unshown.
+  - When a link went unshown, the answer's `links.menu` is `full` with
+    `unshown` above zero. Then name the five the menu shows with `workspace
+    link here -show URL -show URL ...`. A show that leaves an owned link
+    unshown while it shows a reference is refused `owned_link_unshown`,
+    naming `owned_url` and `reference_url`, and nothing changes. The one
+    exception is when the workspace's owned links alone are more than five.
+    Which links to rank first is the metaprompt's ("Workspace links").
   - `workspace link here -remove URL` removes one link, and
     `workspace link here -clear` removes them all.
   - `workspace status here` shows every stored link and its placement as

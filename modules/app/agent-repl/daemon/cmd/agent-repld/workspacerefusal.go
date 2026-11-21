@@ -281,6 +281,12 @@ func describeLinksRefusal(ws string, e *agentreplv1.ChangeWorkspaceLinksError) (
 	case *agentreplv1.ChangeWorkspaceLinksError_PullRequestOwnedElsewhere:
 		o := r.PullRequestOwnedElsewhere
 		return fmt.Sprintf("the pull request %s is already owned by %s at %s, and a pull request has one owning workspace", o.GetUrl(), o.GetOwnerName(), o.GetOwner().GetDir()), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_SubpageOfOwnedLink:
+		o := r.SubpageOfOwnedLink
+		return fmt.Sprintf("%s is a subpage of the GNS page %s, which %s already owns: store it as a reference, or leave it out", o.GetUrl(), o.GetOwnedPageUrl(), ws), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_OwnedLinkUnshown:
+		o := r.OwnedLinkUnshown
+		return fmt.Sprintf("the show leaves the owned link %s out while it names the reference %s: show every owned link first", o.GetOwnedUrl(), o.GetReferenceUrl()), nil
 	}
 	return "", undescribed("the links of "+ws, e)
 }
