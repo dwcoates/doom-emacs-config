@@ -392,7 +392,7 @@ func TestAnEdgeDuringARunningAttemptRunsOneMore(t *testing.T) {
 	// Arrange: the attempt is parked until the test runs it.
 	var parked []func(context.Context)
 	h := newHarness(t, func(d *Deps) {
-		d.Detach = func(run func(context.Context)) { parked = append(parked, run) }
+		d.Detach = func(_ ids.WorkspaceID, run func(context.Context)) { parked = append(parked, run) }
 	})
 	ws := h.hidden(t)
 	h.freeness.SetFree(ws, false)

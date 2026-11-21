@@ -507,7 +507,7 @@ type Fleet struct {
 // fleet's own is ended by DrainStarts at the exit, so an in-flight start is
 // ended and joined rather than left writing into a closing state client.
 func (f *Fleet) StartDetached(ws ids.WorkspaceID, cause shimlife.StartCause, done func(error)) {
-	f.runDetached(func(ctx context.Context) error { return f.Start(shimlife.WithStart(ctx, cause), ws) },
+	f.runDetached(ws, func(ctx context.Context) error { return f.Start(shimlife.WithStart(ctx, cause), ws) },
 		func(_ context.Context, err error) {
 			if done != nil {
 				done(err)
@@ -527,7 +527,7 @@ func (f *Fleet) StandingDown() bool { return f.deps.Supervisor.StandingDown() }
 // starts -- a compaction can run for a minute -- is occasioned by that answer
 // rather than contained in it.
 func (f *Fleet) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done func(context.Context, error)) {
-	f.runDetached(func(ctx context.Context) error { return f.ResumeCold(ctx, ws, resume) }, done)
+	f.runDetached(ws, func(ctx context.Context) error { return f.ResumeCold(ctx, ws, resume) }, done)
 }
 
 // runDetached is THE ONE WAY session work runs off a caller's goroutine: under
@@ -539,13 +539,17 @@ func (f *Fleet) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done f
 // by DrainStarts at the daemon's exit exactly as StartDetached's starts are.
 // The editor's opens run their bring-ups here, and a withheld workspace's
 // stand-down runs here too.
-func (f *Fleet) Detach(run func(context.Context)) {
-	f.runDetached(func(ctx context.Context) error { run(ctx); return nil }, nil)
+//
+// THE WORK IS WS'S, counted on WS's tracker (inflight.ForWorkspace): a fold's
+// stand-down waits minutes by design, and counted as no workspace's it held
+// every scoped idle wait of every other workspace for as long.
+func (f *Fleet) Detach(ws ids.WorkspaceID, run func(context.Context)) {
+	f.runDetached(ws, func(ctx context.Context) error { run(ctx); return nil }, nil)
 }
 
-func (f *Fleet) runDetached(run func(context.Context) error, done func(context.Context, error)) {
+func (f *Fleet) runDetached(ws ids.WorkspaceID, run func(context.Context) error, done func(context.Context, error)) {
 	f.detached.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(ws)).Go(func() {
 		defer f.detached.Done()
 		err := run(f.detachedCtx)
 		if done != nil {
@@ -963,7 +967,7 @@ func (f *Fleet) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
 	// THE GATE RUNS NO SHIM AGAIN: the one the failed answer spawned, or found
 	// still held, is stood down, unless the workspace is in remote control and
 	// it holds the gate's bridge again (parkedbridge.go).
-	f.Detach(func(ctx context.Context) { f.settleGateShim(ctx, ws) })
+	f.Detach(ws, func(ctx context.Context) { f.settleGateShim(ctx, ws) })
 	return true
 }
 

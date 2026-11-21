@@ -98,7 +98,7 @@ func (c *controller) kick(ws ids.WorkspaceID, st *withheldState) {
 	}
 	st.running = true
 	c.mu.Unlock()
-	c.deps.Detach(func(ctx context.Context) {
+	c.deps.Detach(ws, func(ctx context.Context) {
 		for {
 			outcome := c.standDownWithheld(ctx, ws)
 			c.mu.Lock()

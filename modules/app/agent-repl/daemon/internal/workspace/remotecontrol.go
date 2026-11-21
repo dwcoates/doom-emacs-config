@@ -153,7 +153,7 @@ func (f *Fleet) putRemoteControlInForce(ctx context.Context, log dlog.Logger, ws
 	// live session is asked anything.
 	if _, gated := f.StandingColdGate(ws); gated {
 		log.Info(opRemoteControl, "the workspace is parked at its cold gate; the gate's bridge follows the mode", fields)
-		f.Detach(func(ctx context.Context) { f.settleGateShim(ctx, ws) })
+		f.Detach(ws, func(ctx context.Context) { f.settleGateShim(ctx, ws) })
 		return nil
 	}
 	client, ok := f.Client(ws)
@@ -261,7 +261,7 @@ func (f *Fleet) owedForNetwork(ctx context.Context, log dlog.Logger, ws ids.Work
 	// netstate records, and the restoration answers it.
 	log.Info(opRemoteControl, "the vendor could not bridge the new shim while the network is down; it is asked again once the network is restored",
 		dlog.AsTransient(dlog.Context{"evidence": string(verdict.Evidence), "cause": err.Error()}))
-	f.Detach(func(life context.Context) {
+	f.Detach(ws, func(life context.Context) {
 		select {
 		case <-restored:
 		case <-life.Done():

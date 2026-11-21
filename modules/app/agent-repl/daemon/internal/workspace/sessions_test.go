@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
@@ -3965,7 +3966,7 @@ func TestDrainStartsJoinsDetachedWork(t *testing.T) {
 	f := newFleetFixture(t)
 	entered := make(chan struct{})
 	ended := make(chan error, 1)
-	f.fleet.Detach(func(ctx context.Context) {
+	f.fleet.Detach("ws-1", func(ctx context.Context) {
 		close(entered)
 		<-ctx.Done()
 		ended <- ctx.Err()
@@ -3981,6 +3982,40 @@ func TestDrainStartsJoinsDetachedWork(t *testing.T) {
 	}
 	if err := <-ended; !errors.Is(err, context.Canceled) {
 		t.Fatalf("the detached work saw %v, want a cancellation", err)
+	}
+}
+
+// TestDetachedWorkIsItsWorkspaces covers Detach's tracker: the work is
+// counted on its workspace's own tracker, never on another's.
+func TestDetachedWorkIsItsWorkspaces(t *testing.T) {
+	cases := []struct {
+		name string
+		read string
+		want int
+	}{
+		{name: "the workspace's tracker counts it", read: "ws-detach-own", want: 1},
+		{name: "another workspace's tracker does not", read: "ws-detach-other", want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the work holds until the test lets it go.
+			f := newFleetFixture(t)
+			entered, release := make(chan struct{}), make(chan struct{})
+			f.fleet.Detach("ws-detach-own", func(context.Context) {
+				close(entered)
+				<-release
+			})
+			<-entered
+			t.Cleanup(func() { close(release); f.fleet.DrainStarts(time.Minute) })
+
+			// Act.
+			got := inflight.ForWorkspace(tc.read).InFlight()
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("%s's tracker counts %d piece(s) of work, want %d", tc.read, got, tc.want)
+			}
+		})
 	}
 }
 
