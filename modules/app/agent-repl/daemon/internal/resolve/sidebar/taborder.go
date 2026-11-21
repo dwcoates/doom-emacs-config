@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"fmt"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -57,7 +59,20 @@ type openRegion struct {
 // repository is collapsed, or it is a named subsection that is. The one statement of a folded tab, which the sidebar's numbering and the
 // tab bar read alike.
 func (r openRegion) folded(repo wsm.Repository) bool {
-	return repo.Folded || (r.subsection != nil && r.subsection.Folded)
+	return r.fold(repo) != nil
+}
+
+// fold names what folds the region's tabs off the tab bar, nil when nothing
+// does: its repository's collapse wins over its subsection's, as the walk
+// reads them.
+func (r openRegion) fold(repo wsm.Repository) *Fold {
+	if repo.Folded {
+		return &Fold{By: FoldedByRepository, Repository: repo.Name}
+	}
+	if r.subsection != nil && r.subsection.Folded {
+		return &Fold{By: FoldedBySubsection, Repository: repo.Name, Subsection: r.subsection.Name}
+	}
+	return nil
 }
 
 // openRepo is one repository's Open section, its regions in its walk's order.
@@ -156,18 +171,92 @@ func openNodes(tree forest, order blockOrder, list []wsm.Workspace) []openNode {
 // (wsm.Workspace.DrawnInsideFold: its turn started under the fold and is
 // running, or the user is on it) is the one exception: its own tab is drawn,
 // and the fold still covers its family.
-func walkOpen(nodes []openNode, folded bool, visit func(ws wsm.Workspace, folded bool)) {
+func walkOpen(nodes []openNode, fold *Fold, visit func(ws wsm.Workspace, fold *Fold)) {
 	for _, node := range nodes {
-		visit(node.ws, folded && !node.ws.DrawnInsideFold())
-		walkOpen(flatten(node.children, node.blocks), childrenFolded(node, folded), visit)
+		own := fold
+		if node.ws.DrawnInsideFold() {
+			own = nil
+		}
+		visit(node.ws, own)
+		walkOpen(flatten(node.children, node.blocks), familyFold(node, fold), visit)
 	}
 }
 
 // childrenFolded reports whether NODE's family is folded off the tab bar,
-// given whether NODE's own tab is FOLDED: a folded tab folds all below it, and
-// a workspace whose children are folded folds its children's.
+// given whether NODE's own tab is FOLDED: familyFold's answer, as the roster's
+// rows read it.
 func childrenFolded(node openNode, folded bool) bool {
-	return folded || node.ws.ChildrenFolded
+	return folded || familyFold(node, nil) != nil
+}
+
+// familyFold names what folds NODE's family off the tab bar, given the FOLD
+// over NODE's own tab: a folded tab folds all below it under the same fold,
+// and a workspace whose children are folded folds its children's.
+func familyFold(node openNode, fold *Fold) *Fold {
+	if fold != nil {
+		return fold
+	}
+	if node.ws.ChildrenFolded {
+		return &Fold{By: FoldedByParent, Parent: node.ws.ID, ParentName: node.ws.Name}
+	}
+	return nil
+}
+
+// FoldedBy is which collapse folds a tab off the tab bar.
+type FoldedBy int
+
+const (
+	// FoldedByRepository: the tab's repository section is collapsed.
+	FoldedByRepository FoldedBy = iota + 1
+	// FoldedBySubsection: the named subsection the tab sits in is collapsed.
+	FoldedBySubsection
+	// FoldedByParent: an ancestor's children are folded (SetChildrenFolded).
+	FoldedByParent
+)
+
+// String names the collapse for a record.
+func (b FoldedBy) String() string {
+	switch b {
+	case FoldedByRepository:
+		return "repository"
+	case FoldedBySubsection:
+		return "subsection"
+	case FoldedByParent:
+		return "parent"
+	default:
+		return fmt.Sprintf("FoldedBy(%d)", int(b))
+	}
+}
+
+// Fold names the collapse that folds a tab off the tab bar, so a record of
+// what the fold did can say which section, subsection or parent it was.
+type Fold struct {
+	By FoldedBy
+	// Repository is the collapsed repository's name, or the one the
+	// collapsed subsection sits in.
+	Repository string
+	// Subsection is the collapsed subsection's name.
+	Subsection string
+	// Parent is the workspace whose children are folded, and ParentName its
+	// name.
+	Parent     ids.WorkspaceID
+	ParentName string
+}
+
+// Fields is the fold as a record's context.
+func (f Fold) Fields() dlog.Context {
+	fields := dlog.Context{"fold": f.By.String()}
+	switch f.By {
+	case FoldedByRepository:
+		fields["fold_repository"] = f.Repository
+	case FoldedBySubsection:
+		fields["fold_repository"], fields["fold_subsection"] = f.Repository, f.Subsection
+	case FoldedByParent:
+		fields["fold_parent"], fields["fold_parent_name"] = string(f.Parent), f.ParentName
+	default:
+		panic(fmt.Sprintf("sidebar: Fold.Fields of a fold that names no collapse: %d", int(f.By)))
+	}
+	return fields
 }
 
 // Tab is one tab of the editor's tab bar: an open workspace, and whether its
@@ -175,6 +264,8 @@ func childrenFolded(node openNode, folded bool) bool {
 type Tab struct {
 	Workspace wsm.Workspace
 	Withheld  wsm.Withholding
+	// Fold names the collapse that withholds the tab, nil for a drawn one.
+	Fold *Fold
 }
 
 // Tabs answers the editor's tab bar: every open workspace in the Open
@@ -193,12 +284,12 @@ func tabsOf(repos []openRepo) []Tab {
 	var out []Tab
 	for _, repo := range repos {
 		for _, region := range repo.regions {
-			walkOpen(region.rows, region.folded(repo.repo), func(ws wsm.Workspace, folded bool) {
+			walkOpen(region.rows, region.fold(repo.repo), func(ws wsm.Workspace, fold *Fold) {
 				withheld := wsm.Drawn
-				if folded {
+				if fold != nil {
 					withheld = wsm.WithheldCollapsed
 				}
-				out = append(out, Tab{Workspace: ws, Withheld: withheld})
+				out = append(out, Tab{Workspace: ws, Withheld: withheld, Fold: fold})
 			})
 		}
 	}

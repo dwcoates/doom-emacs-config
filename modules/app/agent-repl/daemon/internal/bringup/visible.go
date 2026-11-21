@@ -41,24 +41,29 @@ type VisibilityReader interface {
 	WorkspaceReader
 }
 
-// Folds answers which workspaces a fold keeps off the tab bar: the TAB BAR'S
-// OWN STATEMENT of a folded tab (sidebar.Tabs), so a collapsed repository
-// section and a collapsed subsection withhold exactly the workspaces whose
-// tabs they fold, and what the daemon runs never disagrees with what the bar
+// Folds answers which workspaces a fold keeps off the tab bar, each with the
+// collapse that folds it: the TAB BAR'S OWN STATEMENT of a folded tab
+// (sidebar.Tabs), so a collapsed repository section, a collapsed subsection
+// and a parent's folded children withhold exactly the workspaces whose tabs
+// they fold, and what the daemon runs never disagrees with what the bar
 // draws. A workspace with no tab (closed, a thread) is folded by nothing. A
 // handover orders its transfers and decides its page loads by it too
 // (rollout.foldedRows).
-func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[ids.WorkspaceID]bool, error) {
+func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[ids.WorkspaceID]sidebar.Fold, error) {
 	arrangement, err := repos.ReadArrangement(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bringup: read the arrangement to read its folds: %w", err)
 	}
 	reg := sidebar.Registry{Workspaces: arrangement.Workspaces, Repositories: arrangement.Repositories, Subsections: arrangement.Subsections, RepositoryBlocks: arrangement.RepositoryBlocks}
-	out := map[ids.WorkspaceID]bool{}
+	out := map[ids.WorkspaceID]sidebar.Fold{}
 	for _, tab := range sidebar.Tabs(reg, log) {
-		if tab.Withheld == wsm.WithheldCollapsed {
-			out[tab.Workspace.ID] = true
+		if tab.Withheld != wsm.WithheldCollapsed {
+			continue
 		}
+		if tab.Fold == nil {
+			panic(fmt.Sprintf("bringup: the tab bar withheld workspace %s as collapsed and named no fold", tab.Workspace.ID))
+		}
+		out[tab.Workspace.ID] = *tab.Fold
 	}
 	return out, nil
 }
@@ -141,8 +146,7 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, log dlog.Logger, p
 		return nil, nil, err
 	}
 	for _, ws := range pending {
-		_, inQueue := queued[ws.ID]
-		if ws.Runs(folded[ws.ID], inQueue) {
+		if verdict(ws, folded, queued).Runs {
 			run = append(run, ws)
 			continue
 		}
@@ -151,18 +155,54 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, log dlog.Logger, p
 	return run, withheld, nil
 }
 
+// Visibility is whether the daemon runs one workspace, and the collapse that
+// folds it when one does.
+type Visibility struct {
+	// Runs reports that the daemon runs the workspace (wsm.Workspace.Runs).
+	Runs bool
+	// Fold is the collapse that folds the workspace's tab off the tab bar,
+	// nil when none does.
+	Fold *sidebar.Fold
+}
+
 // Visible reports whether the daemon runs one workspace, read afresh from its
 // record and the folds of its section.
 func Visible(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID) (bool, error) {
+	visibility, err := VisibilityOf(ctx, db, log, ws)
+	return visibility.Runs, err
+}
+
+// VisibilityOf answers Visible's verdict and the fold behind it from ONE read
+// of the record, the folds and the queues, so the fold a record names is the
+// one the verdict was decided on.
+func VisibilityOf(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID) (Visibility, error) {
 	record, err := db.Workspace(ctx, ws)
 	if err != nil {
-		return false, fmt.Errorf("bringup: read the workspace record of %q: %w", ws, err)
+		return Visibility{}, fmt.Errorf("bringup: read the workspace record of %q: %w", ws, err)
 	}
-	run, _, err := OnlyVisible(ctx, db, log, []wsm.Workspace{record})
+	folded, err := Folds(ctx, db, log)
 	if err != nil {
-		return false, err
+		return Visibility{}, err
 	}
-	return len(run) == 1, nil
+	queued, err := queuedMerges(ctx, db)
+	if err != nil {
+		return Visibility{}, err
+	}
+	return verdict(record, folded, queued), nil
+}
+
+// verdict is WS's Visibility under the FOLDED and QUEUED read once for every
+// workspace a caller judges: the one place OnlyVisible and VisibilityOf turn
+// them into wsm.Workspace.Runs.
+func verdict(ws wsm.Workspace, folded map[ids.WorkspaceID]sidebar.Fold, queued map[ids.WorkspaceID]time.Time) Visibility {
+	out := Visibility{}
+	fold, isFolded := folded[ws.ID]
+	if isFolded {
+		out.Fold = &fold
+	}
+	_, inQueue := queued[ws.ID]
+	out.Runs = ws.Runs(isFolded, inQueue)
+	return out
 }
 
 // IDs names workspaces for a record.
