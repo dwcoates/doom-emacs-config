@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -13,21 +14,16 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
-// summaryCall is one warm headless prompt-summary call.
-func summaryCall() *conversationv1.VendorSpend {
-	return &conversationv1.VendorSpend{
-		Model:        "claude-haiku-5-5",
-		Agent:        conversationv1.VendorCallAgent_VENDOR_CALL_AGENT_HEADLESS,
-		Cause:        conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_PROMPT_SUMMARY,
-		CacheOutcome: conversationv1.VendorCacheOutcome_VENDOR_CACHE_OUTCOME_WARM,
-		Calls:        1,
-		Tokens:       &conversationv1.VendorTokens{CacheRead: 100, Output: 10},
-	}
+// summaryCall is one warm prompt-summary call's raw usage.
+func summaryCall() *agentreplv1.ReportedVendorCall {
+	return &agentreplv1.ReportedVendorCall{Model: "claude-haiku-5-5", Tokens: &conversationv1.VendorTokens{CacheRead: 100, Output: 10}}
 }
 
-func reportSpend(t *testing.T, h *harness, ws *workspacev1.WorkspaceRef, configDir string, entries ...*conversationv1.VendorSpend) (*agentreplv1.ReportVendorSpendResponse, error) {
+const summaryCause = conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_PROMPT_SUMMARY
+
+func reportSpend(t *testing.T, h *harness, ws *workspacev1.WorkspaceRef, configDir string, cause conversationv1.VendorCallCause, calls ...*agentreplv1.ReportedVendorCall) (*agentreplv1.ReportVendorSpendResponse, error) {
 	t.Helper()
-	resp, err := h.Client.ReportVendorSpend(context.Background(), connect.NewRequest(&agentreplv1.ReportVendorSpendRequest{Workspace: ws, ConfigDir: configDir, Spend: entries}))
+	resp, err := h.Client.ReportVendorSpend(context.Background(), connect.NewRequest(&agentreplv1.ReportVendorSpendRequest{Workspace: ws, ConfigDir: configDir, Cause: cause, Calls: calls}))
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +34,7 @@ func TestReportVendorSpendRecordsAValidReport(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	resp, err := reportSpend(t, h, ref(), "/home/u/.claude", summaryCall())
+	resp, err := reportSpend(t, h, ref(), "/home/u/.claude", summaryCause, summaryCall())
 	// Assert
 	if err != nil || resp.GetSuccess().GetRecorded() == nil {
 		t.Fatalf("ReportVendorSpend = %v, %v; want recorded", resp, err)
@@ -50,16 +46,22 @@ func TestReportVendorSpendRecordsAValidReport(t *testing.T) {
 }
 
 func TestReportVendorSpendRefusesAnInvalidReportOnTheInvalidArmAndRecordsIt(t *testing.T) {
-	broken := summaryCall()
-	broken.Model = ""
+	noModel := summaryCall()
+	noModel.Model = ""
 	tests := []struct {
 		name      string
 		configDir string
-		entries   []*conversationv1.VendorSpend
-		cause     string
+		cause     conversationv1.VendorCallCause
+		calls     []*agentreplv1.ReportedVendorCall
+		want      string
 	}{
-		{name: "an entry naming no model", configDir: "/home/u/.claude", entries: []*conversationv1.VendorSpend{broken}, cause: "names no model"},
-		{name: "no account root", configDir: "", entries: []*conversationv1.VendorSpend{summaryCall()}, cause: "names no account root"},
+		{name: "a call naming no model", configDir: "/home/u/.claude", cause: summaryCause, calls: []*agentreplv1.ReportedVendorCall{noModel}, want: "names no model"},
+		{name: "a call with no usage", configDir: "/home/u/.claude", cause: summaryCause, calls: []*agentreplv1.ReportedVendorCall{{Model: "claude-haiku-5-5"}}, want: "no usage"},
+		{name: "no account root", configDir: "", cause: summaryCause, calls: []*agentreplv1.ReportedVendorCall{summaryCall()}, want: "names no account root"},
+		{name: "no cause", configDir: "/home/u/.claude", calls: []*agentreplv1.ReportedVendorCall{summaryCall()}, want: "states no cause"},
+		{name: "the unstated cause", configDir: "/home/u/.claude", cause: conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_UNSTATED, calls: []*agentreplv1.ReportedVendorCall{summaryCall()}, want: "states no cause"},
+		{name: "an undeclared cause", configDir: "/home/u/.claude", cause: 99, calls: []*agentreplv1.ReportedVendorCall{summaryCall()}, want: "not a declared cause"},
+		{name: "no call", configDir: "/home/u/.claude", cause: summaryCause, want: "carries no call"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,10 +69,10 @@ func TestReportVendorSpendRefusesAnInvalidReportOnTheInvalidArmAndRecordsIt(t *t
 			log := dlog.NewTestLogger()
 			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log} })
 			// Act
-			resp, err := reportSpend(t, h, ref(), tt.configDir, tt.entries...)
+			resp, err := reportSpend(t, h, ref(), tt.configDir, tt.cause, tt.calls...)
 			// Assert
-			if err != nil || resp.GetError().GetInvalid() == nil {
-				t.Fatalf("ReportVendorSpend = %v, %v; want the invalid arm", resp, err)
+			if err != nil || !strings.Contains(resp.GetError().GetInvalid().GetDetail(), tt.want) {
+				t.Fatalf("ReportVendorSpend = %v, %v; want the invalid arm naming %q", resp, err, tt.want)
 			}
 			if len(h.VendorSpend.reports()) != 0 {
 				t.Fatal("an invalid report was recorded")
@@ -87,7 +89,7 @@ func TestReportVendorSpendRefusesAReportWithNoWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	_, err := reportSpend(t, h, nil, "/home/u/.claude", summaryCall())
+	_, err := reportSpend(t, h, nil, "/home/u/.claude", summaryCause, summaryCall())
 	// Assert
 	if connectCode(t, err) != connect.CodeInvalidArgument {
 		t.Fatalf("ReportVendorSpend with no workspace = %v, want InvalidArgument", err)
@@ -99,7 +101,7 @@ func TestReportVendorSpendSaysTheMetricsAreOff(t *testing.T) {
 	h := newHarness(t)
 	h.VendorSpend.enabled = false
 	// Act
-	resp, err := reportSpend(t, h, ref(), "/home/u/.claude", summaryCall())
+	resp, err := reportSpend(t, h, ref(), "/home/u/.claude", summaryCause, summaryCall())
 	// Assert
 	if err != nil || resp.GetSuccess().GetMetricsOff() == nil || len(h.VendorSpend.reports()) != 0 {
 		t.Fatalf("ReportVendorSpend = %v, %v; want metrics off and nothing recorded", resp, err)

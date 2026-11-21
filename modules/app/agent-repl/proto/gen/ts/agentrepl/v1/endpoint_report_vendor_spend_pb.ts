@@ -18,7 +18,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { VendorSpend } from "../../conversation/v1/vendor_spend_pb";
+import type { VendorCallCause, VendorTokens } from "../../conversation/v1/vendor_spend_pb";
 import { file_conversation_v1_vendor_spend } from "../../conversation/v1/vendor_spend_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_report_vendor_spend.proto.
  */
 export const file_agentrepl_v1_endpoint_report_vendor_spend: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X3ZlbmRvcl9zcGVuZC5wcm90bxIMYWdlbnRyZXBsLnYxIooBChhSZXBvcnRWZW5kb3JTcGVuZFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIrCgVzcGVuZBgCIAMoCzIcLmNvbnZlcnNhdGlvbi52MS5WZW5kb3JTcGVuZBISCgpjb25maWdfZGlyGAMgASgJIpcBChlSZXBvcnRWZW5kb3JTcGVuZFJlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuUmVwb3J0VmVuZG9yU3BlbmRTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuUmVwb3J0VmVuZG9yU3BlbmRFcnJvckgAQggKBnJlc3VsdCKkAQoYUmVwb3J0VmVuZG9yU3BlbmRTdWNjZXNzEjsKCHJlY29yZGVkGAEgASgLMicuYWdlbnRyZXBsLnYxLlJlcG9ydFZlbmRvclNwZW5kUmVjb3JkZWRIABJACgttZXRyaWNzX29mZhgCIAEoCzIpLmFnZW50cmVwbC52MS5SZXBvcnRWZW5kb3JTcGVuZE1ldHJpY3NPZmZIAEIJCgdvdXRjb21lIhsKGVJlcG9ydFZlbmRvclNwZW5kUmVjb3JkZWQiHQobUmVwb3J0VmVuZG9yU3BlbmRNZXRyaWNzT2ZmIlsKFlJlcG9ydFZlbmRvclNwZW5kRXJyb3ISOQoHaW52YWxpZBgBIAEoCzImLmFnZW50cmVwbC52MS5SZXBvcnRWZW5kb3JTcGVuZEludmFsaWRIAEIGCgRraW5kIioKGFJlcG9ydFZlbmRvclNwZW5kSW52YWxpZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_vendor_spend, file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X3ZlbmRvcl9zcGVuZC5wcm90bxIMYWdlbnRyZXBsLnYxIr8BChhSZXBvcnRWZW5kb3JTcGVuZFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhISCgpjb25maWdfZGlyGAIgASgJEi8KBWNhdXNlGAMgASgOMiAuY29udmVyc2F0aW9uLnYxLlZlbmRvckNhbGxDYXVzZRIvCgVjYWxscxgEIAMoCzIgLmFnZW50cmVwbC52MS5SZXBvcnRlZFZlbmRvckNhbGwiUgoSUmVwb3J0ZWRWZW5kb3JDYWxsEg0KBW1vZGVsGAEgASgJEi0KBnRva2VucxgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5WZW5kb3JUb2tlbnMilwEKGVJlcG9ydFZlbmRvclNwZW5kUmVzcG9uc2USOQoHc3VjY2VzcxgBIAEoCzImLmFnZW50cmVwbC52MS5SZXBvcnRWZW5kb3JTcGVuZFN1Y2Nlc3NIABI1CgVlcnJvchgCIAEoCzIkLmFnZW50cmVwbC52MS5SZXBvcnRWZW5kb3JTcGVuZEVycm9ySABCCAoGcmVzdWx0IqQBChhSZXBvcnRWZW5kb3JTcGVuZFN1Y2Nlc3MSOwoIcmVjb3JkZWQYASABKAsyJy5hZ2VudHJlcGwudjEuUmVwb3J0VmVuZG9yU3BlbmRSZWNvcmRlZEgAEkAKC21ldHJpY3Nfb2ZmGAIgASgLMikuYWdlbnRyZXBsLnYxLlJlcG9ydFZlbmRvclNwZW5kTWV0cmljc09mZkgAQgkKB291dGNvbWUiGwoZUmVwb3J0VmVuZG9yU3BlbmRSZWNvcmRlZCIdChtSZXBvcnRWZW5kb3JTcGVuZE1ldHJpY3NPZmYiWwoWUmVwb3J0VmVuZG9yU3BlbmRFcnJvchI5CgdpbnZhbGlkGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlcG9ydFZlbmRvclNwZW5kSW52YWxpZEgAQgYKBGtpbmQiKgoYUmVwb3J0VmVuZG9yU3BlbmRJbnZhbGlkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_conversation_v1_vendor_spend, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.ReportVendorSpendRequest
@@ -42,21 +42,31 @@ export type ReportVendorSpendRequest = Message<"agentrepl.v1.ReportVendorSpendRe
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * The run's calls, by what they were. At least one; every entry names its
-   * model, agent, cause and cache outcome, a cold reason exactly when its
-   * outcome is not WARM, and at least one call.
-   *
-   * @generated from field: repeated conversation.v1.VendorSpend spend = 2;
-   */
-  spend: VendorSpend[];
-
-  /**
    * The account root the run billed to: the `CLAUDE_CONFIG_DIR` it ran
    * under. Required; the daemon labels the spend with the account it names.
    *
-   * @generated from field: string config_dir = 3;
+   * @generated from field: string config_dir = 2;
    */
   configDir: string;
+
+  /**
+   * Why the run was made. Required, never UNSPECIFIED or UNSTATED: Emacs
+   * knows what it ran (PROMPT_SUMMARY for a prompt's summary).
+   *
+   * @generated from field: conversation.v1.VendorCallCause cause = 3;
+   */
+  cause: VendorCallCause;
+
+  /**
+   * The run's vendor calls, each once (one per message id, its last
+   * restatement), in the order the run made them. At least one. The daemon
+   * judges each call's cache outcome and bucket itself, by the same rule as
+   * its own headless runs (agent-repld internal/vendorspend Tally), so the
+   * rule has no copy in Emacs.
+   *
+   * @generated from field: repeated agentrepl.v1.ReportedVendorCall calls = 4;
+   */
+  calls: ReportedVendorCall[];
 };
 
 /**
@@ -65,6 +75,34 @@ export type ReportVendorSpendRequest = Message<"agentrepl.v1.ReportVendorSpendRe
  */
 export const ReportVendorSpendRequestSchema: GenMessage<ReportVendorSpendRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 0);
+
+/**
+ * One vendor call of the run.
+ *
+ * @generated from message agentrepl.v1.ReportedVendorCall
+ */
+export type ReportedVendorCall = Message<"agentrepl.v1.ReportedVendorCall"> & {
+  /**
+   * The model the call ran on, as the vendor named it. Never `<synthetic>`.
+   *
+   * @generated from field: string model = 1;
+   */
+  model: string;
+
+  /**
+   * Its usage, by kind.
+   *
+   * @generated from field: conversation.v1.VendorTokens tokens = 2;
+   */
+  tokens?: VendorTokens | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportedVendorCall.
+ * Use `create(ReportedVendorCallSchema)` to create a new message.
+ */
+export const ReportedVendorCallSchema: GenMessage<ReportedVendorCall> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 1);
 
 /**
  * @generated from message agentrepl.v1.ReportVendorSpendResponse
@@ -93,7 +131,7 @@ export type ReportVendorSpendResponse = Message<"agentrepl.v1.ReportVendorSpendR
  * Use `create(ReportVendorSpendResponseSchema)` to create a new message.
  */
 export const ReportVendorSpendResponseSchema: GenMessage<ReportVendorSpendResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 1);
+  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 2);
 
 /**
  * @generated from message agentrepl.v1.ReportVendorSpendSuccess
@@ -126,7 +164,7 @@ export type ReportVendorSpendSuccess = Message<"agentrepl.v1.ReportVendorSpendSu
  * Use `create(ReportVendorSpendSuccessSchema)` to create a new message.
  */
 export const ReportVendorSpendSuccessSchema: GenMessage<ReportVendorSpendSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 2);
+  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 3);
 
 /**
  * @generated from message agentrepl.v1.ReportVendorSpendRecorded
@@ -139,7 +177,7 @@ export type ReportVendorSpendRecorded = Message<"agentrepl.v1.ReportVendorSpendR
  * Use `create(ReportVendorSpendRecordedSchema)` to create a new message.
  */
 export const ReportVendorSpendRecordedSchema: GenMessage<ReportVendorSpendRecorded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 3);
+  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 4);
 
 /**
  * @generated from message agentrepl.v1.ReportVendorSpendMetricsOff
@@ -152,7 +190,7 @@ export type ReportVendorSpendMetricsOff = Message<"agentrepl.v1.ReportVendorSpen
  * Use `create(ReportVendorSpendMetricsOffSchema)` to create a new message.
  */
 export const ReportVendorSpendMetricsOffSchema: GenMessage<ReportVendorSpendMetricsOff> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 4);
+  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 5);
 
 /**
  * @generated from message agentrepl.v1.ReportVendorSpendError
@@ -177,7 +215,7 @@ export type ReportVendorSpendError = Message<"agentrepl.v1.ReportVendorSpendErro
  * Use `create(ReportVendorSpendErrorSchema)` to create a new message.
  */
 export const ReportVendorSpendErrorSchema: GenMessage<ReportVendorSpendError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 5);
+  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 6);
 
 /**
  * @generated from message agentrepl.v1.ReportVendorSpendInvalid
@@ -194,5 +232,5 @@ export type ReportVendorSpendInvalid = Message<"agentrepl.v1.ReportVendorSpendIn
  * Use `create(ReportVendorSpendInvalidSchema)` to create a new message.
  */
 export const ReportVendorSpendInvalidSchema: GenMessage<ReportVendorSpendInvalid> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 6);
+  messageDesc(file_agentrepl_v1_endpoint_report_vendor_spend, 7);
 

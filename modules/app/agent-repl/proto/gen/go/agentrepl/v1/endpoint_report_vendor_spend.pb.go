@@ -41,13 +41,18 @@ type ReportVendorSpendRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace the run was made for. Required; an unset ref is refused.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The run's calls, by what they were. At least one; every entry names its
-	// model, agent, cause and cache outcome, a cold reason exactly when its
-	// outcome is not WARM, and at least one call.
-	Spend []*v11.VendorSpend `protobuf:"bytes,2,rep,name=spend,proto3" json:"spend,omitempty"`
 	// The account root the run billed to: the `CLAUDE_CONFIG_DIR` it ran
 	// under. Required; the daemon labels the spend with the account it names.
-	ConfigDir     string `protobuf:"bytes,3,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	ConfigDir string `protobuf:"bytes,2,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	// Why the run was made. Required, never UNSPECIFIED or UNSTATED: Emacs
+	// knows what it ran (PROMPT_SUMMARY for a prompt's summary).
+	Cause v11.VendorCallCause `protobuf:"varint,3,opt,name=cause,proto3,enum=conversation.v1.VendorCallCause" json:"cause,omitempty"`
+	// The run's vendor calls, each once (one per message id, its last
+	// restatement), in the order the run made them. At least one. The daemon
+	// judges each call's cache outcome and bucket itself, by the same rule as
+	// its own headless runs (agent-repld internal/vendorspend Tally), so the
+	// rule has no copy in Emacs.
+	Calls         []*ReportedVendorCall `protobuf:"bytes,4,rep,name=calls,proto3" json:"calls,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -89,18 +94,80 @@ func (x *ReportVendorSpendRequest) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
-func (x *ReportVendorSpendRequest) GetSpend() []*v11.VendorSpend {
-	if x != nil {
-		return x.Spend
-	}
-	return nil
-}
-
 func (x *ReportVendorSpendRequest) GetConfigDir() string {
 	if x != nil {
 		return x.ConfigDir
 	}
 	return ""
+}
+
+func (x *ReportVendorSpendRequest) GetCause() v11.VendorCallCause {
+	if x != nil {
+		return x.Cause
+	}
+	return v11.VendorCallCause(0)
+}
+
+func (x *ReportVendorSpendRequest) GetCalls() []*ReportedVendorCall {
+	if x != nil {
+		return x.Calls
+	}
+	return nil
+}
+
+// One vendor call of the run.
+type ReportedVendorCall struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The model the call ran on, as the vendor named it. Never `<synthetic>`.
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// Its usage, by kind.
+	Tokens        *v11.VendorTokens `protobuf:"bytes,2,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportedVendorCall) Reset() {
+	*x = ReportedVendorCall{}
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportedVendorCall) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportedVendorCall) ProtoMessage() {}
+
+func (x *ReportedVendorCall) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportedVendorCall.ProtoReflect.Descriptor instead.
+func (*ReportedVendorCall) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ReportedVendorCall) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ReportedVendorCall) GetTokens() *v11.VendorTokens {
+	if x != nil {
+		return x.Tokens
+	}
+	return nil
 }
 
 type ReportVendorSpendResponse struct {
@@ -116,7 +183,7 @@ type ReportVendorSpendResponse struct {
 
 func (x *ReportVendorSpendResponse) Reset() {
 	*x = ReportVendorSpendResponse{}
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -128,7 +195,7 @@ func (x *ReportVendorSpendResponse) String() string {
 func (*ReportVendorSpendResponse) ProtoMessage() {}
 
 func (x *ReportVendorSpendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -141,7 +208,7 @@ func (x *ReportVendorSpendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVendorSpendResponse.ProtoReflect.Descriptor instead.
 func (*ReportVendorSpendResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ReportVendorSpendResponse) GetResult() isReportVendorSpendResponse_Result {
@@ -198,7 +265,7 @@ type ReportVendorSpendSuccess struct {
 
 func (x *ReportVendorSpendSuccess) Reset() {
 	*x = ReportVendorSpendSuccess{}
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -210,7 +277,7 @@ func (x *ReportVendorSpendSuccess) String() string {
 func (*ReportVendorSpendSuccess) ProtoMessage() {}
 
 func (x *ReportVendorSpendSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -223,7 +290,7 @@ func (x *ReportVendorSpendSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVendorSpendSuccess.ProtoReflect.Descriptor instead.
 func (*ReportVendorSpendSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ReportVendorSpendSuccess) GetOutcome() isReportVendorSpendSuccess_Outcome {
@@ -277,7 +344,7 @@ type ReportVendorSpendRecorded struct {
 
 func (x *ReportVendorSpendRecorded) Reset() {
 	*x = ReportVendorSpendRecorded{}
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -289,7 +356,7 @@ func (x *ReportVendorSpendRecorded) String() string {
 func (*ReportVendorSpendRecorded) ProtoMessage() {}
 
 func (x *ReportVendorSpendRecorded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -302,7 +369,7 @@ func (x *ReportVendorSpendRecorded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVendorSpendRecorded.ProtoReflect.Descriptor instead.
 func (*ReportVendorSpendRecorded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{4}
 }
 
 type ReportVendorSpendMetricsOff struct {
@@ -313,7 +380,7 @@ type ReportVendorSpendMetricsOff struct {
 
 func (x *ReportVendorSpendMetricsOff) Reset() {
 	*x = ReportVendorSpendMetricsOff{}
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -325,7 +392,7 @@ func (x *ReportVendorSpendMetricsOff) String() string {
 func (*ReportVendorSpendMetricsOff) ProtoMessage() {}
 
 func (x *ReportVendorSpendMetricsOff) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -338,7 +405,7 @@ func (x *ReportVendorSpendMetricsOff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVendorSpendMetricsOff.ProtoReflect.Descriptor instead.
 func (*ReportVendorSpendMetricsOff) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{5}
 }
 
 type ReportVendorSpendError struct {
@@ -353,7 +420,7 @@ type ReportVendorSpendError struct {
 
 func (x *ReportVendorSpendError) Reset() {
 	*x = ReportVendorSpendError{}
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -365,7 +432,7 @@ func (x *ReportVendorSpendError) String() string {
 func (*ReportVendorSpendError) ProtoMessage() {}
 
 func (x *ReportVendorSpendError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -378,7 +445,7 @@ func (x *ReportVendorSpendError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVendorSpendError.ProtoReflect.Descriptor instead.
 func (*ReportVendorSpendError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ReportVendorSpendError) GetKind() isReportVendorSpendError_Kind {
@@ -417,7 +484,7 @@ type ReportVendorSpendInvalid struct {
 
 func (x *ReportVendorSpendInvalid) Reset() {
 	*x = ReportVendorSpendInvalid{}
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -429,7 +496,7 @@ func (x *ReportVendorSpendInvalid) String() string {
 func (*ReportVendorSpendInvalid) ProtoMessage() {}
 
 func (x *ReportVendorSpendInvalid) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -442,7 +509,7 @@ func (x *ReportVendorSpendInvalid) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVendorSpendInvalid.ProtoReflect.Descriptor instead.
 func (*ReportVendorSpendInvalid) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReportVendorSpendInvalid) GetDetail() string {
@@ -456,12 +523,16 @@ var File_agentrepl_v1_endpoint_report_vendor_spend_proto protoreflect.FileDescri
 
 const file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDesc = "" +
 	"\n" +
-	"/agentrepl/v1/endpoint_report_vendor_spend.proto\x12\fagentrepl.v1\x1a\"conversation/v1/vendor_spend.proto\x1a\x1cworkspace/v1/workspace.proto\"\xa7\x01\n" +
+	"/agentrepl/v1/endpoint_report_vendor_spend.proto\x12\fagentrepl.v1\x1a\"conversation/v1/vendor_spend.proto\x1a\x1cworkspace/v1/workspace.proto\"\xe3\x01\n" +
 	"\x18ReportVendorSpendRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x122\n" +
-	"\x05spend\x18\x02 \x03(\v2\x1c.conversation.v1.VendorSpendR\x05spend\x12\x1d\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\x03 \x01(\tR\tconfigDir\"\xa7\x01\n" +
+	"config_dir\x18\x02 \x01(\tR\tconfigDir\x126\n" +
+	"\x05cause\x18\x03 \x01(\x0e2 .conversation.v1.VendorCallCauseR\x05cause\x126\n" +
+	"\x05calls\x18\x04 \x03(\v2 .agentrepl.v1.ReportedVendorCallR\x05calls\"a\n" +
+	"\x12ReportedVendorCall\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x125\n" +
+	"\x06tokens\x18\x02 \x01(\v2\x1d.conversation.v1.VendorTokensR\x06tokens\"\xa7\x01\n" +
 	"\x19ReportVendorSpendResponse\x12B\n" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.ReportVendorSpendSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.ReportVendorSpendErrorH\x00R\x05errorB\b\n" +
@@ -491,31 +562,35 @@ func file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_report_vendor_spend_proto_goTypes = []any{
 	(*ReportVendorSpendRequest)(nil),    // 0: agentrepl.v1.ReportVendorSpendRequest
-	(*ReportVendorSpendResponse)(nil),   // 1: agentrepl.v1.ReportVendorSpendResponse
-	(*ReportVendorSpendSuccess)(nil),    // 2: agentrepl.v1.ReportVendorSpendSuccess
-	(*ReportVendorSpendRecorded)(nil),   // 3: agentrepl.v1.ReportVendorSpendRecorded
-	(*ReportVendorSpendMetricsOff)(nil), // 4: agentrepl.v1.ReportVendorSpendMetricsOff
-	(*ReportVendorSpendError)(nil),      // 5: agentrepl.v1.ReportVendorSpendError
-	(*ReportVendorSpendInvalid)(nil),    // 6: agentrepl.v1.ReportVendorSpendInvalid
-	(*v1.WorkspaceRef)(nil),             // 7: workspace.v1.WorkspaceRef
-	(*v11.VendorSpend)(nil),             // 8: conversation.v1.VendorSpend
+	(*ReportedVendorCall)(nil),          // 1: agentrepl.v1.ReportedVendorCall
+	(*ReportVendorSpendResponse)(nil),   // 2: agentrepl.v1.ReportVendorSpendResponse
+	(*ReportVendorSpendSuccess)(nil),    // 3: agentrepl.v1.ReportVendorSpendSuccess
+	(*ReportVendorSpendRecorded)(nil),   // 4: agentrepl.v1.ReportVendorSpendRecorded
+	(*ReportVendorSpendMetricsOff)(nil), // 5: agentrepl.v1.ReportVendorSpendMetricsOff
+	(*ReportVendorSpendError)(nil),      // 6: agentrepl.v1.ReportVendorSpendError
+	(*ReportVendorSpendInvalid)(nil),    // 7: agentrepl.v1.ReportVendorSpendInvalid
+	(*v1.WorkspaceRef)(nil),             // 8: workspace.v1.WorkspaceRef
+	(v11.VendorCallCause)(0),            // 9: conversation.v1.VendorCallCause
+	(*v11.VendorTokens)(nil),            // 10: conversation.v1.VendorTokens
 }
 var file_agentrepl_v1_endpoint_report_vendor_spend_proto_depIdxs = []int32{
-	7, // 0: agentrepl.v1.ReportVendorSpendRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	8, // 1: agentrepl.v1.ReportVendorSpendRequest.spend:type_name -> conversation.v1.VendorSpend
-	2, // 2: agentrepl.v1.ReportVendorSpendResponse.success:type_name -> agentrepl.v1.ReportVendorSpendSuccess
-	5, // 3: agentrepl.v1.ReportVendorSpendResponse.error:type_name -> agentrepl.v1.ReportVendorSpendError
-	3, // 4: agentrepl.v1.ReportVendorSpendSuccess.recorded:type_name -> agentrepl.v1.ReportVendorSpendRecorded
-	4, // 5: agentrepl.v1.ReportVendorSpendSuccess.metrics_off:type_name -> agentrepl.v1.ReportVendorSpendMetricsOff
-	6, // 6: agentrepl.v1.ReportVendorSpendError.invalid:type_name -> agentrepl.v1.ReportVendorSpendInvalid
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	8,  // 0: agentrepl.v1.ReportVendorSpendRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 1: agentrepl.v1.ReportVendorSpendRequest.cause:type_name -> conversation.v1.VendorCallCause
+	1,  // 2: agentrepl.v1.ReportVendorSpendRequest.calls:type_name -> agentrepl.v1.ReportedVendorCall
+	10, // 3: agentrepl.v1.ReportedVendorCall.tokens:type_name -> conversation.v1.VendorTokens
+	3,  // 4: agentrepl.v1.ReportVendorSpendResponse.success:type_name -> agentrepl.v1.ReportVendorSpendSuccess
+	6,  // 5: agentrepl.v1.ReportVendorSpendResponse.error:type_name -> agentrepl.v1.ReportVendorSpendError
+	4,  // 6: agentrepl.v1.ReportVendorSpendSuccess.recorded:type_name -> agentrepl.v1.ReportVendorSpendRecorded
+	5,  // 7: agentrepl.v1.ReportVendorSpendSuccess.metrics_off:type_name -> agentrepl.v1.ReportVendorSpendMetricsOff
+	7,  // 8: agentrepl.v1.ReportVendorSpendError.invalid:type_name -> agentrepl.v1.ReportVendorSpendInvalid
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_report_vendor_spend_proto_init() }
@@ -523,15 +598,15 @@ func file_agentrepl_v1_endpoint_report_vendor_spend_proto_init() {
 	if File_agentrepl_v1_endpoint_report_vendor_spend_proto != nil {
 		return
 	}
-	file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[1].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[2].OneofWrappers = []any{
 		(*ReportVendorSpendResponse_Success)(nil),
 		(*ReportVendorSpendResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[2].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[3].OneofWrappers = []any{
 		(*ReportVendorSpendSuccess_Recorded)(nil),
 		(*ReportVendorSpendSuccess_MetricsOff)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[5].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_vendor_spend_proto_msgTypes[6].OneofWrappers = []any{
 		(*ReportVendorSpendError_Invalid)(nil),
 	}
 	type x struct{}
@@ -540,7 +615,7 @@ func file_agentrepl_v1_endpoint_report_vendor_spend_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDesc), len(file_agentrepl_v1_endpoint_report_vendor_spend_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

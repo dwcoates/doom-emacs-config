@@ -23,13 +23,26 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message ReportVendorSpendRequest {
   // The workspace the run was made for. Required; an unset ref is refused.
   workspace.v1.WorkspaceRef workspace = 1;
-  // The run's calls, by what they were. At least one; every entry names its
-  // model, agent, cause and cache outcome, a cold reason exactly when its
-  // outcome is not WARM, and at least one call.
-  repeated conversation.v1.VendorSpend spend = 2;
   // The account root the run billed to: the `CLAUDE_CONFIG_DIR` it ran
   // under. Required; the daemon labels the spend with the account it names.
-  string config_dir = 3;
+  string config_dir = 2;
+  // Why the run was made. Required, never UNSPECIFIED or UNSTATED: Emacs
+  // knows what it ran (PROMPT_SUMMARY for a prompt's summary).
+  conversation.v1.VendorCallCause cause = 3;
+  // The run's vendor calls, each once (one per message id, its last
+  // restatement), in the order the run made them. At least one. The daemon
+  // judges each call's cache outcome and bucket itself, by the same rule as
+  // its own headless runs (agent-repld internal/vendorspend Tally), so the
+  // rule has no copy in Emacs.
+  repeated ReportedVendorCall calls = 4;
+}
+
+// One vendor call of the run.
+message ReportedVendorCall {
+  // The model the call ran on, as the vendor named it. Never `<synthetic>`.
+  string model = 1;
+  // Its usage, by kind.
+  conversation.v1.VendorTokens tokens = 2;
 }
 
 message ReportVendorSpendResponse {

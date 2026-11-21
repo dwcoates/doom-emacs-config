@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/childproc"
 	"agent-repld/internal/envc"
+	"agent-repld/internal/vendorspend"
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -99,7 +100,7 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	// that failed after its calls still spent them.
 	result, calls, streamErr := readStream(stdout)
 	if len(calls) > 0 {
-		c.spend(effectiveConfigDir(req.ConfigDir), spendOf(calls, conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_HEADLESS_QUESTION))
+		c.spend(effectiveConfigDir(req.ConfigDir), vendorspend.Tally(calls, conversationv1.VendorCallAgent_VENDOR_CALL_AGENT_HEADLESS, conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_HEADLESS_QUESTION))
 	}
 	if err != nil {
 		// A DEADLINE IS ITS OWN CAUSE. exec reports a killed child as a plain

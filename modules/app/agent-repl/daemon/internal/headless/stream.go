@@ -56,9 +56,9 @@ type call struct {
 // carried one, and every vendor call it states, each counted once (one per
 // message id, its largest restatement). A line that does not parse is a
 // broken stream, answered as an error with whatever was read before it.
-func readStream(stdout string) (*envelope, []call, error) {
+func readStream(stdout string) (*envelope, []vendorspend.Call, error) {
 	var result *envelope
-	var calls []call
+	var calls []vendorspend.Call
 	byID := map[string]int{}
 	for n, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
@@ -76,7 +76,7 @@ func readStream(stdout string) (*envelope, []call, error) {
 			if l.Message == nil || l.Message.Usage == nil || l.Message.ID == "" || l.Message.Model == syntheticModel {
 				continue
 			}
-			c := call{model: l.Message.Model, tokens: tokensOf(l.Message.Usage)}
+			c := vendorspend.Call{Model: l.Message.Model, Tokens: tokensOf(l.Message.Usage)}
 			if i, seen := byID[l.Message.ID]; seen {
 				calls[i] = larger(calls[i], c)
 				continue
@@ -103,57 +103,12 @@ func tokensOf(u *streamUsage) *conversationv1.VendorTokens {
 }
 
 // larger is a call's restatement: each figure the larger of the two.
-func larger(a, b call) call {
-	pick := func(x, y uint64) uint64 { return max(x, y) }
-	return call{model: a.model, tokens: &conversationv1.VendorTokens{
-		UncachedInput: pick(a.tokens.GetUncachedInput(), b.tokens.GetUncachedInput()),
-		CacheRead:     pick(a.tokens.GetCacheRead(), b.tokens.GetCacheRead()),
-		CacheWrite_5M: pick(a.tokens.GetCacheWrite_5M(), b.tokens.GetCacheWrite_5M()),
-		CacheWrite_1H: pick(a.tokens.GetCacheWrite_1H(), b.tokens.GetCacheWrite_1H()),
-		Output:        pick(a.tokens.GetOutput(), b.tokens.GetOutput()),
+func larger(a, b vendorspend.Call) vendorspend.Call {
+	return vendorspend.Call{Model: a.Model, Tokens: &conversationv1.VendorTokens{
+		UncachedInput: max(a.Tokens.GetUncachedInput(), b.Tokens.GetUncachedInput()),
+		CacheRead:     max(a.Tokens.GetCacheRead(), b.Tokens.GetCacheRead()),
+		CacheWrite_5M: max(a.Tokens.GetCacheWrite_5M(), b.Tokens.GetCacheWrite_5M()),
+		CacheWrite_1H: max(a.Tokens.GetCacheWrite_1H(), b.Tokens.GetCacheWrite_1H()),
+		Output:        max(a.Tokens.GetOutput(), b.Tokens.GetOutput()),
 	}}
-}
-
-// spendOf tallies a run's calls as spend entries under CAUSE: the run's first
-// call is its agent's first, and a later one the cache did not serve is
-// filed with no reason this package can name.
-func spendOf(calls []call, cause conversationv1.VendorCallCause) []*conversationv1.VendorSpend {
-	entries := map[string]*conversationv1.VendorSpend{}
-	var order []string
-	for i, c := range calls {
-		t := c.tokens
-		outcome := vendorspend.OutcomeOf(t.GetCacheRead(), t.GetCacheWrite_5M()+t.GetCacheWrite_1H(), t.GetUncachedInput())
-		reason := conversationv1.VendorColdReason_VENDOR_COLD_REASON_UNSPECIFIED
-		if outcome != conversationv1.VendorCacheOutcome_VENDOR_CACHE_OUTCOME_WARM {
-			reason = conversationv1.VendorColdReason_VENDOR_COLD_REASON_UNSTATED
-			if i == 0 {
-				reason = conversationv1.VendorColdReason_VENDOR_COLD_REASON_FIRST_CALL
-			}
-		}
-		bound, inBound := vendorspend.BucketOf(vendorspend.InputOf(t))
-		key := fmt.Sprintf("%s|%d|%d|%d|%v", c.model, outcome, reason, bound, inBound)
-		e := entries[key]
-		if e == nil {
-			e = &conversationv1.VendorSpend{
-				Model: c.model, Agent: conversationv1.VendorCallAgent_VENDOR_CALL_AGENT_HEADLESS, Cause: cause,
-				CacheOutcome: outcome, ColdReason: reason, Tokens: &conversationv1.VendorTokens{},
-			}
-			if inBound {
-				e.ContextLeTokens = &bound
-			}
-			entries[key] = e
-			order = append(order, key)
-		}
-		e.Calls++
-		e.Tokens.UncachedInput += t.GetUncachedInput()
-		e.Tokens.CacheRead += t.GetCacheRead()
-		e.Tokens.CacheWrite_5M += t.GetCacheWrite_5M()
-		e.Tokens.CacheWrite_1H += t.GetCacheWrite_1H()
-		e.Tokens.Output += t.GetOutput()
-	}
-	out := make([]*conversationv1.VendorSpend, len(order))
-	for i, key := range order {
-		out[i] = entries[key]
-	}
-	return out
 }

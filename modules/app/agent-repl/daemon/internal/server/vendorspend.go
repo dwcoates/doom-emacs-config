@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -44,31 +45,47 @@ func (s *server) ReportVendorSpend(
 			Outcome: &agentreplv1.ReportVendorSpendSuccess_MetricsOff{MetricsOff: &agentreplv1.ReportVendorSpendMetricsOff{}},
 		}}}), nil
 	}
-	err := validateConfigDir(req.Msg.GetConfigDir())
+	entries, err := tallyReport(req.Msg)
 	if err == nil {
-		err = s.deps.VendorSpend.ObserveVendorSpend(ws, req.Msg.GetConfigDir(), req.Msg.GetSpend())
+		err = s.deps.VendorSpend.ObserveVendorSpend(ws, req.Msg.GetConfigDir(), entries)
 	}
 	if err != nil {
 		if !errors.Is(err, vendorspend.ErrInvalid) {
 			return nil, fail(s.log, rpc, err)
 		}
 		s.log.Error(rpc, "refused a vendor spend report that breaks the contract; nothing of it was recorded", dlog.Context{
-			"workspace": string(ws), "config_dir": req.Msg.GetConfigDir(), "entries": len(req.Msg.GetSpend()), "error": err.Error(),
+			"workspace": string(ws), "config_dir": req.Msg.GetConfigDir(), "cause": req.Msg.GetCause().String(), "calls": len(req.Msg.GetCalls()), "error": err.Error(),
 		})
 		return connect.NewResponse(&agentreplv1.ReportVendorSpendResponse{Result: &agentreplv1.ReportVendorSpendResponse_Error{Error: &agentreplv1.ReportVendorSpendError{
 			Kind: &agentreplv1.ReportVendorSpendError_Invalid{Invalid: &agentreplv1.ReportVendorSpendInvalid{Detail: err.Error()}},
 		}}}), nil
 	}
-	s.log.Debug(rpc, "recorded a vendor spend report", dlog.Context{"workspace": string(ws), "entries": len(req.Msg.GetSpend())})
+	s.log.Debug(rpc, "recorded a vendor spend report", dlog.Context{"workspace": string(ws), "calls": len(req.Msg.GetCalls())})
 	return connect.NewResponse(&agentreplv1.ReportVendorSpendResponse{Result: &agentreplv1.ReportVendorSpendResponse_Success{Success: &agentreplv1.ReportVendorSpendSuccess{
 		Outcome: &agentreplv1.ReportVendorSpendSuccess_Recorded{Recorded: &agentreplv1.ReportVendorSpendRecorded{}},
 	}}}), nil
 }
 
-// validateConfigDir refuses a report that names no account root.
-func validateConfigDir(configDir string) error {
-	if configDir == "" {
-		return errors.Join(vendorspend.ErrInvalid, errors.New("the report names no account root"))
+// tallyReport checks a report against its contract and files its calls by
+// the one tally (vendorspend.Tally). Every error wraps vendorspend.ErrInvalid.
+func tallyReport(r *agentreplv1.ReportVendorSpendRequest) ([]*conversationv1.VendorSpend, error) {
+	cause := r.GetCause()
+	switch {
+	case r.GetConfigDir() == "":
+		return nil, fmt.Errorf("%w: the report names no account root", vendorspend.ErrInvalid)
+	case cause == conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_UNSPECIFIED || cause == conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_UNSTATED:
+		return nil, fmt.Errorf("%w: the report states no cause", vendorspend.ErrInvalid)
+	case conversationv1.VendorCallCause_name[int32(cause)] == "":
+		return nil, fmt.Errorf("%w: cause %v is not a declared cause", vendorspend.ErrInvalid, cause)
+	case len(r.GetCalls()) == 0:
+		return nil, fmt.Errorf("%w: the report carries no call", vendorspend.ErrInvalid)
 	}
-	return nil
+	calls := make([]vendorspend.Call, len(r.GetCalls()))
+	for i, c := range r.GetCalls() {
+		if c.GetModel() == "" || c.GetTokens() == nil {
+			return nil, fmt.Errorf("%w: call %d names no model or no usage", vendorspend.ErrInvalid, i)
+		}
+		calls[i] = vendorspend.Call{Model: c.GetModel(), Tokens: c.GetTokens()}
+	}
+	return vendorspend.Tally(calls, conversationv1.VendorCallAgent_VENDOR_CALL_AGENT_HEADLESS, cause), nil
 }
