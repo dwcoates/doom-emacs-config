@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protodelim"
@@ -86,6 +88,9 @@ func (l *FakeLauncher) serve(t testing.TB, conn net.Conn) {
 	defer conn.Close()
 	var req launcherv1.PostBannerRequest
 	if err := (protodelim.UnmarshalOptions{}).UnmarshalFrom(bufio.NewReader(conn), &req); err != nil {
+		if daemonHungUp(err) {
+			return
+		}
 		t.Errorf("harness: the fake launcher could not read a banner: %v", err)
 		return
 	}
@@ -97,8 +102,20 @@ func (l *FakeLauncher) serve(t testing.TB, conn net.Conn) {
 			Posted: &agentreplv1.DesktopBannerPostOutcomePosted{},
 		}},
 	}}); err != nil {
+		if daemonHungUp(err) {
+			return
+		}
 		t.Errorf("harness: the fake launcher could not answer a banner: %v", err)
 	}
+}
+
+// daemonHungUp reports whether err is the posting daemon closing its end of
+// the exchange: a daemon that stops, or gives up its bound, hangs up on a
+// launcher that has not answered yet, which is normal and no fault of the
+// launcher.
+func daemonHungUp(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
 }
 
 // Banners answers every banner the launcher was handed, in order.
