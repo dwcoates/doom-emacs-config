@@ -307,15 +307,18 @@ func TestAClickedBannerAsksEmacsToSelectTheWorkspace(t *testing.T) {
 }
 
 // TestAHandedBannersClickSelectsTheWorkspace pins a HANDED click (macOS): the
-// launcher reports the click with the banner's own token, and the host
-// stream carries notification_clicked for the banner's workspace.
+// launcher reports the click with the banner's own token, and the Emacs daemon
+// stream carries notification_clicked naming the banner's workspace. The case
+// stands an Emacs daemon stream, whose focus is daemon-wide, so it takes its
+// own daemon.
 func TestAHandedBannersClickSelectsTheWorkspace(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("only a macOS banner is handed to the launcher")
 	}
 	t.Parallel()
 	// Arrange
-	f := newInGroup(t, groupDesktopBanner)
+	f := newOpened(t, harness.Opts{})
+	editor := f.d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
 	f.submit("go", "k-handed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 	awaitBannerSettled(t, f, "the handed turn banner")
@@ -333,6 +336,8 @@ func TestAHandedBannersClickSelectsTheWorkspace(t *testing.T) {
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("ReportDesktopBannerClicked = (%v, %v), want success", resp, err)
 	}
-	harness.AwaitView(t, f.d.Ctx(), f.host, "the banner click on the host stream",
-		func(r *agentreplv1.WatchHostWorkspaceResponse) bool { return r.GetNotificationClicked() != nil })
+	harness.AwaitView(t, f.d.Ctx(), editor, "the banner click on the Emacs daemon stream",
+		func(r *agentreplv1.WatchDaemonResponse) bool {
+			return r.GetNotificationClicked().GetWorkspace().GetId() == f.ws.GetId()
+		})
 }
