@@ -39,6 +39,10 @@ type UnitRecord struct {
 	Rank  int     `json:"rank"`
 	Width int     `json:"width"`
 	Cores float64 `json:"cores"`
+	// Tag is the unit's tag (UnitTag), which its processes carry in UnitEnv,
+	// so the governor reads the unit's own measured use; empty for a record
+	// an earlier testrun wrote, whose use cannot be told apart.
+	Tag string `json:"tag,omitempty"`
 	// Started is when the unit took its seats; zero while it waits for them.
 	Started time.Time `json:"started,omitzero"`
 }

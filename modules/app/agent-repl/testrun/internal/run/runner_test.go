@@ -1,6 +1,7 @@
 package run
 
 import (
+	"agentrepl/testrun/internal/cores"
 	"bytes"
 	"context"
 	"errors"
@@ -1308,14 +1309,12 @@ func TestRunFailsANamedChunkThatRanNoneOfItsTests(t *testing.T) {
 	}
 }
 
-// fakeUnitCPU tags each unit "TAG=<id>" and answers its scripted intervals.
+// fakeUnitCPU answers each unit's scripted intervals.
 type fakeUnitCPU struct {
 	mu     sync.Mutex
 	slices map[string][]testtimes.CPUSlice
 	taken  []string
 }
-
-func (f *fakeUnitCPU) Env(id string) string { return "TAG=" + id }
 
 func (f *fakeUnitCPU) Take(id string) []testtimes.CPUSlice {
 	f.mu.Lock()
@@ -1336,7 +1335,7 @@ func TestRunTagsEachUnitAndGivesItsTestsTheirShareOfItsCPU(t *testing.T) {
 	e := &fakeExec{scripts: map[string]script{"daemon#00": {usage: Usage{CPU: 3}}}}
 	cpu := &fakeUnitCPU{slices: map[string][]testtimes.CPUSlice{"daemon#00": {{From: t0, To: t0.Add(time.Second), CPU: 3}}}}
 	r, _, _ := newRunner(1, e)
-	r.CPU = cpu
+	r.CPU, r.Pid = cpu, 7
 
 	// Act
 	results, _, err := r.Run(context.Background(), []Spec{s})
@@ -1345,7 +1344,7 @@ func TestRunTagsEachUnitAndGivesItsTestsTheirShareOfItsCPU(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"OWN=1", "TAG=daemon#00"}; !slices.Equal(e.envs["daemon#00"], want) {
+	if want := []string{"OWN=1", cores.UnitEnvEntry(7, "daemon#00")}; !slices.Equal(e.envs["daemon#00"], want) {
 		t.Fatalf("the unit's environment = %v, want %v", e.envs["daemon#00"], want)
 	}
 	if !slices.Equal(cpu.taken, []string{"daemon#00"}) {
@@ -1358,6 +1357,26 @@ func TestRunTagsEachUnitAndGivesItsTestsTheirShareOfItsCPU(t *testing.T) {
 	}
 	if results[0].Outcome != Passed {
 		t.Fatalf("outcome = %v, want passed", results[0].Outcome)
+	}
+}
+
+// EVERY UNIT IS TAGGED, measured or not: the CPU governor tells a
+// just-started unit's use apart by its tag (cores.UnitEnv).
+func TestRunTagsEveryUnitWhenItMeasuresNoTestsCPU(t *testing.T) {
+	// Arrange
+	s := spec("daemon#00", "daemon")
+	e := &fakeExec{scripts: map[string]script{"daemon#00": {}}}
+	r, _, _ := newRunner(1, e)
+	r.Pid = 7
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{s}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if want := []string{cores.UnitEnvEntry(7, "daemon#00")}; !slices.Equal(e.envs["daemon#00"], want) {
+		t.Fatalf("the unit's environment = %v, want its tag", e.envs["daemon#00"])
 	}
 }
 
@@ -1392,7 +1411,10 @@ func TestRunFailsAPassingUnitWhoseTestsCPUCannotBeToldApart(t *testing.T) {
 	}
 }
 
-func TestRunWithoutCPUTagsNoUnitAndGivesNoTestCPU(t *testing.T) {
+// A RUN THAT MEASURES NO TEST'S CPU still tags its units, for the CPU
+// governor (TestRunTagsEveryUnitWhenItMeasuresNoTestsCPU), and gives no test
+// a CPU share.
+func TestRunWithoutCPUGivesNoTestCPU(t *testing.T) {
 	// Arrange
 	s := spec("daemon#00", "daemon")
 	s.Tests = func([]byte, bool) ([]testtimes.Test, error) {
@@ -1408,7 +1430,7 @@ func TestRunWithoutCPUTagsNoUnitAndGivesNoTestCPU(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(e.envs["daemon#00"]) != 0 || results[0].Tests[0].HasCPU {
-		t.Fatalf("env %v, test CPU %v; want no tag and no CPU", e.envs["daemon#00"], results[0].Tests[0].HasCPU)
+	if results[0].Tests[0].HasCPU {
+		t.Fatalf("test CPU %v; want no CPU share", results[0].Tests[0].HasCPU)
 	}
 }

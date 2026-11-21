@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -261,7 +262,7 @@ func TestHoldThatWaitsForTheCPUSaysSoAndWhenItEnds(t *testing.T) {
 	// Arrange: the governor holds every unit back, and another unit holds
 	// the only seat.
 	log := &recLog{waits: make(chan struct{}, 1)}
-	h := NewHost(t.TempDir(), 1, 19, log)
+	h := NewHost(t.TempDir(), 1, 19, 4242, log)
 	if err := writeState(h.Pool.Dir, CPUState{WaitingForCPU: true, BusyPercent: 72, TestsPercent: 30, CapPercent: BaseLimits.Target, CeilingPercent: BaseLimits.Ceiling}); err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +315,7 @@ func TestHoldThatWaitsForTheCPUSaysSoAndWhenItEnds(t *testing.T) {
 func TestHoldThatCannotTellWhyItWaitsFailsAndGivesItsSeatsBack(t *testing.T) {
 	// Arrange: a corrupt state, and another unit holding the only seat.
 	log := &recLog{waits: make(chan struct{}, 1)}
-	h := NewHost(t.TempDir(), 1, 19, log)
+	h := NewHost(t.TempDir(), 1, 19, 4242, log)
 	other, err := h.Hold("other", 1, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -380,6 +381,10 @@ type host struct {
 	testsCPU float64
 	err      error
 	testsErr error
+	// units is the CPU seconds each tag's processes use per read, and
+	// unitsErr fails the read.
+	units    map[string]float64
+	unitsErr error
 	// power is the host's power; powerErr fails its read.
 	power    HostPower
 	powerErr error
@@ -431,6 +436,33 @@ func (h *host) readTests() (float64, error) {
 	return h.testsCPU, nil
 }
 
+// setUnits sets the CPU seconds each tag's processes use per read.
+func (h *host) setUnits(units map[string]float64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.units = units
+}
+
+// failUnits fails the per-unit read with err.
+func (h *host) failUnits(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.unitsErr = err
+}
+
+func (h *host) readUnits() (map[string]float64, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.unitsErr != nil {
+		return nil, h.unitsErr
+	}
+	growth := make(map[string]float64, len(h.units))
+	for tag, cpu := range h.units {
+		growth[tag] = cpu
+	}
+	return growth, nil
+}
+
 // clock is the governor's settable clock.
 type clock struct {
 	mu  sync.Mutex
@@ -479,7 +511,7 @@ func newGovRig(t *testing.T, dir string) *govRig {
 func (r *govRig) start() {
 	ctx, stop := context.WithCancel(context.Background())
 	r.stop = stop
-	g := &Governor{Pool: r.pool, NumCPU: 16, Read: r.host.read, Tests: r.host.readTests, Power: r.host.readPower, Now: r.clock.Now, Ticks: r.ticks, Log: r.log, Stepped: func(d Decision) { r.steps <- d }}
+	g := &Governor{Pool: r.pool, NumCPU: 16, Read: r.host.read, Tests: r.host.readTests, Units: r.host.readUnits, Power: r.host.readPower, Now: r.clock.Now, Ticks: r.ticks, Log: r.log, Stepped: func(d Decision) { r.steps <- d }}
 	go func() {
 		g.Run(ctx)
 		close(r.done)
@@ -730,6 +762,123 @@ func TestGovernorCountsAJustStartedUnitAtItsExpectedCoresUntilTheReadsHoldIt(t *
 	// Assert
 	if ramping.Admit || ramping.Load.RampCores != 3 || !settled.Admit || settled.Load.RampCores != 0 {
 		t.Fatalf("decisions = %+v then %+v; want held while it ramps at 3 cores, then admitted", ramping, settled)
+	}
+}
+
+// A JUST-STARTED UNIT COUNTS ONCE: its own measured use is in the reads, so
+// it adds only what its expected cores exceed that use by.
+func TestGovernorCountsAJustStartedUnitOnceAgainstItsOwnMeasuredUse(t *testing.T) {
+	cases := []struct {
+		name     string
+		tag      string
+		measured float64
+		wantRamp float64
+	}{
+		{name: "a unit using less than expected adds the rest", tag: UnitTag(7, "started"), measured: 2, wantRamp: 1},
+		{name: "a unit using as much as expected adds nothing", tag: UnitTag(7, "started"), measured: 3, wantRamp: 0},
+		{name: "a unit using more than expected adds nothing", tag: UnitTag(7, "started"), measured: 5, wantRamp: 0},
+		{name: "an untagged record counts at its whole expected cores", tag: "", measured: 2, wantRamp: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a unit expected to use 3 cores just started, and its
+			// tag's processes use MEASURED cores at every read.
+			r := newGovRig(t, t.TempDir())
+			held := r.running(t, UnitRecord{Unit: "started", Rank: 19, Width: 1, Cores: 3, Tag: tc.tag}, r.clock.Now())
+			defer held.Release()
+			r.host.setUnits(map[string]float64{UnitTag(7, "started"): tc.measured})
+			r.measured(tc.measured, tc.measured)
+			defer r.halt()
+
+			// Act
+			d := r.tick(tc.measured, tc.measured)
+
+			// Assert
+			if d.Load.RampCores != tc.wantRamp {
+				t.Fatalf("ramp cores = %v; want %v (load %+v)", d.Load.RampCores, tc.wantRamp, d.Load)
+			}
+		})
+	}
+}
+
+// THE 2026-11-20 HOLD: a 2-core unit waited while the tests used 3.5 of 8
+// cores and the host 5 of its 8.8, because a just-started 2-core unit already
+// using its 2 cores counted 4. Counted once, the next unit fits.
+func TestGovernorAdmitsTheUnitAJustStartedUnitsDoubleHeldBack(t *testing.T) {
+	// Arrange: on AC power in High Power Mode (8 cores of target, 8.8 of
+	// ceiling), a 2-core unit started a moment ago and uses its 2 cores.
+	r := newGovRig(t, t.TempDir())
+	r.host.plug(pluggedIn, nil)
+	held := r.running(t, UnitRecord{Unit: "started", Rank: 19, Width: 1, Cores: 2, Tag: UnitTag(7, "started")}, r.clock.Now())
+	defer held.Release()
+	r.ask(t, UnitRecord{Unit: "next", Rank: 19, Width: 1, Cores: 2})
+	r.host.setUnits(map[string]float64{UnitTag(7, "started"): 2})
+	r.measured(5, 2)
+	defer r.halt()
+
+	// Act
+	d := r.tick(5, 2)
+
+	// Assert: 5 busy + 0 ramp + 2 next = 7 <= 8.8.
+	if !d.Admit || d.Load.RampCores != 0 {
+		t.Fatalf("decision = %+v; want the next unit admitted with no ramp counted on top", d)
+	}
+}
+
+func TestGovernorThatCannotReadEachUnitsCPUHoldsEveryUnitBackAndSaysSoOnce(t *testing.T) {
+	// Arrange
+	r := newGovRig(t, t.TempDir())
+	r.ask(t, UnitRecord{Unit: "u1", Rank: 19, Width: 1, Cores: 1})
+	r.measured(0, 0)
+	defer r.halt()
+
+	// Act
+	r.host.failUnits(errors.New("proc_pidinfo answered EPERM"))
+	first := r.tick(0, 0)
+	second := r.tick(0, 0)
+
+	// Assert
+	if first.Measured || first.Admit || !first.Gated || second.Admit {
+		t.Fatalf("decisions = %+v, %+v; want unmeasured and gated", first, second)
+	}
+	_, errs := r.log.lines()
+	if len(errs) != 1 || !strings.Contains(errs[0], "cannot read each unit's own CPU, so no test unit starts until it can: proc_pidinfo answered EPERM") {
+		t.Fatalf("errors = %v; want the per-unit read's failure said once", errs)
+	}
+}
+
+func TestUnitRates(t *testing.T) {
+	cases := []struct {
+		name   string
+		prev   map[string][]float64
+		growth map[string]float64
+		want   map[string][]float64
+	}{
+		{name: "a tag first seen starts its rates", growth: map[string]float64{"1/a": 2}, want: map[string][]float64{"1/a": {2}}},
+		{name: "a seen tag adds this read's rate", prev: map[string][]float64{"1/a": {2}}, growth: map[string]float64{"1/a": 4}, want: map[string][]float64{"1/a": {2, 4}}},
+		{name: "a seen tag that used nothing reads 0", prev: map[string][]float64{"1/a": {2}}, growth: map[string]float64{}, want: map[string][]float64{"1/a": {2, 0}}},
+		{name: "only the last AverageTicks reads are kept", prev: map[string][]float64{"1/a": {1, 2, 3}}, growth: map[string]float64{"1/a": 4}, want: map[string][]float64{"1/a": {2, 3, 4}}},
+		{name: "a tag idle over all its last reads is forgotten", prev: map[string][]float64{"1/a": {2, 0, 0}}, growth: map[string]float64{}, want: map[string][]float64{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act: a read over 2 seconds.
+			doubled := map[string]float64{}
+			for tag, cpu := range tc.growth {
+				doubled[tag] = 2 * cpu
+			}
+			got := unitRates(tc.prev, doubled, 2)
+
+			// Assert
+			if len(got) != len(tc.want) {
+				t.Fatalf("rates = %v; want %v", got, tc.want)
+			}
+			for tag, rates := range tc.want {
+				if !slices.Equal(got[tag], rates) {
+					t.Fatalf("rates = %v; want %v", got, tc.want)
+				}
+			}
+		})
 	}
 }
 

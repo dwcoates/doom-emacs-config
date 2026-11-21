@@ -434,7 +434,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	}
 	// THE HOST'S CORE SEATS, taken before planning: the planning's `go list`
 	// holds one as a unit does (reuse.HeldGoList).
-	host := cores.NewHost(plan.Dir, slots, rank, log)
+	host := cores.NewHost(plan.Dir, slots, rank, os.Getpid(), log)
 	reuseDeps, err := reuse.HostDeps(args.Module, self, work, &host, log)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -473,16 +473,24 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 			return 1
 		}
 		testsCPU := &cores.TestsCPU{Scan: marked.Scan}
+		// Each unit's own CPU, by the tag the runner sets on every unit
+		// (cores.UnitEnv), so the governor counts a just-started unit once.
+		unitMarked, err := proctable.NewMarked(cores.UnitEnv)
+		if err != nil {
+			log.Errorf("read each unit's own CPU for the CPU governor: %v", err)
+			return 1
+		}
+		unitsCPU := &cores.TestsCPU{Scan: unitMarked.Scan}
 		// The host's power, which sets the governor's limits (cores.Limits).
 		power := &hostpower.Host{}
 		readPower := func() (cores.HostPower, error) { return cores.ReadHostPower(power, power.EnergyMode) }
-		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Power: readPower, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
+		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Units: unitsCPU.ReadByMark, Power: readPower, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
 	}
 	// EACH TEST'S CPU (cputime): measured only for a run that pushes its
 	// times, since every read scans the user's processes.
 	var unitCPU run.UnitCPU
 	if metricsTarget.Enabled() {
-		tagged, err := proctable.NewMarked(cputime.UnitEnv)
+		tagged, err := proctable.NewMarked(cores.UnitEnv)
 		if err != nil {
 			log.Errorf("read the units' CPU for each test's share: %v", err)
 			return 1
@@ -810,7 +818,7 @@ func planCmd(log *run.Log, argv []string) int {
 		log.Errorf("size the plan's core seats: %v", err)
 		return 1
 	}
-	host := cores.NewHost(seatPlan.Dir, seatPlan.Budget, rank, quiet)
+	host := cores.NewHost(seatPlan.Dir, seatPlan.Budget, rank, os.Getpid(), quiet)
 	d, err := reuse.HostDeps(args.Module, self, work, &host, quiet)
 	if err != nil {
 		log.Errorf("%v", err)

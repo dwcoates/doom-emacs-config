@@ -3,26 +3,24 @@
 // CPU of the intervals it ran in (testtimes.AttributeCPU).
 //
 // EVERY PROCESS OF A UNIT CARRIES ITS TAG. The runner starts each unit with
-// UnitEnv set to the unit's tag (Tag), which every process the unit starts
-// inherits, whatever group or session it moves to, as the CPU governor's mark
-// is (cores.NestedEnv). A read scans the processes carrying UnitEnv and counts
+// cores.UnitEnv set to the unit's tag (cores.UnitTag), which every process the
+// unit starts inherits, whatever group or session it moves to, as the CPU
+// governor's mark is (cores.NestedEnv). A read scans the processes carrying
+// cores.UnitEnv and counts
 // what each tag's tree used since the last read (cores.TestsCPU.ReadByMark),
 // a reaped child's use once, through its parent.
 package cputime
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/testtimes"
 )
-
-// UnitEnv tags a unit's process tree with the unit's tag.
-const UnitEnv = "AGENT_REPL_TESTRUN_UNIT"
 
 // Every is how often the sampler reads. A test shorter than it shares its
 // interval's CPU with the tests beside it by how long each ran, so a shorter
@@ -34,7 +32,7 @@ const Every = 500 * time.Millisecond
 // intervals until the runner takes them.
 type Sampler struct {
 	// Read answers the CPU each tag's processes used since the last read
-	// (cores.TestsCPU.ReadByMark over proctable.Marked of UnitEnv).
+	// (cores.TestsCPU.ReadByMark over proctable.Marked of cores.UnitEnv).
 	Read  func() (map[string]float64, error)
 	Now   func() time.Time
 	Ticks <-chan time.Time
@@ -48,11 +46,8 @@ type Sampler struct {
 	slices map[string][]testtimes.CPUSlice
 }
 
-// Tag is the tag of unit ID in this run.
-func (s *Sampler) Tag(id string) string { return fmt.Sprintf("%d/%s", s.Pid, id) }
-
-// Env is the environment entry that tags unit ID's tree.
-func (s *Sampler) Env(id string) string { return UnitEnv + "=" + s.Tag(id) }
+// Tag is the tag of unit ID in this run (cores.UnitTag).
+func (s *Sampler) Tag(id string) string { return cores.UnitTag(s.Pid, id) }
 
 // Run reads at every tick until ctx ends. The first read only takes the
 // baseline.
@@ -84,9 +79,9 @@ func (s *Sampler) read() {
 		s.slices = map[string][]testtimes.CPUSlice{}
 	}
 	if s.primed {
-		own := fmt.Sprintf("%d/", s.Pid)
+		own := cores.UnitTag(s.Pid, "")
 		for tag, cpu := range growth {
-			// Every run's units carry UnitEnv; only this run's are kept.
+			// Every run's units carry cores.UnitEnv; only this run's are kept.
 			if cpu == 0 || !strings.HasPrefix(tag, own) {
 				continue
 			}

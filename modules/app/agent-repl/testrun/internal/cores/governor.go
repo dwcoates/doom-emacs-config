@@ -42,14 +42,17 @@ import (
 // IT COSTS EACH UNIT BY ITS OWN HISTORY. A unit asks for seats with the cores
 // its own passing runs used (plan.Build, from the runner's per-unit CPU
 // accounting), or DefaultCoresPerSlot a slot when it has none, and states it
-// in the ledger (ledger.go). A unit that just started counts at those cores
-// for RampWindow, until the averaged reads hold its measured use; after that
-// its measured use stands for it. A unit is admitted when
+// in the ledger (ledger.go), with its tag (UnitTag). A unit that just started
+// counts for RampWindow at the larger of those cores and its own measured use
+// (read by its tag, Governor.Units), until the averaged reads hold its
+// measured use; after that its measured use stands for it. A unit is
+// admitted when
 //
 //	tests + its cores <= the target, and
 //	rest of the host + tests + its cores <= the ceiling,
 //
-// with tests the tests' measured cores plus every just-started unit's.
+// with tests the tests' measured cores plus what every just-started unit's
+// expected cores exceed its own measured use by.
 //
 // THE FIRST UNIT IS NEVER STARVED. While no test unit runs, the next unit
 // starts whenever the rest of the host is under the ceiling, whatever its
@@ -79,8 +82,8 @@ import (
 // the role's lock. A governor's run that exits drops the role, its seats and
 // its turnstile with its locks, and the next waiting run governs at once.
 //
-// IT ERRS LOW. A unit that just started counts at its expected cores on top
-// of whatever of its use the reads already show; held seats no ledger record
+// IT ERRS LOW. A unit that just started counts at the larger of its expected
+// cores and its own measured use (Governor.load), never at both; held seats no ledger record
 // accounts for (a run of an earlier testrun, or a unit in the instant between
 // taking its seats and stating it) count DefaultCoresPerSlot each for
 // RampWindow; a waiter seen on a rank's lane with no record is costed as the
@@ -315,6 +318,10 @@ type Governor struct {
 	Read func() (hostcpu.Times, error)
 	// Tests reads the CPU seconds the tests' processes used (TestsCPU.Read).
 	Tests func() (float64, error)
+	// Units reads the CPU seconds each unit's tagged processes used since
+	// the last read, by tag (TestsCPU.ReadByMark over UnitEnv), so a
+	// just-started unit's measured use is told from the rest of the tests'.
+	Units func() (map[string]float64, error)
 	// Power reads the power the host runs on (ReadHostPower), which sets
 	// the limits.
 	Power func() (HostPower, error)
@@ -362,6 +369,8 @@ type governing struct {
 	havePrev  bool
 	host      []float64
 	tests     []float64
+	// units is each tagged unit's measured cores at each of the last reads.
+	units map[string][]float64
 	// unrecorded is the count of held seats no ledger record accounted for,
 	// at each of the last reads.
 	unrecorded []int
@@ -494,6 +503,13 @@ func (g *Governor) read(s *governing) {
 		return
 	}
 	g.recovered(s, "tests")
+	units, err := g.Units()
+	if err != nil {
+		s.havePrev = false
+		g.failed(s, "units", "cannot read each unit's own CPU, so no test unit starts until it can", err)
+		return
+	}
+	g.recovered(s, "units")
 	prevHost, prevTests, had := s.prevHost, s.prevTests, s.havePrev
 	s.prevHost, s.prevTests, s.havePrev = host, tests, true
 	if !had {
@@ -511,6 +527,29 @@ func (g *Governor) read(s *governing) {
 	seconds := (host.Total() - prevHost.Total()) / float64(g.NumCPU)
 	s.host = lastN(append(s.host, busy*float64(g.NumCPU)), AverageTicks)
 	s.tests = lastN(append(s.tests, (tests-prevTests)/seconds), AverageTicks)
+	s.units = unitRates(s.units, units, seconds)
+}
+
+// unitRates is PREV, each tag's measured cores at its last reads, with this
+// read's: GROWTH, the CPU seconds each tag used over SECONDS. A tag that used
+// nothing this read reads 0, and a tag that used nothing over all of its
+// last AverageTicks reads is forgotten.
+func unitRates(prev map[string][]float64, growth map[string]float64, seconds float64) map[string][]float64 {
+	next := make(map[string][]float64, len(prev)+len(growth))
+	for tag, rates := range prev {
+		next[tag] = lastN(append(rates, growth[tag]/seconds), AverageTicks)
+	}
+	for tag, cpu := range growth {
+		if _, seen := prev[tag]; !seen {
+			next[tag] = []float64{cpu / seconds}
+		}
+	}
+	for tag, rates := range next {
+		if len(rates) == AverageTicks && slices.Max(rates) <= 0 {
+			delete(next, tag)
+		}
+	}
+	return next
 }
 
 // decide decides on the next unit and acts on it. A decision at a read also
@@ -542,9 +581,18 @@ func (g *Governor) decide(s *governing, atRead bool) {
 }
 
 // load is the load a decision counts: the averaged reads, every unit that
-// started within RampWindow at its expected cores, and every held seat no
-// record accounts for that was taken within RampWindow at
-// DefaultCoresPerSlot.
+// started within RampWindow at what its expected cores exceed its own
+// measured use by, and every held seat no record accounts for that was taken
+// within RampWindow at DefaultCoresPerSlot.
+//
+// A JUST-STARTED UNIT COUNTS ONCE. Its use is already climbing into the
+// averaged reads, the tests' and the host's alike, so counting its whole
+// expected cores on top counted it twice until RampWindow ended, and the
+// ceiling held the next unit back on a unit's own double (2026-11-20: 352
+// holds in one gate at 29% slot use). So it counts at the larger of its
+// expected and its measured cores: its measured use is in the reads, and the
+// excess is added. A record with no tag (an earlier testrun's) measures
+// nothing of its own, so it counts at its whole expected cores, as before.
 func (g *Governor) load(s *governing, records []UnitRecord, testSeats int, atRead bool) Load {
 	l := Load{HostCores: mean(s.host), TestsCores: max(0, mean(s.tests))}
 	now := g.Now()
@@ -555,7 +603,7 @@ func (g *Governor) load(s *governing, records []UnitRecord, testSeats int, atRea
 		}
 		recorded += r.Width
 		if now.Sub(r.Started) < RampWindow {
-			l.RampCores += r.Cores
+			l.RampCores += max(0, r.Cores-s.measured(r.Tag))
 		}
 	}
 	unrecorded := max(0, testSeats-recorded)
@@ -759,6 +807,15 @@ func (g *Governor) state(s *governing, d Decision, readable bool) {
 		return
 	}
 	g.recovered(s, "state")
+}
+
+// measured is unit TAG's averaged measured cores, 0 for an empty tag or one
+// no read has seen.
+func (s *governing) measured(tag string) float64 {
+	if tag == "" {
+		return 0
+	}
+	return mean(s.units[tag])
 }
 
 // unitName names a decided unit for the log.
