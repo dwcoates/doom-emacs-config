@@ -44,6 +44,24 @@
 # is always announced: it means a tree other checkouts were running on was
 # broken.
 
+# NODE_STORE_PACKAGES — every npm package of the module, relative to the module
+# root. THE ONE LIST: each one's node_modules is a link into the store
+# (node_store_link), build-frontend.sh's `deps` target links them all, and the
+# store's gc protects each one's entries. Its test entry installs only through
+# bin/ensure-deps.sh (test-build-frontend.sh holds every package to both).
+# shellcheck disable=SC2034 # read by the scripts that source this library
+NODE_STORE_PACKAGES=(agent-shim/claude/shim webapp tree-sitter-tldr)
+
+# NODE_STORE_INSTALL_SECS — the bound on one npm install of a package
+# (node_store_bounded). The slowest healthy install measured is
+# tree-sitter-tldr's `npm ci`, 17s under merge-gate load with its
+# tree-sitter-cli postinstall downloading its binary from GitHub (gate logs of
+# 2026-11-10); on an idle host the three packages install in 1.5s, 3.8s and
+# 5.2s (2026-11-14). 50s is three times the slowest. An install past it hung,
+# as tree-sitter-cli's postinstall did for 30+ minutes on 2026-11-09 (a bare
+# https.get with no timeout) and held the merge queue with it.
+NODE_STORE_INSTALL_SECS="${AGENT_REPL_NODE_INSTALL_SECS:-50}"
+
 # node_store_root — the store's root directory.
 node_store_root() {
     printf '%s\n' "${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/node-store}"
@@ -62,6 +80,103 @@ node_store_key() {
 # node_store_say MESSAGE... — one loud repair line on stderr.
 node_store_say() {
     printf '[node-store] %s\n' "$*" >&2
+}
+
+# node_store_name DIR — the name a package's store entries carry: its
+# directory's own name (`shim`, `webapp`, `tree-sitter-tldr`).
+node_store_name() {
+    basename "$1"
+}
+
+# node_store_entry_for DIR — echo the store entry DIR's current manifests key.
+node_store_entry_for() {
+    local key
+    key="$(node_store_key "$1")" || return 1
+    printf '%s/%s-%s\n' "$(node_store_root)" "$(node_store_name "$1")" "$key"
+}
+
+# node_store_bounded LABEL COMMAND... — run COMMAND, killing it and every
+# process under it once it has run NODE_STORE_INSTALL_SECS. A bound that fires
+# answers 124 and says so, naming LABEL, the bound and the measured time.
+#
+# COMMAND STAYS IN ITS CALLER'S PROCESS GROUP, so a test runner that kills a
+# unit's group kills the install with it. The bound therefore kills the tree
+# under COMMAND rather than a group: it stops each process before listing its
+# children, and a stopped process cannot fork, so the walk ends with none left
+# out; then it kills every one.
+node_store_bounded() {
+    local label="$1" rc=0
+    shift
+    perl -e '
+        use strict;
+        my $secs = shift @ARGV;
+        my $pid = fork() // die "fork: $!\n";
+        if ($pid == 0) { exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"; }
+        local $SIG{ALRM} = sub {
+            my @all;
+            my @frontier = ($pid);
+            while (@frontier) {
+                my @next;
+                for my $p (@frontier) {
+                    kill("STOP", $p) or next;
+                    push @all, $p;
+                    push @next, split(" ", `pgrep -P $p`);
+                }
+                @frontier = @next;
+            }
+            kill("KILL", @all);
+            waitpid($pid, 0);
+            exit 124;
+        };
+        alarm $secs;
+        waitpid($pid, 0);
+        alarm 0;
+        exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+    ' "$NODE_STORE_INSTALL_SECS" "$@" || rc=$?
+    if [ "$rc" -eq 124 ]; then
+        node_store_say "$label ran past its ${NODE_STORE_INSTALL_SECS}s bound (the slowest healthy install takes 17s, measured 2026-11-10) and was killed"
+    fi
+    return "$rc"
+}
+
+# node_store_link DIR — point DIR/node_modules at the store entry DIR's
+# manifests key, making sure the entry it points at SATISFIES ITS LOCKFILE.
+#
+#   - A real directory is a deliberate local install and is left exactly as it
+#     is.
+#   - A link into the store has THAT entry checked (`npm ls` inside it) and,
+#     when it exists but is broken — emptied or partial — repaired in place
+#     under the entry's lock. The link itself is kept.
+#   - Anything else (absent, dangling) is linked to the entry the current
+#     lockfile keys, installing that entry once, for every checkout, when it
+#     is not there yet.
+#
+# Fails, loudly, when the entry could not be installed or repaired: a checkout
+# linked to a tree that does not satisfy its lockfile would run against
+# missing dependencies.
+node_store_link() {
+    local dir="$1" entry linked
+    if [ -d "$dir/node_modules" ] && [ ! -L "$dir/node_modules" ]; then
+        return 0
+    fi
+    if [ -d "$dir/node_modules" ] && linked="$(node_store_entry_of_link "$dir/node_modules")"; then
+        if ! node_store_repair "$linked" "$dir"; then
+            node_store_say "the store entry $linked that $dir links is broken and could not be repaired"
+            return 1
+        fi
+        return 0
+    fi
+    [ -d "$dir/node_modules" ] && return 0
+    if ! entry="$(node_store_entry_for "$dir")"; then
+        node_store_say "$dir has no package.json to key a store entry by"
+        return 1
+    fi
+    if ! node_store_repair "$entry" "$dir"; then
+        node_store_say "the store entry $entry could not be installed for $dir"
+        return 1
+    fi
+    ln -sfn "$entry/node_modules" "$dir/node_modules"
+    node_store_say "$dir/node_modules -> $entry/node_modules"
 }
 
 # node_tree_complete DIR — succeed when DIR's node_modules is a COMPLETE
@@ -185,7 +300,7 @@ node_store_install_tree() {
     fi
     local verb=install
     [ -f "$tree/package-lock.json" ] && verb=ci
-    if ! ( cd "$tree" && npm "$verb" --no-audit --no-fund >&2 ); then
+    if ! ( cd "$tree" && node_store_bounded "npm $verb of $entry" npm "$verb" --no-audit --no-fund >&2 ); then
         rm -rf "$tree"
         return 1
     fi

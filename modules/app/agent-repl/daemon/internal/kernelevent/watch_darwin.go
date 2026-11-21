@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -38,6 +40,7 @@ func NewWatch() (*Watch, error) {
 // open(2) refuses it EOPNOTSUPP) with one wrapping ErrUnwatchable, and a
 // symlink being replaced under the open with one wrapping ErrLinkReplaced;
 // its directory is what reports each of them made, removed or replaced.
+// Any other refusal states what the kernel had at PATH (openError).
 func (w *Watch) Add(path string) error {
 	fd, err := unix.Open(path, unix.O_EVTONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -46,7 +49,7 @@ func (w *Watch) Add(path string) error {
 	change := unix.Kevent_t{Ident: uint64(fd), Filter: unix.EVFILT_VNODE, Flags: unix.EV_ADD | unix.EV_CLEAR, Fflags: vnodeChanges}
 	if _, err := unix.Kevent(w.kq, []unix.Kevent_t{change}, nil, nil); err != nil {
 		unix.Close(fd)
-		return fmt.Errorf("register a watch on %s: %w", path, err)
+		return fmt.Errorf("register a watch on %s: %w", path, refusal(path, err))
 	}
 	w.fds = append(w.fds, fd)
 	return nil
@@ -59,16 +62,85 @@ func (w *Watch) Add(path string) error {
 // replaces a workspace's canonical log link (dlog.replaceLink renames a fresh
 // link onto it). The link is not missing and not broken: its directory reports
 // the rename, and the next watch opens the new link.
+//
+// ANY OTHER REFUSAL STATES WHAT THE KERNEL HAD AT PATH (refusal): its errno by
+// name, and the path's own entry and, for a link, its target's, so a refusal
+// nobody has explained yet carries its cause into the failure reporting it.
 func openError(path string, err error) error {
 	switch {
 	case errors.Is(err, unix.EOPNOTSUPP):
 		err = ErrUnwatchable
-	case errors.Is(err, unix.EINVAL):
-		if info, lerr := os.Lstat(path); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
-			err = ErrLinkReplaced
-		}
+	case errors.Is(err, unix.ENOENT):
+	case errors.Is(err, unix.EINVAL) && isSymlink(path):
+		err = ErrLinkReplaced
+	default:
+		err = refusal(path, err)
 	}
 	return &os.PathError{Op: "watch", Path: path, Err: err}
+}
+
+// isSymlink answers whether PATH is a symlink now.
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
+}
+
+// refusal is ERR, still matching its errno, stating the errno by name and
+// what PATH was when the kernel refused it: the entry itself (lstat) and, for
+// a link, where it points and what is there (stat).
+func refusal(path string, err error) error {
+	errno := "no errno"
+	var e unix.Errno
+	if errors.As(err, &e) {
+		errno = fmt.Sprintf("%s(%d)", unix.ErrnoName(e), int(e))
+	}
+	entry, lerr := os.Lstat(path)
+	if lerr != nil {
+		return fmt.Errorf("%w [%s; lstat: %v]", err, errno, lerr)
+	}
+	described := fmt.Sprintf("%s; entry: %s", errno, describeEntry(entry))
+	if entry.Mode()&fs.ModeSymlink != 0 {
+		target, rerr := os.Readlink(path)
+		if rerr != nil {
+			described += fmt.Sprintf("; readlink: %v", rerr)
+		} else {
+			described += fmt.Sprintf("; link to %q", target)
+		}
+		if info, serr := os.Stat(path); serr != nil {
+			described += fmt.Sprintf("; target: %v", serr)
+		} else {
+			described += "; target: " + describeEntry(info)
+		}
+	}
+	return fmt.Errorf("%w [%s]", err, described)
+}
+
+// describeEntry states a file's type, permissions, size, device and inode.
+func describeEntry(info fs.FileInfo) string {
+	out := fmt.Sprintf("type=%s perm=%v size=%d", fileType(info.Mode()), info.Mode().Perm(), info.Size())
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		out += fmt.Sprintf(" dev=%d ino=%d", st.Dev, st.Ino)
+	}
+	return out
+}
+
+// fileType names a mode's file type.
+func fileType(mode fs.FileMode) string {
+	switch {
+	case mode.IsRegular():
+		return "file"
+	case mode.IsDir():
+		return "dir"
+	case mode&fs.ModeSymlink != 0:
+		return "symlink"
+	case mode&fs.ModeNamedPipe != 0:
+		return "fifo"
+	case mode&fs.ModeSocket != 0:
+		return "socket"
+	case mode&fs.ModeDevice != 0:
+		return "device"
+	}
+	return mode.Type().String()
 }
 
 // Wait blocks until a change has been reported since the last Wait, or ctx

@@ -6,7 +6,18 @@
 # Usage: ensure-deps.sh [PACKAGE_DIR]   (default: the current directory)
 #
 # The webapp's and the shim's `ensure-deps` npm scripts call this (their
-# `pre*` hooks run it before every test, typecheck and coverage run).
+# `pre*` hooks run it before every test, typecheck and coverage run), and so
+# does tree-sitter-tldr's test script: every package of NODE_STORE_PACKAGES
+# (lib-node-store.sh) installs only through here.
+#
+# AN ABSENT node_modules IS LINKED INTO THE STORE (node_store_link), the same
+# link build-frontend.sh's `deps` makes, so a fresh worktree -- every merge
+# gate's -- installs nothing a store entry already holds. Before, it ran a
+# private `npm ci`, and tree-sitter-cli's postinstall downloaded its binary
+# from GitHub on every gate: a GitHub 504 failed gates, and a stalled download
+# held the queue for 30+ minutes (2026-11-09).
+#
+# EVERY INSTALL IS BOUNDED (node_store_bounded), so a hung one fails loudly.
 #
 # WHY IT EXISTS. bin/build-frontend.sh links each checkout's node_modules into
 # ONE shared store entry per lockfile hash (~/.cache/agent-repl/node-store), so
@@ -75,6 +86,12 @@ if [ -L node_modules ]; then
     printf 'ensure-deps: removing the LINK only and installing a private node_modules here; the store entry is left untouched.\n' >&2
     # A path with no trailing slash: rm removes the link, never what it names.
     rm node_modules
+elif [ ! -e node_modules ]; then
+    if ! node_store_link "$PWD"; then
+        printf 'ensure-deps: %s/node_modules could not be linked into the shared store.\n' "$PWD" >&2
+        exit 1
+    fi
+    exit 0
 fi
 
-npm ci --no-audit --no-fund
+node_store_bounded "npm ci of $PWD" npm ci --no-audit --no-fund

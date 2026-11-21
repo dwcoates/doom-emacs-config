@@ -17,7 +17,7 @@
 //
 //	--store-socket     store UDS path (default $AGENT_REPL_STORE_SOCKET, else …/sock/store.sock)
 //	--state-dir        agent-repl state root (default $AGENT_REPL_STATE_DIR, else ~/.claude-emacs)
-//	--config-roots     comma-separated config roots (~/.claude,~/.claude-chesscom)
+//	--config-roots     comma-separated config roots (default ~/.claude; the service passes every root, requirements.json)
 //	--spool-root       task-spool root (/tmp; resolves claude-<uid>/… itself)
 //	--log              size-capped rotating log file
 //	--poll-interval    how often each watched file is polled, and how often the
@@ -125,7 +125,7 @@ func main() {
 	storeSocket := flag.String("store-socket", defaultStoreSocket(base), "store UDS path (default $"+StoreSocketEnv+")")
 	stateDir := flag.String("state-dir", "",
 		"agent-repl state root holding the shim's identity records (default $"+StateDirEnv+", else ~/"+DefaultStateDirName+")")
-	configRoots := flag.String("config-roots", "~/.claude,~/.claude-chesscom", "comma-separated config roots")
+	configRoots := flag.String("config-roots", "~/.claude", "comma-separated config roots (the service passes every Claude config root the installer knows)")
 	spoolRoot := flag.String("spool-root", "/tmp", "task-spool root (resolves claude-<uid>/ itself)")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-claude-sidecar.log"), "log file path (size-capped, rotated into N generations)")
 	pollInterval := flag.Duration("poll-interval", DefaultPollInterval, "how often each watched file is polled, and how often the directory-change probe looks for new files")

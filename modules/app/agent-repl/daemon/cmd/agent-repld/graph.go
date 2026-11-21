@@ -673,14 +673,21 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	// EVERY HEADLESS CALL ABOUT A WORKSPACE runs under that workspace's
-	// account root: the chat's abbreviations, the topbar's titles and the
-	// turn banners' summaries.
-	configDirs := account.WorkspaceRoots{Dir: func(ctx context.Context, ws ids.WorkspaceID) (string, error) {
+	// account root (the reader's choice, else its directory's routing): the
+	// chat's abbreviations, the topbar's titles and the turn banners'
+	// summaries.
+	configDirs := account.WorkspaceRoots{Read: func(ctx context.Context, ws ids.WorkspaceID) (account.WorkspaceAccount, error) {
 		record, err := p.DB.Workspace(ctx, ws)
 		if err != nil {
-			return "", err
+			return account.WorkspaceAccount{}, err
 		}
-		return record.Dir, nil
+		// A workspace with no session row has no choice recorded, so the
+		// routing decides.
+		session, _, err := p.DB.Session(ctx, ws)
+		if err != nil {
+			return account.WorkspaceAccount{}, err
+		}
+		return account.WorkspaceAccount{Dir: record.Dir, SelectedConfigDir: session.SelectedConfigDir}, nil
 	}, Accounts: accounts}
 
 	// THE CHAT SERVICE: each zettel chat thread's view, fed by the feed's

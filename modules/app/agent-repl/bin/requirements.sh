@@ -108,20 +108,33 @@ MODULE_DIR="${AGENT_REPL_REQUIREMENTS_ROOT:-$(cd "$THIS_DIR/.." && pwd -P)}"
 ROOT_MANIFEST="$MODULE_DIR/requirements.json"
 BUILD_FRONTEND="${AGENT_REPL_REQUIREMENTS_BUILD:-$MODULE_DIR/bin/build-frontend.sh}"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
-SKILLS_DIR="$HOME/.claude/skills"
+# DEFAULT_CONFIG_ROOT is the Claude config root every session runs under unless
+# its workspace is routed to the work account's (claude_config_roots).
+DEFAULT_CONFIG_ROOT="$HOME/.claude"
 # BIN_DIR is where a command_link puts its command: the user's own bin dir.
 BIN_DIR="${AGENT_REPL_BIN_DIR:-$HOME/.local/bin}"
 
-# skills_dirs: every skills directory a skill link is kept in, one per line.
-# A session runs under ~/.claude, or, for a workspace under MULTI_REPO_ROOT,
-# under the work account's config root MULTI_REPO_CONFIG_DIR (the same value
-# Emacs passes the daemon as --multi-repo-config-dir). A skill linked into the
-# first alone is missing from every session of the second.
-skills_dirs() {
-  printf '%s\n' "$SKILLS_DIR"
+# claude_config_roots: every Claude config root a session runs under, one per
+# line. A session runs under ~/.claude, or, for a workspace under
+# MULTI_REPO_ROOT, under the work account's config root MULTI_REPO_CONFIG_DIR
+# (the same value Emacs passes the daemon as --multi-repo-config-dir). Skills
+# are linked into each root, and the sidecar watches each one
+# (`{claude-config-roots}`, expand_placeholders).
+claude_config_roots() {
+  printf '%s\n' "$DEFAULT_CONFIG_ROOT"
   if [ -n "${MULTI_REPO_CONFIG_DIR:-}" ]; then
-    printf '%s/skills\n' "$MULTI_REPO_CONFIG_DIR"
+    printf '%s\n' "$MULTI_REPO_CONFIG_DIR"
   fi
+}
+
+# skills_dirs: every skills directory a skill link is kept in, one per line:
+# each config root's. A skill linked into the first alone is missing from
+# every session of the second.
+skills_dirs() {
+  local root
+  while IFS= read -r root; do
+    printf '%s/skills\n' "$root"
+  done < <(claude_config_roots)
 }
 
 # ---------------------------------------------------------------------------
@@ -888,7 +901,8 @@ service_definition() { service_definition_path "$(field "$1" .label)"; }
 
 # rendered_service ENTRY: the service's definition for this platform, rendered
 # from the entry, so a plist and a unit can never disagree about a service.
-# Every `~/` becomes the absolute $HOME (no service manager expands ~).
+# Every argument's placeholders are expanded (expand_placeholders), and every
+# `~/` becomes the absolute $HOME (no service manager expands ~).
 #
 # THE PROGRAM IS RUN THROUGH /usr/bin/env ON BOTH PLATFORMS. On macOS the
 # background task manager names a login item by its program's code signature,
@@ -904,7 +918,18 @@ service_definition() { service_definition_path "$(field "$1" .label)"; }
 # ProcessType, 4 under `Adaptive` and darwinbg under `Background`, and 31
 # (normal work's, as a shell's child) only under `Interactive`.
 rendered_service() {
-  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg platform "$(platform)" --arg cache "$CACHE_ROOT" \
+  local entry="$1" arg args=()
+  while IFS= read -r arg; do
+    args+=("$(expand_placeholders "$arg")") || return 1
+  done < <(printf '%s\n' "$entry" | jq -r '(.args // [])[]')
+  # The arguments go to jq as JSON, never as its own argv, where one opening
+  # with a dash would read as a jq option.
+  local json="[]"
+  if [ "${#args[@]}" -gt 0 ]; then
+    json="$(printf '%s\n' "${args[@]}" | jq -Rn '[inputs]')"
+  fi
+  entry="$(printf '%s\n' "$entry" | jq -c --argjson args "$json" '.args = $args')"
+  printf '%s\n' "$entry" | jq -r --arg home "$HOME" --arg platform "$(platform)" --arg cache "$CACHE_ROOT" \
     --arg path "$(command_service_path)" --arg restart "$SERVICE_RESTART_SECONDS" --arg stop "$SERVICE_STOP_SECONDS" '
     def home: gsub("~/"; $home + "/");
     def xml: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
@@ -1278,9 +1303,16 @@ install_emacs() {
 # expand_placeholders ARG: ARG with its placeholders replaced, so a manifest
 # names a path or a version without naming a machine's: `{home}` is the home
 # directory, `{gcc-major}` the major version of the gcc on PATH, `{brew}`
-# Homebrew's prefix and `{brew:FORMULA}` that formula's.
+# Homebrew's prefix, `{brew:FORMULA}` that formula's, and
+# `{claude-config-roots}` every Claude config root, comma-separated
+# (claude_config_roots).
 expand_placeholders() {
   local arg="$1" out="" name
+  if [[ "$arg" == *"{claude-config-roots}"* ]]; then
+    local roots
+    roots="$(claude_config_roots | paste -sd, -)"
+    arg="${arg//\{claude-config-roots\}/$roots}"
+  fi
   if [[ "$arg" == *"{gcc-major}"* ]]; then
     local major
     major="$(gcc -dumpversion)" || { err "expand: $arg names {gcc-major}, and gcc -dumpversion failed"; return 1; }

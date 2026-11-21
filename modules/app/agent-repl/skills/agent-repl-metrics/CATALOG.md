@@ -15,7 +15,7 @@ run, judgement call 12).
 | `agentrepl_deployed_version_info` | gauge, 1 | `version` | daemon (`runtimemetrics`), at start and after each deploy |
 | `agentrepl_latency_seconds` | histogram | `latency`, `workspace` | daemon: `switch_repeat`, `switch_first`, `page_boot`, `prompt_echo`, `page_stall`, `reload_blank` and `switch_sidebar` reported by pages; `editor_stall`, `elisp_reload` and `editor_input_wait` reported by Emacs under an empty `workspace`; `vendor_first_output` and `shim_event_loop_delay` folded from shims |
 | `agentrepl_shim_heap_bytes` | gauge | `workspace`, `kind` | daemon, from each shim's last measurements frame: `used`, `total`, `external` |
-| `agentrepl_process_cpu_seconds_total` | counter | `process`, `workspace` | daemon (`procmetrics`), per group, monotonic across churn |
+| `agentrepl_process_cpu_seconds_total` | counter | `process`, `workspace` | daemon (`procmetrics`), per group, monotonic across churn; counts a child that starts and exits between samples through its parent's reaped-children time |
 | `agentrepl_process_disk_read_bytes_total`, `..._written_bytes_total` | counter | `process`, `workspace` | daemon (`procmetrics`) |
 | `agentrepl_process_energy_joules_total` | counter | `process`, `workspace` | daemon (`procmetrics`) |
 | `agentrepl_process_resident_bytes`, `..._footprint_bytes` | gauge | `process`, `workspace` | daemon (`procmetrics`) |

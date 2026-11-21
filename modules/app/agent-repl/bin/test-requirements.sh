@@ -916,6 +916,32 @@ test_expand_placeholders_fails_when_gcc_cannot_say_its_version() {
   if [ "$rc" -ne 0 ]; then pass "expand_placeholders fails when gcc cannot say its version"; else fail "gcc-major failure was expanded"; fi
 }
 
+test_claude_config_roots_adds_the_work_accounts_root_only_when_named() {
+  local bad="" got
+  # shellcheck source=/dev/null
+  REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  # shellcheck disable=SC2034 # read by skills_dirs through claude_config_roots
+  DEFAULT_CONFIG_ROOT=/h/.claude
+  got="$(MULTI_REPO_CONFIG_DIR=/h/.claude-work expand_placeholders "--roots={claude-config-roots}")"
+  [ "$got" = "--roots=/h/.claude,/h/.claude-work" ] || bad="$bad [named: $got]"
+  got="$(MULTI_REPO_CONFIG_DIR='' expand_placeholders "--roots={claude-config-roots}")"
+  [ "$got" = "--roots=/h/.claude" ] || bad="$bad [unnamed: $got]"
+  if [ -z "$bad" ]; then pass "{claude-config-roots} names the work account's root only when MULTI_REPO_CONFIG_DIR does"; else fail "claude-config-roots:$bad"; fi
+}
+
+# The skills directories are the config roots' own, so the skills a session
+# has and the roots the sidecar watches can never name different accounts.
+test_skills_dirs_are_the_config_roots_skills_dirs() {
+  local want got
+  # shellcheck source=/dev/null
+  REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  # shellcheck disable=SC2034 # read by skills_dirs through claude_config_roots
+  DEFAULT_CONFIG_ROOT=/h/.claude
+  got="$(MULTI_REPO_CONFIG_DIR=/h/.claude-work skills_dirs)"
+  want="$(printf '/h/.claude/skills\n/h/.claude-work/skills')"
+  if [ "$got" = "$want" ]; then pass "skills_dirs answers each config root's skills directory"; else fail "skills_dirs" "$got"; fi
+}
+
 # ---------------------------------------------------------------------------
 # notification_permission.
 # ---------------------------------------------------------------------------
@@ -1522,6 +1548,27 @@ test_define_service_needs_a_label() {
   else fail "define-service without a label" "rc=$RC" "$OUT"; fi
 }
 
+test_a_rendered_service_expands_its_arguments_placeholders() {
+  new_case
+  manifest "[$(jq -c '.args = ["--config-roots", "{claude-config-roots}"]' <<<"$SVC_ENTRY")]"
+  write_stub build 'mkdir -p "$HOME/.cache/agent-repl/bin" && printf "#!/bin/sh\n" >"$HOME/.cache/agent-repl/bin/svc" && chmod +x "$HOME/.cache/agent-repl/bin/svc"'
+  EXTRA_ENV="MULTI_REPO_CONFIG_DIR=$CASE/home/.claude-work" run install
+  local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist"
+  if [ "$RC" -eq 0 ] && grep -qF "<string>$CASE/home/.claude,$CASE/home/.claude-work</string>" "$plist"; then
+    pass "a rendered service's arguments name every Claude config root"
+  else fail "service placeholders" "rc=$RC" "$OUT" "$(cat "$plist" 2>&1)"; fi
+}
+
+# A config root is one person's, so a service names the roots through
+# {claude-config-roots} rather than any literal one.
+test_no_real_service_names_a_literal_claude_config_root() {
+  local bad
+  bad="$(find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -print0 \
+    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | (.args // []) as $a
+        | select([range(0; ($a | length) - 1) | select($a[.] == "--config-roots") | $a[. + 1]] | any(. != "{claude-config-roots}")) | .id')"
+  if [ -z "$bad" ]; then pass "no real service names a literal Claude config root"; else fail "services naming a literal config root:" "$bad"; fi
+}
+
 test_install_builds_renders_and_starts_a_systemd_service() {
   service_case
   PLATFORM=linux run install
@@ -1875,6 +1922,33 @@ test_version_ge() {
 1.23.9 1.24 no
 EOF
   if [ -z "$bad" ]; then pass "version_ge compares part by part"; else fail "version_ge:$bad"; fi
+}
+
+# Walks the whole module for its package.json files, so it lives in the suite that
+# is never reused (test-build-frontend.sh runs confined to its declared inputs).
+# Every npm package of the module is in NODE_STORE_PACKAGES and its tests install
+# only through ensure-deps.sh: a package that installs by hand (as tree-sitter-tldr
+# once did with `npm ci --silent`) fails here.
+test_every_npm_package_installs_through_ensure_deps() {
+    local module packages pkg bad="" listed
+    module="$MODULE"
+    # shellcheck source=lib-node-store.sh
+    listed="$(. "$THIS_DIR/lib-node-store.sh" && printf '%s\n' "${NODE_STORE_PACKAGES[@]}" | sort)"
+    packages="$(find "$module" -name package.json -not -path '*/node_modules/*' -not -path "$module/e2e/*" \
+        | sed "s#^$module/##" | xargs -n1 dirname \
+        | while read -r pkg; do jq -e '.scripts.test' "$module/$pkg/package.json" >/dev/null && echo "$pkg"; done | sort)"
+    [ "$packages" = "$listed" ] || bad="$bad [NODE_STORE_PACKAGES is not every npm package with tests: listed=$(echo $listed) tested=$(echo $packages)]"
+    for pkg in $packages; do
+        grep -rqs 'ensure-deps\.sh' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh || bad="$bad [$pkg: no ensure-deps]"
+        if grep -Eqs '(^|[^-])npm[[:space:]]+(ci|install)' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh; then
+            bad="$bad [$pkg: installs by hand]"
+        fi
+    done
+    if [ -z "$bad" ]; then
+        pass "every npm package's tests install through ensure-deps.sh, and NODE_STORE_PACKAGES lists them all"
+    else
+        fail "every npm package installs through ensure-deps.sh" "$bad"
+    fi
 }
 
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do

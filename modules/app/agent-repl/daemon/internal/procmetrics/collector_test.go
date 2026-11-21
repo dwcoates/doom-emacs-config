@@ -300,6 +300,71 @@ func TestAnExitedProcessKeepsItsGroupsCounterAndLeavesItsGauges(t *testing.T) {
 	mustValue(t, get, 0, "agentrepl_process_count", shimTools()...)
 }
 
+func TestAChildExitingBetweenScrapesCountsThroughItsParent(t *testing.T) {
+	// Arrange: the tool (40) runs and reaps a child the scrapes never see.
+	h := newHarness(t, newWorld())
+	h.scrape(t)
+	h.reader.setUsage(40, Usage{CPUSeconds: 7, ChildCPUSeconds: 3})
+
+	// Act
+	get := h.scrape(t)
+
+	// Assert
+	mustValue(t, get, 3, "agentrepl_process_cpu_seconds_total", shimTools()...)
+}
+
+func TestASampledChildIsNotCountedAgainWhenItsParentReapsIt(t *testing.T) {
+	// Arrange: a child (41) of the tool is sampled at 4s, runs to 5s and
+	// exits, and the tool's child time grows by its whole 5s.
+	h := newHarness(t, newWorld())
+	h.scrape(t)
+	h.reader.addProcess(Identity{PID: 41, PPID: 40, Name: "bash", StartUnixMicros: 9}, Usage{CPUSeconds: 4})
+	h.scrape(t)
+	h.reader.removeProcess(41)
+	h.reader.setUsage(40, Usage{CPUSeconds: 7, ChildCPUSeconds: 5})
+
+	// Act
+	get := h.scrape(t)
+
+	// Assert: the 4s counted at 41's own sample, then only its last 1s.
+	mustValue(t, get, 5, "agentrepl_process_cpu_seconds_total", shimTools()...)
+}
+
+func TestWhatAnExitedChildWasCountedWaitsForItsReap(t *testing.T) {
+	// Arrange: the child (41) leaves the listing a scrape before its parent's
+	// child time shows the reap.
+	h := newHarness(t, newWorld())
+	h.scrape(t)
+	h.reader.addProcess(Identity{PID: 41, PPID: 40, Name: "bash", StartUnixMicros: 9}, Usage{CPUSeconds: 4})
+	h.scrape(t)
+	h.reader.removeProcess(41)
+	h.scrape(t)
+	h.reader.setUsage(40, Usage{CPUSeconds: 7, ChildCPUSeconds: 6})
+
+	// Act
+	get := h.scrape(t)
+
+	// Assert: 4s at 41's sample, then the 2s it ran after it.
+	mustValue(t, get, 6, "agentrepl_process_cpu_seconds_total", shimTools()...)
+}
+
+func TestAChildWhoseParentLeftOwesNothingToItsPidsNextHolder(t *testing.T) {
+	// Arrange: the tool (40) and its sampled child (41) both leave, and pid
+	// 40 is reused by a process that has reaped children of its own.
+	h := newHarness(t, newWorld())
+	h.scrape(t)
+	h.reader.addProcess(Identity{PID: 41, PPID: 40, Name: "bash", StartUnixMicros: 9}, Usage{CPUSeconds: 4})
+	h.scrape(t)
+	h.reader.removeProcess(41)
+	h.reader.addProcess(Identity{PID: 40, PPID: 30, Name: "bash", StartUnixMicros: 99}, Usage{CPUSeconds: 1, ChildCPUSeconds: 2})
+
+	// Act
+	get := h.scrape(t)
+
+	// Assert: 4s for 41, then the new holder's whole 3s.
+	mustValue(t, get, 7, "agentrepl_process_cpu_seconds_total", shimTools()...)
+}
+
 func TestTheHostAndItsPowerAreServed(t *testing.T) {
 	// Arrange
 	h := newHarness(t, newWorld())
