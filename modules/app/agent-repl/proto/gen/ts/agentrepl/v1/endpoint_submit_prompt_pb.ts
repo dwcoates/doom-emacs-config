@@ -314,9 +314,11 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
      * handed the card, quoted, followed by these words, to an ephemeral
      * intake workspace it created for the question in the home repository,
      * or to the workspace already addressing that card's questions
-     * (endpoint_ask_about_response.proto), and ended the question. The intake workspace sends this workspace the
-     * answer to an interrogative, and creates a one-shot child of this
-     * workspace for an imperative, acknowledging this workspace either way
+     * (endpoint_ask_about_response.proto), and ended the question. The
+     * intake workspace sends this workspace the answer to an interrogative,
+     * sends a rework of a change to the workspace that made it, and creates
+     * a one-shot child of this workspace for any other imperative,
+     * acknowledging this workspace either way
      * (conversation.v1.PromptOrigin.PROMPT_ORIGIN_AGENT_SENT). Nothing
      * appears in this workspace's feed until that acknowledgement arrives.
      *

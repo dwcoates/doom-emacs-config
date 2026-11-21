@@ -597,3 +597,22 @@ func TestAskAboutCardFails(t *testing.T) {
 		})
 	}
 }
+
+// TestTheShippedQuestionIntakeBriefSendsReworkToTheWorkspaceThatMadeIt pins
+// that a card question asking to rework a change goes to the workspace whose
+// work made it, per the metaprompt's "Rework" section, and creates no
+// workspace for it.
+func TestTheShippedQuestionIntakeBriefSendsReworkToTheWorkspaceThatMadeIt(t *testing.T) {
+	// Arrange.
+	brief := loadShippedBrief(t, BriefQuestionIntake)
+
+	// Act.
+	body := brief.Body
+
+	// Assert.
+	assertCarries(t, "brief", body,
+		`send the rework to the workspace that made it, as the metaprompt's "Rework" section says`,
+		"Create no workspace for it.",
+		"If it asks for any other change, create one async one-shot workspace",
+	)
+}
