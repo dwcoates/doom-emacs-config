@@ -42,6 +42,7 @@
   - `minor` for a feature, `patch` for a fix or a visual change, `none` for a repository whose lifecycle config versions nothing.
   - Exit 4 is the gate's refusal, which it names: fix it on the branch, with the queue resumed meanwhile, and land again.
   - Exit 1 is a branch that did not merge cleanly; resolve it on the branch and land again.
+  - Exit 5 is a landing the daemon did not record: the branch landed, so never land it again; run the record command it prints once the daemon answers.
 - Deploy it: `/agent-repl-runtime deploy` for agent-repl, or the repository's own deploy.
 - Watch every deploy until it has settled, and fix what it broke before calling it done.
   - Wait for the new build to serve, then read every system's warnings and errors since the deploy began, `--doctor`, and the latencies against the versions before it.
