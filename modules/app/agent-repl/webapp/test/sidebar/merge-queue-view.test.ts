@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   SelectWorkspaceResponseSchema,
@@ -1380,7 +1380,8 @@ describe("drawRosterMergeQueueOffQueue", () => {
     const link = line.querySelector<HTMLElement>(`.${MERGE_QUEUE_ASYNC_OF_LINK_CLASS}`)!;
     expect(link.textContent).toBe("triage");
     link.click();
-    await vi.waitFor(() => expect(selected).toHaveLength(1));
+    await settled();
+    expect(selected).toHaveLength(1);
     expect(selected.map((r) => [r.workspace?.id, "reveal" in r ? r.reveal : undefined])).toEqual([["w2", undefined]]);
   });
 

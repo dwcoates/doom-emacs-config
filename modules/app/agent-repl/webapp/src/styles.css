@@ -1167,7 +1167,7 @@ body {
 #ws-sidebar .sb-mq-async-of-link {
   cursor: pointer;
 }
-#ws-sidebar .sb-mq-async-of-link:hover {
+#ws-sidebar:not(.sb-hover-suspended) .sb-mq-async-of-link:hover {
   text-decoration: underline;
 }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
