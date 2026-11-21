@@ -65,9 +65,17 @@ const landDirectScript = "bin/land-direct.sh"
 
 // landDirectBoundSeconds bounds one direct landing: a --no-ff merge, a
 // changelog commit and a tag in the main worktree, measured at under 2s on the
-// owner's machine (2026-11-14, bin/land-direct.sh landing deploy-mediator); 5s
-// is that with headroom for a cold disk.
-const landDirectBoundSeconds = 5
+// owner's machine (2026-11-14, bin/land-direct.sh landing deploy-mediator),
+// and the landing's report to the daemon (lib-land-record.sh), one
+// `agent-repld` call, measured at 1.0s for the heavier `merge-queue status`
+// (2026-11-20, three runs on the owner's machine); 8s is two and a half
+// times their 3s.
+const landDirectBoundSeconds = 8
+
+// landDirectUnrecorded is land-direct.sh's exit for a landing the daemon did
+// not record (lib-land-record.sh's LAND_RECORD_UNRECORDED): the branch HAS
+// landed, and the finish records it itself.
+const landDirectUnrecorded = 5
 
 // LandsDirectly implements Orchestrator: WS is a deploy mediator, whose
 // finish lands directly whichever work it finishes.
@@ -527,6 +535,10 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 		switch {
 		case run.TimedOut:
 			return fmt.Errorf("merge: the remediation's direct landing outlived its bound of %ds (measured under 2s): %s", landDirectBoundSeconds, strings.TrimSpace(run.Output))
+		case run.ExitCode == landDirectUnrecorded:
+			// THE BRANCH LANDED; only the script's report of it was not
+			// recorded, and the finish's own record below covers it.
+			o.deps.Log.Global().Error(opRemediationFinish, "the remediation's direct landing landed but its report was not recorded; the finish records it", withField(fields, "output", strings.TrimSpace(run.Output)))
 		case run.ExitCode == 1:
 			return o.resumeRemediation(ctx, f, BriefRemediationBehind, map[string]string{"main_branch": mainBranch, "why": strings.TrimSpace(run.Output)}, fields)
 		case run.ExitCode != 0:
