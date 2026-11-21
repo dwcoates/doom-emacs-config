@@ -70,8 +70,8 @@ export function readHoverStamp(stamp: FeedHoverStamp, path: string): HoverStamp 
   return { label: requireMessage(stamp.label, `${path}.label`).text, tokens, atMs, startedAtMs };
 }
 
-/** What the footer is told: the hovered bubble's stamp, or null for none. */
-export type ShowHoverStamp = (stamp: HoverStamp | null) => void;
+/** What the footer and the margin are told: the hovered row's stamp and the row, or null for none. */
+export type ShowHoverStamp = (stamp: HoverStamp | null, row: Element | null) => void;
 
 /** Each drawn row's stamp; a row with none has no entry. */
 const stamps = new WeakMap<Element, HoverStamp>();
@@ -146,7 +146,7 @@ export function installHoverStamp(host: HTMLElement, show: ShowHoverStamp, focus
       operation: "feed.hover-stamp",
       context: { row: rowOf(row), label: stamp?.label ?? null, tokens: stamp?.tokens?.text ?? null },
     });
-    show(stamp);
+    show(stamp, stamp === null ? null : row);
   };
   const onOver = (event: MouseEvent): void => {
     if (rest.suspended()) return;

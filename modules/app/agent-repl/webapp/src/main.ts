@@ -50,6 +50,7 @@ import { mountChat } from "./chat/chat.js";
 import { landChatAtEnd } from "./scroll.js";
 import { mountFooter } from "./footer/footer.js";
 import { installHoverStamp } from "./feed/hover-stamp.js";
+import { mountMarginStamp } from "./feed/margin-stamp.js";
 import { pageFocusLeft } from "./focus-left.js";
 import { pageWebhostPresses } from "./webhost-pressed.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
@@ -456,7 +457,17 @@ function mountWorkspaceFooter(
   // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER (owner request,
   // 2026-10-25): the bubble draws no figure of its own, and the footer's
   // activity cell shows it while the pointer is on the bubble.
-  installHoverStamp(shell.feed, (stamp) => footer.showHoverStamp(stamp), pageFocusLeft());
+  // THE HOVERED ROW'S TIME AND AGE ARE READ IN THE FEED'S RIGHT MARGIN
+  // (owner request, 2026-11-21), faded in beside the row.
+  const marginStamp = mountMarginStamp(shell.feedScroll, ctx.ticker);
+  installHoverStamp(
+    shell.feed,
+    (stamp, row) => {
+      footer.showHoverStamp(stamp);
+      marginStamp.show(stamp, row);
+    },
+    pageFocusLeft(),
+  );
   // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
   // composer is closed exactly when the footer's status arm is blue (the
   // workspace is unusable: an agent-repl fault, a network fault, a close) —

@@ -4,15 +4,15 @@
  * bubble the daemon stamped (src/feed/hover-stamp.ts), the strip's activity
  * cell shows that stamp in place of the daemon's activity line:
  *
- *   "Response 2.1k tokens, 1m 30s · 5m ago"
- *   "Tool call Bash, 12s · 2m ago"
- *   "Prompt · 10m ago"
+ *   "Response 2.1k tokens, 1m 30s"
+ *   "Tool call Bash, 12s"
+ *   "Prompt"
  *   "Testing the fix, 4m 10s"            (still running: the span ticks)
  *
  * Its label; its token figure, in its heat, when it has one; how long it took
  * once it settled (or how long it has run, ticking, while it is under way),
- * when its span's start is known; and how long ago it was sent or settled, as
- * a live clock ending the line as the activity line's own age does. The
+ * when its span's start is known. How long ago it was sent or settled is the
+ * feed margin's (owner request, 2026-11-21), not the footer's. The
  * pointer leaving gives the cell back to the daemon's line on the next draw.
  *
  * It is the page's own line, not a daemon tier: the cell wears
@@ -22,7 +22,7 @@ import type { Ticker } from "../clock.js";
 import type { HoverStamp } from "../feed/hover-stamp.js";
 import { log } from "../log.js";
 import { formatDurationCeil, formatTickedElapsed } from "../duration.js";
-import { footerAgeSpan, footerClockSpan } from "./clock-span.js";
+import { footerClockSpan } from "./clock-span.js";
 
 /** The tier the hover line's cell wears, beside the daemon's three. */
 export const HOVER_STAMP_TIER = "hover";
@@ -47,7 +47,7 @@ export function hoverDuration(stamp: HoverStamp): string | null {
 /**
  * The activity cell drawing STAMP: the label, the figure in its heat when it
  * has one, its duration (settled, or ticking off TICKER while under way) when
- * its start is known, and the live age of its sent-or-settled instant.
+ * its start is known. Its age is the feed margin's (feed/margin-stamp.ts).
  */
 export function drawHoverStampActivity(stamp: HoverStamp, ticker: Ticker): HTMLElement {
   const { atMs, startedAtMs } = stamp;
@@ -78,7 +78,6 @@ export function drawHoverStampActivity(stamp: HoverStamp, ticker: Ticker): HTMLE
       }),
     );
   }
-  if (atMs !== null) line.append(footerAgeSpan(ticker, atMs));
   cell.append(line);
   log.debug("drawing the hovered bubble's stamp in the activity cell", {
     operation: "footer.hover-stamp",
