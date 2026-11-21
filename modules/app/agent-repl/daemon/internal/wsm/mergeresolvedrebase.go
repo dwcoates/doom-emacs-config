@@ -102,8 +102,7 @@ WHERE repo_key = ? AND workspace_id = ? AND resolved_tip IS NOT NULL`, key, id)
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		cleared = n > 0
+		cleared, err = touchedRow(res)
 		return err
 	})
 	return cleared, err
