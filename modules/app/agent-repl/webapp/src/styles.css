@@ -1150,19 +1150,25 @@ body {
   line-height: var(--merged-row-line-h);
   padding-left: var(--mq-list-indent);
 }
-/* AN ASYNC MERGE'S "(async of <requester>)" NOTE is smaller, greyer and
+/* AN ASYNC MERGE'S "(<requester>)" NOTE is smaller, greyer and
    italic beside its name (owner request, 2026-11-18). It gives way first:
    it shrinks to an ellipsis before the name or the clock does, and the
    line's hover shows it whole. */
 #ws-sidebar .sb-mq-async-of {
   color: var(--repo-head-collapsed);
-  font-size: 0.85em;
+  font-size: 0.75em;
   font-style: italic;
   min-width: 0;
   flex: 0 1000 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+#ws-sidebar .sb-mq-async-of-link {
+  cursor: pointer;
+}
+#ws-sidebar:not(.sb-hover-suspended) .sb-mq-async-of-link:hover {
+  text-decoration: underline;
 }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
    bubble's own rules (".merge-tab-glyph.is-live" and its siblings). */

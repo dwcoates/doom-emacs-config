@@ -60,6 +60,7 @@ import {
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_GITHUB_CLASS,
   MERGE_QUEUE_ASYNC_OF_CLASS,
+  MERGE_QUEUE_ASYNC_OF_LINK_CLASS,
   MERGE_QUEUE_OFF_QUEUE_CLASS,
   MERGE_QUEUE_OFF_QUEUE_RULE_CLASS,
   COLD_GATED_REQUEUE_TITLE,
@@ -1161,10 +1162,10 @@ describe("drawRosterMergeQueueWaiting", () => {
     expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
       ["sb-mq-position", "1"],
       ["sb-mq-name", "fix-it"],
-      [MERGE_QUEUE_ASYNC_OF_CLASS, "(async of triage)"],
+      [MERGE_QUEUE_ASYNC_OF_CLASS, "(triage)"],
       ["sb-mq-clock", formatTickedElapsed(3_000)],
     ]);
-    expect([line.title, line.querySelector(".sb-mq-name")?.hasAttribute("title")]).toEqual(["(async of triage)", false]);
+    expect([line.title, line.querySelector(".sb-mq-name")?.hasAttribute("title")]).toEqual(["(triage)", false]);
   });
 
   it("notes nothing after a sync merge's name", () => {
@@ -1367,8 +1368,21 @@ describe("drawRosterMergeQueueOffQueue", () => {
     const off = offQueue("w2", "evicted");
     off.subject = queueSubject("w2", { name: "fix-it", async: true, requester: "triage" });
     const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector<HTMLElement>(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`)!;
-    expect([...line.children].slice(0, 3).map((el) => el.textContent)).toEqual(["fix-it", "(async of triage)", "evicted"]);
-    expect(line.title).toBe("(async of triage)");
+    expect([...line.children].slice(0, 3).map((el) => el.textContent)).toEqual(["fix-it", "(triage)", "evicted"]);
+    expect(line.title).toBe("(triage)");
+  });
+
+  it("selects the requester alone when its name in the note is clicked, never the line", async () => {
+    const { sc, selected } = offQueueDaemon();
+    const off = offQueue("w2", "evicted");
+    off.subject = queueSubject("w2", { name: "fix-it", async: true, requester: "triage", reveal: "bubble-1" });
+    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector<HTMLElement>(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`)!;
+    const link = line.querySelector<HTMLElement>(`.${MERGE_QUEUE_ASYNC_OF_LINK_CLASS}`)!;
+    expect(link.textContent).toBe("triage");
+    link.click();
+    await settled();
+    expect(selected).toHaveLength(1);
+    expect(selected.map((r) => [r.workspace?.id, "reveal" in r ? r.reveal : undefined])).toEqual([["w2", undefined]]);
   });
 
   it("requeues the merge's own workspace at the back, as the user, without selecting the line", async () => {
