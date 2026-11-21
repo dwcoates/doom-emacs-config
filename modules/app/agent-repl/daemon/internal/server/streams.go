@@ -556,6 +556,14 @@ func (s *server) watchWebWorkspace(
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
 	}
+	// ONLY A VISIBLE WORKSPACE IS SERVED (endpoint_watch_web_workspace.proto):
+	// a page nobody can see costs no stream and no feed pushes. Decided by the
+	// roster's live value, the one the editor loaded the page on, never by the
+	// store's copy written a moment after it.
+	if v := s.deps.Sidebar.Visibility(subject.Record.ID); !v.Visible() {
+		subject.Log.Info(rpc, "refused a web stream for a workspace that is not visible", dlog.Context{"visibility": v.String()})
+		return refuseStream(subject.Log, rpc, refusal{Arm: "not_visible", Reason: "the workspace is not visible, so no page of it is served"})
+	}
 	s.holdParticipant(subject.Record.ID, false, +1)
 	defer s.holdParticipant(subject.Record.ID, false, -1)
 	s.deps.Reconnects.Connected(subject.Record.ID, restarttiming.ReconnectWeb)
@@ -972,6 +980,14 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 		// THE AWAITING IS THE HOST STREAM'S. An editor that reconnects --
 		// a restarted Emacs, a handover's re-subscribe -- awaits its pages
 		// afresh, so a page not yet connected is never read as one gone.
+		delete(s.webSeen, ws)
+	}
+	// A WORKSPACE THAT IS NOT VISIBLE HOLDS NO STREAMS BY DESIGN: the editor
+	// closes both when the roster stops showing it (wsm.Visibility), so their
+	// close is no severed hop, and its next open is awaited afresh. Read
+	// off the roster's live value, which the close follows.
+	if delta < 0 && !s.deps.Sidebar.Visibility(ws).Visible() {
+		delete(s.hostSeen, ws)
 		delete(s.webSeen, ws)
 	}
 	hops := s.participantHopsLocked(ws)

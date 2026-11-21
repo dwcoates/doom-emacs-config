@@ -453,26 +453,6 @@ func (d deployChecks) Resume(ctx context.Context, ws ids.WorkspaceID) error {
 	return verbs.ResumeDeployCheck(ctx, ws)
 }
 
-// surfaceForWork is the turn-start edge's surfacing (workspace.WorkSurfacings),
-// read out of the verbs, which are built after the edges.
-func (f *verbsForwarder) surfaceForWork(ctx context.Context, ws ids.WorkspaceID) error {
-	verbs, err := f.bound("a turn's start surfaced a workspace")
-	if err != nil {
-		return err
-	}
-	return verbs.SurfaceForWork(ctx, ws)
-}
-
-// endSurfacing is the turn-end edge's end of a surfacing
-// (workspace.WorkSurfacingEnds), read out of the verbs likewise.
-func (f *verbsForwarder) endSurfacing(ctx context.Context, ws ids.WorkspaceID) error {
-	verbs, err := f.bound("a turn's end ended a workspace's surfacing")
-	if err != nil {
-		return err
-	}
-	return verbs.EndSurfacing(ctx, ws)
-}
-
 // healthForwarder carries the session watcher's diagnostics verdict to the
 // health reporter, which is built after the fleet the watchers live in.
 type healthForwarder struct {

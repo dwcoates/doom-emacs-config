@@ -973,11 +973,6 @@ type DB interface {
 	SetParkedKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
 	// MarkParkedCold records the parked conversation's cache lapsed.
 	MarkParkedCold(ctx context.Context, id WorkspaceID) error
-	// PageLoaded answers whether Emacs last held a workspace's page, known
-	// false when Emacs never reported it (pageresidency.go).
-	PageLoaded(ctx context.Context, id WorkspaceID) (loaded, known bool, err error)
-	// SetPageLoaded records whether Emacs holds a workspace's page.
-	SetPageLoaded(ctx context.Context, id WorkspaceID, loaded bool, at time.Time) error
 	// RecordPullReference records a pull request a workspace's text named,
 	// keeping the first instant of one recorded before (pullreferences.go).
 	RecordPullReference(ctx context.Context, id WorkspaceID, ref pullrefs.Ref, at time.Time) error

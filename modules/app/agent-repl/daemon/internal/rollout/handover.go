@@ -12,7 +12,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/bounce"
-	"agent-repld/internal/bringup"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
@@ -363,18 +362,14 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	}, nil
 }
 
-// foldedRows answers, for each of WORKSPACES, whether its sidebar row is
-// folded away: the one statement of a fold, the tab bar's (bringup.Folds), so
-// what a handover moves last and loads no page for is exactly what the bar
-// folds and the daemon withholds.
-func (c *controller) foldedRows(ctx context.Context, workspaces []wsm.Workspace) (map[ids.WorkspaceID]bool, error) {
-	folds, err := bringup.Folds(ctx, c.deps.DB, c.log)
-	if err != nil {
-		return nil, fmt.Errorf("rollout: handover: %w", err)
-	}
+// foldedRows answers, for each of WORKSPACES, whether the user cannot see it:
+// its persisted visibility (wsm.Workspace.Visibility), the one fact every
+// per-workspace allocation is gated on, so what a handover moves last and
+// loads no page for is exactly what the editor holds nothing for.
+func (c *controller) foldedRows(_ context.Context, workspaces []wsm.Workspace) (map[ids.WorkspaceID]bool, error) {
 	out := make(map[ids.WorkspaceID]bool, len(workspaces))
 	for _, ws := range workspaces {
-		_, out[ws.ID] = folds[ws.ID]
+		out[ws.ID] = !ws.Visibility.Visible()
 	}
 	return out, nil
 }

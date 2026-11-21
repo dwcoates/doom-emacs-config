@@ -2418,6 +2418,8 @@ func (f *fakeTopbar) Participants() []participantEdge { return f.edges.all() }
 func (f *fakeTopbar) AwaitEdge(t *testing.T) participantEdge { return f.edges.await(t) }
 
 type fakeSidebar struct {
+	// visibility is each workspace's seeded visibility (Visibility).
+	visibility map[ids.WorkspaceID]wsm.Visibility
 	sidebar.Resolver
 	topic publish.Topic[*frontendv1.RosterPush]
 	// revision is what Revision answers.
@@ -2473,6 +2475,15 @@ func (f *fakeSidebar) MergedPage(q sidebar.MergedPageQuery) (sidebar.MergedPage,
 }
 
 func (f *fakeSidebar) Revision() uint64 { return f.revision }
+
+// Visibility answers the seeded visibility of WS, UnselectedVisible for a
+// workspace no test seeded: the ordinary workspace a test drives is visible.
+func (f *fakeSidebar) Visibility(ws ids.WorkspaceID) wsm.Visibility {
+	if v, ok := f.visibility[ws]; ok {
+		return v
+	}
+	return wsm.UnselectedVisible
+}
 
 // harness is one running surface over real Connect handlers.
 type harness struct {

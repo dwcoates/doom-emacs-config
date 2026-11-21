@@ -646,31 +646,11 @@ func (s *server) RegisterWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
-// registered answers RECORD's registration: its ref, and whether Emacs last
-// held its page. THE ONE SUCCESS both registration verbs answer, so a lone
-// registration and a re-announcement cannot tell Emacs different things. A
-// residency the store cannot read is recorded at ERROR here and returned.
-func (s *server) registered(ctx context.Context, rpc string, record wsm.Workspace) (*agentreplv1.RegisterWorkspaceSuccess, error) {
-	loaded, known, err := s.deps.DB.PageLoaded(ctx, record.ID)
-	if err != nil {
-		s.log.Error(rpc, "could not read a registered workspace's last-known page", dlog.Context{
-			"workspace": string(record.ID), "dir": record.Dir, "cause": err.Error(),
-		})
-		return nil, fmt.Errorf("%s: read the last-known page of %s: %w", rpc, record.ID, err)
-	}
-	return &agentreplv1.RegisterWorkspaceSuccess{Workspace: record.Ref(), LastKnownPage: lastKnownPage(loaded, known)}, nil
-}
-
-// lastKnownPage renders the store's residency fact; nil when none is known.
-func lastKnownPage(loaded, known bool) *agentreplv1.LastKnownPage {
-	switch {
-	case !known:
-		return nil
-	case loaded:
-		return &agentreplv1.LastKnownPage{State: &agentreplv1.LastKnownPage_Loaded{Loaded: &agentreplv1.LastKnownPageLoaded{}}}
-	default:
-		return &agentreplv1.LastKnownPage{State: &agentreplv1.LastKnownPage_NotLoaded{NotLoaded: &agentreplv1.LastKnownPageNotLoaded{}}}
-	}
+// registered answers RECORD's registration: its ref. THE ONE SUCCESS both
+// registration verbs answer, so a lone registration and a re-announcement
+// cannot tell Emacs different things.
+func (s *server) registered(_ context.Context, _ string, record wsm.Workspace) (*agentreplv1.RegisterWorkspaceSuccess, error) {
+	return &agentreplv1.RegisterWorkspaceSuccess{Workspace: record.Ref()}, nil
 }
 
 // RegisterWorkspaces records every workspace Emacs re-announced at a link

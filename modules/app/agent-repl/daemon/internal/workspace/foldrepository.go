@@ -278,9 +278,6 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 		log.Error(spec.op, "could not record the "+spec.what+"'s fold", dlog.Context{"cause": err.Error()})
 		return nil, nil, fmt.Errorf("fold %s %q: %w", spec.what, spec.target, err)
 	}
-	// A FOLD THE USER MAKES LEAVES A WORKING WORKSPACE DRAWN: a surfaced mark
-	// stands until its turn ends (surfacing.go), through any number of
-	// unfolds and folds.
 	return workspaces, members, nil
 }
 

@@ -443,6 +443,11 @@ func (s *wsState) live(session *wsm.Session) bool {
 type rosterState struct {
 	// reg is the last registry snapshot, whole.
 	reg Registry
+	// visibility is every workspace's visibility as the last render derived
+	// it (resolveVisibility); visibilityKept is the value last handed to the
+	// visibility sink, or read from the registry, per workspace.
+	visibility     map[ids.WorkspaceID]wsm.Visibility
+	visibilityKept map[ids.WorkspaceID]wsm.Visibility
 	// regSeen reports whether any registry has been installed. Nothing
 	// publishes before one: the roster is a view OF the registry, and a roster
 	// built from live frames alone would name no workspaces.

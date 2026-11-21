@@ -167,17 +167,11 @@ func openNodes(tree forest, order blockOrder, list []wsm.Workspace) []openNode {
 // each before its family (its own-repository children, then its blocks'),
 // saying whether the tab is FOLDED: FOLDED is the region's own fold, and a
 // workspace whose children are folded folds every tab below it, block rows
-// included (childrenFolded). A workspace the fold draws inside itself
-// (wsm.Workspace.DrawnInsideFold: its turn started under the fold and is
-// running, or the user is on it) is the one exception: its own tab is drawn,
-// and the fold still covers its family.
+// included (childrenFolded). It is the sections' own reading: which of the
+// covered workspaces are drawn anyway is the visibility (visibility.go).
 func walkOpen(nodes []openNode, fold *Fold, visit func(ws wsm.Workspace, fold *Fold)) {
 	for _, node := range nodes {
-		own := fold
-		if node.ws.DrawnInsideFold() {
-			own = nil
-		}
-		visit(node.ws, own)
+		visit(node.ws, fold)
 		walkOpen(flatten(node.children, node.blocks), familyFold(node, fold), visit)
 	}
 }

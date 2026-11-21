@@ -99,10 +99,9 @@ func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThre
 			row.Summary = &frontendv1.RosterThreadSummary{Text: s.summary}
 		}
 		current := r.state.selected != nil && *r.state.selected == ws.ID
-		// PRESENCE IS THE FACT, as `frontend.v1.RosterThreadHeld` states it.
-		if held(ws, false, current) {
-			row.Held = &frontendv1.RosterThreadHeld{}
-		}
+		// THE THREAD'S VISIBILITY, as this render derived it: selected while
+		// the Chat app shows it, never visible otherwise.
+		row.Visibility = visibilityOf(r.state.visibility[ws.ID])
 		if current {
 			row.Current = &frontendv1.RosterThreadCurrent{}
 			if s, ok := r.state.workspaces[ws.ID]; ok && s.outline != nil {

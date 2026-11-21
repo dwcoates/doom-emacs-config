@@ -41,10 +41,7 @@ const OpenSectionLabel = "Open"
 // rows still draws: both are registered, and a section that vanished when its
 // last workspace left would make the grouping flicker (and leave an empty
 // subsection nowhere to drag a workspace into).
-func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
-	reg := r.state.reg
-	reg.Current = r.state.selected
-	repos, orphans := openTree(reg, log)
+func (r *resolver) repositoryView(repos []openRepo, orphans map[ids.RepoID][]wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
 	current := r.selectedWorkspace()
 	tabs := tabsOf(repos)
 	filed := wsm.SectionRepos(r.state.reg.Workspaces)
@@ -589,9 +586,13 @@ func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer,
 // same order, so a block's rows take their tabs after the own-repository
 // children's.
 func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
-	surfaced := folded && node.ws.DrawnInsideFold()
+	// A VISIBLE ROW'S TAB IS NUMBERED, whatever folds cover it, and one a fold
+	// covers is drawn inside the fold (wsm.Visibilities): the bar and the
+	// sidebar draw exactly the workspaces the editor holds.
+	drawn := r.state.visibility[node.ws.ID].Visible()
+	surfaced := folded && drawn
 	out := &frontendv1.RosterOpenRow{
-		Row: r.row(node.ws, folded, rc, log), Tab: numbers.tab(folded && !surfaced), Surfaced: surfaced,
+		Row: r.row(node.ws, rc, log), Tab: numbers.tab(!drawn), Surfaced: surfaced,
 		RecencyGutter: r.recencyGutter(node.ws.ID),
 	}
 	// THE CHILDREN FOLD COVERS EVERY CHILD, the own-repository ones and every
@@ -846,7 +847,7 @@ func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog
 
 // hiddenRow composes one hidden row and its hidden family below it.
 func (r *resolver) hiddenRow(ws wsm.Workspace, tree forest, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenRow {
-	out := &frontendv1.RosterHiddenRow{Row: r.row(ws, false, rc, log)}
+	out := &frontendv1.RosterHiddenRow{Row: r.row(ws, rc, log)}
 	for _, child := range tree.children[ws.ID] {
 		out.Children = append(out.Children, r.hiddenRow(child, tree, rc, log))
 	}
@@ -859,7 +860,7 @@ func (r *resolver) hiddenRow(ws wsm.Workspace, tree forest, rc rowContext, log d
 func (r *resolver) closedRows(closed []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterClosedRows {
 	out := &frontendv1.RosterClosedRows{}
 	for _, ws := range sortWorkspaces(closed) {
-		out.Rows = append(out.Rows, &frontendv1.RosterClosedRow{Row: r.row(ws, false, rc, log)})
+		out.Rows = append(out.Rows, &frontendv1.RosterClosedRow{Row: r.row(ws, rc, log)})
 	}
 	return out
 }

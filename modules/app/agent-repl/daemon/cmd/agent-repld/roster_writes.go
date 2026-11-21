@@ -22,12 +22,13 @@ import (
 type rosterWrites struct {
 	results       *latestwrite.Writer[ids.WorkspaceID, *wsm.TurnResult]
 	statusChanges *latestwrite.Writer[ids.WorkspaceID, time.Time]
+	visibilities  *latestwrite.Writer[ids.WorkspaceID, wsm.Visibility]
 }
 
-// newRosterWrites starts the writers behind the roster's two sinks: RESULTS
-// and STATUS CHANGES make the writes themselves (rosterResults,
-// rosterStatusChanges) and record their own failures.
-func newRosterWrites(results sidebar.ResultSink, statusChanges sidebar.StatusChangeSink) *rosterWrites {
+// newRosterWrites starts the writers behind the roster's three sinks: RESULTS,
+// STATUS CHANGES and VISIBILITY make the writes themselves (rosterResults,
+// rosterStatusChanges, rosterVisibility) and record their own failures.
+func newRosterWrites(results sidebar.ResultSink, statusChanges sidebar.StatusChangeSink, visibility func(ids.WorkspaceID, wsm.Visibility)) *rosterWrites {
 	return &rosterWrites{
 		// THE NEWER RESULT IS THE ONE THAT STANDS: a result submitted later
 		// replaces one not yet written, as its write would have overwritten it.
@@ -42,6 +43,8 @@ func newRosterWrites(results sidebar.ResultSink, statusChanges sidebar.StatusCha
 				}
 				return held
 			}),
+		// THE NEWER VISIBILITY IS THE ONE THAT STANDS, as a result is.
+		visibilities: latestwrite.New(visibility, func(_, next wsm.Visibility) wsm.Visibility { return next }),
 	}
 }
 
@@ -52,8 +55,19 @@ func (w *rosterWrites) ResultSink() sidebar.ResultSink { return w.results.Submit
 // and returns.
 func (w *rosterWrites) StatusChangeSink() sidebar.StatusChangeSink { return w.statusChanges.Submit }
 
-// Close writes every change still held and returns once both writers have.
+// VisibilitySink is the roster's visibility sink: it submits each change and
+// returns.
+func (w *rosterWrites) VisibilitySink() sidebar.VisibilitySink {
+	return func(changes map[ids.WorkspaceID]wsm.Visibility) {
+		for ws, v := range changes {
+			w.visibilities.Submit(ws, v)
+		}
+	}
+}
+
+// Close writes every change still held and returns once every writer has.
 func (w *rosterWrites) Close() {
 	w.results.Close()
 	w.statusChanges.Close()
+	w.visibilities.Close()
 }
