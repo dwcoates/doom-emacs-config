@@ -55,7 +55,7 @@ import {
   drawRosterOpenRowRepositoryDivider,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
-import { codeOf } from "../source-text.js";
+import { codeOf, functionBody } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { GetWorkspaceMemoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_workspace_memory_pb";
@@ -1244,13 +1244,12 @@ describe("kidsBoxOf", () => {
   ])("is how %s finds or makes a row's box", (file, fn) => {
     // Arrange
     const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
-    const start = source.indexOf(`function ${fn}(`);
 
     // Act
-    const body = source.slice(start, source.indexOf("\n}\n", start));
+    const body = functionBody(source, fn);
 
     // Assert
-    expect([start >= 0, body.includes("kidsBoxOf"), body.includes("createElement")]).toEqual([true, true, false]);
+    expect([body.includes("kidsBoxOf"), body.includes("createElement")]).toEqual([true, false]);
   });
 });
 

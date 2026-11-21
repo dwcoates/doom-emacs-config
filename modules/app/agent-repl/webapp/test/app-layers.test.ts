@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { appLayers, importCycles, layerChunks, type LayerModule, type ModuleGraph } from "../app-layers";
 import appLayersSource from "../app-layers.ts?raw";
-import { codeOf } from "./source-text.js";
+import { codeOf, functionBody } from "./source-text.js";
 
 /** A module of SIZE bytes importing IMPORTS. */
 function mod(id: string, size: number, ...imports: string[]): LayerModule {
@@ -269,12 +269,8 @@ describe("importCycles", () => {
   it("walks the one component walk the layering walks", () => {
     // Arrange
     const code = codeOf(appLayersSource);
-    const bodyOf = (fn: string): string => {
-      const start = code.indexOf(`export function ${fn}(`);
-      return code.slice(start, code.indexOf("\n}\n", start));
-    };
     // Act
-    const walkers = ["appLayers", "importCycles"].filter((fn) => bodyOf(fn).includes("componentsDependenciesFirst("));
+    const walkers = ["appLayers", "importCycles"].filter((fn) => functionBody(code, fn).includes("componentsDependenciesFirst("));
     // Assert
     expect(walkers).toEqual(["appLayers", "importCycles"]);
   });

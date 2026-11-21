@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { pathedFamilies } from "../../src/sidebar/family.js";
-import { codeOf } from "../source-text.js";
+import { codeOf, functionBody } from "../source-text.js";
 import { openRow, row } from "./harness.js";
 
 describe("pathedFamilies", () => {
@@ -22,10 +22,9 @@ describe("pathedFamilies", () => {
   ])("is how %s walks a list's rows", (file, fn) => {
     // Arrange
     const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
-    const start = source.indexOf(`function ${fn}(`);
 
     // Act
-    const body = source.slice(start, source.indexOf("\n}\n", start));
+    const body = functionBody(source, fn);
 
     // Assert
     expect(body.includes("pathedFamilies(")).toBe(true);
