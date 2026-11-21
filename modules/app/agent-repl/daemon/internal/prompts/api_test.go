@@ -787,14 +787,16 @@ func TestTheDeployIntakeBriefMakesAFailureOfTheChecksTheMediators(t *testing.T) 
 	}
 }
 
-// TestTheCheckNotRunBriefSaysNothingLookedAtTheDeploy pins the owner request
+// TestTheCheckNotRunBriefSaysWhereTheMediatorStood pins the owner request
 // of 2026-11-20: a check that could not run is told as that, naming what
-// failed and its cause, never as a deploy escalated for something found.
-func TestTheCheckNotRunBriefSaysNothingLookedAtTheDeploy(t *testing.T) {
+// failed and its cause, never as a deploy escalated for something found; and
+// (2026-11-21) it says whether the mediator was told of the check before the
+// failure, through {{told_standing}}, never that nothing looked at a deploy
+// the mediator was already checking.
+func TestTheCheckNotRunBriefSaysWhereTheMediatorStood(t *testing.T) {
 	// Arrange
 	want := []string{
-		"agent-repl could not prepare the check of the deploy of `{{repo_dir}}` that began at {{deploy_started}}",
-		"nothing has looked at that deploy yet",
+		"agent-repl's own handling of the check of the deploy of `{{repo_dir}}` that began at {{deploy_started}} failed {{told_standing}} This says nothing",
 		"This says nothing about whether the deploy broke anything.",
 		"- What failed: {{what}}",
 		"- The cause: {{cause}}",

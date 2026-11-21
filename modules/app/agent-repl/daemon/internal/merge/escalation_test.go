@@ -704,3 +704,56 @@ func TestAnEscalationWithNoMediatorRecordedNotifiesNoOneAndIsAnError(t *testing.
 		t.Fatalf("records = %v, want the broken invariant at ERROR", h.logs.Records())
 	}
 }
+
+// notRunValues answers the values the one brief that the check could not
+// run was composed with.
+func notRunValues(t *testing.T, h *harness) map[string]string {
+	t.Helper()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []map[string]string
+	for i, name := range h.briefNames {
+		if name == BriefDeployCheckNotRun {
+			out = append(out, h.briefValues[i])
+		}
+	}
+	if len(out) != 1 {
+		t.Fatalf("composed %d briefs that the check could not run, want one", len(out))
+	}
+	return out[0]
+}
+
+// TestTheCheckNotRunBriefSaysWhetherTheMediatorWasTold pins the two
+// wordings of the brief's {{told_standing}} (2026-11-21): a failure before
+// the mediator was told says nothing has looked at the deploy, and one after
+// it (its turn's await lost) says the mediator decides the check itself.
+func TestTheCheckNotRunBriefSaysWhetherTheMediatorWasTold(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    string
+	}{
+		{name: "a brief that could not be submitted, before the mediator was told", want: "before you were told of it, so nothing has looked at that deploy yet.",
+			arrange: func(h *harness) {
+				onBriefThenNext(h, BriefDeployIntake+" ", setQueueErr(h, errors.New("queue closed")), setQueueErr(h, nil))
+			}},
+		{name: "an await of the turn the mediator was told in, lost", want: "after you were told of it, so agent-repl no longer follows what you do with the check: decide it yourself as below.",
+			arrange: func(h *harness) { h.awaitErr = errors.New("the session watcher is gone") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			tt.arrange(h)
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if got := notRunValues(t, h)["told_standing"]; got != tt.want {
+				t.Fatalf("told_standing = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

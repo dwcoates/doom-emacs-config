@@ -626,7 +626,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		// branch: a shadowed err dropped a failed await, and the round then
 		// settled the check as decided nothing, letting the queue through.
 		var turn ids.TurnID
-		turn, err = o.tellIntake(ctx, q, ws, m, brief, window, fields)
+		turn, err = o.tellIntake(ctx, q, ws, &m, brief, window, fields)
 		if err != nil || turn == "" {
 			return
 		}
@@ -708,7 +708,7 @@ func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Me
 func (o *orchestrator) escalateNotRun(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
 	o.deps.Log.Global().Error(opMediation, what+"; the check is escalated to the user", withField(fields, "error", err.Error()))
 	summary := fmt.Sprintf("the deploy check could not run: %s (%v); the queue waits for you", what, err)
-	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, NotRun: &checkNotRun{What: what, Cause: err.Error()}}, wsm.CheckWindow{}, false, fields)
+	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, NotRun: &checkNotRun{What: what, Cause: err.Error(), Told: m.Prompted()}}, wsm.CheckWindow{}, false, fields)
 }
 
 // releaseQuiet releases check M of queue Q, whose WINDOW holds no warning and
@@ -766,12 +766,15 @@ func (o *orchestrator) mediatorFor(ctx context.Context, q checkedQueue, m wsm.Me
 }
 
 // tellIntake tells the chain's intake WS of M in BRIEF, answering the brief's
-// turn: empty when the check was replaced or released meanwhile. The intake's
+// turn: empty when the check was replaced or released meanwhile. M is updated
+// to the check told once its brief is submitted, so a later failure of the
+// round says the mediator was told (checkNotRun.Told). The intake's
 // context is never compacted: every deploy of its chain stays in it.
-func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, m wsm.Mediation, brief string, window wsm.CheckWindow, fields dlog.Context) (ids.TurnID, error) {
+func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, told *wsm.Mediation, brief string, window wsm.CheckWindow, fields dlog.Context) (ids.TurnID, error) {
+	m := *told
 	turn := wsm.NewTurnID()
-	told := o.deps.Now()
-	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, told, turn)
+	at := o.deps.Now()
+	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, at, turn)
 	if err != nil {
 		o.roundFailed(ctx, q, m, "could not record that the deploy mediator is told of the deploy", err, fields)
 		return "", err
@@ -793,11 +796,12 @@ func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.Wo
 		o.deps.Log.Global().Info(opMediation, "the check was replaced or released before its window was recorded; this round ends", fields)
 		return "", nil
 	}
-	o.deps.Meter.ObserveMediationSpan(MediationSpanRollout, MediationTold, told.Sub(m.OwedAt))
+	o.deps.Meter.ObserveMediationSpan(MediationSpanRollout, MediationTold, at.Sub(m.OwedAt))
 	if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
 		o.roundFailed(ctx, q, m, "the deploy mediator's brief of the check could not be submitted", err, fields)
 		return "", err
 	}
+	told.PromptedAt, told.Turn = &at, turn
 	o.deps.Log.Global().Info(opMediation, "the intake was told of the deploy", withField(fields, "turn", string(turn)))
 	o.republishMediation(ctx, q.key)
 	return turn, nil
@@ -1315,9 +1319,13 @@ type escalationBrief struct {
 }
 
 // checkNotRun is why a check could not run: WHAT failed, and its CAUSE.
+// TOLD is whether the mediator was told of the check before the failure, so
+// its brief says truly whether anything has looked at the deploy (a brief
+// kept by an earlier build reads as untold).
 type checkNotRun struct {
 	What  string `json:"what"`
 	Cause string `json:"cause"`
+	Told  bool   `json:"told,omitempty"`
 }
 
 // holdEscalated escalates check M of queue Q with SUMMARY and PROBLEMS,

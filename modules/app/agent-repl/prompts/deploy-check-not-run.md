@@ -1,5 +1,5 @@
-<!-- used by: daemon internal/merge/escalation.go (escalate); placeholders: {{repo_dir}}, {{deploy_started}}, {{what}}, {{cause}} -->
-agent-repl could not prepare the check of the deploy of `{{repo_dir}}` that began at {{deploy_started}}, so nothing has looked at that deploy yet. This says nothing about whether the deploy broke anything.
+<!-- used by: daemon internal/merge/escalation.go (escalate); placeholders: {{repo_dir}}, {{deploy_started}}, {{told_standing}}, {{what}}, {{cause}} -->
+agent-repl's own handling of the check of the deploy of `{{repo_dir}}` that began at {{deploy_started}} failed {{told_standing}} This says nothing about whether the deploy broke anything.
 
 - What failed: {{what}}
 - The cause: {{cause}}

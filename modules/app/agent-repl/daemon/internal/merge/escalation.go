@@ -102,6 +102,7 @@ func (o *orchestrator) escalationBriefText(repoDir string, m wsm.Mediation, told
 		return o.deps.Briefs(BriefDeployCheckNotRun, map[string]string{
 			"repo_dir":       repoDir,
 			"deploy_started": started,
+			"told_standing":  notRunStanding(told.NotRun.Told),
 			"what":           told.NotRun.What,
 			"cause":          told.NotRun.Cause,
 		})
@@ -113,6 +114,18 @@ func (o *orchestrator) escalationBriefText(repoDir string, m wsm.Mediation, told
 		"problems":       renderEscalationProblems(told.Problems),
 		"old_problems":   renderOldProblems(window),
 	})
+}
+
+// notRunStanding is how the brief of a check that could not run says where
+// the mediator stood when it failed (BriefDeployCheckNotRun's
+// {{told_standing}}): TOLD when it was told of the check before the failure
+// (a lost await of its turn, a failed fixer watch), so it may have looked at
+// the deploy already, and otherwise before anything looked at it.
+func notRunStanding(told bool) string {
+	if told {
+		return "after you were told of it, so agent-repl no longer follows what you do with the check: decide it yourself as below."
+	}
+	return "before you were told of it, so nothing has looked at that deploy yet."
 }
 
 // renderOldProblems is every group of WINDOW that is not NEW, as the
