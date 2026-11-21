@@ -164,21 +164,41 @@ type Visibility struct {
 	Fold *sidebar.Fold
 }
 
+// LiveVisibility answers a workspace's visibility as the roster derived it
+// last (sidebar.Resolver.Visibility).
+type LiveVisibility func(ws ids.WorkspaceID) wsm.Visibility
+
+// WithLiveVisibility answers RECORDS, each carrying LIVE's visibility in place
+// of the stored one. A running daemon decides by the roster's live value: the
+// store's copy is written a moment after the push that changed it, so a
+// decision read off the store could act on the visibility the editor has
+// already left. Only a boot, which runs before any render, reads the store's.
+func WithLiveVisibility(records []wsm.Workspace, live LiveVisibility) []wsm.Workspace {
+	out := make([]wsm.Workspace, len(records))
+	for i, ws := range records {
+		ws.Visibility = live(ws.ID)
+		out[i] = ws
+	}
+	return out
+}
+
 // Visible reports whether the daemon runs one workspace, read afresh from its
-// record and the folds of its section.
-func Visible(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID) (bool, error) {
-	visibility, err := VisibilityOf(ctx, db, log, ws)
+// record and the folds of its section, by the roster's live visibility.
+func Visible(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID, live LiveVisibility) (bool, error) {
+	visibility, err := VisibilityOf(ctx, db, log, ws, live)
 	return visibility.Runs, err
 }
 
 // VisibilityOf answers Visible's verdict and the fold behind it from ONE read
 // of the record, the folds and the queues, so the fold a record names is the
-// one the verdict was decided on.
-func VisibilityOf(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID) (Visibility, error) {
+// one the verdict was decided on. The record carries the roster's LIVE
+// visibility (WithLiveVisibility).
+func VisibilityOf(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID, live LiveVisibility) (Visibility, error) {
 	record, err := db.Workspace(ctx, ws)
 	if err != nil {
 		return Visibility{}, fmt.Errorf("bringup: read the workspace record of %q: %w", ws, err)
 	}
+	record = WithLiveVisibility([]wsm.Workspace{record}, live)[0]
 	folded, err := Folds(ctx, db, log)
 	if err != nil {
 		return Visibility{}, err

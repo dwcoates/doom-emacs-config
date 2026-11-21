@@ -1482,6 +1482,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:         p.DB,
 		IdleCutoff: p.Opts.idleCutoff,
 		FoldDelay:  p.Opts.foldStandDownDelay,
+		// THE ROSTER'S LIVE VISIBILITY decides whether a withheld workspace is
+		// still withheld (bringup.WithLiveVisibility).
+		Visibility: sidebarResolver.Visibility,
 		Stand:      fleet,
 		// THE SUPERVISOR ITSELF, not the fleet: an immediate shutdown must
 		// also reach the shims that were spawned and have not yet reached the

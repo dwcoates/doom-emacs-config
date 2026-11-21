@@ -172,20 +172,26 @@ func TestOnlyVisibleReadsNothingForNothingPending(t *testing.T) {
 
 func TestVisibleReadsTheRecordAfresh(t *testing.T) {
 	cases := []struct {
-		name string
-		ws   wsm.Workspace
-		want bool
+		name   string
+		stored wsm.Visibility
+		live   wsm.Visibility
+		want   bool
 	}{
-		{name: "a workspace persisted visible runs", ws: wsm.Workspace{ID: "a", Repo: "r", Visibility: wsm.UnselectedVisible}, want: true},
-		{name: "a workspace persisted not visible does not run", ws: wsm.Workspace{ID: "a", Repo: "r"}, want: false},
+		{name: "a workspace the roster shows runs", stored: wsm.UnselectedVisible, live: wsm.UnselectedVisible, want: true},
+		{name: "a workspace the roster does not show does not run", stored: wsm.NotVisible, live: wsm.NotVisible, want: false},
+		{name: "the roster's live visibility beats a stale stored one", stored: wsm.UnselectedVisible, live: wsm.NotVisible, want: false},
+		{name: "a workspace shown before its visibility was stored runs", stored: wsm.NotVisible, live: wsm.Selected, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			reg := &fakeRegistry{repos: []wsm.Repository{{ID: "r"}}, workspaces: map[ids.WorkspaceID]wsm.Workspace{"a": tc.ws}}
+			reg := &fakeRegistry{repos: []wsm.Repository{{ID: "r"}}, workspaces: map[ids.WorkspaceID]wsm.Workspace{
+				"a": {ID: "a", Repo: "r", Visibility: tc.stored},
+			}}
 
 			// Act
-			got, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "a")
+			got, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "a",
+				func(ids.WorkspaceID) wsm.Visibility { return tc.live })
 
 			// Assert
 			if err != nil || got != tc.want {
@@ -195,12 +201,31 @@ func TestVisibleReadsTheRecordAfresh(t *testing.T) {
 	}
 }
 
+func TestWithLiveVisibilityStampsEachRecordAndLeavesTheRestAlone(t *testing.T) {
+	// Arrange
+	records := []wsm.Workspace{{ID: "a", Name: "one", Visibility: wsm.NotVisible}, {ID: "b", Name: "two", Visibility: wsm.Selected}}
+	live := map[ids.WorkspaceID]wsm.Visibility{"a": wsm.UnselectedVisible, "b": wsm.NotVisible}
+
+	// Act
+	got := WithLiveVisibility(records, func(ws ids.WorkspaceID) wsm.Visibility { return live[ws] })
+
+	// Assert
+	want := []wsm.Workspace{{ID: "a", Name: "one", Visibility: wsm.UnselectedVisible}, {ID: "b", Name: "two", Visibility: wsm.NotVisible}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("WithLiveVisibility = %+v, want %+v", got, want)
+	}
+	if records[0].Visibility != wsm.NotVisible {
+		t.Fatalf("the records handed in were changed: %+v", records)
+	}
+}
+
 func TestVisibleRefusesAnUnreadableRecord(t *testing.T) {
 	// Arrange
 	reg := &fakeRegistry{workspaces: map[ids.WorkspaceID]wsm.Workspace{}}
 
 	// Act
-	_, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "missing")
+	_, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "missing",
+		func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible })
 
 	// Assert
 	if !errors.Is(err, wsm.ErrNotFound) {
@@ -288,10 +313,11 @@ func TestVisibilityOfNamesTheFoldItDecidedOn(t *testing.T) {
 	cases := []struct {
 		name     string
 		ws       wsm.Workspace
+		live     wsm.Visibility
 		wantRuns bool
 		wantFold *sidebar.Fold
 	}{
-		{name: "a drawn workspace runs under no fold", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a"}, wantRuns: true},
+		{name: "a drawn workspace runs under no fold", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a"}, live: wsm.UnselectedVisible, wantRuns: true},
 		{name: "a workspace in a collapsed repository names it", ws: wsm.Workspace{ID: "a", Repo: "folded", Place: 1, Dir: "/worktrees/a"},
 			wantFold: &sidebar.Fold{By: sidebar.FoldedByRepository, Repository: "gamma"}},
 		{name: "a workspace in a collapsed subsection names it", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded},
@@ -309,7 +335,8 @@ func TestVisibilityOfNamesTheFoldItDecidedOn(t *testing.T) {
 			}
 
 			// Act
-			got, err := VisibilityOf(context.Background(), reg, dlog.NewTestLogger(), "a")
+			got, err := VisibilityOf(context.Background(), reg, dlog.NewTestLogger(), "a",
+				func(ids.WorkspaceID) wsm.Visibility { return tc.live })
 
 			// Assert
 			if err != nil || got.Runs != tc.wantRuns || !reflect.DeepEqual(got.Fold, tc.wantFold) {
@@ -332,7 +359,8 @@ func TestVisibilityOfRefusesWhatItCannotRead(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got, err := VisibilityOf(context.Background(), tc.reg, dlog.NewTestLogger(), "a")
+			got, err := VisibilityOf(context.Background(), tc.reg, dlog.NewTestLogger(), "a",
+				func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible })
 
 			// Assert
 			if !errors.Is(err, tc.want) || got.Runs || got.Fold != nil {

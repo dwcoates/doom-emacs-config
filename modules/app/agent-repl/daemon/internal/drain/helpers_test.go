@@ -13,6 +13,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -608,8 +609,11 @@ type harness struct {
 	remote *fakeRemoteGate
 	spawns *fakeSpawns
 	merges *fakeMerges
-	log    *dlog.TestSurfaces
-	exits  chan struct{}
+	// visibility overrides liveVisibility's derivation, by workspace.
+	visibility map[ids.WorkspaceID]wsm.Visibility
+	t          *testing.T
+	log        *dlog.TestSurfaces
+	exits      chan struct{}
 }
 
 // newHarness builds a controller over a real (in-memory) WSM store —
@@ -635,6 +639,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		remote:    &fakeRemoteGate{},
 		spawns:    newFakeSpawns(),
 		merges:    &fakeMerges{},
+		t:         t,
 		log:       log,
 		exits:     make(chan struct{}, 4),
 	}
@@ -647,6 +652,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Spawns:        h.spawns,
 		Merges:        h.merges,
 		Freeness:      h.freeness,
+		Visibility:    h.liveVisibility,
 		Reviving:      h.reviving.Reviving,
 		Delivering: func(ws ids.WorkspaceID) bool {
 			if h.delivering == nil {
@@ -685,6 +691,33 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	}
 	h.c = c
 	return h
+}
+
+// liveVisibility answers WS's visibility as the roster would derive it for an
+// idle row: the selection is selected, an open row no fold covers is visible,
+// and every other is not (wsm.Visibilities over the record and its section's
+// folds). A test that needs another answer sets h.visibility.
+func (h *harness) liveVisibility(ws ids.WorkspaceID) wsm.Visibility {
+	h.t.Helper()
+	if v, set := h.visibility[ws]; set {
+		return v
+	}
+	ctx := context.Background()
+	record, err := h.db.Workspace(ctx, ws)
+	if err != nil {
+		h.t.Fatalf("Workspace: %v", err)
+	}
+	folded, err := bringup.Folds(ctx, h.db, dlog.NewTestLogger())
+	if err != nil {
+		h.t.Fatalf("Folds: %v", err)
+	}
+	_, covered := folded[ws]
+	return wsm.Visibilities([]wsm.VisibilityInput{{
+		ID:       ws,
+		Open:     !record.Closed && !record.Hidden && !record.IsThread() && !record.MergeHidden(),
+		Covered:  covered,
+		Selected: record.Current,
+	}})[ws]
 }
 
 // workspace registers one workspace with a live session engaged at engagedAt,

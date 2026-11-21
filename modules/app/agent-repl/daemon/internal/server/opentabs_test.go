@@ -185,6 +185,8 @@ func TestOpenTabsAnswersAWorkspaceThatIsNotVisibleHidden(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			tc.arrange(h)
+			// The roster shows none of them (wsm.Visibility).
+			h.Sidebar.setVisibility(testWorkspaceID, wsm.NotVisible)
 			ctx, cancel := context.WithTimeout(context.Background(), openBound)
 			defer cancel()
 
@@ -196,6 +198,28 @@ func TestOpenTabsAnswersAWorkspaceThatIsNotVisibleHidden(t *testing.T) {
 				t.Fatalf("opened = %v, want hidden", opened)
 			}
 		})
+	}
+}
+
+// TestOpenTabsOpensAWorkspaceTheRosterShowsBeforeItsVisibilityIsStored pins
+// that an open decides by the roster's live visibility: the editor opens a
+// workspace the moment a push shows it, before the store's copy is written.
+func TestOpenTabsOpensAWorkspaceTheRosterShowsBeforeItsVisibilityIsStored(t *testing.T) {
+	// Arrange: the store still holds the workspace not visible.
+	h := newHarness(t)
+	record := h.DB.workspaces[testWorkspaceID]
+	record.Visibility = wsm.NotVisible
+	h.DB.workspaces[testWorkspaceID] = record
+	h.Sidebar.setVisibility(testWorkspaceID, wsm.UnselectedVisible)
+	ctx, cancel := context.WithTimeout(context.Background(), openBound)
+	defer cancel()
+
+	// Act
+	opened := openedOf(t, openTabs(t, h, ctx, noPage(ref())))
+
+	// Assert
+	if opened.GetReady() == nil {
+		t.Fatalf("opened = %v, want ready", opened)
 	}
 }
 
