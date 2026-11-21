@@ -584,7 +584,7 @@ ending row, live and on replay.
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
 | `AGENT_REPL_SLACK_TEAMS` | user | the Slack teams whose permalinks `OpenExternal` hands to the Slack app as `slack://` deep links instead of a browser, as `<subdomain>=<team-id>` pairs (`internal/externalbrowser/slack.go`; user guide Setup). Applies before `AGENT_REPL_BROWSER_CMD`. A malformed value is a BOOT REFUSAL. The integration harness states it empty (`HostNeutralSlackEnv`) |
-| `AGENT_REPL_NOTIFIER_CMD` | operator/test | the Linux desktop banner program's binary (`internal/desktopnotify`); the platform's argv is unchanged, only the program it is handed to. Unset: `notify-send` on PATH, and a missing one is ERROR at boot and on every banner. macOS has no banner program: the Zettel app posts every banner, so this is ignored there. The integration harness and the Emacs e2e layer point it at a recorder, so no test raises a real banner |
+| `AGENT_REPL_NOTIFIER_CMD` | operator/test | the Linux desktop banner program's binary (`internal/desktopnotify`); the platform's argv is unchanged, only the program it is handed to. Unset: `notify-send` on PATH, and a missing one is ERROR at boot and on every banner. macOS has no banner program: the launcher (Zettel.app) posts every banner, so this is ignored there. The integration harness and the Emacs e2e layer point it at a recorder, so no test raises a real banner |
 | `AGENT_REPL_CHIME_CMD` | operator/test | the banner chime player's binary (`internal/desktopnotify`); the platform's argv is unchanged. Unset: `afplay` playing `Glass.aiff` (macOS) or `canberra-gtk-play --id=complete` (Linux) on PATH, and a missing one is ERROR at boot and on every chime. A SOUND IS ONLY EVER A BANNER'S: the chime rings if and only if a desktop banner is made, from the one edge the banner backend reports it made on (`desktopnotify.Backend.Post`'s `made`: a handed banner once its program exits cleanly, a read-back banner once its program is up), so every banner is posted without a sound of its own and a focused Emacs, a banner given up or a failed banner program rings nothing. A turn the merge queue caused (conflict repair, test repair, the before and after actions, a detached merge's handback) raises no banner (`promptqueue.earnsBanner`); the merge queue raises exactly two of its own, as a merge is put in line and as it is resolved (`merge.Banners`). The integration harness and the Emacs e2e layer point it at a recorder, so no test plays a real sound |
 | `AGENT_REPL_SAY_CMD` | operator/test | the banner speech program's binary (`internal/desktopnotify`, `Speech`); its argv (`-- TEXT`) is unchanged. Unset: `/usr/bin/say` on macOS; no other platform reads banners aloud, which is recorded once at INFO. A MADE BANNER IS READ ALOUD IF AND ONLY IF the daemon's persistent wifi mode is on (its controller's published standing) AND the current audio output is a private listening device (`desktopnotify.PrivateListeningDevice`, owner ruling 2026-11-18: only a kind macOS positively identifies as worn, the built-in headphone jack or a Bluetooth headphones or headset class such as AirPods; every speaker and every unidentifiable output is silent). It is read from the same made edge the chime rings from, so every kind of banner is read alike, after the banner is out and bounded by the text's measured speaking time; every decision is recorded at INFO with the condition that decided it (`decided_by`). The integration harness points it at a recorder, so no test speaks |
 | `AGENT_REPL_AUDIO_OUTPUT_CMD` | operator/test | the program the current audio output is read with; its argv (`audio-output`) is unchanged. Unset: this daemon binary's own `audio-output` verb, which prints CoreAudio's default output device, transport, UID and data source as one `audiooutput.Device` line, run as a child bounded at 240ms so a hung CoreAudio call never holds a daemon thread. A failed read is ERROR and the banner is not read aloud. The integration harness points it at a stand-in printing the built-in speakers |
@@ -595,7 +595,8 @@ ending row, live and on replay.
 | `AGENT_REPL_LAUNCH_AGENTS_DIR` | operator/test | where the services' plists are installed (default `~/Library/LaunchAgents`); a store restart bootstraps the sidecar back from it |
 | `AGENT_REPL_SYSTEMCTL` | operator/test | the systemctl a deploy's service restart drives on Linux (default: `systemctl` on PATH); the harness points it at a recorder so no test reaches systemd |
 | `AGENT_REPL_SYSTEMD_USER_DIR` | operator/test | where the services' units are installed on Linux (default `$XDG_CONFIG_HOME/systemd/user`, else `~/.config/systemd/user`); a store restart starts the sidecar back from it |
-| `AGENT_REPL_APPLICATIONS_DIR` / `AGENT_REPL_LSREGISTER` | operator/test | where a macOS deploy installs the notifier app (default `~/Applications`) and the `lsregister` its restart registers the bundle with (default LaunchServices' own); `bin/build-notifier.sh` honors both. The integration harness points them at a directory of the test's and a recorder, so no test reaches `~/Applications` or LaunchServices |
+| `AGENT_REPL_LAUNCHER_SOCKET` | operator/test | the unix socket the launcher accepts banner posts on (flag `-launcher-socket`; `internal/desktopnotify`, `Launcher`). Default `~/.cache/agent-repl/sock/launcher.sock`, the socket the launcher's holder owns. The integration harness points it at its `FakeLauncher`'s socket, so no test reaches the real launcher |
+| `AGENT_REPL_APPLICATIONS_DIR` / `AGENT_REPL_LSREGISTER` | operator/test | where a macOS deploy installs the launcher app (default `~/Applications`) and the `lsregister` its restart registers the bundle with (default LaunchServices' own); `bin/build-launcher.sh` honors both. The integration harness points them at a directory of the test's and a recorder, so no test reaches `~/Applications` or LaunchServices |
 | `AGENT_REPL_TEST_ALL_SCRIPT` | test only | overrides `bin/test-all.sh` for the merge test gate (invoked as `bash <script> --suites <a,b>` in the merge TARGET worktree; exit 0 = pass; per-suite state parsed from the script's own `<suite>: passed in <N>s` / `<suite> failed after <N>s with exit code <rc>` lines; output archived under `<state>/merge-logs/`) |
 | `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory (the `--prompts-dir` flag beats it) |
 | `SHIM_BUILD_SHA` | operator/test | the shim build stated for a checkout with NO bundle on disk. In production every spawn is stamped with the CONTENT HASH (sha256) of the installed bundle it runs, held from the hash to the shim's answer so an install cannot swap the bytes between them (`buildid.ShimBundle`); this variable answers only while no bundle exists at `--shim-main`. With neither, the SPAWN refuses (`spawn_failed`), naming both — an unstamped shim cannot be judged for staleness. It has no flag |
@@ -625,17 +626,25 @@ is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
 - **Agent notifications** (a permission ask, a question, an agent push) raise
   the workspace's banner from `workspace.verbs.Notify`, beside the attention
   marker it already set.
-- **On macOS the Zettel app posts every banner** (`notifier/`, `notifier/AGENTS.md`;
-  `desktopnotify.App`). Zettel.app is a resident background app launchd runs
-  (`com.agentrepl.notifier`); it holds the ONE `WatchDesktopBanners` stream (a
-  later one supersedes it), posts each banner the daemon hands it through
-  macOS's notification center under its own name and icon, and answers each
-  with `ReportDesktopBannerPosted`. The chime rings and the banner is held only
-  once that answer says the platform took it; no answer within
-  `desktopnotify.AppAnswerBound`, a refusal (`not_allowed` names its remedy), or
-  no app attached at all is an ERROR on that banner, which is never queued. The
-  app reports its build on the stream, and a deploy restarts it when that build
-  is not the one it installed (`deploy.Notifier`, below).
+- **On macOS the launcher posts every banner** (`launcher/`, `launcher/AGENTS.md`;
+  `desktopnotify.Launcher`, `internal/desktopnotify/launcher.go`). Zettel.app, run
+  resident by launchd as `app.zettel.launcher`, is the SERVER: it accepts on
+  `~/.cache/agent-repl/sock/launcher.sock` (flag `-launcher-socket`, env
+  `AGENT_REPL_LAUNCHER_SOCKET`), a socket its holder owns for good, and the
+  daemon DIALS it per banner, so a daemon standing down (a drain) or either
+  daemon of a handover posts exactly like a serving one, and a dial made while the
+  launcher restarts queues in the held socket's backlog. A banner is never lost
+  to a stop or a handover. One exchange per connection on `launcher.v1`
+  (protobuf length-delimited): the daemon writes a `PostBannerRequest` (the
+  `DesktopBanner` and its own pid) and the launcher answers a
+  `PostBannerResponse` once macOS's notification center took or refused the
+  banner. The chime rings and the banner is held only once that answer says the
+  platform took it; no answer within `desktopnotify.LauncherPostBound` (5s, not
+  yet measured; each post records `duration_ms`), a refusal (`not_allowed` names
+  its remedy) or a dial that fails is an ERROR on that banner
+  (`daemon.desktopnotify.post`), which is never queued. The launcher writes a
+  build report, and a deploy restarts it when that build is not the one it
+  installed (`deploy.Launcher`, below).
 - **A click reaches the workspace one of two ways, by platform.**
   - macOS HANDS the banner to the platform (`desktopnotify.Handed`): Zettel
     stores the banner's click token (`DesktopBannerClickToken`, naming the
@@ -1187,22 +1196,23 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
 1. build into `<state>/deploy/staging/<nonce>` (`ScriptBuilder`: `make -C
    proto all`, then `bin/build-frontend.sh --out <staging> <target>` for
    shim, webapp, daemon, store, sidecar, zettel, lock, and on macOS
-   `notifier`, staged as `cache-bin/Zettel.app`). A failure is `build_failed`
+   `launcher`, staged as `cache-bin/Zettel.app`). A failure is `build_failed`
    with the step, the tail of its output and the archived log; NOTHING is
    installed or restarted.
 2. hash every staged artifact (`buildid`: binaries and the shim bundle by
    sha256, the webapp by its entry bundle's hash, elisp by the module-set hash
    held to `proto/vocab/elisp-build.json`);
 3. install atomically (copy beside, rename over; the shim bundle only while no
-   spawn holds it; the notifier app's bundle swapped whole into
-   `~/Applications`, `Live.NotifierApp`);
+   spawn holds it; the launcher app's bundle swapped whole into
+   `~/Applications`, `Live.LauncherApp`);
 4. decide, component by component, against each RUNNING process's reported
    build: store/sidecar by their build report (`agentrepl/logging/buildreport`)
-   and restart them in the recorded safe order (`Restarter`); the notifier app
-   by the build its banner stream reported (`deploy.Notifier`), restarted with
-   `RestartNotifier` (`lsregister -f` on the installed bundle, then a
-   kickstart of `com.agentrepl.notifier`) when that build is not the installed
-   one or no app is attached; Emacs streams by
+   and restart them in the recorded safe order (`Restarter`); the launcher app
+   by its build report (`launcher.build.json`), judged by the same
+   `serviceStaleness`, restarted with `Restarter.RestartLauncher` (ensures the
+   launcher's socket holder, `Restarter.LauncherHolder`; `lsregister -f` on the
+   installed bundle; then a start or kickstart of `app.zettel.launcher`) when
+   that build is not the installed one or the launcher is not running; Emacs streams by
    `WatchDaemon.elisp_build` and push `reload_elisp` to the stale ones (a
    deploy that moves the daemon leaves each Emacs to its successor, which
    decides every Emacs stream as it connects, `Deployer.ElispVerdict`); a stale

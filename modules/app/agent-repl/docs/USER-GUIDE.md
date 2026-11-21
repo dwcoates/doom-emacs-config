@@ -8,8 +8,8 @@ user guide"). Controls that predate this guide are not all listed yet.
 
 Run `bash .claude/install.sh` from this repository, or ask an agent to run
 `/agent-repl-install`. It installs everything agent-repl needs that is missing:
-Emacs with xwidgets, the Go and Node toolchains, Zettel (the app that posts
-agent-repl's desktop notifications, installed in `~/Applications`),
+Emacs with xwidgets, the Go and Node toolchains, Zettel (the launcher: the app that posts
+agent-repl's desktop notifications, installed in `~/Applications`; opening it opens Emacs, and Emacs's startup brings up the backend),
 `hunspell` and the input window's spelling dictionary, the Claude Code skills, the `agent-repld` command on your `PATH`, the git hook, and the store, sidecar and metrics-store (VictoriaMetrics) services. It then
 lists what only you can provide. `bash .claude/install.sh check` reports the
 same thing without changing anything, and `doom doctor` reports it too.

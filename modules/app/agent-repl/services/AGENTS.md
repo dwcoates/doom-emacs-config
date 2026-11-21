@@ -4,22 +4,24 @@ The services the platform's service manager keeps running: the shim-ecosystem
 services `com.agentrepl.shim-store` and `com.agentrepl.shim-claude-sidecar`,
 the knowledge-graph service `com.agentrepl.zettel`, the test service
 `com.agentrepl.tests`, the metrics store `com.agentrepl.victoriametrics`, and,
-on macOS alone, the desktop notifier app `com.agentrepl.notifier` (Zettel.app;
-`notifier/AGENTS.md`). launchd runs them on macOS and the user's own systemd
+on macOS alone, the launcher `app.zettel.launcher` (Zettel.app; `launcher/AGENTS.md`)
+with its socket holder `app.zettel.sockethold.launcher`. launchd runs them on macOS and the user's own systemd
 manager (`systemctl --user`) on Linux; on both they start at login and are
-restarted when they die. The notifier is the one service with no Linux unit:
+restarted when they die. The launcher is the one service with no Linux unit:
 it is a macOS app, and Linux's banners are `notify-send`'s.
 
 ## One entry, rendered for either service manager
 
 Each service is ONE `service` entry in its system's `requirements.json`
 (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`, `zettel/`,
-`testservice/`, `metrics/`, `notifier/`): its label, its program (built here,
+`testservice/`, `metrics/`, `launcher/`): its label, its program (built here,
 or an installed command), its arguments, environment and log files. A built
 program runs from the cache's `bin/` unless its build installs it elsewhere,
-which the entry's `program` names: the notifier runs from
+which the entry's `program` names: the launcher runs from
 `~/Applications/Zettel.app`, the bundle its build registers with
-LaunchServices, so macOS attributes its banners to Zettel.app.
+LaunchServices, so macOS attributes its banners to Zettel.app. The launcher also has a
+`socket-holder-launcher` entry: a socket holder that owns `launcher.sock`
+for good, the same pattern as the daemon's and the store's holders.
 `bin/requirements.sh` (`rendered_service`)
 renders that entry into a launchd plist under `~/Library/LaunchAgents/` or a
 systemd unit under `~/.config/systemd/user/`, and `install` loads it. No plist
@@ -110,12 +112,14 @@ passed; every other flag keeps its default.
   test harness binds and hands over (`daemon/integration/harness/testservice.go`),
   so a client's connect queues until the service accepts. The daemon keeps it
   loaded and current exactly as it keeps zettel.
-- `com.agentrepl.notifier` — `--resident` (started by launchd, so the app
-  stays in the background rather than bringing Emacs forward as an open by
-  hand does) and `--log` (`~/.cache/agent-repl/log/notifier.log`); the
-  contract is `notifier/Sources/ZettelNotifier/Options.swift`. The state root
+- `app.zettel.launcher` — `--resident` (started by launchd, so the app
+  stays in the background rather than opening Emacs as an open by hand does),
+  `--log` (`~/.cache/agent-repl/log/launcher.log`) and `--holder` (the
+  holder's control socket, `~/.cache/agent-repl/sock/launcher-holder.sock`,
+  from which it takes the listening socket `launcher.sock`); the contract is
+  `launcher/Sources/ZettelLauncher/Options.swift`. The state root
   (`daemon.addr`) keeps the daemon's own default. A macOS deploy installs and
-  restarts it (`daemon/internal/deploy`, `RestartNotifier`).
+  restarts it (`daemon/internal/deploy`, `Restarter.RestartLauncher`).
 
 `AGENT_REPL_STATE_DIR` is the sidecar's `--state-dir` default, and the same
 variable the daemon resolves and exports into every shim it spawns; the two

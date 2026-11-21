@@ -18,8 +18,8 @@ it is the one word for its concept in code, protos and docs alike: see
 `docs/knowledge-graph/PLAN.md`.
 
 On macOS the desktop notifications are posted by Zettel.app, a Swift app of
-this module (`notifier/`), not by the daemon or any Homebrew tool: see
-`notifier/AGENTS.md`. "Zettel" there is the app's user-facing name, the
+this module (`launcher/`), the launcher, not by the daemon or any Homebrew
+tool: see `launcher/AGENTS.md`. "Zettel" there is the app's user-facing name, the
 coming name of agent-repl; the knowledge-graph service in `zettel/` is a
 different system.
 
