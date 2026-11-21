@@ -112,7 +112,10 @@ export function createPresence(doc: Document, embedded: boolean, quiet?: Quiet):
 }
 
 /** The presence of each page, keyed by its document: one per page. */
-const presenceOf = perDocument((doc) => createPresence(doc, pageIsEmbedded(window), pageQuiet(doc)));
+const presenceOf = perDocument(
+  (doc) => createPresence(doc, pageIsEmbedded(window), pageQuiet(doc)),
+  (presence) => presence.dispose(),
+);
 
 /** Whether this page runs inside another page's iframe (the host's). */
 export function pageIsEmbedded(win: Window): boolean {

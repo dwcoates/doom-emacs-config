@@ -232,6 +232,37 @@ describe("the webapp's boot against a real page", () => {
     expect(said).not.toContain("the webapp logger is not installed");
   }, BOOT_IMPORT_TIMEOUT_MS);
 
+  it("leaves no listener on the window once the page is torn down", async () => {
+    // Arrange: the suites share one window, so a booted page's listener left
+    // on it fires into every later file (a window blur logged through a
+    // logger long gone, 2026-11-21).
+    const live = new Set<string>();
+    const key = (type: string, listener: unknown): string => `${type}:${String(listenerIds.get(listener as object))}`;
+    const listenerIds = new WeakMap<object, number>();
+    let next = 0;
+    const realAdd = window.addEventListener.bind(window);
+    const realRemove = window.removeEventListener.bind(window);
+    const add = vi.spyOn(window, "addEventListener").mockImplementation((type, listener, options) => {
+      if (listener !== null && !listenerIds.has(listener)) listenerIds.set(listener, next++);
+      live.add(key(type, listener));
+      realAdd(type, listener, options);
+    });
+    const remove = vi.spyOn(window, "removeEventListener").mockImplementation((type, listener, options) => {
+      live.delete(key(type, listener));
+      realRemove(type, listener, options);
+    });
+    await import("../src/main.js");
+    await awaitBootFailureChip();
+
+    // Act
+    (await import("../src/page-teardown.js")).tearDownPage();
+    add.mockRestore();
+    remove.mockRestore();
+
+    // Assert
+    expect([...live]).toEqual([]);
+  }, BOOT_IMPORT_TIMEOUT_MS);
+
   it("re-raises the failure it drew, rather than ending quietly", async () => {
     // The other half of "drew its failure": the chip is what the READER sees,
     // and this is what the BROWSER sees. A boot that drew the failure and then
