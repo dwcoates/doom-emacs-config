@@ -75,6 +75,15 @@ export function spawningCallOf(parentToolUseId: unknown): string | undefined {
 }
 
 /**
+ * {@link spawningCallOf} read off a whole vendor message, whichever arm it is:
+ * the one way the engine asks whether a message is a subagent's, so no engine
+ * site spells the main stream differently from the fold.
+ */
+export function spawningCallOfMessage(message: object): string | undefined {
+  return spawningCallOf((message as { parent_tool_use_id?: unknown }).parent_tool_use_id);
+}
+
+/**
  * The book a vendor message's frames belong to.
  *
  * `parent_tool_use_id` names the CALL that spawned the agent, never the agent,

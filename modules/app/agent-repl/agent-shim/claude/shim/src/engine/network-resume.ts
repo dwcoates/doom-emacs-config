@@ -73,6 +73,7 @@ import { conversationv1, shimv1 } from "../proto.js";
 import type { KeepaliveScheduler } from "./keepalive.js";
 import { networkResumePrompt } from "./network-resume-prompt.js";
 import type { SdkMessage } from "../sdk/types.js";
+import { spawningCallOfMessage } from "../convert/fold-context.js";
 
 const LOGGER = bindLog({ component: "shim-engine-network-resume", operation: "shim.engine.network_resume" });
 
@@ -530,8 +531,8 @@ export class NetworkResume {
   }
 
   private noteAssistant(message: Extract<SdkMessage, { type: "assistant" }>): void {
-    const parent = message.parent_tool_use_id;
-    if (parent === null) return;
+    const parent = spawningCallOfMessage(message);
+    if (parent === undefined) return;
     const run = this.runs.get(parent);
     if (run === undefined) return;
     if (typeof message.error === "string") {

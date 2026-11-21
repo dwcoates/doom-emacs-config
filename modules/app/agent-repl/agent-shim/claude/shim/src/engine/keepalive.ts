@@ -118,6 +118,7 @@ import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import { coverageContext, leftContextCached, type CacheCoverage, type CacheRequest, type TranscriptFacts } from "./cold.js";
 import type { SendVerdict } from "./sends.js";
+import { spawningCallOfMessage } from "../convert/fold-context.js";
 
 const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
 
@@ -316,7 +317,7 @@ function spanContext(turn: SpanTurn): Record<string, unknown> {
  */
 export function conversationRecordUuid(message: SdkMessage): string | undefined {
   if (message.type !== "assistant" && message.type !== "user") return undefined;
-  if (!isMainThread(message)) return undefined;
+  if (spawningCallOfMessage(message) !== undefined) return undefined;
   const uuid = (message as { uuid?: unknown }).uuid;
   if (typeof uuid !== "string" || uuid === "") return undefined;
   return uuid;
@@ -549,11 +550,6 @@ interface PendingKeepalive {
 function isStoppedTaskNotification(message: SdkMessage): boolean {
   if (message.type !== "system" || message.subtype !== "task_notification") return false;
   return (message as { status?: unknown }).status === "stopped";
-}
-
-/** True when MESSAGE belongs to the main conversation, not to a subagent's own transcript. */
-function isMainThread(message: SdkMessage): boolean {
-  return (message as { parent_tool_use_id?: unknown }).parent_tool_use_id == null;
 }
 
 /** The attribution of every message the keep-alive did not produce. */
@@ -811,8 +807,10 @@ function workOf(message: SdkMessage): WorkRef | undefined {
     case "assistant":
     case "stream_event":
     case "user":
-    case "tool_progress":
-      return message.parent_tool_use_id === null ? undefined : { kind: "tool_use", id: message.parent_tool_use_id };
+    case "tool_progress": {
+      const parent = spawningCallOfMessage(message);
+      return parent === undefined ? undefined : { kind: "tool_use", id: parent };
+    }
     case "system":
       switch (message.subtype) {
         case "task_started":

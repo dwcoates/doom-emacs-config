@@ -67,6 +67,7 @@ import { isUserStop } from "../convert/terminals.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { updateEntry } from "../store/update-entry.js";
 import type { PermissionModeLike, PermissionResultLike, PermissionUpdateLike, SdkMessage } from "../sdk/types.js";
+import { spawningCallOfMessage } from "../convert/fold-context.js";
 
 const LOGGER = bindLog({ component: "shim-engine-permission", operation: "shim.engine.permission" });
 
@@ -1365,7 +1366,7 @@ function withdrawalVerdict(ask: Pending, message: SdkMessage, mainAgentId: strin
     case "assistant": {
       // THE ASKING AGENT SPEAKS AGAIN: the main agent on the main thread, a
       // subagent on the thread its spawning call names.
-      const thread = message.parent_tool_use_id ?? mainAgentId;
+      const thread = spawningCallOfMessage(message) ?? mainAgentId;
       return thread === ask.agentId.value ? { how: "remote", evidence: "the asking agent spoke again" } : undefined;
     }
     case "tool_progress":
