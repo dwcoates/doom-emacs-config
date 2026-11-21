@@ -232,8 +232,9 @@ type diagnostic struct {
 
 // verdict is why the package at importPath did not pass vet, or "" when vet
 // analyzed it (and its external test package) and found nothing. A package
-// with no block of its own was not analyzed, since a dependency failed: its
-// verdict is vet's whole output.
+// with no block of its own or of its external test package was not analyzed,
+// since a dependency failed: its verdict is vet's whole output. A directory
+// holding only external test files (package x_test) has only the second.
 func verdict(sections []Section, importPath string, all []byte) (string, error) {
 	var why []string
 	seen := false
@@ -241,9 +242,7 @@ func verdict(sections []Section, importPath string, all []byte) (string, error) 
 		if s.Package != importPath && s.Package != importPath+"_test" {
 			continue
 		}
-		if s.Package == importPath {
-			seen = true
-		}
+		seen = true
 		findings, ok, err := findings(s.Body)
 		if err != nil {
 			return "", err

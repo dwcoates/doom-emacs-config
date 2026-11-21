@@ -167,6 +167,25 @@ func TestVetFailsAPackageItNeverAnalyzedWithItsWholeOutput(t *testing.T) {
 	}
 }
 
+func TestVetPassesAPackageOfOnlyExternalTestFiles(t *testing.T) {
+	// Arrange: the module root holds only package x_test files, so vet
+	// writes a block for x_test and none for x.
+	dir := moduleDir(t)
+	results := t.TempDir()
+	goVet, _ := fakeVet("# x_test\n# [x_test]\n{}\n", true, nil)
+
+	// Act
+	res, err := Vet(Options{Module: dir, ResultDir: results, Packages: []string{"."}}, goVet)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(res.Passed, []string{"."}) {
+		t.Fatalf("passed = %v, failed = %v; want . passed", res.Passed, res.Failed)
+	}
+}
+
 func TestVetRefuses(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -271,7 +290,7 @@ func TestParseArgsRefuses(t *testing.T) {
 
 // TestVetReadsTheRealGoVetsOutput pins the output format the parse assumes
 // against the installed go command, run through Exec: a clean package, one with a finding in
-// its test file, and one that does not type-check.
+// its test file, one that does not type-check, and one of only external test files.
 func TestVetReadsTheRealGoVetsOutput(t *testing.T) {
 	// Arrange
 	dir := moduleDir(t)
@@ -280,6 +299,7 @@ func TestVetReadsTheRealGoVetsOutput(t *testing.T) {
 		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) { t.Logf(\"%d\", \"x\") }\n",
 		"b/b.go":      "package b\n\nfunc B() {}\n",
 		"c/c.go":      "package c\n\nfunc C() { undefined() }\n",
+		"d/d_test.go": "package d_test\n\nimport \"testing\"\n\nfunc TestD(t *testing.T) {}\n",
 	}
 	for name, body := range files {
 		path := filepath.Join(dir, name)
@@ -292,14 +312,14 @@ func TestVetReadsTheRealGoVetsOutput(t *testing.T) {
 	}
 
 	// Act
-	res, err := Vet(Options{Module: dir, ResultDir: t.TempDir(), Packages: []string{"a", "b", "c"}}, Exec)
+	res, err := Vet(Options{Module: dir, ResultDir: t.TempDir(), Packages: []string{"a", "b", "c", "d"}}, Exec)
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(res.Passed, []string{"b"}) {
-		t.Fatalf("passed = %v, want [b]; failed = %v", res.Passed, res.Failed)
+	if !reflect.DeepEqual(res.Passed, []string{"b", "d"}) {
+		t.Fatalf("passed = %v, want [b d]; failed = %v", res.Passed, res.Failed)
 	}
 	if !strings.Contains(res.Failed["a"], "a_test.go:5") || !strings.Contains(res.Failed["c"], "undefined") {
 		t.Fatalf("failed = %v, want a's printf finding and c's type error", res.Failed)
