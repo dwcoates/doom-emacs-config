@@ -29,13 +29,6 @@ func restoredHarness(t *testing.T, in time.Duration) *harness {
 	return h
 }
 
-// applyQueued applies every edge queued on H's keeper, as Run does.
-func applyQueued(h *harness) {
-	for _, e := range h.keeper.take() {
-		h.keeper.apply(context.Background(), e)
-	}
-}
-
 func TestNetworkRestoredPullsBeatsForward(t *testing.T) {
 	tests := []struct {
 		name string
@@ -58,7 +51,7 @@ func TestNetworkRestoredPullsBeatsForward(t *testing.T) {
 			scheduled := h.keeper.beats[theWorkspace]
 			// Act
 			h.keeper.NetworkRestored(tc.down)
-			applyQueued(h)
+			h.applyQueued()
 			// Assert
 			want := scheduled
 			if tc.wantPulled {
@@ -75,7 +68,7 @@ func TestAPulledBeatGoesOutAsAnOrdinaryBeat(t *testing.T) {
 	// Arrange
 	h := restoredHarness(t, 15*time.Minute)
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	// Act
 	h.keeper.beatsDue(context.Background())
 	// Assert
@@ -95,7 +88,7 @@ func TestASentPulledBeatIsNoLongerEarly(t *testing.T) {
 	// Arrange
 	h := restoredHarness(t, 15*time.Minute)
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	h.keeper.beatsDue(context.Background())
 	// Act: the next edge re-times the beat.
 	h.keeper.schedule(context.Background(), theWorkspace, "test")
@@ -112,7 +105,7 @@ func TestAPulledBeatSurvivesARescheduleBeforeItGoesOut(t *testing.T) {
 	// Arrange
 	h := restoredHarness(t, 15*time.Minute)
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	// Act: a reconcile reads the row afresh before the beat goes out.
 	h.keeper.schedule(context.Background(), theWorkspace, "a reconcile")
 	// Assert
@@ -129,7 +122,7 @@ func TestAParkedSessionsPulledBeatGoesOutOnceItIsRestored(t *testing.T) {
 	h.serving = false
 	h.keeper.schedule(context.Background(), theWorkspace, "test")
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	h.keeper.beatsDue(context.Background())
 	if len(h.restoring) != 1 {
 		t.Fatalf("restores asked = %d, want 1", len(h.restoring))
@@ -138,7 +131,7 @@ func TestAParkedSessionsPulledBeatGoesOutOnceItIsRestored(t *testing.T) {
 	h.db.sessions[theWorkspace] = liveSession(theWorkspace)
 	h.serving = true
 	h.keeper.SessionUp(theWorkspace)
-	applyQueued(h)
+	h.applyQueued()
 	h.keeper.beatsDue(context.Background())
 	// Assert
 	if h.shim.beats != 1 {
@@ -150,7 +143,7 @@ func TestAPulledBeatIsNotSentAtTheColdGate(t *testing.T) {
 	// Arrange: the session parks at its cold gate after its beat was pulled.
 	h := restoredHarness(t, 15*time.Minute)
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	h.gate = coldLapsed()
 	// Act
 	h.keeper.beatsDue(context.Background())
@@ -170,7 +163,7 @@ func TestAColdGatedWorkspaceIsNotPulled(t *testing.T) {
 	h.keeper.schedule(context.Background(), theWorkspace, "test")
 	// Act
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	h.keeper.beatsDue(context.Background())
 	// Assert
 	if _, early := h.keeper.early[theWorkspace]; early || h.shim.beats != 0 {
@@ -183,12 +176,12 @@ func TestAPulledBeatWaitingOnDetachedWorkStaysEarly(t *testing.T) {
 	h := restoredHarness(t, 15*time.Minute)
 	h.shim.answer = skipped(&shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_DetachedWorkLive{DetachedWorkLive: &shimv1.SendKeepaliveSkippedDetachedWorkLive{LiveItems: 1}}})
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	h.keeper.beatsDue(context.Background())
 	// Act: the detached work ends.
 	h.shim.answer = sent()
 	h.keeper.SessionFree(theWorkspace, true)
-	applyQueued(h)
+	h.applyQueued()
 	h.keeper.beatsDue(context.Background())
 	// Assert
 	if h.shim.beats != 2 {
@@ -201,7 +194,7 @@ func TestAPulledBeatThatFoundTheMainAgentBusyIsNoLongerEarly(t *testing.T) {
 	h := restoredHarness(t, 15*time.Minute)
 	h.shim.answer = skipped(&shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_MainAgentBusy{MainAgentBusy: &shimv1.SendKeepaliveSkippedMainAgentBusy{}}})
 	h.keeper.NetworkRestored(longOutage)
-	applyQueued(h)
+	h.applyQueued()
 	// Act
 	h.keeper.beatsDue(context.Background())
 	// Assert
@@ -228,7 +221,7 @@ func TestNetworkRestoredRecordsItsDecision(t *testing.T) {
 			h := restoredHarness(t, 15*time.Minute)
 			// Act
 			h.keeper.NetworkRestored(tc.down)
-			applyQueued(h)
+			h.applyQueued()
 			// Assert
 			record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opOutage, Message: tc.message})
 			if !ok || record.Context["down_for"] != tc.down.String() {
