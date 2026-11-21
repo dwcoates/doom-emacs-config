@@ -105,6 +105,9 @@ const (
 	// ArmUnknownMergeTestLog refuses a test log token that names no log this
 	// daemon holds for the workspace (OpenInEditorError.unknown_merge_test_log).
 	ArmUnknownMergeTestLog = "unknown_merge_test_log"
+	// ArmMoveBlocked refuses a one-place move that leaves its merge where it
+	// stands, its `cause` naming why (UpdateMergeQueueError.move_blocked).
+	ArmMoveBlocked = "move_blocked"
 )
 
 // RefusalError is one pre-state refusal: which arm the contract owes it, and

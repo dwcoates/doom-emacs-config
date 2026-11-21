@@ -86,8 +86,7 @@ func (s *server) UpdateMergeQueue(
 
 	if ref, move, ok := mergeMoveOf(req.Msg); ok {
 		return s.actOnQueuedMerge(ctx, rpc, ref, resp, func(ws ids.WorkspaceID) error {
-			_, err := s.deps.Merge.Move(ctx, ws, move)
-			return err
+			return s.deps.Merge.Move(ctx, ws, move)
 		})
 	}
 

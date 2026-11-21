@@ -1530,9 +1530,9 @@ func (f *fakeMerge) MoveTo(_ context.Context, ws, anchor ids.WorkspaceID, side w
 	return f.moveErr == nil, f.moveErr
 }
 
-func (f *fakeMerge) Move(_ context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
+func (f *fakeMerge) Move(_ context.Context, ws ids.WorkspaceID, move wsm.MergeMove) error {
 	f.moves = append(f.moves, fakeMove{ws: ws, move: move})
-	return f.moveErr == nil, f.moveErr
+	return f.moveErr
 }
 
 func (f *fakeMerge) HoldDeploys(_ context.Context, scope merge.RepositoryScope) error {

@@ -452,7 +452,8 @@ func TestAMoveThatMovedNothingTellsTheRosterNothing(t *testing.T) {
 		write func(h *harness, db wsm.DB) (bool, error)
 	}{
 		{"a move up from the front", func(h *harness, db wsm.DB) (bool, error) {
-			return db.MoveMerge(context.Background(), h.repoKey(), "ws-a", wsm.MergeMoveUp)
+			outcome, err := db.MoveMerge(context.Background(), h.repoKey(), "ws-a", wsm.MergeMoveUp)
+			return outcome.Moved(), err
 		}},
 		{"a prioritize of the front", func(h *harness, db wsm.DB) (bool, error) {
 			return db.PrioritizeMerge(context.Background(), h.repoKey(), "ws-a")
@@ -835,8 +836,8 @@ func TestTheRosterQueueOrderIsRecordedAtInfoOnlyWhenItChanges(t *testing.T) {
 	// Act
 	h.o.publishRosterQueue(ctx, h.repoKey())
 	unchanged := countRecords(h, "info", "daemon.merge.roster_queue", message)
-	if moved, err := h.o.deps.DB.MoveMerge(ctx, h.repoKey(), "ws-2", wsm.MergeMoveUp); err != nil || !moved {
-		t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+	if outcome, err := h.o.deps.DB.MoveMerge(ctx, h.repoKey(), "ws-2", wsm.MergeMoveUp); err != nil || !outcome.Moved() {
+		t.Fatalf("MoveMerge = %v, %v; want moved", outcome, err)
 	}
 
 	// Assert

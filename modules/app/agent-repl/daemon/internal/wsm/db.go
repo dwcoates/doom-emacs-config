@@ -658,8 +658,9 @@ type DB interface {
 	// carries, answering whether it carried one.
 	ClearResolvedRebase(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
 	// MoveMerge moves a waiting merge one place up or down its queue, past
-	// the nearest waiting merge on that side, answering whether it moved.
-	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)
+	// the nearest waiting merge on that side, answering whether it moved and,
+	// when it did not, why.
+	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (MergeMoveOutcome, error)
 	// MoveMergeTo moves a waiting merge directly ahead of or behind another
 	// waiting merge on its queue, answering whether it moved.
 	MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, anchor WorkspaceID, side MergeSide) (bool, error)

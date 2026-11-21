@@ -617,70 +617,73 @@ func TestMoveMergePlacesTheMerge(t *testing.T) {
 		steps     []moveStep
 		move      MergeMove
 		wantOrder []string
-		wantMoved bool
+		// wantResult is what the move answers, and wantBlocker the letter of
+		// the admitted entry it names, for MergeMoveBlockedByAdmitted alone.
+		wantResult  MergeMoveResult
+		wantBlocker string
 	}{
 		{
-			name:      "up past the waiting merge ahead of it",
-			steps:     []moveStep{{"a", "queued"}, {"b", "queued"}, {"m", "queued"}},
-			move:      MergeMoveUp,
-			wantOrder: []string{"a", "m", "b"},
-			wantMoved: true,
+			name:       "up past the waiting merge ahead of it",
+			steps:      []moveStep{{"a", "queued"}, {"b", "queued"}, {"m", "queued"}},
+			move:       MergeMoveUp,
+			wantOrder:  []string{"a", "m", "b"},
+			wantResult: MergeMoved,
 		},
 		{
-			name:      "down past the waiting merge behind it",
-			steps:     []moveStep{{"m", "queued"}, {"a", "queued"}, {"b", "queued"}},
-			move:      MergeMoveDown,
-			wantOrder: []string{"a", "m", "b"},
-			wantMoved: true,
+			name:       "down past the waiting merge behind it",
+			steps:      []moveStep{{"m", "queued"}, {"a", "queued"}, {"b", "queued"}},
+			move:       MergeMoveDown,
+			wantOrder:  []string{"a", "m", "b"},
+			wantResult: MergeMoved,
 		},
 		{
-			name:      "never up past the admitted merge",
-			steps:     []moveStep{{"r", "admitted"}, {"m", "queued"}, {"a", "queued"}},
-			move:      MergeMoveUp,
-			wantOrder: []string{"r", "m", "a"},
-			wantMoved: false,
+			name:       "never up past the admitted merge",
+			steps:      []moveStep{{"r", "admitted"}, {"m", "queued"}, {"a", "queued"}},
+			move:       MergeMoveUp,
+			wantOrder:  []string{"r", "m", "a"},
+			wantResult: MergeMoveBlockedByAdmitted, wantBlocker: "r",
 		},
 		{
-			name:      "the first waiting merge stays put moving up",
-			steps:     []moveStep{{"m", "queued"}, {"a", "queued"}},
-			move:      MergeMoveUp,
-			wantOrder: []string{"m", "a"},
-			wantMoved: false,
+			name:       "the first waiting merge stays put moving up",
+			steps:      []moveStep{{"m", "queued"}, {"a", "queued"}},
+			move:       MergeMoveUp,
+			wantOrder:  []string{"m", "a"},
+			wantResult: MergeMoveAtEdge,
 		},
 		{
-			name:      "the last waiting merge stays put moving down",
-			steps:     []moveStep{{"a", "queued"}, {"m", "queued"}},
-			move:      MergeMoveDown,
-			wantOrder: []string{"a", "m"},
-			wantMoved: false,
+			name:       "the last waiting merge stays put moving down",
+			steps:      []moveStep{{"a", "queued"}, {"m", "queued"}},
+			move:       MergeMoveDown,
+			wantOrder:  []string{"a", "m"},
+			wantResult: MergeMoveAtEdge,
 		},
 		{
-			name:      "a request between them is passed over moving up",
-			steps:     []moveStep{{"a", "queued"}, {"p", "requested"}, {"m", "queued"}},
-			move:      MergeMoveUp,
-			wantOrder: []string{"m", "p", "a"},
-			wantMoved: true,
+			name:       "a request between them is passed over moving up",
+			steps:      []moveStep{{"a", "queued"}, {"p", "requested"}, {"m", "queued"}},
+			move:       MergeMoveUp,
+			wantOrder:  []string{"m", "p", "a"},
+			wantResult: MergeMoved,
 		},
 		{
-			name:      "a request behind it is no neighbor moving down",
-			steps:     []moveStep{{"m", "queued"}, {"p", "requested"}},
-			move:      MergeMoveDown,
-			wantOrder: []string{"m", "p"},
-			wantMoved: false,
+			name:       "a request behind it is no neighbor moving down",
+			steps:      []moveStep{{"m", "queued"}, {"p", "requested"}},
+			move:       MergeMoveDown,
+			wantOrder:  []string{"m", "p"},
+			wantResult: MergeMoveAtEdge,
 		},
 		{
-			name:      "the admitted merge stays put",
-			steps:     []moveStep{{"m", "admitted"}, {"a", "queued"}},
-			move:      MergeMoveDown,
-			wantOrder: []string{"m", "a"},
-			wantMoved: false,
+			name:       "the admitted merge stays put",
+			steps:      []moveStep{{"m", "admitted"}, {"a", "queued"}},
+			move:       MergeMoveDown,
+			wantOrder:  []string{"m", "a"},
+			wantResult: MergeMoveNotWaiting,
 		},
 		{
-			name:      "a merge only requested stays put",
-			steps:     []moveStep{{"a", "queued"}, {"m", "requested"}},
-			move:      MergeMoveUp,
-			wantOrder: []string{"a", "m"},
-			wantMoved: false,
+			name:       "a merge only requested stays put",
+			steps:      []moveStep{{"a", "queued"}, {"m", "requested"}},
+			move:       MergeMoveUp,
+			wantOrder:  []string{"a", "m"},
+			wantResult: MergeMoveNotWaiting,
 		},
 	}
 	for _, tt := range tests {
@@ -691,14 +694,14 @@ func TestMoveMergePlacesTheMerge(t *testing.T) {
 			named := buildMoveQueue(t, s, repo, tt.steps)
 
 			// Act
-			moved, err := s.MoveMerge(context.Background(), repo, named["m"], tt.move)
+			outcome, err := s.MoveMerge(context.Background(), repo, named["m"], tt.move)
 
 			// Assert
 			if err != nil {
 				t.Fatalf("MoveMerge: %v", err)
 			}
-			if moved != tt.wantMoved {
-				t.Fatalf("moved = %v, want %v", moved, tt.wantMoved)
+			if want := (MergeMoveOutcome{Result: tt.wantResult, Blocker: named[tt.wantBlocker]}); outcome != want {
+				t.Fatalf("outcome = %+v, want %+v", outcome, want)
 			}
 			if got := lettersOf(t, s, repo, named); !slices.Equal(got, tt.wantOrder) {
 				t.Fatalf("queue = %v, want %v", got, tt.wantOrder)
@@ -811,11 +814,11 @@ func TestMoveMergeRefusesAnUndeclaredMoveAndMovesNothing(t *testing.T) {
 	named := buildMoveQueue(t, s, repo, []moveStep{{"a", "queued"}, {"m", "queued"}})
 
 	// Act
-	moved, err := s.MoveMerge(context.Background(), repo, named["m"], MergeMove(0))
+	outcome, err := s.MoveMerge(context.Background(), repo, named["m"], MergeMove(0))
 
 	// Assert
-	if err == nil || moved {
-		t.Fatalf("MoveMerge(0) = %v, %v; want a refusal", moved, err)
+	if err == nil || outcome.Moved() {
+		t.Fatalf("MoveMerge(0) = %+v, %v; want a refusal", outcome, err)
 	}
 	if !loggedOperation(log, "daemon.wsm.move_merge", "error") {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
@@ -3130,8 +3133,8 @@ func TestAReturnerHoldsNoLeaseOnItsPlace(t *testing.T) {
 		{
 			name: "a user move up of the merge behind it passes it",
 			act: func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) {
-				if moved, err := s.MoveMerge(context.Background(), repo, wss[2], MergeMoveUp); err != nil || !moved {
-					t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+				if outcome, err := s.MoveMerge(context.Background(), repo, wss[2], MergeMoveUp); err != nil || !outcome.Moved() {
+					t.Fatalf("MoveMerge = %+v, %v; want moved", outcome, err)
 				}
 			},
 			want: []int{1, 2, 0, 3, 4},
@@ -3157,8 +3160,8 @@ func TestAReturnerHoldsNoLeaseOnItsPlace(t *testing.T) {
 		{
 			name: "the returner itself moves down like any waiting merge",
 			act: func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) {
-				if moved, err := s.MoveMerge(context.Background(), repo, wss[0], MergeMoveDown); err != nil || !moved {
-					t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+				if outcome, err := s.MoveMerge(context.Background(), repo, wss[0], MergeMoveDown); err != nil || !outcome.Moved() {
+					t.Fatalf("MoveMerge = %+v, %v; want moved", outcome, err)
 				}
 			},
 			want: []int{1, 2, 0, 3, 4},
@@ -3185,8 +3188,8 @@ func TestAConflictReturnerPassesATestReturnerNoLongerAtTheFront(t *testing.T) {
 	// 2; merge 3 steps aside for conflicts.
 	s, repo, wss, _ := returnedFixture(t)
 	ctx := context.Background()
-	if moved, err := s.MoveMerge(ctx, repo, wss[0], MergeMoveDown); err != nil || !moved {
-		t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+	if outcome, err := s.MoveMerge(ctx, repo, wss[0], MergeMoveDown); err != nil || !outcome.Moved() {
+		t.Fatalf("MoveMerge = %+v, %v; want moved", outcome, err)
 	}
 	if err := s.RemoveMergeQueueEntry(ctx, repo, wss[1], "landed"); err != nil {
 		t.Fatalf("RemoveMergeQueueEntry: %v", err)

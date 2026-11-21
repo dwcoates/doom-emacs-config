@@ -1166,11 +1166,11 @@ func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 // MoveMerge swaps a waiting entry with the nearest waiting entry on the
 // move's side, the moved entry taking the passed entry's front mark, exactly
 // as the durable queue re-sequences it.
-func (f *fakeDB) MoveMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
+func (f *fakeDB) MoveMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, move wsm.MergeMove) (wsm.MergeMoveOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.moveErr != nil {
-		return false, f.moveErr
+		return wsm.MergeMoveOutcome{}, f.moveErr
 	}
 	queue := f.queues[repo]
 	for i, entry := range queue {
@@ -1178,24 +1178,33 @@ func (f *fakeDB) MoveMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspace
 			continue
 		}
 		if entry.State != wsm.MergeQueued {
-			return false, nil
+			return wsm.MergeMoveOutcome{Result: wsm.MergeMoveNotWaiting}, nil
 		}
 		step := -1
 		if move == wsm.MergeMoveDown {
 			step = 1
 		}
+		var blocker ids.WorkspaceID
 		for j := i + step; j >= 0 && j < len(queue); j += step {
+			if queue[j].State == wsm.MergeAdmitted && blocker == "" {
+				blocker = queue[j].Workspace
+			}
 			if queue[j].State != wsm.MergeQueued {
 				continue
 			}
 			queue[i].Source.Front = queue[j].Source.Front
 			queue[i], queue[j] = queue[j], queue[i]
 			f.renumber(repo)
-			return true, nil
+			return wsm.MergeMoveOutcome{Result: wsm.MergeMoved}, nil
 		}
-		return false, nil
+		// THE NEAREST ADMITTED ENTRY ON THAT SIDE BLOCKS IT, as the durable
+		// queue answers; with none, it stands at the edge of the line.
+		if blocker != "" {
+			return wsm.MergeMoveOutcome{Result: wsm.MergeMoveBlockedByAdmitted, Blocker: blocker}, nil
+		}
+		return wsm.MergeMoveOutcome{Result: wsm.MergeMoveAtEdge}, nil
 	}
-	return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+	return wsm.MergeMoveOutcome{}, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
 func (f *fakeDB) MoveMergeTo(_ context.Context, repo wsm.RepoKey, id, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error) {

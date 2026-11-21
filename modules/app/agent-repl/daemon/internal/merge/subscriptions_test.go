@@ -414,7 +414,7 @@ func TestAMoveIsReportedReorderedInTheNewOrder(t *testing.T) {
 	queueAnother(t, h, "ws-2", "two")
 
 	// Act.
-	if _, err := h.o.Move(context.Background(), "ws-2", wsm.MergeMoveUp); err != nil {
+	if err := h.o.Move(context.Background(), "ws-2", wsm.MergeMoveUp); err != nil {
 		t.Fatalf("Move: %v", err)
 	}
 
@@ -435,8 +435,8 @@ func TestAMoveThatMovesNothingReportsNothing(t *testing.T) {
 	before := len(h.events.reported())
 
 	// Act.
-	if _, err := h.o.Move(context.Background(), theWorkspace, wsm.MergeMoveUp); err != nil {
-		t.Fatalf("Move: %v", err)
+	if _, refused := Refused(h.o.Move(context.Background(), theWorkspace, wsm.MergeMoveUp)); !refused {
+		t.Fatal("Move of the only merge = not refused, want it refused for standing at the edge")
 	}
 
 	// Assert.
