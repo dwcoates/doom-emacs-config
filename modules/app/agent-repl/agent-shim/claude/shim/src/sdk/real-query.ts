@@ -392,6 +392,13 @@ export async function createRealQuery(
 }
 
 /**
+ * THE ONE GATE of a headless inference call, real or mocked: it takes no
+ * tools, so every tool that reaches the gate is refused.
+ */
+export const denyEveryTool: CanUseToolLike = () =>
+  Promise.resolve({ behavior: "deny", message: "a headless inference call takes no tools" });
+
+/**
  * One HEADLESS, INFERENCE-ONLY call: a prompt in, the model's answer out, and
  * nothing else. The shim's counterpart of the daemon's `headless.KindInference`
  * (daemon/internal/headless/client.go), in the same shape:
@@ -445,7 +452,7 @@ export function realInferenceOptions(spec: RealInferenceSpec): Options {
     // A CALL WITH NO TOOLS ASKS NO PERMISSION, so the gate is the default one
     // and refuses whatever reaches it.
     permissionMode: "default",
-    canUseTool: () => Promise.resolve({ behavior: "deny", message: "a headless inference call takes no tools" }),
+    canUseTool: denyEveryTool,
     // THE SAME ACCOUNT ROOT AND RETRY POSTURE AS A SESSION'S (realQueryOptions).
     env: { ...process.env, CLAUDE_CONFIG_DIR: spec.claudeConfigDir, CLAUDE_CODE_MAX_RETRIES: "0" },
     ...(spec.model === undefined ? {} : { model: spec.model }),

@@ -55,7 +55,7 @@ import {
 import { VendorCallsForbiddenError } from "../src/vendor-guard.js";
 import type { Engine } from "../src/engine/engine.js";
 import { createFakeQuery } from "../src/fake/index.js";
-import { createRealInference, createRealQuery, type RealInferenceSpec } from "../src/sdk/real-query.js";
+import { createRealInference, createRealQuery, denyEveryTool, type RealInferenceSpec } from "../src/sdk/real-query.js";
 import type { InferenceSpec, QuerySpec, SessionEngine } from "../src/engine/session.js";
 import type { QueryLike } from "../src/sdk/types.js";
 
@@ -1087,6 +1087,24 @@ describe("inferenceFactory", () => {
       resume: false,
       ephemeralFork: false,
     });
+  });
+
+  it("gates the mocked call with the real call's own deny-every-tool gate", async () => {
+    // Arrange.
+    const gates: unknown[] = [];
+    const vendors: QueryVendors = {
+      ...recording().vendors,
+      fake: (_prompt, canUseTool) => {
+        gates.push(canUseTool);
+        return {} as QueryLike;
+      },
+    };
+
+    // Act.
+    await inferenceFactory(true, env, cwd, vendors)(spec());
+
+    // Assert.
+    expect(gates).toEqual([denyEveryTool]);
   });
 
   it("writes no trust entry, since the call loads no settings", async () => {

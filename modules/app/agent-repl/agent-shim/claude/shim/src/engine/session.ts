@@ -163,8 +163,10 @@ import {
   contextCutCompacted,
   contextCutFailed,
   readAmbient,
+  summarizerFailure,
   summarizerSpentTokens,
   type CompactionFigures,
+  type SummarizerFailure,
 } from "./compaction.js";
 import {
   cacheRequestOf,
@@ -6469,16 +6471,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         /** The permission mode the live chain last states, in the vendor's spelling. */
         mode: string | undefined;
       }
-    | {
-        ok: false;
-        error: string;
-        retry: VendorStartRetry;
-        apiFailure: conversationv1.ApiRequestFailed | undefined;
-        stream: boolean;
-      }
+    | SummarizerFailure
   > {
-    const failed = (error: string, retry: VendorStartRetry, stream: boolean, apiFailure?: conversationv1.ApiRequestFailed) =>
-      ({ ok: false, error, retry, apiFailure, stream }) as const;
     const file = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
     const context = { vendor_session_id: vendorSessionId, transcript: file, requested_model: model };
     // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at the
@@ -6487,15 +6481,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     switch (read.kind) {
       case "no_transcript":
         // The transcript will not appear by asking again (rejected).
-        return failed(`no transcript exists for vendor session ${JSON.stringify(vendorSessionId)} in this workspace`, "rejected", false);
+        return summarizerFailure(`no transcript exists for vendor session ${JSON.stringify(vendorSessionId)} in this workspace`, "rejected", false);
       case "unreadable":
         // The same transcript reads the same way on the next attempt (rejected).
-        return failed(`the transcript to summarize could not be read: ${read.detail}`, "rejected", false);
+        return summarizerFailure(`the transcript to summarize could not be read: ${read.detail}`, "rejected", false);
       case "ok":
         break;
     }
     const parts = chunkConversation(renderConversation(read.transcript.chain));
-    if (parts.length === 0) return failed("the conversation holds nothing to summarize", "rejected", false);
+    if (parts.length === 0) return summarizerFailure("the conversation holds nothing to summarize", "rejected", false);
     LOGGER.info(
       { ...context, parts: parts.length, chars: parts.reduce((sum, part) => sum + part.length, 0) },
       "rendered the conversation as text for the headless summarizer",
@@ -6548,13 +6542,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     model: string,
   ): Promise<
     | { ok: true; summary: string; model: string; usage: NormalizedApiUsage }
-    | {
-        ok: false;
-        error: string;
-        retry: VendorStartRetry;
-        apiFailure: conversationv1.ApiRequestFailed | undefined;
-        stream: boolean;
-      }
+    | SummarizerFailure
   > {
     const asked = await askSideQuery(
       (queue, abortController) =>
@@ -6562,27 +6550,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       prompt,
       { ledger: measurements.vendorSpend, cause: conversationv1.VendorCallCause.COMPACTION, nowMs: coldNowMs },
     );
-    const failed = (error: string, retry: VendorStartRetry, stream: boolean, apiFailure?: conversationv1.ApiRequestFailed) =>
-      ({ ok: false, error, retry, apiFailure, stream }) as const;
     switch (asked.kind) {
       case "unbuilt":
         // THE CALL THAT COULD NOT BE BUILT meets the same refusal on the next
         // attempt (rejected).
-        return failed(asked.error, "rejected", true);
+        return summarizerFailure(asked.error, "rejected", true);
       case "broken":
         // A THROW FROM INSIDE THE STREAM is a child or stream that ended
         // (retryable).
-        return failed(asked.error, "retryable", true);
+        return summarizerFailure(asked.error, "retryable", true);
       case "noResult":
         // A STREAM THAT ENDED WITHOUT A RESULT is a child that went away.
-        return failed("the summarizing session produced no summary", "retryable", false);
+        return summarizerFailure("the summarizing session produced no summary", "retryable", false);
       case "errorResult": {
         // AN ERROR RESULT IS A FAILURE WHATEVER ITS SUBTYPE: reading the
         // vendor's error sentence as a summary would write the error into the
         // transcript as the conversation's compacted context. READ EXACTLY AS
         // THE OPENING'S IS: its status and its words decide whether it can pass.
         const verdict = openingErrorVerdict(asked.status, asked.words);
-        return failed(
+        return summarizerFailure(
           asked.subtype === "success"
             ? `the summarizing session ended with an error result: ${asked.words}`
             : `the summarizing session ended as ${asked.subtype}`,
@@ -6597,14 +6583,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (asked.text === "") {
       // A result that summarized nothing is the vendor's answer to this
       // conversation, and it will give the same one again (rejected).
-      return failed("the summarizing session produced no summary", "rejected", false);
+      return summarizerFailure("the summarizing session produced no summary", "rejected", false);
     }
     if (asked.model === undefined) {
       // THE VENDOR OPENS EVERY QUERY WITH ITS INIT, before any result, so a
       // summary with no opening before it is a stream that broke the
       // vendor's own order. The summary cannot say on which model it was
       // written, and it fails rather than guess one.
-      return failed("the summarizing session answered without stating its model", "rejected", false);
+      return summarizerFailure("the summarizing session answered without stating its model", "rejected", false);
     }
     return { ok: true, summary: asked.text, model: asked.model, usage: asked.usage };
   }

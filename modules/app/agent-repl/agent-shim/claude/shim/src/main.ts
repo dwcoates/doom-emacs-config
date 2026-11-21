@@ -86,7 +86,13 @@ import {
   DEFAULT_RETRY_POLICY,
   type PersistenceRetryPolicy,
 } from "./store/persistence.js";
-import { boundSessionId, createRealInference, createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
+import {
+  boundSessionId,
+  createRealInference,
+  createRealQuery,
+  denyEveryTool,
+  PER_TASK_STOP_AFFORDANCE,
+} from "./sdk/real-query.js";
 import type { QueryLike } from "./sdk/types.js";
 import { createFakeQuery } from "./fake/index.js";
 import { forkFakeSession } from "./fake/fork.js";
@@ -857,7 +863,7 @@ export function inferenceFactory(
   }
   return (spec: InferenceSpec) =>
     Promise.resolve(
-      vendors.fake(spec.prompt, () => Promise.resolve({ behavior: "deny", message: "a headless inference call takes no tools" }), {
+      vendors.fake(spec.prompt, denyEveryTool, {
         cwd,
         configDir: environment.claudeConfigDir,
         sessionId: randomUUID(),

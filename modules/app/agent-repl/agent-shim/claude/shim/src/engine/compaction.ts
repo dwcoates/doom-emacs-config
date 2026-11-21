@@ -45,6 +45,7 @@ import { bindLog } from "../log.js";
 import { compactionIdField } from "../convert/session-updates.js";
 import { conversationv1 } from "../proto.js";
 import type { NormalizedApiUsage } from "../api-usage.js";
+import type { VendorStartRetry } from "../service/failures.js";
 
 const LOGGER = bindLog({ component: "shim-engine-compaction", operation: "shim.engine.compaction" });
 
@@ -68,6 +69,29 @@ export interface CompactionFigures {
  */
 export function summarizerSpentTokens(usage: NormalizedApiUsage): number {
   return usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
+}
+
+/**
+ * A summarizer call that did not answer, labeled as SummarizeConversation
+ * states it: whether asking again can help, the API's refusal when the failure
+ * was one, and `stream` for a call that never ran or broke mid-stream.
+ */
+export interface SummarizerFailure {
+  readonly ok: false;
+  readonly error: string;
+  readonly retry: VendorStartRetry;
+  readonly apiFailure: conversationv1.ApiRequestFailed | undefined;
+  readonly stream: boolean;
+}
+
+/** THE ONE CONSTRUCTOR of a {@link SummarizerFailure}. */
+export function summarizerFailure(
+  error: string,
+  retry: VendorStartRetry,
+  stream: boolean,
+  apiFailure?: conversationv1.ApiRequestFailed,
+): SummarizerFailure {
+  return { ok: false, error, retry, apiFailure, stream };
 }
 
 /** The sentence the vendor's own compact summary begins with. */

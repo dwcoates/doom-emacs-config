@@ -11422,6 +11422,15 @@ describe("the cold gate's COMPACT remediation", () => {
   });
 });
 
+describe("the summarizer's one failure shape", () => {
+  it("builds every summarizer failure through summarizerFailure, never a literal of its own", () => {
+    // A hand-rolled failure beside the helper would drift from it.
+    const source = readFileSync(new URL("../../src/engine/session.ts", import.meta.url), "utf8");
+
+    expect([/ok: false, error, retry, apiFailure, stream/.test(source), /summarizerFailure\(/.test(source)]).toEqual([false, true]);
+  });
+});
+
 describe("SummarizeConversation's carry: a summary of another conversation", () => {
   /** SummarizeConversation's `carry` of `main-1`, on the carried model. */
   function carryRequest(): shimv1.SummarizeConversationRequest {

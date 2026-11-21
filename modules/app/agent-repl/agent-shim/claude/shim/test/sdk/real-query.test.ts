@@ -13,6 +13,7 @@ import {
   asQueryLike,
   boundSessionId,
   createRealInference,
+  denyEveryTool,
   realInferenceOptions,
   realQueryOptions,
   vendorSpawner,
@@ -955,5 +956,20 @@ describe("createRealInference", () => {
       typed: raised instanceof VendorCallsForbiddenError,
       site: raised instanceof Error && /blocked at: createRealInference/.test(raised.message),
     }).toEqual({ typed: true, site: true });
+  });
+});
+
+describe("denyEveryTool", () => {
+  it("refuses whatever tool reaches it", async () => {
+    expect(await denyEveryTool("Bash", {}, {} as never)).toEqual({
+      behavior: "deny",
+      message: "a headless inference call takes no tools",
+    });
+  });
+
+  it("is the gate the real inference call is built with", () => {
+    expect(realInferenceOptions({ cwd: "/ws", claudeConfigDir: "/a", abortController: new AbortController() }).canUseTool).toBe(
+      denyEveryTool,
+    );
   });
 });
