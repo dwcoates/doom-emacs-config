@@ -91,6 +91,17 @@ AGENT API section, and two fields on an existing message), the conventions
 - WHY NOT JSON TEXT FOR THE SAMPLE: the record's fixed fields are typed
   (instant, message, workspace), and only its free-shape context is untyped.
 
+### `ListLogSites`'s file comment states the tally as built
+
+- WHAT: comment only. The file's comment said the daemon tallies each record
+  "as it is written"; it now says a pass reads each log file from its own
+  cursor before every removal of log files, at each deploy's start and
+  before every window is answered (logging-contract.md "Sites are tallied
+  per deploy, independently of the logs").
+- WHY: the daemon writes only some of the records; the rest are other
+  processes' files, which only a reader of the files can tally, and a pass
+  before each answer makes every answer current to the moment it is asked.
+
 ## Consequences recap
 
 - An old webapp page or sidecar's records are refused for one rollout.
