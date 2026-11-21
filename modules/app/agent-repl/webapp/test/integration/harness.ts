@@ -626,23 +626,20 @@ interface CaseSlice {
   end(): Promise<void>;
 }
 
-// caseSerial names each case of a shared mount, so its turns are its own.
-let caseSerial = 0;
-
 /**
- * THE CASE'S SLICE: its own turns, the rows it pushed, and a page clock and
- * page state that start where a fresh mount's would.
+ * THE CASE'S SLICE: the rows it pushed, its daemon script and calls, the
+ * panels it was handed, and a page clock and page state that start where a
+ * fresh mount's would. The rows keep the turns the case gave them, so a row
+ * still matches the turn the case's own submission minted.
  *
- * - Every row the case pushes is drawn under the case's OWN turn (the
- *   fixture's turn id, suffixed with the case's serial), so no state the feed
- *   keeps per turn crosses from one case to the next.
  * - The page clock is put back at the fixtures' epoch, at the same point of
  *   the page ticker's beat a fresh mount starts at (`tickerPhase`), so a
  *   case's relative times and count-ups read as they would on a fresh mount.
  * - The daemon's recorded calls and its script are the case's own: both are
  *   cleared as the case begins, so `fake.calls`, `fake.nextCall` and
  *   `fake.log` answer only what the case caused, and every rpc serves its
- *   default until the case scripts it.
+ *   default until the case scripts it; and the command panels the composer
+ *   was handed (`panels`) start empty.
  * - At its end, every row it pushed is removed through the daemon's own
  *   removal (`FeedRow.removed`, as production retires a row), so the next case
  *   starts on an empty feed and every settle serializes only its own rows; and
@@ -654,13 +651,9 @@ async function beginCase(
   phase: TickerPhase,
   endCase?: (app: Harness) => Promise<void>,
 ): Promise<CaseSlice> {
-  caseSerial += 1;
-  const suffix = `@case${caseSerial}`;
   const pushed = new Map<string, { workspace: string; feed: FeedKey; id: string; turn: string }>();
   const pushRow = app.fake.pushRow.bind(app.fake);
   app.fake.pushRow = (workspace: string, feed: FeedKey, row: FeedRow): void => {
-    const turn = row.turn?.value;
-    if (turn !== undefined && turn !== "" && !turn.endsWith(suffix)) row.turn = turnId(`${turn}${suffix}`);
     const id = row.id?.value ?? "";
     const key = `${workspace}\u0000${feed}\u0000${id}`;
     if (row.row.case === "removed") pushed.delete(key);
@@ -669,6 +662,7 @@ async function beginCase(
   };
   app.fake.clearCalls();
   app.fake.resetScripts();
+  app.panels.length = 0;
   await phase.startCase();
   return {
     async end() {

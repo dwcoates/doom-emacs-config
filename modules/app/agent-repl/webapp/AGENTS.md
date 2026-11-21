@@ -957,11 +957,12 @@ this suite applies it.
   resets the page and the clock before each file
   (`test/setup-shared-integration.ts`), and the run is un-isolated.
 - **A case's slice** (`beginCase` in `harness.ts`) is its own TURN: every row
-  it pushes is re-keyed to a turn of its own and removed through
+  it pushes keeps the turn the case gave it, and is removed through
   `FeedRow.removed` when it ends, so the next case starts on an empty feed.
   The fake daemon's recorded calls and its script (`answer`, `refuse`,
-  `failNext`, injected fields) start empty per case, and the clock starts
-  back at `HARNESS_EPOCH_MS` on the page ticker's beat, as on a fresh mount.
+  `failNext`, injected fields) and the composer's handed panels start empty
+  per case, and the clock starts back at `HARNESS_EPOCH_MS` on the page
+  ticker's beat, as on a fresh mount.
 - **Chrome is pushed, not booted.** A case about the footer, topbar or rail
   pushes its whole view onto the shared mount (`setFooter`, `setTopbar`,
   `setRoster`), as the daemon pushes every change. Page-wide UI state a case
