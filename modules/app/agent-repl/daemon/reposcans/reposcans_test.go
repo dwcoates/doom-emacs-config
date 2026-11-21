@@ -3,6 +3,7 @@ package reposcans
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -72,6 +73,20 @@ func TestEveryGoSuiteIsSelectedByEveryLocalModuleItReplaces(t *testing.T) {
 // suite's sources and checks that every relative import reaching OUTSIDE the
 // suite's own directory (the generated TS bindings, the shared logging
 // module) selects the suite.
+// importedSource is the file an import specifier dep names: a ".js" import
+// names its ".ts" source, one without an extension the ".ts" file, and any
+// other extension (".mjs", ".json") the file itself.
+func importedSource(dep string) string {
+	switch ext := path.Ext(dep); ext {
+	case ".js":
+		return strings.TrimSuffix(dep, ext) + ".ts"
+	case "":
+		return dep + ".ts"
+	default:
+		return dep
+	}
+}
+
 func TestEveryVitestSuiteIsSelectedByEveryTreeItImports(t *testing.T) {
 	// Arrange: the module root on disk, two directories up.
 	root := moduleRootDir(t)
@@ -106,7 +121,7 @@ func TestEveryVitestSuiteIsSelectedByEveryTreeItImports(t *testing.T) {
 					if err != nil || strings.HasPrefix(dep, "..") {
 						return fmt.Errorf("%s imports %s outside the module", path, m[1])
 					}
-					changed := moduleRoot + filepath.ToSlash(dep) + ".ts"
+					changed := moduleRoot + importedSource(filepath.ToSlash(dep))
 					if checked[suite.Name+" "+changed] {
 						continue
 					}
