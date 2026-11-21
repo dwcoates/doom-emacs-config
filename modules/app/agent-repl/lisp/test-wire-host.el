@@ -1035,6 +1035,23 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                     #'agent-repl-wire-decode-host-workspace-compose-entry (car case))
                    (cadr case)))))
 
+;;;; ---- The daemon stream's workspace events share one decoder ----
+
+(ert-deftest agent-repl-test-wire-host-a-workspace-event-decodes-its-workspace ()
+  "The shared decoder answers the workspace a workspace event names."
+  (should (equal (agent-repl-test-wire-host--decode
+                  (lambda (v) (agent-repl-wire--decode-workspace-event "SomeEvent" v))
+                  (concat "{\"workspace\":" agent-repl-test-wire-host--ref-json "}"))
+                 '(:workspace (:id "w1" :dir "/t/w1")))))
+
+(ert-deftest agent-repl-test-wire-host-every-workspace-event-decoder-is-the-shared-one ()
+  "Each workspace event decoder is the shared one under its message's name:
+a breach names the event's own message."
+  (dolist (case '((agent-repl-wire-decode-daemon-workspace-notification-clicked . "DaemonWorkspaceNotificationClicked")
+                  (agent-repl-wire-decode-daemon-workspace-select-requested . "DaemonWorkspaceSelectRequested")))
+    (should (equal (car (agent-repl-test-wire-host--breach (car case) "{\"extra\":1}"))
+                   (cdr case)))))
+
 ;;;; ---- The notification click push ----
 
 (ert-deftest agent-repl-test-wire-host-notification-clicked-decodes-its-workspace ()

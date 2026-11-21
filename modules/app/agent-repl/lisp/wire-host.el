@@ -892,27 +892,28 @@ The token is REQUIRED: an evaluation that cannot be answered is a breach."
                    #'agent-repl-wire-decode-editor-evaluation-token)
            :text (agent-repl-wire--decode-string "DaemonEvaluate" 'text object)))))
 
+(defun agent-repl-wire--decode-workspace-event (message value)
+  "Decode VALUE as MESSAGE, a daemon-stream event naming one workspace.
+The plist (:workspace REF): the one shape a banner click and a rail click
+share, each naming the workspace, held by this editor or not.  The
+workspace is REQUIRED: an event naming none switches nowhere."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(workspace))
+    (agent-repl-wire--decoded
+     message
+     (list :workspace (agent-repl-wire--decode-message
+                       message 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)))))
+
 (defun agent-repl-wire-decode-daemon-workspace-notification-clicked (value)
   "Decode VALUE as `DaemonWorkspaceNotificationClicked', (:workspace REF).
 The user clicked REF's desktop banner, held by this editor or not."
-  (let ((object (agent-repl-wire--object "DaemonWorkspaceNotificationClicked" value)))
-    (agent-repl-wire--check-keys "DaemonWorkspaceNotificationClicked" object '(workspace))
-    (agent-repl-wire--decoded
-     "DaemonWorkspaceNotificationClicked"
-     (list :workspace (agent-repl-wire--decode-message
-                       "DaemonWorkspaceNotificationClicked" 'workspace object
-                       #'agent-repl-wire-decode-workspace-ref)))))
+  (agent-repl-wire--decode-workspace-event "DaemonWorkspaceNotificationClicked" value))
 
 (defun agent-repl-wire-decode-daemon-workspace-select-requested (value)
   "Decode VALUE as `DaemonWorkspaceSelectRequested', (:workspace REF).
 The user clicked REF's row in a page's rail, held by this editor or not."
-  (let ((object (agent-repl-wire--object "DaemonWorkspaceSelectRequested" value)))
-    (agent-repl-wire--check-keys "DaemonWorkspaceSelectRequested" object '(workspace))
-    (agent-repl-wire--decoded
-     "DaemonWorkspaceSelectRequested"
-     (list :workspace (agent-repl-wire--decode-message
-                       "DaemonWorkspaceSelectRequested" 'workspace object
-                       #'agent-repl-wire-decode-workspace-ref)))))
+  (agent-repl-wire--decode-workspace-event "DaemonWorkspaceSelectRequested" value))
 
 (defun agent-repl-wire-encode-editor-evaluation-value (value)
   "Encode the `EditorEvaluationValue' plist VALUE (:printed P :readable B).
