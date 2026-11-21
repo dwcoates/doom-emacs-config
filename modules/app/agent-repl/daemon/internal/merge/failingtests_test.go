@@ -386,7 +386,9 @@ func TestRenderPointsAnUnnamedUnitToItsBlockInTheArchive(t *testing.T) {
 
 func TestRenderListsEachGroupsCommandAndTests(t *testing.T) {
 	// Arrange.
-	selections := func(names []string) []*testrunv1.TestSelection { return []*testrunv1.TestSelection{testcases.GoPackage("p", names)} }
+	selections := func(names []string) []*testrunv1.TestSelection {
+		return []*testrunv1.TestSelection{testcases.GoPackage("p", names)}
+	}
 	found := failingTests{worktree: "/", suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{selections: selections, names: []string{"TestA", "TestB"}, shown: []string{"TestA", "TestB"}}}}}}
 
 	// Act.
@@ -399,7 +401,9 @@ func TestRenderListsEachGroupsCommandAndTests(t *testing.T) {
 }
 
 func TestRenderWritesNoMarkdownHeading(t *testing.T) {
-	selections := func(names []string) []*testrunv1.TestSelection { return []*testrunv1.TestSelection{testcases.GoPackage("p", names)} }
+	selections := func(names []string) []*testrunv1.TestSelection {
+		return []*testrunv1.TestSelection{testcases.GoPackage("p", names)}
+	}
 	tests := []struct {
 		name  string
 		found failingTests
@@ -757,7 +761,7 @@ func TestAFailingRunsCasesAreEachTestItNamesAndEachUnitItCouldNot(t *testing.T) 
 		want []*testrunv1.TestSelection
 	}{
 		{name: "each failing Go test, a subtest's as its top-level test",
-			out: failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)", "    --- FAIL: TestB/one_case (0.00s)", "--- FAIL: TestB (0.01s)"),
+			out:  failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)", "    --- FAIL: TestB/one_case (0.00s)", "--- FAIL: TestB (0.01s)"),
 			want: []*testrunv1.TestSelection{testcases.GoPackage(merge, []string{"TestA"}), testcases.GoPackage(merge, []string{"TestB"})}},
 		{name: "each failing vitest test", out: failedUnit("webapp#00", "webapp", " FAIL  test/feed.test.ts > feed > draws a row"),
 			want: []*testrunv1.TestSelection{testcases.VitestFile(moduleRoot+"webapp/test/feed.test.ts", "feed draws a row")}},
