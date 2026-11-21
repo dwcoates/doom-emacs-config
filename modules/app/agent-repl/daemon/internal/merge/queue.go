@@ -1320,7 +1320,9 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	}
 	o.deps.Log.Global().Debug("daemon.merge.queue", "redrew the queue tab of every merge in line", dlog.Context{
 		"repo": string(repo), "in_line": len(entries), "drawn": strings.Join(drawn, ",")})
-	return nil
+	// A BUBBLE IS LIVE EXACTLY WHILE ITS MERGE IS IN A QUEUE (livebubbles.go):
+	// every publication of a queue ends the live bubbles no queue holds.
+	return o.endBubblesOffQueue(ctx, "queue")
 }
 
 // queueView is what every drawing of one repository's queue reads: whether

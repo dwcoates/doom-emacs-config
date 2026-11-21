@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 )
 
@@ -292,6 +293,58 @@ func TestDurableFeedRowRankAnswersWhereARowIsRecorded(t *testing.T) {
 			// Assert
 			if err != nil || found != tt.wantFound || key != tt.wantKey || (found && plane != stored.Plane) {
 				t.Fatalf("DurableFeedRowRank = (%d, %q, %v, %v), want key %q found %v", plane, key, found, err, tt.wantKey, tt.wantFound)
+			}
+		})
+	}
+}
+
+// TestMatchDurableFeedRows covers the matched read: only the rows the match
+// selects are loaded, whole, over the scope asked for or every workspace.
+func TestMatchDurableFeedRows(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope func(a, b WorkspaceID) []WorkspaceID
+		want  []string
+	}{
+		{name: "every workspace when the scope is empty", scope: func(a, b WorkspaceID) []WorkspaceID { return nil }, want: []string{"a/head-1", "b/head-2"}},
+		{name: "only the scoped workspace", scope: func(a, b WorkspaceID) []WorkspaceID { return []WorkspaceID{b} }, want: []string{"b/head-2"}},
+		{name: "several scoped workspaces", scope: func(a, b WorkspaceID) []WorkspaceID { return []WorkspaceID{a, b} }, want: []string{"a/head-1", "b/head-2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			a, b := testWorkspace(t, s), testWorkspace(t, s)
+			for _, row := range []DurableFeedRow{
+				durableRow(a.ID, "head-1", "2.a", "a-head"),
+				durableRow(a.ID, "tab-1", "2.b", "a-tab"),
+				durableRow(b.ID, "head-2", "2.a", "b-head"),
+			} {
+				if err := s.PutDurableFeedRow(context.Background(), row); err != nil {
+					t.Fatalf("PutDurableFeedRow: %v", err)
+				}
+			}
+			names := map[WorkspaceID]string{a.ID: "a", b.ID: "b"}
+
+			// Act
+			got, err := s.MatchDurableFeedRows(context.Background(), tc.scope(a.ID, b.ID), func(_ WorkspaceID, id string) bool {
+				return id == "head-1" || id == "head-2"
+			})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("MatchDurableFeedRows: %v", err)
+			}
+			var drawn []string
+			for _, row := range got {
+				drawn = append(drawn, names[row.Workspace]+"/"+row.RowID)
+				if want := names[row.Workspace] + "-head"; string(row.Row) != want || row.OrderKey != "2.a" || row.Plane != 2 {
+					t.Errorf("row %s = %+v, want it whole (%q at 2.a)", row.RowID, row, want)
+				}
+			}
+			slices.Sort(drawn)
+			if !slices.Equal(drawn, tc.want) {
+				t.Fatalf("matched %v, want %v", drawn, tc.want)
 			}
 		})
 	}

@@ -1369,6 +1369,18 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   it (`cause`). `integration/merge_placement_test.go`
   pins the invariant; design record
   `docs/protobuf-design/merge-bubble-tail.md` (repository root).
+- **A BUBBLE IS LIVE EXACTLY WHILE ITS MERGE IS IN A QUEUE** (owner ruling,
+  2026-11-21; `livebubbles.go`). The stored queue is the one fact a bubble's
+  life is read from. The head book knows every live bubble: those this daemon
+  drew, and those the durable store holds live, seeded at boot (`Recover`)
+  and at adoption (`seedLiveBubbles`). Every queue publication
+  (`republishQueue`), the boot and an adoption end each live bubble whose
+  ledger no stored queue entry names (`endBubblesOffQueue`): its head on the
+  abandoned terminal, settled, and every running tab settled failed. An exit
+  still draws its own terminal, which replaces that one, so no exit's
+  omission leaves a bubble live and none survives a restart. A head the store
+  already holds settled (another daemon's terminal) is only forgotten. INFO
+  `daemon.merge.live_bubbles` names each bubble ended.
 - **THE PROCESS, IN ORDER** (`process.go`): preprocessing; rebasing k/n, one
   commit per step (`gitclient.StartRebase` / `ContinueRebase`); a conflict is
   resolved by the requester's own session, and a give-up FAILS the merge in

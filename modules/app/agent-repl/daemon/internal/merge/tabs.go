@@ -375,10 +375,17 @@ type headBook struct {
 	// ledger identity is minted once and never reused, so the set only grows,
 	// by one per merge resolved in this daemon's life.
 	resolved map[ids.LeaseID]bool
+	// live are the ledgers whose bubble stands live, each with the workspace
+	// whose feed draws it: every live head this daemon drew, and every one the
+	// store held live when this daemon took the workspace (seedLiveBubbles).
+	// A bubble leaves it as its head is drawn with an outcome, and every
+	// queue publication ends the ones no stored queue entry names
+	// (endBubblesOffQueue, livebubbles.go).
+	live map[ids.LeaseID]ids.WorkspaceID
 }
 
 func newHeadBook() headBook {
-	return headBook{last: map[ids.WorkspaceID]headArgs{}, resolved: map[ids.LeaseID]bool{}}
+	return headBook{last: map[ids.WorkspaceID]headArgs{}, resolved: map[ids.LeaseID]bool{}, live: map[ids.LeaseID]ids.WorkspaceID{}}
 }
 
 // headCause names which caller published a merge head, so every
@@ -473,10 +480,13 @@ func (o *orchestrator) drawHead(ws ids.WorkspaceID, head headArgs, cause headCau
 		return
 	}
 	o.heads.last[ws] = head
-	if !headIsLive(head.result) {
-		o.heads.resolved[head.lease] = true
-	}
 	at := o.bubbleOf(ws)
+	if headIsLive(head.result) {
+		o.heads.live[head.lease] = at.ws
+	} else {
+		o.heads.resolved[head.lease] = true
+		delete(o.heads.live, head.lease)
+	}
 	row := headRow(at.ws, head.lease, head.line, o.headPullRequest(ws, at, head.line), head.startedMS, head.result)
 	row.GetActivity().GetMerge().Head.Mode = o.headMode(ws, at)
 	pinned := headIsLive(head.result) && !at.async()

@@ -476,6 +476,9 @@ func (o *orchestrator) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) e
 // holds.
 func (o *orchestrator) adoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
 	const op = "daemon.merge.adopt"
+	if err := o.seedLiveBubbles(ctx, []ids.WorkspaceID{ws}); err != nil {
+		return fmt.Errorf("merge: adopt the live bubbles of %q: %w", ws, err)
+	}
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read the merge queues to take the workspace's merges", dlog.Context{
@@ -523,6 +526,9 @@ func (o *orchestrator) adoptWorkspace(ctx context.Context, ws ids.WorkspaceID) e
 			return err
 		}
 		o.kick(repo)
+	}
+	if err := o.endBubblesOffQueue(ctx, "adopt"); err != nil {
+		return err
 	}
 	o.deps.Log.Global().Info(op, "took the workspace's merges", dlog.Context{
 		"workspace": string(ws), "entries": len(repos)})
