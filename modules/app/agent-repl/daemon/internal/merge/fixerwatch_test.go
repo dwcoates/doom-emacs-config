@@ -149,7 +149,7 @@ func TestAFixerThatStoppedButCannotBeEscalatedHoldsTheQueueLoudly(t *testing.T) 
 
 	// Assert
 	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the mediator stopped without a fix but its check could not be escalated; the queue stays held"})
+		Message: "the deploy mediator stopped without a fix, and its check could not be read to escalate it; the check is escalated to the user"})
 	if !ok || rec.Context["error"] != "database is locked" || rec.Context["mediator"] != "ws-fixer" {
 		t.Fatalf("records = %v, want the failed escalation recorded with its cause", h.logs.Records())
 	}
@@ -248,5 +248,48 @@ func TestAFixTurnTheUserInterruptedIsNotEscalated(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
 		Message: "the user interrupted the mediator's fix turn; the fix is left to the user's turns with the mediator, and nothing is escalated"}); !ok {
 		t.Fatalf("records = %v, want the interrupt recorded", h.logs.Records())
+	}
+}
+
+// TestAFixerWatchThatFailsEscalatesTheCheck pins that the fixer watch's
+// failures escalate the dispatched check rather than only logging a hold: a
+// fix turn never brought on ends with no edge, so nothing would run the
+// watch again.
+func TestAFixerWatchThatFailsEscalatesTheCheck(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		what    string
+		cause   string
+	}{
+		{name: "a finish that cannot be read", what: "could not read whether the deploy mediator's finish is under way", cause: "database is locked",
+			arrange: func(t *testing.T, h *harness) {
+				setDB(h, func(db *fakeDB) { db.remediationFinishesErr = errors.New("database is locked") })()
+			}},
+		{name: "a fix brief that cannot be brought on", what: "could not tell where the deploy mediator's fix turn stands", cause: "queue closed",
+			arrange: func(t *testing.T, h *harness) {
+				brief := wsm.FixerTurn{ID: "turn-unsent", Brief: "the gate failed; fix it", Origin: int32(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR)}
+				if ok, err := h.db.RecordFixerTurn(context.Background(), mediationKey(h), deployStarted, brief); err != nil || !ok {
+					t.Fatalf("RecordFixerTurn = (%v, %v)", ok, err)
+				}
+				onBriefThenNext(h, brief.Brief, setQueueErr(h, errors.New("queue closed")), setQueueErr(h, nil))
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			tt.arrange(t, h)
+
+			// Act
+			h.o.watchFixer(context.Background(), queueOf(t, h), *owedCheck(t, h), dlog.Context{"repo": string(mediationKey(h))})
+
+			// Assert
+			setDB(h, func(db *fakeDB) { db.remediationFinishesErr = nil })()
+			assertRoundFailureEscalated(t, h, tt.what, tt.cause)
+			if owedCheck(t, h).Dispatched {
+				t.Fatalf("check %+v, want the dispatch over with the escalation", owedCheck(t, h))
+			}
+		})
 	}
 }

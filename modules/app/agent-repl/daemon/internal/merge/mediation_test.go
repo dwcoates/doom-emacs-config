@@ -266,6 +266,9 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 	}
 }
 
+// TestAMediatorThatCannotBeMadeLeavesTheQueueHeld pins the one failed round
+// that cannot be escalated: no mediator stands to hold the escalation
+// (roundFailed), so the check stays owed and the failure is recorded.
 func TestAMediatorThatCannotBeMadeLeavesTheQueueHeld(t *testing.T) {
 	// Arrange
 	h := checked(t)
@@ -280,7 +283,7 @@ func TestAMediatorThatCannotBeMadeLeavesTheQueueHeld(t *testing.T) {
 		t.Fatalf("check %+v, want it still owed and untold", m)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the deploy mediator could not be found or made; the queue stays held for it"}); !ok {
+		Message: "the deploy mediator could not be found, made or readied for the check; no deploy mediator could be found or made to escalate the check to, and the queue stays held for it"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }
@@ -366,7 +369,11 @@ func TestADispatchedCheckHasNoRound(t *testing.T) {
 	}
 }
 
-func TestARoundWhoseTurnCannotBeAwaitedKeepsTheQueueHeld(t *testing.T) {
+// TestARoundWhoseTurnCannotBeAwaitedEscalatesTheCheck pins that a round
+// that loses its await of the mediator's turn escalates the check: no round
+// awaits that turn now, so nothing would settle a turn that ends deciding
+// nothing, and the check would hold the queue in silence.
+func TestARoundWhoseTurnCannotBeAwaitedEscalatesTheCheck(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(t *testing.T, h *harness)
@@ -391,14 +398,34 @@ func TestARoundWhoseTurnCannotBeAwaitedKeepsTheQueueHeld(t *testing.T) {
 			h.o.Mediate(context.Background())
 
 			// Assert
-			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-				Message: "the intake's turn could not be awaited; the queue stays held until the next round"}); !ok {
-				t.Fatalf("records = %v, want the failed await at ERROR", h.logs.Records())
-			}
-			if m := owedCheck(t, h); m == nil {
-				t.Fatal("the failed await released the check and let the queue through")
-			}
+			assertRoundFailureEscalated(t, h, "the deploy mediator's turn on the check could not be awaited", "the session watcher is gone")
 		})
+	}
+}
+
+// assertRoundFailureEscalated asserts that a check whose round failed, WHAT
+// failing with CAUSE, holds the queue as an escalation told to the mediator,
+// whose summary names WHAT and CAUSE; the user was notified; the failure is
+// recorded at ERROR with its cause; and the mediator was sent one brief that
+// the check could not run, naming WHAT and CAUSE verbatim.
+func assertRoundFailureEscalated(t *testing.T, h *harness, what, cause string) {
+	t.Helper()
+	if got := heldEscalation(t, h); got != "ws-fixer" {
+		t.Fatalf("check %+v waits on %q, want its escalation told to the mediator", owedCheck(t, h), got)
+	}
+	if brief := owedCheck(t, h).EscalationBrief; !strings.Contains(brief, "the deploy check could not run: "+what) || !strings.Contains(brief, cause) {
+		t.Fatalf("the escalation says %q, want it to name %q and its cause %q", brief, what, cause)
+	}
+	if !h.bannerRaisedFor(desktopnotify.KindDeployMediated, "ws-fixer") {
+		t.Fatal("the user was not told the check could not run")
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: what + "; the check is escalated to the user"})
+	if !ok || !strings.Contains(fmt.Sprint(record.Context["error"]), cause) || record.Context["repo"] != string(mediationKey(h)) {
+		t.Fatalf("records = %v, want the failure at ERROR with its cause and its repository", h.logs.Records())
+	}
+	notRun := submissionsTo(h, "ws-fixer", BriefDeployCheckNotRun+" ")
+	if len(notRun) != 1 || !strings.Contains(submittedText(notRun[0]), what) || !strings.Contains(submittedText(notRun[0]), cause) {
+		t.Fatalf("the mediator was sent %v, want one brief that the check could not run, naming %q and %q", h.queue.submissions, what, cause)
 	}
 }
 
@@ -941,7 +968,11 @@ func TestTheMediatorsStandingIsRecordedBeforeItsEffortStartsItsSession(t *testin
 	}
 }
 
-func TestAnIntakeWhoseEffortCannotBeSetIsNotTold(t *testing.T) {
+// TestAnIntakeWhoseEffortCannotBeSetIsToldTheCheckCouldNotRun pins the
+// 2026-11-21 incident's round with a real failure of the effort (a level
+// the selector never offered): the mediator is never told of the deploy as
+// a check, but the check is escalated and the mediator told what failed.
+func TestAnIntakeWhoseEffortCannotBeSetIsToldTheCheckCouldNotRun(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
@@ -951,13 +982,10 @@ func TestAnIntakeWhoseEffortCannotBeSetIsNotTold(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if len(h.queue.submissions) != 0 || owedCheck(t, h) == nil {
-		t.Fatalf("submitted %d, want no brief and the check still owed", len(h.queue.submissions))
+	if len(intakeTellings(h)) != 0 {
+		t.Fatalf("told the intake of the deploy %d times, want never", len(intakeTellings(h)))
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the deploy mediator could not be found or made; the queue stays held for it"}); !ok {
-		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
-	}
+	assertRoundFailureEscalated(t, h, "the deploy mediator could not be found, made or readied for the check", "no catalog")
 }
 
 // resumingBriefs is every resuming brief the harness submitted to the intake.
@@ -1018,26 +1046,34 @@ func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) 
 	}
 }
 
-func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
+func TestAnUndecidedIntakeThatCannotBeResumedEscalatesTheCheck(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
-		message string
+		what    string
+		cause   string
 	}{
-		{name: "a resume that cannot be recorded", message: "could not record that the undecided intake is resumed; the queue stays held",
+		{name: "a resume that cannot be recorded", what: "could not record that the undecided deploy mediator is resumed", cause: "database is locked",
 			arrange: func(h *harness) {
 				h.db.mu.Lock()
 				h.db.resumeMarkErr = errors.New("database is locked")
 				h.db.mu.Unlock()
 			}},
-		{name: "a resuming brief that cannot be submitted", message: "the undecided intake's resuming brief could not be submitted; the queue stays held",
+		{name: "a resuming brief that cannot be submitted", what: "the undecided deploy mediator's resuming brief could not be submitted", cause: "queue closed",
 			arrange: func(h *harness) {
 				h.queue.onSubmit = func(sub promptqueue.Submission) {
 					if !strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
 						return
 					}
+					// THE QUEUE TAKES PROMPTS AGAIN once the resuming brief
+					// was refused, so the escalation's brief is taken.
 					h.queue.mu.Lock()
 					h.queue.err = errors.New("queue closed")
+					h.queue.onSubmit = func(promptqueue.Submission) {
+						h.queue.mu.Lock()
+						h.queue.err = nil
+						h.queue.mu.Unlock()
+					}
 					h.queue.mu.Unlock()
 				}
 			}},
@@ -1053,15 +1089,7 @@ func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
 			h.o.Mediate(context.Background())
 
 			// Assert
-			if owedCheck(t, h) == nil {
-				t.Fatal("the check was released, want the queue held")
-			}
-			if slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-fixer" }) {
-				t.Fatalf("made %v, want no escalation", h.checks.made)
-			}
-			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
-				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
-			}
+			assertRoundFailureEscalated(t, h, tt.what, tt.cause)
 		})
 	}
 }
@@ -1354,7 +1382,7 @@ func TestAnAwaitCutByTheIntakesOwnDecisionIsNoFailure(t *testing.T) {
 		{name: "a decision released the check before the await failed", decide: true, wantLevel: "info",
 			message: "the intake's turn could not be awaited after its check was decided; the check is decided"},
 		{name: "the session ended with the check still owed", wantLevel: "error",
-			message: "the intake's turn could not be awaited; the queue stays held until the next round"},
+			message: "the deploy mediator's turn on the check could not be awaited; the check is escalated to the user"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1512,5 +1540,134 @@ func TestARoundFailureWithNoMediatorToEscalateToLeavesTheCheckOwed(t *testing.T)
 	}
 	if _, err := h.o.owedMediation(context.Background(), mediationKey(h)); err != nil {
 		t.Fatalf("owedMediation = %v, want the queue's status still readable", err)
+	}
+}
+
+// onBriefThenNext runs RUN as the first prompt opening with PREFIX is
+// submitted, before the queue answers it, and THEN as each later prompt is.
+func onBriefThenNext(h *harness, prefix string, run, then func()) {
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if !strings.HasPrefix(submittedText(sub), prefix) {
+			return
+		}
+		run()
+		h.queue.mu.Lock()
+		h.queue.onSubmit = func(promptqueue.Submission) { then() }
+		h.queue.mu.Unlock()
+	}
+}
+
+// setDB sets one of the fake store's knobs under its lock.
+func setDB(h *harness, set func(db *fakeDB)) func() {
+	return func() {
+		h.db.mu.Lock()
+		defer h.db.mu.Unlock()
+		set(h.db)
+	}
+}
+
+// setQueueErr sets the fake queue's answer to ERR under its lock.
+func setQueueErr(h *harness, err error) func() {
+	return func() {
+		h.queue.mu.Lock()
+		defer h.queue.mu.Unlock()
+		h.queue.err = err
+	}
+}
+
+// TestEveryRoundFailureShortOfTellingEscalatesTheCheck pins invariant 2 of
+// the 2026-11-21 incident: after any round, the check is told to the
+// mediator, escalated to the user, or its round was cut. Each site that only
+// logged "the queue stays held" left a hold nothing reran; each now escalates
+// the check and tells the mediator what failed (roundFailed).
+func TestEveryRoundFailureShortOfTellingEscalatesTheCheck(t *testing.T) {
+	quiet := func(h *harness) {
+		h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, nil }
+	}
+	tests := []struct {
+		name         string
+		arrange      func(h *harness)
+		what         string
+		cause        string
+		wantPrompted bool
+	}{
+		{name: "a telling that cannot be recorded", what: "could not record that the deploy mediator is told of the deploy", cause: "database is locked",
+			arrange: func(h *harness) { setDB(h, func(db *fakeDB) { db.promptMarkErr = errors.New("database is locked") })() }},
+		{name: "a told window that cannot be recorded", what: "could not record the window the deploy mediator is told", cause: "disk gone", wantPrompted: true,
+			arrange: func(h *harness) { setDB(h, func(db *fakeDB) { db.windowErr = errors.New("disk gone") })() }},
+		{name: "a brief that cannot be submitted", what: "the deploy mediator's brief of the check could not be submitted", cause: "queue closed", wantPrompted: true,
+			arrange: func(h *harness) {
+				onBriefThenNext(h, BriefDeployIntake+" ", setQueueErr(h, errors.New("queue closed")), setQueueErr(h, nil))
+			}},
+		{name: "a check that cannot be read as the mediator's turn ends", what: "could not read the check the deploy mediator's turn ended on", cause: "database is locked", wantPrompted: true,
+			arrange: func(h *harness) {
+				onBriefThenNext(h, BriefDeployIntake+" ",
+					setDB(h, func(db *fakeDB) { db.mediationErr = errors.New("database is locked") }),
+					setDB(h, func(db *fakeDB) { db.mediationErr = nil }))
+			}},
+		{name: "a told window that cannot be read as the resumed turn ends", what: "could not read the window of the check the deploy mediator's turn ended on", cause: "database is locked", wantPrompted: true,
+			arrange: func(h *harness) {
+				onBriefThenNext(h, BriefDeployIntakeResumed,
+					setDB(h, func(db *fakeDB) { db.windowReadErr = errors.New("database is locked") }),
+					setDB(h, func(db *fakeDB) { db.windowReadErr = nil }))
+			}},
+		{name: "a quiet window that cannot be recorded as read", what: "the quiet check's window could not be recorded as read", cause: "disk gone",
+			arrange: func(h *harness) {
+				quiet(h)
+				setDB(h, func(db *fakeDB) { db.windowErr = errors.New("disk gone") })()
+			}},
+		{name: "a quiet check that cannot be released", what: "the quiet check could not be released", cause: "database is locked",
+			arrange: func(h *harness) {
+				quiet(h)
+				setDB(h, func(db *fakeDB) { db.mediationReleaseErr = errors.New("database is locked") })()
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			tt.arrange(h)
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			assertRoundFailureEscalated(t, h, tt.what, tt.cause)
+			if m := owedCheck(t, h); m.Prompted() != tt.wantPrompted || m.Dispatched {
+				t.Fatalf("check %+v, want it told as a check %v and nothing dispatched", m, tt.wantPrompted)
+			}
+		})
+	}
+}
+
+func TestARoundFailureTheDaemonsExitCutIsNotEscalated(t *testing.T) {
+	// Arrange: the daemon's exit stops the mediation as the brief is
+	// submitted, and the submission comes back cut.
+	h := checked(t)
+	owe(t, h)
+	onBriefThenNext(h, BriefDeployIntake+" ", func() {
+		h.o.stopMediation()
+		setQueueErr(h, context.Canceled)()
+	}, func() {})
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if m := owedCheck(t, h); m == nil || m.Escalated() {
+		t.Fatalf("check %+v, want it still owed and not escalated", m)
+	}
+	if h.bannerRaised(desktopnotify.KindDeployMediated) || len(submissionsTo(h, "ws-fixer", BriefDeployCheckNotRun+" ")) != 0 {
+		t.Fatal("the user or the mediator was told of a round the daemon's exit cut")
+	}
+	if records := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation}); len(records) != 0 {
+		t.Fatalf("error records = %v, want the cut recorded at INFO only", records)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "the mediation was cut by the daemon's exit; the next boot's pass runs it again"}); !ok {
+		t.Fatalf("records = %v, want the cut round recorded at INFO", h.logs.Records())
 	}
 }
