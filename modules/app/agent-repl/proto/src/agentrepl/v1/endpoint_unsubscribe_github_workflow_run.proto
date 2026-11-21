@@ -1,0 +1,54 @@
+// endpoint_unsubscribe_github_workflow_run.proto —
+// UnsubscribeGithubWorkflowRun: end one workspace's subscription to a GitHub
+// workflow run before the run finishes. AGENT API section.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/github_workflow_run.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UnsubscribeGithubWorkflowRunRequest {
+  // The workspace whose subscription ends.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The run it waits on.
+  GithubWorkflowRunRef run = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message UnsubscribeGithubWorkflowRunResponse {
+  oneof result {
+    UnsubscribeGithubWorkflowRunSuccess success = 1;
+    UnsubscribeGithubWorkflowRunError error = 2;
+  }
+}
+
+// The request was served. Holding no such subscription is an answer, not a
+// failure: either way the subscriber now holds none.
+message UnsubscribeGithubWorkflowRunSuccess {
+  // THE ARM IS WHAT WAS FOUND.
+  oneof ended {
+    // The subscription ended.
+    UnsubscribeGithubWorkflowRunSuccessUnsubscribed unsubscribed = 1;
+    // There was no subscription to end.
+    UnsubscribeGithubWorkflowRunSuccessNotSubscribed not_subscribed = 2;
+  }
+}
+
+// Ended. DELIBERATELY EMPTY.
+message UnsubscribeGithubWorkflowRunSuccessUnsubscribed {}
+
+// None held. DELIBERATELY EMPTY.
+message UnsubscribeGithubWorkflowRunSuccessNotSubscribed {}
+
+message UnsubscribeGithubWorkflowRunError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    UnsubscribeGithubWorkflowRunUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message UnsubscribeGithubWorkflowRunUnknownSubscriber {}

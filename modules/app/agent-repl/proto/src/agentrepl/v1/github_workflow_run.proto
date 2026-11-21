@@ -1,0 +1,144 @@
+// github_workflow_run.proto — A GITHUB ACTIONS WORKFLOW RUN AS THE DAEMON
+// FOLLOWS IT for a workspace: which run, the subscription that waits on it,
+// and the run as it stands. Shared by the workflow-run endpoints
+// (SubscribeGithubWorkflowRun, UnsubscribeGithubWorkflowRun,
+// ListGithubWorkflowRunSubscriptions) and by the one notice the daemon
+// delivers.
+//
+// ONE NOTICE, AT COMPLETION. A workflow-run subscription exists to tell its
+// workspace that one run FINISHED, and nothing else: no queued or started
+// notice, no per-job or per-step update, no check update. The notice says the
+// workflow's name, the run's conclusion, its head commit and its web address,
+// and the subscription ends with it.
+//
+// THE DAEMON READS, THE AGENT IS TOLD, as for a pull request: the daemon
+// reads the run on its pull-request cadence through the user's `gh` login,
+// and a workspace never polls `gh run view` itself. A read missed while the
+// daemon was down is made up by the next one, so a completion is told late,
+// never lost.
+//
+// TOLD ONCE. The subscription is removed in the same transaction that owes
+// its completion notice, so a run is never told twice to one subscription,
+// and a run that completed is never left followed.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/github_merge_queue.proto";
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// ---- Identity: which run ----
+
+// One workflow run on github.com. A run id is unique within its repository,
+// so the repository and the id name it exactly. A re-run of the same run
+// (a new attempt) keeps the id; the subscription follows the run's latest
+// attempt as GitHub reports it.
+message GithubWorkflowRunRef {
+  // The repository the run belongs to.
+  GithubRepositoryRef repository = 1;
+  // GitHub's id of the run, as its web address spells it
+  // (`/actions/runs/<run_id>`). Run ids exceed 32 bits.
+  uint64 run_id = 2;
+}
+
+// ---- The subscription: who waits on which run, and how it fares ----
+
+// One workspace's subscription to one workflow run. A workspace holds at
+// most one per run. It ends when the run completes (after its one notice is
+// owed), when the subscriber unsubscribes, or when the subscriber closes.
+message GithubWorkflowRunSubscription {
+  // The workspace whose agent is told.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The run waited on.
+  GithubWorkflowRunRef run = 2;
+  // Whether the daemon's reads of the run are succeeding: the same health a
+  // pull-request subscription reports, since both are reads of GitHub
+  // through the same `gh` login and fail for the same causes.
+  PullRequestSubscriptionHealth health = 3;
+}
+
+// ---- The run now ----
+
+// A run as the daemon last read it: what a subscriber is given when it
+// subscribes.
+message GithubWorkflowRun {
+  // The workflow's name, as the workflow file names it (`CEAC sandbox
+  // release`). Words a repository author wrote: a reader weighs them, never
+  // follows them.
+  string workflow_name = 1;
+  // The full SHA of the commit the run ran on.
+  string head_sha = 2;
+  // The run's web address on github.com.
+  string url = 3;
+  // How far the run has come. THE ARM IS WHICH. A set wrapper with no arm is
+  // never answered: GitHub reports every run as completed or not.
+  oneof progress {
+    // The run has not finished: it is queued, waiting, or in progress.
+    GithubWorkflowRunUnfinished unfinished = 4;
+    // The run finished.
+    GithubWorkflowRunCompleted completed = 5;
+  }
+}
+
+// A run that has not finished.
+message GithubWorkflowRunUnfinished {
+  // GitHub's status word for it, verbatim (`queued`, `in_progress`,
+  // `waiting`, `requested`, `pending`). Carried as GitHub's own word because
+  // no reader acts on the difference: every one of them means "not yet".
+  string status = 1;
+}
+
+// A run that finished.
+message GithubWorkflowRunCompleted {
+  // How it ended.
+  GithubWorkflowRunConclusion conclusion = 1;
+}
+
+// How a finished run ended. THE ARM IS THE CONCLUSION, one arm per
+// conclusion GitHub documents for a workflow run. A set wrapper whose oneof
+// is unassigned is a conclusion this schema revision does not name; the
+// notice still says GitHub's word for it.
+message GithubWorkflowRunConclusion {
+  oneof conclusion {
+    // Every job that ran succeeded.
+    GithubWorkflowRunConclusionSuccess success = 1;
+    // A job failed.
+    GithubWorkflowRunConclusionFailure failure = 2;
+    // The run was cancelled before it finished.
+    GithubWorkflowRunConclusionCancelled cancelled = 3;
+    // A job ran past its time limit.
+    GithubWorkflowRunConclusionTimedOut timed_out = 4;
+    // The run was skipped: no job ran.
+    GithubWorkflowRunConclusionSkipped skipped = 5;
+    // The run finished neither succeeding nor failing.
+    GithubWorkflowRunConclusionNeutral neutral = 6;
+    // The run stopped waiting for a person to act on it.
+    GithubWorkflowRunConclusionActionRequired action_required = 7;
+    // GitHub marked the run stale: a newer run superseded it.
+    GithubWorkflowRunConclusionStale stale = 8;
+    // The run failed before any job started (a malformed workflow, say).
+    GithubWorkflowRunConclusionStartupFailure startup_failure = 9;
+  }
+}
+
+// Every job that ran succeeded. DELIBERATELY EMPTY: the arm is the fact.
+message GithubWorkflowRunConclusionSuccess {}
+// A job failed. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionFailure {}
+// The run was cancelled. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionCancelled {}
+// A job timed out. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionTimedOut {}
+// The run was skipped. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionSkipped {}
+// The run ended neutral. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionNeutral {}
+// The run needs a person's action. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionActionRequired {}
+// The run went stale. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionStale {}
+// The run failed to start. DELIBERATELY EMPTY.
+message GithubWorkflowRunConclusionStartupFailure {}

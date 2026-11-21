@@ -208,6 +208,9 @@ var cliNouns = map[string]map[string]cliCommand{
 		"gh-queue-subscribe":     {usage: "gh-queue-subscribe WS [-repository OWNER/REPO] [-branch BRANCH]", run: workspaceGithubQueueSubscribe},
 		"gh-queue-unsubscribe":   {usage: "gh-queue-unsubscribe WS -queue OWNER/REPO@BRANCH", run: workspaceGithubQueueUnsubscribe},
 		"gh-queue-subscriptions": {usage: "gh-queue-subscriptions WS", run: workspaceGithubQueueSubscriptions},
+		"run-subscribe":          {usage: "run-subscribe WS -run URL|ID [-repository OWNER/REPO]", run: workspaceGithubRunSubscribe},
+		"run-unsubscribe":        {usage: "run-unsubscribe WS -run URL|ID [-repository OWNER/REPO]", run: workspaceGithubRunUnsubscribe},
+		"run-subscriptions":      {usage: "run-subscriptions WS", run: workspaceGithubRunSubscriptions},
 		"notify":                 {usage: "notify WS TEXT", run: workspaceNotify},
 		"pass-gate":              {usage: "pass-gate WS", run: workspacePassGate},
 		"keep-live":              {usage: "keep-live WS", run: workspaceKeepLive},
@@ -2113,8 +2116,8 @@ func workspaceGithubQueueSubscribe(c *cliCall, args []string) int {
 	req := &agentreplv1.SubscribeGithubMergeQueueRequest{Subscriber: subscriber,
 		Repository: &agentreplv1.SubscribeGithubMergeQueueRequest_Subscribers{Subscribers: &agentreplv1.SubscribeGithubMergeQueueSubscribersRepository{}}}
 	if *repository != "" {
-		owner, repo, found := strings.Cut(*repository, "/")
-		if !found || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		owner, repo, ok := repositoryFlag(*repository)
+		if !ok {
 			return c.usageFailed("-repository is OWNER/REPO, not %q", *repository)
 		}
 		req.Repository = &agentreplv1.SubscribeGithubMergeQueueRequest_Named{Named: &agentreplv1.GithubRepositoryRef{Owner: owner, Repo: repo}}
@@ -2155,6 +2158,120 @@ func workspaceGithubQueueSubscriptions(c *cliCall, args []string) int {
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.ListGithubMergeQueueSubscriptionsResponse) (string, error) {
 		return describeGithubQueueSubscriptionsRefusal(named, msg.GetError())
 	})
+}
+
+// workspaceGithubRunSubscribe subscribes WS's agent to one GitHub Actions
+// workflow run's completion: -run's address, or its id in -repository (WS's
+// own repository when unset).
+func workspaceGithubRunSubscribe(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	run := fs.String("run", "", "the run: its github.com address, or its id")
+	repository := fs.String("repository", "", "the repository of a run named by its id, as OWNER/REPO; the workspace's own when unset")
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	req := &agentreplv1.SubscribeGithubWorkflowRunRequest{Subscriber: subscriber}
+	id, isID, problem := runIDFlag(*run, *repository)
+	switch {
+	case problem != "":
+		return c.usageFailed("%s", problem)
+	case !isID:
+		req.Run = &agentreplv1.SubscribeGithubWorkflowRunRequest_Url{Url: strings.TrimSpace(*run)}
+	case *repository == "":
+		req.Run = &agentreplv1.SubscribeGithubWorkflowRunRequest_InSubscribersRepository{InSubscribersRepository: &agentreplv1.SubscribeGithubWorkflowRunInSubscribersRepository{RunId: id}}
+	default:
+		ref, problem := runRefFlag(*run, *repository)
+		if problem != "" {
+			return c.usageFailed("%s", problem)
+		}
+		req.Run = &agentreplv1.SubscribeGithubWorkflowRunRequest_Named{Named: ref}
+	}
+	resp, err := c.client.SubscribeGithubWorkflowRun(c.ctx, connect.NewRequest(req))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubscribeGithubWorkflowRunResponse) (string, error) {
+		return describeGithubRunSubscribeRefusal(named, msg.GetError())
+	})
+}
+
+func workspaceGithubRunUnsubscribe(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	run := fs.String("run", "", "the run: its github.com address, or its id with -repository")
+	repository := fs.String("repository", "", "the repository of a run named by its id, as OWNER/REPO")
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	ref, problem := runRefFlag(*run, *repository)
+	if problem != "" {
+		return c.usageFailed("%s", problem)
+	}
+	resp, err := c.client.UnsubscribeGithubWorkflowRun(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribeGithubWorkflowRunRequest{Subscriber: subscriber, Run: ref}))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UnsubscribeGithubWorkflowRunResponse) (string, error) {
+		return describeGithubRunUnsubscribeRefusal(named, msg.GetError())
+	})
+}
+
+func workspaceGithubRunSubscriptions(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	resp, err := c.client.ListGithubWorkflowRunSubscriptions(c.ctx, connect.NewRequest(&agentreplv1.ListGithubWorkflowRunSubscriptionsRequest{Subscriber: subscriber}))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ListGithubWorkflowRunSubscriptionsResponse) (string, error) {
+		return describeGithubRunSubscriptionsRefusal(named, msg.GetError())
+	})
+}
+
+// runIDFlag reads a -run that may be a bare run id, answering the id and
+// true for one, false for anything else (an address, which the daemon
+// reads), or why the pair of flags names no run.
+func runIDFlag(run, repository string) (uint64, bool, string) {
+	text := strings.TrimSpace(run)
+	if text == "" {
+		return 0, false, "-run names the run: its github.com address, or its id"
+	}
+	id, err := strconv.ParseUint(text, 10, 64)
+	if err != nil {
+		if repository != "" {
+			return 0, false, "-repository goes with a run named by its id, not its address"
+		}
+		return 0, false, ""
+	}
+	if id == 0 {
+		return 0, false, "-run's id is not zero"
+	}
+	return id, true, ""
+}
+
+// repositoryFlag reads a -repository spelled OWNER/REPO.
+func repositoryFlag(text string) (owner, repo string, ok bool) {
+	owner, repo, found := strings.Cut(text, "/")
+	if !found || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		return "", "", false
+	}
+	return owner, repo, true
+}
+
+// runRefFlag reads a -run naming a run exactly: its address, or its id with
+// -repository.
+func runRefFlag(run, repository string) (*agentreplv1.GithubWorkflowRunRef, string) {
+	id, isID, problem := runIDFlag(run, repository)
+	switch {
+	case problem != "":
+		return nil, problem
+	case !isID:
+		key, err := prwatch.ParseRunURL(run)
+		if err != nil {
+			return nil, fmt.Sprintf("-run is a github.com workflow run address or an id, not %q", run)
+		}
+		return prwatch.RunRefProto(key), ""
+	}
+	owner, repo, ok := repositoryFlag(repository)
+	if !ok {
+		return nil, fmt.Sprintf("-repository is OWNER/REPO, not %q", repository)
+	}
+	return prwatch.RunRefProto(wsm.GithubWorkflowRunKey{Owner: owner, Repo: repo, RunID: id}), ""
 }
 
 // workspacePullRequestComment posts a comment on a pull request for WS,

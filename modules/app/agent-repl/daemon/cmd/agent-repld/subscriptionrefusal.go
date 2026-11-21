@@ -92,7 +92,7 @@ func describeGithubQueueSubscribeRefusal(subscriber string, e *agentreplv1.Subsc
 	case *agentreplv1.SubscribeGithubMergeQueueError_SubscriberClosed:
 		return saySubscriberClosed(subscriber), nil
 	case *agentreplv1.SubscribeGithubMergeQueueError_NotOnGithub:
-		return fmt.Sprintf("%s's repository is not on github.com (its origin is %s)", subscriber, r.NotOnGithub.GetOrigin()), nil
+		return sayNotOnGithub(subscriber, r.NotOnGithub.GetOrigin()), nil
 	case *agentreplv1.SubscribeGithubMergeQueueError_NoMergeQueue:
 		q := r.NoMergeQueue.GetMergeQueue()
 		return fmt.Sprintf("GitHub runs no merge queue for %s/%s@%s, so there is nothing to follow", q.GetRepository().GetOwner(), q.GetRepository().GetRepo(), q.GetBranch()), nil
@@ -126,6 +126,51 @@ func describeGithubQueueSubscriptionsRefusal(subscriber string, e *agentreplv1.L
 		return sayNoWorkspace(subscriber), nil
 	}
 	return "", undescribed("listing the GitHub merge queues "+subscriber+" follows", e)
+}
+
+// describeGithubRunSubscribeRefusal says in one plain sentence why
+// SUBSCRIBER was not subscribed to a GitHub Actions workflow run. Every
+// SubscribeGithubWorkflowRunError arm has its own sentence.
+func describeGithubRunSubscribeRefusal(subscriber string, e *agentreplv1.SubscribeGithubWorkflowRunError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.SubscribeGithubWorkflowRunError_UnknownSubscriber:
+		return sayNoWorkspace(subscriber), nil
+	case *agentreplv1.SubscribeGithubWorkflowRunError_SubscriberClosed:
+		return saySubscriberClosed(subscriber), nil
+	case *agentreplv1.SubscribeGithubWorkflowRunError_Unparsable:
+		return fmt.Sprintf("%q names no workflow run (%s)", r.Unparsable.GetText(), r.Unparsable.GetReason()), nil
+	case *agentreplv1.SubscribeGithubWorkflowRunError_NotOnGithub:
+		return sayNotOnGithub(subscriber, r.NotOnGithub.GetOrigin()), nil
+	case *agentreplv1.SubscribeGithubWorkflowRunError_Unreadable:
+		why, err := sayGithubFailure(r.Unreadable.GetCause())
+		if err != nil {
+			return "", err
+		}
+		return "the workflow run could not be read, so whether it can be followed is unknown: " + why, nil
+	}
+	return "", undescribed("subscribing "+subscriber+" to a GitHub Actions workflow run", e)
+}
+
+// describeGithubRunUnsubscribeRefusal says in one plain sentence why
+// SUBSCRIBER was not unsubscribed from a GitHub Actions workflow run. Every
+// UnsubscribeGithubWorkflowRunError arm has its own sentence.
+func describeGithubRunUnsubscribeRefusal(subscriber string, e *agentreplv1.UnsubscribeGithubWorkflowRunError) (string, error) {
+	switch e.GetCause().(type) {
+	case *agentreplv1.UnsubscribeGithubWorkflowRunError_UnknownSubscriber:
+		return sayNoWorkspace(subscriber), nil
+	}
+	return "", undescribed("unsubscribing "+subscriber+" from a GitHub Actions workflow run", e)
+}
+
+// describeGithubRunSubscriptionsRefusal says in one plain sentence why
+// SUBSCRIBER's GitHub Actions workflow-run subscriptions were not listed.
+// Every ListGithubWorkflowRunSubscriptionsError arm has its own sentence.
+func describeGithubRunSubscriptionsRefusal(subscriber string, e *agentreplv1.ListGithubWorkflowRunSubscriptionsError) (string, error) {
+	switch e.GetCause().(type) {
+	case *agentreplv1.ListGithubWorkflowRunSubscriptionsError_UnknownSubscriber:
+		return sayNoWorkspace(subscriber), nil
+	}
+	return "", undescribed("listing the GitHub Actions workflow runs "+subscriber+" follows", e)
 }
 
 // describeCommentRefusal says in one plain sentence why no comment was posted

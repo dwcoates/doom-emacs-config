@@ -22,6 +22,9 @@ var subscriptionRefusals = func() []describedRefusal {
 	queue := &agentreplv1.SubscribeGithubMergeQueueError{}
 	unqueue := &agentreplv1.UnsubscribeGithubMergeQueueError{}
 	queues := &agentreplv1.ListGithubMergeQueueSubscriptionsError{}
+	run := &agentreplv1.SubscribeGithubWorkflowRunError{}
+	unrun := &agentreplv1.UnsubscribeGithubWorkflowRunError{}
+	runs := &agentreplv1.ListGithubWorkflowRunSubscriptionsError{}
 	comment := &agentreplv1.CommentOnPullRequestError{}
 	const closed = "ws is closed: it runs no agent to tell, and a subscription taken while closed would never end"
 	const notFoundSaid = "GitHub answered not found: it was deleted, renamed, or never readable to the gh login"
@@ -84,6 +87,27 @@ var subscriptionRefusals = func() []describedRefusal {
 		{name: "github queue subscriptions", empty: queues, oneof: "cause", cases: []refusalCase{unknown(queues)},
 			describe: func(e proto.Message) (string, error) {
 				return describeGithubQueueSubscriptionsRefusal("ws", e.(*agentreplv1.ListGithubMergeQueueSubscriptionsError))
+			}},
+		{name: "github workflow run", empty: run, oneof: "cause",
+			cases: []refusalCase{
+				unknown(run),
+				{name: "subscriber_closed", err: armed(run, "subscriber_closed", nil), want: closed},
+				{name: "unparsable", err: armedWith(run, "unparsable", map[string]any{"text": "runs/x", "reason": "no run id"}), want: `"runs/x" names no workflow run (no run id)`},
+				{name: "not_on_github", err: armedWith(run, "not_on_github", map[string]any{"origin": "git@gitlab.com:o/r"}),
+					want: "ws's repository is not on github.com (its origin is git@gitlab.com:o/r)"},
+				{name: "unreadable", err: armed(run, "unreadable", &agentreplv1.SubscribeGithubWorkflowRunUnreadable{Cause: notFound}),
+					want: "the workflow run could not be read, so whether it can be followed is unknown: " + notFoundSaid},
+			},
+			describe: func(e proto.Message) (string, error) {
+				return describeGithubRunSubscribeRefusal("ws", e.(*agentreplv1.SubscribeGithubWorkflowRunError))
+			}},
+		{name: "github workflow run unsubscribe", empty: unrun, oneof: "cause", cases: []refusalCase{unknown(unrun)},
+			describe: func(e proto.Message) (string, error) {
+				return describeGithubRunUnsubscribeRefusal("ws", e.(*agentreplv1.UnsubscribeGithubWorkflowRunError))
+			}},
+		{name: "github workflow run subscriptions", empty: runs, oneof: "cause", cases: []refusalCase{unknown(runs)},
+			describe: func(e proto.Message) (string, error) {
+				return describeGithubRunSubscriptionsRefusal("ws", e.(*agentreplv1.ListGithubWorkflowRunSubscriptionsError))
 			}},
 		{name: "comment", empty: comment, oneof: "cause",
 			cases: []refusalCase{

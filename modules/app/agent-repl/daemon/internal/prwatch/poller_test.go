@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -826,5 +827,59 @@ func TestNewRefusesAWatcherThatCannotRedrawLinks(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("New without LinksRedrawn = nil, want refused")
+	}
+}
+
+func TestDeliverKindStopsTheDeliveryWhenItsNoticesCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelled bool
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "a failed read", wantLevel: "error", wantMsg: "could not read the owed workflow-run notices; none is told this tick"},
+		{name: "a stopping daemon", cancelled: true, wantLevel: "debug", wantMsg: "the delivery stopped with its context"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			if tt.cancelled {
+				cancel()
+			} else {
+				defer cancel()
+			}
+			load := func(context.Context) ([]wsm.GithubWorkflowRunOwed, error) {
+				return []wsm.GithubWorkflowRunOwed{{Subscriber: r.ws, Run: runK, Pending: []string{"x."}}}, errors.New("store down")
+			}
+
+			// Act
+			delivered := deliverKind(ctx, r.w, r.prompts, "workflow-run", load, githubWorkflowRunNotice)
+
+			// Assert
+			if delivered || len(r.told()) != 0 {
+				t.Fatalf("delivered %v, told %q; want the delivery stopped with nothing told", delivered, r.told())
+			}
+			if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: opNotice, Message: tt.wantMsg}); !ok {
+				t.Fatalf("no %s record %q: %+v", tt.wantLevel, tt.wantMsg, r.log.Records())
+			}
+		})
+	}
+}
+
+func TestEveryNoticeKindIsDeliveredThroughDeliverKind(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("poller.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if n := strings.Count(string(src), "could not read the owed "); n != 1 {
+		t.Fatalf("poller.go reads owed notices in %d places; every kind goes through deliverKind", n)
+	}
+	if n := strings.Count(string(src), "deliverKind(ctx, w, prompts, "); n != 3 {
+		t.Fatalf("deliverOwed delivers %d kinds through deliverKind, want all 3", n)
 	}
 }

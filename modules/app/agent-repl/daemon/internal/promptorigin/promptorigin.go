@@ -49,8 +49,8 @@ func CheckSenderNamed(origin string, named bool) error {
 // the user neither said nor needs to read: a merge queue subscription's
 // notice, a workspace subscription's notice, the brief notice that a
 // workspace derived from this one was created, landed or closed, a GitHub
-// pull request's or GitHub merge queue's notice to the workspace following
-// it, and the brief asking a workspace that left its one-shot state to file
+// pull request's, GitHub merge queue's or GitHub workflow run's notice to
+// the workspace following it, and the brief asking a workspace that left its one-shot state to file
 // itself into a subsection. The agent's reply to it is drawn as any reply is.
 func Unseen(origin conversationv1.PromptOrigin) bool {
 	switch origin {
@@ -59,6 +59,7 @@ func Unseen(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:
 		return true
 	}

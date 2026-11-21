@@ -1,0 +1,144 @@
+// endpoint_subscribe_github_workflow_run.proto — SubscribeGithubWorkflowRun:
+// tell one workspace's agent, ONCE, when a GitHub Actions workflow run
+// finishes. AGENT API section.
+//
+// DELIVERY. The one notice is submitted to the subscriber's session as a
+// deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE: it
+// waits behind a running turn, wakes an idle agent, and the feed draws no row
+// for it. It names the workflow, the run's conclusion, the head commit and
+// the run's web address. No other notice is ever sent for the run, except
+// the one sentence every GitHub subscription is owed when GitHub rejects
+// agent-repl's credentials.
+//
+// A RUN ALREADY FINISHED is answered `already_completed`, and its notice is
+// delivered at once: no subscription is held.
+//
+// SCOPE AND LIFETIME. A subscriber holds at most one subscription per run;
+// subscribing again is an answer (`already_subscribed`). A subscription ends
+// with the run's completion, when the subscriber unsubscribes, or when it
+// closes however it closes. It is DURABLE across a daemon restart and a
+// handover.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/github_workflow_run.proto";
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SubscribeGithubWorkflowRunRequest {
+  // The workspace whose agent is told: the caller's own when an agent
+  // subscribes itself. Must be open (`subscriber_closed`).
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // Which run. THE ARM IS HOW IT IS NAMED. Unset is a malformed request
+  // (Connect InvalidArgument).
+  oneof run {
+    // The run's github.com web address
+    // (`https://github.com/OWNER/REPO/actions/runs/ID`, optionally followed
+    // by an attempt or a job). The daemon parses it, so every caller reads
+    // a run address the same way; one it cannot read is `unparsable`.
+    string url = 2;
+    // Named exactly: a repository and a run id.
+    GithubWorkflowRunRef named = 3;
+    // A run id in the subscriber's own repository, resolved through its
+    // `origin` remote.
+    SubscribeGithubWorkflowRunInSubscribersRepository in_subscribers_repository = 4;
+  }
+}
+
+// A run of the subscriber's own repository.
+message SubscribeGithubWorkflowRunInSubscribersRepository {
+  // GitHub's id of the run.
+  uint64 run_id = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SubscribeGithubWorkflowRunResponse {
+  oneof result {
+    SubscribeGithubWorkflowRunSuccess success = 1;
+    SubscribeGithubWorkflowRunError error = 2;
+  }
+}
+
+// The request was served.
+message SubscribeGithubWorkflowRunSuccess {
+  // The run the request named, resolved.
+  GithubWorkflowRunRef run = 1;
+  // The run as the daemon read it in serving the request.
+  GithubWorkflowRun status = 2;
+  // What the request came to. THE ARM IS WHICH.
+  oneof taken {
+    // The run had not finished; the subscriber now waits on it.
+    SubscribeGithubWorkflowRunSuccessSubscribed subscribed = 3;
+    // The subscriber already waited on it; the subscription stands.
+    SubscribeGithubWorkflowRunSuccessAlreadySubscribed already_subscribed = 4;
+    // The run had already finished: its notice is owed and delivered at
+    // once, and nothing is held.
+    SubscribeGithubWorkflowRunSuccessAlreadyCompleted already_completed = 5;
+  }
+}
+
+// A new subscription.
+message SubscribeGithubWorkflowRunSuccessSubscribed {
+  // The subscription as taken.
+  GithubWorkflowRunSubscription subscription = 1;
+}
+
+// A subscription already held.
+message SubscribeGithubWorkflowRunSuccessAlreadySubscribed {
+  // The subscription as it stands.
+  GithubWorkflowRunSubscription subscription = 1;
+}
+
+// The run had finished. DELIBERATELY EMPTY: the conclusion is the status's
+// `completed` arm.
+message SubscribeGithubWorkflowRunSuccessAlreadyCompleted {}
+
+// The daemon's refusals; nothing was subscribed and nothing is owed.
+// Validation failures (an unset arm, an empty owner or repository, a zero
+// run id) are Connect InvalidArgument.
+message SubscribeGithubWorkflowRunError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    SubscribeGithubWorkflowRunUnknownSubscriber unknown_subscriber = 1;
+    // The subscriber is closed: it runs no agent to tell, and a close is
+    // what ends a subscription, so one taken while closed would never end.
+    SubscribeGithubWorkflowRunSubscriberClosed subscriber_closed = 2;
+    // The address names no github.com workflow run.
+    SubscribeGithubWorkflowRunUnparsable unparsable = 3;
+    // The subscriber's repository is not on github.com.
+    SubscribeGithubWorkflowRunNotOnGithub not_on_github = 4;
+    // The run could not be read: GitHub rejected the credentials, could not
+    // find it, was rate limited, or could not be reached.
+    SubscribeGithubWorkflowRunUnreadable unreadable = 5;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SubscribeGithubWorkflowRunUnknownSubscriber {}
+
+// The subscriber is closed. DELIBERATELY EMPTY.
+message SubscribeGithubWorkflowRunSubscriberClosed {}
+
+// The address could not be read as a run.
+message SubscribeGithubWorkflowRunUnparsable {
+  // The address, verbatim.
+  string text = 1;
+  // Why it names no run.
+  string reason = 2;
+}
+
+// The subscriber's repository names no github.com repository.
+message SubscribeGithubWorkflowRunNotOnGithub {
+  // The repository's `origin` remote, verbatim; empty when it has none.
+  string origin = 1;
+}
+
+// The read that would decide the subscription failed.
+message SubscribeGithubWorkflowRunUnreadable {
+  // Why.
+  PullRequestGitHubFailure cause = 1;
+}

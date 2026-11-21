@@ -749,6 +749,18 @@ func (s *fakeServer) ListGithubMergeQueueSubscriptions(ctx context.Context, req 
 	return handleUnary[v1.ListGithubMergeQueueSubscriptionsRequest, v1.ListGithubMergeQueueSubscriptionsResponse](ctx, s, "ListGithubMergeQueueSubscriptions", req.Msg)
 }
 
+func (s *fakeServer) SubscribeGithubWorkflowRun(ctx context.Context, req *connect.Request[v1.SubscribeGithubWorkflowRunRequest]) (*connect.Response[v1.SubscribeGithubWorkflowRunResponse], error) {
+	return handleUnary[v1.SubscribeGithubWorkflowRunRequest, v1.SubscribeGithubWorkflowRunResponse](ctx, s, "SubscribeGithubWorkflowRun", req.Msg)
+}
+
+func (s *fakeServer) UnsubscribeGithubWorkflowRun(ctx context.Context, req *connect.Request[v1.UnsubscribeGithubWorkflowRunRequest]) (*connect.Response[v1.UnsubscribeGithubWorkflowRunResponse], error) {
+	return handleUnary[v1.UnsubscribeGithubWorkflowRunRequest, v1.UnsubscribeGithubWorkflowRunResponse](ctx, s, "UnsubscribeGithubWorkflowRun", req.Msg)
+}
+
+func (s *fakeServer) ListGithubWorkflowRunSubscriptions(ctx context.Context, req *connect.Request[v1.ListGithubWorkflowRunSubscriptionsRequest]) (*connect.Response[v1.ListGithubWorkflowRunSubscriptionsResponse], error) {
+	return handleUnary[v1.ListGithubWorkflowRunSubscriptionsRequest, v1.ListGithubWorkflowRunSubscriptionsResponse](ctx, s, "ListGithubWorkflowRunSubscriptions", req.Msg)
+}
+
 func (s *fakeServer) CommentOnPullRequest(ctx context.Context, req *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error) {
 	return handleUnary[v1.CommentOnPullRequestRequest, v1.CommentOnPullRequestResponse](ctx, s, "CommentOnPullRequest", req.Msg)
 }

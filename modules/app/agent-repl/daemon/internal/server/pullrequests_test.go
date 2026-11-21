@@ -27,6 +27,12 @@ type fakePullRequests struct {
 	// queueAnchorErr fails AnchorQueue; anchoredQueues records each anchor's
 	// `owner/repo@branch` as asked.
 	queueAnchorErr error
+	// run answers ReadRun, runErr fails it, runReads records each key asked,
+	// and wakes counts every Wake.
+	run            prwatch.Run
+	runErr         error
+	runReads       []wsm.GithubWorkflowRunKey
+	wakes          int
 	anchoredQueues []string
 }
 
@@ -49,6 +55,13 @@ func (f *fakePullRequests) AnchorQueue(_ context.Context, ws ids.WorkspaceID, ow
 	}
 	return wsm.GithubMergeQueueSubscription{Subscriber: ws, Queue: key, Told: "anchored"}, &agentreplv1.GithubMergeQueueStatus{Url: "queue-url"}, key, nil
 }
+
+func (f *fakePullRequests) ReadRun(_ context.Context, key wsm.GithubWorkflowRunKey) (prwatch.Run, error) {
+	f.runReads = append(f.runReads, key)
+	return f.run, f.runErr
+}
+
+func (f *fakePullRequests) Wake() { f.wakes++ }
 
 func (f *fakePullRequests) Comment(_ context.Context, _ ids.WorkspaceID, _ wsm.PullRequestKey, inReplyTo *uint64, markdown string) (prwatch.Posted, error) {
 	f.comments = append(f.comments, markdown)

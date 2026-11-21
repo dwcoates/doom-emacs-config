@@ -160,12 +160,27 @@ func (e GraphQLError) Failure() *Failure {
 // graphqlPath is the one path every GraphQL call posts to.
 const graphqlPath = "graphql"
 
+// CallBound bounds one `gh` call, from its start to its answer. Measured
+// 2026-11-15 on the owner's host through `gh api`: a REST read of one
+// resource took 0.37-1.06s and a GraphQL merge-queue read 0.62-3.29s (the
+// 3.29s a cold first call), so the bound is three times that worst case. A
+// call that runs past it is a hang, which would otherwise hold the poll of
+// every subscription behind it.
+const CallBound = 10 * time.Second
+
+// callExpected is the measured healthy worst case CallBound is sized from,
+// named in every record of a call that ran past the bound.
+const callExpected = 3290 * time.Millisecond
+
 // Config is a client's collaborators.
 type Config struct {
 	// Binary is the `gh` to run; empty is Binary().
 	Binary string
 	// Log records every failure, and every 304 at debug.
 	Log dlog.Logger
+	// Bound derives one call's context from its caller's; nil is CallBound.
+	// Tests hand a context whose deadline has passed.
+	Bound func(context.Context) (context.Context, context.CancelFunc)
 }
 
 // New builds a client.
@@ -175,6 +190,11 @@ func New(cfg Config) (Client, error) {
 	}
 	if cfg.Binary == "" {
 		cfg.Binary = ghBinary
+	}
+	if cfg.Bound == nil {
+		cfg.Bound = func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return context.WithTimeout(ctx, CallBound)
+		}
 	}
 	if set := tokenVariablesSet(os.Environ()); len(set) > 0 {
 		cfg.Log.Info(opClient, "the daemon's environment carries a GitHub token variable; gh runs without it, as the user's keyring login",
@@ -301,7 +321,9 @@ func (c *client) GraphQL(ctx context.Context, query string, variables map[string
 // call runs `gh ARGS`, with STDIN as its input when set, and judges its
 // answer.
 func (c *client) call(ctx context.Context, op, method, path string, args []string, stdin []byte) (Response, error) {
-	cmd := childproc.CommandContext(ctx, childproc.Stable, c.cfg.Binary, args...)
+	bounded, cancel := c.cfg.Bound(ctx)
+	defer cancel()
+	cmd := childproc.CommandContext(bounded, childproc.Stable, c.cfg.Binary, args...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -313,6 +335,15 @@ func (c *client) call(ctx context.Context, op, method, path string, args []strin
 	if ctx.Err() != nil {
 		// The daemon stopped the call: no fact about GitHub.
 		return Response{}, ctx.Err()
+	}
+	if bounded.Err() != nil {
+		// A CALL PAST ITS BOUND IS A HANG, told as GitHub not answering: it
+		// is never retried here, and the next poll calls again.
+		f := &Failure{Kind: KindUnreachable, Method: method, Path: path,
+			Message: fmt.Sprintf("gh did not answer within its %v bound (healthy calls take up to %v)", CallBound, callExpected)}
+		c.cfg.Log.Error(op, "gh did not answer within its bound; the call was stopped", dlog.Merge(fields, dlog.Context{
+			"kind": string(f.Kind), "bound": CallBound.String(), "expected": callExpected.String()}))
+		return Response{}, f
 	}
 	if captureErr != nil {
 		f := &Failure{Kind: KindUnreachable, Method: method, Path: path, Message: captureErr.Error()}

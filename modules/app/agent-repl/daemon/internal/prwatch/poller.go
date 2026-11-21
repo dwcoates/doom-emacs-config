@@ -58,6 +58,13 @@ type Store interface {
 	RecordGithubMergeQueueNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, queue wsm.GithubMergeQueueKey, turn ids.TurnID, sentences []string, took int) error
 	LinkedPullRequests(ctx context.Context) ([]wsm.PullRequestKey, error)
 	RecordPullRequestState(ctx context.Context, pr wsm.PullRequestKey, state wsm.PullRequestState, at time.Time) ([]ids.WorkspaceID, error)
+	LiveGithubWorkflowRunSubscriptions(ctx context.Context) ([]wsm.GithubWorkflowRunSubscription, error)
+	RecordGithubWorkflowRunRead(ctx context.Context, run wsm.GithubWorkflowRunKey, readAt time.Time) error
+	OweGithubWorkflowRunCompletion(ctx context.Context, c wsm.GithubWorkflowRunCompletion) (bool, error)
+	RecordGithubWorkflowRunReadFailure(ctx context.Context, run wsm.GithubWorkflowRunKey, f wsm.PullRequestFailure) ([]ids.WorkspaceID, error)
+	OweGithubWorkflowRunNotice(ctx context.Context, subscriber ids.WorkspaceID, run wsm.GithubWorkflowRunKey, sentences []string) error
+	OwedGithubWorkflowRunNotices(ctx context.Context) ([]wsm.GithubWorkflowRunOwed, error)
+	RecordGithubWorkflowRunNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, run wsm.GithubWorkflowRunKey, turn ids.TurnID, sentences []string, took int) error
 }
 
 // Deps are the watcher's collaborators: everything but the prompt handler,
@@ -109,6 +116,9 @@ type Watcher struct {
 	// ran into resets; no state read is made before it (pollLinked). Only
 	// the one Tick running at a time touches it.
 	linkedResetsAt time.Time
+	// wake asks the Run loop to deliver what is owed now (Wake); one pending
+	// wake stands for any number asked.
+	wake chan struct{}
 }
 
 // New builds the watcher, refusing a missing collaborator.
@@ -119,23 +129,44 @@ func New(deps Deps) (*Watcher, error) {
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
 	}
-	return &Watcher{deps: deps, reader: newReader(deps.GH), places: map[wsm.PullRequestKey]*placed{},
+	return &Watcher{deps: deps, reader: newReader(deps.GH), places: map[wsm.PullRequestKey]*placed{}, wake: make(chan struct{}, 1),
 		gate: intakegate.NewFor(deps.Serves, deps.Log, opGate, "the pull-request polls")}, nil
 }
 
 // Run polls and tells on the cadence until ctx ends: once at once, then
-// every Every, one tick after the other.
+// every Every, one tick after the other. A Wake between ticks delivers what
+// is owed at once, on this same loop, so a delivery never runs beside a
+// tick's and no notice is submitted twice.
 func (w *Watcher) Run(ctx context.Context, prompts prompthandler.Submitter) {
-	tick := func(ctx context.Context) { w.Tick(ctx, prompts) }
-	tick(ctx)
-	_ = clock.Repeat(ctx, w.deps.Clock, w.deps.Every, w.deps.Every, tick)
-	w.deps.Log.Debug(opPoll, "the pull-request watcher stopped with its context", nil)
+	w.Tick(ctx, prompts)
+	next := w.deps.Clock.After(w.deps.Every)
+	for {
+		select {
+		case <-ctx.Done():
+			w.deps.Log.Debug(opPoll, "the pull-request watcher stopped with its context", nil)
+			return
+		case <-next:
+			w.Tick(ctx, prompts)
+			next = w.deps.Clock.After(w.deps.Every)
+		case <-w.wake:
+			w.DeliverNow(ctx, prompts)
+		}
+	}
+}
+
+// DeliverNow submits every owed notice, when this daemon serves, without
+// polling: what a Wake runs.
+func (w *Watcher) DeliverNow(ctx context.Context, prompts prompthandler.Submitter) {
+	if !w.gate.Admits() {
+		return
+	}
+	w.deliverOwed(ctx, prompts)
 }
 
 // Tick polls every followed pull request, the state of every other linked
-// one, and every followed merge queue once, then submits every notice owed,
-// when this daemon serves. A queue both kinds need is read once
-// (queueReads).
+// one, and every followed merge queue and workflow run once, then submits
+// every notice owed, when this daemon serves. A queue both kinds need is read
+// once (queueReads).
 func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
 	if !w.gate.Admits() {
 		return
@@ -144,6 +175,7 @@ func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
 	polled := w.poll(ctx, queues)
 	w.pollLinked(ctx, polled)
 	w.pollQueues(ctx, queues)
+	w.pollRuns(ctx)
 	w.deliverOwed(ctx, prompts)
 }
 
@@ -162,14 +194,9 @@ func (w *Watcher) poll(ctx context.Context, queues *queueReads) map[wsm.PullRequ
 		w.deps.Log.Error(opPoll, "could not read the pull-request subscriptions; nothing is polled this tick", dlog.WithCause(nil, err))
 		return followed
 	}
-	byPR := map[wsm.PullRequestKey][]wsm.PullRequestSubscription{}
-	var order []wsm.PullRequestKey
-	for _, sub := range subs {
-		if _, seen := byPR[sub.PullRequest]; !seen {
-			order = append(order, sub.PullRequest)
-		}
-		byPR[sub.PullRequest] = append(byPR[sub.PullRequest], sub)
-		followed[sub.PullRequest] = true
+	byPR, order := grouped(subs, func(s wsm.PullRequestSubscription) wsm.PullRequestKey { return s.PullRequest }, itself[wsm.PullRequestSubscription])
+	for _, pr := range order {
+		followed[pr] = true
 	}
 	var read, queued []wsm.PullRequestKey
 	for _, pr := range order {
@@ -271,11 +298,7 @@ func (w *Watcher) recordState(ctx context.Context, pr wsm.PullRequestKey, state 
 // of SUBS waits on one. A SPENT RATE LIMIT IS WAITED OUT: no read is made
 // before GitHub resets it, since every one would be refused.
 func (w *Watcher) rateLimitWait(subs []wsm.PullRequestSubscription) (time.Time, bool) {
-	failing := make([]*wsm.PullRequestFailure, len(subs))
-	for i, sub := range subs {
-		failing[i] = sub.Failing
-	}
-	return w.rateLimitWaitOf(failing)
+	return w.rateLimitWaitOf(failingOf(subs, func(s wsm.PullRequestSubscription) *wsm.PullRequestFailure { return s.Failing }))
 }
 
 // rateLimitWaitOf is rateLimitWait over the failing stretches of any GitHub
@@ -341,15 +364,8 @@ func (f queueFacts) ask(pr wsm.PullRequestKey) *queueAsk { return f[pr] }
 // repository. A query that fails is every one of its pull requests' failure.
 func (w *Watcher) readQueueFacts(ctx context.Context, prs []wsm.PullRequestKey) queueFacts {
 	out := queueFacts{}
-	byRepo := map[repository][]uint32{}
-	var order []repository
-	for _, pr := range prs {
-		repo := repository{pr.Owner, pr.Repo}
-		if _, seen := byRepo[repo]; !seen {
-			order = append(order, repo)
-		}
-		byRepo[repo] = append(byRepo[repo], pr.Number)
-	}
+	byRepo, order := grouped(prs, func(pr wsm.PullRequestKey) repository { return repository{pr.Owner, pr.Repo} },
+		func(pr wsm.PullRequestKey) uint32 { return pr.Number })
 	for _, repo := range order {
 		facts, failures, err := readPRQueues(ctx, w.deps.GH, repo, byRepo[repo])
 		for _, n := range byRepo[repo] {
@@ -549,30 +565,33 @@ func failureOf(err error, now time.Time) wsm.PullRequestFailure {
 // deliverOwed submits every owed notice, each saying first what the
 // subscriber's superseded notice said.
 func (w *Watcher) deliverOwed(ctx context.Context, prompts prompthandler.Submitter) {
-	owed, err := w.deps.Store.OwedPullRequestNotices(ctx)
-	if err != nil && ctx.Err() != nil {
-		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
+	if !deliverKind(ctx, w, prompts, "pull-request", w.deps.Store.OwedPullRequestNotices, pullRequestNotice) {
 		return
 	}
-	if err != nil {
-		w.deps.Log.Error(opNotice, "could not read the owed pull-request notices; none is told this tick", dlog.WithCause(nil, err))
+	if !deliverKind(ctx, w, prompts, "merge-queue", w.deps.Store.OwedGithubMergeQueueNotices, githubMergeQueueNotice) {
 		return
+	}
+	deliverKind(ctx, w, prompts, "workflow-run", w.deps.Store.OwedGithubWorkflowRunNotices, githubWorkflowRunNotice)
+}
+
+// deliverKind submits every notice of one GitHub subscription kind LOAD
+// answers, each as NOTICE spells it, answering false when they could not be
+// read: the delivery then stops for the tick, and a later one tells them.
+func deliverKind[T any](ctx context.Context, w *Watcher, prompts prompthandler.Submitter, noun string,
+	load func(context.Context) ([]T, error), notice func(Store, T) owedNotice) bool {
+	owed, err := load(ctx)
+	if err != nil && ctx.Err() != nil {
+		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
+		return false
+	}
+	if err != nil {
+		w.deps.Log.Error(opNotice, "could not read the owed "+noun+" notices; none is told this tick", dlog.WithCause(nil, err))
+		return false
 	}
 	for _, o := range owed {
-		w.deliver(ctx, prompts, pullRequestNotice(w.deps.Store, o))
+		w.deliver(ctx, prompts, notice(w.deps.Store, o))
 	}
-	queued, err := w.deps.Store.OwedGithubMergeQueueNotices(ctx)
-	if err != nil && ctx.Err() != nil {
-		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
-		return
-	}
-	if err != nil {
-		w.deps.Log.Error(opNotice, "could not read the owed merge-queue notices; none is told this tick", dlog.WithCause(nil, err))
-		return
-	}
-	for _, o := range queued {
-		w.deliver(ctx, prompts, githubMergeQueueNotice(w.deps.Store, o))
-	}
+	return true
 }
 
 // owedNotice is one notice owed to one subscriber, whatever GitHub subject

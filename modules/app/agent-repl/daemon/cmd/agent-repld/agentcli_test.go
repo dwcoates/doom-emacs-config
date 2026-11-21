@@ -241,6 +241,18 @@ func (c *cliClient) UnsubscribeGithubMergeQueue(_ context.Context, req *connect.
 	return connect.NewResponse(&agentreplv1.UnsubscribeGithubMergeQueueResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) SubscribeGithubWorkflowRun(_ context.Context, req *connect.Request[agentreplv1.SubscribeGithubWorkflowRunRequest]) (*connect.Response[agentreplv1.SubscribeGithubWorkflowRunResponse], error) {
+	return connect.NewResponse(&agentreplv1.SubscribeGithubWorkflowRunResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) UnsubscribeGithubWorkflowRun(_ context.Context, req *connect.Request[agentreplv1.UnsubscribeGithubWorkflowRunRequest]) (*connect.Response[agentreplv1.UnsubscribeGithubWorkflowRunResponse], error) {
+	return connect.NewResponse(&agentreplv1.UnsubscribeGithubWorkflowRunResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) ListGithubWorkflowRunSubscriptions(_ context.Context, req *connect.Request[agentreplv1.ListGithubWorkflowRunSubscriptionsRequest]) (*connect.Response[agentreplv1.ListGithubWorkflowRunSubscriptionsResponse], error) {
+	return connect.NewResponse(&agentreplv1.ListGithubWorkflowRunSubscriptionsResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) ListGithubMergeQueueSubscriptions(_ context.Context, req *connect.Request[agentreplv1.ListGithubMergeQueueSubscriptionsRequest]) (*connect.Response[agentreplv1.ListGithubMergeQueueSubscriptionsResponse], error) {
 	return connect.NewResponse(&agentreplv1.ListGithubMergeQueueSubscriptionsResponse{}), c.record(req.Msg)
 }
@@ -3490,6 +3502,45 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 					t.Errorf("request = %v, want the subscriber", req)
 				}
 			}},
+		{name: "run-subscribe sends a run's address for the daemon to read", args: []string{"run-subscribe", "here", "-run", "https://github.com/ChessCom/explanation-engine/actions/runs/43771255095"},
+			check: func(t *testing.T, f *cliFixture) {
+				if req := only[*agentreplv1.SubscribeGithubWorkflowRunRequest](t, f); req.GetUrl() != "https://github.com/ChessCom/explanation-engine/actions/runs/43771255095" {
+					t.Errorf("request = %v, want the address", req)
+				}
+			}},
+		{name: "run-subscribe names a bare id in the workspace's own repository", args: []string{"run-subscribe", "here", "-run", "43771255095"},
+			check: func(t *testing.T, f *cliFixture) {
+				if req := only[*agentreplv1.SubscribeGithubWorkflowRunRequest](t, f); req.GetInSubscribersRepository().GetRunId() != 43771255095 {
+					t.Errorf("request = %v, want the id in the subscriber's repository", req)
+				}
+			}},
+		{name: "run-subscribe names an id in a named repository", args: []string{"run-subscribe", "here", "-run", "43771255095", "-repository", "o/r"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.SubscribeGithubWorkflowRunRequest](t, f)
+				if prwatch.RunKeyOf(req.GetNamed()) != (wsm.GithubWorkflowRunKey{Owner: "o", Repo: "r", RunID: 43771255095}) {
+					t.Errorf("request = %v, want o/r's run", req)
+				}
+			}},
+		{name: "run-unsubscribe reads the run's address", args: []string{"run-unsubscribe", "here", "-run", "https://github.com/o/r/actions/runs/9/job/2"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.UnsubscribeGithubWorkflowRunRequest](t, f)
+				if prwatch.RunKeyOf(req.GetRun()) != (wsm.GithubWorkflowRunKey{Owner: "o", Repo: "r", RunID: 9}) {
+					t.Errorf("request = %v, want o/r's run 9", req)
+				}
+			}},
+		{name: "run-unsubscribe names an id in a named repository", args: []string{"run-unsubscribe", "here", "-run", "9", "-repository", "o/r"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.UnsubscribeGithubWorkflowRunRequest](t, f)
+				if prwatch.RunKeyOf(req.GetRun()) != (wsm.GithubWorkflowRunKey{Owner: "o", Repo: "r", RunID: 9}) {
+					t.Errorf("request = %v, want o/r's run 9", req)
+				}
+			}},
+		{name: "run-subscriptions lists", args: []string{"run-subscriptions", "here"},
+			check: func(t *testing.T, f *cliFixture) {
+				if req := only[*agentreplv1.ListGithubWorkflowRunSubscriptionsRequest](t, f); req.GetSubscriber() == nil {
+					t.Errorf("request = %v, want the subscriber", req)
+				}
+			}},
 		{name: "pr-comment replies in a thread", args: []string{"pr-comment", "here", "-pr", "o/r#7", "-body", "done", "-in-reply-to", "5"},
 			check: func(t *testing.T, f *cliFixture) {
 				req := only[*agentreplv1.CommentOnPullRequestRequest](t, f)
@@ -3512,6 +3563,44 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 			}
 			tt.check(t, f)
 		})
+	}
+}
+
+func TestRepositoryFlag(t *testing.T) {
+	tests := []struct {
+		text        string
+		owner, repo string
+		ok          bool
+	}{
+		{text: "o/r", owner: "o", repo: "r", ok: true},
+		{text: "o", ok: false},
+		{text: "/r", ok: false},
+		{text: "o/", ok: false},
+		{text: "o/r/x", ok: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			// Act
+			owner, repo, ok := repositoryFlag(tt.text)
+
+			// Assert
+			if owner != tt.owner || repo != tt.repo || ok != tt.ok {
+				t.Fatalf("repositoryFlag(%q) = %q, %q, %v; want %q, %q, %v", tt.text, owner, repo, ok, tt.owner, tt.repo, tt.ok)
+			}
+		})
+	}
+}
+
+func TestEveryRepositoryFlagIsReadByRepositoryFlag(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("agentcli.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if n := strings.Count(string(src), `strings.Cut(*repository, "/")`); n != 0 {
+		t.Fatalf("%d -repository flags are split by hand; read every one through repositoryFlag", n)
 	}
 }
 
@@ -3538,6 +3627,12 @@ func TestPullRequestVerbsRefuseAMalformedCall(t *testing.T) {
 		{name: "gh-queue-subscribe naming a malformed repository", args: []string{"gh-queue-subscribe", "here", "-repository", "o"}},
 		{name: "gh-queue-unsubscribe naming no branch", args: []string{"gh-queue-unsubscribe", "here", "-queue", "o/r"}},
 		{name: "pr-unsubscribe naming #N", args: []string{"pr-unsubscribe", "here", "-pr", "#7"}},
+		{name: "run-subscribe naming no run", args: []string{"run-subscribe", "here"}},
+		{name: "run-subscribe naming a zero id", args: []string{"run-subscribe", "here", "-run", "0"}},
+		{name: "run-subscribe naming a repository beside an address", args: []string{"run-subscribe", "here", "-run", "https://github.com/o/r/actions/runs/9", "-repository", "o/r"}},
+		{name: "run-subscribe naming a malformed repository", args: []string{"run-subscribe", "here", "-run", "9", "-repository", "o"}},
+		{name: "run-unsubscribe naming a bare id with no repository", args: []string{"run-unsubscribe", "here", "-run", "9"}},
+		{name: "run-unsubscribe naming no run's address", args: []string{"run-unsubscribe", "here", "-run", "https://github.com/o/r/pull/9"}},
 		{name: "pr-comment with no body", args: []string{"pr-comment", "here", "-pr", "o/r#7"}},
 		{name: "pr-comment with both bodies", args: []string{"pr-comment", "here", "-pr", "o/r#7", "-body", "x", "-body-file", "/f"}},
 	}

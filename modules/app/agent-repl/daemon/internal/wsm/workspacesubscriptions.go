@@ -366,20 +366,9 @@ func endWorkspaceSubscriptionsInTx(ctx context.Context, tx *sql.Tx, ws Workspace
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_untold_notices WHERE subscriber = ?`, ws); err != nil {
 		return 0, err
 	}
-	// Its pull-request subscriptions and their owed notices end with it too
-	// (pullrequests.go): a closed workspace runs no agent to tell.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM pull_request_subscriptions WHERE subscriber = ?`, ws); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM pull_request_untold_notices WHERE subscriber = ?`, ws); err != nil {
-		return 0, err
-	}
-	// So do its GitHub merge-queue subscriptions and their owed notices
-	// (githubmergequeues.go).
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_merge_queue_subscriptions WHERE subscriber = ?`, ws); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_merge_queue_untold_notices WHERE subscriber = ?`, ws); err != nil {
+	// Its GitHub subscriptions of every kind and their owed notices end with
+	// it too (githubnotices.go): a closed workspace runs no agent to tell.
+	if err := endGithubSubscriptionsInTx(ctx, tx, ws); err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()

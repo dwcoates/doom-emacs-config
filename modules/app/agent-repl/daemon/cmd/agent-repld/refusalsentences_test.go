@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,6 +123,8 @@ func TestTheSharedNestedRefusalSentences(t *testing.T) {
 		}, want: "GitHub refused it with 422 (no)"},
 		{name: "subscriber closed", say: func() (string, error) { return saySubscriberClosed("ws"), nil },
 			want: "ws is closed: it runs no agent to tell, and a subscription taken while closed would never end"},
+		{name: "not on github", say: func() (string, error) { return sayNotOnGithub("ws", "git@gitlab.com:o/r"), nil },
+			want: "ws's repository is not on github.com (its origin is git@gitlab.com:o/r)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -158,5 +162,21 @@ func TestASharedNestedSentenceWithNoChoiceIsABug(t *testing.T) {
 				t.Fatalf("sentence = %q, %v; want the undescribed-arm bug", got, err)
 			}
 		})
+	}
+}
+
+func TestEveryNotOnGithubSentenceIsSaidBySayNotOnGithub(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("subscriptionrefusal.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if n := strings.Count(string(src), "is not on github.com"); n != 0 {
+		t.Fatalf("subscriptionrefusal.go says the not_on_github sentence by hand %d times; every describer says it through sayNotOnGithub", n)
+	}
+	if n := strings.Count(string(src), "sayNotOnGithub(subscriber, r.NotOnGithub.GetOrigin())"); n != 2 {
+		t.Fatalf("%d describers say not_on_github through sayNotOnGithub, want the merge queue's and the workflow run's", n)
 	}
 }

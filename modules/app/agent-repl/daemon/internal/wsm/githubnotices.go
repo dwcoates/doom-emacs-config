@@ -13,7 +13,8 @@ import (
 )
 
 // This file is what every GITHUB SUBSCRIPTION shares, whatever it follows (a
-// pull request, pullrequests.go; a merge queue, githubmergequeues.go): the
+// pull request, pullrequests.go; a merge queue, githubmergequeues.go; a
+// workflow run, githubworkflowruns.go): the
 // subscriber's owed notice about one subject, and the health of the daemon's
 // reads of it. Each kind keeps its own tables, named by a githubTables, so
 // one kind's rows never mix with another's.
@@ -44,6 +45,25 @@ var pullRequestTables = githubTables{
 	live:          "ended IS NULL",
 	notices:       "pull_request_untold_notices",
 	subject:       "pull_request",
+}
+
+// githubKinds is every GitHub subscription kind's tables: what a
+// subscriber's close ends (endGithubSubscriptionsInTx). A new kind joins it,
+// so a closed workspace is never left following one.
+var githubKinds = []githubTables{pullRequestTables, githubMergeQueueTables, githubWorkflowRunTables}
+
+// endGithubSubscriptionsInTx ends every GitHub subscription WS holds, of
+// every kind, and drops the notices it is owed about them.
+func endGithubSubscriptionsInTx(ctx context.Context, tx *sql.Tx, ws WorkspaceID) error {
+	for _, t := range githubKinds {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t.subscriptions+` WHERE subscriber = ?`, ws); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t.notices+` WHERE subscriber = ?`, ws); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // keyWhere is the condition matching one subject's subscription rows.

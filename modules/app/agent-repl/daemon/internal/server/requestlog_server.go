@@ -1253,6 +1253,27 @@ func (s *requestLoggingServer) ListGithubMergeQueueSubscriptions(
 	return serveUnary(s, ctx, "ListGithubMergeQueueSubscriptions", req, s.server.ListGithubMergeQueueSubscriptions)
 }
 
+func (s *requestLoggingServer) SubscribeGithubWorkflowRun(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SubscribeGithubWorkflowRunRequest],
+) (*connect.Response[agentreplv1.SubscribeGithubWorkflowRunResponse], error) {
+	return serveUnary(s, ctx, "SubscribeGithubWorkflowRun", req, s.server.SubscribeGithubWorkflowRun)
+}
+
+func (s *requestLoggingServer) UnsubscribeGithubWorkflowRun(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UnsubscribeGithubWorkflowRunRequest],
+) (*connect.Response[agentreplv1.UnsubscribeGithubWorkflowRunResponse], error) {
+	return serveUnary(s, ctx, "UnsubscribeGithubWorkflowRun", req, s.server.UnsubscribeGithubWorkflowRun)
+}
+
+func (s *requestLoggingServer) ListGithubWorkflowRunSubscriptions(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListGithubWorkflowRunSubscriptionsRequest],
+) (*connect.Response[agentreplv1.ListGithubWorkflowRunSubscriptionsResponse], error) {
+	return serveUnary(s, ctx, "ListGithubWorkflowRunSubscriptions", req, s.server.ListGithubWorkflowRunSubscriptions)
+}
+
 func (s *requestLoggingServer) NotifyWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.NotifyWorkspaceRequest],

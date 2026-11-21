@@ -264,4 +264,9 @@ enum PromptOrigin {
   // deploys its remediation (repoconfig.v1.LifecycleConfig.deploy_mediator).
   // Drawn as the daemon's prompt to its own hidden workspace.
   PROMPT_ORIGIN_DEPLOY_MEDIATION = 52;
+  // The one notice of a followed GitHub Actions workflow run
+  // (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
+  // workflow's name, its conclusion, its head commit and its web address.
+  // Submitted and drawn as a workspace notice is: no row, no held card.
+  PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE = 53;
 }

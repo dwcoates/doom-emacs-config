@@ -182,9 +182,51 @@ func TestACallTheDaemonStoppedIsNoFailure(t *testing.T) {
 	// Act
 	_, err := c.Get(ctx, "repos/o/r/pulls/1", "")
 
-	// Assert
-	if !errors.Is(err, context.Canceled) || len(log.Records()) != 0 {
+	// Assert: the call records nothing. New's own record of a token
+	// variable in the test's environment is not the call's.
+	_, recorded := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "daemon.ghclient.get"})
+	if !errors.Is(err, context.Canceled) || recorded {
 		t.Fatalf("Get = %v with records %+v, want the cancellation and nothing recorded", err, log.Records())
+	}
+}
+
+func TestACallPastItsBoundIsAFailureToReachGitHub(t *testing.T) {
+	// Arrange
+	bin, _ := fakeGH(t, answer("200 OK", nil, "{}"), "", 0)
+	log := dlog.NewTestLogger()
+	c, err := New(Config{Binary: bin, Log: log, Bound: func(ctx context.Context) (context.Context, context.CancelFunc) {
+		return context.WithDeadline(ctx, time.Unix(0, 0))
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err = c.Get(context.Background(), "repos/o/r/actions/runs/1", "")
+
+	// Assert
+	var f *Failure
+	if !errors.As(err, &f) || f.Kind != KindUnreachable || !strings.Contains(f.Message, "did not answer within its 10s bound") {
+		t.Fatalf("Get = %v, want an unreachable failure naming the bound", err)
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.ghclient.get", Message: "gh did not answer within its bound; the call was stopped"})
+	if !ok || record.Context["path"] != "repos/o/r/actions/runs/1" || record.Context["bound"] != "10s" || record.Context["expected"] != "3.29s" {
+		t.Fatalf("no error record naming the call, its bound and its expected time: %+v", log.Records())
+	}
+}
+
+func TestEveryCallIsBoundedByDefault(t *testing.T) {
+	// Arrange
+	c, _ := newClient(t, "gh")
+
+	// Act
+	ctx, cancel := c.(*client).cfg.Bound(context.Background())
+	defer cancel()
+
+	// Assert
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > CallBound {
+		t.Fatalf("deadline = %v, %v; want one within %v", deadline, ok, CallBound)
 	}
 }
 
