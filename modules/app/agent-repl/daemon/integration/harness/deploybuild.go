@@ -12,6 +12,8 @@ import (
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/internal/buildid"
+	"agent-repld/internal/deploy"
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/shellword"
 	"agent-repld/internal/wsm"
@@ -180,13 +182,14 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   ` + service(buildreport.ServiceZettel, "") + `
   ` + service(buildreport.ServiceTests, src.Tests) + `
   printf 'harness shim-lock\n' > "$out/cache-bin/shim-lock"
+  printf 'harness sockethold\n' > "$out/cache-bin/sockethold"
   mkdir -p "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources"
   printf 'harness\n' > "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources/source-sha256"
   if [ "$(uname)" = Darwin ]; then
     mkdir -p "$out/cache-bin/Zettel.app/Contents/MacOS"
     printf ` + shellword.Quote(strings.TrimSuffix(fakeLauncherExecutable, "\n")+"\n") + ` > "$out/cache-bin/Zettel.app/Contents/MacOS/Zettel"
   fi
-  for n in shim-store shim-claude-sidecar zettel agent-repl-tests shim-lock; do
+  for n in shim-store shim-claude-sidecar zettel agent-repl-tests shim-lock sockethold; do
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.$n.$f"; done
   done
   exit 0
@@ -248,6 +251,18 @@ func (b *DeployBuilder) StatePlaceholderBuilds(t testing.TB, lockDir string, pid
 		sum := sha256.Sum256([]byte(fakeServiceBinary(service)))
 		if err := buildreport.Write(lockDir, service, buildreport.Report{PID: pid, Build: hex.EncodeToString(sum[:])}); err != nil {
 			t.Fatalf("harness: state the %s build report: %v", service, err)
+		}
+	}
+	// EVERY DECLARED SOCKET HOLDER RUNS THE STAGED HOLDER BUILD: this world's
+	// holder is the test's own (holdtest), never a service a deploy restarts.
+	holders, err := holderensure.Declared(RepoRoot(t), t.TempDir())
+	if err != nil {
+		t.Fatalf("harness: read the declared socket holders: %v", err)
+	}
+	sum := sha256.Sum256([]byte(fakeServiceBinary(deploy.HolderBinary)))
+	for _, h := range holders {
+		if err := buildreport.Write(lockDir, h.Service, buildreport.Report{PID: pid, Build: hex.EncodeToString(sum[:])}); err != nil {
+			t.Fatalf("harness: state the %s build report: %v", h.Service, err)
 		}
 	}
 }

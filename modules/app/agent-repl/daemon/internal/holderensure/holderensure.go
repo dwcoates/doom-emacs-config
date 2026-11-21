@@ -20,6 +20,7 @@ import (
 	"slices"
 	"time"
 
+	"agentrepl/logging/buildreport"
 	"agentrepl/logging/sockethold"
 
 	"agent-repld/internal/dirpath"
@@ -51,6 +52,11 @@ type Holder struct {
 	ID      string
 	Control string
 	Sockets []string
+	// Label is its service manager label.
+	Label string
+	// Service is the name its build report carries
+	// (buildreport.HolderService of its first held socket).
+	Service string
 }
 
 // manifest is the slice of a requirements manifest the holders are read from.
@@ -60,7 +66,9 @@ type manifest struct {
 		Kind      string   `json:"kind"`
 		Platforms []string `json:"platforms"`
 		Control   string   `json:"control"`
+		Label     string   `json:"label"`
 		Sockets   []struct {
+			Name string `json:"name"`
 			Unix string `json:"unix"`
 		} `json:"sockets"`
 	} `json:"requirements"`
@@ -97,7 +105,10 @@ func Declared(root, home string) ([]Holder, error) {
 			if err != nil {
 				return nil, fmt.Errorf("holderensure: the control socket of %s: %w", e.ID, err)
 			}
-			h := Holder{ID: e.ID, Control: control}
+			if len(e.Sockets) == 0 || e.Sockets[0].Name == "" {
+				return nil, fmt.Errorf("holderensure: the socket holder %s names no socket it holds", e.ID)
+			}
+			h := Holder{ID: e.ID, Control: control, Label: e.Label, Service: buildreport.HolderService(e.Sockets[0].Name)}
 			for _, sock := range e.Sockets {
 				if sock.Unix == "" {
 					continue

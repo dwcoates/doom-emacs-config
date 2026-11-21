@@ -2406,3 +2406,83 @@ func TestADeployWithNoSweepStillDeploys(t *testing.T) {
 		t.Fatalf("Deploy = %v with %d sweeps, want a deploy that sweeps nothing", err, h.foldSweep.sweeps)
 	}
 }
+
+func TestASocketHolderOnAnOlderBuildRestartsBeforeTheDaemonRollsOut(t *testing.T) {
+	cases := []struct {
+		name     string
+		report   func(t *testing.T, h *harness)
+		restarts []string
+	}{
+		{name: "a holder on the fresh build is left alone", report: func(*testing.T, *harness) {}},
+		{name: "a holder on an older build restarts", report: func(t *testing.T, h *harness) {
+			h.report(t, "sockethold-daemon", 300, hashOf(t, theOld.holder))
+		}, restarts: []string{"holder socket-holder-daemon"}},
+		{name: "a holder that reports no build restarts", report: func(t *testing.T, h *harness) {
+			if err := os.Remove(buildreport.Path(h.reportDir, "sockethold-store")); err != nil {
+				t.Fatal(err)
+			}
+		}, restarts: []string{"holder socket-holder-store"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.report(t, h)
+			asksAtRestart := -1
+			h.services.atHolder = func() {
+				h.rollout.mu.Lock()
+				asksAtRestart = len(h.rollout.asks)
+				h.rollout.mu.Unlock()
+			}
+
+			// Act
+			_, err := h.d.Deploy(context.Background(), false)
+
+			// Assert: the holder restarted, if at all, before the daemon's
+			// rollout asked anything.
+			if err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+			var holders []string
+			for _, c := range h.services.Calls() {
+				if strings.HasPrefix(c, "holder ") {
+					holders = append(holders, c)
+				}
+			}
+			if !reflect.DeepEqual(holders, tc.restarts) {
+				t.Fatalf("holder restarts = %v, want %v", holders, tc.restarts)
+			}
+			if tc.restarts != nil && asksAtRestart != 0 {
+				t.Fatalf("the rollout had asked %d time(s) when the holder restarted, want none", asksAtRestart)
+			}
+			if got := readFile(t, h.live.CacheBinPath(HolderBinary)); got != theFresh.holder {
+				t.Fatalf("installed %s = %q, want the fresh build", HolderBinary, got)
+			}
+		})
+	}
+}
+
+func TestAFailedSocketHolderRestartStopsTheDeployBeforeTheRollout(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.report(t, "sockethold-daemon", 300, hashOf(t, theOld.holder))
+	h.services.holderErr = errors.New("launchctl kickstart exited 1")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *ServiceRestartFailed
+	if !errors.As(err, &failed) || failed.Component != ComponentDaemon {
+		t.Fatalf("Deploy = %v, want the holder's restart failure", err)
+	}
+	h.rollout.mu.Lock()
+	asks := len(h.rollout.asks)
+	h.rollout.mu.Unlock()
+	if asks != 0 {
+		t.Fatalf("the rollout was asked %d time(s), want none after the holder failed", asks)
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: "the socket holder's restart failed; the daemon is not rolled out"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
+	}
+}

@@ -322,6 +322,9 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		},
 		Clients:  p.Clients,
 		Services: restarter,
+		// EVERY HOLDER IS RESTARTED ONTO THE FRESH BUILD before the daemon
+		// rolls out (deploy.Deployer.services).
+		Holders: holders,
 		StopWifiAsks: func(ctx context.Context) (bool, error) {
 			tools := p.WifiTools
 			tools.WifiApp = where.wifiApp

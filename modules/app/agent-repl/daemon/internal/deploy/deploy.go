@@ -40,6 +40,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/health"
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
@@ -218,7 +219,14 @@ type Services interface {
 	// RestartLauncher registers the installed launcher with LaunchServices
 	// and restarts its launchd agent onto it.
 	RestartLauncher(ctx context.Context) error
+	// RestartHolder restarts the socket holder H and answers once it serves
+	// again.
+	RestartHolder(ctx context.Context, h holderensure.Holder) error
 }
+
+// HolderBinary is the socket holder's binary, which every holder runs
+// (agent-shim/sockethold).
+const HolderBinary = "sockethold"
 
 // Clock is the deploy's view of time.
 type Clock = rollout.Clock
@@ -284,6 +292,10 @@ type OwedReports interface {
 }
 
 type Deps struct {
+	// Holders are the declared socket holders (holderensure.Declared), each
+	// restarted before the daemon rolls out when it does not run the fresh
+	// sockethold build.
+	Holders []holderensure.Holder
 	// Live names the installed artifacts.
 	Live Live
 	// Reports are the landing reports a deploy covers when it commits and
@@ -830,6 +842,8 @@ func (d *Deployer) end(committed bool) {
 // builds are the fresh builds of one deploy.
 type builds struct {
 	shim, webapp, daemon, store, sidecar, lock, elisp string
+	// holder is the socket holder binary's fresh build (HolderBinary).
+	holder string
 	// standalone is each standalone service's fresh build, by component.
 	standalone map[Component]string
 	// wifi is the Wi-Fi helper's source hash (wifiSourceHash); empty where
@@ -861,6 +875,7 @@ func (b builds) fields() dlog.Context {
 		"store": b.store, "sidecar": b.sidecar, "lock": b.lock, "elisp": b.elisp,
 		"wifi":     b.wifi,
 		"launcher": b.launcher,
+		"holder":   b.holder,
 	}
 	for _, s := range Standalones {
 		out[string(s.Component)] = b.standalone[s.Component]
@@ -896,6 +911,7 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 		b.standalone[sv.Component] = hash
 	}
 	step("lock", &b.lock, func() (string, error) { return buildid.File(s.CacheBin(sessionlock.HolderBinary)) })
+	step(HolderBinary, &b.holder, func() (string, error) { return buildid.File(s.CacheBin(HolderBinary)) })
 	step("elisp", &b.elisp, func() (string, error) { return buildid.Elisp(d.deps.Live.ModuleRoot) })
 	if d.deps.Live.WifiApp != "" {
 		step("wifi", &b.wifi, func() (string, error) { return wifiSourceHash(s.WifiApp()) })
@@ -954,6 +970,7 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 	storeInstall, storeWrites, storeRestamp := cacheBin(buildreport.ServiceStore)
 	sidecarInstall, sidecarWrites, sidecarRestamp := cacheBin(buildreport.ServiceSidecar)
 	lockInstall, lockWrites, lockRestamp := cacheBin(sessionlock.HolderBinary)
+	holderInstall, holderWrites, holderRestamp := cacheBin(HolderBinary)
 	artifacts := []artifact{
 		{component: ComponentShim, name: "shim", fresh: fresh.shim, installed: d.deps.Bundle.Build, install: func() error {
 			// THE BUNDLE IS REPLACED ONLY WHILE NO SPAWN HOLDS IT: a spawn
@@ -979,6 +996,11 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 		{component: ComponentShim, name: sessionlock.HolderBinary, fresh: fresh.lock, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(sessionlock.HolderBinary))
 		}, install: lockInstall, writes: lockWrites, restamp: lockRestamp, rider: true},
+		// THE SOCKET HOLDER RIDES WITH THE DAEMON, whose newer requests it
+		// answers: its restart (services) is no component of its own.
+		{component: ComponentDaemon, name: HolderBinary, fresh: fresh.holder, installed: func() (string, error) {
+			return buildid.File(live.CacheBinPath(HolderBinary))
+		}, install: holderInstall, writes: holderWrites, restamp: holderRestamp, rider: true},
 	}
 	for _, sv := range Standalones {
 		install, writes, restamp := cacheBin(sv.Service)
@@ -1101,6 +1123,22 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		standalone[i] = Outcome{Component: sv.Component, Build: fresh.standalone[sv.Component], Kind: UpToDate}
 	}
 	outcomes := func() []Outcome { return append([]Outcome{store, sidecar}, standalone...) }
+	// EVERY SOCKET HOLDER RUNS THE FRESH BUILD BEFORE ANYTHING ELSE MOVES, and
+	// above all before the daemon rolls out (daemonShimWebapp runs after this
+	// returns): a fresh daemon asks its holder for requests an older holder
+	// refuses, and would fail to take the shared address.
+	for _, h := range d.deps.Holders {
+		fields := dlog.Context{"holder": h.ID, "label": h.Label, "holder_build": fresh.holder}
+		if !d.serviceStale(ComponentDaemon, h.Service, fresh.holder) {
+			d.log.Debug(opDecide, "the socket holder runs the fresh build", fields)
+			continue
+		}
+		if err := d.deps.Services.RestartHolder(ctx, h); err != nil {
+			d.log.Error(opDecide, "the socket holder's restart failed; the daemon is not rolled out", dlog.WithCause(fields, err))
+			return outcomes(), &ServiceRestartFailed{Component: ComponentDaemon, Detail: err.Error()}
+		}
+		d.log.Info(opDecide, "restarted the socket holder onto the fresh build, before the daemon rolls out", fields)
+	}
 	switch {
 	case storeStale:
 		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,

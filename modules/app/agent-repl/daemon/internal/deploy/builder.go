@@ -40,7 +40,7 @@ func (e *BuildFailed) Error() string {
 // rides with the shim — the shim spawns shim-lock for every kernel claim — so
 // it is built and installed, but it is not a running process with a build of
 // its own to compare.
-var Targets = []string{"shim", "webapp", "daemon", "store", "sidecar", "zettel", "tests", "lock"}
+var Targets = []string{"shim", "webapp", "daemon", "store", "sidecar", "zettel", "tests", "lock", "sockethold"}
 
 // BuildObserver is told each build step as it begins and ends: the hot
 // reload's card draws every service's build from it (hotreload.Tracker).
