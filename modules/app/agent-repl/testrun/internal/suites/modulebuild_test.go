@@ -362,7 +362,7 @@ func TestEveryRosterGoSuitePlansOneBuildPerPass(t *testing.T) {
 
 func TestPinnedBuildHoldsBuildSlotsPinnedByWidePinnedEnv(t *testing.T) {
 	// Arrange
-	sp := spec("x:build", "x", "/m", []string{"go", "build"})
+	sp := spec("x:build", "x", "/m", []string{"go", "build", "-buildvcs=false"})
 
 	// Act
 	got := pinnedBuild(sp)

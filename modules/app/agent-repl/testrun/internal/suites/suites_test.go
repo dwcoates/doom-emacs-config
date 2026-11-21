@@ -1173,9 +1173,12 @@ func TestGoIntegrationUnitsBuildAndVetUnderTheTags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vet := strings.Join(u.Atomic[0].Argv, " ")
-	build := strings.Join(u.Atomic[1].Argv, " ")
-	if !strings.Contains(vet, "go vet -tags integration") || !strings.HasSuffix(vet, "./p") {
+	byID := map[string]string{}
+	for _, a := range u.Atomic {
+		byID[a.ID] = strings.Join(a.Argv, " ")
+	}
+	vet, build := byID[ModuleVetID("daemon", "integration")], byID[ModuleBuildID("daemon", "integration")]
+	if !strings.Contains(vet, "-tags integration") || !strings.HasSuffix(vet, "-- p") {
 		t.Fatalf("vet = %q, want it under the tags over the integration packages", vet)
 	}
 	if !strings.Contains(build, "-tags integration") {
