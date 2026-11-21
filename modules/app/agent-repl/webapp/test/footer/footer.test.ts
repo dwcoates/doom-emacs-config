@@ -11,7 +11,7 @@ import {
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
-import type { ResponseUsage } from "../../src/feed/response-usage.js";
+import type { HoverStamp } from "../../src/feed/hover-stamp.js";
 import { compactionProgress } from "../../src/footer/progress.js";
 import { TOOLTIP_DELAY_MS } from "../../src/tooltip.js";
 import {
@@ -2027,12 +2027,12 @@ describe("mountFooter: the status the strip draws is recorded", () => {
   });
 });
 
-/** A read response usage with figure TEXT, settled 30 seconds ago. */
-function hoveredUsage(text: string): ResponseUsage {
-  return { text, color: "rgb(1, 2, 3)", settledAtMs: NOW - 30_000, startedAtMs: NOW - 120_000 };
+/** A read response stamp with figure TEXT, settled 30 seconds ago. */
+function hoveredUsage(text: string): HoverStamp {
+  return { label: "Response", tokens: { text, color: "rgb(1, 2, 3)" }, atMs: NOW - 30_000, startedAtMs: NOW - 120_000 };
 }
 
-describe("mountFooter: the hovered response's usage stands in for the activity line", () => {
+describe("mountFooter: the hovered bubble's stamp stands in for the activity line", () => {
   afterEach(() => {
     clearClientFailures();
   });
@@ -2044,7 +2044,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     h.tail.push(pushView(footerView()));
     await settle();
     // Act
-    footer.showResponseUsage(hoveredUsage("2.1k"));
+    footer.showHoverStamp(hoveredUsage("2.1k"));
     // Assert
     expect([tierOf(host), host.querySelector(".footer-activity")?.textContent]).toEqual(["hover", "Response 2.1k tokens, 1m 30s · 30s ago"]);
   });
@@ -2056,9 +2056,9 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     h.tail.push(pushView(footerView()));
     await settle();
     const daemon = tierOf(host);
-    footer.showResponseUsage(hoveredUsage("2.1k"));
+    footer.showHoverStamp(hoveredUsage("2.1k"));
     // Act
-    footer.showResponseUsage(null);
+    footer.showHoverStamp(null);
     // Assert
     expect([daemon !== "hover", tierOf(host)]).toEqual([true, daemon]);
   });
@@ -2069,7 +2069,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     await settle();
     h.tail.push(pushView(footerView()));
     await settle();
-    footer.showResponseUsage(hoveredUsage("2.1k"));
+    footer.showHoverStamp(hoveredUsage("2.1k"));
     // Act
     h.tail.push(pushView(footerView()));
     await settle();
@@ -2084,7 +2084,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     h.tail.push(pushView(footerView()));
     await settle();
     // Act
-    footer.showResponseUsage(hoveredUsage("2.1k"));
+    footer.showHoverStamp(hoveredUsage("2.1k"));
     // Assert
     expect(host.querySelectorAll(".footer-activity")).toHaveLength(1);
   });
@@ -2097,7 +2097,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
     // Act
-    footer.showResponseUsage(hoveredUsage("2.1k"));
+    footer.showHoverStamp(hoveredUsage("2.1k"));
     // Assert
     expect([host.querySelector(".footer-status")?.getAttribute("data-arm"), tierOf(host)]).toEqual(["disconnected", "hover"]);
   });
@@ -2107,7 +2107,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     const { host, footer } = mount();
     await settle();
     // Act
-    footer.showResponseUsage(hoveredUsage("2.1k"));
+    footer.showHoverStamp(hoveredUsage("2.1k"));
     // Assert
     expect(host.querySelector(".footer-activity")).toBeNull();
   });

@@ -371,6 +371,69 @@ message FeedRow {
   // kind, and every row of a sub-feed leave it UNSET. A response row gains it
   // on the publication that settles it.
   optional FeedRowSelectable selectable = 22;
+  // WHAT THE FOOTER'S ACTIVITY CELL SHOWS WHILE THE POINTER IS ON THIS ROW'S
+  // BUBBLE (owner request, 2026-11-19): what the bubble is, how long it took,
+  // and how long ago it was sent or settled. See FeedHoverStamp.
+  //
+  // The DAEMON states it, on every publication of the row, by ONE rule over
+  // the row's own kind (the feed's upsert path), so every hoverable kind is
+  // stamped the same way and the client derives nothing per kind: it records
+  // the stamp on the row it draws and shows it while the row's card is
+  // hovered. SET on a prompt (user or agent), a response, a tool call, a
+  // skill, a hook, a permission, a question, a shell, a subagent (sync or
+  // detached), a merge, and a deploy mediator's fix gate. UNSET on every
+  // other kind, whose bubble shows nothing in the footer when hovered.
+  optional FeedHoverStamp hover = 25;
+}
+
+// WHAT A HOVERED BUBBLE SHOWS IN THE FOOTER'S ACTIVITY CELL, in place of the
+// daemon's activity line, while the pointer is on it:
+//
+//   "Response 2.1k tokens, 1m 30s · 5m ago"
+//   "Tool call Bash, 12s · 2m ago"
+//   "Prompt · 10m ago"
+//   "Testing the fix, 4m 10s"           (still running: the span ticks)
+//
+// The label; the token figure when the bubble has one (a response); the span
+// from `started_at_ms` to `at_ms` when both are set, or ticking up from
+// `started_at_ms` while `at_ms` is unset; and the live age of `at_ms` when it
+// is set. Every instant is read off what the row itself states (a card's
+// clock, a merge's runtime, a response's usage stamp) or, for a prompt, off
+// the conversation entry that delivered it, so a replay serves the same
+// stamp.
+message FeedHoverStamp {
+  // What the bubble is, drawn verbatim first ("Prompt", "Tool call Bash").
+  FeedHoverStampLabel label = 1;
+  // When the bubble's span BEGAN, epoch ms: a call's start, a merge's start,
+  // the span a response's figure counts. UNSET (zero) when it has no span
+  // (a prompt is an instant) or its producer stated no start; the client
+  // then states no duration, never one measured against its own clock.
+  int64 started_at_ms = 2;
+  // When the bubble was SENT (a prompt) or SETTLED (everything else), epoch
+  // ms: the instant the line's "· 5m ago" counts back from. UNSET (zero)
+  // while the unit is still under way, or when no instant is known (a
+  // prompt the queue mirrored before its conversation entry exists). Never
+  // before `started_at_ms` when both are set: a stamp that says so is a
+  // malformed view.
+  int64 at_ms = 3;
+  // The bubble's token figure, drawn after the label in its heat. SET on a
+  // response that has stated usage (the same figure and heat as its
+  // FeedResponse.usage); UNSET on every other kind.
+  optional FeedHoverStampTokens tokens = 4;
+}
+
+// The hover line's label element.
+message FeedHoverStampLabel {
+  // The composed label, drawn verbatim.
+  string text = 1;
+}
+
+// The hover line's token figure element.
+message FeedHoverStampTokens {
+  // The formatted figure ("2.1k"), drawn verbatim before " tokens".
+  string text = 1;
+  // How hot the figure is, which colors it: the footer tokens cell's rule.
+  TokenHeat heat = 2;
 }
 
 // The row-removal marker. Empty: the FeedRow's own `id` names what to drop,
@@ -970,6 +1033,13 @@ message FeedResponse {
   // growing while the bubble arrives, frozen once it settles, the frozen
   // figure on a broken bubble. UNSET while the bubble's agent has stated no
   // usage yet — absence draws no stamp, never a zero.
+  //
+  // NO CLIENT DRAWS IT DIRECTLY (2026-11-19): the row's hover stamp
+  // (FeedRow.hover) restates its figure, heat and span for the footer, by
+  // the one rule every hoverable kind is stamped by. It stays on the arm
+  // because it is the response's own resolved fact, which the fold restamps
+  // as usage arrives and the final answer re-stamps with the turn's total,
+  // and which every durable row already stored carries.
   optional FeedResponseUsageStamp usage = 1;
   oneof result {
     // Still arriving: the prose so far. The DAEMON accumulates the shim's

@@ -18,7 +18,6 @@ import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { OUTCOME_CARD_CLASS } from "../../../src/feed/marker.js";
-import { heatColor } from "../../../src/heat.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
@@ -67,7 +66,6 @@ import { plainProse, servedProse, treeProse } from "../../prose.js";
 import { boundCopyText } from "../../../src/copy-control.js";
 import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
 import { BUBBLE_QUESTION_CLASS, QUESTION_ROW_ATTRIBUTE } from "../../../src/feed/response-question.js";
-import { responseUsageOf } from "../../../src/feed/response-usage.js";
 import { COMPOSER_ENTRY_CLASS, createComposerEntryHighlight } from "../../../src/feed/composer-entry.js";
 import { applyMentionTargets, resetMentionTargets, WORKSPACE_MENTION_ATTRIBUTE } from "../../../src/feed/workspace-mentions.js";
 import { mentionTargets, openTarget } from "../mention-targets.js";
@@ -557,67 +555,6 @@ describe("the usage stamp", () => {
     const el = drawFeedResponse(stamped(arm, { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } }), rowContext());
     // Assert
     expect(el.textContent).not.toContain("2.1k");
-  });
-
-  it.each(STATES)("records the stamp for the footer's hover in the %s state", (arm) => {
-    // Act
-    const el = drawFeedResponse(stamped(arm, { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } }), rowContext());
-    // Assert
-    expect(responseUsageOf(el)).toEqual({ text: "2.1k", color: heatColor(0.5, "p"), settledAtMs: 1_000, startedAtMs: null });
-  });
-
-  it("records an arriving stamp as not settled", () => {
-    // Act
-    const el = drawFeedResponse(stamped("update", { text: "2.1k", atMs: 0n, heat: { position: 0.5 } }), rowContext());
-    // Assert
-    expect(responseUsageOf(el)?.settledAtMs).toBeNull();
-  });
-
-  it("records no usage when none has been observed", () => {
-    // Act
-    const el = drawFeedResponse(stamped("success"), rowContext());
-    // Assert
-    expect(responseUsageOf(el)).toBeNull();
-  });
-
-  it("forgets the usage when a redraw carries none", () => {
-    // Arrange
-    const first = drawFeedResponse(stamped("success", { text: "2.1k", heat: { position: 0.5 } }), rowContext());
-    // Act
-    const again = drawFeedResponse(stamped("success"), rowContext(first));
-    // Assert
-    expect([again === first, responseUsageOf(again)]).toEqual([true, null]);
-  });
-
-  it("restates the usage when a redraw changes the figure", () => {
-    // Arrange
-    const first = drawFeedResponse(stamped("update", { text: "1k", heat: { position: 0.5 } }), rowContext());
-    // Act
-    drawFeedResponse(stamped("update", { text: "2k", heat: { position: 0.5 } }), rowContext(first));
-    // Assert
-    expect(responseUsageOf(first)?.text).toBe("2k");
-  });
-
-  it("refuses a stamp that carries no heat", () => {
-    expect(() => drawFeedResponse(stamped("success", { text: "40k" }), rowContext())).toThrow(MalformedView);
-  });
-
-  it("refuses a settle instant beyond a safe integer as a malformed view", () => {
-    // Arrange
-    const malformed = stamped("success", { text: "2.1k", atMs: BigInt(Number.MAX_SAFE_INTEGER) + 1n, heat: { position: 0.5 } });
-    // Act
-    const draw = (): HTMLElement => drawFeedResponse(malformed, rowContext());
-    // Assert
-    expect(draw).toThrow(MalformedView);
-  });
-
-  it("keeps a bubble's recorded usage when a re-push's stamp is malformed", () => {
-    // Arrange
-    const first = drawFeedResponse(stamped("success", { text: "1k", heat: { position: 0.5 } }), rowContext());
-    // Act
-    expect(() => drawFeedResponse(stamped("success", { text: "2k" }), rowContext(first))).toThrow(MalformedView);
-    // Assert
-    expect(responseUsageOf(first)?.text).toBe("1k");
   });
 });
 

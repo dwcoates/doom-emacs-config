@@ -1,6 +1,12 @@
 {
   "rows": [
     {
+      "hover": {
+        "atMs": "${NOW}",
+        "label": {
+          "text": "Prompt"
+        }
+      },
       "id": {
         "value": "${ROW_1}"
       },
@@ -40,6 +46,13 @@
       }
     },
     {
+      "hover": {
+        "atMs": "1800000000004",
+        "label": {
+          "text": "Question"
+        },
+        "startedAtMs": "1800000000004"
+      },
       "id": {
         "value": "${ROW_2}"
       },
@@ -172,6 +185,19 @@
             "startedAtMs": "${NOW}",
             "text": "6.5k"
           }
+        }
+      },
+      "hover": {
+        "atMs": "1800000000006",
+        "label": {
+          "text": "Response"
+        },
+        "startedAtMs": "${NOW}",
+        "tokens": {
+          "heat": {
+            "position": 0.07186666666666668
+          },
+          "text": "6.5k"
         }
       },
       "id": {

@@ -202,6 +202,18 @@ export function feedRow(row: RowArm, overrides?: Partial<RowInit>): FeedRow {
   return built;
 }
 
+/**
+ * A row's hover stamp (`FeedRow.hover`), labelled LABEL: what the daemon
+ * stamps on every hoverable kind and the footer draws while its card is
+ * hovered. TOKENS, when given, is a response's figure.
+ */
+export function hoverStamp(label: string, tokens?: string): NonNullable<RowInit["hover"]> {
+  return {
+    label: { text: label },
+    ...(tokens === undefined ? {} : { tokens: { text: tokens, heat: { position: 0.5 } } }),
+  };
+}
+
 /** An activity row: the FeedTurnActivity wrapper around one unit. */
 export function activityRow(unit: ActivityUnit, overrides?: Partial<RowInit>): FeedRow {
   return feedRow({ case: "activity", value: { unit } }, overrides);

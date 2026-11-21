@@ -7536,9 +7536,10 @@ bubble-body.bubble-body { display: block; }
    around them stays the cell's own muted register. */
 .footer-activity { color: var(--muted); }
 .footer-activity-age { color: var(--muted); font-variant-numeric: tabular-nums; }
-/* THE HOVERED RESPONSE'S USAGE (src/footer/response-usage.ts): its figure in
-   its own heat, in the figures the line's age wears. */
-.footer-response-tokens { font-variant-numeric: tabular-nums; }
+/* THE HOVERED BUBBLE'S STAMP (src/footer/hover-stamp.ts): its figure in its
+   own heat, and its duration, in the figures the line's age wears. */
+.footer-hover-tokens,
+.footer-hover-duration { font-variant-numeric: tabular-nums; }
 /* The newsworthy allowance is the one the reader must act on, so it is the one
    set in the foreground weight; its sibling stays reference. */
 .footer-allowance-newsworthy { font-weight: 650; }

@@ -46,10 +46,9 @@
  * meaningful while arriving (the vendor states usage when a response opens and
  * restates it as it grows), final once settled, and the last observed figure
  * on a broken bubble. The bubble draws none of it (owner request, 2026-10-25):
- * every draw records the stamp for the bubble (src/feed/response-usage.ts),
- * and hovering the bubble shows it in the footer's activity cell. Absent means
- * NO STAMP, never a zero: "we were not told what it cost" and "it cost
- * nothing" are different claims.
+ * the daemon restates it in the row's hover stamp (`FeedRow.hover`), which
+ * the feed records for every row kind alike (src/feed/hover-stamp.ts), and
+ * hovering the bubble shows it in the footer's activity cell.
  *
  * THE TYPE-OUT FOLLOWS THE ARRIVALS WITHIN THE DAEMON'S PACE, and it RESUMES
  * ACROSS PUSHES. Every live draw carries the daemon's reveal pace (the
@@ -110,7 +109,6 @@ import { linkAnswers } from "../entries.js";
 import { MENTION_TEXT_CLASS, linkWorkspaceMentionsInText } from "../workspace-mentions.js";
 import { bubbleCopyControl, reserveCopyRoom } from "../../bubble/copy-room.js";
 import { questionControl } from "../response-question.js";
-import { readResponseUsage, setResponseUsage } from "../response-usage.js";
 import { markComposerEntry } from "../composer-entry.js";
 import { markRevealedNode } from "../revealed-node.js";
 import { revisedWindow, type RevealWindow } from "../../bubble/text-reveal.js";
@@ -201,10 +199,6 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // why under the prose.
   const revision = readResponseRevision(u.revision, `${path}.revision`);
   if (revision.pending) hooks.push(RESPONSE_REVISING_CLASS);
-
-  // The usage stamp is read before anything is drawn too, so a stamp the
-  // wire got wrong refuses the row here rather than at the hover.
-  const usage = u.usage === undefined ? undefined : readResponseUsage(u.usage, `${path}.usage`);
 
   // The arm is read BEFORE anything is drawn, so an arm a newer daemon set
   // reaches the refusal that names it rather than half a bubble.
@@ -315,10 +309,6 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     },
     rc.previous,
   );
-  // THE STAMP IS READ IN THE FOOTER while the bubble is hovered
-  // (response-usage.ts), restated on every draw so a hovered bubble's footer
-  // line follows its figure.
-  setResponseUsage(bubble, usage);
   if (turningInterim !== undefined && turningInterim.height > 0 && bubble !== rc.previous) {
     easeIntoLook(bubble, turningInterim);
   }

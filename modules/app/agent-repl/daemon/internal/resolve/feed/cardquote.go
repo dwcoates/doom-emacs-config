@@ -75,7 +75,7 @@ func cardTextOf(drawn *frontendv1.FeedRow) CardText {
 	arm := cardArm(drawn)
 	if markdown, ok := bubbleMarkdown(drawn); ok {
 		kind := CardResponse
-		if drawn.GetUserPrompt() != nil || drawn.GetAgentPrompt() != nil {
+		if isPromptRow(drawn) {
 			kind = CardPrompt
 		}
 		return CardText{Kind: kind, Arm: arm, Text: markdown}

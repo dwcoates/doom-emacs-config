@@ -1,6 +1,12 @@
 {
   "rows": [
     {
+      "hover": {
+        "atMs": "${NOW}",
+        "label": {
+          "text": "Prompt"
+        }
+      },
       "id": {
         "value": "${ROW_1}"
       },
@@ -63,6 +69,13 @@
           }
         }
       },
+      "hover": {
+        "atMs": "1800000000009",
+        "label": {
+          "text": "Tool call Edit"
+        },
+        "startedAtMs": "1800000000009"
+      },
       "id": {
         "value": "${ROW_2}"
       },
@@ -82,6 +95,11 @@
           "headline": {
             "text": "hook blocked: PostToolUse:Edit (PostToolUse)"
           }
+        }
+      },
+      "hover": {
+        "label": {
+          "text": "Hook"
         }
       },
       "id": {
@@ -122,6 +140,19 @@
             "startedAtMs": "${NOW}",
             "text": "6.5k"
           }
+        }
+      },
+      "hover": {
+        "atMs": "1800000000007",
+        "label": {
+          "text": "Response"
+        },
+        "startedAtMs": "${NOW}",
+        "tokens": {
+          "heat": {
+            "position": 0.07186666666666668
+          },
+          "text": "6.5k"
         }
       },
       "id": {

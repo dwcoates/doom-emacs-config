@@ -78,7 +78,7 @@ describe("createPointerRest", () => {
 });
 
 describe("every surface that suspends on leaving", () => {
-  it.each(["../src/sidebar/transients.ts", "../src/feed/response-usage.ts"])(
+  it.each(["../src/sidebar/transients.ts", "../src/feed/hover-stamp.ts"])(
     "%s judges the user's return through the one latch, not its own",
     (path) => {
       // Arrange

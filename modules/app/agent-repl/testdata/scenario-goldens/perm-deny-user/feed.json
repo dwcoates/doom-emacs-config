@@ -1,6 +1,12 @@
 {
   "rows": [
     {
+      "hover": {
+        "atMs": "${NOW}",
+        "label": {
+          "text": "Prompt"
+        }
+      },
       "id": {
         "value": "${ROW_1}"
       },
@@ -40,6 +46,13 @@
       }
     },
     {
+      "hover": {
+        "atMs": "1800000000004",
+        "label": {
+          "text": "Permission"
+        },
+        "startedAtMs": "1800000000004"
+      },
       "id": {
         "value": "${ROW_2}"
       },
@@ -93,6 +106,11 @@
           }
         }
       },
+      "hover": {
+        "label": {
+          "text": "Tool call Bash"
+        }
+      },
       "id": {
         "value": "${ROW_3}"
       },
@@ -131,6 +149,19 @@
             "startedAtMs": "${NOW}",
             "text": "6.5k"
           }
+        }
+      },
+      "hover": {
+        "atMs": "1800000000005",
+        "label": {
+          "text": "Response"
+        },
+        "startedAtMs": "${NOW}",
+        "tokens": {
+          "heat": {
+            "position": 0.07186666666666668
+          },
+          "text": "6.5k"
         }
       },
       "id": {

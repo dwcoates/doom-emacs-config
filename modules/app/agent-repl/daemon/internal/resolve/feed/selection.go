@@ -246,7 +246,7 @@ func (r *resolver) rootRowText(ws ids.WorkspaceID, id *frontendv1.FeedId, rule f
 		return RowText{}, false
 	}
 	markdown, ok := rule(row)
-	return RowText{Markdown: markdown, Prompt: row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil}, ok
+	return RowText{Markdown: markdown, Prompt: isPromptRow(row)}, ok
 }
 
 // bubbleMarkdown is THE ONE RULE for which rows are bubbles with text, and

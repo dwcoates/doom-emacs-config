@@ -2,11 +2,14 @@ package feed
 
 import (
 	"agent-repld/internal/prose"
+	"agent-repld/internal/sourcescan"
 	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"regexp"
+	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -1526,5 +1529,42 @@ func TestSaidTextWithImages(t *testing.T) {
 				t.Fatalf("SaidTextWithImages = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsPromptRowNamesBothKindsOfPromptAndNothingElse(t *testing.T) {
+	tests := []struct {
+		name string
+		row  *frontendv1.FeedRow
+		want bool
+	}{
+		{name: "a user prompt", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}}, want: true},
+		{name: "an agent prompt", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{}}}, want: true},
+		{name: "a response", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{}}}, want: false},
+		{name: "a merge handback", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_MergeHandback{MergeHandback: &frontendv1.FeedMergeHandbackBadge{}}}, want: false},
+		{name: "a row of no kind", row: &frontendv1.FeedRow{}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act, Assert.
+			if got := isPromptRow(tc.row); got != tc.want {
+				t.Fatalf("isPromptRow = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// EVERY RULE THAT TREATS BOTH KINDS OF PROMPT ALIKE ASKS isPromptRow, so a
+// hand-rolled pair of arm checks cannot drift from it.
+func TestNoSourceHandRollsThePromptRowTest(t *testing.T) {
+	// Arrange.
+	pair := regexp.MustCompile(`GetUserPrompt\(\) != nil \|\| [a-z]+\.GetAgentPrompt\(\) != nil`)
+
+	// Act.
+	rolled := sourcescan.SitesMatching(t, pair)
+
+	// Assert: isPromptRow's own body is the one pair.
+	if !slices.Equal(rolled, []string{"prompt.go"}) {
+		t.Fatalf("hand-rolled prompt row tests = %v, want only isPromptRow's own in prompt.go", rolled)
 	}
 }
