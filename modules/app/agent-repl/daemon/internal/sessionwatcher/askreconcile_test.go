@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -26,7 +27,7 @@ func openPermission(id string) *conversationv1.SessionOpenAsk {
 func attachWith(t *testing.T, before, open []*conversationv1.SessionOpenAsk, afterStart func(*harness)) *harness {
 	t.Helper()
 	h := startHarnessFeed(t, Session{}, nil, nil, &mergeSink{}, &feedSink{standing: before})
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 	if afterStart != nil {
 		afterStart(h)
 	}
@@ -104,7 +105,7 @@ func TestAttachRoutesTheAbandonedSettleDownTheLiveSettlesPath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := startHarnessFeed(t, Session{}, nil, nil, &mergeSink{}, &feedSink{standing: []*conversationv1.SessionOpenAsk{tt.ask}})
-			h.session = h.client.nextSessionOpen(t)
+			h.session = h.client.NextSessionOpen(t)
 
 			// Act
 			h.sendSessionStarted(t, sessionStarted("turn-1"))

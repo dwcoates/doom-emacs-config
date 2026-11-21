@@ -48,7 +48,7 @@ func TestAnAnnouncementAdmitsNothingUnderTheLevel(t *testing.T) {
 
 	// Assert.
 	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{})
-	h.client.noAgentOpen(t)
+	h.client.NoAgentOpen(t)
 }
 
 func TestALevelAdmitsADescribedItem(t *testing.T) {
@@ -251,14 +251,14 @@ func TestARunReadmittedAfterItsReleaseOpensItsAgentWatchAgain(t *testing.T) {
 	h.quiet()
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
 	h.pushLevel(t, "w-1")
-	h.client.nextAgentOpenFor(t, "sub-1")
+	h.client.NextAgentOpenFor(t, "sub-1")
 	h.pushLevel(t)
 
 	// Act.
 	h.pushLevel(t, "w-1")
 
 	// Assert: the second run's watch is opened.
-	h.client.nextAgentOpenFor(t, "sub-1")
+	h.client.NextAgentOpenFor(t, "sub-1")
 }
 
 func TestAReleaseIsRecordedOnTheLevelThatMadeIt(t *testing.T) {
@@ -299,7 +299,7 @@ func TestAStaleLevelNamingARetiredHandleIsRecordedAtInfo(t *testing.T) {
 func TestAShellsRetirementOutlivesEveryLevel(t *testing.T) {
 	// Arrange: the shell ends, and a level (which never names shells) follows.
 	h := newHarness(t, Session{Started: levelStarted("", createdWork("w-1", bashWork()))})
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 	h.quiet()
 	entry := h.shellWatchFor("w-1")
 	h.routeNow(func(w *watcher) {

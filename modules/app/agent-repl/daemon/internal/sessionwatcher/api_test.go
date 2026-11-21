@@ -1,6 +1,7 @@
 package sessionwatcher
 
 import (
+	"agent-repld/internal/sessionwatcher/watchtest"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -81,7 +82,7 @@ func TestStartAcceptsAnUnsetSessionStartedAsAPureAttach(t *testing.T) {
 	}
 
 	// Act.
-	w, err := Start(t.Context(), "ws-1", newFakeClient(), Session{Opening: WorkspaceOpened()}, sinks, newTestLogger())
+	w, err := Start(t.Context(), "ws-1", watchtest.NewClient(), Session{Opening: WorkspaceOpened()}, sinks, newTestLogger())
 
 	// Assert.
 	if err != nil {
@@ -141,7 +142,7 @@ func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 			tt.mutate(&session, &sinks)
 
 			// Act.
-			_, err := Start(t.Context(), "ws-1", newFakeClient(), session, sinks, newTestLogger())
+			_, err := Start(t.Context(), "ws-1", watchtest.NewClient(), session, sinks, newTestLogger())
 
 			// Assert.
 			if err == nil {
@@ -434,12 +435,12 @@ func TestEveryViewFindsASubagentNewToTheSetThroughAgentsNewSince(t *testing.T) {
 func TestStartLabelsTheWatchersWorkByItsWorkspace(t *testing.T) {
 	// Arrange / Act
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 
 	// Assert
-	h.client.mu.Lock()
-	label, labeled := h.client.sessionLabel, h.client.sessionLabeled
-	h.client.mu.Unlock()
+	h.client.Mu.Lock()
+	label, labeled := h.client.SessionLabel, h.client.SessionLabeled
+	h.client.Mu.Unlock()
 	if !labeled || label != "ws-1" {
 		t.Fatalf("the session watch ran labeled %q (%v), want the watcher's workspace ws-1", label, labeled)
 	}

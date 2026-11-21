@@ -131,12 +131,12 @@ func TestAShellConcludedWhileItsWatchOpenHangsLeavesTheLiveSet(t *testing.T) {
 	// the fleet whose own shell open hangs the same way.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	first := h.client.gate(&h.client.bashGate, true)
+	first := h.client.GateIn(&h.client.BashGate, true)
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-	first.awaitBlocked(t)
-	reopened := h.client.gate(&h.client.bashGate, true)
+	first.AwaitBlocked(t)
+	reopened := h.client.GateIn(&h.client.BashGate, true)
 	h.relink(t)
-	reopened.awaitBlocked(t)
+	reopened.AwaitBlocked(t)
 
 	// Act: the shim's re-announcement no longer names the shell.
 	h.reannounce(t, sessionStarted(""))
@@ -154,17 +154,17 @@ func TestAConcludedShellsHungOpenIsCancelled(t *testing.T) {
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-	h.client.nextBashOpen(t)
-	reopened := h.client.gate(&h.client.bashGate, true)
+	h.client.NextBashOpen(t)
+	reopened := h.client.GateIn(&h.client.BashGate, true)
 	h.relink(t)
-	reopened.awaitBlocked(t)
+	reopened.AwaitBlocked(t)
 
 	// Act.
 	h.reannounce(t, sessionStarted(""))
 
 	// Assert: the hung open returned (no goroutine is left holding it), and
 	// the retirement names the open it cancelled.
-	withinDeadline(t, "the concluded shell's hung open", h.client.settleOpens)
+	withinDeadline(t, "the concluded shell's hung open", h.client.SettleOpens)
 	if got := h.retiredRecord(t, "w-1")["watch"]; got != "opening" {
 		t.Fatalf("retired watch state = %v, want opening", got)
 	}
@@ -180,17 +180,17 @@ func TestAConcludedShellsOpenStreamIsClosed(t *testing.T) {
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 	h.relink(t)
-	open := h.client.nextBashOpen(t)
-	h.client.settleOpens()
+	open := h.client.NextBashOpen(t)
+	h.client.SettleOpens()
 
 	// Act.
 	h.reannounce(t, sessionStarted(""))
 
 	// Assert.
 	select {
-	case <-open.stream.closed:
+	case <-open.Stream.Closed:
 	case <-time.After(waitDeadline):
 		t.Fatal("the concluded shell's open stream was never closed")
 	}
@@ -203,12 +203,12 @@ func TestAShellConcludedBeforeAnyWatchOpenedLeavesTheLiveSet(t *testing.T) {
 	// Arrange: every WatchBash is refused, so the shell never has a watch.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
+	h.client.SetBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-	h.client.awaitRefusedOpen(t, "WatchBash")
+	h.client.AwaitRefusedOpen(t, "WatchBash")
 	h.relink(t)
-	h.client.awaitRefusedOpen(t, "WatchBash")
-	h.client.settleOpens()
+	h.client.AwaitRefusedOpen(t, "WatchBash")
+	h.client.SettleOpens()
 
 	// Act.
 	h.reannounce(t, sessionStarted(""))
@@ -231,7 +231,7 @@ func TestAnUnaddressableSubagentIsCounted(t *testing.T) {
 	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1", subagentKind("")))))
 
 	// Assert.
-	h.client.noAgentOpen(t)
+	h.client.NoAgentOpen(t)
 	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("w-1")}})
 	if !h.hasRecord("error", "daemon.sessionwatcher.detached_subagent_unaddressable") {
 		t.Fatalf("records = %+v, want the unaddressable announcement at ERROR", h.log.Records())
@@ -276,7 +276,7 @@ func TestAWatchStreamEndingDoesNotRetireALiveItem(t *testing.T) {
 	tests := []struct {
 		name string
 		// announce makes one item live and answers its open stream.
-		announce func(t *testing.T, h *harness) interface{ fail(error) }
+		announce func(t *testing.T, h *harness) interface{ Fail(error) }
 		// ended waits until the watcher has handled the stream's end: a
 		// shell's watch is re-opened, and an agent's severs the link.
 		ended func(t *testing.T, h *harness)
@@ -284,18 +284,18 @@ func TestAWatchStreamEndingDoesNotRetireALiveItem(t *testing.T) {
 	}{
 		{
 			name: "a detached shell's WatchBash",
-			announce: func(t *testing.T, h *harness) interface{ fail(error) } {
+			announce: func(t *testing.T, h *harness) interface{ Fail(error) } {
 				h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-				return h.client.nextBashOpen(t).stream
+				return h.client.NextBashOpen(t).Stream
 			},
-			ended: func(t *testing.T, h *harness) { h.client.nextBashOpen(t) },
+			ended: func(t *testing.T, h *harness) { h.client.NextBashOpen(t) },
 			want:  LiveWorkSet{Shells: []*conversationv1.DetachedWorkId{workID("w-1")}},
 		},
 		{
 			name: "a detached subagent's WatchAgent",
-			announce: func(t *testing.T, h *harness) interface{ fail(error) } {
+			announce: func(t *testing.T, h *harness) interface{ Fail(error) } {
 				h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
-				return h.client.nextAgentOpenFor(t, "sub-1").stream
+				return h.client.NextAgentOpenFor(t, "sub-1").Stream
 			},
 			ended: func(t *testing.T, h *harness) { h.rec.until(t, "sidebar.OnLink") },
 			want:  LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}},
@@ -307,10 +307,10 @@ func TestAWatchStreamEndingDoesNotRetireALiveItem(t *testing.T) {
 			h := newHarness(t, Session{Started: sessionStarted("")})
 			h.quiet()
 			stream := tt.announce(t, h)
-			h.client.settleOpens()
+			h.client.SettleOpens()
 
 			// Act.
-			stream.fail(io.ErrUnexpectedEOF)
+			stream.Fail(io.ErrUnexpectedEOF)
 			tt.ended(t, h)
 
 			// Assert.
@@ -440,17 +440,17 @@ func departWith(t *testing.T, h *harness, edge string) []event {
 	t.Helper()
 	switch edge {
 	case "link_dead":
-		h.client.links <- shimclient.LinkDead
+		h.client.Links <- shimclient.LinkDead
 		h.awaitDeparture(t)
 	case "link_dead_in_stand_down":
 		h.client.StandDown()
-		h.client.links <- shimclient.LinkDead
+		h.client.Links <- shimclient.LinkDead
 		h.awaitDeparture(t)
 	case "close_ending":
 		h.w.SessionEnding("a test ends the session")
 		closeWatcher(t, h)
 	case "close_reaped":
-		h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: -1, Signal: "killed"})
+		h.client.SetReaped(shimclient.ExitInfo{PID: 4242, Code: -1, Signal: "killed"})
 		closeWatcher(t, h)
 	default:
 		t.Fatalf("unknown departure edge %q", edge)
@@ -589,7 +589,7 @@ func TestADisplacedWatchersDepartureStillEmptiesItsOwnLedger(t *testing.T) {
 func TestAStartlessShellsFailureTerminalRetiresItAsABashTerminal(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 	h.quiet()
 	entry := h.shellWatchFor("w-1")
 
