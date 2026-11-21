@@ -322,6 +322,9 @@ type Manager struct {
 	// Cut closes once the run is cut (its sentinel is gone): a wait for a
 	// memory seat ends then, and nothing is attached (seats.Pool.Take).
 	Cut <-chan struct{}
+	// WatchExit watches a process for its exit (WatchProcessExit): the
+	// disk's helper, whose exit is the disk's loss (WatchLoss).
+	WatchExit func(pid int) (ExitWatch, error)
 }
 
 // Volume is one attached, mounted RAM disk owned by this run.
@@ -338,7 +341,9 @@ type Volume struct {
 	// the release finds its disk by it, never by Device (helper).
 	helper helper
 	// use records the space in use over the run (WatchUse).
-	use  *use
+	use *use
+	// loss watches the helper for the disk's loss over the run (WatchLoss).
+	loss *loss
 	lock *os.File
 	// seat is the memory seat the disk holds until its release (seats.go).
 	seat *seats.Seat
@@ -352,6 +357,7 @@ func Default(log Logger) Manager {
 		Probe: RunBounded, Procs: proctable.List, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
 		LockBound: LockBound, Memory: HostMemory, Used: MountUsed,
 		Recheck: func() <-chan time.Time { return time.After(MemoryRecheck) }, Rank: NoRank,
+		WatchExit: WatchProcessExit,
 	}
 }
 
@@ -609,6 +615,10 @@ func (v *Volume) Release() error {
 	v.m.Log.Infof("RAM disk release: begin at %s, %s mounted at %s", stamp(start), v.Device, v.Mount)
 	v.stopUse()
 	var errs []error
+	// THE LOSS WATCH ENDS BEFORE THE DETACH, which ends the helper on purpose.
+	if err := v.stopLoss(); err != nil {
+		errs = append(errs, err)
+	}
 	detached := true
 	if v.Device != "" {
 		// NOTHING IS DETACHED UNDER A LIVE PROCESS. A run stopped mid-suite
