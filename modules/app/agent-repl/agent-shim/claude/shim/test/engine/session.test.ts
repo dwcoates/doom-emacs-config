@@ -18089,7 +18089,7 @@ describe("the vendor-error retry", () => {
     await failedTurn(h, "turn-1", [], UNREACHABLE);
 
     // Act
-    await h.engine.onSdkMessage({ type: "stream_event" } as unknown as SdkMessage);
+    await h.engine.onSdkMessage({ type: "stream_event", parent_tool_use_id: "toolu_subagent" } as unknown as SdkMessage);
     await settledUntil(() => delivered.some(isVendorErrorRetryPrompt));
 
     // Assert
