@@ -239,6 +239,9 @@ type orchestrator struct {
 	// moveLocks are the workspaces' move locks (lockMove), made on first use
 	// under mu.
 	moveLocks map[ids.WorkspaceID]*sync.Mutex
+	// serviceGates are the gates' runs on the test service, and a restart's
+	// hold of them (testservicehold.go).
+	serviceGates serviceGates
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// lines serializes, per repository, every decision that reads its line
@@ -325,6 +328,11 @@ type orchestrator struct {
 	// merge to stop at its next step boundary, before the restart waits for
 	// it. Nil in production; tests release the step in flight from it.
 	onBoundaryAsk func()
+	// onServiceHoldWait, when set, is called each time a gate begins waiting
+	// out a restart's hold of the test service (enterTestService): THE TEST
+	// SEAM, NIL IN PRODUCTION, that shows the gate waiting before its run
+	// starts.
+	onServiceHoldWait func()
 	// onDrainWait, when set, is called once the drain has stopped admitting
 	// and snapshotted the terminal work, immediately before it begins waiting.
 	// It exists so a test releases a held terminal from inside the drain's own
@@ -405,6 +413,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		headLeases:         map[ids.WorkspaceID]wsm.Lease{},
 		leaseWaits:         map[ids.WorkspaceID]wsm.RepoKey{},
 		events:             newQueueEvents(),
+		serviceGates:       serviceGates{on: map[*serviceGate]struct{}{}},
 	}
 	// EVERY WRITE THAT ADDS OR REMOVES A QUEUE ROW REPUBLISHES THE ROSTER'S
 	// QUEUE (rosterqueue.go): the orchestrator only ever writes through the

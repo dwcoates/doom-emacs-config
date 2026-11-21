@@ -261,6 +261,54 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("`approve`: the deploy broke nothing, or everything found is pre-existing, transient or ignorable");
   });
 
+  it("has the deploy mediator fix a failure of the deploy checks themselves, whenever it was first logged", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-21: nothing else watches the checks, so
+    // a failure of them is never passed over as pre-existing.
+    expect(text).toContain("### A failure of the deploy checks themselves is always the mediator's to fix");
+    expect(text).toContain("A record showing the deploy checks did not run as designed is never pre-existing, whenever it was first logged (owner ruling, 2026-11-21).");
+    expect(text).toContain("an error of the `daemon.merge.mediation` operation, a `daemon.workspace.deploy_checks` error, a deploy that was never checked, a queue held with no decision owed to anyone");
+    expect(text).toContain("The mediator dispatches it and fixes it in the check that first sees it.");
+    expect(text).toContain("The one exception is a failure of the deploy checks themselves, as the next section says.");
+  });
+
+  it("has each deploy check first confirm that no deploy since the last decided check went unchecked", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-21.
+    expect(text).toContain("Each check first confirms that no deploy since the last decided check went unchecked.");
+    expect(text).toContain("`agent-repld merge-queue landings -repository here -since <the last check>`");
+    expect(text).toContain("A deploy that went unchecked is a failure of the checks");
+  });
+
+  it("has the deploy mediator diagnose and design a fix itself, and dispatch its implementation to opus subagents", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-21.
+    expect(text).toContain("Diagnose each dispatched problem yourself, from its records, and settle its fix's design.");
+    expect(text).toContain("Then dispatch the implementation to opus subagents (`subagent_type: opus-medium`) (owner ruling, 2026-11-21).");
+    expect(text).toContain("They work in this workspace's worktree, on its branch, and commit there.");
+    expect(text).toContain("Wait on them in this turn, never in the background: the turn ends only with the finish.");
+    expect(text).toContain("Review what they return, see the named tests pass, and finish. One remediation is still one landing.");
+  });
+
+  it("keeps the deploy mediator from creating a workspace, its subagents being part of its session", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner rulings 2026-11-18 and 2026-11-21.
+    expect(text).toContain("It NEVER creates a workspace of any kind (a child, a one-shot, a peer, an async merge) to do any part of it (owner ruling, 2026-11-18).");
+    expect(text).toContain("The subagents it dispatches a fix's implementation to are part of that session.");
+  });
+
   it("has the deploy mediator decide every deploy itself, never needing the user's approval", () => {
     // Arrange
     const home = homeOnThisRepository();

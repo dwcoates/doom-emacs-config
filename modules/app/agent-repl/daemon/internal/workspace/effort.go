@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -12,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/effortlevel"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -85,6 +87,28 @@ func (f *Fleet) SetEffort(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		return &ShimRefusal{Verb: "SetSessionEffort", Arm: ArmShimNoSession, Detail: "the workspace has no live session"}
 	}
 	effective, err := applyEffort(ctx, client, level)
+	if switchFoundNoShim(err) {
+		// A SHIM GONE OR UNREACHABLE HOLDS NO SESSION TO SWITCH, the same
+		// answer as no shim at all: one this daemon stood down or that died
+		// (recorded where that is observed), or one whose socket could not be
+		// dialed (recorded at ERROR by the shim client). The session that
+		// replaces it comes up at the pick (reapplyEffort). 2026-11-21
+		// 12:56:28: a deploy mediator's shim, stood down by the rollout as
+		// its effort was set, was recorded here at ERROR and the deploy's
+		// check was never told.
+		log.Info(opSetEffort, "the workspace's shim is gone or unreachable; it holds no session to set an effort on now", dlog.Context{
+			"effort": level.String(), "cause": err.Error(),
+		})
+		return fmt.Errorf("set effort on %q: %w", ws, err)
+	}
+	if err != nil && ctx.Err() != nil {
+		// A SWITCH ITS OWN CALLER ABANDONED IS NO REFUSAL: the shim answered
+		// nothing (the daemon's exit, a cancelled request).
+		log.Info(opSetEffort, "the effort switch was abandoned: its caller's context ended before the shim answered", dlog.Context{
+			"effort": level.String(), "cause": err.Error(),
+		})
+		return fmt.Errorf("set effort on %q: %w", ws, err)
+	}
 	if refusedNoSession(err) {
 		// A SHIM WITH NO SESSION YET (one prelaunched inert, one whose session
 		// ended) is the same answer as no shim at all, which the caller turns
@@ -104,6 +128,53 @@ func (f *Fleet) SetEffort(ctx context.Context, log dlog.Logger, ws ids.Workspace
 	}
 	f.deps.Topbar.SetPickedEffort(ws, effective)
 	return nil
+}
+
+// switchFoundNoShim reports whether ERR, an effort switch's failure, is the
+// switch finding no shim to take it: the shim died or this daemon stood it
+// down (shimGone), or its socket could not be dialed.
+func switchFoundNoShim(err error) bool {
+	return shimGone(err) || errors.Is(err, shimclient.ErrShimUnreachable)
+}
+
+// switchFoundNoSession reports whether ERR, an effort switch's failure, means
+// no live session took it: none held, a shim with no session yet, or no shim
+// to take it (switchFoundNoShim). A recorded pick then stands for the
+// session's next start (reapplyEffort).
+func switchFoundNoSession(err error) bool {
+	return refusedNoSession(err) || switchFoundNoShim(err)
+}
+
+// SwitchEffort switches WS's live session to LEVEL OFF THE CALLER'S
+// GOROUTINE, under the fleet's lifetime (Detach), and answers at once. The
+// caller has recorded LEVEL as the workspace's pick first, so every outcome
+// leaves the session at it from its next start on.
+//
+// THE CALLER NEVER WAITS ON A TURN. The shim holds a switch asked mid-turn
+// until that turn ends and answers only then (agent-shim engine/session.ts
+// setSessionEffort, engine/boundary-change.ts), which has no bound: a deploy
+// check's round that set its mediator's effort waited on the mediator's
+// running turn for minutes (2026-11-21 13:55:20). The switch lands at the
+// boundary, before the next turn, which is the turn a prompt queued behind
+// the running one runs in.
+//
+// A REFUSAL IS LOUD, NEVER FATAL to the caller: it is recorded at ERROR
+// (SetEffort) and stated on the warning strip, the reader's one error
+// surface, as a failed put-back is. A switch that found no session, or that
+// the daemon's exit cut, is recorded at INFO by SetEffort: the pick stands.
+func (f *Fleet) SwitchEffort(log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) {
+	f.Detach(func(ctx context.Context) {
+		err := f.SetEffort(ctx, log, ws, level)
+		switch {
+		case err == nil:
+			log.Info(opSetEffort, "the effort switch landed", dlog.Context{"effort": level.String()})
+		case switchFoundNoSession(err) || ctx.Err() != nil:
+			log.Info(opSetEffort, "the effort switch found no session to take it; the pick stands for the session's next start", dlog.Context{"effort": level.String()})
+		default:
+			f.deps.Topbar.RaiseWarning(ws, opSetEffort,
+				fmt.Sprintf("the session could not be switched to effort %s: %v", effortlevel.Word(level), err))
+		}
+	})
 }
 
 // reapplyEffort puts a freshly started shim back at the level a pick put in

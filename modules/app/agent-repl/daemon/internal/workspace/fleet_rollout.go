@@ -848,6 +848,13 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	if factsErr != nil {
 		return rollout.Resumed{}, factsErr
 	}
+	// A RELAUNCHED SHIM STARTS AT THE ROOT'S LEVEL, as every new shim does,
+	// while a pick holds for the rest of the session: put it back before the
+	// session is called up, as the cold bring-up does (sessionUp). A rollout's
+	// relaunch dropped the pick (2026-11-21 12:56:28: the deploy mediator's
+	// shim, bounced for changed skills, would have come up at the root's
+	// level under the low effort picked for it).
+	f.reapplyEffort(ctx, log, ws, c)
 	f.publishHost(ws)
 	log.Info(opFleetRollout, "the session is up on the new shim", dlog.Context{
 		"fresh": src.Fresh, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),

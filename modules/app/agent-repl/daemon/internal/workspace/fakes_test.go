@@ -3145,6 +3145,8 @@ type fakeSessions struct {
 	// efforts is every SetEffort asked of the fleet; effortErr its answer.
 	efforts   []effortCall
 	effortErr error
+	// switches is every SwitchEffort asked of the fleet.
+	switches []effortCall
 	// remoteChanges is every SetRemoteControl asked of the fleet, answered
 	// with remoteOn and remoteErr.
 	remoteChanges []wsm.RemoteControlChange
@@ -3186,6 +3188,12 @@ type stopCall struct {
 func (s *fakeSessions) SetEffort(_ context.Context, _ dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {
 	s.efforts = append(s.efforts, effortCall{WS: ws, Level: level})
 	return s.effortErr
+}
+
+// SwitchEffort records the ask; the fleet's switch runs off the caller's
+// goroutine and answers nothing.
+func (s *fakeSessions) SwitchEffort(_ dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) {
+	s.switches = append(s.switches, effortCall{WS: ws, Level: level})
 }
 
 // RetryVendorError records the ask and answers the scripted outcome.

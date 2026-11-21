@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -1084,6 +1085,28 @@ func shimDied(err error) error {
 	return fmt.Errorf("%w: %w", ErrShimDied, err)
 }
 
+// ErrShimUnreachable marks a shim call that never reached a shim: the dial
+// of its socket failed (no socket at the path, or nobody listening on it).
+// It is told apart from anything a shim answered, which crossed the wire, so
+// a caller for whom an unreachable shim means "no session to act on now"
+// reads it by type, never by its message (2026-11-21 12:56:28: a mediator's
+// effort was refused by a dial to a socket its replacement had removed).
+// The failure is still returned with the transport error in its chain.
+var ErrShimUnreachable = errors.New("the shim could not be reached at its socket")
+
+// dialFailed answers whether ERR is a call's dial of the shim's socket
+// failing: the transport never connected, so no shim saw the call.
+func dialFailed(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial"
+}
+
+// shimUnreachable wraps a call's failure as one that never reached a shim,
+// keeping the transport error in the chain.
+func shimUnreachable(err error) error {
+	return fmt.Errorf("%w: %w", ErrShimUnreachable, err)
+}
+
 // diedUnder answers whether a call's transport failure was the shim dying:
 // only a transport cut (transportcut.Is) can be, and only when Died says so.
 func (c *client) diedUnder(err error) (ExitInfo, bool) {
@@ -1901,6 +1924,14 @@ func unary[Req any, Resp any](
 		if info, died := c.diedUnder(err); died {
 			c.log.Info(operation, "the shim call failed because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(fields, info))
 			return nil, shimDied(err)
+		}
+		// A CALL WHOSE DIAL FAILED NEVER REACHED A SHIM: still a fault of
+		// this client's shim, recorded at ERROR, and typed so a caller can
+		// tell it from any answer (ErrShimUnreachable).
+		if dialFailed(err) {
+			fields["unreachable"] = true
+			c.log.Error(operation, "shim call failed", fields)
+			return nil, shimUnreachable(err)
 		}
 		c.log.Error(operation, "shim call failed", fields)
 		return nil, err

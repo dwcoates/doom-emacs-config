@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -17,9 +18,9 @@ import (
 // standing workspace that checks every deploy, fixes what it dispatches,
 // and settles an escalation with the user. It is made with no initial
 // prompt, so no session comes up at the create, and recorded as its queue's
-// standing mediator before its effort is set (SetDeployMediatorEffort, which
-// starts a sessionless workspace's shim), so its session always comes up
-// under the mediator's landing (sessionProfile).
+// standing mediator before it is briefed: its session first comes up for the
+// brief's delivery, at the effort picked for it (SetDeployMediatorEffort),
+// so it always comes up under the mediator's landing (sessionProfile).
 
 // opDeployChecks is the operation the deploy mediator's verbs are recorded
 // under.
@@ -67,26 +68,53 @@ func (v *verbs) CreateDeployMediator(ctx context.Context, repoDir, name string) 
 	return made, nil
 }
 
-// SetDeployMediatorEffort implements Verbs: sets WS to the mediator's
+// SetDeployMediatorEffort implements Verbs: puts WS at the mediator's
 // effort. A sessionless workspace's shim starts for it, so its standing is
 // recorded before.
+//
+// THE EFFORT IS A RECORDED PICK FIRST (Topbar.SetPickedEffort), which every
+// session start puts back in force (Fleet.reapplyEffort, from the cold
+// bring-up and a rollout's relaunch alike); only then is a live session
+// switched. So the mediator's shim being absent, stood down, mid-replacement
+// or unreachable never fails a check's brief: the session the brief's
+// delivery starts comes up at the pick. 2026-11-21 12:56:28: the switch met
+// a shim the rollout had just stood down, the round failed, and the deploy's
+// check was never told.
+//
+// THE ROUND NEVER WAITS ON THE SWITCH. A live session is switched off the
+// round's goroutine (Sessions.SwitchEffort): the shim holds a switch asked
+// mid-turn until the turn ends, which has no bound (2026-11-21 13:55:20: a
+// round stood behind the mediator's running turn for minutes), and the brief
+// the round submits is queued behind that same turn.
+//
+// A REAL FAILURE STAYS AN ERROR: a level the live session's selector never
+// offered is refused here, before any pick, and a vendor's refusal of the
+// switch is recorded at ERROR and stated on the warning strip by the fleet.
 func (v *verbs) SetDeployMediatorEffort(ctx context.Context, ws wsm.WorkspaceID) error {
 	fields := dlog.Context{"workspace": string(ws), "effort": mediatorEffort.String()}
 	// A WORKSPACE WITH NO SESSION YET SERVES NO EFFORT SELECTOR, so its level
-	// is picked rather than set: the session the brief starts comes up at the
-	// pick (Fleet.reapplyEffort). Setting it through the selector refused
-	// every fresh intake (2026-11-15 16:17, 0.444.0: "serves no effort level
-	// for its model") and left the queue held for it.
-	if _, served := v.deps.Cards.EffortLevels(ws); !served {
+	// is only picked: setting it through the selector refused every fresh
+	// intake (2026-11-15 16:17, 0.444.0: "serves no effort level for its
+	// model") and left the queue held for it.
+	served, live := v.deps.Cards.EffortLevels(ws)
+	if !live {
 		v.deps.Topbar.SetPickedEffort(ws, mediatorEffort)
 		v.deps.Log.Global().Info(opDeployChecks, "picked the deploy mediator's effort; its session starts at it", fields)
 		return nil
 	}
-	if err := v.SetEffort(ctx, ws, mediatorEffort); err != nil {
+	if !slices.Contains(served, mediatorEffort) {
+		err := fmt.Errorf("the selector served %v and never offered %v", served, mediatorEffort)
 		v.deps.Log.Global().Error(opDeployChecks, "the deploy mediator's effort could not be set", dlog.WithCause(fields, err))
 		return fmt.Errorf("set the deploy mediator %s's effort: %w", ws, err)
 	}
-	v.deps.Log.Global().Info(opDeployChecks, "set the deploy mediator's effort", fields)
+	_, log, err := v.owned(ctx, "SetDeployMediatorEffort", ws)
+	if err != nil {
+		v.deps.Log.Global().Error(opDeployChecks, "the deploy mediator's effort could not be set", dlog.WithCause(fields, err))
+		return fmt.Errorf("set the deploy mediator %s's effort: %w", ws, err)
+	}
+	v.deps.Topbar.SetPickedEffort(ws, mediatorEffort)
+	v.deps.Sessions.SwitchEffort(log, ws, mediatorEffort)
+	v.deps.Log.Global().Info(opDeployChecks, "picked the deploy mediator's effort; its live session is switched to it before its next turn", fields)
 	return nil
 }
 

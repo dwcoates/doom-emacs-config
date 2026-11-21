@@ -1,5 +1,5 @@
-<!-- used by: daemon internal/merge/escalation.go (escalate); placeholders: {{repo_dir}}, {{deploy_started}}, {{what}}, {{cause}} -->
-agent-repl could not prepare the check of the deploy of `{{repo_dir}}` that began at {{deploy_started}}, so nothing has looked at that deploy yet. This says nothing about whether the deploy broke anything.
+<!-- used by: daemon internal/merge/escalation.go (escalate); placeholders: {{repo_dir}}, {{deploy_started}}, {{told_standing}}, {{what}}, {{cause}} -->
+agent-repl's own handling of the check of the deploy of `{{repo_dir}}` that began at {{deploy_started}} failed {{told_standing}} This says nothing about whether the deploy broke anything.
 
 - What failed: {{what}}
 - The cause: {{cause}}
@@ -14,4 +14,4 @@ Your job is the usual one, without the digest: find out whether this deploy brok
   - The check is held as an escalation, so its fix lands through the finish and no dispatch is made.
 - If the fix turns on a decision that is the user's, say plainly what is wrong and what the choices are, and wait for their ruling.
 
-The failure above is a failure of agent-repl's own deploy check. Name it on the approval when it was there before this deploy, and fix it with the rest when this deploy caused it.
+The failure above is a failure of agent-repl's own deploy check, so it is always yours to fix, whenever it was first logged: fix it with the rest and finish, never name it on the approval as older.

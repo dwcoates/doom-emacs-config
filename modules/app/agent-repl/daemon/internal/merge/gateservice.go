@@ -124,7 +124,8 @@ func (g *gateRun) serviceRun(ctx context.Context, dir string, argv []string) (st
 // leaveOrStop ends the watch of RUN its context cut: the run is left going
 // when a suspension the merge resumes from (keepsGateRun) or the daemon's
 // exit took the merge -- the resumed merge watches the run again -- and
-// stopped otherwise.
+// stopped otherwise: a restart of the test service takes it off the service
+// (testservicehold.go).
 func (g *gateRun) leaveOrStop(ctx context.Context, run string, fields dlog.Context) {
 	r := g.r
 	why, suspended := r.suspendedFor()
@@ -132,7 +133,11 @@ func (g *gateRun) leaveOrStop(ctx context.Context, run string, fields dlog.Conte
 		r.o.log(ctx, r.ws).Info("daemon.merge.tests", "a suspension took the merge mid-gate; its run goes on on the test service for the merge's resume to watch", fields)
 		return
 	}
-	r.retireTestRun(ctx, "the gate ended before its run did")
+	retired := "the gate ended before its run did"
+	if errors.Is(context.Cause(ctx), errTestServiceRestart) {
+		retired = whyTestServiceRestart
+	}
+	r.retireTestRun(ctx, retired)
 }
 
 // retireTestRun stops the run the merge's progress records, if any, and

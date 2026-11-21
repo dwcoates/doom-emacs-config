@@ -103,8 +103,9 @@ func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, fields
 		o.mediationFailed(ctx, fields, "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed", err)
 		return standing{}, fmt.Errorf("merge: refresh the deploy mediator %s: %w", mediator.ws, err)
 	}
-	// THE MEDIATOR IS RECORDED BEFORE THE EFFORT IS SET: setting it starts a
-	// made mediator's shim, whose landing reads the record.
+	// THE MEDIATOR IS RECORDED BEFORE ITS EFFORT IS PICKED, and so before
+	// the brief's delivery brings its session up at the pick: the session's
+	// landing reads the record.
 	if err := o.deps.DeployChecks.SetDeployMediatorEffort(ctx, mediator.ws); err != nil {
 		o.mediationFailed(ctx, fields, "the deploy mediator's effort could not be set; it is not briefed", err)
 		return standing{}, fmt.Errorf("merge: set the deploy mediator %s's effort: %w", mediator.ws, err)

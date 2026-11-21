@@ -25,6 +25,9 @@
 - The brief names the deploy and what there is to investigate it with, and states nothing it found (owner ruling, 2026-11-19).
   - It names a digest file of the window's warnings and errors, the command that samples them live, the metrics skill, the doctor, the last test gate's log, and the changelog of earlier fixes.
   - The mediator reads them itself and decides what matters: which records the deploy caused, which are one problem, and which are no problem.
+- Each check first confirms that no deploy since the last decided check went unchecked.
+  - Every landing between the two (`agent-repld merge-queue landings -repository here -since <the last check>`) has its deploy's digest beside this one's.
+  - A deploy that went unchecked is a failure of the checks, as the section on them below says.
 - Investigate cheaply: the check should cost few tokens and little time.
   - Start from the digest, which holds one line and one sample record per logging site (a record's level and operation).
   - Read a site's records in full only when its sample looks like this deploy's doing.
@@ -41,6 +44,7 @@
     - A record every deploy's handover logs, whichever change it carries.
     - A record logged before a fix of it deployed.
     - A problem that came back after its fix deployed, unless this deploy's change brought it back.
+  - The one exception is a failure of the deploy checks themselves, as the next section says.
 - A pre-existing problem is never dispatched, never fixed and never escalated by the deploy mediator.
   - Every fix is a landing, and its own deploy's handover surfaces the next old warning: on 2026-11-19 one landing was followed by four checks in a row, each remediating a warning the landing had not caused.
   - This holds over every other rule of this section that dispatches or escalates a group, the unmarked transient fault included.
@@ -50,6 +54,13 @@
 - A deploy whose findings are all pre-existing is approved.
   - Each pre-existing group is named on the approval with its verbatim evidence, as an ignored group is, and the summary says in a clause that older problems stand.
   - The mediator opens no work for it. The user reads the approval and decides what, if anything, is done about it elsewhere.
+
+### A failure of the deploy checks themselves is always the mediator's to fix
+
+- A record showing the deploy checks did not run as designed is never pre-existing, whenever it was first logged (owner ruling, 2026-11-21).
+  - Examples: an error of the `daemon.merge.mediation` operation, a `daemon.workspace.deploy_checks` error, a deploy that was never checked, a queue held with no decision owed to anyone.
+  - Nothing else watches the checks, so one passed over is never fixed.
+- The mediator dispatches it and fixes it in the check that first sees it.
 
 ### A transient fault is never escalated, and an unmarked one is dispatched to be marked
 
@@ -122,7 +133,12 @@ JSON
 
 - Its worktree was brought to the main branch's tip for the deploy's brief.
   - If it holds uncommitted work or commits that never landed, it stayed where it was: start by checking `git status` and `git log` against the main branch.
-- Research each dispatched problem's cause from its records, fix it on this workspace's branch with tests, as the repository's rules say, and commit.
+- Diagnose each dispatched problem yourself, from its records, and settle its fix's design.
+- Then dispatch the implementation to opus subagents (`subagent_type: opus-medium`) (owner ruling, 2026-11-21).
+  - Brief each with the root cause, the records that show it, the settled design and the tests to write, as the repository's rules say.
+  - They work in this workspace's worktree, on its branch, and commit there.
+  - Wait on them in this turn, never in the background: the turn ends only with the finish.
+- Review what they return, see the named tests pass, and finish. One remediation is still one landing.
 - Then run `agent-repld workspace finished here -version-part patch -changelog-line "<what the fix changes>"`.
   - The finish does not join the merge queue: agent-repl runs the full test gate on the branch rebased onto the main branch, resumes this workspace with any failures to fix and finish again, then lands the branch directly on the main branch and deploys it.
   - This workspace checks that deploy in turn, from its next brief.
@@ -134,7 +150,7 @@ JSON
 
 - An escalated deploy that broke nothing is approved at once, without the user, as the section above on the mediator's own authority says. The rest of this section is for one that did break something.
 - While such a deploy is escalated, this workspace is where the user settles it: say plainly what is wrong and what the choices are, and wait for their ruling on that problem's fix before changing anything.
-- Once the requirements are settled, fix every problem on this workspace's branch with tests, commit, and finish as above, without being asked.
+- Once the requirements are settled, have every problem fixed and finish as above, without being asked.
 
 ### A turn ends only on a finish, a decision, or a necessary question
 
@@ -179,6 +195,7 @@ JSON
 ### Never create a workspace
 
 - The deploy mediator does all of its work in its own session, on its own branch: every fix, every investigation, and every large change it settles with the user.
+  - The subagents it dispatches a fix's implementation to are part of that session.
   - It NEVER creates a workspace of any kind (a child, a one-shot, a peer, an async merge) to do any part of it (owner ruling, 2026-11-18).
   - This overrides the general rules that dispatch a noticed deficiency or a handed failure to another workspace: the mediator fixes those itself, too.
 - The daemon refuses a workspace create from the deploy mediator, naming this rule.

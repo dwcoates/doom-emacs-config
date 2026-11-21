@@ -30,7 +30,7 @@ const fixerStoppedSummary = "the deploy mediator's turn ended without landing a 
 func (o *orchestrator) watchFixer(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) {
 	finish, err := o.finishUnderWay(ctx, q.key)
 	if err != nil {
-		o.mediationFailed(ctx, fields, "could not read whether the mediator's finish is under way; the queue stays held for the mediator", err)
+		o.roundFailed(ctx, q, m, "could not read whether the deploy mediator's finish is under way", err, fields)
 		return
 	}
 	if finish != nil {
@@ -39,7 +39,7 @@ func (o *orchestrator) watchFixer(ctx context.Context, q checkedQueue, m wsm.Med
 	}
 	mediator, found, err := o.deps.DB.DeployMediatorOf(ctx, q.key)
 	if err != nil {
-		o.mediationFailed(ctx, fields, "could not read the deploy mediator the fix is dispatched to; the queue stays held for it", err)
+		o.roundFailed(ctx, q, m, "could not read the deploy mediator the fix is dispatched to", err, fields)
 		return
 	}
 	// A DISPATCH IS ONLY EVER RECORDED BY THE MEDIATOR, with its turn
@@ -55,7 +55,7 @@ func (o *orchestrator) watchFixer(ctx context.Context, q checkedQueue, m wsm.Med
 	fields = withField(withField(fields, "mediator", string(mediator.Workspace)), "turn", string(turn.ID))
 	place, closed, err := o.bringTurnOn(ctx, mediator.Workspace, fields, turn.ID, turn.Brief, conversationv1.PromptOrigin(turn.Origin))
 	if err != nil {
-		o.mediationFailed(ctx, fields, "could not tell where the mediator's fix turn stands; the queue stays held for it until the next round", err)
+		o.roundFailed(ctx, q, m, "could not tell where the deploy mediator's fix turn stands", err, fields)
 		return
 	}
 	if place == turnUnderWay {
@@ -70,7 +70,7 @@ func (o *orchestrator) watchFixer(ctx context.Context, q checkedQueue, m wsm.Med
 		return
 	}
 	if err := o.escalateForMediator(ctx, q.key, fixerStoppedSummary, fields); err != nil {
-		o.mediationFailed(ctx, fields, "the mediator stopped without a fix but its check could not be escalated; the queue stays held", err)
+		o.roundFailed(ctx, q, m, "the deploy mediator stopped without a fix, and its check could not be read to escalate it", err, fields)
 	}
 }
 

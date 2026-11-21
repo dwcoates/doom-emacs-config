@@ -122,8 +122,16 @@ type fakeDB struct {
 	// onRelease, when set, runs before each check's release, as a newer
 	// deploy racing it does.
 	onRelease func()
-	// windowErr fails RecordMediationWindow when set.
-	windowErr            error
+	// windowErr fails RecordMediationWindow when set, and windowReadErr
+	// MediationWindowOf.
+	windowErr     error
+	windowReadErr error
+	// promptMarkErr fails MarkMediationPrompted, and mediationReleaseErr
+	// ReleaseMediation.
+	promptMarkErr       error
+	mediationReleaseErr error
+	// escalateErr fails EscalateMediation.
+	escalateErr          error
 	remediationFinishErr error
 	// remediationFinishesErr fails RemediationFinishes.
 	remediationFinishesErr error
@@ -390,6 +398,12 @@ func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Tim
 }
 
 func (f *fakeDB) MarkMediationPrompted(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
+	f.mu.Lock()
+	err := f.promptMarkErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
 	return f.checks.MarkMediationPrompted(ctx, repo, owed, at, turn)
 }
 
@@ -404,15 +418,24 @@ func (f *fakeDB) MarkMediationResumed(ctx context.Context, repo wsm.RepoKey, owe
 }
 
 func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time, brief string) (bool, error) {
+	f.mu.Lock()
+	err := f.escalateErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
 	return f.checks.EscalateMediation(ctx, repo, owed, brief)
 }
 
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
 	f.mu.Lock()
-	hook := f.onRelease
+	hook, err := f.onRelease, f.mediationReleaseErr
 	f.mu.Unlock()
 	if hook != nil {
 		hook()
+	}
+	if err != nil {
+		return false, err
 	}
 	return f.checks.ReleaseMediation(ctx, repo, owed)
 }
@@ -556,6 +579,12 @@ func (f *fakeDB) RecordMediationWindow(ctx context.Context, repo wsm.RepoKey, ow
 }
 
 func (f *fakeDB) MediationWindowOf(ctx context.Context, repo wsm.RepoKey) (wsm.CheckWindow, bool, error) {
+	f.mu.Lock()
+	err := f.windowReadErr
+	f.mu.Unlock()
+	if err != nil {
+		return wsm.CheckWindow{}, false, err
+	}
 	return f.checks.MediationWindowOf(ctx, repo)
 }
 

@@ -2066,3 +2066,37 @@ func TestAwaitTurnEndRefusesATurnNoSessionWillRun(t *testing.T) {
 		})
 	}
 }
+
+func TestARelaunchedShimIsPutBackAtThePickedEffort(t *testing.T) {
+	tests := []struct {
+		name        string
+		picked      conversationv1.AgentEffortLevel
+		wantEfforts []conversationv1.AgentEffortLevel
+	}{
+		{name: "a workspace whose effort was picked", picked: effortLow, wantEfforts: []conversationv1.AgentEffortLevel{effortLow}},
+		{name: "a workspace with no pick is asked nothing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a rollout relaunches the session on a new shim.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			f.picked = tt.picked
+
+			// Act.
+			if _, err := f.fleet.Resume(context.Background(), ws.ID, f.client); err != nil {
+				t.Fatalf("Resume: %v", err)
+			}
+
+			// Assert.
+			var asked []conversationv1.AgentEffortLevel
+			for _, req := range f.client.efforts {
+				asked = append(asked, req.GetEffort())
+			}
+			if !reflect.DeepEqual(asked, tt.wantEfforts) {
+				t.Fatalf("SetSessionEffort asks = %v, want %v", asked, tt.wantEfforts)
+			}
+		})
+	}
+}

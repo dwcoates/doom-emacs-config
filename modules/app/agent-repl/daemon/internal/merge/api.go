@@ -357,6 +357,13 @@ type Orchestrator interface {
 	// ReviewQueues offers every repository with a merge queue to this
 	// daemon's pump, judged from its durable rows (rollout.MergeMover).
 	ReviewQueues(ctx context.Context) error
+	// TakeTestRunsOff takes every gate's run off the test service and holds
+	// every gate off it until the release it answers is called: the daemon's
+	// own restart of the service (deploy.Restarter) runs between the two and
+	// releases the gates once the service answers again, or with why it does
+	// not. A gate it held runs again from its start, spending no fixing
+	// attempt and pausing nothing (testservicehold.go).
+	TakeTestRunsOff(ctx context.Context) (func(answered error), error)
 	// SuspendForRestart brings a workspace's merge to a stopping point for a
 	// RestartWorkspace, exactly as a transfer does, and stops this daemon
 	// admitting any merge of it until ResumeAfterRestart. A merge that is
@@ -860,9 +867,9 @@ type DeployCheckWorkspaces interface {
 	// CreateDeployMediator makes a repository's deploy mediator, in sight,
 	// unprompted and in remote control.
 	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployMediatorEffort sets the deploy mediator to its effort; it
-	// starts a sessionless workspace's shim, so its standing is recorded
-	// before it.
+	// SetDeployMediatorEffort picks the deploy mediator's effort, which its
+	// session comes up at, and switches a live session to it without waiting
+	// on its turn; a shim absent, stood down or unreachable is no failure.
 	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
 	// Reopen opens a closed remediation workspace again, its worktree cut
 	// again on its branch at the main branch's tip.

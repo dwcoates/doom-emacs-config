@@ -32,6 +32,9 @@ type fakeTestService struct {
 	startErr, stopErr, watchErr error
 	// onStart, when set, is called with every started run's id.
 	onStart func(run string)
+	// onStop, when set, is called with every stopped run's id before the
+	// stop answers.
+	onStop func(run string)
 	// holds parks the play of a run started with a held label (heldRun)
 	// until the run is stopped or the test ends, so a hold names its run
 	// rather than whichever play reaches the runner first.
@@ -157,6 +160,12 @@ func (s *fakeTestService) lineCount(id string) int {
 }
 
 func (s *fakeTestService) Stop(_ context.Context, id string) error {
+	s.mu.Lock()
+	onStop := s.onStop
+	s.mu.Unlock()
+	if onStop != nil {
+		onStop(id)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stops = append(s.stops, id)

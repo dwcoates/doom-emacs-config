@@ -83,6 +83,10 @@ type Client interface {
 	// Stop kills RUN's process group; a run already ended is left as it
 	// ended.
 	Stop(ctx context.Context, run string) error
+	// Answers makes one call of the service and answers nil once the
+	// service answered it: the proof that it serves, which a restart of it
+	// awaits (deploy.Restarter).
+	Answers(ctx context.Context) error
 }
 
 type client struct {
@@ -153,6 +157,32 @@ func (c *client) Stop(ctx context.Context, run string) error {
 		return &RefusedError{RPC: "StopRun", Kind: "invalid_request", Detail: f.GetDetail()}
 	}
 	return nil
+}
+
+// Answers implements Client. The call is a watch naming no run, which the
+// service refuses at once as an invalid request and which touches no run:
+// its refusal is the answer. A call that never reached the service or never
+// came back is ErrUnavailable; any other answer is an error naming it, a
+// service that does not keep the protocol.
+func (c *client) Answers(ctx context.Context) error {
+	stream, err := c.rpc.WatchRun(ctx, connect.NewRequest(&testservicev1.WatchRunRequest{}))
+	if err != nil {
+		return transport(ctx, "WatchRun", err)
+	}
+	defer stream.Close()
+	if !stream.Receive() {
+		if err := stream.Err(); err != nil {
+			return transport(ctx, "WatchRun", err)
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: a watch naming no run ended with no answer", ErrUnavailable)
+	}
+	if stream.Msg().GetFailure().GetInvalidRequest() != nil {
+		return nil
+	}
+	return fmt.Errorf("testsclient: the service answered a watch naming no run with %v, not its refusal", stream.Msg())
 }
 
 // transport is a call's transport failure: the caller's own end when ctx
