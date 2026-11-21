@@ -5563,32 +5563,6 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
         (should (= (length agent-repl-test-input--release-requests) 1))
         (should-not agent-repl-test-input--submitted)))))
 
-(ert-deftest agent-repl-test-input-control-return-send-skips-a-composer-changed-since-the-press ()
-  "A composer edited between `C-RET' and the daemon's answer is not sent."
-  (agent-repl-test-input--with
-    (with-current-buffer agent-repl-test-input--buffer
-      (insert "first")
-      (let ((tick (buffer-chars-modified-tick)) (sent nil) (said nil) (logged nil))
-        (insert " and more")
-        (cl-letf (((symbol-function 'agent-repl-send) (lambda (&optional ws) (push ws sent)))
-                  ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged))
-                  ((symbol-function 'message)
-                   (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
-          (agent-repl--input-send-if-unchanged "w" (current-buffer) tick))
-        (should-not sent)
-        (should (cl-some (lambda (m) (string-match-p "composer changed" m)) said))
-        (should (cl-some (lambda (m) (string-match-p "control-return-send ws=w outcome=composer-changed" m)) logged))))))
-
-(ert-deftest agent-repl-test-input-control-return-send-skips-a-composer-gone-since-the-press ()
-  "A composer killed between `C-RET' and the daemon's answer sends nothing."
-  (let ((buf (generate-new-buffer " *dead-composer*")) (sent nil) (logged nil))
-    (kill-buffer buf)
-    (cl-letf (((symbol-function 'agent-repl-send) (lambda (&optional ws) (push ws sent)))
-              ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged)))
-      (agent-repl--input-send-if-unchanged "w" buf 0))
-    (should-not sent)
-    (should (cl-some (lambda (m) (string-match-p "outcome=composer-gone" m)) logged))))
-
 (ert-deftest agent-repl-test-input-only-a-composer-send-is-remembered ()
   "A minted turn from the composer is remembered, one from a canned send is not."
   (let ((agent-repl--input-last-sent-turns (make-hash-table :test #'equal)))

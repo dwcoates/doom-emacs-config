@@ -2,12 +2,10 @@ package promptqueue
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 )
 
 func TestNoteSentNowStandingClearsTheReplaysShortcut(t *testing.T) {
@@ -33,26 +31,10 @@ func TestNoteSentNowStandingClearsTheReplaysShortcut(t *testing.T) {
 // through noteSentNowStanding, fails here.
 func TestOnlyNoteSentNowStandingClearsTheReplaysShortcut(t *testing.T) {
 	// Arrange
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	fset := token.NewFileSet()
 	var offenders []string
 
 	// Act
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("ReadFile(%s): %v", path, err)
-		}
-		file, err := parser.ParseFile(fset, path, src, 0)
-		if err != nil {
-			t.Fatalf("ParseFile(%s): %v", path, err)
-		}
+	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, file *ast.File) {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Name.Name == "noteSentNowStanding" || fn.Body == nil {
@@ -75,7 +57,7 @@ func TestOnlyNoteSentNowStandingClearsTheReplaysShortcut(t *testing.T) {
 				return true
 			})
 		}
-	}
+	})
 
 	// Assert
 	if len(offenders) != 0 {
