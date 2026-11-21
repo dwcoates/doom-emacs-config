@@ -574,7 +574,8 @@ its label, and the composer says so."
                           (+ (line-beginning-position) (length label)) (line-end-position))))))
 
 (defun agent-repl-prompt-entries--advance-or-open (next none)
-  "Relabel an empty entry to its node's neighbor below (NEXT) or above, else open it.
+  "Relabel an empty entry to its neighbor node, else open that node.
+The neighbor is below (NEXT) or above point's entry.
 THE ONE SHAPE of `C-SPC' and `C-S-SPC': the daemon names the node NEXT
 `:next' or else `:previous' from the entry's own.  An entry with nothing
 after its label is relabeled to that node; a filled entry opens a line
@@ -653,12 +654,11 @@ binding for it stands, so `TAB' keeps its own meaning.")
     (,(kbd "C-S-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-retreat-or-open-previous))
     (,(kbd "S-RET") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-newline)))
   "The composer's entry-only keys in insert mode, as (KEY . BINDING).
-`M-j' opens the previous sibling above, `M-k' the next one below, and
-`C-SPC' advances an empty entry to its next sibling or aunt (else opens
-that node below),
-`C-S-SPC' steps an empty entry back to the node before it (else opens
-that node above), on an entry line, and `S-RET' clears an empty entry as it opens the next line,
-and all fall through elsewhere.")
+`M-j' opens the previous sibling above and `M-k' the next one below.
+`C-SPC' advances an empty entry to its next sibling or aunt, else opens
+that node below.  `C-S-SPC' steps an empty entry back to the node before
+it, else opens that node above.  `S-RET' clears an empty entry as it
+opens the next line.  All act on an entry line and fall through elsewhere.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.
