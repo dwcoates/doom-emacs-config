@@ -85,8 +85,10 @@ func dedupe(sels []*testrunv1.TestSelection) []*testrunv1.TestSelection {
 }
 
 // Key is a case's identity: two selections naming the same case share it.
+// Its parts are joined by the ASCII unit separator, which no path or test
+// name holds, and never by NUL, which SQLite's text functions stop at.
 func Key(sel *testrunv1.TestSelection) string {
-	return strings.Join(append([]string{kindOf(sel), whereOf(sel)}, namesOf(sel)...), "\x00")
+	return strings.Join(append([]string{kindOf(sel), whereOf(sel)}, namesOf(sel)...), "\x1f")
 }
 
 // GoPackage is the Go package in DIR (repository-relative), every test of it
