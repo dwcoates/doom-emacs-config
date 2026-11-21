@@ -209,6 +209,33 @@ no entry runs whole."
           (ignore-errors (delete-directory eln-dir t)))
         (kill-emacs 2)))))
 
+(defun agent-repl-testrun-ert-list (dir files)
+  "Print the tests each of FILES in DIR defines, running none.
+A rerun's existence check (testrun's suites.Lister.ERTNames): the shared
+helpers load first and then each of FILES, as a chunk loads them, and each
+test a file defines prints one line,
+
+  TESTRUN-NAME <file> <test>
+
+Exit status is 0 once every file loaded, 2 when one could not."
+  (or noninteractive
+      (user-error "This function is only for use in batch mode"))
+  (condition-case err
+      (progn
+        (load (expand-file-name "test-helpers.el" dir) nil t)
+        (dolist (file files)
+          (unless (equal file "test-helpers.el")
+            (load (expand-file-name file dir) nil t)))
+        (dolist (test (ert-select-tests t t))
+          (let* ((path (ert-test-file-name test))
+                 (file (and path (file-name-nondirectory path))))
+            (when (member file files)
+              (princ (format "TESTRUN-NAME %s %s\n" file (ert-test-name test))))))
+        (kill-emacs 0))
+    (error
+     (message "agent-repl-testrun: listing %s failed: %S" files err)
+     (kill-emacs 2))))
+
 (provide 'agent-repl-testrun-ert)
 
 ;;; driver.el ends here

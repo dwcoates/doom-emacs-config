@@ -70,6 +70,9 @@ type Deps struct {
 	// Metrics is where the run pushes every test's time when it ends, and
 	// what ran it; the zero Target pushes nothing (testtimes.TakeTarget).
 	Metrics testtimes.Target
+	// Lister lists the cases the tree holds, for a rerun's existence check
+	// (selection.Prune).
+	Lister selection.Lister
 	// Roster finds a suite by name (roster.Lookup): the push labels each
 	// suite's series with its own batching.
 	Roster func(name string) (roster.Suite, bool)
@@ -156,6 +159,12 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		err := protofile.Read(a.Selection, req)
 		if err != nil {
 			err = fmt.Errorf("read the selection: %w", err)
+		}
+		if err == nil && req.GetDropMissing() {
+			var code int
+			if req, code = prune(d, ev, req, moduleRoot); req == nil {
+				return code
+			}
 		}
 		if err == nil {
 			a, err = a.WithRequest(req)
@@ -789,4 +798,40 @@ func programUnits(layout suites.Layout, selected []roster.Suite, built []suites.
 		return suites.Units{}, err
 	}
 	return suites.Units{Atomic: specs}, nil
+}
+
+// prune drops every case a rerun names that the tree no longer holds
+// (selection.Prune), stating the dropped cases before anything is planned.
+// It answers the request left to run, or nil and the exit status of a run
+// that ends here: refused when a selection names no one case or every case
+// was dropped, aborted when a listing failed.
+func prune(d Deps, ev *events.Emitter, req *testrunv1.TestRunRequest, moduleRoot string) (*testrunv1.TestRunRequest, int) {
+	layout := suites.Layout{Repo: repoRoot(moduleRoot), Module: moduleRoot, Work: d.Work, Self: d.Self}
+	kept, dropped, err := selection.Prune(req, layout, d.Lister)
+	switch {
+	case errors.Is(err, selection.ErrNotOneCase):
+		d.Log.Errorf("the rerun cannot be run: %v", err)
+		ev.Refused(err.Error())
+		return nil, 1
+	case err != nil:
+		detail := fmt.Sprintf("the rerun could not list the cases the tree holds: %v", err)
+		d.Log.Errorf("%s", detail)
+		ev.Aborted(selection.Describe(req), detail)
+		return nil, 1
+	}
+	if len(dropped) > 0 {
+		cases := make([]*testrunv1.TestRunDroppedCase, len(dropped))
+		for i, c := range dropped {
+			d.Log.Infof("the rerun dropped %s: %s", selection.Describe(&testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{c.Selection}}), c.Detail)
+			cases[i] = &testrunv1.TestRunDroppedCase{Selection: c.Selection, Detail: c.Detail}
+		}
+		ev.Dropped(cases)
+	}
+	if len(kept.GetSelections()) == 0 {
+		detail := fmt.Sprintf("the tree holds none of the rerun's %d cases any more", len(dropped))
+		d.Log.Errorf("the rerun cannot be run: %s", detail)
+		ev.RefusedNothingLeft(detail)
+		return nil, 1
+	}
+	return kept, 0
 }
