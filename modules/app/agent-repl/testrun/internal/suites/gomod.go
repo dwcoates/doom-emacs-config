@@ -174,8 +174,7 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 // its tests would have had (goPkg.group).
 func (u *Units) addUntestedVets(v *GoVet, suite, tags string, rels []string) {
 	for _, rel := range rels {
-		group := goPkg{Suite: suite, Rel: rel, Tags: tags}.group()
-		u.Atomic = append(u.Atomic, v.check(group, rel))
+		u.Atomic = append(u.Atomic, v.check(packageGroup(suite, rel, tags), rel))
 	}
 }
 

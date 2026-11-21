@@ -145,11 +145,15 @@ func (p *goPkg) prebuild(dir string, before ...string) run.Spec {
 // group is the package's chunk group, which is also its unit ID prefix.
 // A tagged package's group names its tags, so it never collides with the
 // same directory's untagged pass.
-func (p goPkg) group() string {
-	if p.Tags != "" {
-		return p.Suite + ":" + p.Rel + "[" + p.Tags + "]"
+func (p goPkg) group() string { return packageGroup(p.Suite, p.Rel, p.Tags) }
+
+// packageGroup is the unit ID prefix of package rel of suite under a pass
+// (tags): "<suite>:<rel>", with "[<tags>]" under a tagged pass.
+func packageGroup(suite, rel, tags string) string {
+	if tags != "" {
+		return suite + ":" + rel + "[" + tags + "]"
 	}
-	return p.Suite + ":" + p.Rel
+	return suite + ":" + rel
 }
 
 // CompiledUnitID is the unit of a package whose test files hold no test:
