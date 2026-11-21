@@ -36,6 +36,11 @@ const BriefDeployCheckNotRun = "deploy-check-not-run"
 // PROBLEMS, in the queue's deploy mediator, answering it. SAID is whether
 // the mediator escalated in its own turn. Each failure is recorded at ERROR
 // and answered.
+//
+// IT NEVER NOTIFIES THE USER: the user was notified as the escalation was
+// recorded (holdBrief), whether or not this telling reaches the mediator, so
+// a telling the next pass makes again (remakeHeldEscalation) notifies no one
+// a second time.
 func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, told escalationBrief, window wsm.CheckWindow, said bool, fields dlog.Context) (ids.WorkspaceID, error) {
 	repoDir := q.repository.Dir
 	summary, problems := told.Summary, told.Problems
@@ -67,24 +72,22 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 		escalation, err = o.readyMediator(ctx, q, fields)
 	}
 	if err != nil {
-		return failed("the deploy mediator could not be readied for the escalation; the user is not told of the escalated deploy", err)
+		return failed("the deploy mediator could not be readied for the escalation; it is not told, and the next pass tells it", err)
 	}
 	fields["workspace"] = string(escalation.ws)
 	// THE MEDIATOR THAT ESCALATED IN ITS OWN TURN TELLS THE USER ITSELF, as
-	// its rules say: it is shown and the user is notified, with no brief.
+	// its rules say: it is shown, with no brief.
 	if said {
-		o.deps.Banners.Mediated(escalation.ws, summary)
 		o.deps.Log.Global().Info(opMediation, "the mediator escalated in its own turn; it is shown and the user notified", withField(fields, "problems", len(problems)))
 		return escalation.ws, nil
 	}
 	brief, err := o.escalationBriefText(repoDir, m, told, window)
 	if err != nil {
-		return failed("the escalation's brief could not be composed; the mediator is not briefed and the user is not told", err)
+		return failed("the escalation's brief could not be composed; the mediator is not briefed, and the next pass tells it", err)
 	}
 	if _, err := o.submitCheckPrompt(ctx, escalation.ws, wsm.NewTurnID(), brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
-		return failed("the escalation's brief could not be submitted to the mediator; the user is not told", err)
+		return failed("the escalation's brief could not be submitted to the mediator; the next pass tells it", err)
 	}
-	o.deps.Banners.Mediated(escalation.ws, summary)
 	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the deploy mediator", withField(fields, "problems", len(problems)))
 	return escalation.ws, nil
 }

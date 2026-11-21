@@ -109,7 +109,11 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInTheMediator(t *testing.T) {
 	}
 }
 
-func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
+// TestAnEscalationThatCannotReachTheMediatorStillNotifiesTheUser pins that
+// the user's notice never depends on the mediator: it is posted as the
+// escalation is recorded, and a telling that fails leaves the check
+// escalated and untold for the next pass (2026-11-21).
+func TestAnEscalationThatCannotReachTheMediatorStillNotifiesTheUser(t *testing.T) {
 	tests := []struct {
 		name    string
 		byUs    bool
@@ -122,9 +126,9 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no catalog") }},
 		{name: "a worktree that cannot be refreshed", byUs: true, message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
 			arrange: func(h *harness) { h.checks.refreshErr = errors.New("git gone") }},
-		{name: "a daemon's brief that cannot be composed", byUs: true, message: "the escalation's brief could not be composed; the mediator is not briefed and the user is not told",
+		{name: "a daemon's brief that cannot be composed", byUs: true, message: "the escalation's brief could not be composed; the mediator is not briefed, and the next pass tells it",
 			arrange: func(h *harness) { delete(h.briefs, BriefDeployEscalation) }},
-		{name: "a daemon's brief that cannot be submitted", byUs: true, message: "the escalation's brief could not be submitted to the mediator; the user is not told",
+		{name: "a daemon's brief that cannot be submitted", byUs: true, message: "the escalation's brief could not be submitted to the mediator; the next pass tells it",
 			arrange: func(h *harness) { h.queue.err = errors.New("queue closed") }},
 	}
 	for _, tt := range tests {
@@ -142,17 +146,18 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 				t.Fatalf("DecideMediation = %v", err)
 			}
 
-			// Assert: the queue stays held for the user, escalated and untold
-			// for the next pass to tell, and the lost escalation is the
-			// record's to tell.
+			// Assert: the queue stays held, escalated and untold to the
+			// mediator for the next pass to tell, the failed telling is
+			// recorded at ERROR, and the user is notified all the same.
 			if heldEscalation(t, h) != "" {
 				t.Fatal("want the check held, escalated and untold")
 			}
-			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
-				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message})
+			if !ok || record.Context["summary"] != "yours" || record.Context["error"] == nil {
+				t.Fatalf("records = %v, want %q at ERROR with the summary and its cause", h.logs.Records(), tt.message)
 			}
-			if h.bannerRaised(desktopnotify.KindDeployMediated) {
-				t.Fatal("the user was notified of an escalation that never reached its workspace")
+			if !h.bannerRaisedFor(desktopnotify.KindDeployMediated, "ws-fixer") {
+				t.Fatal("the user was not notified of the escalated check")
 			}
 		})
 	}
@@ -412,6 +417,22 @@ func TestAnEscalationThatCouldNotBeToldIsToldByTheNextPass(t *testing.T) {
 	if subs := escalationBriefs(h); len(subs) != 1 || !strings.Contains(submittedText(subs[0]), "the reaper errors on every pass") {
 		t.Fatalf("briefed %v, want the escalation briefed once with the kept findings", subs)
 	}
+	// THE USER WAS NOTIFIED AS THE ESCALATION WAS RECORDED, and the pass's
+	// telling notifies no one a second time.
+	if n := bannersOf(h, desktopnotify.KindDeployMediated); n != 1 {
+		t.Fatalf("raised %d escalation notices, want the one raised as it was recorded", n)
+	}
+}
+
+// bannersOf counts the banners of KIND the harness raised.
+func bannersOf(h *harness, kind string) int {
+	n := 0
+	for _, b := range h.banners.seen() {
+		if b.kind == kind {
+			n++
+		}
+	}
+	return n
 }
 
 func TestTheMediatorIsNeverToldWhatItSaidItself(t *testing.T) {
@@ -658,5 +679,28 @@ func TestACheckThatCouldNotRunIsToldToTheMediatorAsItStands(t *testing.T) {
 				t.Fatalf("refreshed %v, efforts %v; want the mediator told as it stands", h.checks.refreshed, h.checks.efforts)
 			}
 		})
+	}
+}
+
+// TestAnEscalationWithNoMediatorRecordedNotifiesNoOneAndIsAnError pins the
+// broken-invariant branch of the user's notice: a notice names the recorded
+// mediator, so an escalation recorded with none is recorded at ERROR and
+// notifies no one rather than a guessed workspace.
+func TestAnEscalationWithNoMediatorRecordedNotifiesNoOneAndIsAnError(t *testing.T) {
+	// Arrange: no mediator is recorded, and none can be made.
+	h := checked(t)
+	owe(t, h)
+	h.checks.createErr = errors.New("worktree gone")
+
+	// Act
+	h.o.holdEscalated(context.Background(), queueOf(t, h), *owedCheck(t, h), "yours", nil, wsm.CheckWindow{}, false, dlog.Context{"repo": string(mediationKey(h))})
+
+	// Assert
+	if h.bannerRaised(desktopnotify.KindDeployMediated) {
+		t.Fatal("a notice was raised with no mediator recorded to name it")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "the check is escalated with no deploy mediator recorded to name its notice; the user is not notified of it"}); !ok {
+		t.Fatalf("records = %v, want the broken invariant at ERROR", h.logs.Records())
 	}
 }

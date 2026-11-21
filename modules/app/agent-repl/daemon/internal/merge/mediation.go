@@ -1334,8 +1334,32 @@ func (o *orchestrator) holdBrief(ctx context.Context, q checkedQueue, m wsm.Medi
 		o.deps.Log.Global().Info(opMediation, "the check was replaced, released or escalated already; it is not escalated again", fields)
 		return
 	}
+	o.notifyEscalated(ctx, q, brief.Summary, fields)
 	o.republishMediation(ctx, q.key)
 	o.tellEscalation(ctx, q, m, brief, window, said, fields)
+}
+
+// notifyEscalated notifies the user of the check of queue Q just recorded
+// escalated with SUMMARY: once per escalation, since only the one write that
+// escalates the check comes here (wsm.EscalateMediation takes a check not
+// escalated yet), and BEFORE the mediator is told, so the user's notice never
+// depends on the mediator being reachable, shown or briefable (2026-11-21:
+// a telling that failed left the user told nothing). The notice's click
+// opens the queue's recorded mediator; a check escalated with none recorded
+// is a broken invariant (roundFailed makes one first, and every other
+// escalation comes from the mediator's own check), recorded at ERROR.
+func (o *orchestrator) notifyEscalated(ctx context.Context, q checkedQueue, summary string, fields dlog.Context) {
+	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q.key)
+	if err != nil {
+		o.mediationFailed(ctx, fields, "could not read the deploy mediator to name the escalated check's notice; the user is not notified of it", err)
+		return
+	}
+	if !found {
+		o.deps.Log.Global().Error(opMediation, "the check is escalated with no deploy mediator recorded to name its notice; the user is not notified of it", fields)
+		return
+	}
+	o.deps.Banners.Mediated(recorded.Workspace, summary)
+	o.deps.Log.Global().Info(opMediation, "the user is notified of the escalated check", withField(fields, "mediator", string(recorded.Workspace)))
 }
 
 // tellEscalation tells the mediator and the user of escalated check M of
