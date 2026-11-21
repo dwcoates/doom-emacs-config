@@ -14,13 +14,13 @@ import (
 )
 
 // FILES RUN IN BATCHES. A vitest or ERT suite's test files are cut into
-// batches, and each batch is one split: one reuse unit, run in as few
-// processes as the scheduler's chunking gives it. One process per file paid a
-// process start per file (a vitest worker or an Emacs, about 3s against the
-// 0.3s its tests took), which made the webapp suite about four times slower
-// and ERT about 2.6 times (2026-11-12). A batch is still confined to its
-// files' inputs as a whole, so a missing input fails loudly; the cost is that
-// a change to one file's input reruns its batch.
+// batches, and each batch is one split, run in as few processes as the
+// scheduler's chunking gives it. One process per file paid a process start
+// per file (a vitest worker or an Emacs, about 3s against the 0.3s its tests
+// took), which made the webapp suite about four times slower and ERT about
+// 2.6 times (2026-11-12). Reuse is still PER FILE (reuse.decideBatch): a
+// batch runs only its files whose own inputs changed, confined to those
+// files' inputs together, so a batch's size trades only process starts.
 //
 // A BATCH HOLDS FILES THAT READ THE SAME CODE, so a change reruns only the
 // batches that read it: each file belongs to an AREA (what it tests: a vitest

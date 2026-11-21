@@ -192,7 +192,8 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
   - A refused read does not always say "operation not permitted": a listing of an undeclared directory comes back EMPTY (`filepath.Glob` drops the refusal), so a scan that globs a directory fails on finding nothing. Its declaration is the directory (a `/`-suffixed subtree).
   - A unit whose reads cannot be enumerated goes in `Reuse.Never` with why: it runs unconfined and is never recorded.
   - A targeted run (`-go DIR=Test`, `-vitest FILE=name`) is never confined, so only an untargeted run of the unit proves a declaration; run one after adding a read.
-- vitest and ERT files run in BATCHES, one process per batch (`testrun/internal/suites/batch.go`): files of one area (a vitest file's most imported `src/` directory, an ERT file's module family), at most the suite's own `Batch.Max` per batch, areas under its `Batch.Min` pooled (`roster.Suite.Batch`, default 48 and 12). A batch is one unit, confined to its files' inputs together.
+- vitest and ERT files run in BATCHES, one process per batch (`testrun/internal/suites/batch.go`): files of one area (a vitest file's most imported `src/` directory, an ERT file's module family), at most the suite's own `Batch.Max` per batch, areas under its `Batch.Min` pooled (`roster.Suite.Batch`, default 48 and 12). A batch is one process, but reuse is per FILE (`reuse.decideBatch`): a batch runs only its files whose own inputs changed since each last passed, confined to those files' inputs together, and regrouping files or changing a suite's batch size never forces a rerun; so a batch's size trades only process starts.
+  - Accepted caveat: a file that passed beside some files is taken to pass beside any others; a cross-file leak that hides is a defect fixed at its source (`modules/app/agent-repl/AGENTS.md`, "Integration tests share one canonical process, each case on its own slice").
   - A file its suite never reuses (`Reuse.Never`) is a batch of its own.
   - A suite's batch size is tuned by bisecting toward the best batch count: change its `Batch`, then compare the suite's average CPU seconds per merge-gate run over about 10 real merges before and after (`agentrepl_test_unit_cpu_seconds` through `/agent-repl-metrics`). A full run's CPU and the CPU rerun after a one-file change are the starting estimate; real merges decide.
   - Measured 2026-11-20 (one full run each, loaded host): webapp 364 CPU-s at 48/12 against 428 at 96/24, and the rerun after a one-file change 17 against 32 CPU-s; at 192/48 one process of 146 files overflowed its stack, a per-file leak larger batches expose.
@@ -429,6 +430,7 @@ coverage impact (always none).
     - Evidence: per-unit reuse (450f3ccd79) ran each file in its own process; a vitest process costs about 12s beyond its tests, so the gate's `webapp` went from 2.3 to 15.6 min and `ert` from 1.1 to 3.8 (2026-11-12).
     - Fix: area batches ("Every suite declares its inputs"), 0.425.8. Governed, High Power, 2026-11-13: `webapp` units sum 2.9 min, longest 0.9.
     - Coverage impact: none; every file still runs, confined to its batch's inputs.
+    - 2026-11-20: reuse became per file within a batch (`reuse.decideBatch`), so a batch's size no longer decides what reruns, only how many processes start.
 
 16. **Measuring in Low Power Mode.**
     - Evidence: persistent-wifi mode held the machine in Low Power with the lid open; an ungoverned run's longest units took about twice what the governed High Power run's did (2026-11-13).

@@ -44,6 +44,19 @@ type Unit struct {
 	// suites.BatchFiles), each of which the roster may name for what it
 	// reads; nil for every other unit.
 	Members []string
+	// MemberSets and MemberDescs are each member's own inputs and roster
+	// facts: a keyed batch's reuse is PER FILE (decideBatch), so a member is
+	// keyed, reused and recorded on what it reads, whichever batch runs it.
+	// Nil for every other unit, and for a batch that is never reused.
+	MemberSets  map[string]*InputSet
+	MemberDescs map[string]string
+}
+
+// MemberRecordName is a batch member's record name in the store: the
+// suite, "@file%", and the file with each "/" spelled "%", apart from every
+// batch's and every other unit's.
+func MemberRecordName(suite, file string) string {
+	return UnitRecordName(suite, "file/"+file)
 }
 
 // RecordName is the unit's name in the store.
@@ -162,6 +175,31 @@ type UnitVerdict struct {
 	Reused *Record
 	// Why is why a unit that runs is not reused.
 	Why Why
+	// Members are a keyed batch's members decided one by one (decideBatch),
+	// in the batch's order; nil for every other unit.
+	Members []MemberVerdict
+}
+
+// MemberVerdict is one member of a batch, decided on its own inputs.
+type MemberVerdict struct {
+	File string
+	Key  Key
+	// Reused is the member's own record this run reuses, nil when it runs.
+	Reused *Record
+	// Why is why a member that runs is not reused.
+	Why Why
+}
+
+// RunMembers are the members of a batch that run, in order: every member
+// not reused.
+func (v UnitVerdict) RunMembers() []string {
+	var out []string
+	for _, m := range v.Members {
+		if m.Reused == nil {
+			out = append(out, m.File)
+		}
+	}
+	return out
 }
 
 // SuiteVerdict is one suite's units decided.
@@ -266,11 +304,74 @@ func unitFacts(d Deps, u Unit, tools map[string]string) Facts {
 }
 
 func decideUnit(d Deps, v *UnitVerdict, mode Mode, tools map[string]string) error {
+	if v.MemberSets != nil {
+		return decideBatch(d, v, mode, tools)
+	}
 	dec, err := decideKeyed(d, v.RecordName(), v.Set, unitFacts(d, v.Unit, tools), mode)
 	if err != nil {
 		return err
 	}
 	v.Keyed, v.Key, v.Profile, v.Reused, v.Why = true, dec.Key, dec.Profile, dec.Reused, dec.Why
+	return nil
+}
+
+// memberFacts are one batch member's non-file inputs.
+func memberFacts(d Deps, u Unit, member string, tools map[string]string) Facts {
+	return Facts{Suite: u.MemberDescs[member], Toolchain: tools, Env: KeyedEnv(d.Environ)}
+}
+
+// REUSE OF A BATCH IS PER FILE. A batch (suites.BatchFiles) is only how its
+// files share a process: each member is keyed, looked up and recorded on its
+// own inputs (MemberSets) under its own record (MemberRecordName), so the
+// batch runs only the members whose inputs changed since each last passed,
+// and moving a file to another batch reruns nothing. The batch runs confined
+// to the inputs of the members it runs, together.
+//
+// THE ACCEPTED CAVEAT: a member that passed beside some files is taken to
+// pass beside any others. A cross-file leak that this hides (one file's
+// state breaking another's in their shared process) is a defect, fixed at its
+// source, as for every shared process (AGENTS.md "Integration tests share one
+// canonical process, each case on its own slice").
+func decideBatch(d Deps, v *UnitVerdict, mode Mode, tools map[string]string) error {
+	v.Keyed = true
+	v.Members = make([]MemberVerdict, 0, len(v.Unit.Members))
+	run := NewInputSet()
+	var lines []string
+	var newest *Record
+	for _, m := range v.Unit.Members {
+		set, ok := v.MemberSets[m]
+		if !ok {
+			return fmt.Errorf("reuse: %s's batch %s has no input set for its member %s", v.Suite, v.Name, m)
+		}
+		dec, err := decideKeyed(d, MemberRecordName(v.Suite, m), set, memberFacts(d, v.Unit, m, tools), mode)
+		if err != nil {
+			return err
+		}
+		v.Members = append(v.Members, MemberVerdict{File: m, Key: dec.Key, Reused: dec.Reused, Why: dec.Why})
+		lines = append(lines, m+"="+dec.Key.Digest)
+		if dec.Reused != nil {
+			if newest == nil || dec.Reused.PassedAt.After(newest.PassedAt) {
+				newest = dec.Reused
+			}
+			continue
+		}
+		if len(v.RunMembers()) == 1 {
+			// The batch runs for its first running member's reason.
+			v.Why = dec.Why
+		}
+		run.AddAll(set)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	v.Key = Key{Digest: hex.EncodeToString(sum[:])}
+	if len(v.RunMembers()) == 0 {
+		v.Reused = newest
+		return nil
+	}
+	profile, err := writeProfile(d, v.RecordName(), run)
+	if err != nil {
+		return err
+	}
+	v.Profile = profile
 	return nil
 }
 
@@ -330,6 +431,10 @@ func Report(log Logger, v SuiteVerdict) {
 	log.Infof("%s: reuse: %d units, %d reused, %d run (%s)", name, len(v.Units), reused, len(v.Units)-reused, whyTallyOf([]SuiteVerdict{v}))
 	for _, u := range v.Units {
 		if u.Reused != nil {
+			continue
+		}
+		if u.Members != nil {
+			log.Infof("%s: %s runs %d of its %d files (inputs %s): %s", name, u.Label(), len(u.RunMembers()), len(u.Members), u.Key.Short(), u.Why)
 			continue
 		}
 		if u.Keyed {
@@ -436,7 +541,8 @@ func specOwners(su SuiteUnits, u suites.Units) (map[string]int, map[string]bool)
 	return owner, infra
 }
 
-// SkipReused drops every reused unit's specs from u, then every infra unit no
+// SkipReused drops every reused unit's specs from u, narrows every batch to
+// the members it runs, then every infra unit no
 // remaining spec depends on, and places u's module builds over the packages
 // that remain (suites.Units.Finish).
 func SkipReused(v SuiteVerdict, u suites.Units) suites.Units {
@@ -447,9 +553,14 @@ func SkipReused(v SuiteVerdict, u suites.Units) suites.Units {
 	}
 	var splits []suites.Split
 	for _, sp := range u.Splits {
-		if !reused(sp.Group) {
-			splits = append(splits, sp)
+		if reused(sp.Group) {
+			continue
 		}
+		// A batch runs only its members not reused (decideBatch).
+		if i, ok := owner[sp.Group]; ok && v.Units[i].Members != nil {
+			sp.Items = v.Units[i].RunMembers()
+		}
+		splits = append(splits, sp)
 	}
 	var kept []run.Spec
 	for _, a := range u.Atomic {
@@ -606,6 +717,27 @@ func RecordOutcomes(d Deps, mode Mode, verdicts []SuiteVerdict, results []run.Re
 					return fmt.Errorf("reuse: %s's toolchain: %w", sv.Suite.Name, err)
 				}
 				tools[sv.Suite.Kind] = t
+			}
+			if v.Members != nil {
+				// A batch records each member it ran on the member's own
+				// inputs (decideBatch), with the batch's outcome.
+				for _, m := range v.Members {
+					if m.Reused != nil {
+						continue
+					}
+					label := fmt.Sprintf("%s: %s's file %s", sv.Suite.Name, v.Label(), m.File)
+					ok, err := rec.record(MemberRecordName(sv.Suite.Name, m.File), label, v.MemberSets[m.File], memberFacts(d, v.Unit, m.File, tools[sv.Suite.Kind]), m.Key, n, bad)
+					if err != nil {
+						return err
+					}
+					switch {
+					case ok && bad:
+						failures++
+					case ok:
+						recorded++
+					}
+				}
+				continue
 			}
 			ok, err := rec.record(v.RecordName(), sv.Suite.Name+": "+v.Label(), v.Set, unitFacts(d, v.Unit, tools[sv.Suite.Kind]), v.Key, n, bad)
 			if err != nil {

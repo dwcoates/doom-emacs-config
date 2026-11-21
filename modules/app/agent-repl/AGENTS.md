@@ -303,8 +303,18 @@ unit".
 - **The unit** is what the runner records one pass for: a Go package (unit
   or integration; a tagged pass's is `<package>[<tags>]`), a vitest test file,
   an ERT test file, a suite-wide check (`vet`, `vet[<tag>]`, `typecheck`), or
-  a whole script or e2e suite. Each vitest and ERT file runs in its own
-  process, so a unit's profile confines only its own inputs. Module builds,
+  a whole script or e2e suite. Vitest and ERT files run in BATCHES, one
+  process per batch (`suites.BatchFiles`), but a batch is only how its files
+  share a process: each file is keyed, reused and recorded on its OWN inputs
+  under its own record (`reuse.decideBatch`), so a batch runs only the files
+  whose inputs changed since each last passed, and moving a file to another
+  batch reruns nothing. A batch runs confined to the inputs of the files it
+  runs, together. The accepted caveat (owner ruling, 2026-11-20): a file that
+  passed beside some files is taken to pass beside any others; a cross-file
+  leak that hides is a defect, fixed at its source, as for every shared
+  process ("Integration tests share one canonical process, each case on its
+  own slice"). So a batch's size trades only process starts, never reruns.
+  Module builds,
   the ERT fake daemon's build and an integration bundle are infra: each runs
   only while a unit that needs it runs, under the suite's envelope (every
   unit's inputs together), and is never recorded.
