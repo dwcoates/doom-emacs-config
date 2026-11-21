@@ -89,6 +89,12 @@ message DaemonFault {
     // The cache keeper's loop stopped before the daemon did: no keep-alive
     // goes out for any workspace until the next daemon runs its own.
     DaemonFaultKeepaliveDriveStopped keepalive_drive_stopped = 10;
+    // A brief the daemon composes read but would not splice: its
+    // placeholders and the values the daemon handed it disagree. It is
+    // about that one brief, not the prompts directory, so every other brief
+    // still composes; it stands until that brief next composes, or a new
+    // daemon boots.
+    DaemonFaultBriefUnsplicable brief_unsplicable = 11;
   }
 }
 message DaemonFaultAdoptionWindowExpired {
@@ -124,6 +130,12 @@ message DaemonFaultWsmReadOnly {}
 message DaemonFaultKeepaliveDriveStopped {
   // Why the keeper's loop ended, verbatim.
   string cause = 1;
+}
+message DaemonFaultBriefUnsplicable {
+  // The brief's name in the prompts directory.
+  string brief = 1;
+  // The splice's own account of the disagreement.
+  string cause = 2;
 }
 message DaemonFaultDeployFailed {
   // THE ARM IS THE STEP THAT FAILED, and it carries the very refusal the

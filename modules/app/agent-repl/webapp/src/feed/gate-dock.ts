@@ -2,14 +2,12 @@
  * gate-dock — THE STANDING GATE DOCKS AT THE PAGE'S VERY BOTTOM.
  *
  * A gate is a choice the user must answer before the conversation can go on,
- * and whose answer REPLACES the composer (owner, 2026-10-02). While one
- * stands, Emacs hides the workspace's input window (it reads
- * `HostWorkspace.gate`) and this webview grows into that space; the gate's
- * banner is drawn in the exact slot the input had: `#gate-dock`, below the
- * footer, at least the input window's height and growing to fit a taller
- * gate. The daemon resolves both from the ONE cold-gate standing, which
- * this page reads as the root feed's standing `FeedColdGate` row, so the
- * hidden input and the docked banner move together.
+ * and whose answer REPLACES the composer (owner, 2026-10-02). In Emacs the
+ * webhost draws the shown workspace's gate (host/gate.ts) in the slot of the
+ * input window Emacs hides, so a page in the webhost docks nothing. A page on
+ * its own (a browser tab) docks its root feed's standing `FeedColdGate` row
+ * here instead: `#gate-dock`, below the footer, its card's own height,
+ * growing to fit a taller gate.
  *
  * THE CARD MOVES; THE ROW STAYS (card-dock.ts): the feed draws no inline
  * gate, and the card keeps every control and listener it was drawn with. The
@@ -30,38 +28,17 @@ export const WEBHOST_GATE_CLASS = "webhost-gate";
 export const DOCKED_CARD_CLASS = "cold-gate-docked";
 /** The class the docked card's (hidden) home row wears. */
 export const DOCKED_ROW_CLASS = "gate-docked-row";
-/** The root custom property Emacs sets to the input window's pixel height. */
+/** The custom property the webhost's gate takes the composer's told height from. */
 export const DOCK_HEIGHT_PROPERTY = "--gate-dock-height";
-
-/** What Emacs set PROPERTY to on the root, or null when it never told it. */
-function toldRootProperty(doc: Document, property: string): string | null {
-  const told = doc.documentElement.style.getPropertyValue(property).trim();
-  return told === "" ? null : told;
-}
-
-/** The height the dock takes: what Emacs said, or null when it said nothing
- * and the stylesheet's fraction stands in. */
-export function toldDockHeight(doc: Document): string | null {
-  return toldRootProperty(doc, DOCK_HEIGHT_PROPERTY);
-}
-
 
 /** What `installGateDock` hands back. */
 export type GateDock = CardDock;
 
-/** Record a gate's docking: the height Emacs told the dock. */
-function recordDocked(_card: HTMLElement, dock: HTMLElement): void {
-  const height = toldDockHeight(dock.ownerDocument);
-  if (height === null) {
-    // Emacs tells the input's height before it hides the input; a page it
-    // never told sizes the dock by the input-height fraction instead.
-    log.info("a gate stands; Emacs never told the input's height, so the dock takes the input-height fraction", {
-      operation: "feed.gate-dock.height-fallback",
-    });
-  }
+/** Record a gate's docking. A page on its own has no composer slot to take,
+ * so the dock is its card's own height. */
+function recordDocked(): void {
   log.info("a gate stands; its banner docks below the footer", {
     operation: "feed.gate-dock.docked",
-    context: { height: height ?? "fallback" },
   });
 }
 

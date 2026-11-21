@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -25,6 +26,8 @@ func TestComposeBrief(t *testing.T) {
 		wantErr string
 		// wantRecord is the message of the ERROR record a failure leaves.
 		wantRecord string
+		// wantKind is the fault a failure raises.
+		wantKind string
 	}{
 		{
 			name:     "a brief that loads and splices answers the spliced text",
@@ -35,12 +38,14 @@ func TestComposeBrief(t *testing.T) {
 			name:       "a missing brief is an error naming it as unreadable",
 			wantErr:    "the " + composeBriefName + " brief is unreadable",
 			wantRecord: "could not read a daemon brief",
+			wantKind:   health.KindPromptsDirMissing,
 		},
 		{
 			name:       "a brief whose placeholders do not match is an error naming it as unsplicable",
 			brief:      &prompts.Prompt{Name: composeBriefName, Body: "hello {{whom}}", Placeholders: []string{"whom"}},
 			wantErr:    "the " + composeBriefName + " brief will not splice",
 			wantRecord: "could not splice a daemon brief",
+			wantKind:   health.KindBriefUnsplicable,
 		},
 	}
 	for _, tc := range cases {
@@ -82,8 +87,8 @@ func TestComposeBrief(t *testing.T) {
 			if record.Context["brief"] != composeBriefName {
 				t.Fatalf("record brief = %v, want %q", record.Context["brief"], composeBriefName)
 			}
-			if len(f.health.opened) != 1 || f.health.opened[0].Kind != health.KindPromptsDirMissing {
-				t.Fatalf("opened faults = %+v, want one prompts_dir_missing fault", f.health.opened)
+			if len(f.health.opened) != 1 || f.health.opened[0].Kind != tc.wantKind || f.health.opened[0].Workspace != nil {
+				t.Fatalf("opened faults = %+v, want one daemon-scoped %s fault", f.health.opened, tc.wantKind)
 			}
 		})
 	}
@@ -109,6 +114,129 @@ func TestComposeBriefClosesAStandingPromptsFault(t *testing.T) {
 	// Assert.
 	if len(f.health.closed) != 1 {
 		t.Fatalf("closed faults = %v, want exactly the standing prompts-directory fault", f.health.closed)
+	}
+}
+
+// unsplicable is a brief whose placeholder the values handed it do not cover.
+func unsplicable(name string) prompts.Prompt {
+	return prompts.Prompt{Name: name, Body: "hello {{whom}}", Placeholders: []string{"whom"}}
+}
+
+// TestASpliceFailureNamesItsBrief pins the fault a splice raises to the brief
+// it is about, which no prompts-directory reader would mistake for the
+// directory being gone.
+func TestASpliceFailureNamesItsBrief(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.briefs[composeBriefName] = unsplicable(composeBriefName)
+	v := f.verbs.(*verbs)
+
+	// Act.
+	_, err := v.composeBrief(context.Background(), f.log.Global(), "daemon.workspace.compose_test", composeBriefName, map[string]string{"who": "world"})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("composeBrief = success, want the splice's failure")
+	}
+	if got := f.health.opened; len(got) != 1 || got[0].Evidence["brief"] != composeBriefName || !strings.Contains(got[0].Evidence["cause"], "no value for placeholder whom") {
+		t.Fatalf("opened faults = %+v, want one naming the brief and the splice's cause", got)
+	}
+}
+
+func TestASpliceFailureOpensOneFaultPerBrief(t *testing.T) {
+	cases := []struct {
+		name   string
+		second string
+		want   int
+	}{
+		{name: "the same brief failing again opens no second fault", second: composeBriefName, want: 1},
+		{name: "another brief failing opens its own", second: "another-brief", want: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.briefs[composeBriefName] = unsplicable(composeBriefName)
+			f.briefs["another-brief"] = unsplicable("another-brief")
+			v := f.verbs.(*verbs)
+			log := f.log.Global()
+			_, _ = v.composeBrief(context.Background(), log, "daemon.workspace.compose_test", composeBriefName, nil)
+
+			// Act.
+			_, _ = v.composeBrief(context.Background(), log, "daemon.workspace.compose_test", tc.second, nil)
+
+			// Assert.
+			if len(f.health.opened) != tc.want {
+				t.Fatalf("opened faults = %+v, want %d", f.health.opened, tc.want)
+			}
+		})
+	}
+}
+
+func TestComposeBriefClosesOnlyItsOwnSpliceFault(t *testing.T) {
+	cases := []struct {
+		name     string
+		composed string
+		want     int
+	}{
+		{name: "the brief composing closes its fault", composed: composeBriefName, want: 1},
+		{name: "another brief composing leaves it standing", composed: "another-brief", want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a fault stands from an earlier failed splice.
+			f := newFixture(t)
+			f.briefs[composeBriefName] = unsplicable(composeBriefName)
+			v := f.verbs.(*verbs)
+			log := f.log.Global()
+			_, _ = v.composeBrief(context.Background(), log, "daemon.workspace.compose_test", composeBriefName, nil)
+			f.briefs[composeBriefName] = prompts.Prompt{Name: composeBriefName, Body: "hello"}
+			f.briefs["another-brief"] = prompts.Prompt{Name: "another-brief", Body: "hello"}
+
+			// Act.
+			if _, err := v.composeBrief(context.Background(), log, "daemon.workspace.compose_test", tc.composed, nil); err != nil {
+				t.Fatalf("composeBrief: %v", err)
+			}
+
+			// Assert.
+			if len(f.health.closed) != tc.want {
+				t.Fatalf("closed faults = %v, want %d", f.health.closed, tc.want)
+			}
+		})
+	}
+}
+
+func TestASpliceFaultThatCannotBeRecordedIsLogged(t *testing.T) {
+	cases := []struct {
+		name    string
+		fail    func(h *fakeHealth)
+		message string
+	}{
+		{name: "the standing faults cannot be read", fail: func(h *fakeHealth) { h.listErr = errors.New("the state database is locked") },
+			message: "could not check whether the daemon fault already stands; it is recorded anyway"},
+		{name: "the fault cannot be opened", fail: func(h *fakeHealth) { h.openErr = errors.New("the state database is locked") },
+			message: "could not record the daemon fault"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.briefs[composeBriefName] = unsplicable(composeBriefName)
+			tc.fail(f.health)
+			v := f.verbs.(*verbs)
+
+			// Act.
+			_, err := v.composeBrief(context.Background(), f.log.Global(), "daemon.workspace.compose_test", composeBriefName, nil)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("composeBrief = success, want the splice's failure")
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opBriefFault})
+			if !ok || record.Message != tc.message || record.Context["brief"] != composeBriefName || record.Context["cause"] == nil {
+				t.Fatalf("records = %+v, want an ERROR %q naming the brief and the cause", f.log.logger.Records(), tc.message)
+			}
+		})
 	}
 }
 

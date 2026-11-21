@@ -191,7 +191,11 @@ type fakeDB struct {
 	// answers; summariesErr fails that read.
 	summaries    map[ids.WorkspaceID]string
 	summariesErr error
-	drainPut     []wsm.DrainSchedule
+	// titles are the stored vendor titles ListVendorTitles answers;
+	// titlesErr fails that read.
+	titles    map[ids.WorkspaceID]string
+	titlesErr error
+	drainPut  []wsm.DrainSchedule
 	// feedScalePut records every persisted feed text zoom; feedScalePutErr
 	// fails the write; feedScaleRead is what FeedTextScale answers (0 means the
 	// default).
@@ -3478,6 +3482,14 @@ func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// ListVendorTitles answers the seeded vendor titles, or titlesErr.
+func (d *fakeDB) ListVendorTitles(context.Context) (map[ids.WorkspaceID]string, error) {
+	if d.titlesErr != nil {
+		return nil, d.titlesErr
+	}
+	return d.titles, nil
 }
 
 // ListWorkspaceSummaries answers the seeded summaries, or summariesErr.

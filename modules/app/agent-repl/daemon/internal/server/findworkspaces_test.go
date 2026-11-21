@@ -105,6 +105,27 @@ func TestFindWorkspacesAnswersEveryMatchWithItsSummary(t *testing.T) {
 	}
 }
 
+// TestFindWorkspacesAnswersTheVendorTitleWhereNoSummaryStands pins the
+// topbar's precedence: a workspace closed before its agent set a summary is
+// found by the vendor's title its topbar drew, and a summary outranks it.
+func TestFindWorkspacesAnswersTheVendorTitleWhereNoSummaryStands(t *testing.T) {
+	// Arrange
+	h := findHarness(t)
+	h.DB.titles = map[ids.WorkspaceID]string{"ws-open": "Footer status work", "ws-landed": "Landed topbar work"}
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FindWorkspaces: %v", err)
+	}
+	got := foundByName(resp)
+	if got["open-one"].GetSummary() != "Fix the footer" || got["landed-one"].GetSummary() != "Landed topbar work" {
+		t.Fatalf("summaries = %q, %q; want the agent's summary, then the vendor's title", got["open-one"].GetSummary(), got["landed-one"].GetSummary())
+	}
+}
+
 func TestFindWorkspacesMapsTheRequestOntoTheQuery(t *testing.T) {
 	tests := []struct {
 		name string
@@ -326,6 +347,7 @@ func TestFindWorkspacesFailsAndRecordsAFailedRead(t *testing.T) {
 	}{
 		{name: "the repositories", edit: func(d *fakeDB) { d.listRepositoriesErr = errors.New("disk gone") }, cause: "list the repositories: disk gone"},
 		{name: "the summaries", edit: func(d *fakeDB) { d.summariesErr = errors.New("disk gone") }, cause: "list the workspace summaries: disk gone"},
+		{name: "the vendor titles", edit: func(d *fakeDB) { d.titlesErr = errors.New("disk gone") }, cause: "list the vendor titles: disk gone"},
 		{name: "a workspace of an unregistered repository", edit: func(d *fakeDB) {
 			d.workspaces["ws-orphan"] = wsm.Workspace{ID: "ws-orphan", Repo: "repo-gone", Name: "orphan"}
 		}, cause: "workspacefind: workspace ws-orphan names repository repo-gone, which the registry does not hold"},

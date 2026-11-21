@@ -13,6 +13,13 @@ import (
 type recordingSummarySink struct {
 	mu     sync.Mutex
 	resets []ids.WorkspaceID
+	titles []string
+}
+
+func (t *recordingSummarySink) OnVendorTitle(_ ids.WorkspaceID, title string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.titles = append(t.titles, title)
 }
 
 func (t *recordingSummarySink) OnContextReset(ws ids.WorkspaceID) {
@@ -72,5 +79,35 @@ func TestAClearTellsTheSummaryKeeperItsWorkspace(t *testing.T) {
 	// Assert.
 	if len(ts.resets) != 1 || ts.resets[0] != h.w.ws {
 		t.Fatalf("resets = %v, want exactly the watched workspace %q", ts.resets, h.w.ws)
+	}
+}
+
+func TestTheVendorTitleReachesTheSummaryKeeper(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	ts := h.withSummary()
+
+	// Act.
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(titleUpdate()) })
+
+	// Assert: the title is kept beyond the session, for workspace find.
+	if len(ts.titles) != 1 || ts.titles[0] != "Add SPC j keybinding support" {
+		t.Fatalf("titles = %v, want the vendor's title once", ts.titles)
+	}
+}
+
+func TestAnotherSessionFactTellsTheSummaryKeeperNoTitle(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	ts := h.withSummary()
+
+	// Act.
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(mcpServerUpdate()) })
+
+	// Assert.
+	if len(ts.titles) != 0 {
+		t.Fatalf("titles = %v, want none for a fact that is no title", ts.titles)
 	}
 }

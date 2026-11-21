@@ -78,29 +78,12 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 // At most ONE such fault stands at a time: a second identical row would tell
 // the operator nothing the first did not, and faults stay open until closed.
 func (v *verbs) raisePromptsFault(ctx context.Context, log dlog.Logger, detail string) {
-	standing, err := v.deps.Health.OpenFaults(ctx, wsm.FaultScope{Kind: health.KindPromptsDirMissing})
-	if err != nil {
-		// The read failing does not excuse leaving the fault unrecorded: it is
-		// surfaced, and the fault is opened anyway.
-		log.Error(opCommandSupport, "could not check for a standing prompts-directory fault",
-			dlog.Context{"cause": err.Error()})
-	}
-	for _, f := range standing {
-		if f.Workspace == nil {
-			log.Debug(opCommandSupport, "a prompts-directory fault already stands",
-				dlog.Context{"fault": string(f.ID)})
-			return
-		}
-	}
-	if _, err := v.deps.Health.OpenFault(ctx, wsm.Fault{
+	v.raiseDaemonFault(ctx, log, opCommandSupport, wsm.Fault{
 		Kind:     health.KindPromptsDirMissing,
 		Detail:   detail,
 		Evidence: map[string]string{"path": v.deps.PromptsDir},
 		OpenedAt: v.now(),
-	}); err != nil {
-		log.Error(opCommandSupport, "could not record the prompts-directory fault",
-			dlog.Context{"cause": err.Error()})
-	}
+	}, func(wsm.Fault) bool { return true }, nil)
 }
 
 // clearPromptsFault closes every standing DAEMON-SCOPED prompts-directory

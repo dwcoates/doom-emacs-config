@@ -103,20 +103,28 @@ func (f *fanned) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID, s
 	f.Resolver.SetRegistrySelected(reg, ws, stamp)
 }
 
+// bindFooter binds one workspace's directory on the footer once, as its
+// registration does (workspace.bindResolvers) before anything is drawn for
+// it, so every fact the fan forwards reaches a footer that may serve it,
+// whether or not the roster's registry carries the workspace yet.
+func (f *fanned) bindFooter(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.bound[ws] {
+		return
+	}
+	f.bound[ws] = true
+	if err := f.footer.SetWorkspaceDir(ws, f.dir); err != nil {
+		panic(err)
+	}
+	f.footer.SetParticipants(ws, true, true)
+}
+
 // bindRegistry is the footer binding both registry installs share.
 func (f *fanned) bindRegistry(reg sidebar.Registry) {
-	f.mu.Lock()
 	for _, ws := range reg.Workspaces {
-		if f.bound[ws.ID] {
-			continue
-		}
-		f.bound[ws.ID] = true
-		if err := f.footer.SetWorkspaceDir(ws.ID, f.dir); err != nil {
-			panic(err)
-		}
-		f.footer.SetParticipants(ws.ID, true, true)
+		f.bindFooter(ws.ID)
 	}
-	f.mu.Unlock()
 	// A PARKED RECORD IS THE DAEMON'S PARK, which the stand-down tells the
 	// footer in the same breath as it publishes the record.
 	for _, session := range reg.Sessions {
@@ -127,21 +135,25 @@ func (f *fanned) bindRegistry(reg sidebar.Registry) {
 }
 
 func (f *fanned) AckTurn(ws ids.WorkspaceID) {
+	f.bindFooter(ws)
 	f.footer.AckTurn(ws)
 	f.Resolver.AckTurn(ws)
 }
 
 func (f *fanned) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
+	f.bindFooter(ws)
 	f.footer.OnTurnRunningAtAttach(ws, turn, startedAt)
 	f.Resolver.OnTurnRunningAtAttach(ws, turn, startedAt)
 }
 
 func (f *fanned) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.SessionStarted) {
+	f.bindFooter(ws)
 	f.footer.OnSessionStarted(ws, started)
 	f.Resolver.OnSessionStarted(ws, started)
 }
 
 func (f *fanned) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
+	f.bindFooter(ws)
 	f.footer.OnAgentTerminal(ws, agent, turn, success, failure)
 	f.Resolver.OnAgentTerminal(ws, agent, turn, success, failure)
 }
@@ -149,66 +161,79 @@ func (f *fanned) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Agent
 // OnSignedIn tells the footer first, as the daemon's sign-in fan-out does, so
 // the row reads the footer's lifted status.
 func (f *fanned) OnSignedIn(ws ids.WorkspaceID) {
+	f.bindFooter(ws)
 	f.footer.OnSignedIn(ws)
 	f.Resolver.OnSignedIn(ws)
 }
 
 func (f *fanned) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
+	f.bindFooter(ws)
 	f.footer.OnActivity(ws, agent, act)
 	f.Resolver.OnActivity(ws, agent, act)
 }
 
 func (f *fanned) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
+	f.bindFooter(ws)
 	f.footer.OnDetachedWork(ws, agent, work)
 	f.Resolver.OnDetachedWork(ws, agent, work)
 }
 
 func (f *fanned) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, perm *conversationv1.AgentPermission) {
+	f.bindFooter(ws)
 	f.footer.OnPermission(ws, agent, perm)
 	f.Resolver.OnPermission(ws, agent, perm)
 }
 
 func (f *fanned) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed) {
+	f.bindFooter(ws)
 	f.footer.OnApiError(ws, agent, failed)
 	f.Resolver.OnApiError(ws, agent, failed)
 }
 
 func (f *fanned) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate) {
+	f.bindFooter(ws)
 	f.footer.OnSessionUpdate(ws, update)
 	f.Resolver.OnSessionUpdate(ws, update)
 }
 
 func (f *fanned) OnLink(ws ids.WorkspaceID, link shimclient.LinkState) {
+	f.bindFooter(ws)
 	f.footer.OnLink(ws, link)
 	f.Resolver.OnLink(ws, link)
 }
 
 func (f *fanned) OnLiveWorkChanged(ws ids.WorkspaceID, live sidebar.LiveWorkSet) {
+	f.bindFooter(ws)
 	f.footer.OnLiveWorkChanged(ws, live)
 	f.Resolver.OnLiveWorkChanged(ws, live)
 }
 
 func (f *fanned) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
+	f.bindFooter(ws)
 	f.footer.SetMerge(ws, facts)
 	f.Resolver.SetMerge(ws, facts)
 }
 
 func (f *fanned) SetStateUnreported(ws ids.WorkspaceID, unreported bool) {
+	f.bindFooter(ws)
 	f.footer.SetStateUnreported(ws, unreported)
 	f.Resolver.SetStateUnreported(ws, unreported)
 }
 
 func (f *fanned) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
+	f.bindFooter(ws)
 	f.footer.SetBringingUp(ws, bringingUp)
 	f.Resolver.SetBringingUp(ws, bringingUp)
 }
 
 func (f *fanned) SetTurn(ws ids.WorkspaceID, turn *sidebar.TurnStarted) {
+	f.bindFooter(ws)
 	f.footer.SetTurn(ws, turn)
 	f.Resolver.SetTurn(ws, turn)
 }
 
 func (f *fanned) SetTurnEnded(ws ids.WorkspaceID, how sidebar.TurnClose) {
+	f.bindFooter(ws)
 	f.footer.SetTurnEnded(ws, how)
 	f.Resolver.SetTurnEnded(ws, how)
 }
@@ -216,11 +241,13 @@ func (f *fanned) SetTurnEnded(ws ids.WorkspaceID, how sidebar.TurnClose) {
 // NetworkFaultOpened is the network fault health.ObserveFaults opens: the
 // footer's standing fault and the roster's own record of it.
 func (f *fanned) NetworkFaultOpened(ws ids.WorkspaceID, id string) {
+	f.bindFooter(ws)
 	f.openFault(ws, id, health.KindNetworkUnreachable)
 	f.Resolver.NetworkFaultOpened(ws, id)
 }
 
 func (f *fanned) FaultClosed(ws ids.WorkspaceID, id string) {
+	f.bindFooter(ws)
 	f.footer.CloseFault(ws, id)
 	f.Resolver.FaultClosed(ws, id)
 }
@@ -228,6 +255,7 @@ func (f *fanned) FaultClosed(ws ids.WorkspaceID, id string) {
 // SetVendorStart is the vendor-start run the fleet records as faults: the
 // footer takes the run's fault, the roster its state.
 func (f *fanned) SetVendorStart(ws ids.WorkspaceID, state sidebar.VendorStart) {
+	f.bindFooter(ws)
 	id := "vendor-start-" + string(ws)
 	f.footer.CloseFault(ws, id)
 	switch state {
@@ -242,6 +270,7 @@ func (f *fanned) SetVendorStart(ws ids.WorkspaceID, state sidebar.VendorStart) {
 // openFault opens a standing fault on the footer in the cell the health
 // partition gives its kind, as the fault surfaces do.
 func (f *fanned) openFault(ws ids.WorkspaceID, id, kind string) {
+	f.bindFooter(ws)
 	cell, ok := health.FaultFooterCell(kind, false)
 	if !ok {
 		panic("no footer cell for fault kind " + kind)

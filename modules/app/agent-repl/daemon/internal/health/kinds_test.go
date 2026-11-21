@@ -22,6 +22,7 @@ func TestDaemonFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "successor spawn failed", fault: wsm.Fault{Kind: KindSuccessorSpawnFailed}},
 		{name: "prompts dir missing", fault: wsm.Fault{Kind: KindPromptsDirMissing}},
 		{name: "wsm read only", fault: wsm.Fault{Kind: KindWsmReadOnly}},
+		{name: "brief unsplicable", fault: wsm.Fault{Kind: KindBriefUnsplicable}},
 		{name: "deploy failed", fault: wsm.Fault{Kind: KindDeployFailed, Evidence: DeployFailure{Step: DeployStepBuild}.Evidence()}},
 		{name: "keep-alive drive stopped", fault: wsm.Fault{Kind: KindKeepaliveDriveStopped}},
 	}
@@ -60,6 +61,19 @@ func TestDaemonFaultCarriesThePromptsPath(t *testing.T) {
 	// Assert.
 	if got.GetPromptsDirMissing().GetPath() != "/repo/prompts" {
 		t.Fatalf("path = %q, want the recorded path", got.GetPromptsDirMissing().GetPath())
+	}
+}
+
+func TestDaemonFaultCarriesTheUnsplicableBrief(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{Kind: KindBriefUnsplicable, Detail: "prose", Evidence: map[string]string{"brief": "create-failed", "cause": "missing [why]"}}
+
+	// Act.
+	got := daemonFault(fault).GetBriefUnsplicable()
+
+	// Assert.
+	if got.GetBrief() != "create-failed" || got.GetCause() != "missing [why]" {
+		t.Fatalf("arm = %v, want the recorded brief and cause", got)
 	}
 }
 

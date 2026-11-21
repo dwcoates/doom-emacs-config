@@ -133,27 +133,23 @@ func (r *resolver) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 	return nil
 }
 
-// logOf answers the workspace's logger. An unbound workspace is an invariant
-// violation, recorded as one on the only sink that exists before a directory is
-// known rather than silently dropped.
+// logOf answers the workspace's logger. Every workspace is bound
+// (SetWorkspaceDir) at registration, before any frame for it can arrive, so a
+// frame for an unbound one is an invariant violation: it is recorded at ERROR
+// on the global sink, the only one that exists before a directory is known,
+// and the resolver panics rather than serve a view for a workspace the daemon
+// never registered with it.
 func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 	if s.log != nil {
 		return s.log
 	}
-	log := r.log.Global().With(dlog.Context{
-		"workspace_id":        string(ws),
-		"invariant_violation": "topbar resolver frame for a workspace with no bound directory",
-		"remediation":         "call SetWorkspaceDir at registration",
-	})
-	// THE VIOLATION IS AN ERROR, stated ONCE per workspace. Every record after
-	// it keeps its own level and carries the violation as context; before
-	// this, the only trace was that context on records logged at INFO and
-	// DEBUG, so a level sweep never saw the invariant break.
-	if !s.unboundReported {
-		s.unboundReported = true
-		log.Error("daemon.topbar.unbound_workspace", "a topbar record arrived for a workspace whose directory was never bound", nil)
-	}
-	return log
+	r.log.Global().Error("daemon.topbar.unbound_workspace", "a topbar record arrived for a workspace whose directory was never bound",
+		dlog.Context{
+			"workspace_id":        string(ws),
+			"invariant_violation": "topbar resolver frame for a workspace with no bound directory",
+			"remediation":         "call SetWorkspaceDir at registration",
+		})
+	panic(fmt.Sprintf("topbar: a frame for workspace %q, whose directory was never bound", ws))
 }
 
 // mutate runs one accumulation change under the lock and republishes the whole

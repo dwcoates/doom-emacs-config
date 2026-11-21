@@ -117,6 +117,19 @@ func TestFaultFooterCellLeavesTheStatusToAStoppedKeeper(t *testing.T) {
 	}
 }
 
+// TestFaultFooterCellLeavesTheStatusToABriefThatWillNotSplice: one brief
+// disagreeing with its values leaves every other brief composing, so the
+// fault paints no workspace's row.
+func TestFaultFooterCellLeavesTheStatusToABriefThatWillNotSplice(t *testing.T) {
+	// Arrange, Act
+	got, ok := FaultFooterCell(KindBriefUnsplicable, true)
+
+	// Assert
+	if !ok || got != (FaultCell{}) {
+		t.Fatalf("FaultFooterCell(%q, daemon) = %+v, %v; want the non-escalating cell", KindBriefUnsplicable, got, ok)
+	}
+}
+
 // TestFaultFooterCellRefusesTheAccountingKind is the one kind that draws
 // nothing, and the reason it draws nothing.
 func TestFaultFooterCellRefusesTheAccountingKind(t *testing.T) {

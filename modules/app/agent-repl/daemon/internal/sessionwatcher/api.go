@@ -684,6 +684,9 @@ type SummarySink interface {
 	// OnContextReset is a /clear. A /compact keeps the conversation it
 	// summarizes, so it is not a reset.
 	OnContextReset(ws ids.WorkspaceID)
+	// OnVendorTitle is the vendor's own title for the conversation (its
+	// ai-title); empty retracts it.
+	OnVendorTitle(ws ids.WorkspaceID, title string)
 }
 
 // Departure is how a watched shim went away. See LifecycleSink.OnDeparted.

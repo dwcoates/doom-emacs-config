@@ -4034,6 +4034,13 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"promptsDirMissing\":{\"path\":\"/p\"}}"))
                    '(:detail "" :kind (:arm :prompts-dir-missing :value (:path "/p")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-brief-unsplicable-kind ()
+  "DaemonFault's `brief_unsplicable' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"briefUnsplicable\":{\"brief\":\"b\",\"cause\":\"missing [x]\"}}"))
+                   '(:detail "" :kind (:arm :brief-unsplicable :value (:brief "b" :cause "missing [x]")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-wsm-read-only-kind ()
   "DaemonFault's `wsm_read_only' kind decodes with everything it carries."
   (agent-repl-test-wire-verbs--with-common
@@ -4116,11 +4123,11 @@ here."
                  (sort (list "build" "install" "restartServices" "rollback") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
-  "DaemonFault's kind oneof has exactly the eight arms decoded here."
+  "DaemonFault's kind oneof has exactly the nine arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFault")
                        #'string<)
-                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable" "deployFailed" "keepaliveDriveStopped")
+                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable" "deployFailed" "keepaliveDriveStopped" "briefUnsplicable")
                        #'string<))))
 
 ;;;; ---- Interrupt -------------------------------------------------------

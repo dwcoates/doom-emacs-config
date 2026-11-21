@@ -136,6 +136,11 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 			"arm": sessionArm(update),
 		})
 		w.mu.later(func() { w.sinks.Topbar.OnSessionUpdate(w.ws, update) })
+		// THE TITLE IS KEPT BEYOND THE SESSION, so a workspace closed before
+		// its agent set a summary still has words for `workspace find`.
+		if title := update.GetTitle(); title != nil && w.sinks.Summary != nil {
+			w.sinks.Summary.OnVendorTitle(w.ws, title.GetText())
+		}
 
 	case *conversationv1.SessionUpdate_ModelChanged,
 		*conversationv1.SessionUpdate_PermissionModeChanged:

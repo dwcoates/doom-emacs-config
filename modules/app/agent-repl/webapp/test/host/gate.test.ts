@@ -85,6 +85,9 @@ beforeEach(() => {
     },
     dismissDigest: (id) => dismissed.push(id),
   });
+  // Emacs tells each gated workspace's slot as it hides its input window.
+  gate.setSlot("a", 120);
+  gate.setSlot("b", 120);
 });
 
 afterEach(() => {
@@ -206,17 +209,41 @@ describe("the webhost's gate", () => {
     expect(el.style.getPropertyValue(DOCK_HEIGHT_PROPERTY)).toBe("90px");
   });
 
-  it("falls back to the stylesheet's slot for a workspace whose slot was never told", () => {
+  it("waits to draw a gate whose slot Emacs has not told", () => {
     // Arrange
-    gate.setSlot("a", 132);
-    gate.setGates([rosterGate("a"), rosterGate("b")]);
-    gate.setShown("a");
+    gate.setGates([rosterGate("c")]);
 
     // Act
-    gate.setShown("b");
+    gate.setShown("c");
 
     // Assert
-    expect(el.style.getPropertyValue(DOCK_HEIGHT_PROPERTY)).toBe("");
+    expect([el.hidden, drawn(), el.style.getPropertyValue(DOCK_HEIGHT_PROPERTY)]).toEqual([true, null, ""]);
+  });
+
+  it("draws a waiting gate the moment Emacs tells its slot", () => {
+    // Arrange
+    gate.setGates([rosterGate("c")]);
+    gate.setShown("c");
+
+    // Act
+    gate.setSlot("c", 100);
+
+    // Assert
+    expect([el.hidden, drawn() !== null, el.style.getPropertyValue(DOCK_HEIGHT_PROPERTY)]).toEqual([false, true, "100px"]);
+  });
+
+  it("records a gate's wait for its slot once, however often the roster moves", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    gate.setShown("c");
+
+    // Act
+    gate.setGates([rosterGate("c")]);
+    gate.setGates([rosterGate("c")]);
+
+    // Assert
+    const records = await forwardedRecords(capture);
+    expect(records.filter((r) => r.operation === "webhost.gate.awaiting-slot").length).toBe(1);
   });
 
   it("ends the pages and the sidebar above the gate as soon as it is drawn", () => {

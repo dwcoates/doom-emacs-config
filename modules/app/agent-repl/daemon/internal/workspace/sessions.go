@@ -3526,6 +3526,12 @@ func (f *Fleet) teardown(ctx context.Context, ws ids.WorkspaceID, session *live,
 		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, killErr)
 	}
 	f.noteReap(ws, session.client)
+	// THE SHIM'S VERDICT ENDS WITH THE SHIM. A fault the shim reported stands
+	// until its next diagnostics push, and a shim this daemon stood down
+	// sends none: a cold gate's stand-down left a network fault drawing the
+	// row blue until the gate was answered. The close is the workspace's own
+	// accounting, so a stop under a cancelled context still makes it.
+	f.closeOnEdge(context.WithoutCancel(ctx), f.logFor(ctx, ws), ws, health.EdgeShimStoodDown)
 	f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}).Info(opBringUp,
 		"stopped the workspace session", dlog.Context{"force": force, "shim_pid": session.client.PID(), "reason": reason})
 	return nil

@@ -249,27 +249,6 @@ func TestTheClockIsUnsetWithNoTurnInFlight(t *testing.T) {
 	}
 }
 
-func TestAFrameForAnUnboundWorkspaceIsRecordedLoudly(t *testing.T) {
-	// Arrange
-	log := dlog.NewTestSurfaces()
-	r, err := newResolver(testColors(), log, WithClock(newFakeClock()))
-	if err != nil {
-		t.Fatalf("newResolver: %v", err)
-	}
-
-	// Act
-	r.OnLink("ws-unbound", shimclient.LinkConnected)
-
-	// Assert
-	records := log.Records()
-	if len(records) == 0 {
-		t.Fatalf("no record was written for a frame on an unbound workspace")
-	}
-	if records[len(records)-1].Context["invariant_violation"] == nil {
-		t.Fatalf("record = %+v, want the invariant violation named", records[len(records)-1])
-	}
-}
-
 // TestAContextCutEndsItsActButNotItsTurn — the cut ends the clear or
 // compaction it carries, never the turn: a `/clear` or `/compact` turn runs on
 // to the vendor's `result`, and an auto-compaction runs inside a turn that
@@ -1114,10 +1093,10 @@ func unboundErrors(log *dlog.TestSurfaces, operation string) int {
 	return n
 }
 
-// TestAFrameForAnUnboundWorkspaceStatesTheViolationAtError pins that the
-// record's level matches what it claims: the violation used to ride as context
-// on INFO and DEBUG records only, where no level sweep could see it.
-func TestAFrameForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
+// TestAFrameForAnUnboundWorkspaceFailsHard pins that the resolver asserts
+// rather than serves a view for a workspace it never bound: the violation is
+// recorded at ERROR, then the resolver panics.
+func TestAFrameForAnUnboundWorkspaceFailsHard(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestSurfaces()
 	r, err := newResolver(testColors(), log, WithClock(newFakeClock()))
@@ -1126,29 +1105,21 @@ func TestAFrameForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
 	}
 
 	// Act
-	r.OnLink("ws-unbound", shimclient.LinkConnected)
+	recovered := func() (got any) {
+		defer func() { got = recover() }()
+		r.OnLink("ws-unbound", shimclient.LinkConnected)
+		return nil
+	}()
 
 	// Assert
+	if recovered == nil {
+		t.Fatal("OnLink on an unbound workspace did not panic")
+	}
 	if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != 1 {
 		t.Fatalf("unbound-workspace ERROR records = %d, want 1", got)
 	}
-}
-
-func TestTheUnboundViolationIsStatedOncePerWorkspace(t *testing.T) {
-	// Arrange
-	log := dlog.NewTestSurfaces()
-	r, err := newResolver(testColors(), log, WithClock(newFakeClock()))
-	if err != nil {
-		t.Fatalf("newResolver: %v", err)
-	}
-	r.OnLink("ws-unbound", shimclient.LinkConnected)
-
-	// Act
-	r.OnLink("ws-unbound", shimclient.LinkDialing)
-
-	// Assert
-	if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != 1 {
-		t.Fatalf("unbound-workspace ERROR records = %d, want 1 across two frames", got)
+	if rec := log.Records()[len(log.Records())-1]; rec.Context["invariant_violation"] == nil || rec.Context["workspace_id"] != "ws-unbound" {
+		t.Fatalf("record = %+v, want the invariant violation named for ws-unbound", rec)
 	}
 }
 
@@ -1429,6 +1400,7 @@ func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
 		resolve    func(ids.WorkspaceID) (string, error)
 		idLookup   dlog.WorkspaceIDLookup
 		wantErrors int
+		wantPanic  bool
 		wantDir    string
 	}{
 		{name: "a registered workspace's directory binds it, with no violation",
@@ -1437,7 +1409,7 @@ func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
 			resolve:  func(ids.WorkspaceID) (string, error) { return "/tmp/ws-gone", nil },
 			idLookup: func(string) (string, error) { return "", dlog.ErrWorkspaceDirGone }, wantDir: "/tmp/ws-gone"},
 		{name: "a workspace the registry cannot answer is still the violation",
-			resolve: func(ids.WorkspaceID) (string, error) { return "", errors.New("no such workspace") }, wantErrors: 1},
+			resolve: func(ids.WorkspaceID) (string, error) { return "", errors.New("no such workspace") }, wantErrors: 1, wantPanic: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1452,11 +1424,25 @@ func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
 			}
 
 			// Act
-			r.OnLink("ws-unbound", shimclient.LinkConnected)
+			recovered := func() (got any) {
+				defer func() { got = recover() }()
+				r.OnLink("ws-unbound", shimclient.LinkConnected)
+				return nil
+			}()
 
 			// Assert
+			if (recovered != nil) != tt.wantPanic {
+				t.Fatalf("panicked = %v, want %v", recovered, tt.wantPanic)
+			}
 			if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != tt.wantErrors {
 				t.Fatalf("unbound-workspace ERROR records = %d, want %d", got, tt.wantErrors)
+			}
+			if tt.wantPanic {
+				// The panic left r.mu held, and an unbound workspace binds no directory.
+				if rec := log.Records()[len(log.Records())-1]; rec.Context["cause"] == nil {
+					t.Fatalf("record = %+v, want the registry's cause", rec)
+				}
+				return
 			}
 			r.mu.Lock()
 			dir := r.states["ws-unbound"].dir

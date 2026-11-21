@@ -8423,25 +8423,19 @@ bubble-body.bubble-body { display: block; }
 .cold-gate-trace { color: var(--fg); }
 /* THE STANDING GATE DOCKS AT THE PAGE'S VERY BOTTOM (src/feed/gate-dock.ts):
    Emacs hides the input window while it stands and this webview grows into
-   that space, so the banner takes the input's exact slot: #gate-dock, the
-   body grid's full-width second row under the rail AND the main column (the
-   rail keeps its height), exactly the input window's height. Emacs tells
-   the page that height in pixels (--gate-dock-height, set on the root before the input
-   hides; lisp/window.el); 18.4vh, `agent-repl-input-height-fraction`, is the
-   fallback only for a page Emacs never told, which gate-dock.ts records. The
-   banner's row stays in the feed, hidden, so the feed draws no inline gate
-   while it is docked. */
+   that space, so the banner takes the input's slot: #gate-dock, the body
+   grid's full-width second row under the rail AND the main column (the rail
+   keeps its height). In Emacs the webhost draws the gate in the composer's
+   told height (host/host.css #webhost-gate) and this page docks nothing; a
+   page on its own, in a browser, has no composer whose slot it could take,
+   so its dock is its card's own height. The banner's row stays in the feed,
+   hidden, so the feed draws no inline gate while it is docked. */
 #gate-dock {
   grid-column: 1 / -1;
   grid-row: 2;
-  /* THE DOCK IS THE INPUT WINDOW'S HEIGHT AT LEAST (owner request,
-     2026-10-29, superseding 2026-10-28's fixed slot): a gate that fits stands
-     in the composer's exact slot, so showing one moves nothing. A gate that
-     needs more (the open compact submenu, or any selection mode) grows the
-     dock to fit its content, never scrolling, and the dock falls back to the
-     told height when the content is gone. A column, so the docked card can
-     fill it. */
-  min-height: var(--gate-dock-height, 18.4vh);
+  /* A gate that needs more room (the open compact submenu, or any
+     selection mode) grows the dock to fit its content, never scrolling
+     (owner request, 2026-10-29). A column, so the docked card fills it. */
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -8484,7 +8478,9 @@ bubble-body.bubble-body { display: block; }
    would not line up under one another. */
 #gate-dock > .cold-gate-docked .cold-gate-submenu,
 #webhost-gate > .cold-gate-docked .cold-gate-submenu { text-align: start; }
-#feed > .gate-docked-row { display: none; }
+/* The docked card's home row, a feed row like any other (#feed > .feed-body
+   > .feed-item), is hidden while its card is away. */
+.feed-item.gate-docked-row { display: none; }
 /* IN THE WEBHOST THE GATE IS THE WEBHOST'S (src/host/gate.ts, owner request
    2026-10-29): it is drawn while the page may still be loading, so the page
    draws no standing gate, and keeps no slot for one; a resolved gate is the

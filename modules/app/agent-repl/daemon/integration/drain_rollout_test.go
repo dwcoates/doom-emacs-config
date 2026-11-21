@@ -404,13 +404,9 @@ func TestAScheduledDrainDoesNotWaitOnADetachedSubagentThatHasSettled(t *testing.
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
-	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
-	})
+	awaitDetachedRunLive(t, f, footer)
 	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9", "toolu-1")))
-	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents() == nil
-	})
+	awaitDetachedRunsSettled(t, f, footer)
 	stream := f.d.WatchDaemonStream()
 
 	// Act: schedule a drain and wait out its deadline.

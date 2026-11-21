@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -596,5 +597,19 @@ func TestABlockDividerNamesItsRepositorysMainWorkspace(t *testing.T) {
 				t.Fatalf("main workspace = %v, want %q", divider.GetMainWorkspace(), tc.want)
 			}
 		})
+	}
+}
+
+// TestTheSidebarFilesFamiliesThroughTheSharedWalk pins the sidebar to wsm's
+// family walk: a copy of its own would let the sections drift from a
+// repository fold's membership (wsm.RepositoryMembers).
+func TestTheSidebarFilesFamiliesThroughTheSharedWalk(t *testing.T) {
+	// Act
+	shared := sourcescan.Count(t, "wsm.SectionRepos(") + sourcescan.Count(t, "wsm.FamilyRoots(") + sourcescan.Count(t, "wsm.ParentsIn(")
+	byHand := sourcescan.Count(t, "func familyRoots(") + sourcescan.Count(t, "func sectionRepos(") + sourcescan.Count(t, "func parentsIn(") + sourcescan.Count(t, "func cycles(")
+
+	// Assert
+	if shared == 0 || byHand != 0 {
+		t.Fatalf("shared family walks = %d, hand-rolled = %d; want some and none", shared, byHand)
 	}
 }

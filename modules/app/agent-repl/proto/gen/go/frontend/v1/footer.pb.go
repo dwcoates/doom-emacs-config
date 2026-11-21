@@ -408,6 +408,7 @@ func (x *FooterStrip) GetLiveWork() *FooterLiveWorkChips {
 //	|            |           | keepalive_undelivered,                       |
 //	|            |           | deploy_failed (daemon),                      |
 //	|            |           | keepalive_drive_stopped (daemon)             |
+//	|            |           | brief_unsplicable (daemon)                   |
 //
 // WHY THOSE FOUR DO NOT ESCALATE, since the ruling's worked example put them
 // under `disconnected · degraded`: the shim answered in every one of them. A

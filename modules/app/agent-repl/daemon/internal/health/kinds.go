@@ -35,6 +35,10 @@ const (
 	// daemon did (cachelapse.Keeper.Run): no keep-alive goes out for any
 	// workspace. Evidence: cause.
 	KindKeepaliveDriveStopped = "keepalive_drive_stopped"
+	// KindBriefUnsplicable is a brief that read but would not splice: its
+	// placeholders and the values handed to it disagree. It is about that one
+	// brief, named in its `brief` evidence, never the prompts directory.
+	KindBriefUnsplicable = "brief_unsplicable"
 )
 
 // The SESSION-scope fault kinds, spelled exactly as SessionFault's kind oneof
@@ -182,6 +186,10 @@ func daemonFault(f wsm.Fault) *agentreplv1.DaemonFault {
 	case KindStateUnreadable:
 		out.Kind = &agentreplv1.DaemonFault_DaemonStateUnreadable{
 			DaemonStateUnreadable: &agentreplv1.DaemonFaultDaemonStateUnreadable{Cause: evidenceCause(f)},
+		}
+	case KindBriefUnsplicable:
+		out.Kind = &agentreplv1.DaemonFault_BriefUnsplicable{
+			BriefUnsplicable: &agentreplv1.DaemonFaultBriefUnsplicable{Brief: f.Evidence["brief"], Cause: evidenceCause(f)},
 		}
 	case KindDeployFailed:
 		if arm := DeployFailureOf(f).arm(); arm != nil {
