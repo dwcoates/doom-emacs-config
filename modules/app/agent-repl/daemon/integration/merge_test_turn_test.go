@@ -47,7 +47,7 @@ if [ "$code" = 0 ]; then echo "daemon: passed in 1s"; else echo "daemon failed a
 exit "$code"
 `
 
-func newTurnGate(t *testing.T) *turnGate {
+func newTurnGate(t *testing.T, repo *harness.Repo) *turnGate {
 	t.Helper()
 	dir := t.TempDir()
 	for _, fifo := range []string{"started", "release"} {
@@ -55,10 +55,8 @@ func newTurnGate(t *testing.T) *turnGate {
 			t.Fatalf("making the gate's %s pipe: %v", fifo, err)
 		}
 	}
-	g := &turnGate{t: t, dir: dir, path: filepath.Join(dir, "test-all.sh"), starts: make(chan string, 16)}
-	if err := os.WriteFile(g.path, []byte(fmt.Sprintf(turnGateScript, dir)), 0o755); err != nil {
-		t.Fatalf("writing the gate: %v", err)
-	}
+	g := &turnGate{t: t, dir: dir, starts: make(chan string, 16)}
+	g.path = repo.WriteTestAllScript(fmt.Sprintf(turnGateScript, dir))
 	go g.follow()
 	t.Cleanup(g.stop)
 	return g
@@ -139,11 +137,10 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	t.Parallel()
 	// Arrange: two children of one repository, each with work to land.
 	repo := harness.NewRepo(t)
-	gate := newTurnGate(t)
+	gate := newTurnGate(t, repo)
 	repo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout,
-		ExpectWarnings: []string{"daemon.merge.tests", "daemon.scriptrunner.run"},
-		ExtraEnv:       []string{harness.TestAllScriptEnv(gate.path)}})
+		ExpectWarnings: []string{"daemon.merge.tests", "daemon.scriptrunner.run"}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	a := mergeCreateChild(t, d, repoRef, "alpha", "the first work", nil)
 	b := mergeCreateChild(t, d, repoRef, "beta", "the second work", nil)

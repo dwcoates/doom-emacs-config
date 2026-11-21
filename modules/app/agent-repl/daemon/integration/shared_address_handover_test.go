@@ -24,13 +24,12 @@ func TestAHandoverOnASharedAddressIsReachedOnlyThroughThatAddress(t *testing.T) 
 	// Arrange: a holder, and a daemon serving its shared address.
 	holder := harness.StartSocketHolder(t)
 	selfRepo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script := selfRepo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
-		ExtraEnv:     []string{harness.TestAllScriptEnv(script.Path)},
 		Holder:       holder,
 		Timeout:      harness.HandoverChainTimeout,
 	})

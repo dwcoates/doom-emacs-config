@@ -30,10 +30,10 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 	// Arrange: A, the head, inside its gate; B, behind it, waiting in
 	// line.
 	repo := harness.NewRepo(t)
-	gate := newTurnGate(t)
+	gate := newTurnGate(t, repo)
 	repo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout,
-		ExtraEnv: []string{harness.TestAllScriptEnv(gate.path), adoptAwaitsParticipantsEnv}})
+		ExtraEnv: []string{adoptAwaitsParticipantsEnv}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	a := mergeCreateChild(t, d, repoRef, "alpha", "the first work", nil)
 	b := mergeCreateChild(t, d, repoRef, "beta", "the second work", nil)

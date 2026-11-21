@@ -117,21 +117,20 @@ func TestRecorderRecordsEveryArgumentVerbatim(t *testing.T) {
 	}
 }
 
-func TestTestAllScriptEnvNamesTheVariableTheMergeOrchestratorReads(t *testing.T) {
-	// Act
-	got := TestAllScriptEnv("/repo/bin/test-all.sh")
-
-	// Assert
-	if got != "AGENT_REPL_TEST_ALL_SCRIPT=/repo/bin/test-all.sh" {
-		t.Fatalf("TestAllScriptEnv = %q, want the daemon's AGENT_REPL_TEST_ALL_SCRIPT entry", got)
+func TestNoTestSetsTheRetiredTestAllVariable(t *testing.T) {
+	// Arrange: the daemon no longer reads AGENT_REPL_TEST_ALL_SCRIPT; a merge
+	// gate runs the script checked in to the tree it tests
+	// (Repo.TestAllScript), so a test still setting it would set nothing.
+	var files []string
+	for _, glob := range []string{"../*.go", "../../../e2e/*.go", "../../../e2e/kit/*.go"} {
+		matched, err := filepath.Glob(glob)
+		if err != nil {
+			t.Fatalf("glob %s: %v", glob, err)
+		}
+		files = append(files, matched...)
 	}
-}
-
-func TestNoIntegrationTestSpellsTheTestAllVariableByHand(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob(filepath.Join("..", "*.go"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("list the integration suite's files: %v (%d files)", err, len(files))
+	if len(files) == 0 {
+		t.Fatal("found no test files to read")
 	}
 
 	// Act
@@ -141,14 +140,14 @@ func TestNoIntegrationTestSpellsTheTestAllVariableByHand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", file, err)
 		}
-		if strings.Contains(string(body), "AGENT_REPL_TEST_ALL_SCRIPT=") {
+		if strings.Contains(string(body), "AGENT_REPL_TEST_ALL"+"_SCRIPT") {
 			offenders = append(offenders, file)
 		}
 	}
 
 	// Assert
 	if len(offenders) != 0 {
-		t.Fatalf("%v spell the test-all variable by hand; use TestAllScriptEnv", offenders)
+		t.Fatalf("%v name the retired test-all variable; check the script in with Repo.TestAllScript", offenders)
 	}
 }
 

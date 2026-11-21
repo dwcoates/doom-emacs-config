@@ -266,8 +266,8 @@ rather than guessing:
   the vite cache changes nothing — vitest transforms sources per run),
   so there was no hidden cold-start term. 10 s, from measurement.
 - The §F7 merge area briefly carried a 15 s "merge chain" bound. That was
-  covering a HARNESS FAULT — a missing `AGENT_REPL_TEST_ALL_SCRIPT` made the
-  merge gate exit 127, so the merge never reached a terminal and the bubble
+  covering a HARNESS FAULT — a missing test script (now checked in with
+  `Repo.TestAllScript`) made the merge gate exit 127, so the merge never reached a terminal and the bubble
   sometimes never appeared. With the gate provided, the bubble is drawn
   19-57 ms after the enqueue and the tab strip 6-8 ms after that, and the
   area needs no bound of its own at all.

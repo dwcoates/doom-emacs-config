@@ -21,12 +21,12 @@ func TestALandingCarryingAnOutsideAuthorFailsAndLeavesMainUnmoved(t *testing.T) 
 	// Arrange: a passing gate, and the workspace's one commit authored by an
 	// outside contributor.
 	repo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, repo.Dir)
+	script := repo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	repo.DeploysAsAgentRepl()
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
+	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.MergeChainTimeout})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "outsideauthor", "land the contribution", nil)
 	root := f.watchRootFeed()

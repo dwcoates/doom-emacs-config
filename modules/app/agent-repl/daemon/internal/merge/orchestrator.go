@@ -711,8 +711,9 @@ const TestRunMarkerEnv = "AGENT_REPL_TEST_RUN_BY_DAEMON"
 // the tree's OWN copy of the deploy config's test script (SCRIPT, relative to
 // a checkout's root), because the script tests the checkout it lives in, so
 // running any other copy of it would test that copy's tree instead of the
-// merge. AGENT_REPL_TEST_ALL_SCRIPT overrides it for tests, and the script is
-// run through bash so a fixture script needs no execute bit. The command
+// merge. A test's fixture repository checks its fake script in at that path,
+// so the gate runs a test's script exactly as it runs a real one. The script
+// is run through bash so a fixture script needs no execute bit. The command
 // carries TestRunMarkerEnv, so every test run the daemon starts (the merge
 // queue's gates, RunTests, RunRedundancy) is one bin/background.sh admits;
 // this is the one place it is set. It also names WORKSPACE, the workspace
@@ -720,11 +721,7 @@ const TestRunMarkerEnv = "AGENT_REPL_TEST_RUN_BY_DAEMON"
 // RAM disk seat it holds, so a run waiting behind it names it. The script is
 // the LAST element, which is what the gate's preflight reads.
 func TestCommandFor(tree, script, workspace string) []string {
-	path := os.Getenv("AGENT_REPL_TEST_ALL_SCRIPT")
-	if path == "" {
-		path = filepath.Join(tree, script)
-	}
-	return []string{"env", TestRunMarkerEnv + "=1", seatwait.EnvWorkspace + "=" + workspace, "bash", path}
+	return []string{"env", TestRunMarkerEnv + "=1", seatwait.EnvWorkspace + "=" + workspace, "bash", filepath.Join(tree, script)}
 }
 
 // errNoRun is returned when a verb addresses an in-flight merge that is not

@@ -51,7 +51,8 @@
 // mechanism: the incumbent re-execs itself with --joining) by giving a
 // fake-git repository agent-repl's own deploy config (DeploysAsAgentRepl),
 // landing a real (scripted, fake-git) commit through a real CreateWorkspace + FinishWorkspace round
-// trip, and setting AGENT_REPL_TEST_ALL_SCRIPT so the merge gate passes —
+// trip, and checking a passing test script in to the repository
+// (Repo.TestAllScript) so the merge gate passes —
 // exactly the mechanism daemon/integration/drain_rollout_test.go's own
 // TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous and
 // TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall use, reimplemented here
@@ -200,13 +201,12 @@ func adColdBoot(t *testing.T, w *stack.World) *harness.Daemon {
 func adSelfRepoWorld(t *testing.T) (*harness.Repo, *stack.World) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script := selfRepo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("e2e: passed in 1s\n")
 	selfRepo.DeploysAsAgentRepl()
 	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		DurableState: true,
-		ExtraEnv:     []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 		Timeout:      stack.HandoverChainTimeout,
 	}})
 	return selfRepo, w

@@ -175,12 +175,11 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 func coldStartSelfRepoDaemonOn(t *testing.T, first *harness.Daemon, shimMain string) (*harness.Repo, *harness.Daemon) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script := selfRepo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	opts := first.SuccessorOpts()
 	selfRepo.DeploysAsAgentRepl()
-	opts.ExtraEnv = []string{harness.TestAllScriptEnv(script.Path)}
 	opts.Timeout = harness.HandoverChainTimeout
 	opts.ShimMain = shimMain
 	d := harness.StartDaemon(t, opts)

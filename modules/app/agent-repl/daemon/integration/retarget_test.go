@@ -88,12 +88,11 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	// script stands in for the gate, because the emacs-repo method is the one
 	// that runs `git merge`, so where the merge lands is read off git's -C.
 	repo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, repo.Dir)
+	script := repo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	repo.DeploysAsAgentRepl()
 	f := newRetargetFamily(t, harness.Opts{
-		ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)},
 		Timeout:  harness.MergeChainTimeout,
 	}, repo)
 
