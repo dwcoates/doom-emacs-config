@@ -6,7 +6,7 @@
  * scenario stands on, because a defect here is invisible in a scenario test
  * (which asserts what the scenario said, not how the engine said it).
  */
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince } from "../log-records.js";
@@ -31,6 +31,7 @@ import {
 } from "../../src/fake/index.js";
 import type { CanUseToolLike, QueryLike, SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
 
+import { transcriptPath } from "../../src/engine/vendor-paths.js";
 import { RESUME_DROPS_TURN_REFUSAL_PREFIX } from "../../src/engine/rollback.js";
 import {
   FAKE_DEFAULT_EFFORT,
@@ -1430,6 +1431,44 @@ describe("a truncating resume and file checkpointing", () => {
 
     // Assert
     expect(new Set(messages.map((message) => message.session_id))).toEqual(new Set(["fork-1"]));
+  });
+
+  it("writes no transcript of the minted session when it answers unpersisted", async () => {
+    // Arrange: a headless inference call continues no conversation.
+    const where = world(twoTurns());
+
+    // Act
+    await drain(
+      createFakeQuery(
+        (async function* () {
+          yield prompt("p2");
+        })(),
+        ALLOW,
+        { cwd: where.cwd, configDir: where.configDir, sessionId: "unused", unpersisted: true, newUuid: () => "inference-1", nowMs: () => HARNESS_NOW_MS },
+      ),
+    );
+
+    // Assert
+    expect(existsSync(transcriptPath(where.configDir, where.cwd, "inference-1"))).toBe(false);
+  });
+
+  it("answers unpersisted under a session id of its own", async () => {
+    // Arrange
+    const where = world(twoTurns());
+
+    // Act
+    const messages = await drain(
+      createFakeQuery(
+        (async function* () {
+          yield prompt("p2");
+        })(),
+        ALLOW,
+        { cwd: where.cwd, configDir: where.configDir, sessionId: "unused", unpersisted: true, newUuid: () => "inference-1", nowMs: () => HARNESS_NOW_MS },
+      ),
+    );
+
+    // Assert
+    expect(new Set(messages.map((message) => message.session_id))).toEqual(new Set(["inference-1"]));
   });
 
   it("answers a file rewind with the files the edit tools touched from the prompt on", async () => {

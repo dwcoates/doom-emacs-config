@@ -631,6 +631,17 @@ export type LiveChainRead =
 
 /**
  * The live conversation at `file`, after the rollbacks whose prompts are
+ * `rolledBackPromptUuids`, as {@link readLiveChain} reads it, with every
+ * record WHOLE: the headless summarizer renders what was said
+ * (engine/conversation-text.ts), which the chain's slices do not keep. A
+ * one-shot read, never cached, so no conversation stays in memory after it.
+ */
+export function readLiveConversation(file: string, rolledBackPromptUuids: ReadonlySet<string>): LiveChainRead {
+  return readLiveChain(createTranscriptIndex(file, wholeRecord), rolledBackPromptUuids);
+}
+
+/**
+ * The live conversation at `file`, after the rollbacks whose prompts are
  * `rolledBackPromptUuids`: the chain from the newest record, ended by
  * {@link liveEnd}. A rolled-back prompt that opens the chain is a broken
  * invariant (a rollback never cuts before the first prompt) and answers

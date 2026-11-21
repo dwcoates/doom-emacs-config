@@ -7,7 +7,7 @@
  * as pure functions and asserted directly; the end-to-end behavior of the built
  * bundle is the dist smoke's job.
  */
-import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +29,7 @@ import {
   resolveRetryPolicy,
   resolveWatcherConclusionBudgetMs,
   logCorrelation,
+  inferenceFactory,
   queryFactory,
   QUERY_VENDORS,
   type QueryVendors,
@@ -54,8 +55,9 @@ import {
 import { VendorCallsForbiddenError } from "../src/vendor-guard.js";
 import type { Engine } from "../src/engine/engine.js";
 import { createFakeQuery } from "../src/fake/index.js";
-import { createRealQuery } from "../src/sdk/real-query.js";
-import type { QuerySpec, SessionEngine } from "../src/engine/session.js";
+import { createRealInference, createRealQuery, type RealInferenceSpec } from "../src/sdk/real-query.js";
+import type { InferenceSpec, QuerySpec, SessionEngine } from "../src/engine/session.js";
+import type { QueryLike } from "../src/sdk/types.js";
 
 // EVERY `main` TEST RE-IMPORTS `main.js` AFTER A MODULE RESET, so the generated
 // protobuf modules are pinned for the whole file rather than re-evaluated by
@@ -1021,6 +1023,106 @@ describe("queryFactory", () => {
   });
 });
 
+describe("inferenceFactory", () => {
+  const configDir = mkdtempSync(path.join(os.tmpdir(), "shim-inference-factory-config-"));
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "shim-inference-factory-cwd-"));
+  const env: ShimEnvironment = {
+    claudeConfigDir: configDir,
+    stateDir: "/state",
+    shimBuildSha: "abc1234",
+    storeSocket: "/tmp/store.sock",
+  };
+
+  /** A call's spec, on MODEL when one is named. */
+  const spec = (model?: string): InferenceSpec => ({
+    abortController: new AbortController(),
+    prompt: (async function* () {})(),
+    ...(model === undefined ? {} : { model }),
+  });
+
+  /** Vendors that record what each constructor was handed. */
+  function recording(): { vendors: QueryVendors; real: RealInferenceSpec[]; fake: unknown[] } {
+    const real: RealInferenceSpec[] = [];
+    const fake: unknown[] = [];
+    const vendors: QueryVendors = {
+      real: () => Promise.reject(new Error("an inference call never reaches the session's query")),
+      realInference: (inference) => {
+        real.push(inference);
+        return Promise.resolve({} as QueryLike);
+      },
+      fake: (_prompt, _canUseTool, opts) => {
+        fake.push(opts);
+        return {} as QueryLike;
+      },
+    };
+    return { vendors, real, fake };
+  }
+
+  it("without --fake, hands the real call the workspace directory, the account root and the model", async () => {
+    // Arrange.
+    const { vendors, real } = recording();
+    const create = inferenceFactory(false, env, cwd, vendors);
+
+    // Act.
+    await create(spec("claude-haiku-5-5"));
+
+    // Assert.
+    expect(real.map((handed) => ({ ...handed, abortController: handed.abortController instanceof AbortController }))).toEqual([
+      { cwd, claudeConfigDir: configDir, abortController: true, model: "claude-haiku-5-5" },
+    ]);
+  });
+
+  it("under --fake, builds an unpersisted mock that continues no conversation", async () => {
+    // Arrange.
+    const { vendors, fake } = recording();
+    const create = inferenceFactory(true, env, cwd, vendors);
+
+    // Act.
+    await create(spec());
+
+    // Assert.
+    const opts = fake[0] as Record<string, unknown>;
+    expect({ unpersisted: opts["unpersisted"], resume: "resume" in opts, ephemeralFork: "ephemeralFork" in opts }).toEqual({
+      unpersisted: true,
+      resume: false,
+      ephemeralFork: false,
+    });
+  });
+
+  it("writes no trust entry, since the call loads no settings", async () => {
+    // Arrange.
+    const repo = mkdtempSync(path.join(os.tmpdir(), "shim-inference-factory-repo-"));
+    const accounts = mkdtempSync(path.join(os.tmpdir(), "shim-inference-factory-accounts-"));
+    const { vendors } = recording();
+    const create = inferenceFactory(true, { ...env, claudeConfigDir: accounts }, repo, vendors);
+
+    // Act.
+    await create(spec());
+
+    // Assert.
+    expect(existsSync(path.join(accounts, ".claude.json"))).toBe(false);
+  });
+
+  it("without --fake, refuses with the guard's own error naming createRealInference", async () => {
+    // Arrange.
+    const create = inferenceFactory(false, env, cwd);
+
+    // Act.
+    let raised: unknown;
+    try {
+      await create(spec());
+    } catch (err) {
+      raised = err;
+    }
+
+    // Assert.
+    expect({
+      typed: raised instanceof VendorCallsForbiddenError,
+      site: raised instanceof Error && /blocked at: createRealInference/.test(raised.message),
+    }).toEqual({ typed: true, site: true });
+  });
+});
+
 /**
  * `main()` itself — the wiring, the exit paths and the signal boundary.
  *
@@ -1512,6 +1614,7 @@ describe("main", () => {
 describe("QUERY_VENDORS", () => {
   it.each([
     ["the real vendor", "real", createRealQuery],
+    ["the real vendor's headless inference call", "realInference", createRealInference],
     ["the mocked vendor", "fake", createFakeQuery],
   ] as const)("hands production %s's own constructor", (_name, key, constructor) => {
     // Arrange / Act

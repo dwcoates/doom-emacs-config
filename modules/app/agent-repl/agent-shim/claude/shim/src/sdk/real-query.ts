@@ -392,6 +392,83 @@ export async function createRealQuery(
 }
 
 /**
+ * One HEADLESS, INFERENCE-ONLY call: a prompt in, the model's answer out, and
+ * nothing else. The shim's counterpart of the daemon's `headless.KindInference`
+ * (daemon/internal/headless/client.go), in the same shape:
+ *
+ *   - NO TOOLS (`tools: []`, the daemon's `--tools ""`), so the answer is
+ *     prose and never work;
+ *   - NO AGENT SYSTEM PROMPT (`systemPrompt: ""`, the daemon's
+ *     `--system-prompt ""`);
+ *   - NO SESSION OF ANYONE'S: no `resume`, no `sessionId`, no fork, and
+ *     `persistSession: false` (`--no-session-persistence`), so the vendor
+ *     records nothing anywhere and no workspace's transcript can receive a
+ *     record of it;
+ *   - the daemon's PINNED posture: thinking off, no MCP server
+ *     (`strictMcpConfig` with none), and none of the user's settings, skills,
+ *     CLAUDE.md or hooks (`settingSources: []`, `hooks: {}`), so the user's
+ *     interactive configuration cannot change what the call does.
+ *
+ * The cold gate's summarizer runs on it (engine/session.ts, `summarize`): it
+ * used to resume the workspace's own session under `plan`, and the vendor wrote
+ * its prompt, its answer and its `plan` posture into the user's transcript.
+ */
+export interface RealInferenceSpec {
+  /** The directory the CLI runs in. Nothing is written under it. */
+  readonly cwd: string;
+  /** The account root the call bills through, passed in `env`. */
+  readonly claudeConfigDir: string;
+  /** The model to answer with, or absence for the account default. */
+  readonly model?: string;
+  /** The call's ONLY lifecycle capability; aborting it ends the CLI child. */
+  readonly abortController: AbortController;
+}
+
+/**
+ * The SDK options for one headless inference call ({@link RealInferenceSpec}).
+ * Pure, so the suite asserts every decision above without the live SDK.
+ */
+export function realInferenceOptions(spec: RealInferenceSpec): Options {
+  return {
+    cwd: spec.cwd,
+    abortController: spec.abortController,
+    tools: [],
+    allowedTools: [],
+    systemPrompt: "",
+    persistSession: false,
+    settingSources: [],
+    mcpServers: {},
+    strictMcpConfig: true,
+    hooks: {},
+    thinking: { type: "disabled" },
+    maxTurns: 1,
+    // A CALL WITH NO TOOLS ASKS NO PERMISSION, so the gate is the default one
+    // and refuses whatever reaches it.
+    permissionMode: "default",
+    canUseTool: () => Promise.resolve({ behavior: "deny", message: "a headless inference call takes no tools" }),
+    // THE SAME ACCOUNT ROOT AND RETRY POSTURE AS A SESSION'S (realQueryOptions).
+    env: { ...process.env, CLAUDE_CONFIG_DIR: spec.claudeConfigDir, CLAUDE_CODE_MAX_RETRIES: "0" },
+    ...(spec.model === undefined ? {} : { model: spec.model }),
+  };
+}
+
+/**
+ * Construct one headless inference call, through the single vendor chokepoint
+ * ({@link importRealSDK}), as {@link createRealQuery} does.
+ */
+export async function createRealInference(
+  spec: RealInferenceSpec,
+  prompt: AsyncIterable<SdkUserMessage>,
+): Promise<QueryLike> {
+  LOGGER.debug(
+    { workspace_dir: spec.cwd, model: spec.model ?? "" },
+    "constructing a headless inference call on the real vendor",
+  );
+  const sdk = await importRealSDK("createRealInference");
+  return asQueryLike(sdk.query({ prompt, options: realInferenceOptions(spec) }));
+}
+
+/**
  * The members the vendor's query provides WITHOUT DECLARING them, each with
  * what the shim cannot do without it (see types.ts QueryLike).
  */

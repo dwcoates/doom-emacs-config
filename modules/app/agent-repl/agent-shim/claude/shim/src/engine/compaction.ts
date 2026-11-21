@@ -1,12 +1,15 @@
 /**
- * engine/compaction.ts — the throwaway session that rewrites the transcript.
+ * engine/compaction.ts — the two records a compaction appends to the
+ * transcript.
  *
  * RESPONSIBILITY. Compaction summarizes a conversation and extends its
- * transcript with the two records the vendor's own loader understands, and it
- * is driven by a SEPARATE, throwaway query rather than the live one: the live
- * query owns the session's identity, its locks and its in-flight turn, and
- * handing it a summarization prompt would put harness work inside the user's
- * conversation.
+ * transcript with the two records the vendor's own loader understands. The
+ * summary is written by a HEADLESS INFERENCE call that holds no session at all
+ * (engine/session.ts, `summarize`), never by the live query: the live query
+ * owns the session's identity, its locks and its in-flight turn, and handing
+ * it a summarization prompt would put harness work inside the user's
+ * conversation. Those two records are the ONLY ones a compaction ever writes
+ * to the transcript.
  *
  * WHO ASKS FOR IT. Only `SessionColdCompact`, the cold gate's remediation for
  * a cold context. Hibernation never compacts.
@@ -75,7 +78,7 @@ export const COMPACT_SUMMARY_PREFIX =
 /** The `content` of the boundary line, verbatim from the observed record. */
 export const COMPACT_BOUNDARY_CONTENT = "Conversation compacted";
 
-/** The instruction the throwaway session is given, per requested scope. */
+/** The instruction the summarizer is given, per requested scope. */
 export function compactionPrompt(scope: conversationv1.SessionCompactScope): string {
   const focus =
     scope === conversationv1.SessionCompactScope.PROMPTS
@@ -173,17 +176,13 @@ interface CompactionLinesSpec {
   /**
    * The permission mode THE SESSION is in, in the vendor's own spelling.
    *
-   * It is written onto the summary `user` line, and that is a correction rather
-   * than a decoration. The summarizing query runs under `plan` so it can take
-   * no tools, it RESUMES the user's own vendor session id, and the vendor
-   * records `permissionMode` on every `user` record it writes — so the
-   * throwaway leaves `plan` as the last mode the transcript states. A resume
-   * restores the conversation's posture from exactly that field
-   * (`engine/cold.ts`), so a session resumed straight after a compaction
-   * came back in PLAN MODE, which nobody chose: observed on a headless sandbox
-   * run's own revival, where the topbar read `plan` and the revived turn ran
-   * under it. Writing the session's own mode on the last record the compaction
-   * appends puts the transcript's final word back in the user's hands.
+   * It is written onto the summary `user` line, the LAST record the compaction
+   * appends, and a resume restores the conversation's posture from the last
+   * `permissionMode` the transcript states (`engine/cold.ts`). So the line
+   * states the mode the conversation's live chain last states
+   * (engine/conversation-text.ts, `chainPermissionMode`): a summarizer that
+   * resumed the user's session under `plan` once left `plan` there, and the
+   * session came back in a mode nobody chose (2026-11-15).
    */
   readonly permissionMode: string;
   readonly newUuid?: () => string;

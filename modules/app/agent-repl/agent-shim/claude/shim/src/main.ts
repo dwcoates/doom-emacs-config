@@ -71,7 +71,14 @@ import { SPAWN_GATE_FD, awaitSpawnGate } from "./spawn-gate.js";
 import { lockBinaryPath, lockDir, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
-import { createEngine, type CreateQuery, type QuerySpec, type SessionEngine } from "./engine/session.js";
+import {
+  createEngine,
+  type CreateInference,
+  type CreateQuery,
+  type InferenceSpec,
+  type QuerySpec,
+  type SessionEngine,
+} from "./engine/session.js";
 import { createFold } from "./convert/fold.js";
 import { createStoreClient } from "./store/client.js";
 import {
@@ -79,7 +86,7 @@ import {
   DEFAULT_RETRY_POLICY,
   type PersistenceRetryPolicy,
 } from "./store/persistence.js";
-import { boundSessionId, createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
+import { boundSessionId, createRealInference, createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
 import type { QueryLike } from "./sdk/types.js";
 import { createFakeQuery } from "./fake/index.js";
 import { forkFakeSession } from "./fake/fork.js";
@@ -806,12 +813,62 @@ export function logCorrelation(
  */
 export interface QueryVendors {
   real: typeof createRealQuery;
+  /** The real vendor's headless inference call (sdk/real-query.ts). */
+  realInference: typeof createRealInference;
   /** The mocked vendor; the engine drives it as the `QueryLike` it is. */
   fake: (...args: Parameters<typeof createFakeQuery>) => QueryLike;
 }
 
 /** Production's vendor constructors. */
-export const QUERY_VENDORS: QueryVendors = { real: createRealQuery, fake: createFakeQuery };
+export const QUERY_VENDORS: QueryVendors = {
+  real: createRealQuery,
+  realInference: createRealInference,
+  fake: createFakeQuery,
+};
+
+/**
+ * The headless inference call for this process (engine/session.ts,
+ * `InferenceSpec`): the real vendor's, or under `--fake` the mocked vendor's,
+ * chosen by the same flag that chooses the query. Neither binds a session:
+ * the real call persists nothing, and the mock answers under a minted id and
+ * files its records in a throwaway directory.
+ *
+ * NO TRUST ENTRY IS WRITTEN. Trust only decides whether the workspace's
+ * permission allowlists load, and an inference call loads no settings and
+ * takes no tools.
+ */
+export function inferenceFactory(
+  fake: boolean,
+  environment: ShimEnvironment,
+  cwd: string,
+  vendors: QueryVendors = QUERY_VENDORS,
+): CreateInference {
+  if (!fake) {
+    return (spec: InferenceSpec) =>
+      vendors.realInference(
+        {
+          cwd,
+          claudeConfigDir: environment.claudeConfigDir,
+          abortController: spec.abortController,
+          ...(spec.model === undefined ? {} : { model: spec.model }),
+        },
+        spec.prompt,
+      );
+  }
+  return (spec: InferenceSpec) =>
+    Promise.resolve(
+      vendors.fake(spec.prompt, () => Promise.resolve({ behavior: "deny", message: "a headless inference call takes no tools" }), {
+        cwd,
+        configDir: environment.claudeConfigDir,
+        sessionId: randomUUID(),
+        unpersisted: true,
+        newUuid: () => randomUUID(),
+        abortSignal: spec.abortController.signal,
+        permissionMode: "default",
+        ...(spec.model === undefined ? {} : { model: spec.model }),
+      }),
+    );
+}
 
 export function queryFactory(
   fake: boolean,
@@ -1042,6 +1099,7 @@ export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void>
     }),
     fold: createFold(),
     createQuery: queryFactory(args.fake, environment, cwd),
+    createInference: inferenceFactory(args.fake, environment, cwd),
     forkVendorSession: forkFactory(args.fake, environment),
     runtime: { shimBuildSha: identity.shimBuildSha, sdkVersion: identity.sdkVersion },
     env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },

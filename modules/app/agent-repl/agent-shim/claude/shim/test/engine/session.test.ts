@@ -21,8 +21,10 @@ import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
 import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
-import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
+import { createEngine, type InferenceSpec, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { contextCutUpsertKey } from "../../src/store/keys.js";
+import { compactionPrompt } from "../../src/engine/compaction.js";
+import { SUMMARY_PART_CHARS } from "../../src/engine/conversation-text.js";
 import { agentIdPath } from "../../src/engine/identity.js";
 import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
 import { textSaid } from "../../src/engine/turn.js";
@@ -54,7 +56,7 @@ import { VENDOR_ERROR_RETRY_INTERVAL_MS } from "../../src/engine/vendor-error-re
 import { isVendorErrorRetryPrompt } from "../../src/engine/vendor-error-retry-prompt.js";
 import { rollBackSessionRequestFor } from "../service/requests.js";
 import type { ForkVendorSession } from "../../src/engine/fork-session.js";
-import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ownedBy, ownedBySession, ScriptedQuery, emitSummary, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ownedBy, ownedBySession, ScriptedQuery, emitSummary, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedInference, unexpectedVendorFork } from "./fakes.js";
 import { projectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
 import { FakeSkillWatchFs } from "./skill-watch-fake.js";
 import type { SkillWatchFs } from "../../src/engine/skill-watch.js";
@@ -71,6 +73,8 @@ interface Harness {
   /** The reachability probe the network-resume loop asks. */
   readonly probe: ScriptedProbe;
   readonly queries: { spec: QuerySpec; query: ScriptedQuery }[];
+  /** Every headless inference call the summarizer made, in order. */
+  readonly inferences: { spec: InferenceSpec; query: ScriptedQuery }[];
   readonly stateDir: string;
   readonly configDir: string;
   readonly cwd: string;
@@ -123,6 +127,8 @@ function assistantLine(overrides: Record<string, unknown> = {}): Record<string, 
     sessionId: "resume-1",
     message: {
       model: "claude-opus-5",
+      // SAID SOMETHING, so the headless summarizer has a conversation to read.
+      content: [{ type: "text", text: "The parser fix is in." }],
       usage: {
         input_tokens: 0,
         cache_creation_input_tokens: 0,
@@ -245,6 +251,12 @@ function harness(
     drainSends?: SdkUserMessage[];
     /** Reach each scripted query the moment it is created, before it is returned. */
     onQueryCreated?: (query: ScriptedQuery, spec: QuerySpec, index: number) => void;
+    /** Reach each headless inference call the moment it is created, before it is returned. */
+    onInferenceCreated?: (query: ScriptedQuery, spec: InferenceSpec, index: number) => void;
+    /** Refuse to create any headless inference call after this many have been created. */
+    createInferenceFailsFrom?: number;
+    /** Reject EVERY `createInference` with this exact value, Error or not. */
+    createInferenceRejection?: unknown;
     /**
      * Build the engine with a DIFFERENT module graph's `createEngine`.
      *
@@ -279,6 +291,7 @@ function harness(
   const retryScheduler = new ManualScheduler();
   const probe = new ScriptedProbe();
   const queries: { spec: QuerySpec; query: ScriptedQuery }[] = [];
+  const inferences: { spec: InferenceSpec; query: ScriptedQuery }[] = [];
   const locks: string[] = [];
   const released: string[] = [];
   const workspaceLocks: string[] = [];
@@ -290,6 +303,17 @@ function harness(
     persistence,
     fold,
     forkVendorSession: options.forkVendorSession ?? unexpectedVendorFork,
+    createInference: (spec) => {
+      if (options.createInferenceRejection !== undefined) return Promise.reject(options.createInferenceRejection);
+      if (options.createInferenceFailsFrom !== undefined && inferences.length >= options.createInferenceFailsFrom) {
+        return Promise.reject(new Error("the vendor refused another inference call"));
+      }
+      const query = new ScriptedQuery();
+      const index = inferences.length;
+      inferences.push({ spec, query });
+      options.onInferenceCreated?.(query, spec, index);
+      return Promise.resolve(query);
+    },
     createQuery: (spec) => {
       if (options.createQueryRejection !== undefined) return Promise.reject(options.createQueryRejection);
       if (options.createQueryFailsFrom !== undefined && queries.length >= options.createQueryFailsFrom) {
@@ -393,6 +417,7 @@ function harness(
     retryScheduler,
     probe,
     queries,
+    inferences,
     stateDir,
     configDir,
     cwd,
@@ -401,6 +426,34 @@ function harness(
     released,
     exits,
     minted,
+  };
+}
+
+/**
+ * A headless summarizer that READS each call's prompt before it answers, so a
+ * test can assert what the summarizer was asked: every prompt lands in
+ * PROMPTS, in order, and each call answers ANSWER(its index) as its summary
+ * (with an init naming its model first, as the vendor opens every query).
+ * Answering only after the prompt arrived orders the record before the
+ * summary, so nothing waits on time.
+ */
+function readingSummarizer(
+  prompts: string[],
+  answer: (index: number) => string = () => "done",
+): (query: ScriptedQuery, spec: InferenceSpec, index: number) => void {
+  return (query, spec, index) => {
+    void (async (): Promise<void> => {
+      for await (const message of spec.prompt) {
+        const content = message.message.content;
+        prompts.push(typeof content === "string" ? content : JSON.stringify(content));
+        query.emit(initMessage());
+        query.emit({
+          ...(resultMessage(`00000000-0000-4000-8000-${String(900 + index).padStart(12, "0")}`) as unknown as Record<string, unknown>),
+          result: answer(index),
+        } as never);
+        return;
+      }
+    })();
   };
 }
 
@@ -941,6 +994,7 @@ describe("StartSession, fresh", () => {
       persistence: h.persistence,
       fold: h.fold,
       forkVendorSession: unexpectedVendorFork,
+      createInference: unexpectedInference,
       createQuery: () => Promise.reject(new Error("the mocked vendor is not implemented")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -961,6 +1015,7 @@ describe("StartSession, fresh", () => {
       persistence: h.persistence,
       fold: h.fold,
       forkVendorSession: unexpectedVendorFork,
+      createInference: unexpectedInference,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -997,6 +1052,7 @@ describe("StartSession, fresh", () => {
       persistence: h.persistence,
       fold: h.fold,
       forkVendorSession: unexpectedVendorFork,
+      createInference: unexpectedInference,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -1024,6 +1080,7 @@ describe("StartSession, fresh", () => {
       persistence: h.persistence,
       fold: h.fold,
       forkVendorSession: unexpectedVendorFork,
+      createInference: unexpectedInference,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -1062,6 +1119,7 @@ describe("StartSession, fresh", () => {
       persistence: h.persistence,
       fold: h.fold,
       forkVendorSession: unexpectedVendorFork,
+      createInference: unexpectedInference,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -1087,6 +1145,7 @@ describe("StartSession, fresh", () => {
       persistence: h.persistence,
       fold: h.fold,
       forkVendorSession: unexpectedVendorFork,
+      createInference: unexpectedInference,
       createQuery: (spec) => {
         starts += 1;
         if (starts === 1) return Promise.reject(new Error("the vendor was not startable yet"));
@@ -10673,13 +10732,13 @@ describe("the cold gate's COMPACT remediation", () => {
     // cannot be keyed yet — it waits rather than vanishing.
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777");
       },
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
     const pending = startCompacted(h, resumeRequest("resume-1", compactRemediation()));
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
     expect(contextCuts(h).map((cut) => cut.cut.case)).toEqual(["compacted"]);
@@ -10691,13 +10750,13 @@ describe("the cold gate's COMPACT remediation", () => {
     // second entry, and the feed drew the compaction twice (2026-11-11).
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777");
       },
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
     const pending = startCompacted(h, resumeRequest("resume-1", compactRemediation()));
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
     const boundary = readFileSync(path.join(projectDir(h.configDir, h.cwd), "resume-1.jsonl"), "utf8")
@@ -10712,7 +10771,7 @@ describe("the cold gate's COMPACT remediation", () => {
   it("refuses vendor_start_failed when the summarizing session ends in a failure subtype", async () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) {
           query.emit({
             ...(resultMessage("88888888-8888-4888-8888-888888888888") as unknown as Record<string, unknown>),
@@ -10733,7 +10792,7 @@ describe("the cold gate's COMPACT remediation", () => {
   it("refuses when the summarizing session produced no summary", async () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) {
           query.emit({
             ...(resultMessage("99999999-9999-4999-8999-999999999999") as unknown as Record<string, unknown>),
@@ -10752,14 +10811,14 @@ describe("the cold gate's COMPACT remediation", () => {
   });
 
   it("refuses with the vendor's own words when the throwaway query cannot be created", async () => {
-    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000, createQueryFailsFrom: 0 });
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000, createInferenceFailsFrom: 0 });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
     const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
-    ).toBe("the vendor refused another query");
+    ).toBe("the vendor refused another inference call");
   });
 
   describe("labels the refusal by the compaction's own cause", () => {
@@ -10769,7 +10828,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
         },
       });
@@ -10786,7 +10845,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index !== 0) return;
           query.emit({
             ...(errorResultMessage({ errors: ["Overloaded"] }) as unknown as Record<string, unknown>),
@@ -10817,7 +10876,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.emit(erroredSuccess("API Error: 400 prompt is too long"));
         },
       });
@@ -10836,7 +10895,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.emit(erroredSuccess("API Error: Connection error."));
         },
       });
@@ -10859,7 +10918,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.emit(erroredSuccess(words, status));
         },
       });
@@ -10876,7 +10935,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.emit(erroredSuccess("Failed to authenticate: OAuth session expired and could not be refreshed"));
         },
       });
@@ -10893,7 +10952,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index !== 0) return;
           query.emit({
             ...(resultMessage("99999999-9999-4999-8999-999999999991") as unknown as Record<string, unknown>),
@@ -10914,7 +10973,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index !== 0) return;
           query.emit({
             ...(resultMessage("99999999-9999-4999-8999-999999999990") as unknown as Record<string, unknown>),
@@ -10935,7 +10994,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.end();
         },
       });
@@ -10952,7 +11011,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.fail(new Error("Claude Code process exited with code 1"));
         },
       });
@@ -10967,7 +11026,7 @@ describe("the cold gate's COMPACT remediation", () => {
 
     it("labels a throwaway query that could not be created rejected", async () => {
       // Arrange.
-      const h = harness({ nowMs: COLD_NOW, createQueryFailsFrom: 0 });
+      const h = harness({ nowMs: COLD_NOW, createInferenceFailsFrom: 0 });
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
@@ -10981,7 +11040,7 @@ describe("the cold gate's COMPACT remediation", () => {
       // Arrange.
       const h = harness({
         nowMs: COLD_NOW,
-        onQueryCreated: (query, _spec, index) => {
+        onInferenceCreated: (query, _spec, index) => {
           if (index === 0) query.end();
         },
       });
@@ -11031,9 +11090,9 @@ describe("the cold gate's COMPACT remediation", () => {
   /**
    * A cold resume, driven to its own answer.
    *
-   * `queryIndex` is which created query is the REAL session's: a `compact`
-   * answer spends query 0 on the throwaway summarizer, a `pay` answer spends
-   * none, so the session's own query is the next one either way.
+   * `queryIndex` is which created query is the REAL session's: the `compact`
+   * answer's summarizer is a headless inference call and no query at all, so
+   * the session's own query is the first either way.
    */
   async function coldResume(
     h: Harness,
@@ -11050,28 +11109,28 @@ describe("the cold gate's COMPACT remediation", () => {
 
   /** The same, for the `compact` answer this suite is about. */
   const compactedResume = (h: Harness): Promise<shimv1.StartSessionResponse> =>
-    coldResume(h, compactRemediation(), 1);
+    coldResume(h, compactRemediation(), 0);
 
   /** A harness whose throwaway summarizing query answers with a summary. */
   const summarizing = (timeline?: string[]): Harness =>
     harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index !== 0) return;
         timeline?.push("summarizing-query");
         emitSummary(query, "77777777-7777-4777-8777-777777777777");
       },
     });
 
-  it("hands the summarizing query and the session's own query the workspace's name", async () => {
+  it("hands the session's own query the workspace's name", async () => {
     // Arrange
     const h = summarizing();
 
     // Act
     await compactedResume(h);
 
-    // Assert: both queries are handed the one system prompt.
-    expect(h.queries.map((q) => q.spec.workspaceName)).toEqual(["parser-fix", "parser-fix"]);
+    // Assert: the summarizer is no query of the session's, so the session's is the one.
+    expect(h.queries.map((q) => q.spec.workspaceName)).toEqual(["parser-fix"]);
   });
 
   it("pushes SUMMARIZING before the summarizing query is created", async () => {
@@ -11132,7 +11191,7 @@ describe("the cold gate's COMPACT remediation", () => {
   const spending = (model: string, usage: Parameters<typeof resultMessage>[1]): Harness =>
     harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777", { model, usage });
       },
     });
@@ -11244,7 +11303,7 @@ describe("the cold gate's COMPACT remediation", () => {
     // none before it cannot say which model wrote it.
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
       },
     });
@@ -11270,7 +11329,7 @@ describe("the cold gate's COMPACT remediation", () => {
     // Arrange
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index !== 0) return;
         query.emit(initMessage({ model: "claude-sonnet-5" }));
         query.emit({
@@ -11294,7 +11353,7 @@ describe("the cold gate's COMPACT remediation", () => {
     const timeline: string[] = [];
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index !== 0) return;
         query.emit({
           ...(resultMessage("88888888-8888-4888-8888-888888888888") as unknown as Record<string, unknown>),
@@ -11374,7 +11433,7 @@ describe("SummarizeConversation's carry: a summary of another conversation", () 
   /** A harness whose first query, the summarizer, answers with `done`. */
   function summarizing(): Harness {
     const h = harness({
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777771");
       },
     });
@@ -11395,7 +11454,7 @@ describe("SummarizeConversation's carry: a summary of another conversation", () 
     expect(use?.case === "carried" ? use.value.text : "not carried").toBe("done");
   });
 
-  it("summarizes the named conversation on an ephemeral fork, which writes nothing", async () => {
+  it("summarizes the named conversation on a headless call that names no session", async () => {
     // Arrange
     const h = summarizing();
 
@@ -11403,7 +11462,49 @@ describe("SummarizeConversation's carry: a summary of another conversation", () 
     await h.engine.summarizeConversation(carryRequest());
 
     // Assert
-    expect(h.queries[0]?.spec.binding).toEqual({ kind: "ephemeral_fork", parentSessionId: "main-1" });
+    expect(Object.keys(h.inferences[0]?.spec ?? {}).sort()).toEqual(["abortController", "model", "prompt"]);
+  });
+
+  it("reads the named conversation's transcript into the summarizer's prompt", async () => {
+    // Arrange
+    const prompts: string[] = [];
+    const h = harness({ onInferenceCreated: readingSummarizer(prompts) });
+    writeTranscript(h.configDir, h.cwd, "main-1", [assistantLine({ message: { content: [{ type: "text", text: "main-1 said this" }] } })]);
+
+    // Act
+    await h.engine.summarizeConversation(carryRequest());
+
+    // Assert
+    expect(prompts[0]).toContain("Assistant:\nmain-1 said this");
+  });
+
+  it("refuses summarizer_failed rejected for a carried conversation with no transcript", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await h.engine.summarizeConversation(carryRequest());
+
+    // Assert
+    expect([retryLabel(response), response.result.case === "failure" ? response.result.value.detail : ""]).toEqual([
+      "rejected",
+      'no transcript exists for vendor session "main-1" in this workspace',
+    ]);
+  });
+
+  it("logs the carried summary's failure with its cause", async () => {
+    // Arrange
+    const h = harness();
+    const before = logSinkMark();
+
+    // Act
+    await h.engine.summarizeConversation(carryRequest());
+
+    // Assert
+    expect({
+      level: logLevelFor(before, "the summary this resume carries did not complete"),
+      cause: logContextFor(before, "the summary this resume carries did not complete")?.["cause"],
+    }).toEqual({ level: "error", cause: 'no transcript exists for vendor session "main-1" in this workspace' });
   });
 
   it("asks the summarizer on the carried model", async () => {
@@ -11414,18 +11515,7 @@ describe("SummarizeConversation's carry: a summary of another conversation", () 
     await h.engine.summarizeConversation(carryRequest());
 
     // Assert
-    expect(h.queries[0]?.spec.model).toBe("claude-haiku-4-5");
-  });
-
-  it("hands the summarizer the request's workspace name before any start named one", async () => {
-    // Arrange
-    const h = summarizing();
-
-    // Act
-    await h.engine.summarizeConversation(carryRequest());
-
-    // Assert
-    expect(h.queries[0]?.spec.workspaceName).toBe("parser-fix");
+    expect(h.inferences[0]?.spec.model).toBe("claude-haiku-4-5");
   });
 
   it("leaves the summarized conversation's transcript as it was", async () => {
@@ -11444,7 +11534,7 @@ describe("SummarizeConversation's carry: a summary of another conversation", () 
   it("refuses summarizer_failed when the summary does not complete", async () => {
     // Arrange
     const h = harness({
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
       },
     });
@@ -11460,7 +11550,7 @@ describe("SummarizeConversation's carry: a summary of another conversation", () 
   it("opens no session when the summary does not complete", async () => {
     // Arrange
     const h = harness({
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
       },
     });
@@ -11470,7 +11560,7 @@ describe("SummarizeConversation's carry: a summary of another conversation", () 
     await h.engine.summarizeConversation(carryRequest());
 
     // Assert
-    expect(h.queries).toHaveLength(1);
+    expect(h.queries).toHaveLength(0);
   });
 });
 
@@ -11478,7 +11568,7 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
   /** A harness whose first query, the summarizer, answers with a summary. */
   function summarizing(): Harness {
     const h = harness({
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777772");
       },
     });
@@ -11517,8 +11607,295 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
     // Act
     await h.engine.summarizeConversation(compactRequest("resume-1"));
 
-    // Assert: the summarizer is the one query.
-    expect(h.queries).toHaveLength(1);
+    // Assert: the summarizer is a headless call, and no query at all.
+    expect(h.queries).toHaveLength(0);
+  });
+
+  /** Every record of the transcript of VENDOR_SESSION_ID, in file order. */
+  const transcriptRecords = (h: Harness, vendorSessionId = "resume-1"): Record<string, unknown>[] =>
+    readFileSync(transcriptPath(h.configDir, h.cwd, vendorSessionId), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+  /** The summary record the compaction appended, as the transcript holds it. */
+  const summaryRecord = (h: Harness): Record<string, unknown> | undefined =>
+    transcriptRecords(h).find((record) => record["isCompactSummary"] === true);
+
+  /** A user prompt record under PARENT, run under MODE. */
+  const promptRecord = (uuid: string, parent: string | null, text: string, mode: string): Record<string, unknown> => ({
+    type: "user",
+    uuid,
+    parentUuid: parent,
+    permissionMode: mode,
+    message: { role: "user", content: text },
+  });
+
+  it("builds the summarizer from a spec that names no session of the workspace's", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert: no binding, no profile, no workspace name -- nothing to resume or write.
+    expect(Object.keys(h.inferences[0]?.spec ?? {}).sort()).toEqual(["abortController", "prompt"]);
+  });
+
+  it("appends the compaction's two records to the transcript and nothing else", async () => {
+    // Arrange
+    const h = summarizing();
+    const before = transcriptRecords(h);
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    const after = transcriptRecords(h);
+    expect([after.slice(0, before.length), after.slice(before.length).map((record) => record["subtype"] ?? record["type"])]).toEqual([
+      before,
+      ["compact_boundary", "user"],
+    ]);
+  });
+
+  it("renders the conversation into the summarizer's prompt, ahead of the compaction's instruction", async () => {
+    // Arrange
+    const prompts: string[] = [];
+    const h = harness({ onInferenceCreated: readingSummarizer(prompts) });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    expect(prompts).toEqual([
+      "The conversation to summarize:\n\n<conversation>\nAssistant:\nThe parser fix is in.\n</conversation>\n\n" +
+        compactionPrompt(conversationv1.SessionCompactScope.ALL),
+    ]);
+  });
+
+  it("states the session's own mode on the summary record", async () => {
+    // Arrange
+    const h = summarizing();
+    writeTranscript(h.configDir, h.cwd, "resume-1", [promptRecord("p1", null, "fix the parser", "acceptEdits"), assistantLine({ parentUuid: "p1" })]);
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    expect(summaryRecord(h)?.["permissionMode"]).toBe("acceptEdits");
+  });
+
+  it("states the live chain's mode on the summary record, never a rolled-back turn's", async () => {
+    // Arrange: turn-2 ran under bypassPermissions and was rolled back.
+    const h = summarizing();
+    writeTranscript(h.configDir, h.cwd, "resume-1", [
+      promptRecord(promptVendorUuid("turn-1"), null, "fix the parser", "acceptEdits"),
+      assistantLine({ uuid: "a1", parentUuid: promptVendorUuid("turn-1") }),
+      promptRecord(promptVendorUuid("turn-2"), "a1", "delete everything", "bypassPermissions"),
+      assistantLine({ uuid: "a2", parentUuid: promptVendorUuid("turn-2") }),
+    ]);
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1", { rolledBackTurns: ["turn-2"] }));
+
+    // Assert
+    expect(summaryRecord(h)?.["permissionMode"]).toBe("acceptEdits");
+  });
+
+  it("states the shim's default mode on the summary record when no record names one", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    expect(summaryRecord(h)?.["permissionMode"]).toBe("auto");
+  });
+
+  it("leaves the transcript, and so its mode, untouched when the summary is cut short", async () => {
+    // Arrange: the 2026-11-15 failure -- the summarizer's call ended before
+    // its answer. It once left `plan` as the transcript's last mode.
+    const h = harness({
+      onInferenceCreated: (query, _spec, index) => {
+        if (index === 0) query.end();
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [promptRecord("p1", null, "fix the parser", "acceptEdits"), assistantLine({ parentUuid: "p1" })]);
+    const before = readFileSync(transcriptPath(h.configDir, h.cwd, "resume-1"), "utf8");
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    expect(readFileSync(transcriptPath(h.configDir, h.cwd, "resume-1"), "utf8")).toBe(before);
+  });
+
+  it("refuses summarizer_failed rejected for a conversation that says nothing", async () => {
+    // Arrange: a transcript of usage alone, which renders no text.
+    const h = summarizing();
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine({ message: { model: "claude-opus-5" } })]);
+
+    // Act
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    expect([retryLabel(response), response.result.case === "failure" ? response.result.value.detail : "", h.inferences.length]).toEqual([
+      "rejected",
+      "the conversation holds nothing to summarize",
+      0,
+    ]);
+  });
+
+  it("refuses summarizer_failed rejected for a live chain that cannot be read", async () => {
+    // Arrange: a rolled-back prompt that opens the conversation has nothing before it.
+    const h = summarizing();
+    writeTranscript(h.configDir, h.cwd, "resume-1", [
+      promptRecord(promptVendorUuid("turn-0"), null, "fix the parser", "default"),
+      assistantLine({ uuid: "a0", parentUuid: promptVendorUuid("turn-0") }),
+    ]);
+
+    // Act
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1", { rolledBackTurns: ["turn-0"] }));
+
+    // Assert
+    expect([retryLabel(response), response.result.case === "failure" ? response.result.value.detail : ""]).toEqual([
+      "rejected",
+      `the transcript to summarize could not be read: rolled-back prompt ${promptVendorUuid("turn-0")} opens the conversation; nothing precedes it to resume at`,
+    ]);
+  });
+
+  it("logs a conversation that says nothing on the refusal's own line", async () => {
+    // Arrange
+    const h = summarizing();
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine({ message: { model: "claude-opus-5" } })]);
+    const before = logSinkMark();
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    expect(logContextFor(before, "refused SummarizeConversation: the summarizer did not complete")).toMatchObject({
+      vendor_session_id: "resume-1",
+      retry: "rejected",
+      cause: "the conversation holds nothing to summarize",
+    });
+  });
+
+  describe("a conversation larger than one call reads", () => {
+    /** Two prompts that together exceed one part, so the conversation is read in two. */
+    const overWindow = (h: Harness): void => {
+      const half = "x".repeat(SUMMARY_PART_CHARS / 2 + 1);
+      writeTranscript(h.configDir, h.cwd, "resume-1", [
+        promptRecord("p1", null, `first ${half}`, "default"),
+        assistantLine({ uuid: "a1", parentUuid: "p1" }),
+        promptRecord("p2", "a1", `second ${half}`, "default"),
+        assistantLine({ uuid: "a2", parentUuid: "p2" }),
+      ]);
+    };
+
+    it("summarizes the conversation in parts, oldest first", async () => {
+      // Arrange
+      const prompts: string[] = [];
+      const h = harness({ onInferenceCreated: readingSummarizer(prompts, (index) => `summary-${index}`) });
+      overWindow(h);
+
+      // Act
+      await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+      // Assert
+      expect(prompts.map((prompt) => [prompt.includes("User:\nfirst "), prompt.includes("User:\nsecond ")])).toEqual([
+        [true, false],
+        [false, true],
+      ]);
+    });
+
+    it("carries the summary so far into the next part", async () => {
+      // Arrange
+      const prompts: string[] = [];
+      const h = harness({ onInferenceCreated: readingSummarizer(prompts, (index) => `summary-${index}`) });
+      overWindow(h);
+
+      // Act
+      await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+      // Assert
+      expect(prompts[1]).toContain("<summary_so_far>\nsummary-0\n</summary_so_far>");
+    });
+
+    it("appends the last part's summary as the compaction's", async () => {
+      // Arrange
+      const prompts: string[] = [];
+      const h = harness({ onInferenceCreated: readingSummarizer(prompts, (index) => `summary-${index}`) });
+      overWindow(h);
+
+      // Act
+      await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+      // Assert
+      expect((summaryRecord(h)?.["message"] as { content?: string } | undefined)?.content?.endsWith("summary-1")).toBe(true);
+    });
+
+    it("states every part's spend as the summarizer's", async () => {
+      // Arrange: each part spends 1 input and 2 output tokens.
+      const prompts: string[] = [];
+      const h = harness({ onInferenceCreated: readingSummarizer(prompts) });
+      overWindow(h);
+      const before = logSinkMark();
+
+      // Act
+      await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+      // Assert
+      expect(
+        logContextFor(before, "the cold gate's summary came back and the compaction boundary was appended to the transcript")?.[
+          "summarizer_tokens"
+        ],
+      ).toBe(6);
+    });
+
+    it("names the failed part in the refusal", async () => {
+      // Arrange
+      const prompts: string[] = [];
+      const reading = readingSummarizer(prompts);
+      const h = harness({
+        onInferenceCreated: (query, spec, index) => {
+          if (index === 1) query.end();
+          else reading(query, spec, index);
+        },
+      });
+      overWindow(h);
+
+      // Act
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+      // Assert
+      expect([retryLabel(response), response.result.case === "failure" ? response.result.value.detail : ""]).toEqual([
+        "retryable",
+        "part 2 of 2: the summarizing session produced no summary",
+      ]);
+    });
+
+    it("writes nothing to the transcript when a part fails", async () => {
+      // Arrange
+      const prompts: string[] = [];
+      const reading = readingSummarizer(prompts);
+      const h = harness({
+        onInferenceCreated: (query, spec, index) => {
+          if (index === 1) query.end();
+          else reading(query, spec, index);
+        },
+      });
+      overWindow(h);
+      const before = readFileSync(transcriptPath(h.configDir, h.cwd, "resume-1"), "utf8");
+
+      // Act
+      await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+      // Assert
+      expect(readFileSync(transcriptPath(h.configDir, h.cwd, "resume-1"), "utf8")).toBe(before);
+    });
   });
 
   it("refuses unknown_session for a conversation with no transcript", async () => {
@@ -11540,7 +11917,7 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
     await h.engine.summarizeConversation(compactRequest("never-written"));
 
     // Assert
-    expect(h.queries).toHaveLength(0);
+    expect(h.inferences).toHaveLength(0);
   });
 
   it("refuses already_started once the shim's session has started", async () => {
@@ -11560,7 +11937,7 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
   it("labels a summarizer the network failed retryable on the network", async () => {
     // Arrange
     const h = harness({
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) query.fail(new Error("getaddrinfo ENOTFOUND api.anthropic.com"));
       },
     });
@@ -11583,7 +11960,7 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
     await h.engine.summarizeConversation(compactRequest("resume-1", { model: "claude-haiku-5-5" }));
 
     // Assert
-    expect(logContextFor(before, "the cold gate is summarizing the conversation on a throwaway query")?.["requested_model"]).toBe(
+    expect(logContextFor(before, "the cold gate is summarizing the conversation on a headless inference call")?.["requested_model"]).toBe(
       "claude-haiku-5-5",
     );
   });
@@ -11596,7 +11973,7 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
     await h.engine.summarizeConversation(compactRequest("resume-1", { model: "claude-haiku-5-5" }));
 
     // Assert
-    expect(h.queries[0]?.spec.model).toBe("claude-haiku-5-5");
+    expect(h.inferences[0]?.spec.model).toBe("claude-haiku-5-5");
   });
 
   it("fails a start naming compact that no compaction on this shim preceded", async () => {
@@ -11646,11 +12023,11 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
 
     // Act
     const pending = h.engine.startSession(resumeRequest("resume-1", compact()));
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
     // Assert
-    expect(h.queries).toHaveLength(2);
+    expect([h.queries.length, h.inferences.length]).toEqual([1, 1]);
   });
 
   it("compacts a WARM context the start then resumes", async () => {
@@ -11661,7 +12038,7 @@ describe("SummarizeConversation's compact, and the start that follows it", () =>
 
     // Act
     const pending = startCompacted(h, resumeRequest("resume-1", compact()));
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
     // Assert
@@ -12327,7 +12704,7 @@ describe("compaction when no model is in effect", () => {
   it("passes NO model to the throwaway query, leaving the SDK's own default", async () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
       },
     });
@@ -12336,6 +12713,7 @@ describe("compaction when no model is in effect", () => {
     writeTranscript(h.configDir, h.cwd, "resume-1", [
       assistantLine({
         message: {
+          content: [{ type: "text", text: "The parser fix is in." }],
           usage: {
             input_tokens: 0,
             cache_creation_input_tokens: 0,
@@ -12354,10 +12732,10 @@ describe("compaction when no model is in effect", () => {
       },
     });
     const pending = startCompacted(h, resumeRequest("resume-1", remediation));
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
-    expect(h.queries[0]?.spec.model).toBeUndefined();
+    expect(h.inferences[0]?.spec.model).toBeUndefined();
   });
 });
 
@@ -12750,7 +13128,7 @@ describe("a vendor failure that is not an Error", () => {
   it("carries a bare-string throwaway-query rejection into the summary's refusal", async () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      createQueryRejection: "the vendor binary is not on this box",
+      createInferenceRejection: "the vendor binary is not on this box",
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
@@ -13518,7 +13896,7 @@ describe("the cold gate's compact remediation, in detail", () => {
   it("summarizes on the model the remediation named", async () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
       },
     });
@@ -13534,16 +13912,16 @@ describe("the cold gate's compact remediation, in detail", () => {
         },
       }),
     );
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
-    expect(h.queries[0]?.spec.model).toBe("claude-haiku-4-5");
+    expect(h.inferences[0]?.spec.model).toBe("claude-haiku-4-5");
   });
 
   it("ignores everything the summarizing session says before its result", async () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
+      onInferenceCreated: (query, _spec, index) => {
         if (index !== 0) return;
         query.emit(initMessage());
         query.emit(assistantMessage("00000000-0000-4000-8000-000000000110"));
@@ -13561,7 +13939,7 @@ describe("the cold gate's compact remediation, in detail", () => {
         },
       }),
     );
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
 
     expect((await pending).result.case).toBe("success");
   });
@@ -16565,12 +16943,8 @@ describe("RollBackSession", () => {
 
     it("summarizes a cold resume's compaction from the cut", async () => {
       // Arrange
-      const h = harness({
-        nowMs: 1_000_000 + 10 * 60 * 1000,
-        onQueryCreated: (query, _spec, index) => {
-          if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777");
-        },
-      });
+      const prompts: string[] = [];
+      const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000, onInferenceCreated: readingSummarizer(prompts) });
       writeTranscript(h.configDir, h.cwd, "resume-1", [
         ...threeTurns().slice(0, 5),
         assistantLine({ uuid: "a2", parentUuid: promptVendorUuid("turn-2") }),
@@ -16584,11 +16958,11 @@ describe("RollBackSession", () => {
 
       // Act
       const pending = startCompacted(h, resumeRequest("resume-1", compact, { rolledBackTurns: ["turn-2"] }));
-      (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+      (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
       await pending;
 
-      // Assert
-      expect(h.queries[0]?.spec.resumeSessionAt).toBe("a1");
+      // Assert: turn-2's prompt is past the cut, so it is not what the summarizer read.
+      expect([prompts[0]?.includes("prompt of turn-1"), prompts[0]?.includes("prompt of turn-2")]).toEqual([true, false]);
     });
   });
 });
