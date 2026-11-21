@@ -371,6 +371,49 @@ if [ -n "$QUERY" ]; then
         rm -rf "$STUB_DIR"
     fi
 
+    # --- 2c''. on macOS no clamp reaches a test process from outside --------
+    # Case 2c' proves the helper sets no clamp; this proves none reaches the
+    # process from anywhere else, such as the launchd service that runs the
+    # merge gate (owner ruling 2026-11-13): a test process runs above
+    # utility's 20 (a process at nice alone runs at 31, measured 2026-11-13).
+    #
+    # What is read is each thread's BASE priority and the ceiling its QoS
+    # clamp sets (libproc's PROC_PIDTHREADINFO pth_priority and
+    # pth_maxpriority), never `ps -o pri`: that is the scheduler's current
+    # priority, which decays with CPU use, so a 20 there cannot tell a clamp
+    # from a busy process. Neither of these moves with load; a utility clamp
+    # pins both at 20 (measured 2026-11-17: `taskpolicy -c utility` reads
+    # base 20, max 20; `nice -n 19` alone reads base 31, max 63; the merge
+    # gate's launchd test service, then ProcessType Standard, read 20, 20).
+    if [ "$HOST_OS" = Darwin ]; then
+        out="$(python3 - "$$" 2>&1 <<'PY'
+import ctypes, struct, sys
+libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+pid = int(sys.argv[1])
+handles = ctypes.create_string_buffer(8 * 256)
+n = libproc.proc_pidinfo(pid, 6, ctypes.c_uint64(0), handles, len(handles))  # PROC_PIDLISTTHREADS
+if n <= 0:
+    sys.exit("PROC_PIDLISTTHREADS on pid %d returned %d" % (pid, n))
+for i in range(n // 8):
+    handle = struct.unpack_from("<Q", handles.raw, i * 8)[0]
+    info = ctypes.create_string_buffer(512)
+    m = libproc.proc_pidinfo(pid, 5, ctypes.c_uint64(handle), info, len(info))  # PROC_PIDTHREADINFO
+    if m <= 0:
+        sys.exit("PROC_PIDTHREADINFO on pid %d thread %d returned %d" % (pid, handle, m))
+    # proc_threadinfo: two uint64 times, then int32 cpu_usage, policy,
+    # run_state, flags, sleep_time, curpri, priority, maxpriority.
+    fields = struct.unpack_from("<2Q8i", info.raw)
+    print("%d %d" % (fields[8], fields[9]))
+PY
+)" || true
+        # Every line is one thread's "base max", and every value is above 20.
+        if printf '%s\n' "$out" | awk '!/^[0-9]+ [0-9]+$/ || $1 <= 20 || $2 <= 20 { bad = 1 } END { exit bad || NR == 0 }'; then
+            pass "Darwin (real): no clamp reaches a test process from outside, every thread's base and max priority above utility's 20"
+        else
+            fail "Darwin (real): no clamp reaches a test process from outside, every thread's base and max priority above utility's 20" "base/max priority per thread: $out"
+        fi
+    fi
+
     # --- 2d. the wrap EXECs: the caller's pid is the command's ----------------
     out="$(env -u AGENT_REPL_BACKGROUND_PRIORITY \
         bash -c 'echo "$$"; exec bash "$0" bash -c "echo \$\$"' "$HELPER" 2>&1)" || true
