@@ -181,6 +181,9 @@ calls it itself.")
 (defvar agent-repl-test-host--live nil
   "What the stubbed `agent-repl-link-live' answers: the live daemon, or nil.")
 
+(defvar agent-repl-test-host--promotions 0
+  "What the stubbed `agent-repl-link-promotions' answers: the promotion epoch.")
+
 (defvar agent-repl-test-host--ending nil
   "The connection the stubbed `agent-repl-link-ending-p' answers as ending, or nil.")
 
@@ -271,6 +274,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--live nil)
          (agent-repl-test-host--link-up t)
          (agent-repl-test-host--ending nil)
+         (agent-repl-test-host--promotions 0)
          (agent-repl-link-down-planned nil)
          (agent-repl-host--reattach-tokens 0)
          (agent-repl-link-handover-functions nil)
@@ -375,6 +379,8 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda () (or agent-repl-test-host--successor agent-repl-test-host--live)))
                ((symbol-function 'agent-repl-link-live)
                 (lambda () agent-repl-test-host--live))
+               ((symbol-function 'agent-repl-link-promotions)
+                (lambda () agent-repl-test-host--promotions))
                ((symbol-function 'agent-repl-link-ending-p)
                 (lambda (conn) (and conn (eq conn agent-repl-test-host--ending))))
                ((symbol-function 'agent-repl-link-dial-successor)
@@ -5417,6 +5423,61 @@ Registering on a daemon that is handing over would only fail."
         ;; Assert
         (should-not (agent-repl-host-adopting-p "ws-1"))))))
 
+;; Which pages an attached successor's rendezvous awaits: those of the
+;; workspaces not yet adopted onto it (2026-11-10: every page was held
+;; while any successor was attached).
+
+(ert-deftest agent-repl-test-host-handover-awaits-no-page-without-a-successor ()
+  "With no successor attached no rendezvous awaits any page."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act / Assert
+    (should-not (agent-repl-host-handover-awaits-page-p "ws-1"))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-the-page-of-a-workspace-on-the-incumbent ()
+  "A workspace still standing on the outgoing daemon has its page awaited."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:61043"))
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:58175"))
+    ;; Act / Assert
+    (should (agent-repl-host-handover-awaits-page-p "ws-1"))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-the-page-of-an-adopt-in-flight ()
+  "A workspace whose adopt onto the successor is unanswered has its page awaited."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:61043"))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-host--put "ws-1" :conn successor)
+      (cl-letf (((symbol-function 'agent-repl-host--adopt-onto) #'ignore))
+        (agent-repl-host--reattach "ws-1" successor :adopt "transferred"))
+      ;; Act / Assert
+      (should (agent-repl-host-handover-awaits-page-p "ws-1")))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-the-page-of-an-adopt-pending-acceptance ()
+  "A transfer waiting for the successor\='s acceptance has its page awaited."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-host--subscribe "ws-1" successor)
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-host--put "ws-1" :adopt-pending t)
+      ;; Act / Assert
+      (should (agent-repl-host-handover-awaits-page-p "ws-1")))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-no-page-of-an-adopted-workspace ()
+  "A workspace adopted onto the successor has had its rendezvous."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-host--subscribe "ws-1" successor)
+      (setq agent-repl-test-host--successor successor)
+      ;; Act / Assert
+      (should-not (agent-repl-host-handover-awaits-page-p "ws-1")))))
+
 (ert-deftest agent-repl-test-host-planned-end-during-an-adopt-registers-nothing ()
   "A planned end while an adopt onto the successor is in flight calls nothing."
   (agent-repl-test-host--with-harness
@@ -5691,6 +5752,108 @@ afresh."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--subscribe "ws-1")
     (should-not (agent-repl-host-standing-ask "ws-1"))))
+
+;; A re-registration onto the incumbent that FAILS after the successor was
+;; promoted: the promotion edge has already run, so the walk goes at once
+;; onto the live daemon (2026-11-06, `main (explanation-engine)' severed 20
+;; minutes, then by a `not_yet_adopted' re-registration; that refusal now
+;; adopts instead, and every walk that registers, a lost stream's here,
+;; keeps the rule).
+
+(defmacro agent-repl-test-host--with-incumbent-register-held (&rest body)
+  "Run BODY after WS ws-1\='s re-registration on the incumbent is sent, unanswered.
+The incumbent is the primary link when the refusal arrives, as it is when a
+walk begins.  Binds `live', the connection to the daemon serving Emacs after
+the walk began, which BODY makes the stubbed links answer."
+  (declare (indent 0))
+  `(agent-repl-test-host--with-harness
+     (agent-repl-test-host--with-serving-conns
+       (agent-repl-test-host--with-dir
+         (let ((live (agent-repl-connect-open "127.0.0.1:9100")))
+           (agent-repl-test-host--subscribe "ws-1")
+           (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9000"))
+           (setq agent-repl-test-host--register-answer '(:held))
+           (agent-repl-host--reattach "ws-1" agent-repl-test-host--live :register "stream-lost")
+           (setq agent-repl-test-host--register-answer
+                 (list :response (list :arm :success
+                                       :value (list :workspace (agent-repl-test-host--ref)))))
+           ,@body)))))
+
+(defun agent-repl-test-host--fail-held-register ()
+  "Fail the oldest held call in transport."
+  (let ((call (pop agent-repl-test-host--held)))
+    (funcall (cdr call) (list :kind :transport :message "connection refused"))))
+
+(ert-deftest agent-repl-test-host-register-failed-after-a-promotion-walks-onto-the-live-daemon ()
+  "A walk that failed after a promotion passed registers at once on the live daemon."
+  (agent-repl-test-host--with-incumbent-register-held
+    ;; Arrange
+    (setq agent-repl-test-host--live live
+          agent-repl-test-host--promotions 1)
+    ;; Act
+    (agent-repl-test-host--fail-held-register)
+    ;; Assert
+    (should (eq live (agent-repl-host-conn "ws-1")))))
+
+(ert-deftest agent-repl-test-host-register-failed-after-a-promotion-leaves-nothing-detached ()
+  "The walk onto the live daemon finishes, so the workspace is no longer detached."
+  (agent-repl-test-host--with-incumbent-register-held
+    ;; Arrange
+    (setq agent-repl-test-host--live live
+          agent-repl-test-host--promotions 1)
+    ;; Act
+    (agent-repl-test-host--fail-held-register)
+    ;; Assert
+    (should-not (agent-repl-host-detached-p "ws-1"))))
+
+(ert-deftest agent-repl-test-host-register-failed-after-a-promotion-is-recorded ()
+  "The immediate walk is recorded with the epochs it read."
+  (agent-repl-test-host--with-incumbent-register-held
+    ;; Arrange
+    (setq agent-repl-test-host--live live
+          agent-repl-test-host--promotions 1)
+    ;; Act
+    (agent-repl-test-host--fail-held-register)
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.reattach-after-promotion ws=ws-1 trigger=stream-lost promotions=0..1"))))
+
+(ert-deftest agent-repl-test-host-register-failed-with-no-promotion-only-arms-the-edges ()
+  "A walk that failed with no promotion since it began waits for its edges."
+  (agent-repl-test-host--with-incumbent-register-held
+    ;; Arrange
+    (setq agent-repl-test-host--live live
+          agent-repl-test-host--calls nil)
+    ;; Act
+    (agent-repl-test-host--fail-held-register)
+    ;; Assert
+    (should (null (agent-repl-test-host--calls-to "RegisterWorkspace" live)))
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.reattach-armed ws=ws-1 trigger=stream-lost edges=link-up,promotion,select"))))
+
+(ert-deftest agent-repl-test-host-register-failed-after-a-promotion-with-no-link-awaits-it ()
+  "With no live daemon after the promotion, the walk waits for the link-up edge."
+  (agent-repl-test-host--with-incumbent-register-held
+    ;; Arrange
+    (setq agent-repl-test-host--live nil
+          agent-repl-test-host--promotions 1)
+    ;; Act
+    (agent-repl-test-host--fail-held-register)
+    ;; Assert
+    (should (agent-repl-host-detached-p "ws-1"))
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.reattach-awaiting-link ws=ws-1 trigger=promotion-passed"))))
+
+(ert-deftest agent-repl-test-host-a-walk-without-a-promotion-epoch-fails-hard ()
+  "A walk recorded with no promotion epoch is an invariant breach."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((fatals nil))
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+        ;; Act
+        (should-error (agent-repl-host--promoted-since-p "ws-1" (list :token 1)))
+        ;; Assert
+        (should (string-search "elisp.host.walk-without-promotion-epoch ws=ws-1" (car fatals)))))))
 
 ;;;; ---- The batched link-edge walk, and a detached workspace's armed walk ----
 

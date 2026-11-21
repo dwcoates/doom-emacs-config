@@ -191,11 +191,75 @@ func TestCreateRefusalArmsClassifyEveryArm(t *testing.T) {
 
 	// Act.
 	classified := append(classifiedArms(true), classifiedArms(false)...)
+	for arm := range createRefusalReaders {
+		classified = append(classified, arm)
+	}
 	slices.Sort(classified)
 
 	// Assert.
 	if !slices.Equal(classified, contract) {
 		t.Fatalf("classified arms = %v\nwant every CreateWorkspaceError arm = %v", classified, contract)
+	}
+}
+
+// TestNoCreateRefusalArmIsClassifiedTwice pins that an arm classified by
+// reading its refusal is not also given a fixed classification, which
+// callerInputRefusal would otherwise silently ignore.
+func TestNoCreateRefusalArmIsClassifiedTwice(t *testing.T) {
+	// Arrange: the two maps.
+
+	// Act.
+	var both []string
+	for arm := range createRefusalReaders {
+		if _, fixed := createRefusalArms[arm]; fixed {
+			both = append(both, arm)
+		}
+	}
+
+	// Assert.
+	if len(both) != 0 {
+		t.Fatalf("arms classified both fixed and by their refusal: %v", both)
+	}
+}
+
+// TestANameBranchExistsRefusalIsReportedOnlyForALandedBranch pins the
+// name_branch_exists classification end to end: a branch cut by hand under the
+// supplied name is the caller's own input and reported to no one, while a
+// branch a landed workspace left (the sweep kept it) is reported to the main
+// worktree.
+func TestANameBranchExistsRefusalIsReportedOnlyForALandedBranch(t *testing.T) {
+	cases := []struct {
+		name       string
+		fields     map[string]any
+		wantReport bool
+	}{
+		{name: "a branch cut by hand", fields: map[string]any{"branch": "fix", "head": "abc"}},
+		{name: "a branch a landed workspace left",
+			fields:     map[string]any{"branch": "fix", "head": "abc", nameBranchLandedField: wsm.Workspace{ID: "ws-landed"}.Ref()},
+			wantReport: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := failingCreate(t, f, true)
+			v := f.verbs.(*verbs)
+
+			// Act.
+			v.reportCreateFailure(context.Background(), spec, &Refusal{Rpc: "CreateWorkspace", Arm: ArmNameBranchExists, Reason: "exists", Fields: tc.fields})
+			v.createFailureReports.Wait()
+
+			// Assert.
+			reported := len(f.queue.submissions) == 1 && f.queue.submissions[0].WS == mainWorkspaceID
+			if reported != tc.wantReport || len(f.queue.submissions) > 1 {
+				t.Fatalf("submissions = %+v, want reported %v", f.queue.submissions, tc.wantReport)
+			}
+			record, found := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: opCreateFailedReport})
+			skipped := found && strings.Contains(record.Message, "caller's own input")
+			if skipped == tc.wantReport {
+				t.Fatalf("records = %+v, want the caller's-input skip record %v", f.log.logger.Records(), !tc.wantReport)
+			}
+		})
 	}
 }
 
@@ -277,6 +341,12 @@ func TestCallerInputRefusal(t *testing.T) {
 		{name: "a no_slug refusal", err: &Refusal{Arm: ArmNoSlug}, wantArm: ArmNoSlug, want: true},
 		{name: "an unknown_owner refusal", err: &Refusal{Arm: ArmUnknownOwner}, wantArm: ArmUnknownOwner, want: true},
 		{name: "a family rule's closed parent", err: fmt.Errorf("create: %w", &wsm.ParentNotOpenError{}), wantArm: "parent_not_open", want: true},
+		{name: "a name_branch_exists refusal of a branch cut by hand",
+			err:     fmt.Errorf("create: %w", &Refusal{Arm: ArmNameBranchExists, Fields: map[string]any{"branch": "fix", "head": "abc"}}),
+			wantArm: ArmNameBranchExists, want: true},
+		{name: "a name_branch_exists refusal of a branch a landed workspace left",
+			err:  &Refusal{Arm: ArmNameBranchExists, Fields: map[string]any{"branch": "fix", "head": "abc", nameBranchLandedField: wsm.Workspace{ID: "ws-landed"}.Ref()}},
+			want: false},
 		{name: "a refusal of something the daemon holds", err: &Refusal{Arm: ArmUnknownRepository}, want: false},
 		{name: "a naming call that failed", err: &Refusal{Arm: ArmNamingFailed}, want: false},
 		{name: "an internal failure", err: errors.New("fatal: worktree add failed"), want: false},

@@ -1221,7 +1221,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE WEB CONTENT PROCESS UNDER MEMORY PRESSURE, read from the webhost's
 	// stalls: a stall on every beat of WebKit's 30-second memory-pressure poll
 	// is raised as an error (internal/stallbeat).
-	stallBeat, err := stallbeat.New(stallbeat.Deps{Log: log})
+	stallBeat, err := stallbeat.New(stallbeat.Deps{Log: log, Footprint: footprints})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the stall beat detector: %w", err)
 	}

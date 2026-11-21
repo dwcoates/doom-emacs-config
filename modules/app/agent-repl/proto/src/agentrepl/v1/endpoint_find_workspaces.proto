@@ -9,10 +9,13 @@
 // each such record carries the roster section and live status it is drawn
 // with, so one record shape serves `workspace find` and `workspace list`.
 //
-// AGENT WORKSPACES ONLY. A zettel chat thread and a merge workspace (the
-// hidden workspace an async merge runs in) are registry rows too, but neither
-// is a piece of work an agent looks for: a thread is the Chat app's, and a
-// merge workspace carries another workspace's branch. Neither is answered.
+// AGENT WORKSPACES ONLY. A zettel chat thread is a registry row too, but it
+// is the Chat app's, never a piece of work an agent looks for, so it is never
+// answered. A MERGE WORKSPACE (the hidden workspace an async merge runs in)
+// IS answered, marked as one (FoundWorkspace.merge): the agent that asked
+// for an async merge reads the merge workspace it forked, and the agent CLI
+// resolves a merge workspace's own worktree to it, though the roster draws
+// no row of it until it needs the user.
 
 syntax = "proto3";
 
@@ -185,6 +188,18 @@ message FoundWorkspace {
   // (FindWorkspacesRequest.caller), false for every other record and for every
   // record of a request naming no caller.
   bool calling = 12;
+  // SET FOR A MERGE WORKSPACE, the hidden workspace an async merge runs in to
+  // land another workspace's branch; UNSET for every other workspace.
+  optional FoundWorkspaceMerge merge = 13;
+}
+
+// What makes a found workspace a merge workspace.
+message FoundWorkspaceMerge {
+  // The workspace that asked for the async merge, whose session the merge's
+  // handback reaches. UNSET when the registry no longer holds that workspace
+  // (a merge's requester is recorded by id alone, so its row may be
+  // forgotten before the merge workspace's is).
+  optional workspace.v1.WorkspaceRef requester = 1;
 }
 
 // A found workspace as the sidebar roster draws it right now: which section

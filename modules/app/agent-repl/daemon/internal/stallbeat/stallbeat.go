@@ -32,16 +32,26 @@
 // 9,857 sidebar stalls only 259 fell within 300ms of a host stall
 // (2026-11-16). One document's stalls are never counted against another's
 // beat, so the detector keeps a window per document.
+//
+// THE ERROR NAMES WHAT THE PROCESS HOLDS (2026-11-14). Nothing recorded which
+// page kept a process under pressure. The error now names every document of
+// the beating process whose census stands (the host view's process holds the
+// host and every workspace page; the sidebar's holds the sidebar alone), each
+// one's elements, feed rows and animations, largest first, and the web
+// content processes' latest footprint, so the next occurrence names its
+// holder.
 package stallbeat
 
 import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/webfootprint"
 )
 
 const op = "daemon.webprocess.stall_beat"
@@ -68,9 +78,57 @@ const FalseAlarm = 1e-3
 // 2*Tolerance whose centers lie Tolerance apart cover every placement.
 const phases = int(Period / Tolerance)
 
+// CensusFresh is how long a document's census stands. Every page and webhost
+// document states its size each minute (webapp CENSUS_EVERY_MS), so one
+// silent for two has been unloaded.
+const CensusFresh = 2 * time.Minute
+
+// HostDocument is the webhost view whose web content process holds every
+// workspace page; the other view (the sidebar) has a process of its own.
+const HostDocument = "host"
+
+// Document is one web document in a web content process.
+type Document struct {
+	// Kind is KindPage, a workspace's page named by its workspace ID, or
+	// KindWebhost, one of Emacs's two web views named "host" or "sidebar".
+	Kind, Name string
+}
+
+// The kinds of Document.
+const (
+	KindPage    = "page"
+	KindWebhost = "webhost"
+)
+
+// Census is a document's own statement of its size (webapp page.census and
+// webhost.census). No per-page byte figure exists; a document's elements and
+// feed rows are what each can measure of itself.
+type Census struct {
+	DomNodes, FeedRows int64
+	// Animations is a page's live animations; nil for a webhost document,
+	// which does not count them.
+	Animations *int64
+	// Visibility is a page's visibility state; empty for a webhost document.
+	Visibility string
+}
+
+// stated is a census and the moment its document stated it.
+type stated struct {
+	at time.Time
+	Census
+}
+
+// Footprint answers the web content processes' latest measured footprint
+// (webfootprint.Sampler).
+type Footprint interface {
+	Latest() (webfootprint.Reading, bool)
+}
+
 // Deps are the detector's collaborators, every one required.
 type Deps struct {
 	Log dlog.Logger
+	// Footprint is the web content processes' footprint, named in the error.
+	Footprint Footprint
 }
 
 // stall is one recorded main-thread stall.
@@ -89,16 +147,20 @@ type clock struct {
 type Detector struct {
 	log dlog.Logger
 
+	footprint Footprint
+
 	mu     sync.Mutex
 	clocks map[string]*clock
+	// censuses is every document's latest census.
+	censuses map[Document]stated
 }
 
 // New builds a detector.
 func New(deps Deps) (*Detector, error) {
-	if deps.Log == nil {
-		return nil, errors.New("stallbeat: a logger is required")
+	if deps.Log == nil || deps.Footprint == nil {
+		return nil, errors.New("stallbeat: a logger and the web footprint are required")
 	}
-	return &Detector{log: deps.Log, clocks: map[string]*clock{}}, nil
+	return &Detector{log: deps.Log, footprint: deps.Footprint, clocks: map[string]*clock{}, censuses: map[Document]stated{}}, nil
 }
 
 // Observe takes one stall: the web view DOCUMENT that recorded it, the moment
@@ -123,9 +185,8 @@ func (d *Detector) Observe(document string, at time.Time, blockedMS int64) {
 		return
 	}
 	c.raised = at
-	d.log.Error(op, fmt.Sprintf(
-		"%d of the last %s's %d %s web-process stalls fell on one phase of WebKit's %s memory-pressure cycle, where chance puts at most %d: the process is under sustained memory pressure",
-		onBeat, Window, len(c.stalls), document, Period, byChance-1), dlog.Context{
+	documents := d.documentsAt(document, at)
+	ctx := dlog.Context{
 		"document":           document,
 		"stalls_on_beat":     onBeat,
 		"stalls_in_window":   len(c.stalls),
@@ -134,7 +195,85 @@ func (d *Detector) Observe(document string, at time.Time, blockedMS int64) {
 		"phase_ms":           phase.Milliseconds(),
 		"window_s":           int(Window.Seconds()),
 		"period_s":           int(Period.Seconds()),
+		"documents":          documents,
+	}
+	if reading, ok := d.footprint.Latest(); ok {
+		ctx["largest_web_content_footprint_mb"] = reading.LargestBytes >> 20
+		ctx["web_content_processes"] = reading.Processes
+		ctx["footprint_age_s"] = int64(at.Sub(reading.At).Seconds())
+	} else {
+		ctx["footprint_sampled"] = false
+	}
+	largest := "no document has stated its size"
+	if len(documents) > 0 {
+		largest = fmt.Sprintf("the largest document is %s %s at %d elements",
+			documents[0]["kind"], documents[0]["name"], documents[0]["dom_nodes"])
+	}
+	d.log.Error(op, fmt.Sprintf(
+		"%d of the last %s's %d %s web-process stalls fell on one phase of WebKit's %s memory-pressure cycle, where chance puts at most %d: the process is under sustained memory pressure; %d documents are loaded in it, %s",
+		onBeat, Window, len(c.stalls), document, Period, byChance-1, len(documents), largest), ctx)
+}
+
+// Census records DOC's latest statement of its size, stated AT.
+func (d *Detector) Census(doc Document, at time.Time, c Census) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.censuses[doc] = stated{at: at, Census: c}
+}
+
+// inProcess reports whether DOC lives in the web content process of the
+// webhost view PROCESS: the host view's process holds every workspace page.
+func inProcess(doc Document, process string) bool {
+	if doc.Kind == KindPage {
+		return process == HostDocument
+	}
+	return doc.Name == process
+}
+
+// documentsAt answers every document of PROCESS's web content process whose
+// census stands at AT, most elements first, and forgets every census, of any
+// process, that no longer stands. Caller holds mu.
+func (d *Detector) documentsAt(process string, at time.Time) []map[string]any {
+	type entry struct {
+		doc Document
+		stated
+	}
+	var standing []entry
+	for doc, c := range d.censuses {
+		if at.Sub(c.at) >= CensusFresh {
+			delete(d.censuses, doc)
+			continue
+		}
+		if inProcess(doc, process) {
+			standing = append(standing, entry{doc, c})
+		}
+	}
+	sort.Slice(standing, func(i, j int) bool {
+		a, b := standing[i], standing[j]
+		if a.DomNodes != b.DomNodes {
+			return a.DomNodes > b.DomNodes
+		}
+		if a.doc.Kind != b.doc.Kind {
+			return a.doc.Kind < b.doc.Kind
+		}
+		return a.doc.Name < b.doc.Name
 	})
+	out := make([]map[string]any, 0, len(standing))
+	for _, e := range standing {
+		m := map[string]any{
+			"kind": e.doc.Kind, "name": e.doc.Name,
+			"dom_nodes": e.DomNodes, "feed_rows": e.FeedRows,
+			"census_age_s": int64(at.Sub(e.at).Seconds()),
+		}
+		if e.Animations != nil {
+			m["animations"] = *e.Animations
+		}
+		if e.Visibility != "" {
+			m["visibility"] = e.Visibility
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // within answers the STALLS still inside Window before AT, reusing their array.

@@ -120,6 +120,62 @@ func TestCreateUsesTheSuppliedName(t *testing.T) {
 	}
 }
 
+// TestCreateASuppliedNameWinsOverThePromptInEveryForm pins that a supplied
+// name is the branch in every create form, whatever the prompt says: the
+// naming call is scripted to answer ANOTHER workspace's name, as a prompt that
+// mentions that workspace once made it (2026-10-25, `-name
+// hide-announces-unload` created `concurrent-deploy-tab-fault`), and must
+// never be asked.
+func TestCreateASuppliedNameWinsOverThePromptInEveryForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture, spec *CreateSpec)
+	}{
+		{name: "a standard create", arrange: func(*testing.T, *fixture, *CreateSpec) {}},
+		{name: "a one-shot", arrange: func(_ *testing.T, f *fixture, spec *CreateSpec) {
+			oneShotBriefs(f)
+			spec.OneShot = true
+		}},
+		{name: "a fork", arrange: func(t *testing.T, f *fixture, spec *CreateSpec) {
+			parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
+			id := parent.ID
+			spec.Parent, spec.ForkFrom = &id, &id
+			f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
+			f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			t.Setenv(PrefixEnv, "")
+			t.Setenv(LegacyPrefixEnv, "")
+			script(f, headlessAnswer{text: "concurrent-deploy-tab-fault"})
+			spec := standardSpec(t, f)
+			spec.InitialPrompt = "the concurrent-deploy-tab-fault workspace found the announce; hide it on unload"
+			spec.Name = "hide-announces-unload"
+			tc.arrange(t, f, &spec)
+
+			// Act.
+			record, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if len(f.headless.calls) != 0 {
+				t.Fatalf("calls = %+v, want the naming call never made for a supplied name", f.headless.calls)
+			}
+			if len(f.git.created) != 1 || f.git.created[0].Branch != "hide-announces-unload" {
+				t.Fatalf("created = %+v, want the one branch hide-announces-unload", f.git.created)
+			}
+			if record.Name != "hide-announces-unload" {
+				t.Fatalf("name = %q, want hide-announces-unload", record.Name)
+			}
+		})
+	}
+}
+
 func TestCreateKeepsASuppliedNameThatAlreadyCarriesAPrefix(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

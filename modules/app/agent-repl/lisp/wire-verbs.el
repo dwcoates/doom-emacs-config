@@ -683,13 +683,18 @@ the branch the name resolves to, and O is non-nil when REF is open."
   (agent-repl-wire-decode-create-workspace-name-held json))
 
 (defun agent-repl-wire-decode-create-workspace-name-branch-exists (json)
-  "Decode CreateWorkspaceNameBranchExists from JSON into (:branch B :head H).
-The supplied name resolves to branch B, which the repository already has
-at commit H while no workspace that has not landed holds it."
+  "Decode CreateWorkspaceNameBranchExists from JSON.
+The answer is (:branch B :head H :landed-workspace REF).  The supplied
+name resolves to branch B, which the repository already has at commit H
+while no workspace that has not landed holds it.  REF is the landed
+workspace that left the branch, which the landed-branch sweep kept; it
+is nil for a branch no registered workspace ever held, cut by hand."
   (let ((message "CreateWorkspaceNameBranchExists"))
-    (agent-repl-wire-verbs--check-keys message json '(branch head))
+    (agent-repl-wire-verbs--check-keys message json '(branch head landedWorkspace))
     (list :branch (agent-repl-wire-verbs--decode-string message 'branch json)
-          :head (agent-repl-wire-verbs--decode-string message 'head json))))
+          :head (agent-repl-wire-verbs--decode-string message 'head json)
+          :landed-workspace (agent-repl-wire-verbs--decode-optional-message
+                             message 'landedWorkspace json #'agent-repl-wire-decode-workspace-ref))))
 
 (defun agent-repl-wire-decode-create-workspace-error-name-branch-exists (json)
   "Decode CreateWorkspaceError's `name_branch_exists' cause arm."

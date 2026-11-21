@@ -5279,3 +5279,62 @@ The landing the panels were first opened over must not come back over it."
         (should-not (member phase (mapcar (lambda (p) (format "%s" p))
                                           agent-repl--open-progress-terminal-phases))))
       (should (= (agent-repl-test-panels--panel-window-count) 2)))))
+
+;;;; ---- A frontend buffer about to be shown in a second window ----
+;; Instrumentation for "You can't share an xwidget (webkit2) among windows"
+;; (2026-10-26): the record names who put the buffer in a second window.
+
+(defmacro agent-repl-test-panels--with-second-window (name &rest body)
+  "Run BODY with buffer NAME shown in the selected window and a split beside it.
+Binds `buf', `first', `second' and `records', the INFO records made, newest first."
+  (declare (indent 1))
+  `(save-window-excursion
+     (delete-other-windows)
+     (let* ((buf (get-buffer-create ,name))
+            (first (selected-window))
+            (second (split-window first))
+            (records nil))
+       (unwind-protect
+           (progn
+             (set-window-buffer first buf)
+             (cl-letf (((symbol-function 'agent-repl--info)
+                        (agent-repl-test--record-into records)))
+               ,@body))
+         (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-panels-frontend-in-a-second-window-is-recorded ()
+  "Showing a frontend buffer in a second window names the buffer, both windows and the command."
+  (agent-repl-test-panels--with-second-window "*agent-frontend-second-ws*"
+    ;; Arrange: the windows as printed when the record is made, BEFORE the
+    ;; second one shows the buffer (a window prints with its buffer).
+    (let ((want (format "elisp.panels.frontend-second-window: buffer=*agent-frontend-second-ws* showing=%S target=%S command=agent-repl-test-switch"
+                        (list first) second)))
+      ;; Act
+      (let ((this-command 'agent-repl-test-switch))
+        (set-window-buffer second buf))
+      ;; Assert
+      (should (equal records (list want))))))
+
+(ert-deftest agent-repl-test-panels-frontend-in-a-second-window-is-still-shown ()
+  "The record changes nothing: the second window still shows the buffer."
+  (agent-repl-test-panels--with-second-window "*agent-frontend-shown-ws*"
+    ;; Act
+    (set-window-buffer second buf)
+    ;; Assert
+    (should (eq (window-buffer second) buf))))
+
+(ert-deftest agent-repl-test-panels-frontend-reshown-in-its-own-window-is-not-recorded ()
+  "Showing a frontend buffer again in the one window already showing it records nothing."
+  (agent-repl-test-panels--with-second-window "*agent-frontend-same-ws*"
+    ;; Act
+    (set-window-buffer first buf)
+    ;; Assert
+    (should (null records))))
+
+(ert-deftest agent-repl-test-panels-other-buffer-in-a-second-window-is-not-recorded ()
+  "A buffer that holds no xwidget may be shown in any number of windows unrecorded."
+  (agent-repl-test-panels--with-second-window " *test-not-a-frontend*"
+    ;; Act
+    (set-window-buffer second buf)
+    ;; Assert
+    (should (null records))))

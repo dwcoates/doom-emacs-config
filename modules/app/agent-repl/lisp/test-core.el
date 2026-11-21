@@ -1821,6 +1821,86 @@ own run log, never in the OS temporary root the system may sweep."
 
 ;;;; ---- Tests: JSONL workspace logging contract ----
 
+;;;; A record is bounded at its writer
+
+(ert-deftest agent-repl-test-log-record-within-the-bound-is-written-as-is ()
+  "A record within `agent-repl-log-record-max-bytes' keeps its level and text."
+  ;; Act
+  (let ((record (json-parse-string
+                 (agent-repl--log-record nil "info" "normal" "elisp.test.small value=%s" '("v"))
+                 :object-type 'alist)))
+    ;; Assert
+    (should (equal (alist-get 'level record) "info"))
+    (should (equal (alist-get 'message record) "elisp.test.small value=v"))
+    (should-not (alist-get 'oversize_bytes (alist-get 'context record)))))
+
+(ert-deftest agent-repl-test-log-record-past-the-bound-is-cut-to-it ()
+  "A record past the bound is written within it."
+  ;; Arrange
+  (let ((agent-repl-log-record-max-bytes 16384)
+        (big (make-string 100000 ?x)))
+    ;; Act
+    (let ((line (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big))))
+      ;; Assert
+      (should (<= (string-bytes line) agent-repl-log-record-max-bytes)))))
+
+(ert-deftest agent-repl-test-log-record-past-the-bound-is-an-error-naming-its-size ()
+  "A cut record is raised to ERROR and names its full size and operation."
+  ;; Arrange
+  (let ((agent-repl-log-record-max-bytes 16384)
+        (big (make-string 100000 ?x)))
+    ;; Act
+    (let* ((full (string-bytes (let ((agent-repl-log-record-max-bytes most-positive-fixnum))
+                                 (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big)))))
+           (record (json-parse-string
+                    (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big))
+                    :object-type 'alist)))
+      ;; Assert
+      (should (equal (alist-get 'level record) "error"))
+      (should (equal (alist-get 'oversize_bytes (alist-get 'context record)) full))
+      (should (string-match-p "\\`elisp.test.big body=x+ \\[[0-9]+ more characters not logged\\]\\'"
+                              (alist-get 'message record))))))
+
+(ert-deftest agent-repl-test-log-record-cut-still-past-the-bound-signals ()
+  "A record its cut cannot bring within the bound is an invariant breach."
+  ;; Arrange: a bound below what a record's fixed fields alone take.
+  (let ((agent-repl-log-record-max-bytes 64))
+    ;; Act / Assert
+    (should-error (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s"
+                                          (list (make-string 10000 ?x))))))
+
+(ert-deftest agent-repl-test-log-excerpt-names-what-it-left-out ()
+  "An excerpt keeps the head of a long text and names the characters cut."
+  ;; Act
+  (let ((cut (agent-repl--log-excerpt (make-string (+ agent-repl--log-oversize-excerpt-chars 10) ?y)))
+        (kept (agent-repl--log-excerpt "short")))
+    ;; Assert
+    (should (equal kept "short"))
+    (should (string-suffix-p " [10 more characters not logged]" cut))))
+
+(ert-deftest agent-repl-test-log-excerpt-cuts-to-a-given-length ()
+  "An excerpt cut to an explicit length keeps that many characters."
+  ;; Act
+  (let ((cut (agent-repl--log-excerpt "abcdefghij" 4)))
+    ;; Assert
+    (should (equal cut "abcd [6 more characters not logged]"))))
+
+(ert-deftest agent-repl-test-log-excerpt-is-every-excerpt-s-one-cut ()
+  "No agent-repl source but core.el writes the excerpt marker by hand."
+  ;; Arrange
+  (let ((dir (file-name-directory (symbol-file 'agent-repl--log-excerpt)))
+        (hand-rolled nil))
+    (dolist (file (directory-files dir t "\\`[a-z-]+\\.el\\'"))
+      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
+                  (equal (file-name-nondirectory file) "core.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          ;; Act
+          (when (search-forward "more characters not logged]" nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should (null hand-rolled))))
+
 (defun agent-repl-test--workspace-log-record (ws)
   "Return the LAST JSONL record written to WS's durable Emacs log sink."
   (let ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
@@ -4264,6 +4344,59 @@ Only the daemon saying the workspace is still open makes it a WARN, and
         ;; Act / Assert
         (should (eq (agent-repl--central-log-fallback-class "class-merged-ws")
                     'merge-departure))))))
+
+(ert-deftest agent-repl-test-a-gone-directory-of-a-landed-row-is-a-merge-departure ()
+  "A worktree gone after the merge landed is the merge\='s, whatever the status says.
+2026-11-14: the landing\='s session stand-down moved the row to `:inactive'
+while it stayed open for the deploy, and its records warned stale-registration."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-gone-workspace "class-landed-ws"
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                 (lambda (_ws) (list :status (list :arm :inactive :value nil)
+                                     :closed (list :closed nil)
+                                     :when (list :arm :merged :value (list :at-ms 1000))))))
+        ;; Act / Assert
+        (should (eq (agent-repl--central-log-fallback-class "class-landed-ws")
+                    'merge-departure))))))
+
+(ert-deftest agent-repl-test-a-landed-row-detaches-the-workspace-sink ()
+  "A workspace whose merge landed is detached: its sink touches nothing in the tree."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+               (lambda (_ws) (list :status (list :arm :inactive :value nil)
+                                   :closed (list :closed nil)
+                                   :when (list :arm :merged :value (list :at-ms 1000))))))
+      ;; Act / Assert
+      (should (agent-repl--log-workspace-detached-p "class-landed-ws")))))
+
+(ert-deftest agent-repl-test-a-fallback-names-the-operation-that-met-it ()
+  "The fallback record names the operation and level of the record that fell back."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl-test--with-gone-workspace "class-caller-ws"
+          (cl-letf (((symbol-function 'display-warning) #'ignore))
+            ;; Act
+            (agent-repl--info "class-caller-ws" "elisp.test.caller-site ws=%s" "class-caller-ws")))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (string-search "operation=agent-repl.elisp-test-caller-site-ws-s level=info written=t"
+                                 (alist-get 'message record))))))))
+
+(ert-deftest agent-repl-test-a-fallback-says-when-the-record-that-met-it-is-dropped ()
+  "A fallback met by a record the file level drops says it was not written."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl-test--with-gone-workspace "class-dropped-ws"
+          (cl-letf (((symbol-function 'display-warning) #'ignore))
+            (let ((agent-repl-log-file-level 'info))
+              ;; Act
+              (agent-repl--log "class-dropped-ws" "elisp.test.dropped-site"))))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (string-search "operation=agent-repl.elisp-test-dropped-site level=debug written=nil"
+                                 (alist-get 'message record))))))))
 
 (ert-deftest agent-repl-test-a-gone-directory-of-a-closed-row-is-a-merge-departure ()
   "A worktree gone with a row the daemon closed is that departure finishing."

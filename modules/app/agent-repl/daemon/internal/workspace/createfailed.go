@@ -87,11 +87,15 @@ func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause 
 // main worktree investigates, or a handover (HandedOver), which is no
 // failure at all.
 //
-// THE MAP IS EXHAUSTIVE (TestCreateRefusalArmsClassifyEveryArm checks it
-// against the contract), so a new arm cannot reach the main worktree as a
-// failed create merely because nobody remembered to exclude it. Arms only the
-// async-merge path or the transport raise are classified too; they are named
-// by their contract spelling where this package declares no constant.
+// An arm whose cause the refusal ITSELF says is classified by reading it
+// (createRefusalReaders) and is absent here.
+//
+// THE TWO MAPS ARE EXHAUSTIVE TOGETHER (TestCreateRefusalArmsClassifyEveryArm
+// checks them against the contract), so a new arm cannot reach the main
+// worktree as a failed create merely because nobody remembered to exclude it.
+// Arms only the async-merge path or the transport raise are classified too;
+// they are named by their contract spelling where this package declares no
+// constant.
 var createRefusalArms = map[string]bool{
 	// The caller's input.
 	ArmUngatedWithoutConsent:        true,
@@ -143,24 +147,35 @@ var createRefusalArms = map[string]bool{
 	ArmOriginFetchFailed:                false,
 	"async_merge_no_deploy_config":      false,
 	"async_merge_deploy_config_invalid": false,
-	// A branch nothing the daemon serves owns is the repository's state: most
-	// often a landed branch the landed-branch sweep kept, whose record says
-	// why, which the main worktree investigates.
-	ArmNameBranchExists:       false,
-	ArmLifecycleConfigInvalid: false,
-	ArmCreationHookFailed:     false,
+	ArmLifecycleConfigInvalid:           false,
+	ArmCreationHookFailed:               false,
 	// A handover.
 	ArmTransferringAway: false,
 	ArmStandingDown:     false,
 }
 
+// createRefusalReaders classifies the arms of agentrepl.v1.CreateWorkspaceError
+// whose cause the refusal itself carries, answering true when the refusal is
+// of the caller's own input. No arm is in both maps.
+var createRefusalReaders = map[string]func(*Refusal) bool{
+	// A branch a landed workspace left is one the landed-branch sweep kept,
+	// whose record says why: a fault the main worktree investigates. A branch
+	// no registered workspace ever held was cut by hand under the name the
+	// caller then supplied: the caller's own input.
+	ArmNameBranchExists: nameBranchCutByHand,
+}
+
 // callerInputRefusal answers the arm of a create's error when it is a refusal
-// of the caller's own input (createRefusalArms). A family rule's refusal
-// (wsm.ParentNotOpenError) is the create's `parent_not_open` arm.
+// of the caller's own input (createRefusalArms, createRefusalReaders). A
+// family rule's refusal (wsm.ParentNotOpenError) is the create's
+// `parent_not_open` arm.
 func callerInputRefusal(err error) (string, bool) {
 	var refusal *Refusal
-	if errors.As(err, &refusal) && createRefusalArms[refusal.Arm] {
-		return refusal.Arm, true
+	if errors.As(err, &refusal) {
+		read, byRefusal := createRefusalReaders[refusal.Arm]
+		if (byRefusal && read(refusal)) || (!byRefusal && createRefusalArms[refusal.Arm]) {
+			return refusal.Arm, true
+		}
 	}
 	var parent *wsm.ParentNotOpenError
 	if errors.As(err, &parent) && createRefusalArms["parent_not_open"] {

@@ -45,6 +45,7 @@
 (declare-function agent-repl-wire-call "wire-common" (direction codec value))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
+(declare-function agent-repl--log-excerpt "core" (text &optional chars))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--capture-log-scope "core" (scope))
 
@@ -238,8 +239,8 @@ ON-FAILURE."
                             method (plist-get decoded :arm))
            (when on-response (funcall on-response decoded)))
        (error
-        (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%S"
-                           method err alist)
+        (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%s"
+                           method err (agent-repl-rpc--logged-body alist))
         (when on-failure
           (funcall on-failure
                    (list :kind :malformed :code nil :status 200
@@ -274,13 +275,9 @@ outlived its 3 s bound.")
 (defun agent-repl-rpc--logged-body (alist)
   "Return ALIST printed for a dropped push's record, as a string.
 A body longer than `agent-repl-rpc--logged-body-chars' is cut there and
-ends by saying how many characters were left out."
-  (let* ((text (prin1-to-string alist))
-         (over (- (length text) agent-repl-rpc--logged-body-chars)))
-    (if (<= over 0)
-        text
-      (format "%s [%d more characters not logged]"
-              (substring text 0 agent-repl-rpc--logged-body-chars) over))))
+ends by saying how many characters were left out (`agent-repl--log-excerpt',
+every record's one cut)."
+  (agent-repl--log-excerpt (prin1-to-string alist) agent-repl-rpc--logged-body-chars))
 
 (defun agent-repl-rpc--stream (conn method encoder decoder request on-push on-close
                                     &optional on-open)

@@ -203,18 +203,29 @@ func (v *verbs) installRegistry(ctx context.Context, log dlog.Logger, operation 
 		if err != nil {
 			return err
 		}
-		v.selection.Lock()
-		if v.selectEpoch == epoch {
-			install(reg)
-			v.selection.Unlock()
+		installed, overtaken := v.installUnlessOvertaken(epoch, reg, install)
+		if installed {
 			return nil
 		}
-		overtaken := v.selectEpoch
-		v.selection.Unlock()
 		log.Debug(operation, "a select landed while the registry was read, so the read may predate its selection; it is taken again", dlog.Context{
 			"read_from_epoch": epoch, "select_epoch": overtaken,
 		})
 	}
+}
+
+// installUnlessOvertaken installs REG under the selection lock unless a
+// select landed since EPOCH, answering whether it installed and the epoch it
+// found. THE LOCK IS RELEASED BY DEFER, so an install that panics (a roster
+// invariant) leaves it free: a create's undo republishes the registry on its
+// way out of that panic, and a lock the panic held made the undo wait forever.
+func (v *verbs) installUnlessOvertaken(epoch uint64, reg sidebar.Registry, install func(sidebar.Registry)) (bool, uint64) {
+	v.selection.Lock()
+	defer v.selection.Unlock()
+	if v.selectEpoch != epoch {
+		return false, v.selectEpoch
+	}
+	install(reg)
+	return true, epoch
 }
 
 // selected counts a selection this daemon wrote or followed (selectEpoch).

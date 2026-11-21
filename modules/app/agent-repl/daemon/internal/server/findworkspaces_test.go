@@ -192,6 +192,59 @@ func TestFindWorkspacesByCreatorNamesTheCreatorAndTheParent(t *testing.T) {
 	}
 }
 
+func TestFindWorkspacesMarksAMergeWorkspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		requester ids.WorkspaceID
+		// wantRequester is the requester's dir the marker names, "" for none.
+		wantRequester string
+	}{
+		{name: "a requester the registry holds is named", requester: "ws-open", wantRequester: "/src/open"},
+		{name: "a forgotten requester is answered as none", requester: "ws-forgotten", wantRequester: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a hidden merge workspace the roster draws no row of.
+			h := findHarness(t)
+			h.DB.workspaces["ws-merge"] = wsm.Workspace{ID: "ws-merge", Repo: "repo-1", Dir: "/src/merge", Name: "merge-one", Branch: "merge-one",
+				CreatedAt: time.UnixMilli(1_000), Hidden: true, MergeOf: &wsm.MergeOrigin{Requester: tt.requester}}
+
+			// Act
+			resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Text: ptrTo("merge-one")}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FindWorkspaces: %v", err)
+			}
+			found := resp.Msg.GetSuccess().GetComplete().GetWorkspaces()
+			if len(found) != 1 || found[0].GetWorkspace().GetId() != "ws-merge" || found[0].Merge == nil || found[0].Roster != nil {
+				t.Fatalf("found = %v, want the merge workspace alone, marked, drawn on no roster", found)
+			}
+			if got := found[0].GetMerge().GetRequester().GetDir(); got != tt.wantRequester {
+				t.Fatalf("merge requester dir = %q, want %q", got, tt.wantRequester)
+			}
+		})
+	}
+}
+
+func TestFindWorkspacesLeavesAnOrdinaryWorkspaceUnmarked(t *testing.T) {
+	// Arrange
+	h := findHarness(t)
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FindWorkspaces: %v", err)
+	}
+	for _, f := range resp.Msg.GetSuccess().GetComplete().GetWorkspaces() {
+		if f.Merge != nil {
+			t.Fatalf("%s answered a merge marker, want none on an ordinary workspace", f.GetName())
+		}
+	}
+}
+
 func TestFindWorkspacesByAnUnknownCreatorIsAnAnswer(t *testing.T) {
 	tests := []struct {
 		name string

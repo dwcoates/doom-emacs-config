@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"regexp"
 	"slices"
@@ -1976,7 +1979,7 @@ func TestListExitsRefusedOnARefusedFind(t *testing.T) {
 	code := f.run(workspaceNoun, "list")
 
 	// Assert
-	if code != exitRefused || !strings.Contains(f.errOut.String(), "the daemon refused") {
+	if code != exitRefused || !strings.Contains(f.errOut.String(), "the daemon has no workspace for the calling directory") {
 		t.Fatalf("exit %d, stderr %q; want the refusal", code, f.errOut.String())
 	}
 }
@@ -3158,7 +3161,7 @@ func TestFindExitsRefusedOnAnUnknownRepository(t *testing.T) {
 	code := f.run(workspaceNoun, "find", "-repository", "/src/nowhere")
 
 	// Assert
-	if code != exitRefused || !strings.Contains(f.errOut.String(), "the daemon refused") {
+	if code != exitRefused || !strings.Contains(f.errOut.String(), "the daemon has no repository by the one -repository named") {
 		t.Fatalf("exit %d, stderr %q; want the refusal", code, f.errOut.String())
 	}
 }
@@ -3278,10 +3281,14 @@ func TestRepositoryRegisterSurfacesTheDaemonsErrorArms(t *testing.T) {
 		name  string
 		cause *agentreplv1.RegisterRepositoryError
 		want  string
+		said  string
 	}{
-		{name: "not in a repository", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_NotInARepository{NotInARepository: &agentreplv1.RegisterRepositoryNotInARepository{}}}, want: "notInARepository"},
-		{name: "an unreadable path", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_UnreadablePath{UnreadablePath: &agentreplv1.RegisterRepositoryUnreadablePath{}}}, want: "unreadablePath"},
-		{name: "inside a temporary directory", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_InsideTemporaryDirectory{InsideTemporaryDirectory: &agentreplv1.RegisterRepositoryInsideTemporaryDirectory{Dir: "/tmp/x", TemporaryRoot: "/tmp"}}}, want: "insideTemporaryDirectory"},
+		{name: "not in a repository", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_NotInARepository{NotInARepository: &agentreplv1.RegisterRepositoryNotInARepository{}}}, want: "notInARepository",
+			said: "/nowhere lies inside no git work tree, or inside a bare repository, which has no main worktree"},
+		{name: "an unreadable path", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_UnreadablePath{UnreadablePath: &agentreplv1.RegisterRepositoryUnreadablePath{}}}, want: "unreadablePath",
+			said: "/nowhere cannot be read: it is not there, or its directory cannot be stat'ed"},
+		{name: "inside a temporary directory", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_InsideTemporaryDirectory{InsideTemporaryDirectory: &agentreplv1.RegisterRepositoryInsideTemporaryDirectory{Dir: "/tmp/x", TemporaryRoot: "/tmp"}}}, want: "insideTemporaryDirectory",
+			said: "the repository's main worktree /tmp/x lies inside the temporary directory /tmp"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3293,8 +3300,8 @@ func TestRepositoryRegisterSurfacesTheDaemonsErrorArms(t *testing.T) {
 			code := f.run(repositoryNoun, "register", "/nowhere")
 
 			// Assert
-			if code != exitRefused || !strings.Contains(f.out.String(), tt.want) || !strings.Contains(f.errOut.String(), "the daemon refused") {
-				t.Fatalf("exit %d, stdout %q, stderr %q; want refused naming %s", code, f.out.String(), f.errOut.String(), tt.want)
+			if code != exitRefused || !strings.Contains(f.out.String(), tt.want) || !strings.Contains(f.errOut.String(), tt.said) {
+				t.Fatalf("exit %d, stdout %q, stderr %q; want refused naming %s, saying %q", code, f.out.String(), f.errOut.String(), tt.want, tt.said)
 			}
 		})
 	}
@@ -4024,5 +4031,115 @@ func TestListWithoutLoginNarrowsToNoLogin(t *testing.T) {
 	req := only[*agentreplv1.FindWorkspacesRequest](t, f)
 	if code != exitSuccess || req.Login != nil {
 		t.Fatalf("exit %d, login %v; want none", code, req.Login)
+	}
+}
+
+// describerName is the shape of a refusal describer's name.
+var describerName = regexp.MustCompile(`^describe\w+Refusal$`)
+
+// scanDescribedAnswers reads every answerDescribed and onWorkspace call in
+// the production sources and answers the response each describes (the
+// agentrepl.v1 message its describer closure takes), sorted and once each,
+// with every call site that does not name a describer: a closure that is not
+// one return of a describe…Refusal call, so a constant sentence such as the
+// old "the daemon refused" cannot come back.
+func scanDescribedAnswers(t *testing.T) (responses, problems []string) {
+	t.Helper()
+	fset := token.NewFileSet()
+	seen := map[string]bool{}
+	for _, file := range sourcescan.Production(t) {
+		parsed, err := parser.ParseFile(fset, file.Name, file.Source, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file.Name, err)
+		}
+		for _, decl := range parsed.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			inOnWorkspace := fn.Name.Name == "onWorkspace"
+			ast.Inspect(fn, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				callee, ok := call.Fun.(*ast.Ident)
+				if !ok || (callee.Name != "answerDescribed" && callee.Name != "onWorkspace") || len(call.Args) == 0 {
+					return true
+				}
+				where := fset.Position(call.Pos()).String()
+				lit, ok := call.Args[len(call.Args)-1].(*ast.FuncLit)
+				if !ok {
+					problems = append(problems, where+": the describer is not a closure")
+					return true
+				}
+				params := lit.Type.Params.List
+				last := params[len(params)-1]
+				star, ok := last.Type.(*ast.StarExpr)
+				if !ok {
+					problems = append(problems, where+": the closure takes no response")
+					return true
+				}
+				generic := false
+				switch typ := star.X.(type) {
+				case *ast.SelectorExpr:
+					if pkg, ok := typ.X.(*ast.Ident); !ok || pkg.Name != "agentreplv1" {
+						problems = append(problems, where+": the closure takes no agentrepl.v1 response")
+						return true
+					}
+					if !seen[typ.Sel.Name] {
+						seen[typ.Sel.Name] = true
+						responses = append(responses, typ.Sel.Name)
+					}
+				case *ast.Ident:
+					generic = inOnWorkspace && typ.Name == "Res"
+				}
+				if len(lit.Body.List) != 1 {
+					problems = append(problems, where+": the closure is not one return")
+					return true
+				}
+				ret, ok := lit.Body.List[0].(*ast.ReturnStmt)
+				if !ok || len(ret.Results) != 1 {
+					problems = append(problems, where+": the closure is not one return")
+					return true
+				}
+				said, ok := ret.Results[0].(*ast.CallExpr)
+				if !ok {
+					problems = append(problems, where+": the closure returns no describer's sentence")
+					return true
+				}
+				name, ok := said.Fun.(*ast.Ident)
+				if !ok || !(describerName.MatchString(name.Name) || (generic && name.Name == "why")) {
+					problems = append(problems, where+": the closure returns no describe…Refusal call")
+				}
+				return true
+			})
+		}
+	}
+	slices.Sort(responses)
+	return responses, problems
+}
+
+// describedResponses is every response an answerDescribed call site
+// describes, for the reflection test over their errors' arms.
+func describedResponses(t *testing.T) []string {
+	t.Helper()
+	responses, _ := scanDescribedAnswers(t)
+	return responses
+}
+
+// TestEveryAnsweredRefusalNamesItsDescriber pins that every verb answers
+// through a describer of its rpc's error: no call site says a refusal with a
+// sentence of its own, so none can fall back to "the daemon refused".
+func TestEveryAnsweredRefusalNamesItsDescriber(t *testing.T) {
+	// Act
+	responses, problems := scanDescribedAnswers(t)
+
+	// Assert
+	if len(responses) == 0 {
+		t.Fatal("found no answerDescribed call site to check")
+	}
+	for _, p := range problems {
+		t.Error(p)
 	}
 }

@@ -575,19 +575,28 @@ func TestCreateFailsLoudlyWhenTheHeldNameCheckCannotReadTheRegistry(t *testing.T
 func TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld(t *testing.T) {
 	const branch = "ABC/ramdisk-leak-investigation"
 	merged := time.Unix(1_700_000_000, 0).UTC()
+	mergedLater := merged.Add(time.Hour)
 	probeFailed := errors.New("git could not answer")
 	resolveFailed := errors.New("git could not resolve")
 	cases := []struct {
 		name string
-		// landed registers a landed workspace that last named the branch.
-		landed     bool
+		// landed registers landed workspaces that named the branch.
+		landed     []wsm.Workspace
 		probeErr   error
 		resolveErr error
 		wantArm    bool
+		// wantLanded is the landed workspace the refusal names; empty for none.
+		wantLanded ids.WorkspaceID
 		wantError  string
 	}{
 		{name: "a branch no workspace names", wantArm: true},
-		{name: "a branch a landed workspace left behind", landed: true, wantArm: true},
+		{name: "a branch a landed workspace left behind", wantArm: true, wantLanded: "ws-inv",
+			landed: []wsm.Workspace{{ID: "ws-inv", Name: branch, Branch: branch, MergedAt: &merged}}},
+		{name: "a branch two landed workspaces named names the later", wantArm: true, wantLanded: "ws-later",
+			landed: []wsm.Workspace{
+				{ID: "ws-earlier", Name: branch, Branch: branch, MergedAt: &merged},
+				{ID: "ws-later", Name: "renamed", Branch: branch, MergedAt: &mergedLater},
+			}},
 		{name: "a probe that fails fails the create", probeErr: probeFailed,
 			wantError: "could not ask whether the supplied name's branch already exists"},
 		{name: "a resolve that fails fails the create", resolveErr: resolveFailed,
@@ -600,8 +609,9 @@ func TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld(t *testing.T) {
 			t.Setenv(PrefixEnv, "ABC")
 			t.Setenv(LegacyPrefixEnv, "")
 			repo := mainWorktree(t, f)
-			if tc.landed {
-				f.db.with(wsm.Workspace{ID: "ws-inv", Name: branch, Branch: branch, Repo: "repo-1", Dir: t.TempDir(), Closed: true, MergedAt: &merged})
+			for _, landed := range tc.landed {
+				landed.Repo, landed.Dir, landed.Closed = "repo-1", t.TempDir(), true
+				f.db.with(landed)
 			}
 			f.git.existingBranches = map[string]bool{branch: true}
 			if tc.probeErr != nil {
@@ -637,6 +647,14 @@ func TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld(t *testing.T) {
 			wantHead := "sha-of-refs/heads/" + branch
 			if refusal.Fields["branch"] != branch || refusal.Fields["head"] != wantHead {
 				t.Fatalf("refusal fields = %v, want branch %s at %s", refusal.Fields, branch, wantHead)
+			}
+			ref, named := refusal.Fields[nameBranchLandedField].(*workspacev1.WorkspaceRef)
+			_, present := refusal.Fields[nameBranchLandedField]
+			switch {
+			case tc.wantLanded == "" && present:
+				t.Fatalf("refusal fields = %v, want no landed workspace for a branch cut by hand", refusal.Fields)
+			case tc.wantLanded != "" && (!named || ref.GetId() != string(tc.wantLanded)):
+				t.Fatalf("refusal fields = %v, want landed workspace %s", refusal.Fields, tc.wantLanded)
 			}
 			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
 			if !ok || record.Context["arm"] != ArmNameBranchExists || record.Context["arm_branch"] != branch || record.Context["arm_head"] != wantHead {

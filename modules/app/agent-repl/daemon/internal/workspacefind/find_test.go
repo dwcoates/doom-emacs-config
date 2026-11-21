@@ -150,7 +150,7 @@ func TestFindAnswersEachWorkspacesRepositoryAndSummary(t *testing.T) {
 	}
 }
 
-func TestFindLeavesOutThreadsAndMergeWorkspaces(t *testing.T) {
+func TestFindLeavesOutThreadsAndAnswersMergeWorkspaces(t *testing.T) {
 	// Arrange
 	thread := record("thread", "chat", doom, 1)
 	thread.Kind = wsm.WorkspaceKindThread
@@ -165,8 +165,8 @@ func TestFindLeavesOutThreadsAndMergeWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
-	if !reflect.DeepEqual(ids(got), []string{"agent"}) {
-		t.Fatalf("Find = %v, want only the agent workspace", ids(got))
+	if !reflect.DeepEqual(ids(got), []string{"agent", "merge"}) {
+		t.Fatalf("Find = %v, want the agent and the merge workspace, never the thread", ids(got))
 	}
 }
 

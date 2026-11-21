@@ -276,6 +276,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; stale-sink.el asks the daemon whether a registered workspace whose
 ;; directory is gone is still open, and warns only then.
 (agent-repl--load-module "stale-sink")
+;; heap-census.el measures what holds the editor's heap on an idle timer; it
+;; needs only core.el's logging ladder.
+(agent-repl--load-module "heap-census")
 ;; WHY: mutation-progress.el is the correlation seat the daemon-link's push
 ;; dispatch hands workspace-mutation progress to, and the create verb registers
 ;; its callbacks with; it needs only core.el, so it loads beside daemon-link.
@@ -286,11 +289,6 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; own needs are core.el's logging ladder and heartbeat assertion.
 (agent-repl--load-module "elisp-build")
 (agent-repl--load-module "bytecode")
-;; WHY: external-browser.el pins `browse-url-browser-function' so every
-;; hyperlink lands in the external Chrome profile instead of an Emacs
-;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
-;; this early so no later module can visit a URL before the handler is in
-;; place.
 ;; WHY: workspace.el owns `agent-repl--workspaces' and the hash
 ;; accessors that nearly every other module uses.  Must load right
 ;; after core.el (which provides the logging primitives workspace.el
@@ -516,22 +514,107 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; capture the tail of the module load rather than the user's session.
 (agent-repl--load-module "interaction-record")
 
+;; ---- What runs once every module had its turn, whichever failed ----
+;;
+;; A MODULE THAT FAILED TO LOAD COSTS ITSELF, NEVER THE LIFECYCLE.  The
+;; daemon ensure, the shutdown composer save and the log retention sweep are
+;; registered BEFORE the failed modules are reported, and each one whose own
+;; module is missing is reported instead of registered.  Regression,
+;; 2026-10-25: the load-error report signalled before any of them was
+;; registered, so a cosmetic module failing its load (the splash's banner
+;; check) left a fresh Emacs with no daemon and no tabs at all.
+
+(defun agent-repl--register-lifecycle-hook (hook fn depth what)
+  "Add FN to HOOK at DEPTH, or report loudly that its module failed to load.
+WHAT names the registration for the records.  FN undefined means the
+module that defines it failed its load, already recorded in
+`agent-repl--load-errors'; the registration it cannot make is reported
+through `agent-repl--boot-warn' rather than added as a hook that would
+signal `void-function' when it runs."
+  (if (fboundp fn)
+      (progn
+        (add-hook hook fn depth)
+        (agent-repl--boot-info "lifecycle: registered %s on %s" what hook))
+    (agent-repl--boot-warn "lifecycle: %s NOT registered on %s: `%s' is undefined, its module failed to load"
+                           what hook fn)))
+
+(defun agent-repl--register-lifecycle-hooks (batch)
+  "Register agent-repl's lifecycle hooks, whatever modules failed to load.
+BATCH non-nil (a batch run, `noninteractive') registers nothing: a batch
+run must never build or spawn a daemon, save composers or sweep logs.
+
+COLD START.  Emacs owns bringing a daemon up and nothing after that:
+`agent-repl-daemon-ensure' adopts any daemon that answers, and only
+builds and starts one when `daemon.addr' names nobody.  What is registered
+on `emacs-startup-hook' is `agent-repl-daemon-schedule-ensure', which only
+ARMS an idle timer: `emacs-startup-hook' runs before Doom\='s UI init and
+before the first redisplay, so an ensure run directly from it would hold
+the frame back until the whole stack build finishes.  Gated on
+`agent-repl-frontend-auto-start'.
+
+UNSENT INPUT SURVIVES A RESTART.  Every workspace\='s non-empty composer
+is saved to its history at shutdown, the same way
+`agent-repl-discard-input' saves it, and put back when the composer is
+born again.  Depth -50 runs it ahead of hooks that may tear buffers down.
+
+LOG RETENTION.  Every log file Emacs writes is deleted once its last write
+is `agent-repl-log-retention-seconds' (three days) old.  The first sweep
+is armed on an IDLE timer, never run from the startup hook: unlinking
+files before the first redisplay would hold the frame off screen to tidy
+a directory.  Then it repeats hourly.
+
+THE HEAP CENSUS.  What holds the editor\='s heap is measured once Emacs is
+idle, at most every half hour (heap-census.el), armed from the startup
+hook like the retention sweep, so nothing runs before the first
+redisplay."
+  (if batch
+      (agent-repl--boot-info "lifecycle: nothing registered batch=%s" batch)
+    (if (and (boundp 'agent-repl-frontend-auto-start)
+             (not (symbol-value 'agent-repl-frontend-auto-start)))
+        (agent-repl--boot-info "lifecycle: daemon ensure NOT registered auto-start=nil")
+      (agent-repl--register-lifecycle-hook
+       'emacs-startup-hook #'agent-repl-daemon-schedule-ensure nil "daemon ensure"))
+    (agent-repl--register-lifecycle-hook
+     'kill-emacs-hook #'agent-repl-input-save-all-on-shutdown -50 "composer save")
+    (agent-repl--register-lifecycle-hook
+     'emacs-startup-hook #'agent-repl-schedule-log-retention-sweep nil "log retention sweep")
+    (agent-repl--register-lifecycle-hook
+     'emacs-startup-hook #'agent-repl-heap-census-schedule nil "heap census")))
+
+(defun agent-repl--report-load-errors (errors)
+  "Report ERRORS, the modules that failed to load, loudly, then signal.
+ERRORS is `agent-repl--load-errors', newest first.  Each failed module is
+reported through `agent-repl--boot-warn', not `agent-repl--warn': core.el
+is a module, so the real ladder may not exist to report its own absence.
+The `error' that follows is the FATAL report a failed load always made;
+it is signalled only after the lifecycle hooks are registered
+\(`agent-repl--register-lifecycle-hooks'), so it costs the rest of the
+load, never the daemon."
+  (agent-repl--boot-warn "Loaded with %d ERROR(S):" (length errors))
+  (dolist (pair (reverse errors))
+    (agent-repl--boot-warn "  %s.el: %S" (car pair) (cdr pair)))
+  (error "[agent-repl] FATAL: %d module(s) failed to load — see messages above"
+         (length errors)))
+
+(agent-repl--register-lifecycle-hooks noninteractive)
+
 ;; The ONE Doom popup rule every agent-repl popup is displayed by (popup.el):
 ;; right side, 40% of the frame's width, `q' closes it and kills its buffer.
 ;; Installed here, after every module has loaded, so it is a single rule
-;; whatever order the modules that show popups were loaded in.
-(agent-repl-popup-install-rule)
+;; whatever order the modules that show popups were loaded in.  popup.el
+;; failing its load is already a load error, reported below.
+(when (fboundp 'agent-repl-popup-install-rule)
+  (agent-repl-popup-install-rule))
+
+;; NO SNAPSHOT RESTORE.  The durable Emacs workspace-roster snapshot is
+;; gone: THE DAEMON is the source of which workspaces exist, and on connect
+;; Emacs opens tabs from the roster stream (roster.el's reconciliation).  A
+;; second, Emacs-authored roster on disk could only ever disagree with the
+;; pushed one, and reconciling two sources of truth was the machinery this
+;; overhaul removed rather than repaired.
 
 (if agent-repl--load-errors
-    (progn
-      ;; `agent-repl--boot-warn', not `agent-repl--warn': this branch is
-      ;; reached precisely when a module failed, and core.el is a module —
-      ;; so the real ladder may not exist to report its own absence.
-      (agent-repl--boot-warn "Loaded with %d ERROR(S):" (length agent-repl--load-errors))
-      (dolist (pair (nreverse agent-repl--load-errors))
-        (agent-repl--boot-warn "  %s.el: %S" (car pair) (cdr pair)))
-      (error "[agent-repl] FATAL: %d module(s) failed to load — see messages above"
-             (length agent-repl--load-errors)))
+    (agent-repl--report-load-errors agent-repl--load-errors)
   (agent-repl--info '(:agent-repl-central "module loading is process-wide")
                     "Loaded Agent-Repl package.")
   ;; EVERY MODULE WAS LOADED FROM SOURCE, so its functions run interpreted
@@ -544,50 +627,6 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
     (agent-repl-bytecode-schedule
      (file-name-directory (or load-file-name buffer-file-name))
      (mapcar #'car agent-repl--elisp-module-builds))))
-
-;; NO SNAPSHOT RESTORE.  The durable Emacs workspace-roster snapshot is
-;; gone: THE DAEMON is the source of which workspaces exist, and on connect
-;; Emacs opens tabs from the roster stream (roster.el's reconciliation).  A
-;; second, Emacs-authored roster on disk could only ever disagree with the
-;; pushed one, and reconciling two sources of truth was the machinery this
-;; overhaul removed rather than repaired.
-
-;; COLD START.  Emacs owns bringing a daemon up and nothing after that:
-;; `agent-repl-daemon-ensure' adopts any daemon that answers, and only
-;; builds and starts one when `daemon.addr' names nobody.  Registered on
-;; `emacs-startup-hook' rather than run here — and what the hook registers
-;; is `agent-repl-daemon-schedule-ensure', which only ARMS an idle timer:
-;; `emacs-startup-hook' runs before Doom's UI init and before the first
-;; redisplay, so an ensure run directly from it holds the frame back until
-;; the whole stack build finishes.  GATED ON `noninteractive' too, because
-;; a batch run must never build or spawn anything.
-(if (and agent-repl-frontend-auto-start (not noninteractive))
-    (progn
-      (add-hook 'emacs-startup-hook #'agent-repl-daemon-schedule-ensure)
-      (agent-repl--boot-info "cold-start: registered daemon ensure on emacs-startup-hook"))
-  (agent-repl--boot-info "cold-start: daemon ensure NOT registered auto-start=%s batch=%s"
-                         agent-repl-frontend-auto-start noninteractive))
-
-;; UNSENT INPUT SURVIVES A RESTART.  Every workspace's non-empty composer is
-;; saved to its history at shutdown, the same way `agent-repl-discard-input'
-;; saves it, and put back when the composer is born again.  Depth -50 runs it
-;; ahead of hooks that may tear buffers down.  Batch runs arm nothing.
-(if noninteractive
-    (agent-repl--boot-info "shutdown: composer save NOT registered batch=%s" noninteractive)
-  (add-hook 'kill-emacs-hook #'agent-repl-input-save-all-on-shutdown -50)
-  (agent-repl--boot-info "shutdown: registered composer save on kill-emacs-hook"))
-
-;; LOG RETENTION.  Every log file Emacs writes is deleted once its last write
-;; is `agent-repl-log-retention-seconds' (three days) old, the retention every
-;; agent-repl runtime keeps.  The first sweep is armed on an IDLE timer, never
-;; run from the startup hook: unlinking files before the first redisplay would
-;; hold the frame off screen to tidy a directory.  Then it repeats hourly.
-;; Batch runs arm nothing.
-(if noninteractive
-    (agent-repl--boot-info "cold-start: log retention sweep NOT registered batch=%s"
-                           noninteractive)
-  (add-hook 'emacs-startup-hook #'agent-repl-schedule-log-retention-sweep)
-  (agent-repl--boot-info "cold-start: registered log retention sweep on emacs-startup-hook"))
 
 (provide 'agent-repl)
 ;;; config.el ends here

@@ -103,7 +103,7 @@
 (declare-function agent-repl-open-tabs-folded-p "open-tabs" (ws))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl--webhost-id "webhost" (ws))
-(declare-function agent-repl-link-successor "daemon-link" ())
+(declare-function agent-repl-host-handover-awaits-page-p "host" (ws))
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
@@ -442,18 +442,28 @@ working on its own, and either way it is held as working."
      ((agent-repl--ws-get ws :page-visit) 'visited)
      (t 'idle))))
 
+(defun agent-repl-page-unload--awaited-p (ws)
+  "Non-nil when a handover\='s rendezvous awaits WS\='s page, which is then kept.
+The hold is recorded at debug, so a page a stalled handover keeps loaded
+is visible in the log."
+  (when (agent-repl-host-handover-awaits-page-p ws)
+    (agent-repl--log ws "elisp.page-unload.held-for-handover ws=%s" ws)
+    t))
+
 (defun agent-repl-page-unload--holdable-p (ws)
   "The page of WS, when it is one a pass may unload, else nil.
 Neither the page the host shows nor the current workspace\='s is ever
 unloaded, nor one already unloaded, nor one whose unload is already being
 reported, nor one whose tab's open is in flight: the daemon answers that
 open once the page has drawn, so a page dropped under it left the tab
-unanswered for good (2026-10-29).  NOTHING IS UNLOADED WHILE A HANDOVER\='S
-SUCCESSOR IS ATTACHED: the successor awaits every page whose stream stood
-at the announcement (rollout's rendezvous), and the statuses a transfer
-moves through would otherwise drop pages it is waiting on."
+unanswered for good (2026-10-29).  NOR IS A PAGE AN ATTACHED SUCCESSOR\='S
+RENDEZVOUS STILL AWAITS (`agent-repl-host-handover-awaits-page-p'): the
+statuses a transfer moves through would otherwise drop a page it is
+waiting on.  Every other page is unloaded as ever while the handover runs,
+so a handover that stalls does not grow the loaded pages without bound
+\(2026-11-10: 78 pages loaded behind a successor that never promoted)."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (and (null (agent-repl-link-successor))
+    (and (not (agent-repl-page-unload--awaited-p ws))
          (buffer-live-p buf)
          (agent-repl-webhost-has-page-p ws)
          (not (agent-repl-page-unload--on-screen-p ws))

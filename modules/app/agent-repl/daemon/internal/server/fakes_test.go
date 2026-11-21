@@ -54,6 +54,7 @@ import (
 	"agent-repld/internal/revision"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/storagesweep"
 	"agent-repld/internal/streamslot"
 	"agent-repld/internal/subagentmaker"
@@ -634,6 +635,9 @@ type fakeVerbs struct {
 	// while Create is mid-flight and prove the work is detached from it.
 	createEntered chan struct{}
 	createRelease chan struct{}
+	// createPanic, when set, is what RunCreate panics with, as a create whose
+	// invariant broke does once it is undone (workspace.CreatePanicError).
+	createPanic any
 
 	// beginErr refuses a kill's or a nuke's fast half; teardownErr is what
 	// its teardown answers. teardownRan, when set, receives the error of the
@@ -729,6 +733,9 @@ func (f *fakeVerbs) EnterCreate(spec workspace.CreateSpec) *workspace.CreateTick
 // held for the network when createHeld names one, telling its reporter.
 func (f *fakeVerbs) RunCreate(ctx context.Context, ticket *workspace.CreateTicket) (wsm.Workspace, error) {
 	spec := ticket.Spec()
+	if f.createPanic != nil {
+		panic(f.createPanic)
+	}
 	if f.createTurnHeld != "" {
 		f.createSpecs = append(f.createSpecs, spec)
 		if spec.Progress != nil {
@@ -3096,6 +3103,25 @@ func (h *harness) withoutDep(strip func(*Deps)) Deps {
 type fakeStallBeat struct {
 	mu       sync.Mutex
 	observed []observedStall
+	census   []observedCensus
+}
+
+type observedCensus struct {
+	doc stallbeat.Document
+	at  time.Time
+	c   stallbeat.Census
+}
+
+func (f *fakeStallBeat) Census(doc stallbeat.Document, at time.Time, c stallbeat.Census) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.census = append(f.census, observedCensus{doc: doc, at: at, c: c})
+}
+
+func (f *fakeStallBeat) censuses() []observedCensus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]observedCensus(nil), f.census...)
 }
 
 type observedStall struct {

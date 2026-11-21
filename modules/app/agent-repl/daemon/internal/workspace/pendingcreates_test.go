@@ -1053,3 +1053,148 @@ func TestHeldDeployHooksShareTheProtoHexEncoding(t *testing.T) {
 		t.Fatalf("decodeHooks(malformed) = %v, want the deploy hook named", err)
 	}
 }
+
+// The seams a create's panic is injected at: inside its worktree step, before
+// anything is registered, and in the roster's republish inside Register,
+// after its row is written (the 2026-11 sidebar invariant panic).
+const (
+	seamWorktree = "the worktree step"
+	seamRoster   = "the roster republish after registration"
+)
+
+// createPanicValue is what an injected create panic raises.
+const createPanicValue = "injected create invariant"
+
+// saidCreatePanicked is the record a create that panicked is stated by.
+const saidCreatePanicked = "the create panicked: it was undone and answered failed, and the daemon panics again"
+
+// panickedCreate runs a standard create, under a supplied name, that panics
+// with createPanicValue at SEAM, while an identical request joins it from
+// inside its worktree step. It answers the fixture, the create's ticket, what
+// its RunCreate panicked with, and the joined ticket.
+func panickedCreate(t *testing.T, seam string) (*fixture, *CreateTicket, any, *CreateTicket) {
+	t.Helper()
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	spec.Name = "panicked-create"
+	var joined *CreateTicket
+	f.git.duringCreate = func() {
+		joined = f.verbs.EnterCreate(spec)
+		if seam == seamWorktree {
+			panic(createPanicValue)
+		}
+	}
+	if seam == seamRoster {
+		f.sidebar.panicOnce = createPanicValue
+	}
+	ticket := f.verbs.EnterCreate(spec)
+	raised := func() (r any) {
+		defer func() { r = recover() }()
+		f.verbs.RunCreate(context.Background(), ticket)
+		return nil
+	}()
+	return f, ticket, raised, joined
+}
+
+func TestACreateThatPanicsPanicsAgainWithItsValue(t *testing.T) {
+	for _, seam := range []string{seamWorktree, seamRoster} {
+		t.Run(seam, func(t *testing.T) {
+			// Arrange: panickedCreate.
+
+			// Act.
+			_, _, raised, _ := panickedCreate(t, seam)
+
+			// Assert.
+			if raised != createPanicValue {
+				t.Fatalf("RunCreate raised %v, want the create's own panic %q raised again", raised, createPanicValue)
+			}
+		})
+	}
+}
+
+func TestACreateThatPanicsIsUndone(t *testing.T) {
+	cases := []struct {
+		seam string
+		// wantNuked is whether the registered workspace is nuked: the row
+		// written before the panic is found in the registry.
+		wantNuked bool
+	}{
+		{seam: seamWorktree},
+		{seam: seamRoster, wantNuked: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.seam, func(t *testing.T) {
+			// Arrange: panickedCreate.
+
+			// Act.
+			f, _, _, _ := panickedCreate(t, tc.seam)
+
+			// Assert.
+			if len(f.db.putJobs) != 1 {
+				t.Fatalf("put jobs = %+v, want the one creation job", f.db.putJobs)
+			}
+			id := f.db.putJobs[0].Workspace
+			if _, left := f.db.jobs[id]; left && !tc.wantNuked {
+				t.Fatalf("jobs = %+v, want the creation job of %s removed", f.db.jobs, id)
+			}
+			if _, left := f.db.workspaces[id]; left {
+				t.Fatalf("workspaces = %+v, want no registration of %s left", f.db.workspaces, id)
+			}
+			nuked := len(f.git.nuked) == 1 && f.git.nuked[0].Branch == "panicked-create"
+			if nuked != tc.wantNuked || (tc.wantNuked && !slices.Contains(f.db.forgotten, id)) {
+				t.Fatalf("nuked = %+v, forgotten = %v; want the registered workspace nuked %v", f.git.nuked, f.db.forgotten, tc.wantNuked)
+			}
+		})
+	}
+}
+
+func TestACreateThatPanicsIsRecordedWithItsIdentityAndStack(t *testing.T) {
+	// Arrange: panickedCreate.
+
+	// Act.
+	f, ticket, _, _ := panickedCreate(t, seamRoster)
+
+	// Assert.
+	got := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate, Message: saidCreatePanicked})
+	if len(got) != 1 {
+		t.Fatalf("want one ERROR %s record %q, got %+v", opCreate, saidCreatePanicked, f.log.logger.Records())
+	}
+	record := got[0]
+	stack, _ := record.Context["stack"].(string)
+	switch {
+	case record.Context["create_id"] != string(ticket.ID()) || record.Context["name"] != "panicked-create":
+		t.Fatalf("record = %+v, want the create %s named panicked-create", record.Context, ticket.ID())
+	case record.Context["panic"] != createPanicValue:
+		t.Fatalf("record = %+v, want the panic %q", record.Context, createPanicValue)
+	case !strings.Contains(stack, "SetRegistry"):
+		t.Fatalf("stack = %q, want the panicking frames", stack)
+	}
+}
+
+func TestAJoinerOfACreateThatPanickedIsAnsweredFailed(t *testing.T) {
+	// Arrange.
+	f, _, _, joined := panickedCreate(t, seamRoster)
+
+	// Act.
+	_, err := f.verbs.RunCreate(context.Background(), joined)
+
+	// Assert.
+	var panicked *CreatePanicError
+	if !joined.Joined() || !errors.As(err, &panicked) || panicked.Value != createPanicValue {
+		t.Fatalf("joined = %v, RunCreate = %v; want the joined create answered with its panic", joined.Joined(), err)
+	}
+}
+
+func TestARequestAfterACreatePanickedDoesNotJoinIt(t *testing.T) {
+	// Arrange.
+	f, ticket, _, _ := panickedCreate(t, seamRoster)
+	spec := ticket.Spec()
+
+	// Act.
+	again := f.verbs.EnterCreate(spec)
+
+	// Assert.
+	if again.Joined() || again.ID() == ticket.ID() {
+		t.Fatalf("the later request joined %s, want a fresh create", again.ID())
+	}
+}

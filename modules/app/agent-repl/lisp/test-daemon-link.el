@@ -98,6 +98,7 @@
          (agent-repl-link--ending-conn nil)
          (agent-repl-link--primary-ended nil)
          (agent-repl-link--shared-handover nil)
+         (agent-repl-link--promotions 0)
          (agent-repl-link-drain nil)
          (agent-repl-link--surfaced-faults (make-hash-table :test #'equal))
          (agent-repl-link-drain-segment nil)
@@ -1102,6 +1103,41 @@ Nothing goes down: the daemon that accepts the address next is promoted."
       ;; Assert
       (should (equal (cdr (assq :promote agent-repl-test-link--hooks))
                      (list conn successor))))))
+
+(ert-deftest agent-repl-test-link-promotion-counts-the-promotion-epoch ()
+  "Each promotion counts the epoch up, so work begun earlier can tell it passed."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (= 1 (agent-repl-link-promotions))))))
+
+(ert-deftest agent-repl-test-link-promote-hook-reads-the-new-promotion-epoch ()
+  "The epoch is counted BEFORE the promote hooks, so a walk they start reads it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (seen nil))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      (add-hook 'agent-repl-link-promote-functions
+                (lambda (_old _new) (setq seen (agent-repl-link-promotions))))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (equal seen 1)))))
+
+(ert-deftest agent-repl-test-link-a-plain-link-down-counts-no-promotion ()
+  "A link that went down with no successor promoted nothing."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (= 0 (agent-repl-link-promotions))))))
 
 (ert-deftest agent-repl-test-link-promote-hook-runs-before-the-old-close ()
   "A consumer must never be handed a NEW that is already closed underneath it."

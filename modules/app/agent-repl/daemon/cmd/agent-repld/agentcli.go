@@ -556,15 +556,12 @@ func (c *cliCall) arrangedRepositoryOf(ref *workspacev1.WorkspaceRef) (*agentrep
 	return nil, c.failed("the sidebar arrangement holds no repository %s (%s)", repository.GetId(), repository.GetDir())
 }
 
-// answer prints an rpc's answer and answers the command's exit.
-func answer[Res any](c *cliCall, resp *connect.Response[Res], err error) int {
-	return answerDescribed(c, resp, err, func(*Res) (string, error) { return "the daemon refused", nil })
-}
-
-// answerDescribed is answer whose refusal line on stderr is WHY's sentence
-// for the refused answer, so the reason reaches a caller that reads only
-// stderr. A refusal WHY has no sentence for is a bug: it is reported as one,
-// and the command still exits refused.
+// answerDescribed prints an rpc's answer and answers the command's exit. Its
+// refusal line on stderr is WHY's sentence for the refused answer, so the
+// reason reaches a caller that reads only stderr. A refusal WHY has no
+// sentence for is a bug: it is reported as one, and the command still exits
+// refused. It is the only way a verb answers: every call site names the
+// describer of its rpc's error, so no refusal is ever said without its reason.
 func answerDescribed[Res any](c *cliCall, resp *connect.Response[Res], err error, why func(*Res) (string, error)) int {
 	if errors.Is(err, errDryRun) {
 		return exitSuccess
@@ -831,7 +828,9 @@ func workspaceCreate(c *cliCall, args []string) int {
 	}
 	req.Placement = placed
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.CreateWorkspaceResponse) (string, error) {
+		return describeCreateRefusal(msg.GetError())
+	})
 }
 
 // createPlacement reads -subsection, -new-subsection and -gather: nil when
@@ -974,7 +973,9 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 		ContextOrigin: &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Fork{Fork: &agentreplv1.WorkspaceContextOriginFork{Workspace: forkRef}}},
 		Form:          &agentreplv1.CreateWorkspaceRequest_AsyncMerge{AsyncMerge: async}}
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.CreateWorkspaceResponse) (string, error) {
+		return describeCreateRefusal(msg.GetError())
+	})
 }
 
 // workspaceArg parses a command of one workspace and answers it.
@@ -1075,13 +1076,17 @@ func workspaceSet(c *cliCall, args []string) int {
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspaceHidden(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref,
 				Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}}}))
-			return answer(c, resp, err)
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceHiddenResponse) (string, error) {
+				return describeHiddenRefusal(named, msg.GetError())
+			})
 		})
 	case *shown:
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspaceHidden(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref,
 				Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Show{Show: &agentreplv1.SetWorkspaceHiddenShow{}}}))
-			return answer(c, resp, err)
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceHiddenResponse) (string, error) {
+				return describeHiddenRefusal(named, msg.GetError())
+			})
 		})
 	}
 	if *priority != "" {
@@ -1091,7 +1096,9 @@ func workspaceSet(c *cliCall, args []string) int {
 		}
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspacePriority(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspacePriorityRequest{Workspace: ref, Priority: level}))
-			return answer(c, resp, err)
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspacePriorityResponse) (string, error) {
+				return describePriorityRefusal(named, msg.GetError())
+			})
 		})
 	}
 	if *parent != "" || *topLevel || *landsInto != "" {
@@ -1120,7 +1127,9 @@ func workspaceSet(c *cliCall, args []string) int {
 	if *name != "" {
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspaceName(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: ref, Name: *name}))
-			return answer(c, resp, err)
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceNameResponse) (string, error) {
+				return describeNameRefusal(named, msg.GetError())
+			})
 		})
 	}
 	if *remoteControl != "" {
@@ -1130,7 +1139,9 @@ func workspaceSet(c *cliCall, args []string) int {
 		}
 		calls = append(calls, func() int {
 			resp, err := c.client.UpdateRemoteControlMode(c.ctx, connect.NewRequest(req))
-			return answer(c, resp, err)
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.UpdateRemoteControlModeResponse) (string, error) {
+				return describeRemoteControlRefusal(named, msg.GetError())
+			})
 		})
 	}
 	if *queueBypass != "" || *bypassContext != "" {
@@ -1140,7 +1151,9 @@ func workspaceSet(c *cliCall, args []string) int {
 		}
 		calls = append(calls, func() int {
 			resp, err := c.client.UpdateQueueBypassMode(c.ctx, connect.NewRequest(req))
-			return answer(c, resp, err)
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.UpdateQueueBypassModeResponse) (string, error) {
+				return describeQueueBypassRefusal(named, msg.GetError())
+			})
 		})
 	}
 	if *oneShot || *notOneShot || *await != "" || *notAwaiting {
@@ -1165,13 +1178,17 @@ func workspaceSet(c *cliCall, args []string) int {
 			calls = append(calls, func() int {
 				resp, err := c.client.SetWorkspaceCorrespondence(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceCorrespondenceRequest{Workspace: ref, Requester: requester,
 					Mark: &agentreplv1.SetWorkspaceCorrespondenceRequest_Awaiting{Awaiting: &agentreplv1.SetWorkspaceCorrespondenceAwaiting{Awaited: awaited}}}))
-				return answer(c, resp, err)
+				return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceCorrespondenceResponse) (string, error) {
+					return describeCorrespondenceRefusal(named, msg.GetError())
+				})
 			})
 		case *notAwaiting:
 			calls = append(calls, func() int {
 				resp, err := c.client.SetWorkspaceCorrespondence(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceCorrespondenceRequest{Workspace: ref, Requester: requester,
 					Mark: &agentreplv1.SetWorkspaceCorrespondenceRequest_Clear{Clear: &agentreplv1.SetWorkspaceCorrespondenceClear{}}}))
-				return answer(c, resp, err)
+				return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceCorrespondenceResponse) (string, error) {
+					return describeCorrespondenceRefusal(named, msg.GetError())
+				})
 			})
 		}
 	}
@@ -1209,7 +1226,7 @@ func originatorFlag(spelled string) (*agentreplv1.WorkspaceOriginator, bool) {
 func workspaceSummary(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	text := fs.String("text", "", "the summary: one imperative sentence of at most fifteen words")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -1220,7 +1237,9 @@ func workspaceSummary(c *cliCall, args []string) int {
 		return c.usageFailed("-text names the summary")
 	}
 	resp, err := c.client.SetWorkspaceSummary(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref, Summary: *text}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceSummaryResponse) (string, error) {
+		return describeSummaryRefusal(named, msg.GetError())
+	})
 }
 
 // workspaceLink changes one of a workspace's links, the topbar summary's
@@ -1239,7 +1258,7 @@ func workspaceLink(c *cliCall, args []string) int {
 	var show []string
 	fs.Var(repeatedFlag{values: &show, noun: "url"}, "show", "a url the menu shows; repeat it for each, at most five")
 	clear := fs.Bool("clear", false, "remove every link")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -1251,7 +1270,9 @@ func workspaceLink(c *cliCall, args []string) int {
 		return c.usageFailed("%s", problem)
 	}
 	resp, err := c.client.ChangeWorkspaceLinks(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ChangeWorkspaceLinksResponse) (string, error) {
+		return describeLinksRefusal(named, msg.GetError())
+	})
 }
 
 // linkSet is workspaceLink's set flags.
@@ -1424,7 +1445,7 @@ func workspaceFinished(c *cliCall, args []string) int {
 
 func workspaceOpen(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -1434,13 +1455,15 @@ func workspaceOpen(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.OpenWorkspace(c.ctx, connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref, OpId: key}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.OpenWorkspaceResponse) (string, error) {
+		return describeOpenRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceClose(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -1449,12 +1472,16 @@ func workspaceClose(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.CloseWorkspace(c.ctx, connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref, Requester: requester}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.CloseWorkspaceResponse) (string, error) {
+		return describeCloseRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceKill(c *cliCall, args []string) int {
 	return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.KillWorkspaceResponse], error) {
 		return c.client.KillWorkspace(c.ctx, connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: ref}))
+	}, func(ws string, msg *agentreplv1.KillWorkspaceResponse) (string, error) {
+		return describeKillRefusal(ws, msg.GetError())
 	})
 }
 
@@ -1462,6 +1489,8 @@ func workspaceKill(c *cliCall, args []string) int {
 func workspaceSelect(c *cliCall, args []string) int {
 	return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.SelectWorkspaceResponse], error) {
 		return c.client.SelectWorkspace(c.ctx, connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref}))
+	}, func(ws string, msg *agentreplv1.SelectWorkspaceResponse) (string, error) {
+		return describeSelectRefusal(ws, msg.GetError())
 	})
 }
 
@@ -1471,12 +1500,14 @@ func workspaceSelect(c *cliCall, args []string) int {
 func workspaceRestart(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	whenIdle := fs.Bool("when-idle", false, "restart once the workspace is idle, interrupting nothing")
-	ref, ok := c.onlyWorkspace(fs, stateDir, args)
+	named, ref, ok := c.onlyWorkspace(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
 	resp, err := c.client.RestartWorkspace(c.ctx, connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ref, WhenIdle: *whenIdle}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.RestartWorkspaceResponse) (string, error) {
+		return describeRestartRefusal(named, msg.GetError())
+	})
 }
 
 // workspacePark parks WS's session as the keep-alive cycle parks one, or with
@@ -1485,6 +1516,8 @@ func workspacePark(c *cliCall, args []string) int {
 	if !slices.Contains(args, "-all") {
 		return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.ParkWorkspaceResponse], error) {
 			return c.client.ParkWorkspace(c.ctx, connect.NewRequest(&agentreplv1.ParkWorkspaceRequest{Workspace: ref}))
+		}, func(ws string, msg *agentreplv1.ParkWorkspaceResponse) (string, error) {
+			return describeParkRefusal(ws, msg.GetError())
 		})
 	}
 	fs, stateDir := c.flags()
@@ -1509,7 +1542,10 @@ func workspacePark(c *cliCall, args []string) int {
 	for _, row := range rosterwalk.OpenRows(roster) {
 		ref := row.GetRow().GetWorkspace().GetWorkspace()
 		resp, err := c.client.ParkWorkspace(c.ctx, connect.NewRequest(&agentreplv1.ParkWorkspaceRequest{Workspace: ref}))
-		if code := answer(c, resp, err); code > exit {
+		code := answerDescribed(c, resp, err, func(msg *agentreplv1.ParkWorkspaceResponse) (string, error) {
+			return describeParkRefusal(row.GetRow().GetName().GetText(), msg.GetError())
+		})
+		if code > exit {
 			exit = code
 		}
 	}
@@ -1523,7 +1559,7 @@ func workspaceInterrupt(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	allAgents := fs.Bool("all-agents", false, "stop every live detached agent instead of the turn")
 	confirmAgents := fs.Bool("confirm-agents", false, "stop the live agents along with the turn")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -1536,43 +1572,48 @@ func workspaceInterrupt(c *cliCall, args []string) int {
 		req.Target = &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}}
 	}
 	resp, err := c.client.Interrupt(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.InterruptResponse) (string, error) {
+		return describeInterruptRefusal(named, msg.GetError())
+	})
 }
 
 // onWorkspace runs a verb that names one workspace and takes nothing else:
 // it resolves the workspace from ARGS, refuses anything after it, and answers
-// CALL's reply to the ref. Every such verb is this, so none parses its
-// workspace on its own.
-func onWorkspace[Res any](c *cliCall, args []string, call func(*workspacev1.WorkspaceRef) (*connect.Response[Res], error)) int {
+// CALL's reply to the ref, a refusal said by WHY about the workspace as the
+// caller named it. Every such verb is this, so none parses its workspace on
+// its own.
+func onWorkspace[Res any](c *cliCall, args []string, call func(*workspacev1.WorkspaceRef) (*connect.Response[Res], error), why func(string, *Res) (string, error)) int {
 	fs, stateDir := c.flags()
-	ref, ok := c.onlyWorkspace(fs, stateDir, args)
+	named, ref, ok := c.onlyWorkspace(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
 	resp, err := call(ref)
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *Res) (string, error) {
+		return why(named, msg)
+	})
 }
 
 // onlyWorkspace parses ARGS against FS for a verb that names one workspace
 // and nothing after it, refusing anything after it. It is onWorkspace's parse,
 // shared by a verb that also takes flags of its own.
-func (c *cliCall) onlyWorkspace(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, bool) {
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+func (c *cliCall) onlyWorkspace(fs *flag.FlagSet, stateDir *string, args []string) (string, *workspacev1.WorkspaceRef, bool) {
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
-		return nil, false
+		return "", nil, false
 	}
 	if len(rest) != 0 {
 		c.usageFailed("the command names its workspace and nothing after it")
-		return nil, false
+		return "", nil, false
 	}
-	return ref, true
+	return named, ref, true
 }
 
 func workspaceCompact(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	instructions := fs.String("instructions", "", "what the summary keeps")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -1585,17 +1626,21 @@ func workspaceCompact(c *cliCall, args []string) int {
 		req.Instructions = &agentreplv1.CompactWorkspaceInstructions{Text: *instructions}
 	}
 	resp, err := c.client.CompactWorkspace(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.CompactWorkspaceResponse) (string, error) {
+		return describeCompactRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceStatus(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
 	resp, err := c.client.GetWorkspaceStatus(c.ctx, connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ref}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.GetWorkspaceStatusResponse) (string, error) {
+		return describeStatusRefusal(named, msg.GetError())
+	})
 }
 
 // defaultFindLimit is how many workspaces `workspace find` answers unless
@@ -1685,7 +1730,9 @@ func workspaceFind(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.FindWorkspacesResponse) (string, error) {
+		return describeFindRefusal(msg.GetError())
+	})
 }
 
 // parseWhen reads a time flag: an age counted back from NOW (a Go duration
@@ -1765,7 +1812,9 @@ func workspacePlace(c *cliCall, args []string) int {
 			Change: &agentreplv1.ArrangeSidebarRequest_CreateAgentSubsection{CreateAgentSubsection: &agentreplv1.ArrangeCreateAgentSubsection{
 				CreatedBy: creator, Name: *newName, Workspaces: refs,
 			}}}))
-		return answer(c, resp, err)
+		return answerDescribed(c, resp, err, func(msg *agentreplv1.ArrangeSidebarResponse) (string, error) {
+			return describeArrangeRefusal(msg.GetError())
+		})
 	}
 	arranged, ok := c.arrangedRepositoryOf(refs[0])
 	if !ok {
@@ -1782,7 +1831,9 @@ func workspacePlace(c *cliCall, args []string) int {
 			Into:       &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: subsection},
 			At:         &agentreplv1.ArrangePlaceWorkspaces_End{End: &agentreplv1.ArrangeEnd{}},
 		}}}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ArrangeSidebarResponse) (string, error) {
+		return describeArrangeRefusal(msg.GetError())
+	})
 }
 
 // subsectionNamed answers the ref of ARRANGED's one subsection named NAME,
@@ -1849,7 +1900,9 @@ func workspaceList(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
 	if err != nil || resp.Msg.GetError() != nil {
-		return answer(c, resp, err)
+		return answerDescribed(c, resp, err, func(msg *agentreplv1.FindWorkspacesResponse) (string, error) {
+			return describeFindRefusal(msg.GetError())
+		})
 	}
 	complete := resp.Msg.GetSuccess().GetComplete()
 	if complete == nil {
@@ -1891,7 +1944,7 @@ var allNoticeEvents = lifecycleEventsName + "," + wsm.AllWorkspaceEvents().Strin
 func workspaceSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	events := fs.String("events", "", "comma-separated: "+strings.ReplaceAll(allNoticeEvents, ",", ", ")+"; none means "+lifecycleEventsName+" (landed, closed, deployed, evicted, cold_gated)")
-	followed, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, followed, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -1904,7 +1957,9 @@ func workspaceSubscribe(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.SubscribeWorkspace(c.ctx, connect.NewRequest(&agentreplv1.SubscribeWorkspaceRequest{Subscriber: subscriber, Followed: followed, Events: wanted}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubscribeWorkspaceResponse) (string, error) {
+		return describeWorkspaceSubscribeRefusal(subscriber.GetDir(), named, msg.GetError())
+	})
 }
 
 // parseNoticeEvents reads workspace subscribe's -events: nothing for an
@@ -1937,7 +1992,9 @@ func workspaceUnsubscribe(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.UnsubscribeWorkspace(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribeWorkspaceRequest{Subscriber: subscriber, Followed: followed}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UnsubscribeWorkspaceResponse) (string, error) {
+		return describeWorkspaceUnsubscribeRefusal(subscriber.GetDir(), msg.GetError())
+	})
 }
 
 // pullRequestEvents are the -events spellings of pr-subscribe: each event
@@ -1960,7 +2017,7 @@ func workspacePullRequestSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	pr := fs.String("pr", "", "the pull request: a url, #N in the workspace's repository, or OWNER/REPO#N")
 	events := fs.String("events", allPullRequestEvents, "comma-separated: "+strings.ReplaceAll(allPullRequestEvents, ",", ", "))
-	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -1981,7 +2038,9 @@ func workspacePullRequestSubscribe(c *cliCall, args []string) int {
 		req.PullRequest = &agentreplv1.SubscribePullRequestRequest_Ref{Ref: prwatch.RefProto(key)}
 	}
 	resp, err := c.client.SubscribePullRequest(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubscribePullRequestResponse) (string, error) {
+		return describePullRequestSubscribeRefusal(named, msg.GetError())
+	})
 }
 
 // pullRequestFlag reads a -pr naming a pull request exactly: a url or
@@ -1999,7 +2058,7 @@ func pullRequestFlag(text string) (*agentreplv1.PullRequestRef, string) {
 func workspacePullRequestUnsubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	pr := fs.String("pr", "", "the pull request: a url or OWNER/REPO#N")
-	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -2008,17 +2067,21 @@ func workspacePullRequestUnsubscribe(c *cliCall, args []string) int {
 		return c.usageFailed("%s", problem)
 	}
 	resp, err := c.client.UnsubscribePullRequest(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribePullRequestRequest{Subscriber: subscriber, PullRequest: ref}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UnsubscribePullRequestResponse) (string, error) {
+		return describePullRequestUnsubscribeRefusal(named, msg.GetError())
+	})
 }
 
 func workspacePullRequestSubscriptions(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
 	resp, err := c.client.ListPullRequestSubscriptions(c.ctx, connect.NewRequest(&agentreplv1.ListPullRequestSubscriptionsRequest{Subscriber: subscriber}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ListPullRequestSubscriptionsResponse) (string, error) {
+		return describePullRequestSubscriptionsRefusal(named, msg.GetError())
+	})
 }
 
 // workspaceGithubQueueSubscribe subscribes WS's agent to a GitHub merge
@@ -2028,7 +2091,7 @@ func workspaceGithubQueueSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	repository := fs.String("repository", "", "the repository as OWNER/REPO; the workspace's own when unset")
 	branch := fs.String("branch", "", "the branch whose queue is followed; the repository's default branch when unset")
-	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -2045,13 +2108,15 @@ func workspaceGithubQueueSubscribe(c *cliCall, args []string) int {
 		req.Branch = branch
 	}
 	resp, err := c.client.SubscribeGithubMergeQueue(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubscribeGithubMergeQueueResponse) (string, error) {
+		return describeGithubQueueSubscribeRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceGithubQueueUnsubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	queue := fs.String("queue", "", "the queue as OWNER/REPO@BRANCH")
-	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -2060,17 +2125,21 @@ func workspaceGithubQueueUnsubscribe(c *cliCall, args []string) int {
 		return c.usageFailed("-queue is OWNER/REPO@BRANCH, not %q", *queue)
 	}
 	resp, err := c.client.UnsubscribeGithubMergeQueue(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribeGithubMergeQueueRequest{Subscriber: subscriber, MergeQueue: prwatch.QueueRefProto(key)}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UnsubscribeGithubMergeQueueResponse) (string, error) {
+		return describeGithubQueueUnsubscribeRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceGithubQueueSubscriptions(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, subscriber, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
 	resp, err := c.client.ListGithubMergeQueueSubscriptions(c.ctx, connect.NewRequest(&agentreplv1.ListGithubMergeQueueSubscriptionsRequest{Subscriber: subscriber}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ListGithubMergeQueueSubscriptionsResponse) (string, error) {
+		return describeGithubQueueSubscriptionsRefusal(named, msg.GetError())
+	})
 }
 
 // workspacePullRequestComment posts a comment on a pull request for WS,
@@ -2081,7 +2150,7 @@ func workspacePullRequestComment(c *cliCall, args []string) int {
 	body := fs.String("body", "", "the comment's markdown")
 	bodyFile := fs.String("body-file", "", "a file holding the comment's markdown")
 	inReplyTo := fs.Uint64("in-reply-to", 0, "a line comment's id: the comment is a reply in its thread")
-	ws, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ws, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -2106,7 +2175,9 @@ func workspacePullRequestComment(c *cliCall, args []string) int {
 		req.Placement = &agentreplv1.CommentOnPullRequestRequest_Reply{Reply: &agentreplv1.CommentOnPullRequestReply{InReplyToCommentId: *inReplyTo, Markdown: markdown}}
 	}
 	resp, err := c.client.CommentOnPullRequest(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.CommentOnPullRequestResponse) (string, error) {
+		return describeCommentRefusal(named, msg.GetError())
+	})
 }
 
 // workspaceNotify posts a desktop banner attributed to WS: titled by WS's
@@ -2115,7 +2186,7 @@ func workspacePullRequestComment(c *cliCall, args []string) int {
 // any other.
 func workspaceNotify(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ws, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ws, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -2123,7 +2194,9 @@ func workspaceNotify(c *cliCall, args []string) int {
 		return c.usageFailed("the command names the banner's text, once")
 	}
 	resp, err := c.client.NotifyWorkspace(c.ctx, connect.NewRequest(&agentreplv1.NotifyWorkspaceRequest{Workspace: ws, Message: rest[0]}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.NotifyWorkspaceResponse) (string, error) {
+		return describeNotifyRefusal(named, msg.GetError())
+	})
 }
 
 // workspacePassGate passes WS's standing cold gate by a Haiku compaction of
@@ -2132,7 +2205,7 @@ func workspaceNotify(c *cliCall, args []string) int {
 // pay the cold read or clear the context.
 func workspacePassGate(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -2145,7 +2218,9 @@ func workspacePassGate(c *cliCall, args []string) int {
 	}
 	req := &agentreplv1.PassColdGateRequest{Workspace: ref, Requester: asker}
 	resp, err := c.client.PassColdGate(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.PassColdGateResponse) (string, error) {
+		return describePassColdGateRefusal(named, msg.GetError())
+	})
 }
 
 // ---- merge-queue ---------------------------------------------------------------
@@ -2190,7 +2265,9 @@ func queueStatus(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.GetMergeQueueStatus(c.ctx, connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{Repository: scope}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.GetMergeQueueStatusResponse) (string, error) {
+		return describeQueueStatusRefusal(msg.GetError())
+	})
 }
 
 // queuedArg answers the merge a queue verb names: `here`, the calling
@@ -2202,7 +2279,7 @@ func queueStatus(c *cliCall, args []string) int {
 // the name off the roster could address no async merge at all (2026-10-22:
 // `merge-queue move-down pt3-sentences` answered "the daemon's roster holds no
 // workspace named" while the queue listed it waiting).
-func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
+func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (string, *workspacev1.WorkspaceRef, []string, bool) {
 	return c.mergeArg(fs, stateDir, args, "in any queue", "in the queues", func(queue *agentreplv1.MergeQueueStatus) []namedMerge {
 		var out []namedMerge
 		for _, entry := range queue.GetEntries() {
@@ -2215,7 +2292,7 @@ func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (
 // offQueueArg answers the merge off its queue a requeue or discard names:
 // `here`, or a merge's NAME as the queues list it off the queue
 // (agentrepl.v1.MergeQueueStatus.off_queue), which must name exactly one.
-func (c *cliCall) offQueueArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
+func (c *cliCall) offQueueArg(fs *flag.FlagSet, stateDir *string, args []string) (string, *workspacev1.WorkspaceRef, []string, bool) {
 	return c.mergeArg(fs, stateDir, args, "off any queue", "off the queues", func(queue *agentreplv1.MergeQueueStatus) []namedMerge {
 		var out []namedMerge
 		for _, off := range queue.GetOffQueue() {
@@ -2235,23 +2312,23 @@ type namedMerge struct {
 // calling workspace's own merge, or a NAME, matched against the merges LIST
 // reads off every queue's status, which must name exactly one. NONE and MANY
 // say in the failure where no merge, or more than one, was found.
-func (c *cliCall) mergeArg(fs *flag.FlagSet, stateDir *string, args []string, none, many string, list func(*agentreplv1.MergeQueueStatus) []namedMerge) (*workspacev1.WorkspaceRef, []string, bool) {
+func (c *cliCall) mergeArg(fs *flag.FlagSet, stateDir *string, args []string, none, many string, list func(*agentreplv1.MergeQueueStatus) []namedMerge) (string, *workspacev1.WorkspaceRef, []string, bool) {
 	positionals, ok := c.targetArgs(fs, stateDir, args, "merge")
 	if !ok {
-		return nil, nil, false
+		return "", nil, nil, false
 	}
 	name := positionals[0]
 	if name == here {
 		ref, ok := c.calling()
-		return ref, positionals[1:], ok
+		return name, ref, positionals[1:], ok
 	}
 	resp, err := c.client.GetMergeQueueStatus(c.ctx, connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{}))
 	if err != nil {
-		return nil, nil, c.failed("read the merge queues: %v", err)
+		return "", nil, nil, c.failed("read the merge queues: %v", err)
 	}
 	success := resp.Msg.GetSuccess()
 	if success == nil {
-		return nil, nil, c.failed("the daemon refused to read the merge queues: %v", resp.Msg.GetResult())
+		return "", nil, nil, c.failed("the daemon refused to read the merge queues: %v", resp.Msg.GetResult())
 	}
 	var found []*workspacev1.WorkspaceRef
 	for _, queue := range success.GetQueues() {
@@ -2263,11 +2340,11 @@ func (c *cliCall) mergeArg(fs *flag.FlagSet, stateDir *string, args []string, no
 	}
 	switch len(found) {
 	case 0:
-		return nil, nil, c.failed("no merge %s is named %q", none, name)
+		return "", nil, nil, c.failed("no merge %s is named %q", none, name)
 	case 1:
-		return found[0], positionals[1:], true
+		return name, found[0], positionals[1:], true
 	}
-	return nil, nil, c.failed("%d merges %s are named %q", len(found), many, name)
+	return "", nil, nil, c.failed("%d merges %s are named %q", len(found), many, name)
 }
 
 // queueRequeue puts a merge that left its queue without landing back in line
@@ -2279,7 +2356,7 @@ func queueRequeue(c *cliCall, args []string) int {
 	part := fs.String("version-part", "", "minor or patch, only for a merge whose request recorded no version increment")
 	line := fs.String("changelog-line", "", "the version tag's changelog line, with -version-part")
 	model := fs.String("model", "", "the model the merge's session resumes under, from its login's catalog")
-	ref, rest, ok := c.offQueueArg(fs, stateDir, args)
+	named, ref, rest, ok := c.offQueueArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -2303,14 +2380,16 @@ func queueRequeue(c *cliCall, args []string) int {
 		req.Model = &conversationv1.AgentModel{Name: *model}
 	}
 	resp, err := c.client.RequeueMerge(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.RequeueMergeResponse) (string, error) {
+		return describeRequeueRefusal(named, msg.GetError())
+	})
 }
 
 // queueDiscard ends a merge's request standing off its queue; an async
 // merge's merge workspace closes with it.
 func queueDiscard(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.offQueueArg(fs, stateDir, args)
+	named, ref, rest, ok := c.offQueueArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -2319,36 +2398,46 @@ func queueDiscard(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.DiscardMerge(c.ctx, connect.NewRequest(&agentreplv1.DiscardMergeRequest{Workspace: ref, Requester: requester}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.DiscardMergeResponse) (string, error) {
+		return describeDiscardRefusal(named, msg.GetError())
+	})
 }
 
 func queueDequeue(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.queuedArg(fs, stateDir, args)
+	named, ref, rest, ok := c.queuedArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
-	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{
+	return c.updateMergeQueue(named, &agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref}}})
 }
 
 // updateMergeQueue sends one merge-queue action, naming the calling workspace
 // as its requester: the one way every queue verb asks, so none can act on a
-// queue without the daemon recording who asked.
-func (c *cliCall) updateMergeQueue(req *agentreplv1.UpdateMergeQueueRequest) int {
+// queue without the daemon recording who asked. NAMED is the merge the action
+// names, as the caller named it, which a refusal is said about; empty for an
+// action that names none (a pause, a resume, a mediation), whose refusal is
+// said about the requester.
+func (c *cliCall) updateMergeQueue(named string, req *agentreplv1.UpdateMergeQueueRequest) int {
 	requester, ok := c.requester(false)
 	if !ok {
 		return exitFailure
 	}
 	req.Requester = requester
+	if named == "" {
+		named = requester.GetWorkspace().GetWorkspace().GetDir()
+	}
 	resp, err := c.client.UpdateMergeQueue(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UpdateMergeQueueResponse) (string, error) {
+		return describeUpdateQueueRefusal(named, msg.GetError())
+	})
 }
 
 func queueMove(up bool) func(c *cliCall, args []string) int {
 	return func(c *cliCall, args []string) int {
 		fs, stateDir := c.flags()
-		ref, rest, ok := c.queuedArg(fs, stateDir, args)
+		named, ref, rest, ok := c.queuedArg(fs, stateDir, args)
 		if !ok || len(rest) != 0 {
 			return exitFailure
 		}
@@ -2356,7 +2445,7 @@ func queueMove(up bool) func(c *cliCall, args []string) int {
 		if up {
 			req.Action = &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: ref}}
 		}
-		return c.updateMergeQueue(req)
+		return c.updateMergeQueue(named, req)
 	}
 }
 
@@ -2380,7 +2469,7 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		if pause {
 			req.Action = &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: scope, Hard: hard, ToLand: toLand}}
 		}
-		return c.updateMergeQueue(req)
+		return c.updateMergeQueue("", req)
 	}
 }
 
@@ -2402,7 +2491,7 @@ func queueReleaseEscalation(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation{
+	return c.updateMergeQueue("", &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation{
 		ReleaseEscalation: &agentreplv1.UpdateMergeQueueReleaseEscalation{Repository: scope}}})
 }
 
@@ -2429,7 +2518,7 @@ func queueGiveUp(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_GiveUp{
+	return c.updateMergeQueue("", &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_GiveUp{
 		GiveUp: &agentreplv1.UpdateMergeQueueGiveUp{Workspace: ref, Reason: *reason}}})
 }
 
@@ -2473,7 +2562,7 @@ func queueMediation(c *cliCall, args []string) int {
 		if !c.dial(*stateDir) {
 			return exitFailure
 		}
-		return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_IgnoredRecords{IgnoredRecords: change}})
+		return c.updateMergeQueue("", &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_IgnoredRecords{IgnoredRecords: change}})
 	}
 	m := &agentreplv1.UpdateMergeQueueMediation{Summary: *summary}
 	if positionals[0] == "dispatch" && *withProblems {
@@ -2515,7 +2604,7 @@ func queueMediation(c *cliCall, args []string) int {
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
-	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: m}})
+	return c.updateMergeQueue("", &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: m}})
 }
 
 // readProblems reads a decision's problems from IN: a JSON list of
@@ -2557,7 +2646,9 @@ func queueSubscribe(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.SubscribeMergeQueue(c.ctx, connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{Subscriber: subscriber, Repository: scope}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubscribeMergeQueueResponse) (string, error) {
+		return describeQueueSubscribeRefusal(subscriber.GetDir(), msg.GetError())
+	})
 }
 
 func queueUnsubscribe(c *cliCall, args []string) int {
@@ -2575,7 +2666,9 @@ func queueUnsubscribe(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.UnsubscribeMergeQueue(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribeMergeQueueRequest{Subscriber: subscriber, Repository: scope}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UnsubscribeMergeQueueResponse) (string, error) {
+		return describeQueueUnsubscribeRefusal(subscriber.GetDir(), msg.GetError())
+	})
 }
 
 // ---- editor --------------------------------------------------------------------
@@ -2598,7 +2691,9 @@ func editorEval(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.EvaluateInEditor(c.ctx, connect.NewRequest(&agentreplv1.EvaluateInEditorRequest{Workspace: ref, Text: positionals[0]}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.EvaluateInEditorResponse) (string, error) {
+		return describeEvalRefusal(*workspaceName, msg.GetError())
+	})
 }
 
 // ---- runtime -------------------------------------------------------------------
@@ -2631,7 +2726,9 @@ func runtimeDeployHold(c *cliCall, args []string) int {
 	}
 	req.Repository = scope
 	resp, err := c.client.UpdateDeployHold(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UpdateDeployHoldResponse) (string, error) {
+		return describeDeployHoldRefusal(msg.GetError())
+	})
 }
 
 // repositoryRegister registers the repository PATH is inside with agent-repl,
@@ -2666,7 +2763,9 @@ func repositoryRegister(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.RegisterRepository(c.ctx, connect.NewRequest(&agentreplv1.RegisterRepositoryRequest{Path: filepath.Clean(path)}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.RegisterRepositoryResponse) (string, error) {
+		return describeRegisterRefusal(path, msg.GetError())
+	})
 }
 
 // runtimePruneStorage runs the daemon's storage sweep now. -preview asks the
@@ -2686,7 +2785,9 @@ func runtimePruneStorage(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.PruneStorage(c.ctx, connect.NewRequest(&agentreplv1.PruneStorageRequest{DryRun: *preview}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.PruneStorageResponse) (string, error) {
+		return describePruneRefusal(msg.GetError())
+	})
 }
 
 // runtimeReapWorktrees runs the daemon's landed-worktree reaper now. -preview
@@ -2709,7 +2810,9 @@ func runtimeReapWorktrees(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.ReapWorktrees(c.ctx, connect.NewRequest(&agentreplv1.ReapWorktreesRequest{DryRun: *preview, Force: *force}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ReapWorktreesResponse) (string, error) {
+		return describeReapRefusal(msg.GetError())
+	})
 }
 
 // runtimeRollOutLanding is a deploy hook's call. -daemon dials the daemon
@@ -2737,7 +2840,9 @@ func runtimeRollOutLanding(c *cliCall, args []string) int {
 		req.Deploy = &agentreplv1.DeployLedger{Ledger: *deploy}
 	}
 	resp, err := c.client.RollOutLanding(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.RollOutLandingResponse) (string, error) {
+		return describeRollOutRefusal(*deploy, msg.GetError())
+	})
 }
 
 func runtimeHealth(c *cliCall, args []string) int {

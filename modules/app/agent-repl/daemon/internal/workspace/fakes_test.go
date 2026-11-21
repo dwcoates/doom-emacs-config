@@ -2873,6 +2873,9 @@ type fakeSidebar struct {
 	refuseSelection bool
 	// openOwned records every SetOpenOwnedPullRequest call, in order.
 	openOwned []openOwnedTold
+	// panicOnce, when set, is what the next SetRegistry panics with, as a
+	// roster invariant does; it is cleared as it is raised.
+	panicOnce any
 }
 
 // openOwnedTold is one SetOpenOwnedPullRequest call.
@@ -2895,9 +2898,16 @@ type revivingEdge struct {
 
 func (s *fakeSidebar) SetRegistry(reg sidebar.Registry) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.registries = append(s.registries, reg)
-	s.calls = append(s.calls, "registry")
+	raise := s.panicOnce
+	s.panicOnce = nil
+	if raise == nil {
+		s.registries = append(s.registries, reg)
+		s.calls = append(s.calls, "registry")
+	}
+	s.mu.Unlock()
+	if raise != nil {
+		panic(raise)
+	}
 }
 
 func (s *fakeSidebar) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID, stamp sidebar.SelectStamp) {

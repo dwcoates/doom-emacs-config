@@ -219,7 +219,8 @@ who race against a teardown."
            (extra (split-window main)))
       ;; Predicate: every window EXCEPT the originally selected one.
       (agent-repl-window--delete-where
-       (lambda (w) (not (eq w main))))
+       (lambda (w) (not (eq w main)))
+       :caller "test" :predicate-name "every window but main")
       (should (window-live-p main))
       (should-not (window-live-p extra)))))
 
@@ -249,7 +250,8 @@ heuristics may refuse to split."
             ;; main windows would be undeletable as the last main) so
             ;; we target specifically.
             (agent-repl-window--delete-where
-             (lambda (w) (or (eq w extra) (eq w side))))
+             (lambda (w) (or (eq w extra) (eq w side)))
+             :caller "test" :predicate-name "extra or side")
             (should-not (window-live-p extra))
             (should (window-live-p side)))
         (when (window-live-p side) (delete-window side))
@@ -268,7 +270,8 @@ that genuinely wants a single-panel frame)."
             (should (window-live-p side))
             (agent-repl-window--delete-where
              (lambda (w) (eq w side))
-             :skip-side-windows nil)
+             :skip-side-windows nil
+             :caller "test" :predicate-name "side")
             (should-not (window-live-p side)))
         (when (window-live-p side) (delete-window side))
         (kill-buffer side-buf)))))
@@ -284,7 +287,8 @@ it — so the sweep must skip it categorically rather than attempt and warn."
       ;; Treat EXTRA as the minibuffer window; PREDICATE matches ONLY it.
       (cl-letf (((symbol-function 'window-minibuffer-p)
                  (lambda (&optional w) (eq w extra))))
-        (let ((deleted (agent-repl-window--delete-where (lambda (w) (eq w extra)))))
+        (let ((deleted (agent-repl-window--delete-where (lambda (w) (eq w extra))
+                                                        :caller "test" :predicate-name "extra")))
           (should (window-live-p extra))   ; excluded, not deleted
           (should-not deleted))))))         ; nothing swept
 
@@ -296,7 +300,8 @@ caller can verify the sweep was non-empty."
            (extra (split-window main))
            (deleted
             (agent-repl-window--delete-where
-             (lambda (w) (eq w extra)))))
+             (lambda (w) (eq w extra))
+             :caller "test" :predicate-name "extra")))
       (should (equal deleted (list extra)))
       (should-not (window-live-p extra)))))
 
@@ -307,7 +312,8 @@ and returns an empty list."
     (let* ((main (selected-window))
            (extra (split-window main))
            (deleted
-            (agent-repl-window--delete-where (lambda (_w) nil))))
+            (agent-repl-window--delete-where (lambda (_w) nil)
+                                             :caller "test" :predicate-name "nothing")))
       (should (null deleted))
       (should (window-live-p main))
       (should (window-live-p extra)))))
@@ -702,7 +708,8 @@ window--delete-where: could not delete' message."
               ;; it as the frame's main window.  We want the sweep to
               ;; recognize that and stay silent.
               (agent-repl-window--delete-where
-               (lambda (win) (eq (window-buffer win) main-buf)))
+               (lambda (win) (eq (window-buffer win) main-buf))
+               :caller "test" :predicate-name "main-buf")
               (should-not captured)))
         (when (window-live-p side-win) (delete-window side-win))
         (kill-buffer side-buf)
@@ -729,11 +736,74 @@ naturally."
                              (push s captured))
                            (apply orig-message fmt args)))))
               (agent-repl-window--delete-where
-               (lambda (win) (eq win other-win)))
+               (lambda (win) (eq win other-win))
+               :caller "test" :predicate-name "other-win")
               (should captured)))
         (when (window-live-p other-win)
           (ignore-errors (delete-window other-win)))
         (kill-buffer other-buf)))))
+
+;;;; ---- delete-where: every record names its sweep ----
+
+(ert-deftest agent-repl-window-test-delete-where-unnamed-sweep-fails-hard ()
+  "A sweep that does not name its caller and predicate is refused."
+  (agent-repl-window-test--with-temp-frame
+    (let ((fatals nil))
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+        ;; Act
+        (should-error (agent-repl-window--delete-where (lambda (_w) nil)))
+        ;; Assert
+        (should (string-search "window--delete-where: unnamed sweep caller=nil predicate=nil"
+                               (car fatals)))))))
+
+(ert-deftest agent-repl-window-test-delete-where-failure-names-caller-predicate-and-buffer ()
+  "A failed delete is warned naming the sweep, its predicate and the window\='s buffer.
+2026-10-26: \"Deletion failed\" on an `*agent-frontend-...*' window named
+neither the caller nor the predicate."
+  (agent-repl-window-test--with-temp-frame
+    (let* ((other-buf (generate-new-buffer " *test-named-sweep*"))
+           (other-win (split-window (selected-window)))
+           (warns nil))
+      (set-window-buffer other-win other-buf)
+      (unwind-protect
+          (cl-letf (((symbol-function 'delete-window)
+                     (lambda (&rest _) (error "Deletion failed")))
+                    ((symbol-function 'agent-repl--warn)
+                     (agent-repl-test--record-into warns)))
+            ;; Act
+            (agent-repl-window--delete-where
+             (lambda (win) (eq win other-win))
+             :caller "sync-panels" :predicate-name "orphaned panel")
+            ;; Assert
+            (should (seq-some
+                     (lambda (text)
+                       (string-search
+                        "could not delete caller=sync-panels predicate=orphaned panel"
+                        text))
+                     warns))
+            (should (seq-some (lambda (text) (string-search "buffer= *test-named-sweep*" text))
+                              warns)))
+        (when (window-live-p other-win)
+          (ignore-errors (delete-window other-win)))
+        (kill-buffer other-buf)))))
+
+(ert-deftest agent-repl-window-test-delete-where-begin-names-caller-and-predicate ()
+  "The sweep\='s first record names who asked and what it matches."
+  (agent-repl-window-test--with-temp-frame
+    (let ((logs nil))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (agent-repl-test--record-into logs)))
+        ;; Act
+        (agent-repl-window--delete-where (lambda (_w) nil)
+                                         :caller "clear-main-area-for-panels"
+                                         :predicate-name "every window but the selected one"))
+      ;; Assert
+      (should (seq-some
+               (lambda (text)
+                 (string-search
+                  "begin caller=clear-main-area-for-panels predicate=every window but the selected one"
+                  text))
+               logs)))))
 
 ;;;; ---- Panel-finder log routing ----
 

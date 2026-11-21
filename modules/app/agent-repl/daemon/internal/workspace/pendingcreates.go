@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -258,7 +259,11 @@ func (v *verbs) EnterCreate(spec CreateSpec) *CreateTicket {
 func (v *verbs) RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Workspace, error) {
 	entry := ticket.entry
 	if entry == nil {
-		return v.attemptCreate(ctx, ticket.spec)
+		created, err := v.attemptCreate(ctx, ticket.spec)
+		if panicked := recordCreatePanic(v.deps.Log.Global().With(dlog.Context{"repo_dir": ticket.spec.RepoDir}), ticket.spec, err); panicked != nil {
+			panic(panicked.Value)
+		}
+		return created, err
 	}
 	log := v.deps.Log.Global().With(dlog.Context{"create_id": string(entry.id), "repo_dir": entry.spec.RepoDir})
 	if ticket.joined {
@@ -287,8 +292,64 @@ func (v *verbs) RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Worksp
 	spec := entry.spec
 	spec.Progress = entryProgress{set: &v.pending, entry: entry}
 	created, err := v.attemptCreate(ctx, spec)
+	panicked := recordCreatePanic(log, spec, err)
 	result := v.settle(ctx, log, entry, created, err)
+	// THE PANIC IS RAISED AGAIN once the create is undone (create's traps)
+	// and its outcome answered, so every caller joined to it has its answer
+	// and nothing it built is left behind. A panic is an invariant violation:
+	// the daemon does not carry on as if the create had merely failed.
+	if panicked != nil {
+		panic(panicked.Value)
+	}
 	return result.created, result.err
+}
+
+// CreatePanicError is a create that PANICKED: the panic, trapped at the
+// create's undo points (trapCreatePanic), as the create's error, so its undo
+// runs and its pending create is answered failed. RunCreate then records it
+// and panics again with Value; every caller joined to the create is answered
+// with this error.
+type CreatePanicError struct {
+	// Value is what the create panicked with.
+	Value any
+	// Stack is the panicking goroutine's stack, taken where it was trapped.
+	Stack []byte
+}
+
+func (e *CreatePanicError) Error() string {
+	return fmt.Sprintf("the create panicked: %v", e.Value)
+}
+
+// trapCreatePanic, deferred directly, turns a panic in the create into ERR,
+// a *CreatePanicError, so the undo deferred before it runs as for any
+// failure. It traps nothing when the create is not panicking.
+func trapCreatePanic(err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	trapped := &CreatePanicError{Value: r, Stack: debug.Stack()}
+	if *err != nil {
+		*err = errors.Join(trapped, *err)
+		return
+	}
+	*err = trapped
+}
+
+// recordCreatePanic records, on LOG, a create whose ERR holds a panic it
+// trapped, naming the create, the panic and its stack, and answers the panic;
+// nil, recording nothing, for any other outcome.
+func recordCreatePanic(log dlog.Logger, spec CreateSpec, err error) *CreatePanicError {
+	var panicked *CreatePanicError
+	if !errors.As(err, &panicked) {
+		return nil
+	}
+	log.Error(opCreate, "the create panicked: it was undone and answered failed, and the daemon panics again", dlog.Context{
+		"name": spec.Name, "one_shot": spec.OneShot, "requester": ids.Optional(spec.Requester),
+		"parent": ids.Optional(spec.Parent), "fork_from": ids.Optional(spec.ForkFrom),
+		"panic": fmt.Sprint(panicked.Value), "stack": string(panicked.Stack), "outcome_error": err.Error(),
+	})
+	return panicked
 }
 
 // attemptCreate is one run of the create.

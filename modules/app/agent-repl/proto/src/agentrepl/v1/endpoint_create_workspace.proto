@@ -919,12 +919,22 @@ message CreateWorkspaceNameHeld {
 // workspace left behind is deleted by the daemon's landed-branch sweep once
 // its tip is verified landed, after which the same name is free again; a
 // branch the sweep keeps names, in the daemon's log, why it was kept.
+//
+// WHOSE BRANCH IT IS decides whether the refusal is a fault: a branch a landed
+// workspace left behind (`landed_workspace` set) is one the sweep kept, which
+// the repository's main worktree is asked to investigate; a branch no
+// registered workspace ever held (`landed_workspace` unset) was cut by hand,
+// and naming it is the caller's own input to correct, reported to no one.
 message CreateWorkspaceNameBranchExists {
   // The branch the supplied name resolves to.
   string branch = 1;
   // The commit the existing branch points at, so the caller can tell which
   // work it holds before deleting or reusing it.
   string head = 2;
+  // The landed workspace whose name or branch the existing branch is, which
+  // the landed-branch sweep kept; unset when no registered workspace holds
+  // it, a branch cut by hand.
+  workspace.v1.WorkspaceRef landed_workspace = 3;
 }
 // A supplied name (CreateWorkspaceStandard.name) that breaks the naming rule.
 // The name is the workspace's branch, its worktree directory and its tab

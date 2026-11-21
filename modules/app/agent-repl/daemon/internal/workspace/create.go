@@ -89,6 +89,12 @@ func reportCreateStage(spec CreateSpec, stage CreateStage) {
 }
 
 func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, err error) {
+	// A PANIC IN THE CREATE IS TRAPPED AT EVERY UNDO (trapCreatePanic): each
+	// undo below is deferred with a trap after it, so the panic becomes the
+	// create's error before the undo reads it, and the undo runs as it does
+	// for any failure. RunCreate records it, answers the create failed, and
+	// panics again. This first trap covers what panics before any undo.
+	defer trapCreatePanic(&err)
 	global := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "one_shot": spec.OneShot})
 
 	if err := v.validateCreate(global, spec); err != nil {
@@ -369,6 +375,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 			err = v.dropCreationJob(context.WithoutCancel(ctx), global, err, workspaceID, branch)
 		}
 	}()
+	defer trapCreatePanic(&err)
 
 	// A MERGE WORKSPACE IS CUT AT ITS FORK HEAD, never at wherever its
 	// requester's branch has moved to since: the head it records is then
@@ -416,10 +423,25 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// create is reported as failed, so a worktree it left would be a
 	// workspace nobody asked for and nothing would ever finish.
 	defer func() {
-		if err != nil {
-			err = v.unmaterialize(context.WithoutCancel(ctx), global, err, repoDir, worktreeDir, branch, made)
+		if err == nil {
+			return
 		}
+		// A PANIC CAN CUT A REGISTRATION AFTER ITS ROW IS WRITTEN (the roster's
+		// republish inside Register), before `made` is set: the registry,
+		// not `made`, then says whether the workspace was registered, so the
+		// undo nukes the row rather than leaving it naming a worktree it
+		// destroyed.
+		if made == nil && errors.As(err, new(*CreatePanicError)) {
+			registered, lookupErr := v.registeredByPanickedCreate(context.WithoutCancel(ctx), global, workspaceID, branch)
+			if lookupErr != nil {
+				err = errors.Join(err, lookupErr)
+				return
+			}
+			made = registered
+		}
+		err = v.unmaterialize(context.WithoutCancel(ctx), global, err, repoDir, worktreeDir, branch, made)
 	}()
+	defer trapCreatePanic(&err)
 
 	// THE WORKTREE EXISTS; everything from here to the terminal outcome —
 	// registration, a fork's record, the session bring-up and the
@@ -589,6 +611,28 @@ func (v *verbs) unmaterialize(ctx context.Context, log dlog.Logger, cause error,
 	}
 	log.Info(opCreate, "undid the failed create: its worktree, branch and registration are gone", fields)
 	return cause
+}
+
+// registeredByPanickedCreate answers the workspace a create that PANICKED
+// after materializing its worktree registered under ID, read from the
+// registry; nil when the panic came before the row was written. A read that
+// fails is recorded and answered, and the caller undoes nothing, since it
+// cannot tell what was built.
+func (v *verbs) registeredByPanickedCreate(ctx context.Context, log dlog.Logger, id wsm.WorkspaceID, branch string) (*wsm.Workspace, error) {
+	record, err := v.deps.DB.Workspace(ctx, id)
+	if errors.Is(err, wsm.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		log.Error(opCreate, "could not read whether the panicked create registered its workspace; nothing it built is undone", dlog.Context{
+			"workspace": string(id), "branch": branch, "cause": err.Error(),
+		})
+		return nil, fmt.Errorf("create %q: read the panicked create's registration: %w", branch, err)
+	}
+	log.Info(opCreate, "the panicked create had registered its workspace; the undo nukes it", dlog.Context{
+		"workspace": string(id), "branch": branch,
+	})
+	return &record, nil
 }
 
 // dropCreationJob removes the creation job of a create that failed with CAUSE
@@ -854,10 +898,11 @@ func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, nam
 	// its request already checked the name against every registered
 	// workspace and every branch, and reserved it (ClaimMergeName).
 	if holder == "" {
-		if err := v.refuseHeldLocked(ctx, log, branch); err != nil {
+		landed, err := v.refuseHeldLocked(ctx, log, branch)
+		if err != nil {
 			return "", nil, err
 		}
-		if err := v.refuseBranchExistsLocked(ctx, log, repoDir, branch); err != nil {
+		if err := v.refuseBranchExistsLocked(ctx, log, repoDir, branch, landed); err != nil {
 			return "", nil, err
 		}
 	}
@@ -922,27 +967,36 @@ func (v *verbs) releaseMergedHolder(ctx context.Context, log dlog.Logger, branch
 // workspace that has not landed holds it as its name or its branch
 // (ArmNameHeld, naming that workspace and whether it is open). A closed
 // holder holding only merged work is retired instead, freeing the name
-// (releaseMergedHolder). The caller holds v.names.mu.
-func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch string) error {
+// (releaseMergedHolder). Otherwise it answers the LANDED workspace that last
+// held it, nil when none did, which tells refuseBranchExistsLocked whose an
+// existing branch is. The caller holds v.names.mu.
+func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch string) (*wsm.Workspace, error) {
 	records, err := v.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		log.Error(opCreate, "could not read the registered workspaces to check the supplied name", dlog.Context{"branch": branch, "cause": err.Error()})
-		return fmt.Errorf("create %q: list the registered workspaces: %w", branch, err)
+		return nil, fmt.Errorf("create %q: list the registered workspaces: %w", branch, err)
 	}
+	var landed *wsm.Workspace
 	for _, record := range records {
-		if record.MergedAt != nil || (record.Name != branch && record.Branch != branch) {
+		if record.Name != branch && record.Branch != branch {
+			continue
+		}
+		if record.MergedAt != nil {
+			if landed == nil || record.MergedAt.After(*landed.MergedAt) {
+				landed = &record
+			}
 			continue
 		}
 		if record.Closed && !record.Current {
 			released, err := v.releaseMergedHolder(ctx, log, branch, record)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if released {
 				continue
 			}
 		}
-		return refuseWith(log, "CreateWorkspace", ArmNameHeld,
+		return nil, refuseWith(log, "CreateWorkspace", ArmNameHeld,
 			fmt.Sprintf("the name %q is already workspace %s's name or branch, and it has not landed", branch, record.ID), false,
 			map[string]any{
 				"branch":    branch,
@@ -950,15 +1004,19 @@ func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch st
 				"open":      !record.Closed,
 			})
 	}
-	return nil
+	return landed, nil
 }
 
 // refuseBranchExistsLocked refuses BRANCH, a supplied name's branch no
 // registered unlanded workspace holds (refuseHeldLocked ran first), when the
 // repository at REPODIR already has it: `git worktree add -b` would refuse it
-// with an untyped failure. The refusal (ArmNameBranchExists) names the branch
-// and the commit it points at. The caller holds v.names.mu.
-func (v *verbs) refuseBranchExistsLocked(ctx context.Context, log dlog.Logger, repoDir, branch string) error {
+// with an untyped failure. The refusal (ArmNameBranchExists) names the branch,
+// the commit it points at and LANDED, the landed workspace that last held the
+// name, when one did: a branch it left is one the landed-branch sweep kept (a
+// fault the main worktree investigates), and a branch with none was cut by
+// hand (the caller's own input; nameBranchCutByHand). The caller holds
+// v.names.mu.
+func (v *verbs) refuseBranchExistsLocked(ctx context.Context, log dlog.Logger, repoDir, branch string, landed *wsm.Workspace) error {
 	fields := dlog.Context{"branch": branch, "repo_dir": repoDir}
 	exists, err := v.deps.Git.BranchExists(ctx, repoDir, branch)
 	if err != nil {
@@ -973,9 +1031,29 @@ func (v *verbs) refuseBranchExistsLocked(ctx context.Context, log dlog.Logger, r
 		log.Error(opCreate, "could not resolve the existing branch of the supplied name", dlog.WithCause(fields, err))
 		return fmt.Errorf("create %q: resolve the existing branch: %w", branch, err)
 	}
+	armFields := map[string]any{"branch": branch, "head": head}
+	if landed == nil {
+		return refuseWith(log, "CreateWorkspace", ArmNameBranchExists,
+			fmt.Sprintf("the name %q is already a branch of the repository, at %s, which no registered workspace ever held: it was cut by hand", branch, head), false,
+			armFields)
+	}
+	armFields[nameBranchLandedField] = landed.Ref()
 	return refuseWith(log, "CreateWorkspace", ArmNameBranchExists,
-		fmt.Sprintf("the name %q is already a branch of the repository, at %s, and no workspace that has not landed holds it", branch, head), false,
-		map[string]any{"branch": branch, "head": head})
+		fmt.Sprintf("the name %q is already a branch of the repository, at %s, left by workspace %s, which landed; the landed-branch sweep kept it", branch, head, landed.ID), false,
+		armFields)
+}
+
+// nameBranchLandedField is the ArmNameBranchExists field naming the landed
+// workspace that left the branch (CreateWorkspaceNameBranchExists
+// .landed_workspace).
+const nameBranchLandedField = "landed_workspace"
+
+// nameBranchCutByHand reports whether a name_branch_exists REFUSAL names a
+// branch no registered workspace ever held, so it was cut by hand: naming it
+// is the caller's own input, not a fault.
+func nameBranchCutByHand(refusal *Refusal) bool {
+	_, landed := refusal.Fields[nameBranchLandedField]
+	return !landed
 }
 
 // forkNamingConversation answers the summary of the conversation a FORK
