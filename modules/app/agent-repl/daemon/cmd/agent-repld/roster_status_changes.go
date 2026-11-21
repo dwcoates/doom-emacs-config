@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
@@ -22,10 +21,7 @@ type statusChangeWriter interface {
 // ERROR; the roster already ranks by the live instant, and only the next
 // daemon's ranking misses it.
 func rosterStatusChanges(db statusChangeWriter, log dlog.Logger) sidebar.StatusChangeSink {
-	return func(ws ids.WorkspaceID, at time.Time) {
-		if err := db.SetStatusChangedAt(context.Background(), ws, at); err != nil {
-			log.Error("daemon.cmd.roster_status_changes", "could not keep the workspace's status change instant durable",
-				dlog.Context{"workspace": string(ws), "status_changed_at": at, "cause": err.Error()})
-		}
-	}
+	return rosterWrite(log, "daemon.cmd.roster_status_changes", "could not keep the workspace's status change instant durable",
+		db.SetStatusChangedAt,
+		func(at time.Time) dlog.Context { return dlog.Context{"status_changed_at": at} })
 }

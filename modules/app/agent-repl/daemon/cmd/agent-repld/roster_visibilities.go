@@ -18,10 +18,9 @@ type visibilityWriter interface {
 // failed write is recorded at ERROR; the roster already gates on the live
 // value, and only the next boot reads the stale one.
 func rosterVisibility(db visibilityWriter, log dlog.Logger) func(ws ids.WorkspaceID, v wsm.Visibility) {
-	return func(ws ids.WorkspaceID, v wsm.Visibility) {
-		if err := db.SetVisibilities(context.Background(), map[wsm.WorkspaceID]wsm.Visibility{ws: v}); err != nil {
-			log.Error("daemon.cmd.roster_visibilities", "could not keep the workspace's visibility durable",
-				dlog.Context{"workspace": string(ws), "visibility": v.String(), "cause": err.Error()})
-		}
-	}
+	return rosterWrite(log, "daemon.cmd.roster_visibilities", "could not keep the workspace's visibility durable",
+		func(ctx context.Context, ws ids.WorkspaceID, v wsm.Visibility) error {
+			return db.SetVisibilities(ctx, map[wsm.WorkspaceID]wsm.Visibility{ws: v})
+		},
+		func(v wsm.Visibility) dlog.Context { return dlog.Context{"visibility": v.String()} })
 }
