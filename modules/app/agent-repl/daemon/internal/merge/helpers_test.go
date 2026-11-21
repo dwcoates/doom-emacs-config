@@ -2954,6 +2954,10 @@ func (q *fakeQueue) ColdGateAnswered(context.Context, ids.WorkspaceID, promptque
 // OnVendorServes is a no-op: no merge scenario stands a vendor block.
 func (q *fakeQueue) OnVendorServes(ids.WorkspaceID) {}
 
+// TurnInFlight answers no turn running: no merge scenario reads a click's
+// selection.
+func (q *fakeQueue) TurnInFlight(ids.WorkspaceID) (ids.TurnID, bool) { return "", false }
+
 func (q *fakeQueue) Submit(ctx context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
 	q.mu.Lock()
 	q.submissions = append(q.submissions, sub)
