@@ -6431,14 +6431,12 @@ describe("the repository's subsections and the drag", () => {
     ]).toEqual([expect.stringMatching(/display:\s*none/), expect.stringMatching(/display:\s*none/)]);
   });
 
-  it("indents a subsection's rows one step under its header, through the row indent", () => {
-    expect([
-      declarationsOf("#ws-sidebar .sb-subsection > .rows"),
-      declarationsOf("#ws-sidebar .sb-subsection > .rows > .ws"),
-    ]).toEqual([
-      expect.stringMatching(/--row-indent-parent:\s*var\(--row-indent\)/),
-      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 0\.9rem\)/),
-    ]);
+  it("leaves a subsection's top-level rows unindented under its header", () => {
+    expect(
+      rulesOf(stylesheet).filter(
+        (rule) => rule.selectors.includes(".sb-subsection") && /--row-indent(-parent)?:/.test(rule.declarations),
+      ),
+    ).toEqual([]);
   });
 
   it("lights the subsection a dragged row would join, subtly", () => {
