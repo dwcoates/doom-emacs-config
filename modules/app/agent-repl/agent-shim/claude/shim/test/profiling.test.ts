@@ -10,8 +10,10 @@ import {
   startExitProfile,
   type InspectorPort,
   type ProfilingEvent,
+  type ProfilingLogger,
   type SyncInspectorPort,
 } from "../src/profiling.js";
+import { recordingLogMethod } from "./log-records.js";
 import { LevelWindow, WINDOW_SECONDS } from "../../../logging/ts/level-window.js";
 
 interface Captured {
@@ -20,13 +22,13 @@ interface Captured {
   message: string;
 }
 
-function captureLog(): { log: { info: (f: Record<string, unknown>, m: string) => void; error: (f: Record<string, unknown>, m: string) => void }; records: Captured[] } {
+function captureLog(): { log: ProfilingLogger; records: Captured[] } {
   const records: Captured[] = [];
   return {
     records,
     log: {
-      info: (fields, message) => records.push({ level: "info", fields, message }),
-      error: (fields, message) => records.push({ level: "error", fields, message }),
+      info: recordingLogMethod((fields, message) => records.push({ level: "info", fields, message })),
+      error: recordingLogMethod((fields, message) => records.push({ level: "error", fields, message })),
     },
   };
 }

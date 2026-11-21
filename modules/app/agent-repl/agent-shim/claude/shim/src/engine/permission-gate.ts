@@ -69,7 +69,7 @@ import { updateEntry } from "../store/update-entry.js";
 import type { PermissionModeLike, PermissionResultLike, PermissionUpdateLike, SdkMessage } from "../sdk/types.js";
 import { spawningCallOfMessage } from "../convert/fold-context.js";
 
-const LOGGER = bindLog({ component: "shim-engine-permission", operation: "shim.engine.permission" });
+const LOGGER = bindLog("shim.engine.permission-gate", { component: "shim-engine-permission", operation: "shim.engine.permission" });
 
 /** The vendor's name for the one tool that is a question rather than an act. */
 export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";

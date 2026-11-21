@@ -105,7 +105,7 @@ function isShellTaskId(taskId: string): boolean {
   return taskId.startsWith("b");
 }
 
-const LOGGER = bindLog({ component: "shim-fake", operation: "shim.fake.query" });
+const LOGGER = bindLog("shim.fake.index", { component: "shim-fake", operation: "shim.fake.query" });
 
 export {
   FAKE_ACCOUNT_INFO,
@@ -2031,8 +2031,9 @@ export function createFakeQuery(
       // consumer instead of leaving a turn that never terminates.
       const message = `fake scenario "${scenario.name}" returned without emitting a result`;
       LOGGER.error(
-        { claude_session_id: sessionUuid, turn, scenario: scenario.name, detail: message },
-        message,
+        { claude_session_id: sessionUuid, turn, detail: message },
+        "fake scenario \"{scenario}\" returned without emitting a result",
+        { scenario: scenario.name },
       );
       throw new Error(message);
     }
@@ -2046,7 +2047,8 @@ export function createFakeQuery(
     // ordinary SDK EOF and silently erase the producer failure.
     LOGGER.error(
       { claude_session_id: sessionUuid, cause: err },
-      `fake vendor producer failed: ${err instanceof Error ? err.message : String(err)}`,
+      "fake vendor producer failed: {failure}",
+      { failure: err instanceof Error ? err.message : String(err) },
     );
     out.fail(err);
   });

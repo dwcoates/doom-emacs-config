@@ -36,7 +36,7 @@ import type { HookCallback, HookCallbackMatcher, HookEvent, HookInput, HookJSONO
 import { bindLog } from "../log.js";
 import { AGENT_REPL_PEER_PREFIX } from "../convert/peer.js";
 
-const LOGGER = bindLog({ component: "shim-agent-repl-hooks", operation: "shim.sdk.agent_repl_hooks" });
+const LOGGER = bindLog("shim.sdk.agent-repl-hooks", { component: "shim-agent-repl-hooks", operation: "shim.sdk.agent_repl_hooks" });
 
 /** The vendor's agent-listing tool. */
 export const LIST_AGENTS_TOOL = "ListAgents";

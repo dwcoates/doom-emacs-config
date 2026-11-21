@@ -81,13 +81,13 @@
  * - ONE TIMER, and it exists only while a retry is due at an instant.
  */
 import { create } from "@bufbuild/protobuf";
-import { bindLog } from "../log.js";
+import { bindLog, type LogMessage } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 import type { KeepaliveScheduler } from "./keepalive.js";
 import type { ShimPromptDelivery } from "./shim-prompt.js";
 import { vendorErrorRetryPrompt } from "./vendor-error-retry-prompt.js";
 
-const LOGGER = bindLog({ component: "shim-engine-vendor-error-retry", operation: "shim.engine.vendor_error_retry" });
+const LOGGER = bindLog("shim.engine.vendor-error-retry", { component: "shim-engine-vendor-error-retry", operation: "shim.engine.vendor_error_retry" });
 
 /** How long after a failed turn the next retry is delivered (owner ruling, 2026-10-20). */
 export const VENDOR_ERROR_RETRY_INTERVAL_MS = 30 * 1_000;
@@ -275,7 +275,7 @@ interface Chain {
 /** How a chain that may have promised a retry ends without making it. */
 interface ChainAbandonment {
   /** The record's message. */
-  readonly why: string;
+  readonly why: LogMessage;
   /** Why the retry was never made, stated on the abandonment. */
   readonly cause: string;
   /** The record's level. */
@@ -372,7 +372,7 @@ export class VendorErrorRetry {
     };
     if (!failure.retryable && !failure.usageLimit) {
       if (chain === undefined) return "not_retried";
-      this.end(chain, "the retried turn ended without a failure agent-repl retries", {
+      this.end(chain, LOGGER.message("the retried turn ended without a failure agent-repl retries"), {
         turn_id: turnId,
         outcome: frame.result.case === "failure" ? `failure.${String(frame.result.value.failure.case)}` : "success",
       });
@@ -403,7 +403,7 @@ export class VendorErrorRetry {
   promptSubmitted(turnId: string): void {
     const chain = this.chain;
     if (chain === undefined) return;
-    this.end(chain, "a prompt was submitted; the retry chain yields to it", { turn_id: turnId });
+    this.end(chain, LOGGER.message("a prompt was submitted; the retry chain yields to it"), { turn_id: turnId });
   }
 
   /** Stand down: cancel the timer and abandon the chain. */
@@ -412,7 +412,7 @@ export class VendorErrorRetry {
     this.stopped = true;
     const chain = this.chain;
     if (chain === undefined) return;
-    const why = "the shim is standing down; the failed turn keeps its failure";
+    const why = LOGGER.message("the shim is standing down; the failed turn keeps its failure");
     this.abandon(chain, { why, cause: reason, level: "info", fields: { reason } }, () => this.end(chain, why, { reason }));
   }
 
@@ -568,7 +568,7 @@ export class VendorErrorRetry {
     if (now + VENDOR_ERROR_RETRY_INTERVAL_MS > deadline) {
       this.giveUp(
         chain,
-        "the vendor kept failing the turn for the whole retry window; agent-repl stopped retrying and the turn keeps its failure",
+        LOGGER.message("the vendor kept failing the turn for the whole retry window; agent-repl stopped retrying and the turn keeps its failure"),
         `the next retry would start past the ${String(VENDOR_ERROR_RETRY_WINDOW_MS)}ms window`,
         { retried_for_ms: now - chain.mode.sinceMs, window_ms: VENDOR_ERROR_RETRY_WINDOW_MS },
       );
@@ -609,7 +609,7 @@ export class VendorErrorRetry {
       if (now + VENDOR_ERROR_RETRY_INTERVAL_MS > chain.mode.untilMs) {
         this.giveUp(
           chain,
-          "the vendor kept refusing the turn's usage after the window reset; agent-repl stopped retrying and the turn keeps its failure",
+          LOGGER.message("the vendor kept refusing the turn's usage after the window reset; agent-repl stopped retrying and the turn keeps its failure"),
           `the next retry would start past the ${String(USAGE_LIMIT_RETRY_TAIL_MS)}ms after the ${chain.mode.window.window} window reset`,
           { window: chain.mode.window.window, resets_at_ms: chain.mode.window.resetsAtMs },
         );
@@ -628,7 +628,7 @@ export class VendorErrorRetry {
       this.retryVendorError(chain, failure);
       return;
     }
-    this.end(chain, "the usage-limit failure names no exhausted allowance to wait for; the turn is not retried", { detail });
+    this.end(chain, LOGGER.message("the usage-limit failure names no exhausted allowance to wait for; the turn is not retried"), { detail });
   }
 
   private arm(chain: Chain, delayMs: number): void {
@@ -656,7 +656,7 @@ export class VendorErrorRetry {
     } catch (err) {
       const cause = err instanceof Error ? err.message : String(err);
       if (this.chain !== chain) return { kind: "ended", detail: cause };
-      const why = "the vendor refused the retry prompt; agent-repl stopped retrying and the turn keeps its failure";
+      const why = LOGGER.message("the vendor refused the retry prompt; agent-repl stopped retrying and the turn keeps its failure");
       this.abandon(chain, { why, cause, level: "error", fields: { attempt } }, () => this.giveUp(chain, why, cause, { attempt }));
       return { kind: "ended", detail: cause };
     }
@@ -682,7 +682,7 @@ export class VendorErrorRetry {
         return { kind: "busy", detail: delivery.detail };
       case "unavailable":
         {
-          const why = "the session cannot take the retry prompt; the failed turn keeps its failure";
+          const why = LOGGER.message("the session cannot take the retry prompt; the failed turn keeps its failure");
           this.abandon(chain, { why, cause: delivery.detail, level: "error", fields: { attempt, detail: delivery.detail } }, () =>
             this.end(chain, why, { attempt, detail: delivery.detail }),
           );
@@ -692,7 +692,7 @@ export class VendorErrorRetry {
   }
 
   /** The chain ran out: ERROR, because the turn's work is left undone. CAUSE says what ran out. */
-  private giveUp(chain: Chain, why: string, cause: string, fields: Record<string, unknown>): void {
+  private giveUp(chain: Chain, why: LogMessage, cause: string, fields: Record<string, unknown>): void {
     this.closeChain(undefined);
     LOGGER.error({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, ...fields }, why);
   }
@@ -714,13 +714,12 @@ export class VendorErrorRetry {
       return;
     }
     this.closeChain({ abandoned: true, failedTurn: promised, cause });
-    LOGGER[level](
-      { chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, failed_turn: promised, abandoned: true, ...fields },
-      why,
-    );
+    const abandoned = { chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, failed_turn: promised, abandoned: true, ...fields };
+    if (level === "error") LOGGER.error(abandoned, why);
+    else LOGGER.info(abandoned, why);
   }
 
-  private end(chain: Chain, why: string, fields: Record<string, unknown>): void {
+  private end(chain: Chain, why: LogMessage, fields: Record<string, unknown>): void {
     this.closeChain(undefined);
     LOGGER.info({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", ...fields }, why);
   }

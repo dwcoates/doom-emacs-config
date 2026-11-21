@@ -26,7 +26,7 @@ import {
   type PersistenceRetryPolicy,
 } from "./persistence.js";
 
-const LOGGER = bindLog({ component: "shim-store-retry", operation: "shim.store.retry" });
+const LOGGER = bindLog("shim.store.retry", { component: "shim-store-retry", operation: "shim.store.retry" });
 
 /**
  * The read half's schedule: the writer's backoff steps, then 3s steps, giving

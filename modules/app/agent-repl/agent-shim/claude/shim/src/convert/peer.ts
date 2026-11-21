@@ -23,7 +23,7 @@ import { peerUpsertKey } from "../store/keys.js";
 import type { FoldContext } from "./fold-context.js";
 import { bookFor } from "./fold-context.js";
 
-const LOGGER = bindLog({ component: "shim-convert-peer", operation: "shim.convert.peer" });
+const LOGGER = bindLog("shim.convert.peer", { component: "shim-convert-peer", operation: "shim.convert.peer" });
 
 /**
  * THE ADDRESS AGENT-REPL'S OWN PEER MESSAGES ARE SENT FROM: an agent's prompt

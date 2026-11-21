@@ -28,7 +28,7 @@ import { settledAt, startedAt } from "../entries.js";
 import { MCP_PREFIX, type PendingCall, type ToolConverter, type ToolEnvironment } from "../tool-calls.js";
 import { failureOf, returnedContent, untypedArguments } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.mcp", {
   component: "shim-convert-tools",
   operation: "shim.convert.tools.mcp",
 });

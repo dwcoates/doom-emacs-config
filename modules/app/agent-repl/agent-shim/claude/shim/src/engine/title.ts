@@ -24,7 +24,7 @@ import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { bindLog } from "../log.js";
 import { lastAiTitle } from "../convert/session-title.js";
 
-const LOGGER = bindLog({ component: "shim-engine-title", operation: "shim.engine.title" });
+const LOGGER = bindLog("shim.engine.title", { component: "shim-engine-title", operation: "shim.engine.title" });
 
 /** One transcript's incremental scan for the vendor's title. */
 export class TranscriptTitleTail {

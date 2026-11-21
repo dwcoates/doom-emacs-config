@@ -120,7 +120,7 @@ import { coverageContext, leftContextCached, type CacheCoverage, type CacheReque
 import type { SendVerdict } from "./sends.js";
 import { spawningCallOfMessage } from "../convert/fold-context.js";
 
-const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
+const LOGGER = bindLog("shim.engine.keepalive", { component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
 
 /**
  * The keep-alive's failed answer for a keep-alive turn whose terminal FRAME is
@@ -1213,7 +1213,7 @@ export class KeepaliveCadence {
       this.stated = statement;
       LOGGER.info(
         { ...anchorContext(anchor), cache_expires_at: new Date(expiresAtMs).toISOString(), interval_ms: this.intervalMs, reason },
-        `no keep-alive is scheduled: ${why}`,
+        "no keep-alive is scheduled: {why}", { why },
       );
     }
     return false;

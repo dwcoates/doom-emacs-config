@@ -26,7 +26,7 @@ import { conversationv1 } from "../proto.js";
 import { transcriptCacheAnchor } from "./keepalive.js";
 import { CACHE_READ_PRICE, CACHE_TTL_1H_MS, CACHE_TTL_5M_MS, CACHE_WRITE_PRICE, isCliSynthesized, type TranscriptFacts } from "./cold.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.engine.vendor-spend", {
   component: "shim-vendor-spend",
   operation: "shim.engine.vendor_spend",
 });

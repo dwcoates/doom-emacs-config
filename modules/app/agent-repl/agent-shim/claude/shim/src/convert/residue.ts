@@ -35,7 +35,7 @@ import type { PersistEntry } from "../store/persistence.js";
 import type { FoldContext } from "./fold-context.js";
 import { residueUpsertKey, streamResidueUpsertKey } from "../store/keys.js";
 
-const LOGGER = bindLog({ component: "shim-convert-residue", operation: "shim.convert.residue" });
+const LOGGER = bindLog("shim.convert.residue", { component: "shim-convert-residue", operation: "shim.convert.residue" });
 
 /**
  * The record entire and verbatim, as a Struct.

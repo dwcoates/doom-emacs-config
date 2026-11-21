@@ -56,7 +56,7 @@ import type {
   SdkUserMessage,
 } from "./types.js";
 
-const LOGGER = bindLog({ component: "shim-real-query", operation: "shim.sdk.real-query" });
+const LOGGER = bindLog("shim.sdk.real-query", { component: "shim-real-query", operation: "shim.sdk.real-query" });
 
 /**
  * THE SHIM RENDERS A PER-TASK STOP, SO AN INTERRUPT ENDS THE TURN AND NOTHING ELSE.
@@ -495,8 +495,8 @@ export function asQueryLike(query: object): QueryLike {
   for (const { member, consequence } of UNDECLARED_MEMBERS) {
     if (typeof (query as Record<string, unknown>)[member] !== "function") {
       LOGGER.error(
-        { cause: `the vendor query's ${member} is not a function`, member },
-        `the vendor query provides no ${member}(); ${consequence}`,
+        { cause: `the vendor query's ${member} is not a function` },
+        "the vendor query provides no {member}(); {consequence}", { member, consequence },
       );
       throw new Error(`the vendor SDK's query no longer provides ${member}()`);
     }

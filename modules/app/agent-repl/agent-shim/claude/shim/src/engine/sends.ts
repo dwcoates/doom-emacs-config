@@ -104,7 +104,7 @@ import type { SdkMessage } from "../sdk/types.js";
 import { commandLifecycleOf, type CommandLifecycle } from "./peer-send.js";
 import { spawningCallOfMessage } from "../convert/fold-context.js";
 
-const LOGGER = bindLog({ component: "shim-engine-sends", operation: "shim.engine.sends" });
+const LOGGER = bindLog("shim.engine.sends", { component: "shim-engine-sends", operation: "shim.engine.sends" });
 
 /**
  * How many sends may be open at once before the ledger refuses another.

@@ -18,13 +18,13 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 
-const LOGGER = bindLog({ component: "shim-convert-ids", operation: "shim.convert.ids" });
+const LOGGER = bindLog("shim.convert.ids", { component: "shim-convert-ids", operation: "shim.convert.ids" });
 
 /** Refuse a vendor identity that is present but empty. */
 function requireVendorValue(value: string, what: string): string {
   if (value === "") {
     const message = `shim identities: ${what} is empty; an identity is never the empty string`;
-    LOGGER.error({ what, detail: message }, message);
+    LOGGER.error({ detail: message }, "shim identities: {what} is empty; an identity is never the empty string", { what });
     throw new Error(message);
   }
   return value;
@@ -84,7 +84,7 @@ export function blockActivityId(
   requireVendorValue(messageId, "the api message id");
   if (!Number.isInteger(blockIndex) || blockIndex < 0) {
     const message = `shim identities: block index ${String(blockIndex)} is not a 0-based integer`;
-    LOGGER.error({ message_id: messageId, block_index: blockIndex, detail: message }, message);
+    LOGGER.error({ message_id: messageId, detail: message }, "shim identities: block index {block_index} is not a 0-based integer", { block_index: blockIndex });
     throw new Error(message);
   }
   return create(conversationv1.AgentActivityIdSchema, { value: `${messageId}:${blockIndex}` });

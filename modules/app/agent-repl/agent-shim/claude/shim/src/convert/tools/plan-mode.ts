@@ -25,7 +25,7 @@ import { prose, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, failureOf, settle, str, strOr } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.plan-mode", {
   component: "shim-convert-plan-mode",
   operation: "shim.convert.tools.plan_mode",
 });

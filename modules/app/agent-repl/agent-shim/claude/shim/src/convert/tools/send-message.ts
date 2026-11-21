@@ -41,7 +41,7 @@ import { subagentId } from "../ids.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, failureOf, obj, str } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.send-message", {
   component: "shim-convert-send-message",
   operation: "shim.convert.send_message",
 });

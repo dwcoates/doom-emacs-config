@@ -23,7 +23,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, failureOf, settle, str, strOr, uint } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.worktree", {
   component: "shim-convert-worktree",
   operation: "shim.convert.tools.worktree",
 });

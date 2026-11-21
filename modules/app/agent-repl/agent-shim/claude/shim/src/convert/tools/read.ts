@@ -39,7 +39,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, failureOf, obj, settle, str, uint } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.read" });
+const LOGGER = bindLog("shim.convert.tools.read", { component: "shim-convert-tools", operation: "shim.convert.tools.read" });
 
 /** The path a read acted on, as the tool resolved it. */
 function readPath(path: string): conversationv1.ReadPath {

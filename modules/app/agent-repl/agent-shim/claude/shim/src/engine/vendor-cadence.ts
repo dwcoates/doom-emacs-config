@@ -22,7 +22,7 @@
 import { performance, type EventLoopUtilization } from "node:perf_hooks";
 import { bindLog } from "../log.js";
 
-const LOGGER = bindLog({ component: "shim-vendor-cadence", operation: "shim.engine.vendor_cadence" });
+const LOGGER = bindLog("shim.engine.vendor-cadence", { component: "shim-vendor-cadence", operation: "shim.engine.vendor_cadence" });
 
 /**
  * The shortest wait on the vendor that is recorded. Inside a clump messages

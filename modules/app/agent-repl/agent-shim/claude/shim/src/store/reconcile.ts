@@ -64,7 +64,7 @@ import { updateEntry } from "./update-entry.js";
 import { readFailure, transportFailure } from "./reader.js";
 import { readWithRetry, type ReadRetryOptions } from "./retry.js";
 
-const LOGGER = bindLog({ component: "shim-store-reconcile", operation: "shim.store.reconcile" });
+const LOGGER = bindLog("shim.store.reconcile", { component: "shim-store-reconcile", operation: "shim.store.reconcile" });
 
 /**
  * The vendor-record coordinate a RECONCILED terminal is keyed by.

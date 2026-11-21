@@ -13,7 +13,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { PlanUsageLike } from "../sdk/types.js";
 
-const LOGGER = bindLog({ component: "shim-convert-plan-usage", operation: "shim.convert.plan_usage" });
+const LOGGER = bindLog("shim.convert.plan-usage", { component: "shim-convert-plan-usage", operation: "shim.convert.plan_usage" });
 
 /** One window as the vendor's answer carries it. */
 type VendorWindow =

@@ -107,7 +107,7 @@ import { awaitAgentByVendorTask, lookupAgentByVendorTask, type VendorTaskAnswer 
 import { lookupPeerDelivery, type PeerDeliveryAnswer } from "./peer-delivery.js";
 import { createReconciler } from "./reconcile.js";
 
-const LOGGER = bindLog({ component: "shim-store-writer", operation: "shim.store.writer" });
+const LOGGER = bindLog("shim.store.writer", { component: "shim-store-writer", operation: "shim.store.writer" });
 
 /** The component name every fault and degraded window from this half carries. */
 const WRITER_COMPONENT = "store-writer";
@@ -485,7 +485,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     if (producer === undefined || producer === "") {
       const message =
         "shim store writer: a row was produced before StartSession named the conversation; write ids would land in a namespace no replay can absorb";
-      LOGGER.error({ detail: message }, message);
+      LOGGER.error({ detail: message }, "shim store writer: a row was produced before StartSession named the conversation; write ids would land in a namespace no replay can absorb");
       throw new PersistenceError("store_unavailable", message);
     }
     return producer;

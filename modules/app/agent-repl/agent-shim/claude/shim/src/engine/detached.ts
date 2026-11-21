@@ -59,7 +59,7 @@ import type {
   SdkTaskUpdatedMessage,
 } from "../sdk/types.js";
 
-const LOGGER = bindLog({ component: "shim-engine-detached", operation: "shim.engine.detached" });
+const LOGGER = bindLog("shim.engine.detached", { component: "shim-engine-detached", operation: "shim.engine.detached" });
 
 /** One live item, as the shim knows it. */
 export interface LiveWorkEntry {

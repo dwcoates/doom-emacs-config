@@ -32,11 +32,11 @@
  */
 import type { SaidContent } from "./said-content.js";
 import { conversationv1, type shimv1 } from "../proto.js";
-import { bindLog } from "../log.js";
+import { bindLog, type LogFields } from "../log.js";
 import { AGENT_REPL_PEER_PREFIX } from "../convert/peer.js";
 import type { SdkMessage } from "../sdk/types.js";
 
-const LOGGER = bindLog({ component: "shim-engine-peer-send", operation: "shim.engine.peer_send" });
+const LOGGER = bindLog("shim.engine.peer-send", { component: "shim-engine-peer-send", operation: "shim.engine.peer_send" });
 
 /** The vendor's permission classes, as a host declares a sender's (sdk.d.ts `fromMode`). */
 export type PeerPermissionClass = "bypass" | "prompting";
@@ -305,7 +305,7 @@ export class PeerAdmissions {
         this.fail(
           uuid,
           `the vendor said neither that it queued nor that it held turn ${turnId}'s message from ${from} within ${this.budgetMs}ms; nothing reached the agent`,
-          "the vendor did not answer a peer send within its admission budget",
+          (fields) => LOGGER.info(fields, "the vendor did not answer a peer send within its admission budget"),
         );
       }, this.budgetMs);
       this.waiting.set(uuid, { turnId, from, sentAtMs: this.nowMs(), resolve, reject, timer });
@@ -323,7 +323,7 @@ export class PeerAdmissions {
   /** The query died: every waiting send is refused, since no frame about it can come. */
   abandonAll(detail: string): void {
     for (const uuid of [...this.waiting.keys()]) {
-      this.fail(uuid, `the vendor query ended before it queued the message: ${detail}`, "a peer send's query ended before the vendor queued it");
+      this.fail(uuid, `the vendor query ended before it queued the message: ${detail}`, (fields) => LOGGER.info(fields, "a peer send's query ended before the vendor queued it"));
     }
   }
 
@@ -353,7 +353,7 @@ export class PeerAdmissions {
         this.fail(
           lifecycle.commandUuid,
           `the vendor ${lifecycle.state} turn ${waiter.turnId}'s message from ${waiter.from} instead of queuing it; nothing reached the agent`,
-          "the vendor did not queue a peer send",
+          (fields) => LOGGER.info(fields, "the vendor did not queue a peer send"),
         );
         return;
     }
@@ -377,7 +377,7 @@ export class PeerAdmissions {
         uuid,
         `the vendor HELD turn ${waiter.turnId}'s message from ${waiter.from} instead of running it: ${holdCauseSentence(hold.cause)}; ` +
           "a held message is dropped unread, so the prompt was not delivered",
-        "the vendor held a peer send instead of queuing it; the StartTurn is refused",
+        (fields) => LOGGER.info(fields, "the vendor held a peer send instead of queuing it; the StartTurn is refused"),
         hold.cause,
       );
       return;
@@ -417,7 +417,8 @@ export class PeerAdmissions {
     waiter.resolve();
   }
 
-  private fail(uuid: string, detail: string, message: string, cause?: string): void {
+  /** Refuse the send of UUID: RECORD writes the caller's own record of why, with the send's fields. */
+  private fail(uuid: string, detail: string, record: (fields: LogFields) => void, cause?: string): void {
     const waiter = this.waiting.get(uuid);
     if (waiter === undefined) return;
     clearTimeout(waiter.timer);
@@ -425,7 +426,7 @@ export class PeerAdmissions {
     this.remember(uuid, waiter.turnId, false);
     // INFO, NOT ERROR: the refusal this rejection becomes is recorded at
     // ERROR once, where the StartTurn is refused (engine/turn.ts).
-    LOGGER.info({ client_uuid: uuid, turn_id: waiter.turnId, from: waiter.from, cause: cause ?? "", detail }, message);
+    record({ client_uuid: uuid, turn_id: waiter.turnId, from: waiter.from, cause: cause ?? "", detail });
     waiter.reject(new PeerNotAdmittedError(detail));
   }
 

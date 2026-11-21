@@ -35,7 +35,7 @@ import { agentActivity, updateFrame } from "./entries.js";
 import type { FoldContext, LastChange } from "./fold-context.js";
 import { residueEntry, residueForMessage, vendorSpecificResidue } from "./residue.js";
 
-const LOGGER = bindLog({ component: "shim-convert-attach", operation: "shim.convert.attachments" });
+const LOGGER = bindLog("shim.convert.attachments", { component: "shim-convert-attach", operation: "shim.convert.attachments" });
 
 /** An attachment record, read loosely before it is typed. */
 export interface AttachmentRecord {

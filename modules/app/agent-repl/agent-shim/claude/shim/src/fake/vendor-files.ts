@@ -44,7 +44,7 @@ import { dirname, join } from "node:path";
 import { cwdSlug, projectDir, transcriptPath } from "../engine/vendor-paths.js";
 import { bindLog, noteSlowWrite } from "../log.js";
 
-const LOGGER = bindLog({ component: "shim-fake", operation: "shim.fake.vendor-files" });
+const LOGGER = bindLog("shim.fake.vendor-files", { component: "shim-fake", operation: "shim.fake.vendor-files" });
 
 /**
  * Append TEXT to the vendor file at PATH: the ONE write every fake vendor file

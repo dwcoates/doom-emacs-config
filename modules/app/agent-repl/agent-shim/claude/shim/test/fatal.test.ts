@@ -8,6 +8,7 @@
  */
 import { writeSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderTemplate } from "../../../logging/ts/logsite.js";
 import { logRecordsSince } from "./log-records.js";
 import { MAIN_FATAL_OPERATION, MAIN_LIFECYCLE_LOGGER, MAIN_LIFECYCLE_OPERATION, reportFatal } from "../src/fatal.js";
 
@@ -138,8 +139,8 @@ describe("reportFatal when its logger itself fails", () => {
         logVerbose: (): void => {},
         with: (): unknown => ({}),
       }),
-      emergencyStderr: (message: string): void => {
-        emergencies.push(message);
+      emergencyStderr: (template: string, values: Readonly<Record<string, unknown>> = {}): void => {
+        emergencies.push(renderTemplate(template, values));
       },
     }));
     const fatal = await import("../src/fatal.js");

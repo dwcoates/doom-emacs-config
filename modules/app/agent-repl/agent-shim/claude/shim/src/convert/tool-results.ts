@@ -38,7 +38,7 @@ import { activityEntry, agentActivity } from "./entries.js";
 import { convertPeerMessage } from "./peer.js";
 import { toolCallActivityId } from "./ids.js";
 
-const LOGGER = bindLog({ component: "shim-convert-results", operation: "shim.convert.results" });
+const LOGGER = bindLog("shim.convert.tool-results", { component: "shim-convert-results", operation: "shim.convert.results" });
 
 /** A user-record content block, read loosely before it is typed. */
 interface RawUserBlock {

@@ -78,7 +78,7 @@ import { createHash } from "node:crypto";
 import { bindLog } from "./log.js";
 
 const COMPONENT = "shim-session-lock";
-const LOGGER = bindLog({ component: COMPONENT, operation: "shim.session-lock.lifecycle" });
+const LOGGER = bindLog("shim.locks", { component: COMPONENT, operation: "shim.session-lock.lifecycle" });
 
 /**
  * The exit code `shim-lock` reserves for "another process already holds this".
@@ -327,7 +327,7 @@ function acquireExclusiveLock(claim: {
   file: string;
   context: Record<string, unknown>;
 }): Promise<LockRelease> {
-  LOGGER.debug({ ...claim.context, platform: process.platform }, `acquiring exclusive shim ${claim.kind} lock`);
+  LOGGER.debug({ ...claim.context, platform: process.platform }, "acquiring exclusive shim {kind} lock", { kind: claim.kind });
   const file = claim.file;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const binary = lockBinaryPath();
@@ -377,7 +377,7 @@ function acquireExclusiveLock(claim: {
       // warn: a defect because the lock holder disappeared while the shim kept running.
       LOGGER.warn(
         { ...claim.context, lock_path: file, cause: err.message },
-        `the ${claim.kind} lock holder's stdin failed; the holder is gone and so is the lock`,
+        "the {kind} lock holder's stdin failed; the holder is gone and so is the lock", { kind: claim.kind },
       );
     });
 
@@ -391,7 +391,7 @@ function acquireExclusiveLock(claim: {
         // warn: a defect because a settled claim's holder raised an error (a failed kill).
         LOGGER.warn(
           { ...claim.context, lock_path: file, lock_binary: binary, cause: err.message },
-          `the ${claim.kind} lock holder raised an error after its claim settled`,
+          "the {kind} lock holder raised an error after its claim settled", { kind: claim.kind },
         );
         return;
       }
@@ -420,7 +420,7 @@ function acquireExclusiveLock(claim: {
         return;
       }
       settle(() => {
-        LOGGER.debug(claim.context, `holding ${claim.kind} lock ${file}`);
+        LOGGER.debug(claim.context, "holding {kind} lock {file}", { kind: claim.kind, file });
         let released = false;
         resolve(async () => {
           if (released) return;
@@ -431,7 +431,7 @@ function acquireExclusiveLock(claim: {
           await exited;
           LOGGER.debug(
             { ...claim.context, lock_path: file, holder_stderr: stderr.trim() },
-            `released exclusive shim ${claim.kind} lock`,
+            "released exclusive shim {kind} lock", { kind: claim.kind },
           );
         });
       });
@@ -464,7 +464,7 @@ function holderClosed(
   if (signal !== null) return holderFailed(claim, binary, file, { kind: "signaled", signal, stderr });
   LOGGER.error(
     { ...claim.context, lock_path: file, lock_binary: binary, holder_stderr: stderr, detail: "a closed child reported neither an exit code nor a signal" },
-    `invariant violated: the ${claim.kind} lock holder closed with neither an exit code nor a signal`,
+    "invariant violated: the {kind} lock holder closed with neither an exit code nor a signal", { kind: claim.kind },
   );
   return new Error(
     `${COMPONENT}: the lock holder ${binary} for the ${claim.kind} lock ${file} closed with neither an exit code nor a signal`,
@@ -493,7 +493,7 @@ function holderFailed(
   // can start on it and nobody is known to own the conversation.
   LOGGER.error(
     { ...claim.context, lock_path: file, lock_binary: binary, how: how.kind, cause: account },
-    `the ${claim.kind} lock holder ${binary} failed: ${account}`,
+    "the {kind} lock holder {binary} failed: {account}", { kind: claim.kind, binary, account },
   );
   return new LockHolderUnavailableError(
     binary,

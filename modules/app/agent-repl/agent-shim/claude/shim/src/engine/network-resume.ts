@@ -75,7 +75,7 @@ import { networkResumePrompt } from "./network-resume-prompt.js";
 import type { SdkMessage } from "../sdk/types.js";
 import { spawningCallOfMessage } from "../convert/fold-context.js";
 
-const LOGGER = bindLog({ component: "shim-engine-network-resume", operation: "shim.engine.network_resume" });
+const LOGGER = bindLog("shim.engine.network-resume", { component: "shim-engine-network-resume", operation: "shim.engine.network_resume" });
 
 /** How often the one probe loop asks whether the API is reachable. FIXED: no backoff. */
 export const NETWORK_RESUME_PROBE_INTERVAL_MS = 5_000;

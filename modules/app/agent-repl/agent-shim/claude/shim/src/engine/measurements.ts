@@ -32,7 +32,7 @@ import { bindLog } from "../log.js";
 import { shimv1 } from "../proto.js";
 import { VendorSpendLedger } from "./vendor-spend.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.engine.measurements", {
   component: "shim-measurements",
   operation: "shim.engine.measurements",
 });

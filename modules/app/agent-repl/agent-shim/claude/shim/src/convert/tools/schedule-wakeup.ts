@@ -20,7 +20,7 @@ import { conversationv1 } from "../../proto.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, big, bool, failureOf, strOr, uint } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.schedule-wakeup", {
   component: "shim-convert-schedule-wakeup",
   operation: "shim.convert.tools.schedule_wakeup",
 });

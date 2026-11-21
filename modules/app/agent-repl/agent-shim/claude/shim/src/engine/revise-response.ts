@@ -21,7 +21,7 @@ import { askSideQuery } from "./side-query.js";
 import { saidContent } from "./said-content.js";
 import type { VendorSpendLedger } from "./vendor-spend.js";
 
-const LOGGER = bindLog({ component: "shim-engine-revise-response", operation: "shim.engine.revise_response" });
+const LOGGER = bindLog("shim.engine.revise-response", { component: "shim-engine-revise-response", operation: "shim.engine.revise_response" });
 
 /** Where the side query's fork ends. THE KIND IS THE OUTCOME. */
 export type RevisionCut =

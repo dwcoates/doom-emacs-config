@@ -139,7 +139,7 @@ import {
 import { TOOL_CONVERTERS } from "./tools/registry.js";
 import { isLaunchReceipt } from "./tools/subagent.js";
 
-const LOGGER = bindLog({ component: "shim-convert-fold", operation: "shim.convert.fold" });
+const LOGGER = bindLog("shim.convert.fold", { component: "shim-convert-fold", operation: "shim.convert.fold" });
 
 /**
  * Everything ONE SDK message produced.

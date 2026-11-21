@@ -25,7 +25,7 @@ import { bindLog } from "../log.js";
 import { readTranscriptFacts, type TranscriptFacts } from "./cold.js";
 import { projectDir } from "./vendor-paths.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.engine.transcripts", {
   component: "shim-engine-transcripts",
   operation: "shim.engine.transcripts",
 });

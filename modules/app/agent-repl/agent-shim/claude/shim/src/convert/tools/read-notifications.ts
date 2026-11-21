@@ -17,7 +17,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { failureOf, resultText, settle } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.read-notifications", {
   component: "shim-convert-read-notifications",
   operation: "shim.convert.tools.read_notifications",
 });

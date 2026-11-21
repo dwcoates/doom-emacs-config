@@ -303,7 +303,7 @@ function resolveFakeMsOverride(
   if (!fake) {
     log.debug(
       { env: variable, value: raw, outcome: `${outcomePrefix}_refused` },
-      `the ${subject} override is honored only under --fake; ignoring it for this real session`,
+      "the {subject} override is honored only under --fake; ignoring it for this real session", { subject },
     );
     return undefined;
   }
@@ -311,13 +311,13 @@ function resolveFakeMsOverride(
   if (!Number.isInteger(parsed) || parsed <= 0) {
     log.debug(
       { env: variable, value: raw, outcome: `${outcomePrefix}_invalid` },
-      `the ${subject} override is not a positive whole number of milliseconds; ignoring it`,
+      "the {subject} override is not a positive whole number of milliseconds; ignoring it", { subject },
     );
     return undefined;
   }
   log.debug(
     { env: variable, value_ms: parsed, outcome: `${outcomePrefix}_applied` },
-    `a fake session took its ${subject} from the environment`,
+    "a fake session took its {subject} from the environment", { subject },
   );
   return parsed;
 }
@@ -663,12 +663,8 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
               code === 0 ? "graceful_stand_down_complete" : "stand_down_with_lost_writes",
             exit_code: code,
           };
-          const message =
-            code === 0
-              ? "stood down cleanly"
-              : "stood down with writes the store never acked; exiting nonzero";
-          if (code === 0) lifecycle.info(fields, message);
-          else lifecycle.error({ ...fields, detail: message }, message);
+          if (code === 0) lifecycle.info(fields, "stood down cleanly");
+          else lifecycle.error({ ...fields, detail: "stood down with writes the store never acked; exiting nonzero" }, "stood down with writes the store never acked; exiting nonzero");
           targets.exit(code);
         } catch (err) {
           // A failed stand-down is still an exit, but NOT a clean one: reporting
@@ -1141,12 +1137,8 @@ export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void>
           outcome: code === 0 ? "session_killed_exit" : "session_killed_exit_lost_writes",
           exit_code: code,
         };
-        const message =
-          code === 0
-            ? "the session was killed over the wire; the process is ending"
-            : "the session was killed with writes the store never acked; exiting nonzero";
-        if (code === 0) deps.lifecycle.info(fields, message);
-        else deps.lifecycle.error({ ...fields, detail: message }, message);
+        if (code === 0) deps.lifecycle.info(fields, "the session was killed over the wire; the process is ending");
+        else deps.lifecycle.error({ ...fields, detail: "the session was killed with writes the store never acked; exiting nonzero" }, "the session was killed with writes the store never acked; exiting nonzero");
       } catch (err) {
         deps.reportFatal(err);
         process.exit(1);

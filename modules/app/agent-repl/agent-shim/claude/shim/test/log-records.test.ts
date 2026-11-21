@@ -51,7 +51,7 @@ describe("logRecordsSince", () => {
     const before = logSinkMark();
 
     // Act.
-    bindLog({ operation: "shim.test.log-records" }).warn({ probe: "value" }, "a record to decode");
+    bindLog("shim.test.log-records", { operation: "shim.test.log-records" }).warn({ probe: "value" }, "a record to decode");
 
     // Assert.
     expect(logRecordsSince(before).map((record) => record[field])).toEqual([want]);
@@ -59,7 +59,7 @@ describe("logRecordsSince", () => {
 
   it("reads nothing when nothing was written since the mark", () => {
     // Arrange.
-    bindLog({ operation: "shim.test.log-records" }).debug({}, "written before the mark");
+    bindLog("shim.test.log-records", { operation: "shim.test.log-records" }).debug({}, "written before the mark");
 
     // Act.
     const records = logRecordsSince(logSinkMark());
@@ -72,7 +72,7 @@ describe("logRecordsSince", () => {
 describe("logRecordsDuring", () => {
   it("returns only the records written while act ran", () => {
     // Arrange.
-    const log = bindLog({ operation: "shim.test.log-records" });
+    const log = bindLog("shim.test.log-records", { operation: "shim.test.log-records" });
     log.debug({}, "outside the window");
 
     // Act.

@@ -17,7 +17,7 @@ import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { failureOf, str } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.show-chess-board", {
   component: "shim-convert-show-chess-board",
   operation: "shim.convert.show_chess_board",
 });

@@ -34,13 +34,13 @@ import {
   unsetOneof,
 } from "./fields.js";
 
-const LOGGER = bindLog({ component: "shim-validate", operation: "shim.service.validate" });
+const LOGGER = bindLog("shim.service.validate.requests", { component: "shim-validate", operation: "shim.service.validate" });
 
 /** Record a refusal once, at the boundary that made it, then rethrow. */
 function refuse(rpc: string, err: unknown): never {
   LOGGER.debug(
-    { rpc, cause: err },
-    `refused a ${rpc} request that violates the validation invariant`,
+    { cause: err },
+    "refused a {rpc} request that violates the validation invariant", { rpc },
   );
   throw err;
 }

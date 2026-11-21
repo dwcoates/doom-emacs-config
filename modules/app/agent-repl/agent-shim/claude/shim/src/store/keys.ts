@@ -31,13 +31,13 @@ import { createHash } from "node:crypto";
 import { bindLog } from "../log.js";
 import type { conversationv1 } from "../proto.js";
 
-const LOGGER = bindLog({ component: "shim-store-keys", operation: "shim.store.keys" });
+const LOGGER = bindLog("shim.store.keys", { component: "shim-store-keys", operation: "shim.store.keys" });
 
 /** Refuse an identity that is present but empty; a key built on one collides with every other. */
 function requireValue(value: string, what: string): string {
   if (value === "") {
     const message = `shim store keys: ${what} is empty; a key built on an empty identity would collide with every other`;
-    LOGGER.error({ what, detail: message }, message);
+    LOGGER.error({ detail: message }, "shim store keys: {what} is empty; a key built on an empty identity would collide with every other", { what });
     throw new Error(message);
   }
   return value;

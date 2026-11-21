@@ -32,7 +32,7 @@ import path from "node:path";
 import { bindLog } from "../log.js";
 import { identityDir } from "./identity.js";
 
-const LOGGER = bindLog({ component: "shim-engine-backup", operation: "shim.engine.backup" });
+const LOGGER = bindLog("shim.engine.backup", { component: "shim-engine-backup", operation: "shim.engine.backup" });
 
 /** How many bytes one compare or append step reads at a time. */
 const CHUNK_BYTES = 1 << 20;

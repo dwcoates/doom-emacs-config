@@ -28,7 +28,7 @@ import { sessionFault } from "../service/failures.js";
 import type { QueryLike } from "../sdk/types.js";
 import type { SessionPushes } from "./pushes.js";
 
-const LOGGER = bindLog({ component: "shim-engine-vendor-probe", operation: "shim.engine.vendor_probe" });
+const LOGGER = bindLog("shim.engine.vendor-probe", { component: "shim-engine-vendor-probe", operation: "shim.engine.vendor_probe" });
 
 /** Where a probe states its health: the session's fault table. */
 export type ProbeHealth = Pick<SessionPushes, "resolveComponent" | "fault">;

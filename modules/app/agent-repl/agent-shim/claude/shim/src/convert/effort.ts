@@ -11,7 +11,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { AppliedSettingsLike, EffortLevelLike } from "../sdk/types.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.effort", {
   component: "shim-convert-effort",
   operation: "shim.convert.effort",
 });

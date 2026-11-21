@@ -37,7 +37,7 @@ import { existsSync, readFileSync, renameSync, statSync, writeFileSync, chmodSyn
 import path from "node:path";
 import { bindLog } from "./log.js";
 
-const LOGGER = bindLog({ component: "shim-trust", operation: "shim.trust" });
+const LOGGER = bindLog("shim.trust", { component: "shim-trust", operation: "shim.trust" });
 
 /** The vendor's per-account config file, relative to an account root. */
 export const VENDOR_CONFIG_FILE = ".claude.json";
@@ -121,8 +121,7 @@ export function ensureWorkspaceTrusted(configDir: string, cwd: string): TrustOut
   writeVendorConfig(file, next, indentOf(raw));
   LOGGER.info(
     { workspace_dir: cwd, trust_root: root, config_file: file },
-    "granted the workspace's repository folder trust under this account root; " +
-      "without it the vendor silently drops the workspace's permission allowlists",
+    "granted the workspace's repository folder trust under this account root; without it the vendor silently drops the workspace's permission allowlists",
   );
   return "granted";
 }

@@ -8204,7 +8204,7 @@ describe("the vendor request the turn runs under", () => {
 
   /** The request_id the logger stamps right now, undefined when it stamps none. */
   function stampedRequestId(): string | undefined {
-    const [record] = logRecordsDuring(() => bindLog({ operation: "shim.test.request-id" }).debug({}, "probe"));
+    const [record] = logRecordsDuring(() => bindLog("shim.test.session", { operation: "shim.test.request-id" }).debug({}, "probe"));
     return record.request_id as string | undefined;
   }
 

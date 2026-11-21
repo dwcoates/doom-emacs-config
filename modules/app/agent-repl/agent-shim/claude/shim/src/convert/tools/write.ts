@@ -22,7 +22,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, diffHunks, failureOf, settle, str } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.write" });
+const LOGGER = bindLog("shim.convert.tools.write", { component: "shim-convert-tools", operation: "shim.convert.tools.write" });
 
 /** The path a write acted on. */
 function readPath(path: string): conversationv1.ReadPath {

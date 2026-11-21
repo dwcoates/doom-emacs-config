@@ -47,7 +47,7 @@ import { conversationv1 } from "../proto.js";
 import type { NormalizedApiUsage } from "../api-usage.js";
 import type { VendorStartRetry } from "../service/failures.js";
 
-const LOGGER = bindLog({ component: "shim-engine-compaction", operation: "shim.engine.compaction" });
+const LOGGER = bindLog("shim.engine.compaction", { component: "shim-engine-compaction", operation: "shim.engine.compaction" });
 
 /**
  * What a compaction measured, carried from the summary to every later phase so

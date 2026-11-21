@@ -21,7 +21,7 @@ import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { returnedContent, untypedArguments } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.unmodeled", {
   component: "shim-convert-tools",
   operation: "shim.convert.tools.unmodeled",
 });

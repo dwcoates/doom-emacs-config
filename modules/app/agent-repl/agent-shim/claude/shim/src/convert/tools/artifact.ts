@@ -21,7 +21,7 @@ import { conversationv1 } from "../../proto.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, str, uint } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.artifact", {
   component: "shim-convert-artifact",
   operation: "shim.convert.tools.artifact",
 });

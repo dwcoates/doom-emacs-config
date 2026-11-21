@@ -45,7 +45,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { bindLog } from "./log.js";
 
-const LOGGER = bindLog({ component: "shim-build-identity", operation: "shim.build-identity" });
+const LOGGER = bindLog("shim.build-identity", { component: "shim-build-identity", operation: "shim.build-identity" });
 
 /**
  * The build identity the process was SPAWNED with, or "" when nothing set it.
@@ -79,7 +79,7 @@ function readJsonField(file: string, field: string): string | undefined {
     raw = readFileSync(file, "utf8");
   } catch (err) {
     // warn: a defect because an unreadable package manifest leaves runtime identity incomplete.
-    LOGGER.warn({ file, cause: err }, `build identity: ${file} is unreadable`);
+    LOGGER.warn({ cause: err }, "build identity: {file} is unreadable", { file });
     return undefined;
   }
   let parsed: unknown;
@@ -87,18 +87,18 @@ function readJsonField(file: string, field: string): string | undefined {
     parsed = JSON.parse(raw);
   } catch (err) {
     // warn: a defect because malformed package metadata leaves runtime identity incomplete.
-    LOGGER.warn({ file, cause: err }, `build identity: ${file} is not valid JSON`);
+    LOGGER.warn({ cause: err }, "build identity: {file} is not valid JSON", { file });
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) {
     // warn: a defect because non-object package metadata leaves runtime identity incomplete.
-    LOGGER.warn({ file }, `build identity: ${file} is not a JSON object`);
+    LOGGER.warn({}, "build identity: {file} is not a JSON object", { file });
     return undefined;
   }
   const value = (parsed as Record<string, unknown>)[field];
   if (typeof value !== "string" || value === "") {
     // warn: a defect because required package metadata is absent from runtime identity.
-    LOGGER.warn({ file, field }, `build identity: ${file} declares no usable ${field}`);
+    LOGGER.warn({}, "build identity: {file} declares no usable {field}", { file, field });
     return undefined;
   }
   return value;

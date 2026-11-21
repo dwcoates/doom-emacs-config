@@ -29,7 +29,7 @@ import { PersistenceError } from "./persistence.js";
 import { answeredLookup, lookupRefused, sendLookup } from "./answered-lookup.js";
 import type { ReadRetryOptions } from "./retry.js";
 
-const LOGGER = bindLog({ component: "shim-store-detached-work", operation: "shim.store.detached-work" });
+const LOGGER = bindLog("shim.store.detached-work", { component: "shim-store-detached-work", operation: "shim.store.detached-work" });
 
 /** The kinds the record classifies. */
 type RecordedWorkKind = "subagent" | "bash" | "workflow" | "monitor";

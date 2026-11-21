@@ -34,7 +34,7 @@
 import { bindLog } from "../log.js";
 import type { QueryLike, RemoteControlAnswerLike } from "../sdk/types.js";
 
-const LOGGER = bindLog({ component: "shim-engine-remote-control", operation: "shim.engine.remote-control" });
+const LOGGER = bindLog("shim.engine.remote-control", { component: "shim-engine-remote-control", operation: "shim.engine.remote-control" });
 
 /** What the daemon asked for (shim.v1.SetSessionRemoteControlRequest). */
 export interface RemoteControlRequest {
