@@ -335,7 +335,17 @@ func Check(bin string, out io.Writer) error {
 // binary itself never says and each test's CPU share is read from
 // (testtimes.AttributeCPU). It is in the unit's process group, so the
 // runner's kill reaches it and the binary alike.
-func ExecTest(bin string, args []string, out, stderr io.Writer, now func() time.Time) (int, error) {
+//
+// IT NEVER EXITS BEFORE THE BINARY. The runner waits on this process, and
+// sends its SIGKILL only while the process it waits on lives (run.osProcess
+// Kill), so a wrapper that died at the runner's SIGTERM while the binary
+// trapped it would leave the binary and everything it started running with
+// no one to kill them (2026-11-20: an e2e binary orphaned at its unit's
+// bound burned about 11 cores for over an hour). SIGNALS are the termination
+// signals this process received, which the caller has stopped from ending it
+// (signal.Notify): each is forwarded to the binary, and this process exits
+// only once the binary has, so the runner's SIGKILL still reaches both.
+func ExecTest(bin string, args []string, out, stderr io.Writer, now func() time.Time, signals <-chan os.Signal) (int, error) {
 	if err := Check(bin, out); err != nil {
 		return 0, err
 	}
@@ -348,8 +358,27 @@ func ExecTest(bin string, args []string, out, stderr io.Writer, now func() time.
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("gobuild: start %s: %w", bin, err)
 	}
+	exited := make(chan struct{})
+	forwarded := make(chan struct{})
+	go func() {
+		defer close(forwarded)
+		for {
+			select {
+			case <-exited:
+				return
+			case sig := <-signals:
+				// A binary already gone answers ErrProcessDone: nothing left
+				// to tell.
+				if err := cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+					fmt.Fprintf(stderr, "gobuild: forward %v to %s (pid %d): %v\n", sig, bin, cmd.Process.Pid, err)
+				}
+			}
+		}
+	}()
 	copyErr := StampStarts(stdout, out, now)
 	waitErr := cmd.Wait()
+	close(exited)
+	<-forwarded
 	if copyErr != nil {
 		return 0, fmt.Errorf("gobuild: copy %s's output: %w", bin, copyErr)
 	}
