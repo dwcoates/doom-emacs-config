@@ -258,7 +258,12 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 		return nil, nil, err
 	}
 	b := newUnitBuilder(s)
-	type pkg struct{ rel, tags string }
+	// tested is whether the package has test files: its split or its
+	// compiled check says so. A package only its vet check names has none.
+	type pkg struct {
+		rel, tags string
+		tested    bool
+	}
 	pkgs := map[string]pkg{}
 	vets := map[string]string{}
 	for _, sp := range u.Splits {
@@ -273,7 +278,7 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 		// path groups it as "<package group>/<test path>", which no parse of
 		// the group can tell from a package path.
 		b.own(name, sp.Group)
-		pkgs[name] = pkg{sp.Package, sp.Tags}
+		pkgs[name] = pkg{sp.Package, sp.Tags, true}
 	}
 	moduleVets := map[string]bool{}
 	for _, v := range u.GoVets {
@@ -296,7 +301,9 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 				return nil, nil, err
 			}
 			b.own(name, id)
-			pkgs[name] = pkg{rel, tags}
+			if _, named := pkgs[name]; !named {
+				pkgs[name] = pkg{rel, tags, false}
+			}
 		case id == s.Name+":vet":
 			b.own("vet", id)
 			vets["vet"] = ""
@@ -313,7 +320,7 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 				return nil, nil, err
 			}
 			b.own(name, id)
-			pkgs[name] = pkg{rel, tags}
+			pkgs[name] = pkg{rel, tags, true}
 		default:
 			return nil, nil, fmt.Errorf("reuse: %s's unit %s is no package's, vet's or build's", s.Name, id)
 		}
@@ -369,11 +376,11 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		main := gobuild.ImportPath(modulePath, p.rel) + ".test"
-		if _, tested := byPath[main]; !tested {
-			// A package without test files is only vetted: vet reads the
-			// package and what it imports.
-			main = gobuild.ImportPath(modulePath, p.rel)
+		// A package without test files is only vetted: vet reads the package
+		// and what it imports. A tested one's listing must hold its binary.
+		main := gobuild.ImportPath(modulePath, p.rel)
+		if p.tested {
+			main += ".test"
 		}
 		if err := addTestBinary(d, set, byPath, main); err != nil {
 			return nil, nil, fmt.Errorf("reuse: %s tests %s: %w", s.Name, name, err)
