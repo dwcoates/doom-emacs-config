@@ -398,6 +398,12 @@ const (
 	// AgentReplGetMergeQueueStatusProcedure is the fully-qualified name of the AgentRepl's
 	// GetMergeQueueStatus RPC.
 	AgentReplGetMergeQueueStatusProcedure = "/agentrepl.v1.AgentRepl/GetMergeQueueStatus"
+	// AgentReplListMergeLandingsProcedure is the fully-qualified name of the AgentRepl's
+	// ListMergeLandings RPC.
+	AgentReplListMergeLandingsProcedure = "/agentrepl.v1.AgentRepl/ListMergeLandings"
+	// AgentReplRecordDirectLandingProcedure is the fully-qualified name of the AgentRepl's
+	// RecordDirectLanding RPC.
+	AgentReplRecordDirectLandingProcedure = "/agentrepl.v1.AgentRepl/RecordDirectLanding"
 	// AgentReplFindWorkspacesProcedure is the fully-qualified name of the AgentRepl's FindWorkspaces
 	// RPC.
 	AgentReplFindWorkspacesProcedure = "/agentrepl.v1.AgentRepl/FindWorkspaces"
@@ -602,6 +608,8 @@ var (
 	agentReplRefreshNewsDigestMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RefreshNewsDigest")
 	agentReplGetWorkspaceStatusMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceStatus")
 	agentReplGetMergeQueueStatusMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("GetMergeQueueStatus")
+	agentReplListMergeLandingsMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("ListMergeLandings")
+	agentReplRecordDirectLandingMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("RecordDirectLanding")
 	agentReplFindWorkspacesMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("FindWorkspaces")
 	agentReplLocateWorkspaceMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("LocateWorkspace")
 	agentReplSubscribeWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
@@ -1051,6 +1059,14 @@ type AgentReplClient interface {
 	GetWorkspaceStatus(context.Context, *connect.Request[v1.GetWorkspaceStatusRequest]) (*connect.Response[v1.GetWorkspaceStatusResponse], error)
 	// Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
 	GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error)
+	// What landed on one repository's main branch in a window of time, the
+	// merges through its queue apart from every other landing. See
+	// endpoint_list_merge_landings.proto.
+	ListMergeLandings(context.Context, *connect.Request[v1.ListMergeLandingsRequest]) (*connect.Response[v1.ListMergeLandingsResponse], error)
+	// land-direct.sh's report of a landing it made outside the queue, which the
+	// daemon records under the path its own state names. See
+	// endpoint_record_direct_landing.proto.
+	RecordDirectLanding(context.Context, *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
 	// activity window, standing, text and whether the sidebar draws them, each
 	// with its name, summary and, when drawn, its roster section and live
@@ -1955,6 +1971,19 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		listMergeLandings: connect.NewClient[v1.ListMergeLandingsRequest, v1.ListMergeLandingsResponse](
+			httpClient,
+			baseURL+AgentReplListMergeLandingsProcedure,
+			connect.WithSchema(agentReplListMergeLandingsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		recordDirectLanding: connect.NewClient[v1.RecordDirectLandingRequest, v1.RecordDirectLandingResponse](
+			httpClient,
+			baseURL+AgentReplRecordDirectLandingProcedure,
+			connect.WithSchema(agentReplRecordDirectLandingMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		findWorkspaces: connect.NewClient[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse](
 			httpClient,
 			baseURL+AgentReplFindWorkspacesProcedure,
@@ -2241,6 +2270,8 @@ type agentReplClient struct {
 	refreshNewsDigest                 *connect.Client[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse]
 	getWorkspaceStatus                *connect.Client[v1.GetWorkspaceStatusRequest, v1.GetWorkspaceStatusResponse]
 	getMergeQueueStatus               *connect.Client[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse]
+	listMergeLandings                 *connect.Client[v1.ListMergeLandingsRequest, v1.ListMergeLandingsResponse]
+	recordDirectLanding               *connect.Client[v1.RecordDirectLandingRequest, v1.RecordDirectLandingResponse]
 	findWorkspaces                    *connect.Client[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse]
 	locateWorkspace                   *connect.Client[v1.LocateWorkspaceRequest, v1.LocateWorkspaceResponse]
 	subscribeWorkspace                *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
@@ -2927,6 +2958,16 @@ func (c *agentReplClient) GetMergeQueueStatus(ctx context.Context, req *connect.
 	return c.getMergeQueueStatus.CallUnary(ctx, req)
 }
 
+// ListMergeLandings calls agentrepl.v1.AgentRepl.ListMergeLandings.
+func (c *agentReplClient) ListMergeLandings(ctx context.Context, req *connect.Request[v1.ListMergeLandingsRequest]) (*connect.Response[v1.ListMergeLandingsResponse], error) {
+	return c.listMergeLandings.CallUnary(ctx, req)
+}
+
+// RecordDirectLanding calls agentrepl.v1.AgentRepl.RecordDirectLanding.
+func (c *agentReplClient) RecordDirectLanding(ctx context.Context, req *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error) {
+	return c.recordDirectLanding.CallUnary(ctx, req)
+}
+
 // FindWorkspaces calls agentrepl.v1.AgentRepl.FindWorkspaces.
 func (c *agentReplClient) FindWorkspaces(ctx context.Context, req *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {
 	return c.findWorkspaces.CallUnary(ctx, req)
@@ -3470,6 +3511,14 @@ type AgentReplHandler interface {
 	GetWorkspaceStatus(context.Context, *connect.Request[v1.GetWorkspaceStatusRequest]) (*connect.Response[v1.GetWorkspaceStatusResponse], error)
 	// Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
 	GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error)
+	// What landed on one repository's main branch in a window of time, the
+	// merges through its queue apart from every other landing. See
+	// endpoint_list_merge_landings.proto.
+	ListMergeLandings(context.Context, *connect.Request[v1.ListMergeLandingsRequest]) (*connect.Response[v1.ListMergeLandingsResponse], error)
+	// land-direct.sh's report of a landing it made outside the queue, which the
+	// daemon records under the path its own state names. See
+	// endpoint_record_direct_landing.proto.
+	RecordDirectLanding(context.Context, *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
 	// activity window, standing, text and whether the sidebar draws them, each
 	// with its name, summary and, when drawn, its roster section and live
@@ -4370,6 +4419,19 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplListMergeLandingsHandler := connect.NewUnaryHandler(
+		AgentReplListMergeLandingsProcedure,
+		svc.ListMergeLandings,
+		connect.WithSchema(agentReplListMergeLandingsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRecordDirectLandingHandler := connect.NewUnaryHandler(
+		AgentReplRecordDirectLandingProcedure,
+		svc.RecordDirectLanding,
+		connect.WithSchema(agentReplRecordDirectLandingMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplFindWorkspacesHandler := connect.NewUnaryHandler(
 		AgentReplFindWorkspacesProcedure,
 		svc.FindWorkspaces,
@@ -4785,6 +4847,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplGetWorkspaceStatusHandler.ServeHTTP(w, r)
 		case AgentReplGetMergeQueueStatusProcedure:
 			agentReplGetMergeQueueStatusHandler.ServeHTTP(w, r)
+		case AgentReplListMergeLandingsProcedure:
+			agentReplListMergeLandingsHandler.ServeHTTP(w, r)
+		case AgentReplRecordDirectLandingProcedure:
+			agentReplRecordDirectLandingHandler.ServeHTTP(w, r)
 		case AgentReplFindWorkspacesProcedure:
 			agentReplFindWorkspacesHandler.ServeHTTP(w, r)
 		case AgentReplLocateWorkspaceProcedure:
@@ -5368,6 +5434,14 @@ func (UnimplementedAgentReplHandler) GetWorkspaceStatus(context.Context, *connec
 
 func (UnimplementedAgentReplHandler) GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetMergeQueueStatus is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListMergeLandings(context.Context, *connect.Request[v1.ListMergeLandingsRequest]) (*connect.Response[v1.ListMergeLandingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListMergeLandings is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RecordDirectLanding(context.Context, *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RecordDirectLanding is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {

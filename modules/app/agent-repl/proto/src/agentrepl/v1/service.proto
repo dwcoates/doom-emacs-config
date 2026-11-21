@@ -55,6 +55,8 @@ import "agentrepl/v1/endpoint_forget_workspace.proto";
 import "agentrepl/v1/endpoint_get_feed_page.proto";
 import "agentrepl/v1/endpoint_get_memory_overview.proto";
 import "agentrepl/v1/endpoint_get_merge_queue_status.proto";
+import "agentrepl/v1/endpoint_list_merge_landings.proto";
+import "agentrepl/v1/endpoint_record_direct_landing.proto";
 import "agentrepl/v1/endpoint_get_sidebar_arrangement.proto";
 import "agentrepl/v1/endpoint_get_workspace_memory.proto";
 import "agentrepl/v1/endpoint_get_workspace_status.proto";
@@ -752,6 +754,17 @@ service AgentRepl {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+  // What landed on one repository's main branch in a window of time, the
+  // merges through its queue apart from every other landing. See
+  // endpoint_list_merge_landings.proto.
+  rpc ListMergeLandings(ListMergeLandingsRequest) returns (ListMergeLandingsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // land-direct.sh's report of a landing it made outside the queue, which the
+  // daemon records under the path its own state names. See
+  // endpoint_record_direct_landing.proto.
+  rpc RecordDirectLanding(RecordDirectLandingRequest) returns (RecordDirectLandingResponse);
   // The registry's agent workspaces, open or closed, narrowed by repository,
   // activity window, standing, text and whether the sidebar draws them, each
   // with its name, summary and, when drawn, its roster section and live

@@ -1,0 +1,105 @@
+// endpoint_list_merge_landings.proto — ListMergeLandings: what landed on one
+// repository's main branch in a window of time, the merges THROUGH ITS QUEUE
+// apart from every landing made OTHERWISE. AGENT API section. A read.
+//
+// "MERGED THROUGH THE QUEUE" IS THE QUEUE LIST ONLY. Queue-bypass landings,
+// the deploy mediator's direct landings and every other path are the other
+// list, reported beside it and never counted in it.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/merge_landing.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ListMergeLandingsRequest {
+  // The repository whose main branch is read. REQUIRED.
+  workspace.v1.RepositoryRef repository = 1;
+  // The window's start, epoch ms, inclusive. REQUIRED.
+  int64 since_ms = 2;
+  // The window's end, epoch ms, inclusive. UNSET = now. An end before the
+  // start is malformed (Connect InvalidArgument).
+  optional int64 until_ms = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message ListMergeLandingsResponse {
+  oneof result {
+    ListMergeLandingsSuccess success = 1;
+    ListMergeLandingsError error = 2;
+  }
+}
+
+// The window's landings, split by path.
+message ListMergeLandingsSuccess {
+  // The repository read.
+  workspace.v1.RepositoryRef repository = 1;
+  // The window read, its end resolved.
+  ListMergeLandingsWindow window = 2;
+  // Whether the daemon recorded landings over the whole window.
+  ListMergeLandingsCoverage coverage = 3;
+  // The merges the queue landed.
+  ListMergeLandingsThroughQueue through_queue = 4;
+  // Every other landing on the main branch.
+  ListMergeLandingsOtherwise otherwise = 5;
+}
+
+// The window as read: the request's start, and its end with an unset end
+// resolved to the instant of the read.
+message ListMergeLandingsWindow {
+  // The start, epoch ms, inclusive.
+  int64 since_ms = 1;
+  // The end, epoch ms, inclusive.
+  int64 until_ms = 2;
+}
+
+// WHETHER THE LISTS COVER THE WHOLE WINDOW. THE ARM IS THE COVERAGE. Landings
+// are recorded from the instant the daemon's store first held their table, and
+// nothing before it is reconstructed, so a window reaching back before that
+// instant is answered partial, naming it, rather than silently undercounted.
+message ListMergeLandingsCoverage {
+  oneof coverage {
+    // Recording began at or before the window's start: the lists are every
+    // landing of the window.
+    ListMergeLandingsCoverageComplete complete = 1;
+    // Recording began after the window's start: the lists hold only the
+    // landings from `recorded_since_ms` on, and any before it are unknown.
+    ListMergeLandingsCoveragePartial partial = 2;
+  }
+}
+// Complete. No fields: the arm is the fact.
+message ListMergeLandingsCoverageComplete {}
+// Partial, and from when the lists hold.
+message ListMergeLandingsCoveragePartial {
+  // The earliest recorded instant, epoch ms: when recording began.
+  int64 recorded_since_ms = 1;
+}
+
+// The merges the queue landed in the window, oldest first.
+message ListMergeLandingsThroughQueue {
+  // How many there are: the length of `landings`, so an agent asked how many
+  // merged through the queue reads one number.
+  uint32 count = 1;
+  // Each landing.
+  repeated MergeLandingThroughQueue landings = 2;
+}
+
+// Every other landing on the main branch in the window, oldest first.
+message ListMergeLandingsOtherwise {
+  // How many there are: the length of `landings`.
+  uint32 count = 1;
+  // Each landing, with the path it took.
+  repeated MergeLandingOtherwise landings = 2;
+}
+
+message ListMergeLandingsError {
+  oneof cause {
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    ListMergeLandingsUnknownRepository unknown_repository = 1;
+  }
+}
+// Empty: the echoed ref is the only identity involved.
+message ListMergeLandingsUnknownRepository {}

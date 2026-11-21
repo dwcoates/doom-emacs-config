@@ -38,6 +38,29 @@ message MergeQueueStatus {
   // each waits for `merge-queue requeue` to put it back in line as itself, or
   // `merge-queue discard` to end it.
   repeated MergeQueueStatusOffQueue off_queue = 4;
+  // How many merges the queue holds now, counted from `entries` and
+  // `off_queue` above, so an agent asked how big the queue is reads numbers
+  // rather than counting lists.
+  MergeQueueStatusSize size = 5;
+}
+
+// THE QUEUE'S SIZE NOW. `running`, `waiting` and `out_of_line` partition
+// `entries` by stage, and `in_queue` is their sum; `off_queue` counts the
+// merges that left without landing and are in no line, so it is never part
+// of `in_queue`. What landed is not a size: that is ListMergeLandings.
+message MergeQueueStatusSize {
+  // Every merge in the queue: running, waiting and out of line together.
+  uint32 in_queue = 1;
+  // The merge at the head, running its gate and landing: 0 or 1.
+  uint32 running = 2;
+  // The merges waiting their turn in line.
+  uint32 waiting = 3;
+  // The merges out of line repairing: fixing tests, resolving conflicts, or
+  // awaiting a repair slot.
+  uint32 out_of_line = 4;
+  // The merges off the queue (evicted, dequeued, failed, ...), each waiting
+  // for a requeue or a discard: the length of `off_queue`.
+  uint32 off_queue = 5;
 }
 
 // ONE MERGE OFF ITS QUEUE: it left without landing, and its request -- its

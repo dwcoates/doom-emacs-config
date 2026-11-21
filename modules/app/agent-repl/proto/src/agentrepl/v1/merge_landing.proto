@@ -1,0 +1,94 @@
+// merge_landing.proto — ONE LANDING ONTO A REPOSITORY'S MAIN BRANCH, as the
+// daemon recorded it at landing time. Shared by ListMergeLandings, which lists
+// them, and RecordDirectLanding, which answers the path a reported landing was
+// recorded under.
+//
+// THE PATH IS RECORDED, NEVER INFERRED. Each landing site writes its record
+// the moment it has landed, naming the path it took, so whether a landing
+// went through the merge queue is a fact the daemon kept, not a reading of
+// commit messages. A merge through the queue and every other landing are
+// different messages, so no list can hold one where the other belongs.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// ---- The landing's workspace ----
+
+// The workspace whose landing it was, with its name as it stood when the
+// landing was recorded, so a landing of a workspace since closed or renamed
+// still reads as the agent that made it knew it.
+message MergeLandingWorkspace {
+  // The workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Its name when the landing was recorded. An async merge's is the merge's
+  // own name (its merge workspace's).
+  string name = 2;
+}
+
+// ---- A landing through the queue ----
+
+// A merge the repository's merge queue ran and landed on its main branch: a
+// workspace's finish, a one-shot's, or an async merge. Its list is the path,
+// so it carries none. A merge the queue landed into a parent workspace's
+// branch landed on no main branch and is never one of these.
+message MergeLandingThroughQueue {
+  // The workspace the merge ran in: the one landing its own branch, or the
+  // async merge's merge workspace. Always set: every queued merge has one.
+  MergeLandingWorkspace workspace = 1;
+  // The branch that landed.
+  string branch = 2;
+  // The main branch's commit once the merge landed: the merge commit.
+  string landed_head = 3;
+  // When it landed, epoch ms.
+  int64 landed_at_ms = 4;
+}
+
+// ---- A landing by any other path ----
+
+// A landing on the main branch that did not go through the merge queue.
+message MergeLandingOtherwise {
+  // The workspace whose landing it was. UNSET when no workspace ran the
+  // landing (land-direct.sh run outside any workspace's worktree).
+  optional MergeLandingWorkspace workspace = 1;
+  // The branch that landed.
+  string branch = 2;
+  // The main branch's commit once the landing was done. A landing by
+  // land-direct.sh ends on its changelog commit when the repository keeps a
+  // remediation changelog, so this may be one commit past the merge commit.
+  string landed_head = 3;
+  // When it landed, epoch ms.
+  int64 landed_at_ms = 4;
+  // The way it landed.
+  MergeLandingOtherwisePath path = 5;
+}
+
+// THE WAY A LANDING REACHED THE MAIN BRANCH WITHOUT THE QUEUE. THE ARM IS THE
+// PATH. A set message with no arm assigned is a path this schema revision
+// does not name.
+message MergeLandingOtherwisePath {
+  // Each arm is one landing site the daemon knows, classified from the
+  // daemon's own state at the moment of landing.
+  oneof path {
+    // land-direct.sh run by the workspace holding the repository's queue
+    // bypass mode (agentrepl.v1.UpdateQueueBypassMode).
+    MergeLandingOtherwisePathQueueBypass queue_bypass = 1;
+    // The repository's deploy mediator's own fix, landed directly by the
+    // daemon's remediation finish.
+    MergeLandingOtherwisePathDeployMediator deploy_mediator = 2;
+    // land-direct.sh run by a caller holding neither role: no workspace, or
+    // a workspace that holds no queue bypass mode for this repository.
+    MergeLandingOtherwisePathDirect direct = 3;
+  }
+}
+// A queue-bypass landing. No fields: the arm is the fact.
+message MergeLandingOtherwisePathQueueBypass {}
+// A deploy mediator's landing. No fields: the arm is the fact.
+message MergeLandingOtherwisePathDeployMediator {}
+// A direct landing by a caller holding neither role. No fields: the arm is
+// the fact.
+message MergeLandingOtherwisePathDirect {}
