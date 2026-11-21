@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -108,6 +109,17 @@ func (o *orchestrator) drainDue(ctx context.Context, repo wsm.RepoKey) (string, 
 		return "", nil, false
 	}
 	root, err := o.repositoryRootOf(ctx, repo)
+	if errors.Is(err, errQueueUnregistered) {
+		// A REPOSITORY FORGOTTEN WHILE ITS DRAIN WAS OWED owes nothing: its
+		// last workspace went with its queue empty, and the debt, left, would
+		// be asked after on every pump kick forever.
+		if err := o.deps.DB.ClearQueueDrainOwed(ctx, repo); err != nil {
+			log.Error(opQueueDrained, "could not clear the drain of a repository that is no longer registered", withField(fields, "error", err.Error()))
+			return "", nil, false
+		}
+		log.Info(opQueueDrained, "the repository whose queue owed its drain is no longer registered; the drain is dropped", fields)
+		return "", nil, false
+	}
 	if err != nil {
 		log.Error(opQueueDrained, "could not resolve the repository whose queue owes its drain; the drain stays owed", withField(fields, "error", err.Error()))
 		return "", nil, false
@@ -175,8 +187,12 @@ func (o *orchestrator) repositoryRootOf(ctx context.Context, repo wsm.RepoKey) (
 			return o.deps.Git.MainWorktree(ctx, q.repository.Dir)
 		}
 	}
-	return "", fmt.Errorf("merge: no registered repository's merge queue is %s", repo)
+	return "", fmt.Errorf("%w: %s", errQueueUnregistered, repo)
 }
+
+// errQueueUnregistered is repositoryRootOf's answer for a queue no registered
+// repository has: the repository was forgotten.
+var errQueueUnregistered = errors.New("merge: no registered repository's merge queue is")
 
 // offerOwedDrains offers this daemon's pump every registered repository that
 // owes its drain and is not among OFFERED, the queues the caller already

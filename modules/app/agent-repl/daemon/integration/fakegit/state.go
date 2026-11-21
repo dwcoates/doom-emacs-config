@@ -154,6 +154,23 @@ type Repo struct {
 	// Tags maps every annotated tag to what it names: the version tags the
 	// merge queue creates and the seed a test places.
 	Tags map[string]*Tag `json:"tags,omitempty"`
+	// CheckedIn are paths, relative to the main checkout (Dir), of the files
+	// every checkout of the repository carries: a fixture's committed
+	// executables, such as the test script the merge gate runs from the tree
+	// it tests. Every linked worktree links each one from the main checkout
+	// (LinkCheckedIn).
+	CheckedIn []string `json:"checked_in,omitempty"`
+}
+
+// LinkCheckedIn gives the linked worktree at DIR the checked-in file REL of
+// REPO, linked to the main checkout's copy so a fixture that rewrites or
+// reads it back sees one file.
+func LinkCheckedIn(repo *Repo, dir, rel string) error {
+	link := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(filepath.Join(repo.Dir, rel), link)
 }
 
 // Tag is one annotated tag: the commit it points at and its annotation.

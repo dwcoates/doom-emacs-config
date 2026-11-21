@@ -5,7 +5,6 @@ package integration
 import (
 	"database/sql"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -120,10 +119,10 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	// Arrange: a gate whose FIRST run holds -- the daemon's exit cuts it --
 	// and whose every later run passes.
 	repo := harness.NewRepo(t)
-	env, started, hold := firstRunHoldsGate(t)
+	started, hold := firstRunHoldsGate(t, repo)
 	repo.DeploysAsAgentRepl()
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "resumed", "do the resumed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())
@@ -145,7 +144,7 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	d.AwaitExit()
 	repo.DeploysAsAgentRepl()
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, Timeout: harness.MergeChainTimeout,
-		ExtraEnv: append(env, "AGENT_REPL_LOCK_DIR="+d.LockDir)})
+		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + d.LockDir}})
 	f.d = d2
 
 	// Assert: the stop left the gate's run going and said so, the restart
@@ -172,10 +171,10 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 // firstRunHoldsGate writes a test gate whose FIRST run holds on a pipe until
 // the test releases it (releaseHold on HOLD), and whose every later run
 // passes. The run goes on on the test service through any stop of the merge,
-// and the resumed merge watches it. It answers the daemon environment naming
-// the gate, the file the first run creates as it begins holding, and the
-// pipe.
-func firstRunHoldsGate(t *testing.T) (env []string, started, hold string) {
+// and the resumed merge watches it. The gate is checked in to REPO
+// (Repo.WriteTestAllScript); it answers the file the first run creates as it
+// begins holding, and the pipe.
+func firstRunHoldsGate(t *testing.T, repo *harness.Repo) (started, hold string) {
 	t.Helper()
 	gateDir := t.TempDir()
 	started = filepath.Join(gateDir, "first-run")
@@ -190,14 +189,11 @@ func firstRunHoldsGate(t *testing.T) (env []string, started, hold string) {
 	// the pipe for writing and closing it hands the reader its EOF; with no
 	// reader the open answers ENXIO at once and there is nothing to release.
 	t.Cleanup(func() { releaseHold(t, hold) })
-	gate := filepath.Join(gateDir, "test-all.sh")
 	body := "#!/bin/sh\n" +
 		"if [ ! -f '" + started + "' ]; then : > '" + started + "'; cat '" + hold + "' > /dev/null; fi\n" +
 		"echo 'daemon: passed in 1s'\nexit 0\n"
-	if err := os.WriteFile(gate, []byte(body), 0o755); err != nil {
-		t.Fatalf("writing the gate: %v", err)
-	}
-	return []string{harness.TestAllScriptEnv(gate)}, started, hold
+	repo.WriteTestAllScript(body)
+	return started, hold
 }
 
 // releaseHold gives a reader blocked on the pipe at path its EOF, and does
@@ -226,10 +222,10 @@ func TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands(t *testing.T
 	t.Parallel()
 	// Arrange: a merge held inside its test gate.
 	repo := harness.NewRepo(t)
-	env, started, hold := firstRunHoldsGate(t)
+	started, hold := firstRunHoldsGate(t, repo)
 	repo.DeploysAsAgentRepl()
 	// The handover chains a second real daemon's boot onto this one's context.
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout, ExtraEnv: env})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "handed", "do the handed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())

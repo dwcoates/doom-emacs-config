@@ -5,7 +5,7 @@ import "testing"
 func TestWorldDaemonEnvLeavesTheCheckoutToTheHarness(t *testing.T) {
 	t.Parallel()
 	// Arrange: a caller that states nothing about the checkout.
-	extra := []string{"AGENT_REPL_TEST_ALL_SCRIPT=/gate"}
+	extra := []string{"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms"}
 
 	// Act.
 	env := WorldDaemonEnv(extra, "/spool", "/shim-lock")

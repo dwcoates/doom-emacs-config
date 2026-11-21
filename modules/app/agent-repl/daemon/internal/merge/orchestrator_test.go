@@ -86,35 +86,32 @@ func TestFactsAreAbsentBeforeAnyMerge(t *testing.T) {
 	}
 }
 
-// TestTestCommandPrefersTheScriptOverride covers the gate's test knob, whose
-// existence is what lets the landed-range-to-deploy path be asserted end to end
-// without running the repository's real suite.
-func TestTestCommandPrefersTheScriptOverride(t *testing.T) {
-	// Arrange: the override set.
-	t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", "/fixtures/test-all.sh")
-
-	// Act.
-	got := TestCommandFor("/checkout", "bin/suites.sh", "fix-footer")
-
-	// Assert.
-	if want := []string{"env", TestRunMarkerEnv + "=1", "AGENT_REPL_TEST_WORKSPACE=fix-footer", "bash", "/fixtures/test-all.sh"}; !slices.Equal(got, want) {
-		t.Fatalf("TestCommandFor answered %v, want %v", got, want)
+// TestTestCommandRunsTheTreesOwnScript covers the gate's command: the
+// config's script under the tree being tested, naming the workspace the run
+// is for. No environment points it anywhere else: the retired
+// AGENT_REPL_TEST_ALL_SCRIPT, set, changes nothing.
+func TestTestCommandRunsTheTreesOwnScript(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+	}{
+		{name: "nothing set"},
+		{name: "the retired override set", env: "/fixtures/test-all.sh"},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", tc.env)
 
-// TestTestCommandFallsBackToTheRepositoryEntrypoint covers the ordinary case.
-func TestTestCommandFallsBackToTheRepositoryEntrypoint(t *testing.T) {
-	// Arrange: no override.
-	t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", "")
+			// Act.
+			got := TestCommandFor("/checkout", "bin/suites.sh", "fix-footer")
 
-	// Act.
-	got := TestCommandFor("/checkout", "bin/suites.sh", "fix-footer")
-
-	// Assert: the config's script, under the tree being tested, naming the
-	// workspace the run is for.
-	want := []string{"env", "AGENT_REPL_TEST_RUN_BY_DAEMON=1", "AGENT_REPL_TEST_WORKSPACE=fix-footer", "bash", "/checkout/bin/suites.sh"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("TestCommandFor answered %v, want %v", got, want)
+			// Assert.
+			want := []string{"env", "AGENT_REPL_TEST_RUN_BY_DAEMON=1", "AGENT_REPL_TEST_WORKSPACE=fix-footer", "bash", "/checkout/bin/suites.sh"}
+			if !slices.Equal(got, want) {
+				t.Fatalf("TestCommandFor answered %v, want %v", got, want)
+			}
+		})
 	}
 }
 

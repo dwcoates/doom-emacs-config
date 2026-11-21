@@ -2564,3 +2564,27 @@ func TestARebaseReplayKeepsItsAuthorAndIsCommittedByTheHarness(t *testing.T) {
 		t.Fatalf("replayed = %+v, want the contributor's author and the harness's committer", replayed)
 	}
 }
+
+func TestAWorktreeAddLinksTheRepositorysCheckedInFiles(t *testing.T) {
+	// Arrange: the main checkout holds a checked-in script.
+	s, repo, dir := world(t)
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "test-all.sh"), []byte("#!/bin/bash\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo.CheckedIn = []string{"bin/test-all.sh"}
+	linked := filepath.Join(filepath.Dir(dir), "repo-feature")
+
+	// Act
+	got := Run(s, "/", []string{"-C", dir, "worktree", "add", "-b", "feature", linked, "main"})
+
+	// Assert
+	if got.Exit != 0 {
+		t.Fatalf("worktree add = %+v, want success", got)
+	}
+	if target, err := os.Readlink(filepath.Join(linked, "bin", "test-all.sh")); err != nil || target != filepath.Join(dir, "bin", "test-all.sh") {
+		t.Fatalf("the new worktree's bin/test-all.sh links to %q (%v), want the main checkout's", target, err)
+	}
+}

@@ -120,12 +120,11 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	// to the merge prompts, and no git merge is issued for this assertion to
 	// find.
 	repo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, repo.Dir)
+	script := repo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	repo.DeploysAsAgentRepl()
 	d := newDaemon(t, harness.Opts{
-		ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)},
 		// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 		Timeout: harness.MergeChainTimeout,
 	})

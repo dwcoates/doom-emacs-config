@@ -747,8 +747,8 @@ type Deps struct {
 	// with the selected suites, no flake re-run, output archived. The gate
 	// runs in the worktree checked out on the rebased branch, and a
 	// repository's test entrypoint tests the tree it lives in, so the command is
-	// resolved per tree from the deploy config's script path (TestCommandFor;
-	// AGENT_REPL_TEST_ALL_SCRIPT overrides the script). Its LAST element is the
+	// resolved per tree from the deploy config's script path (TestCommandFor).
+	// Its LAST element is the
 	// script, which the gate checks is there before it runs; `--suites <a,b>`
 	// is appended. WORKSPACE is the requesting workspace's name, which the
 	// run names itself by in the RAM disk seat it holds.

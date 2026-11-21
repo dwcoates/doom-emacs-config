@@ -206,3 +206,38 @@ func TestRepoLettersNamesEveryIndexInLettersAlone(t *testing.T) {
 		})
 	}
 }
+
+func TestTestAllScriptIsCarriedByEveryCheckout(t *testing.T) {
+	cases := []struct {
+		name  string
+		order func(repo *Repo) (string, *Recorder)
+	}{
+		{name: "a worktree made before the script is checked in", order: func(repo *Repo) (string, *Recorder) {
+			dir := repo.AddWorktree("before")
+			return dir, repo.TestAllScript()
+		}},
+		{name: "a worktree made after", order: func(repo *Repo) (string, *Recorder) {
+			script := repo.TestAllScript()
+			return repo.AddWorktree("after"), script
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			repo := NewRepo(t)
+
+			// Act.
+			dir, script := tc.order(repo)
+
+			// Assert: the worktree's copy is the main checkout's, so a run of
+			// it is recorded where the test reads it.
+			got, err := os.Readlink(filepath.Join(dir, TestAllScriptPath))
+			if err != nil || got != script.Path {
+				t.Fatalf("the worktree's %s links to %q (%v), want the main checkout's %s", TestAllScriptPath, got, err, script.Path)
+			}
+			if c := repo.w.read().Repo(repo.Dir).CheckedIn; len(c) != 1 || c[0] != TestAllScriptPath {
+				t.Fatalf("checked in = %v, want [%s]", c, TestAllScriptPath)
+			}
+		})
+	}
+}

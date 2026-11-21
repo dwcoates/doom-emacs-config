@@ -74,7 +74,7 @@ import (
 func mqCleanRepo(t *testing.T) (*harness.Repo, *harness.Recorder) {
 	t.Helper()
 	repo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, repo.Dir)
+	script := repo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("mergequeue e2e: passed in 1s\n")
 	return repo, script
@@ -639,7 +639,7 @@ func mqCreateChildWithHooks(t *testing.T, w *stack.World, repoRef *workspacev1.R
 // with a merge test gate that passes, so a deploy runs past the gate.
 func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *stack.World {
 	t.Helper()
-	script := harness.NewTestAllScript(t, repo.Dir)
+	script := repo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("e2e marker: passed in 1s\n")
 	// A whole merge and the landing's deploy are each a chain of subprocesses
@@ -648,8 +648,7 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *stack.World {
 	// still installing at +4.4s when the 5s DefaultTimeout cut it (2026-10-14).
 	repo.DeploysAsAgentRepl()
 	return stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
-		Timeout:  harness.MergeChainTimeout,
-		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		Timeout: harness.MergeChainTimeout,
 	}})
 }
 

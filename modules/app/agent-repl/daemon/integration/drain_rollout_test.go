@@ -1088,7 +1088,7 @@ func TestALateFactsRefusalIsOfferedAgainMidWork(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn on a shim whose next watch re-announces nothing.
 	selfRepo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script := selfRepo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	selfRepo.DeploysAsAgentRepl()
@@ -1098,7 +1098,6 @@ func TestALateFactsRefusalIsOfferedAgainMidWork(t *testing.T) {
 		// WARN in the instant before the re-offer lands.
 		ExpectWarnings: []string{"daemon.rollout.handover"},
 		ExtraEnv: []string{
-			harness.TestAllScriptEnv(script.Path),
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
 			"AGENT_REPL_HANDOVER_FACTS_BOUND=300ms",
 		},
@@ -1484,13 +1483,13 @@ func drainOpenWorkspace(t *testing.T, d *harness.Daemon) *fixture {
 func drainSelfRepoDaemon(t *testing.T, extraEnv ...string) (*harness.Repo, *harness.Daemon) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script := selfRepo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
-		ExtraEnv:     append([]string{harness.TestAllScriptEnv(script.Path)}, extraEnv...),
+		ExtraEnv:     extraEnv,
 		// Every caller of this fixture drives a real self-reload handover
 		// (drainTriggerDeploy): a second real agent-repld boots and adopts
 		// every workspace within THIS daemon's one context, never a fresh one

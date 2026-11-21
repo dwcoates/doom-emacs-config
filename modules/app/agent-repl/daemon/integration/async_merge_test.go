@@ -267,11 +267,11 @@ func TestAnAsyncLandingIsReportedOnlyOnceItsDeployHasRun(t *testing.T) {
 func mainCheckoutRequester(t *testing.T) *sourcedRepo {
 	t.Helper()
 	repo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, repo.Dir)
+	script := repo.TestAllScript()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
 	repo.DeploysAsAgentRepl()
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout})
 	f := &fixture{d: d, repo: repo, ws: harness.Register(t, d, repo.Dir), t: t}
 	f.open()
 	f.host = d.WatchHost(f.ws)
