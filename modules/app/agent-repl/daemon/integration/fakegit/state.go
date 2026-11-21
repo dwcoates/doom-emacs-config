@@ -199,8 +199,14 @@ type Conflict struct {
 }
 
 // Failure scripts one command failing: the next invocation whose subject starts
-// with Match, in Dir when Dir is set, exits nonzero with Stderr.
+// with Match, in a worktree of Repo when Repo is set and in Dir when Dir is
+// set, exits nonzero with Stderr.
 type Failure struct {
+	// Repo is the main worktree directory of the one repository whose
+	// commands the failure may fail. One world serves every repository of a
+	// shared daemon, so a failure a case scripts for its own repository must
+	// never be spent by another case's command.
+	Repo   string   `json:"repo,omitempty"`
 	Dir    string   `json:"dir"`
 	Match  []string `json:"match"`
 	Stderr string   `json:"stderr"`

@@ -568,11 +568,14 @@ func (r *Repo) CheckIn(rel string) {
 	})
 }
 
-// ScriptFailure makes the NEXT git command matching this prefix fail.
+// ScriptFailure makes the NEXT git command matching this prefix, run in one
+// of this repository's worktrees (in dir when dir is set), fail. The world is
+// shared by every repository of the daemon, so the failure is never spent by
+// another repository's command.
 func (r *Repo) ScriptFailure(dir string, exit int, stderr string, match ...string) {
 	r.t.Helper()
 	r.edit(func(s *fakegit.State) {
-		s.Failures = append(s.Failures, &fakegit.Failure{Dir: dir, Match: match, Stderr: stderr, Exit: exit})
+		s.Failures = append(s.Failures, &fakegit.Failure{Repo: r.Dir, Dir: dir, Match: match, Stderr: stderr, Exit: exit})
 	})
 }
 

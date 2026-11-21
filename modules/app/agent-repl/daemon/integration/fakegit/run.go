@@ -155,6 +155,11 @@ func (s *State) takeFailure(dir string, subject []string) *Failure {
 		if f.Dir != "" && Canon(f.Dir) != Canon(dir) {
 			continue
 		}
+		if f.Repo != "" {
+			if repo := s.Repo(dir); repo == nil || Canon(repo.Dir) != Canon(f.Repo) {
+				continue
+			}
+		}
 		if !hasPrefix(subject, f.Match) {
 			continue
 		}
