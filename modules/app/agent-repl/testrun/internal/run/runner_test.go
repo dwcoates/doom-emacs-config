@@ -1281,6 +1281,8 @@ func TestRunFailsANamedChunkThatRanNoneOfItsTests(t *testing.T) {
 	}{
 		{name: "a named chunk that ran none fails", named: true, want: Failed, wantError: true},
 		{name: "a named chunk that ran its test passes", named: true, ran: []testtimes.Test{{Suite: "ert", Name: "case-a"}}, want: Passed},
+		{name: "a named chunk that skipped every test fails", named: true, ran: []testtimes.Test{{Suite: "ert", Name: "case-a", Outcome: testtimes.Skip}, {Suite: "ert", Name: "case-b", Outcome: testtimes.Skip}}, want: Failed, wantError: true},
+		{name: "a named chunk that ran one test beside skipped ones passes", named: true, ran: []testtimes.Test{{Suite: "ert", Name: "case-a", Outcome: testtimes.Skip}, {Suite: "ert", Name: "case-b", Outcome: testtimes.Pass}}, want: Passed},
 		{name: "a whole chunk that ran none passes", want: Passed},
 	}
 	for _, tt := range tests {
