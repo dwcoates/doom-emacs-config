@@ -111,6 +111,10 @@ const (
 	// whole: tab numbers run across every repository the daemon holds, and
 	// the arrangement lists every one of them.
 	groupTabOrder daemonGroup = "the sidebar's tab order"
+	// groupDesktopBanner is the daemon whose desktop banners a case raises or
+	// reads: whether a banner shows turns on the one editor's focus, and a
+	// focus gain claims the newest banner held for any workspace.
+	groupDesktopBanner daemonGroup = "the desktop banner"
 )
 
 var (

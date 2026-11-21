@@ -264,8 +264,10 @@ mechanics (`integration/shareddaemon_test.go`).
   per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
   catalog its login last served; no case of it starts a session) and
   `groupHiddenKeepalives` (SendHiddenKeepalives asks every hidden shim of
-  the daemon) and `groupTabOrder` (tab numbers run across every repository,
-  and the arrangement lists them all). A new
+  the daemon), `groupTabOrder` (tab numbers run across every repository,
+  and the arrangement lists them all) and `groupDesktopBanner` (a banner
+  turns on the one editor's focus, and a focus gain claims the newest held
+  banner of any workspace). A new
   precondition is a new `daemonGroup`
   constant, never a daemon for one case.
 - **A fresh daemon (`newOpened`, `newRegistered`, `harness.StartDaemon`) is
@@ -276,6 +278,12 @@ mechanics (`integration/shareddaemon_test.go`).
   repository's main worktree (`newReportedCreateDaemon`): the report reopens
   that workspace after the case is answered, which a slice's retirement
   would race.
+- **A case reads the run log through its own records**
+  (`Daemon.AwaitOwnRunLogRecord`, `Daemon.OwnRunLog`): a view owns a record
+  naming a workspace it registered, by `workspace_dir` or, for a central
+  record stamped with the id alone, `workspace_id`; another case's record
+  never ends its wait. A shared stub's runs are read by what names the
+  workspace in them (a banner's group), never whole.
 - **A view's idle barrier is its own slice's** (`ExpectNoPush`,
   `ExpectNoPushMatching`, `ExpectFileUnchanged`, `Daemon.AwaitIdle`): it names
   the view's workspaces (`agentrepl.v1.AwaitIdleRequest.workspaces`) and waits

@@ -41,8 +41,8 @@ func bannerSettled(r harness.LogRecord) bool {
 // every banner posted so far (harness.Daemon.PostedBanners).
 func awaitBannerSettled(t *testing.T, f *fixture, what string) [][]string {
 	t.Helper()
-	f.d.AwaitLogRecord(f.d.RunLogPath(), what, bannerSettled)
-	return f.d.PostedBanners()
+	f.d.AwaitOwnRunLogRecord(what, bannerSettled)
+	return f.d.PostedBannersFor(f.ws.GetId())
 }
 
 // bannerCarrying reports whether any posted banner carries every one of words
@@ -69,7 +69,7 @@ func bannerCarrying(argvs [][]string, words ...string) bool {
 func TestQuestionAskedRaisesABannerAndSetsAttention(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-notify-question", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	roster := f.d.WatchRoster()
 
@@ -106,7 +106,7 @@ func TestQuestionAskedRaisesABannerAndSetsAttention(t *testing.T) {
 func TestAgentAddressedRaisesABannerWithItsText(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-notify-addressed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act
@@ -134,7 +134,7 @@ func TestAgentAddressedRaisesABannerWithItsText(t *testing.T) {
 func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-turn-banner", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act
@@ -152,7 +152,7 @@ func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 func TestAFailedTurnRaisesTheErroredBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-turn-failed-banner", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act
@@ -166,18 +166,23 @@ func TestAFailedTurnRaisesTheErroredBanner(t *testing.T) {
 	}
 }
 
-// awaitChimePlayed waits for the daemon's record that a chime finished, and
-// answers every chime argv played so far.
-func awaitChimePlayed(t *testing.T, f *fixture, what string) [][]string {
+// awaitChimePlayed waits for the daemon's record that f's workspace's chime
+// finished, and answers every chime its workspace played so far.
+func awaitChimePlayed(t *testing.T, f *fixture, what string) []harness.LogRecord {
 	t.Helper()
-	f.d.AwaitLogRecord(f.d.RunLogPath(), what, func(r harness.LogRecord) bool {
+	played := func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.desktopnotify.chime" && r.Message == "the chime played"
-	})
-	var argvs [][]string
-	for _, inv := range f.d.Chime.Invocations() {
-		argvs = append(argvs, inv.Argv)
 	}
-	return argvs
+	f.d.AwaitOwnRunLogRecord(what, played)
+	// THE CHIME PROGRAM NAMES NO WORKSPACE, so the case's chimes are counted
+	// from its own workspace's records, never from the shared stub's runs.
+	var plays []harness.LogRecord
+	for _, r := range f.d.OwnRunLog() {
+		if r.Operation == "daemon.desktopnotify.chime" && r.Message == "playing the chime" {
+			plays = append(plays, r)
+		}
+	}
+	return plays
 }
 
 // TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn pins that an unfocused
@@ -186,15 +191,15 @@ func awaitChimePlayed(t *testing.T, f *fixture, what string) [][]string {
 func TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-chime-unfocused", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 
 	// Assert
-	if argvs := awaitChimePlayed(t, f, "the turn banner's chime"); len(argvs) != 1 {
-		t.Fatalf("chimes %q, want exactly one", argvs)
+	if plays := awaitChimePlayed(t, f, "the turn banner's chime"); len(plays) != 1 {
+		t.Fatalf("chimes played %v, want exactly one", plays)
 	}
 	argvs := awaitBannerSettled(t, f, "the silent turn banner")
 	if !bannerCarrying(argvs, "✅") || slices.ContainsFunc(argvs, func(argv []string) bool {
@@ -209,7 +214,7 @@ func TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn(t *testing.T) {
 func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
 	resp, err := f.d.Client().ReportEditorFocus(context.Background(),
 		connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{Focus: harness.FocusedEditor()}))
@@ -222,10 +227,10 @@ func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 
 	// Assert
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the suppressed banner", func(r harness.LogRecord) bool {
+	f.d.AwaitOwnRunLogRecord("the suppressed banner", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.desktopnotify.post" && r.Message == "Emacs is focused; no desktop banner"
 	})
-	if got := f.d.PostedBanners(); len(got) != 0 {
+	if got := f.d.PostedBannersFor(f.ws.GetId()); len(got) != 0 {
 		t.Fatalf("a reported-focused Emacs got %d banners, want none", len(got))
 	}
 }
@@ -251,12 +256,12 @@ func TestAFocusGainClaimsTheHeldBannerInTheSameReport(t *testing.T) {
 	}
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
 	f.submit("go", "k-claimed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 	awaitBannerSettled(t, f, "the handed turn banner")
-	runs := len(f.d.PostedBanners())
+	runs := len(f.d.PostedBannersFor(f.ws.GetId()))
 
 	// Act
 	first := reportFocus(t, f.d, harness.FocusedEditor())
@@ -271,7 +276,7 @@ func TestAFocusGainClaimsTheHeldBannerInTheSameReport(t *testing.T) {
 	if second.GetNothingHeld() == nil {
 		t.Fatalf("second gain = %v, want nothing_held: the first consumed the banner", second)
 	}
-	if after := f.d.PostedBanners(); len(after) != runs {
+	if after := f.d.PostedBannersFor(f.ws.GetId()); len(after) != runs {
 		t.Fatalf("banners %v posted after the gains, want none: the claim asks the platform nothing", after[runs:])
 	}
 }
@@ -306,11 +311,11 @@ func TestAHandedBannersClickSelectsTheWorkspace(t *testing.T) {
 	}
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-handed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 	awaitBannerSettled(t, f, "the handed turn banner")
-	banners := f.d.Launcher.Banners()
+	banners := f.d.Launcher.BannersFor("agent-repl:" + f.ws.GetId())
 	if len(banners) != 1 {
 		t.Fatalf("banners %v, want exactly one", banners)
 	}

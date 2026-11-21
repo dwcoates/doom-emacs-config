@@ -1105,7 +1105,7 @@ func TestAClearDrawsOnlyItsBarThenTheFollowUpPromptOnTheRealPath(t *testing.T) {
 func TestPermissionStartDrawsOpenRowFooterAndBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-permstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)
@@ -1125,7 +1125,7 @@ func TestPermissionStartDrawsOpenRowFooterAndBanner(t *testing.T) {
 	awaitFooter(t, f, footer, "footer permission", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetPermission() != nil
 	})
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the permission ask's desktop banner", func(r harness.LogRecord) bool {
+	f.d.AwaitOwnRunLogRecord("the permission ask's desktop banner", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.desktopnotify.post" && r.Message == "posting a desktop banner" &&
 			r.Context["kind"] == "permission_requested"
 	})
