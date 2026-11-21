@@ -460,6 +460,12 @@ coverage impact (always none).
     - Pitfall inside the fix: incremental `tsc` under `--noEmit` keys a file's signature on its text, so a body edit to that file cost 26.1 CPU-s, more than the full check. Declaration emit makes the signature its declarations.
     - Coverage impact: none; every binary, package and file is still built, vetted and typechecked, and tsc compares every source by the hash of its text.
 
+21. **Every vitest process re-transforming the same modules.**
+    - Evidence (2026-11-20): on vitest 2.1.9 a 48-file webapp batch cost 25-34 CPU-s, about a third of it transforming modules every earlier process of the run had already transformed; the gate's webapp suite cost 269.3 CPU-s and the shim's 197.8 (gate 06af8b3d47e14195, nothing reused).
+    - Fix: vitest 5.1.1 (vite 7.3.8; vite 8 would have replaced the production bundle's Rollup) and its persistent module cache, kept per worktree (`webapp/vite-cache.ts`'s `vitestModuleCacheDir`, the shim's in its own `node_modules`). Each entry is keyed by the module's path and its text's hash, so a confined unit never reads one for a changed source. Measured unit by unit in full `-suite` runs: webapp 176.3 CPU-s, shim 140.3 (cache cold).
+    - Pitfalls the upgrade surfaced, each a fix at its source: a second `vi.spyOn` of the same method returns the spy already installed, so a spy per fixture recursed; a getter spy and a setter spy on one accessor restored the mocked getter for every later file; files that left the root element's attributes or the document's own properties behind failed others once vitest 5 reordered the files (`webapp/test/setup-shared-worker.ts` now starts every test on a bare root element and the document as the environment made it); a module reading an import at its top level inside an import cycle read `undefined` (`src/sidebar/section-classes.ts`).
+    - Coverage impact: none; every test runs with its assertions unchanged.
+
 ## Changes that LOOK faster and are refused
 
 - Skipping a test, or moving it behind a flag nobody sets: coverage loss.
