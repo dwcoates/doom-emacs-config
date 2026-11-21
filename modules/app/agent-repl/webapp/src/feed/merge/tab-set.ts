@@ -33,7 +33,6 @@ import { placeChildren } from "../../dom.js";
 import type { Ticker } from "../../clock.js";
 import { FeedRowSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { replaceTicking, stopTicking } from "../ticking.js";
-import { requireMessage } from "../../rpc/strict.js";
 import {
   autoSelectedTab,
   drawFeedMergeTab,
@@ -55,7 +54,7 @@ export interface TabPanel {
    * A panel with views of its own (a run's tests and remediation) offers them
    * here; a panel without leaves it unset, and the click only pins the tab.
    */
-  reselect?(badge: HTMLElement): void;
+  reselect?: (badge: HTMLElement) => void;
   /**
    * The strip just OPENED this panel: its tab became the one shown (the
    * reader's click, the auto rule moving on, or the strip's first draw when

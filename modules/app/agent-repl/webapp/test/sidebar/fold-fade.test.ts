@@ -125,7 +125,7 @@ describe("the fold fade", () => {
     fade.apply("ws-1", row, false);
 
     // Act
-    timers[0]!.fn();
+    timers[0].fn();
 
     // Assert
     expect(fadingOn(row)).toBe("0ms");
