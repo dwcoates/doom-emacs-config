@@ -1,7 +1,7 @@
 ---
 name: agent-repl-merge-queue
-description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, puts a merge that left the queue without landing back in line as itself (requeue), discards one, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s depletion, pause and resume (following one workspace''s merge is `workspace subscribe`, `/agent-repl-workspaces`''). Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, a merge that failed or was evicted must go back in line or be discarded, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
-argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | requeue | discard | move-up | move-down | pause [-hard] [-to-land] | resume | subscribe | unsubscribe"
+description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, puts a merge that left the queue without landing back in line as itself (requeue), discards one, moves a waiting merge up, down, or to any place in one call (front, back, behind a merge, or an index), pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s depletion, pause and resume (following one workspace''s merge is `workspace subscribe`, `/agent-repl-workspaces`''). Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, a merge that failed or was evicted must go back in line or be discarded, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
+argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | requeue | discard | move-up | move-down | move | pause [-hard] [-to-land] | resume | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-merge-queue/agent-repld:*)
 ---
 
@@ -183,6 +183,28 @@ Either kind:
   `merge-queue move-down MERGE` take a merge off the queue or move it one
   place. MERGE is the name `merge-queue status` lists it under (an async
   merge's `-name`), or `here` for this workspace's own merge.
+- `merge-queue move MERGE|here -placement front|back|behind=MERGE|index=N`
+  moves a WAITING merge to any place in its queue in ONE atomic call. CRITICAL:
+  use `move` whenever a merge must go more than one place; NEVER loop
+  `move-up`/`move-down`.
+  - `front` is the head of the waiting line: directly behind the running merge,
+    ahead of every other waiting merge INCLUDING earlier front placements; the
+    merge becomes a front merge.
+  - `back` is behind every waiting merge.
+  - `behind=MERGE` is directly behind the merge the queue lists under that name
+    (waiting or running; behind the running merge is the same place as front).
+    Unlike `-placement behind=` on a request, it sets up no wait on that merge
+    landing.
+  - `index=N` is the 0-based place among the WAITING merges (the running merge
+    is not counted; 0 is the front).
+  - The moved merge takes the front mark of its new place (front at the head,
+    otherwise the mark of the merge directly ahead), so front merges stay ahead
+    of ordinary ones. A merge already on that place answers success and stays.
+  - Refusals, each changing nothing: `no_such_queued_merge` (the workspace has
+    no WAITING merge: none, running, only requested, or stepped aside for a
+    repair), `placement_behind_not_in_line` (`behind=` names no merge in line on
+    that queue), `index_out_of_range` (carries `index` and `waiting`; the last
+    place is waiting-1).
 - A merge's request lives until it lands or is discarded. Any exit short of a
   landing (dequeue, failure, a restart that could not resume it, hidden at its
   cold gate, the merge ahead not landing) keeps it OFF THE QUEUE with its
@@ -328,9 +350,8 @@ next (owner ruling 2026-10-23). CRITICAL: do this only when the user asked for
 it; it discards the running merge's test progress.
 
 1. Put the commandeering merge at the front: a new request uses
-   `-placement front`; a waiting one is moved with `merge-queue move-up MERGE`
-   until it sits directly behind the running merge (`move-up` never passes the
-   running merge).
+   `-placement front`; a waiting one is moved there in one call with
+   `merge-queue move MERGE -placement front`.
 2. `merge-queue status` and note the running merge's name. Its request is
    kept when it is dequeued; nothing needs recording.
 3. `merge-queue dequeue RUNNING`. The commandeering merge starts.

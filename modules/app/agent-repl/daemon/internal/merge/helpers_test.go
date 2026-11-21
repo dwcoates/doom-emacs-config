@@ -1163,6 +1163,54 @@ func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 	return 0, fmt.Errorf("no queue entry for %s", id)
 }
 
+// waitingOf answers the waiting entries of REPO's queue in line order, ID's
+// place among them (-1 when absent), and their indexes in the queue.
+func (f *fakeDB) waitingOf(repo wsm.RepoKey, id ids.WorkspaceID) ([]wsm.MergeQueueEntry, int, []int) {
+	var waiting []wsm.MergeQueueEntry
+	var slots []int
+	at := -1
+	for i, entry := range f.queues[repo] {
+		if entry.State != wsm.MergeQueued {
+			continue
+		}
+		if entry.Workspace == id {
+			at = len(waiting)
+		}
+		waiting = append(waiting, entry)
+		slots = append(slots, i)
+	}
+	return waiting, at, slots
+}
+
+// stateOf answers the state of WS's entry in REPO's queue, and whether it has one.
+func (f *fakeDB) stateOf(repo wsm.RepoKey, ws ids.WorkspaceID) (wsm.MergeQueueState, bool) {
+	for _, entry := range f.queues[repo] {
+		if entry.Workspace == ws {
+			return entry.State, true
+		}
+	}
+	return 0, false
+}
+
+// reorderWaiting puts ID's waiting entry on the TARGET'th waiting place with
+// the front mark FRONT, moving only waiting entries among the places they
+// hold, exactly as the durable queue's reorderWaiting does. It answers
+// whether the order changed.
+func (f *fakeDB) reorderWaiting(repo wsm.RepoKey, id ids.WorkspaceID, target int, front bool) bool {
+	waiting, from, slots := f.waitingOf(repo, id)
+	if target == from {
+		return false
+	}
+	moved := waiting[from]
+	moved.Source.Front = front
+	order := slices.Insert(slices.Delete(slices.Clone(waiting), from, from+1), target, moved)
+	for i, slot := range slots {
+		f.queues[repo][slot] = order[i]
+	}
+	f.renumber(repo)
+	return true
+}
+
 // MoveMerge swaps a waiting entry with the nearest waiting entry on the
 // move's side, the moved entry taking the passed entry's front mark, exactly
 // as the durable queue re-sequences it.
@@ -1172,39 +1220,36 @@ func (f *fakeDB) MoveMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspace
 	if f.moveErr != nil {
 		return wsm.MergeMoveOutcome{}, f.moveErr
 	}
-	queue := f.queues[repo]
-	for i, entry := range queue {
-		if entry.Workspace != id {
-			continue
-		}
-		if entry.State != wsm.MergeQueued {
-			return wsm.MergeMoveOutcome{Result: wsm.MergeMoveNotWaiting}, nil
-		}
-		step := -1
-		if move == wsm.MergeMoveDown {
-			step = 1
-		}
-		var blocker ids.WorkspaceID
-		for j := i + step; j >= 0 && j < len(queue); j += step {
-			if queue[j].State == wsm.MergeAdmitted && blocker == "" {
-				blocker = queue[j].Workspace
-			}
-			if queue[j].State != wsm.MergeQueued {
-				continue
-			}
-			queue[i].Source.Front = queue[j].Source.Front
-			queue[i], queue[j] = queue[j], queue[i]
-			f.renumber(repo)
-			return wsm.MergeMoveOutcome{Result: wsm.MergeMoved}, nil
-		}
-		// THE NEAREST ADMITTED ENTRY ON THAT SIDE BLOCKS IT, as the durable
-		// queue answers; with none, it stands at the edge of the line.
-		if blocker != "" {
-			return wsm.MergeMoveOutcome{Result: wsm.MergeMoveBlockedByAdmitted, Blocker: blocker}, nil
-		}
-		return wsm.MergeMoveOutcome{Result: wsm.MergeMoveAtEdge}, nil
+	state, found := f.stateOf(repo, id)
+	if !found {
+		return wsm.MergeMoveOutcome{}, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 	}
-	return wsm.MergeMoveOutcome{}, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+	if state != wsm.MergeQueued {
+		return wsm.MergeMoveOutcome{Result: wsm.MergeMoveNotWaiting}, nil
+	}
+	waiting, from, _ := f.waitingOf(repo, id)
+	target := from - 1
+	if move == wsm.MergeMoveDown {
+		target = from + 1
+	}
+	if target >= 0 && target < len(waiting) {
+		f.reorderWaiting(repo, id, target, waiting[target].Source.Front)
+		return wsm.MergeMoveOutcome{Result: wsm.MergeMoved}, nil
+	}
+	// THE NEAREST ADMITTED ENTRY ON THAT SIDE BLOCKS IT, as the durable
+	// queue answers; with none, it stands at the edge of the line.
+	queue := f.queues[repo]
+	i := slices.IndexFunc(queue, func(entry wsm.MergeQueueEntry) bool { return entry.Workspace == id })
+	step := -1
+	if move == wsm.MergeMoveDown {
+		step = 1
+	}
+	for j := i + step; j >= 0 && j < len(queue); j += step {
+		if queue[j].State == wsm.MergeAdmitted {
+			return wsm.MergeMoveOutcome{Result: wsm.MergeMoveBlockedByAdmitted, Blocker: queue[j].Workspace}, nil
+		}
+	}
+	return wsm.MergeMoveOutcome{Result: wsm.MergeMoveAtEdge}, nil
 }
 
 func (f *fakeDB) MoveMergeTo(_ context.Context, repo wsm.RepoKey, id, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error) {
@@ -1213,38 +1258,64 @@ func (f *fakeDB) MoveMergeTo(_ context.Context, repo wsm.RepoKey, id, anchor ids
 	if f.moveErr != nil {
 		return false, f.moveErr
 	}
-	queue := f.queues[repo]
-	at := func(ws ids.WorkspaceID) int {
-		for i, entry := range queue {
-			if entry.Workspace == ws {
-				return i
-			}
-		}
-		return -1
-	}
-	from, to := at(id), at(anchor)
-	if from < 0 || to < 0 {
+	state, found := f.stateOf(repo, id)
+	anchorState, anchorFound := f.stateOf(repo, anchor)
+	if !found || !anchorFound {
 		return false, fmt.Errorf("no queue entry for %s or %s: %w", id, anchor, wsm.ErrNotFound)
 	}
-	if queue[from].State != wsm.MergeQueued || queue[to].State != wsm.MergeQueued || id == anchor {
+	if state != wsm.MergeQueued || anchorState != wsm.MergeQueued || id == anchor {
 		return false, nil
 	}
-	moved := queue[from]
-	moved.Source.Front = queue[to].Source.Front
-	rest := append(append([]wsm.MergeQueueEntry(nil), queue[:from]...), queue[from+1:]...)
-	place := to
-	if from < to {
-		place--
-	}
+	waiting, from, _ := f.waitingOf(repo, id)
+	rest := slices.Delete(slices.Clone(waiting), from, from+1)
+	at := slices.IndexFunc(rest, func(e wsm.MergeQueueEntry) bool { return e.Workspace == anchor })
+	target := at
 	if side == wsm.MergeSideBehind {
-		place++
+		target++
 	}
-	if place == from {
-		return false, nil
+	return f.reorderWaiting(repo, id, target, rest[at].Source.Front), nil
+}
+
+// PlaceMerge puts a waiting entry on a place among the waiting entries,
+// taking its new place's front mark and refusing as the durable queue does.
+func (f *fakeDB) PlaceMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, place wsm.MergePlace) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.moveErr != nil {
+		return false, f.moveErr
 	}
-	f.queues[repo] = append(rest[:place:place], append([]wsm.MergeQueueEntry{moved}, rest[place:]...)...)
-	f.renumber(repo)
-	return true, nil
+	own, found := f.stateOf(repo, id)
+	if !found {
+		return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+	}
+	if own != wsm.MergeQueued {
+		return false, fmt.Errorf("%s stands %s: %w", id, own, wsm.ErrMergeNotWaiting)
+	}
+	waiting, from, _ := f.waitingOf(repo, id)
+	rest := slices.Delete(slices.Clone(waiting), from, from+1)
+	target := 0
+	switch place.Kind {
+	case wsm.MergePlaceBack:
+		target = len(waiting) - 1
+	case wsm.MergePlaceIndex:
+		if place.Index >= len(waiting) {
+			return false, &wsm.MergePlaceOutOfRangeError{Index: place.Index, Waiting: len(waiting)}
+		}
+		target = place.Index
+	case wsm.MergePlaceBehind:
+		anchorState, found := f.stateOf(repo, place.Anchor)
+		switch {
+		case place.Anchor == id:
+			target = from
+		case found && anchorState == wsm.MergeAdmitted:
+			target = 0
+		case found && anchorState == wsm.MergeQueued:
+			target = slices.IndexFunc(rest, func(e wsm.MergeQueueEntry) bool { return e.Workspace == place.Anchor }) + 1
+		default:
+			return false, fmt.Errorf("%s is not in line: %w", place.Anchor, wsm.ErrAnchorNotInLine)
+		}
+	}
+	return f.reorderWaiting(repo, id, target, target == 0 || rest[target-1].Source.Front), nil
 }
 
 // PrioritizeMerge moves a waiting entry ahead of every other waiting entry,
@@ -1255,28 +1326,14 @@ func (f *fakeDB) PrioritizeMerge(_ context.Context, repo wsm.RepoKey, id ids.Wor
 	if f.prioritizeErr != nil {
 		return false, f.prioritizeErr
 	}
-	queue := f.queues[repo]
-	for i, entry := range queue {
-		if entry.Workspace != id {
-			continue
-		}
-		if entry.State != wsm.MergeQueued {
-			return false, nil
-		}
-		for j := 0; j < i; j++ {
-			if queue[j].State != wsm.MergeQueued {
-				continue
-			}
-			moved := queue[i]
-			moved.Source.Front = true
-			copy(queue[j+1:i+1], queue[j:i])
-			queue[j] = moved
-			f.renumber(repo)
-			return true, nil
-		}
+	state, found := f.stateOf(repo, id)
+	if !found {
+		return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+	}
+	if state != wsm.MergeQueued {
 		return false, nil
 	}
-	return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+	return f.reorderWaiting(repo, id, 0, true), nil
 }
 
 // renumber restates the positions, which are derived from order rather than

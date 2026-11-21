@@ -2224,12 +2224,12 @@ encoded here."
 `mediation', which only the deploy mediator sends, through the CLI,
 `releaseEscalation', which the sidebar and the CLI send, `giveUp',
 which only a merge's own agent sends, through the CLI, and
-`ignoredRecords', which only the CLI sends."
+`ignoredRecords' and `move', which only the CLI sends."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "giveUp" "ignoredRecords" "mediation" "moveDown" "moveTo" "moveUp" "pause" "releaseEscalation" "resume"))))
+                 '("evict" "giveUp" "ignoredRecords" "mediation" "move" "moveDown" "moveTo" "moveUp" "pause" "releaseEscalation" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -3715,8 +3715,31 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld" "noRepairTurn" "moveBlocked")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld" "noRepairTurn" "placementBehindNotInLine" "indexOutOfRange" "moveBlocked")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-placement-behind-not-in-line-arm ()
+  "UpdateMergeQueueError's `placement_behind_not_in_line' arm decodes the
+name the move asked to go behind."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"placementBehindNotInLine\":{\"behind\":\"two\"}}"))
+                   '(:cause (:arm :placement-behind-not-in-line :value (:behind "two")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-index-out-of-range-arm ()
+  "UpdateMergeQueueError's `index_out_of_range' arm decodes the place asked
+for and how many merges were waiting."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"indexOutOfRange\":{\"index\":3,\"waiting\":2}}"))
+                   '(:cause (:arm :index-out-of-range :value (:index 3 :waiting 2)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-index-out-of-range-negative-is-a-breach ()
+  "A negative place in `index_out_of_range' breaks its unsigned contract."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-merge-queue-error
+                   (agent-repl-test-wire-verbs--parse "{\"indexOutOfRange\":{\"index\":-1,\"waiting\":2}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-move-blocked-arms-pinned ()
   "UpdateMergeQueueMoveBlocked's cause set is exactly what the frozen schema declares."

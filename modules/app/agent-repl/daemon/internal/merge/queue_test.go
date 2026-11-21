@@ -1526,7 +1526,7 @@ func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
 			t.Fatalf("read %s: %v", file, err)
 		}
 		// Act.
-		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.MoveMergeTo(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
+		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.MoveMergeTo(", "o.deps.DB.PlaceMerge(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
 			for range strings.Count(string(code), call) {
 				calls = append(calls, file+":"+call)
 			}
@@ -1536,8 +1536,8 @@ func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
 	// Assert: each store reorder is called once, inside the reordering its
 	// verb hands to reorder.
 	want := []string{
-		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.deps.DB.MoveMergeTo(",
-		"queue.go:o.reorder(ctx, ws, reordering{", "queue.go:o.reorder(ctx, ws, reordering{",
+		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.deps.DB.MoveMergeTo(", "queue.go:o.deps.DB.PlaceMerge(",
+		"queue.go:o.reorder(ctx, ws, reordering{", "queue.go:o.reorder(ctx, ws, reordering{", "queue.go:o.reorder(ctx, ws, reordering{",
 		"terminal.go:o.deps.DB.PrioritizeMerge(", "terminal.go:o.reorder(ctx, ws, reordering{",
 	}
 	if !slices.Equal(calls, want) {
@@ -3260,5 +3260,246 @@ func TestEveryScopedReadSharesReadScopedRepository(t *testing.T) {
 	// Assert
 	if count != 1 {
 		t.Fatalf("%q is written %d times; want it only in readScopedRepository, so no scoped read records its failure by hand", message, count)
+	}
+}
+
+// TestPlaceRedrawsTheQueueInItsNewOrder covers every place a move names:
+// the merge stands there, and every merge on the queue is told its place.
+func TestPlaceRedrawsTheQueueInItsNewOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws         wsm.WorkspaceID
+		place      MovePlace
+		wantPlaces map[wsm.WorkspaceID]int
+	}{
+		{name: "front", ws: "ws-3", place: MovePlace{Kind: wsm.MergePlaceFront},
+			wantPlaces: map[wsm.WorkspaceID]int{"ws-3": 1, theWorkspace: 2, "ws-2": 3}},
+		{name: "back", ws: theWorkspace, place: MovePlace{Kind: wsm.MergePlaceBack},
+			wantPlaces: map[wsm.WorkspaceID]int{"ws-2": 1, "ws-3": 2, theWorkspace: 3}},
+		{name: "behind a merge named as the queue lists it", ws: "ws-3", place: MovePlace{Kind: wsm.MergePlaceBehind, Behind: "ws-one"},
+			wantPlaces: map[wsm.WorkspaceID]int{theWorkspace: 1, "ws-3": 2, "ws-2": 3}},
+		{name: "a waiting index", ws: theWorkspace, place: MovePlace{Kind: wsm.MergePlaceIndex, Index: 1},
+			wantPlaces: map[wsm.WorkspaceID]int{"ws-2": 1, theWorkspace: 2, "ws-3": 3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: three merges wait.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+			queueAnother(t, h, "ws-3", "three")
+
+			// Act.
+			moved, err := h.o.Place(context.Background(), tt.ws, tt.place)
+
+			// Assert.
+			if err != nil || !moved {
+				t.Fatalf("Place = %v, %v; want moved", moved, err)
+			}
+			for ws, want := range tt.wantPlaces {
+				if got := h.factsOf(ws).QueuePlace; got != want {
+					t.Fatalf("%s's place = %d, want %d", ws, got, want)
+				}
+			}
+			record, logged := h.recordFor("info", "daemon.merge.place")
+			if !logged || record.Context["workspace"] != string(tt.ws) || record.Context["place"] != tt.place.Kind.String() {
+				t.Fatalf("the move was not recorded with its context: %+v", h.logs.Records())
+			}
+		})
+	}
+}
+
+// TestPlaceResolvesAMergeToGoBehindByItsSuppliedName covers a name given
+// without the workspace prefix its merge stands under.
+func TestPlaceResolvesAMergeToGoBehindByItsSuppliedName(t *testing.T) {
+	// Arrange: two merges wait, the second standing under a prefixed name.
+	h := newHarness(t)
+	h.names.prefix = "agent"
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "agent/two")
+	queueAnother(t, h, "ws-3", "three")
+
+	// Act.
+	moved, err := h.o.Place(context.Background(), theWorkspace, MovePlace{Kind: wsm.MergePlaceBehind, Behind: "two"})
+
+	// Assert.
+	if err != nil || !moved {
+		t.Fatalf("Place = %v, %v; want moved", moved, err)
+	}
+	if got := h.factsOf(theWorkspace).QueuePlace; got != 2 {
+		t.Fatalf("place = %d, want 2", got)
+	}
+}
+
+// TestPlaceLeavesAMergeAlreadyOnItsPlaceWhereItIs covers the success answer
+// for a merge that already stands where it is asked to go.
+func TestPlaceLeavesAMergeAlreadyOnItsPlaceWhereItIs(t *testing.T) {
+	// Arrange: two merges wait.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+
+	// Act.
+	moved, err := h.o.Place(context.Background(), theWorkspace, MovePlace{Kind: wsm.MergePlaceFront})
+
+	// Assert.
+	if err != nil || moved {
+		t.Fatalf("Place = %v, %v; want unmoved", moved, err)
+	}
+	if _, logged := h.recordFor("info", "daemon.merge.place"); !logged {
+		t.Fatalf("the unmoved answer was not recorded: %+v", h.logs.Records())
+	}
+}
+
+// TestPlaceRefusesAndRecordsTheRefusal covers every refusal of a move: the
+// typed refusal reaches the caller, it is recorded at INFO with its arm, and
+// nothing moves.
+func TestPlaceRefusesAndRecordsTheRefusal(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws         wsm.WorkspaceID
+		place      MovePlace
+		running    bool
+		wantArm    string
+		wantFields map[string]any
+	}{
+		{name: "a workspace with no merge", ws: "ws-9", place: MovePlace{Kind: wsm.MergePlaceFront}, wantArm: ArmNoSuchQueuedMerge},
+		{name: "the running merge", ws: theWorkspace, running: true, place: MovePlace{Kind: wsm.MergePlaceBack}, wantArm: ArmNoSuchQueuedMerge},
+		{name: "behind a name no merge in line stands under", ws: "ws-2", place: MovePlace{Kind: wsm.MergePlaceBehind, Behind: "nowhere"},
+			wantArm: ArmPlacementBehindNotInLine, wantFields: map[string]any{"behind": "nowhere"}},
+		{name: "an index past the last waiting place", ws: "ws-2", place: MovePlace{Kind: wsm.MergePlaceIndex, Index: 3},
+			wantArm: ArmIndexOutOfRange, wantFields: map[string]any{"index": uint32(3), "waiting": uint32(3)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two merges wait, or one runs and one waits.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+			h.register("ws-9", "nine")
+			if tt.running {
+				h.db.mu.Lock()
+				h.db.queues[h.repoKey()][0].State = wsm.MergeAdmitted
+				h.db.mu.Unlock()
+			} else {
+				queueAnother(t, h, "ws-3", "three")
+			}
+
+			// Act.
+			moved, err := h.o.Place(context.Background(), tt.ws, tt.place)
+
+			// Assert.
+			refusal, refused := Refused(err)
+			if moved || !refused || refusal.Arm != tt.wantArm {
+				t.Fatalf("Place = %v, %v; want the %s refusal", moved, err, tt.wantArm)
+			}
+			for field, want := range tt.wantFields {
+				if refusal.Fields[field] != want {
+					t.Fatalf("refusal field %s = %v, want %v", field, refusal.Fields[field], want)
+				}
+			}
+			record, logged := h.recordFor("info", "daemon.merge.place")
+			if !logged || record.Context["arm"] != tt.wantArm || record.Context["workspace"] != string(tt.ws) {
+				t.Fatalf("the refusal was not recorded at INFO with its arm: %+v", h.logs.Records())
+			}
+			if _, failed := h.recordFor("error", "daemon.merge.place"); failed {
+				t.Fatalf("a refusal was recorded at ERROR: %+v", h.logs.Records())
+			}
+			if got := h.factsOf("ws-2").QueuePlace; got != 2 {
+				t.Fatalf("ws-2's place = %d, want 2", got)
+			}
+		})
+	}
+}
+
+// TestPlaceRecordsAFailedMoveAndRedrawsNothing covers the store failing the
+// move: the error reaches the caller and is recorded at ERROR with its context.
+func TestPlaceRecordsAFailedMoveAndRedrawsNothing(t *testing.T) {
+	// Arrange: two merges wait, and the store fails every move.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+	h.db.moveErr = errors.New("database is locked")
+
+	// Act.
+	moved, err := h.o.Place(context.Background(), "ws-2", MovePlace{Kind: wsm.MergePlaceIndex, Index: 0})
+
+	// Assert.
+	if err == nil || moved {
+		t.Fatalf("Place = %v, %v; want the store's failure", moved, err)
+	}
+	record, logged := h.recordFor("error", "daemon.merge.place")
+	if !logged || record.Context["error"] != "database is locked" || record.Context["workspace"] != "ws-2" ||
+		record.Context["place"] != "index" || record.Context["index"] != 0 {
+		t.Fatalf("the failed move was not recorded at ERROR with its context: %+v", h.logs.Records())
+	}
+	if got := h.factsOf("ws-2"); got.QueuePlace != 2 {
+		t.Fatalf("place = %d, want 2", got.QueuePlace)
+	}
+}
+
+// TestEveryBehindRefusalSharesOneShape pins that a request and a move asked
+// to go behind a merge not in line are refused through behindNotInLine: the
+// same arm, field and sentence.
+func TestEveryBehindRefusalSharesOneShape(t *testing.T) {
+	tests := []struct {
+		name string
+		ask  func(h *harness) error
+	}{
+		{name: "a request", ask: func(h *harness) error {
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: "ws-3", Source: ownBranch, By: RequestedByUser, PlaceBehind: "nowhere"})
+			return err
+		}},
+		{name: "a move", ask: func(h *harness) error {
+			_, err := h.o.Place(context.Background(), "ws-2", MovePlace{Kind: wsm.MergePlaceBehind, Behind: "nowhere"})
+			return err
+		}},
+	}
+	want := behindNotInLine("", "nowhere", []string{"ws-one", "two"})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two merges wait.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+			h.registerOther("ws-3", "three", "b-three")
+
+			// Act.
+			err := tt.ask(h)
+
+			// Assert.
+			refusal, refused := Refused(err)
+			if !refused || refusal.Arm != want.Arm || refusal.Reason != want.Reason || refusal.Fields["behind"] != want.Fields["behind"] {
+				t.Fatalf("refusal = %+v, want %+v", refusal, want)
+			}
+		})
+	}
+}
+
+// TestFakeReorderWaitingMovesOnlyWaitingEntries pins the fake store's one
+// reorder, which its MoveMerge, MoveMergeTo, PlaceMerge and PrioritizeMerge
+// share: only waiting entries change places, as in the durable queue.
+func TestFakeReorderWaitingMovesOnlyWaitingEntries(t *testing.T) {
+	// Arrange: the running merge, a waiting one, a request and the moved one.
+	h := newHarness(t)
+	repo := h.repoKey()
+	h.db.queues[repo] = []wsm.MergeQueueEntry{
+		{Workspace: "ws-r", State: wsm.MergeAdmitted}, {Workspace: "ws-a", State: wsm.MergeQueued},
+		{Workspace: "ws-p", State: wsm.MergeRequested}, {Workspace: "ws-m", State: wsm.MergeQueued},
+	}
+
+	// Act.
+	moved := h.db.reorderWaiting(repo, "ws-m", 0, true)
+
+	// Assert.
+	var order []wsm.WorkspaceID
+	for _, entry := range h.db.queues[repo] {
+		order = append(order, entry.Workspace)
+	}
+	if want := []wsm.WorkspaceID{"ws-r", "ws-m", "ws-p", "ws-a"}; !moved || !slices.Equal(order, want) {
+		t.Fatalf("reorderWaiting = %v, queue %v; want moved, %v", moved, order, want)
+	}
+	if !h.db.queues[repo][1].Source.Front {
+		t.Fatal("the moved entry did not take the front mark")
 	}
 }

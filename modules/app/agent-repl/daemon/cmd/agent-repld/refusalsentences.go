@@ -34,6 +34,13 @@ func sayNotYetAdopted(ws, again string) string {
 	return fmt.Sprintf("the daemon is restarting and has not taken %s over yet; %s once the restart finishes", ws, again)
 }
 
+// sayBehindNotInLine is the placement_behind_not_in_line sentence of every
+// verb that places WS's merge behind another: BEHIND names no merge in line on
+// its queue.
+func sayBehindNotInLine(ws string, e *agentreplv1.MergeQueuePlacementBehindNotInLine) string {
+	return fmt.Sprintf("the merge %s that %s was to go behind is not in its queue", e.GetBehind(), ws)
+}
+
 // errUndescribedArm is a refusal arm, or a fact inside one, that the command
 // has no sentence for: a new arm landed without one, a bug the unit tests
 // catch.

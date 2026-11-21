@@ -23,6 +23,8 @@ func TestTheSharedRefusalSentences(t *testing.T) {
 		{name: "lives elsewhere", got: sayLivesElsewhere("ws", "/w/ws", "the request"), want: "ws lives at /w/ws, not at the directory the request named"},
 		{name: "handed over", got: sayHandedOver("ws", "127.0.0.1:9", "finish it again"), want: "the daemon is restarting and handed ws to its successor at 127.0.0.1:9; finish it again"},
 		{name: "not yet adopted", got: sayNotYetAdopted("ws", "finish it again"), want: "the daemon is restarting and has not taken ws over yet; finish it again once the restart finishes"},
+		{name: "behind a merge not in line", got: sayBehindNotInLine("ws", &agentreplv1.MergeQueuePlacementBehindNotInLine{Behind: "other"}),
+			want: "the merge other that ws was to go behind is not in its queue"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,6 +65,39 @@ func TestEveryDescriberSaysTheUnknownWorkspaceArmOneWay(t *testing.T) {
 			// Assert
 			if err != nil || got != sayNoWorkspace("ws") {
 				t.Fatalf("describe = %q, %v; want %q", got, err, sayNoWorkspace("ws"))
+			}
+		})
+	}
+}
+
+// TestEveryDescriberSaysTheBehindNotInLineArmOneWay pins that every refusal
+// describer with a placement_behind_not_in_line arm says it through
+// sayBehindNotInLine, so a describer that hand-rolls its own wording fails
+// here.
+func TestEveryDescriberSaysTheBehindNotInLineArmOneWay(t *testing.T) {
+	behind := &agentreplv1.MergeQueuePlacementBehindNotInLine{Behind: "other"}
+	tests := []struct {
+		name     string
+		describe func() (string, error)
+	}{
+		{name: "finish", describe: func() (string, error) {
+			return describeFinishRefusal("ws", &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_PlacementBehindNotInLine{PlacementBehindNotInLine: behind}})
+		}},
+		{name: "requeue", describe: func() (string, error) {
+			return describeRequeueRefusal("ws", &agentreplv1.RequeueMergeError{Cause: &agentreplv1.RequeueMergeError_PlacementBehindNotInLine{PlacementBehindNotInLine: behind}})
+		}},
+		{name: "update", describe: func() (string, error) {
+			return describeUpdateQueueRefusal("ws", &agentreplv1.UpdateMergeQueueError{Cause: &agentreplv1.UpdateMergeQueueError_PlacementBehindNotInLine{PlacementBehindNotInLine: behind}})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := tt.describe()
+
+			// Assert
+			if want := sayBehindNotInLine("ws", behind); err != nil || got != want {
+				t.Fatalf("describe = %q, %v; want %q", got, err, want)
 			}
 		})
 	}

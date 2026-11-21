@@ -1426,6 +1426,21 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 		}
 		return invalid("move_to.place", "a move to a place names the merge it goes beside")
 	}
+	if move := req.GetMove(); move != nil {
+		if err := validateWorkspaceRef("move.workspace", move.GetWorkspace()); err != nil {
+			return err
+		}
+		switch place := move.GetPlace().(type) {
+		case *agentreplv1.UpdateMergeQueueMove_Front, *agentreplv1.UpdateMergeQueueMove_Back, *agentreplv1.UpdateMergeQueueMove_Index:
+			return nil
+		case *agentreplv1.UpdateMergeQueueMove_Behind:
+			if strings.TrimSpace(place.Behind.GetMerge()) == "" {
+				return invalid("move.behind.merge", "a move behind a merge names it as the queue lists it")
+			}
+			return nil
+		}
+		return invalid("move.place", "a move names the place it puts the merge on")
+	}
 	if ignored := req.GetIgnoredRecords(); ignored != nil {
 		if req.GetRequester().GetWorkspace() == nil {
 			return invalid("requester", "only a deploy mediator's agent changes the records the deploy checks leave out")

@@ -369,6 +369,18 @@ func (d queueEventsDB) MoveMergeTo(ctx context.Context, repo wsm.RepoKey, id, an
 	return moved, err
 }
 
+// PlaceMerge moves a waiting merge to a place in its queue and reports the
+// reorder when it moved.
+func (d queueEventsDB) PlaceMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, place wsm.MergePlace) (bool, error) {
+	var moved bool
+	err := d.reported(ctx, repo, false, func() (queueWrite, error) {
+		var err error
+		moved, err = d.DB.PlaceMerge(ctx, repo, id, place)
+		return queueWrite{report: moved, kind: QueueChangeReordered, subject: id}, err
+	})
+	return moved, err
+}
+
 // PrioritizeMerge moves a waiting merge to the front of the waiting and
 // reports the reorder when it moved.
 func (d queueEventsDB) PrioritizeMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) (bool, error) {

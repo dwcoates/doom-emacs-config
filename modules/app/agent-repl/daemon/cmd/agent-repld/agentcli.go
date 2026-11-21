@@ -224,6 +224,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"dequeue":            {usage: "dequeue MERGE|here", run: queueDequeue},
 		"move-up":            {usage: "move-up MERGE|here", run: queueMove(true)},
 		"move-down":          {usage: "move-down MERGE|here", run: queueMove(false)},
+		"move":               {usage: "move MERGE|here -placement front|back|behind=MERGE|index=N", run: queueMoveTo},
 		"requeue":            {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
 		"discard":            {usage: "discard MERGE|here", run: queueDiscard},
 		"pause":              {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
@@ -676,22 +677,60 @@ func deployHooks(pre, post *hookList) *agentreplv1.CreateWorkspaceDeployHooks {
 	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: pre.hooks, PostDeploy: post.hooks}
 }
 
-// placement reads a -placement flag: back, front, or behind=MERGE (directly
-// behind the merge the queue lists under that name). Nothing is defaulted.
-func placement(text string) (*agentreplv1.MergeQueuePlacement, error) {
+// placementWord is a -placement value read as its word: exactly one of its
+// fields is set.
+type placementWord struct {
+	// front and back are the bare words.
+	front, back bool
+	// behind is the merge named by behind=MERGE, as the queue lists it.
+	behind string
+	// index is the waiting place named by index=N, counted from 0.
+	index *uint32
+}
+
+// readPlacement reads a -placement value: back, front or behind=MERGE, and,
+// WITHINDEX, index=N. It is the one reading of the flag every verb that takes
+// it shares, so the words and their errors never drift between verbs.
+func readPlacement(text string, withIndex bool) (placementWord, error) {
 	if merge, behind := strings.CutPrefix(text, "behind="); behind {
 		if strings.TrimSpace(merge) == "" {
-			return nil, fmt.Errorf("-placement behind= names no merge")
+			return placementWord{}, fmt.Errorf("-placement behind= names no merge")
 		}
-		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: merge}}}, nil
+		return placementWord{behind: merge}, nil
+	}
+	if n, indexed := strings.CutPrefix(text, "index="); indexed && withIndex {
+		index, err := strconv.ParseUint(n, 10, 32)
+		if err != nil {
+			return placementWord{}, fmt.Errorf("-placement index= takes a waiting place counted from 0, not %q", n)
+		}
+		at := uint32(index)
+		return placementWord{index: &at}, nil
 	}
 	switch text {
 	case "back":
-		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}, nil
+		return placementWord{back: true}, nil
 	case "front":
-		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}, nil
+		return placementWord{front: true}, nil
 	}
-	return nil, fmt.Errorf("-placement is back, front or behind=MERGE, not %q", text)
+	if withIndex {
+		return placementWord{}, fmt.Errorf("-placement is front, back, behind=MERGE or index=N, not %q", text)
+	}
+	return placementWord{}, fmt.Errorf("-placement is back, front or behind=MERGE, not %q", text)
+}
+
+// placement reads a -placement flag: back, front, or behind=MERGE (directly
+// behind the merge the queue lists under that name). Nothing is defaulted.
+func placement(text string) (*agentreplv1.MergeQueuePlacement, error) {
+	word, err := readPlacement(text, false)
+	switch {
+	case err != nil:
+		return nil, err
+	case word.behind != "":
+		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: word.behind}}}, nil
+	case word.back:
+		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}, nil
+	}
+	return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}, nil
 }
 
 // versionIncrement reads -version-part and -changelog-line, nil when neither
@@ -2679,6 +2718,47 @@ func queueMove(up bool) func(c *cliCall, args []string) int {
 		}
 		return c.updateMergeQueue(named, req)
 	}
+}
+
+// queueMoveTo puts a waiting merge on any place of its queue in one call:
+// the head of the waiting line, its back, directly behind a merge in line, or
+// a waiting place counted from 0.
+func queueMoveTo(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	place := fs.String("placement", "", "front, back, behind=MERGE or index=N")
+	named, ref, rest, ok := c.queuedArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("nothing but the merge is positional")
+	}
+	move, err := movePlacement(ref, *place)
+	if err != nil {
+		return c.usageFailed("%v", err)
+	}
+	return c.updateMergeQueue(named, &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Move{Move: move}})
+}
+
+// movePlacement reads a move's -placement as the move of REF's merge. Nothing
+// is defaulted.
+func movePlacement(ref *workspacev1.WorkspaceRef, text string) (*agentreplv1.UpdateMergeQueueMove, error) {
+	word, err := readPlacement(text, true)
+	if err != nil {
+		return nil, err
+	}
+	move := &agentreplv1.UpdateMergeQueueMove{Workspace: ref}
+	switch {
+	case word.behind != "":
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Behind{Behind: &agentreplv1.UpdateMergeQueueMoveBehind{Merge: word.behind}}
+	case word.index != nil:
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Index{Index: &agentreplv1.UpdateMergeQueueMoveIndex{Index: *word.index}}
+	case word.back:
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Back{Back: &agentreplv1.UpdateMergeQueueMoveBack{}}
+	default:
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}
+	}
+	return move, nil
 }
 
 func queuePause(pause bool) func(c *cliCall, args []string) int {

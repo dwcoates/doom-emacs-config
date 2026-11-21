@@ -4198,6 +4198,22 @@ why a move up or down left its merge where it stands."
   "Decode UpdateMergeQueueError's `move_blocked' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-move-blocked json))
 
+(defun agent-repl-wire-decode-update-merge-queue-index-out-of-range (json)
+  "Decode UpdateMergeQueueIndexOutOfRange from JSON into (:index I :waiting W):
+a move asked for waiting place I, counted from 0, of the W merges waiting."
+  (let ((message "UpdateMergeQueueIndexOutOfRange"))
+    (agent-repl-wire-verbs--check-keys message json '(index waiting))
+    (list :index (agent-repl-wire--decode-uint32 message 'index json)
+          :waiting (agent-repl-wire--decode-uint32 message 'waiting json))))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-placement-behind-not-in-line (json)
+  "Decode UpdateMergeQueueError's `placement_behind_not_in_line' arm from JSON."
+  (agent-repl-wire-decode-merge-queue-placement-behind-not-in-line json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-index-out-of-range (json)
+  "Decode UpdateMergeQueueError's `index_out_of_range' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-index-out-of-range json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached (json)
   "Decode UpdateMergeQueueError's `remediation_bound_reached' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-remediation-bound-reached json))
@@ -4207,7 +4223,7 @@ why a move up or down left its merge where it stands."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld noRepairTurn moveBlocked))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld noRepairTurn placementBehindNotInLine indexOutOfRange moveBlocked))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4223,6 +4239,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'noMediationOwed :no-mediation-owed #'agent-repl-wire-decode-update-merge-queue-error-no-mediation-owed)
          (list 'noEscalationHeld :no-escalation-held #'agent-repl-wire-decode-update-merge-queue-error-no-escalation-held)
          (list 'noRepairTurn :no-repair-turn #'agent-repl-wire-decode-update-merge-queue-error-no-repair-turn)
+         (list 'placementBehindNotInLine :placement-behind-not-in-line #'agent-repl-wire-decode-update-merge-queue-error-placement-behind-not-in-line)
+         (list 'indexOutOfRange :index-out-of-range #'agent-repl-wire-decode-update-merge-queue-error-index-out-of-range)
          (list 'moveBlocked :move-blocked #'agent-repl-wire-decode-update-merge-queue-error-move-blocked)
          (list 'remediationBoundReached :remediation-bound-reached #'agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached)
          (list 'problemsUnowned :problems-unowned #'agent-repl-wire-decode-update-merge-queue-error-problems-unowned)

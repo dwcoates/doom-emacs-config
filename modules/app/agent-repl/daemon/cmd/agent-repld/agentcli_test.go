@@ -4459,3 +4459,147 @@ func TestEveryTimeFlagIsReadThroughWhenFlag(t *testing.T) {
 		t.Fatalf("parseWhen is called %d times (%d through whenFlag); want only whenFlag to call it", all-1, calls)
 	}
 }
+
+func TestReadPlacementReadsEachWord(t *testing.T) {
+	three := uint32(3)
+	tests := []struct {
+		name      string
+		text      string
+		withIndex bool
+		want      placementWord
+		wantErr   string
+	}{
+		{name: "front", text: "front", want: placementWord{front: true}},
+		{name: "back", text: "back", want: placementWord{back: true}},
+		{name: "behind a merge", text: "behind=two", want: placementWord{behind: "two"}},
+		{name: "behind no merge", text: "behind= ", wantErr: "-placement behind= names no merge"},
+		{name: "an index where indexed", text: "index=3", withIndex: true, want: placementWord{index: &three}},
+		{name: "an index that is no number", text: "index=x", withIndex: true, wantErr: `-placement index= takes a waiting place counted from 0, not "x"`},
+		{name: "a negative index", text: "index=-1", withIndex: true, wantErr: `-placement index= takes a waiting place counted from 0, not "-1"`},
+		{name: "an index where not indexed", text: "index=3", wantErr: `-placement is back, front or behind=MERGE, not "index=3"`},
+		{name: "an unknown word where indexed", text: "middle", withIndex: true, wantErr: `-placement is front, back, behind=MERGE or index=N, not "middle"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := readPlacement(tt.text, tt.withIndex)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("readPlacement(%q) = %v, want %q", tt.text, err, tt.wantErr)
+				}
+				return
+			}
+			sameIndex := (got.index == nil) == (tt.want.index == nil) && (got.index == nil || *got.index == *tt.want.index)
+			if err != nil || got.front != tt.want.front || got.back != tt.want.back || got.behind != tt.want.behind || !sameIndex {
+				t.Fatalf("readPlacement(%q) = %+v, %v; want %+v", tt.text, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlacementSpellsEachWordAsItsArm(t *testing.T) {
+	tests := []struct {
+		text string
+		want *agentreplv1.MergeQueuePlacement
+	}{
+		{text: "front", want: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}},
+		{text: "back", want: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}},
+		{text: "behind=two", want: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: "two"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			// Act
+			got, err := placement(tt.text)
+
+			// Assert
+			if err != nil || !proto.Equal(got, tt.want) {
+				t.Fatalf("placement(%q) = %v, %v; want %v", tt.text, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestQueueMoveSendsTheMergeAndItsPlaceInOneUpdate(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		ws    string
+		place *agentreplv1.UpdateMergeQueueMove
+	}{
+		{name: "front", args: []string{"pt3-sentences", "-placement", "front"}, ws: "ws-hidden-merge",
+			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}}},
+		{name: "back", args: []string{"pt3-sentences", "-placement", "back"}, ws: "ws-hidden-merge",
+			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Back{Back: &agentreplv1.UpdateMergeQueueMoveBack{}}}},
+		{name: "behind a merge", args: []string{"pt3-sentences", "-placement", "behind=other"}, ws: "ws-hidden-merge",
+			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Behind{Behind: &agentreplv1.UpdateMergeQueueMoveBehind{Merge: "other"}}}},
+		{name: "a waiting index", args: []string{"pt3-sentences", "-placement", "index=2"}, ws: "ws-hidden-merge",
+			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Index{Index: &agentreplv1.UpdateMergeQueueMoveIndex{Index: 2}}}},
+		{name: "the calling workspace's own merge", args: []string{"here", "-placement", "front"}, ws: "ws-caller",
+			place: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.queues = queuesListing([2]string{"other", "ws-other"}, [2]string{"pt3-sentences", "ws-hidden-merge"})
+
+			// Act
+			code := f.run(mergeQueueNoun, append([]string{"move"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.UpdateMergeQueueRequest](t, f)
+			if got := req.GetMove(); got.GetWorkspace().GetId() != tt.ws || !proto.Equal(withoutWorkspace(got), tt.place) {
+				t.Fatalf("move = %v, want %v of %s", got, tt.place, tt.ws)
+			}
+			if req.GetRequester() == nil {
+				t.Fatalf("update %v names no requester", req)
+			}
+		})
+	}
+}
+
+// withoutWorkspace is MOVE with its workspace cleared, so two moves compare
+// on their place alone.
+func withoutWorkspace(move *agentreplv1.UpdateMergeQueueMove) *agentreplv1.UpdateMergeQueueMove {
+	out := proto.Clone(move).(*agentreplv1.UpdateMergeQueueMove)
+	out.Workspace = nil
+	return out
+}
+
+func TestQueueMoveRefusesAPlacementItCannotReadAndSendsNothing(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{name: "no placement", args: []string{"pt3-sentences"}, stderr: `-placement is front, back, behind=MERGE or index=N, not ""`},
+		{name: "an unknown word", args: []string{"pt3-sentences", "-placement", "middle"}, stderr: `-placement is front, back, behind=MERGE or index=N, not "middle"`},
+		{name: "an index that is no number", args: []string{"pt3-sentences", "-placement", "index=first"}, stderr: `-placement index= takes a waiting place counted from 0, not "first"`},
+		{name: "a second positional", args: []string{"pt3-sentences", "extra", "-placement", "front"}, stderr: "nothing but the merge is positional"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.queues = queuesListing([2]string{"pt3-sentences", "ws-hidden-merge"})
+
+			// Act
+			code := f.run(mergeQueueNoun, append([]string{"move"}, tt.args...)...)
+
+			// Assert
+			if code == exitSuccess || !strings.Contains(f.errOut.String(), tt.stderr) {
+				t.Fatalf("exit %d, stderr %q, want a failure saying %q", code, f.errOut.String(), tt.stderr)
+			}
+			for _, req := range f.client.requests {
+				if _, updated := req.(*agentreplv1.UpdateMergeQueueRequest); updated {
+					t.Fatalf("requests = %v, want no queue update", f.client.requests)
+				}
+			}
+		})
+	}
+}

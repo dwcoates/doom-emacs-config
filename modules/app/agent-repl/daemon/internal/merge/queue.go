@@ -653,6 +653,82 @@ func (o *orchestrator) MoveTo(ctx context.Context, ws, anchor ids.WorkspaceID, s
 	})
 }
 
+// MovePlace is where Place puts a waiting merge
+// (agentrepl.v1.UpdateMergeQueueMove.place): the store's place, with the merge
+// to go behind named as the queue lists it rather than by its workspace.
+type MovePlace struct {
+	// Kind is which place.
+	Kind wsm.MergePlaceKind
+	// Behind is the name of the merge in line to go directly behind
+	// (wsm.MergePlaceBehind), supplied or resolved (namesMerge).
+	Behind string
+	// Index is the 0-based waiting place (wsm.MergePlaceIndex).
+	Index int
+}
+
+// fields is the place's own log context.
+func (p MovePlace) fields() dlog.Context {
+	fields := dlog.Context{"place": p.Kind.String()}
+	switch p.Kind {
+	case wsm.MergePlaceBehind:
+		fields["behind"] = p.Behind
+	case wsm.MergePlaceIndex:
+		fields["index"] = p.Index
+	}
+	return fields
+}
+
+// Place moves WS's waiting merge to PLACE among the merges waiting on its
+// queue in one store transaction (agentrepl.v1.UpdateMergeQueueMove), and
+// redraws every bubble on that queue when the order changed. A name to go
+// behind is resolved among the merges in line on WS's queue; the store
+// re-checks it inside the transaction, so a merge that left meanwhile is
+// refused rather than half-moved.
+func (o *orchestrator) Place(ctx context.Context, ws ids.WorkspaceID, place MovePlace) (bool, error) {
+	return o.reorder(ctx, ws, reordering{
+		op:      "daemon.merge.place",
+		fields:  place.fields(),
+		failed:  "could not move a merge to a place in its queue",
+		unmoved: "a merge asked to move already stands on that place, and stays where it is",
+		moved:   "moved a merge to a place in its queue",
+		refusal: func(err error) *RefusalError { return placeRefusal(ws, place, err) },
+		do: func(repo wsm.RepoKey) (bool, error) {
+			stored := wsm.MergePlace{Kind: place.Kind, Index: place.Index}
+			if place.Kind == wsm.MergePlaceBehind {
+				queue, err := o.readQueue(ctx, o.deps.DB, repo)
+				if err != nil {
+					return false, err
+				}
+				anchor, found := o.memberNamed(queue, place.Behind)
+				if !found {
+					return false, behindNotInLine(ws, place.Behind, namesInLine(queue))
+				}
+				stored.Anchor = anchor
+			}
+			return o.deps.DB.PlaceMerge(ctx, repo, ws, stored)
+		},
+	})
+}
+
+// placeRefusal answers the typed refusal a store refusal of Place is, and nil
+// for an error that is no refusal (the store failing).
+func placeRefusal(ws ids.WorkspaceID, place MovePlace, err error) *RefusalError {
+	var outOfRange *wsm.MergePlaceOutOfRangeError
+	switch {
+	case errors.Is(err, wsm.ErrNotFound), errors.Is(err, wsm.ErrMergeNotWaiting):
+		return refuse(ArmNoSuchQueuedMerge, ws, "no merge of this workspace is waiting in line: %v", err)
+	case errors.Is(err, wsm.ErrAnchorNotInLine):
+		refusal := refuse(ArmPlacementBehindNotInLine, ws, "the merge %q left the line before the move: %v", place.Behind, err)
+		refusal.Fields = map[string]any{"behind": place.Behind}
+		return refusal
+	case errors.As(err, &outOfRange):
+		refusal := refuse(ArmIndexOutOfRange, ws, "waiting place %d is past the last of the %d merges waiting", outOfRange.Index, outOfRange.Waiting)
+		refusal.Fields = map[string]any{"index": uint32(outOfRange.Index), "waiting": uint32(outOfRange.Waiting)}
+		return refusal
+	}
+	return nil
+}
+
 // reordering is one way a waiting merge's place in its queue is changed: the
 // store's reorder, and the records each of its outcomes leaves.
 type reordering struct {
@@ -663,6 +739,9 @@ type reordering struct {
 	failed  string
 	unmoved string
 	moved   string
+	// refusal answers the typed refusal a store error is, nil for a store
+	// failure. Unset, every store error is a failure.
+	refusal func(error) *RefusalError
 	do      func(repo wsm.RepoKey) (bool, error)
 	// refuseUnmoved, when set, answers a reordering that moved nothing as a
 	// refusal, recording it itself with the reordering's context, in place
@@ -676,17 +755,21 @@ type reordering struct {
 // queued is the queue's refusal, answered as it is.
 func (o *orchestrator) reorder(ctx context.Context, ws ids.WorkspaceID, r reordering) (bool, error) {
 	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws)}
+	maps.Copy(fields, r.fields)
 	repo, err := o.queueOf(ctx, ws)
 	if err != nil {
-		return false, err
+		return false, o.reorderFailed(log, r, fields, err)
 	}
-	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
-	maps.Copy(fields, r.fields)
+	fields["repo"] = string(repo)
 	moved, err := r.do(repo)
 	if err != nil {
-		fields["error"] = err.Error()
-		log.Error(r.op, r.failed, fields)
-		return false, err
+		if r.refusal != nil {
+			if refusal := r.refusal(err); refusal != nil {
+				err = refusal
+			}
+		}
+		return false, o.reorderFailed(log, r, fields, err)
 	}
 	if !moved {
 		if r.refuseUnmoved != nil {
@@ -697,6 +780,20 @@ func (o *orchestrator) reorder(ctx context.Context, ws ids.WorkspaceID, r reorde
 	}
 	log.Info(r.op, r.moved, fields)
 	return true, o.republishQueue(ctx, repo)
+}
+
+// reorderFailed records a reordering that did not run and answers ERR: a
+// typed refusal is the queue answering what was asked, recorded at INFO with
+// its arm, and anything else is the store failing, recorded at ERROR.
+func (o *orchestrator) reorderFailed(log dlog.Logger, r reordering, fields dlog.Context, err error) error {
+	if refusal, refused := Refused(err); refused {
+		fields["arm"], fields["reason"] = refusal.Arm, refusal.Reason
+		log.Info(r.op, "refused to move a merge; nothing was moved", fields)
+		return err
+	}
+	fields["error"] = err.Error()
+	log.Error(r.op, r.failed, fields)
+	return err
 }
 
 // dequeue takes one workspace's merge out, whatever it is doing. A merge still

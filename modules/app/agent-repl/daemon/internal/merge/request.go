@@ -886,17 +886,10 @@ func (o *orchestrator) placeBehind(ctx context.Context, record wsm.Workspace, re
 	if err != nil {
 		return "", err
 	}
-	// THE ANCHOR IS MATCHED AS SUPPLIED AND AS RESOLVED: a merge stands
-	// under its resolved name (prefixed when a workspace prefix is set), and
-	// the agent may name it either way.
-	resolved := o.deps.Names.MergeBranch(req.PlaceBehind)
-	var names []string
-	for _, member := range queue.Members {
-		if member.Name == req.PlaceBehind || member.Name == resolved {
-			return member.Workspace, nil
-		}
-		names = append(names, member.Name)
+	if anchor, found := o.memberNamed(queue, req.PlaceBehind); found {
+		return anchor, nil
 	}
+	names := namesInLine(queue)
 	// A REQUEST OF THE SAME REQUESTER NOT YET HANDED OFF is a place too: it
 	// is handed off first (handOffReady, then waitThenQueue), so it stands in
 	// line when this merge is placed, and the hand-off points the wait at its
@@ -906,12 +899,46 @@ func (o *orchestrator) placeBehind(ctx context.Context, record wsm.Workspace, re
 		return "", err
 	}
 	for _, request := range pending {
-		if request.Repo == repo && (request.Source.DetachName == req.PlaceBehind || request.Source.DetachName == resolved) {
+		if request.Repo == repo && o.namesMerge(request.Source.DetachName, req.PlaceBehind) {
 			return wsm.WorkspaceID(request.Source.Detach), nil
 		}
 		names = append(names, request.Source.DetachName)
 	}
-	refusal := refuse(ArmPlacementBehindNotInLine, req.Workspace, "no merge named %q stands in the queue to be placed behind (in line: %s)", req.PlaceBehind, strings.Join(names, ", "))
-	refusal.Fields = map[string]any{"behind": req.PlaceBehind}
-	return "", refusal
+	return "", behindNotInLine(req.Workspace, req.PlaceBehind, names)
+}
+
+// namesMerge reports whether ASKED names the merge standing under NAME. THE
+// NAME IS MATCHED AS SUPPLIED AND AS RESOLVED: a merge stands under its
+// resolved name (prefixed when a workspace prefix is set), and the agent may
+// name it either way.
+func (o *orchestrator) namesMerge(name, asked string) bool {
+	return name == asked || name == o.deps.Names.MergeBranch(asked)
+}
+
+// memberNamed answers the workspace of the merge in line on QUEUE (running or
+// waiting) that ASKED names (namesMerge).
+func (o *orchestrator) memberNamed(queue QueueSnapshot, asked string) (wsm.WorkspaceID, bool) {
+	for _, member := range queue.Members {
+		if o.namesMerge(member.Name, asked) {
+			return member.Workspace, true
+		}
+	}
+	return "", false
+}
+
+// namesInLine answers the names of the merges in line on QUEUE, in line order.
+func namesInLine(queue QueueSnapshot) []string {
+	names := make([]string, 0, len(queue.Members))
+	for _, member := range queue.Members {
+		names = append(names, member.Name)
+	}
+	return names
+}
+
+// behindNotInLine is the placement_behind_not_in_line refusal of WS's merge,
+// asked to go behind ASKED while only NAMES stand in line.
+func behindNotInLine(ws wsm.WorkspaceID, asked string, names []string) *RefusalError {
+	refusal := refuse(ArmPlacementBehindNotInLine, ws, "no merge named %q stands in the queue to be placed behind (in line: %s)", asked, strings.Join(names, ", "))
+	refusal.Fields = map[string]any{"behind": asked}
+	return refusal
 }

@@ -1515,12 +1515,18 @@ and `agent-repld workspace async-merge` a named branch.
 
 - `status [-repository here|DIR]` reads `GetMergeQueueStatus`, every queue
   when unset.
-- `dequeue`, `move-up` and `move-down` take `MERGE|here`: `here` is the
-  calling workspace's own merge, and a NAME is matched against the merges the
-  queues list (`queuedArg`), never the roster, because the roster leaves out
-  the hidden workspace an async merge runs in. A name must match exactly one
-  merge across every queue. They send `UpdateMergeQueue`'s `evict`, `move_up`
-  and `move_down`.
+- `dequeue`, `move-up`, `move-down` and `move` take `MERGE|here`: `here` is
+  the calling workspace's own merge, and a NAME is matched against the merges
+  the queues list (`queuedArg`), never the roster, because the roster leaves
+  out the hidden workspace an async merge runs in. A name must match exactly
+  one merge across every queue. They send `UpdateMergeQueue`'s `evict`,
+  `move_up`, `move_down` and `move`.
+- `move MERGE|here -placement front|back|behind=MERGE|index=N` puts a waiting
+  merge on any place of its queue in one store transaction
+  (`wsm.PlaceMerge`, through `merge.Place`). `-placement` is read by
+  `readPlacement`, the one reader every placing verb shares; `behind=` names
+  the merge as the queue lists it and the daemon resolves it among the merges
+  in line on the moved merge's queue.
 - `pause [-repository here|DIR] [-hard]` and `resume [-repository here|DIR]`
   send `pause` (a hard stop also interrupts the turns the queue's merges
   drive) and `resume`, every queue when unset.

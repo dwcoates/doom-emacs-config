@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -407,23 +408,27 @@ func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, mov
 			outcome = MergeMoveOutcome{Result: MergeMoveNotWaiting}
 			return nil
 		}
-		side, order := `seq < ?`, `ORDER BY seq DESC LIMIT 1`
-		if move == MergeMoveDown {
-			side, order = `seq > ?`, `ORDER BY seq LIMIT 1`
-		}
-		var neighbor int64
-		var neighborFront bool
-		err = tx.QueryRowContext(ctx, `SELECT seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? AND `+side+` `+order,
-			key, int(MergeQueued), seq).Scan(&neighbor, &neighborFront)
-		if errors.Is(err, sql.ErrNoRows) {
-			outcome, err = unmovedOutcome(ctx, tx, key, seq, side, order)
-			return err
-		}
+		waiting, err := waitingInLine(ctx, tx, key)
 		if err != nil {
 			return err
 		}
+		target := waitingIndex(waiting, id) - 1
+		if move == MergeMoveDown {
+			target += 2
+		}
+		if target < 0 || target >= len(waiting) {
+			side, order := `seq < ?`, `ORDER BY seq DESC LIMIT 1`
+			if move == MergeMoveDown {
+				side, order = `seq > ?`, `ORDER BY seq LIMIT 1`
+			}
+			outcome, err = unmovedOutcome(ctx, tx, key, seq, side, order)
+			return err
+		}
+		if _, err := reorderWaiting(ctx, tx, key, waiting, id, target, waiting[target].front); err != nil {
+			return err
+		}
 		outcome = MergeMoveOutcome{Result: MergeMoved}
-		return swapPlaces(ctx, tx, key, id, seq, neighbor, neighborFront)
+		return nil
 	})
 	if err != nil {
 		return MergeMoveOutcome{}, err
@@ -489,25 +494,13 @@ func (s *store) MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, a
 		if err != nil {
 			return err
 		}
-		order, anchorFront := placedBeside(waiting, id, anchor, side)
-		for i, row := range order {
-			if row.workspace != waiting[i].workspace {
-				moved = true
-				break
-			}
+		rest := withoutWaiting(waiting, id)
+		at := waitingIndex(rest, anchor)
+		target := at
+		if side == MergeSideBehind {
+			target++
 		}
-		if !moved {
-			return nil
-		}
-		places := make([]int64, len(waiting))
-		workspaces := make([]WorkspaceID, len(order))
-		for i := range waiting {
-			places[i], workspaces[i] = waiting[i].seq, order[i].workspace
-		}
-		if err := assignQueuePlaces(ctx, tx, key, places, workspaces); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ? WHERE repo_key = ? AND workspace_id = ?`, anchorFront, key, id)
+		moved, err = reorderWaiting(ctx, tx, key, waiting, id, target, rest[at].front)
 		return err
 	})
 	if err != nil {
@@ -565,37 +558,144 @@ func waitingInLine(ctx context.Context, tx *sql.Tx, key RepoKey) ([]waitingRow, 
 	return out, rows.Err()
 }
 
-// placedBeside answers WAITING reordered with ID taken out and put on SIDE of
-// ANCHOR, and ANCHOR's front mark. Both are in WAITING: the caller read their
-// states as waiting in the same transaction.
-func placedBeside(waiting []waitingRow, id, anchor WorkspaceID, side MergeSide) ([]waitingRow, bool) {
-	var moved waitingRow
-	rest := make([]waitingRow, 0, len(waiting))
-	for _, row := range waiting {
-		if row.workspace == id {
-			moved = row
-			continue
-		}
-		rest = append(rest, row)
+// PlaceMerge moves a merge WAITING in line to PLACE among the merges waiting
+// on its queue, in one transaction, answering whether it moved
+// (agentrepl.v1.UpdateMergeQueueMove).
+//
+// ONLY WAITING MERGES CHANGE PLACES (reorderWaiting): the admitted merge keeps
+// the slot, and behind it is the head of the waiting line.
+//
+// THE MOVED MERGE TAKES THE FRONT MARK OF ITS NEW PLACE: at the head of the
+// waiting line it is a front merge, and anywhere else it takes the mark of
+// the waiting merge directly ahead of it, so every front merge stays ahead of
+// every ordinary merge waiting.
+//
+// A workspace with no queue entry is refused with ErrNotFound, and one whose
+// entry is not waiting with ErrMergeNotWaiting. An anchor not in line on this
+// queue is ErrAnchorNotInLine, and an index past the last waiting place a
+// MergePlaceOutOfRangeError. Every refusal is decided inside the transaction
+// that would reorder, so it moves nothing.
+func (s *store) PlaceMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place MergePlace) (bool, error) {
+	const op = "daemon.wsm.place_merge"
+	fields := dlog.Context{"repo": string(repo), "workspace": string(id), "place": place.Kind.String()}
+	if !place.Kind.valid() {
+		err := fmt.Errorf("wsm: undeclared merge place %d", int(place.Kind))
+		s.log.Error(op, "refused an undeclared merge place", withError(fields, err))
+		return false, err
 	}
-	order := make([]waitingRow, 0, len(waiting))
-	anchorFront := false
-	for _, row := range rest {
-		if row.workspace != anchor {
-			order = append(order, row)
-			continue
-		}
-		anchorFront = row.front
-		if side == MergeSideAheadOf {
-			order = append(order, moved, row)
-		} else {
-			order = append(order, row, moved)
-		}
+	key, err := s.normalizedRepoKey(op, repo, fields)
+	if err != nil {
+		return false, err
 	}
-	if len(order) != len(waiting) {
-		panic(fmt.Sprintf("wsm: placing %s beside %s lost a waiting merge: %d of %d placed", id, anchor, len(order), len(waiting)))
+	fields["repo"] = string(key)
+	var moved bool
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+		_, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil {
+			return err
+		}
+		if state != MergeQueued {
+			return fmt.Errorf("wsm: placing workspace %s in repo %q, which stands %s: %w", id, key, state, ErrMergeNotWaiting)
+		}
+		waiting, err := waitingInLine(ctx, tx, key)
+		if err != nil {
+			return err
+		}
+		target, err := waitingTarget(ctx, tx, key, waiting, id, place)
+		if err != nil {
+			return err
+		}
+		front := true
+		if target > 0 {
+			front = withoutWaiting(waiting, id)[target-1].front
+		}
+		moved, err = reorderWaiting(ctx, tx, key, waiting, id, target, front)
+		return err
+	})
+	if err != nil {
+		return false, err
 	}
-	return order, anchorFront
+	return moved, nil
+}
+
+// waitingTarget answers the waiting place PLACE names for ID among WAITING,
+// refusing an anchor not in line and an index past the last place.
+func waitingTarget(ctx context.Context, tx *sql.Tx, key RepoKey, waiting []waitingRow, id WorkspaceID, place MergePlace) (int, error) {
+	switch place.Kind {
+	case MergePlaceFront:
+		return 0, nil
+	case MergePlaceBack:
+		return len(waiting) - 1, nil
+	case MergePlaceIndex:
+		if place.Index < 0 || place.Index >= len(waiting) {
+			return 0, &MergePlaceOutOfRangeError{Index: place.Index, Waiting: len(waiting)}
+		}
+		return place.Index, nil
+	case MergePlaceBehind:
+		if place.Anchor == id {
+			return waitingIndex(waiting, id), nil
+		}
+		_, state, err := entryPlace(ctx, tx, key, place.Anchor)
+		if errors.Is(err, ErrNotFound) {
+			return 0, fmt.Errorf("wsm: placing workspace %s behind %s in repo %q: %w", id, place.Anchor, key, ErrAnchorNotInLine)
+		}
+		if err != nil {
+			return 0, err
+		}
+		switch state {
+		case MergeAdmitted:
+			return 0, nil
+		case MergeQueued:
+			return waitingIndex(withoutWaiting(waiting, id), place.Anchor) + 1, nil
+		}
+		return 0, fmt.Errorf("wsm: placing workspace %s behind %s in repo %q, which stands %s: %w", id, place.Anchor, key, state, ErrAnchorNotInLine)
+	}
+	panic(fmt.Sprintf("wsm: merge place %s past validation has no target", place.Kind))
+}
+
+// waitingIndex answers the place ID holds among WAITING, counted from 0. The
+// caller read ID's state as waiting in the same transaction, so ID is there.
+func waitingIndex(waiting []waitingRow, id WorkspaceID) int {
+	i := slices.IndexFunc(waiting, func(row waitingRow) bool { return row.workspace == id })
+	if i < 0 {
+		panic(fmt.Sprintf("wsm: workspace %s read as waiting is not among the %d merges waiting", id, len(waiting)))
+	}
+	return i
+}
+
+// withoutWaiting answers WAITING with ID taken out: the waiting line as the
+// merges other than ID stand in it, which a place for ID is counted in.
+func withoutWaiting(waiting []waitingRow, id WorkspaceID) []waitingRow {
+	return slices.DeleteFunc(slices.Clone(waiting), func(row waitingRow) bool { return row.workspace == id })
+}
+
+// reorderWaiting puts ID, a merge waiting in KEY's queue, on the TARGET'th
+// place of WAITING (every merge waiting there, front first, as waitingInLine
+// reads them) with the front mark FRONT, answering whether the order changed.
+// It is the one way a waiting merge changes its place in line.
+//
+// ONLY THE WAITING MERGES CHANGE PLACES, among the places they already hold
+// (assignQueuePlaces), so the admitted merge and every merge out of line keep
+// theirs and are never passed. An order left as it was writes nothing, the
+// front mark included.
+func reorderWaiting(ctx context.Context, tx *sql.Tx, key RepoKey, waiting []waitingRow, id WorkspaceID, target int, front bool) (bool, error) {
+	if target < 0 || target >= len(waiting) {
+		panic(fmt.Sprintf("wsm: workspace %s put on waiting place %d of %d", id, target, len(waiting)))
+	}
+	if waitingIndex(waiting, id) == target {
+		return false, nil
+	}
+	order := slices.Insert(withoutWaiting(waiting, id), target, waitingRow{workspace: id})
+	places := make([]int64, len(waiting))
+	workspaces := make([]WorkspaceID, len(order))
+	for i := range waiting {
+		places[i], workspaces[i] = waiting[i].seq, order[i].workspace
+	}
+	if err := assignQueuePlaces(ctx, tx, key, places, workspaces); err != nil {
+		return false, err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ? WHERE repo_key = ? AND workspace_id = ?`, front, key, id)
+	return err == nil, err
 }
 
 // PrioritizeMerge moves a merge WAITING in line to the front of the merges
@@ -622,26 +722,16 @@ func (s *store) PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceI
 	fields["repo"] = string(key)
 	var moved bool
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
-		seq, state, err := entryPlace(ctx, tx, key, id)
+		_, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil || state != MergeQueued {
 			return err
 		}
-		var first int64
-		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ?`,
-			key, int(MergeQueued)).Scan(&first); err != nil {
+		waiting, err := waitingInLine(ctx, tx, key)
+		if err != nil {
 			return err
 		}
-		if first == seq {
-			return nil
-		}
-		if err := moveAhead(ctx, tx, key, id, first); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = 1 WHERE repo_key = ? AND workspace_id = ?`, key, id); err != nil {
-			return err
-		}
-		moved = true
-		return nil
+		moved, err = reorderWaiting(ctx, tx, key, waiting, id, 0, true)
+		return err
 	})
 	if err != nil {
 		return false, err
@@ -664,20 +754,6 @@ func entryPlace(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) (i
 		return 0, 0, err
 	}
 	return seq, MergeQueueState(state), nil
-}
-
-// swapPlaces trades the places of the row for ID (at own) and the row at
-// other, giving ID's row FRONT as its front mark.
-func swapPlaces(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, own, other int64, front bool) error {
-	var neighbor WorkspaceID
-	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM merge_queue WHERE repo_key = ? AND seq = ?`, key, other).Scan(&neighbor); err != nil {
-		return err
-	}
-	if err := assignQueuePlaces(ctx, tx, key, []int64{own, other}, []WorkspaceID{neighbor, id}); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ? WHERE repo_key = ? AND workspace_id = ?`, front, key, id)
-	return err
 }
 
 // nextSeq answers the sequence number one past a queue's last.

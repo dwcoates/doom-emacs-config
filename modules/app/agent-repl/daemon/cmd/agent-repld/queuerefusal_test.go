@@ -95,6 +95,10 @@ var queueRefusals = func() []describedRefusal {
 					want: "no escalation holds the repository's queue, so there is no hold to release"},
 				refusalCase{name: "no_repair_turn", err: armed(update, "no_repair_turn", nil),
 					want: "ws runs no repair turn of its merge (a conflict resolution or a fixing attempt), so it has no merge to give up"},
+				refusalCase{name: "placement_behind_not_in_line", err: armedWith(update, "placement_behind_not_in_line", map[string]any{"behind": "other"}),
+					want: "the merge other that ws was to go behind is not in its queue"},
+				refusalCase{name: "index_out_of_range", err: armed(update, "index_out_of_range", &agentreplv1.UpdateMergeQueueIndexOutOfRange{Index: 3, Waiting: 2}),
+					want: "waiting place 3 is past the last of the 2 merges waiting on ws's queue, counted from 0"},
 				refusalCase{name: "move_blocked/not_waiting", err: armed(update, "move_blocked", &agentreplv1.UpdateMergeQueueMoveBlocked{
 					Cause: &agentreplv1.UpdateMergeQueueMoveBlocked_NotWaiting{NotWaiting: &agentreplv1.UpdateMergeQueueMoveBlockedNotWaiting{}}}),
 					want: "the merge of ws is not waiting in line (it runs, is only requested, or is out of line for a repair), so it does not move"},

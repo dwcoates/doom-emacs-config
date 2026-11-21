@@ -779,3 +779,84 @@ func TestTakeRequestingTurn(t *testing.T) {
 		})
 	}
 }
+
+func TestNamesMergeMatchesANameAsSuppliedAndAsResolved(t *testing.T) {
+	tests := []struct {
+		name  string
+		stood string
+		asked string
+		want  bool
+	}{
+		{name: "the name as supplied", stood: "two", asked: "two", want: true},
+		{name: "the name the prefix resolves", stood: "agent/two", asked: "two", want: true},
+		{name: "another name", stood: "agent/two", asked: "three", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.names.prefix = "agent"
+
+			// Act.
+			got := h.o.namesMerge(tt.stood, tt.asked)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("namesMerge(%q, %q) = %v, want %v", tt.stood, tt.asked, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMemberNamedAnswersTheMergeInLineANameNames(t *testing.T) {
+	queue := QueueSnapshot{Members: []QueueMember{{Workspace: "ws-1", Name: "one"}, {Workspace: "ws-2", Name: "agent/two"}}}
+	tests := []struct {
+		name      string
+		asked     string
+		want      wsm.WorkspaceID
+		wantFound bool
+	}{
+		{name: "the running merge", asked: "one", want: "ws-1", wantFound: true},
+		{name: "a waiting merge named without its prefix", asked: "two", want: "ws-2", wantFound: true},
+		{name: "no merge", asked: "nowhere", wantFound: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.names.prefix = "agent"
+
+			// Act.
+			got, found := h.o.memberNamed(queue, tt.asked)
+
+			// Assert.
+			if got != tt.want || found != tt.wantFound {
+				t.Fatalf("memberNamed(%q) = %q, %v; want %q, %v", tt.asked, got, found, tt.want, tt.wantFound)
+			}
+		})
+	}
+}
+
+func TestNamesInLineListsTheMergesInLineInOrder(t *testing.T) {
+	// Arrange.
+	queue := QueueSnapshot{Members: []QueueMember{{Name: "one"}, {Name: "two"}}}
+
+	// Act.
+	got := namesInLine(queue)
+
+	// Assert.
+	if want := []string{"one", "two"}; !slices.Equal(got, want) {
+		t.Fatalf("namesInLine = %v, want %v", got, want)
+	}
+}
+
+func TestBehindNotInLineNamesTheMergeAskedForAndWhatIsInLine(t *testing.T) {
+	// Act.
+	refusal := behindNotInLine(theWorkspace, "nowhere", []string{"one", "two"})
+
+	// Assert.
+	if refusal.Arm != ArmPlacementBehindNotInLine || refusal.Workspace != theWorkspace || refusal.Fields["behind"] != "nowhere" ||
+		!strings.Contains(refusal.Reason, "in line: one, two") {
+		t.Fatalf("behindNotInLine = %+v, want placement_behind_not_in_line naming nowhere and what is in line", refusal)
+	}
+}

@@ -214,6 +214,14 @@ type Orchestrator interface {
 	// moved. A merge or an anchor not waiting is left where it is; an anchor
 	// with no merge on WS's queue is the no_such_queued_merge refusal.
 	MoveTo(ctx context.Context, ws, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error)
+	// Place moves WS's waiting merge to PLACE among the merges waiting on its
+	// queue -- front, back, behind a merge in line named as the queue lists
+	// it, or a waiting index -- in one store transaction
+	// (UpdateMergeQueueMove), answering whether it moved. A workspace with no
+	// waiting merge is no_such_queued_merge, a name in no merge in line
+	// placement_behind_not_in_line, and an index past the last waiting place
+	// index_out_of_range; a refused move moves nothing.
+	Place(ctx context.Context, ws ids.WorkspaceID, place MovePlace) (bool, error)
 	// AnswerQueueOffer answers the merge-queue question an interrupt raised:
 	// evict the merge (a running one is abandoned, as Evict does), move it to
 	// the front of the merges waiting in its queue, or leave the queue as it

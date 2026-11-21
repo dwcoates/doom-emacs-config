@@ -691,6 +691,15 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 			s.log.Debug(op, "the repository is still in use; the retirement was refused", withError(fields, err))
 			return err
 		}
+		// A REFUSED MOVE is the store answering what a move asked (a merge not
+		// waiting, an anchor not in line, a place past the line's end); the
+		// merge queue turns it into the rpc's arm and records it at its own
+		// level.
+		var outOfRange *MergePlaceOutOfRangeError
+		if errors.Is(err, ErrMergeNotWaiting) || errors.Is(err, ErrAnchorNotInLine) || errors.As(err, &outOfRange) {
+			s.log.Debug(op, "the move was refused; nothing was moved", withError(fields, err))
+			return err
+		}
 		// A REFUSED RETARGET is the store answering what was asked (an
 		// unknown or foreign parent, a cycle, no merge geometry); the verb
 		// turns it into the rpc's arm and records it at its own level.
