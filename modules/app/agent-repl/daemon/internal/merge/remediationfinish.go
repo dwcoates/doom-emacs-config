@@ -313,7 +313,12 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 		return fmt.Errorf("merge: the remediation's gate did not run: %s; the whole run is archived at %s", why, archive)
 	}
 	if !result.Passed {
-		failing := readFailingTests(result.Tail, filepath.Join(record.Dir, moduleRoot)).render(archive)
+		found := readFailingTests(result.Tail, record.Dir)
+		if err := o.recordFailingCases(ctx, f.Workspace, found, dlog.Merge(fields, dlog.Context{"archive": archive})); err != nil {
+			card.failed("the suite failed, and its failing cases could not be recorded: " + err.Error())
+			return err
+		}
+		failing := found.render(archive)
 		card.failed(fmt.Sprintf("the suite failed (exit %d); the fix goes back to work", result.ExitCode))
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate failed", withField(withField(fields, "archive", archive), "exit_code", result.ExitCode))
 		return o.resumeRemediation(ctx, f, BriefRemediationGateFailed, map[string]string{"archive_path": archive, "failing_tests": failing}, fields)

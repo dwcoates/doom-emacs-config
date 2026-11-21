@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/testcases"
 	"agent-repld/internal/wsm"
 )
 
@@ -251,5 +252,20 @@ func TestAFixGateRowIsARootCardRow(t *testing.T) {
 		&frontendv1.FeedTurnActivity{Unit: &frontendv1.FeedTurnActivity_FixGate{FixGate: card}})
 	if !proto.Equal(row, want) {
 		t.Fatalf("row = %v, want the shared root card row %v", row, want)
+	}
+}
+
+func TestAMediatorsFailingGateRecordsItsCasesForTheMediatorsReruns(t *testing.T) {
+	// Arrange
+	h := finishing(t)
+	h.runner.runs = []scriptedRun{{Output: failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)") + "[agent-repl-tests] daemon: FAILED in 2s\n", Code: 1}}
+
+	// Act
+	_ = h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+	// Assert
+	got := h.db.testCases["ws-fixer"]
+	if len(got) != 1 || testcases.Key(got[0]) != testcases.Key(testcases.GoPackage(moduleRoot+"daemon/internal/merge", []string{"TestA"})) {
+		t.Fatalf("recorded %v for the mediator, want its gate's failing TestA", got)
 	}
 }

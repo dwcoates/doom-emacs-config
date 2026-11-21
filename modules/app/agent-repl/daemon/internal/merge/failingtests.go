@@ -9,10 +9,14 @@ import (
 	"slices"
 	"strings"
 
+	testrunv1 "agentrepl/proto/testrun/v1"
+
 	"agentrepl/testrun/roster"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/shellword"
+	"agent-repld/internal/testcases"
 )
 
 // This file reads a failing gate run's archive for every failing TEST, not
@@ -65,9 +69,11 @@ var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 // unitCouldNotStart is the runner's line for a unit that never started.
 var unitCouldNotStart = regexp.MustCompile(`unit (\S+) \(([A-Za-z0-9_-]+)\) could not start`)
 
-// failingTests is one failing run's failing tests, by suite.
+// failingTests is one failing run's failing tests, by suite, in the worktree
+// the run tested.
 type failingTests struct {
-	suites []*failingSuite
+	worktree string
+	suites   []*failingSuite
 }
 
 // failingSuite is one suite's failing tests: each group shares one targeted
@@ -86,11 +92,13 @@ const TestRunCommand = "~/.claude/skills/agent-repl-workspaces/agent-repld test 
 // failingGroup is the failing tests one selection runs.
 type failingGroup struct {
 	key string
-	// flags answers the `agent-repld test run` selection flags that run
-	// names, the group's raw test names, built when the file is rendered so
-	// every chunk's failures of the group are in it.
-	flags func(names []string) []string
-	// names are the raw names flags takes; shown is how each is listed.
+	// selections answers the selections that run names, the group's raw test
+	// names, built when the file is rendered so every chunk's failures of the
+	// group are in it. ONE SHAPE FEEDS THE BRIEF AND THE RECORD: the brief's
+	// commands spell these selections (testcases.Flags), and the workspace's
+	// record of its cases takes them (failingTests.cases).
+	selections func(names []string) []*testrunv1.TestSelection
+	// names are the raw names selections takes; shown is how each is listed.
 	names []string
 	shown []string
 }
@@ -108,8 +116,8 @@ func (f *failingTests) suite(name string) *failingSuite {
 }
 
 // add records one failing test under the group key: name is what the
-// group's selection flags take, shown how the file lists it.
-func (s *failingSuite) add(key string, flags func([]string) []string, name, shown string) {
+// group's selections take, shown how the file lists it.
+func (s *failingSuite) add(key string, selections func([]string) []*testrunv1.TestSelection, name, shown string) {
 	for _, g := range s.groups {
 		if g.key == key {
 			if !slices.Contains(g.shown, shown) {
@@ -118,29 +126,75 @@ func (s *failingSuite) add(key string, flags func([]string) []string, name, show
 			return
 		}
 	}
-	s.groups = append(s.groups, &failingGroup{key: key, flags: flags, names: []string{name}, shown: []string{shown}})
+	s.groups = append(s.groups, &failingGroup{key: key, selections: selections, names: []string{name}, shown: []string{shown}})
+}
+
+// flags spells the group's selections as `agent-repld test run` flags, their
+// paths under WORKTREE.
+func (g *failingGroup) flags(worktree string) []string {
+	var out []string
+	for _, sel := range g.selections(g.names) {
+		out = append(out, testcases.Flags(worktree, sel)...)
+	}
+	return out
 }
 
 // command is the group's `agent-repld test run` command line.
-func (g *failingGroup) command() string {
-	return TestRunCommand + " " + strings.Join(g.flags(g.names), " ")
+func (g *failingGroup) command(worktree string) string {
+	return TestRunCommand + " " + strings.Join(g.flags(worktree), " ")
 }
 
-// selectionFlag spells one `agent-repld test run` selection flag, its path
-// and its comma-separated names quoted for the shell.
-func selectionFlag(kind, path string, names []string) string {
-	value := path
-	if len(names) > 0 {
-		value += "=" + strings.Join(names, ",")
+// cases answers every case the failing run names, each its own selection
+// (testcases.Of): each group's tests, and for each failed unit whose tests
+// could not be named, the narrowest selection that runs it (unnamedCase).
+func (f failingTests) cases() []*testrunv1.TestSelection {
+	var sels []*testrunv1.TestSelection
+	for _, s := range f.suites {
+		for _, g := range s.groups {
+			sels = append(sels, g.selections(g.names)...)
+		}
+		for _, unit := range s.unnamed {
+			sels = append(sels, unnamedCase(f.worktree, s.name, unit))
+		}
 	}
-	return "-" + kind + " " + shellword.Quote(value)
+	return testcases.Of(sels)
+}
+
+// unnamedCase is the narrowest selection that runs UNIT of suite SUITE, a
+// failed unit whose tests could not be named: the Go package the unit is of
+// (a package's build, vet or test chunk), where it names one that is in
+// WORKTREE, otherwise the whole suite.
+func unnamedCase(worktree, suite, unit string) *testrunv1.TestSelection {
+	s, known := roster.Lookup(suite)
+	if known && (s.Kind == roster.GoModule || s.Kind == roster.E2E) {
+		if rest, ok := strings.CutPrefix(unit, suite+":"); ok {
+			pkg := rest
+			if i := strings.IndexAny(pkg, "#:["); i >= 0 {
+				pkg = pkg[:i]
+			}
+			dir := filepath.ToSlash(filepath.Join(moduleRoot, s.Path, pkg))
+			if info, err := os.Stat(filepath.Join(worktree, dir)); pkg != "" && err == nil && info.IsDir() {
+				return testcases.GoPackage(dir, nil)
+			}
+		}
+	}
+	return testcases.Suite(suite)
+}
+
+// repoPath is PATH, a path under the agent-repl module, relative to the
+// repository: a roster path starting with "/" is the repository's own.
+func repoPath(path string) string {
+	if rest, ok := strings.CutPrefix(path, "/"); ok {
+		return rest
+	}
+	return filepath.ToSlash(filepath.Join(moduleRoot, path))
 }
 
 // readFailingTests reads every failing test out of a run's archived output.
-// module is the absolute path of the agent-repl module in the worktree the
-// run tested, which every invocation is spelled against.
-func readFailingTests(output, module string) failingTests {
-	var found failingTests
+// worktree is the worktree the run tested, which every invocation is spelled
+// against.
+func readFailingTests(output, worktree string) failingTests {
+	found := failingTests{worktree: worktree}
 	type block struct {
 		unit, suite string
 		lines       []string
@@ -151,7 +205,7 @@ func readFailingTests(output, module string) failingTests {
 		if open != nil {
 			if m := unitVerdict.FindStringSubmatch(line); m != nil && m[1] == open.unit {
 				if m[3] == "FAILED" {
-					readUnit(&found, open.unit, open.suite, open.lines, module)
+					readUnit(&found, open.unit, open.suite, open.lines)
 				}
 				open = nil
 				continue
@@ -165,7 +219,7 @@ func readFailingTests(output, module string) failingTests {
 		}
 		if m := unitVerdict.FindStringSubmatch(line); m != nil && m[3] == "FAILED" {
 			// A verdict with no output block: the unit printed nothing.
-			readUnit(&found, m[1], m[2], nil, module)
+			readUnit(&found, m[1], m[2], nil)
 			continue
 		}
 		if m := unitCouldNotStart.FindStringSubmatch(line); m != nil {
@@ -190,7 +244,7 @@ func readFailingTests(output, module string) failingTests {
 }
 
 // readUnit reads one failed unit's block for the tests that failed in it.
-func readUnit(found *failingTests, unit, suiteName string, lines []string, module string) {
+func readUnit(found *failingTests, unit, suiteName string, lines []string) {
 	s := found.suite(suiteName)
 	suite, known := roster.Lookup(suiteName)
 	named := false
@@ -199,17 +253,17 @@ func readUnit(found *failingTests, unit, suiteName string, lines []string, modul
 	case suite.Kind == roster.GoModule || suite.Kind == roster.E2E:
 		rel, _, ok := goUnitPackage(unit, suiteName)
 		if ok {
-			dir := filepath.Join(module, suite.Path, rel)
-			named = readGoUnit(s, lines, unit[:strings.LastIndex(unit, "#")], func(names []string) []string {
-				return []string{selectionFlag("go", dir, deepest(names))}
+			dir := repoPath(filepath.Join(suite.Path, rel))
+			named = readGoUnit(s, lines, unit[:strings.LastIndex(unit, "#")], func(names []string) []*testrunv1.TestSelection {
+				return []*testrunv1.TestSelection{testcases.GoPackage(dir, deepest(names))}
 			})
 		}
 	case suite.Kind == roster.ERT:
-		named = readERTUnit(s, lines, module)
+		named = readERTUnit(s, suite, lines)
 	case suite.Kind == roster.Vitest:
-		named = readVitestUnit(s, unit, suite, lines, module)
+		named = readVitestUnit(s, unit, suite, lines)
 	case suite.Kind == roster.Script || suite.Kind == roster.SplitScript:
-		named = readScriptUnit(s, suite, lines, module)
+		named = readScriptUnit(s, suite, lines)
 	}
 	if !named {
 		s.unnamed = append(s.unnamed, unit)
@@ -234,11 +288,11 @@ func goUnitPackage(unit, suite string) (rel, tags string, ok bool) {
 
 // readGoUnit reads `go test -v` failure lines: every failing test and
 // subtest, by its full path.
-func readGoUnit(s *failingSuite, lines []string, key string, flags func([]string) []string) bool {
+func readGoUnit(s *failingSuite, lines []string, key string, selections func([]string) []*testrunv1.TestSelection) bool {
 	named := false
 	for _, line := range lines {
 		if m := goFailLine.FindStringSubmatch(line); m != nil {
-			s.add(key, flags, m[1], m[1])
+			s.add(key, selections, m[1], m[1])
 			named = true
 		}
 	}
@@ -261,7 +315,7 @@ func deepest(names []string) []string {
 
 // readERTUnit reads ERT's unexpected-result lines, grouping the tests by the
 // file that defines them.
-func readERTUnit(s *failingSuite, lines []string, module string) bool {
+func readERTUnit(s *failingSuite, suite roster.Suite, lines []string) bool {
 	byFile := map[string][]string{}
 	var files []string
 	for _, line := range lines {
@@ -278,10 +332,12 @@ func readERTUnit(s *failingSuite, lines []string, module string) bool {
 		}
 	}
 	for _, file := range files {
-		path := filepath.Join(module, "lisp", file)
-		flags := func(names []string) []string { return []string{selectionFlag("ert", path, names)} }
+		path := repoPath(filepath.Join(suite.Path, file))
+		selections := func(names []string) []*testrunv1.TestSelection {
+			return []*testrunv1.TestSelection{testcases.ErtFile(path, names)}
+		}
 		for _, name := range byFile[file] {
-			s.add("ert:"+file, flags, name, file+": "+name)
+			s.add("ert:"+file, selections, name, file+": "+name)
 		}
 	}
 	return len(files) > 0
@@ -290,13 +346,13 @@ func readERTUnit(s *failingSuite, lines []string, module string) bool {
 // readVitestUnit reads vitest's failure lines, grouping the tests by file.
 // The unit id says whether the chunk ran under the suite's integration
 // config.
-func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []string, module string) bool {
+func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []string) bool {
 	if strings.Contains(unit, ":") {
 		// A suite-wide check (typecheck, knip) or the coverage unit: no test
 		// to name.
 		return false
 	}
-	dir := filepath.Join(module, suite.Path)
+	dir := repoPath(suite.Path)
 	byFile := map[string][]string{}
 	whole := map[string]bool{}
 	var files []string
@@ -322,25 +378,25 @@ func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []st
 		}
 	}
 	for _, file := range files {
-		path := filepath.Join(dir, file)
-		// A vitest flag carries ONE full name; "" is the whole file, which
-		// runs every name of it anyway.
-		flags := func(names []string) []string {
+		path := filepath.ToSlash(filepath.Join(dir, file))
+		// A vitest selection carries ONE full name; "" is the whole file,
+		// which runs every name of it anyway.
+		selections := func(names []string) []*testrunv1.TestSelection {
 			if slices.Contains(names, "") {
-				return []string{selectionFlag("vitest", path, nil)}
+				return []*testrunv1.TestSelection{testcases.VitestFile(path, "")}
 			}
-			out := make([]string, 0, len(names))
+			out := make([]*testrunv1.TestSelection, 0, len(names))
 			for _, n := range names {
-				out = append(out, selectionFlag("vitest", path, []string{n}))
+				out = append(out, testcases.VitestFile(path, n))
 			}
 			return out
 		}
 		if whole[file] || len(byFile[file]) == 0 {
-			s.add("vitest:"+file, flags, "", file+": the whole file failed")
+			s.add("vitest:"+file, selections, "", file+": the whole file failed")
 			continue
 		}
 		for _, name := range byFile[file] {
-			s.add("vitest:"+file, flags, name, file+": "+name)
+			s.add("vitest:"+file, selections, name, file+": "+name)
 		}
 	}
 	return len(files) > 0
@@ -348,16 +404,15 @@ func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []st
 
 // readScriptUnit reads a shell harness's failure lines. A harness runs whole:
 // its cases have no names of their own to select by.
-func readScriptUnit(s *failingSuite, suite roster.Suite, lines []string, module string) bool {
-	script := filepath.Join(module, suite.Path)
-	if strings.HasPrefix(suite.Path, "/") {
-		script = filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(module))), suite.Path[1:])
+func readScriptUnit(s *failingSuite, suite roster.Suite, lines []string) bool {
+	script := repoPath(suite.Path)
+	selections := func([]string) []*testrunv1.TestSelection {
+		return []*testrunv1.TestSelection{testcases.Harness(script, nil)}
 	}
-	flags := func([]string) []string { return []string{selectionFlag("harness", script, nil)} }
 	named := false
 	for _, line := range lines {
 		if m := scriptFailLine.FindStringSubmatch(line); m != nil {
-			s.add("script:"+suite.Name, flags, m[1], m[1])
+			s.add("script:"+suite.Name, selections, m[1], m[1])
 			named = true
 		}
 	}
@@ -381,7 +436,7 @@ func (f failingTests) render(archive string) string {
 	var all []string
 	for _, s := range f.suites {
 		for _, g := range s.groups {
-			for _, flag := range g.flags(g.names) {
+			for _, flag := range g.flags(f.worktree) {
 				if !slices.Contains(all, flag) {
 					all = append(all, flag)
 				}
@@ -394,7 +449,7 @@ func (f failingTests) render(archive string) string {
 	for _, s := range f.suites {
 		b.WriteString(fmt.Sprintf("\nsuite %s:\n", s.name))
 		for _, g := range s.groups {
-			b.WriteString(fmt.Sprintf("\nrun: %s\n", g.command()))
+			b.WriteString(fmt.Sprintf("\nrun: %s\n", g.command(f.worktree)))
 			for _, test := range g.shown {
 				b.WriteString(fmt.Sprintf("- %s\n", test))
 			}
@@ -422,8 +477,12 @@ func (r *run) writeFailingTests(ctx context.Context, archive string) (string, er
 	if err := r.excludeFromCommits(ctx, FailingTestsFile); err != nil {
 		return "", err
 	}
-	module := filepath.Join(r.subject.dir, moduleRoot)
-	found := readFailingTests(string(output), module)
+	found := readFailingTests(string(output), r.subject.dir)
+	// THE CASES ARE RECORDED FIRST, so an attempt that cannot record them
+	// fails before it hands the agent anything.
+	if err := r.o.recordFailingCases(ctx, r.ws, found, dlog.Context{"archive": archive}); err != nil {
+		return "", err
+	}
 	path := filepath.Join(r.subject.dir, FailingTestsFile)
 	body := found.render(archive)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -480,5 +539,25 @@ func (r *run) excludeFromCommits(ctx context.Context, name string) error {
 	}
 	r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "excluded a merge file from commits in the repository's info/exclude", dlog.Context{
 		"workspace": string(r.ws), "exclude": path, "entry": entry})
+	return nil
+}
+
+// recordFailingCases adds every case a failing gate run names (found.cases)
+// to workspace WS's record of its cases, which `agent-repld test run -rerun`
+// runs: the branch's agent may never have run them itself. A failure to
+// record is the gate's, failing the fixing attempt loudly.
+func (o *orchestrator) recordFailingCases(ctx context.Context, ws ids.WorkspaceID, found failingTests, fields dlog.Context) error {
+	const op = "daemon.merge.fixes"
+	cases := found.cases()
+	fields = dlog.Merge(fields, dlog.Context{"workspace": string(ws), "cases": len(cases)})
+	if len(cases) == 0 {
+		o.log(ctx, ws).Info(op, "the failing gate run named no case to record", fields)
+		return nil
+	}
+	if err := o.deps.DB.RecordTestCases(ctx, ws, cases, o.nowMS()); err != nil {
+		o.log(ctx, ws).Error(op, "the failing gate run's cases could not be recorded for the workspace's reruns", dlog.WithCause(fields, err))
+		return fmt.Errorf("merge: recording the failing tests' cases: %w", err)
+	}
+	o.log(ctx, ws).Info(op, "recorded the failing gate run's cases for the workspace's reruns", fields)
 	return nil
 }
