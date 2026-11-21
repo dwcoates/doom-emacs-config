@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,6 +25,7 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -2972,5 +2976,102 @@ func TestAMergeAtAColdGatedWorkspaceFailsForTheUserAtInfo(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.fault"}); ok {
 		t.Fatalf("records = %v, want no merge fault", h.logs.Records())
+	}
+}
+
+func TestRecordRebaseRecordsTheRebaseAndClearsEveryEarlierStepsFacts(t *testing.T) {
+	// Arrange: a record still carrying a conflict's, a fix's and a commit's
+	// facts from earlier steps.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	r.prog = progressDoc{
+		Turn: "turn-earlier", ConflictFiles: []string{"x.go"}, FixAttempt: 2, FailingSuites: []string{"suite"},
+		Head: "head-earlier", MergeCommit: "merge-earlier", FailingArchive: "archive", FailingTail: "tail",
+	}
+	commits := []gitclient.Commit{{SHA: "a1", Subject: "one"}, {SHA: "a2", Subject: "two"}}
+
+	// Act.
+	err := r.recordRebase(context.Background(), "master", "tip-sha", "head-sha", commits)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("recordRebase: %v", err)
+	}
+	got := r.prog
+	if got.Step != TabRebasing || got.TargetBranch != "master" || got.Tip != "tip-sha" || got.BranchHead != "head-sha" || got.Replayed != 0 {
+		t.Fatalf("record = %+v, want the rebase onto tip-sha from head-sha at its start", got)
+	}
+	if !reflect.DeepEqual(fromCommitDocs(got.Commits), commits) {
+		t.Fatalf("commits = %+v, want %+v", fromCommitDocs(got.Commits), commits)
+	}
+	if got.Turn != "" || got.ConflictFiles != nil || got.FixAttempt != 0 || got.FailingSuites != nil ||
+		got.Head != "" || got.MergeCommit != "" || got.FailingArchive != "" || got.FailingTail != "" {
+		t.Fatalf("record = %+v, want every earlier step's facts cleared", got)
+	}
+}
+
+// TestEveryRebaseRecordIsWrittenByRecordRebase covers the one record every
+// rebase writes: the commits a rebase replays reach a record only through
+// recordRebase, so no rebase start writes a record of its own shape.
+func TestEveryRebaseRecordIsWrittenByRecordRebase(t *testing.T) {
+	// Arrange
+	fset := token.NewFileSet()
+	for _, source := range sourcescan.Production(t) {
+		parsed, err := parser.ParseFile(fset, source.Name, source.Source, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", source.Name, err)
+		}
+
+		// Act
+		var enclosing string
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			if decl, ok := n.(*ast.FuncDecl); ok {
+				enclosing = decl.Name.Name
+			}
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+			for _, lhs := range assign.Lhs {
+				sel, ok := lhs.(*ast.SelectorExpr)
+				// Assert
+				if ok && (sel.Sel.Name == "BranchHead" || sel.Sel.Name == "Commits") && enclosing != "recordRebase" {
+					if id, isIdent := sel.X.(*ast.Ident); isIdent && id.Name == "d" {
+						t.Errorf("%s: %s writes a rebase's record by hand, not through recordRebase", fset.Position(assign.Pos()), enclosing)
+					}
+				}
+			}
+			return true
+		})
+	}
+}
+
+func TestAFreshStartAbortsAResolvedRebaseWhoseTargetMovedAndRebasesOntoTheNewTip(t *testing.T) {
+	// Arrange: the merge's own repair worked on a rebase onto a tip the
+	// target has since left.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.leftStanding = true
+	enqueue(t, h)
+	h.db.carryResolved(t, h.repoKey(), theWorkspace, &wsm.ResolvedRebase{Tip: "old-tip", BranchHead: "head-1", Turn: "turn-1"})
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Logf("the merge ended on: %v", err)
+	}
+
+	// Assert.
+	h.git.mu.Lock()
+	commands := append([]string(nil), h.git.rebaseCommands...)
+	h.git.mu.Unlock()
+	if len(commands) < 2 || commands[0] != "abort" || !strings.HasPrefix(commands[1], "start ") || strings.HasSuffix(commands[1], "old-tip") {
+		t.Fatalf("rebase commands = %v, want the resolved rebase aborted before a rebase onto the new tip", commands)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.rebase", text: "the target moved since the merge's own conflict repair worked on the rebase",
+		context: map[string]string{"verdict": "abort_target_moved", "resolved_tip": "old-tip"}}) {
+		t.Fatal("the decision was not recorded with its context")
+	}
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("facts = %+v, want the merge landed", facts)
 	}
 }

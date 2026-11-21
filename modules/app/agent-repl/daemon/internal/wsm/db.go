@@ -638,8 +638,13 @@ type DB interface {
 	// ReturnRemediatedMerge puts a remediating merge back in line at the
 	// first waiting place, behind every merge the caller names as being
 	// worked on, waiting in line or not, releasing its repair slot to the
-	// next merge awaiting it.
-	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) error
+	// next merge awaiting it. RESOLVED, when not nil, is the rebase the
+	// merge's own conflict repair worked on, recorded on its entry in the same
+	// write.
+	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID, resolved *ResolvedRebase) error
+	// ClearResolvedRebase retires the resolved rebase a merge's entry
+	// carries, answering whether it carried one.
+	ClearResolvedRebase(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
 	// MoveMerge moves a waiting merge one place up or down its queue, past
 	// the nearest waiting merge on that side, answering whether it moved.
 	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)

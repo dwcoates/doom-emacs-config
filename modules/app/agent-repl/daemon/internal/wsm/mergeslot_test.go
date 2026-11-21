@@ -196,13 +196,17 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 		{
 			name: "a remediated merge returning behind the worked-on head waits from its return",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
-				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }}},
+				{"return", func(q *slotQueue, ctx context.Context) error {
+					return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil, nil)
+				}}},
 			want: check{ws: a, slot: MergeSlotWaiting, at: func(m map[string]time.Time) time.Time { return m["return"] }},
 		},
 		{
 			name: "a returned merge takes the head again as the head ahead of it lands",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
-				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }},
+				{"return", func(q *slotQueue, ctx context.Context) error {
+					return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil, nil)
+				}},
 				{"b lands", func(q *slotQueue, ctx context.Context) error {
 					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "landed")
 				}}},
@@ -217,7 +221,9 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 				{"c leaves", func(q *slotQueue, ctx context.Context) error {
 					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.c, "taken off")
 				}},
-				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }}},
+				{"return", func(q *slotQueue, ctx context.Context) error {
+					return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil, nil)
+				}}},
 			want: check{ws: a, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["return"] }},
 		},
 		{

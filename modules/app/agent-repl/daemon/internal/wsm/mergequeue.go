@@ -791,18 +791,31 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 // repair slot is released in the same write, and granted to the next merge
 // awaiting it (mergeSlotsOf). Anything but a remediating entry is a refusal.
 //
+// RESOLVED is the rebase the merge's own conflict repair worked on, written
+// on the entry in the same write (mergeresolvedrebase.go), or nil for a
+// return that leaves no rebase standing. Only a merge that stepped aside from
+// the head for its conflicts carries one; any other return naming one is a
+// refusal.
+//
 // WORKED ON IS THE CALLER'S WORD, not the entries' states: a merge the
 // orchestrator has taken up (its chain's member joining behind the head) is
 // still waiting in the store until its admission is written, and the return
 // that read it as waiting stood ahead of a merge already being worked on.
-func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) error {
+func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID, resolved *ResolvedRebase) error {
 	const op = "daemon.wsm.return_remediated_merge"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
-	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "resolved_rebase": resolved != nil}
+	if resolved != nil {
+		if err := resolved.validate(); err != nil {
+			s.log.Error(op, "refused a merge's return carrying a malformed resolved rebase", withError(fields, err))
+			return err
+		}
+	}
+	resolvedTip, resolvedHead, resolvedTurn := resolvedRebaseColumns(resolved)
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		_, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil {
@@ -823,13 +836,17 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 		default:
 			return fmt.Errorf("wsm: workspace %s in repo %q returns from remediating for %s, which names no repair", id, key, MergeAside(aside))
 		}
+		if resolved != nil && MergeAside(aside) != MergeAsideConflicts {
+			return fmt.Errorf("%w: workspace %s in repo %q returns from %s", errResolvedRebaseAside, id, key, MergeAside(aside))
+		}
 		rank := returnRankOf(MergeAside(aside))
 		back, err := nextSeq(ctx, tx, key)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 1, return_rank = ? WHERE repo_key = ? AND workspace_id = ?`,
-			int(returns), int(MergeAsideNone), back, rank, key, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 1, return_rank = ?,
+resolved_tip = ?, resolved_branch_head = ?, resolved_turn = ? WHERE repo_key = ? AND workspace_id = ?`,
+			int(returns), int(MergeAsideNone), back, rank, resolvedTip, resolvedHead, resolvedTurn, key, id); err != nil {
 			return err
 		}
 		// A RETURNER GOES AHEAD OF EVERY ENTRY OF A LOWER RANK, never ahead of
@@ -1119,7 +1136,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, pick_started_at, pick_turn, slot, slot_since, aside, waits_on, waits_on_name, waits_on_left, cold_gated, ` + requestColumns
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, pick_started_at, pick_turn, slot, slot_since, aside, waits_on, waits_on_name, waits_on_left, cold_gated, resolved_tip, resolved_branch_head, resolved_turn, ` + requestColumns
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -1148,9 +1165,12 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			waitsOn   sql.NullString
 			waitsName sql.NullString
 			waitsLeft sql.NullString
+			resTip    sql.NullString
+			resHead   sql.NullString
+			resTurn   sql.NullString
 			req       requestScan
 		)
-		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &picked, &pickTurn, &slot, &slotSince, &aside, &waitsOn, &waitsName, &waitsLeft, &entry.ColdGated}, req.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &picked, &pickTurn, &slot, &slotSince, &aside, &waitsOn, &waitsName, &waitsLeft, &entry.ColdGated, &resTip, &resHead, &resTurn}, req.targets()...)...); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -1180,6 +1200,9 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 		entry.WaitsOn, entry.WaitsOnName, entry.WaitsOnLeft = WorkspaceID(waitsOn.String), waitsName.String, waitsLeft.String
 		if entry.WaitsOnLeft != "" && entry.WaitsOn == "" {
 			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "waits_on_left", Err: fmt.Errorf("records the cause %q a merge ahead left for, but waits on no merge", entry.WaitsOnLeft)}
+		}
+		if entry.Resolved, err = decodeResolvedRebase(row, resTip, resHead, resTurn); err != nil {
+			return nil, err
 		}
 		entry.Position = len(loaded[entry.Repo]) + 1
 		loaded[entry.Repo] = append(loaded[entry.Repo], entry)

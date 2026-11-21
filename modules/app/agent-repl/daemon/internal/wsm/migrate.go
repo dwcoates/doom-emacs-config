@@ -334,6 +334,7 @@ var migrations = []migration{
 	{To: 176, Name: "pull_request_states", Kind: MigrationAdditive, DDL: pullRequestStatesDDL, Rewrite: backfillPullRequestStates},
 	{To: 177, Name: "settings_visit", Kind: MigrationAdditive, DDL: settingsVisitDDL},
 	{To: 178, Name: "retired_quiet_compaction", Kind: MigrationContract, DDL: retiredQuietCompactionDDL},
+	{To: 179, Name: "merge_queue_resolved_rebase", Kind: MigrationAdditive, DDL: mergeQueueResolvedRebaseDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
