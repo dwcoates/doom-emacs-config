@@ -1835,18 +1835,6 @@ and loaded no page."
                           :already-mounted))))
         (kill-buffer buf)))))
 
-(ert-deftest agent-repl-test-frontend-precreate-refuses-a-hidden-workspace ()
-  "A hidden workspace runs nothing, so it is owed no page."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl-host-ref)
-               (lambda (_ws) '(:id "ws-1" :dir "/w")))
-              ((symbol-function 'agent-repl-open-tabs-withheld-p) (lambda (_ws) t)))
-      ;; Act / Assert
-      (should (eq (agent-repl--frontend-precreate-refusal "alpha") :hidden)))))
-
 (ert-deftest agent-repl-test-frontend-precreate-accepts-the-hidden-workspace-looked-at ()
   "A hidden workspace the user stands on is owed its page like any other."
   ;; Arrange

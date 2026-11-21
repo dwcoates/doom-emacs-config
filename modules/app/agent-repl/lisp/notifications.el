@@ -34,7 +34,9 @@
 
 (require 'seq)
 
-(declare-function agent-repl-host-request-switch "host" (ws trigger))
+(declare-function agent-repl-host-request-switch-ref "host" (ref trigger))
+(declare-function agent-repl-roster-row-of-id "roster" (id))
+(declare-function agent-repl-roster-row-closed-p "roster" (row))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-serial-create "core" (&rest slots))
@@ -188,15 +190,21 @@ like any other switch; `:nothing-held' is a gain with no banner held, and
 `:no-gain' any other report, so nothing moves."
   (pcase (plist-get claim :arm)
     (:banner
-     (let* ((id (plist-get (plist-get (plist-get claim :value) :workspace) :id))
-            (ws (agent-repl--ws-by-ref-id id)))
-       (if ws
+     (let* ((ref (plist-get (plist-get claim :value) :workspace))
+            (id (plist-get ref :id))
+            (row (agent-repl-roster-row-of-id id)))
+       (if (and row (not (agent-repl-roster-row-closed-p row)))
+           ;; AN OPEN WORKSPACE IS LANDED ON, held here or not: a folded or
+           ;; hidden one is opened by the roster push its selection brings
+           ;; (`agent-repl-host-request-switch-ref').
            (progn
-             (agent-repl--info ws "elisp.notifications.claim banner ws=%s id=%s" ws id)
-             (agent-repl-host-request-switch ws 'notification-focus))
-         ;; THE BANNER'S WORKSPACE HAS NO TAB in this Emacs (closed or hidden
-         ;; since the banner was made): there is nowhere to land, so the user
-         ;; stays where they are.
+             (agent-repl--info agent-repl--focus-log-scope
+                               "elisp.notifications.claim banner id=%s held=%s"
+                               id (and (agent-repl--ws-by-ref-id id) t))
+             (agent-repl-host-request-switch-ref ref 'notification-focus))
+         ;; THE BANNER'S WORKSPACE IS CLOSED, or gone from the roster, since the
+         ;; banner was made: there is nowhere to land, so the user stays where
+         ;; they are.
          (agent-repl--info agent-repl--focus-log-scope
                            "elisp.notifications.claim banner-without-tab id=%s" id))))
     (:nothing-held
@@ -212,26 +220,18 @@ like any other switch; `:nothing-held' is a gain with no banner held, and
 
 ;;;; ---- The click ----
 
-(defun agent-repl--notification-activate (ws)
-  "Raise the Emacs frame and select workspace WS's tab.
-THE CLICK ACTION of the host stream's `notification_clicked' push: the
+(defun agent-repl--notification-activate (ref)
+  "Raise the Emacs frame and switch to the workspace REF names.
+THE CLICK ACTION of the daemon stream's `notification_clicked' push: the
 daemon posted the banner and read the click back.  Like every switch
-trigger it REQUESTS the switch (`agent-repl-host-request-switch') and the
-frame follows the roster's `current'; the daemon clears the attention
-marker on the selection.  The frame is raised and focused at once, so the
-click brings Emacs forward.  A nil or empty WS still focuses Emacs rather than
-attempting a bogus jump."
-  (agent-repl--log ws "elisp.notifications.activate ws=%s" ws)
-  (let ((navigable (and ws (stringp ws) (not (string-empty-p ws)))))
-    (if navigable
-        (progn
-          (agent-repl--log ws "elisp.notifications.activate-navigable ws=%s navigable=t" ws)
-          (agent-repl-host-request-switch ws 'notification))
-      ;; An unknown workspace is a WARNING and NO switch: a click that
-      ;; cannot name where to go still brings Emacs forward, but guessing a
-      ;; destination would move the user somewhere nobody asked for.
-      (agent-repl--warn ws "elisp.notifications.activate-unknown-workspace ws=%S" ws))
-    (select-frame-set-input-focus (selected-frame))))
+trigger it REQUESTS the switch (`agent-repl-host-request-switch-ref'),
+held by this editor or not, and the frame follows the roster's `current';
+the daemon clears the attention marker on the selection.  The frame is
+raised and focused at once, so the click brings Emacs forward."
+  (agent-repl--log '(:agent-repl-central "a banner click is resolved to its workspace by the switch")
+                   "elisp.notifications.activate id=%s" (plist-get ref :id))
+  (agent-repl-host-request-switch-ref ref 'notification)
+  (select-frame-set-input-focus (selected-frame)))
 
 (provide 'notifications)
 

@@ -32,11 +32,6 @@
 (defvar agent-repl-test-pu--held-back nil
   "Workspaces whose page the harness's host holds back.")
 
-(defvar agent-repl-test-pu--hidden nil
-  "Workspaces the roster answers hidden.")
-
-(defvar agent-repl-test-pu--folded nil
-  "Workspaces a collapsed section folds.")
 
 (defvar agent-repl-test-pu--status nil
   "Each workspace's roster status arm, (WS . ARM); a workspace absent is `:ready'.
@@ -92,8 +87,6 @@
   `(agent-repl-test--with-clean-state
      (let ((agent-repl-test-pu--now 1000)
            (agent-repl-test-pu--dropped nil)
-           (agent-repl-test-pu--hidden nil)
-           (agent-repl-test-pu--folded nil)
            (agent-repl-test-pu--status nil)
            (agent-repl-test-pu--turn-ended nil)
            (agent-repl-test-pu--current nil)
@@ -147,10 +140,6 @@
                         (lambda (ws) (alist-get ws agent-repl-test-pu--status :ready nil #'equal)))
                        ((symbol-function 'agent-repl-roster-last-turn-ended-ms)
                         (lambda (ws) (alist-get ws agent-repl-test-pu--turn-ended nil nil #'equal)))
-                       ((symbol-function 'agent-repl-open-tabs-hidden-p)
-                        (lambda (ws) (member ws agent-repl-test-pu--hidden)))
-                       ((symbol-function 'agent-repl-open-tabs-folded-p)
-                        (lambda (ws) (member ws agent-repl-test-pu--folded)))
                        ((symbol-function 'agent-repl-host-report-page-unloading)
                         (agent-repl-test--page-unloading-reporter
                          (lambda () agent-repl-test-pu--report)
@@ -444,15 +433,6 @@ of 111 reports timed out in the deploy of 2026-11-17 23:52."
     ;; Act / Assert
     (should (agent-repl-page-unload-wanted-p "alpha"))))
 
-(ert-deftest agent-repl-test-pu-a-hidden-page-last-known-loaded-is-not-wanted ()
-  "A hidden workspace holds no page off screen, whatever the daemon last knew."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--hidden '("alpha")
-          agent-repl-test-pu--last-known '(("alpha" . :loaded)))
-    ;; Act / Assert
-    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
-
 (ert-deftest agent-repl-test-pu-an-unknown-last-known-page-fails-hard ()
   "A last-known residency that is neither loaded nor not loaded is a bug."
   ;; Arrange
@@ -486,15 +466,6 @@ of 111 reports timed out in the deploy of 2026-11-17 23:52."
   "An idle workspace's page is not loaded ahead of its show."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    ;; Act / Assert
-    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
-
-(ert-deftest agent-repl-test-pu-a-hidden-working-page-is-not-wanted ()
-  "A hidden workspace holds no page off screen, working or not."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
-          agent-repl-test-pu--hidden '("alpha"))
     ;; Act / Assert
     (should-not (agent-repl-page-unload-wanted-p "alpha"))))
 
@@ -781,30 +752,6 @@ of 111 reports timed out in the deploy of 2026-11-17 23:52."
     ;; Assert
     (should (agent-repl-test-pu--said-p "ws=alpha" "reason=merged"))))
 
-(ert-deftest agent-repl-test-pu-a-hidden-page-finished-within-the-hold-is-unloaded ()
-  "A hidden workspace holds no page off screen however recently its turn ended."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--hidden '("alpha")
-          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=hidden"))))
-
-(ert-deftest agent-repl-test-pu-a-hidden-workspace-page-is-unloaded-at-once ()
-  "A hidden workspace's page is unloaded off screen, working or not."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-loaded-at 1000)
-    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
-          agent-repl-test-pu--hidden '("alpha"))
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should (equal agent-repl-test-pu--dropped '("alpha")))
-    (should (agent-repl-test-pu--said-p "reason=hidden"))))
-
 (ert-deftest agent-repl-test-pu-the-shown-page-is-never-unloaded ()
   "The page the host shows stays, whatever its status."
   ;; Arrange
@@ -932,150 +879,7 @@ stalled handover grew the loaded pages to 78."
     ;; Assert
     (should-not agent-repl-test-pu--events)))
 
-(ert-deftest agent-repl-test-pu-an-unloaded-hidden-working-page-is-not-loaded ()
-  "A hidden workspace is loaded by no status."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--pages nil
-          agent-repl-test-pu--status '(("alpha" . :thinking))
-          agent-repl-test-pu--hidden '("alpha"))
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should-not agent-repl-test-pu--events)))
-
 ;;;; ---- A folded section ----
-
-(ert-deftest agent-repl-test-pu-a-folded-working-page-is-not-wanted ()
-  "A folded workspace holds no page off screen, working or not."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
-          agent-repl-test-pu--folded '("alpha"))
-    ;; Act / Assert
-    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
-
-(ert-deftest agent-repl-test-pu-a-folded-working-page-is-unloaded-at-once ()
-  "A folded workspace's page is unloaded by the pass, working or not."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
-          agent-repl-test-pu--folded '("alpha"))
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should (equal agent-repl-test-pu--dropped '("alpha")))
-    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=folded"))))
-
-(ert-deftest agent-repl-test-pu-a-fold-unloads-within-the-grace-after-a-switch-away ()
-  "The grace after a switch away holds no folded page (owner request, 2026-10-30)."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha" "beta")
-    (agent-repl-page-unload-note-shown "alpha")
-    (agent-repl-page-unload-note-shown "beta")
-    (setq agent-repl-test-pu--folded '("alpha"))
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should (equal agent-repl-test-pu--dropped '("alpha")))))
-
-(ert-deftest agent-repl-test-pu-an-unloaded-folded-working-page-is-not-loaded ()
-  "A folded workspace is loaded by no status."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--pages nil
-          agent-repl-test-pu--status '(("alpha" . :thinking))
-          agent-repl-test-pu--folded '("alpha"))
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should-not agent-repl-test-pu--events)))
-
-(ert-deftest agent-repl-test-pu-an-unfold-gives-back-a-page-the-fold-took-within-its-hold ()
-  "A page a fold unloaded inside its hold is loaded again at the unfold (owner ruling, 2026-11-18)."
-  ;; Arrange: alpha's turn ended at 900s, so its hold runs to 1400s.
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000))
-          agent-repl-test-pu--folded '("alpha"))
-    (agent-repl-page-unload-pass)
-    (setq agent-repl-test-pu--folded nil
-          agent-repl-test-pu--events nil)
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should (member '(ensure "alpha") agent-repl-test-pu--events))
-    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=unfolded-within-hold"))))
-
-(ert-deftest agent-repl-test-pu-an-unfold-leaves-a-page-whose-hold-ran-out-while-folded ()
-  "A page whose hold ended while its section was folded loads only when shown."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000))
-          agent-repl-test-pu--folded '("alpha"))
-    (agent-repl-page-unload-pass)
-    (setq agent-repl-test-pu--folded nil
-          agent-repl-test-pu--events nil
-          agent-repl-test-pu--now 1500)
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should-not (member '(ensure "alpha") agent-repl-test-pu--events))))
-
-(ert-deftest agent-repl-test-pu-an-unfold-loads-no-page-the-fold-did-not-take ()
-  "A page that was not loaded when its section folded is not loaded at the unfold."
-  ;; Arrange: alpha is within its hold, but held no page when it folded.
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--pages nil
-          agent-repl-test-pu--turn-ended '(("alpha" . 900000))
-          agent-repl-test-pu--folded '("alpha"))
-    (agent-repl-page-unload-pass)
-    (setq agent-repl-test-pu--folded nil
-          agent-repl-test-pu--events nil)
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should-not agent-repl-test-pu--events)))
-
-(ert-deftest agent-repl-test-pu-the-shown-folded-page-is-kept ()
-  "A folded workspace's page the host shows is never unloaded."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--folded '("alpha")
-          agent-repl-page-unload--shown "alpha")
-    ;; Act
-    (agent-repl-page-unload-pass)
-    ;; Assert
-    (should-not agent-repl-test-pu--events)))
-
-(ert-deftest agent-repl-test-pu-judge-unloads-a-folded-page-at-once ()
-  "Judging one folded workspace starts its unload and answers non-nil."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--folded '("alpha"))
-    ;; Act
-    (let ((started (agent-repl-page-unload-judge "alpha")))
-      ;; Assert
-      (should (equal (list (and started t) agent-repl-test-pu--dropped) '(t ("alpha")))))))
-
-(ert-deftest agent-repl-test-pu-judge-reports-the-folded-page-unloaded ()
-  "Judging one folded workspace reports its residency once its page is gone."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--folded '("alpha"))
-    ;; Act
-    (agent-repl-page-unload-judge "alpha")
-    ;; Assert
-    (should (equal (car agent-repl-test-pu--residencies)
-                   '("alpha" (:arm :not-loaded :value nil))))))
-
-(ert-deftest agent-repl-test-pu-judge-keeps-a-page-a-status-holds ()
-  "Judging a drawn working workspace unloads nothing and answers nil."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
-    ;; Act / Assert
-    (should-not (agent-repl-page-unload-judge "alpha"))
-    (should-not agent-repl-test-pu--dropped)))
 
 ;;;; ---- The switch to, and away ----
 
@@ -1511,15 +1315,6 @@ naming a dead buffer, and every switch back found its panels closed."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
     (setq agent-repl-test-pu--status '(("alpha" . :severed)))
-    ;; Act / Assert
-    (should (eq (agent-repl-test-pu--release "alpha") :on-leave))))
-
-(ert-deftest agent-repl-test-pu-a-hidden-working-page-reports-on-leave ()
-  "A hidden workspace holds its page only while shown, working or not."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
-          agent-repl-test-pu--hidden '("alpha"))
     ;; Act / Assert
     (should (eq (agent-repl-test-pu--release "alpha") :on-leave))))
 

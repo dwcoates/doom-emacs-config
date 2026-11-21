@@ -41,8 +41,8 @@ WS is the workspace a thread is open in, nil while it is still opening."
                      (`(:failure ,f) (funcall on-failure f))))))
                ((symbol-function 'agent-repl--ws-by-ref-id)
                 (lambda (id) (nth 2 (cl-find id ,threads :key #'car :test #'equal))))
-               ((symbol-function 'agent-repl-host-request-switch)
-                (lambda (ws trigger) (push (cons ws trigger) agent-repl-test-threads--switched)))
+               ((symbol-function 'agent-repl-host-request-switch-ref)
+                (lambda (ref trigger) (push (cons (plist-get ref :id) trigger) agent-repl-test-threads--switched)))
                ((symbol-function 'agent-repl--info)
                 (agent-repl-test--record-leveled-into agent-repl-test-threads--records 'info))
                ((symbol-function 'agent-repl--warn)
@@ -130,21 +130,21 @@ and `said' to the last message."
   "`SPC TAB T' opens the thread last interacted with."
   (agent-repl-test-threads--with '(("t2" "newer" "chat/newer") ("t1" "older" "chat/older"))
     (agent-repl-thread-recent)
-    (should (equal agent-repl-test-threads--switched '(("chat/newer" . thread-recent))))))
+    (should (equal agent-repl-test-threads--switched '(("t2" . thread-recent))))))
 
-(ert-deftest agent-repl-test-threads-a-thread-still-opening-is-not-switched-to ()
-  "A thread whose workspace has not opened yet says so and moves nothing."
+(ert-deftest agent-repl-test-threads-a-thread-not-held-here-is-switched-to-by-its-ref ()
+  "A thread with no workspace here (held only while selected) is switched to by its ref."
   (agent-repl-test-threads--with '(("t1" "why" nil))
     (agent-repl-thread-recent)
-    (should (null agent-repl-test-threads--switched))
-    (should (agent-repl-test-threads--recorded 'info "elisp.threads.open-pending id=t1"))))
+    (should (equal agent-repl-test-threads--switched '(("t1" . thread-recent))))
+    (should (agent-repl-test-threads--recorded 'info "elisp.threads.open id=t1"))))
 
 (ert-deftest agent-repl-test-threads-pick-opens-the-named-thread ()
   "`SPC TAB .' opens the thread picked by name."
   (agent-repl-test-threads--with '(("t2" "newer" "chat/newer") ("t1" "older" "chat/older"))
     (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "older")))
       (agent-repl-thread-pick))
-    (should (equal agent-repl-test-threads--switched '(("chat/older" . thread-picker))))))
+    (should (equal agent-repl-test-threads--switched '(("t1" . thread-picker))))))
 
 (ert-deftest agent-repl-test-threads-no-thread-yet-is-refused ()
   "With no thread at all, opening one is refused."

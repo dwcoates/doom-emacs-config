@@ -621,14 +621,6 @@ absent field is none."
                             (agent-repl-wire--fail "HostComposerEntries" 'unanswered
                                                    "an element is not a string"))))))))
 
-;;;; ---- The notification click push ----
-
-(defun agent-repl-wire-decode-host-workspace-notification-clicked (value)
-  "Decode VALUE as the empty message `HostWorkspaceNotificationClicked'.
-The user clicked this workspace's desktop banner; the daemon posted it
-and read the click back, so selecting the tab is all that is left."
-  (agent-repl-wire--decode-empty "HostWorkspaceNotificationClicked" value))
-
 ;;;; ---- The final-response click push ----
 
 (defun agent-repl-wire-decode-host-workspace-final-response-clicked (value)
@@ -671,14 +663,6 @@ the composer it asks for.  Every arm is an empty message."
                   (list arm (intern (format ":%s" arm))
                         (lambda (v) (agent-repl-wire--decode-empty name v)))))
               '(asked moved withdrawn taken))))))
-
-;;;; ---- The rail's row click push ----
-
-(defun agent-repl-wire-decode-host-workspace-select-requested (value)
-  "Decode VALUE as the empty message `HostWorkspaceSelectRequested'.
-The user clicked this workspace's row in a page's rail; the daemon
-relayed the click, so requesting the switch to it is all that is left."
-  (agent-repl-wire--decode-empty "HostWorkspaceSelectRequested" value))
 
 ;;;; ---- The link-followed push ----
 
@@ -891,17 +875,44 @@ The token is opaque to the editor, which only echoes it back."
   (list (cons 'value (agent-repl-wire--encode-string
                       "EditorEvaluationToken" 'value (plist-get value :value)))))
 
-(defun agent-repl-wire-decode-host-evaluate (value)
-  "Decode VALUE as `HostEvaluate', a plist (:token TOKEN :text TEXT).
+(defun agent-repl-wire-decode-daemon-evaluate (value)
+  "Decode VALUE as `DaemonEvaluate', a plist (:workspace :token :text).
+The workspace is the REF of the one whose agent asked, held by this
+editor or not.
 The token is REQUIRED: an evaluation that cannot be answered is a breach."
-  (let ((object (agent-repl-wire--object "HostEvaluate" value)))
-    (agent-repl-wire--check-keys "HostEvaluate" object '(token text))
+  (let ((object (agent-repl-wire--object "DaemonEvaluate" value)))
+    (agent-repl-wire--check-keys "DaemonEvaluate" object '(workspace token text))
     (agent-repl-wire--decoded
-     "HostEvaluate"
-     (list :token (agent-repl-wire--decode-message
-                   "HostEvaluate" 'token object
+     "DaemonEvaluate"
+     (list :workspace (agent-repl-wire--decode-message
+                       "DaemonEvaluate" 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)
+           :token (agent-repl-wire--decode-message
+                   "DaemonEvaluate" 'token object
                    #'agent-repl-wire-decode-editor-evaluation-token)
-           :text (agent-repl-wire--decode-string "HostEvaluate" 'text object)))))
+           :text (agent-repl-wire--decode-string "DaemonEvaluate" 'text object)))))
+
+(defun agent-repl-wire-decode-daemon-workspace-notification-clicked (value)
+  "Decode VALUE as `DaemonWorkspaceNotificationClicked', (:workspace REF).
+The user clicked REF's desktop banner, held by this editor or not."
+  (let ((object (agent-repl-wire--object "DaemonWorkspaceNotificationClicked" value)))
+    (agent-repl-wire--check-keys "DaemonWorkspaceNotificationClicked" object '(workspace))
+    (agent-repl-wire--decoded
+     "DaemonWorkspaceNotificationClicked"
+     (list :workspace (agent-repl-wire--decode-message
+                       "DaemonWorkspaceNotificationClicked" 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)))))
+
+(defun agent-repl-wire-decode-daemon-workspace-select-requested (value)
+  "Decode VALUE as `DaemonWorkspaceSelectRequested', (:workspace REF).
+The user clicked REF's row in a page's rail, held by this editor or not."
+  (let ((object (agent-repl-wire--object "DaemonWorkspaceSelectRequested" value)))
+    (agent-repl-wire--check-keys "DaemonWorkspaceSelectRequested" object '(workspace))
+    (agent-repl-wire--decoded
+     "DaemonWorkspaceSelectRequested"
+     (list :workspace (agent-repl-wire--decode-message
+                       "DaemonWorkspaceSelectRequested" 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)))))
 
 (defun agent-repl-wire-encode-editor-evaluation-value (value)
   "Encode the `EditorEvaluationValue' plist VALUE (:printed P :readable B).
@@ -1012,10 +1023,6 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `host' push arm VALUE as a HostWorkspace."
   (agent-repl-wire-decode-host-workspace value))
 
-(defun agent-repl-wire-decode-watch-host-workspace-response-notification-clicked (value)
-  "Decode the `notification_clicked' push arm VALUE."
-  (agent-repl-wire-decode-host-workspace-notification-clicked value))
-
 (defun agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked (value)
   "Decode the `final_response_clicked' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-final-response-clicked value))
@@ -1031,10 +1038,6 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
 (defun agent-repl-wire-decode-watch-host-workspace-response-response-question (value)
   "Decode the `response_question' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-response-question value))
-
-(defun agent-repl-wire-decode-watch-host-workspace-response-select-requested (value)
-  "Decode the `select_requested' push arm VALUE."
-  (agent-repl-wire-decode-host-workspace-select-requested value))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response-link-followed (value)
   "Decode the `link_followed' push arm VALUE."
@@ -1093,10 +1096,6 @@ Returns a plist (:command STRING)."
   "Decode the `run_in_terminal' push arm VALUE."
   (agent-repl-wire-decode-open-in-editor-terminal-command value))
 
-(defun agent-repl-wire-decode-watch-host-workspace-response-evaluate (value)
-  "Decode the `evaluate' push arm VALUE as its `(:token :text)' plist."
-  (agent-repl-wire-decode-host-evaluate value))
-
 (defun agent-repl-wire-decode-watch-host-workspace-response-ending (value)
   "Decode the `ending' push arm VALUE."
   (agent-repl-wire-decode-daemon-stream-ending value))
@@ -1119,17 +1118,12 @@ Returns a plist (:command STRING)."
      (runInTerminal :run-in-terminal
                     agent-repl-wire-decode-watch-host-workspace-response-run-in-terminal)
      (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending)
-     (notificationClicked :notification-clicked
-                          agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
      (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection)
      (mentions :mentions agent-repl-wire-decode-watch-host-workspace-response-mentions)
      (mentionTargets :mention-targets
                      agent-repl-wire-decode-watch-host-workspace-response-mention-targets)
-     (evaluate :evaluate agent-repl-wire-decode-watch-host-workspace-response-evaluate)
      (finalResponseClicked :final-response-clicked
                            agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked)
-     (selectRequested :select-requested
-                      agent-repl-wire-decode-watch-host-workspace-response-select-requested)
      (loadPageRequested :load-page-requested
                         agent-repl-wire-decode-watch-host-workspace-response-load-page-requested)
      (linkFollowed :link-followed
@@ -2678,7 +2672,12 @@ THE ARM IS THE FRAME; an unset one is a contract breach."
                      agent-repl-wire-decode-watch-daemon-response-persistent-wifi)
      (reloadWebhost :reload-webhost agent-repl-wire-decode-daemon-reload-webhost)
      (newThreadRequested :new-thread-requested
-                         agent-repl-wire-decode-daemon-new-thread-requested))))
+                         agent-repl-wire-decode-daemon-new-thread-requested)
+     (notificationClicked :notification-clicked
+                          agent-repl-wire-decode-daemon-workspace-notification-clicked)
+     (selectRequested :select-requested
+                      agent-repl-wire-decode-daemon-workspace-select-requested)
+     (evaluate :evaluate agent-repl-wire-decode-daemon-evaluate))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-persistent-wifi (value)
   "Decode `WatchDaemonResponse''s `persistent_wifi' push arm VALUE.
@@ -2700,7 +2699,8 @@ UpdatePersistentWifiMode's success)."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       elispCurrent ending faultsStanding persistentWifi reloadWebhost newThreadRequested))
+       elispCurrent ending faultsStanding persistentWifi reloadWebhost newThreadRequested
+       notificationClicked selectRequested evaluate))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))

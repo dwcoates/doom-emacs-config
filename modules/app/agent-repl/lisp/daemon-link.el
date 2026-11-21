@@ -72,6 +72,9 @@
 
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl-thread-requested "threads" ())
+(declare-function agent-repl-host-notification-clicked "host" (ref))
+(declare-function agent-repl-host-select-requested "host" (ref))
+(declare-function agent-repl-host-evaluate "host" (conn request))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-persistent-wifi-handle "persistent-wifi" (state))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
@@ -949,6 +952,12 @@ non-nil says the daemon announced the ending first; the hooks read it as
       ;; The sidebar's new-thread button: open the new-thread prompt, OUT of
       ;; this process filter (threads.el).
       (:new-thread-requested (agent-repl-thread-requested))
+      ;; A banner click, a rail click and an agent's evaluation each name
+      ;; their workspace, held by this editor or not, so they ride this
+      ;; stream rather than the workspace's host stream (host.el).
+      (:notification-clicked (agent-repl-host-notification-clicked (plist-get value :workspace)))
+      (:select-requested (agent-repl-host-select-requested (plist-get value :workspace)))
+      (:evaluate (agent-repl-host-evaluate conn value))
       ;; The daemon is standing down on purpose and this was the stream's
       ;; last frame; `agent-repl-link--handle-close' reads the mark.
       (:ending

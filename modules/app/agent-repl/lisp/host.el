@@ -103,7 +103,7 @@
 (defvar agent-repl--global-log-scope)
 (defvar agent-repl-roster-following)
 
-(declare-function agent-repl--notification-activate "notifications" (ws))
+(declare-function agent-repl--notification-activate "notifications" (ref))
 (declare-function agent-repl-input-focus-for-reply "input" (ws))
 (declare-function agent-repl-input-text-highlighted "input" (ws))
 (declare-function agent-repl-input-compose-entry "input" (ws label))
@@ -164,6 +164,18 @@ daemon that serves WS, so work held for WS while it had none may go.")
 (defun agent-repl-host--entry (ws)
   "Return the bookkeeping plist for workspace WS, or nil."
   (gethash ws agent-repl-host--by-name))
+
+(defun agent-repl-host--held-name (id)
+  "Return the name of the workspace this editor holds whose ref id is ID, or nil.
+Read from the host table (`agent-repl-host--by-name'), the one record of
+which workspaces hold a host stream here: a workspace the roster does not
+mark held (frontend.v1.RosterRowHeld) has no entry, so it answers nil."
+  (let ((found nil))
+    (maphash (lambda (name entry)
+               (when (and (null found) (equal (plist-get (plist-get entry :ref) :id) id))
+                 (setq found name)))
+             agent-repl-host--by-name)
+    found))
 
 (defun agent-repl-host--put (ws key value)
   "Set KEY to VALUE in workspace WS's bookkeeping plist."
@@ -706,7 +718,10 @@ one place the handover walk lives."
 ;; returning.
 
 (defvar agent-repl-host--select-in-flight nil
-  "The workspace whose SelectWorkspace awaits its answer, or nil.
+  "The `WorkspaceRef' whose SelectWorkspace awaits its answer, or nil.
+A REF, NEVER A NAME: a workspace this editor does not hold (a folded or
+hidden one, frontend.v1.RosterRowHeld) is selected through the same one
+queue as a held one, and it has no name here until its tab opens.
 EMACS SENDS ONE SELECTION AT A TIME.  Every unary call rides its own
 socket, so two selects sent back to back -- `s-}' pressed twice -- reach
 the daemon in whatever order its accepts are scheduled, and the older one
@@ -716,21 +731,21 @@ in the order the user made them, and the last press is the last stamp.")
 
 (defvar agent-repl-host--select-queued nil
   "The newest selection waiting behind the one in flight, or nil.
-A list (WS ON-SETTLED KEEP-HISTORY SWITCH-STARTED-MS), the arguments of the
-`agent-repl-host-select' it will be sent as.  Only the newest is kept: a
+A list (REF ON-SETTLED KEEP-HISTORY SWITCH-STARTED-MS), the arguments of the
+`agent-repl-host-select-ref' it will be sent as.  Only the newest is kept: a
 selection the user has already moved past is never sent, because the daemon
 would stamp it `current' only for the next one to overwrite it.  The one it
 replaces is settled `:superseded' so its caller is not left waiting.")
 
 (defvar agent-repl-host--confirming nil
   "A selection the daemon accepted whose roster has not arrived, or nil.
-A cons (WS . REVISION): the daemon answered WS's SelectWorkspace with the
+A cons (REF . REVISION): the daemon answered REF's SelectWorkspace with the
 roster revision the selection is in (agentrepl.v1
 SelectWorkspaceSuccess.roster_revision).  THE ANSWER AND THE ROSTER RIDE
 SEPARATE STREAMS, so the roster Emacs holds when the answer lands can be
 one from before the selection; followed, it moved the frame back to the
 workspace the user had left, and the next push moved it forward again
-\(measured 2026-10-16: three passes per switch).  While this stands WS is
+\(measured 2026-10-16: three passes per switch).  While this stands REF is
 the pending selection (`agent-repl-host-pending-selection'), so such a
 roster is deferred; `agent-repl-roster-apply-current' releases it once the
 roster it holds is at REVISION or later.")
@@ -745,16 +760,31 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl-link-up-p "daemon-link" ())
 (declare-function agent-repl-page-unload-load-requested "page-unload" (ws))
 
-(defun agent-repl-host-pending-selection ()
-  "Return the workspace most recently REQUESTED and not yet answered, or nil.
-The queued selection when there is one, else the one in flight.  Adjacent
-keys step from it while it stands (so rapid presses walk before the roster
-catches up), and `agent-repl-roster-apply-current' defers any `current'
-naming another workspace until it is answered.  An answered selection
-whose roster has not arrived is pending too (`agent-repl-host--confirming')."
+(defun agent-repl-host--target-scope (ref)
+  "Return the log scope of a selection of REF: its workspace\='s name when held.
+A workspace this editor does not hold has no sink of its own here, so its
+records go to the central sink, naming its id in the message."
+  (or (agent-repl-host--held-name (plist-get ref :id))
+      '(:agent-repl-central "a selection of a workspace this editor does not hold has no workspace sink")))
+
+(defun agent-repl-host-pending-selection-ref ()
+  "Return the `WorkspaceRef' most recently REQUESTED and not yet answered, or nil.
+The queued selection when there is one, else the one in flight.
+`agent-repl-roster-apply-current' defers any `current' naming another
+workspace until it is answered.  An answered selection whose roster has
+not arrived is pending too (`agent-repl-host--confirming')."
   (or (car agent-repl-host--select-queued)
       agent-repl-host--select-in-flight
       (car agent-repl-host--confirming)))
+
+(defun agent-repl-host-pending-selection ()
+  "Return the name of the workspace pending selection, or nil.
+The workspace `agent-repl-host-pending-selection-ref' names, when this
+editor holds it: adjacent keys step from it while it stands, so rapid
+presses walk before the roster catches up.  Nil when nothing is pending,
+or when the pending workspace is one this editor does not hold yet."
+  (let ((ref (agent-repl-host-pending-selection-ref)))
+    (and ref (agent-repl-host--held-name (plist-get ref :id)))))
 
 (defun agent-repl-host-release-confirmed (revision)
   "Release the answered selection once the roster held is at REVISION.
@@ -763,9 +793,10 @@ its roster (`agent-repl-host--confirming') is released when REVISION has
 reached the one its answer named."
   (when (and agent-repl-host--confirming
              (>= revision (cdr agent-repl-host--confirming)))
-    (agent-repl--log (car agent-repl-host--confirming)
-                     "elisp.host.select-confirmed ws=%s revision=%d awaited=%d"
-                     (car agent-repl-host--confirming) revision (cdr agent-repl-host--confirming))
+    (let ((ref (car agent-repl-host--confirming)))
+      (agent-repl--log (agent-repl-host--target-scope ref)
+                       "elisp.host.select-confirmed id=%s revision=%d awaited=%d"
+                       (plist-get ref :id) revision (cdr agent-repl-host--confirming)))
     (setq agent-repl-host--confirming nil)))
 
 (defun agent-repl-host-forget-confirming (reason)
@@ -774,9 +805,10 @@ The roster stream that would have carried it has ended, and the next
 daemon's revisions start afresh: awaiting one of this daemon's would hold
 the selection pending forever."
   (when agent-repl-host--confirming
-    (agent-repl--info (car agent-repl-host--confirming)
-                      "elisp.host.select-unconfirmed ws=%s awaited=%d reason=%s"
-                      (car agent-repl-host--confirming) (cdr agent-repl-host--confirming) reason)
+    (let ((ref (car agent-repl-host--confirming)))
+      (agent-repl--info (agent-repl-host--target-scope ref)
+                        "elisp.host.select-unconfirmed id=%s awaited=%d reason=%s"
+                        (plist-get ref :id) (cdr agent-repl-host--confirming) reason))
     (setq agent-repl-host--confirming nil)))
 
 (defun agent-repl-host-select (ws &optional on-settled keep-history switch-started-ms)
@@ -814,26 +846,50 @@ is never left without one: selection is one of the three edges a failed
 walk is armed on (`agent-repl-host--register-settled')."
   (when (agent-repl-host-detached-p ws)
     (agent-repl-host--follow-live-daemon ws "select"))
+  (let ((ref (agent-repl-host-ref ws)))
+    (if (null ref)
+        (progn
+          (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=no-ref" ws)
+          nil)
+      (agent-repl-host-select-ref ref on-settled keep-history switch-started-ms))))
+
+(defun agent-repl-host-select-ref (ref &optional on-settled keep-history switch-started-ms)
+  "Tell the daemon the user switched to the workspace REF names.
+`agent-repl-host-select', by the workspace\='s identity: the one way to
+select a workspace this editor does not hold (frontend.v1.RosterRowHeld),
+whose roster push then opens it and lands the frame on it
+\(`agent-repl-roster-apply-current').  ON-SETTLED, KEEP-HISTORY and
+SWITCH-STARTED-MS are as `agent-repl-host-select' documents; so is the one
+selection in flight, behind which this one waits."
   (if agent-repl-host--select-in-flight
       (let ((older agent-repl-host--select-queued))
-        (setq agent-repl-host--select-queued (list ws on-settled keep-history switch-started-ms))
-        (agent-repl--info ws "elisp.host.select-queued ws=%s behind=%s superseded=%s"
-                          ws agent-repl-host--select-in-flight (or (car older) "none"))
+        (setq agent-repl-host--select-queued (list ref on-settled keep-history switch-started-ms))
+        (agent-repl--info (agent-repl-host--target-scope ref)
+                          "elisp.host.select-queued id=%s behind=%s superseded=%s"
+                          (plist-get ref :id) (plist-get agent-repl-host--select-in-flight :id)
+                          (or (plist-get (car older) :id) "none"))
         (when (and older (cadr older))
           (funcall (cadr older) :superseded))
         t)
-    (agent-repl-host--send-select ws on-settled keep-history switch-started-ms)))
+    (agent-repl-host--send-select ref on-settled keep-history switch-started-ms)))
 
-(defun agent-repl-host--send-select (ws on-settled keep-history switch-started-ms)
-  "Send WS\='s SelectWorkspace now, holding the in-flight slot until it answers.
+(defun agent-repl-host--select-conn (ref)
+  "Return the connection REF\='s selection is sent on, or nil.
+A held workspace\='s own connection (`agent-repl-host-conn-or-primary');
+for one this editor does not hold, the primary link, the daemon whose
+roster will open it."
+  (let ((ws (agent-repl-host--held-name (plist-get ref :id))))
+    (if ws
+        (agent-repl-host-conn-or-primary ws)
+      (and (fboundp 'agent-repl-link-primary) (agent-repl-link-primary)))))
+
+(defun agent-repl-host--send-select (ref on-settled keep-history switch-started-ms)
+  "Send REF\='s SelectWorkspace now, holding the in-flight slot until it answers.
 ON-SETTLED, KEEP-HISTORY and SWITCH-STARTED-MS are as
 `agent-repl-host-select' documents."
-  (let ((ref (agent-repl-host-ref ws))
-        (conn (agent-repl-host-conn-or-primary ws)))
+  (let ((conn (agent-repl-host--select-conn ref))
+        (scope (agent-repl-host--target-scope ref)))
     (cond
-     ((null ref)
-      (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=no-ref" ws)
-      nil)
      ((null conn)
       ;; A SELECTION WITH NO DAEMON TO SEND IT TO IS STILL THE USER'S, as
       ;; one nobody answered is (`agent-repl-host--select-failed'): it is
@@ -845,14 +901,14 @@ ON-SETTLED, KEEP-HISTORY and SWITCH-STARTED-MS are as
       ;; the next daemon was told the selection the user had already left
       ;; (2026-10-14, e2e TestEmacsRestartKeepsTheSelectedWorkspace).
       (setq agent-repl-host-last-selected-id (plist-get ref :id))
-      (agent-repl--info ws "elisp.host.select-deferred ws=%s id=%S reason=no-connection reassert=next-link-up"
-                        ws (plist-get ref :id))
+      (agent-repl--info scope "elisp.host.select-deferred id=%S reason=no-connection reassert=next-link-up"
+                        (plist-get ref :id))
       (when on-settled (funcall on-settled :standing-down))
       nil)
      (t
-      (agent-repl--info ws "elisp.host.select ws=%s id=%S keep-history=%s started-ms=%s"
-                        ws (plist-get ref :id) (and keep-history t) switch-started-ms)
-      (setq agent-repl-host--select-in-flight ws)
+      (agent-repl--info scope "elisp.host.select id=%S keep-history=%s started-ms=%s"
+                        (plist-get ref :id) (and keep-history t) switch-started-ms)
+      (setq agent-repl-host--select-in-flight ref)
       (condition-case err
           (agent-repl-rpc-select-workspace
            conn (append (list :workspace ref)
@@ -861,22 +917,22 @@ ON-SETTLED, KEEP-HISTORY and SWITCH-STARTED-MS are as
            :on-response
            (lambda (response)
              (agent-repl-host--select-settled
-              ws (lambda () (agent-repl-host--select-answered ws ref response on-settled))))
+              ref (lambda () (agent-repl-host--select-answered ref response on-settled))))
            :on-failure
            (lambda (detail)
              (agent-repl-host--select-settled
-              ws (lambda () (agent-repl-host--select-failed ws ref detail on-settled)))))
+              ref (lambda () (agent-repl-host--select-failed ref detail on-settled)))))
         (error
          ;; The call never went out, so nothing will ever answer it: the
          ;; slot is released here or no later selection is ever sent.
          (setq agent-repl-host--select-in-flight nil)
-         (agent-repl--error ws "elisp.host.select-unsent ws=%s id=%S error=%S"
-                            ws (plist-get ref :id) err)
+         (agent-repl--error scope "elisp.host.select-unsent id=%S error=%S"
+                            (plist-get ref :id) err)
          (signal (car err) (cdr err))))
       t))))
 
-(defun agent-repl-host--select-settled (ws handle)
-  "Release WS\='s in-flight selection slot, run HANDLE, then drain.
+(defun agent-repl-host--select-settled (ref handle)
+  "Release REF\='s in-flight selection slot, run HANDLE, then drain.
 The slot is released FIRST, so a selection HANDLE itself starts (a
 handover\='s re-attach selects the current workspace) is sent at once
 rather than queued behind an answer that has already arrived.  The
@@ -885,18 +941,18 @@ the roster's `current' is applied again: a push that arrived while the
 selection was pending was DEFERRED (`agent-repl-roster-apply-current'),
 and this is the moment it is judged -- the last push wins."
   (setq agent-repl-host--select-in-flight nil)
-  (agent-repl--log ws "elisp.host.select-settled ws=%s queued=%s"
-                   ws (or (car agent-repl-host--select-queued) "none"))
+  (agent-repl--log (agent-repl-host--target-scope ref) "elisp.host.select-settled id=%s queued=%s"
+                   (plist-get ref :id) (or (plist-get (car agent-repl-host--select-queued) :id) "none"))
   (unwind-protect
       (funcall handle)
     (if agent-repl-host--select-queued
         (let ((next agent-repl-host--select-queued))
           (setq agent-repl-host--select-queued nil)
-          (apply #'agent-repl-host-select next))
+          (apply #'agent-repl-host-select-ref next))
       (agent-repl-roster-apply-current))))
 
-(defun agent-repl-host--select-failed (ws ref detail on-settled)
-  "Act on WS\='s selection of REF failing with DETAIL before any answer.
+(defun agent-repl-host--select-failed (ref detail on-settled)
+  "Act on the selection of REF failing with DETAIL before any answer.
 ON-SETTLED is as `agent-repl-host-select' documents.
 
 A SELECTION NOBODY ANSWERED IS STILL THE USER\='S, so it is ALWAYS recorded
@@ -914,16 +970,20 @@ with it up the failure is the error it is (ERROR, settled `:failure')."
   (setq agent-repl-host-last-selected-id (plist-get ref :id))
   (if (agent-repl-link-up-p)
       (progn
-        (agent-repl--error ws "elisp.host.select-failed ws=%s id=%S reassert=next-link-up detail=%S"
-                           ws (plist-get ref :id) detail)
+        (agent-repl--error (agent-repl-host--target-scope ref)
+                           "elisp.host.select-failed id=%S reassert=next-link-up detail=%S"
+                           (plist-get ref :id) detail)
         (when on-settled (funcall on-settled :failure)))
-    (agent-repl--info ws "elisp.host.select-daemon-gone ws=%s id=%S reassert=next-daemon detail=%S"
-                      ws (plist-get ref :id) detail)
+    (agent-repl--info (agent-repl-host--target-scope ref)
+                      "elisp.host.select-daemon-gone id=%S reassert=next-daemon detail=%S"
+                      (plist-get ref :id) detail)
     (when on-settled (funcall on-settled :standing-down))))
 
-(defun agent-repl-host--select-answered (ws ref response on-settled)
-  "Act on the daemon\='s RESPONSE to WS\='s selection of REF.
+(defun agent-repl-host--select-answered (ref response on-settled)
+  "Act on the daemon\='s RESPONSE to the selection of REF.
 ON-SETTLED is as `agent-repl-host-select' documents."
+  (let ((ws (agent-repl-host--held-name (plist-get ref :id)))
+        (scope (agent-repl-host--target-scope ref)))
   (pcase (plist-get response :arm)
     (:success
      ;; RECORDED ONLY ON THE ACK.  `agent-repl-host-last-selected-id' is
@@ -935,9 +995,9 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      ;; THE ROSTER CARRYING THE SELECTION IS AWAITED, or one resolved before
      ;; it would move the frame back (`agent-repl-host--confirming').
      (setq agent-repl-host--confirming
-           (cons ws (plist-get (plist-get response :value) :roster-revision)))
-     (agent-repl--log ws "elisp.host.selected ws=%s id=%S roster-revision=%d"
-                      ws (plist-get ref :id) (cdr agent-repl-host--confirming))
+           (cons ref (plist-get (plist-get response :value) :roster-revision)))
+     (agent-repl--log scope "elisp.host.selected id=%S roster-revision=%d"
+                      (plist-get ref :id) (cdr agent-repl-host--confirming))
      (when on-settled (funcall on-settled :success)))
     ((and :error
           (guard (eq (plist-get (plist-get (plist-get response :value) :cause) :arm)
@@ -950,15 +1010,39 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      ;; (`agent-repl-host--selected-dir', `agent-repl-host--reassert-selection'),
      ;; which revives the workspace.
      (setq agent-repl-host-last-selected-id (plist-get ref :id))
-     (agent-repl--info ws "elisp.host.select-standing-down ws=%s id=%S reassert=next-daemon"
-                       ws (plist-get ref :id))
+     (agent-repl--info scope "elisp.host.select-standing-down id=%S reassert=next-daemon"
+                       (plist-get ref :id))
      (when on-settled (funcall on-settled :standing-down)))
-    (:error
+    ((and :error (guard ws))
      (agent-repl-host--on-refused ws "select" (plist-get response :value))
      (when on-settled (funcall on-settled :error)))
+    (:error
+     (agent-repl-host--unheld-select-refused ref (plist-get response :value))
+     (when on-settled (funcall on-settled :error)))
     (arm
-     (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
-     (when on-settled (funcall on-settled :error)))))
+     (agent-repl--error scope "elisp.host.select-unknown-arm id=%S arm=%S" (plist-get ref :id) arm)
+     (when on-settled (funcall on-settled :error))))))
+
+(defun agent-repl-host--unheld-select-refused (ref value)
+  "Report the daemon refusing the selection of REF, a workspace not held here.
+VALUE is the decoded error.  A held workspace\='s refusal walks its handover
+\(`agent-repl-host--on-refused'); one this editor does not hold has no
+stream to walk, so its refusal is told: in the echo area, and at ERROR, or
+at INFO for a handover arm, the daemon leaving under the click.  The user
+picks the workspace again on the daemon that serves now."
+  (let* ((cause (plist-get value :cause))
+         (keyword (plist-get cause :arm))
+         (handover (memq keyword agent-repl-host--handover-arms))
+         (name (or (plist-get ref :dir) (plist-get ref :id))))
+    (if handover
+        (agent-repl--info '(:agent-repl-central "a selection of a workspace this editor does not hold has no workspace sink")
+                          "elisp.host.select-unheld-handover id=%S arm=%S fields=%S"
+                          (plist-get ref :id) keyword (plist-get cause :value))
+      (agent-repl--error '(:agent-repl-central "a selection of a workspace this editor does not hold has no workspace sink")
+                         "elisp.host.select-unheld-refused id=%S arm=%S fields=%S"
+                         (plist-get ref :id) keyword (plist-get cause :value)))
+    (message "[agent-repl] The switch to %s did not happen (%s): pick it again"
+             name (if handover "the daemon was handing over" keyword))))
 
 (defvar agent-repl--recency-walk-landing)
 (declare-function agent-repl--end-recency-walk "agent-repl-workspace" (log-ws reason))
@@ -984,7 +1068,7 @@ a move Emacs makes on its own account (`agent-repl-host-automatic-switch').
 What is counted is every switch request a gesture of the user\='s makes
 \(`agent-repl-host-request-switch') -- a key, a picker, a banner click, or
 a sidebar row\='s click, which the daemon relays to Emacs
-\(`agent-repl-host--select-requested') -- and every perspective activation
+\(`agent-repl-host-select-requested') -- and every perspective activation
 an Emacs command made directly (`agent-repl-host--on-workspace-activated').")
 
 (defvar agent-repl-host-automatic-switch nil
@@ -1073,6 +1157,32 @@ Answers t when the request was sent or queued, nil otherwise."
                                     ws outcome)))
            walk started)
         (agent-repl-host--move-on-request ws shown))))))
+
+(defun agent-repl-host-request-switch-ref (ref trigger)
+  "Ask the daemon to make the workspace REF names current, whether held or not.
+TRIGGER is as `agent-repl-host-request-switch' takes it.  A workspace this
+editor holds is switched to by name, the frame moving at once.  One it
+does not hold (frontend.v1.RosterRowHeld) has no perspective to move to:
+the daemon is asked to select it (`agent-repl-host-select-ref'), the
+roster push that marks it held opens it, and the roster\='s follow lands
+the frame on it (`agent-repl-roster-apply-current', owner ruling
+2026-11-21).  Either way the switch is counted as the user\='s and ends any
+recency walk.  Answers t when the request was sent or queued."
+  (let ((ws (agent-repl-host--held-name (plist-get ref :id))))
+    (if ws
+        (agent-repl-host-request-switch ws trigger)
+      (let ((scope (agent-repl-host--target-scope ref))
+            (started (agent-repl-host--count-editor-switch nil trigger)))
+        (agent-repl--end-recency-walk scope trigger)
+        (setq agent-repl-host-last-request nil)
+        (agent-repl--info scope "elisp.host.switch-requested-unheld id=%s trigger=%s shown=%s"
+                          (plist-get ref :id) trigger (agent-repl--ws-current-name))
+        (agent-repl-host-select-ref
+         ref (lambda (outcome)
+               (unless (eq outcome :success)
+                 (agent-repl--info scope "elisp.host.switch-request-settled id=%s outcome=%S"
+                                   (plist-get ref :id) outcome)))
+         nil started)))))
 
 (defun agent-repl-host--move-on-request (ws shown)
   "Move the frame to WS for Emacs\='s own switch request, unless it cannot.
@@ -1618,14 +1728,12 @@ re-create bookkeeping for a workspace whose tab is gone (measured
   "Apply one host push of ARM carrying VALUE to WS; STREAM carried it."
   (pcase arm
     (:host (agent-repl-host--apply-state ws value))
-    (:notification-clicked (agent-repl-host--notification-clicked ws))
     (:selection (agent-repl-host--apply-selection ws value))
     (:mentions (agent-repl-host--apply-mentions ws value))
     (:mention-targets (agent-repl-host--apply-mention-targets ws value))
     (:final-response-clicked (agent-repl-host--reply-target-picked ws "final-response-clicked"))
     (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
     (:response-text-highlighted (agent-repl-host--reply-target-picked ws "response-text-highlighted"))
-    (:select-requested (agent-repl-host--select-requested ws))
     (:load-page-requested (agent-repl-host--load-page-requested ws))
     (:link-followed (agent-repl-host--link-followed ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
@@ -1637,7 +1745,6 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:open-commit-log (agent-repl-host--open-commit-log ws value))
     (:run-in-terminal (agent-repl-host--run-in-terminal ws value))
 
-    (:evaluate (agent-repl-host--evaluate ws value))
     (:ending (agent-repl-host--note-ending ws stream))
     (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S value=%S"
                           ws arm value))))
@@ -1800,17 +1907,17 @@ reconnect never edits the composer again."
 
 ;;;; ---- The rail's row click ----
 
-(defun agent-repl-host--select-requested (ws)
-  "Switch to WS: the user clicked its row in a page\='s rail.
-THE SAME SWITCH AS A KEY\='S (`agent-repl-host-request-switch'), so the
+(defun agent-repl-host-select-requested (ref)
+  "Switch to the workspace REF names: the user clicked its row in a page\='s rail.
+THE SAME SWITCH AS A KEY\='S (`agent-repl-host-request-switch-ref'), so the
 frame moves on the click rather than after the roster push that a select
 made by the page provoked, which waited on the daemon re-reading its
 whole registry: some 350ms, where a key took 10 (2026-10-23).  The daemon
-relays the click on WS\='s own host stream (SelectInEditor), so WS is a
-workspace Emacs holds.  An event, never replayed, so a reconnect never
-switches."
-  (agent-repl--info ws "elisp.host.select-requested ws=%s" ws)
-  (agent-repl-host-request-switch ws 'sidebar))
+relays the click on the daemon stream (SelectInEditor), because the row
+can be a workspace this editor does not hold.  An event, never replayed,
+so a reconnect never switches."
+  (agent-repl--info (agent-repl-host--target-scope ref) "elisp.host.select-requested id=%s" (plist-get ref :id))
+  (agent-repl-host-request-switch-ref ref 'sidebar))
 
 ;;;; ---- A link followed in a page ----
 
@@ -1852,12 +1959,13 @@ reconnect never opens another."
 
 ;;;; ---- The notification click ----
 
-(defun agent-repl-host--notification-clicked (ws)
-  "Select WS's tab: the user clicked WS's desktop banner.
-The daemon posted the banner and read the click back; raising the frame
-and selecting the tab is `agent-repl--notification-activate'."
-  (agent-repl--info ws "elisp.host.notification-clicked ws=%s" ws)
-  (agent-repl--notification-activate ws))
+(defun agent-repl-host-notification-clicked (ref)
+  "Switch to the workspace REF names: the user clicked its desktop banner.
+The daemon posted the banner and read the click back, on the daemon
+stream, because a banner can name a workspace this editor does not hold;
+raising the frame and switching is `agent-repl--notification-activate'."
+  (agent-repl--info (agent-repl-host--target-scope ref) "elisp.host.notification-clicked id=%s" (plist-get ref :id))
+  (agent-repl--notification-activate ref))
 
 ;;;; ---- Reattach: the ONE walk that moves a workspace onto a daemon ----
 
@@ -2610,47 +2718,62 @@ exactly as `agent-repl-host--open-in-editor' is."
 
 ;;;; ---- Editor evaluation ----
 
-(defun agent-repl-host--evaluate (ws request)
-  "Evaluate REQUEST's elisp for an agent and answer the daemon with its token.
-REQUEST is the decoded `HostEvaluate' plist (:token TOKEN :text TEXT).
-The text is evaluated by the editor\='s one handler
-\(`agent-repl-evaluate-text') with WS\='s composer current when it is live,
-the buffer the agent\='s workspace types into; a workspace whose composer
-has not been created evaluates in whatever buffer is current, and the
-record says which.  The answer goes to WS\='s own connection, the daemon
-that minted the token."
-  (let* ((token (plist-get request :token))
-         (composer (agent-repl--ws-get ws :input-buffer))
-         (buffer (if (buffer-live-p composer) composer (current-buffer)))
+(defun agent-repl-host--evaluation-buffer (ref)
+  "Return the buffer an evaluation for the workspace REF names runs in.
+The workspace\='s composer when this editor holds it and its composer is
+live, the buffer the agent\='s workspace types into.  Otherwise the
+editor\='s own evaluation buffer, whose `default-directory' is the
+workspace\='s directory: a workspace this editor does not hold
+\(frontend.v1.RosterRowHeld) has no buffer of its own, and the
+evaluation must not run in whatever buffer the user happens to be in."
+  (let* ((ws (agent-repl-host--held-name (plist-get ref :id)))
+         (composer (and ws (agent-repl--ws-get ws :input-buffer))))
+    (if (buffer-live-p composer)
+        composer
+      (let ((buffer (get-buffer-create " *agent-repl-evaluation*"))
+            (dir (plist-get ref :dir)))
+        (with-current-buffer buffer
+          (setq default-directory (file-name-as-directory
+                                   (or (and dir (not (string-empty-p dir)) dir) "~/"))))
+        buffer))))
+
+(defun agent-repl-host-evaluate (conn request)
+  "Evaluate REQUEST's elisp for an agent and answer on CONN with its token.
+REQUEST is the decoded `DaemonEvaluate' plist (:workspace REF :token TOKEN
+:text TEXT), pushed on CONN\='s daemon stream for the workspace REF names,
+whether or not this editor holds it.  The text is evaluated by the
+editor\='s one handler (`agent-repl-evaluate-text') in the buffer
+`agent-repl-host--evaluation-buffer' chooses, and the record says which.
+The answer goes to CONN, the daemon that minted the token."
+  (let* ((ref (plist-get request :workspace))
+         (scope (agent-repl-host--target-scope ref))
+         (token (plist-get request :token))
+         (buffer (agent-repl-host--evaluation-buffer ref))
          (outcome (with-current-buffer buffer
                     (agent-repl-evaluate-text (plist-get request :text))))
-         (arm (plist-get (plist-get outcome :outcome) :arm))
-         (conn (agent-repl-host-conn ws)))
-    (agent-repl--info ws "elisp.host.evaluate ws=%s token=%s buffer=%S composer=%s outcome=%s messages=%d"
-                      ws (plist-get token :value) (buffer-name buffer)
-                      (eq buffer composer) arm (length (plist-get outcome :messages)))
-    (unless conn
-      (agent-repl--fatal ws "elisp.host.evaluate-no-connection ws=%s token=%s"
-                         ws (plist-get token :value)))
+         (arm (plist-get (plist-get outcome :outcome) :arm)))
+    (agent-repl--info scope "elisp.host.evaluate id=%s token=%s buffer=%S outcome=%s messages=%d"
+                      (plist-get ref :id) (plist-get token :value) (buffer-name buffer)
+                      arm (length (plist-get outcome :messages)))
     (agent-repl-rpc-answer-editor-evaluation
-     conn (list :workspace (agent-repl-host-ref ws) :token token :outcome outcome)
+     conn (list :workspace ref :token token :outcome outcome)
      :on-response
      (lambda (response)
        (pcase (plist-get response :arm)
          (:success
-          (agent-repl--log ws "elisp.host.evaluation-answered ws=%s token=%s"
-                           ws (plist-get token :value)))
+          (agent-repl--log scope "elisp.host.evaluation-answered id=%s token=%s"
+                           (plist-get ref :id) (plist-get token :value)))
          (:error
-          (agent-repl--error ws "elisp.host.evaluation-answer-refused ws=%s token=%s cause=%S"
-                             ws (plist-get token :value)
+          (agent-repl--error scope "elisp.host.evaluation-answer-refused id=%s token=%s cause=%S"
+                             (plist-get ref :id) (plist-get token :value)
                              (plist-get (plist-get (plist-get response :value) :cause) :arm)))
          (other
-          (agent-repl--error ws "elisp.host.evaluation-answer-unknown-arm ws=%s token=%s arm=%S"
-                             ws (plist-get token :value) other))))
+          (agent-repl--error scope "elisp.host.evaluation-answer-unknown-arm id=%s token=%s arm=%S"
+                             (plist-get ref :id) (plist-get token :value) other))))
      :on-failure
      (lambda (detail)
-       (agent-repl--error ws "elisp.host.evaluation-answer-failed ws=%s token=%s detail=%S"
-                          ws (plist-get token :value) detail)))))
+       (agent-repl--error scope "elisp.host.evaluation-answer-failed id=%s token=%s detail=%S"
+                          (plist-get ref :id) (plist-get token :value) detail)))))
 
 ;;;; ---- Link lifecycle ----
 
@@ -2671,11 +2794,15 @@ left (2026-10-15, e2e TestEmacsRestartKeepsTheSelectedWorkspace: the
 select of the workspace the user stood on was still in flight when the
 daemon stopped).  The id Emacs last had recorded comes next, and the tab
 the frame is on is the fallback."
-  (let ((ws (or (agent-repl-host-pending-selection)
-                (and agent-repl-host-last-selected-id
-                     (agent-repl--ws-by-ref-id agent-repl-host-last-selected-id))
-                (agent-repl--ws-current-name))))
-    (and ws (agent-repl--ws-get ws :project-dir))))
+  (let ((pending (agent-repl-host-pending-selection-ref)))
+    (if pending
+        ;; A PENDING WORKSPACE THIS EDITOR DOES NOT HOLD names its own dir.
+        (let ((ws (agent-repl-host--held-name (plist-get pending :id))))
+          (if ws (agent-repl--ws-get ws :project-dir) (plist-get pending :dir)))
+      (let ((ws (or (and agent-repl-host-last-selected-id
+                         (agent-repl--ws-by-ref-id agent-repl-host-last-selected-id))
+                    (agent-repl--ws-current-name))))
+        (and ws (agent-repl--ws-get ws :project-dir))))))
 
 (defun agent-repl-host--ws-for-dir (dir)
   "Return the live workspace registered at DIR, or nil when none came back.

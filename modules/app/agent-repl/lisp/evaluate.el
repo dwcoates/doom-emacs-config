@@ -4,7 +4,7 @@
 
 ;; AN AGENT EVALUATES ELISP IN THE RUNNING EDITOR THROUGH THE DAEMON
 ;; (agentrepl.v1 EvaluateInEditor).  The daemon pushes the text on the
-;; workspace's host stream (`HostEvaluate'), host.el hands it here, and the
+;; editor's daemon stream (`DaemonEvaluate'), host.el hands it here, and the
 ;; outcome rides back on AnswerEditorEvaluation.
 ;;
 ;; ERRORS ARE CAUGHT IN THIS ONE HANDLER (editor_evaluation.proto): the text is

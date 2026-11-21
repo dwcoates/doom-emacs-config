@@ -1653,15 +1653,142 @@ an echo would race a newer request and take the frame back."
       (should (= (length requests) 1))
       (should-not (plist-member (car requests) :switch-started-at-ms)))))
 
+;;;; ---- A selection of a workspace this editor does not hold ----
+
+(defconst agent-repl-test-host--unheld-ref '(:id "ws-id-folded" :dir "/tmp/folded")
+  "The ref of a workspace the roster does not mark held: no host entry here.")
+
+(defun agent-repl-test-host--stand-primary ()
+  "Stand the primary link an unheld workspace's selection is sent on; answer it."
+  (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9011")))
+
+(ert-deftest agent-repl-test-host-held-name-answers-a-subscribed-workspace ()
+  "A workspace with a host entry is held, found by its ref id."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act / Assert
+    (should (equal (agent-repl-host--held-name "ws-id-2") "ws-2"))))
+
+(ert-deftest agent-repl-test-host-held-name-is-nil-for-an-unheld-workspace ()
+  "A workspace with no host entry is not held here."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act / Assert
+    (should-not (agent-repl-host--held-name "ws-id-folded"))))
+
+(ert-deftest agent-repl-test-host-an-unheld-selection-is-pending-by-its-ref ()
+  "A selection of an unheld workspace is pending: by ref, with no name here."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-select-ref agent-repl-test-host--unheld-ref)
+    ;; Assert
+    (should (equal (agent-repl-host-pending-selection-ref) agent-repl-test-host--unheld-ref))
+    (should-not (agent-repl-host-pending-selection))))
+
+(ert-deftest agent-repl-test-host-an-unheld-selection-is-sent-on-the-primary-link ()
+  "A workspace with no host entry is selected on the primary link."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--stand-primary)
+    ;; Act
+    (agent-repl-host-select-ref agent-repl-test-host--unheld-ref)
+    ;; Assert
+    (let ((call (cl-find "SelectWorkspace" agent-repl-test-host--calls :key #'car :test #'equal)))
+      (should (eq (nth 1 call) agent-repl-test-host--live))
+      (should (equal (plist-get (nth 2 call) :workspace) agent-repl-test-host--unheld-ref)))))
+
+(ert-deftest agent-repl-test-host-an-unheld-selection-queues-behind-a-held-one ()
+  "One queue orders every selection, held or not: an unheld one waits its turn."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-select "ws-1")
+    ;; Act
+    (agent-repl-host-select-ref agent-repl-test-host--unheld-ref)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-1")))
+    (should (equal (car agent-repl-host--select-queued) agent-repl-test-host--unheld-ref))))
+
+(ert-deftest agent-repl-test-host-request-switch-ref-of-a-held-workspace-moves-by-name ()
+  "A held workspace's ref takes the name path: the select names its own ref."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch-ref (agent-repl-host-ref "ws-2") 'picker)
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.switch-requested ws=ws-2 trigger=picker"))))
+
+(ert-deftest agent-repl-test-host-request-switch-ref-of-an-unheld-workspace-selects-it ()
+  "An unheld workspace is selected by its ref, and the frame is not moved here."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch-ref agent-repl-test-host--unheld-ref 'notification)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-folded")))
+    (should-not agent-repl-host-last-request)))
+
+(ert-deftest agent-repl-test-host-an-unheld-selection-the-daemon-refuses-is-reported ()
+  "A refused selection of an unheld workspace is told: at ERROR and in the echo area."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (setq agent-repl-test-host--select-answer
+          (list :response (list :arm :error :value (list :cause (list :arm :unknown-workspace :value nil)))))
+    (let ((echoed nil))
+      (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) echoed))))
+        ;; Act
+        (agent-repl-host-select-ref agent-repl-test-host--unheld-ref)
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :error "elisp.host.select-unheld-refused id=\"ws-id-folded\" arm=:unknown-workspace"))
+        (should (seq-some (lambda (line) (string-search "did not happen" line)) echoed))))))
+
+(ert-deftest agent-repl-test-host-an-unheld-selection-a-handover-refuses-is-info ()
+  "A handover refusing an unheld selection is the daemon leaving, recorded at INFO."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (setq agent-repl-test-host--select-answer
+          (list :response (list :arm :error
+                                :value (list :cause (list :arm :transferring-away
+                                                          :value (list :address "127.0.0.1:9100"))))))
+    (cl-letf (((symbol-function 'message) #'ignore))
+      ;; Act
+      (agent-repl-host-select-ref agent-repl-test-host--unheld-ref)
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.select-unheld-handover id=\"ws-id-folded\" arm=:transferring-away"))
+      (should-not (agent-repl-test-host--logged-p :error "select-unheld")))))
+
+(ert-deftest agent-repl-test-host-selected-dir-of-an-unheld-pending-selection-is-its-refs ()
+  "A pending selection of an unheld workspace names its own dir."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-host--select-in-flight agent-repl-test-host--unheld-ref)
+    ;; Act / Assert
+    (should (equal (agent-repl-host--selected-dir) "/tmp/folded"))))
+
 (ert-deftest agent-repl-test-host-a-queued-select-keeps-its-instant ()
   "A select waiting behind the one in flight is sent with its own instant."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe-three)
-    (setq agent-repl-host--select-in-flight "ws-1")
+    (setq agent-repl-host--select-in-flight (agent-repl-host-ref "ws-1"))
     (agent-repl-host-select "ws-2" nil nil 1700000000456)
     ;; Act
-    (agent-repl-host--select-settled "ws-1" #'ignore)
+    (agent-repl-host--select-settled (agent-repl-host-ref "ws-1") #'ignore)
     ;; Assert
     (should (equal (agent-repl-test-host--select-instants)
                    '(1700000000456)))))
@@ -2639,15 +2766,15 @@ answers `:unknown' and records the breach rather than opening."
 
 ;;;; ---- The notification click ----
 
-(ert-deftest agent-repl-test-host-notification-click-selects-this-workspace ()
-  "A `notification_clicked' push selects the workspace its stream carries."
+(ert-deftest agent-repl-test-host-notification-click-activates-the-workspace-it-names ()
+  "A `notification_clicked' push activates the workspace it names, by its ref."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :notification-clicked :value nil))
+    (agent-repl-host-notification-clicked (agent-repl-test-host--ref))
     ;; Assert
-    (should (equal (car agent-repl-test-host--effects) '(:activate . "ws-1")))))
+    (should (equal (car agent-repl-test-host--effects) (cons :activate (agent-repl-test-host--ref))))))
 
 (ert-deftest agent-repl-test-host-notification-click-is-logged ()
   "The click reaching Emacs leaves an INFO record naming the workspace."
@@ -2655,9 +2782,9 @@ answers `:unknown' and records the breach rather than opening."
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :notification-clicked :value nil))
+    (agent-repl-host-notification-clicked (agent-repl-test-host--ref))
     ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.notification-clicked ws=ws-1"))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.notification-clicked id=ws-id-1"))))
 
 ;;;; ---- The load button ----
 
@@ -2688,14 +2815,27 @@ answers `:unknown' and records the breach rather than opening."
 ;;;; ---- The rail's row click ----
 
 (ert-deftest agent-repl-test-host-select-requested-sends-select-workspace ()
-  "A `select_requested' push requests the switch to the workspace its stream carries."
+  "A `select_requested' push requests the switch to the workspace it names."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe-three)
     ;; Act
-    (agent-repl-test-host--push "ws-2" (list :arm :select-requested :value nil))
+    (agent-repl-host-select-requested (agent-repl-test-host--ref "ws-id-2" "/tmp/ws-2"))
     ;; Assert
     (should (equal (agent-repl-test-host--selected-ids) '("ws-id-2")))))
+
+(ert-deftest agent-repl-test-host-select-requested-for-an-unheld-workspace-selects-it-by-ref ()
+  "A rail click on a workspace this editor does not hold selects it by its ref."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--stand-primary)
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-select-requested (agent-repl-test-host--ref "ws-id-folded" "/tmp/folded"))
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-folded")))
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.switch-requested-unheld id=ws-id-folded trigger=sidebar"))))
 
 (ert-deftest agent-repl-test-host-select-requested-is-a-sidebar-switch-request ()
   "The click takes the key's own path, recorded with the `sidebar' trigger."
@@ -2704,7 +2844,7 @@ answers `:unknown' and records the breach rather than opening."
     (agent-repl-test-host--subscribe-three)
     (setq agent-repl-test-host--current-ws "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-2" (list :arm :select-requested :value nil))
+    (agent-repl-host-select-requested (agent-repl-test-host--ref "ws-id-2" "/tmp/ws-2"))
     ;; Assert
     (should (agent-repl-test-host--logged-p
              :info "elisp.host.switch-requested ws=ws-2 trigger=sidebar shown=ws-1 pending=none"))))
@@ -2715,7 +2855,15 @@ answers `:unknown' and records the breach rather than opening."
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :select-requested :value nil))
+    (agent-repl-host-select-requested (agent-repl-test-host--ref))
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 1))))
+
+(ert-deftest agent-repl-test-host-an-unheld-workspaces-click-is-counted ()
+  "A click on a workspace this editor does not hold is counted as the user's switch too."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-host-select-requested (agent-repl-test-host--ref "ws-id-folded" "/tmp/folded"))
     ;; Assert
     (should (= (agent-repl-host-editor-switch-count) 1))))
 
@@ -2725,9 +2873,9 @@ answers `:unknown' and records the breach rather than opening."
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :select-requested :value nil))
+    (agent-repl-host-select-requested (agent-repl-test-host--ref))
     ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.select-requested ws=ws-1"))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.select-requested id=ws-id-1"))))
 
 ;;;; ---- A link followed in a page ----
 
@@ -3395,18 +3543,20 @@ BEFORE the answer lands, which is the order a promotion makes."
     (should (= (length calls) 1))
     (nth 2 (car calls))))
 
-(defun agent-repl-test-host--evaluate (ws text)
-  "Push an evaluation of TEXT to WS's host stream with the token `t-1'."
-  (agent-repl-test-host--push
-   ws (list :arm :evaluate :value (list :token '(:value "t-1") :text text))))
+(defun agent-repl-test-host--evaluate (ref text &optional conn)
+  "Hand the evaluation of TEXT for REF, token `t-1', to the daemon stream's handler.
+CONN is the connection the daemon stream stood on, a fresh one by default."
+  (agent-repl-host-evaluate
+   (or conn (agent-repl-connect-open "127.0.0.1:9001"))
+   (list :workspace ref :token '(:value "t-1") :text text)))
 
 (ert-deftest agent-repl-test-host-evaluate-answers-with-the-token-and-the-outcome ()
-  "An evaluation push is answered on WS's connection with its token unchanged."
+  "An evaluation is answered naming its workspace, with its token unchanged."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--evaluate "ws-1" "(+ 1 2)")
+    (agent-repl-test-host--evaluate (agent-repl-test-host--ref) "(+ 1 2)")
     ;; Assert
     (let ((request (agent-repl-test-host--evaluation-call)))
       (should (equal (plist-get request :workspace) (agent-repl-test-host--ref)))
@@ -3414,22 +3564,22 @@ BEFORE the answer lands, which is the order a promotion makes."
       (should (equal (plist-get (plist-get request :outcome) :outcome)
                      '(:arm :value :value (:printed "3" :readable t)))))))
 
-(ert-deftest agent-repl-test-host-evaluate-answers-on-the-workspaces-connection ()
-  "The answer goes to the daemon whose stream pushed the evaluation."
+(ert-deftest agent-repl-test-host-evaluate-answers-on-the-connection-that-pushed-it ()
+  "The answer goes to the daemon whose daemon stream pushed the evaluation."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (let ((conn (agent-repl-connect-open "127.0.0.1:9007")))
-      (agent-repl-test-host--subscribe "ws-1" conn)
+      (agent-repl-test-host--subscribe "ws-1")
       ;; Act
-      (agent-repl-test-host--evaluate "ws-1" "1")
+      (agent-repl-test-host--evaluate (agent-repl-test-host--ref) "1" conn)
       ;; Assert
       (should (eq (nth 1 (car (cl-remove-if-not
                                (lambda (call) (equal (car call) "AnswerEditorEvaluation"))
                                agent-repl-test-host--calls)))
                   conn)))))
 
-(ert-deftest agent-repl-test-host-evaluate-runs-in-the-composer ()
-  "A live composer is the buffer current while the text is evaluated."
+(ert-deftest agent-repl-test-host-evaluate-runs-in-a-held-workspaces-composer ()
+  "A held workspace's live composer is the buffer current while the text is evaluated."
   (agent-repl-test-host--with-harness
     (with-temp-buffer
       (rename-buffer "agent-repl-test-host-composer" t)
@@ -3440,7 +3590,7 @@ BEFORE the answer lands, which is the order a promotion makes."
             ;; Arrange
             (agent-repl-test-host--subscribe "ws-1")
             ;; Act
-            (agent-repl-test-host--evaluate "ws-1" "(buffer-name)")
+            (agent-repl-test-host--evaluate (agent-repl-test-host--ref) "(buffer-name)")
             ;; Assert
             (should (equal (plist-get (plist-get (plist-get (plist-get (agent-repl-test-host--evaluation-call)
                                                                        :outcome)
@@ -3449,20 +3599,26 @@ BEFORE the answer lands, which is the order a promotion makes."
                                       :printed)
                            (prin1-to-string (buffer-name composer))))
             (should (agent-repl-test-host--logged-p
-                     :info "composer=t outcome=:value"))))))))
+                     :info (format "buffer=%S outcome=:value" (buffer-name composer))))))))))
 
-(ert-deftest agent-repl-test-host-evaluate-without-a-composer-says-so ()
-  "A workspace with no live composer evaluates in the current buffer, recorded."
+(ert-deftest agent-repl-test-host-evaluate-for-an-unheld-workspace-runs-in-its-directory ()
+  "A workspace this editor does not hold evaluates in the editor's own buffer, at its dir.
+Never in whatever buffer the user happens to be in."
   (agent-repl-test-host--with-harness
-    (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil)))
-      ;; Arrange
-      (agent-repl-test-host--subscribe "ws-1")
-      ;; Act
-      (agent-repl-test-host--evaluate "ws-1" "1")
-      ;; Assert
-      (agent-repl-test-host--evaluation-call)
-      (should (agent-repl-test-host--logged-p
-               :info "composer=nil outcome=:value")))))
+    (let ((dir (file-name-as-directory temporary-file-directory)))
+      (with-temp-buffer
+        (let ((user-buffer (current-buffer)))
+          ;; Act
+          (agent-repl-test-host--evaluate (agent-repl-test-host--ref "ws-id-folded" dir)
+                                          "(list (buffer-name) default-directory)")
+          ;; Assert
+          (let ((printed (plist-get (plist-get (plist-get (plist-get (agent-repl-test-host--evaluation-call)
+                                                                     :outcome)
+                                                          :outcome)
+                                               :value)
+                                    :printed)))
+            (should (equal printed (prin1-to-string (list " *agent-repl-evaluation*" dir))))
+            (should-not (string-match-p (regexp-quote (buffer-name user-buffer)) printed))))))))
 
 (ert-deftest agent-repl-test-host-evaluate-answers-a-read-error ()
   "Text that does not read is answered, never dropped."
@@ -3470,7 +3626,7 @@ BEFORE the answer lands, which is the order a promotion makes."
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--evaluate "ws-1" "(+ 1")
+    (agent-repl-test-host--evaluate (agent-repl-test-host--ref) "(+ 1")
     ;; Assert
     (should (eq (plist-get (plist-get (plist-get (agent-repl-test-host--evaluation-call) :outcome)
                                       :outcome)
@@ -3486,10 +3642,10 @@ BEFORE the answer lands, which is the order a promotion makes."
                                 :value (list :cause (list :arm :unknown-token :value nil)))))
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--evaluate "ws-1" "1")
+    (agent-repl-test-host--evaluate (agent-repl-test-host--ref) "1")
     ;; Assert
     (should (agent-repl-test-host--logged-p
-             :error "elisp.host.evaluation-answer-refused ws=ws-1 token=t-1 cause=:unknown-token"))))
+             :error "elisp.host.evaluation-answer-refused id=ws-id-1 token=t-1 cause=:unknown-token"))))
 
 (ert-deftest agent-repl-test-host-evaluate-failed-answer-is-an-error ()
   "An answer the transport could not deliver is recorded at ERROR."
@@ -3499,26 +3655,10 @@ BEFORE the answer lands, which is the order a promotion makes."
           (list :failure (list :detail "connection refused")))
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--evaluate "ws-1" "1")
+    (agent-repl-test-host--evaluate (agent-repl-test-host--ref) "1")
     ;; Assert
     (should (agent-repl-test-host--logged-p
-             :error "elisp.host.evaluation-answer-failed ws=ws-1 token=t-1"))))
-
-(ert-deftest agent-repl-test-host-evaluate-without-a-connection-signals ()
-  "A push on a stream whose workspace has no connection is a broken invariant."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (let (fatals)
-      (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--fatal)
-                 (agent-repl-test--fatal-into fatals)))
-        ;; Act / Assert
-        (should (string-match-p
-                 "elisp.host.evaluate-no-connection ws=ws-1 token=t-1"
-                 (cadr (should-error (agent-repl-test-host--evaluate "ws-1" "1")))))
-        (should-not (cl-find "AnswerEditorEvaluation" agent-repl-test-host--calls
-                             :key #'car :test #'equal))))))
+             :error "elisp.host.evaluation-answer-failed id=ws-id-1 token=t-1"))))
 
 (ert-deftest agent-repl-test-host-unknown-push-arm-is-an-error ()
   "An arm nobody knows is a contract breach, never a silent drop."
@@ -3705,7 +3845,7 @@ names the workspace the user already left."
     ;; is still in flight as the next daemon's link comes up.
     (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
       (setq agent-repl-host-last-selected-id "ws-id-2"
-            agent-repl-host--select-in-flight "ws-1"
+            agent-repl-host--select-in-flight '(:id "ws-id-1" :dir "/tmp/ws-1")
             agent-repl-test-host--current-ws "ws-1")
       (cl-letf (((symbol-function 'agent-repl--live-ws-names)
                  (lambda () '("ws-2" "ws-1")))
@@ -3725,8 +3865,8 @@ names the workspace the user already left."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (setq agent-repl-host-last-selected-id "ws-id-1"
-          agent-repl-host--select-in-flight "ws-2"
-          agent-repl-host--select-queued (cons "ws-3" nil))
+          agent-repl-host--select-in-flight '(:id "ws-id-2" :dir "/tmp/ws-2")
+          agent-repl-host--select-queued (list '(:id "ws-id-3" :dir "/tmp/ws-3")))
     (cl-letf (((symbol-function 'agent-repl--ws-get)
                (lambda (ws _key) (concat "/tmp/" ws)))
               ((symbol-function 'agent-repl--ws-by-ref-id)
@@ -5596,16 +5736,16 @@ is deferred rather than followed back (2026-10-16)."
     ;; Act
     (agent-repl-test-host--answer-held '(:arm :success :value (:roster-revision 7)))
     ;; Assert
-    (should (equal agent-repl-host--confirming '("ws-2" . 7)))
+    (should (equal agent-repl-host--confirming (cons (agent-repl-host-ref "ws-2") 7)))
     (should (equal (agent-repl-host-pending-selection) "ws-2"))))
 
 (ert-deftest agent-repl-test-host-release-confirmed-waits-for-the-revision ()
   "A roster before the answered revision keeps the selection pending; one
 at it or after releases it."
-  (dolist (case '((6 . ("ws-2" . 7)) (7 . nil) (9 . nil)))
+  (dolist (case '((6 . ((:id "ws-id-2" :dir "/tmp/ws-2") . 7)) (7 . nil) (9 . nil)))
     (agent-repl-test-host--with-harness
       ;; Arrange
-      (setq agent-repl-host--confirming (cons "ws-2" 7))
+      (setq agent-repl-host--confirming (cons '(:id "ws-id-2" :dir "/tmp/ws-2") 7))
       ;; Act
       (agent-repl-host-release-confirmed (car case))
       ;; Assert
@@ -5616,13 +5756,13 @@ at it or after releases it."
 afresh."
   (agent-repl-test-host--with-harness
     ;; Arrange
-    (setq agent-repl-host--confirming (cons "ws-2" 7))
+    (setq agent-repl-host--confirming (cons '(:id "ws-id-2" :dir "/tmp/ws-2") 7))
     ;; Act
     (agent-repl-host-forget-confirming "the roster stream closed")
     ;; Assert
     (should (null agent-repl-host--confirming))
     (should (agent-repl-test-host--logged-p
-             :info "elisp.host.select-unconfirmed ws=ws-2 awaited=7 reason=the roster stream closed"))))
+             :info "elisp.host.select-unconfirmed id=ws-id-2 awaited=7 reason=the roster stream closed"))))
 
 (ert-deftest agent-repl-test-host-standing-ask-is-read-off-the-push ()
   "The standing ask is the last push's `ask', nil when none stands."

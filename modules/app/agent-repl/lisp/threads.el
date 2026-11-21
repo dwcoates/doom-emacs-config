@@ -41,11 +41,10 @@
 (declare-function agent-repl-verbs--read-required-prompt "verbs" (prompt-text refusal &optional history-file))
 (declare-function agent-repl--send "input" (origin &optional prompt ws force-metaprompt))
 (declare-function agent-repl--sidebar-app-last-thread "commands" ())
-(declare-function agent-repl-host-request-switch "host" (ws trigger))
+(declare-function agent-repl-host-request-switch-ref "host" (ref trigger))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-rpc-create-thread "rpc" (conn request &rest keys))
 (declare-function agent-repl-roster-threads "roster" (&optional roster))
-(declare-function agent-repl-roster-thread-row-ws "roster" (row))
 (defvar agent-repl-roster-view)
 (defvar agent-repl-roster-update-functions)
 
@@ -144,14 +143,14 @@ With no open thread the press is refused before the question is read."
 ;;;; ---- Opening a thread ----
 
 (defun agent-repl-threads--open (row trigger)
-  "Switch to the workspace of the thread ROW, recording TRIGGER."
-  (let ((id (plist-get (plist-get row :thread) :id))
-        (ws (agent-repl-roster-thread-row-ws row)))
-    (if ws
-        (agent-repl-host-request-switch ws trigger)
-      (agent-repl--info agent-repl-threads--log-scope "elisp.threads.open-pending id=%s name=%s"
-                        id (plist-get row :name))
-      (message "[agent-repl] Thread %s is still opening" (plist-get row :name)))))
+  "Switch to the workspace of the thread ROW, recording TRIGGER.
+A thread is held only while it is the selection (frontend.v1.RosterThreadHeld),
+so the one asked for usually has no workspace here yet: the switch is
+requested by its ref, and the roster push that marks it held opens it
+\(`agent-repl-host-request-switch-ref')."
+  (agent-repl--info agent-repl-threads--log-scope "elisp.threads.open id=%s name=%s trigger=%s"
+                    (plist-get (plist-get row :thread) :id) (plist-get row :name) trigger)
+  (agent-repl-host-request-switch-ref (plist-get row :thread) trigger))
 
 (defun agent-repl-thread-recent ()
   "Open the thread last asked a question (`SPC TAB T\=')."

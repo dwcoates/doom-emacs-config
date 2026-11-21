@@ -5102,11 +5102,11 @@ This is what an Emacs restart does to it.  Returns the new buffer."
   (agent-repl-test-input--with-composers '("ws-a")
     (agent-repl-test-input--capturing-rungs
       ;; Act
-      (should (eq (agent-repl--input-save-on-shutdown "ws-a") 'empty))
+      (should (eq (agent-repl--input-save-unsent "ws-a") 'empty))
       ;; Assert
       (should (null (buffer-local-value 'agent-repl--input-history (cdar composers))))
       (should (agent-repl-test-input--rung-has-p
-               agent-repl-test-input--debug "elisp.input.shutdown-save ws=ws-a outcome=empty")))))
+               agent-repl-test-input--debug "elisp.input.save-unsent ws=ws-a outcome=empty")))))
 
 (ert-deftest agent-repl-input-shutdown-save-skips-a-whitespace-only-composer ()
   "A composer holding only whitespace counts as empty."
@@ -5115,7 +5115,7 @@ This is what an Emacs restart does to it.  Returns the new buffer."
       ;; Arrange
       (with-current-buffer (cdar composers) (insert "  \n "))
       ;; Act, Assert
-      (should (eq (agent-repl--input-save-on-shutdown "ws-a") 'empty)))))
+      (should (eq (agent-repl--input-save-unsent "ws-a") 'empty)))))
 
 (ert-deftest agent-repl-input-shutdown-save-skips-a-workspace-with-no-composer ()
   "A workspace whose composer is gone has nothing to save."
@@ -5124,7 +5124,7 @@ This is what an Emacs restart does to it.  Returns the new buffer."
       ;; Arrange
       (kill-buffer (cdar composers))
       ;; Act, Assert
-      (should (eq (agent-repl--input-save-on-shutdown "ws-a") 'no-composer)))))
+      (should (eq (agent-repl--input-save-unsent "ws-a") 'no-composer)))))
 
 (ert-deftest agent-repl-input-shutdown-save-failure-is-logged-and-the-rest-saved ()
   "One workspace failing to save is an error record; the next still saves."

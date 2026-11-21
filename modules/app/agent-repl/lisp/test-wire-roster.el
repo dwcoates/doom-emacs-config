@@ -72,6 +72,7 @@ status arm and whatever else the case is about."
                    :merge-paused nil
                    :merge-turn nil
                    :open-owned-pull-request nil
+                   :held nil
                    :last-selected nil
                    :last-turn-ended nil
                    :last-turn-boundary nil
@@ -252,6 +253,23 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"openOwnedPullRequest\":{\"url\":{}}"))
                  '("RosterRowOpenOwnedPullRequest" url "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-held-marker ()
+  "A row carrying `held' decodes it as PRESENT: the editor holds the workspace."
+  ;; Act
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-row
+              (agent-repl-test-wire-roster--row "\"ready\":{}" "\"held\":{}"))))
+    ;; Assert
+    (should (eq (plist-get row :held) t))))
+
+(ert-deftest agent-repl-test-wire-roster-row-held-marker-carries-no-payload ()
+  "`RosterRowHeld' is EMPTY: a field in it is unknown."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"ready\":{}" "\"held\":{\"why\":{}}"))
+                 '("RosterRowHeld" why "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-opening-marker ()
   "A row carrying `opening' decodes it as PRESENT, beside its status arm."
@@ -2780,9 +2798,9 @@ its place and since it joined."
                           "\"standing\":{\"archived\":{}}}]}"))
                  '(:new-thread "New thread"
                    :rows ((:thread (:id "t2" :dir "/z/b") :name "b" :summary "light" :current t
-                           :standing (:arm :open :value nil) :outline nil)
+                           :standing (:arm :open :value nil) :outline nil :held nil)
                           (:thread (:id "t1" :dir "/z/a") :name "a" :summary nil :current nil
-                           :standing (:arm :archived :value nil) :outline nil))))))
+                           :standing (:arm :archived :value nil) :outline nil :held nil))))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-a-threads-outline ()
   "A thread's outline decodes its breadcrumb and each row's place and counts."
@@ -2825,6 +2843,15 @@ its place and since it joined."
                   #'agent-repl-wire-decode-roster-thread-outline-row
                   "{\"node\":{\"id\":\"n2\"},\"label\":{\"text\":\"and?\"},\"turns\":1}")
                  '("RosterThreadOutlineRow" place "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-thread-row-decodes-its-held-marker ()
+  "A thread row carrying `held' decodes it as PRESENT: the editor holds the thread."
+  (should (eq (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-thread-row
+                          (concat "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"},"
+                                  "\"standing\":{\"open\":{}},\"held\":{}}"))
+                         :held)
+              t)))
 
 (ert-deftest agent-repl-test-wire-roster-a-thread-row-without-a-standing-is-a-breach ()
   "Whether a thread is open or archived is never unset on the wire."

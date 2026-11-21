@@ -137,7 +137,6 @@
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
-(declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl-webhost-reload-page "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-buffer "webhost" ())
@@ -1275,11 +1274,6 @@ Refusals, all preconditions rather than failures:
   - `:no-ref'            no `WorkspaceRef' yet, so no URL exists to
                          mount — the roster has not reached this
                          workspace, and a guessed URL is not an option;
-  - `:hidden'            the user hid it, and the user is not looking at
-                         it: it runs nothing
-                         (`agent-repl-open-tabs-withheld-p').  A fold
-                         keeps the slot and withholds only its page
-                         (`agent-repl-page-unload-wanted-p');
   - `:already-mounted'   a live webview buffer already exists (this is
                          what makes pre-creation idempotent);
   - `:no-xwidget'        an Emacs with no xwidget support has no webview
@@ -1288,7 +1282,6 @@ Refusals, all preconditions rather than failures:
    ((not (agent-repl--ws-live-p ws)) :not-live)
    ((not (agent-repl--ws-gui-frontend-p ws)) :not-gui)
    ((null (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))) :no-ref)
-   ((and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)) :hidden)
    ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
    ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))
 

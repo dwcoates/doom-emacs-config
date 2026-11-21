@@ -30,12 +30,9 @@
 ;;   - COLD-GATED and MERGED are held only while shown whenever their last
 ;;     turn ended: a cold gate holds its page back by design, and a merged
 ;;     workspace is ending;
-;;   - a HIDDEN workspace (one the user hid) holds no page while the user is
-;;     not looking at it;
-;;   - a FOLDED workspace (in a repository section or subsection the user
-;;     collapsed) holds no page, whatever its status: its page is unloaded
-;;     the moment the section folds, with no grace after a switch away
-;;     (owner request, 2026-10-30), and loaded back at its show.
+;;   - a HIDDEN or FOLDED workspace the user is not looking at has no tab
+;;     here at all, page included: this editor holds only the workspaces the
+;;     roster marks held (frontend.v1.RosterRowHeld), and closes the rest.
 ;;
 ;; The page on screen and the current workspace's are never unloaded.  A
 ;; workspace with no roster row yet decides nothing until its first push.
@@ -99,8 +96,6 @@
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-hold-back "webhost" (ws))
 (declare-function agent-repl-webhost-held-back-p "webhost" (ws))
-(declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
-(declare-function agent-repl-open-tabs-folded-p "open-tabs" (ws))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl--webhost-id "webhost" (ws))
 (declare-function agent-repl-host-handover-awaits-page-p "host" (ws))
@@ -215,8 +210,7 @@ The stamp orders the working workspaces for the cap
 \(`agent-repl-page-unload--within-working-cap-p'): the first stamped keep
 their pages."
   (dolist (ws (agent-repl--live-ws-names))
-    (if (and (eq (agent-repl-page-unload--ws-bucket ws) 'working)
-             (not (agent-repl-page-unload--withheld-p ws)))
+    (if (eq (agent-repl-page-unload--ws-bucket ws) 'working)
         (unless (agent-repl--ws-get ws :page-working-since)
           (agent-repl--ws-put ws :page-working-since now))
       (agent-repl--ws-put ws :page-working-since nil))))
@@ -241,25 +235,16 @@ first, ties broken by name, so a workspace keeps its place while it works."
   (or (equal ws agent-repl-page-unload--shown)
       (equal ws (agent-repl--ws-current-name))))
 
-(defun agent-repl-page-unload--folded-p (ws)
-  "Non-nil when a collapsed section folds WS, so it holds no page."
-  (and (fboundp 'agent-repl-open-tabs-folded-p) (agent-repl-open-tabs-folded-p ws)))
-
-(defun agent-repl-page-unload--withheld-p (ws)
-  "Non-nil when the user hid WS or folded its section.
-Either way WS holds no page off screen."
-  (or (and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws))
-      (agent-repl-page-unload--folded-p ws)))
-
 (defun agent-repl-page-unload--gated-p (ws)
   "Non-nil when WS stands at its cold gate, so its page is held back on show."
   (eq (agent-repl-page-unload--ws-bucket ws) 'cold-gated))
 
 (defun agent-repl-page-unload-wanted-p (ws)
   "Non-nil when WS's page should be loaded now, before anyone shows it.
-That is when it is on screen and not cold-gated, or, neither hidden nor
-folded (`agent-repl-page-unload--withheld-p'), when the daemon last knew
-the page loaded.  With no residency known to the daemon, a working page
+That is when it is on screen and not cold-gated, or when the daemon last
+knew the page loaded.  A folded or hidden workspace the user is not looking
+at has no tab here at all (frontend.v1.RosterRowHeld), so no page is
+weighed for it.  With no residency known to the daemon, a working page
 is wanted in its place.  A slot made for a workspace that is not wanted
 is made with no page (`agent-repl--frontend-ensure-webview-buffer'); its
 show loads it, or holds it back when WS is cold-gated
@@ -273,14 +258,13 @@ so the pages loaded after a restart are the ones held before it, and the
 pass loads a working page later on its own (`agent-repl-page-unload-pass')."
   (or (and (agent-repl-page-unload--on-screen-p ws)
            (not (agent-repl-page-unload--gated-p ws)))
-      (and (not (agent-repl-page-unload--withheld-p ws))
-           (pcase (agent-repl-host-last-known-page ws)
-             (:loaded t)
-             (:not-loaded nil)
-             ('nil (and (eq (agent-repl-page-unload--ws-bucket ws) 'working)
-                        (agent-repl-page-unload--within-working-cap-p ws)))
-             (other (agent-repl--fatal ws "elisp.page-unload.last-known-page-unknown ws=%s page=%S"
-                                       ws other))))))
+      (pcase (agent-repl-host-last-known-page ws)
+        (:loaded t)
+        (:not-loaded nil)
+        ('nil (and (eq (agent-repl-page-unload--ws-bucket ws) 'working)
+                   (agent-repl-page-unload--within-working-cap-p ws)))
+        (other (agent-repl--fatal ws "elisp.page-unload.last-known-page-unknown ws=%s page=%S"
+                                  ws other)))))
 
 (defun agent-repl-page-unload-note-shown (ws)
   "Record that the host now shows WS's page.
@@ -410,7 +394,6 @@ whose hold has ended."
     (and bucket
          (not (eq bucket 'working))
          (not (memq bucket agent-repl-page-unload--unheld-buckets))
-         (not (agent-repl-page-unload--withheld-p ws))
          (< now ends)
          ends)))
 
@@ -423,12 +406,8 @@ working on its own, and either way it is held as working."
     (when (eq bucket 'working)
       (agent-repl--ws-put ws :page-visit nil))
     (cond
-     ;; A FOLD UNLOADS AT ONCE (owner request, 2026-10-30), the grace after a
-     ;; switch away included.
-     ((agent-repl-page-unload--folded-p ws) 'folded)
      ;; THE GRACE AFTER A SWITCH AWAY holds the page, whatever its status.
      ((agent-repl-page-unload--leave-ends ws now) nil)
-     ((agent-repl-page-unload--withheld-p ws) 'hidden)
      ((null bucket) nil)
      ;; A WORKING PAGE PAST THE CAP is held only while shown (owner ruling,
      ;; 2026-11-18).
@@ -513,9 +492,6 @@ the report was in flight."
      ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
      (agent-repl-webhost-remove ws 'unloading)
      (agent-repl--ws-put ws :page-visit nil)
-     ;; A FOLD'S UNLOAD IS REMEMBERED, so the unfold gives back exactly the
-     ;; pages the fold took early (`agent-repl-page-unload--load-unfolded').
-     (agent-repl--ws-put ws :page-folded-away (eq reason 'folded))
      (agent-repl-page-unload--report ws)
      (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s held-s=%d"
                        ws reason
@@ -534,20 +510,11 @@ the report was in flight."
       (agent-repl-page-unload--unload ws reason now)
       t)))
 
-(defun agent-repl-page-unload-judge (ws)
-  "Unload WS\='s page now when no status holds it, and report its residency.
-The open-tabs reconcile calls it the moment a fold takes WS\='s tab off
-the bar, so the folded page goes at once rather than at the next pass.
-Answers non-nil when an unload was started."
-  (prog1 (agent-repl-page-unload--judge ws (agent-repl-page-unload--now))
-    (agent-repl-page-unload--report ws)))
-
 (defun agent-repl-page-unload--load-working (ws)
   "Load WS\='s unloaded page in the background when WS is working; non-nil if so.
 A workspace that starts working while its page is unloaded gets it back
 before anyone switches to it (owner ruling, 2026-10-29)."
   (when (and (agent-repl-page-unloaded-p ws)
-             (not (agent-repl-page-unload--withheld-p ws))
              (eq (agent-repl-page-unload--ws-bucket ws) 'working)
              (agent-repl-page-unload--within-working-cap-p ws))
     (agent-repl--ws-put ws :page-visit nil)
@@ -555,26 +522,6 @@ before anyone switches to it (owner ruling, 2026-10-29)."
     (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=working" ws)
     (agent-repl-webhost-ensure-page ws)
     t))
-
-(defun agent-repl-page-unload--load-unfolded (ws now)
-  "Load WS\='s page in the background when a fold unloaded it early; non-nil if so.
-AN UNFOLD GIVES BACK ONLY WHAT THE FOLD TOOK EARLY (owner ruling,
-2026-11-18): a page the fold unloaded whose hold still stands at NOW, its
-10-minute hold after its last turn (`agent-repl-page-unload--hold-ends'),
-is loaded again once its section unfolds.  Every other page of the section
-loads only when shown, as it would have had it never folded; a working one
-is `agent-repl-page-unload--load-working''s.  A page whose hold ran out
-while folded forgets the fold."
-  (when (and (agent-repl--ws-get ws :page-folded-away)
-             (agent-repl-page-unloaded-p ws)
-             (not (agent-repl-page-unload--folded-p ws)))
-    (agent-repl--ws-put ws :page-folded-away nil)
-    (when (and (not (agent-repl-page-unload--withheld-p ws))
-               (agent-repl-page-unload--hold-ends ws now))
-      (agent-repl-page-unload-note-mounted ws)
-      (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=unfolded-within-hold" ws)
-      (agent-repl-webhost-ensure-page ws)
-      t)))
 
 (defun agent-repl-page-unload-residency (ws)
   "What Emacs holds of WS\='s page now, as a `PageResidency' plist.
@@ -591,10 +538,9 @@ workspace memory hover
       (list :arm :loaded
             :value (list :release
                          (cond
-                          ((and (or (null bucket)
-                                    (and (eq bucket 'working)
-                                         (agent-repl-page-unload--within-working-cap-p ws)))
-                                (not (agent-repl-page-unload--withheld-p ws)))
+                          ((or (null bucket)
+                               (and (eq bucket 'working)
+                                    (agent-repl-page-unload--within-working-cap-p ws)))
                            (list :arm :held :value nil))
                           ((agent-repl-page-unload--hold-ends ws (agent-repl-page-unload--now))
                            (list :arm :at
@@ -636,7 +582,6 @@ Answers how many unloads were started."
         (loaded 0))
     (dolist (ws (agent-repl--live-ws-names))
       (when (or (agent-repl-page-unload--load-working ws)
-                (agent-repl-page-unload--load-unfolded ws now)
                 (agent-repl-page-unload--load-ungated ws))
         (setq loaded (1+ loaded)))
       (when (agent-repl-page-unload--judge ws now)

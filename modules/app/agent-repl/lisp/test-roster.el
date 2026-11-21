@@ -37,7 +37,8 @@ merges async), `:current', `:dir', `:availability' (an arm keyword,
 default `:available'), `:repository' (the repository's name, default none)."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
     (agent-repl-test--with-family
-     (list :workspace (list :workspace (list :id id :dir dir))
+     (append
+      (list :workspace (list :workspace (list :id id :dir dir))
           :attention (plist-get overrides :attention)
           :priority (plist-get overrides :priority)
           :viewed (plist-get overrides :viewed)
@@ -57,6 +58,11 @@ default `:available'), `:repository' (the repository's name, default none)."
           :closed (list :closed (if (plist-member overrides :closed)
                                     (plist-get overrides :closed)
                                   :false)))
+      ;; THE HELD MARKER is the daemon's; the fixtures stamp it as the
+      ;; daemon would (`agent-repl-test--stamp-held') unless `:held' is
+      ;; given, when it is taken as given.
+      (when (plist-member overrides :held)
+        (list :held (and (plist-get overrides :held) t))))
      (plist-get overrides :children))))
 
 (defun agent-repl-test-roster--section (label rows &optional collapsed)
@@ -105,7 +111,10 @@ closed stream's rows.  THREADS are the thread section's rows, each
                                        (list :thread (list :id (car thread)
                                                            :dir (concat "/zettel/threads/" (cdr thread)))
                                              :name (cdr thread)
-                                             :standing (list :arm :open :value nil)))
+                                             :standing (list :arm :open :value nil)
+                                             ;; A THREAD IS HELD only while it is the
+                                             ;; selection, as the daemon stamps it.
+                                             :held (and (equal (car thread) current) t)))
                                      threads))))
 
 ;;;; ---- Harness ----
@@ -151,7 +160,6 @@ whose calls are the observation."
            (agent-repl-roster--streams nil)
            (agent-repl-roster--tab-order nil)
            (agent-repl-roster--hidden-tabs nil)
-           (agent-repl-roster--walked-folded nil)
            (agent-repl-roster--rows-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--viewed-by-id (make-hash-table :test 'equal))
@@ -1684,7 +1692,7 @@ through every stop."
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "one")
     (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a"))
-    (setq agent-repl-host--select-in-flight "one")
+    (setq agent-repl-host--select-in-flight '(:id "a" :dir "/w/a"))
     ;; Act
     (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
     ;; Assert
@@ -1697,11 +1705,9 @@ once, without waiting for the request's answer."
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "one")
     (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a"))
-    (setq agent-repl-host--select-in-flight "two")
-    (cl-letf (((symbol-function 'agent-repl-host-ref)
-               (lambda (ws) (and (equal ws "two") (list :id "b" :dir "/w/b")))))
-      ;; Act
-      (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+    (setq agent-repl-host--select-in-flight '(:id "b" :dir "/w/b"))
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("two")))))
 
@@ -1711,7 +1717,7 @@ obeyed once the pending request is answered: the last push wins."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "one"
-          agent-repl-host--select-in-flight "one")
+          agent-repl-host--select-in-flight '(:id "a" :dir "/w/a"))
     (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
     (setq agent-repl-host--select-in-flight nil)
     ;; Act
@@ -1773,13 +1779,13 @@ activation hook sends no SelectWorkspace echo."
   (agent-repl-test-roster--with-editor
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "one"
-            agent-repl-host--select-in-flight "one")
+            agent-repl-host--select-in-flight '(:id "a" :dir "/w/a"))
       (cl-letf (((symbol-function 'agent-repl--info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
       ;; Assert
-      (should (member "elisp.roster.current: deferred id=b ws=two requested=one" infos)))))
+      (should (member "elisp.roster.current: deferred id=b ws=two requested=a" infos)))))
 
 (ert-deftest agent-repl-test-roster-a-current-is-held-while-a-minibuffer-is-active ()
   "A `current' arriving while the user types in a minibuffer moves nothing:
@@ -3253,8 +3259,8 @@ saying the roster had been asked for one and declined."
 
 ;;;; ---- The Open section is the tab bar ----
 
-(ert-deftest agent-repl-test-roster-desired-tabs-follow-the-open-walk-then-the-hidden ()
-  "The tabs are the Open section's rows in its walk, then each hidden workspace's."
+(ert-deftest agent-repl-test-roster-desired-tabs-are-the-held-rows-in-the-open-walk ()
+  "The tabs are the Open section's held rows in its walk; a hidden one not looked at has none."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
@@ -3265,11 +3271,11 @@ saying the roster had been asked for one and declined."
       ;; Act
       (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
                           (agent-repl-roster-desired-tabs roster))))
-        ;; Assert: a hidden workspace keeps an undrawn tab.
-        (should (equal tabs '(("a") ("b") ("h" . t))))))))
+        ;; Assert
+        (should (equal tabs '(("a") ("b"))))))))
 
-(ert-deftest agent-repl-test-roster-a-folded-tab-is-collapsed ()
-  "An open row whose tab the daemon folds keeps its tab but comes back `:collapsed'."
+(ert-deftest agent-repl-test-roster-a-folded-row-not-looked-at-has-no-tab ()
+  "An open row the daemon folds, and does not mark held, gets no tab here."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
@@ -3279,13 +3285,33 @@ saying the roster had been asked for one and declined."
                                     (agent-repl-test-roster--section
                                      "folded" (list (agent-repl-test-roster--row "f" "f" :ready)) t))))))
       ;; Act
-      (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
-                          (agent-repl-roster-desired-tabs roster))))
+      (let ((tabs (mapcar (lambda (tab) (plist-get tab :id)) (agent-repl-roster-desired-tabs roster))))
         ;; Assert
-        (should (equal tabs '(("a") ("f" . t))))))))
+        (should (equal tabs '("a")))))))
 
-(ert-deftest agent-repl-test-roster-a-collapsed-subsections-tabs-are-collapsed ()
-  "A collapsed subsection's rows carry folded tabs, so their tabs come back `:collapsed'."
+(ert-deftest agent-repl-test-roster-a-row-marked-held-gets-a-tab-whatever-its-fold ()
+  "The held marker alone decides: a folded row the daemon marks held gets a tab."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "folded" (list (agent-repl-test-roster--row "f" "f" :ready :held t)) t)))))
+      ;; Act / Assert
+      (should (equal (mapcar (lambda (tab) (plist-get tab :id)) (agent-repl-roster-desired-tabs roster))
+                     '("f"))))))
+
+(ert-deftest agent-repl-test-roster-a-row-not-marked-held-gets-no-tab-whatever-its-fold ()
+  "The held marker alone decides: a drawn row the daemon does not mark held gets none."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "shown" (list (agent-repl-test-roster--row "a" "a" :ready :held nil)))))))
+      ;; Act / Assert
+      (should-not (agent-repl-roster-desired-tabs roster)))))
+
+(ert-deftest agent-repl-test-roster-a-collapsed-subsections-rows-have-no-tabs ()
+  "A collapsed subsection's rows carry folded tabs and are not held, so they get no tabs."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let* ((section (agent-repl-test-roster--with-subsections
@@ -3295,28 +3321,24 @@ saying the roster had been asked for one and declined."
            (_ (plist-put (car (agent-repl-test--section-subsections section)) :fold (list :arm :collapsed :value nil)))
            (roster (agent-repl-test-roster--roster :sections (list section))))
       ;; Act
-      (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
-                          (agent-repl-roster-desired-tabs roster))))
+      (let ((tabs (mapcar (lambda (tab) (plist-get tab :id)) (agent-repl-roster-desired-tabs roster))))
         ;; Assert
-        (should (equal tabs '(("a") ("s" . t))))))))
+        (should (equal tabs '("a")))))))
 
-(ert-deftest agent-repl-test-roster-only-a-hidden-tab-is-hidden ()
-  "A folded tab is `:collapsed' but not `:hidden'; a hidden workspace's is both."
+(ert-deftest agent-repl-test-roster-the-hidden-selection-is-a-collapsed-hidden-tab ()
+  "A hidden workspace the user is looking at is held: its tab is `:collapsed' and `:hidden'."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
                    :sections (list (agent-repl-test-roster--section
-                                    "shown" (list (agent-repl-test-roster--row "a" "a" :ready)))
-                                   (agent-repl-test-roster--with-subsections
-                                    (agent-repl-test-roster--section
-                                     "folded" (list (agent-repl-test-roster--row "f" "f" :ready)) t)))
-                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready)))))
+                                    "shown" (list (agent-repl-test-roster--row "a" "a" :ready))))
+                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready :current t)))))
       ;; Act
       (let ((tabs (mapcar (lambda (tab) (list (plist-get tab :id) (plist-get tab :collapsed)
                                               (plist-get tab :hidden)))
                           (agent-repl-roster-desired-tabs roster))))
         ;; Assert
-        (should (equal tabs '(("a" nil nil) ("f" t nil) ("h" t t))))))))
+        (should (equal tabs '(("a" nil nil) ("h" t t))))))))
 
 (ert-deftest agent-repl-test-roster-a-misnumbered-push-is-dropped-at-error ()
   "A tab numbered out of its place is a broken roster: dropped whole, said loudly."
@@ -3504,8 +3526,8 @@ saying the roster had been asked for one and declined."
                                    "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) t))))))
     (should (equal (mapcar (lambda (entry) (plist-get entry :collapsed)) walked) '(nil t)))))
 
-(ert-deftest agent-repl-test-roster-reconcile-keeps-a-collapsed-repositorys-tabs-off-the-drawing ()
-  "A collapsed repository's workspaces keep their tabs and are not drawn."
+(ert-deftest agent-repl-test-roster-reconcile-opens-no-tab-for-a-collapsed-repository ()
+  "A collapsed repository's workspaces the user is not looking at get no tabs."
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-reconcile
      (agent-repl-test-roster--roster
@@ -3515,7 +3537,7 @@ saying the roster had been asked for one and declined."
                        "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) t)
                       (agent-repl-test-roster--section
                        "late" (list (agent-repl-test-roster--row "w3" "three" :ready))))))
-    (should (equal (agent-repl-roster-tab-order) '("one" "two" "three")))
+    (should (equal (agent-repl-roster-tab-order) '("one" "three")))
     (should (equal (agent-repl-roster-drawn-tab-order) '("one" "three")))))
 
 (ert-deftest agent-repl-test-roster-reconcile-draws-a-repository-again-once-expanded ()
@@ -3530,6 +3552,147 @@ saying the roster had been asked for one and declined."
       (funcall push t)
       (funcall push nil)
       (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))
+
+;;;; ---- A workspace the roster stops marking held is closed here ----
+
+(defun agent-repl-test-roster--fold-roster (folded)
+  "A roster with w1 drawn and w2 in a repository FOLDED or not."
+  (agent-repl-test-roster--roster
+   :sections (list (agent-repl-test-roster--section
+                    "open" (list (agent-repl-test-roster--row "w1" "one" :ready)))
+                   (agent-repl-test-roster--section
+                    "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) folded))))
+
+(defmacro agent-repl-test-roster--recording-saves (&rest body)
+  "Run BODY with each composer save before a teardown recorded into `saved'."
+  `(let ((saved nil))
+     (cl-letf (((symbol-function 'agent-repl--input-save-unsent)
+                (lambda (ws) (push ws saved) 'saved)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-folding-a-held-workspace-closes-it-here ()
+  "A fold that stops the daemon marking a workspace held kills its perspective."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     ;; Arrange
+     (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
+     ;; Act
+     (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster t))
+     ;; Assert
+     (should (member "two" agent-repl-test-roster--killed))
+     (should-not (agent-repl--ws-by-ref-id "w2"))
+     (should (equal (agent-repl-roster-tab-order) '("one"))))))
+
+(ert-deftest agent-repl-test-roster-a-workspace-closed-here-saves-its-composer-first ()
+  "The composer of a workspace closed here is saved as its history's unsent head."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     ;; Arrange
+     (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
+     ;; Act
+     (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster t))
+     ;; Assert
+     (should (equal saved '("two"))))))
+
+(ert-deftest agent-repl-test-roster-a-workspace-folded-away-is-released ()
+  "A workspace the roster still lists open is only released, not closed."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     ;; Arrange
+     (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
+     ;; Act
+     (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster t))
+     ;; Assert
+     (should (agent-repl--ws-get "two" :released)))))
+
+(ert-deftest agent-repl-test-roster-a-workspace-closed-by-the-roster-is-not-released ()
+  "A workspace whose row closed is torn down closed, not released."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     ;; Arrange
+     (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
+     ;; Act
+     (agent-repl-roster-reconcile
+      (agent-repl-test-roster--roster
+       :sections (list (agent-repl-test-roster--section
+                        "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+       :closed (list (agent-repl-test-roster--row "w2" "two" :ready :closed t))))
+     ;; Assert
+     (should (member "two" agent-repl-test-roster--killed))
+     (should-not (agent-repl--ws-get "two" :released)))))
+
+(ert-deftest agent-repl-test-roster-a-failed-composer-save-still-closes-the-workspace ()
+  "A save that signals is recorded at ERROR, and the teardown goes on."
+  (agent-repl-test-roster--with-editor
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--input-save-unsent)
+                 (lambda (_ws) (error "disk full")))
+                ((symbol-function 'agent-repl--error)
+                 (agent-repl-test--record-into errors)))
+        ;; Arrange
+        (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
+        ;; Act
+        (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster t)))
+      ;; Assert
+      (should (member "two" agent-repl-test-roster--killed))
+      (should (seq-some (lambda (line) (string-prefix-p "elisp.roster.tab-teardown-save-failed: ws=two error=disk full" line))
+                        errors)))))
+
+(ert-deftest agent-repl-test-roster-an-unfold-reopens-a-released-workspace-as-a-re-hold ()
+  "A released workspace held again is no arrival: it neither enters the history nor opens panels."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     (let ((agent-repl--panels-arrivals-armed t)
+           (created nil)
+           (arrived nil))
+       (cl-letf (((symbol-function 'agent-repl--note-workspace-created) (lambda (ws) (push ws created)))
+                 ((symbol-function 'agent-repl--panels-open-on-arrival) (lambda (ws _id) (push ws arrived))))
+         ;; Arrange
+         (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
+         (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster t))
+         (setq created nil arrived nil)
+         ;; Act
+         (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil)))
+       ;; Assert
+       (should (equal (agent-repl--ws-by-ref-id "w2") "two"))
+       (should-not (member "two" created))
+       (should-not (member "two" arrived))
+       (should-not (agent-repl--ws-get "two" :released))))))
+
+(ert-deftest agent-repl-test-roster-a-reopened-closed-workspace-is-an-arrival ()
+  "A workspace whose row closed and came back open is an arrival, as a new one is."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-saves
+     (let ((agent-repl--panels-arrivals-armed t)
+           (created nil))
+       (cl-letf (((symbol-function 'agent-repl--note-workspace-created) (lambda (ws) (push ws created)))
+                 ((symbol-function 'agent-repl--panels-open-on-arrival) #'ignore))
+         ;; Arrange
+         (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
+         (agent-repl-roster-reconcile
+          (agent-repl-test-roster--roster
+           :sections (list (agent-repl-test-roster--section
+                            "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+           :closed (list (agent-repl-test-roster--row "w2" "two" :ready :closed t))))
+         (setq created nil)
+         ;; Act
+         (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil)))
+       ;; Assert
+       (should (member "two" created))))))
+
+(ert-deftest agent-repl-test-roster-listed-open-ids-name-every-open-and-hidden-row-and-thread ()
+  "The rows a roster lists open are its Open and Hidden rows and open threads, held or not."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section
+                                  "shut" (list (agent-repl-test-roster--row "w1" "one" :ready)) t))
+                 :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))
+                 :closed (list (agent-repl-test-roster--row "w3" "three" :ready :closed t))
+                 :threads '(("t1" . "why")))))
+    ;; Act
+    (let ((ids (agent-repl-roster--listed-open-ids roster)))
+      ;; Assert
+      (should (equal (sort (hash-table-keys ids) #'string<) '("t1" "w1" "w2"))))))
 
 ;;;; ---- The daemon's tab numbers ----
 
@@ -3642,8 +3805,8 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
     (should (equal (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row))) walked)
                    '("w1" "w2" "w3")))))
 
-(ert-deftest agent-repl-test-roster-reconcile-keeps-a-hidden-workspaces-tab-off-the-drawing ()
-  "A hidden workspace keeps its tab, and the drawn numbering closes up over it."
+(ert-deftest agent-repl-test-roster-reconcile-opens-no-tab-for-a-hidden-workspace ()
+  "A hidden workspace the user is not looking at gets no tab, and the numbering closes up."
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-reconcile
      (agent-repl-test-roster--roster
@@ -3651,7 +3814,7 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
                        "repo" (list (agent-repl-test-roster--row "w1" "one" :ready)
                                     (agent-repl-test-roster--row "w3" "three" :ready))))
       :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))))
-    (should (member "two" (agent-repl-roster-tab-order)))
+    (should-not (member "two" (agent-repl-roster-tab-order)))
     (should (equal (agent-repl-roster-drawn-tab-order) '("one" "three")))))
 
 (ert-deftest agent-repl-test-roster-reconcile-draws-a-workspace-again-once-shown ()
@@ -3668,36 +3831,16 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
         :sections (list (agent-repl-test-roster--section "repo" (list one two)))))
       (should (equal (agent-repl-roster-drawn-tab-order) '("one" "two"))))))
 
-(ert-deftest agent-repl-test-roster-navigable-order-holds-a-folded-tab-and-not-a-hidden-one ()
-  "Navigation reaches a collapsed section's tab but not the user's hidden one."
-  (agent-repl-test-roster--with-editor
-    (agent-repl-roster-reconcile
-     (agent-repl-test-roster--roster
-      :sections (list (agent-repl-test-roster--section
-                       "open" (list (agent-repl-test-roster--row "w1" "one" :ready)))
-                      (agent-repl-test-roster--section
-                       "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) t))
-      :hidden (list (agent-repl-test-roster--row "w3" "three" :ready))))
-    (should (equal (agent-repl-roster-tab-order) '("one" "two" "three")))
-    (should (equal (agent-repl-roster-drawn-tab-order) '("one")))
-    (should (equal (agent-repl-roster-navigable-tab-order) '("one" "two")))))
-
-(ert-deftest agent-repl-test-roster-navigable-order-draws-a-folded-tab-again-once-expanded ()
-  "The push that expands the section leaves its tab in the navigable order."
-  (agent-repl-test-roster--with-editor
-    (let ((push (lambda (collapsed)
-                  (agent-repl-roster-reconcile
-                   (agent-repl-test-roster--roster
-                    :sections (list (agent-repl-test-roster--section
-                                     "shut" (list (agent-repl-test-roster--row "w2" "two" :ready))
-                                     collapsed)))))))
-      (funcall push t)
-      (should (equal (agent-repl-roster-navigable-tab-order) '("two")))
-      (funcall push nil)
-      (should (equal (agent-repl-roster-navigable-tab-order) '("two")))
-      (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))
-
 ;;;; ---- One row, indexed ahead of the next push ----
+
+(ert-deftest agent-repl-test-roster-row-of-id-answers-every-listed-row-held-or-not ()
+  "A row is found by its id whether this editor holds it or not."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply (agent-repl-test-roster--fold-roster t))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster-row-id (agent-repl-roster-row-of-id "w2")) "w2"))
+    (should-not (agent-repl-roster-row-of-id "w-unknown"))))
 
 (ert-deftest agent-repl-test-roster-note-row-indexes-a-newer-row ()
   "A row from a revision past the roster held is indexed under its id."
@@ -4011,13 +4154,13 @@ it (2026-10-16: it went back, then forward, on every switch)."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "two"
-          agent-repl-host--confirming (cons "two" 7))
+          agent-repl-host--confirming (cons '(:id "b" :dir "/w/b") 7))
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--at-revision (agent-repl-test-roster--two-tabs "a") 6))
     ;; Assert
     (should (null agent-repl-test-roster--switched))
-    (should (equal agent-repl-host--confirming '("two" . 7)))))
+    (should (equal agent-repl-host--confirming (cons '(:id "b" :dir "/w/b") 7)))))
 
 (ert-deftest agent-repl-test-roster-the-roster-carrying-the-answered-selection-releases-it ()
   "A roster at the answered revision releases the selection and is judged
@@ -4025,7 +4168,7 @@ as any roster is."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "two"
-          agent-repl-host--confirming (cons "two" 7))
+          agent-repl-host--confirming (cons '(:id "b" :dir "/w/b") 7))
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--at-revision (agent-repl-test-roster--two-tabs "b") 7))
@@ -4039,7 +4182,7 @@ workspace is the daemon's newer word, and is followed."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "two"
-          agent-repl-host--confirming (cons "two" 7))
+          agent-repl-host--confirming (cons '(:id "b" :dir "/w/b") 7))
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--at-revision (agent-repl-test-roster--two-tabs "a") 8))
@@ -4050,7 +4193,7 @@ workspace is the daemon's newer word, and is followed."
   "The next daemon's revisions start afresh, so the wait ends with the stream."
   ;; Arrange
   (agent-repl-test-roster--with-editor
-    (setq agent-repl-host--confirming (cons "two" 7))
+    (setq agent-repl-host--confirming (cons '(:id "b" :dir "/w/b") 7))
     ;; Act
     (agent-repl-roster-on-close '(:cancelled))
     ;; Assert
@@ -4133,14 +4276,14 @@ selection the new daemon answered at revision 3."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (setq agent-repl-test-roster--current-name "two"
-          agent-repl-host--confirming (cons "two" 3)
+          agent-repl-host--confirming (cons '(:id "b" :dir "/w/b") 3)
           agent-repl-roster-view (agent-repl-test-roster--at-revision
                                   (agent-repl-test-roster--two-tabs "a") 50)
           agent-repl-roster--view-stream 'old-stream)
     ;; Act
     (agent-repl-roster-apply-current)
     ;; Assert
-    (should (equal agent-repl-host--confirming '("two" . 3)))))
+    (should (equal agent-repl-host--confirming (cons '(:id "b" :dir "/w/b") 3)))))
 
 (ert-deftest agent-repl-test-roster-a-replaced-streams-current-is-not-followed ()
   "The old daemon's `current' does not move the frame back to the
@@ -4599,13 +4742,13 @@ handed to `:on-failure'."
 ;;;; ---- Threads are workspaces off the bar ----
 
 (ert-deftest agent-repl-test-roster-reconcile-opens-a-thread-off-the-drawing ()
-  "A thread opens a workspace of its own, which the bar never draws."
+  "The selected thread opens a workspace of its own, which the bar never draws."
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-reconcile
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
-      :threads '(("t1" . "why-blue"))))
+      :current "t1" :threads '(("t1" . "why-blue"))))
     (should (equal (agent-repl--ws-by-ref-id "t1") "chat/t1"))
     (should (member "chat/t1" agent-repl-test-roster--created))
     (should (equal (agent-repl-roster-drawn-tab-order) '("one")))))
@@ -4613,8 +4756,8 @@ handed to `:on-failure'."
 (ert-deftest agent-repl-test-roster-a-renamed-thread-keeps-its-workspace ()
   "A thread's name arriving renames nothing in Emacs: its workspace is named by its id."
   (agent-repl-test-roster--with-editor
-    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "Loading…"))))
-    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "Why fusion stops at iron"))))
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :current "t1" :threads '(("t1" . "Loading…"))))
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :current "t1" :threads '(("t1" . "Why fusion stops at iron"))))
     (should (equal (list (agent-repl--ws-by-ref-id "t1") agent-repl-test-roster--created)
                    '("chat/t1" ("chat/t1"))))))
 
@@ -4625,7 +4768,7 @@ handed to `:on-failure'."
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
-      :threads '(("t1" . "why-blue"))))
+      :current "t1" :threads '(("t1" . "why-blue"))))
     (should (agent-repl-roster-thread-p "chat/t1"))
     (should-not (agent-repl-roster-thread-p "one"))
     (should-not (agent-repl-roster-thread-p nil))))
@@ -4643,7 +4786,7 @@ handed to `:on-failure'."
          (agent-repl-test-roster--roster
           :sections (list (agent-repl-test-roster--section
                            "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
-          :threads '(("t1" . "why-blue")))))
+          :current "t1" :threads '(("t1" . "why-blue")))))
       ;; Assert
       (should (equal (alist-get "chat/t1" marked nil nil #'equal) t))
       (should (assoc "one" marked))
@@ -4652,10 +4795,31 @@ handed to `:on-failure'."
 (ert-deftest agent-repl-test-roster-a-thread-gone-from-the-roster-is-torn-down ()
   "A thread the next roster no longer carries loses its workspace."
   (agent-repl-test-roster--with-editor
-    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "why"))))
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :current "t1" :threads '(("t1" . "why"))))
     (agent-repl-roster-reconcile (agent-repl-test-roster--roster))
     (should (member "chat/t1" agent-repl-test-roster--killed))
     (should-not (agent-repl--ws-by-ref-id "t1"))))
+
+(ert-deftest agent-repl-test-roster-a-thread-the-user-is-not-on-opens-no-workspace ()
+  "A thread is held only while it is the selection: another thread opens nothing here."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster :current "t1" :threads '(("t2" . "other") ("t1" . "this"))))
+    ;; Assert
+    (should (equal (agent-repl--ws-by-ref-id "t1") "chat/t1"))
+    (should-not (agent-repl--ws-by-ref-id "t2"))))
+
+(ert-deftest agent-repl-test-roster-a-thread-the-user-leaves-is-closed-here-and-released ()
+  "Leaving a thread closes its workspace here, marked released: the thread stays open."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :current "t1" :threads '(("t1" . "why"))))
+    ;; Act
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "why"))))
+    ;; Assert
+    (should (member "chat/t1" agent-repl-test-roster--killed))
+    (should (agent-repl--ws-get "chat/t1" :released))))
 
 (ert-deftest agent-repl-test-roster-thread-row-ws-names-the-opened-workspace ()
   "A thread row resolves, by its ref id, to the workspace Emacs opened for it."

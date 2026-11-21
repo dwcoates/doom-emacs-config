@@ -176,6 +176,11 @@ answers a bare success, which is what almost every verb's success is."
                    (setq agent-repl-test-verbs--switch-requests
                          (append agent-repl-test-verbs--switch-requests (list ws)))
                    t))
+                ((symbol-function 'agent-repl-host-request-switch-ref)
+                 (lambda (ref _trigger)
+                   (setq agent-repl-test-verbs--switch-requests
+                         (append agent-repl-test-verbs--switch-requests (list ref)))
+                   t))
                 ((symbol-function 'agent-repl-host-ref)
                  (lambda (_ws) (agent-repl-test-verbs--ref)))
                 ((symbol-function 'agent-repl--ws-require-known)
@@ -815,6 +820,30 @@ still says where the question stands."
     (should (equal (plist-get (agent-repl-test-verbs--request :set-hidden) :visibility)
                    (list :arm :show :value nil)))))
 
+(ert-deftest agent-repl-verbs-show-ref-shows-the-workspace-by-its-ref ()
+  "Showing a hidden workspace this editor does not hold addresses it by its ref."
+  (agent-repl-test-verbs--with nil
+    (let ((ref (agent-repl-test-verbs--ref "hid" "/tmp/h")))
+      (agent-repl-verb-show-ref ref)
+      (let ((request (agent-repl-test-verbs--request :set-hidden)))
+        (should (equal (plist-get request :workspace) ref))
+        (should (equal (plist-get request :visibility) (list :arm :show :value nil)))))))
+
+(ert-deftest agent-repl-verbs-show-ref-lands-on-the-workspace-once-shown ()
+  "An accepted show requests the switch to the workspace, by its ref."
+  (agent-repl-test-verbs--with nil
+    (let ((ref (agent-repl-test-verbs--ref "hid" "/tmp/h")))
+      (agent-repl-verb-show-ref ref)
+      (should (equal agent-repl-test-verbs--switch-requests (list ref))))))
+
+(ert-deftest agent-repl-verbs-show-ref-refused-lands-nowhere ()
+  "A refused show switches to nothing."
+  (agent-repl-test-verbs--with
+      (list (cons :set-hidden (list :response (list :arm :error
+                                                    :value (list :cause (list :arm :unknown-workspace :value nil))))))
+    (agent-repl-verb-show-ref (agent-repl-test-verbs--ref "hid" "/tmp/h"))
+    (should-not agent-repl-test-verbs--switch-requests)))
+
 (ert-deftest agent-repl-verbs-set-hidden-success-echoes-the-change ()
   "An accepted hide says so in the echo area; the push is the new state."
   (agent-repl-test-verbs--with nil
@@ -1180,28 +1209,27 @@ list, so there is nothing to drop."
     (should (equal (mapcar #'agent-repl-roster-row-name (agent-repl-verbs--hidden-rows))
                    '("hid")))))
 
-(ert-deftest agent-repl-verbs-show-hidden-offers-tab-names-shows-and-switches ()
-  "`SPC TAB H' offers the hidden workspaces' tabs, shows the pick and switches to it."
+(ert-deftest agent-repl-verbs-show-hidden-offers-row-names-shows-and-switches ()
+  "`SPC TAB H' offers the hidden workspaces by name, shows the pick by its ref and switches to it.
+A hidden workspace the user is not on has no tab here, so nothing is addressed by a tab name."
   ;; Arrange.
-  (let* ((hidden (agent-repl-test-verbs--row
-                  :workspace (list :workspace (agent-repl-test-verbs--ref "hid" "/tmp/h"))
+  (let* ((ref (agent-repl-test-verbs--ref "hid" "/tmp/h"))
+         (hidden (agent-repl-test-verbs--row
+                  :workspace (list :workspace ref)
                   :name (list :text "hidden-one")))
          (agent-repl-roster-view (agent-repl-test-verbs--roster nil nil nil (list hidden)))
          (offered nil))
     (agent-repl-test-verbs--with nil
-      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
-                 (lambda (id) (and (equal id "hid") "hidden-one·repo")))
-                ((symbol-function 'completing-read)
-                 (lambda (_p candidates &rest _) (setq offered candidates) "hidden-one·repo")))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p candidates &rest _) (setq offered candidates) "hidden-one")))
         ;; Act.
         (agent-repl-show-hidden-workspace)
         ;; Assert.
-        (should (equal offered '("hidden-one·repo")))
-        (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :set-hidden)
-                                          :visibility)
-                               :arm)
-                    :show))
-        (should (equal agent-repl-test-verbs--switch-requests '("hidden-one·repo")))))))
+        (should (equal offered '("hidden-one")))
+        (let ((request (agent-repl-test-verbs--request :set-hidden)))
+          (should (equal (plist-get request :workspace) ref))
+          (should (eq (plist-get (plist-get request :visibility) :arm) :show)))
+        (should (equal agent-repl-test-verbs--switch-requests (list ref)))))))
 
 (ert-deftest agent-repl-verbs-show-hidden-with-none-refuses-and-logs ()
   "`SPC TAB H' with nothing hidden is a user error, recorded, and sends nothing."

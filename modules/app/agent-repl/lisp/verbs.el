@@ -157,6 +157,7 @@
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
 (declare-function agent-repl-host-request-switch "agent-repl-host" (ws trigger))
+(declare-function agent-repl-host-request-switch-ref "agent-repl-host" (ref trigger))
 (defvar agent-repl-roster-view)
 (defvar agent-repl-metaprompt-file)
 
@@ -1002,6 +1003,22 @@ of its own beyond the echo: the push is the new state."
      (lambda (_)
        (message "agent-repl: %s %s" ws (if hidden "hidden" "shown"))
        (agent-repl-verbs--land-after-visibility ws hidden)))))
+
+(defun agent-repl-verb-show-ref (ref)
+  "Show the hidden workspace REF names again, and land on it.
+`agent-repl-verb-set-hidden' showing, for a hidden workspace this editor does
+not hold (frontend.v1.RosterRowHeld): it has no name here, so it is
+addressed by its ref on the primary link.  Once shown it is drawn, so the
+roster push marks it held and opens it, and the switch requested on success
+lands the frame on it (`agent-repl-host-request-switch-ref')."
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-set-workspace-hidden (agent-repl-verbs--conn)
+   (list :workspace ref :visibility (list :arm :show :value nil))
+   :op "show"
+   :on-success
+   (lambda (_)
+     (message "agent-repl: %s shown" (agent-repl-verbs--ref-label ref))
+     (agent-repl-host-request-switch-ref ref 'show))))
 
 (defun agent-repl-verbs--retry-outcome-text (outcome)
   "Return the echo for a decoded vendor-error retry OUTCOME, or nil for none.
@@ -2251,20 +2268,23 @@ to switch back to."
 (defun agent-repl-show-hidden-workspace ()
   "Show a hidden workspace again and switch to it (`SPC TAB H').
 Completes over the workspaces the sidebar's HIDDEN WORKSPACES section
-holds, by their tab names.  The chosen one comes back onto the tab bar,
+holds, by their roster names: a hidden workspace the user is not looking
+at has no tab here (frontend.v1.RosterRowHeld), so it is shown by its ref
+\(`agent-repl-verb-show-ref').  The chosen one comes back onto the tab bar,
 and the frame lands on it once the daemon accepts."
   (interactive)
-  (let ((names (delq nil (mapcar (lambda (row)
-                                   (agent-repl--ws-by-ref-id
-                                    (plist-get (agent-repl-roster-row-ref row) :id)))
-                                 (agent-repl-verbs--hidden-rows)))))
-    (unless names
+  (let ((choices (mapcar (lambda (row)
+                           (cons (agent-repl-roster-row-name row) (agent-repl-roster-row-ref row)))
+                         (agent-repl-verbs--hidden-rows))))
+    (unless choices
       (agent-repl--info '(:agent-repl-central "the hidden-workspace picker spans every workspace")
                         "elisp.verbs.show-hidden-none")
       (user-error "agent-repl: no hidden workspaces"))
-    (let ((choice (completing-read "Show hidden workspace: " names nil t)))
-      (agent-repl--info choice "elisp.verbs.show-hidden-chosen ws=%s" choice)
-      (agent-repl-verb-set-hidden choice nil))))
+    (let* ((choice (completing-read "Show hidden workspace: " (mapcar #'car choices) nil t))
+           (ref (cdr (assoc choice choices))))
+      (agent-repl--info '(:agent-repl-central "the hidden-workspace picker spans every workspace")
+                        "elisp.verbs.show-hidden-chosen name=%s id=%s" choice (plist-get ref :id))
+      (agent-repl-verb-show-ref ref))))
 
 (defun agent-repl-set-priority (&optional ws)
   "Set or clear the current workspace's priority."
