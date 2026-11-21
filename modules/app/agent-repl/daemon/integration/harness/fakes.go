@@ -169,7 +169,6 @@ func NewRecorderExecutable(t testing.TB, dir, name string) *Recorder {
 	return r
 }
 
-
 // FakeClaudeLoginMarker is printed by the fake `claude` binary the login pty
 // runs, so a test can recognize the terminal it attached to.
 const FakeClaudeLoginMarker = "FAKE-CLAUDE-LOGIN-READY"

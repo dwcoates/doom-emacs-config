@@ -93,7 +93,7 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	script.SetStdout("daemon: passed in 1s\n")
 	repo.DeploysAsAgentRepl()
 	f := newRetargetFamily(t, harness.Opts{
-		Timeout:  harness.MergeChainTimeout,
+		Timeout: harness.MergeChainTimeout,
 	}, repo)
 
 	// Act
