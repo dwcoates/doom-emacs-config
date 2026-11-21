@@ -598,9 +598,9 @@ func (o *orchestrator) Move(ctx context.Context, ws ids.WorkspaceID, move wsm.Me
 // The causes a one-place move is refused for, spelled as the
 // agentrepl.v1.UpdateMergeQueueMoveBlocked.cause arms.
 const (
-	causeMoveNotWaiting = refusalarm.Nested("not_waiting")
-	causeMoveAtEdge     = refusalarm.Nested("at_edge")
-	causeMoveAdmitted   = refusalarm.Nested("admitted")
+	moveBlockedNotWaiting = refusalarm.Nested("not_waiting")
+	moveBlockedAtEdge     = refusalarm.Nested("at_edge")
+	moveBlockedAdmitted   = refusalarm.Nested("admitted")
 )
 
 // moveBlocked answers the refusal of WS's MOVE, which OUTCOME says left the
@@ -616,10 +616,10 @@ func (o *orchestrator) moveBlocked(ctx context.Context, ws ids.WorkspaceID, move
 	switch outcome.Result {
 	case wsm.MergeMoveNotWaiting:
 		refusal = refuse(ArmMoveBlocked, ws, "the merge is not waiting in line, so it does not move %s", move)
-		refusal.Fields = map[string]any{"cause": causeMoveNotWaiting}
+		refusal.Fields = map[string]any{"cause": moveBlockedNotWaiting}
 	case wsm.MergeMoveAtEdge:
 		refusal = refuse(ArmMoveBlocked, ws, "no merge stands in line on that side, so the merge does not move %s", move)
-		refusal.Fields = map[string]any{"cause": causeMoveAtEdge}
+		refusal.Fields = map[string]any{"cause": moveBlockedAtEdge}
 	case wsm.MergeMoveBlockedByAdmitted:
 		blocker, err := o.deps.DB.Workspace(ctx, outcome.Blocker)
 		if err != nil {
@@ -629,7 +629,7 @@ func (o *orchestrator) moveBlocked(ctx context.Context, ws ids.WorkspaceID, move
 		}
 		fields["blocker"], fields["blocker_name"] = string(blocker.ID), blocker.Name
 		refusal = refuse(ArmMoveBlocked, ws, "every merge on that side is admitted, the nearest %q, so the merge does not move %s", blocker.Name, move)
-		refusal.Fields = map[string]any{"cause": causeMoveAdmitted,
+		refusal.Fields = map[string]any{"cause": moveBlockedAdmitted,
 			"blocker": &agentreplv1.UpdateMergeQueueMoveBlocker{Workspace: blocker.Ref(), Name: blocker.Name}}
 	default:
 		panic(fmt.Sprintf("merge: the move of %s was refused for %s, which is no reason a move stays", ws, outcome.Result))
