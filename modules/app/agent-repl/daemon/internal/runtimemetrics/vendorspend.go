@@ -35,6 +35,13 @@ type spendKey struct {
 	account, model, agent, subagentType, cause, outcome, reason string
 }
 
+// callsKey names the calls of one kind of call of one workspace, by the
+// context bucket they fell in.
+type callsKey struct {
+	spendKey
+	context string
+}
+
 // contextKey names the tokens of one kind spent by calls of one context bucket.
 type contextKey struct {
 	account, model, context, kind string
@@ -43,6 +50,11 @@ type contextKey struct {
 // contextHistKey names one distribution of the calls' contexts.
 type contextHistKey struct {
 	account, model, agent string
+}
+
+// labels are the key's values in spendLabels order.
+func (k spendKey) labels() []string {
+	return []string{string(k.ws), k.account, k.model, k.agent, k.subagentType, k.cause, k.outcome, k.reason}
 }
 
 // kindCounts are tokens by kind, in vendorspend.Kinds order.
@@ -66,7 +78,7 @@ type vendorSpend struct {
 	mu       sync.Mutex
 	accounts map[string]string
 	runs     map[ids.WorkspaceID]*spendRun
-	calls    map[spendKey]float64
+	calls    map[callsKey]float64
 	tokens   map[spendKey]*kindCounts
 	context  map[contextKey]float64
 	contexts map[contextHistKey]*histogram
@@ -93,14 +105,14 @@ func newVendorSpend(log dlog.Logger) *vendorSpend {
 		log:       log,
 		accounts:  map[string]string{},
 		runs:      map[ids.WorkspaceID]*spendRun{},
-		calls:     map[spendKey]float64{},
+		calls:     map[callsKey]float64{},
 		tokens:    map[spendKey]*kindCounts{},
 		context:   map[contextKey]float64{},
 		contexts:  map[contextHistKey]*histogram{},
 		keepalive: map[ids.WorkspaceID]*kindCounts{},
 		tokensDesc: prometheus.NewDesc(VendorTokensName, "Tokens vendor calls spent, by kind, with the call's workspace, account, model, agent, cause and cache outcome.",
 			append(append([]string{}, spendLabels...), "kind"), nil),
-		callsDesc:   prometheus.NewDesc(VendorCallsName, "Vendor calls made, by workspace, account, model, agent, cause and cache outcome.", spendLabels, nil),
+		callsDesc:   prometheus.NewDesc(VendorCallsName, "Vendor calls made, by workspace, account, model, agent, cause, cache outcome and the context bucket each fell in.", append(append([]string{}, spendLabels...), "context"), nil),
 		contextDesc: prometheus.NewDesc(VendorContextTokensName, "Tokens vendor calls spent, by kind and the context bucket the call fell in.", []string{"account", "model", "context", "kind"}, nil),
 		histDesc:    prometheus.NewDesc(VendorCallContextName, "The context each vendor call sent, in tokens.", []string{"account", "model", "agent"}, nil),
 	}
@@ -270,13 +282,13 @@ func (v *vendorSpend) add(ws ids.WorkspaceID, account string, e *conversationv1.
 		ws: ws, account: account, model: e.GetModel(), agent: agent, subagentType: e.GetSubagentType(),
 		cause: vendorspend.CauseLabel(e.GetCause()), outcome: vendorspend.OutcomeLabel(e.GetCacheOutcome()), reason: vendorspend.ReasonLabel(e.GetColdReason()),
 	}
-	v.calls[key] += calls
+	context := vendorspend.ContextLabel(e)
+	v.calls[callsKey{spendKey: key, context: context}] += calls
 	tokens := v.tokens[key]
 	if tokens == nil {
 		tokens = &kindCounts{}
 		v.tokens[key] = tokens
 	}
-	context := vendorspend.ContextLabel(e)
 	var input float64
 	for i, kind := range vendorspend.Kinds {
 		tokens[i] += counts[i]
@@ -331,6 +343,10 @@ func (v *vendorSpend) forget(ws ids.WorkspaceID) {
 	for key := range v.calls {
 		if key.ws == ws {
 			delete(v.calls, key)
+		}
+	}
+	for key := range v.tokens {
+		if key.ws == ws {
 			delete(v.tokens, key)
 		}
 	}
@@ -350,16 +366,22 @@ func (v *vendorSpend) Describe(ch chan<- *prometheus.Desc) {
 func (v *vendorSpend) Collect(ch chan<- prometheus.Metric) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	keys := make([]spendKey, 0, len(v.calls))
+	callKeys := make([]callsKey, 0, len(v.calls))
 	for k := range v.calls {
+		callKeys = append(callKeys, k)
+	}
+	sort.Slice(callKeys, func(i, j int) bool { return fmt.Sprint(callKeys[i]) < fmt.Sprint(callKeys[j]) })
+	for _, k := range callKeys {
+		ch <- prometheus.MustNewConstMetric(v.callsDesc, prometheus.CounterValue, v.calls[k], append(k.labels(), k.context)...)
+	}
+	keys := make([]spendKey, 0, len(v.tokens))
+	for k := range v.tokens {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool { return fmt.Sprint(keys[i]) < fmt.Sprint(keys[j]) })
 	for _, k := range keys {
-		labels := []string{string(k.ws), k.account, k.model, k.agent, k.subagentType, k.cause, k.outcome, k.reason}
-		ch <- prometheus.MustNewConstMetric(v.callsDesc, prometheus.CounterValue, v.calls[k], labels...)
 		for i, kind := range vendorspend.Kinds {
-			ch <- prometheus.MustNewConstMetric(v.tokensDesc, prometheus.CounterValue, v.tokens[k][i], append(labels, kind)...)
+			ch <- prometheus.MustNewConstMetric(v.tokensDesc, prometheus.CounterValue, v.tokens[k][i], append(k.labels(), kind)...)
 		}
 	}
 	for k, n := range v.context {

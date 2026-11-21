@@ -40,7 +40,7 @@ func spendFrame(since int64, configDir string, entries ...*conversationv1.Vendor
 	return &shimv1.ShimMeasurements{CountedSinceUnixMs: since, ConfigDir: configDir, VendorSpend: entries}
 }
 
-const warmLabels = `account="default",agent="main",cache_outcome="warm",cause="user_prompt",cold_reason="",model="claude-opus-5-5",subagent_type="",workspace="ws1"`
+const warmLabels = `account="default",agent="main",cache_outcome="warm",cause="user_prompt",cold_reason="",context="25000",model="claude-opus-5-5",subagent_type="",workspace="ws1"`
 
 func TestShimSpendFolds(t *testing.T) {
 	tests := []struct {
