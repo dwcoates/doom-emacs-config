@@ -354,6 +354,8 @@ var migrations = []migration{
 	{To: 187, Name: "arrival_waits", Kind: MigrationAdditive, DDL: arrivalWaitsDDL, Rewrite: moveArrivalHolds},
 	{To: 188, Name: "workspaces_spawned_shim_start", Kind: MigrationAdditive, DDL: spawnedShimStartDDL},
 	{To: 189, Name: "merge_profile_gate", Kind: MigrationAdditive, DDL: mergeProfileGateDDL},
+	// IT IS ADDITIVE: a new table the previous build never names.
+	{To: 190, Name: "workspace_test_cases", Kind: MigrationAdditive, DDL: testCasesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
