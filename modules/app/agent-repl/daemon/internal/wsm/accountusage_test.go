@@ -21,7 +21,8 @@ func fullUsage(root string) AccountUsage {
 			Verdict: VerdictRejected, VerdictResetsAtS: 1_791_532_799},
 		WeeklySonnet: &AllowanceFigures{Utilization: 0.3, ResetsAtS: 1_791_532_799,
 			Verdict: VerdictAllowedWarning},
-		Overage: &AllowanceFigures{Utilization: 0.1, ResetsAtS: 1_793_000_000, Verdict: VerdictRejected, VerdictResetsAtS: 1_793_000_000},
+		Overage:      &AllowanceFigures{Utilization: 0.1, ResetsAtS: 1_793_000_000, Verdict: VerdictRejected, VerdictResetsAtS: 1_793_000_000},
+		MonthlySpend: &MonthlySpendFigures{SpentMinor: 199_396, LimitMinor: ptr[int64](1_200_000), Currency: "USD"},
 	}
 }
 
@@ -42,6 +43,18 @@ func TestAccountUsageIsReadBack(t *testing.T) {
 		{name: "the model windows unfigured", usage: func() AccountUsage {
 			u := fullUsage("/home/a/.claude")
 			u.WeeklyOpus, u.WeeklySonnet = nil, nil
+			return u
+		}()},
+		{name: "an uncapped monthly spend", usage: func() AccountUsage {
+			u := fullUsage("/home/a/.claude")
+			u.MonthlySpend.LimitMinor = nil
+			return u
+		}()},
+		{name: "a monthly spend alone", usage: AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: time.Unix(5, 0).UTC(),
+			MonthlySpend: &MonthlySpendFigures{SpentMinor: 0, LimitMinor: ptr[int64](1_200_000), Currency: "USD"}}},
+		{name: "no monthly spend", usage: func() AccountUsage {
+			u := fullUsage("/home/a/.claude")
+			u.MonthlySpend = nil
 			return u
 		}()},
 	}
@@ -141,6 +154,62 @@ func TestSetAccountUsageRefusesAnUnknownVerdict(t *testing.T) {
 	}
 	if !loggedOperation(log, "daemon.wsm.set_account_usage", "error") {
 		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+}
+
+func TestSetAccountUsageRefusesASpendWithNoCurrency(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	usage := fullUsage("/home/a/.claude")
+	usage.MonthlySpend.Currency = ""
+
+	// Act
+	err := s.SetAccountUsage(context.Background(), usage)
+
+	// Assert
+	if err == nil {
+		t.Fatal("SetAccountUsage stored a monthly spend in no currency")
+	}
+	if !loggedOperation(log, "daemon.wsm.set_account_usage", "error") {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+	if got, err := s.AccountUsages(context.Background()); err != nil || len(got) != 0 {
+		t.Fatalf("AccountUsages after the refusal = %+v, %v, want no row", got, err)
+	}
+}
+
+func TestAccountUsagesRefusesACorruptMonthlySpend(t *testing.T) {
+	tests := []struct {
+		name    string
+		corrupt string
+	}{
+		{name: "a limit with no spend", corrupt: `UPDATE account_usage SET monthly_spent_minor = NULL, monthly_currency = NULL`},
+		{name: "a spend with no currency", corrupt: `UPDATE account_usage SET monthly_currency = NULL`},
+		{name: "a currency with no spend", corrupt: `UPDATE account_usage SET monthly_spent_minor = NULL`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			if err := s.SetAccountUsage(context.Background(), fullUsage("/home/a/.claude")); err != nil {
+				t.Fatalf("seed SetAccountUsage: %v", err)
+			}
+			if _, err := s.db().Exec(tt.corrupt); err != nil {
+				t.Fatalf("corrupt the row: %v", err)
+			}
+
+			// Act
+			_, err := s.AccountUsages(context.Background())
+
+			// Assert
+			var decode *DecodeError
+			if !errors.As(err, &decode) || decode.Field != "monthly_spend" {
+				t.Fatalf("AccountUsages = %v, want a DecodeError naming the monthly spend", err)
+			}
+			if !loggedOperation(log, "daemon.wsm.account_usages", "error") {
+				t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+			}
+		})
 	}
 }
 
@@ -332,13 +401,14 @@ func TestTheMigrationAddsTheAccountUsage(t *testing.T) {
 	}
 }
 
-// accountUsageFreshColumns is account_usage's columns once layout 91 has run,
-// in the order the migrations leave them.
+// accountUsageFreshColumns is account_usage's columns at this build's
+// layout, in the order the migrations leave them.
 const accountUsageFreshColumns = "config_dir,observed_at,weekly_utilization,weekly_resets_at_s,weekly_verdict," +
 	"overage_utilization,overage_resets_at_s,overage_verdict," +
 	"weekly_opus_utilization,weekly_opus_resets_at_s,weekly_opus_verdict," +
 	"weekly_sonnet_utilization,weekly_sonnet_resets_at_s,weekly_sonnet_verdict," +
-	"weekly_verdict_resets_at_s,weekly_opus_verdict_resets_at_s,weekly_sonnet_verdict_resets_at_s,overage_verdict_resets_at_s"
+	"weekly_verdict_resets_at_s,weekly_opus_verdict_resets_at_s,weekly_sonnet_verdict_resets_at_s,overage_verdict_resets_at_s," +
+	"monthly_spent_minor,monthly_limit_minor,monthly_currency"
 
 // TestTheMigrationDropsTheUnproducedAccountUsageColumns pins the layout-91
 // step: the five-hour window, the seat's spend, every sample stamp and
@@ -381,6 +451,32 @@ VALUES ('/home/a/.claude', 5, 0, 0.44, 1791299399, 1791294066973, 'allowed', 0.5
 	// Assert
 	want := AccountUsage{ConfigDir: "/home/a/.claude", ObservedAt: fromNanos(5),
 		Weekly: &AllowanceFigures{Utilization: 0.53, ResetsAtS: 1_791_532_799, Verdict: VerdictRejected, VerdictResetsAtS: 1_791_532_799}}
+	if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("AccountUsages = %+v, %v, want [%+v]", got, err, want)
+	}
+}
+
+// TestTheMigrationAddsTheMonthlySpend pins the account_usage_monthly_spend
+// step: a row the build before it stored keeps its windows and reloads with
+// no spend.
+func TestTheMigrationAddsTheMonthlySpend(t *testing.T) {
+	// Arrange: a row with a weekly figure, at the layout just before the step.
+	before := stepNamed(t, "account_usage_monthly_spend") - 1
+	path := fixtureAt(t, before)
+	execRaw(t, path, `INSERT INTO account_usage (config_dir, observed_at, weekly_utilization, weekly_resets_at_s, weekly_verdict)
+VALUES ('/home/a/.claude', 5, 0.53, 1791532799, '')`)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-%d database: %v", before, err)
+	}
+	defer handle.Close()
+	got, err := handle.(*store).AccountUsages(context.Background())
+
+	// Assert
+	want := AccountUsage{ConfigDir: "/home/a/.claude", ObservedAt: fromNanos(5),
+		Weekly: &AllowanceFigures{Utilization: 0.53, ResetsAtS: 1_791_532_799, Verdict: VerdictNone}}
 	if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], want) {
 		t.Fatalf("AccountUsages = %+v, %v, want [%+v]", got, err, want)
 	}

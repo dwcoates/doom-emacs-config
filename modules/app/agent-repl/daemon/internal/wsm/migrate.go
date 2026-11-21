@@ -340,6 +340,7 @@ var migrations = []migration{
 	{To: 180, Name: "merge_queue_clock", Kind: MigrationAdditive, DDL: mergeQueueClockDDL},
 	// IT IS ADDITIVE: see sessionContextBankDDL.
 	{To: 181, Name: "session_context_bank", Kind: MigrationAdditive, DDL: sessionContextBankDDL},
+	{To: 182, Name: "account_usage_monthly_spend", Kind: MigrationAdditive, DDL: accountUsageMonthlySpendDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

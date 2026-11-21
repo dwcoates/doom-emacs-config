@@ -937,6 +937,26 @@ unchanged.
     `no_allowance` columns from `account_usage`.
   - The webapp draws weekly then overage, and no seat line.
 
+### 10. The monthly spend returns, read off the plan-usage read (2026-11-18)
+
+- **Asked by** the owner: the work account (billed by its spend) draws its
+  monthly usage the way the personal account draws its weekly windows.
+- **Source**: the plan-usage read already made at every turn end
+  (`conversation.v1.SessionPlanUsage`) carries the vendor's `extra_usage`, so
+  entry 9's reason for retiring the spend (no source but a sample) no longer
+  holds. No sample is reintroduced.
+- **What changed, on the wire** (record:
+  `docs/protobuf-design/2026-11-18-monthly-spend.md`):
+  - `conversation.v1.SessionPlanUsage.monthly_spend` (tag 4).
+  - `frontend.v1.FooterActivityEnduringUsage.monthly_spend` (tag 7), an
+    element beside weekly and overage rather than entry 8's line of its own,
+    so an account reporting both draws both.
+- **What changed, in the systems:**
+  - The shim states the spend; the daemon files and retires it with the
+    read's weekly windows and keeps it per account root (wsm layout 182, the `account_usage_monthly_spend` step).
+  - The webapp draws weekly, overage, then "$1,993.96 of $12,000 this month",
+    in the strip and the tokens sheet alike.
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.

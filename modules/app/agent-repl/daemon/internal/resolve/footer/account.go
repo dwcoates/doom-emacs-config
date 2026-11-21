@@ -22,7 +22,8 @@ import (
 // spoken.
 
 // accountUsage is ONE account root's usage evidence: the allowance windows
-// the vendor's rate-limit events and the account's plan-usage reads figured.
+// the vendor's rate-limit events and the account's plan-usage reads figured,
+// and the monthly spend the plan-usage reads stated.
 type accountUsage struct {
 	// rate is the drawn allowances.
 	rate rateState
@@ -35,7 +36,8 @@ type accountUsage struct {
 // figured reports whether any window has a figure to draw.
 func (u *accountUsage) figured() bool {
 	r := &u.rate
-	return r.weekly.figured || r.weeklyOpus.figured || r.weeklySonnet.figured || r.overage.figured
+	return r.weekly.figured || r.weeklyOpus.figured || r.weeklySonnet.figured || r.overage.figured ||
+		r.monthlySpend != nil
 }
 
 // arm names what the enduring line draws from this evidence, for the logs.
@@ -61,6 +63,7 @@ func (u *accountUsage) record(root string) wsm.AccountUsage {
 		WeeklyOpus:   u.rate.weeklyOpus.figures(),
 		WeeklySonnet: u.rate.weeklySonnet.figures(),
 		Overage:      u.rate.overage.figures(),
+		MonthlySpend: u.rate.monthlySpend,
 	}
 }
 
@@ -72,6 +75,7 @@ func usageFromRecord(rec wsm.AccountUsage) *accountUsage {
 	u.rate.weeklyOpus.restore(rec.WeeklyOpus)
 	u.rate.weeklySonnet.restore(rec.WeeklySonnet)
 	u.rate.overage.restore(rec.Overage)
+	u.rate.monthlySpend = rec.MonthlySpend
 	return u
 }
 
@@ -101,6 +105,19 @@ func (w *allowanceWindow) restore(f *wsm.AllowanceFigures) {
 		verdict:          f.Verdict,
 		verdictResetsAtS: f.VerdictResetsAtS,
 	}
+}
+
+// monthlySpendFigures is a plan-usage read's spend as the evidence keeps it.
+func monthlySpendFigures(spend *conversationv1.SessionPlanUsageMonthlySpend) *wsm.MonthlySpendFigures {
+	figures := &wsm.MonthlySpendFigures{
+		SpentMinor: spend.GetSpent().GetAmountMinor(),
+		Currency:   spend.GetSpent().GetCurrency(),
+	}
+	if capped := spend.GetCapped(); capped != nil {
+		limit := capped.GetLimit().GetAmountMinor()
+		figures.LimitMinor = &limit
+	}
+	return figures
 }
 
 // verdictOf is a rate-limit event's status arm as a stored verdict. An event

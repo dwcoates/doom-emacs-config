@@ -2357,10 +2357,10 @@ message FooterActivityTransientUpdated {
 // learns them, and the daemon keeps the last figures per account durably, so
 // a restarted daemon draws them before any session has spoken.
 //
-// THE FIGURES COME FROM THE VENDOR'S RATE-LIMIT EVENTS ALONE
-// (conversation.v1.SessionRateLimitStatus): the account's usage is never
-// sampled, so an account the vendor has sent no event for draws
-// `unobserved`.
+// THE FIGURES COME FROM THE VENDOR'S RATE-LIMIT EVENTS
+// (conversation.v1.SessionRateLimitStatus) AND THE ACCOUNT'S PLAN-USAGE READS
+// (conversation.v1.SessionPlanUsage), so an account neither has figured
+// draws `unobserved`.
 //
 // THE LINE IS NEVER EMPTY (owner ruling, 2026-10-06): every arm draws words.
 //
@@ -2383,9 +2383,10 @@ message FooterActivityEnduring {
   // figure draws `unobserved`.
   reserved 4;
   reserved "no_allowance";
-  // Tag 5 (`seat_spend`, a per-seat account's month-to-date spend) is
-  // RETIRED: only a sample of the account's usage ever measured a seat's
-  // spend, and the account is never sampled.
+  // Tag 5 (`seat_spend`, a per-seat account's month-to-date spend as a line
+  // of its own) is RETIRED: the spend is an element of the usage arm
+  // (FooterActivityEnduringUsage.monthly_spend), drawn beside any weekly
+  // window the account also reports.
   reserved 5;
   reserved "seat_spend";
 }
@@ -2393,12 +2394,13 @@ message FooterActivityEnduring {
 message FooterActivityEnduringUnobserved {}
 
 // The account's usage allowances. The vendor bills independent allowances
-// (seven-day weekly, and an overage window beyond them); every figure its
-// rate-limit events and the account's plan-usage reads
-// (conversation.v1.SessionPlanUsage) report is shown, WHETHER OR NOT any is
-// near its limit, so
-// the reader always knows how close the account is. SET only when at least
-// one of its elements is.
+// (seven-day weekly, an overage window beyond them, and a month-to-date spend
+// for an account billed by what it spends); every figure its rate-limit
+// events and the account's plan-usage reads (conversation.v1.SessionPlanUsage)
+// report is shown, WHETHER OR NOT any is near its limit, so the reader always
+// knows how close the account is. The elements draw in the one fixed order
+// weekly, overage, monthly spend. SET only when at least one of its elements
+// is.
 message FooterActivityEnduringUsage {
   // Tag 1 (`session`, the rolling five-hour allowance) is RETIRED: the plan
   // has no five-hour window to draw (owner ruling, 2026-10-30).
@@ -2427,6 +2429,55 @@ message FooterActivityEnduringUsage {
   // line carries no age.
   reserved 5;
   reserved "figures_read_at_ms";
+  // The account's month-to-date spend: "$1,993.96 of $12,000 this month". It
+  // is the only element an account billed by its spend draws (such an account
+  // reports no weekly window). UNSET until a plan-usage read states a spend,
+  // and again once a read states none.
+  optional FooterMonthlySpend monthly_spend = 7;
+}
+
+// The monthly-spend element of the usage line: what the account has spent
+// this calendar month, and against what limit. The vendor states no
+// billing-period reset, so the element draws none and never lapses on the
+// client's clock; the next plan-usage read restates it.
+message FooterMonthlySpend {
+  // What the account has spent this month. Drawn first, in the percent
+  // gradient when the spend is capped.
+  FooterMoney spent = 1;
+  // Whether the spend runs against a monthly limit, which decides the line:
+  // "$1,993.96 of $12,000 this month" or "$1,993.96 this month".
+  oneof limit {
+    // The spend runs against a monthly limit.
+    FooterMonthlySpendCapped capped = 2;
+    // The account has no monthly limit.
+    FooterMonthlySpendUncapped uncapped = 3;
+  }
+}
+
+// A spend against a monthly limit.
+message FooterMonthlySpendCapped {
+  // The monthly limit, in the spend's currency. Drawn after "of".
+  FooterMoney limit = 1;
+  // How much of the limit is spent, 0..1 (spent / limit), resolved by the
+  // daemon so the client paints the spent figure's gradient without dividing
+  // money. It may exceed 1 when the vendor lets a spend pass its limit.
+  double utilization = 2;
+}
+
+// A spend with no monthly limit: only the spent figure and "this month" draw.
+message FooterMonthlySpendUncapped {}
+
+// An amount of money as the footer draws it: an integer count of the
+// currency's MINOR unit (cents for USD). The client draws the major unit, with
+// the minor digits only when the amount has any, so 1200000 USD reads
+// "$12,000" and 199396 reads "$1,993.96"; the minor unit's exponent is the
+// currency's ISO 4217 one.
+message FooterMoney {
+  // The amount in the currency's minor unit.
+  int64 amount_minor = 1;
+  // The ISO 4217 currency code ("USD"). A code the client cannot name is a
+  // malformed view.
+  string currency = 2;
 }
 
 // The weekly element of the usage line: the account-wide seven-day window,

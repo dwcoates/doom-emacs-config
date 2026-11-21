@@ -24,14 +24,17 @@ import (
 // own reset is NULL on its own when unknown.
 //
 // Every figure comes from a vendor rate-limit event or a plan-usage read of
-// the weekly windows: there is no per-seat spend, no five-hour window and no
-// sample stamp to keep. observed_at is when the daemon last filed evidence for
-// the account (unix nanos).
+// the weekly windows and the monthly spend: there is no five-hour window and
+// no sample stamp to keep. The monthly spend's amount and currency are NULL
+// together when no spend was read; its limit is NULL on its own for an
+// uncapped spend, and set with no spend it is a corrupt record. observed_at
+// is when the daemon last filed evidence for the account (unix nanos).
 //
-// A FILE OLDER THAN LAYOUT 91 REACHES THIS SHAPE BY STEPS: layout 24 created
+// A FILE OLDER THAN LAYOUT 182 REACHES THIS SHAPE BY STEPS: layout 24 created
 // the table (accountUsageLayout24DDL), layouts 25 and 72 added columns
-// (accountUsageSeatDDL, accountUsageWindowsDDL), and layout 91 dropped the
-// ones nothing produces (accountUsageDropUnproducedDDL). The columns are
+// (accountUsageSeatDDL, accountUsageWindowsDDL), layout 91 dropped the ones
+// nothing produced then (accountUsageDropUnproducedDDL), and layout 182 added
+// the monthly spend (accountUsageMonthlySpendDDL). The columns are
 // declared here in the order those steps leave them, and
 // TestAMigratedAccountUsageTableMatchesAFreshOne keeps the two routes to one
 // shape.
@@ -54,7 +57,10 @@ CREATE TABLE account_usage (
   weekly_verdict_resets_at_s INTEGER,
   weekly_opus_verdict_resets_at_s INTEGER,
   weekly_sonnet_verdict_resets_at_s INTEGER,
-  overage_verdict_resets_at_s INTEGER
+  overage_verdict_resets_at_s INTEGER,
+  monthly_spent_minor INTEGER,
+  monthly_limit_minor INTEGER,
+  monthly_currency TEXT
 );
 `
 
@@ -156,6 +162,19 @@ ALTER TABLE account_usage DROP COLUMN seat_currency;
 ALTER TABLE account_usage DROP COLUMN seat_sampled_at_ms;
 `
 
+// accountUsageMonthlySpendDDL is the layout-182 addition: the account's
+// month-to-date spend, read off the plan-usage read's extra usage
+// (conversation.v1.SessionPlanUsage.monthly_spend).
+//
+// IT IS ADDITIVE. The previous build's upsert names none of these columns: a
+// row it inserts leaves them NULL (no spend read), and a row it updates keeps
+// their values, which the next write of this build replaces.
+const accountUsageMonthlySpendDDL = `
+ALTER TABLE account_usage ADD COLUMN monthly_spent_minor INTEGER;
+ALTER TABLE account_usage ADD COLUMN monthly_limit_minor INTEGER;
+ALTER TABLE account_usage ADD COLUMN monthly_currency TEXT;
+`
+
 // AllowanceVerdict is the vendor's last verdict on one allowance window, as
 // the account_usage row stores it. Empty is "no verdict observed yet".
 type AllowanceVerdict string
@@ -190,8 +209,20 @@ type AllowanceFigures struct {
 	VerdictResetsAtS int64
 }
 
+// MonthlySpendFigures is the account's month-to-date spend, in the currency's
+// minor unit.
+type MonthlySpendFigures struct {
+	// SpentMinor is what the account spent this month.
+	SpentMinor int64
+	// LimitMinor is the monthly limit, nil when the spend is uncapped.
+	LimitMinor *int64
+	// Currency is the ISO 4217 code both amounts are in.
+	Currency string
+}
+
 // AccountUsage is the last usage evidence the daemon read for one account
-// root: the allowance windows the vendor's rate-limit events figured.
+// root: the allowance windows the vendor's rate-limit events and plan-usage
+// reads figured, and the monthly spend the plan-usage reads stated.
 type AccountUsage struct {
 	// ConfigDir is the account root's path.
 	ConfigDir string
@@ -203,6 +234,8 @@ type AccountUsage struct {
 	WeeklyOpus   *AllowanceFigures
 	WeeklySonnet *AllowanceFigures
 	Overage      *AllowanceFigures
+	// MonthlySpend is the month-to-date spend, nil when none was read.
+	MonthlySpend *MonthlySpendFigures
 }
 
 // SetAccountUsage records an account root's usage evidence, replacing what
@@ -281,8 +314,12 @@ func accountUsageColumns() []string {
 	for _, name := range accountUsageWindowNames {
 		cols = append(cols, windowColumns(name)...)
 	}
-	return cols
+	return append(cols, monthlySpendColumns...)
 }
+
+// monthlySpendColumns is the monthly spend's columns, in the order
+// spendArgs and storedSpend.dest lay them out.
+var monthlySpendColumns = []string{"monthly_spent_minor", "monthly_limit_minor", "monthly_currency"}
 
 // accountUsageUpsert is the row's insert-or-replace, built from
 // accountUsageColumns.
@@ -317,6 +354,7 @@ func (s *store) writeAccountUsage(ctx context.Context, op string, fields dlog.Co
 	for _, w := range usage.windows() {
 		args = append(args, windowArgs(*w)...)
 	}
+	args = append(args, spendArgs(usage.MonthlySpend)...)
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, accountUsageUpsert(), args...)
 		return err
@@ -333,7 +371,23 @@ func (u AccountUsage) validate() error {
 			return fmt.Errorf("wsm: invalid allowance verdict %q", (*w).Verdict)
 		}
 	}
+	if m := u.MonthlySpend; m != nil && m.Currency == "" {
+		return fmt.Errorf("wsm: a monthly spend names no currency")
+	}
 	return nil
+}
+
+// spendArgs is the monthly spend's three columns, all NULL when none was
+// read and the limit NULL alone for an uncapped spend.
+func spendArgs(m *MonthlySpendFigures) []any {
+	if m == nil {
+		return []any{nil, nil, nil}
+	}
+	var limit any
+	if m.LimitMinor != nil {
+		limit = *m.LimitMinor
+	}
+	return []any{m.SpentMinor, limit, m.Currency}
 }
 
 // windowArgs is one window's four columns, all NULL for an unfigured window.
@@ -365,11 +419,13 @@ func (s *store) AccountUsages(ctx context.Context) ([]AccountUsage, error) {
 				usage    AccountUsage
 				observed int64
 				windows  = make([]storedWindow, len(accountUsageWindowNames))
+				spend    storedSpend
 			)
 			dest := []any{&usage.ConfigDir, &observed}
 			for i := range windows {
 				dest = append(dest, windows[i].dest()...)
 			}
+			dest = append(dest, spend.dest()...)
 			if err := rows.Scan(dest...); err != nil {
 				return err
 			}
@@ -381,6 +437,9 @@ func (s *store) AccountUsages(ctx context.Context) ([]AccountUsage, error) {
 					return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: name, Err: err}
 				}
 				*decoded[i] = figures
+			}
+			if usage.MonthlySpend, err = spend.decode(); err != nil {
+				return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: "monthly_spend", Err: err}
 			}
 			if err := usage.validate(); err != nil {
 				return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: "config_dir", Err: err}
@@ -435,4 +494,37 @@ func (w *storedWindow) decode() (*AllowanceFigures, error) {
 		Verdict:          verdict,
 		VerdictResetsAtS: w.verdictResetsAtS.Int64,
 	}, nil
+}
+
+// storedSpend is the monthly spend's three nullable columns as scanned.
+type storedSpend struct {
+	spentMinor sql.NullInt64
+	limitMinor sql.NullInt64
+	currency   sql.NullString
+}
+
+// dest is the scan destinations, in column order.
+func (m *storedSpend) dest() []any {
+	return []any{&m.spentMinor, &m.limitMinor, &m.currency}
+}
+
+// decode is the spend, nil when its amount and currency are NULL. The amount
+// and currency are set or NULL together, and a limit with no spend is a
+// corrupt record.
+func (m *storedSpend) decode() (*MonthlySpendFigures, error) {
+	switch {
+	case !m.spentMinor.Valid && !m.currency.Valid:
+		if m.limitMinor.Valid {
+			return nil, fmt.Errorf("a monthly limit is stored with no spend")
+		}
+		return nil, nil
+	case m.spentMinor.Valid != m.currency.Valid:
+		return nil, fmt.Errorf("a monthly spend's amount and currency are set or NULL together")
+	}
+	figures := &MonthlySpendFigures{SpentMinor: m.spentMinor.Int64, Currency: m.currency.String}
+	if m.limitMinor.Valid {
+		limit := m.limitMinor.Int64
+		figures.LimitMinor = &limit
+	}
+	return figures, nil
 }

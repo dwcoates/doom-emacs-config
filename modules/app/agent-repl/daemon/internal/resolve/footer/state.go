@@ -124,6 +124,9 @@ type rateState struct {
 	// stays unfigured — and so draws absent — on the accounts that never
 	// report an overage window at all.
 	overage allowanceWindow
+	// monthlySpend is the account's month-to-date spend, as the newest
+	// plan-usage read stated it; nil when no read stated one.
+	monthlySpend *wsm.MonthlySpendFigures
 	// at is when the newest evidence for any window was observed.
 	at time.Time
 }

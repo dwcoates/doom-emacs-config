@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { planUsageUpdate } from "../../src/convert/plan-usage.js";
 import type { PlanUsageLike } from "../../src/sdk/types.js";
+import { logRecordsDuring } from "../log-records.js";
 
 type Limits = NonNullable<PlanUsageLike["rate_limits"]>;
 
@@ -95,5 +96,109 @@ describe("planUsageUpdate", () => {
 
     // Assert.
     expect(update).toBeUndefined();
+  });
+});
+
+/** The work account's extra usage as its vendor usage cache carries it. */
+const EXTRA = { is_enabled: true, monthly_limit: 1_200_000, used_credits: 199_396, utilization: 16.6, currency: "USD" };
+
+/** The monthly spend an enterprise answer with `extra` states, and the records the read wrote. */
+function spendOf(extra: Limits["extra_usage"]) {
+  let update: ReturnType<typeof planUsageUpdate>;
+  const records = logRecordsDuring(() => {
+    update = planUsageUpdate({
+      subscription_type: "enterprise",
+      rate_limits_available: true,
+      rate_limits: { seven_day: null, extra_usage: extra },
+    });
+  });
+  if (update?.update.case !== "planUsage") throw new Error("expected a planUsage update");
+  return { spend: update.update.value.monthlySpend, records };
+}
+
+describe("planUsageUpdate's monthly spend", () => {
+  it("a capped spend carries the spent amount and the limit in minor units", () => {
+    // Act.
+    const { spend } = spendOf(EXTRA);
+
+    // Assert.
+    expect(spend?.spent).toMatchObject({ amountMinor: 199_396n, currency: "USD" });
+    expect(spend?.limit.case).toBe("capped");
+    if (spend?.limit.case !== "capped") return;
+    expect(spend.limit.value.limit).toMatchObject({ amountMinor: 1_200_000n, currency: "USD" });
+  });
+
+  it("a null monthly limit is an uncapped spend", () => {
+    // Act.
+    const { spend } = spendOf({ ...EXTRA, monthly_limit: null });
+
+    // Assert.
+    expect(spend?.spent?.amountMinor).toBe(199_396n);
+    expect(spend?.limit.case).toBe("uncapped");
+  });
+
+  it("a stated spend is recorded at INFO with the vendor's figures", () => {
+    // Act.
+    const { records } = spendOf(EXTRA);
+
+    // Assert.
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message: "the vendor stated the account's monthly spend",
+        context: expect.objectContaining({ used_credits: "199396", monthly_limit: "1200000", currency: "USD" }),
+      }),
+    );
+  });
+
+  it.each([
+    { name: "no extra usage stated", extra: undefined },
+    { name: "a null extra usage", extra: null },
+  ])("$name leaves the spend unset", ({ extra }) => {
+    // Act.
+    const { spend } = spendOf(extra);
+
+    // Assert.
+    expect(spend).toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: "extra usage disabled",
+      extra: { ...EXTRA, is_enabled: false },
+      message: "the vendor stated extra usage disabled for this account; no monthly spend is stated",
+    },
+    {
+      name: "a null spend",
+      extra: { ...EXTRA, used_credits: null },
+      message: "the vendor stated extra usage without a readable spend or currency; the monthly spend stays unset",
+    },
+    {
+      name: "a fractional spend",
+      extra: { ...EXTRA, used_credits: 1993.96 },
+      message: "the vendor stated extra usage without a readable spend or currency; the monthly spend stays unset",
+    },
+    {
+      name: "a negative limit",
+      extra: { ...EXTRA, monthly_limit: -1 },
+      message: "the vendor stated extra usage without a readable spend or currency; the monthly spend stays unset",
+    },
+    {
+      name: "a null currency",
+      extra: { ...EXTRA, currency: null },
+      message: "the vendor stated extra usage without a readable spend or currency; the monthly spend stays unset",
+    },
+    {
+      name: "no currency",
+      extra: { is_enabled: true, monthly_limit: 1_200_000, used_credits: 199_396, utilization: 16.6 },
+      message: "the vendor stated extra usage without a readable spend or currency; the monthly spend stays unset",
+    },
+  ])("$name leaves the spend unset and records why", ({ extra, message }) => {
+    // Act.
+    const { spend, records } = spendOf(extra);
+
+    // Assert.
+    expect(spend).toBeUndefined();
+    expect(records).toContainEqual(expect.objectContaining({ level: "info", message }));
   });
 });

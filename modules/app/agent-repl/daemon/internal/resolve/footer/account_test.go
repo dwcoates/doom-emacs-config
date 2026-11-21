@@ -238,6 +238,42 @@ func TestAPlanUsageReadIsKeptForItsRoot(t *testing.T) {
 	}
 }
 
+func TestAPlanUsageReadsSpendIsKeptForItsRoot(t *testing.T) {
+	// Arrange
+	kept := &keptUsage{}
+	h := newHarness(t, WithAccountUsageSink(kept.sink))
+	connected(h)
+	h.r.SetAccount(testWS, workRoot)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, ratelimittest.WithMonthlySpend(
+		ratelimittest.PlanUsage(nil, nil, nil), ratelimittest.CappedSpend(199_396, 1_200_000)))
+
+	// Assert
+	got := kept.last(t)
+	if got.ConfigDir != workRoot || got.MonthlySpend == nil || got.MonthlySpend.SpentMinor != 199_396 ||
+		got.MonthlySpend.LimitMinor == nil || *got.MonthlySpend.LimitMinor != 1_200_000 || got.MonthlySpend.Currency != "USD" {
+		t.Fatalf("kept = %+v, want the read's spend under the root", got)
+	}
+}
+
+func TestARestartedResolverDrawsTheKeptMonthlySpend(t *testing.T) {
+	// Arrange
+	limit := int64(1_200_000)
+	after := newHarness(t, WithAccountUsages([]wsm.AccountUsage{{ConfigDir: workRoot, ObservedAt: instant,
+		MonthlySpend: &wsm.MonthlySpendFigures{SpentMinor: 199_396, LimitMinor: &limit, Currency: "USD"}}}))
+
+	// Act
+	connected(after)
+	after.r.SetAccount(testWS, workRoot)
+
+	// Assert
+	spend := enduringOf(t, after).GetUsage().GetMonthlySpend()
+	if spend.GetSpent().GetAmountMinor() != 199_396 || spend.GetCapped().GetLimit().GetAmountMinor() != 1_200_000 {
+		t.Fatalf("restarted spend = %+v, want the kept $1,993.96 of $12,000", spend)
+	}
+}
+
 func TestAnUnboundWorkspacesUsageIsNotKept(t *testing.T) {
 	// Arrange
 	kept := &keptUsage{}

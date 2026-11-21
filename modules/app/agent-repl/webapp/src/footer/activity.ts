@@ -35,6 +35,8 @@
 import type {
   FooterActivityEnduring,
   FooterActivityEnduringUsage,
+  FooterMoney,
+  FooterMonthlySpend,
   FooterActivityTransient,
   FooterActivityTransientApiRestored,
   FooterActivityTransientCompactionConcluded,
@@ -727,7 +729,8 @@ export function drawGivesUpCountdown(
 
 /**
  * THE ENDURING LINE: the account's usage. Its allowances read "weekly 12% ·
- * resets in 3d | overage 4% · resets in 2h 5m". It is always true while it
+ * resets in 3d | overage 4% · resets in 2h 5m", and an account billed by its
+ * spend reads "$1,993.96 of $12,000 this month". It is always true while it
  * stands, so it carries no age.
  *
  * IT IS NEVER EMPTY (owner ruling, 2026-10-06): an account never observed
@@ -774,7 +777,8 @@ export const ENDURING_UNOBSERVED_TEXT = "usage not yet seen for this account";
  *
  * AN ALLOWANCE THE PRODUCER LEFT UNSET IS DRAWN ABSENT, never required: a
  * figure nobody reported is never drawn. The overage window is drawn beside
- * the other two when the vendor reported one, which most accounts never do.
+ * the other two when the vendor reported one, which most accounts never do,
+ * and the monthly spend when a plan-usage read stated one.
  *
  * THE STRIP DRAWS THE FIGURES LAST READ AND THE AGE OF THAT READING, never a
  * "usage unread" caveat (owner ruling of 2026-09-15).
@@ -857,16 +861,17 @@ export function paintPressure(figure: HTMLElement, fraction: number): void {
 
 /**
  * One drawable allowance, under the label the strip and the sheet both use:
- * a single window (overage) or the weekly element, which carries
- * the per-model weekly windows beside the account-wide one.
+ * a single window (overage), the weekly element, which carries the per-model
+ * weekly windows beside the account-wide one, or the monthly spend.
  */
 export type LabelledAllowance =
   | { readonly kind: "single"; readonly label: string; readonly value: FooterAllowance }
-  | { readonly kind: "weekly"; readonly label: "weekly"; readonly value: FooterWeeklyAllowance };
+  | { readonly kind: "weekly"; readonly label: "weekly"; readonly value: FooterWeeklyAllowance }
+  | { readonly kind: "spend"; readonly label: "monthly_spend"; readonly value: FooterMonthlySpend };
 
 /**
  * The windows the producer figured, ALWAYS in the one fixed order weekly,
- * overage (owner ruling, 2026-10-08): which window stands left of the blue
+ * overage, monthly spend (owner ruling, 2026-10-08): which window stands left of the blue
  * "|" and which right never changes. Nothing about a window's figure —
  * newsworthiness, status, a reset — reorders the line; `newsworthy` only
  * emphasizes.
@@ -881,6 +886,8 @@ export function orderedAllowances(
     present.push({ kind: "weekly", label: "weekly", value: u.weekly });
   if (u.overage !== undefined)
     present.push({ kind: "single", label: "overage", value: u.overage });
+  if (u.monthlySpend !== undefined)
+    present.push({ kind: "spend", label: "monthly_spend", value: u.monthlySpend });
   return present;
 }
 
@@ -900,11 +907,84 @@ export function drawLabelledAllowance(
       return drawFooterAllowance(allowance.value, allowance.label, deps, at);
     case "weekly":
       return drawFooterWeeklyAllowance(allowance.value, deps, at);
+    case "spend":
+      return drawFooterMonthlySpend(allowance.value, at);
     default: {
       const other: { kind: string } = allowance;
       return unreachableArm(path, other.kind);
     }
   }
+}
+
+/**
+ * The space between the spent figure and the words after it: a NO-BREAK
+ * space, because the enduring line is an inline flex box and an ordinary space
+ * leading the text after the figure is collapsed away (the same reason
+ * `FOOTER_RATE_SEPARATOR_GAP` is one).
+ */
+export const MONTHLY_SPEND_GAP = "\u00a0";
+
+/**
+ * The account's month-to-date spend: "$1,993.96 of $12,000 this month", or
+ * "$1,993.96 this month" with no monthly limit. The vendor states no
+ * billing-period reset, so none is drawn and the element never lapses.
+ *
+ * A CAPPED SPENT FIGURE WEARS THE PERCENT GRADIENT, driven by the daemon's
+ * spent / limit (`utilization`) through the one path every footer percentage
+ * takes (`paintPressure`); the limit and the words stay the line's color. An
+ * uncapped spend has no fullness to paint.
+ */
+export function drawFooterMonthlySpend(u: FooterMonthlySpend, path: string): HTMLElement {
+  const cell = document.createElement("span");
+  cell.className = "footer-allowance footer-monthly-spend";
+  cell.setAttribute("data-allowance", "monthly_spend");
+  const spent = document.createElement("span");
+  spent.className = "footer-monthly-spent";
+  spent.setAttribute("data-datum", "spent");
+  spent.textContent = formatMoney(requireMessage(u.spent, `${path}.spent`), `${path}.spent`);
+  const limit = requireCase(u.limit, `${path}.limit`);
+  cell.setAttribute("data-limit", limit.case);
+  switch (limit.case) {
+    case "capped": {
+      const cap = formatMoney(requireMessage(limit.value.limit, `${path}.capped.limit`), `${path}.capped.limit`);
+      paintPressure(spent, limit.value.utilization);
+      cell.append(spent, `${MONTHLY_SPEND_GAP}of ${cap} this month`);
+      break;
+    }
+    case "uncapped":
+      cell.append(spent, `${MONTHLY_SPEND_GAP}this month`);
+      break;
+    default: {
+      const other: { case: string } = limit;
+      return unreachableArm(`${path}.limit`, other.case);
+    }
+  }
+  return cell;
+}
+
+/**
+ * An amount of money as the footer draws it: the currency's major unit, with
+ * the minor digits only when the amount has any, so 1_200_000 USD cents reads
+ * "$12,000" and 199_396 reads "$1,993.96". A currency code the runtime cannot
+ * name is refused at PATH, never drawn.
+ */
+export function formatMoney(m: FooterMoney, path: string): string {
+  let digits: number;
+  try {
+    digits = new Intl.NumberFormat("en-US", { style: "currency", currency: m.currency })
+      .resolvedOptions().maximumFractionDigits ?? 0;
+  } catch (err) {
+    throw new MalformedView(`${path}.currency`, `${JSON.stringify(m.currency)} is not a currency: ${String(err)}`);
+  }
+  const scale = 10n ** BigInt(digits);
+  const whole = m.amountMinor % scale === 0n;
+  const amount = Number(m.amountMinor) / Number(scale);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: m.currency,
+    minimumFractionDigits: whole ? 0 : digits,
+    maximumFractionDigits: whole ? 0 : digits,
+  }).format(amount);
 }
 
 // ---- the kinds' lines -------------------------------------------------------
