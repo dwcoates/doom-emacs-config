@@ -1,6 +1,10 @@
 package prompts
 
-import "testing"
+import (
+	"testing"
+
+	"agent-repld/internal/dlog"
+)
 
 func TestStripSentinelsRemovesTheSpanAndTheWhitespaceItLeaves(t *testing.T) {
 	tests := []struct {
@@ -137,5 +141,44 @@ func TestStripSentinelsKeepsTheUserTextOfAMixedPrompt(t *testing.T) {
 	}
 	if got != "fix the bug in status.el" {
 		t.Fatalf("StripSentinels = %q, want the user text alone", got)
+	}
+}
+
+func TestSentinelStripperDrawsABalancedPromptStrippedAndRecordsNothing(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	strip := SentinelStripper(log)
+
+	// Act
+	got := strip("a " + Wrap("daemon note") + " b")
+
+	// Assert
+	if got != "a b" {
+		t.Fatalf("drawn = %q, want %q", got, "a b")
+	}
+	if records := log.Records(); len(records) != 0 {
+		t.Fatalf("records = %+v, want none", records)
+	}
+}
+
+func TestSentinelStripperDrawsAnUnbalancedPromptUnstrippedAndRecordsIt(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	strip := SentinelStripper(log)
+	text := "a" + MetaOpen + "b"
+
+	// Act
+	got := strip(text)
+
+	// Assert: the text is drawn as it stands, and the warning names the cause.
+	if got != text {
+		t.Fatalf("drawn = %q, want the text unstripped %q", got, text)
+	}
+	r, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "warn", Operation: "daemon.cmd.strip_sentinels"})
+	if !ok {
+		t.Fatalf("records = %+v, want the unbalanced prompt's warning", log.Records())
+	}
+	if r.Context["error"] == nil || r.Context["error"] == "" {
+		t.Fatalf("warning context = %+v, want the parse error", r.Context)
 	}
 }

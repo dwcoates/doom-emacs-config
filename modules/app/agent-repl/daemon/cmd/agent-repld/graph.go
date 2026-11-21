@@ -474,7 +474,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The metaprompt sentinels are stripped from DRAWN text only; the record
 	// keeps the full text. Both the feed resolver and the queue's mirror draw
 	// prompt rows, so both take the same one implementation.
-	stripSentinels := sentinelStripper(log)
+	stripSentinels := prompts.SentinelStripper(log)
 	// THE IMAGE ORIGIN AND THE RESOLVER ARE ONE WIRING. A path becomes
 	// servable only by the feed resolver drawing a record that referenced it,
 	// so the registrar the resolver holds IS the origin's own Register: there
@@ -2345,23 +2345,6 @@ func (h hostSessionFacts) StandingGate(ws ids.WorkspaceID) (server.HostGateKind,
 		return server.HostGateColdGate, true
 	}
 	return 0, false
-}
-
-// sentinelStripper adapts prompts.StripSentinels to the resolvers' drawing
-// seam. An UNBALANCED marker is a producer bug: it is recorded at WARNING and
-// the text is drawn as it stands, because losing the prompt row is worse than
-// drawing a marker the reader can see and report.
-func sentinelStripper(log dlog.Logger) func(string) string {
-	return func(text string) string {
-		drawn, err := prompts.StripSentinels(text)
-		if err != nil {
-			log.Warn("daemon.cmd.strip_sentinels",
-				"a prompt's injected spans are unbalanced; it is drawn unstripped",
-				dlog.Context{"error": err.Error()})
-			return text
-		}
-		return drawn
-	}
 }
 
 // DeployStampEnv overrides the daemon's source-revision stamp, which the
