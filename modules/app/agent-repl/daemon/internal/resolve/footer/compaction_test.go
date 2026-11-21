@@ -1110,25 +1110,58 @@ func TestAPhaseOnTheSessionStreamNamesItsSpendAsTheAnswersDoes(t *testing.T) {
 	}
 }
 
-func TestASpendWithNoGateStandingIsRecordedAndFailsHard(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	defer func() {
-		// Assert
-		if recover() == nil {
-			t.Fatal("a spend with no gate standing did not fail hard")
-		}
-		errs := recordsOf(h.log.Records(), "daemon.footer.compaction_spend_without_gate")
-		if len(errs) != 1 || errs[0].Level != dlog.LevelError ||
-			errs[0].Context["summarizer_model"] != "claude-sonnet-5" || errs[0].Context["gate_standing"] != false {
-			t.Fatalf("records = %+v, want one ERROR naming the summarizer and the absent gate", errs)
-		}
-	}()
+func TestASpendWithNoGateStanding(t *testing.T) {
+	// The owner's ruling of 2026-11-21: the violation is an ERROR record,
+	// never a daemon crash; the line names the spend without the gate's color.
+	tests := []struct {
+		name   string
+		assert func(t *testing.T, h *harness)
+	}{
+		{
+			name: "is recorded at ERROR naming the summarizer and the absent gate",
+			assert: func(t *testing.T, h *harness) {
+				errs := recordsOf(h.log.Records(), "daemon.footer.compaction_spend_without_gate")
+				if len(errs) != 1 || errs[0].Level != dlog.LevelError ||
+					errs[0].Context["summarizer_model"] != "claude-sonnet-5" || errs[0].Context["gate_standing"] != false {
+					t.Fatalf("records = %+v, want one ERROR naming the summarizer and the absent gate", errs)
+				}
+			},
+		},
+		{
+			name: "draws the spend in the line's text",
+			assert: func(t *testing.T, h *harness) {
+				got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction().GetText()
+				want := "the summary is written; the context is cut · claude-sonnet-5 spent 104.3k tokens"
+				if got != want {
+					t.Fatalf("line = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			name: "colors no figure",
+			assert: func(t *testing.T, h *harness) {
+				line := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction()
+				if line.GetParts() != nil {
+					t.Fatalf("parts = %v, want none", partsOf(line.GetParts()))
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
 
-	// Act
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
-		Progress: spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, "claude-sonnet-5", 104_300)})
+			// Act
+			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
+				spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, "claude-sonnet-5", 104_300)))
+
+			// Assert
+			tt.assert(t, h)
+		})
+	}
 }
 
 func TestAColdGateAnswerSettingNeitherLineIsRecordedAndFailsHard(t *testing.T) {

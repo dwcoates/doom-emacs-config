@@ -1093,10 +1093,10 @@ func unboundErrors(log *dlog.TestSurfaces, operation string) int {
 	return n
 }
 
-// TestAFrameForAnUnboundWorkspaceFailsHard pins that the resolver asserts
-// rather than serves a view for a workspace it never bound: the violation is
-// recorded at ERROR, then the resolver panics.
-func TestAFrameForAnUnboundWorkspaceFailsHard(t *testing.T) {
+// TestAFrameForAnUnboundWorkspaceIsRecordedNotACrash pins the owner's ruling
+// of 2026-11-21: a frame for a workspace the resolver never bound is recorded
+// at ERROR and served on the global sink; it never crashes the daemon.
+func TestAFrameForAnUnboundWorkspaceIsRecordedNotACrash(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestSurfaces()
 	r, err := newResolver(testColors(), log, WithClock(newFakeClock()))
@@ -1112,14 +1112,17 @@ func TestAFrameForAnUnboundWorkspaceFailsHard(t *testing.T) {
 	}()
 
 	// Assert
-	if recovered == nil {
-		t.Fatal("OnLink on an unbound workspace did not panic")
+	if recovered != nil {
+		t.Fatalf("OnLink on an unbound workspace panicked: %v", recovered)
 	}
 	if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != 1 {
 		t.Fatalf("unbound-workspace ERROR records = %d, want 1", got)
 	}
-	if rec := log.Records()[len(log.Records())-1]; rec.Context["invariant_violation"] == nil || rec.Context["workspace_id"] != "ws-unbound" {
-		t.Fatalf("record = %+v, want the invariant violation named for ws-unbound", rec)
+	for _, rec := range log.Records() {
+		if rec.Operation == "daemon.footer.unbound_workspace" &&
+			(rec.Context["invariant_violation"] == nil || rec.Context["workspace_id"] != "ws-unbound") {
+			t.Fatalf("record = %+v, want the invariant violation named for ws-unbound", rec)
+		}
 	}
 }
 
@@ -1396,12 +1399,12 @@ func TestARefusedSubmissionLeavesNoClock(t *testing.T) {
 
 func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
 	tests := []struct {
-		name       string
-		resolve    func(ids.WorkspaceID) (string, error)
-		idLookup   dlog.WorkspaceIDLookup
-		wantErrors int
-		wantPanic  bool
-		wantDir    string
+		name        string
+		resolve     func(ids.WorkspaceID) (string, error)
+		idLookup    dlog.WorkspaceIDLookup
+		wantErrors  int
+		wantUnbound bool
+		wantDir     string
 	}{
 		{name: "a registered workspace's directory binds it, with no violation",
 			resolve: func(ids.WorkspaceID) (string, error) { return "/tmp/ws-closed", nil }, wantDir: "/tmp/ws-closed"},
@@ -1409,7 +1412,7 @@ func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
 			resolve:  func(ids.WorkspaceID) (string, error) { return "/tmp/ws-gone", nil },
 			idLookup: func(string) (string, error) { return "", dlog.ErrWorkspaceDirGone }, wantDir: "/tmp/ws-gone"},
 		{name: "a workspace the registry cannot answer is still the violation",
-			resolve: func(ids.WorkspaceID) (string, error) { return "", errors.New("no such workspace") }, wantErrors: 1, wantPanic: true},
+			resolve: func(ids.WorkspaceID) (string, error) { return "", errors.New("no such workspace") }, wantErrors: 1, wantUnbound: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1431,16 +1434,18 @@ func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
 			}()
 
 			// Assert
-			if (recovered != nil) != tt.wantPanic {
-				t.Fatalf("panicked = %v, want %v", recovered, tt.wantPanic)
+			if recovered != nil {
+				t.Fatalf("OnLink panicked: %v", recovered)
 			}
 			if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != tt.wantErrors {
 				t.Fatalf("unbound-workspace ERROR records = %d, want %d", got, tt.wantErrors)
 			}
-			if tt.wantPanic {
-				// The panic left r.mu held, and an unbound workspace binds no directory.
-				if rec := log.Records()[len(log.Records())-1]; rec.Context["cause"] == nil {
-					t.Fatalf("record = %+v, want the registry's cause", rec)
+			if tt.wantUnbound {
+				// An unbound workspace binds no directory; its record names the registry's cause.
+				for _, rec := range log.Records() {
+					if rec.Operation == "daemon.footer.unbound_workspace" && rec.Context["cause"] == nil {
+						t.Fatalf("record = %+v, want the registry's cause", rec)
+					}
 				}
 				return
 			}

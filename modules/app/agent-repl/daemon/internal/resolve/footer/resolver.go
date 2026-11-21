@@ -210,8 +210,14 @@ func (r *resolver) RetryStanding(ws ids.WorkspaceID) bool {
 // (resolveUnboundLocked), so a frame for one that is neither is an invariant
 // violation: it is recorded at ERROR, with the registry's cause,
 // on the global sink, the only one that exists before a directory is known,
-// and the resolver panics rather than serve a view for a workspace the daemon
-// never registered with it.
+// and the frame is served on that sink.
+//
+// IT DOES NOT CRASH THE DAEMON (owner's ruling, 2026-11-21). A panic here
+// ran on whatever goroutine sent the frame and took every workspace down:
+// the boot's revival of a queued prompt for a workspace whose directory was
+// gone raised its recorded cold gate here, and the daemon crash-looped 32
+// times. The ERROR record is the violation's loud surface; the frame is
+// logged on the global sink, tagged with the workspace.
 func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 	if s.log != nil {
 		return s.log
@@ -220,14 +226,17 @@ func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 	if cause == nil {
 		return log
 	}
-	r.log.Global().Error("daemon.footer.unbound_workspace", "a footer record arrived for a workspace whose directory was never bound",
-		dlog.Context{
-			"workspace_id":        string(ws),
-			"invariant_violation": "footer resolver frame for a workspace with no bound directory",
-			"remediation":         "call SetWorkspaceDir at registration",
-			"cause":               cause.Error(),
-		})
-	panic(fmt.Sprintf("footer: a frame for workspace %q, whose directory was never bound: %v", ws, cause))
+	if !s.unboundRecorded {
+		s.unboundRecorded = true
+		r.log.Global().Error("daemon.footer.unbound_workspace", "a footer record arrived for a workspace whose directory was never bound",
+			dlog.Context{
+				"workspace_id":        string(ws),
+				"invariant_violation": "footer resolver frame for a workspace with no bound directory",
+				"remediation":         "call SetWorkspaceDir at registration",
+				"cause":               cause.Error(),
+			})
+	}
+	return r.log.Global().With(dlog.Context{"workspace_id": string(ws)})
 }
 
 // resolveUnboundLocked resolves the logger of a workspace the footer was never
