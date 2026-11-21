@@ -121,7 +121,7 @@ test_build_caches_are_skipped() {
 
 test_build_output_is_skipped() {
     local c=build ok=0
-    file $c notifier/.build/debug/output-file-map.json "$FAKE_HOME"
+    file $c launcher/.build/debug/output-file-map.json "$FAKE_HOME"
     act $c
     [ "$RUN_RC" -eq 0 ] && ok=1
     report "SwiftPM's .build output is skipped" $c $ok

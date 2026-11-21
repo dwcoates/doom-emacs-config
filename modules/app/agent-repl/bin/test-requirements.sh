@@ -128,7 +128,7 @@ test_the_real_manifests_honor_the_contract() {
   OUT="$(env -i HOME="$TMP" PATH="/usr/bin:/bin" AGENT_REPL_REQUIREMENTS_PLATFORM=darwin /bin/bash "$RUNNER" list 2>&1)"
   RC=$?
   set -e
-  if [ "$RC" -eq 0 ] && grep -q '^service-notifier	' <<<"$OUT" && grep -q '^service-shim-store	' <<<"$OUT"; then
+  if [ "$RC" -eq 0 ] && grep -q '^service-launcher	' <<<"$OUT" && grep -q '^service-shim-store	' <<<"$OUT"; then
     pass "the real manifests load, validate and list"
   else
     fail "the real manifests" "rc=$RC" "$OUT"
@@ -165,12 +165,12 @@ test_the_real_manifests_load_on_linux_with_every_service() {
 }
 
 # A service is one entry rendered for either service manager, so none may be
-# left to one platform. The one exception is the notifier: Zettel.app is a
+# left to one platform. The one exception is the launcher: Zettel.app is a
 # macOS app, and Linux's banners are notify-send's (services/AGENTS.md).
 test_every_real_service_runs_on_macos_and_linux() {
   local bad
   bad="$(find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0 \
-    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | select(.id != "service-notifier") | select((.platforms | index("darwin") and index("linux")) | not) | .id')"
+    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | select(.id != "service-launcher") | select((.platforms | index("darwin") and index("linux")) | not) | .id')"
   if [ -z "$bad" ]; then pass "every real service runs on macOS and Linux"; else fail "services left to one platform:" "$bad"; fi
 }
 
@@ -1767,7 +1767,7 @@ test_uninstall_removes_a_command_services_files_and_leaves_its_command() {
 }
 
 # A built service whose build installs its program outside the cache (the
-# notifier's app bundle) runs from the entry's `program`.
+# launcher's app bundle) runs from the entry's `program`.
 PROGRAM_SVC_ENTRY='{"id": "svc", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "com.example.svc", "args": ["--resident"], "log": {"stdout": "svc.out.log", "stderr": "svc.err.log"}, "build_target": "svc", "binary": "Svc.app/Contents/MacOS/Svc", "program": "~/Applications/Svc.app/Contents/MacOS/Svc"}'
 
 program_service_case() {

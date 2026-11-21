@@ -14,7 +14,7 @@
     "e2e/requirements.json",
     "lisp/requirements.json",
     "metrics/requirements.json",
-    "notifier/requirements.json"
+    "launcher/requirements.json"
   ],
   "requirements": [
     {

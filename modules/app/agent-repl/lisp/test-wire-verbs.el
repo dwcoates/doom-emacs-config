@@ -1572,7 +1572,7 @@ wire."
                     ("DEPLOY_COMPONENT_WEBAPP" :webapp) ("DEPLOY_COMPONENT_STORE" :store)
                     ("DEPLOY_COMPONENT_SIDECAR" :sidecar) ("DEPLOY_COMPONENT_ELISP" :elisp)
                     ("DEPLOY_COMPONENT_ZETTEL" :zettel) ("DEPLOY_COMPONENT_TESTS" :tests)
-                    ("DEPLOY_COMPONENT_NOTIFIER" :notifier)))
+                    ("DEPLOY_COMPONENT_LAUNCHER" :launcher)))
       (should (equal (plist-get
                       (car (plist-get
                             (plist-get (agent-repl-test-wire-verbs--deploy

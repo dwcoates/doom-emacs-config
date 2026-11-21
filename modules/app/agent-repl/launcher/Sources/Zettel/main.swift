@@ -1,23 +1,34 @@
-// Zettel.app: agent-repl's desktop notifier. A background app (no window, no
-// Dock icon) that posts the daemon's banners under its own name and icon, and
-// brings Emacs forward when a banner is clicked or the app is opened by hand.
-// Everything it does lives in ZettelNotifier; this file is the AppKit shell.
+// Zettel.app, the launcher. A background app (no window, no Dock icon) that
+// opens Emacs, and with it the backend, when it is opened by hand, and posts
+// every desktop banner a daemon hands it under its own name and icon.
+// Everything it does lives in ZettelLauncher; this file is the AppKit shell.
 import AppKit
 import UserNotifications
-import ZettelNotifier
+import ZettelLauncher
 
 /// The application whose window a click or an open by hand brings forward.
 let emacsBundleID = "org.gnu.Emacs"
 
+/// The launcher's launchd agent, which an open by hand starts when it is
+/// not running.
+let launcherLabel = "app.zettel.launcher"
+
+/// The name the launcher's socket holder holds its socket under
+/// (launcher/requirements.json, socket-holder-launcher).
+let heldSocketName = "launcher"
+
 enum Op {
-    static let app = "notifier.app"
+    static let app = "launcher.app"
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let options: Options
     let log: FileLogger
-    var relay: Relay!
+    var clicks: ClickReporter!
     var watcher: AdvertisementWatcher!
+    var server: BannerServer!
+    /// The one-instance lock, held for the life of the process.
+    var lock: Int32 = -1
 
     init(options: Options, log: FileLogger) {
         self.options = options
@@ -32,6 +43,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         log.info(Op.app, "Zettel started", ["resident": options.resident, "state_dir": options.stateDir.path])
+        // OPENED BY HAND, AND NO LAUNCHER RUNS: opening the bundle while the
+        // resident launcher runs reopens that one instead
+        // (applicationShouldHandleReopen), so this copy opens Emacs, starts
+        // the resident service, and exits. Only launchd's copy ever serves.
+        guard options.resident else {
+            bringEmacsForward(because: "Zettel was opened by hand")
+            startResidentLauncher()
+            NSApp.terminate(nil)
+            return
+        }
+        do {
+            lock = try takeInstanceLock(at: options.runDir.appendingPathComponent("launcher.lock"))
+        } catch {
+            log.error(Op.app, "another launcher already serves; this one exits", ["cause": "\(error)"])
+            NSApp.terminate(nil)
+            return
+        }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { [log] granted, error in
             if let error {
                 log.error(Op.app, "asking for permission to notify failed", ["cause": "\(error)"])
@@ -41,19 +69,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 log.info(Op.app, "Zettel is allowed to notify", [:])
             }
         }
-        let build: String
+        let listener: Int32
         do {
-            build = try executableBuild(at: Bundle.main.executableURL!)
+            listener = try takeHeldSocket(control: options.holder, name: heldSocketName)
         } catch {
-            log.error(Op.app, "could not hash this app's own executable to report its build; Zettel exits", ["cause": "\(error)"])
+            log.error(Op.app, "could not take the launcher's socket from its holder; Zettel exits", ["holder": options.holder, "cause": "\(error)"])
             NSApp.terminate(nil)
             return
         }
-        relay = Relay(
-            dial: { ConnectDaemon(address: $0) }, center: NotificationCenterPoster(), log: log, pid: getpid(), build: build,
-            superseded: { DispatchQueue.main.async { NSApp.terminate(nil) } })
-        watcher = AdvertisementWatcher(stateDir: options.stateDir) { [relay] advertisement in
-            Task { await relay!.advertised(advertisement) }
+        server = BannerServer(listener: listener, exchange: BannerExchange(center: NotificationCenterPoster(), log: log), log: log)
+        server.start()
+        do {
+            let build = try executableBuild(at: Bundle.main.executableURL!)
+            try writeBuildReport(dir: options.runDir, pid: getpid(), build: build)
+        } catch {
+            log.error(Op.app, "could not report this launcher's build; a deploy restarts it as stale", ["run_dir": options.runDir.path, "cause": "\(error)"])
+        }
+        clicks = ClickReporter(dial: { ConnectDaemon(address: $0) }, log: log)
+        watcher = AdvertisementWatcher(stateDir: options.stateDir) { [clicks] advertisement in
+            Task { await clicks!.advertised(advertisement) }
         }
         do {
             try watcher.start()
@@ -62,8 +96,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             NSApp.terminate(nil)
             return
         }
-        if !options.resident {
-            bringEmacsForward(because: "Zettel was opened by hand")
+        log.info(Op.app, "the launcher serves banners on its held socket", ["holder": options.holder])
+    }
+
+    /// Starts the resident launcher's launchd agent (`launchctl kickstart`).
+    func startResidentLauncher() {
+        let kickstart = Process()
+        kickstart.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        kickstart.arguments = ["kickstart", "gui/\(getuid())/\(launcherLabel)"]
+        do {
+            try kickstart.run()
+            kickstart.waitUntilExit()
+        } catch {
+            log.error(Op.app, "could not start the resident launcher", ["label": launcherLabel, "cause": "\(error)"])
+            return
+        }
+        if kickstart.terminationStatus != 0 {
+            log.error(Op.app, "launchctl refused to start the resident launcher", ["label": launcherLabel, "status": kickstart.terminationStatus])
+        } else {
+            log.info(Op.app, "started the resident launcher", ["label": launcherLabel])
         }
     }
 
@@ -84,7 +135,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             log.error(Op.app, "a clicked banner carried no click token; it selects nothing", ["identifier": response.notification.request.identifier])
             return
         }
-        Task { await relay.clicked(token: token) }
+        guard let clicks else {
+            log.error(Op.app, "a banner was clicked while this launcher serves nothing; it selects nothing", ["resident": options.resident])
+            return
+        }
+        Task { await clicks.clicked(token: token) }
     }
 
     func userNotificationCenter(

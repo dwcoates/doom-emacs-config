@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# build-notifier.sh — build Zettel.app, agent-repl's macOS desktop notifier
-# (notifier/), into a complete, ad-hoc-signed bundle at OUT (default
+# build-launcher.sh — build Zettel.app, the launcher, which opens Emacs and posts
+# every macOS desktop banner (launcher/), into a complete, ad-hoc-signed bundle at OUT (default
 # ~/.cache/agent-repl/bin/Zettel.app), then, unless --no-install, install it
 # at ~/Applications/Zettel.app, register it with LaunchServices, and restart
-# its launchd agent (com.agentrepl.notifier) onto the new build.
+# its launchd agent (app.zettel.launcher) onto the new build.
 #
 # THE BUNDLE IS ASSEMBLED, NEVER COMMITTED: the executable is SwiftPM's
-# release build, the Info.plist is notifier/Bundle/Info.plist, and the icon is
+# release build, the Info.plist is launcher/Bundle/Info.plist, and the icon is
 # rendered from source by the ZettelIcon target at every size iconutil packs.
 #
 # INSTALLING REPLACES THE WHOLE BUNDLE BY RENAME, so a click on a banner never
@@ -14,7 +14,7 @@
 # the two are swapped by mv. ~/Applications is where Spotlight and Finder
 # find it.
 #
-# Usage: bin/build-notifier.sh [--out BUNDLE] [--no-install]
+# Usage: bin/build-launcher.sh [--out BUNDLE] [--no-install]
 #
 # Test seams: AGENT_REPL_APPLICATIONS_DIR (default ~/Applications),
 # AGENT_REPL_LAUNCHCTL (default launchctl, through lib-service.sh),
@@ -23,29 +23,29 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-NOTIFIER="$ROOT/notifier"
+LAUNCHER="$ROOT/launcher"
 OUT="${HOME}/.cache/agent-repl/bin/Zettel.app"
 INSTALL=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --out) OUT="$2"; shift 2 ;;
         --no-install) INSTALL=0; shift ;;
-        *) echo "build-notifier.sh: unknown argument $1" >&2; exit 2 ;;
+        *) echo "build-launcher.sh: unknown argument $1" >&2; exit 2 ;;
     esac
 done
 APPS="${AGENT_REPL_APPLICATIONS_DIR:-$HOME/Applications}"
 LSREGISTER="${AGENT_REPL_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
-LABEL="com.agentrepl.notifier"
+LABEL="app.zettel.launcher"
 
-echo "[build-notifier] building the release products..."
-( cd "$NOTIFIER" && swift build -c release --product Zettel && swift build -c release --product ZettelIcon )
-BIN="$(cd "$NOTIFIER" && swift build -c release --show-bin-path)"
+echo "[build-launcher] building the release products..."
+( cd "$LAUNCHER" && swift build -c release --product Zettel && swift build -c release --product ZettelIcon )
+BIN="$(cd "$LAUNCHER" && swift build -c release --show-bin-path)"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/zettel-bundle.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 STAGE="$WORK/Zettel.app"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources" "$WORK/AppIcon.iconset"
-cp "$NOTIFIER/Bundle/Info.plist" "$STAGE/Contents/Info.plist"
+cp "$LAUNCHER/Bundle/Info.plist" "$STAGE/Contents/Info.plist"
 cp "$BIN/Zettel" "$STAGE/Contents/MacOS/Zettel"
 for px in 16 32 128 256 512; do
     "$BIN/ZettelIcon" "$px" "$WORK/AppIcon.iconset/icon_${px}x${px}.png"
@@ -59,7 +59,7 @@ rm -rf "$OUT.new"
 cp -R "$STAGE" "$OUT.new"
 rm -rf "$OUT"
 mv "$OUT.new" "$OUT"
-echo "[build-notifier] built $OUT"
+echo "[build-launcher] built $OUT"
 
 [ "$INSTALL" -eq 1 ] || exit 0
 DEST="$APPS/Zettel.app"
@@ -70,12 +70,12 @@ cp -R "$OUT" "$DEST.new"
 mv "$DEST.new" "$DEST"
 rm -rf "$DEST.old"
 "$LSREGISTER" -f "$DEST"
-echo "[build-notifier] installed $DEST"
-# The notifier is macOS's alone, so its service manager is launchd's.
+echo "[build-launcher] installed $DEST"
+# The launcher is macOS's alone, so its service manager is launchd's.
 # shellcheck source=lib-service.sh
 . "$ROOT/bin/lib-service.sh"
 SERVICE_PLATFORM=darwin
 if service_held "$LABEL"; then
     service_restart "$LABEL"
-    echo "[build-notifier] restarted $LABEL onto the new build"
+    echo "[build-launcher] restarted $LABEL onto the new build"
 fi

@@ -2,7 +2,7 @@ import Foundation
 import UserNotifications
 import XCTest
 import ZettelProto
-@testable import ZettelNotifier
+@testable import ZettelLauncher
 
 /// The repository's agent-repl root, from this file's place in it.
 let agentReplRoot = URL(fileURLWithPath: #filePath)
@@ -50,15 +50,15 @@ final class LogTests: XCTestCase {
 
     func testALineCarriesEveryRequiredField() throws {
         // Act
-        let line = logLine(level: .error, operation: "notifier.x", message: "m", context: ["post": UInt64(7), "cause": "c"],
+        let line = logLine(level: .error, operation: "launcher.x", message: "m", context: ["post": UInt64(7), "cause": "c"],
                            at: Date(timeIntervalSince1970: 0), pid: 9, zone: TimeZone(identifier: "UTC")!)
 
         // Assert
         let object = try JSONSerialization.jsonObject(with: line) as! [String: Any]
-        XCTAssertEqual(object["runtime"] as? String, "notifier")
+        XCTAssertEqual(object["runtime"] as? String, "launcher")
         XCTAssertEqual(object["level"] as? String, "error")
         XCTAssertEqual(object["verbosity"] as? String, "normal")
-        XCTAssertEqual(object["operation"] as? String, "notifier.x")
+        XCTAssertEqual(object["operation"] as? String, "launcher.x")
         XCTAssertEqual(object["message"] as? String, "m")
         XCTAssertEqual(object["pid"] as? Int, 9)
         XCTAssertEqual(object["timestamp"] as? String, "1970-01-01T00:00:00.000000+00:00")
@@ -69,12 +69,12 @@ final class LogTests: XCTestCase {
 
     func testTheFileLoggerAppendsOneLinePerRecord() throws {
         // Arrange
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("notifier.log")
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("launcher.log")
         let logger = FileLogger(path: path)
 
         // Act
-        logger.info("notifier.x", "one")
-        logger.info("notifier.x", "two")
+        logger.info("launcher.x", "one")
+        logger.info("launcher.x", "two")
 
         // Assert
         let lines = try String(contentsOf: path, encoding: .utf8).split(separator: "\n")
@@ -85,11 +85,11 @@ final class LogTests: XCTestCase {
     func testTheFileLoggerRotatesBeforeCrossingItsCap() throws {
         // Arrange
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let path = dir.appendingPathComponent("notifier.log")
+        let path = dir.appendingPathComponent("launcher.log")
         let logger = FileLogger(path: path, cap: 300)
 
         // Act
-        for n in 0..<12 { logger.info("notifier.x", "record \(n)") }
+        for n in 0..<12 { logger.info("launcher.x", "record \(n)") }
 
         // Assert
         let current = try String(contentsOf: path, encoding: .utf8)
@@ -164,33 +164,6 @@ final class DaemonAddressTests: XCTestCase {
 }
 
 final class ConnectTests: XCTestCase {
-    func testAnEnvelopeRoundTrips() {
-        // Arrange
-        var buffer = envelope(Data([1, 2, 3])) + envelope(Data("{}".utf8), flags: 0x02)
-
-        // Act
-        let frames = takeEnvelopes(&buffer)
-
-        // Assert
-        XCTAssertEqual(frames, [.message(Data([1, 2, 3])), .end(Data("{}".utf8))])
-        XCTAssertTrue(buffer.isEmpty)
-    }
-
-    func testAPartialEnvelopeWaitsForMoreBytes() {
-        // Arrange
-        let whole = envelope(Data([9, 9, 9, 9]))
-        var buffer = whole.prefix(6)
-
-        // Act
-        let none = takeEnvelopes(&buffer)
-        buffer.append(whole.suffix(from: 6))
-        let one = takeEnvelopes(&buffer)
-
-        // Assert
-        XCTAssertEqual(none, [])
-        XCTAssertEqual(one, [.message(Data([9, 9, 9, 9]))])
-    }
-
     func testTheProtocolsErrorIsReadBareOrUnderError() {
         XCTAssertEqual(connectError(fromJSON: Data(#"{"code":"invalid_argument","message":"no"}"#.utf8)),
                        ConnectError(code: "invalid_argument", message: "no"))
@@ -204,11 +177,18 @@ final class ConnectTests: XCTestCase {
 final class OptionsTests: XCTestCase {
     let home = URL(fileURLWithPath: "/Users/someone")
 
-    func testTheDefaultsAreTheDaemonsStateRootAndTheCacheLog() throws {
+    func testTheDefaultsAreTheDaemonsStateRootTheCacheLogTheHeldSocketAndTheRunDirectory() throws {
         let options = try parseOptions([], environment: [:], home: home)
         XCTAssertEqual(options, Options(stateDir: URL(fileURLWithPath: "/Users/someone/.claude-emacs"),
-                                        logPath: URL(fileURLWithPath: "/Users/someone/.cache/agent-repl/log/notifier.log"),
+                                        logPath: URL(fileURLWithPath: "/Users/someone/.cache/agent-repl/log/launcher.log"),
+                                        holder: "/Users/someone/.cache/agent-repl/sock/launcher-holder.sock",
+                                        runDir: URL(fileURLWithPath: "/Users/someone/.cache/agent-repl/run"),
                                         resident: false))
+    }
+
+    func testTheRunDirectoryFollowsTheServicesEnvironment() throws {
+        let options = try parseOptions([], environment: ["AGENT_REPL_LOCK_DIR": "/tmp/run"], home: home)
+        XCTAssertEqual(options.runDir, URL(fileURLWithPath: "/tmp/run"))
     }
 
     func testTheStateRootFollowsTheDaemonsEnvironment() throws {
@@ -217,8 +197,10 @@ final class OptionsTests: XCTestCase {
     }
 
     func testEveryFlagIsRead() throws {
-        let options = try parseOptions(["--resident", "--state-dir", "/s", "--log", "/l", "-psn_0_1"], environment: [:], home: home)
-        XCTAssertEqual(options, Options(stateDir: URL(fileURLWithPath: "/s"), logPath: URL(fileURLWithPath: "/l"), resident: true))
+        let options = try parseOptions(["--resident", "--state-dir", "/s", "--log", "/l", "--holder", "/h.sock", "--run-dir", "/r", "-psn_0_1"],
+                                       environment: [:], home: home)
+        XCTAssertEqual(options, Options(stateDir: URL(fileURLWithPath: "/s"), logPath: URL(fileURLWithPath: "/l"), holder: "/h.sock",
+                                        runDir: URL(fileURLWithPath: "/r"), resident: true))
     }
 
     func testThePermissionModesAreRead() throws {
@@ -253,7 +235,7 @@ final class NotificationCenterTests: XCTestCase {
 
     func testABannersContentCarriesItsTextAndClickTokenAndNoSound() throws {
         // Arrange
-        let banner = bannerFrame(post: 1).banner
+        let banner = bannerRequest().banner
 
         // Act
         let content = try notificationContent(for: banner)

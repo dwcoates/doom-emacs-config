@@ -1,5 +1,6 @@
 import Foundation
-import ZettelNotifier
+import ZettelLauncher
+import SwiftProtobuf
 import ZettelProto
 
 /// One record a RecordingLogger took.
@@ -34,42 +35,17 @@ final class RecordingLogger: Logger, @unchecked Sendable {
     }
 }
 
-/// A Daemon whose banner stream the test drives frame by frame, and which
-/// records every report.
+/// A Daemon that records every click it is reported and answers each with
+/// its scripted answer.
 final class FakeDaemon: Daemon, @unchecked Sendable {
     let address: String
-    let signals: Signals
     private let lock = NSLock()
-    private var continuation: AsyncThrowingStream<Agentrepl_V1_WatchDesktopBannersResponse, Error>.Continuation?
-    private var opened: [Agentrepl_V1_WatchDesktopBannersRequest] = []
-    private var posted: [Agentrepl_V1_ReportDesktopBannerPostedRequest] = []
     private var clicked: [Agentrepl_V1_ReportDesktopBannerClickedRequest] = []
-    var postedAnswer = Agentrepl_V1_ReportDesktopBannerPostedResponse.with { $0.success = .init() }
     var clickAnswer = Agentrepl_V1_ReportDesktopBannerClickedResponse.with { $0.success = .init() }
     var clickError: Error?
 
-    init(address: String, signals: Signals) {
+    init(address: String) {
         self.address = address
-        self.signals = signals
-    }
-
-    func watchBanners(_ request: Agentrepl_V1_WatchDesktopBannersRequest) -> AsyncThrowingStream<Agentrepl_V1_WatchDesktopBannersResponse, Error> {
-        let (stream, continuation) = AsyncThrowingStream<Agentrepl_V1_WatchDesktopBannersResponse, Error>.makeStream()
-        lock.lock()
-        opened.append(request)
-        self.continuation = continuation
-        lock.unlock()
-        Task { [signals, address] in await signals.raise("opened \(address)") }
-        return stream
-    }
-
-    func reportPosted(_ request: Agentrepl_V1_ReportDesktopBannerPostedRequest) async throws -> Agentrepl_V1_ReportDesktopBannerPostedResponse {
-        let answer = lock.withLock {
-            posted.append(request)
-            return postedAnswer
-        }
-        Task { [signals] in await signals.raise("reported") }
-        return answer
     }
 
     func reportClicked(_ request: Agentrepl_V1_ReportDesktopBannerClickedRequest) async throws -> Agentrepl_V1_ReportDesktopBannerClickedResponse {
@@ -77,33 +53,15 @@ final class FakeDaemon: Daemon, @unchecked Sendable {
             clicked.append(request)
             return (clickAnswer, clickError)
         }
-        Task { [signals, address] in await signals.raise("clicked \(address)") }
         if let failure { throw failure }
         return answer
     }
 
-    func send(_ frame: Agentrepl_V1_WatchDesktopBannersResponse) {
-        lock.lock()
-        let continuation = self.continuation
-        lock.unlock()
-        continuation?.yield(frame)
-    }
-
-    func finish(throwing error: Error? = nil) {
-        lock.lock()
-        let continuation = self.continuation
-        lock.unlock()
-        continuation?.finish(throwing: error)
-    }
-
-    var opens: [Agentrepl_V1_WatchDesktopBannersRequest] { lock.lock(); defer { lock.unlock() }; return opened }
-    var posts: [Agentrepl_V1_ReportDesktopBannerPostedRequest] { lock.lock(); defer { lock.unlock() }; return posted }
     var clicks: [Agentrepl_V1_ReportDesktopBannerClickedRequest] { lock.lock(); defer { lock.unlock() }; return clicked }
 }
 
 /// Dials one FakeDaemon per address, the same one every time.
 final class FakeDialer: @unchecked Sendable {
-    let signals = Signals()
     private let lock = NSLock()
     private var daemons: [String: FakeDaemon] = [:]
     private(set) var dials: [String] = []
@@ -112,7 +70,7 @@ final class FakeDialer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let d = daemons[address] { return d }
-        let d = FakeDaemon(address: address, signals: signals)
+        let d = FakeDaemon(address: address)
         daemons[address] = d
         return d
     }
@@ -166,15 +124,51 @@ actor Signals {
     }
 }
 
-func bannerFrame(post: UInt64, group: String = "agent-repl:ws1", workspace: String = "ws1") -> Agentrepl_V1_WatchDesktopBannersResponse {
+/// A banner request as a daemon sends it.
+func bannerRequest(group: String = "agent-repl:ws1", workspace: String = "ws1") -> Launcher_V1_PostBannerRequest {
     .with {
         $0.banner = .with { b in
-            b.postID.value = post
             b.title.text = "✅ ws"
             b.body.text = "done"
             b.group.id = group
             b.click.workspace.id = workspace
             b.click.workspace.dir = "/work/\(workspace)"
         }
+        $0.daemon.pid = 4242
     }
+}
+
+/// A ByteChannel over two buffers: what the launcher reads, and what it
+/// wrote.
+final class MemoryChannel: ByteChannel, @unchecked Sendable {
+    private let lock = NSLock()
+    private var input: Data
+    private var output = Data()
+    var writeError: Error?
+
+    init(_ input: Data) { self.input = input }
+
+    func read(upTo count: Int) throws -> Data {
+        lock.withLock {
+            let chunk = input.prefix(count)
+            input = input.dropFirst(chunk.count)
+            return Data(chunk)
+        }
+    }
+
+    func write(_ data: Data) throws {
+        try lock.withLock {
+            if let writeError { throw writeError }
+            output.append(data)
+        }
+    }
+
+    var written: Data { lock.withLock { output } }
+}
+
+/// The length-delimited bytes of one message.
+func delimited(_ message: SwiftProtobuf.Message) -> Data {
+    let channel = MemoryChannel(Data())
+    try! writeDelimited(message, to: channel)
+    return channel.written
 }

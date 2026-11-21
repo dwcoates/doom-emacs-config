@@ -267,9 +267,9 @@ deploy_stamp_system_paths() {
         sockethold)          printf '%s %s' "$(deploy_stamp_prefix agent-shim/sockethold "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
         zettel)              printf '%s %s %s' "$(deploy_stamp_prefix zettel "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
         agent-repl-tests)    printf '%s %s %s' "$(deploy_stamp_prefix testservice "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
-        # The notifier app compiles its own package and the Swift bindings, and
+        # The launcher compiles its own package and the Swift bindings, and
         # its build script and icon belong to it.
-        notifier)            printf '%s %s %s' "$(deploy_stamp_prefix notifier "$rel")" "$(deploy_stamp_prefix proto/gen/swift "$rel")" "$(deploy_stamp_prefix bin/build-notifier.sh "$rel")" ;;
+        launcher)            printf '%s %s %s' "$(deploy_stamp_prefix launcher "$rel")" "$(deploy_stamp_prefix proto/gen/swift "$rel")" "$(deploy_stamp_prefix bin/build-launcher.sh "$rel")" ;;
         *) return 1 ;;
     esac
 }

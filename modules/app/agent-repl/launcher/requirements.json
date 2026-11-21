@@ -1,0 +1,70 @@
+{
+  "system": "launcher",
+  "requirements": [
+    {
+      "id": "swift",
+      "kind": "program",
+      "why": "builds Zettel.app, the launcher (launcher/, bin/build-launcher.sh), and its protoc-gen-swift",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "swift",
+      "install": {
+        "manual": "Install Xcode, or its command line tools with `xcode-select --install`."
+      }
+    },
+    {
+      "id": "socket-holder-launcher",
+      "kind": "socket_holder",
+      "why": "keeps the socket the launcher accepts banners on open across every restart of the launcher and of every daemon, so a daemon standing down or handing over still posts its banners, and a post made while the launcher restarts queues instead of failing (launcher.v1)",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "label": "app.zettel.sockethold.launcher",
+      "control": "~/.cache/agent-repl/sock/launcher-holder.sock",
+      "sockets": [
+        {
+          "name": "launcher",
+          "unix": "~/.cache/agent-repl/sock/launcher.sock"
+        }
+      ],
+      "log": "sockethold-launcher.log"
+    },
+    {
+      "id": "service-launcher",
+      "kind": "service",
+      "why": "Zettel.app, the launcher: it opens Emacs when opened, and posts every desktop banner under its own name and icon (daemon/internal/desktopnotify), kept running by launchd",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "label": "app.zettel.launcher",
+      "args": [
+        "--resident",
+        "--log",
+        "~/.cache/agent-repl/log/launcher.log",
+        "--holder",
+        "~/.cache/agent-repl/sock/launcher-holder.sock"
+      ],
+      "log": {
+        "stdout": "launcher.out.log",
+        "stderr": "launcher.err.log"
+      },
+      "build_target": "launcher",
+      "binary": "Zettel.app/Contents/MacOS/Zettel",
+      "program": "~/Applications/Zettel.app/Contents/MacOS/Zettel"
+    },
+    {
+      "id": "launcher-notification-permission",
+      "kind": "notification_permission",
+      "why": "macOS shows Zettel's banners only once it is allowed to notify",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "~/Applications/Zettel.app/Contents/MacOS/Zettel"
+    }
+  ]
+}

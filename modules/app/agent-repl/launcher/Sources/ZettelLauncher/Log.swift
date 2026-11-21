@@ -28,7 +28,7 @@ extension Logger {
 }
 
 /// The runtime name every record of this app carries.
-public let notifierRuntime = "notifier"
+public let launcherRuntime = "launcher"
 
 /// Renders `date` in the shared log timestamp representation
 /// (`proto/vocab/log-timestamp.json`): RFC 3339, `zone`'s local time, exactly
@@ -54,7 +54,7 @@ public func logLine(
 ) -> Data {
     let record: [String: Any] = [
         "timestamp": logTimestamp(date, zone: zone),
-        "runtime": notifierRuntime,
+        "runtime": launcherRuntime,
         "level": level.rawValue,
         "verbosity": "normal",
         "operation": operation,
@@ -110,9 +110,9 @@ public final class FileLogger: Logger, @unchecked Sendable {
             try append(line)
         } catch {
             // The sink itself failed: stderr is launchd's capture of this
-            // process (com.agentrepl.notifier's StandardErrorPath), the one
+            // process (app.zettel.launcher's StandardErrorPath), the one
             // place left that a person reads.
-            FileHandle.standardError.write(Data("notifier: log sink \(path.path) failed: \(error)\n".utf8))
+            FileHandle.standardError.write(Data("launcher: log sink \(path.path) failed: \(error)\n".utf8))
             FileHandle.standardError.write(line)
         }
     }

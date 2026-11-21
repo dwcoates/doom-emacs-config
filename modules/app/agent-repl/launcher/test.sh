@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The Zettel notifier app's unit tests (Tests/ZettelNotifierTests), run by the
-# `notifier` suite. SwiftPM builds the package (fetching the pinned
+# The launcher's unit tests (Tests/ZettelLauncherTests), run by the
+# `launcher` suite. SwiftPM builds the package (fetching the pinned
 # swift-protobuf on a cold cache) and runs every XCTest case; a failing case
 # fails the suite with XCTest's own report.
 

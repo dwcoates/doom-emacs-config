@@ -92,7 +92,7 @@ make_repo() {
              "$root/agent-shim/shim-store" \
              "$root/agent-shim/claude/shim/dist" \
              "$root/agent-shim/claude/shim-sidecar" \
-             "$root/agent-shim/shim-lock" "$root/zettel" "$root/notifier" \
+             "$root/agent-shim/shim-lock" "$root/zettel" "$root/launcher" \
              "$root/webapp/dist" "$root/home/.cache/agent-repl/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
@@ -105,7 +105,7 @@ make_repo() {
     git_c "$root" init -q
     for d in proto agent-shim/shim-store \
              agent-shim/claude/shim agent-shim/claude/shim-sidecar \
-             agent-shim/shim-lock zettel notifier webapp daemon; do
+             agent-shim/shim-lock zettel launcher webapp daemon; do
         echo "rev0" > "$root/$d/file.txt"
         git_c "$root" add -A
         n=$((n + 1))
@@ -206,8 +206,8 @@ tree_stamp_path() {
         daemon)  printf '%s' "$1/daemon/bin/.source-tree" ;;
         shim)    printf '%s' "$1/agent-shim/claude/shim/dist/.source-tree" ;;
         webapp)  printf '%s' "$1/webapp/dist/.source-tree" ;;
-        # The notifier's stamps are named for its bundle, Zettel.app.
-        notifier) printf '%s' "$1/home/.cache/agent-repl/bin/.Zettel.app.source-tree" ;;
+        # The launcher's stamps are named for its bundle, Zettel.app.
+        launcher) printf '%s' "$1/home/.cache/agent-repl/bin/.Zettel.app.source-tree" ;;
         *)       printf '%s' "$1/home/.cache/agent-repl/bin/.$2.source-tree" ;;
     esac
 }
@@ -313,7 +313,7 @@ t_dirty_stamp_flagged_and_still_measured() {
 # --- 6. a stamp naming an unknown revision errors, without killing the run --
 t_unknown_deployed_revision_errors_per_system() {
     local root systems=8; root="$(new_root)"
-    # The notifier app is reported on macOS alone.
+    # The launcher is reported on macOS alone.
     [ "$(uname)" != Darwin ] || systems=9
     stamp "$root/webapp/dist/.built-sha" "0123456789012345678901234567890123456789"
     run_report "$root"
@@ -339,9 +339,9 @@ t_proto_commit_stales_every_system() {
     # agentrepl/logging, it speaks no wire at all, and so a proto regeneration
     # genuinely cannot stale it. Listing proto among its paths to make this
     # assertion uniform would report it behind over a change it never reads.
-    # The notifier app (macOS) is excluded the same way: its build reads only
+    # The launcher (macOS) is excluded the same way: its build reads only
     # the Swift bindings (proto/gen/swift), never the rest of proto/.
-    if [ "$(jq_get "$OUT" "len(set(s['source_sha'] for s in d['systems'] if s['name'] not in ('shim-lock', 'notifier'))) == 1")" = "True" ] \
+    if [ "$(jq_get "$OUT" "len(set(s['source_sha'] for s in d['systems'] if s['name'] not in ('shim-lock', 'launcher'))) == 1")" = "True" ] \
        && [ "$(jq_get "$OUT" 'sysmap["shim"]["source_sha"]')" = "$want" ]; then
         pass "a proto commit becomes the source revision of every Go/TS system"
     else
@@ -483,23 +483,23 @@ t_service_fingerprint_mismatch_is_stale() {
     rm -rf "$root"
 }
 
-# --- the notifier app (macOS) is reported from its cache-bin stamps ---------
-t_notifier_is_reported_on_macos_from_its_stamps() {
+# --- the launcher (macOS) is reported from its cache-bin stamps ---------
+t_launcher_is_reported_on_macos_from_its_stamps() {
     if [ "$(uname)" != Darwin ]; then
-        pass "the notifier app is reported only on macOS (skipped elsewhere)"
+        pass "the launcher is reported only on macOS (skipped elsewhere)"
         return
     fi
     local root cache; root="$(new_root)"
     cache="$root/home/.cache/agent-repl/bin"
     mkdir -p "$cache"
     stamp "$cache/.Zettel.app.built-sha" "$(head_sha "$root")"
-    stamp_tree "$root" notifier
+    stamp_tree "$root" launcher
     run_report "$root"
-    if [ "$(jq_get "$OUT" 'sysmap["notifier"]["ready"]')" = "True" ] \
-       && [ "$(jq_get "$OUT" 'sysmap["notifier"]["deployed_sha"]')" = "$(head_sha "$root")" ]; then
-        pass "the notifier app is reported from its .Zettel.app stamps"
+    if [ "$(jq_get "$OUT" 'sysmap["launcher"]["ready"]')" = "True" ] \
+       && [ "$(jq_get "$OUT" 'sysmap["launcher"]["deployed_sha"]')" = "$(head_sha "$root")" ]; then
+        pass "the launcher is reported from its .Zettel.app stamps"
     else
-        fail "the notifier app is reported from its .Zettel.app stamps" "rc=$RC out: $(cat "$OUT") err: $(cat "$root/err.txt")"
+        fail "the launcher is reported from its .Zettel.app stamps" "rc=$RC out: $(cat "$OUT") err: $(cat "$root/err.txt")"
     fi
     rm -rf "$root"
 }
@@ -866,7 +866,7 @@ readiness_group_processes() {
     t_daemon_started_after_binary_is_fresh
     t_service_fingerprint_mismatch_is_stale
     t_service_fingerprint_match_is_fresh
-    t_notifier_is_reported_on_macos_from_its_stamps
+    t_launcher_is_reported_on_macos_from_its_stamps
     t_processless_systems_report_null_running
     t_elisp_is_not_reported
 }
