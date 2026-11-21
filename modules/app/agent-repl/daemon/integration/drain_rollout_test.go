@@ -1517,10 +1517,24 @@ func drainTriggerDeploy(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo,
 	// ever lands to run the deploy.
 	repoRef := mergeRepositoryRef(t, d, selfRepo)
 	f := mergeCreateChild(t, d, repoRef, "trigger", "trigger work", nil)
+	stampEveryWorkspacePrompted(t, d)
 	sha := writeCommit(t, selfRepo, f.ws.GetDir(), path, "trigger\n")
 	selfRepo.SetPaths(sha, path)
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
 		t.Fatalf("FinishWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
+	}
+}
+
+// stampEveryWorkspacePrompted records a user prompt just now to every
+// registered workspace, so the deploy's fold sweep (internal/foldsweep) leaves
+// every section standing: these tests model a user at work in their
+// workspaces, and a swept fold would stand a session down mid-handover.
+func stampEveryWorkspacePrompted(t *testing.T, d *harness.Daemon) {
+	t.Helper()
+	if _, err := rawStateDB(t, d).ExecContext(context.Background(),
+		`INSERT OR REPLACE INTO user_attention (kind, target, at) SELECT 'prompt', id, ? FROM workspaces`,
+		time.Now().UnixNano()); err != nil {
+		t.Fatalf("stamp every workspace as prompted: %v", err)
 	}
 }
 
