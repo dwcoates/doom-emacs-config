@@ -281,7 +281,13 @@ var workspaceSettingRefusals = func() []describedRefusal {
 					want: "the link announces https://pr, which ws does not hold"},
 				refusalCase{name: "pull_request_owned_elsewhere", err: armed(links, "pull_request_owned_elsewhere", &agentreplv1.ChangeWorkspaceLinksPullRequestOwnedElsewhere{
 					Url: "https://pr", OwnerName: "other", Owner: &workspacev1.WorkspaceRef{Dir: "/w/other"}}),
-					want: "the pull request https://pr is already owned by other at /w/other, and a pull request has one owning workspace"}),
+					want: "the pull request https://pr is already owned by other at /w/other, and a pull request has one owning workspace"},
+				refusalCase{name: "subpage_of_owned_link", err: armed(links, "subpage_of_owned_link", &agentreplv1.ChangeWorkspaceLinksSubpageOfOwnedLink{
+					Url: "https://gns/key/a.b", OwnedPageUrl: "https://gns/key/a"}),
+					want: "https://gns/key/a.b is a subpage of the GNS page https://gns/key/a, which ws already owns: store it as a reference, or leave it out"},
+				refusalCase{name: "owned_link_unshown", err: armed(links, "owned_link_unshown", &agentreplv1.ChangeWorkspaceLinksOwnedLinkUnshown{
+					OwnedUrl: "https://o", ReferenceUrl: "https://r"}),
+					want: "the show leaves the owned link https://o out while it names the reference https://r: show every owned link first"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeLinksRefusal("ws", e.(*agentreplv1.ChangeWorkspaceLinksError))
 			}},
