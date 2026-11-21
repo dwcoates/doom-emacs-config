@@ -4,11 +4,8 @@ import (
 	"context"
 	"errors"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +15,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
+	"agent-repld/internal/sourcescan"
 )
 
 // keepLiveHarness is a visible workspace whose cache was warmed ten minutes
@@ -424,19 +422,7 @@ func TestAKeepLiveEndsWithTheBeatTimedFromTheClockAgain(t *testing.T) {
 func TestTheVerbAndTheScheduledBeatShareOneSubroutine(t *testing.T) {
 	// Arrange
 	callers := map[string][]string{}
-	fset := token.NewFileSet()
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+	sourcescan.EachSourceIn(t, ".", false, func(_ *token.FileSet, f *ast.File) {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -451,7 +437,7 @@ func TestTheVerbAndTheScheduledBeatShareOneSubroutine(t *testing.T) {
 				return true
 			})
 		}
-	}
+	})
 
 	// Assert
 	if got, want := callers["sendBeat"], []string{"beginKeepLive", "beatsDue"}; !sameSet(got, want) {
