@@ -13,7 +13,7 @@ import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { SidebarContext } from "./context.js";
 import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY } from "./context.js";
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./section-classes.js";
 import { queryAll } from "../dom.js";
 import type { FocusLeft } from "../focus-left.js";
 import { log } from "../log.js";

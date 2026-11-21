@@ -118,12 +118,8 @@ import {
 } from "./merge-queue-view.js";
 import { DEPLOYS_FLOOR, DEPLOYS_GROUP_CLASS } from "./deploys-fold.js";
 import { mergedToday } from "./row.js";
+import { OPEN_SECTION_CLASS, HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "./section-classes.js";
 
-/** The classes the four sections are drawn with. */
-export const OPEN_SECTION_CLASS = "open-section";
-export const HIDDEN_SECTION_CLASS = "hidden-section";
-export const MERGED_SECTION_CLASS = "merged-section";
-export const MERGE_QUEUE_SECTION_CLASS = "merge-queue-section";
 
 /** The class of the Open section's rows region: the box its repository sections are placed in. */
 export const OPEN_REGION_CLASS = "sb-sections";

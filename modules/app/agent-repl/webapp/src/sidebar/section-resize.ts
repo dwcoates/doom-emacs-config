@@ -25,15 +25,8 @@ import type { SidebarViewSectionSizeSchema, UpdateSidebarViewRequestSchema } fro
 import { DRAGGING_CLASS } from "../drag.js";
 import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
-import {
-  BAND_SIZED_ATTRIBUTE,
-  HIDDEN_SECTION_CLASS,
-  MERGED_SECTION_CLASS,
-  MERGE_QUEUE_SECTION_CLASS,
-  OPEN_SECTION_CLASS,
-  fittedSection,
-  type FittedSection,
-} from "./band-fit.js";
+import { BAND_SIZED_ATTRIBUTE, fittedSection, type FittedSection } from "./band-fit.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
 import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, type SidebarContext } from "./context.js";
 import { changeViews, type ViewPiece } from "./view-change.js";
 import { heightViewKey } from "./view.js";

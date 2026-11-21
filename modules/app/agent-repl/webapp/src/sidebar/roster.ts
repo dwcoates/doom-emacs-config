@@ -29,14 +29,8 @@
  */
 import { drawRosterSectionHeight, drawSectionHeight, type RosterSectionHeight } from "./section-resize.js";
 import { FOLDED_CLASS } from "./folded-class.js";
-import {
-  HIDDEN_SECTION_CLASS,
-  MERGED_AT_ATTRIBUTE,
-  MERGED_SECTION_CLASS,
-  MERGE_QUEUE_SECTION_CLASS,
-  OPEN_REGION_CLASS,
-  OPEN_SECTION_CLASS,
-} from "./band-fit.js";
+import { MERGED_AT_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
 import {
   RosterHiddenSectionSchema,
   RosterMergedSectionSchema,

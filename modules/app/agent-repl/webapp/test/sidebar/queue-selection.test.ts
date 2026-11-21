@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetLoggingForTests } from "../../src/log.js";
 import { createQueueSelectionScroll, markQueueSelection, QUEUE_CURRENT_CLASS } from "../../src/sidebar/queue-selection.js";
 import { MERGE_QUEUE_SUBJECT_CLASS, MERGE_QUEUE_WAITING_CLASS } from "../../src/sidebar/merge-queue-view.js";
-import { MERGE_QUEUE_SECTION_CLASS } from "../../src/sidebar/band-fit.js";
+import { MERGE_QUEUE_SECTION_CLASS } from "../../src/sidebar/section-classes.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { boxRect } from "../dom-rect.js";
 import { cascadedValue, inRail } from "../stylesheet.js";

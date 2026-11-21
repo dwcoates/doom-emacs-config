@@ -49,7 +49,7 @@ import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, inRail, installStylesheet, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/band-fit.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/section-classes.js";
 import { DEPLOYS_GROUP_CLASS } from "../src/sidebar/deploys-fold.js";
 import { MERGED_GROUP_HEAD_CLASS } from "../src/sidebar/roster.js";
 import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS, LABEL_LINK_CLASS } from "../src/feed/entries.js";
