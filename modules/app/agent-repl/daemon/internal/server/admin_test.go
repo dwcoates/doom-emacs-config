@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -18,6 +19,7 @@ import (
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -462,6 +464,58 @@ func TestMoveOfNothingQueuedIsAnAnswer(t *testing.T) {
 			if resp.Msg.GetError().GetNoSuchQueuedMerge() == nil {
 				t.Fatalf("result = %v, want no_such_queued_merge", resp.Msg.GetResult())
 			}
+		})
+	}
+}
+
+// TestAMoveThatMovesNothingIsAnsweredMoveBlocked pins the wire answer of a
+// one-place move refused for each cause: the move_blocked arm with that
+// cause set, and the admitted blocker named inside its cause, never a
+// success.
+func TestAMoveThatMovesNothingIsAnsweredMoveBlocked(t *testing.T) {
+	blocker := &agentreplv1.UpdateMergeQueueMoveBlocker{Workspace: &workspacev1.WorkspaceRef{Id: "ws-head", Dir: "/w/head"}, Name: "pr-status-link-badges"}
+	tests := []struct {
+		name   string
+		fields map[string]any
+		check  func(t *testing.T, blocked *agentreplv1.UpdateMergeQueueMoveBlocked)
+	}{
+		{name: "not waiting", fields: map[string]any{"cause": refusalarm.Nested("not_waiting")},
+			check: func(t *testing.T, blocked *agentreplv1.UpdateMergeQueueMoveBlocked) {
+				if blocked.GetNotWaiting() == nil {
+					t.Fatalf("cause = %v, want not_waiting", blocked.GetCause())
+				}
+			}},
+		{name: "at the edge", fields: map[string]any{"cause": refusalarm.Nested("at_edge")},
+			check: func(t *testing.T, blocked *agentreplv1.UpdateMergeQueueMoveBlocked) {
+				if blocked.GetAtEdge() == nil {
+					t.Fatalf("cause = %v, want at_edge", blocked.GetCause())
+				}
+			}},
+		{name: "blocked by an admitted merge", fields: map[string]any{"cause": refusalarm.Nested("admitted"), "blocker": blocker},
+			check: func(t *testing.T, blocked *agentreplv1.UpdateMergeQueueMoveBlocked) {
+				if got := blocked.GetAdmitted().GetBlocker(); !proto.Equal(got, blocker) {
+					t.Fatalf("blocker = %v, want %v", got, blocker)
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Merge.moveErr = &merge.RefusalError{Arm: merge.ArmMoveBlocked, Reason: "stays", Fields: tt.fields}
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(moveRequests()[0].req))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+			blocked := resp.Msg.GetError().GetMoveBlocked()
+			if blocked == nil {
+				t.Fatalf("result = %v, want move_blocked", resp.Msg.GetResult())
+			}
+			tt.check(t, blocked)
 		})
 	}
 }

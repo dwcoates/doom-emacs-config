@@ -1293,6 +1293,57 @@ func (m MergeMove) valid() bool {
 	return m == MergeMoveUp || m == MergeMoveDown
 }
 
+// MergeMoveOutcome is what one one-place move (MoveMerge) did: moved the
+// merge, or left it where it stands for Result's cause. A move that moved
+// nothing is never reported as a move (2026-11-20: a move up answered
+// success twice while its merge stayed fourth, behind admitted entries).
+type MergeMoveOutcome struct {
+	// Result is whether the merge moved, and if not, why.
+	Result MergeMoveResult
+	// Blocker is the admitted entry directly on the side the merge moved
+	// toward, set for MergeMoveBlockedByAdmitted alone.
+	Blocker WorkspaceID
+}
+
+// Moved reports whether the move moved the merge.
+func (o MergeMoveOutcome) Moved() bool {
+	return o.Result == MergeMoved
+}
+
+// MergeMoveResult is how a one-place move ended. The zero value is no
+// result, so an outcome left unset is never read as one of them.
+type MergeMoveResult int
+
+// The results of a one-place move.
+const (
+	// MergeMoved is a move that traded places with the nearest waiting merge
+	// on that side.
+	MergeMoved MergeMoveResult = iota + 1
+	// MergeMoveNotWaiting leaves a merge that is not waiting in line: it
+	// runs, is only requested, or stands out of line for a repair.
+	MergeMoveNotWaiting
+	// MergeMoveAtEdge leaves a merge with no entry in line on that side.
+	MergeMoveAtEdge
+	// MergeMoveBlockedByAdmitted leaves a merge every entry on whose side is
+	// admitted: no waiting merge stands there to trade places with.
+	MergeMoveBlockedByAdmitted
+)
+
+// String names the result in log records.
+func (r MergeMoveResult) String() string {
+	switch r {
+	case MergeMoved:
+		return "moved"
+	case MergeMoveNotWaiting:
+		return "not_waiting"
+	case MergeMoveAtEdge:
+		return "at_edge"
+	case MergeMoveBlockedByAdmitted:
+		return "blocked_by_admitted"
+	}
+	return fmt.Sprintf("MergeMoveResult(%d)", int(r))
+}
+
 // MergeSide is which side of its anchor a move to a place puts a waiting
 // merge (agentrepl.v1.UpdateMergeQueueMoveTo.place).
 type MergeSide int

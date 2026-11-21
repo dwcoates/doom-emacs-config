@@ -341,6 +341,10 @@ message UpdateMergeQueueError {
     // A give-up from a workspace running no repair turn of its merge (a
     // conflict resolution or a fixing attempt). (Added 2026-11-17.)
     UpdateMergeQueueNoRepairTurn no_repair_turn = 22;
+    // A `move_up` or `move_down` that cannot move the merge: nothing is
+    // moved, and the arm says what keeps it where it stands. A move that
+    // moves nothing is never answered as a success. (Added 2026-11-21.)
+    UpdateMergeQueueMoveBlocked move_blocked = 25;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -374,6 +378,52 @@ message UpdateMergeQueueNoMediationOwed {}
 message UpdateMergeQueueNoEscalationHeld {}
 // The no-repair-turn refusal. No fields: the caller knows its own turn.
 message UpdateMergeQueueNoRepairTurn {}
+
+// ---- Move up or down: why a one-place move moved nothing ----
+
+// The refusal of a `move_up` or `move_down` that leaves the merge where it
+// stands. A one-place move trades places with the nearest WAITING merge on
+// the side it moves toward, so it is refused when the merge itself is not
+// waiting, when no entry stands in line on that side, or when every entry on
+// that side is admitted.
+message UpdateMergeQueueMoveBlocked {
+  // What keeps the merge in place. Exactly one cause holds: the merge's own
+  // standing is judged first, then what stands on the side it moves toward.
+  oneof cause {
+    // The merge is not waiting in line: it runs, is only requested, or stands
+    // out of line for a repair. Only a waiting merge moves.
+    UpdateMergeQueueMoveBlockedNotWaiting not_waiting = 1;
+    // The merge already stands first (`move_up`) or last (`move_down`) among
+    // the entries in line: nothing stands on that side to pass.
+    UpdateMergeQueueMoveBlockedAtEdge at_edge = 2;
+    // Every entry in line on that side is ADMITTED, so no waiting merge
+    // stands there to trade places with: the merge running at the head, a
+    // merge taken up behind it, or a merge an earlier build returned admitted
+    // from its repair. The one directly on that side is named.
+    UpdateMergeQueueMoveBlockedByAdmitted admitted = 3;
+  }
+}
+// The not-waiting cause. No fields: the merge's own standing is what the
+// caller asked about.
+message UpdateMergeQueueMoveBlockedNotWaiting {}
+// The at-the-edge cause. No fields: the direction asked for names the edge.
+message UpdateMergeQueueMoveBlockedAtEdge {}
+// The admitted-neighbour cause: the entry the move would have passed.
+message UpdateMergeQueueMoveBlockedByAdmitted {
+  // The admitted entry directly ahead of (`move_up`) or behind (`move_down`)
+  // the merge, as the queue lists it.
+  UpdateMergeQueueMoveBlocker blocker = 1;
+}
+// The entry a one-place move cannot pass.
+message UpdateMergeQueueMoveBlocker {
+  // The workspace the entry's merge runs in: a merge workspace for an async
+  // merge.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The name `merge-queue status` lists the merge under (an async merge's own
+  // name, otherwise its workspace's), so the refusal names it as the user
+  // reads it.
+  string name = 2;
+}
 // The unowned-problems refusal. DEPRECATED (2026-11-19): never answered; see
 // UpdateMergeQueueError.problems_unowned.
 message UpdateMergeQueueProblemsUnowned {

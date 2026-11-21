@@ -13,12 +13,14 @@ import (
 
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -570,18 +572,70 @@ func (o *orchestrator) Evict(ctx context.Context, ws ids.WorkspaceID) error {
 }
 
 // Move moves a workspace's waiting merge one place up or down its queue, and
-// redraws every bubble on that queue when the order changed.
-func (o *orchestrator) Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
-	return o.reorder(ctx, ws, reordering{
-		op:      "daemon.merge.move",
-		fields:  dlog.Context{"move": move.String()},
-		failed:  "could not move a merge in its queue",
-		unmoved: "a merge asked to move has no waiting merge to pass on that side, and stays where it is",
-		moved:   "moved a merge one place in its queue",
+// redraws every bubble on that queue when the order changed. A move that
+// moves nothing is REFUSED (ArmMoveBlocked), never answered as a success,
+// naming what keeps the merge where it stands, and recorded once at INFO
+// (moveBlocked).
+func (o *orchestrator) Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) error {
+	var outcome wsm.MergeMoveOutcome
+	_, err := o.reorder(ctx, ws, reordering{
+		op:     "daemon.merge.move",
+		fields: dlog.Context{"move": move.String()},
+		failed: "could not move a merge in its queue",
+		moved:  "moved a merge one place in its queue",
 		do: func(repo wsm.RepoKey) (bool, error) {
-			return o.deps.DB.MoveMerge(ctx, repo, ws, move)
+			var err error
+			outcome, err = o.deps.DB.MoveMerge(ctx, repo, ws, move)
+			return outcome.Moved(), err
+		},
+		refuseUnmoved: func(fields dlog.Context) error {
+			return o.moveBlocked(ctx, ws, move, outcome, fields)
 		},
 	})
+	return err
+}
+
+// The causes a one-place move is refused for, spelled as the
+// agentrepl.v1.UpdateMergeQueueMoveBlocked.cause arms.
+const (
+	causeMoveNotWaiting = refusalarm.Nested("not_waiting")
+	causeMoveAtEdge     = refusalarm.Nested("at_edge")
+	causeMoveAdmitted   = refusalarm.Nested("admitted")
+)
+
+// moveBlocked answers the refusal of WS's MOVE, which OUTCOME says left the
+// merge where it stands, and records it at INFO with FIELDS, the move's own
+// context: the one record of the refusal. An admitted blocker is named as
+// the queue lists it, its workspace's name; a blocker whose record cannot be
+// read is recorded at ERROR and answered as that error.
+func (o *orchestrator) moveBlocked(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove, outcome wsm.MergeMoveOutcome, fields dlog.Context) error {
+	const op = "daemon.merge.move"
+	log := o.log(ctx, ws)
+	fields["result"] = outcome.Result.String()
+	var refusal *RefusalError
+	switch outcome.Result {
+	case wsm.MergeMoveNotWaiting:
+		refusal = refuse(ArmMoveBlocked, ws, "the merge is not waiting in line, so it does not move %s", move)
+		refusal.Fields = map[string]any{"cause": causeMoveNotWaiting}
+	case wsm.MergeMoveAtEdge:
+		refusal = refuse(ArmMoveBlocked, ws, "no merge stands in line on that side, so the merge does not move %s", move)
+		refusal.Fields = map[string]any{"cause": causeMoveAtEdge}
+	case wsm.MergeMoveBlockedByAdmitted:
+		blocker, err := o.deps.DB.Workspace(ctx, outcome.Blocker)
+		if err != nil {
+			fields["blocker"], fields["error"] = string(outcome.Blocker), err.Error()
+			log.Error(op, "could not read the admitted merge a move cannot pass, so the move's refusal cannot name it", fields)
+			return fmt.Errorf("merge: read the merge blocking the move of %s: %w", ws, err)
+		}
+		fields["blocker"], fields["blocker_name"] = string(blocker.ID), blocker.Name
+		refusal = refuse(ArmMoveBlocked, ws, "every merge on that side is admitted, the nearest %q, so the merge does not move %s", blocker.Name, move)
+		refusal.Fields = map[string]any{"cause": causeMoveAdmitted,
+			"blocker": &agentreplv1.UpdateMergeQueueMoveBlocker{Workspace: blocker.Ref(), Name: blocker.Name}}
+	default:
+		panic(fmt.Sprintf("merge: the move of %s was refused for %s, which is no reason a move stays", ws, outcome.Result))
+	}
+	logRefusal(log, op, "a merge asked to move one place stays where it is; the move is refused", fields, refusal)
+	return refusal
 }
 
 // MoveTo moves WS's waiting merge directly to SIDE of ANCHOR's waiting merge
@@ -610,6 +664,10 @@ type reordering struct {
 	unmoved string
 	moved   string
 	do      func(repo wsm.RepoKey) (bool, error)
+	// refuseUnmoved, when set, answers a reordering that moved nothing as a
+	// refusal, recording it itself with the reordering's context, in place
+	// of the `unmoved` record.
+	refuseUnmoved func(fields dlog.Context) error
 }
 
 // reorder runs one reordering of WS's waiting merge, answering whether it
@@ -631,6 +689,9 @@ func (o *orchestrator) reorder(ctx context.Context, ws ids.WorkspaceID, r reorde
 		return false, err
 	}
 	if !moved {
+		if r.refuseUnmoved != nil {
+			return false, r.refuseUnmoved(fields)
+		}
 		log.Info(r.op, r.unmoved, fields)
 		return false, nil
 	}

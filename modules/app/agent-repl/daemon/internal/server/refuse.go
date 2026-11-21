@@ -324,7 +324,8 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 }
 
 // setArmFields fills whichever of ARMMESSAGE's own fields the refusal
-// supplied, keyed by their proto names.
+// supplied, keyed by their proto names: the one filler a
+// refusal's arm and the nested arm its cause selects (setNestedArms) share.
 func setArmFields(armMessage protoreflect.Message, fields map[string]any) {
 	for i := 0; i < armMessage.Descriptor().Fields().Len(); i++ {
 		field := armMessage.Descriptor().Fields().Get(i)
@@ -460,7 +461,12 @@ func setNestedArms(armMessage protoreflect.Message, fields map[string]any) bool 
 		if nested == nil || nested.Kind() != protoreflect.MessageKind {
 			return false
 		}
-		armMessage.Set(nested, protoreflect.ValueOfMessage(armMessage.NewField(nested).Message()))
+		// THE NESTED ARM CARRIES ITS OWN EVIDENCE from the same fields, so a
+		// cause such as UpdateMergeQueueMoveBlockedByAdmitted names the entry
+		// it is about rather than standing empty beside a sentence that does.
+		nestedMessage := armMessage.NewField(nested).Message()
+		setArmFields(nestedMessage, fields)
+		armMessage.Set(nested, protoreflect.ValueOfMessage(nestedMessage))
 	}
 	return true
 }

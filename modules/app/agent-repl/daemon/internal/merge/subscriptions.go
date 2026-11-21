@@ -347,14 +347,14 @@ func (d queueEventsDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, 
 }
 
 // MoveMerge moves a waiting merge and reports the reorder when it moved.
-func (d queueEventsDB) MoveMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, move wsm.MergeMove) (bool, error) {
-	var moved bool
+func (d queueEventsDB) MoveMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, move wsm.MergeMove) (wsm.MergeMoveOutcome, error) {
+	var outcome wsm.MergeMoveOutcome
 	err := d.reported(ctx, repo, false, func() (queueWrite, error) {
 		var err error
-		moved, err = d.DB.MoveMerge(ctx, repo, id, move)
-		return queueWrite{report: moved, kind: QueueChangeReordered, subject: id}, err
+		outcome, err = d.DB.MoveMerge(ctx, repo, id, move)
+		return queueWrite{report: outcome.Moved(), kind: QueueChangeReordered, subject: id}, err
 	})
-	return moved, err
+	return outcome, err
 }
 
 // MoveMergeTo moves a waiting merge to a place beside another and reports the

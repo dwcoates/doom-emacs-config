@@ -3715,8 +3715,38 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld" "noRepairTurn")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld" "noRepairTurn" "moveBlocked")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-move-blocked-arms-pinned ()
+  "UpdateMergeQueueMoveBlocked's cause set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueMoveBlocked")
+                       #'string<)
+                 (sort (list "notWaiting" "atEdge" "admitted") #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-move-blocked-at-edge ()
+  "UpdateMergeQueueError's `move_blocked' arm decodes its at-the-edge cause."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"moveBlocked\":{\"atEdge\":{}}}"))
+                   '(:cause (:arm :move-blocked :value (:cause (:arm :at-edge :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-move-blocked-not-waiting ()
+  "UpdateMergeQueueError's `move_blocked' arm decodes its not-waiting cause."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"moveBlocked\":{\"notWaiting\":{}}}"))
+                   '(:cause (:arm :move-blocked :value (:cause (:arm :not-waiting :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-move-blocked-by-admitted ()
+  "UpdateMergeQueueError's `move_blocked' arm decodes the admitted merge it names."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((blocked (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"moveBlocked\":{\"admitted\":{\"blocker\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w\"},\"name\":\"pr-status-link-badges\"}}}}"))))
+      (let ((blocker (plist-get (plist-get (plist-get (plist-get blocked :cause) :value) :cause) :value)))
+        (should (equal (plist-get (plist-get blocker :blocker) :name) "pr-status-link-badges"))))))
 
 (ert-deftest agent-repl-test-wire-verbs-update-merge-queue-error-decodes-problems-recurring ()
   "UpdateMergeQueueError's `problems_recurring' arm decodes the recurring groups."

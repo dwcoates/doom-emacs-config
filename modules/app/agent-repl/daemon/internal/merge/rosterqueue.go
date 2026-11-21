@@ -102,9 +102,9 @@ func (d rosterQueueDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, 
 
 // MoveMerge moves a waiting merge and republishes its repository's queue when
 // it moved.
-func (d rosterQueueDB) MoveMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, move wsm.MergeMove) (bool, error) {
-	moved, err := d.DB.MoveMerge(ctx, repo, id, move)
-	return moved, d.republishedIf(ctx, repo, moved, err)
+func (d rosterQueueDB) MoveMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, move wsm.MergeMove) (wsm.MergeMoveOutcome, error) {
+	outcome, err := d.DB.MoveMerge(ctx, repo, id, move)
+	return outcome, d.republishedIf(ctx, repo, outcome.Moved(), err)
 }
 
 // MoveMergeTo moves a waiting merge to a place beside another and

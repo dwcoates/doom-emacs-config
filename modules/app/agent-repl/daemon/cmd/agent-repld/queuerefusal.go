@@ -143,8 +143,26 @@ func describeUpdateQueueRefusal(ws string, e *agentreplv1.UpdateMergeQueueError)
 		return "no escalation holds the repository's queue, so there is no hold to release", nil
 	case *agentreplv1.UpdateMergeQueueError_NoRepairTurn:
 		return fmt.Sprintf("%s runs no repair turn of its merge (a conflict resolution or a fixing attempt), so it has no merge to give up", ws), nil
+	case *agentreplv1.UpdateMergeQueueError_MoveBlocked:
+		return describeMoveBlocked(ws, r.MoveBlocked)
 	}
 	return "", undescribed("updating the merge queue", e)
+}
+
+// describeMoveBlocked says in one plain sentence why the merge of WS stays
+// where it stands after a move up or down. Every cause arm has its own
+// sentence; a cause this build does not spell is undescribed.
+func describeMoveBlocked(ws string, blocked *agentreplv1.UpdateMergeQueueMoveBlocked) (string, error) {
+	switch cause := blocked.GetCause().(type) {
+	case *agentreplv1.UpdateMergeQueueMoveBlocked_NotWaiting:
+		return fmt.Sprintf("the merge of %s is not waiting in line (it runs, is only requested, or is out of line for a repair), so it does not move", ws), nil
+	case *agentreplv1.UpdateMergeQueueMoveBlocked_AtEdge:
+		return fmt.Sprintf("no merge stands in line on that side of %s, so it does not move", ws), nil
+	case *agentreplv1.UpdateMergeQueueMoveBlocked_Admitted:
+		return fmt.Sprintf("every merge on that side of %s is admitted, the nearest %s, and a move does not pass an admitted merge, so it does not move",
+			ws, cause.Admitted.GetBlocker().GetName()), nil
+	}
+	return "", undescribed("moving a merge in its queue", blocked)
 }
 
 // describeQueueSubscribeRefusal says in one plain sentence why SUBSCRIBER was

@@ -4155,6 +4155,49 @@ refusing anything but an escalation."
   "Decode UpdateMergeQueueError's `no_repair_turn' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-no-repair-turn json))
 
+(defun agent-repl-wire-decode-update-merge-queue-move-blocker (json)
+  "Decode UpdateMergeQueueMoveBlocker from JSON into (:workspace REF :name NAME):
+the admitted merge a one-place move cannot pass, as the queue lists it."
+  (let ((message "UpdateMergeQueueMoveBlocker"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace name))
+    (list :workspace (agent-repl-wire-verbs--decode-optional-message
+                      message 'workspace json #'agent-repl-wire-decode-workspace-ref)
+          :name (agent-repl-wire-verbs--decode-string message 'name json))))
+
+(defun agent-repl-wire-decode-update-merge-queue-move-blocked-not-waiting (json)
+  "Decode UpdateMergeQueueMoveBlockedNotWaiting from JSON.  Empty: the merge
+is not waiting in line, so it does not move."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueMoveBlockedNotWaiting" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-move-blocked-at-edge (json)
+  "Decode UpdateMergeQueueMoveBlockedAtEdge from JSON.  Empty: no entry stands
+in line on the side the merge was asked to move to."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueMoveBlockedAtEdge" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-move-blocked-by-admitted (json)
+  "Decode UpdateMergeQueueMoveBlockedByAdmitted from JSON into (:blocker B):
+every entry on that side is admitted, B the one directly there."
+  (let ((message "UpdateMergeQueueMoveBlockedByAdmitted"))
+    (agent-repl-wire-verbs--check-keys message json '(blocker))
+    (list :blocker (agent-repl-wire-verbs--decode-optional-message
+                    message 'blocker json #'agent-repl-wire-decode-update-merge-queue-move-blocker))))
+
+(defun agent-repl-wire-decode-update-merge-queue-move-blocked (json)
+  "Decode UpdateMergeQueueMoveBlocked from JSON into (:cause (:arm ARM :value V)):
+why a move up or down left its merge where it stands."
+  (let ((message "UpdateMergeQueueMoveBlocked"))
+    (agent-repl-wire-verbs--check-keys message json '(notWaiting atEdge admitted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'notWaiting :not-waiting #'agent-repl-wire-decode-update-merge-queue-move-blocked-not-waiting)
+                 (list 'atEdge :at-edge #'agent-repl-wire-decode-update-merge-queue-move-blocked-at-edge)
+                 (list 'admitted :admitted #'agent-repl-wire-decode-update-merge-queue-move-blocked-by-admitted))))))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-move-blocked (json)
+  "Decode UpdateMergeQueueError's `move_blocked' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-move-blocked json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached (json)
   "Decode UpdateMergeQueueError's `remediation_bound_reached' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-remediation-bound-reached json))
@@ -4164,7 +4207,7 @@ refusing anything but an escalation."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld noRepairTurn))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld noRepairTurn moveBlocked))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4180,6 +4223,7 @@ arm this codec does not know is refused as an unknown field."
          (list 'noMediationOwed :no-mediation-owed #'agent-repl-wire-decode-update-merge-queue-error-no-mediation-owed)
          (list 'noEscalationHeld :no-escalation-held #'agent-repl-wire-decode-update-merge-queue-error-no-escalation-held)
          (list 'noRepairTurn :no-repair-turn #'agent-repl-wire-decode-update-merge-queue-error-no-repair-turn)
+         (list 'moveBlocked :move-blocked #'agent-repl-wire-decode-update-merge-queue-error-move-blocked)
          (list 'remediationBoundReached :remediation-bound-reached #'agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached)
          (list 'problemsUnowned :problems-unowned #'agent-repl-wire-decode-update-merge-queue-error-problems-unowned)
          (list 'problemsRecurring :problems-recurring #'agent-repl-wire-decode-update-merge-queue-error-problems-recurring))))))

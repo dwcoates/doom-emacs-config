@@ -365,14 +365,18 @@ func admittedAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID)
 }
 
 // MoveMerge moves a merge WAITING in line one place up or down its queue,
-// swapping it with the nearest waiting merge on that side. It answers whether
-// the merge moved.
+// swapping it with the nearest waiting merge on that side. It answers what it
+// did: moved, or why the merge stays where it is (MergeMoveOutcome), never a
+// bare "did not move".
 //
 // ONLY WAITING MERGES TRADE PLACES. The admitted merge holds the repository's
 // one slot and is never passed, and a merge only REQUESTED is in nobody's line
 // (it takes its place when it is queued), so neither is the neighbor a move
-// swaps with, and neither moves itself. A merge with no waiting neighbor on
-// that side, or a merge not waiting, is left where it is.
+// swaps with, and neither moves itself. A merge not waiting stays
+// (MergeMoveNotWaiting); one with no waiting merge on that side stays too,
+// blocked by the admitted entry directly on that side when one stands there
+// (MergeMoveBlockedByAdmitted), and at the edge of the line otherwise
+// (MergeMoveAtEdge).
 //
 // THE MOVED MERGE TAKES THE PASSED MERGE'S FRONT MARK, so a move can never
 // put an ordinary merge ahead of a front merge or a front merge behind an
@@ -380,45 +384,68 @@ func admittedAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID)
 // which is the order placeInLine puts a newly queued front merge into.
 //
 // A workspace with no queue entry is refused.
-func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error) {
+func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (MergeMoveOutcome, error) {
 	const op = "daemon.wsm.move_merge"
 	fields := dlog.Context{"repo": string(repo), "workspace": string(id), "move": move.String()}
 	if !move.valid() {
 		err := fmt.Errorf("wsm: undeclared merge move %d", int(move))
 		s.log.Error(op, "refused an undeclared merge move", withError(fields, err))
-		return false, err
+		return MergeMoveOutcome{}, err
 	}
 	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		return false, err
+		return MergeMoveOutcome{}, err
 	}
 	fields["repo"] = string(key)
-	var moved bool
+	var outcome MergeMoveOutcome
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		seq, state, err := entryPlace(ctx, tx, key, id)
-		if err != nil || state != MergeQueued {
+		if err != nil {
 			return err
 		}
-		query := `SELECT seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? AND seq < ? ORDER BY seq DESC LIMIT 1`
+		if state != MergeQueued {
+			outcome = MergeMoveOutcome{Result: MergeMoveNotWaiting}
+			return nil
+		}
+		side, order := `seq < ?`, `ORDER BY seq DESC LIMIT 1`
 		if move == MergeMoveDown {
-			query = `SELECT seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? AND seq > ? ORDER BY seq LIMIT 1`
+			side, order = `seq > ?`, `ORDER BY seq LIMIT 1`
 		}
 		var neighbor int64
 		var neighborFront bool
-		err = tx.QueryRowContext(ctx, query, key, int(MergeQueued), seq).Scan(&neighbor, &neighborFront)
+		err = tx.QueryRowContext(ctx, `SELECT seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? AND `+side+` `+order,
+			key, int(MergeQueued), seq).Scan(&neighbor, &neighborFront)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil
+			outcome, err = unmovedOutcome(ctx, tx, key, seq, side, order)
+			return err
 		}
 		if err != nil {
 			return err
 		}
-		moved = true
+		outcome = MergeMoveOutcome{Result: MergeMoved}
 		return swapPlaces(ctx, tx, key, id, seq, neighbor, neighborFront)
 	})
 	if err != nil {
-		return false, err
+		return MergeMoveOutcome{}, err
 	}
-	return moved, nil
+	return outcome, nil
+}
+
+// unmovedOutcome answers why a waiting merge at SEQ in KEY's queue, with no
+// waiting merge on the side SIDE and ORDER select, stays where it is: the
+// entry in line directly on that side, which is then admitted, blocks it;
+// with none, it stands at the edge of the line.
+func unmovedOutcome(ctx context.Context, tx *sql.Tx, key RepoKey, seq int64, side, order string) (MergeMoveOutcome, error) {
+	var blocker WorkspaceID
+	err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM merge_queue WHERE repo_key = ? AND state = ? AND `+side+` `+order,
+		key, int(MergeAdmitted), seq).Scan(&blocker)
+	if errors.Is(err, sql.ErrNoRows) {
+		return MergeMoveOutcome{Result: MergeMoveAtEdge}, nil
+	}
+	if err != nil {
+		return MergeMoveOutcome{}, err
+	}
+	return MergeMoveOutcome{Result: MergeMoveBlockedByAdmitted, Blocker: blocker}, nil
 }
 
 // MoveMergeTo moves a merge WAITING in line to the place directly ahead of or

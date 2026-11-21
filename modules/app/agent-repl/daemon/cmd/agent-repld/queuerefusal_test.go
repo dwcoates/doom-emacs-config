@@ -94,7 +94,17 @@ var queueRefusals = func() []describedRefusal {
 				refusalCase{name: "no_escalation_held", err: armed(update, "no_escalation_held", nil),
 					want: "no escalation holds the repository's queue, so there is no hold to release"},
 				refusalCase{name: "no_repair_turn", err: armed(update, "no_repair_turn", nil),
-					want: "ws runs no repair turn of its merge (a conflict resolution or a fixing attempt), so it has no merge to give up"}),
+					want: "ws runs no repair turn of its merge (a conflict resolution or a fixing attempt), so it has no merge to give up"},
+				refusalCase{name: "move_blocked/not_waiting", err: armed(update, "move_blocked", &agentreplv1.UpdateMergeQueueMoveBlocked{
+					Cause: &agentreplv1.UpdateMergeQueueMoveBlocked_NotWaiting{NotWaiting: &agentreplv1.UpdateMergeQueueMoveBlockedNotWaiting{}}}),
+					want: "the merge of ws is not waiting in line (it runs, is only requested, or is out of line for a repair), so it does not move"},
+				refusalCase{name: "move_blocked/at_edge", err: armed(update, "move_blocked", &agentreplv1.UpdateMergeQueueMoveBlocked{
+					Cause: &agentreplv1.UpdateMergeQueueMoveBlocked_AtEdge{AtEdge: &agentreplv1.UpdateMergeQueueMoveBlockedAtEdge{}}}),
+					want: "no merge stands in line on that side of ws, so it does not move"},
+				refusalCase{name: "move_blocked/admitted", err: armed(update, "move_blocked", &agentreplv1.UpdateMergeQueueMoveBlocked{
+					Cause: &agentreplv1.UpdateMergeQueueMoveBlocked_Admitted{Admitted: &agentreplv1.UpdateMergeQueueMoveBlockedByAdmitted{
+						Blocker: &agentreplv1.UpdateMergeQueueMoveBlocker{Name: "pr-status-link-badges"}}}}),
+					want: "every merge on that side of ws is admitted, the nearest pr-status-link-badges, and a move does not pass an admitted merge, so it does not move"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeUpdateQueueRefusal("ws", e.(*agentreplv1.UpdateMergeQueueError))
 			}},

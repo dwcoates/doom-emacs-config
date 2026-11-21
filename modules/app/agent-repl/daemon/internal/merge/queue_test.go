@@ -13,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -45,12 +47,12 @@ func TestMoveRefusesAWorkspaceWithNothingQueued(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	moved, err := h.o.Move(context.Background(), theWorkspace, wsm.MergeMoveUp)
+	err := h.o.Move(context.Background(), theWorkspace, wsm.MergeMoveUp)
 
 	// Assert.
 	refusal, refused := Refused(err)
-	if !refused || refusal.Arm != ArmNoSuchQueuedMerge || moved {
-		t.Fatalf("Move answered %v, %v; want the %s refusal", moved, err, ArmNoSuchQueuedMerge)
+	if !refused || refusal.Arm != ArmNoSuchQueuedMerge {
+		t.Fatalf("Move answered %v; want the %s refusal", err, ArmNoSuchQueuedMerge)
 	}
 }
 
@@ -77,11 +79,11 @@ func TestMoveRedrawsTheQueueInItsNewOrder(t *testing.T) {
 			queueAnother(t, h, "ws-3", "three")
 
 			// Act.
-			moved, err := h.o.Move(context.Background(), tt.ws, tt.move)
+			err := h.o.Move(context.Background(), tt.ws, tt.move)
 
 			// Assert.
-			if err != nil || !moved {
-				t.Fatalf("Move = %v, %v; want moved", moved, err)
+			if err != nil {
+				t.Fatalf("Move = %v; want moved", err)
 			}
 			for ws, want := range tt.wantPlaces {
 				if got := h.factsOf(ws).QueuePlace; got != want {
@@ -92,23 +94,64 @@ func TestMoveRedrawsTheQueueInItsNewOrder(t *testing.T) {
 	}
 }
 
-// TestMoveLeavesAMergeWithNoNeighborWhereItIs covers the success answer for
-// a merge with no waiting merge on the side it is asked to move to.
-func TestMoveLeavesAMergeWithNoNeighborWhereItIs(t *testing.T) {
-	// Arrange: two merges wait.
-	h := newHarness(t)
-	enqueue(t, h)
-	queueAnother(t, h, "ws-2", "two")
-
-	// Act.
-	moved, err := h.o.Move(context.Background(), theWorkspace, wsm.MergeMoveUp)
-
-	// Assert.
-	if err != nil || moved {
-		t.Fatalf("Move = %v, %v; want unmoved", moved, err)
+// TestAMoveThatMovesNothingIsRefusedWithItsCause covers every reason a
+// one-place move leaves its merge where it stands: the move is refused with
+// the move_blocked arm naming that cause, nothing moves, and the refusal is
+// recorded once at INFO.
+func TestAMoveThatMovesNothingIsRefusedWithItsCause(t *testing.T) {
+	tests := []struct {
+		name        string
+		ws          wsm.WorkspaceID
+		move        wsm.MergeMove
+		admitFirst  bool
+		wantCause   string
+		wantBlocker wsm.WorkspaceID
+	}{
+		{name: "the first waiting merge moved up stands at the edge", ws: theWorkspace, move: wsm.MergeMoveUp, wantCause: "at_edge"},
+		{name: "the last waiting merge moved down stands at the edge", ws: "ws-2", move: wsm.MergeMoveDown, wantCause: "at_edge"},
+		{name: "a merge behind an admitted head moved up is blocked by it", ws: "ws-2", move: wsm.MergeMoveUp, admitFirst: true,
+			wantCause: "admitted", wantBlocker: theWorkspace},
+		{name: "a merge that is not waiting does not move", ws: theWorkspace, move: wsm.MergeMoveDown, admitFirst: true, wantCause: "not_waiting"},
 	}
-	if got := h.factsOf(theWorkspace); got.QueuePlace != 1 {
-		t.Fatalf("place = %d, want 1", got.QueuePlace)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two merges in line, the first admitted when asked.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+			if tt.admitFirst {
+				if err := h.db.AdmitMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
+					t.Fatalf("AdmitMerge: %v", err)
+				}
+			}
+			before := queueOrderOf(t, h)
+
+			// Act.
+			err := h.o.Move(context.Background(), tt.ws, tt.move)
+
+			// Assert.
+			refusal, refused := Refused(err)
+			if !refused || refusal.Arm != ArmMoveBlocked || refusal.Fields["cause"] != refusalarm.Nested(tt.wantCause) {
+				t.Fatalf("Move = %v; want the %s refusal for %s", err, ArmMoveBlocked, tt.wantCause)
+			}
+			blocker, named := refusal.Fields["blocker"].(*agentreplv1.UpdateMergeQueueMoveBlocker)
+			if (tt.wantBlocker != "") != named || named && (blocker.GetWorkspace().GetId() != string(tt.wantBlocker) || blocker.GetName() == "") {
+				t.Fatalf("blocker = %v, want %q named", refusal.Fields["blocker"], tt.wantBlocker)
+			}
+			if got := queueOrderOf(t, h); !slices.Equal(got, before) {
+				t.Fatalf("queue = %v, want it unchanged from %v", got, before)
+			}
+			var records []dlog.Record
+			for _, rec := range h.logs.Records() {
+				if rec.Operation == "daemon.merge.move" {
+					records = append(records, rec)
+				}
+			}
+			if len(records) != 1 || records[0].Level != "info" || records[0].Context["workspace"] != string(tt.ws) ||
+				records[0].Context["blocker"] != map[bool]any{true: string(tt.wantBlocker), false: nil}[tt.wantBlocker != ""] {
+				t.Fatalf("daemon.merge.move records = %+v, want the one INFO refusal naming the merge and its blocker", records)
+			}
+		})
 	}
 }
 
@@ -244,11 +287,11 @@ func TestMoveRecordsAFailedMoveAndRedrawsNothing(t *testing.T) {
 	h.db.moveErr = errors.New("database is locked")
 
 	// Act.
-	moved, err := h.o.Move(context.Background(), "ws-2", wsm.MergeMoveUp)
+	err := h.o.Move(context.Background(), "ws-2", wsm.MergeMoveUp)
 
 	// Assert.
-	if err == nil || moved {
-		t.Fatalf("Move = %v, %v; want the store's failure", moved, err)
+	if err == nil {
+		t.Fatal("Move = nil; want the store's failure")
 	}
 	record, logged := h.recordFor("error", "daemon.merge.move")
 	if !logged || record.Context["error"] != "database is locked" || record.Context["workspace"] != "ws-2" || record.Context["move"] != "up" {
@@ -1459,7 +1502,8 @@ func TestReorderRedrawsTheQueueOnlyWhenTheOrderChanged(t *testing.T) {
 				if !tt.moved {
 					return false, nil
 				}
-				return h.db.MoveMerge(context.Background(), repo, "ws-2", wsm.MergeMoveUp)
+				outcome, err := h.db.MoveMerge(context.Background(), repo, "ws-2", wsm.MergeMoveUp)
+				return outcome.Moved(), err
 			}))
 
 			// Assert.

@@ -205,10 +205,10 @@ type Orchestrator interface {
 	// subscriber holding none there is refused (ArmNotSubscribed).
 	Unsubscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope) error
 	// Move moves a workspace's waiting merge one place up or down its queue,
-	// past the nearest waiting merge on that side, answering whether it moved.
-	// A merge with no waiting merge on that side, or one not waiting (running,
-	// or only requested), is left where it is.
-	Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error)
+	// past the nearest waiting merge on that side. A move that moves nothing
+	// -- no waiting merge on that side, or a merge not waiting (running, or
+	// only requested) -- is refused with ArmMoveBlocked, naming why.
+	Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) error
 	// MoveTo moves WS's waiting merge directly to SIDE of ANCHOR's waiting
 	// merge on the same queue (UpdateMergeQueueMoveTo), answering whether it
 	// moved. A merge or an anchor not waiting is left where it is; an anchor
