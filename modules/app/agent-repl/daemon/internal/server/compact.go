@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/sessioncommand"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -34,23 +35,42 @@ func (s *server) CompactWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if subject.Record.Closed {
-		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{Arm: "closed", Reason: "a closed workspace runs no session to compact", Info: true})))
-	}
-	key, err := prompthandler.MintKey("workspace-compact")
+	outcome, refused, err := s.submitCompaction(ctx, subject, req.Msg.GetInstructions())
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
-	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, feed.SaidText(CompactionPrompt(req.Msg.GetInstructions())), key,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, nil, wsm.DeliveryDeferred, nil)
-	if err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	if refused != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, refused, nil))
 	}
 	asker, by := askerOf(req.Msg.GetRequester())
 	subject.Log.Info("daemon.server.compact_workspace", "submitted a compaction to the workspace's prompt queue", dlog.Context{
 		"requested_by": asker.String(), "requester": string(by), "instructions": req.Msg.Instructions != nil, "turn": string(outcome.Turn)})
 	resp.Result = &agentreplv1.CompactWorkspaceResponse_Success{Success: &agentreplv1.CompactWorkspaceSuccess{}}
 	return connect.NewResponse(resp), nil
+}
+
+// submitCompaction submits the compaction of the resolved workspace to its
+// prompt queue, deferred behind its running turn. A closed workspace or the
+// queue's refusal answers REFUSED, which the caller renders on its own rpc's
+// error arms; any other failure answers err.
+func (s *server) submitCompaction(
+	ctx context.Context,
+	subject resolved,
+	instructions *agentreplv1.CompactWorkspaceInstructions,
+) (outcome prompthandler.Outcome, refused error, err error) {
+	if subject.Record.Closed {
+		return prompthandler.Outcome{}, &workspace.Refusal{Arm: "closed", Reason: "a closed workspace runs no session to compact"}, nil
+	}
+	key, err := prompthandler.MintKey("workspace-compact")
+	if err != nil {
+		return prompthandler.Outcome{}, nil, err
+	}
+	outcome, err = s.deps.Prompts.Submit(ctx, subject.Record.ID, feed.SaidText(CompactionPrompt(instructions)), key,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, nil, wsm.DeliveryDeferred, nil)
+	if err != nil {
+		return prompthandler.Outcome{}, err, nil
+	}
+	return outcome, nil, nil
 }
 
 // CompactionPrompt is the compaction a CompactWorkspace request submits: the
