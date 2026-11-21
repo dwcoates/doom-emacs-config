@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { RosterOpenRowTabSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { CHILD_COUNT_CLASS, CHILD_COUNT_THRESHOLD, childCountOf, drawChildCount } from "../../src/sidebar/child-count.js";
+import { CHILD_COUNT_CLASS, childCountOf, drawChildCount } from "../../src/sidebar/child-count.js";
 import type { RowFamily } from "../../src/sidebar/family.js";
 import { drawRosterFamily } from "../../src/sidebar/row.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -59,12 +59,12 @@ describe("childCountOf", () => {
 });
 
 describe("drawChildCount", () => {
-  it("draws nothing at the threshold", () => {
-    expect(drawChildCount({ children: children(CHILD_COUNT_THRESHOLD) }, "R")).toBeUndefined();
+  it("draws nothing with no children", () => {
+    expect(drawChildCount({ children: children(0) }, "R")).toBeUndefined();
   });
-  it("draws the count past the threshold, as a subsection's count", () => {
+  it("draws the count with any children, as a subsection's count", () => {
     // Act
-    const drawn = drawChildCount({ children: children(CHILD_COUNT_THRESHOLD + 1, 2, 1) }, "R");
+    const drawn = drawChildCount({ children: children(6, 2, 1) }, "R");
 
     // Assert
     expect([drawn?.textContent, drawn?.classList.contains("sb-count")]).toEqual(["(2/1/6)", true]);
@@ -72,10 +72,13 @@ describe("drawChildCount", () => {
 });
 
 describe("a drawn row", () => {
-  it("wears the count with more than five children", () => {
-    expect(drawnCount(7)?.textContent).toBe("(0/0/7)");
+  it("wears the count with several children", () => {
+    expect(drawnCount(7)?.textContent).toBe("(7)");
   });
-  it("wears no count with five children", () => {
-    expect(drawnCount(5)).toBeNull();
+  it("wears the count with one child", () => {
+    expect(drawnCount(1)?.textContent).toBe("(1)");
+  });
+  it("wears no count with no children", () => {
+    expect(drawnCount(0)).toBeNull();
   });
 });

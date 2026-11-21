@@ -13,7 +13,6 @@ import {
   sameBucket,
   showsNoRows,
   stampBucket,
-  ZERO_COUNT_ATTRIBUTE,
   workingTone,
   WORKING_TONE_ATTRIBUTE,
 } from "../../src/sidebar/subsections.js";
@@ -201,7 +200,7 @@ describe("a repository's subsections", () => {
       sub.querySelector(".sb-subsection-label")?.textContent,
       sub.querySelector(".sb-count")?.textContent,
       sub.querySelector(":scope > .rows > [data-roster-row='ws-1']") !== null,
-    ]).toEqual(["sub-1", "later", "(0/0/1)", true]);
+    ]).toEqual(["sub-1", "later", "(1)", true]);
   });
 
   it("draw their count as the working, the synchronously merging and every row, folded or not", () => {
@@ -281,15 +280,15 @@ describe("a repository's subsections", () => {
     expect(pane.querySelector(".sb-subsection")?.hasAttribute("data-empty")).toBe(false);
   });
 
-  it("mark the count of a subsection with no workspaces zero", () => {
+  it("draw no count for a subsection with no workspaces", () => {
     // Arrange / Act
     const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1" }] })] }), sidebarContext());
 
     // Assert
-    expect(pane.querySelector(".sb-subsection .sb-count")?.hasAttribute(ZERO_COUNT_ATTRIBUTE)).toBe(true);
+    expect(pane.querySelector(".sb-subsection .sb-count")).toBeNull();
   });
 
-  it("do not mark the count of a subsection with workspaces zero", () => {
+  it("draw the count of a subsection with workspaces, though none work", () => {
     // Arrange / Act
     const pane = mount(
       roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1", rows: [row({ id: "ws-1" })] }] })] }),
@@ -297,7 +296,7 @@ describe("a repository's subsections", () => {
     );
 
     // Assert
-    expect(pane.querySelector(".sb-subsection .sb-count")?.hasAttribute(ZERO_COUNT_ATTRIBUTE)).toBe(false);
+    expect(pane.querySelector(".sb-subsection .sb-count")?.textContent).toBe("(1)");
   });
 
   it("delete through the header's remove control", async () => {

@@ -359,7 +359,7 @@ export function drawRosterRow(
   drawNameInk(label, name);
   if (place === "grouping") renameOnDoubleClick(label, sc, workspace, name);
   line.appendChild(label);
-  // A ROW WITH MANY CHILDREN SAYS HOW MANY, in grey after its name.
+  // A ROW WITH CHILDREN SAYS HOW MANY, in grey after its name.
   const childCount = place === "grouping" ? drawChildCount(kin, familyPath) : undefined;
   if (childCount !== undefined) line.appendChild(childCount);
 
