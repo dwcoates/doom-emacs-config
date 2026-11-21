@@ -864,7 +864,7 @@ func TestASignInUnderAStandingGateClosesTheRejectionAndRetriesNothing(t *testing
 	ws := f.workspace("w1")
 	f.client.response = vendorRefusal(rejectedFor(credentialRejected()), "the vendor refused")
 	_ = f.fleet.Start(context.Background(), ws.ID)
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 
 	// Act.
 	retry := f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)

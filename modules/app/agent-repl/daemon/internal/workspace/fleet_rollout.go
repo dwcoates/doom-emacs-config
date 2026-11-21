@@ -1285,7 +1285,7 @@ func (f *Fleet) standCarriedColdGate(ws ids.WorkspaceID, vendorSessionID string,
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
-	f.raiseColdGate(ws, vendorSessionID, cold, configDir, false)
+	f.raiseColdGate(ws, vendorSessionID, cold, configDir, RaiseStanding)
 	f.publishHost(ws)
 }
 
@@ -1342,7 +1342,7 @@ func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conve
 	}
 	// The relaunched shim was spawned under spawnRootFor (Prelaunch), so the
 	// gate serves that account's menu.
-	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session), true)
+	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session), RaiseJudged)
 	f.bridgeGateInRemoteControl(context.Background(), ws)
 	return nil
 }

@@ -225,7 +225,7 @@ func heldAtGate(t *testing.T, f *fleetFixture) ids.WorkspaceID {
 	t.Helper()
 	ws := resumable(f)
 	f.fleet.remember(ws, &live{client: f.client, hostSessionID: "host-1"})
-	f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/accounts/work", true)
+	f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/accounts/work", RaiseJudged)
 	return ws
 }
 

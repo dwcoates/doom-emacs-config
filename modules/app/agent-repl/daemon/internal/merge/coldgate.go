@@ -31,6 +31,13 @@ import (
 //     marked and skipped for as long as the compaction takes, and the
 //     session it brings up retires the gate. A compaction that fails is an
 //     ERROR and leaves the merge marked, skipped, with the gate standing.
+//     THE QUEUE ANSWERS A GATE AT MOST ONCE: a compaction whose re-open
+//     fails stands the gate again (edgeStoodAfterFailedAnswer), and that
+//     stand is never answered by the queue, which once answered, failed and
+//     stood the same gate every 10s for 40 minutes (2026-11-21). The merge
+//     stays marked and skipped, and the gate stands for the user, said at
+//     ERROR. A daemon that raises the gate again from its record later
+//     answers it once more: a new build is a new attempt.
 //   - PASSING THE GATE BY AN ANSWER RESUMES IT THERE. Pay, clear and compact
 //     bring a session up, which retires the gate's record and with it the
 //     mark (wsm.ClearMergeColdGated); a merge the merges worked on meanwhile
@@ -62,6 +69,9 @@ const (
 	// edgeHidden is the workspace hidden, which passes a standing gate
 	// without an answer.
 	edgeHidden
+	// edgeStoodAfterFailedAnswer is the gate standing again because an
+	// answer to it failed: kept as a raise is, never answered by the queue.
+	edgeStoodAfterFailedAnswer
 )
 
 // coldGateEdge is one edge of a workspace's cold gate, as the queue applies it.
@@ -73,6 +83,12 @@ type coldGateEdge struct {
 // ColdGateRaised is told that WS's session parked at its cold gate.
 func (o *orchestrator) ColdGateRaised(ws ids.WorkspaceID) {
 	o.queueColdGateEdge(coldGateEdge{ws: ws, kind: edgeRaised})
+}
+
+// ColdGateStoodAfterFailedAnswer is told that WS's cold gate stood again
+// because an answer to it failed.
+func (o *orchestrator) ColdGateStoodAfterFailedAnswer(ws ids.WorkspaceID) {
+	o.queueColdGateEdge(coldGateEdge{ws: ws, kind: edgeStoodAfterFailedAnswer})
 }
 
 // ColdGateRetired is told that WS's recorded cold gate was retired: a session
@@ -121,6 +137,10 @@ func (o *orchestrator) applyColdGateEdge(ctx context.Context, edge coldGateEdge)
 	case edgeRaised:
 		if o.coldGateRaised(ctx, edge.ws) {
 			o.compactQueuedColdGate(ctx, edge.ws)
+		}
+	case edgeStoodAfterFailedAnswer:
+		if o.coldGateRaised(ctx, edge.ws) {
+			o.leaveFailedColdGateStanding(ctx, edge.ws)
 		}
 	case edgeRetired:
 		o.coldGateRetired(ctx, edge.ws)
@@ -232,6 +252,19 @@ func (o *orchestrator) compactQueuedColdGate(ctx context.Context, ws ids.Workspa
 		defer o.live.Done()
 		compact()
 	})
+}
+
+// leaveFailedColdGateStanding records that the cold gate standing again on
+// WS, whose merge waits in line skipped at it, is left for the user: an
+// answer to it failed, and the queue never answers a gate again after one
+// did. The failed answer's own cause is recorded where its re-open failed
+// (daemon.workspace.answer_cold_gate).
+func (o *orchestrator) leaveFailedColdGateStanding(ctx context.Context, ws ids.WorkspaceID) {
+	fields := dlog.Context{"workspace": string(ws)}
+	if repo, err := o.queueOf(ctx, ws); err == nil {
+		fields["repo"] = string(repo)
+	}
+	o.log(ctx, ws).Error(opColdGate, "an answer to the cold gate of a queued merge's workspace failed and the gate stands again; the queue does not answer it again, and the merge stays skipped until the user answers it", fields)
 }
 
 // coldGateRetired resumes WS's merge where it stands in line once its gate was
