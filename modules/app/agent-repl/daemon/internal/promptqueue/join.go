@@ -11,6 +11,8 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -62,16 +64,23 @@ type joiningPrompt struct {
 	sentBy *ids.WorkspaceID
 }
 
-// joining answers the oldest prompt waiting to join the running turn, if one
-// does.
+// joining answers the oldest prompt of the held line waiting to join the
+// running turn, if one does. A prompt delivered on arrival that joins is not
+// of that line (arrival.go): it keeps no prompt behind it from the classifier,
+// and no judged join waits for it.
 func (q *queue) joining(ws ids.WorkspaceID) (joiningPrompt, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	state, ok := q.states[ws]
-	if !ok || len(state.joins) == 0 {
+	if !ok {
 		return joiningPrompt{}, false
 	}
-	return state.joins[0], true
+	for _, joined := range state.joins {
+		if !promptorigin.DeliveredOnArrival(joined.origin) {
+			return joined, true
+		}
+	}
+	return joiningPrompt{}, false
 }
 
 // behindJoinVerdict is the verdict a prompt earns while another waits to join
@@ -189,14 +198,72 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		q.recordWaiting(ctx, sub, "the running turn is one the agent started on its own, which is never joined, so the prompt waits for it to end", log)
 		return joinWaiting
 	}
+	switch outcome, err := q.sendJoinLocked(ctx, d, sub, running, sender, watcher, []ids.TurnID{sub.Turn}, cause.String(), log); outcome {
+	case joinSendSent:
+		// A retirement that fails is recorded at ERROR where it failed.
+		_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
+		return joinSent
+	case joinSendTurnUnrecorded:
+		log.Error(opJoin, "could not record the turn before sending the prompt to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
+		q.recordWaiting(ctx, sub, "the prompt's turn could not be recorded, so it waits for the running turn to end", log)
+		return joinRefused
+	case joinSendAskOpen:
+		// A RELEASE INTERRUPTS THE TURN THE ASK BLOCKS, as it does a turn
+		// it cannot join: the user chose to send this prompt now.
+		if cause == joinReleased {
+			log.Info(opJoin, "an ask blocks the vendor, so the released prompt cannot join the running turn; it interrupts it instead", dlog.Context{"cause": err.Error()})
+			return joinAskOpen
+		}
+		log.Info(opJoin, "an ask blocks the vendor, so the prompt cannot join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
+		q.recordWaiting(ctx, sub, askOpenReason, log)
+		return joinWaiting
+	case joinSendRecorded:
+		// THE PROMPT WAS ANSWERED WHEN IT WAS FIRST SENT: nothing joins
+		// the running turn, and the entry retires as delivered
+		// (alreadyRecorded, without the pop: the running turn's end pops).
+		q.closeRecorded(ctx, sub.WS, sub.Turn, err, opJoin,
+			"the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing joins", log)
+		_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
+		return joinGone
+	default:
+		log.Error(opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
+		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
+		return joinRefused
+	}
+}
+
+// joinSendOutcome is what became of one join's send (sendJoinLocked).
+type joinSendOutcome int
+
+const (
+	// joinSendSent: the shim took the prompt into the running turn.
+	joinSendSent joinSendOutcome = iota
+	// joinSendTurnUnrecorded: the prompt's turn could not be recorded, so
+	// nothing was sent.
+	joinSendTurnUnrecorded
+	// joinSendAskOpen: an ask blocks the vendor, so the shim refused it.
+	joinSendAskOpen
+	// joinSendRecorded: the vendor already recorded the prompt.
+	joinSendRecorded
+	// joinSendRefused: the shim refused it for any other cause.
+	joinSendRefused
+)
+
+// sendJoinLocked sends SUB to join RUNNING: the ONE send every join makes, a
+// held prompt's (joinLocked) and a prompt delivered on arrival's
+// (joinArrivalLocked), which then settle the outcome as each path's own. The
+// watcher has already taken the join (OnTurnJoining); every outcome but
+// joinSendSent has withdrawn what the send set up, and carries its cause. The
+// call claims CLAIMS, the hold it sends when it sends one, and CAUSE says why
+// it joins. The caller holds the delivery lock (d), released for the call
+// itself (call.go).
+func (q *queue) sendJoinLocked(ctx context.Context, d *delivery, sub Submission, running ids.TurnID, sender Sender, watcher Watcher, claims []ids.TurnID, cause string, log dlog.Logger) (joinSendOutcome, error) {
 	text := saidText(sub.Said)
 	if err := q.recordTurn(ctx, wsm.Turn{
 		ID: sub.Turn, Workspace: sub.WS, Text: text, Origin: sub.Origin.String(), SentBy: sub.SentBy, StartedAt: q.deps.Now(),
 	}, log); err != nil {
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
-		log.Error(opJoin, "could not record the turn before sending the prompt to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
-		q.recordWaiting(ctx, sub, "the prompt's turn could not be recorded, so it waits for the running turn to end", log)
-		return joinRefused
+		return joinSendTurnUnrecorded, err
 	}
 	q.mirrorAccepted(sub)
 	// THE JOIN IS RECORDED BEFORE THE PROMPT IS SENT. The shim's answer and
@@ -209,7 +276,8 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	// send withdraws it.
 	q.addJoin(sub.WS, joiningPrompt{turn: sub.Turn, into: running, said: sub.Said, origin: sub.Origin, sentBy: sub.SentBy})
 	var success *shimv1.StartTurnSuccess
-	d.outside(shimCall{what: "join", turn: sub.Turn, holds: []ids.TurnID{sub.Turn}}, log, func() {
+	var err error
+	d.outside(shimCall{what: "join", turn: sub.Turn, holds: claims}, log, func() {
 		var sentBy *SentBy
 		if sentBy, err = q.sentByOf(ctx, sub, log); err == nil {
 			success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin, sentBy)
@@ -218,40 +286,22 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	if err != nil {
 		q.withdrawJoining(sub.WS, sub.Turn)
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
-		// THE ACCEPTED ROW DRAWN BEFORE THE CALL COMES DOWN: the prompt stays
-		// held, so the tray draws it and the feed must not show it accepted.
+		// THE ACCEPTED ROW DRAWN BEFORE THE CALL COMES DOWN: the prompt did
+		// not go, so the feed must not show it accepted.
 		q.retractAccepted(sub.WS, sub.Turn)
-		if errors.Is(err, ErrAskOpen) {
-			// A RELEASE INTERRUPTS THE TURN THE ASK BLOCKS, as it does a turn
-			// it cannot join: the user chose to send this prompt now.
-			if cause == joinReleased {
-				log.Info(opJoin, "an ask blocks the vendor, so the released prompt cannot join the running turn; it interrupts it instead", dlog.Context{"cause": err.Error()})
-				return joinAskOpen
-			}
-			log.Info(opJoin, "an ask blocks the vendor, so the prompt cannot join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
-			q.recordWaiting(ctx, sub, askOpenReason, log)
-			return joinWaiting
+		switch {
+		case errors.Is(err, ErrAskOpen):
+			return joinSendAskOpen, err
+		case errors.Is(err, ErrPromptRecorded):
+			return joinSendRecorded, err
 		}
-		if errors.Is(err, ErrPromptRecorded) {
-			// THE PROMPT WAS ANSWERED WHEN IT WAS FIRST SENT: nothing joins
-			// the running turn, and the entry retires as delivered
-			// (alreadyRecorded, without the pop: the running turn's end pops).
-			q.closeRecorded(ctx, sub.WS, sub.Turn, err, opJoin,
-				"the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing joins", log)
-			_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
-			return joinGone
-		}
-		log.Error(opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
-		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
-		return joinRefused
+		return joinSendRefused, err
 	}
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageAfterToolCall})
 	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
-	log.Info(opJoin, "sent the prompt to join the running turn after its current tool call; nothing was interrupted", dlog.Context{"cause": cause.String()})
-	// A retirement that fails is recorded at ERROR where it failed.
-	_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
-	return joinSent
+	log.Info(opJoin, "sent the prompt to join the running turn after its current tool call; nothing was interrupted", dlog.Context{"cause": cause})
+	return joinSendSent, nil
 }
 
 // joinOutcome is what became of a prompt sent to join the running turn.
@@ -457,9 +507,7 @@ func (q *queue) reholdWithdrawn(ctx context.Context, ws ids.WorkspaceID, turn id
 		log.Error(opJoin, "could not read the withdrawn prompt's hold; it is lost from the queue", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
 		return
 	case !found:
-		log.Error(opJoin, "the withdrawn prompt has no hold to restore; it is lost from the queue", dlog.Merge(fields, dlog.Context{
-			"invariant_violation": "every prompt sent to join the running turn was sent from a standing hold",
-		}))
+		q.rewaitWithdrawnArrival(ctx, ws, turn, fields, log)
 		return
 	}
 	again := heldAgain(held, nil, &wsm.Classification{Arm: wsm.ArmHoldForTurnEnd, Reason: askOpenReason, At: q.deps.Now()})
@@ -472,6 +520,40 @@ func (q *queue) reholdWithdrawn(ctx context.Context, ws ids.WorkspaceID, turn id
 	// A tray that could not be republished is recorded at ERROR by pushTray;
 	// the hold itself is durable either way.
 	_ = q.pushTray(ctx, ws, log)
+}
+
+// rewaitWithdrawnArrival puts a withdrawn prompt that had no hold, which is a
+// prompt delivered on arrival (arrival.go), back under an arrival wait for the
+// running turn's end, under a new turn id for the reason reholdWithdrawn's
+// prompt takes one. Its turn record holds what it said.
+func (q *queue) rewaitWithdrawnArrival(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, fields dlog.Context, log dlog.Logger) {
+	record, err := q.deps.DB.Turn(ctx, ws, turn)
+	if err != nil {
+		log.Error(opJoin, "could not read the withdrawn prompt's turn; it is lost from the queue", dlog.WithCause(fields, err))
+		return
+	}
+	origin := promptorigin.Named(record.Origin)
+	if !promptorigin.DeliveredOnArrival(origin) {
+		log.Error(opJoin, "the withdrawn prompt has no hold to restore; it is lost from the queue", dlog.Merge(fields, dlog.Context{
+			"origin":              record.Origin,
+			"invariant_violation": "every prompt sent to join the running turn was sent from a standing hold or arrived",
+		}))
+		return
+	}
+	again := wsm.NewTurnID()
+	fields["waiting_turn"] = string(again)
+	if err := q.deps.DB.RecordTurnSuccession(ctx, wsm.TurnSuccession{
+		Workspace: ws, Turn: turn, Kind: wsm.SuccessionReheld, Successor: again, At: q.deps.Now(),
+	}); err != nil {
+		log.Error(opJoin, "could not record the move of the withdrawn prompt; it is lost from the queue", dlog.WithCause(fields, err))
+		return
+	}
+	sub := Submission{WS: ws, Turn: again, Said: feed.SaidText(record.Text), Origin: origin, SentBy: record.SentBy, Delivery: wsm.DeliveryDeferred}
+	if _, err := q.awaitArrival(ctx, sub, wsm.WaitTurnEnd, askOpenReason, log); err != nil {
+		log.Error(opJoin, "could not put the withdrawn prompt back under its wait; it is lost from the queue", dlog.WithCause(fields, err))
+		return
+	}
+	log.Info(opJoin, "the withdrawn prompt waits again for the running turn to end", fields)
 }
 
 // onJoinedTurnStood gives the footer and the roster the turn fact of a joining

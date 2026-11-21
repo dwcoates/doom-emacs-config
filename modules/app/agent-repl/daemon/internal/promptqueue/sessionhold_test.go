@@ -550,7 +550,7 @@ func putRow(t *testing.T, h *harness, over wsm.HeldPrompt) {
 	}
 }
 
-func TestANoticeSentToAGateWithNoShimIsHeldThereWithNoRevival(t *testing.T) {
+func TestANoticeSentToAGateWithNoShimWaitsThereWithNoRevival(t *testing.T) {
 	// Arrange: the gate stands and runs no shim; a notice waits out a gate.
 	h := newHarness(t)
 	parkAtGate(h)
@@ -561,7 +561,9 @@ func TestANoticeSentToAGateWithNoShimIsHeldThereWithNoRevival(t *testing.T) {
 	_, err := h.q.Submit(context.Background(), sub)
 
 	// Assert
-	if err != nil || !heldUnder(h, "t1", wsm.HoldColdGate) || h.revivals != 0 {
-		t.Fatalf("Submit = %v, hold = %+v, revivals = %d; want t1 held at the gate and nothing revived", err, h.db.hold("t1"), h.revivals)
+	if err != nil || h.revivals != 0 {
+		t.Fatalf("Submit = %v, revivals = %d; want t1 waiting at the gate and nothing revived", err, h.revivals)
 	}
+	waitsUnder(t, h, "t1", wsm.WaitColdGate)
+	noHolds(t, h)
 }

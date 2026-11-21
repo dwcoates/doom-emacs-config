@@ -77,6 +77,12 @@ func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error)
 	d := q.lockDelivery(sub.WS)
 	defer d.unlock()
 
+	// A PROMPT DELIVERED ON ARRIVAL IS NEVER HELD: it goes now, or waits
+	// under the named wait that keeps it (arrival.go).
+	if deliveredOnArrival(sub) {
+		return q.arriveLocked(ctx, d, sub, log)
+	}
+
 	disposition, handled, err := q.applyLeasePolicy(ctx, sub, log)
 	if handled || err != nil {
 		return disposition, err
@@ -226,9 +232,8 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 	// boot's merge recovery releases every merge lease it finds.
 	case wsm.PolicyRefuse, wsm.PolicyParked:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyRefuse"})
-		refusalLevel(ctx, log, log.Warn)(opSubmit, "the submission is refused: a merge is in flight", fields)
-		q.noteDrainRefusal(lease.Holder, sub.WS)
-		return Disposition{RefusedArm: ArmMerging}, true, ErrMerging
+		disposition, err := q.refuseMerging(ctx, lease, sub, log)
+		return disposition, true, err
 
 	case wsm.PolicyHold:
 		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyHold"})
@@ -253,6 +258,16 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 		log.Error(opSubmit, "the lease carries a policy the queue does not know", fields)
 		return Disposition{}, true, fmt.Errorf("lease policy %d on %q is unknown", lease.Policy, sub.WS)
 	}
+}
+
+// refuseMerging is the refusal a refusing lease gives SUB: the one refusal
+// both the held path (applyLeasePolicy) and the arrival path (arrival.go)
+// answer with.
+func (q *queue) refuseMerging(ctx context.Context, lease wsm.Lease, sub Submission, log dlog.Logger) (Disposition, error) {
+	refusalLevel(ctx, log, log.Warn)(opSubmit, "the submission is refused: a merge is in flight",
+		dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
+	q.noteDrainRefusal(lease.Holder, sub.WS)
+	return Disposition{RefusedArm: ArmMerging}, ErrMerging
 }
 
 // leaseHold is the daemon-side condition a holding lease projects.
@@ -824,6 +839,9 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 	if q.factsPending(ws, "the session-up release", log, q.releaseReconnectHoldsLocked) {
 		return
 	}
+	// A SESSION THAT SERVES ENDS EVERY ARRIVAL WAIT (arrival.go), driven once
+	// what the release delivers below has gone.
+	defer q.driveArrivalsLocked(ctx, d, arrivalSessionUp, log)
 	// WHAT A STAND-DOWN CUT RUNS FIRST (restartredrive.go): the prompts that
 	// waited out the restart are released below and judged against it, as any
 	// prompt that arrives while a turn runs.

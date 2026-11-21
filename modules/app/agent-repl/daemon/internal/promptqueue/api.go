@@ -229,6 +229,10 @@ type Submission struct {
 	// the shim call delivering it claims (shimCall.holds). Set by the
 	// delivery of a hold, never by a caller.
 	fromHold bool
+	// fromWait reports a prompt delivered on arrival driven from its arrival
+	// wait (arrival.go), whose wait its delivery ends. Set by the drive of a
+	// wait, never by a caller.
+	fromWait bool
 }
 
 // claims answers the standing holds a call delivering SUB claims: its own
@@ -259,6 +263,9 @@ type Disposition struct {
 	// RefusedArm names the refusal when the submission was rejected outright
 	// (the merge lease's refuse policy), empty otherwise.
 	RefusedArm string
+	// Waiting is the named wait a prompt delivered on arrival waits under,
+	// nil when it went or is no such prompt (arrival.go). It is never held.
+	Waiting *wsm.ArrivalWaitReason
 }
 
 // Parked reports that the submission was held rather than delivered or
@@ -465,6 +472,12 @@ type Queue interface {
 	// RestoreHolds reloads every standing hold at boot, ALL-OR-NOTHING: a
 	// corrupt row fails the restore and nothing is loaded.
 	RestoreHolds(ctx context.Context) error
+	// DriveArrivalWaits drives every stored arrival wait at boot, once the
+	// holds are restored and the adopted sessions released: each prompt
+	// delivered on arrival that waited across the restart is delivered, or
+	// waits again under what keeps it, and a workspace with no shim is
+	// revived for it (arrival.go). An unreadable wait drives none.
+	DriveArrivalWaits(ctx context.Context) error
 	// Drain waits, BOUNDED, for the queue's own background goroutines — the
 	// asynchronous classification verdicts and the background revivals — to
 	// finish, and reports whether they all did.

@@ -282,21 +282,6 @@ func TestFoldRefuses(t *testing.T) {
 			message: "the fold is refused: the entry ahead is a session act, not a prompt",
 		},
 		{
-			name: "an agent's prompt into the user's",
-			arrange: func(t *testing.T, h *harness) (string, string) {
-				queuedPrompts(t, h, [2]string{"t1", "the user's words"})
-				// A JOIN THE VENDOR WOULD NOT TAKE leaves the agent's prompt held.
-				h.watcher.refuseJoins = true
-				if _, err := h.q.Submit(context.Background(), agentSubmission("t2", "an agent's words")); err != nil {
-					t.Fatalf("Submit(t2): %v", err)
-				}
-				h.q.waitForClassifications()
-				return "t2", "t1"
-			},
-			wantErr: ErrAboveOtherAuthor,
-			message: "the fold is refused: the entry ahead has another author",
-		},
-		{
 			name: "the entry ahead being edited",
 			arrange: func(t *testing.T, h *harness) (string, string) {
 				twoQueued(t, h)
@@ -496,8 +481,8 @@ func TestFoldPassesOverAPromptDrawnNowhere(t *testing.T) {
 	if got := saidText(h.db.hold("t1").Said); got != "first words\n\nsecond words" {
 		t.Fatalf("t1 = %q, want both prompts' words", got)
 	}
-	if brief := h.db.hold("brief"); brief.Tombstone != nil || brief.Coalesced {
-		t.Fatalf("brief = %+v, want it standing as it was", brief)
+	if _, found, err := h.db.HeldPromptByTurn(context.Background(), "brief"); err != nil || found {
+		t.Fatalf("brief held = (%v, %v), want the brief never held", found, err)
 	}
 }
 
@@ -519,7 +504,7 @@ func TestFoldIntoAPromptDrawnNowhereIsRefused(t *testing.T) {
 	if !errors.As(err, &moved) || moved.Current != "t1" {
 		t.Fatalf("Fold = %v, want above_moved naming t1", err)
 	}
-	for _, turn := range []string{"t1", "brief", "t2"} {
+	for _, turn := range []string{"t1", "t2"} {
 		if held := h.db.hold(idsTurn(turn)); held.Tombstone != nil || held.Coalesced {
 			t.Fatalf("%s = %+v, want every entry standing as it was", turn, held)
 		}

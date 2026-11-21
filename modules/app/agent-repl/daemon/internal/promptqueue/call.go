@@ -331,6 +331,8 @@ func (q *queue) redrive(d *delivery) {
 	if releaseOwed {
 		q.releaseReconnectHoldsLocked(ctx, d, log)
 	}
+	// THE SETTLE ENDS THE ARRIVAL WAITS ON THE CALL (arrival.go).
+	q.driveArrivalsLocked(ctx, d, arrivalCallSettled, log)
 	// A PROMPT ADDRESSED TO AN AGENT IS NOT THE SESSION'S TURN: it goes now
 	// whatever the session is running, as it would have gone at submission.
 	for _, sub := range parked {

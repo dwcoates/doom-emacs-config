@@ -93,6 +93,9 @@ func (q *queue) ColdGateAnswered(ctx context.Context, ws ids.WorkspaceID, fate G
 	log = log.With(dlog.Context{"fate": fate.String()})
 	d := q.lockDelivery(ws)
 	defer d.unlock()
+	// THE ANSWER ENDS THE ARRIVAL WAITS AT THE GATE (arrival.go), whatever
+	// its fate: each then waits on the session the answer brings up.
+	defer q.driveArrivalsLocked(ctx, d, arrivalGateAnswered, log)
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {

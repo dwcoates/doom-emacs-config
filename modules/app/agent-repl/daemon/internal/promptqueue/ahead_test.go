@@ -250,9 +250,11 @@ func TestTheQueueReadsSessionActsThroughHoldfold(t *testing.T) {
 	}
 }
 
-func TestAPromptIsNotCoalescedIntoAnotherAuthorsPrompt(t *testing.T) {
-	// Arrange: an agent's prompt the vendor would not take into the running
-	// turn stands queued, and the user's prompt is ruled to interrupt it.
+// AN AGENT'S PROMPT IS NEVER HELD (arrival.go), so it never meets the user's
+// queued prompt: it joins the running turn, and the user's waits as it was.
+func TestAnAgentsPromptJoinsTheRunningTurnPastTheUsersQueuedPrompt(t *testing.T) {
+	// Arrange: the user's prompt is queued, and a classifier that would rule
+	// the agent's prompt to interrupt it stands.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
 	h.watcher.refuseJoins = true
@@ -268,16 +270,13 @@ func TestAPromptIsNotCoalescedIntoAnotherAuthorsPrompt(t *testing.T) {
 	}
 	h.q.waitForClassifications()
 
-	// Assert: both stand, each as it was, and the user's waits its turn.
+	// Assert: the user's prompt stands alone as it was, and the agent's joined.
 	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
-	if err != nil || len(standing) != 2 || standing[0].Coalesced || saidText(standing[0].Said) != "an earlier question" {
-		t.Fatalf("standing = (%+v, %v), want both prompts standing apart", standing, err)
+	if err != nil || len(standing) != 1 || standing[0].Coalesced || saidText(standing[0].Said) != "an earlier question" {
+		t.Fatalf("standing = (%+v, %v), want the user's prompt standing alone", standing, err)
 	}
-	if got := verdictOf(t, h, "later"); got.Arm != wsm.ArmHoldForTurnEnd {
-		t.Fatalf("verdict = %v, want the user's prompt waiting its turn", got.Arm)
-	}
-	if !logged(h.log.Records(), "info", opClassify, "the prompt ahead has another author, so the prompt is not folded into it and waits its turn") {
-		t.Fatalf("records = %+v, want the refused fold said at info", h.log.Records())
+	if len(h.sender.joins) != 1 || h.sender.joins[0] != "later" {
+		t.Fatalf("joins = %v, want the agent's prompt joining the running turn", h.sender.joins)
 	}
 }
 
@@ -309,10 +308,11 @@ func placementSubmission(turn ids.TurnID) Submission {
 	return sub
 }
 
-// A PROMPT DRAWN NOWHERE STANDS OUTSIDE THE LINE (holdfold.Seen): the user's
-// next prompt is never judged against it nor folded into it (2026-10-31: a
-// prompt coalesced into the placement brief, so its words ran under the
-// brief's origin, drawn nowhere, and the tray drew a fold into no card).
+// A PROMPT DRAWN NOWHERE STANDS OUTSIDE THE LINE: it is never held
+// (arrival.go), so the user's next prompt is never judged against it nor
+// folded into it (2026-10-31: a prompt coalesced into the placement brief, so
+// its words ran under the brief's origin, drawn nowhere, and the tray drew a
+// fold into no card).
 func TestAPromptIsNeverJudgedAgainstOrFoldedIntoAnUnseenPrompt(t *testing.T) {
 	tests := []struct {
 		name string
@@ -362,9 +362,11 @@ func TestAPromptIsNeverJudgedAgainstOrFoldedIntoAnUnseenPrompt(t *testing.T) {
 			if len(asked) != 1 || asked[0][0] != tt.wantJudged {
 				t.Fatalf("judged against = %v, want %q", asked, tt.wantJudged)
 			}
-			brief, found, err := h.db.HeldPromptByTurn(context.Background(), "brief")
-			if err != nil || !found || brief.Tombstone != nil || brief.Coalesced || saidText(brief.Said) != "file yourself into a subsection" {
-				t.Fatalf("brief = (%+v, %v, %v), want it standing as it was", brief, found, err)
+			if _, found, err := h.db.HeldPromptByTurn(context.Background(), "brief"); err != nil || found {
+				t.Fatalf("brief held = (%v, %v), want the brief never held", found, err)
+			}
+			if len(h.sender.joins) == 0 || h.sender.joins[0] != "brief" {
+				t.Fatalf("joins = %v, want the brief joining the running turn", h.sender.joins)
 			}
 			if tt.wantInto == "" {
 				return

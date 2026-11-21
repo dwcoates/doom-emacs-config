@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/resolve/feed"
@@ -68,6 +69,12 @@ type fakeDB struct {
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	leases     map[ids.WorkspaceID]wsm.Lease
 	held       map[ids.TurnID]*wsm.HeldPrompt
+	// waits are the arrival waits, by turn; waitOrder the order they arrived
+	// in. putWaitErr fails PutArrivalWait, and waitsErr every wait read.
+	waits      map[ids.TurnID]*wsm.ArrivalWait
+	waitOrder  []ids.TurnID
+	putWaitErr error
+	waitsErr   error
 	// classificationErr, when set, is what every verdict write answers.
 	classificationErr error
 	// retireErr fails RetireVerdictsJudgedAgainst.
@@ -153,6 +160,7 @@ func newFakeDB() *fakeDB {
 		workspaces:  map[ids.WorkspaceID]wsm.Workspace{theWorkspace: {ID: theWorkspace, Dir: "/tmp/ws-1"}},
 		leases:      map[ids.WorkspaceID]wsm.Lease{},
 		held:        map[ids.TurnID]*wsm.HeldPrompt{},
+		waits:       map[ids.TurnID]*wsm.ArrivalWait{},
 		turns:       map[ids.TurnID]*wsm.Turn{},
 		closedTurns: map[ids.TurnID]wsm.TurnClose{},
 		sessions:    map[ids.WorkspaceID]wsm.Session{},
@@ -229,6 +237,10 @@ func (d *fakeDB) PutHeldPrompt(_ context.Context, h wsm.HeldPrompt) error {
 	defer d.mu.Unlock()
 	if d.putHeldErr != nil {
 		return d.putHeldErr
+	}
+	// AS THE REAL STORE: a prompt delivered on arrival is never held.
+	if promptorigin.DeliveredOnArrivalNamed(h.Origin) {
+		return wsm.ErrHeldOnArrival
 	}
 	if d.beforeHoldWrite != nil {
 		d.beforeHoldWrite(d)
@@ -2161,4 +2173,67 @@ func (l *fakeLeases) told() []ids.WorkspaceID {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]ids.WorkspaceID(nil), l.changed...)
+}
+
+// PutArrivalWait records a wait, as the real store's upsert: a wait recorded
+// again takes its new reason and keeps its place.
+func (d *fakeDB) PutArrivalWait(_ context.Context, w wsm.ArrivalWait) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.putWaitErr != nil {
+		return d.putWaitErr
+	}
+	if !promptorigin.DeliveredOnArrivalNamed(w.Origin) {
+		return wsm.ErrNotDeliveredOnArrival
+	}
+	if prior, ok := d.waits[w.Turn]; ok {
+		prior.Reason, prior.Why = w.Reason, w.Why
+		return nil
+	}
+	copied := w
+	d.waits[w.Turn] = &copied
+	d.waitOrder = append(d.waitOrder, w.Turn)
+	return nil
+}
+
+// DeleteArrivalWait ends a wait, answering whether one stood.
+func (d *fakeDB) DeleteArrivalWait(_ context.Context, turn ids.TurnID) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.waits[turn]; !ok {
+		return false, nil
+	}
+	delete(d.waits, turn)
+	return true, nil
+}
+
+// ArrivalWaits answers one workspace's waits in the order they arrived.
+func (d *fakeDB) ArrivalWaits(_ context.Context, ws ids.WorkspaceID) ([]wsm.ArrivalWait, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.waitsErr != nil {
+		return nil, d.waitsErr
+	}
+	var out []wsm.ArrivalWait
+	for _, turn := range d.waitOrder {
+		if w, ok := d.waits[turn]; ok && (ws == "" || w.Workspace == ws) {
+			out = append(out, *w)
+		}
+	}
+	return out, nil
+}
+
+// AllArrivalWaits answers every workspace's waits in the order they arrived.
+func (d *fakeDB) AllArrivalWaits(ctx context.Context) ([]wsm.ArrivalWait, error) {
+	return d.ArrivalWaits(ctx, "")
+}
+
+// arrivalWaits answers the waits standing on theWorkspace.
+func (d *fakeDB) arrivalWaits(t *testing.T) []wsm.ArrivalWait {
+	t.Helper()
+	waits, err := d.ArrivalWaits(context.Background(), theWorkspace)
+	if err != nil {
+		t.Fatalf("ArrivalWaits: %v", err)
+	}
+	return waits
 }

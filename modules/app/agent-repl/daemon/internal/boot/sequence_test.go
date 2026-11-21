@@ -150,6 +150,38 @@ func TestAnAdoptedSessionsReconnectHoldsAreReleasedAfterTheRestore(t *testing.T)
 	}
 }
 
+func TestTheBootDrivesTheArrivalWaitsOnceTheAdoptedSessionsAreReleased(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.register(t, t.TempDir(), sessionlock.StateHeld)
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	if h.queue.drives != 1 || h.queue.reconnectsAtDrive != 1 {
+		t.Fatalf("drives = %d after %d releases, want one drive after the adopted session's release", h.queue.drives, h.queue.reconnectsAtDrive)
+	}
+}
+
+func TestAnArrivalDriveThatFailsRefusesTheBoot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(_ *Deps, h *harness) { h.queue.driveErr = errBoom })
+
+	// Act.
+	_, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("Run error = %v, want it to wrap %v", err, errBoom)
+	}
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Message: "the arrival waits could not be driven"}); !found {
+		t.Fatalf("no ERROR record of the failed drive; records %+v", h.log.Records())
+	}
+}
+
 // TestAFailedAdoptionFailsTheBoot pins the loudness rule: a shim that could not
 // be adopted is not a workspace to carry on without.
 func TestAFailedAdoptionFailsTheBoot(t *testing.T) {
