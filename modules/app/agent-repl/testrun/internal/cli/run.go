@@ -81,6 +81,9 @@ type Deps struct {
 	// CPU measures each unit's CPU over time, for each test's share
 	// (cputime.Sampler); nil, as in a run that pushes nothing, measures none.
 	CPU run.UnitCPU
+	// Impact is the shadow-mode impact recording's seams
+	// (agentrepl/testrun/internal/impact); nil records nothing.
+	Impact *ImpactDeps
 }
 
 // Reuser is the run's pass-record seam (reuse.Runner).
@@ -182,6 +185,10 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		Self:      d.Self,
 		Coverage:  a.Coverage,
 		DebugInfo: a.DebugInfo,
+		// SHADOW MODE: every run records the files each daemon integration test
+		// executed, except a coverage run, whose programs are built for its own
+		// reports.
+		Impact: impactLayoutOn(d, a),
 	}
 	csvPath := filepath.Join(moduleRoot, "test_time.csv")
 	if err := ValidateCSV(csvPath); err != nil {
@@ -381,7 +388,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		verdicts: verdicts, mode: mode, hist: hist,
 		times:  runTimes{start: start, end: end, predicted: p.Makespan, verdicts: verdicts},
 		placed: placed, unplaced: unplaced,
-		repo: layout.Repo, startBranch: startBranch, startCommit: startCommit,
+		repo: layout.Repo, startBranch: startBranch, startCommit: startCommit, layout: layout,
 	})
 	var runFailures []string
 	if runFailure != "" {
@@ -404,6 +411,7 @@ type settleInputs struct {
 	repo         string
 	startBranch  string
 	startCommit  string
+	layout       suites.Layout
 }
 
 // settleRun records a run whose units have ended, judges it, and answers its
@@ -420,6 +428,9 @@ func settleRun(ctx context.Context, d Deps, a Args, in settleInputs) (int, strin
 	if err := in.hist.Record(plan.Measurements(in.results)); err != nil {
 		return fail("recording this run's timings in the host history failed: %v", err)
 	}
+	// THE IMPACT RECORDING COMES FIRST: it reads the store as the run found it,
+	// and its metrics ride the push below.
+	in.times.impact = recordImpact(d, in.layout, in.results, d.Clock.Now())
 	if err := pushTimes(ctx, d, in.results, in.suiteResults, in.times); err != nil {
 		return fail("recording this run's test times in the metrics store failed: %v", err)
 	}
@@ -496,6 +507,8 @@ type runTimes struct {
 	start, end time.Time
 	predicted  float64
 	verdicts   []reuse.SuiteVerdict
+	// impact is the run's shadow-mode impact recording (recordImpact).
+	impact []testtimes.Impact
 }
 
 func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults []run.SuiteResult, rt runTimes) error {
@@ -510,6 +523,7 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 			outcome = testtimes.Fail
 		}
 	}
+	report.Impact = rt.impact
 	report.Run = &testtimes.Run{Seconds: rt.end.Sub(rt.start).Seconds(), PredictedSeconds: rt.predicted, Outcome: outcome}
 	for _, v := range rt.verdicts {
 		report.SuiteUnits = append(report.SuiteUnits, testtimes.SuiteUnits{Suite: v.Suite.Name, Run: len(v.Units) - v.Reused(), Reused: v.Reused(), Batching: suiteBatching(d.Roster, v.Suite.Name)})

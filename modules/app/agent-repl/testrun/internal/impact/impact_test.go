@@ -338,3 +338,25 @@ func TestDeciderDecideEntryTreatsNonTopLevelNamesAsWouldRun(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultStoreDirCases(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	tests := []struct {
+		name, env, want string
+	}{
+		{"the override", "/elsewhere", "/elsewhere"},
+		{"beside the run history by default", "", "/home/u/.cache/agent-repl/test-impact"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			t.Setenv(EnvStore, tt.env)
+			// Act
+			got, err := DefaultStoreDir()
+			// Assert
+			if err != nil || got != tt.want {
+				t.Fatalf("DefaultStoreDir = (%s, %v), want %s", got, err, tt.want)
+			}
+		})
+	}
+}
