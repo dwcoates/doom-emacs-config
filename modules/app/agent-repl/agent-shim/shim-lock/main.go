@@ -83,19 +83,19 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return withSinkStatus(log, exitUsage)
 	}
 	lockPath := args[0]
-	ctx := logging.Context{"lock_path": lockPath}
+	log = log.With(logging.Context{"lock_path": lockPath})
 
 	// The lock DIRECTORY is created here rather than assumed. A holder that
 	// refused for want of a directory would be indistinguishable, to a reader,
 	// from one that refused because a live shim owns the workspace.
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		log.Error("shim-lock.acquire", "the lock directory could not be created: "+err.Error(), ctx)
+		log.Error("shim-lock.acquire", "the lock directory could not be created: {cause}", logging.Context{"cause": err.Error()})
 		return withSinkStatus(log, exitError)
 	}
 
 	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
-		log.Error("shim-lock.acquire", "the lock file could not be opened: "+err.Error(), ctx)
+		log.Error("shim-lock.acquire", "the lock file could not be opened: {cause}", logging.Context{"cause": err.Error()})
 		return withSinkStatus(log, exitError)
 	}
 	// Held for the whole of this process's life; the close is what drops the
@@ -108,10 +108,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// refusal into a typed StartSession answer and stays serving.
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			log.Error("shim-lock.acquire", "the lock is already held by another process", ctx)
+			log.Error("shim-lock.acquire", "the lock is already held by another process", nil)
 			return withSinkStatus(log, exitHeld)
 		}
-		log.Error("shim-lock.acquire", "flock failed: "+err.Error(), ctx)
+		log.Error("shim-lock.acquire", "flock failed: {cause}", logging.Context{"cause": err.Error()})
 		return withSinkStatus(log, exitError)
 	}
 
@@ -131,20 +131,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	signal.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	if _, err := fmt.Fprintln(stdout, ReadyLine); err != nil {
-		log.Error("shim-lock.acquire", "the ready line could not be written: "+err.Error(), ctx)
+		log.Error("shim-lock.acquire", "the ready line could not be written: {cause}", logging.Context{"cause": err.Error()})
 		return withSinkStatus(log, exitError)
 	}
-	log.Info("shim-lock.hold", "holding the lock until stdin closes", ctx)
+	log.Info("shim-lock.hold", "holding the lock until stdin closes", nil)
 
 	// The hold. Nothing is ever sent on stdin; the read exists solely so that
 	// the parent's death — which closes the pipe — ends this process and
 	// therefore the lock.
 	if _, err := io.Copy(io.Discard, stdin); err != nil {
-		log.Error("shim-lock.hold", "reading stdin failed: "+err.Error(), ctx)
+		log.Error("shim-lock.hold", "reading stdin failed: {cause}", logging.Context{"cause": err.Error()})
 		return withSinkStatus(log, exitError)
 	}
 
-	log.Info("shim-lock.release", "stdin reached EOF; releasing the lock", ctx)
+	log.Info("shim-lock.release", "stdin reached EOF; releasing the lock", nil)
 	return withSinkStatus(log, exitOK)
 }
 

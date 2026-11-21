@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/logsite"
 )
 
 type failingWriter struct{}
@@ -47,6 +48,8 @@ func TestLogWritesTheCanonicalRecordShape(t *testing.T) {
 		"component": Component,
 		"operation": "shim-lock.hold",
 		"message":   "holding the lock until stdin closes",
+		"site":      logsite.Key(Runtime, "agentrepl/shim-lock/internal/logging.TestLogWritesTheCanonicalRecordShape", "holding the lock until stdin closes"),
+		"template":  "holding the lock until stdin closes",
 		"context":   map[string]any{"lock_path": "/run/a.lock"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -163,5 +166,110 @@ func TestAnUnmarshallableContextStillEmitsTheBranchItWasReporting(t *testing.T) 
 	}
 	if !strings.Contains(line, "flock failed") {
 		t.Fatalf("record = %q, want the original message preserved", line)
+	}
+}
+
+func TestEveryRecordRendersItsTemplateFromItsNamedValues(t *testing.T) {
+	const function = "agentrepl/shim-lock/internal/logging.TestEveryRecordRendersItsTemplateFromItsNamedValues"
+	tests := []struct {
+		name        string
+		log         func(l *Logger)
+		template    string
+		wantMessage string
+		wantContext map[string]any
+	}{
+		{
+			name:        "a placeholder takes the call's own value",
+			log:         func(l *Logger) { l.Error("shim-lock.acquire", "flock failed: {cause}", Context{"cause": "EIO"}) },
+			template:    "flock failed: {cause}",
+			wantMessage: "flock failed: EIO",
+			wantContext: map[string]any{"cause": "EIO"},
+		},
+		{
+			name: "a placeholder takes a value bound with With",
+			log: func(l *Logger) {
+				l.With(Context{"lock_path": "/run/a.lock"}).Info("shim-lock.hold", "holding {lock_path}", nil)
+			},
+			template:    "holding {lock_path}",
+			wantMessage: "holding /run/a.lock",
+			wantContext: map[string]any{"lock_path": "/run/a.lock"},
+		},
+		{
+			name:        "a doubled brace renders as one literal brace",
+			log:         func(l *Logger) { l.Info("shim-lock.hold", "a {{literal}} brace", nil) },
+			template:    "a {{literal}} brace",
+			wantMessage: "a {literal} brace",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var sink bytes.Buffer
+			log, _ := pinned(&sink)
+
+			// Act
+			tt.log(log)
+
+			// Assert
+			var got map[string]any
+			if err := json.Unmarshal(sink.Bytes(), &got); err != nil {
+				t.Fatalf("record is not JSON: %v", err)
+			}
+			if got["message"] != tt.wantMessage || got["template"] != tt.template {
+				t.Errorf("message, template = %v, %v, want %q, %q", got["message"], got["template"], tt.wantMessage, tt.template)
+			}
+			if want := logsite.Key(Runtime, function, tt.template); got["site"] != want {
+				t.Errorf("site = %v, want %q", got["site"], want)
+			}
+			if ctx, _ := got["context"].(map[string]any); tt.wantContext != nil && !reflect.DeepEqual(ctx, tt.wantContext) {
+				t.Errorf("context = %v, want %v", ctx, tt.wantContext)
+			}
+		})
+	}
+}
+
+func TestAnUnrenderableRecordPanics(t *testing.T) {
+	tests := []struct {
+		name string
+		log  func(l *Logger)
+	}{
+		{name: "a placeholder no value fills", log: func(l *Logger) { l.Error("shim-lock.acquire", "lost {gone}", Context{"here": 1}) }},
+		{name: "a template whose braces do not parse", log: func(l *Logger) { l.Info("shim-lock.hold", "unclosed {", nil) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var sink bytes.Buffer
+			log, _ := pinned(&sink)
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("the record was written instead of panicking")
+				}
+				if sink.Len() != 0 {
+					t.Errorf("sink got %q, want nothing", sink.String())
+				}
+			}()
+
+			// Act
+			tt.log(log)
+		})
+	}
+}
+
+func TestWithSharesTheSinkAndLeavesItsParentAlone(t *testing.T) {
+	// Arrange
+	log := New(failingWriter{})
+	child := log.With(Context{"lock_path": "/run/a.lock"})
+
+	// Act
+	child.Info("shim-lock.hold", "holding", nil)
+
+	// Assert
+	if !log.SinkFailed() {
+		t.Fatal("the child's failed write was not seen by its parent")
+	}
+	if len(log.base) != 0 {
+		t.Fatalf("the parent's base = %v, want the child's field kept out of it", log.base)
 	}
 }

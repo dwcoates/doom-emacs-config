@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"agentrepl/logging/buildreport"
+	"agentrepl/logging/logsite"
 	"agentrepl/logging/recordlog"
 	"agentrepl/logging/sockethold"
 	"agentrepl/logging/sockethold/activate"
@@ -63,16 +64,16 @@ func main() {
 // run takes the control socket CONTROL and every socket of HOLD from ACTIVATE
 // and serves them until CTX ends. Every failure is recorded before it returns.
 func run(ctx context.Context, control string, hold []string, activateSockets func([]string) ([]activate.Socket, error), log *recordlog.Logger, getenv func(string) string) error {
-	fail := func(message string, err error) error {
-		log.Error("sockethold.run", message, recordlog.Context{"control": control, "hold": strings.Join(hold, ","), "cause": err.Error()})
+	fail := func(message logsite.Message, err error) error {
+		log.Log("error", "sockethold.run", message, recordlog.Context{"control": control, "hold": strings.Join(hold, ","), "cause": err.Error()})
 		return err
 	}
 	if control == "" || len(hold) == 0 {
-		return fail("the holder was given no control socket or no socket to hold", errors.New("--control and at least one --hold are required"))
+		return fail(logsite.Msg("the holder was given no control socket or no socket to hold"), errors.New("--control and at least one --hold are required"))
 	}
 	sockets, err := activateSockets(append([]string{control}, hold...))
 	if err != nil {
-		return fail("the service manager handed the holder no sockets", err)
+		return fail(logsite.Msg("the service manager handed the holder no sockets"), err)
 	}
 	byName := map[string]*os.File{}
 	for _, s := range sockets {
@@ -80,21 +81,21 @@ func run(ctx context.Context, control string, hold []string, activateSockets fun
 	}
 	controlFile, ok := byName[control]
 	if !ok {
-		return fail("the service manager handed no control socket", fmt.Errorf("no socket named %q", control))
+		return fail(logsite.Msg("the service manager handed no control socket"), fmt.Errorf("no socket named %q", control))
 	}
 	delete(byName, control)
 	for _, name := range hold {
 		if _, ok := byName[name]; !ok {
-			return fail("the service manager handed no socket to hold", fmt.Errorf("no socket named %q", name))
+			return fail(logsite.Msg("the service manager handed no socket to hold"), fmt.Errorf("no socket named %q", name))
 		}
 	}
 	ln, err := net.FileListener(controlFile)
 	if err != nil {
-		return fail("the control socket is no listener", err)
+		return fail(logsite.Msg("the control socket is no listener"), err)
 	}
 	unix, ok := ln.(*net.UnixListener)
 	if !ok {
-		return fail("the control socket is not a unix socket", fmt.Errorf("listener %T", ln))
+		return fail(logsite.Msg("the control socket is not a unix socket"), fmt.Errorf("listener %T", ln))
 	}
 	log.Info("sockethold.run", "holding the sockets and serving their control socket", recordlog.Context{"control": control, "hold": strings.Join(hold, ",")})
 	// THE HOLDER STATES ITS BUILD, as every service a deploy restarts does: a
@@ -122,7 +123,7 @@ func run(ctx context.Context, control string, hold []string, activateSockets fun
 		}
 	})
 	if err != nil {
-		return fail("serving the control socket failed", err)
+		return fail(logsite.Msg("serving the control socket failed"), err)
 	}
 	log.Info("sockethold.run", "the holder is exiting on its service manager's signal", nil)
 	return nil

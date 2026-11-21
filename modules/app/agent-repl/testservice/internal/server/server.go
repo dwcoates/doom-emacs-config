@@ -70,7 +70,7 @@ func (s *Server) StartRun(_ context.Context, req *connect.Request[testservicev1.
 	}
 	invalid := func(field string) *connect.Response[testservicev1.StartRunResponse] {
 		detail := "the start names no " + field
-		s.log.Info(op, "refused a start that names no "+field, recordlog.Context{"field": field})
+		s.log.Info(op, "refused a start that names no {field}", recordlog.Context{"field": field})
 		return fail(&testservicev1.StartRunFailure{Detail: detail, Kind: &testservicev1.StartRunFailure_InvalidRequest{InvalidRequest: &testservicev1.StartRunInvalidRequest{Field: field}}})
 	}
 	switch {

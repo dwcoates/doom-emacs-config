@@ -809,3 +809,7 @@ func (s *fakeServer) launcherOnly(ctx context.Context, method string, msg proto.
 	return connect.NewError(connect.CodeUnimplemented,
 		fmt.Errorf("fakedaemon mocks only Emacs's surface; %s is the launcher's", method))
 }
+
+func (s *fakeServer) ListLogSites(ctx context.Context, req *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error) {
+	return handleUnary[v1.ListLogSitesRequest, v1.ListLogSitesResponse](ctx, s, "ListLogSites", req.Msg)
+}

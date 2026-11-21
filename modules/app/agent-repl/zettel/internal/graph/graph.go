@@ -244,7 +244,7 @@ func (db *DB) Thread(ctx context.Context, thread ThreadID) ([]Node, error) {
 	}
 	nodes, err := collect(rows, func(r *sql.Rows) (Node, error) { return scanNodeRow(r) })
 	if err != nil {
-		db.log.Error("zettel.thread.read", "reading the thread's nodes failed", zlog.Context{"thread": string(thread), "cause": err.Error()})
+		db.log.Error("zettel.thread.read", "reading the thread's node rows failed", zlog.Context{"thread": string(thread), "cause": err.Error()})
 		return nil, storagef(err, "reading the thread's nodes")
 	}
 	return nodes, nil
