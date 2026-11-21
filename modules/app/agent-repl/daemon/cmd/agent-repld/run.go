@@ -833,6 +833,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		EndStreams:     endStreams,
 		Mark:           teardown.mark,
 		Log:            log,
+		HandBack:       shared.handBack,
 	})
 	teardown.markSinceBegin("serve_stop")
 	if err := serveErr; err != nil {
@@ -990,6 +991,10 @@ type serveExit struct {
 	Grace time.Duration
 	// Log is where the shutdown reports a grace it ran out. Required.
 	Log dlog.Logger
+	// HandBack gives the holder a connection accepted on the shared address
+	// and never read (sharedTake.handBack). Nil hands nothing back: every
+	// requestless connection is closed.
+	HandBack func(*os.File) error
 }
 
 // serve runs the http server on the claimed listener until ctx ends, then shuts
@@ -1021,7 +1026,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 	if !ok {
 		return fmt.Errorf("agent-repld: the serving handler carries no in-flight request gate; an orderly exit would cut every call it is still answering")
 	}
-	conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, log: exit.Log}
+	conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, handed: map[net.Conn]bool{}, log: exit.Log, handBack: exit.HandBack}
 	srv := &http.Server{Handler: closingHTTP1(h), ConnState: conns.track}
 	// A CONNECTION THAT HAS DELIVERED NO REQUEST OWES NOTHING, and
 	// `Server.Shutdown` waits for it anyway: it polls, on an interval that
@@ -1172,6 +1177,10 @@ type connStates struct {
 	// closeFailures are the errors closing a requestless connection met,
 	// reported through summary rather than dropped.
 	closeFailures []string
+	// handBack gives the holder an unread shared connection; handed are the
+	// ones it took, whose close is no lost call.
+	handBack func(*os.File) error
+	handed   map[net.Conn]bool
 }
 
 func (c *connStates) track(conn net.Conn, state http.ConnState) {
@@ -1180,9 +1189,10 @@ func (c *connStates) track(conn net.Conn, state http.ConnState) {
 	was, known := c.byConn[conn]
 	switch state {
 	case http.StateClosed, http.StateHijacked:
-		if known && was == http.StateNew && state == http.StateClosed {
+		if known && was == http.StateNew && state == http.StateClosed && !c.handed[conn] {
 			c.recordRequestless(conn)
 		}
+		delete(c.handed, conn)
 		delete(c.byConn, conn)
 		delete(c.born, conn)
 	default:
@@ -1219,6 +1229,34 @@ func (c *connStates) closeRequestless() {
 	}
 	c.mu.Unlock()
 	for _, conn := range requestless {
+		// A CONNECTION OF THE SHARED ADDRESS IS THE NEXT DAEMON'S when nothing
+		// was read of it (server.HandBackUnread): its client may be writing its
+		// call this instant, and closing it would cut that call off.
+		if c.handBack != nil {
+			// MARKED BEFORE THE HAND-BACK, which closes it: its close is then
+			// no lost call.
+			c.mu.Lock()
+			c.handed[conn] = true
+			c.mu.Unlock()
+			outcome, err := server.HandBackUnread(conn, c.handBack)
+			if err != nil || outcome != server.HandedBack {
+				c.mu.Lock()
+				delete(c.handed, conn)
+				c.mu.Unlock()
+			}
+			switch {
+			case err != nil:
+				c.log.Error("daemon.server.hand_back", "an unread connection of the shared address could not be handed back; it was closed", dlog.Context{
+					"remote": conn.RemoteAddr().String(), "error": err.Error()})
+				continue
+			case outcome == server.HandedBack:
+				c.log.Info("daemon.server.hand_back", "handed an unread connection of the shared address back to the holder, for the daemon accepting next", dlog.Context{
+					"remote": conn.RemoteAddr().String()})
+				continue
+			case outcome == server.ReadFrom:
+				continue
+			}
+		}
 		if err := conn.Close(); err != nil {
 			c.mu.Lock()
 			c.closeFailures = append(c.closeFailures, err.Error())

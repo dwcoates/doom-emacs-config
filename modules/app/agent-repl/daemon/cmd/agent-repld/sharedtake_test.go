@@ -5,10 +5,15 @@ import (
 	"errors"
 	"go/ast"
 	"go/token"
+	"io"
 	"net"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
@@ -56,7 +61,7 @@ func TestSharedTakeEnsuresItsHolderBeforeItTakes(t *testing.T) {
 			t.Cleanup(func() { shared.Close() })
 			var order []string
 			claim := &advertisingClaim{}
-			s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: &spyLogger{},
+			s := &sharedTake{holder: "/h/daemon-holder.sock", subscribeFn: noReturns, accept: newPrivateAccept(t), claim: claim, log: &spyLogger{},
 				ensure: func(_ context.Context, control string) error {
 					order = append(order, "ensure "+control)
 					return tt.ensureErr
@@ -96,7 +101,7 @@ func TestSharedTakeAdvertisesAndAcceptsOnTheHoldersListenerOnce(t *testing.T) {
 	accept := newPrivateAccept(t)
 	log := &spyLogger{}
 	takes := 0
-	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: accept, claim: claim, log: log, ensure: holderServes,
+	s := &sharedTake{holder: "/h/daemon-holder.sock", subscribeFn: noReturns, accept: accept, claim: claim, log: log, ensure: holderServes,
 		takeFn: func(_ context.Context, control, name string) (net.Listener, error) {
 			takes++
 			if control != "/h/daemon-holder.sock" || name != holderDaemonSocket {
@@ -131,7 +136,7 @@ func TestSharedTakeFailsWhenTheHolderCannotGrant(t *testing.T) {
 	// Arrange
 	claim := &advertisingClaim{}
 	log := &spyLogger{}
-	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: log, ensure: holderServes,
+	s := &sharedTake{holder: "/h/daemon-holder.sock", subscribeFn: noReturns, accept: newPrivateAccept(t), claim: claim, log: log, ensure: holderServes,
 		takeFn: func(context.Context, string, string) (net.Listener, error) {
 			return nil, errors.New("connection refused")
 		}}
@@ -155,7 +160,7 @@ func TestAnAcquiredSharedListenerNamesItsAddressAndIsServedOnlyOnceTaken(t *test
 		t.Fatal(err)
 	}
 	claim := &advertisingClaim{}
-	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: &spyLogger{}, ensure: holderServes,
+	s := &sharedTake{holder: "/h/daemon-holder.sock", subscribeFn: noReturns, accept: newPrivateAccept(t), claim: claim, log: &spyLogger{}, ensure: holderServes,
 		takeFn: func(context.Context, string, string) (net.Listener, error) { return shared, nil }}
 
 	// Act
@@ -178,7 +183,7 @@ func TestSharedTakeAnswersItsAddressOnlyOnceTaken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: &advertisingClaim{}, log: &spyLogger{}, ensure: holderServes,
+	s := &sharedTake{holder: "/h/daemon-holder.sock", subscribeFn: noReturns, accept: newPrivateAccept(t), claim: &advertisingClaim{}, log: &spyLogger{}, ensure: holderServes,
 		takeFn: func(context.Context, string, string) (net.Listener, error) { return shared, nil }}
 
 	// Act
@@ -207,7 +212,7 @@ func TestYieldStopsTheSharedAcceptBeforeItYieldsTheClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	accept := newPrivateAccept(t)
-	accept.AddShared(shared)
+	accept.AddShared(shared, newFakeReturned(), &spyLogger{})
 	claim := &yieldingClaim{}
 	s := &sharedTake{accept: accept, log: &spyLogger{}}
 
@@ -366,5 +371,180 @@ func TestTheDaemonsHolderTakeIsSocketholdsTimedTake(t *testing.T) {
 	// Assert
 	if ownBound != "" || calls != 1 {
 		t.Fatalf("own take bound at %q, %d sockethold.TakeTimed calls; want none of its own and exactly one call", ownBound, calls)
+	}
+}
+
+// fakeReturned is a holder's accept stream the test feeds: Next answers each
+// connection put on conns, then io.EOF once the stream is stopped.
+type fakeReturned struct {
+	conns chan net.Conn
+	stop  chan struct{}
+	once  sync.Once
+}
+
+func newFakeReturned() *fakeReturned {
+	return &fakeReturned{conns: make(chan net.Conn, 4), stop: make(chan struct{})}
+}
+
+func (f *fakeReturned) Next() (net.Conn, error) {
+	select {
+	case c := <-f.conns:
+		return c, nil
+	case <-f.stop:
+		return nil, io.EOF
+	}
+}
+
+func (f *fakeReturned) Stop() error { f.once.Do(func() { close(f.stop) }); return nil }
+
+func (f *fakeReturned) Close() error { return f.Stop() }
+
+// noReturns opens a fake accept stream that hands back nothing.
+func noReturns(context.Context, string, string) (server.Returned, error) {
+	return newFakeReturned(), nil
+}
+
+// acceptedShared answers a client and the connection a SharedAccept took for
+// it from the shared address, as a daemon's serve sees it.
+func acceptedShared(t *testing.T) (net.Conn, net.Conn) {
+	t.Helper()
+	shared, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept := newPrivateAccept(t)
+	accept.AddShared(shared, newFakeReturned(), &spyLogger{})
+	client, err := net.Dial("tcp", shared.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.Close() })
+	conn, err := accept.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	return client, conn
+}
+
+func TestTheExitHandsBackAnUnreadSharedConnection(t *testing.T) {
+	cases := []struct {
+		name       string
+		giveErr    error
+		wantLevel  string
+		wantMsg    string
+		requestles bool
+	}{
+		{name: "the holder takes it", wantLevel: dlog.LevelInfo,
+			wantMsg: "handed an unread connection of the shared address back to the holder, for the daemon accepting next"},
+		{name: "the holder refuses it", giveErr: errors.New("the holder refused"), wantLevel: dlog.LevelError,
+			wantMsg: "an unread connection of the shared address could not be handed back; it was closed", requestles: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: an accepted shared connection that delivered nothing.
+			_, conn := acceptedShared(t)
+			log := &spyLogger{}
+			var gave int
+			conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, handed: map[net.Conn]bool{}, log: log,
+				handBack: func(*os.File) error { gave++; return tc.giveErr }}
+			conns.track(conn, http.StateNew)
+
+			// Act
+			conns.closeRequestless()
+			conns.track(conn, http.StateClosed)
+
+			// Assert
+			if gave != 1 {
+				t.Fatalf("handed back %d time(s), want once", gave)
+			}
+			if msg, ok := log.message(tc.wantLevel); !ok || msg != tc.wantMsg {
+				t.Fatalf("records = %+v, want %q at %s", log.records, tc.wantMsg, tc.wantLevel)
+			}
+			recorded := false
+			for _, r := range log.records {
+				if r.operation == "daemon.server.conn_requestless" {
+					recorded = true
+				}
+			}
+			if recorded != tc.requestles {
+				t.Fatalf("requestless recorded = %v, want %v: a handed-back connection is no lost call", recorded, tc.requestles)
+			}
+		})
+	}
+}
+
+func TestTheExitClosesAPrivateConnectionThatDeliveredNothing(t *testing.T) {
+	// Arrange
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gave int
+	conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, handed: map[net.Conn]bool{}, log: &spyLogger{},
+		handBack: func(*os.File) error { gave++; return nil }}
+	conns.track(conn, http.StateNew)
+
+	// Act
+	conns.closeRequestless()
+
+	// Assert
+	if gave != 0 {
+		t.Fatalf("handed back %d private connection(s), want none", gave)
+	}
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("the private connection is still open, want it closed")
+	}
+}
+
+func TestTakeFailsWhenTheHoldersStreamCannotBeOpened(t *testing.T) {
+	// Arrange
+	shared, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { shared.Close() })
+	log := &spyLogger{}
+	claim := &advertisingClaim{}
+	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: log, ensure: holderServes,
+		takeFn: func(context.Context, string, string) (net.Listener, error) { return shared, nil },
+		subscribeFn: func(context.Context, string, string) (server.Returned, error) {
+			return nil, errors.New("sockethold: the holder refused the request")
+		}}
+
+	// Act
+	err = s.take()
+
+	// Assert
+	if err == nil {
+		t.Fatal("take = nil, want the stream's failure")
+	}
+	if msg, ok := log.message(dlog.LevelError); !ok || msg != "the holder's stream of handed-back connections could not be opened" {
+		t.Fatalf("records = %+v, want the failure at ERROR", log.records)
+	}
+}
+
+func TestHandBackAsksTheDaemonsHolder(t *testing.T) {
+	// Arrange
+	var control, name string
+	s := &sharedTake{holder: "/h/daemon-holder.sock", log: &spyLogger{},
+		returnFn: func(_ context.Context, c, n string, _ *os.File) error { control, name = c, n; return nil }}
+
+	// Act
+	err := s.handBack(os.Stdin)
+
+	// Assert
+	if err != nil || control != "/h/daemon-holder.sock" || name != holderDaemonSocket {
+		t.Fatalf("handBack = %v to (%q, %q), want the daemon's socket at its holder", err, control, name)
 	}
 }
