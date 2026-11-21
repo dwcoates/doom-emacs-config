@@ -2340,6 +2340,121 @@ func TestRemoveCleanWorktreeReattachFailureIsReturnedAndLogged(t *testing.T) {
 	}
 }
 
+func TestAWorktreeLifecycleFailureIsRecordedAsTheWorkspaces(t *testing.T) {
+	// The workspace's own sinks are detached around a creation or removal, so
+	// each failure goes to the central sink; it must still name the workspace
+	// it is about, or its records are read back with nobody's. A forced
+	// removal names the workspace's own path even after moving it aside.
+	cases := []struct {
+		name      string
+		operation string
+		arrange   func(t *testing.T, s *testSurfaces, worktreeDir string)
+		act       func(git Git, worktreeDir string) error
+	}{
+		{
+			name:      "the detach is refused",
+			operation: "daemon.gitclient.remove_worktree",
+			arrange: func(t *testing.T, s *testSurfaces, _ string) {
+				s.dirFailure = errors.New("detach refused")
+				newFakeGit(t, ok("", "worktree", "prune"))
+			},
+			act: removeWorktreeOf,
+		},
+		{
+			name:      "the move aside is refused",
+			operation: "daemon.gitclient.remove_worktree",
+			arrange: func(t *testing.T, _ *testSurfaces, _ string) {
+				newFakeGit(t, fails(128, "fatal: refused\n", "worktree", "move"), ok("", "worktree", "prune"))
+			},
+			act: removeWorktreeOf,
+		},
+		{
+			name:      "the tree survives its forced removal",
+			operation: "daemon.gitclient.remove_worktree",
+			arrange: func(t *testing.T, _ *testSurfaces, worktreeDir string) {
+				newFakeGit(t, movedAside(worktreeDir), fails(1, "fatal: unable to remove worktree\n", "worktree", "remove"), ok("", "worktree", "prune"))
+			},
+			act: removeWorktreeOf,
+		},
+		{
+			name:      "the tree is still present after a removal git reported done",
+			operation: "daemon.gitclient.remove_worktree",
+			arrange: func(t *testing.T, _ *testSurfaces, worktreeDir string) {
+				newFakeGit(t, movedAside(worktreeDir), ok("", "worktree", "remove"), ok("", "worktree", "prune"))
+			},
+			act: removeWorktreeOf,
+		},
+		{
+			name:      "a refused clean removal cannot re-attach the tree",
+			operation: "daemon.gitclient.remove_clean_worktree",
+			arrange: func(t *testing.T, s *testSurfaces, _ string) {
+				s.attachFailure = errors.New("attach refused")
+				newFakeGit(t, fails(128, "fatal: contains modified or untracked files\n", "worktree", "remove"), ok("", "worktree", "prune"))
+			},
+			act: func(git Git, worktreeDir string) error {
+				return git.RemoveCleanWorktree(context.Background(), "/repo", worktreeDir)
+			},
+		},
+		{
+			name:      "a new worktree cannot be attached",
+			operation: "daemon.gitclient.create_worktree",
+			arrange: func(t *testing.T, s *testSurfaces, _ string) {
+				s.attachFailure = errors.New("attach refused")
+				newFakeGit(t, ok("", "worktree", "add"))
+			},
+			act: func(git Git, worktreeDir string) error {
+				return git.CreateWorktree(context.Background(), "/repo", "feature", "master", worktreeDir)
+			},
+		},
+		{
+			name:      "a restored worktree cannot be attached",
+			operation: "daemon.gitclient.restore_worktree",
+			arrange: func(t *testing.T, s *testSurfaces, _ string) {
+				s.attachFailure = errors.New("attach refused")
+				newFakeGit(t, ok("", "worktree", "add"))
+			},
+			act: func(git Git, worktreeDir string) error {
+				return git.RestoreWorktree(context.Background(), "/repo", worktreeDir, "feature")
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			worktreeDir := existingDir(t, "wt")
+			tc.arrange(t, surfaces, worktreeDir)
+
+			// Act.
+			err := tc.act(git, worktreeDir)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("the operation succeeded, want its failure")
+			}
+			var errors []dlog.Record
+			for _, r := range surfaces.records() {
+				if r.Level == "error" && r.Operation == tc.operation {
+					errors = append(errors, r)
+				}
+			}
+			if len(errors) == 0 {
+				t.Fatalf("no ERROR record under %s", tc.operation)
+			}
+			for _, r := range errors {
+				if got := r.Context[dlog.KeyWorkspaceDir]; got != worktreeDir {
+					t.Fatalf("record %q names workspace_dir %v, want the workspace's own %s", r.Message, got, worktreeDir)
+				}
+			}
+		})
+	}
+}
+
+// removeWorktreeOf removes the worktree at worktreeDir of the repository /repo.
+func removeWorktreeOf(git Git, worktreeDir string) error {
+	return git.RemoveWorktree(context.Background(), "/repo", worktreeDir)
+}
+
 func TestRemoveCleanWorktreeSuccessReattachesNothing(t *testing.T) {
 	// Arrange: a removed tree stays detached, so a late record cannot bring
 	// it back.
