@@ -162,14 +162,16 @@ func (t *Tallier) Pass(ctx context.Context, reason string) (Report, error) {
 		"reason": reason, "files": report.Files, "bytes": report.Bytes, "records": report.Records,
 		"unkeyed": report.Unkeyed, "earlier": report.Earlier, "malformed": report.Malformed,
 		"moved": report.Moved, "failed": report.Failed, "pruned_rows": report.PrunedRows,
-		"elapsed_ms": t.now().Sub(started).Milliseconds(), "bound": t.passBound.String(),
+		"elapsed_ms": t.now().Sub(started).Milliseconds(),
 	}
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
-		t.log.Error(opPass, "the log site pass ran past its bound of {bound}", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
+		t.log.With(fields).Error(opPass, "the log site pass ran past its bound of {bound}", dlog.Context{
+			"bound": t.passBound.String(), "cause": err.Error(),
+		})
 		return report, err
 	}
 	if err != nil {
-		t.log.Error(opPass, "the log site pass could not tally every sink", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
+		t.log.With(fields).Error(opPass, "the log site pass could not tally every sink", dlog.Context{"cause": err.Error()})
 		return report, err
 	}
 	t.log.Info(opPass, "tallied the log sites of every sink", fields)
