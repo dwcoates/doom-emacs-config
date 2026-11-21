@@ -388,7 +388,12 @@ func TestAWaitingMergesRebaseKeepsItsPlaceInLine(t *testing.T) {
 	w.finish(t)
 }
 
-func TestTheDaemonsExitAbortsAResolvingRebaseAndKeepsItsBase(t *testing.T) {
+// TestTheDaemonsExitKeepsAResolvingRebaseItsConflictTurnWorksOn: the turn
+// handed over is recorded on C's entry before it starts, so the exit leaves
+// the rebase standing with whatever the turn resolves, for the next run to
+// continue (2026-11-20: gh-workflow-run-subscribe's resolution was lost to a
+// handover's cut).
+func TestTheDaemonsExitKeepsAResolvingRebaseItsConflictTurnWorksOn(t *testing.T) {
 	// Arrange: C holds the resolving-conflicts slot, and its session's
 	// conflict turn is still running when the daemon exits.
 	w := newWaitingWorld(t, "ws-c")
@@ -396,11 +401,13 @@ func TestTheDaemonsExitAbortsAResolvingRebaseAndKeepsItsBase(t *testing.T) {
 	w.land(t)
 	w.awaitPass(t)
 	prompted := make(chan struct{})
+	var turn ids.TurnID
 	w.h.queue.mu.Lock()
 	w.h.queue.onSubmit = func(sub promptqueue.Submission) {
 		if sub.WS != "ws-c" {
 			return
 		}
+		turn = sub.Turn
 		w.h.mu.Lock()
 		w.h.awaitGate = make(chan struct{})
 		w.h.mu.Unlock()
@@ -419,14 +426,22 @@ func TestTheDaemonsExitAbortsAResolvingRebaseAndKeepsItsBase(t *testing.T) {
 	receiveWithin(t, resolved, "the resolving rebase ending at the exit")
 
 	// Assert
-	if !w.recorded("info", "daemon.merge.rebase_waiting", "the daemon's exit cut a waiting merge's rebase") {
-		t.Fatal("the abort of the cut rebase was not recorded")
+	if !loggedLike(w.h, logLike{level: "info", op: "daemon.merge.rebase_waiting",
+		text:    "is the one its own conflict repair worked on; it is left standing for the next run to continue",
+		context: map[string]string{"workspace": "ws-c", "resolved_turn": string(turn)}}) {
+		t.Fatal("keeping the resolving rebase standing was not recorded with its context")
 	}
-	if standing, _ := w.git.RebaseInProgress(context.Background(), w.dirs["ws-c"]); standing {
-		t.Fatal("the cut rebase still stands in C's worktree")
+	if w.recorded("info", "daemon.merge.rebase_waiting", "the daemon's exit cut a waiting merge's rebase; it was aborted") {
+		t.Fatal("the exit aborted the rebase C's conflict turn works on")
+	}
+	if standing, _ := w.git.RebaseInProgress(context.Background(), w.dirs["ws-c"]); !standing {
+		t.Fatal("the resolving rebase no longer stands in C's worktree")
 	}
 	if got := w.git.tree("b-ws-c"); got != "base+w1" {
-		t.Fatalf("C holds %s after the exit, want its base kept (base+w1)", got)
+		t.Fatalf("C's branch holds %s after the exit, want it untouched mid-rebase (base+w1)", got)
+	}
+	if got := w.entryOf(t, "ws-c").Resolved; got == nil || got.Turn != turn {
+		t.Fatalf("resolved = %+v, want the rebase its turn %s works on recorded", got, turn)
 	}
 	if got := w.entryOf(t, "ws-c").Slot; got != wsm.MergeSlotResolvingConflicts {
 		t.Fatalf("C = %s after the exit, want it still holding the slot for the next boot", got)
