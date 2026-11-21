@@ -4,8 +4,10 @@ import (
 	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/wsm"
 )
 
 // heldIDs reads every row the resolver last published, and every merged row
@@ -105,6 +107,37 @@ func TestAThreadIsHeldOnlyWhileItIsTheSelection(t *testing.T) {
 			row := latest(t, r).GetThreads().GetRows()[0]
 			if (row.GetHeld() != nil) != tc.want {
 				t.Fatalf("thread held = %v, want %v", row.GetHeld() != nil, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheTabBarAndTheHeldMarkerAgree pins that the tab bar (sidebar.Tabs) and
+// the roster's held marker read one withholding (wsm.Workspace.Withheld): with
+// no selection, an open workspace is held exactly when its tab is drawn.
+func TestTheTabBarAndTheHeldMarkerAgree(t *testing.T) {
+	registries := map[string]func() sidebar.Registry{
+		"numbering":         numberingRegistry,
+		"folded subsection": foldedSubsectionRegistry,
+		"folded parent":     foldedBlockFamily,
+		"surfaced child":    func() sidebar.Registry { return surfacedIn(foldedBlockFamily(), "w-a1") },
+	}
+	for name, registry := range registries {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			r.SetRegistry(registry())
+
+			// Act
+			tabs := sidebar.Tabs(registry(), dlog.NewTestLogger())
+			held := heldIDs(t, r)
+
+			// Assert
+			for _, tab := range tabs {
+				drawn := tab.Withheld == wsm.Drawn
+				if held[string(tab.Workspace.ID)] != drawn {
+					t.Errorf("%s: held = %v, tab drawn = %v", tab.Workspace.ID, held[string(tab.Workspace.ID)], drawn)
+				}
 			}
 		})
 	}

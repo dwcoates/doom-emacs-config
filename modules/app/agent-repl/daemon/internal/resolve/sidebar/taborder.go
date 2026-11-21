@@ -284,12 +284,12 @@ func tabsOf(repos []openRepo) []Tab {
 	var out []Tab
 	for _, repo := range repos {
 		for _, region := range repo.regions {
+			// THE TAB'S WITHHOLDING IS wsm.Workspace.Withheld, the one statement
+			// the daemon's Runs and Holds read, so the bar and the daemon cannot
+			// disagree about a tab. An open row is never in the hidden section,
+			// so it is Drawn or WithheldCollapsed.
 			walkOpen(region.rows, region.fold(repo.repo), func(ws wsm.Workspace, fold *Fold) {
-				withheld := wsm.Drawn
-				if fold != nil {
-					withheld = wsm.WithheldCollapsed
-				}
-				out = append(out, Tab{Workspace: ws, Withheld: withheld, Fold: fold})
+				out = append(out, Tab{Workspace: ws, Withheld: ws.Withheld(fold != nil), Fold: fold})
 			})
 		}
 	}
