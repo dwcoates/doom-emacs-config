@@ -526,6 +526,48 @@ func (r *Repo) RemoveBranch(name string) {
 	})
 }
 
+// TestAllScriptPath is the test script AgentReplDeploy names, relative to a
+// checkout's root: the merge gate runs the copy in the tree it tests.
+const TestAllScriptPath = "bin/test-all.sh"
+
+// TestAllScript installs a fake TestAllScriptPath in the repository, checked
+// in so every checkout of it carries it (CheckIn), and answers its recorder.
+func (r *Repo) TestAllScript() *Recorder {
+	r.t.Helper()
+	script := NewRecorderExecutable(r.t, filepath.Join(r.Dir, filepath.Dir(TestAllScriptPath)), filepath.Base(TestAllScriptPath))
+	r.CheckIn(TestAllScriptPath)
+	return script
+}
+
+// WriteTestAllScript checks BODY in as the repository's TestAllScriptPath, a
+// gate a test scripts itself, and answers its path in the main checkout.
+func (r *Repo) WriteTestAllScript(body string) string {
+	r.t.Helper()
+	path := filepath.Join(r.Dir, TestAllScriptPath)
+	writeExecutable(r.t, path, body)
+	r.CheckIn(TestAllScriptPath)
+	return path
+}
+
+// CheckIn makes the file REL, already written in the main checkout, one
+// every checkout of the repository carries, as a committed file is: every
+// linked worktree, those there now and those made later, links it.
+func (r *Repo) CheckIn(rel string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		repo.CheckedIn = append(repo.CheckedIn, rel)
+		for _, wt := range repo.Worktrees {
+			if fakegit.Canon(wt.Dir) == fakegit.Canon(repo.Dir) {
+				continue
+			}
+			if err := fakegit.LinkCheckedIn(repo, wt.Dir, rel); err != nil {
+				r.t.Fatalf("harness: check %s in to %s: %v", rel, wt.Dir, err)
+			}
+		}
+	})
+}
+
 // ScriptFailure makes the NEXT git command matching this prefix fail.
 func (r *Repo) ScriptFailure(dir string, exit int, stderr string, match ...string) {
 	r.t.Helper()

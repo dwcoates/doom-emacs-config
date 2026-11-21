@@ -1878,6 +1878,13 @@ func addWorktree(repo *Repo, wt *Worktree) (Result, bool) {
 	if err := os.WriteFile(filepath.Join(wt.Dir, ".git"), []byte("gitdir: "+repo.CommonDir+"\n"), 0o644); err != nil {
 		return fail(err)
 	}
+	// A NEW CHECKOUT CARRIES THE REPOSITORY'S CHECKED-IN FILES, as a real
+	// checkout of the branch would.
+	for _, rel := range repo.CheckedIn {
+		if err := LinkCheckedIn(repo, wt.Dir, rel); err != nil {
+			return fail(err)
+		}
+	}
 	admin := gitDir(repo, wt)
 	if err := os.MkdirAll(admin, 0o755); err != nil {
 		return fail(err)
