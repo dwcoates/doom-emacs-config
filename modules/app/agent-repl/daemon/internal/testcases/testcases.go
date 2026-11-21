@@ -67,14 +67,18 @@ func Of(sels []*testrunv1.TestSelection) []*testrunv1.TestSelection {
 			out = append(out, Suite(t.Suite.GetName()))
 		}
 	}
-	return dedupe(out)
+	return Add(nil, out)
 }
 
-// dedupe keeps the first of every case named twice.
-func dedupe(sels []*testrunv1.TestSelection) []*testrunv1.TestSelection {
+// Add answers RECORD with each of CASES it does not already hold appended,
+// in order: the first of every case named twice is kept.
+func Add(record, cases []*testrunv1.TestSelection) []*testrunv1.TestSelection {
 	seen := map[string]bool{}
-	var out []*testrunv1.TestSelection
-	for _, sel := range sels {
+	for _, sel := range record {
+		seen[Key(sel)] = true
+	}
+	out := record
+	for _, sel := range cases {
 		key := Key(sel)
 		if !seen[key] {
 			seen[key] = true

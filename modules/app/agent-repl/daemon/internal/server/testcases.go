@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
@@ -54,11 +55,11 @@ func (s *server) rerunOf(ctx context.Context, w testWorktree, options *testrunv1
 		return nil, nil
 	}
 	w.log.Info(opTestCases, "rerunning the workspace's recorded cases", dlog.Context{"workspace": string(w.id), "dir": w.dir, "cases": len(cases)})
-	return &testrunv1.TestRunRequest{
-		Selections: cases, DropMissing: true,
-		Coverage: options.GetCoverage(), Record: options.GetRecord(), Remeasure: options.GetRemeasure(), NoReuse: options.GetNoReuse(),
-		PlanOnly: options.GetPlanOnly(), DebugInfo: options.GetDebugInfo(),
-	}, nil
+	// Every option the caller set is carried, an option added later
+	// included.
+	rerun := proto.Clone(options).(*testrunv1.TestRunRequest)
+	rerun.Selections, rerun.DropMissing = cases, true
+	return rerun, nil
 }
 
 // forgetTestCases forgets the cases a rerun of W's record dropped. It runs as

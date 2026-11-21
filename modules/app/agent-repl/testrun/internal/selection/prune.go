@@ -10,6 +10,8 @@ import (
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
+	"google.golang.org/protobuf/proto"
+
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
 )
@@ -87,12 +89,12 @@ func Prune(req *testrunv1.TestRunRequest, l suites.Layout, list Lister) (*testru
 	return kept, dropped, nil
 }
 
-// cloneOptions answers REQ's options with no selection.
+// cloneOptions answers REQ's options with no selection: every option, an
+// option added later included, is carried by the clone.
 func cloneOptions(req *testrunv1.TestRunRequest) *testrunv1.TestRunRequest {
-	return &testrunv1.TestRunRequest{
-		Coverage: req.GetCoverage(), Record: req.GetRecord(), Remeasure: req.GetRemeasure(), NoReuse: req.GetNoReuse(),
-		PlanOnly: req.GetPlanOnly(), DebugInfo: req.GetDebugInfo(), DropMissing: req.GetDropMissing(),
-	}
+	kept := proto.Clone(req).(*testrunv1.TestRunRequest)
+	kept.Selections = nil
+	return kept
 }
 
 // oneCase refuses a selection that names no case or several, and a Go

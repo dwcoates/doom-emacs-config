@@ -132,3 +132,44 @@ func TestACaseWithNoTargetIsADefect(t *testing.T) {
 	// Act
 	Key(&testrunv1.TestSelection{})
 }
+
+func TestAddKeepsTheRecordAndAppendsOnlyNewCases(t *testing.T) {
+	a, b, c := GoPackage(pkg, []string{"TestA"}), Suite("daemon"), ErtFile("test-x.el", nil)
+	tests := []struct {
+		name   string
+		record []*testrunv1.TestSelection
+		cases  []*testrunv1.TestSelection
+		want   []*testrunv1.TestSelection
+	}{
+		{name: "new cases are appended in order", record: []*testrunv1.TestSelection{a}, cases: []*testrunv1.TestSelection{b, c}, want: []*testrunv1.TestSelection{a, b, c}},
+		{name: "a case the record holds is not added again", record: []*testrunv1.TestSelection{a, b}, cases: []*testrunv1.TestSelection{GoPackage(pkg, []string{"TestA"})}, want: []*testrunv1.TestSelection{a, b}},
+		{name: "a case named twice among the new is added once", cases: []*testrunv1.TestSelection{c, c, a}, want: []*testrunv1.TestSelection{c, a}},
+		{name: "nothing new leaves the record as it stands", record: []*testrunv1.TestSelection{a}, want: []*testrunv1.TestSelection{a}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := Add(tt.record, tt.cases)
+
+			// Assert
+			if !slices.EqualFunc(got, tt.want, func(x, y *testrunv1.TestSelection) bool { return proto.Equal(x, y) }) {
+				t.Fatalf("Add = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// OF DEDUPES THROUGH ADD: its cases are already Add's, so adding them to
+// nothing changes nothing.
+func TestOfAnswersCasesAddLeavesAsTheyStand(t *testing.T) {
+	// Arrange
+	cases := Of([]*testrunv1.TestSelection{GoPackage(pkg, []string{"TestA", "TestA/x", "TestB"}), Suite("daemon"), Suite("daemon")})
+
+	// Act
+	again := Add(nil, cases)
+
+	// Assert
+	if len(cases) != 3 || !slices.EqualFunc(again, cases, func(x, y *testrunv1.TestSelection) bool { return proto.Equal(x, y) }) {
+		t.Fatalf("Of = %v, Add(nil, Of) = %v; want three cases, unchanged", cases, again)
+	}
+}

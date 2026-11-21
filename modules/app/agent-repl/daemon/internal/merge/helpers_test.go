@@ -1011,11 +1011,7 @@ func (f *fakeDB) RecordTestCases(_ context.Context, id ids.WorkspaceID, cases []
 	if f.testCases == nil {
 		f.testCases = map[ids.WorkspaceID][]*testrunv1.TestSelection{}
 	}
-	for _, c := range cases {
-		if !slices.ContainsFunc(f.testCases[id], func(had *testrunv1.TestSelection) bool { return testcases.Key(had) == testcases.Key(c) }) {
-			f.testCases[id] = append(f.testCases[id], c)
-		}
-	}
+	f.testCases[id] = testcases.Add(f.testCases[id], cases)
 	return nil
 }
 
