@@ -101,7 +101,7 @@ func (a HeadlessAbbreviator) Abbreviate(ctx context.Context, log dlog.Logger, ws
 	value, failure := headless.AskValidated(ctx, a.Headless, headless.Ask{
 		Request: headless.Request{
 			Kind: headless.KindInference,
-			Site: AbbreviationSite, Model: headless.ModelHaiku, Format: headless.FormatJSON,
+			Site: AbbreviationSite, Model: headless.ModelHaiku,
 			ConfigDir: configDir, Prompt: prompt, Timeout: AbbreviationTimeout,
 		},
 		Attempts: AbbreviationAttempts,

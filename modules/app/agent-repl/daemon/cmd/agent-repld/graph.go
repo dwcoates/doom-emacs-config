@@ -360,7 +360,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// boot because the alternative was invisible: buildJudge used to hand the
 	// classifier an empty binary, so every classification refused before it
 	// reached the model and nothing said so.
-	headlessClient := headless.New(guard, "")
+	// EVERY HEADLESS RUN'S VENDOR CALLS ARE COUNTED into the spend series,
+	// under no workspace: the daemon's own questions belong to none.
+	headlessClient := headless.New(guard, "", func(configDir string, entries []*conversationv1.VendorSpend) {
+		if err := p.Metrics.ObserveVendorSpend("", configDir, entries); err != nil {
+			log.Error(opHeadlessBinary, "a headless run's vendor spend was refused; it is not counted", dlog.Context{
+				"config_dir": configDir, "entries": len(entries), "cause": err.Error(),
+			})
+		}
+	})
 	log.Info(opHeadlessBinary, "resolved the vendor binary for the daemon's headless calls", dlog.Context{
 		"bin":    headlessClient.Bin(),
 		"source": headless.BinSource(""),

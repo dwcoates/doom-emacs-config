@@ -11,7 +11,11 @@ import (
 	"time"
 
 	"agent-repld/internal/envc"
+	conversationv1 "agentrepl/proto/conversation/v1"
 )
+
+// discardSpend is the spend sink of a test whose subject is not the spend.
+func discardSpend(string, []*conversationv1.VendorSpend) {}
 
 // permissiveGuard permits the vendor call, which is what every subject
 // exercising the run path needs.
@@ -53,7 +57,7 @@ type recorded struct {
 func scripted(t *testing.T, guard envc.VendorGuard, bin, out string, runErr error) (*Client, *recorded) {
 	t.Helper()
 	seen := &recorded{}
-	c := New(guard, bin)
+	c := New(guard, bin, discardSpend)
 	c.exec = func(_ context.Context, execBin string, args, env []string, stdin string) (string, error) {
 		seen.Bin, seen.Args, seen.Env, seen.Stdin = execBin, args, env, stdin
 		return out, runErr
@@ -63,7 +67,7 @@ func scripted(t *testing.T, guard envc.VendorGuard, bin, out string, runErr erro
 
 func TestRunRefusesARequestWithNoSite(t *testing.T) {
 	// Arrange.
-	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+	c, _ := scripted(t, permissiveGuard(t), "fake-claude", okStream, nil)
 
 	// Act.
 	_, err := c.Run(context.Background(), Request{Kind: KindInference, Prompt: "q"})
@@ -77,7 +81,7 @@ func TestRunRefusesARequestWithNoSite(t *testing.T) {
 func TestRunRefusesWhenTheGuardForbidsTheSite(t *testing.T) {
 	// Arrange: the DEFAULT binary, which is the only spelling the guard
 	// refuses — an explicit path is by definition not the real CLI.
-	c, seen := scripted(t, forbiddingGuard(t), DefaultBin, "ok", nil)
+	c, seen := scripted(t, forbiddingGuard(t), DefaultBin, okStream, nil)
 
 	// Act.
 	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"})
@@ -97,7 +101,7 @@ func TestRunRefusesWhenTheGuardForbidsTheSite(t *testing.T) {
 // forbidding guard does not refuse it and a test can drive the whole path.
 func TestRunPermitsAnExplicitBinaryUnderTheGuard(t *testing.T) {
 	// Arrange.
-	c, seen := scripted(t, forbiddingGuard(t), "/tmp/fake-claude", "ok", nil)
+	c, seen := scripted(t, forbiddingGuard(t), "/tmp/fake-claude", okStream, nil)
 
 	// Act.
 	if _, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"}); err != nil {
@@ -112,7 +116,7 @@ func TestRunPermitsAnExplicitBinaryUnderTheGuard(t *testing.T) {
 
 func TestRunRefusesWithNoBinaryConfigured(t *testing.T) {
 	// Arrange: a client whose binary was emptied after resolution.
-	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+	c, _ := scripted(t, permissiveGuard(t), "fake-claude", okStream, nil)
 	c.bin = ""
 
 	// Act.
@@ -125,19 +129,36 @@ func TestRunRefusesWithNoBinaryConfigured(t *testing.T) {
 	}
 }
 
-func TestRunAnswersWithStdoutForATextRun(t *testing.T) {
+// okStream is a run's stream that answered "ok" and states no call.
+const okStream = `{"type":"result","subtype":"success","is_error":false,"result":"ok"}`
+
+func TestRunAnswersWithTheResultsTextVerbatim(t *testing.T) {
 	// Arrange.
-	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "ROUTE_HOLD\n", nil)
+	c, _ := scripted(t, permissiveGuard(t), "fake-claude", `{"type":"system","subtype":"init"}`+"\n"+`{"type":"result","result":"ROUTE_HOLD\n"}`+"\n", nil)
 
 	// Act.
-	got, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "classifier", Format: FormatText, Prompt: "q"})
+	got, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "classifier", Prompt: "q"})
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
 	if got.Text != "ROUTE_HOLD\n" {
-		t.Fatalf("Text = %q, want the binary's stdout verbatim", got.Text)
+		t.Fatalf("Text = %q, want the result verbatim", got.Text)
+	}
+}
+
+func TestRunRefusesAStreamThatCarriesNoResult(t *testing.T) {
+	// Arrange.
+	c, _ := scripted(t, permissiveGuard(t), "fake-claude", `{"type":"system","subtype":"init"}`, nil)
+
+	// Act.
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "classifier", Prompt: "q"})
+
+	// Assert.
+	var hErr *Error
+	if !errors.As(err, &hErr) || hErr.Cause != CauseUnreadableEnvelope || !strings.Contains(hErr.Detail, "no result") {
+		t.Fatalf("err = %v, want the %s cause naming the missing result", err, CauseUnreadableEnvelope)
 	}
 }
 
@@ -146,7 +167,7 @@ func TestRunReadsTheResultOutOfAJSONEnvelope(t *testing.T) {
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", `{"type":"result","result":"flaky-login-test"}`, nil)
 
 	// Act.
-	got, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
+	got, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"})
 
 	// Assert.
 	if err != nil {
@@ -162,7 +183,7 @@ func TestRunRefusesAnUnparseableEnvelope(t *testing.T) {
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "not json at all", nil)
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"})
 
 	// Assert.
 	var hErr *Error
@@ -177,7 +198,7 @@ func TestRunRefusesAnEnvelopeThatReportsItsOwnError(t *testing.T) {
 		`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"credit balance too low"}`, nil)
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"})
 
 	// Assert.
 	var hErr *Error
@@ -210,8 +231,8 @@ func TestEveryEnvelopeErrorIsWordedByAccount(t *testing.T) {
 	raw := `{"subtype":"error_max_turns","result":"ran out","is_error":true}`
 
 	// Act.
-	_, parsed := resultOf(raw)
-	exited := exitAccount(FormatJSON, raw)
+	_, parsed := resultOf(&env, nil)
+	exited := exitAccount(&env, raw)
 
 	// Assert.
 	if parsed == nil || !strings.HasSuffix(parsed.Error(), env.account()) {
@@ -239,37 +260,31 @@ func TestRunReportsAnExitFailureAsAnExitStatus(t *testing.T) {
 func TestRunCarriesWhatAFailedRunSaidOnStdout(t *testing.T) {
 	tests := []struct {
 		name   string
-		format string
 		stdout string
 		want   string
 	}{
 		{
-			name:   "a json run's error envelope is read for its own account",
-			format: FormatJSON,
+			name:   "an error envelope is read for its own account",
 			stdout: `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Failed to authenticate: OAuth session expired"}` + "\n",
 			want:   "exit status 1; the cli said (error_during_execution): Failed to authenticate: OAuth session expired",
 		},
 		{
-			name:   "a json run whose stdout is no envelope is carried as written",
-			format: FormatJSON,
+			name:   "a stdout that is no stream is carried as written",
 			stdout: "  not an envelope\n",
 			want:   "exit status 1; the cli said: not an envelope",
 		},
 		{
-			name:   "a json envelope reporting no error is carried as written",
-			format: FormatJSON,
+			name:   "a stream with no error envelope is carried as written",
 			stdout: `{"is_error":false,"result":"half"}`,
 			want:   `exit status 1; the cli said: {"is_error":false,"result":"half"}`,
 		},
 		{
-			name:   "a text run's stdout is carried as written",
-			format: FormatText,
+			name:   "a plain sentence is carried as written",
 			stdout: "Invalid API key\n",
 			want:   "exit status 1; the cli said: Invalid API key",
 		},
 		{
 			name:   "a run that said nothing adds nothing",
-			format: FormatJSON,
 			stdout: " \n",
 			want:   "exit status 1",
 		},
@@ -280,7 +295,7 @@ func TestRunCarriesWhatAFailedRunSaidOnStdout(t *testing.T) {
 			c, _ := scripted(t, permissiveGuard(t), "fake-claude", tt.stdout, errors.New("exit status 1"))
 
 			// Act.
-			_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: tt.format, Prompt: "q"})
+			_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"})
 
 			// Assert.
 			var hErr *Error
@@ -327,28 +342,28 @@ func TestRunComposesTheExactArgv(t *testing.T) {
 		want string
 	}{
 		{
-			name: "a json run with a model",
-			req:  Request{Kind: KindInference, Site: "workspace_naming", Model: ModelHaiku, Format: FormatJSON, Prompt: "q"},
-			out:  `{"result":"x"}`,
-			want: "-p --output-format json --model " + ModelHaiku + " --tools  --system-prompt  " + wantPinned,
+			name: "a run with a model",
+			req:  Request{Kind: KindInference, Site: "workspace_naming", Model: ModelHaiku, Prompt: "q"},
+			out:  okStream,
+			want: "-p --output-format stream-json --verbose --model " + ModelHaiku + " --tools  --system-prompt  " + wantPinned,
 		},
 		{
-			name: "a text run with no model omits the model flag",
+			name: "a run with no model omits the model flag",
 			req:  Request{Kind: KindInference, Site: "classifier", Prompt: "q"},
-			out:  "ok",
-			want: "-p --output-format text --tools  --system-prompt  " + wantPinned,
+			out:  okStream,
+			want: "-p --output-format stream-json --verbose --tools  --system-prompt  " + wantPinned,
 		},
 		{
 			name: "a run with tools makes exactly those available and approved",
-			req:  Request{Kind: KindToolCalls, Site: "news_digest_ipo", Model: ModelSonnet, Format: FormatJSON, Prompt: "q", Tools: []string{"WebSearch", "WebFetch"}},
-			out:  `{"result":"x"}`,
-			want: "-p --output-format json --model " + ModelSonnet + " --tools WebSearch,WebFetch --allowedTools WebSearch,WebFetch " + wantPinned,
+			req:  Request{Kind: KindToolCalls, Site: "news_digest_ipo", Model: ModelSonnet, Prompt: "q", Tools: []string{"WebSearch", "WebFetch"}},
+			out:  okStream,
+			want: "-p --output-format stream-json --verbose --model " + ModelSonnet + " --tools WebSearch,WebFetch --allowedTools WebSearch,WebFetch " + wantPinned,
 		},
 		{
 			name: "an inference run has no tools and an empty system prompt",
 			req:  Request{Kind: KindInference, Site: "turn_summary", Model: ModelHaiku, Prompt: "q"},
-			out:  "ok",
-			want: "-p --output-format text --model " + ModelHaiku + " --tools  --system-prompt  " + wantPinned,
+			out:  okStream,
+			want: "-p --output-format stream-json --verbose --model " + ModelHaiku + " --tools  --system-prompt  " + wantPinned,
 		},
 	}
 	for _, tt := range tests {
@@ -378,7 +393,7 @@ func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
 		req  Request
 	}{
 		{name: "the bare minimum", req: Request{Kind: KindInference, Site: "classifier", Prompt: "q"}},
-		{name: "a model and a text format", req: Request{Kind: KindInference, Site: "classifier", Model: "sonnet", Format: FormatText, Prompt: "q"}},
+		{name: "a model", req: Request{Kind: KindInference, Site: "classifier", Model: "sonnet", Prompt: "q"}},
 		{name: "a config dir", req: Request{Kind: KindInference, Site: "workspace_naming", ConfigDir: "/roots/multi", Prompt: "q"}},
 		{name: "a timeout", req: Request{Kind: KindInference, Site: "title_synth", Timeout: time.Minute, Prompt: "q"}},
 		{name: "tools", req: Request{Kind: KindToolCalls, Site: "news_digest_ipo", Tools: []string{"WebSearch"}, Prompt: "q"}},
@@ -386,7 +401,7 @@ func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+			c, seen := scripted(t, permissiveGuard(t), "fake-claude", okStream, nil)
 
 			// Act.
 			if _, err := c.Run(context.Background(), tt.req); err != nil {
@@ -417,7 +432,7 @@ func TestRunPanicsOnARequestWhoseKindIsBroken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+			c, seen := scripted(t, permissiveGuard(t), "fake-claude", okStream, nil)
 
 			// Act.
 			var recovered any
@@ -468,7 +483,7 @@ func TestPinnedSettingsTurnThinkingOff(t *testing.T) {
 // composed question never rides an argv a process listing shows.
 func TestRunPutsThePromptOnStdin(t *testing.T) {
 	// Arrange.
-	c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+	c, seen := scripted(t, permissiveGuard(t), "fake-claude", okStream, nil)
 
 	// Act.
 	if _, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "classifier", Prompt: "the composed question"}); err != nil {
@@ -488,7 +503,7 @@ func TestRunPutsThePromptOnStdin(t *testing.T) {
 
 func TestRunExportsTheConfigDir(t *testing.T) {
 	// Arrange.
-	c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+	c, seen := scripted(t, permissiveGuard(t), "fake-claude", okStream, nil)
 
 	// Act.
 	if _, err := c.Run(context.Background(), Request{

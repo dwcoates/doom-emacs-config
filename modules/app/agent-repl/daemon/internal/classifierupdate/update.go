@@ -212,7 +212,6 @@ func (u *Updater) Update(ctx context.Context, req Request) (Result, error) {
 		Kind:    headless.KindInference,
 		Site:    Site,
 		Model:   Model,
-		Format:  headless.FormatText,
 		Prompt:  question,
 		Timeout: RunTimeout,
 	})

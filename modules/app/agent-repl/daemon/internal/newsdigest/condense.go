@@ -138,7 +138,6 @@ func (c condenser) condense(ctx context.Context, period string, material []sourc
 		Kind:      headless.KindInference,
 		Site:      Site,
 		Model:     Model,
-		Format:    headless.FormatJSON,
 		ConfigDir: c.configDir,
 		Prompt:    question,
 		Timeout:   c.timeout,

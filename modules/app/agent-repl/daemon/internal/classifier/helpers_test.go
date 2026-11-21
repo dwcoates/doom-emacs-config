@@ -1,6 +1,7 @@
 package classifier
 
 import (
+	conversationv1 "agentrepl/proto/conversation/v1"
 	"context"
 	"errors"
 	"testing"
@@ -38,7 +39,7 @@ func forbiddingGuard(t *testing.T) envc.VendorGuard {
 func answering(t *testing.T, guard envc.VendorGuard, out string, runErr error) (*vendorJudge, *string) {
 	t.Helper()
 	var asked string
-	j := newVendorJudge(guard, headless.New(guard, "fake-claude"), "unused")
+	j := newVendorJudge(guard, headless.New(guard, "fake-claude", func(string, []*conversationv1.VendorSpend) {}), "unused")
 	j.load = func(string, string) (prompts.Prompt, error) { return routingBrief, nil }
 	j.splice = func(_ prompts.Prompt, values map[string]string) (string, error) {
 		return values["token_interrupt"] + "|" + values["token_after_tool_call"] + "|" + values["token_hold"] + "|" +

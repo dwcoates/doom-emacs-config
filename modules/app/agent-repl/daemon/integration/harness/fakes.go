@@ -185,10 +185,14 @@ const FakeClaudeMintedAbbreviation = "Fake minted abbreviation"
 
 // fakeClaudeScript is the vendor stand-in for BOTH call shapes the daemon
 // has. A headless run (`-p`) drains the question off stdin and answers as the
-// requested output format: a naming call gets the JSON envelope with a legal
-// slug of at most four words in `result`. Anything else is the login pty: it prints the
-// marker and echoes every keystroke back, so WatchLoginTerminal has scrollback
-// to replay and input to echo.
+// CLI's event stream (`--output-format stream-json`, headless/stream.go): one
+// vendor call's assistant message with its usage, then the result envelope.
+// The answer is chosen by the question: the abbreviation brief gets the
+// abbreviation, the routing classifier's question (which names its
+// ROUTE_HOLD token) gets ROUTE_HOLD, and anything else (a naming call) gets
+// a legal slug of at most four words. Anything else is the login pty: it
+// prints the marker and echoes every keystroke back, so WatchLoginTerminal
+// has scrollback to replay and input to echo.
 const fakeClaudeScript = `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-p" ]; then
@@ -196,14 +200,10 @@ for arg in "$@"; do
     answer="` + FakeClaudeMintedName + `"
     case "$question" in
       *"Abbreviate the chat question"*) answer="` + FakeClaudeMintedAbbreviation + `" ;;
+      *ROUTE_HOLD*) answer="ROUTE_HOLD" ;;
     esac
-    for fmt in "$@"; do
-      if [ "$fmt" = "json" ]; then
-        printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}' "$answer"
-        exit 0
-      fi
-    done
-    printf 'ROUTE_HOLD'
+    printf '{"type":"assistant","message":{"id":"msg_fake","model":"claude-haiku-fake","usage":{"input_tokens":12,"output_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}\n'
+    printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$answer"
     exit 0
   fi
 done
