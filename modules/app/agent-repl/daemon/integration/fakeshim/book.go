@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agent-repld/integration/fakeshim/shimfacts"
 	"agent-repld/integration/fakestore"
 )
 
@@ -229,7 +230,7 @@ func (b *book) since(agent string, known *conversationv1.HistoryPointer) *conver
 func (s *server) openingPageFor(req *shimv1.WatchAgentRequest) *conversationv1.HistoryPage {
 	switch {
 	case req.GetTailOnly() != nil:
-		return &conversationv1.HistoryPage{}
+		return shimfacts.TailOnlyPage()
 	case req.GetKnownThrough() != nil:
 		return s.book.since(req.GetTarget().GetValue(), req.GetKnownThrough())
 	}

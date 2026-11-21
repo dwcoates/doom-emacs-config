@@ -1,9 +1,13 @@
 package shimfacts
 
 import (
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func TestServedEntry(t *testing.T) {
@@ -51,5 +55,42 @@ func TestStartedSessionStatesTheFakesDefaultFacts(t *testing.T) {
 	}
 	if len(s.GetModelCatalog()) != len(DefaultCatalog()) || s.GetLiveWork() != nil {
 		t.Fatalf("started = %+v, want the default catalog and no live work", s)
+	}
+}
+
+func TestOpeningPage(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       *shimv1.WatchAgentRequest
+		wantFloor bool
+		wantErr   string
+	}{
+		{name: "a tail-only open gets nothing", req: &shimv1.WatchAgentRequest{Opening: &shimv1.WatchAgentRequest_TailOnly{TailOnly: &shimv1.WatchAgentTailOnly{}}}},
+		{name: "an open naming neither gets the empty floor", req: &shimv1.WatchAgentRequest{}, wantFloor: true},
+		{name: "a catch-up of a fresh book is refused", req: &shimv1.WatchAgentRequest{
+			Target:  &conversationv1.AgentId{Value: "a1"},
+			Opening: &shimv1.WatchAgentRequest_KnownThrough{KnownThrough: &conversationv1.HistoryPointer{Value: "p-3"}},
+		}, wantErr: "no catch-up for a1 known through p-3"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			page, err := OpeningPage(tc.req)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || page != nil {
+					t.Fatalf("OpeningPage = %v, %v; want the refusal %q", page, err, tc.wantErr)
+				}
+				return
+			}
+			want := TailOnlyPage()
+			if tc.wantFloor {
+				want = EmptyFloorPage()
+			}
+			if err != nil || !proto.Equal(page, want) {
+				t.Fatalf("OpeningPage = %v, %v; want %v", page, err, want)
+			}
+		})
 	}
 }

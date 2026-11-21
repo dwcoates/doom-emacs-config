@@ -7,6 +7,8 @@ package shimfacts
 
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+	"fmt"
 
 	"agent-repld/integration/fakestore"
 )
@@ -163,4 +165,22 @@ func ServedEntry(pointer, turn string, placeMs int64, entry *conversationv1.Hist
 		}
 	}
 	return at
+}
+
+// TailOnlyPage is what a tail-only watch opens with: nothing, the stream's
+// live entries following it.
+func TailOnlyPage() *conversationv1.HistoryPage { return &conversationv1.HistoryPage{} }
+
+// OpeningPage is what a FRESH book's watch opens with for REQ: nothing under
+// tail_only, and the empty floor page for a request naming neither. A fresh
+// book has no catch-up to answer known_through with, which is refused.
+func OpeningPage(req *shimv1.WatchAgentRequest) (*conversationv1.HistoryPage, error) {
+	switch {
+	case req.GetTailOnly() != nil:
+		return TailOnlyPage(), nil
+	case req.GetKnownThrough() != nil:
+		return nil, fmt.Errorf("shimfacts: a fresh book has no catch-up for %s known through %s",
+			req.GetTarget().GetValue(), req.GetKnownThrough().GetValue())
+	}
+	return EmptyFloorPage(), nil
 }
