@@ -24,10 +24,24 @@ type fakeStanding struct {
 
 func (s fakeStanding) Latest() (*agentreplv1.PersistentWifiState, bool) { return s.state, s.ok }
 
-// wifiOn and wifiOff are the two standings a test reads.
+// modeOn answers a standing with persistent wifi mode on and its lid as
+// setLid leaves it, unassigned (not yet heard) when setLid sets nothing.
+func modeOn(setLid func(*agentreplv1.PersistentWifiState)) fakeStanding {
+	state := &agentreplv1.PersistentWifiState{Mode: &agentreplv1.PersistentWifiState_On{On: &agentreplv1.PersistentWifiModeOn{}}}
+	setLid(state)
+	return fakeStanding{state: state, ok: true}
+}
+
+// wifiOn is the standing a banner is read aloud under (the mode on and the
+// lid closed), and wifiOff the mode off with the lid closed.
 var (
-	wifiOn  = fakeStanding{state: &agentreplv1.PersistentWifiState{Mode: &agentreplv1.PersistentWifiState_On{On: &agentreplv1.PersistentWifiModeOn{}}}, ok: true}
-	wifiOff = fakeStanding{state: &agentreplv1.PersistentWifiState{Mode: &agentreplv1.PersistentWifiState_Off{Off: &agentreplv1.PersistentWifiModeOff{}}}, ok: true}
+	wifiOn = modeOn(func(s *agentreplv1.PersistentWifiState) {
+		s.Lid = &agentreplv1.PersistentWifiState_LidClosed{LidClosed: &agentreplv1.PersistentWifiLidClosed{}}
+	})
+	wifiOff = fakeStanding{state: &agentreplv1.PersistentWifiState{
+		Mode: &agentreplv1.PersistentWifiState_Off{Off: &agentreplv1.PersistentWifiModeOff{}},
+		Lid:  &agentreplv1.PersistentWifiState_LidClosed{LidClosed: &agentreplv1.PersistentWifiLidClosed{}},
+	}, ok: true}
 )
 
 // speechRun is one program run the speech runner saw.
@@ -154,7 +168,7 @@ func (f speechFixture) postOne() {
 	f.notifier.wg.Wait()
 }
 
-func TestSpeechReadsTheBannerAloudWhenBothConditionsHold(t *testing.T) {
+func TestSpeechReadsTheBannerAloudWhenEveryConditionHolds(t *testing.T) {
 	// Arrange
 	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{}))
 
@@ -170,14 +184,14 @@ func TestSpeechReadsTheBannerAloudWhenBothConditionsHold(t *testing.T) {
 		t.Fatalf("say argv %q, want the text behind --", runs[len(runs)-1].args)
 	}
 	r, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: opSpeak})
-	if !ok || r.Context["decided_by"] != "persistent_wifi_on_and_private_listening_device" || r.Context["device"] != "Dodge’s AirPods Pro" || r.Context["bluetooth_class"] != BluetoothHeadphones || r.Context["kind"] != KindTurnEnded {
-		t.Fatalf("decision record = %+v (found %v), want both conditions, the device and the kind", r, ok)
+	if !ok || r.Context["decided_by"] != "persistent_wifi_on_lid_closed_and_private_listening_device" || r.Context["device"] != "Dodge’s AirPods Pro" || r.Context["bluetooth_class"] != BluetoothHeadphones || r.Context["kind"] != KindTurnEnded {
+		t.Fatalf("decision record = %+v (found %v), want every condition, the device and the kind", r, ok)
 	}
 }
 
-// TestSpeechIsSilentUnlessBothConditionsHold pins each condition that keeps a
+// TestSpeechIsSilentUnlessEveryConditionHolds pins each condition that keeps a
 // banner from being read aloud, and that its banner is drawn all the same.
-func TestSpeechIsSilentUnlessBothConditionsHold(t *testing.T) {
+func TestSpeechIsSilentUnlessEveryConditionHolds(t *testing.T) {
 	cases := []struct {
 		name      string
 		goos      string
@@ -185,9 +199,20 @@ func TestSpeechIsSilentUnlessBothConditionsHold(t *testing.T) {
 		audio     speechAnswer
 		wantLevel string
 		wantBy    Silence
+		wantLid   string
 		wantRuns  int
 	}{
 		{name: "persistent wifi off", goos: "darwin", standing: wifiOff, wantLevel: "info", wantBy: SilenceWifiOff},
+		{name: "the lid open", goos: "darwin", standing: modeOn(func(s *agentreplv1.PersistentWifiState) {
+			s.Lid = &agentreplv1.PersistentWifiState_LidOpen{LidOpen: &agentreplv1.PersistentWifiLidOpen{}}
+		}), audio: onAirpods, wantLevel: "info", wantBy: SilenceLidNotClosed, wantLid: "open"},
+		{name: "a machine with no lid", goos: "darwin", standing: modeOn(func(s *agentreplv1.PersistentWifiState) {
+			s.Lid = &agentreplv1.PersistentWifiState_NoLid{NoLid: &agentreplv1.PersistentWifiNoLid{}}
+		}), audio: onAirpods, wantLevel: "info", wantBy: SilenceLidNotClosed, wantLid: "no_lid"},
+		{name: "the lid not yet heard", goos: "darwin", standing: modeOn(func(*agentreplv1.PersistentWifiState) {}), audio: onAirpods, wantLevel: "info", wantBy: SilenceLidNotClosed, wantLid: "unheard"},
+		{name: "the lid unwatched", goos: "darwin", standing: modeOn(func(s *agentreplv1.PersistentWifiState) {
+			s.Lid = &agentreplv1.PersistentWifiState_LidUnwatched{LidUnwatched: &agentreplv1.PersistentWifiLidUnwatched{Detail: "no IOKit port"}}
+		}), audio: onAirpods, wantLevel: "info", wantBy: SilenceLidNotClosed, wantLid: "unwatched"},
 		{name: "persistent wifi not yet read", goos: "darwin", standing: fakeStanding{}, wantLevel: "info", wantBy: SilenceWifiUnread},
 		{name: "airpods absent", goos: "darwin", standing: wifiOn, audio: onSpeakers, wantLevel: "info", wantBy: SilenceNoPrivateDevice, wantRuns: 1},
 		{name: "the audio read fails", goos: "darwin", standing: wifiOn, audio: speechAnswer{err: errors.New("agent-repld: signal: killed")}, wantLevel: "error", wantBy: SilenceOutputUnreadable, wantRuns: 1},
@@ -215,6 +240,9 @@ func TestSpeechIsSilentUnlessBothConditionsHold(t *testing.T) {
 			r, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: tc.wantLevel, Operation: opSpeak})
 			if !ok || r.Context["decided_by"] != string(tc.wantBy) {
 				t.Fatalf("decision record = %+v (found %v), want %s decided by %s", r, ok, tc.wantLevel, tc.wantBy)
+			}
+			if tc.wantLid != "" && r.Context["lid"] != tc.wantLid {
+				t.Fatalf("decision record = %+v, want lid %q", r, tc.wantLid)
 			}
 			if tc.audio.err != nil && !strings.Contains(r.Context["cause"].(string), tc.audio.err.Error()) {
 				t.Fatalf("failure record = %+v, want the read's cause", r)
@@ -654,6 +682,42 @@ func TestNewSpeechRefusesAHalfWiredSpeech(t *testing.T) {
 
 			// Act
 			NewSpeech("darwin", darwinSpeech, tc.runner, tc.standing)
+		})
+	}
+}
+
+func TestLidName(t *testing.T) {
+	cases := []struct {
+		name string
+		lid  func(*agentreplv1.PersistentWifiState)
+		want string
+	}{
+		{name: "open", lid: func(s *agentreplv1.PersistentWifiState) {
+			s.Lid = &agentreplv1.PersistentWifiState_LidOpen{LidOpen: &agentreplv1.PersistentWifiLidOpen{}}
+		}, want: "open"},
+		{name: "closed", lid: func(s *agentreplv1.PersistentWifiState) {
+			s.Lid = &agentreplv1.PersistentWifiState_LidClosed{LidClosed: &agentreplv1.PersistentWifiLidClosed{}}
+		}, want: "closed"},
+		{name: "no lid", lid: func(s *agentreplv1.PersistentWifiState) {
+			s.Lid = &agentreplv1.PersistentWifiState_NoLid{NoLid: &agentreplv1.PersistentWifiNoLid{}}
+		}, want: "no_lid"},
+		{name: "unwatched", lid: func(s *agentreplv1.PersistentWifiState) {
+			s.Lid = &agentreplv1.PersistentWifiState_LidUnwatched{LidUnwatched: &agentreplv1.PersistentWifiLidUnwatched{}}
+		}, want: "unwatched"},
+		{name: "not yet heard", lid: func(*agentreplv1.PersistentWifiState) {}, want: "unheard"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			state := modeOn(tc.lid).state
+
+			// Act
+			got := lidName(state)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("lidName = %q, want %q", got, tc.want)
+			}
 		})
 	}
 }

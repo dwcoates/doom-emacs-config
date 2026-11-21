@@ -171,9 +171,10 @@ func (p SpeechPlatform) WithOverrides(say, audioOutput, bluetooth string) Speech
 	return p
 }
 
-// Speech reads a made banner aloud IF AND ONLY IF BOTH hold: the daemon's
-// persistent wifi mode is on, and the current audio output is a listening
-// device (ListeningDevice). Otherwise it says nothing, and the banner is
+// Speech reads a made banner aloud IF AND ONLY IF ALL THREE hold: the
+// daemon's persistent wifi mode is on, the lid is heard closed, and the
+// current audio output is a private listening device
+// (PrivateListeningDevice). Otherwise it says nothing, and the banner is
 // drawn as ever. Every run goes through the Runner the banner backend uses.
 type Speech struct {
 	goos     string
@@ -202,13 +203,14 @@ const (
 	SilenceUnsupported      Silence = "speech_unsupported"
 	SilenceWifiUnread       Silence = "persistent_wifi_unread"
 	SilenceWifiOff          Silence = "persistent_wifi_off"
+	SilenceLidNotClosed     Silence = "lid_not_closed"
 	SilenceOutputUnreadable Silence = "audio_output_unreadable"
 	SilenceNoPrivateDevice  Silence = "no_private_listening_device"
 )
 
 // decide answers whether banner is read aloud, and the silence that decided
-// it not to be, recording the decision through log. Persistent wifi is read
-// first: it is the daemon's own standing and runs no program.
+// it not to be, recording the decision through log. Persistent wifi and the
+// lid are read first: both are the daemon's own standing and run no program.
 func (s *Speech) decide(ctx context.Context, log dlog.Logger) (bool, Silence) {
 	if !s.platform.supported() {
 		s.unsupported.Do(func() {
@@ -231,6 +233,14 @@ func (s *Speech) decide(ctx context.Context, log dlog.Logger) (bool, Silence) {
 		})
 		return false, SilenceWifiOff
 	}
+	if state.GetLidClosed() == nil {
+		// Open, a machine with no lid, a lid not yet heard, and a lid the
+		// daemon cannot hear are all not heard closed.
+		log.Info(opSpeak, "the lid is not heard closed; the banner is not read aloud", dlog.Context{
+			"lid": lidName(state), "decided_by": string(SilenceLidNotClosed),
+		})
+		return false, SilenceLidNotClosed
+	}
 	out, err := s.readOutput(ctx)
 	if err != nil {
 		log.Error(opSpeak, "the current audio output could not be read; the banner is not read aloud", dlog.Context{
@@ -246,9 +256,28 @@ func (s *Speech) decide(ctx context.Context, log dlog.Logger) (bool, Silence) {
 		log.Info(opSpeak, "the current audio output is no private listening device; the banner is not read aloud", fields)
 		return false, SilenceNoPrivateDevice
 	}
-	fields["decided_by"] = "persistent_wifi_on_and_private_listening_device"
-	log.Info(opSpeak, "persistent wifi mode is on and a private listening device is the audio output; reading the banner aloud", fields)
+	fields["decided_by"] = "persistent_wifi_on_lid_closed_and_private_listening_device"
+	log.Info(opSpeak, "persistent wifi mode is on, the lid is closed and a private listening device is the audio output; reading the banner aloud", fields)
 	return true, ""
+}
+
+// lidName names the standing's lid arm for the decision record, "unheard"
+// while none is assigned.
+func lidName(state *agentreplv1.PersistentWifiState) string {
+	switch state.GetLid().(type) {
+	case *agentreplv1.PersistentWifiState_LidOpen:
+		return "open"
+	case *agentreplv1.PersistentWifiState_LidClosed:
+		return "closed"
+	case *agentreplv1.PersistentWifiState_NoLid:
+		return "no_lid"
+	case *agentreplv1.PersistentWifiState_LidUnwatched:
+		return "unwatched"
+	case nil:
+		return "unheard"
+	default:
+		panic(fmt.Sprintf("desktopnotify: unknown lid arm %T", state.GetLid()))
+	}
 }
 
 // Speak reads banner aloud when decide says so, and returns once it is read,
