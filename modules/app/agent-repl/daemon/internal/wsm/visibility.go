@@ -30,44 +30,21 @@ func (w Withholding) String() string {
 	}
 }
 
-// Withheld answers whether the tab bar withholds the workspace's tab, given
-// whether a collapsed section folds its tab (its repository's, or its
-// subsection's). A hidden workspace has no tab at all; a folded section's
-// open workspaces keep a folded one, except the one a fold draws anyway
-// (DrawnInsideFold: surfaced, or the selection), whose tab the bar draws.
+// Withheld answers whether the tab bar withholds the workspace's tab by the
+// sections alone, given whether a collapsed section covers it (its
+// repository's, its subsection's, or an ancestor's children fold). A hidden
+// workspace has no tab at all; a covered one keeps a folded one. It is the
+// sections' half of the picture: what a fold leaves drawn is the persisted
+// visibility (Visibility), which a working or unviewed workspace under a fold
+// is visible by, and which is the one fact every allocation reads.
 func (ws Workspace) Withheld(folded bool) Withholding {
 	switch {
 	case ws.InHiddenSection():
 		return WithheldHidden
-	case folded && !ws.DrawnInsideFold():
+	case folded:
 		return WithheldCollapsed
 	default:
 		return Drawn
-	}
-}
-
-// Holds reports whether the editor holds the workspace open, with a
-// perspective, a composer and a host stream (frontend.v1.RosterRowHeld), given
-// whether a collapsed section folds its tab. THE ONE STATEMENT of what the
-// editor holds (owner ruling, 2026-11-21): the roster stamps it on every row,
-// the editor reconciles on it alone, and Runs is defined over it, so the
-// editor never holds a workspace the daemon does not run.
-//
-// A workspace is held while it is the selection or the tab bar draws it. A
-// closed workspace never is, even while it is the selection: the editor
-// tombstones every closed row. A thread and a hidden merge workspace
-// (MergeHidden) are drawn by no tab bar, so each is held only while it is the
-// selection.
-func (ws Workspace) Holds(folded bool) bool {
-	switch {
-	case ws.Closed:
-		return false
-	case ws.Current:
-		return true
-	case ws.IsThread(), ws.MergeHidden():
-		return false
-	default:
-		return ws.Withheld(folded) == Drawn
 	}
 }
 
@@ -105,8 +82,17 @@ func (ws Workspace) InMergedBand() bool {
 // (LetsCacheLapse). Before it, a collapsed workspace owed no keep-alive, and
 // its cache lapsed an hour after its last one (2026-11-16: four workspaces
 // cold-gated three hours after their last turn).
+//
+// IT IS NOT BUILT ON RUNS: Runs follows the persisted visibility, which a fold
+// changes, and the visibility is no keep-alive input (owner-settled,
+// 2026-11-21). It is the run rule with every section unfolded and no
+// visibility: the selection, a queued merge, a deploy mediator, and every
+// workspace that is neither hidden nor a hidden merge workspace.
 func (ws Workspace) KeptWarm(mergeQueued bool) bool {
-	return ws.Runs(false, mergeQueued)
+	if ws.Current || mergeQueued || ws.DeployMediator {
+		return true
+	}
+	return !ws.MergeHidden() && !ws.InHiddenSection()
 }
 
 // LetsCacheLapse reports whether the workspace's prompt cache is left to lapse
@@ -155,25 +141,22 @@ func (ws Workspace) LetsCacheLapse() bool {
 // 2026-11-03), so a folded one-shot's unattended work would otherwise stop at
 // the next daemon start.
 //
-// EVERY WORKSPACE THE EDITOR HOLDS RUNS (Holds), so the two can never
-// disagree; the rest of this rule adds the workspaces that run while nobody
-// can see them.
+// EVERY VISIBLE WORKSPACE RUNS (owner-settled, 2026-11-21): the run rule is
+// a superset of the persisted visibility, so a workspace the user can see
+// always has its session. The rest of this rule adds the workspaces that run
+// while nobody can see them.
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
-	if ws.Holds(folded) || ws.Current || mergeQueued || ws.DeployMediator {
+	if ws.Visibility.Visible() || mergeQueued || ws.DeployMediator {
 		return true
 	}
 	if ws.MergeHidden() {
 		return false
 	}
-	switch ws.Withheld(folded) {
-	case Drawn:
-		return true
-	case WithheldCollapsed:
-		_, spared := ws.FoldSpare()
-		return spared
-	default:
+	if ws.Withheld(folded) != WithheldCollapsed {
 		return false
 	}
+	_, spared := ws.FoldSpare()
+	return spared
 }
 
 // KeepaliveHeld reports whether the workspace's keep-alives are held from

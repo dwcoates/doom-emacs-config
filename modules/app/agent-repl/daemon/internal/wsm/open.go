@@ -137,6 +137,10 @@ type store struct {
 	// asked to record, latest per workspace, written at the promotion
 	// (SetStatusChangedAt), under heldMu as heldUsage is.
 	heldStatusChanges map[WorkspaceID]time.Time
+	// heldVisibilities are the visibilities a READ-ONLY handle was asked to
+	// record, latest per workspace, written at the promotion
+	// (SetVisibilities), under heldMu as heldStatusChanges are.
+	heldVisibilities map[WorkspaceID]Visibility
 
 	// conns accounts for every operation's use of the one connection
 	// (conn.go); now is its clock, time.Now outside a test.
@@ -606,6 +610,7 @@ func (s *store) Promote(ctx context.Context) error {
 	// waits and lands after the held one it supersedes, never before it.
 	s.writeHeldUsageLocked(ctx)
 	s.writeHeldStatusChangesLocked(ctx)
+	s.writeHeldVisibilitiesLocked(ctx)
 	return nil
 }
 

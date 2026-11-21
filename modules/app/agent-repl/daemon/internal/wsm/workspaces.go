@@ -60,7 +60,7 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
 	mergeTurnStartedColumn + `, ` +
-	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, surfaced, ` +
+	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, visibility, ` +
 	`EXISTS (SELECT 1 FROM deploy_mediators WHERE deploy_mediators.workspace_id = workspaces.id), ` +
 	emojiAckColumn
 
@@ -131,10 +131,16 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		visitAt       sql.NullInt64
 		landsInto     sql.NullString
 		spawnedStart  sql.NullInt64
+		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &ws.Surfaced, &ws.DeployMediator, &ws.EmojiAck); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.DeployMediator, &ws.EmojiAck); err != nil {
 		return Workspace{}, err
 	}
+	v, err := parseVisibility(visibility)
+	if err != nil {
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "visibility", Err: err}
+	}
+	ws.Visibility = v
 	switch WorkspaceKind(kind) {
 	case WorkspaceKindRepository, WorkspaceKindThread:
 		ws.Kind = WorkspaceKind(kind)
