@@ -173,3 +173,87 @@ func TestRunRecordsEveryFailureToStart(t *testing.T) {
 		})
 	}
 }
+
+func TestRunRecordsAReturnAndAnAcceptStream(t *testing.T) {
+	// Arrange: a server took the held socket and accepted one connection.
+	dir, err := os.MkdirTemp("/tmp", "shr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	control, data := filepath.Join(dir, "c.sock"), filepath.Join(dir, "d.sock")
+	sockets := []activate.Socket{{Name: "control", File: socketFile(t, control)}, {Name: "store", File: socketFile(t, data)}}
+	var sink bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, "control", []string{"store"}, func([]string) ([]activate.Socket, error) { return sockets, nil }, newLog(&sink))
+	}()
+	bound := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), exchangeBound)
+	}
+	c, cc := bound()
+	ln, err := sockethold.Take(c, control, "store")
+	cc()
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	client, err := net.Dial("unix", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := conn.(*net.UnixConn).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	ln.Close()
+
+	// Act: hand it back, refuse a return of an unheld socket, and drain one stream.
+	c, cc = bound()
+	returnErr := sockethold.Return(c, control, "store", file)
+	refusedErr := sockethold.Return(c, control, "nope", file)
+	stream, subscribeErr := sockethold.Subscribe(c, control, "store")
+	cc()
+	file.Close()
+	if subscribeErr != nil {
+		t.Fatalf("Subscribe: %v", subscribeErr)
+	}
+	handed, nextErr := stream.Next()
+	if nextErr != nil {
+		t.Fatalf("Next: %v", nextErr)
+	}
+	handed.Close()
+	if err := stream.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if _, err := stream.Next(); err == nil {
+		t.Fatal("Next after Stop answered a connection, want the stream's end")
+	}
+	stream.Close()
+	cancel()
+	runErr := <-done
+
+	// Assert
+	if returnErr != nil || runErr != nil {
+		t.Fatalf("Return = %v, run = %v; want both clean", returnErr, runErr)
+	}
+	if !errors.Is(refusedErr, sockethold.ErrRefused) {
+		t.Fatalf("Return of an unheld socket = %v, want ErrRefused", refusedErr)
+	}
+	recs := records(t, &sink)
+	for _, want := range [][3]string{
+		{"info", "sockethold.return", "kept a connection a departing server handed back, for the next to accept"},
+		{"error", "sockethold.return", "a connection handed back was not kept"},
+		{"info", "sockethold.accept", "an accept stream of handed-back connections ended"},
+	} {
+		if !hasRecord(recs, want[0], want[1], want[2]) {
+			t.Fatalf("records = %v, want %v", recs, want)
+		}
+	}
+}

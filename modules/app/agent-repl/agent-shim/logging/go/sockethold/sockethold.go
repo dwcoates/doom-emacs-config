@@ -18,12 +18,15 @@ package sockethold
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -143,6 +146,10 @@ type Grant struct {
 	Name string
 	// Probe reports a probe (Probe), which asks for no socket.
 	Probe bool
+	// Verb is what was asked of Name: "" for its listener (Take), "return"
+	// for a connection handed back (Return), "accept" for an accept stream
+	// (Subscribe), recorded once the stream ends.
+	Verb string
 	// Err is why the request was not granted; nil when it was.
 	Err error
 }
@@ -150,13 +157,21 @@ type Grant struct {
 // Serve answers every request on CONTROL with the socket of its name from
 // SOCKETS, calling RECORD once per request, until CTX ends or CONTROL fails.
 // The holder keeps every socket open: a grant duplicates the fd into the
-// client, so a server's exit never closes it.
+// client, so a server's exit never closes it. Each request is answered on its
+// own goroutine, since an accept stream stays open; Serve returns once every
+// one has ended, closing the connections still waiting to be handed over.
 func Serve(ctx context.Context, control *net.UnixListener, sockets map[string]*os.File, record func(Grant)) error {
 	if record == nil {
 		panic("sockethold: Serve needs a record function")
 	}
 	stop := context.AfterFunc(ctx, func() { control.Close() })
 	defer stop()
+	held := newReturns()
+	var wg sync.WaitGroup
+	defer func() {
+		wg.Wait()
+		held.closeAll()
+	}()
 	for {
 		conn, err := control.AcceptUnix()
 		if err != nil {
@@ -165,32 +180,108 @@ func Serve(ctx context.Context, control *net.UnixListener, sockets map[string]*o
 			}
 			return fmt.Errorf("sockethold: accept on the control socket: %w", err)
 		}
-		record(answer(conn, sockets))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			record(answer(ctx, conn, sockets, held))
+		}()
 	}
 }
 
 // answer serves one request on CONN and closes it.
-func answer(conn *net.UnixConn, sockets map[string]*os.File) Grant {
+func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File, held *returns) Grant {
 	defer conn.Close()
-	line, err := bufio.NewReader(conn).ReadString('\n')
+	line, fds, err := readRequest(conn)
+	// A DESCRIPTOR ONLY A RETURN CARRIES IS THE HOLDER'S once read; any other
+	// request's is closed with it.
+	var carried *os.File
+	for i, fd := range fds {
+		if i == 0 && strings.HasPrefix(line, verbReturn) {
+			carried = os.NewFile(uintptr(fd), "returned")
+			continue
+		}
+		syscall.Close(fd)
+	}
 	if err != nil {
+		if carried != nil {
+			carried.Close()
+		}
 		return Grant{Err: fmt.Errorf("read the request: %w", err)}
 	}
-	name := strings.TrimSuffix(line, "\n")
-	if name == "" {
+	refuse := func(g Grant, reason string) Grant {
+		_, _ = conn.Write(append([]byte{StatusRefused}, []byte(reason+"\n")...))
+		g.Err = errors.New(reason)
+		return g
+	}
+	switch {
+	case line == "":
 		if _, err := conn.Write([]byte{StatusOK}); err != nil {
 			return Grant{Probe: true, Err: fmt.Errorf("answer the probe: %w", err)}
 		}
 		return Grant{Probe: true}
+	case strings.HasPrefix(line, verbReturn):
+		name := strings.TrimPrefix(line, verbReturn)
+		g := Grant{Name: name, Verb: "return"}
+		if _, ok := sockets[name]; !ok {
+			if carried != nil {
+				carried.Close()
+			}
+			return refuse(g, fmt.Sprintf("this holder holds no socket named %q", name))
+		}
+		if carried == nil {
+			return refuse(g, errNoFD.Error())
+		}
+		held.put(name, carried)
+		if _, err := conn.Write([]byte{StatusOK}); err != nil {
+			g.Err = fmt.Errorf("answer the return: %w", err)
+		}
+		return g
+	case strings.HasPrefix(line, verbAccept):
+		name := strings.TrimPrefix(line, verbAccept)
+		g := Grant{Name: name, Verb: "accept"}
+		if _, ok := sockets[name]; !ok {
+			return refuse(g, fmt.Sprintf("this holder holds no socket named %q", name))
+		}
+		held.subscribe(ctx, name, conn)
+		return g
 	}
-	file, ok := sockets[name]
+	file, ok := sockets[line]
 	if !ok {
-		reason := fmt.Sprintf("this holder holds no socket named %q", name)
-		_, _ = conn.Write(append([]byte{StatusRefused}, []byte(reason+"\n")...))
-		return Grant{Name: name, Err: errors.New(reason)}
+		return refuse(Grant{Name: line}, fmt.Sprintf("this holder holds no socket named %q", line))
 	}
 	if _, _, err := conn.WriteMsgUnix([]byte{StatusOK}, syscall.UnixRights(int(file.Fd())), nil); err != nil {
-		return Grant{Name: name, Err: fmt.Errorf("send the socket: %w", err)}
+		return Grant{Name: line, Err: fmt.Errorf("send the socket: %w", err)}
 	}
-	return Grant{Name: name}
+	return Grant{Name: line}
+}
+
+// readRequest reads CONN's one request line and every fd it carried.
+func readRequest(conn *net.UnixConn) (string, []int, error) {
+	var line []byte
+	var fds []int
+	buf := make([]byte, 256)
+	oob := make([]byte, syscall.CmsgSpace(4))
+	for {
+		n, oobn, _, _, err := conn.ReadMsgUnix(buf, oob)
+		if oobn > 0 {
+			msgs, perr := syscall.ParseSocketControlMessage(oob[:oobn])
+			if perr == nil {
+				for i := range msgs {
+					if got, rerr := syscall.ParseUnixRights(&msgs[i]); rerr == nil {
+						fds = append(fds, got...)
+					}
+				}
+			}
+		}
+		line = append(line, buf[:n]...)
+		if i := bytes.IndexByte(line, '\n'); i >= 0 {
+			return string(line[:i]), fds, nil
+		}
+		if err != nil {
+			return "", fds, err
+		}
+		if n == 0 {
+			return "", fds, io.ErrUnexpectedEOF
+		}
+	}
 }

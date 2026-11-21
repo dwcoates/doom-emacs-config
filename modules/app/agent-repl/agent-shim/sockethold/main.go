@@ -102,6 +102,14 @@ func run(ctx context.Context, control string, hold []string, activateSockets fun
 			log.Error("sockethold.probe", "a probe could not be answered", recordlog.Context{"cause": g.Err.Error()})
 		case g.Probe:
 			log.Info("sockethold.probe", "answered a probe: the holder is serving", nil)
+		case g.Verb == "return" && g.Err != nil:
+			log.Error("sockethold.return", "a connection handed back was not kept", recordlog.Context{"socket": g.Name, "cause": g.Err.Error()})
+		case g.Verb == "return":
+			log.Info("sockethold.return", "kept a connection a departing server handed back, for the next to accept", recordlog.Context{"socket": g.Name})
+		case g.Verb == "accept" && g.Err != nil:
+			log.Error("sockethold.accept", "an accept stream of handed-back connections was refused", recordlog.Context{"socket": g.Name, "cause": g.Err.Error()})
+		case g.Verb == "accept":
+			log.Info("sockethold.accept", "an accept stream of handed-back connections ended", recordlog.Context{"socket": g.Name})
 		case g.Err != nil:
 			log.Error("sockethold.grant", "a request for a held socket was not granted", recordlog.Context{"socket": g.Name, "cause": g.Err.Error()})
 		default:
