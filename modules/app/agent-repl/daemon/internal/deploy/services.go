@@ -173,6 +173,18 @@ type Restarter struct {
 	// probe (holderensure.Ensurer.ServingID), installing nothing. REQUIRED
 	// when StoreHolder is set.
 	HolderServing func(ctx context.Context, id string) (bool, error)
+	// TestRuns takes every merge gate's run off the test service before its
+	// restart and holds the gates off it until it answers again
+	// (merge.Orchestrator.TakeTestRunsOff). REQUIRED to restart the test
+	// service.
+	TestRuns TestRuns
+	// TestsSocket is the test service's socket, which its new process binds
+	// once it serves. REQUIRED to restart the test service.
+	TestsSocket string
+	// TestsAnswer makes one call of the test service and answers nil once it
+	// answered (testsclient.Client.Answers). REQUIRED to restart the test
+	// service.
+	TestsAnswer func(ctx context.Context) error
 	// StoreHolder is the id of the socket holder that holds StoreSocket, the
 	// one the store takes its sockets from (holderensure.HolderOfSocket);
 	// empty when no declared holder holds that socket, and then the store
@@ -346,8 +358,12 @@ func (r *Restarter) RestartLauncher(ctx context.Context) error {
 
 // RestartStandalone restarts standalone service S alone. Nothing else
 // depends on its socket but the daemon's own calls, which fail loudly while
-// it is out.
+// it is out -- but for the merge gates' runs on the test service, which are
+// taken off it first and held until it answers again (restartTests).
 func (r *Restarter) RestartStandalone(ctx context.Context, s Standalone) error {
+	if s.Component == ComponentTests {
+		return r.restartTests(ctx, s)
+	}
 	return r.restartStandalone(ctx, s)
 }
 

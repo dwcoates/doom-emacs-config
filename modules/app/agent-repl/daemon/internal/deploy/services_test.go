@@ -170,6 +170,61 @@ type restarterHarness struct {
 	// what it answers.
 	holderDown bool
 	probeErr   error
+	// testRuns is the merge gates' hold the test service's restart takes;
+	// testsSock is the test service's socket, bound from the start (a
+	// serving service); answerErr is what its answer probe says, and answers
+	// counts the probes.
+	testRuns  *fakeTestRuns
+	testsSock string
+	answerMu  sync.Mutex
+	answerErr error
+	answers   int
+}
+
+// fakeTestRuns is the merge orchestrator's hold of the gates across the test
+// service's restart. It records how many of the service manager's acts had
+// been made at each take-off and release, and what each release was told.
+type fakeTestRuns struct {
+	mu       sync.Mutex
+	services *fakeServiceManager
+	err      error
+	// takenAt and releasedAt are the count of acts at each take-off and each
+	// release; answered is each release's argument.
+	takenAt, releasedAt []int
+	answered            []error
+}
+
+func (f *fakeTestRuns) TakeTestRunsOff(context.Context) (func(error), error) {
+	acts := len(actsOf(f.services))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.takenAt = append(f.takenAt, acts)
+	return func(answered error) {
+		acts := len(actsOf(f.services))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.releasedAt = append(f.releasedAt, acts)
+		f.answered = append(f.answered, answered)
+	}, nil
+}
+
+// testsAnswer is the harness's TestsAnswer: it counts the probe and answers
+// answerErr.
+func (h *restarterHarness) testsAnswer(context.Context) error {
+	h.answerMu.Lock()
+	defer h.answerMu.Unlock()
+	h.answers++
+	return h.answerErr
+}
+
+// probes answers how many times the test service was asked to answer.
+func (h *restarterHarness) probes() int {
+	h.answerMu.Lock()
+	defer h.answerMu.Unlock()
+	return h.answers
 }
 
 // ensureHolder is the harness's EnsureHolder: it records "ensure-holder <id>"
@@ -283,8 +338,29 @@ func newRestarter(t *testing.T) *restarterHarness {
 			return !h.holderDown, h.probeErr
 		},
 		StoreHolder: "store-holder",
+		TestsSocket: filepath.Join(sockDir, "tests.sock"),
+		TestsAnswer: h.testsAnswer,
 	}
+	h.testsSock = h.r.TestsSocket
+	h.testRuns = &fakeTestRuns{services: h.services}
+	h.r.TestRuns = h.testRuns
+	listen(t, h.testsSock)
 	return h
+}
+
+// listen stands a real unix socket at path for the test's length, as a
+// serving service binds its own.
+func listen(t *testing.T, path string) {
+	t.Helper()
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("bind %s: %v", path, err)
+	}
+	t.Cleanup(func() {
+		if err := ln.Close(); err != nil {
+			t.Errorf("close the test socket %s: %v", path, err)
+		}
+	})
 }
 
 // bindSocket stands a real unix socket at the store's path, as the new store
@@ -995,9 +1071,12 @@ func (h *restarterHarness) running(t *testing.T, label, service string, pid int,
 }
 
 // acts answers every launchd call other than a look.
-func (h *restarterHarness) acts() []string {
+func (h *restarterHarness) acts() []string { return actsOf(h.services) }
+
+// actsOf answers every call of SERVICES other than a look.
+func actsOf(services *fakeServiceManager) []string {
 	var out []string
-	for _, c := range h.services.Calls() {
+	for _, c := range services.Calls() {
 		if !strings.HasPrefix(c, "status") {
 			out = append(out, c)
 		}
