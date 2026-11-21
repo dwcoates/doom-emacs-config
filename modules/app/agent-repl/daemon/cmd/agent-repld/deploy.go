@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"time"
 
 	"agentrepl/logging/buildreport"
@@ -310,20 +309,11 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 // rolloutForwarder carries the session watcher's build reports to the rollout
 // controller, which is built after the fleet the watchers live in.
 type rolloutForwarder struct {
-	mu     sync.RWMutex
-	target rollout.Controller
-}
-
-func (f *rolloutForwarder) bind(target rollout.Controller) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[rollout.Controller]
 }
 
 func (f *rolloutForwarder) controller() (rollout.Controller, bool) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.target, f.target != nil
+	return f.load()
 }
 
 // deployClientsForwarder carries the deploy's reads of the connected clients'
@@ -331,22 +321,13 @@ func (f *rolloutForwarder) controller() (rollout.Controller, bool) {
 // deploy. With no server yet no client can be connected, so the reads answer
 // none — the truth rather than a stand-in for it — and a push reaches nobody.
 type deployClientsForwarder struct {
-	mu     sync.RWMutex
-	target deploy.Clients
+	lateBound[deploy.Clients]
 }
 
 var _ deploy.Clients = (*deployClientsForwarder)(nil)
 
-func (f *deployClientsForwarder) bind(target deploy.Clients) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
-}
-
 func (f *deployClientsForwarder) bound() (deploy.Clients, bool) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.target, f.target != nil
+	return f.load()
 }
 
 func (f *deployClientsForwarder) EmacsBuilds() []deploy.EmacsClient {

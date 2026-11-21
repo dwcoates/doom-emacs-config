@@ -56,6 +56,9 @@ type Deps struct {
 	Chime Chime
 	// ChimeErr is why no Chime was resolved.
 	ChimeErr error
+	// Speech reads each made banner aloud when the host is set up for
+	// listening away from the screen (Speech's doc says when).
+	Speech *Speech
 	// Clicks is told each clicked banner's workspace.
 	Clicks ClickSink
 	// Workspaces titles each banner and names its click's target.
@@ -89,8 +92,8 @@ type Notifier struct {
 // New builds a notifier. It panics on a missing collaborator, because a
 // half-wired notifier is a boot defect, not a runtime condition.
 func New(deps Deps) *Notifier {
-	if deps.Focus == nil || deps.Clicks == nil || deps.Workspaces == nil || deps.Log == nil {
-		panic("desktopnotify: New requires Focus, Clicks, Workspaces and Log")
+	if deps.Focus == nil || deps.Clicks == nil || deps.Workspaces == nil || deps.Speech == nil || deps.Log == nil {
+		panic("desktopnotify: New requires Focus, Clicks, Workspaces, Speech and Log")
 	}
 	if (deps.Backend == nil) == (deps.BackendErr == nil) {
 		panic("desktopnotify: New requires exactly one of Backend and BackendErr")
@@ -136,8 +139,9 @@ func (d Decision) String() string {
 // Post raises one banner for ws, unless Emacs is focused, and rings the chime
 // the instant the banner is made. It answers what it decided before composing.
 //
-// A SOUND IS ONLY EVER A BANNER'S. The chime is rung from one place: the edge
-// the backend reports the banner made on (Backend.Post's made). A banner that
+// A SOUND IS ONLY EVER A BANNER'S. The chime is rung, and the banner read
+// aloud (Speech), from one place: the edge the backend reports the banner
+// made on (Backend.Post's made). A banner that
 // is not made -- Emacs is focused, the workspace cannot be named, no banner
 // program is installed, the program failed, the daemon is standing down --
 // rings nothing, and nothing else in the daemon plays a sound.
@@ -180,6 +184,16 @@ func (n *Notifier) ring(log dlog.Logger) {
 	log.Debug(opChime, "ringing the chime", nil)
 	if !n.spawn(func() { n.play(log) }) {
 		log.Info(opChime, "the daemon is standing down; no chime", nil)
+	}
+}
+
+// speak reads a made banner aloud, when Speech decides it is, on a goroutine
+// of its own, so the reading never holds or delays the banner. It is called
+// only from a banner's made edge (show): EVERY KIND OF BANNER IS READ ALOUD
+// ALIKE, because every one is made there.
+func (n *Notifier) speak(banner Banner, log dlog.Logger) {
+	if !n.spawn(func() { n.deps.Speech.Speak(n.ctx, banner, log) }) {
+		log.Info(opSpeak, "the daemon is standing down; the banner is not read aloud", nil)
 	}
 }
 
@@ -277,6 +291,7 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		made = true
 		log.Debug(opPost, "the desktop banner is made; ringing its chime", nil)
 		n.ring(log)
+		n.speak(banner, log)
 		seq = n.hold(target, log)
 	})
 	if made {

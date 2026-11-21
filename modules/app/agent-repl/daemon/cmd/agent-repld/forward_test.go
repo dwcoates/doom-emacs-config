@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -979,5 +981,80 @@ func TestTheMergeForwarderCarriesAPausedMergesReturn(t *testing.T) {
 				t.Fatalf("ReturnPausedMerges = %v, calls %v; want %v and %v", err, target.calls, tc.wantErr, tc.want)
 			}
 		})
+	}
+}
+
+func TestLateBound(t *testing.T) {
+	cases := []struct {
+		name   string
+		bind   bool
+		want   string
+		wantOK bool
+	}{
+		{name: "unbound answers the zero value and false", bind: false, want: "", wantOK: false},
+		{name: "bound answers the collaborator", bind: true, want: "target", wantOK: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var b lateBound[string]
+			if tc.bind {
+				b.bind("target")
+			}
+
+			// Act
+			got, ok := b.load()
+
+			// Assert
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("load = %q, %v, want %q, %v", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestLateBoundAnswersTheLastBinding(t *testing.T) {
+	// Arrange
+	var b lateBound[string]
+	b.bind("first")
+	b.bind("second")
+
+	// Act
+	got, ok := b.load()
+
+	// Assert
+	if got != "second" || !ok {
+		t.Fatalf("load = %q, %v, want the last binding", got, ok)
+	}
+}
+
+// TestEveryForwarderCarriesItsCollaboratorThroughLateBound pins the shared
+// shape: no forwarder guards its one late-bound collaborator with a mutex of
+// its own. historyForwarder binds three sources at once and mediationHook's
+// lock guards its owed deploy too, so each keeps its own.
+func TestEveryForwarderCarriesItsCollaboratorThroughLateBound(t *testing.T) {
+	// Arrange
+	forwarder := regexp.MustCompile(`type (\w+(?:Forwarder|Hook)) struct \{\n\tmu +sync\.RWMutex`)
+	allowed := map[string]bool{"historyForwarder": true, "mediationHook": true}
+	embedded := regexp.MustCompile(`\tlateBound\[`)
+
+	// Act
+	var handRolled []string
+	carried := 0
+	for _, file := range sourcescan.Production(t) {
+		for _, m := range forwarder.FindAllStringSubmatch(string(file.Source), -1) {
+			if !allowed[m[1]] {
+				handRolled = append(handRolled, file.Name+": "+m[1])
+			}
+		}
+		carried += len(embedded.FindAllIndex(file.Source, -1))
+	}
+
+	// Assert
+	if len(handRolled) != 0 {
+		t.Fatalf("forwarders guarding their collaborator by hand: %v; embed lateBound", handRolled)
+	}
+	if carried < 16 {
+		t.Fatalf("found %d forwarders embedding lateBound, want the 16 the extraction moved", carried)
 	}
 }

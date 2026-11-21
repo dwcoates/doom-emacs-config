@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -258,4 +259,54 @@ func TestNotifyProgramsResolveThroughOneHelper(t *testing.T) {
 	if asks != 2 || records != 1 {
 		t.Fatalf("resolveNotifyProgram( x%d (want 2), log.Error(opDesktopNotify x%d (want 1)", asks, records)
 	}
+}
+
+func TestSpeechPlatformTakesTheOverrides(t *testing.T) {
+	// Arrange
+	t.Setenv(desktopnotify.EnvSayCmd, "/tmp/fake-say")
+	t.Setenv(desktopnotify.EnvAudioOutputCmd, "/tmp/fake-audio")
+	t.Setenv(desktopnotify.EnvBluetoothCmd, "/tmp/fake-bluetooth")
+	want := desktopnotify.SpeechPlatformFor(runtime.GOOS, "/bin/agent-repld").WithOverrides("/tmp/fake-say", "/tmp/fake-audio", "/tmp/fake-bluetooth")
+
+	// Act
+	got := speechPlatform("/bin/agent-repld")
+
+	// Assert
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("speechPlatform = %+v, want this platform's with the overrides %+v", got, want)
+	}
+}
+
+// fixedStanding answers one standing.
+type fixedStanding struct {
+	state *agentreplv1.PersistentWifiState
+}
+
+func (s fixedStanding) Latest() (*agentreplv1.PersistentWifiState, bool) { return s.state, true }
+
+func TestWifiStandingForwarderAnswersTheBoundStanding(t *testing.T) {
+	// Arrange
+	state := &agentreplv1.PersistentWifiState{Mode: &agentreplv1.PersistentWifiState_On{On: &agentreplv1.PersistentWifiModeOn{}}}
+	f := &wifiStandingForwarder{}
+	f.bind(fixedStanding{state: state})
+
+	// Act
+	got, ok := f.Latest()
+
+	// Assert
+	if !ok || got != state {
+		t.Fatalf("Latest = %v, %v, want the bound standing", got, ok)
+	}
+}
+
+func TestWifiStandingForwarderPanicsUnbound(t *testing.T) {
+	// Assert
+	defer func() {
+		if recover() == nil {
+			t.Fatal("an unbound forwarder answered a standing")
+		}
+	}()
+
+	// Act
+	(&wifiStandingForwarder{}).Latest()
 }

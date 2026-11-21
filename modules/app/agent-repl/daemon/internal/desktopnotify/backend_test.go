@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // fakeRunner answers one scripted stdout and records the argv it was handed.
@@ -626,22 +628,27 @@ func TestRunWithinBoundsTheRun(t *testing.T) {
 	}
 }
 
-// TestEveryProgramRunGoesThroughRunWithin pins that no backend or chime
-// bounds a run of its own: the one bounded run is runWithin.
+// TestEveryProgramRunGoesThroughRunWithin pins that no backend, chime or
+// speech bounds a run of its own: the one bounded run is runWithin, across
+// every production source of the package.
 func TestEveryProgramRunGoesThroughRunWithin(t *testing.T) {
-	// Arrange
-	source, err := os.ReadFile("backend.go")
-	if err != nil {
-		t.Fatalf("read backend.go: %v", err)
+	cases := []struct {
+		substr string
+		want   []string
+	}{
+		{substr: "context.WithTimeout(", want: []string{"backend.go"}},
+		{substr: "runner.Run(", want: []string{"backend.go"}},
 	}
+	for _, tc := range cases {
+		t.Run(tc.substr, func(t *testing.T) {
+			// Act
+			got := sourcescan.Sites(t, tc.substr)
 
-	// Act
-	timeouts := strings.Count(string(source), "context.WithTimeout(")
-	runs := strings.Count(string(source), "runner.Run(")
-
-	// Assert
-	if timeouts != 1 || runs != 1 {
-		t.Fatalf("backend.go bounds %d runs and calls runner.Run %d times, want both only in runWithin", timeouts, runs)
+			// Assert
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("%q occurs in %v, want only runWithin's %v", tc.substr, got, tc.want)
+			}
+		})
 	}
 }
 

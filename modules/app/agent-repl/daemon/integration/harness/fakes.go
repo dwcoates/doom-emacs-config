@@ -275,6 +275,44 @@ func NewFakeChime(t testing.TB, dir string) *Recorder {
 	return NewRecorderExecutable(t, dir, "chime")
 }
 
+// NewFakeSay writes the speech program a made banner is read aloud through
+// (AGENT_REPL_SAY_CMD). It records the platform argv and speaks nothing, so
+// no test ever speaks on the host.
+func NewFakeSay(t testing.TB, dir string) *Recorder {
+	t.Helper()
+	return NewRecorderExecutable(t, dir, "say")
+}
+
+// FakeAudioOutput is what the fake audio-output reader prints (the daemon's
+// `audio-output` verb's line): the host's built-in speakers, so a banner is
+// never read aloud unless a test scripts a private listening device
+// (SetStdout).
+const FakeAudioOutput = `{"name":"MacBook Pro Speakers","transport":"bltn","uid":"BuiltInSpeakerDevice","data_source":"ispk"}` + "\n"
+
+// NewFakeAudioOutput writes the program the current audio output is read
+// with (AGENT_REPL_AUDIO_OUTPUT_CMD). It records the argv and prints
+// FakeAudioOutput, so no test ever reads the host's audio.
+func NewFakeAudioOutput(t testing.TB, dir string) *Recorder {
+	t.Helper()
+	r := NewRecorderExecutable(t, dir, "audio-output")
+	r.SetStdout(FakeAudioOutput)
+	return r
+}
+
+// FakeBluetoothReport is what the fake Bluetooth reader prints: no device
+// connected.
+const FakeBluetoothReport = `{"SPBluetoothDataType":[{}]}`
+
+// NewFakeBluetooth writes the program a Bluetooth output's class is read with
+// (AGENT_REPL_BLUETOOTH_CMD). It records the argv and prints
+// FakeBluetoothReport, so no test ever reads the host's Bluetooth.
+func NewFakeBluetooth(t testing.TB, dir string) *Recorder {
+	t.Helper()
+	r := NewRecorderExecutable(t, dir, "bluetooth")
+	r.SetStdout(FakeBluetoothReport)
+	return r
+}
+
 // FakeDeployBuildRefusal is what the fake deploy builder prints before it
 // fails: a harness NEVER builds, so every deploy it drives is a build failure
 // that deploys nothing.

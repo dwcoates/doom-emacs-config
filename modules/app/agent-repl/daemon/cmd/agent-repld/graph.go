@@ -1083,9 +1083,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	backend, backendErr := resolveBannerBackend(ctx, log, selectWorkspaceClick(selfExe, p.Layout.Dir()))
 	chime, chimeErr := resolveChime(log)
 	clicks := &clickForwarder{}
+	// A MADE BANNER IS READ ALOUD with persistent wifi mode on and a private
+	// listening device as the audio output; the controller's standing is bound below.
+	wifiStanding := &wifiStandingForwarder{}
 	notifier := desktopnotify.New(desktopnotify.Deps{
 		Focus: focus, Backend: backend, BackendErr: backendErr,
-		Chime: chime, ChimeErr: chimeErr,
+		Chime: chime, ChimeErr: chimeErr, Speech: buildSpeech(wifiStanding, selfExe),
 		Clicks: clicks, Workspaces: bannerWorkspaces{db: p.DB}, Log: log,
 	})
 	// One Haiku summarizer writes every banner's one-sentence body: a turn's
@@ -1221,6 +1224,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the persistent-wifi controller: %w", err)
 	}
+	wifiStanding.bind(wifi.Topic())
 	// THE WEB CONTENT PROCESS'S FOOTPRINT, once a minute: every workspace
 	// page lives in it, and its size is what its main-thread stalls follow.
 	footprints, err := webfootprint.New(webfootprint.Deps{Reader: procmetrics.Kernel{}, Clock: clock.System{}, Log: log})

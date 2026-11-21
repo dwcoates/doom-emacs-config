@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"agent-repld/internal/account"
+	"agent-repld/internal/audiooutput"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/envc"
@@ -178,7 +179,7 @@ type options struct {
 // commandNames are the first arguments main answers as a command rather than
 // booting the daemon, sorted.
 func commandNames() []string {
-	names := []string{thawGuardVerb, deployVerb, callVerb}
+	names := []string{thawGuardVerb, deployVerb, callVerb, audiooutput.Verb}
 	for noun := range cliNouns {
 		names = append(names, noun)
 	}
@@ -223,6 +224,10 @@ func main() {
 		// THE GUARD STARTS NOTHING: it waits for the daemon that started it
 		// to be gone, then thaws a frozen set no daemon owns.
 		os.Exit(runThawGuard(os.Args[2:], os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == audiooutput.Verb {
+		// THE VERB STARTS NOTHING: it prints the default audio output once.
+		os.Exit(runAudioOutputVerb(audiooutput.Read, os.Stdout, os.Stderr))
 	}
 	if len(os.Args) > 1 && os.Args[1] == deployVerb {
 		// THE VERB STARTS NOTHING: it asks the serving daemon to deploy and

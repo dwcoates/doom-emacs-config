@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"agent-repld/internal/audiooutput"
 	"agent-repld/internal/sourcescan"
 )
 
@@ -331,5 +332,48 @@ func TestLinkPromptsStagesReadOnlyPromptsOnAnotherFilesystem(t *testing.T) {
 	}
 	if err := os.WriteFile(path, []byte("x"), 0o644); !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("an in-place write into a staged prompt = %v, want it refused", err)
+	}
+}
+
+func TestFakeSpeechProgramsSpeakNothingAndReadNoPrivateDevice(t *testing.T) {
+	cases := []struct {
+		name       string
+		fake       func(t testing.TB, dir string) *Recorder
+		args       []string
+		wantStdout string
+	}{
+		{name: "the audio-output reader prints the built-in speakers", fake: NewFakeAudioOutput, args: []string{"audio-output"}, wantStdout: FakeAudioOutput},
+		{name: "the bluetooth reader prints no device", fake: NewFakeBluetooth, args: []string{"SPBluetoothDataType", "-json"}, wantStdout: FakeBluetoothReport},
+		{name: "say prints nothing", fake: NewFakeSay, args: []string{"--", "hello"}, wantStdout: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r := tc.fake(t, t.TempDir())
+
+			// Act
+			out, err := exec.Command(r.Path, tc.args...).Output()
+
+			// Assert
+			if err != nil || string(out) != tc.wantStdout {
+				t.Fatalf("ran %s: %q, %v, want %q", r.Path, out, err, tc.wantStdout)
+			}
+		})
+	}
+}
+
+// TestFakeAudioOutputIsADeviceTheDaemonReads pins that the fake prints the
+// one shape the daemon's verb prints, and that it names no private
+// listening device.
+func TestFakeAudioOutputIsADeviceTheDaemonReads(t *testing.T) {
+	// Act
+	device, err := audiooutput.Decode(FakeAudioOutput)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Decode(FakeAudioOutput): %v", err)
+	}
+	if device.Transport != audiooutput.TransportBuiltIn || device.DataSource != audiooutput.DataSourceInternalSpeakers {
+		t.Fatalf("FakeAudioOutput = %+v, want the built-in speakers", device)
 	}
 }
