@@ -1105,14 +1105,13 @@ func TestPlaceWorkspacesFilesSeveralAsOneBlockInTheirOrder(t *testing.T) {
 
 func TestPlacingIntoACollapsedSubsection(t *testing.T) {
 	tests := []struct {
-		name         string
-		byAgent      bool
-		folded       bool
-		into         bool
-		wantFolded   bool
-		wantExpanded bool
+		name       string
+		byAgent    bool
+		folded     bool
+		into       bool
+		wantFolded bool
 	}{
-		{name: "an agent placing into a collapsed subsection expands it", byAgent: true, folded: true, into: true, wantExpanded: true},
+		{name: "an agent placing into a collapsed subsection keeps it collapsed", byAgent: true, folded: true, into: true, wantFolded: true},
 		{name: "an agent placing into an open subsection leaves it open", byAgent: true, into: true},
 		{name: "an agent placing into no subsection leaves a collapsed one collapsed", byAgent: true, folded: true, wantFolded: true},
 		{name: "the user's drop into a collapsed subsection keeps it collapsed", folded: true, into: true, wantFolded: true},
@@ -1122,7 +1121,7 @@ func TestPlacingIntoACollapsedSubsection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			s, log := testStore(t)
+			s, _ := testStore(t)
 			ctx := context.Background()
 			repoDir := arrangeRepo(t, "repo")
 			ws := registerIn(t, s, repoDir, "w", nil)
@@ -1139,9 +1138,9 @@ func TestPlacingIntoACollapsedSubsection(t *testing.T) {
 			if tt.into {
 				into = &later.ID
 			}
-			place, op := s.PlaceWorkspaces, "daemon.wsm.place_workspaces"
+			place := s.PlaceWorkspaces
 			if tt.byAgent {
-				place, op = s.PlaceWorkspacesByAgent, "daemon.wsm.place_workspaces_by_agent"
+				place = s.PlaceWorkspacesByAgent
 			}
 
 			// Act
@@ -1156,13 +1155,6 @@ func TestPlacingIntoACollapsedSubsection(t *testing.T) {
 			}
 			if !repositoryFolded(t, s, ws.Repo) {
 				t.Error("the repository's own fold was expanded")
-			}
-			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: op, Message: "expanded the collapsed subsection the workspaces were placed in"})
-			if ok != tt.wantExpanded {
-				t.Fatalf("expansion record found = %v, want %v: %v", ok, tt.wantExpanded, log.Records())
-			}
-			if ok && (rec.Context["into"] != string(later.ID) || !slices.Equal(rec.Context["workspaces"].([]WorkspaceID), []WorkspaceID{ws.ID})) {
-				t.Errorf("the expansion record's context = %v", rec.Context)
 			}
 		})
 	}
@@ -1299,9 +1291,9 @@ func TestMoveWorkspaceFromAnEarlierListJoinsTheTargetsSubsectionAfterIt(t *testi
 	}
 }
 
-func TestMoveWorkspaceExpandsTheCollapsedSubsectionItJoins(t *testing.T) {
+func TestMoveWorkspaceKeepsTheCollapsedSubsectionItJoinsCollapsed(t *testing.T) {
 	// Arrange
-	s, log := testStore(t)
+	s, _ := testStore(t)
 	ctx := context.Background()
 	repoDir := arrangeRepo(t, "repo")
 	ws := registerIn(t, s, repoDir, "w", nil)
@@ -1319,12 +1311,8 @@ func TestMoveWorkspaceExpandsTheCollapsedSubsectionItJoins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MoveWorkspace: %v", err)
 	}
-	if subsectionNow(t, s, later.ID).Folded {
-		t.Error("the subsection the workspace joined is still collapsed")
-	}
-	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.move_workspace", Message: "expanded the collapsed subsection the workspace was moved into"})
-	if !ok || rec.Context["workspace"] != ws.ID || rec.Context["target"] != target.ID {
-		t.Fatalf("expansion record = %+v (found %v), want an INFO naming the workspace and target", rec, ok)
+	if !subsectionNow(t, s, later.ID).Folded {
+		t.Error("the subsection the workspace joined was expanded")
 	}
 }
 
