@@ -30,12 +30,12 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl-link-newest "daemon-link" ())
 (declare-function agent-repl-rpc-report-latencies "rpc" (conn request &rest keys))
 
@@ -95,9 +95,9 @@ Each is a plist (:kind KEYWORD :seconds NUMBER) for
             agent-repl-latency-report--dropped
             (+ agent-repl-latency-report--dropped excess))
       (agent-repl--warn agent-repl-latency-report--central
-                        "elisp.latency-report.overflow dropped=%d held=%d"
-                        agent-repl-latency-report--dropped
-                        (length agent-repl-latency-report--editor)))))
+                        "elisp.latency-report.overflow dropped={dropped} held={held}"
+                        :dropped agent-repl-latency-report--dropped
+                        :held (length agent-repl-latency-report--editor)))))
 
 (defun agent-repl-latency-report--scheduled ()
   "The scheduled send came due."
@@ -119,8 +119,8 @@ acceptance, a promotion), so what waited is sent there."
             (editor agent-repl-latency-report--editor))
         (setq agent-repl-latency-report--in-flight t)
         (agent-repl--log agent-repl-latency-report--central
-                         "elisp.latency-report.send milestones=%d latencies=%d"
-                         (length startup) (length editor))
+                         "elisp.latency-report.send milestones={milestones} latencies={latencies}"
+                         :milestones (length startup) :latencies (length editor))
         (agent-repl-rpc-report-latencies
          conn
          (list :editor-startup startup :editor-latencies editor)
@@ -140,19 +140,19 @@ Every answer ends the batch; what was queued meanwhile is sent next."
   (pcase (plist-get response :arm)
     (:success
      (agent-repl--info agent-repl-latency-report--central
-                       "elisp.latency-report.ok milestones=%d latencies=%d outcome=%s dropped=%d"
-                       (length startup) (length editor)
-                       (plist-get (plist-get response :value) :arm)
-                       agent-repl-latency-report--dropped)
+                       "elisp.latency-report.ok milestones={milestones} latencies={latencies} outcome={outcome} dropped={dropped}"
+                       :milestones (length startup) :latencies (length editor)
+                       :outcome (plist-get (plist-get response :value) :arm)
+                       :dropped agent-repl-latency-report--dropped)
      (setq agent-repl-latency-report--dropped 0))
     (:error
      (agent-repl--error agent-repl-latency-report--central
-                        "elisp.latency-report.refused milestones=%d latencies=%d cause=%S"
-                        (length startup) (length editor) (plist-get response :value)))
+                        "elisp.latency-report.refused milestones={milestones} latencies={latencies} cause={cause}"
+                        :milestones (length startup) :latencies (length editor) :cause (prin1-to-string (plist-get response :value))))
     (arm
      (agent-repl--error agent-repl-latency-report--central
-                        "elisp.latency-report.unknown-arm milestones=%d latencies=%d arm=%S"
-                        (length startup) (length editor) arm)))
+                        "elisp.latency-report.unknown-arm milestones={milestones} latencies={latencies} arm={arm}"
+                        :milestones (length startup) :latencies (length editor) :arm (prin1-to-string arm))))
   (agent-repl-latency-report-flush))
 
 (defun agent-repl-latency-report--failed (startup editor detail)
@@ -160,8 +160,8 @@ Every answer ends the batch; what was queued meanwhile is sent next."
 Both stay queued for the next link-up or measurement."
   (setq agent-repl-latency-report--in-flight nil)
   (agent-repl--info agent-repl-latency-report--central
-                    "elisp.latency-report.deferred milestones=%d latencies=%d detail=%S"
-                    (length startup) (length editor) detail))
+                    "elisp.latency-report.deferred milestones={milestones} latencies={latencies} detail={detail}"
+                    :milestones (length startup) :latencies (length editor) :detail (prin1-to-string detail)))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-latency-report-flush)
 (add-hook 'agent-repl-link-handover-functions #'agent-repl-latency-report-flush)

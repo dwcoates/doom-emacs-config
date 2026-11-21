@@ -39,6 +39,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
@@ -53,12 +57,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl-connect-refused-arm "connect" (detail))
@@ -222,10 +220,8 @@ treats as having no connection."
   (let ((conn (agent-repl-host--recorded-conn ws)))
     (if (or (null conn) (agent-repl-connect-connection-alive-p conn))
         conn
-      (agent-repl--info ws "elisp.host.dead-connection ws=%s recorded=%s address=%S live=%s"
-                        ws (agent-repl-host--conn-id conn)
-                        (agent-repl-connect-connection-address conn)
-                        (agent-repl-host--conn-id (agent-repl-link-live)))
+      (agent-repl--info ws "elisp.host.dead-connection ws={ws} recorded={recorded} address={address} live={live}"
+                        :ws ws :recorded (agent-repl-host--conn-id conn) :address (prin1-to-string (agent-repl-connect-connection-address conn)) :live (agent-repl-host--conn-id (agent-repl-link-live)))
       (agent-repl-host--follow-live-daemon ws "dead-connection")
       (let ((now (agent-repl-host--recorded-conn ws)))
         (if (and now (agent-repl-connect-connection-alive-p now))
@@ -254,9 +250,9 @@ stands at all."
       (and (agent-repl-host-detached-p ws)
            (let ((live (agent-repl-link-live)))
              (when live
-               (agent-repl--info ws "elisp.host.page-conn-from-live-link ws=%s address=%S walk=%s"
-                                 ws (agent-repl-connect-connection-address live)
-                                 (if (plist-get (agent-repl-host--entry ws) :reattach)
+               (agent-repl--info ws "elisp.host.page-conn-from-live-link ws={ws} address={address} walk={walk}"
+                                 :ws ws :address (prin1-to-string (agent-repl-connect-connection-address live))
+                                 :walk (if (plist-get (agent-repl-host--entry ws) :reattach)
                                      "in-flight" "none")))
              live))))
 
@@ -371,7 +367,7 @@ or `:terminal'; `:unknown' means no host push has arrived yet."
          (session (plist-get host :session)))
     (cond
      ((null host)
-      (agent-repl--log ws "elisp.host.gate ws=%s gate=unknown reason=no-push" ws)
+      (agent-repl--log ws "elisp.host.gate ws={ws} gate=unknown reason=no-push" :ws ws)
       :unknown)
      ((eq (plist-get session :arm) :none) :no-session)
      ((eq (plist-get session :arm) :existing)
@@ -382,13 +378,13 @@ or `:terminal'; `:unknown' means no host push has arrived yet."
            (let ((arm (plist-get (plist-get (plist-get standing :value) :composer) :arm)))
              (if (memq arm '(:open :merging :draining :restarting))
                  arm
-               (agent-repl--error ws "elisp.host.gate-unknown-composer-arm ws=%s arm=%S" ws arm)
+               (agent-repl--error ws "elisp.host.gate-unknown-composer-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm))
                :unknown)))
           (arm
-           (agent-repl--error ws "elisp.host.gate-unknown-standing ws=%s arm=%S" ws arm)
+           (agent-repl--error ws "elisp.host.gate-unknown-standing ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm))
            :unknown))))
      (t
-      (agent-repl--error ws "elisp.host.gate-unset-session ws=%s host=%S" ws host)
+      (agent-repl--error ws "elisp.host.gate-unset-session ws={ws} host={host}" :ws ws :host (prin1-to-string host))
       :unknown))))
 
 (defun agent-repl-host-take-restart-hold (ws)
@@ -415,15 +411,15 @@ The hold is taken for EVERY restart: a restart is always immediate, so
 the bounce is always coming."
   (let ((generation (agent-repl-host-generation ws)))
     (agent-repl-host--put ws :restart-hold (list :generation generation))
-    (agent-repl--info ws "elisp.host.restart-hold-taken ws=%s generation=%s"
-                      ws (or generation "-"))))
+    (agent-repl--info ws "elisp.host.restart-hold-taken ws={ws} generation={generation}"
+                      :ws ws :generation (or generation "-"))))
 
 (defun agent-repl-host-release-restart-hold (ws reason)
   "Drop WS's local restart hold, recording REASON for why it ended."
   (when (plist-get (agent-repl-host--entry ws) :restart-hold)
     (agent-repl-host--put ws :restart-hold nil)
-    (agent-repl--info ws "elisp.host.restart-hold-released ws=%s reason=%s"
-                      ws reason)))
+    (agent-repl--info ws "elisp.host.restart-hold-released ws={ws} reason={reason}"
+                      :ws ws :reason reason)))
 
 (defun agent-repl-host--settle-restart-hold (ws)
   "Release WS's restart hold once the DAEMON's own push resolves it.
@@ -493,7 +489,7 @@ there to say it."
                        workspace
                      '(:agent-repl-central
                        "initial registration precedes workspace ownership"))))
-    (agent-repl--info log-scope "elisp.host.register dir=%S" dir)
+    (agent-repl--info log-scope "elisp.host.register dir={dir}" :dir (prin1-to-string dir))
     (agent-repl-rpc-register-workspace
      conn (list :dir dir)
      :on-response
@@ -505,13 +501,13 @@ there to say it."
          (:error
           (if on-refused
               (progn
-                (agent-repl--info log-scope "elisp.host.register-refused dir=%S error=%S"
-                                  dir (plist-get response :value))
+                (agent-repl--info log-scope "elisp.host.register-refused dir={dir} error={error}"
+                                  :dir (prin1-to-string dir) :error (prin1-to-string (plist-get response :value)))
                 (funcall on-refused (plist-get response :value)))
             (funcall on-done (agent-repl-host--record-registration
                               log-scope dir :refused (plist-get response :value) workspace))))
          (arm
-          (agent-repl--error log-scope "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
+          (agent-repl--error log-scope "elisp.host.register-unknown-arm dir={dir} arm={arm}" :dir (prin1-to-string dir) :arm (prin1-to-string arm))
           (funcall on-done nil))))
      :on-failure
      (lambda (detail)
@@ -534,23 +530,23 @@ registration\='s outcome the same way however it was sent."
   (pcase arm
     (:registered
      (let ((ref (plist-get value :workspace)))
-       (agent-repl--info scope "elisp.host.registered dir=%S id=%S"
-                         dir (plist-get ref :id))
+       (agent-repl--info scope "elisp.host.registered dir={dir} id={id}"
+                         :dir (prin1-to-string dir) :id (prin1-to-string (plist-get ref :id)))
        ref))
     (:refused
      (let ((cause (plist-get value :cause)))
        (if (and ws (eq (plist-get cause :arm) :transferring-away))
            (progn
-             (agent-repl--info scope "elisp.host.register-transferring-away dir=%S fields=%S"
-                               dir (plist-get cause :value))
+             (agent-repl--info scope "elisp.host.register-transferring-away dir={dir} fields={fields}"
+                               :dir (prin1-to-string dir) :fields (prin1-to-string (plist-get cause :value)))
              (agent-repl-host-handle-refusal ws cause))
-         (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)))
+         (agent-repl--error scope "elisp.host.register-refused dir={dir} error={error}" :dir (prin1-to-string dir) :error (prin1-to-string value))))
      nil)
     (:failed
-     (agent-repl--error scope "elisp.host.register-failed dir=%S detail=%S" dir value)
+     (agent-repl--error scope "elisp.host.register-failed dir={dir} detail={detail}" :dir (prin1-to-string dir) :detail (prin1-to-string value))
      nil)
-    (_ (agent-repl--fatal scope "elisp.host.record-registration-unknown-arm dir=%S arm=%S"
-                          dir arm))))
+    (_ (agent-repl--fatal scope "elisp.host.record-registration-unknown-arm dir={dir} arm={arm}"
+                          :dir (prin1-to-string dir) :arm (prin1-to-string arm)))))
 
 (defun agent-repl-host-register-all (conn dirs on-done)
   "Register every dir of DIRS on CONN in ONE call; call ON-DONE with the outcomes.
@@ -569,8 +565,8 @@ up edges walk every workspace again.
 AN ANSWER THAT DOES NOT PAIR WITH DIRS IS A BROKEN CONTRACT, and fails
 hard: one outcome per dir, in order, each echoing its dir."
   (let ((scope '(:agent-repl-central "a batched registration spans every workspace")))
-    (agent-repl--info scope "elisp.host.register-all dirs=%d address=%S"
-                      (length dirs) (agent-repl-connect-connection-address conn))
+    (agent-repl--info scope "elisp.host.register-all dirs={dirs} address={address}"
+                      :dirs (length dirs) :address (prin1-to-string (agent-repl-connect-connection-address conn)))
     (agent-repl-rpc-register-workspaces
      conn (list :dirs dirs)
      :timeout :none
@@ -580,14 +576,14 @@ hard: one outcome per dir, in order, each echoing its dir."
          (unless (and (= (length outcomes) (length dirs))
                       (cl-every (lambda (outcome dir) (equal (plist-get outcome :dir) dir))
                                 outcomes dirs))
-           (agent-repl--fatal scope "elisp.host.register-all-unpaired dirs=%S outcomes=%S"
-                              dirs outcomes))
-         (agent-repl--info scope "elisp.host.registered-all dirs=%d" (length dirs))
+           (agent-repl--fatal scope "elisp.host.register-all-unpaired dirs={dirs} outcomes={outcomes}"
+                              :dirs (prin1-to-string dirs) :outcomes (prin1-to-string outcomes)))
+         (agent-repl--info scope "elisp.host.registered-all dirs={dirs}" :dirs (length dirs))
          (funcall on-done outcomes)))
      :on-failure
      (lambda (detail)
-       (agent-repl--error scope "elisp.host.register-all-failed dirs=%d address=%S detail=%S"
-                          (length dirs) (agent-repl-connect-connection-address conn) detail)
+       (agent-repl--error scope "elisp.host.register-all-failed dirs={dirs} address={address} detail={detail}"
+                          :dirs (length dirs) :address (prin1-to-string (agent-repl-connect-connection-address conn)) :detail (prin1-to-string detail))
        (funcall on-done (make-list (length dirs) nil))))))
 
 (defun agent-repl-host--outcome-ref (ws dir outcome)
@@ -607,7 +603,7 @@ registration\='s own."
       (:failed
        (agent-repl-host--record-registration ws dir :failed (plist-get value :cause)))
       (other
-       (agent-repl--fatal ws "elisp.host.register-unknown-arm dir=%S arm=%S" dir other)))))
+       (agent-repl--fatal ws "elisp.host.register-unknown-arm dir={dir} arm={arm}" :dir (prin1-to-string dir) :arm (prin1-to-string other))))))
 
 (defconst agent-repl-host--handover-arms '(:transferring-away :not-yet-adopted)
   "Refusal arms that are HANDOVER NEWS rather than user-facing failures.
@@ -651,11 +647,11 @@ non-nil when a walk was started, nil when WS already stands there."
     (if (and (agent-repl-connect-connection-at-p current address)
              (agent-repl-connect-connection-alive-p current))
         (progn
-          (agent-repl--info ws "elisp.host.served-here-already ws=%s address=%S trigger=%s"
-                            ws address trigger)
+          (agent-repl--info ws "elisp.host.served-here-already ws={ws} address={address} trigger={trigger}"
+                            :ws ws :address (prin1-to-string address) :trigger trigger)
           nil)
-      (agent-repl--info ws "elisp.host.view-where-served ws=%s address=%S trigger=%s"
-                        ws address trigger)
+      (agent-repl--info ws "elisp.host.view-where-served ws={ws} address={address} trigger={trigger}"
+                        :ws ws :address (prin1-to-string address) :trigger trigger)
       (agent-repl-host--reattach ws conn :register trigger)
       t)))
 
@@ -670,8 +666,8 @@ one place the handover walk lives."
          (keyword (plist-get arm :arm)))
     (cond
      ((memq keyword agent-repl-host--handover-arms)
-      (agent-repl--info ws (format "elisp.host.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
-                        ws keyword (plist-get arm :value))
+      (agent-repl--info ws "elisp.host.{op}-handover-refusal ws={ws} arm={arm} fields={fields}" :op op
+                        :ws ws :arm (prin1-to-string keyword) :fields (prin1-to-string (plist-get arm :value)))
       ;; A SELECTION A HANDOVER REFUSED IS STILL THE USER\='S: it is sent
       ;; again once WS stands on the daemon that serves it.  Marked BEFORE
       ;; the routing below, whose walk may finish at once.
@@ -693,10 +689,10 @@ one place the handover walk lives."
      ;; `not_yet_adopted' flipped the webview between the two daemons about
      ;; three times a second for minutes (2026-10-11).
      ((eq keyword :transfer-deferred)
-      (agent-repl--info ws (format "elisp.host.%s-transfer-deferred ws=%%s" op) ws))
+      (agent-repl--info ws "elisp.host.{op}-transfer-deferred ws={ws}" :op op :ws ws))
      (t
-      (agent-repl--error ws (format "elisp.host.%s-refused ws=%%s error=%%S" op)
-                         ws value)))))
+      (agent-repl--error ws "elisp.host.{op}-refused ws={ws} error={error}" :op op
+                         :ws ws :error (prin1-to-string value))))))
 
 ;;;; ---- Select ----
 
@@ -792,8 +788,8 @@ reached the one its answer named."
              (>= revision (cdr agent-repl-host--confirming)))
     (let ((ref (car agent-repl-host--confirming)))
       (agent-repl--log (agent-repl-host--target-scope ref)
-                       "elisp.host.select-confirmed id=%s revision=%d awaited=%d"
-                       (plist-get ref :id) revision (cdr agent-repl-host--confirming)))
+                       "elisp.host.select-confirmed id={id} revision={revision} awaited={awaited}"
+                       :id (plist-get ref :id) :revision revision :awaited (cdr agent-repl-host--confirming)))
     (setq agent-repl-host--confirming nil)))
 
 (defun agent-repl-host-forget-confirming (reason)
@@ -804,8 +800,8 @@ the selection pending forever."
   (when agent-repl-host--confirming
     (let ((ref (car agent-repl-host--confirming)))
       (agent-repl--info (agent-repl-host--target-scope ref)
-                        "elisp.host.select-unconfirmed id=%s awaited=%d reason=%s"
-                        (plist-get ref :id) (cdr agent-repl-host--confirming) reason))
+                        "elisp.host.select-unconfirmed id={id} awaited={awaited} reason={reason}"
+                        :id (plist-get ref :id) :awaited (cdr agent-repl-host--confirming) :reason reason))
     (setq agent-repl-host--confirming nil)))
 
 (defun agent-repl-host-select (ws &optional on-settled keep-history switch-started-ms)
@@ -846,7 +842,7 @@ walk is armed on (`agent-repl-host--register-settled')."
   (let ((ref (agent-repl-host-ref ws)))
     (if (null ref)
         (progn
-          (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=no-ref" ws)
+          (agent-repl--log ws "elisp.host.select-skipped ws={ws} reason=no-ref" :ws ws)
           nil)
       (agent-repl-host-select-ref ref on-settled keep-history switch-started-ms))))
 
@@ -862,9 +858,8 @@ selection in flight, behind which this one waits."
       (let ((older agent-repl-host--select-queued))
         (setq agent-repl-host--select-queued (list ref on-settled keep-history switch-started-ms))
         (agent-repl--info (agent-repl-host--target-scope ref)
-                          "elisp.host.select-queued id=%s behind=%s superseded=%s"
-                          (plist-get ref :id) (plist-get agent-repl-host--select-in-flight :id)
-                          (or (plist-get (car older) :id) "none"))
+                          "elisp.host.select-queued id={id} behind={behind} superseded={superseded}"
+                          :id (plist-get ref :id) :behind (plist-get agent-repl-host--select-in-flight :id) :superseded (or (plist-get (car older) :id) "none"))
         (when (and older (cadr older))
           (funcall (cadr older) :superseded))
         t)
@@ -898,13 +893,13 @@ ON-SETTLED, KEEP-HISTORY and SWITCH-STARTED-MS are as
       ;; the next daemon was told the selection the user had already left
       ;; (2026-10-14, e2e TestEmacsRestartKeepsTheSelectedWorkspace).
       (setq agent-repl-host-last-selected-id (plist-get ref :id))
-      (agent-repl--info scope "elisp.host.select-deferred id=%S reason=no-connection reassert=next-link-up"
-                        (plist-get ref :id))
+      (agent-repl--info scope "elisp.host.select-deferred id={id} reason=no-connection reassert=next-link-up"
+                        :id (prin1-to-string (plist-get ref :id)))
       (when on-settled (funcall on-settled :standing-down))
       nil)
      (t
-      (agent-repl--info scope "elisp.host.select id=%S keep-history=%s started-ms=%s"
-                        (plist-get ref :id) (and keep-history t) switch-started-ms)
+      (agent-repl--info scope "elisp.host.select id={id} keep-history={keep_history} started-ms={started_ms}"
+                        :id (prin1-to-string (plist-get ref :id)) :keep_history (and keep-history t) :started_ms switch-started-ms)
       (setq agent-repl-host--select-in-flight ref)
       (condition-case err
           (agent-repl-rpc-select-workspace
@@ -923,8 +918,8 @@ ON-SETTLED, KEEP-HISTORY and SWITCH-STARTED-MS are as
          ;; The call never went out, so nothing will ever answer it: the
          ;; slot is released here or no later selection is ever sent.
          (setq agent-repl-host--select-in-flight nil)
-         (agent-repl--error scope "elisp.host.select-unsent id=%S error=%S"
-                            (plist-get ref :id) err)
+         (agent-repl--error scope "elisp.host.select-unsent id={id} error={error}"
+                            :id (prin1-to-string (plist-get ref :id)) :error (prin1-to-string err))
          (signal (car err) (cdr err))))
       t))))
 
@@ -938,8 +933,8 @@ the roster's `current' is applied again: a push that arrived while the
 selection was pending was DEFERRED (`agent-repl-roster-apply-current'),
 and this is the moment it is judged -- the last push wins."
   (setq agent-repl-host--select-in-flight nil)
-  (agent-repl--log (agent-repl-host--target-scope ref) "elisp.host.select-settled id=%s queued=%s"
-                   (plist-get ref :id) (or (plist-get (car agent-repl-host--select-queued) :id) "none"))
+  (agent-repl--log (agent-repl-host--target-scope ref) "elisp.host.select-settled id={id} queued={queued}"
+                   :id (plist-get ref :id) :queued (or (plist-get (car agent-repl-host--select-queued) :id) "none"))
   (unwind-protect
       (funcall handle)
     (if agent-repl-host--select-queued
@@ -968,12 +963,12 @@ with it up the failure is the error it is (ERROR, settled `:failure')."
   (if (agent-repl-link-up-p)
       (progn
         (agent-repl--error (agent-repl-host--target-scope ref)
-                           "elisp.host.select-failed id=%S reassert=next-link-up detail=%S"
-                           (plist-get ref :id) detail)
+                           "elisp.host.select-failed id={id} reassert=next-link-up detail={detail}"
+                           :id (prin1-to-string (plist-get ref :id)) :detail (prin1-to-string detail))
         (when on-settled (funcall on-settled :failure)))
     (agent-repl--info (agent-repl-host--target-scope ref)
-                      "elisp.host.select-daemon-gone id=%S reassert=next-daemon detail=%S"
-                      (plist-get ref :id) detail)
+                      "elisp.host.select-daemon-gone id={id} reassert=next-daemon detail={detail}"
+                      :id (prin1-to-string (plist-get ref :id)) :detail (prin1-to-string detail))
     (when on-settled (funcall on-settled :standing-down))))
 
 (defun agent-repl-host--select-answered (ref response on-settled)
@@ -993,8 +988,8 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      ;; it would move the frame back (`agent-repl-host--confirming').
      (setq agent-repl-host--confirming
            (cons ref (plist-get (plist-get response :value) :roster-revision)))
-     (agent-repl--log scope "elisp.host.selected id=%S roster-revision=%d"
-                      (plist-get ref :id) (cdr agent-repl-host--confirming))
+     (agent-repl--log scope "elisp.host.selected id={id} roster-revision={roster_revision}"
+                      :id (prin1-to-string (plist-get ref :id)) :roster_revision (cdr agent-repl-host--confirming))
      (when on-settled (funcall on-settled :success)))
     ((and :error
           (guard (eq (plist-get (plist-get (plist-get response :value) :cause) :arm)
@@ -1007,8 +1002,8 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      ;; (`agent-repl-host--selected-dir', `agent-repl-host--reassert-selection'),
      ;; which revives the workspace.
      (setq agent-repl-host-last-selected-id (plist-get ref :id))
-     (agent-repl--info scope "elisp.host.select-standing-down id=%S reassert=next-daemon"
-                       (plist-get ref :id))
+     (agent-repl--info scope "elisp.host.select-standing-down id={id} reassert=next-daemon"
+                       :id (prin1-to-string (plist-get ref :id)))
      (when on-settled (funcall on-settled :standing-down)))
     ((and :error (guard ws))
      (agent-repl-host--on-refused ws "select" (plist-get response :value))
@@ -1017,7 +1012,7 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      (agent-repl-host--unheld-select-refused ref (plist-get response :value))
      (when on-settled (funcall on-settled :error)))
     (arm
-     (agent-repl--error scope "elisp.host.select-unknown-arm id=%S arm=%S" (plist-get ref :id) arm)
+     (agent-repl--error scope "elisp.host.select-unknown-arm id={id} arm={arm}" :id (prin1-to-string (plist-get ref :id)) :arm (prin1-to-string arm))
      (when on-settled (funcall on-settled :error))))))
 
 (defun agent-repl-host--unheld-select-refused (ref value)
@@ -1033,11 +1028,11 @@ picks the workspace again on the daemon that serves now."
          (name (or (plist-get ref :dir) (plist-get ref :id))))
     (if handover
         (agent-repl--info '(:agent-repl-central "a selection of a workspace this editor does not hold has no workspace sink")
-                          "elisp.host.select-unheld-handover id=%S arm=%S fields=%S"
-                          (plist-get ref :id) keyword (plist-get cause :value))
+                          "elisp.host.select-unheld-handover id={id} arm={arm} fields={fields}"
+                          :id (prin1-to-string (plist-get ref :id)) :arm (prin1-to-string keyword) :fields (prin1-to-string (plist-get cause :value)))
       (agent-repl--error '(:agent-repl-central "a selection of a workspace this editor does not hold has no workspace sink")
-                         "elisp.host.select-unheld-refused id=%S arm=%S fields=%S"
-                         (plist-get ref :id) keyword (plist-get cause :value)))
+                         "elisp.host.select-unheld-refused id={id} arm={arm} fields={fields}"
+                         :id (prin1-to-string (plist-get ref :id)) :arm (prin1-to-string keyword) :fields (prin1-to-string (plist-get cause :value))))
     (message "[agent-repl] The switch to %s did not happen (%s): pick it again"
              name (if handover "the daemon was handing over" keyword))))
 
@@ -1090,8 +1085,8 @@ switch from the same instant the page does."
   ;; the switch the user felt (webhost.el).
   (let ((started (and ws (agent-repl-webhost-note-switch ws))))
     (agent-repl--info (or ws '(:agent-repl-central "a switch to a perspective without a workspace has no workspace sink"))
-                      "elisp.host.editor-switch ws=%s origin=%s count=%d started-ms=%s"
-                      ws origin agent-repl-host--editor-switches started)
+                      "elisp.host.editor-switch ws={ws} origin={origin} count={count} started-ms={started_ms}"
+                      :ws ws :origin origin :count agent-repl-host--editor-switches :started_ms started)
     started))
 
 (defun agent-repl-host-request-switch (ws trigger)
@@ -1132,17 +1127,17 @@ Answers t when the request was sent or queued, nil otherwise."
         (setq agent-repl--recency-walk-landing ws)
       (agent-repl--end-recency-walk ws trigger))
     (setq agent-repl-host-last-request (cons ws (float-time)))
-    (agent-repl--info ws "elisp.host.switch-requested ws=%s trigger=%s shown=%s pending=%s"
-                      ws trigger shown (or (agent-repl-host-pending-selection) "none"))
+    (agent-repl--info ws "elisp.host.switch-requested ws={ws} trigger={trigger} shown={shown} pending={pending}"
+                      :ws ws :trigger trigger :shown shown :pending (or (agent-repl-host-pending-selection) "none"))
     (cond
      ((null (agent-repl-host-ref ws))
-      (agent-repl--warn ws "elisp.host.switch-request-unsent ws=%s trigger=%s reason=no-ref"
-                        ws trigger)
+      (agent-repl--warn ws "elisp.host.switch-request-unsent ws={ws} trigger={trigger} reason=no-ref"
+                        :ws ws :trigger trigger)
       (message "[agent-repl] Cannot switch to %s: the daemon has not registered it" ws)
       nil)
      ((null (agent-repl-host-conn-or-primary ws))
-      (agent-repl--warn ws "elisp.host.switch-request-unsent ws=%s trigger=%s reason=no-connection"
-                        ws trigger)
+      (agent-repl--warn ws "elisp.host.switch-request-unsent ws={ws} trigger={trigger} reason=no-connection"
+                        :ws ws :trigger trigger)
       (message "[agent-repl] Cannot switch to %s: no daemon connection" ws)
       nil)
      (t
@@ -1150,8 +1145,8 @@ Answers t when the request was sent or queued, nil otherwise."
           (agent-repl-host-select
            ws (lambda (outcome)
                 (unless (eq outcome :success)
-                  (agent-repl--info ws "elisp.host.switch-request-settled ws=%s outcome=%S"
-                                    ws outcome)))
+                  (agent-repl--info ws "elisp.host.switch-request-settled ws={ws} outcome={outcome}"
+                                    :ws ws :outcome (prin1-to-string outcome))))
            walk started)
         (agent-repl-host--move-on-request ws shown))))))
 
@@ -1172,13 +1167,13 @@ recency walk.  Answers t when the request was sent or queued."
             (started (agent-repl-host--count-editor-switch nil trigger)))
         (agent-repl--end-recency-walk scope trigger)
         (setq agent-repl-host-last-request nil)
-        (agent-repl--info scope "elisp.host.switch-requested-unheld id=%s trigger=%s shown=%s"
-                          (plist-get ref :id) trigger (agent-repl--ws-current-name))
+        (agent-repl--info scope "elisp.host.switch-requested-unheld id={id} trigger={trigger} shown={shown}"
+                          :id (plist-get ref :id) :trigger trigger :shown (agent-repl--ws-current-name))
         (agent-repl-host-select-ref
          ref (lambda (outcome)
                (unless (eq outcome :success)
-                 (agent-repl--info scope "elisp.host.switch-request-settled id=%s outcome=%S"
-                                   (plist-get ref :id) outcome)))
+                 (agent-repl--info scope "elisp.host.switch-request-settled id={id} outcome={outcome}"
+                                   :id (plist-get ref :id) :outcome (prin1-to-string outcome))))
          nil started)))))
 
 (defun agent-repl-host--move-on-request (ws shown)
@@ -1188,10 +1183,10 @@ decision is recorded at INFO, as the roster's follow records its own."
   (let ((id (plist-get (agent-repl-host-ref ws) :id)))
     (cond
      ((equal ws shown)
-      (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=already-shown" ws))
+      (agent-repl--info ws "elisp.host.move-on-request ws={ws} decision=already-shown" :ws ws))
      ((or (agent-repl-open-tabs-holds-p id)
           (not (equal (agent-repl--ws-by-ref-id id) ws)))
-      (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=no-tab-yet" ws))
+      (agent-repl--info ws "elisp.host.move-on-request ws={ws} decision=no-tab-yet" :ws ws))
      (t
       ;; THE MOVE IS TIMED, GC APART.  A switch a focus gain's claim asks for
       ;; took 140-190ms from its select to its move where a keyboard one took
@@ -1216,12 +1211,12 @@ decision is recorded at INFO, as the roster's follow records its own."
         (agent-repl--frontend-fit-webviews)
         (let ((page (agent-repl-webhost-has-page-p ws)))
           (when page (agent-repl-webhost-show ws))
-          (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s page=%s since-request-ms=%d move-ms=%d gcs=%d gc-ms=%d"
-                            ws shown (if page "shown" "none")
-                            (round (* 1000 (- (float-time) (cdr agent-repl-host-last-request))))
-                            (round (* 1000 (- (float-time) started)))
-                            (- gcs-done gcs)
-                            (round (* 1000 (- gc-elapsed gc-seconds))))))))))
+          (agent-repl--info ws "elisp.host.move-on-request ws={ws} decision=moved from={from} page={page} since-request-ms={since_request_ms} move-ms={move_ms} gcs={gcs} gc-ms={gc_ms}"
+                            :ws ws :from shown :page (if page "shown" "none")
+                            :since_request_ms (round (* 1000 (- (float-time) (cdr agent-repl-host-last-request))))
+                            :move_ms (round (* 1000 (- (float-time) started)))
+                            :gcs (- gcs-done gcs)
+                            :gc_ms (round (* 1000 (- gc-elapsed gc-seconds))))))))))
 
 (defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent)
   "Send workspace WS\='s ref through the workspace-subject verb RPC.
@@ -1236,12 +1231,12 @@ Answers t when the call was made, nil when it was not."
         (conn (agent-repl-host-conn-or-primary ws)))
     (cond
      ((or (null ref) (null conn))
-      (agent-repl--log ws (format "elisp.host.%s-skipped ws=%%s reason=%%s" op)
-                       ws (if ref "no-connection" "no-ref"))
+      (agent-repl--log ws "elisp.host.{op}-skipped ws={ws} reason={reason}" :op op
+                       :ws ws :reason (if ref "no-connection" "no-ref"))
       (funcall on-not-sent)
       nil)
      (t
-      (agent-repl--log ws (format "elisp.host.%s ws=%%s id=%%S" op) ws (plist-get ref :id))
+      (agent-repl--log ws "elisp.host.{op} ws={ws} id={id}" :op op :ws ws :id (prin1-to-string (plist-get ref :id)))
       (funcall
        rpc conn (list :workspace ref)
        :on-response
@@ -1252,11 +1247,12 @@ Answers t when the call was made, nil when it was not."
             (agent-repl-host--on-refused ws op (plist-get response :value))
             (funcall on-not-sent))
            (arm
-            (agent-repl--error ws (format "elisp.host.%s-unknown-arm ws=%%s arm=%%S" op) ws arm)
+            (agent-repl--error ws "elisp.host.{op}-unknown-arm ws={ws} arm={arm}" :op op :ws ws :arm (prin1-to-string arm))
             (funcall on-not-sent))))
        :on-failure
        (lambda (detail)
-         (agent-repl--error ws (format "elisp.host.%s-failed ws=%%s detail=%%S" op) ws detail)
+         (agent-repl--error ws "elisp.host.{op}-failed ws={ws} detail={detail}"
+                            :op op :ws ws :detail (prin1-to-string detail))
          (funcall on-not-sent)))
       t))))
 
@@ -1272,7 +1268,7 @@ The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
   (agent-repl-host--send-subject-verb
    ws "page-unloading" #'agent-repl-rpc-report-page-unloading
    (lambda ()
-     (agent-repl--log ws "elisp.host.page-unloading-reported ws=%s" ws)
+     (agent-repl--log ws "elisp.host.page-unloading-reported ws={ws}" :ws ws)
      (funcall on-reported))
    on-not-reported))
 
@@ -1293,7 +1289,7 @@ Answers nil without calling anything when WS has no ref or no connection
 yet: an unregistered workspace has no row to mark."
   (agent-repl-host--send-subject-verb
    ws "mark-viewed" #'agent-repl-rpc-mark-workspace-viewed
-   (lambda () (agent-repl--log ws "elisp.host.marked-viewed ws=%s" ws))
+   (lambda () (agent-repl--log ws "elisp.host.marked-viewed ws={ws}" :ws ws))
    #'ignore))
 
 (defun agent-repl-host-report-view-dwell (ws dwell)
@@ -1339,7 +1335,7 @@ not the one just sent (`agent-repl-host-report-view-dwell')."
          (apply #'agent-repl-rpc-report-view-dwell conn
                 (append request (list :dwell dwell)) args))
        (lambda ()
-         (agent-repl--log ws "elisp.host.view-dwell-reported ws=%s dwell=%S" ws (plist-get dwell :arm))
+         (agent-repl--log ws "elisp.host.view-dwell-reported ws={ws} dwell={dwell}" :ws ws :dwell (prin1-to-string (plist-get dwell :arm)))
          (funcall answered))
        answered))))
 
@@ -1375,20 +1371,20 @@ docstring in `core.el\=')."
      ;; click landing between the follow and the echo was overwritten by the
      ;; echo and the frame went back.
      (agent-repl-roster-following
-      (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=followed-roster" ws))
+      (agent-repl--log ws "elisp.host.select-skipped ws={ws} reason=followed-roster" :ws ws))
      (t
       ;; A switch Emacs made itself (a Doom command, a teardown landing, a
       ;; file placed in its workspace) is the user's, unless Emacs made it
       ;; on its own account.
       (let ((started (if agent-repl-host-automatic-switch
                          (progn
-                           (agent-repl--log ws "elisp.host.editor-switch-uncounted ws=%s reason=automatic" ws)
+                           (agent-repl--log ws "elisp.host.editor-switch-uncounted ws={ws} reason=automatic" :ws ws)
                            nil)
                        (agent-repl-host--count-editor-switch ws 'activation))))
         ;; The daemon is told after the fact.
         (when (and ws (agent-repl-host--entry ws))
-          (agent-repl--info ws "elisp.host.select-local-activation ws=%s command=%S"
-                            ws this-command)
+          (agent-repl--info ws "elisp.host.select-local-activation ws={ws} command={command}"
+                            :ws ws :command (prin1-to-string this-command))
           (agent-repl-host-select ws nil nil started)))))))
 
 ;;;; ---- Subscribe ----
@@ -1455,7 +1451,7 @@ tombstoned workspace), where it is the best name the record has."
   ;; `:stream' left the first one running unreferenced: nothing could cancel
   ;; it, and its frames kept arriving after the workspace was forgotten.
   (when (agent-repl-host-stream ws)
-    (agent-repl--info ws "elisp.host.subscribe-replaces-standing ws=%s" ws)
+    (agent-repl--info ws "elisp.host.subscribe-replaces-standing ws={ws}" :ws ws)
     (agent-repl-host-unsubscribe ws))
   (agent-repl-host--attach ws conn ref)
   (let* ((id (plist-get ref :id))
@@ -1472,10 +1468,10 @@ tombstoned workspace), where it is the best name the record has."
                     (agent-repl-host--handle-close (funcall current) outcome stream))
                   (lambda ()
                     (let ((now (funcall current)))
-                      (agent-repl--info now "elisp.host.subscribed ws=%s method=%S id=%S"
-                                        now "WatchHostWorkspace" id)))))
+                      (agent-repl--info now "elisp.host.subscribed ws={ws} method={method} id={id}"
+                                        :ws now :method (prin1-to-string "WatchHostWorkspace") :id (prin1-to-string id))))))
     (agent-repl-host--put ws :stream stream)
-    (agent-repl--info ws "elisp.host.subscribe-opened ws=%s id=%S" ws (plist-get ref :id))
+    (agent-repl--info ws "elisp.host.subscribe-opened ws={ws} id={id}" :ws ws :id (prin1-to-string (plist-get ref :id)))
     stream))
 
 (defun agent-repl-host-unsubscribe (ws)
@@ -1483,8 +1479,8 @@ tombstoned workspace), where it is the best name the record has."
 Idempotent: a workspace with no standing stream is already unsubscribed."
   (let ((stream (agent-repl-host-stream ws)))
     (if (null stream)
-        (agent-repl--log ws "elisp.host.unsubscribe-noop ws=%s" ws)
-      (agent-repl--info ws "elisp.host.unsubscribe ws=%s" ws)
+        (agent-repl--log ws "elisp.host.unsubscribe-noop ws={ws}" :ws ws)
+      (agent-repl--info ws "elisp.host.unsubscribe ws={ws}" :ws ws)
       (agent-repl-host--put ws :stream nil)
       (agent-repl-connect-stream-cancel stream))))
 
@@ -1511,13 +1507,13 @@ nothing moves: two workspaces would otherwise share one stream."
   (let ((entry (gethash old agent-repl-host--by-name)))
     (cond
      ((null entry)
-      (agent-repl--log new "elisp.host.rename-noop old=%s new=%s reason=no-entry"
-                       old new)
+      (agent-repl--log new "elisp.host.rename-noop old={old} new={new} reason=no-entry"
+                       :old old :new new)
       nil)
      ((gethash new agent-repl-host--by-name)
       (agent-repl--error new
-                         "elisp.host.rename-target-occupied old=%s new=%s ref=%S"
-                         old new (plist-get entry :ref))
+                         "elisp.host.rename-target-occupied old={old} new={new} ref={ref}"
+                         :old old :new new :ref (prin1-to-string (plist-get entry :ref)))
       nil)
      (t
       ;; Primitive hash mutations with no Lisp call between them, so no
@@ -1525,11 +1521,11 @@ nothing moves: two workspaces would otherwise share one stream."
       (puthash new entry agent-repl-host--by-name)
       (remhash old agent-repl-host--by-name)
       (agent-repl--info new
-                        "elisp.host.renamed old=%s new=%s id=%s stream=%s conn=%s host-push=%s"
-                        old new (plist-get (plist-get entry :ref) :id)
-                        (and (plist-get entry :stream) t)
-                        (and (plist-get entry :conn) t)
-                        (and (plist-get entry :host) t))
+                        "elisp.host.renamed old={old} new={new} id={id} stream={stream} conn={conn} host-push={host_push}"
+                        :old old :new new :id (plist-get (plist-get entry :ref) :id)
+                        :stream (and (plist-get entry :stream) t)
+                        :conn (and (plist-get entry :conn) t)
+                        :host_push (and (plist-get entry :host) t))
       t))))
 
 (defun agent-repl-host-forget (ws)
@@ -1540,7 +1536,7 @@ untouched, because closing a tab is a VIEW act."
   ;; A call held for WS is the user's: it goes before WS is forgotten.
   (agent-repl-host--release-held ws "forgotten")
   (remhash ws agent-repl-host--by-name)
-  (agent-repl--info ws "elisp.host.forgotten ws=%s" ws))
+  (agent-repl--info ws "elisp.host.forgotten ws={ws}" :ws ws))
 
 (defun agent-repl-host--note-ending (ws stream)
   "Record that STREAM, WS\='s host stream, carried the planned ending.
@@ -1549,7 +1545,7 @@ last frame (`DaemonStreamEnding'), so the clean end that follows is
 expected, not lost: `agent-repl-host--handle-close' reads the mark.
 STREAM nil means the stream standing for WS now."
   (agent-repl-host--put ws :ending-stream (or stream (agent-repl-host-stream ws)))
-  (agent-repl--info ws "elisp.host.stream-ending ws=%s" ws))
+  (agent-repl--info ws "elisp.host.stream-ending ws={ws}" :ws ws))
 
 (defun agent-repl-host--planned-end-p (ws outcome stream)
   "Return non-nil when STREAM closing with OUTCOME is WS\='s planned end.
@@ -1591,21 +1587,21 @@ already moved on, and dropping the stream that stands now would strand
 it.  STREAM nil means the caller did not name the stream."
   (cond
    ((and stream (not (eq stream (agent-repl-host-stream ws))))
-    (agent-repl--log ws "elisp.host.stale-stream-close ws=%s outcome=%S" ws outcome))
+    (agent-repl--log ws "elisp.host.stale-stream-close ws={ws} outcome={outcome}" :ws ws :outcome (prin1-to-string outcome)))
    ((eq (car outcome) :cancelled)
-    (agent-repl--log ws "elisp.host.stream-cancelled ws=%s" ws))
+    (agent-repl--log ws "elisp.host.stream-cancelled ws={ws}" :ws ws))
    ;; THE STREAM STANDS ON THE OUTGOING DAEMON ON PURPOSE, its move owed to
    ;; the promotion (`agent-repl-host--adopt-settled'): its end is that
    ;; daemon exiting, which the promotion answers with the one move, so no
    ;; walk of its own starts here.
    ((plist-get (agent-repl-host--entry ws) :stream-due)
-    (agent-repl--info ws "elisp.host.stream-ended-awaiting-promotion ws=%s outcome=%S" ws outcome)
+    (agent-repl--info ws "elisp.host.stream-ended-awaiting-promotion ws={ws} outcome={outcome}" :ws ws :outcome (prin1-to-string outcome))
     (agent-repl-host--put ws :stream nil))
    ((agent-repl-host--planned-end-p ws outcome stream)
     ;; THE DAEMON SAID SO FIRST.  Its last frame was the planned ending, so
     ;; this clean end is a stand-down, not a fault: INFO, and the same
     ;; single walk onto the live daemon a loss takes.
-    (agent-repl--info ws "elisp.host.stream-ended-planned ws=%s" ws)
+    (agent-repl--info ws "elisp.host.stream-ended-planned ws={ws}" :ws ws)
     (agent-repl-host-release-restart-hold ws "planned-ending")
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl-host--put ws :stream nil)
@@ -1623,7 +1619,7 @@ it.  STREAM nil means the caller did not name the stream."
     ;; onto whichever successor the link recorded.
     (let ((address (agent-repl-connect-refusal-address (cadr outcome))))
       (agent-repl-host--put ws :ending-stream nil)
-      (agent-repl--info ws "elisp.host.stream-refused-transferred ws=%s address=%S" ws address)
+      (agent-repl--info ws "elisp.host.stream-refused-transferred ws={ws} address={address}" :ws ws :address (prin1-to-string address))
       (agent-repl-host-release-restart-hold ws "stream-refused-transferred")
       (agent-repl-host--put ws :stream nil)
       (agent-repl-host--put ws :detached t)
@@ -1644,7 +1640,7 @@ it.  STREAM nil means the caller did not name the stream."
     ;; refused walks nothing there, and takes the walk below.
     (let ((address (agent-repl-connect-refusal-address (cadr outcome))))
       (agent-repl-host--put ws :ending-stream nil)
-      (agent-repl--info ws "elisp.host.stream-refused-not-yet-adopted ws=%s serving=%S" ws address)
+      (agent-repl--info ws "elisp.host.stream-refused-not-yet-adopted ws={ws} serving={serving}" :ws ws :serving (prin1-to-string address))
       (agent-repl-host-release-restart-hold ws "stream-refused-not-yet-adopted")
       (agent-repl-host--put ws :stream nil)
       (agent-repl-host--put ws :detached t)
@@ -1653,7 +1649,7 @@ it.  STREAM nil means the caller did not name the stream."
       (agent-repl-host-handle-refusal ws (list :arm :not-yet-adopted))))
    (t
     (agent-repl-host--put ws :ending-stream nil)
-    (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
+    (agent-repl--error ws "elisp.host.stream-lost ws={ws} outcome={outcome}" :ws ws :outcome (prin1-to-string outcome))
     ;; NOTHING CAN RESOLVE THE HOLD ANY MORE.  The hold is a bet that the
     ;; daemon's next push settles it; a dropped standing stream means no
     ;; such push is coming, so keeping the composer shut would wedge it
@@ -1679,11 +1675,11 @@ re-create bookkeeping for a workspace whose tab is gone (measured
         (value (plist-get push :value)))
     (cond
      ((and stream (null (agent-repl-host--entry ws)))
-      (agent-repl--info ws "elisp.host.push-dropped ws=%s arm=%s reason=forgotten"
-                        ws arm))
+      (agent-repl--info ws "elisp.host.push-dropped ws={ws} arm={arm} reason=forgotten"
+                        :ws ws :arm arm))
      ((and stream (not (eq stream (agent-repl-host-stream ws))))
-      (agent-repl--info ws "elisp.host.push-dropped ws=%s arm=%s reason=stale-stream"
-                        ws arm))
+      (agent-repl--info ws "elisp.host.push-dropped ws={ws} arm={arm} reason=stale-stream"
+                        :ws ws :arm arm))
      (t
       (agent-repl-host--dispatch-push ws arm value stream)))))
 
@@ -1709,8 +1705,8 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:run-in-terminal (agent-repl-host--run-in-terminal ws value))
 
     (:ending (agent-repl-host--note-ending ws stream))
-    (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S value=%S"
-                          ws arm value))))
+    (_ (agent-repl--error ws "elisp.host.unknown-push ws={ws} arm={arm} value={value}"
+                          :ws ws :arm (prin1-to-string arm) :value (prin1-to-string value)))))
 
 (defun agent-repl-host--apply-naming (ws)
   "Rename WS's input buffer so its name carries WS's display title.
@@ -1739,9 +1735,9 @@ daemon has by then rather than wearing the bare canonical name forever."
             ;; and a rename that ERRORED on the collision would strand the
             ;; second composer under the old name with no way back.
             (rename-buffer want t))
-          (agent-repl--info ws "elisp.host.buffer-renamed ws=%s buffer=%S title=%S"
-                            ws (buffer-name buffer)
-                            (agent-repl-host-display-title ws)))))))
+          (agent-repl--info ws "elisp.host.buffer-renamed ws={ws} buffer={buffer} title={title}"
+                            :ws ws :buffer (prin1-to-string (buffer-name buffer))
+                            :title (prin1-to-string (agent-repl-host-display-title ws))))))))
 
 (defun agent-repl-host--apply-state (ws host)
   "Whole-replace WS's host state with HOST and run the update hooks.
@@ -1757,14 +1753,14 @@ otherwise invisible in the logs."
     (agent-repl-host--put ws :host host)
     (let ((vendor-after (agent-repl-host-vendor-session-id ws)))
       (unless (equal vendor-before vendor-after)
-        (agent-repl--info ws "elisp.host.vendor-session ws=%s from=%S to=%S"
-                          ws vendor-before vendor-after))))
+        (agent-repl--info ws "elisp.host.vendor-session ws={ws} from={from} to={to}"
+                          :ws ws :from (prin1-to-string vendor-before) :to (prin1-to-string vendor-after)))))
   (agent-repl-host--settle-restart-hold ws)
   (agent-repl-host--apply-naming ws)
-  (agent-repl--log ws "elisp.host.state ws=%s gate=%S backfill=%S faults=%d"
-                   ws (agent-repl-host-composer-gate ws)
-                   (agent-repl-host-backfill ws)
-                   (length (agent-repl-host-faults ws)))
+  (agent-repl--log ws "elisp.host.state ws={ws} gate={gate} backfill={backfill} faults={faults}"
+                   :ws ws :gate (prin1-to-string (agent-repl-host-composer-gate ws))
+                   :backfill (prin1-to-string (agent-repl-host-backfill ws))
+                   :faults (length (agent-repl-host-faults ws)))
   (run-hook-with-args 'agent-repl-host-update-functions ws host))
 
 ;;;; ---- The feed selection ----
@@ -1780,7 +1776,7 @@ composer turns its selection mode on or off from it
 \(`agent-repl--input-selection-changed')."
   (let ((kind (plist-get selection :kind)))
     (agent-repl-host--put ws :selection kind)
-    (agent-repl--info ws "elisp.host.selection ws=%s kind=%S" ws kind)
+    (agent-repl--info ws "elisp.host.selection ws={ws} kind={kind}" :ws ws :kind (prin1-to-string kind))
     (agent-repl--input-selection-changed ws)))
 
 (defun agent-repl-host-selection (ws)
@@ -1801,9 +1797,9 @@ on every subscription, so Emacs's record is the daemon's after a restart of
 either side.  The composer orders its completions by it
 \(completion-order.el)."
   (agent-repl-host--put ws :mentions mentions)
-  (agent-repl--log ws "elisp.host.mentions ws=%s commands=%d workspaces=%d"
-                   ws (length (plist-get mentions :commands))
-                   (length (plist-get mentions :workspaces))))
+  (agent-repl--log ws "elisp.host.mentions ws={ws} commands={commands} workspaces={workspaces}"
+                   :ws ws :commands (length (plist-get mentions :commands))
+                   :workspaces (length (plist-get mentions :workspaces))))
 
 (defun agent-repl-host-mentions (ws kind)
   "Return the names of KIND WS's own final responses mentioned, newest first.
@@ -1830,7 +1826,7 @@ as the names its feed links.  It is the host watch's `mention_targets'
 push: state, whole-replaced, and sent first on every subscription.  Runs
 `agent-repl-host-mention-targets-functions' with WS once recorded."
   (agent-repl-host--put ws :mention-targets targets)
-  (agent-repl--log ws "elisp.host.mention-targets ws=%s targets=%d" ws (length targets))
+  (agent-repl--log ws "elisp.host.mention-targets ws={ws} targets={targets}" :ws ws :targets (length targets))
   (run-hook-with-args 'agent-repl-host-mention-targets-functions ws))
 
 (defun agent-repl-host-mention-targets (ws)
@@ -1854,7 +1850,7 @@ insert state (`agent-repl-input-focus-for-reply').  A highlight first
 sets the composer's draft aside for the prompt about it
 \(`agent-repl-input-text-highlighted').  All are events, never replayed,
 so a reconnect never moves the keyboard or clears the composer."
-  (agent-repl--info ws "elisp.host.%s ws=%s" event ws)
+  (agent-repl--info ws "elisp.host.{event} ws={ws}" :event event :ws ws)
   (when (member event '("chat-text-highlighted" "response-text-highlighted"))
     (agent-repl-input-text-highlighted ws))
   (agent-repl-input-focus-for-reply ws))
@@ -1865,7 +1861,7 @@ CHANGE is the decoded `HostWorkspaceResponseQuestion', whose arm names the
 transition; the composer makes the edit it asks for
 \(`agent-repl-input-response-question').  An event, never replayed, so a
 reconnect never edits the composer again."
-  (agent-repl--info ws "elisp.host.response-question ws=%s change=%S" ws (plist-get change :arm))
+  (agent-repl--info ws "elisp.host.response-question ws={ws} change={change}" :ws ws :change (prin1-to-string (plist-get change :arm)))
   (agent-repl-input-response-question ws (plist-get change :arm)))
 
 ;;;; ---- The rail's row click ----
@@ -1879,7 +1875,7 @@ whole registry: some 350ms, where a key took 10 (2026-10-23).  The daemon
 relays the click on the daemon stream (SelectInEditor), because the row
 can be a workspace this editor does not hold.  An event, never replayed,
 so a reconnect never switches."
-  (agent-repl--info (agent-repl-host--target-scope ref) "elisp.host.select-requested id=%s" (plist-get ref :id))
+  (agent-repl--info (agent-repl-host--target-scope ref) "elisp.host.select-requested id={id}" :id (plist-get ref :id))
   (agent-repl-host-request-switch-ref ref 'sidebar))
 
 ;;;; ---- A link followed in a page ----
@@ -1893,7 +1889,7 @@ ways the view dwell would have counted it: its visit enters the selection
 history however short it was (`agent-repl--keep-visit'), and its row goes
 PARTIAL (`agent-repl--tab-view-on-link-followed').  An event, never
 replayed, so a reconnect counts nothing."
-  (agent-repl--info ws "elisp.host.link-followed ws=%s" ws)
+  (agent-repl--info ws "elisp.host.link-followed ws={ws}" :ws ws)
   (agent-repl--keep-visit ws)
   (agent-repl--tab-view-on-link-followed ws))
 
@@ -1906,7 +1902,7 @@ A cold-gated workspace\='s page is held back when the user switches to it
 button where it would be; the daemon relays the click on WS\='s own host
 stream (LoadPageInEditor), because Emacs owns which pages the host holds.
 An event, never replayed, so a reconnect never loads a page."
-  (agent-repl--info ws "elisp.host.load-page-requested ws=%s" ws)
+  (agent-repl--info ws "elisp.host.load-page-requested ws={ws}" :ws ws)
   (agent-repl-page-unload-load-requested ws))
 
 ;;;; ---- The branch click ----
@@ -1917,7 +1913,7 @@ VALUE is (:label LABEL): the click on a response's node selected the
 response, and the composer opens an entry answering LABEL
 \(`agent-repl-input-compose-entry').  An event, never replayed, so a
 reconnect never opens another."
-  (agent-repl--info ws "elisp.host.compose-entry ws=%s label=%s" ws (plist-get value :label))
+  (agent-repl--info ws "elisp.host.compose-entry ws={ws} label={label}" :ws ws :label (plist-get value :label))
   (agent-repl-input-compose-entry ws (plist-get value :label)))
 
 ;;;; ---- The notification click ----
@@ -1927,7 +1923,7 @@ reconnect never opens another."
 The daemon posted the banner and read the click back, on the daemon
 stream, because a banner can name a workspace this editor does not hold;
 raising the frame and switching is `agent-repl--notification-activate'."
-  (agent-repl--info (agent-repl-host--target-scope ref) "elisp.host.notification-clicked id=%s" (plist-get ref :id))
+  (agent-repl--info (agent-repl-host--target-scope ref) "elisp.host.notification-clicked id={id}" :id (plist-get ref :id))
   (agent-repl--notification-activate ref))
 
 ;;;; ---- Reattach: the ONE walk that moves a workspace onto a daemon ----
@@ -1965,8 +1961,8 @@ late answer is dropped rather than moving WS back."
     (pcase claim
       (:adopt (agent-repl-host--adopt-onto ws new token trigger))
       (:register (agent-repl-host--register-onto ws new token trigger on-settled))
-      (_ (agent-repl--fatal ws "elisp.host.reattach-unknown-claim ws=%s claim=%S trigger=%s"
-                            ws claim trigger)))))
+      (_ (agent-repl--fatal ws "elisp.host.reattach-unknown-claim ws={ws} claim={claim} trigger={trigger}"
+                            :ws ws :claim (prin1-to-string claim) :trigger trigger)))))
 
 (defun agent-repl-host--begin-walk (ws new claim trigger)
   "Record WS\='s newest reattach walk onto NEW by CLAIM, and answer its token.
@@ -1997,10 +1993,8 @@ and superseded one way.  TRIGGER is recorded."
     ;; what it held.
     (unless (and (eq claim :adopt) (eq (plist-get was :conn) new))
       (agent-repl-host--release-held ws "superseded"))
-    (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s conn=%s from=%s"
-                      ws (agent-repl-connect-connection-address new) claim trigger
-                      (agent-repl-host--conn-id new)
-                      (agent-repl-host--conn-id (agent-repl-host--recorded-conn ws)))
+    (agent-repl--info ws "elisp.host.reattach ws={ws} address={address} claim={claim} trigger={trigger} conn={conn} from={from}"
+                      :ws ws :address (prin1-to-string (agent-repl-connect-connection-address new)) :claim claim :trigger trigger :conn (agent-repl-host--conn-id new) :from (agent-repl-host--conn-id (agent-repl-host--recorded-conn ws)))
     token))
 
 (defun agent-repl-host--reattach-all (names new trigger &optional on-settled)
@@ -2111,8 +2105,8 @@ back with the page kept and Emacs measures it here
 No page loaded to carry STARTED, so Emacs measures it."
   (when started
     (let ((seconds (/ (- (agent-repl--now-unix-ms) started) 1000.0)))
-      (agent-repl--info ws "elisp.host.downtime-measured ws=%s trigger=%s seconds=%.3f"
-                        ws trigger seconds)
+      (agent-repl--info ws "elisp.host.downtime-measured ws={ws} trigger={trigger} seconds={seconds}"
+                        :ws ws :trigger trigger :seconds (format "%.3f" seconds))
       (agent-repl-latency-report-editor :viewed-reattach seconds))))
 
 (defun agent-repl-host--reattached (ws new ref trigger)
@@ -2137,9 +2131,8 @@ Clears the walk and the detached mark and runs
 `agent-repl-host-reattached-functions'."
   (agent-repl-host--put ws :reattach nil)
   (agent-repl-host--put ws :detached nil)
-  (agent-repl--info ws "elisp.host.reattached ws=%s address=%S trigger=%s conn=%s"
-                    ws (agent-repl-connect-connection-address new) trigger
-                    (agent-repl-host--conn-id new))
+  (agent-repl--info ws "elisp.host.reattached ws={ws} address={address} trigger={trigger} conn={conn}"
+                    :ws ws :address (prin1-to-string (agent-repl-connect-connection-address new)) :trigger trigger :conn (agent-repl-host--conn-id new))
   (run-hook-with-args 'agent-repl-host-reattached-functions ws)
   (agent-repl-host--reselect-after-reattach ws))
 
@@ -2167,9 +2160,8 @@ WS stays on, and the stream moves there now."
   (if (agent-repl-host--retiring-conn-p new)
       (progn
         (agent-repl-host--put ws :stream-due ref)
-        (agent-repl--info ws "elisp.host.stream-move-deferred ws=%s conn=%s address=%S"
-                          ws (agent-repl-host--conn-id new)
-                          (agent-repl-connect-connection-address new))
+        (agent-repl--info ws "elisp.host.stream-move-deferred ws={ws} conn={conn} address={address}"
+                          :ws ws :conn (agent-repl-host--conn-id new) :address (prin1-to-string (agent-repl-connect-connection-address new)))
         (agent-repl-host--reattach-finished ws new trigger))
     (agent-repl-host--reattached ws new ref trigger)))
 
@@ -2185,18 +2177,16 @@ is an invariant breach, failed hard."
        (let ((ref (plist-get entry :stream-due)))
          (when ref
            (unless (eq (plist-get entry :conn) old)
-             (agent-repl--fatal ws "elisp.host.stream-due-off-old ws=%s recorded=%s old=%s"
-                                ws (agent-repl-host--conn-id (plist-get entry :conn))
-                                (agent-repl-host--conn-id old)))
+             (agent-repl--fatal ws "elisp.host.stream-due-off-old ws={ws} recorded={recorded} old={old}"
+                                :ws ws :recorded (agent-repl-host--conn-id (plist-get entry :conn)) :old (agent-repl-host--conn-id old)))
            (push ws moved))))
      agent-repl-host--by-name)
     (dolist (ws moved)
       (let ((ref (plist-get (agent-repl-host--entry ws) :stream-due)))
         (agent-repl-host--put ws :stream-due nil)
         (agent-repl-host--move-stream ws new ref)
-        (agent-repl--info ws "elisp.host.stream-moved ws=%s from=%s conn=%s address=%S"
-                          ws (agent-repl-host--conn-id old) (agent-repl-host--conn-id new)
-                          (agent-repl-connect-connection-address new))))
+        (agent-repl--info ws "elisp.host.stream-moved ws={ws} from={from} conn={conn} address={address}"
+                          :ws ws :from (agent-repl-host--conn-id old) :conn (agent-repl-host--conn-id new) :address (prin1-to-string (agent-repl-connect-connection-address new)))))
     moved))
 
 (defun agent-repl-host--reselect-after-reattach (ws)
@@ -2204,9 +2194,9 @@ is an invariant breach, failed hard."
 See `agent-repl-host--reselect-on-reattach'."
   (when (equal ws agent-repl-host--reselect-on-reattach)
     (setq agent-repl-host--reselect-on-reattach nil)
-    (agent-repl--info ws "elisp.host.reselect-where-served ws=%s address=%S"
-                      ws (let ((conn (agent-repl-host-conn ws)))
-                           (and conn (agent-repl-connect-connection-address conn))))
+    (agent-repl--info ws "elisp.host.reselect-where-served ws={ws} address={address}"
+                      :ws ws :address (prin1-to-string (let ((conn (agent-repl-host-conn ws)))
+                           (and conn (agent-repl-connect-connection-address conn)))))
     (agent-repl-host-select ws)))
 
 (defun agent-repl-host--register-onto (ws new token trigger on-settled)
@@ -2225,7 +2215,7 @@ ON-SETTLED is called once the walk has an outcome."
     (if (null dir)
         (progn
           (agent-repl-host--put ws :reattach nil)
-          (agent-repl--error ws "elisp.host.reattach-without-dir ws=%s trigger=%s" ws trigger)
+          (agent-repl--error ws "elisp.host.reattach-without-dir ws={ws} trigger={trigger}" :ws ws :trigger trigger)
           (funcall settle))
       (agent-repl-host-register
        new dir
@@ -2262,7 +2252,7 @@ incumbent failed after the successor was promoted, and `main
   (let ((walk (plist-get (agent-repl-host--entry ws) :reattach)))
     (cond
      ((not (agent-repl-host--reattach-current-p ws token))
-      (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+      (agent-repl--log ws "elisp.host.reattach-superseded ws={ws} trigger={trigger}" :ws ws :trigger trigger))
      ;; THE DAEMON HANDED WS TO ITS SUCCESSOR, and the refusal's walk is
      ;; waiting for that successor to be accepted (`:adopt-pending',
      ;; the adopt on the primary link).  WS is not detached: the
@@ -2271,30 +2261,30 @@ incumbent failed after the successor was promoted, and `main
      ;; above dropped this one as superseded.
      ((and (null ref) (plist-get (agent-repl-host--entry ws) :adopt-pending))
       (agent-repl-host--put ws :reattach nil)
-      (agent-repl--info ws (format "elisp.host.%s-register-handed-over ws=%%s dir=%%S address=%%S" trigger)
-                        ws dir (agent-repl-connect-connection-address new)))
+      (agent-repl--info ws "elisp.host.{trigger}-register-handed-over ws={ws} dir={dir} address={address}" :trigger trigger
+                        :ws ws :dir (prin1-to-string dir) :address (prin1-to-string (agent-repl-connect-connection-address new))))
      ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
      ;; `elisp.host.stream-lost-registered', ...), a closed
      ;; vocabulary, so a reader can ask for one edge's walks alone.
      ((null ref)
       (agent-repl-host--put ws :reattach nil)
       (agent-repl-host--put ws :detached t)
-      (agent-repl--error ws (format "elisp.host.%s-register-failed ws=%%s dir=%%S address=%%S" trigger)
-                         ws dir (agent-repl-connect-connection-address new))
+      (agent-repl--error ws "elisp.host.{trigger}-register-failed ws={ws} dir={dir} address={address}" :trigger trigger
+                         :ws ws :dir (prin1-to-string dir) :address (prin1-to-string (agent-repl-connect-connection-address new)))
       (if (agent-repl-host--promoted-since-p ws walk)
           (progn
-            (agent-repl--info ws "elisp.host.reattach-after-promotion ws=%s trigger=%s promotions=%d..%d"
-                              ws trigger (plist-get walk :promotions) (agent-repl-link-promotions))
+            (agent-repl--info ws "elisp.host.reattach-after-promotion ws={ws} trigger={trigger} promotions={began}..{now}"
+                              :ws ws :trigger trigger :began (plist-get walk :promotions) :now (agent-repl-link-promotions))
             (agent-repl-host--follow-live-daemon ws "promotion-passed"))
-        (agent-repl--info ws "elisp.host.reattach-armed ws=%s trigger=%s edges=link-up,promotion,select"
-                          ws trigger)))
+        (agent-repl--info ws "elisp.host.reattach-armed ws={ws} trigger={trigger} edges=link-up,promotion,select"
+                          :ws ws :trigger trigger)))
      ;; THE PAGE IS LEFT AS IT IS: every daemon serves one shared address,
      ;; so the page's own streams reopen there by themselves.
      (t
       (agent-repl-host--landed
        ws trigger (lambda () (agent-repl-host--reattached ws new ref trigger)))
-      (agent-repl--info ws (format "elisp.host.%s-registered ws=%%s address=%%S" trigger)
-                        ws (agent-repl-connect-connection-address new))))))
+      (agent-repl--info ws "elisp.host.{trigger}-registered ws={ws} address={address}" :trigger trigger
+                        :ws ws :address (prin1-to-string (agent-repl-connect-connection-address new)))))))
 
 (defun agent-repl-host--promoted-since-p (ws walk)
   "Return non-nil when a promotion passed since WS\='s reattach WALK began.
@@ -2303,7 +2293,7 @@ WALK is the plist `agent-repl-host--begin-walk' recorded, whose
 recorded is an invariant breach, failed hard."
   (let ((began (plist-get walk :promotions)))
     (unless (integerp began)
-      (agent-repl--fatal ws "elisp.host.walk-without-promotion-epoch ws=%s walk=%S" ws walk))
+      (agent-repl--fatal ws "elisp.host.walk-without-promotion-epoch ws={ws} walk={walk}" :ws ws :walk (prin1-to-string walk)))
     (/= began (agent-repl-link-promotions))))
 
 (defun agent-repl-host--follow-live-daemon (ws trigger)
@@ -2346,19 +2336,19 @@ the successor was already in flight when the old stream ended planned."
     (agent-repl-host--put ws :detached t)
     (cond
      ((null live)
-      (agent-repl--info ws "elisp.host.reattach-awaiting-link ws=%s trigger=%s" ws trigger))
+      (agent-repl--info ws "elisp.host.reattach-awaiting-link ws={ws} trigger={trigger}" :ws ws :trigger trigger))
      ((and walk (memq (plist-get walk :conn)
                       (delq nil (list live (agent-repl-link-successor)))))
-      (agent-repl--log ws "elisp.host.reattach-in-flight ws=%s trigger=%s address=%S"
-                       ws trigger (agent-repl-connect-connection-address live)))
+      (agent-repl--log ws "elisp.host.reattach-in-flight ws={ws} trigger={trigger} address={address}"
+                       :ws ws :trigger trigger :address (prin1-to-string (agent-repl-connect-connection-address live))))
      ((and (eq live (agent-repl-host--recorded-conn ws))
            (or (agent-repl-link-successor) (agent-repl-link-successor-pending-p)))
-      (agent-repl--info ws "elisp.host.reattach-awaiting-promotion ws=%s trigger=%s address=%S"
-                        ws trigger (agent-repl-connect-connection-address live)))
+      (agent-repl--info ws "elisp.host.reattach-awaiting-promotion ws={ws} trigger={trigger} address={address}"
+                        :ws ws :trigger trigger :address (prin1-to-string (agent-repl-connect-connection-address live))))
      ((agent-repl-link-departing-p
        live (and (equal trigger "planned-ending") (agent-repl-host--recorded-conn ws)))
-      (agent-repl--info ws "elisp.host.reattach-awaiting-link-edge ws=%s trigger=%s address=%S"
-                        ws trigger (agent-repl-connect-connection-address live)))
+      (agent-repl--info ws "elisp.host.reattach-awaiting-link-edge ws={ws} trigger={trigger} address={address}"
+                        :ws ws :trigger trigger :address (prin1-to-string (agent-repl-connect-connection-address live))))
      (t
       (agent-repl-host--reattach ws live :register trigger)))))
 
@@ -2425,7 +2415,7 @@ Nil when ID is nil, or no workspace\='s outstanding adopt walk is on CONN."
   (let ((held (append (plist-get (agent-repl-host--entry ws) :held-calls)
                       (list (list :method method :send send :fail fail)))))
     (agent-repl-host--put ws :held-calls held)
-    (agent-repl--info ws "elisp.host.call-held ws=%s method=%s held=%d" ws method (length held))))
+    (agent-repl--info ws "elisp.host.call-held ws={ws} method={method} held={held}" :ws ws :method method :held (length held))))
 
 (defun agent-repl-host--release-held (ws outcome &optional to)
   "Send every call held for WS, in the order it was made.
@@ -2440,23 +2430,23 @@ the calls after it are still sent."
   (let ((held (plist-get (agent-repl-host--entry ws) :held-calls)))
     (when held
       (agent-repl-host--put ws :held-calls nil)
-      (agent-repl--info ws "elisp.host.held-calls-sent ws=%s count=%d outcome=%s"
-                        ws (length held) outcome)
+      (agent-repl--info ws "elisp.host.held-calls-sent ws={ws} count={count} outcome={outcome}"
+                        :ws ws :count (length held) :outcome outcome)
       (dolist (call held)
         (let ((conn (or to (agent-repl-host-conn-or-primary ws)))
               (method (plist-get call :method)))
           (if (null conn)
               (progn
-                (agent-repl--error ws "elisp.host.held-call-unsent ws=%s method=%s outcome=%s reason=no-connection"
-                                   ws method outcome)
+                (agent-repl--error ws "elisp.host.held-call-unsent ws={ws} method={method} outcome={outcome} reason=no-connection"
+                                   :ws ws :method method :outcome outcome)
                 (funcall (plist-get call :fail)
                          (list :kind :transport :code nil :status nil
                                :message (format "%s: no daemon connection for the held call" method))))
             (condition-case err
                 (funcall (plist-get call :send) conn)
               (agent-repl-connect-error
-               (agent-repl--error ws "elisp.host.held-call-unsent ws=%s method=%s outcome=%s error=%S"
-                                  ws method outcome err)
+               (agent-repl--error ws "elisp.host.held-call-unsent ws={ws} method={method} outcome={outcome} error={error}"
+                                  :ws ws :method method :outcome outcome :error (prin1-to-string err))
                (funcall (plist-get call :fail) (cadr err))))))))))
 
 (defun agent-repl-host--adopt-onto (ws new token trigger)
@@ -2537,10 +2527,10 @@ walk."
     (cond
      ((not (agent-repl-host--reattach-current-p ws token))
       ;; A walk a newer one has since superseded.
-      (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+      (agent-repl--log ws "elisp.host.reattach-superseded ws={ws} trigger={trigger}" :ws ws :trigger trigger))
      ((null (agent-repl-host-ref ws))
       (agent-repl-host--put ws :reattach nil)
-      (agent-repl--error ws "elisp.host.adopt-without-ref ws=%s" ws))
+      (agent-repl--error ws "elisp.host.adopt-without-ref ws={ws}" :ws ws))
      (t
       ;; THE WALK REMEMBERS WHERE IT CAME FROM, so a withdrawn transfer can
       ;; put WS back while this adopt is still unanswered
@@ -2589,10 +2579,10 @@ is recorded."
         (restore
          (lambda ()
            (agent-repl-host--put ws :conn old)
-           (agent-repl--info ws "elisp.host.restored ws=%s address=%S"
-                             ws (and old (agent-repl-connect-connection-address old))))))
+           (agent-repl--info ws "elisp.host.restored ws={ws} address={address}"
+                             :ws ws :address (prin1-to-string (and old (agent-repl-connect-connection-address old)))))))
     (if (not (agent-repl-host--reattach-current-p ws token))
-        (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger)
+        (agent-repl--log ws "elisp.host.reattach-superseded ws={ws} trigger={trigger} at=adopt" :ws ws :trigger trigger)
       (agent-repl--with-log-context
        ws nil
        (lambda ()
@@ -2603,12 +2593,12 @@ is recorded."
           (lambda (response)
             (cond
              ((not (agent-repl-host--reattach-current-p ws token))
-              (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+              (agent-repl--log ws "elisp.host.reattach-superseded ws={ws} trigger={trigger} at=adopt-answered" :ws ws :trigger trigger))
              (t
               (pcase (plist-get response :arm)
                 (:success
-                 (agent-repl--info ws "elisp.host.adopted ws=%s address=%S conn=%s"
-                                   ws address (agent-repl-host--conn-id new))
+                 (agent-repl--info ws "elisp.host.adopted ws={ws} address={address} conn={conn}"
+                                   :ws ws :address (prin1-to-string address) :conn (agent-repl-host--conn-id new))
                  (agent-repl-host--landed
                   ws trigger (lambda () (agent-repl-host--adopt-settled ws new ref trigger)))
                  (agent-repl-host--release-held ws "adopted"))
@@ -2620,12 +2610,12 @@ is recorded."
                 (arm
                  (funcall restore)
                  (agent-repl-host--put ws :reattach nil)
-                 (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm)
+                 (agent-repl--error ws "elisp.host.adopt-unknown-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm))
                  (agent-repl-host--release-held ws "refused"))))))
           :on-failure
           (lambda (detail)
             (if (not (agent-repl-host--reattach-current-p ws token))
-                (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger)
+                (agent-repl--log ws "elisp.host.reattach-superseded ws={ws} trigger={trigger} at=adopt-failed" :ws ws :trigger trigger)
               (let ((retry (agent-repl-host--adopt-retryable-p new detail)))
                 (cond
                  ((eq retry t)
@@ -2634,8 +2624,8 @@ is recorded."
                   ;; the retry keeps WS and its page on NEW.
                   (agent-repl-host--release-held
                    ws "failed" (and old (agent-repl-connect-connection-alive-p old) old))
-                  (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
-                                     ws detail)
+                  (agent-repl--error ws "elisp.host.adopt-failed ws={ws} detail={detail} retrying=t"
+                                     :ws ws :detail (prin1-to-string detail))
                   (run-at-time agent-repl-host-handover-retry-delay nil
                                #'agent-repl-host--adopt-call ws new token trigger old))
                  (t
@@ -2651,13 +2641,13 @@ is recorded."
                      ;; workspaces).  The primary serves every workspace now,
                      ;; so WS registers there.
                      ((and primary (not (eq new primary)))
-                      (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil registering=t"
-                                         ws detail)
+                      (agent-repl--error ws "elisp.host.adopt-failed ws={ws} detail={detail} retrying=nil registering=t"
+                                         :ws ws :detail (prin1-to-string detail))
                       (agent-repl-host--reattach ws primary :register "adopt-after-promotion"))
                      (t
                       (agent-repl-host--put ws :reattach nil)
-                      (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil stopped=%s"
-                                         ws detail retry)))))))))))))))
+                      (agent-repl--error ws "elisp.host.adopt-failed ws={ws} detail={detail} retrying=nil stopped={stopped}"
+                                         :ws ws :detail (prin1-to-string detail) :stopped retry)))))))))))))))
 
 (defun agent-repl-host--transferred (ws &optional _value)
   "Adopt WS onto the daemon its old one handed it to, after the release.
@@ -2677,7 +2667,7 @@ deploy reloads the host.
 
 `transferred\=' is a PUSH, never a terminal frame, so the old stream stays
 standing until the adopt lands and the shared walk cancels it."
-  (agent-repl--info ws "elisp.host.transferred ws=%s adopting=t" ws)
+  (agent-repl--info ws "elisp.host.transferred ws={ws} adopting=t" :ws ws)
   (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "transferred"))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
@@ -2703,12 +2693,12 @@ each time and recording an ERROR for every adopt."
       (when (and from (not (eq from (agent-repl-host--recorded-conn ws))))
         (agent-repl-host--put ws :conn from))
       (agent-repl-host--release-held ws "withdrawn")
-      (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s address=%S adopt=ended"
-                        ws (and from (agent-repl-connect-connection-address from))))
+      (agent-repl--info ws "elisp.host.transfer-withdrawn ws={ws} address={address} adopt=ended"
+                        :ws ws :address (prin1-to-string (and from (agent-repl-connect-connection-address from)))))
      (pending
-      (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s adopt=never-sent" ws))
+      (agent-repl--info ws "elisp.host.transfer-withdrawn ws={ws} adopt=never-sent" :ws ws))
      (t
-      (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s adopt=none" ws)))))
+      (agent-repl--info ws "elisp.host.transfer-withdrawn ws={ws} adopt=none" :ws ws)))))
 
 (defun agent-repl-host-route-handover (ws arm slug)
   "Hand ARM, a per-workspace rpc's refusal for WS, to the handover walk.
@@ -2720,8 +2710,9 @@ other arm, which stays the caller's to report.  THE ONE ROUTING every
 verb's refusal handler shares, so none hand-rolls the membership test."
   (let ((keyword (plist-get arm :arm)))
     (when (memq keyword agent-repl-host--handover-arms)
-      (agent-repl--info ws (concat slug " ws=%s arm=%S fields=%S")
-                        ws keyword (plist-get arm :value))
+      (agent-repl--info ws "{slug} ws={ws} arm={arm} fields={fields}"
+                        :slug slug :ws ws :arm (prin1-to-string keyword)
+                        :fields (prin1-to-string (plist-get arm :value)))
       (agent-repl-host-handle-refusal ws arm)
       t)))
 
@@ -2748,15 +2739,15 @@ through here, so a repeated refusal cannot recurse into a loop."
          ;; decodes to the empty string rather than to an absence: both mean
          ;; "no address rode the arm" and both are the same breach.
          (if (or (null address) (string-empty-p address))
-             (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s address=%S"
-                                ws address)
-           (agent-repl--info ws "elisp.host.transferring-away ws=%s address=%S" ws address)
+             (agent-repl--error ws "elisp.host.transferring-away-without-address ws={ws} address={address}"
+                                :ws ws :address (prin1-to-string address))
+           (agent-repl--info ws "elisp.host.transferring-away ws={ws} address={address}" :ws ws :address (prin1-to-string address))
            (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "transferring-away"))))
       (:not-yet-adopted
-       (agent-repl--info ws "elisp.host.not-yet-adopted ws=%s" ws)
+       (agent-repl--info ws "elisp.host.not-yet-adopted ws={ws}" :ws ws)
        (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "not-yet-adopted"))
       (_
-       (agent-repl--error ws "elisp.host.unknown-refusal-arm ws=%s arm=%S" ws arm)))))
+       (agent-repl--error ws "elisp.host.unknown-refusal-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm))))))
 
 ;;;; ---- The two relayed acts ----
 
@@ -2769,7 +2760,7 @@ page lives in the one host web view, so the host reloads once per build;
 a restart names none and reloads WS's page alone
 \(`agent-repl-frontend-reload-webapp')."
   (let ((build (plist-get value :webapp-build)))
-    (agent-repl--info ws "elisp.host.reload-webapp ws=%s build=%s" ws build)
+    (agent-repl--info ws "elisp.host.reload-webapp ws={ws} build={build}" :ws ws :build build)
     (agent-repl-frontend-reload-webapp ws build)))
 
 (defun agent-repl-host--open-in-editor (ws target)
@@ -2779,7 +2770,7 @@ absence means the file's top — or a directory, which the popup opens in
 dired."
   (let ((path (plist-get target :path))
         (line (plist-get target :line)))
-    (agent-repl--info ws "elisp.host.open-in-editor ws=%s path=%S line=%S" ws path line)
+    (agent-repl--info ws "elisp.host.open-in-editor ws={ws} path={path} line={line}" :ws ws :path (prin1-to-string path) :line (prin1-to-string line))
     (agent-repl-popup-open path line)))
 
 (defun agent-repl-host--open-commit-log (ws target)
@@ -2789,8 +2780,8 @@ The click on a landed merge's commit; a fact, not a command, exactly as
   (let ((dir (plist-get target :repository-dir))
         (branch (plist-get target :branch))
         (commit (plist-get target :commit)))
-    (agent-repl--info ws "elisp.host.open-commit-log ws=%s dir=%S branch=%S commit=%S"
-                      ws dir branch commit)
+    (agent-repl--info ws "elisp.host.open-commit-log ws={ws} dir={dir} branch={branch} commit={commit}"
+                      :ws ws :dir (prin1-to-string dir) :branch (prin1-to-string branch) :commit (prin1-to-string commit))
     (agent-repl-magit-log-commit ws dir branch commit)))
 
 (defun agent-repl-host--run-in-terminal (ws target)
@@ -2835,28 +2826,26 @@ The answer goes to CONN, the daemon that minted the token."
          (outcome (with-current-buffer buffer
                     (agent-repl-evaluate-text (plist-get request :text))))
          (arm (plist-get (plist-get outcome :outcome) :arm)))
-    (agent-repl--info scope "elisp.host.evaluate id=%s token=%s buffer=%S outcome=%s messages=%d"
-                      (plist-get ref :id) (plist-get token :value) (buffer-name buffer)
-                      arm (length (plist-get outcome :messages)))
+    (agent-repl--info scope "elisp.host.evaluate id={id} token={token} buffer={buffer} outcome={outcome} messages={messages}"
+                      :id (plist-get ref :id) :token (plist-get token :value) :buffer (prin1-to-string (buffer-name buffer)) :outcome arm :messages (length (plist-get outcome :messages)))
     (agent-repl-rpc-answer-editor-evaluation
      conn (list :workspace ref :token token :outcome outcome)
      :on-response
      (lambda (response)
        (pcase (plist-get response :arm)
          (:success
-          (agent-repl--log scope "elisp.host.evaluation-answered id=%s token=%s"
-                           (plist-get ref :id) (plist-get token :value)))
+          (agent-repl--log scope "elisp.host.evaluation-answered id={id} token={token}"
+                           :id (plist-get ref :id) :token (plist-get token :value)))
          (:error
-          (agent-repl--error scope "elisp.host.evaluation-answer-refused id=%s token=%s cause=%S"
-                             (plist-get ref :id) (plist-get token :value)
-                             (plist-get (plist-get (plist-get response :value) :cause) :arm)))
+          (agent-repl--error scope "elisp.host.evaluation-answer-refused id={id} token={token} cause={cause}"
+                             :id (plist-get ref :id) :token (plist-get token :value) :cause (prin1-to-string (plist-get (plist-get (plist-get response :value) :cause) :arm))))
          (other
-          (agent-repl--error scope "elisp.host.evaluation-answer-unknown-arm id=%s token=%s arm=%S"
-                             (plist-get ref :id) (plist-get token :value) other))))
+          (agent-repl--error scope "elisp.host.evaluation-answer-unknown-arm id={id} token={token} arm={arm}"
+                             :id (plist-get ref :id) :token (plist-get token :value) :arm (prin1-to-string other)))))
      :on-failure
      (lambda (detail)
-       (agent-repl--error scope "elisp.host.evaluation-answer-failed id=%s token=%s detail=%S"
-                          (plist-get ref :id) (plist-get token :value) detail)))))
+       (agent-repl--error scope "elisp.host.evaluation-answer-failed id={id} token={token} detail={detail}"
+                          :id (plist-get ref :id) :token (plist-get token :value) :detail (prin1-to-string detail))))))
 
 ;;;; ---- Link lifecycle ----
 
@@ -2918,11 +2907,11 @@ next sidebar click."
     (setq agent-repl-host-reselect-pending nil)
     (agent-repl--warn '(:agent-repl-central
                         "the lost selection has no registered workspace sink")
-                      "elisp.host.link-up-reselect-lost dir=%S kept=%S"
-                      dir (agent-repl--ws-current-name)))
+                      "elisp.host.link-up-reselect-lost dir={dir} kept={kept}"
+                      :dir (prin1-to-string dir) :kept (prin1-to-string (agent-repl--ws-current-name))))
    (t
     (let ((ws (agent-repl-host--ws-for-dir dir)))
-      (agent-repl--info ws "elisp.host.link-up-reselect ws=%s dir=%S" ws dir)
+      (agent-repl--info ws "elisp.host.link-up-reselect ws={ws} dir={dir}" :ws ws :dir (prin1-to-string dir))
       (unless (equal ws (agent-repl--ws-current-name))
         ;; Restoring the user's own selection is not a new switch by them.
         (let ((agent-repl-host-automatic-switch t))
@@ -2930,8 +2919,8 @@ next sidebar click."
       (agent-repl-host-select
        ws (lambda (outcome)
             (setq agent-repl-host-reselect-pending nil)
-            (agent-repl--log ws "elisp.host.link-up-reselected ws=%s outcome=%S"
-                             ws outcome)))))))
+            (agent-repl--log ws "elisp.host.link-up-reselected ws={ws} outcome={outcome}"
+                             :ws ws :outcome (prin1-to-string outcome))))))))
 
 (defun agent-repl-host-on-link-up (conn)
   "Re-register, re-subscribe and re-point every live workspace on CONN.
@@ -2970,8 +2959,8 @@ nothing."
          (eligible (seq-filter (lambda (ws) (agent-repl--ws-get ws :project-dir)) names)))
     (setq agent-repl-host-reselect-pending wanted)
     (agent-repl--info '(:agent-repl-central "link recovery spans every workspace")
-                      "elisp.host.link-up workspaces=%d selection=%S"
-                      (length names) wanted)
+                      "elisp.host.link-up workspaces={workspaces} selection={selection}"
+                      :workspaces (length names) :selection (prin1-to-string wanted))
     (dolist (ws names)
       (unless (agent-repl--ws-get ws :project-dir)
         ;; A name with no registered project directory owns no durable
@@ -2979,7 +2968,7 @@ nothing."
         ;; repair; preserve the candidate name in the record body.
         (agent-repl--warn '(:agent-repl-central
                             "a link-repair candidate without a directory owns no sink")
-                          "elisp.host.link-up-skipped ws=%s reason=no-dir" ws)))
+                          "elisp.host.link-up-skipped ws={ws} reason=no-dir" :ws ws)))
     ;; ONE BATCHED WALK for every workspace (`agent-repl-host--reattach-all'),
     ;; and the selection is re-asserted once, after every outcome -- at
     ;; once when no workspace had a dir to re-register.
@@ -3009,9 +2998,9 @@ WARN, as it always was."
      agent-repl-host--by-name)
     (if agent-repl-link-down-planned
         (agent-repl--info '(:agent-repl-central "link loss spans every workspace")
-                          "elisp.host.link-down workspaces=%d planned=t" affected)
+                          "elisp.host.link-down workspaces={workspaces} planned=t" :workspaces affected)
       (agent-repl--warn '(:agent-repl-central "link loss spans every workspace")
-                        "elisp.host.link-down workspaces=%d planned=nil" affected))))
+                        "elisp.host.link-down workspaces={workspaces} planned=nil" :workspaces affected))))
 
 (defun agent-repl-host-on-link-promote (old new)
   "Re-attach onto NEW every workspace the promotion left behind on OLD.
@@ -3033,10 +3022,8 @@ detached, is walked onto NEW in one batched registration
                  (push ws left)))
              agent-repl-host--by-name)
     (agent-repl--info '(:agent-repl-central "link promotion spans every workspace")
-                      "elisp.host.link-promote left-behind=%d moved=%d old=%s conn=%s address=%S"
-                      (length left) (length moved) (agent-repl-host--conn-id old)
-                      (agent-repl-host--conn-id new)
-                      (agent-repl-connect-connection-address new))
+                      "elisp.host.link-promote left-behind={left_behind} moved={moved} old={old} conn={conn} address={address}"
+                      :left_behind (length left) :moved (length moved) :old (agent-repl-host--conn-id old) :conn (agent-repl-host--conn-id new) :address (prin1-to-string (agent-repl-connect-connection-address new)))
     (agent-repl-host--reattach-all (nreverse left) new "promotion")))
 
 ;; A TORN-DOWN WORKSPACE LEAVES NOTHING BEHIND HERE.  Every teardown of a

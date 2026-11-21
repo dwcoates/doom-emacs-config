@@ -42,6 +42,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
@@ -49,12 +53,9 @@
 (declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--sanitize-ws-name "core" (name))
 (declare-function agent-repl-window-tell-gate-dock "window" (ws))
-(declare-function agent-repl--fatal "core")
 (declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--log-level-window "core" (level until now))
 (defvar agent-repl--log-level-clock)
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--error "core")
 (declare-function agent-repl--kill-cause-str "core")
 (declare-function agent-repl--user-message "core")
 
@@ -65,11 +66,8 @@
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
 (declare-function agent-repl--deferred-quit-arm-audit "agent-repl-core" (context))
 (declare-function agent-repl--deferred-quit-hand-off "agent-repl-core" (context))
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
 (declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--agent-view-buffer-p "agent-repl-core" (&optional buf))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
@@ -184,8 +182,8 @@ before a webview is created."
       (error
        (agent-repl--fatal
         ws
-        "elisp.frontend.log-level: invalid ws=%s variable=AGENT_REPL_LOG_LEVEL value=%S until=%S allowed=debug,info,warn,error reason=%s"
-        ws value until (error-message-string err))))))
+        "elisp.frontend.log-level: invalid ws={ws} variable=AGENT_REPL_LOG_LEVEL value={value} until={until} allowed=debug,info,warn,error reason={reason}"
+        :ws ws :value (prin1-to-string value) :until (prin1-to-string until) :reason (error-message-string err))))))
 
 ;;;; ---- Capability -----------------------------------------------------------
 
@@ -310,8 +308,8 @@ No-op for a window showing anything else, or a webview with no live widget."
                (size (agent-repl--frontend-widget-size xw)))
           (unless (and (equal (car size) width) (equal (cadr size) height))
             (agent-repl--log '(:agent-repl-central "webview sizing walks every window of a frame")
-                             "elisp.frontend.webview-fit buffer=%s from=%Sx%S to=%dx%d"
-                             (buffer-name buf) (car size) (cadr size) width height)
+                             "elisp.frontend.webview-fit buffer={buffer} from={from}x{size} to={to}x{height}"
+                             :buffer (buffer-name buf) :from (prin1-to-string (car size)) :size (prin1-to-string (cadr size)) :to width :height height)
             (agent-repl--frontend-resize-widget xw width height)))))))
 
 (defun agent-repl--frontend-fit-webviews (&optional frame)
@@ -487,8 +485,8 @@ unowned workspace webview unrepresentable rather than merely unlikely."
     (condition-case err
         (run-hooks 'agent-repl-frontend-webview-adopt-hook)
       (error
-       (agent-repl--warn owner "frontend webview adopt-hook failed buffer=%s err=%S"
-                        name err))))
+       (agent-repl--warn owner "frontend webview adopt-hook failed buffer={buffer} err={err}"
+                        :buffer name :err (prin1-to-string err)))))
   buf)
 
 (defun agent-repl--frontend-rename-webview (ws)
@@ -507,8 +505,8 @@ name matches no panel pattern."
      ((not (buffer-live-p buf)) nil)
      ((equal (buffer-name buf) name) buf)
      ((get-buffer name)
-      (agent-repl--error ws "elisp.frontend.webview-rename-target-taken ws=%s buffer=%s target=%s"
-                         ws (buffer-name buf) name)
+      (agent-repl--error ws "elisp.frontend.webview-rename-target-taken ws={ws} buffer={buffer} target={target}"
+                         :ws ws :buffer (buffer-name buf) :target name)
       nil)
      (t
       (let ((old (buffer-name buf)))
@@ -516,8 +514,8 @@ name matches no panel pattern."
           (setq-local agent-repl--owning-workspace ws)
           (setq-local xwidget-webkit-buffer-name-format name)
           (rename-buffer name))
-        (agent-repl--info ws "elisp.frontend.webview-renamed ws=%s from=%s to=%s"
-                          ws old name)
+        (agent-repl--info ws "elisp.frontend.webview-renamed ws={ws} from={from} to={to}"
+                          :ws ws :from old :to name)
         buf)))))
 
 (defun agent-repl--frontend-remap-stock-reload ()
@@ -660,7 +658,7 @@ another buffer's.  Returns non-nil when the read was injected, and nil,
 injecting nothing, when BUF holds no live webview."
   (unless (and callback (symbolp callback) (fboundp callback))
     (agent-repl--error agent-repl--owning-workspace
-                       "elisp.frontend.read-script: refused callback=%S" callback)
+                       "elisp.frontend.read-script: refused callback={callback}" :callback (prin1-to-string callback))
     (error "agent-repl: webview read callback must name a function, got %S"
            callback))
   (when-let ((xw (agent-repl--frontend-webview-live-widget buf)))
@@ -700,8 +698,8 @@ returns is an invariant violation: it is logged and signalled."
         answer)
     ((json-parse-error wrong-type-argument)
      (agent-repl--error agent-repl--owning-workspace
-                        "elisp.frontend.copy-selection: unreadable answer raw=%S err=%S"
-                        raw err)
+                        "elisp.frontend.copy-selection: unreadable answer raw={raw} err={err}"
+                        :raw (prin1-to-string raw) :err (prin1-to-string err))
      (error "agent-repl: the webview answered the selection request unreadably: %S"
             raw))))
 
@@ -717,8 +715,8 @@ answer (one whose wait was abandoned) is dropped, at debug."
           (setq agent-repl--frontend-copy-answer answer)
           (push agent-repl--frontend-copy-wake-event unread-command-events))
       (agent-repl--log agent-repl--owning-workspace
-                       "elisp.frontend.copy-selection: stale answer id=%s waiting=%s"
-                       (plist-get answer :id) agent-repl--frontend-copy-waiting))))
+                       "elisp.frontend.copy-selection: stale answer id={id} waiting={waiting}"
+                       :id (plist-get answer :id) :waiting agent-repl--frontend-copy-waiting))))
 
 (defun agent-repl--frontend-read-event ()
   "Read the next ordinary input event, running special events meanwhile.
@@ -747,8 +745,8 @@ abandons the wait: it is logged and quits."
                ((eq event agent-repl--frontend-copy-wake-event))
                ((eql event ?\C-g)
                 (agent-repl--info agent-repl--owning-workspace
-                                  "elisp.frontend.copy-selection: wait abandoned id=%d held=%d"
-                                  id (length held))
+                                  "elisp.frontend.copy-selection: wait abandoned id={id} held={held}"
+                                  :id id :held (length held))
                 (signal 'quit nil))
                (t (push event held)))))
           (cons agent-repl--frontend-copy-answer (nreverse held)))
@@ -768,8 +766,8 @@ answer whose text is null is an invariant violation: signalled."
     (error "agent-repl: the webview's selection answer carries no text: %S" answer))
    ((null (plist-get answer :text))
     (agent-repl--error agent-repl--owning-workspace
-                       "elisp.frontend.copy-selection: the page has no selection object answer=%S"
-                       answer)
+                       "elisp.frontend.copy-selection: the page has no selection object answer={answer}"
+                       :answer (prin1-to-string answer))
     (error "agent-repl: the webview has no selection object"))
    ((not (plist-get answer :focused)) 'unfocused)
    ((string-empty-p (plist-get answer :text)) 'empty)
@@ -788,8 +786,8 @@ completes with the reader's next key exactly as it always did."
          (cmd (cl-progv (list mode) (list nil)
                 (key-binding seq t))))
     (agent-repl--log agent-repl--owning-workspace
-                     "elisp.frontend.copy-selection: fall-through keys=%s command=%S"
-                     (key-description seq) cmd)
+                     "elisp.frontend.copy-selection: fall-through keys={keys} command={command}"
+                     :keys (key-description seq) :command (prin1-to-string cmd))
     (setq prefix-arg current-prefix-arg
           this-command (or cmd #'undefined))
     (command-execute (or cmd #'undefined) nil seq)))
@@ -813,8 +811,8 @@ is asked synchronously."
                      (error
                       (setq unread-command-events (append held unread-command-events))
                       (signal (car err) (cdr err))))))
-    (agent-repl--log ws "elisp.frontend.copy-selection: keys=%s decision=%s held=%d"
-                     (key-description keys) decision (length held))
+    (agent-repl--log ws "elisp.frontend.copy-selection: keys={keys} decision={decision} held={held}"
+                     :keys (key-description keys) :decision decision :held (length held))
     (if (eq decision 'copy)
         (let ((text (plist-get answer :text)))
           (kill-new text)
@@ -874,8 +872,8 @@ and the system clipboard through `kill-new'."
          (keys (this-command-keys-vector)))
     (if (use-region-p)
         (progn
-          (agent-repl--log ws "elisp.frontend.copy-held: keys=%s decision=region"
-                           (key-description keys))
+          (agent-repl--log ws "elisp.frontend.copy-held: keys={keys} decision=region"
+                           :keys (key-description keys))
           (agent-repl--frontend-copy-fall-through keys nil 'agent-repl-frontend-composer-copy-mode))
       (let* ((buf (agent-repl--ws-get ws :frontend-buffer))
              (asked (if (buffer-live-p buf)
@@ -884,8 +882,8 @@ and the system clipboard through `kill-new'."
              (answer (car asked))
              (held (cdr asked))
              (decision (agent-repl--frontend-held-copy-decision answer)))
-        (agent-repl--log ws "elisp.frontend.copy-held: keys=%s decision=%s held=%d"
-                         (key-description keys) decision (length held))
+        (agent-repl--log ws "elisp.frontend.copy-held: keys={keys} decision={decision} held={held}"
+                         :keys (key-description keys) :decision decision :held (length held))
         (if (eq decision 'copy)
             (let ((text (plist-get answer :held)))
               (kill-new text)
@@ -963,8 +961,8 @@ webview window resolves against the worktree the REPL is attached to."
          (fresh (not (buffer-live-p existing)))
          (buf (if (not fresh)
                   (progn
-                    (agent-repl--log ws "ensure-webview: outcome=reused buf=%s"
-                                     (buffer-name existing))
+                    (agent-repl--log ws "ensure-webview: outcome=reused buf={buf}"
+                                     :buf (buffer-name existing))
                     existing)
                 (agent-repl--with-deferred-quit "frontend-ensure-webview"
                   (let* ((xw (agent-repl-webhost-ensure))
@@ -972,7 +970,7 @@ webview window resolves against the worktree the REPL is attached to."
                          (buf (agent-repl--frontend-make-slot-buffer name xw)))
                     (agent-repl--frontend-adopt-webview-buffer buf name ws)
                     (agent-repl--ws-put ws :frontend-buffer buf)
-                    (agent-repl--info ws "elisp.frontend.slot-mounted ws=%s buffer=%s" ws name)
+                    (agent-repl--info ws "elisp.frontend.slot-mounted ws={ws} buffer={buffer}" :ws ws :buffer name)
                     buf)))))
     ;; A PAGE IS LOADED FOR EVERY WORKSPACE HELD HERE, which the daemon
     ;; calls visible (owner ruling, 2026-11-21), but a cold-gated one: its
@@ -1030,8 +1028,8 @@ only ever the CALLING workspace's own input window."
                          (selected-window)))
              (host (split-window parent nil 'below)))
         (agent-repl--log ws
-                         "frontend-main-area-window: no undedicated host; split parent=%S host=%S"
-                         parent host)
+                         "frontend-main-area-window: no undedicated host; split parent={parent} host={host}"
+                         :parent (prin1-to-string parent) :host (prin1-to-string host))
         host)))
 
 (defun agent-repl--frontend-display-webview (ws buf)
@@ -1049,8 +1047,8 @@ windows.
 Without the clear, whatever the frame carried before the mount (magit,
 the dashboard, a previous workspace's leftovers) stayed up beside the
 panels — the extra-windows-on-first-switch bug."
-  (agent-repl--log ws "display-webview: begin buf=%s panels-visible=%s"
-                   (buffer-name buf) (agent-repl--panels-visible-p))
+  (agent-repl--log ws "display-webview: begin buf={buf} panels-visible={panels_visible}"
+                   :buf (buffer-name buf) :panels_visible (agent-repl--panels-visible-p))
   (when (agent-repl--panels-visible-p)
     (agent-repl--log ws "display-webview: hiding agent panels first")
     (agent-repl--hide-panels))
@@ -1066,8 +1064,8 @@ panels — the extra-windows-on-first-switch bug."
     ;; by lifting the composer's locks instead (`agent-repl-window--unharden').
     (when (window-live-p stale-input-win)
       (let ((deletable (agent-repl-window--deletable-p stale-input-win)))
-        (agent-repl--info ws "elisp.frontend.display-webview-stale-input ws=%s window=%s outcome=%s"
-                          ws stale-input-win (if deletable "deleted" "reclaimed-as-host"))
+        (agent-repl--info ws "elisp.frontend.display-webview-stale-input ws={ws} window={window} outcome={outcome}"
+                          :ws ws :window stale-input-win :outcome (if deletable "deleted" "reclaimed-as-host"))
         (if deletable
             (delete-window stale-input-win)
           (agent-repl-window--unharden stale-input-win))))
@@ -1114,8 +1112,8 @@ panels — the extra-windows-on-first-switch bug."
                ws))
       (when (window-dedicated-p win)
         (agent-repl--warn ws
-                          "display-webview: host window %S still dedicated to %s after clear; reclaiming"
-                          win (buffer-name (window-buffer win)))
+                          "display-webview: host window {win} still dedicated to {buffer} after clear; reclaiming"
+                          :win (prin1-to-string win) :buffer (buffer-name (window-buffer win)))
         (set-window-dedicated-p win nil))
       (set-window-buffer win buf)
       (if (agent-repl-input-hidden-p ws)
@@ -1127,8 +1125,8 @@ panels — the extra-windows-on-first-switch bug."
           (progn
             (agent-repl-window-tell-gate-dock ws)
             (select-window win)
-            (agent-repl--info ws "display-webview: mounted webview-window=%s input-hidden-by-gate=t"
-                              win))
+            (agent-repl--info ws "display-webview: mounted webview-window={webview_window} input-hidden-by-gate=t"
+                              :webview_window win))
       ;; Hybrid UI: the classic input panel sits below the webview,
       ;; hardened with the standard panel recipe (dedicated,
       ;; height-locked, delete-protected, mini-window-shrink-proof).
@@ -1154,8 +1152,8 @@ panels — the extra-windows-on-first-switch bug."
                                    :delete-protect t
                                    :preserve-size  'height)
         (select-window input-win)
-        (agent-repl--log ws "display-webview: mounted webview-window=%s input-window=%s input-height=%s target-height=%s"
-                         win input-win actual-height target-height))))
+        (agent-repl--log ws "display-webview: mounted webview-window={webview_window} input-window={input_window} input-height={input_height} target-height={target_height}"
+                         :webview_window win :input_window input-win :input_height actual-height :target_height target-height))))
     ;; THE SIDEBAR STANDS BESIDE THE PANELS, in a full-height window of its
     ;; own at the frame's left edge (sidebar-view.el).  One for every
     ;; workspace: a switch leaves the standing one where it is.
@@ -1183,7 +1181,7 @@ workspace's layout.  The anchor is inert when WS is already current.
 A mount the anchor HOLDS for an active minibuffer answers `:pending': the
 display, and the placeholder's finish with it, run once the minibuffer
 has exited, so the open still owns its own outcome."
-  (agent-repl--log ws "elisp.frontend.gui-open: begin ws=%s" ws)
+  (agent-repl--log ws "elisp.frontend.gui-open: begin ws={ws}" :ws ws)
   (agent-repl--frontend-require-xwidget ws)
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (agent-repl--open-progress-note ws :acked)
@@ -1196,8 +1194,8 @@ has exited, so the open still owns its own outcome."
               ;; The real panel is on the frame; the placeholder has nothing left
               ;; to say and goes away in the same call that replaced it.
               (agent-repl--open-progress-finish ws)
-              (agent-repl--info ws "elisp.frontend.gui-open: displayed ws=%s buffer=%s"
-                                ws (and (buffer-live-p buf) (buffer-name buf)))
+              (agent-repl--info ws "elisp.frontend.gui-open: displayed ws={ws} buffer={buffer}"
+                                :ws ws :buffer (and (buffer-live-p buf) (buffer-name buf)))
               buf)))))
     (if (eq outcome :held) :pending outcome)))
 
@@ -1215,7 +1213,7 @@ second answer that outlives the daemon's own.
 
 The hints are unused: the gui reads WS's directory from its ref."
   (agent-repl--frontend-validate-for-ws 'gui ws)
-  (agent-repl--log ws "elisp.frontend.gui-boot: begin ws=%s" ws)
+  (agent-repl--log ws "elisp.frontend.gui-boot: begin ws={ws}" :ws ws)
   (agent-repl--frontend-precreate-webview ws))
 
 (defun agent-repl--frontend-precreate-webview (ws)
@@ -1238,9 +1236,9 @@ to one; the refusals are preconditions, not failures (see
   (let ((refusal (agent-repl--frontend-precreate-refusal ws)))
     (if refusal
         (progn
-          (agent-repl--log ws "elisp.frontend.precreate: skipped ws=%s reason=%s" ws refusal)
+          (agent-repl--log ws "elisp.frontend.precreate: skipped ws={ws} reason={reason}" :ws ws :reason refusal)
           nil)
-      (agent-repl--log ws "elisp.frontend.precreate: begin ws=%s" ws)
+      (agent-repl--log ws "elisp.frontend.precreate: begin ws={ws}" :ws ws)
       (agent-repl--frontend-precreate-mount ws)
       :created)))
 
@@ -1253,8 +1251,8 @@ nothing to anchor."
   (let ((buf (agent-repl--frontend-ensure-webview-buffer ws)))
     (when-let ((persp (agent-repl--ws-resolve-persp ws)))
       (agent-repl--ws-add-buffer buf persp nil))
-    (agent-repl--log ws "elisp.frontend.precreate: mounted ws=%s buffer=%s"
-                     ws (and (buffer-live-p buf) (buffer-name buf)))
+    (agent-repl--log ws "elisp.frontend.precreate: mounted ws={ws} buffer={buffer}"
+                     :ws ws :buffer (and (buffer-live-p buf) (buffer-name buf)))
     buf))
 
 (defun agent-repl--frontend-precreate-refusal (ws)
@@ -1320,9 +1318,9 @@ this machine instead."
          (port (and colon (match-string 1 address)))
          (ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))))
     (unless (and host (member host '("127.0.0.1" "localhost")))
-      (agent-repl--fatal ws "elisp.frontend.page-origin: the daemon address %S is not a loopback host:port" address))
+      (agent-repl--fatal ws "elisp.frontend.page-origin: the daemon address {address} is not a loopback host:port" :address (prin1-to-string address)))
     (unless ref
-      (agent-repl--fatal ws "elisp.frontend.page-origin: no ref for ws=%s" ws))
+      (agent-repl--fatal ws "elisp.frontend.page-origin: no ref for ws={ws}" :ws ws))
     (format "http://ws-%s.localhost:%s"
             (agent-repl--frontend-page-host-label (plist-get ref :id)) port)))
 
@@ -1366,9 +1364,9 @@ than no webview."
   (let ((ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws)))
         (conn (and (fboundp 'agent-repl-host-page-conn) (agent-repl-host-page-conn ws))))
     (unless ref
-      (agent-repl--fatal ws "elisp.frontend.webview-url: no ref for ws=%s" ws))
+      (agent-repl--fatal ws "elisp.frontend.webview-url: no ref for ws={ws}" :ws ws))
     (unless conn
-      (agent-repl--fatal ws "elisp.frontend.webview-url: no connection for ws=%s" ws))
+      (agent-repl--fatal ws "elisp.frontend.webview-url: no connection for ws={ws}" :ws ws))
     (let* ((level (agent-repl--frontend-log-level ws))
            (url (format "%s/?workspace=%s&dir=%s&log_level=%s%s"
                         (agent-repl--frontend-page-origin ws conn)
@@ -1378,7 +1376,7 @@ than no webview."
                         (if-let ((until (plist-get level :until)))
                             (format "&log_level_until=%d" until)
                           ""))))
-      (agent-repl--log ws "elisp.frontend.webview-url: ws=%s url=%s" ws url)
+      (agent-repl--log ws "elisp.frontend.webview-url: ws={ws} url={url}" :ws ws :url url)
       url)))
 
 ;; THERE IS NO WEBVIEW RETARGETING.  The URL addresses the WORKSPACE, so a
@@ -1407,18 +1405,18 @@ nothing to reload, and its next open mounts fresh."
      ((null ws)
       (user-error "agent-repl: no current workspace"))
      ((not (buffer-live-p buf))
-      (agent-repl--log ws "elisp.frontend.reload-webview: skipped ws=%s reason=no-live-webview" ws)
+      (agent-repl--log ws "elisp.frontend.reload-webview: skipped ws={ws} reason=no-live-webview" :ws ws)
       nil)
      ;; AN UNLOADED PAGE IS NOT LOADED BY A RELOAD.  Its slot stands with no
      ;; page, and its next load reads the URL then, so there is nothing to
      ;; re-point.  Re-pointing it loaded it: a handover re-points every
      ;; workspace, and on 2026-11-10 21:43 that loaded 77 pages in ten seconds.
      ((not (agent-repl-webhost-has-page-p ws))
-      (agent-repl--log ws "elisp.frontend.reload-webview: skipped ws=%s reason=page-not-loaded" ws)
+      (agent-repl--log ws "elisp.frontend.reload-webview: skipped ws={ws} reason=page-not-loaded" :ws ws)
       nil)
      (t
       (prog1 (agent-repl-webhost-reload-page ws)
-        (agent-repl--info ws "elisp.frontend.reload-webview: reloaded ws=%s" ws))))))
+        (agent-repl--info ws "elisp.frontend.reload-webview: reloaded ws={ws}" :ws ws))))))
 
 (defun agent-repl-frontend-reload-webapp (ws build)
   "React to WS's `reload_webapp', which names BUILD or nil.
@@ -1427,7 +1425,7 @@ one burst; the host reloads once onto it for all of them
 \(`agent-repl-webhost-reload-onto'), which also brings the host page's own
 code onto it.  A push naming no build reloads WS's page alone, on the
 build it runs (a restart replaced its shim)."
-  (agent-repl--info ws "elisp.frontend.reload-webapp ws=%s build=%s" ws build)
+  (agent-repl--info ws "elisp.frontend.reload-webapp ws={ws} build={build}" :ws ws :build build)
   (if build
       (agent-repl-webhost-reload-onto build)
     (agent-repl-frontend-reload-webview ws)))
@@ -1497,7 +1495,7 @@ name directly.  Signals when the workspace has no webview open at all."
             (agent-repl--log ws "rescue-webview: outcome=page-reloaded")
             (prog1 (agent-repl-frontend-reload-webview ws)
               (agent-repl--user-message ws "webview reloaded" nil)))
-        (agent-repl--log ws "rescue-webview: outcome=host-astray url=%s" uri)
+        (agent-repl--log ws "rescue-webview: outcome=host-astray url={url}" :url uri)
         (agent-repl-webhost-reload)
         (agent-repl--user-message
          ws "webview brought home from %s"
@@ -1520,12 +1518,12 @@ whatever state the workspace is in."
         (progn
           (agent-repl--frontend-display-webview ws buf)
           (agent-repl--open-progress-finish ws)
-          (agent-repl--log ws "elisp.frontend.gui-show: displayed ws=%s" ws)
+          (agent-repl--log ws "elisp.frontend.gui-show: displayed ws={ws}" :ws ws)
           buf)
       ;; The webview died under a workspace we believed running.  The open
       ;; path owns the placeholder from here — including its teardown — so
       ;; nothing is resolved on this branch.
-      (agent-repl--log ws "elisp.frontend.gui-show: remounting ws=%s reason=no-live-webview" ws)
+      (agent-repl--log ws "elisp.frontend.gui-show: remounting ws={ws} reason=no-live-webview" :ws ws)
       (agent-repl--gui-open ws))))
 
 (defun agent-repl--gui-hide (ws)
@@ -1613,7 +1611,7 @@ workspace reattaches to the same record and the conversation comes back.
 A teardown that ended the session would stamp its record with a death
 reason `resume-resolve' reads as the user discarding the CONVERSATION,
 which is not what closing a panel says."
-  (agent-repl--log ws "gui-kill: ws=%s kill-cause=%s" ws (agent-repl--kill-cause-str))
+  (agent-repl--log ws "gui-kill: ws={ws} kill-cause={kill_cause}" :ws ws :kill_cause (agent-repl--kill-cause-str))
   (agent-repl--gui-hide ws)
   (agent-repl--frontend-release-workspace-webview ws)
   (agent-repl--ws-put ws :frontend-buffer nil))
@@ -1695,7 +1693,7 @@ workspace kill path (`agent-repl-ws-del-hook')."
     (unless (buffer-live-p buf)
       (agent-repl--log ws "close-panel: rejected=no-live-webview")
       (user-error "agent-repl: no webview open for workspace %s" ws))
-    (agent-repl--log ws "close-panel: killing buf=%s" (buffer-name buf))
+    (agent-repl--log ws "close-panel: killing buf={buf}" :buf (buffer-name buf))
     ;; THE WORKSPACE STAYS OPEN, so the daemon is told before its page goes.
     (agent-repl-page-drop-announced
      ws
@@ -1704,7 +1702,7 @@ workspace kill path (`agent-repl-ws-del-hook')."
        (agent-repl--frontend-detach-webview ws buf)
        (agent-repl--user-message ws "webview closed (session kept)" nil))
      (lambda (why)
-       (agent-repl--info ws "elisp.frontend.close-panel-kept ws=%s why=%s" ws why)
+       (agent-repl--info ws "elisp.frontend.close-panel-kept ws={ws} why={why}" :ws ws :why why)
        (agent-repl--user-message
         ws (pcase why
              ('not-reported "webview kept: the daemon was not told it was closing")
@@ -1723,7 +1721,7 @@ Runs pre-tombstone, while `:frontend-buffer' is still readable."
     (agent-repl-webhost-remove ws)
     (if (buffer-live-p buf)
         (progn
-          (agent-repl--log ws "frontend webview released on kill: %s" (buffer-name buf))
+          (agent-repl--log ws "frontend webview released on kill: {kill}" :kill (buffer-name buf))
           (agent-repl--frontend-kill-webview buf))
       (agent-repl--log-verbose ws "frontend webview release: skipped=no-live-webview"))))
 

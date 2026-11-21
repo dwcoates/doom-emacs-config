@@ -32,19 +32,18 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'seq)
 
 (declare-function agent-repl-host-request-switch-ref "host" (ref trigger))
 (declare-function agent-repl-roster-row-of-id "roster" (id))
 (declare-function agent-repl-roster-row-closed-p "roster" (row))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-serial-create "core" (&rest slots))
 (declare-function agent-repl-serial-send-to-newest "core" (serial report scope label send))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl-rpc-report-editor-focus "rpc" (conn request &rest keys))
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
 (defvar agent-repl--global-log-scope)
@@ -77,8 +76,8 @@ directory can supply.  Here there is nothing missing to supply."
           nil)
       (let* ((frames (frame-list))
              (focused (seq-some #'frame-focus-state frames)))
-        (agent-repl--log-verbose scope "emacs-focused-p noninteractive=nil frame-count=%s focused=%s"
-                                 (length frames) focused)
+        (agent-repl--log-verbose scope "emacs-focused-p noninteractive=nil frame-count={frame_count} focused={focused}"
+                                 :frame_count (length frames) :focused focused)
         focused))))
 
 ;;;; ---- Reporting the focus ----
@@ -115,7 +114,7 @@ new one is OWED and sent when that one is answered
    (lambda (conn done)
      (let ((focused (and (agent-repl--emacs-focused-p) t)))
        (agent-repl--info agent-repl--focus-log-scope
-                         "elisp.notifications.focus-report send focused=%s" focused)
+                         "elisp.notifications.focus-report send focused={focused}" :focused focused)
        (agent-repl-rpc-report-editor-focus
         conn (list :focus (agent-repl-wire-editor-focus focused))
         :on-response (lambda (response) (agent-repl--focus-report-answered focused response done))
@@ -133,20 +132,20 @@ A success carries what the report claimed (`agent-repl--focus-claim-answered')."
      ;; The stream that comes back states its focus itself, so nothing is
      ;; lost, and it is recorded as the ordinary reconnect it is.
      (agent-repl--info agent-repl--focus-log-scope
-                       "elisp.notifications.focus-report refused focused=%s cause=%S"
-                       focused (plist-get (plist-get response :value) :cause)))
+                       "elisp.notifications.focus-report refused focused={focused} cause={cause}"
+                       :focused focused :cause (prin1-to-string (plist-get (plist-get response :value) :cause))))
     (arm
      (agent-repl--error agent-repl--focus-log-scope
-                        "elisp.notifications.focus-report unknown-arm focused=%s arm=%S"
-                        focused arm)))
+                        "elisp.notifications.focus-report unknown-arm focused={focused} arm={arm}"
+                        :focused focused :arm (prin1-to-string arm))))
   (funcall done))
 
 (defun agent-repl--focus-report-failed (focused detail done)
   "Record a report of FOCUSED that failed in transport with DETAIL.
 DONE ends the report."
   (agent-repl--error agent-repl--focus-log-scope
-                     "elisp.notifications.focus-report failed focused=%s detail=%S"
-                     focused detail)
+                     "elisp.notifications.focus-report failed focused={focused} detail={detail}"
+                     :focused focused :detail (prin1-to-string detail))
   (funcall done))
 
 (defvar agent-repl-focus-settled-hook nil
@@ -199,24 +198,24 @@ like any other switch; `:nothing-held' is a gain with no banner held, and
            ;; (`agent-repl-host-request-switch-ref').
            (progn
              (agent-repl--info agent-repl--focus-log-scope
-                               "elisp.notifications.claim banner id=%s held=%s"
-                               id (and (agent-repl--ws-by-ref-id id) t))
+                               "elisp.notifications.claim banner id={id} held={held}"
+                               :id id :held (and (agent-repl--ws-by-ref-id id) t))
              (agent-repl-host-request-switch-ref ref 'notification-focus))
          ;; THE BANNER'S WORKSPACE IS CLOSED, or gone from the roster, since the
          ;; banner was made: there is nowhere to land, so the user stays where
          ;; they are.
          (agent-repl--info agent-repl--focus-log-scope
-                           "elisp.notifications.claim banner-without-tab id=%s" id))))
+                           "elisp.notifications.claim banner-without-tab id={id}" :id id))))
     (:nothing-held
      (agent-repl--log agent-repl--focus-log-scope
-                      "elisp.notifications.focus-report ok focused=%s claim=nothing-held" focused))
+                      "elisp.notifications.focus-report ok focused={focused} claim=nothing-held" :focused focused))
     (:no-gain
      (agent-repl--log agent-repl--focus-log-scope
-                      "elisp.notifications.focus-report ok focused=%s claim=no-gain" focused))
+                      "elisp.notifications.focus-report ok focused={focused} claim=no-gain" :focused focused))
     (arm
      (agent-repl--error agent-repl--focus-log-scope
-                        "elisp.notifications.claim unknown-arm focused=%s arm=%S"
-                        focused arm))))
+                        "elisp.notifications.claim unknown-arm focused={focused} arm={arm}"
+                        :focused focused :arm (prin1-to-string arm)))))
 
 ;;;; ---- The click ----
 
@@ -229,7 +228,7 @@ held by this editor or not, and the frame follows the roster's `current';
 the daemon clears the attention marker on the selection.  The frame is
 raised and focused at once, so the click brings Emacs forward."
   (agent-repl--log '(:agent-repl-central "a banner click is resolved to its workspace by the switch")
-                   "elisp.notifications.activate id=%s" (plist-get ref :id))
+                   "elisp.notifications.activate id={id}" :id (plist-get ref :id))
   (agent-repl-host-request-switch-ref ref 'notification)
   (select-frame-set-input-focus (selected-frame)))
 

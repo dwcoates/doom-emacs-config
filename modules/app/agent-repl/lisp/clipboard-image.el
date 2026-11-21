@@ -39,14 +39,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'image)
 (require 'seq)
 (require 'cl-lib)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--input-image-present-p "agent-repl-input" (path))
 (declare-function agent-repl--input-open-feed-image "agent-repl-input" (ws image))
@@ -142,7 +142,7 @@ icon), because the words are what the user copied.")
          (listed (cond ((vectorp targets) (append targets nil))
                        ((listp targets) targets)
                        (t nil))))
-    (agent-repl--log ws "clipboard-image: clipboard targets=%S" listed)
+    (agent-repl--log ws "clipboard-image: clipboard targets={targets}" :targets (prin1-to-string listed))
     listed))
 
 (defun agent-repl--image-clipboard-image-type (targets)
@@ -159,8 +159,8 @@ the paste is then the ordinary one."
                          agent-repl--image-text-targets))
          (image (agent-repl--image-clipboard-image-type targets))
          (paste (and image (not text) image)))
-    (agent-repl--log ws "clipboard-image: paste decision text=%s image=%s paste=%s"
-                     (and text t) (car image) (car paste))
+    (agent-repl--log ws "clipboard-image: paste decision text={text} image={image} paste={paste}"
+                     :text (and text t) :image (car image) :paste (car paste))
     paste))
 
 ;;;; ---- Capture --------------------------------------------------------------
@@ -169,8 +169,8 @@ the paste is then the ordinary one."
   "Return DIR, creating it, recording the step under log SCOPE."
   (let ((already-exists (file-directory-p dir)))
     (agent-repl--log scope
-                     "clipboard-image: ensure image directory path=%s already-exists=%s"
-                     dir already-exists)
+                     "clipboard-image: ensure image directory path={path} already-exists={already_exists}"
+                     :path dir :already_exists already-exists)
     (make-directory dir t)
     dir))
 
@@ -192,14 +192,14 @@ The write is ATOMIC, and that is what makes skipping an existing PATH
 sound: a file under a digest's name is only ever the whole image.  A
 failed write is recorded at error with its cause and re-signalled."
   (if (file-exists-p path)
-      (agent-repl--log ws "clipboard-image: image already kept path=%s" path)
+      (agent-repl--log ws "clipboard-image: image already kept path={path}" :path path)
     (condition-case err
         (agent-repl--write-file-atomically path data t)
       (error
-       (agent-repl--error ws "clipboard-image: image write failed path=%s bytes=%d err=%S"
-                          path (length data) err)
+       (agent-repl--error ws "clipboard-image: image write failed path={path} bytes={bytes} err={err}"
+                          :path path :bytes (length data) :err (prin1-to-string err))
        (signal (car err) (cdr err))))
-    (agent-repl--log ws "clipboard-image: image written path=%s bytes=%d" path (length data))))
+    (agent-repl--log ws "clipboard-image: image written path={path} bytes={bytes}" :path path :bytes (length data))))
 
 (defun agent-repl--image-convert-tiff (tiff &optional ws)
   "Convert the TIFF file at path TIFF to PNG beside it; return the PNG's path.
@@ -207,17 +207,17 @@ macOS only, through `sips'; anywhere else, and on a failed conversion,
 the refusal is recorded at error and signalled as a `user-error'."
   (let ((png (concat (file-name-sans-extension tiff) ".png")))
     (unless (eq system-type 'darwin)
-      (agent-repl--error ws "clipboard-image: tiff conversion unsupported system-type=%s tiff=%s"
-                         system-type tiff)
+      (agent-repl--error ws "clipboard-image: tiff conversion unsupported system-type={system_type} tiff={tiff}"
+                         :system_type system-type :tiff tiff)
       (user-error "agent-repl: the clipboard image is a TIFF, which cannot be converted on %s"
                   system-type))
     (if (file-exists-p png)
-        (agent-repl--log ws "clipboard-image: converted image already kept path=%s" png)
+        (agent-repl--log ws "clipboard-image: converted image already kept path={path}" :path png)
       (let ((exit (agent-repl--image-call-process "sips" "-s" "format" "png" tiff "--out" png)))
-        (agent-repl--log ws "clipboard-image: tiff conversion tiff=%s png=%s exit=%s" tiff png exit)
+        (agent-repl--log ws "clipboard-image: tiff conversion tiff={tiff} png={png} exit={exit}" :tiff tiff :png png :exit exit)
         (unless (and (eq 0 exit) (file-exists-p png))
-          (agent-repl--error ws "clipboard-image: tiff conversion failed tiff=%s png=%s exit=%s"
-                             tiff png exit)
+          (agent-repl--error ws "clipboard-image: tiff conversion failed tiff={tiff} png={png} exit={exit}"
+                             :tiff tiff :png png :exit exit)
           (user-error "agent-repl: the clipboard image could not be converted to PNG"))))
     png))
 
@@ -238,7 +238,7 @@ bytes are in hand, so a refused paste makes no directory."
   (pcase-let* ((`(,target ,extension ,media-type) entry)
                (data (agent-repl--image-clipboard-selection target)))
     (unless (and (stringp data) (> (length data) 0))
-      (agent-repl--error scope "clipboard-image: clipboard answered no image bytes target=%s" target)
+      (agent-repl--error scope "clipboard-image: clipboard answered no image bytes target={target}" :target target)
       (user-error "agent-repl: no image found on the clipboard"))
     (let* ((path (agent-repl--image-path (funcall dir-fn) data extension)))
       (agent-repl--image-write path data scope)
@@ -258,8 +258,8 @@ when this frame draws images; otherwise `agent-repl--image-fallback-display'."
                                    :height agent-repl-image-thumbnail-height
                                    :max-width agent-repl-image-thumbnail-max-width
                                    :ascent 'center))))
-    (agent-repl--log ws "clipboard-image: display path=%s drawable=%s image=%s"
-                     path drawable (and image t))
+    (agent-repl--log ws "clipboard-image: display path={path} drawable={drawable} image={image}"
+                     :path path :drawable drawable :image (and image t))
     (or image agent-repl--image-fallback-display)))
 
 (defvar agent-repl--image-marker-map (make-sparse-keymap)
@@ -306,7 +306,7 @@ opens nothing."
                            'keymap agent-repl--image-marker-map
                            'mouse-face 'highlight
                            'help-echo (format "mouse-1: show %s over the feed" path)))
-                  (agent-repl--log ws "clipboard-image: drawn as no longer available path=%s" path)
+                  (agent-repl--log ws "clipboard-image: drawn as no longer available path={path}" :path path)
                   (remove-list-of-text-properties at (1+ at) '(keymap mouse-face))
                   (add-text-properties
                    at (1+ at)
@@ -338,13 +338,13 @@ daemon and the shim run on this same host, so the path is the whole
 payload."
   (unless (derived-mode-p 'agent-repl-input-mode)
     (agent-repl--fatal '(:agent-repl-central "the attachment request has no composer workspace")
-                       "elisp.input.attach-outside-composer buffer=%s path=%s"
-                       (buffer-name) path))
+                       "elisp.input.attach-outside-composer buffer={buffer} path={path}"
+                       :buffer (buffer-name) :path path))
   (let ((ws (agent-repl--buffer-owner (current-buffer)))
         (at (point)))
     (insert (agent-repl--image-marker path media-type))
-    (agent-repl--info ws "elisp.input.attached ws=%s path=%s media-type=%s at=%d"
-                      ws path media-type at)
+    (agent-repl--info ws "elisp.input.attached ws={ws} path={path} media-type={media_type} at={at}"
+                      :ws ws :path path :media_type media-type :at at)
     at))
 
 (defun agent-repl--image-open (image ws)
@@ -354,9 +354,9 @@ A file that is gone (its worktree was deleted) is recorded at info and
 signalled as a `user-error'; nothing is asked of the daemon."
   (let ((path (plist-get image :path)))
     (unless (agent-repl--input-image-present-p path)
-      (agent-repl--info ws "clipboard-image: open refused, file missing path=%s" path)
+      (agent-repl--info ws "clipboard-image: open refused, file missing path={path}" :path path)
       (user-error "agent-repl: the image %s no longer exists" path))
-    (agent-repl--log ws "clipboard-image: opening over the feed path=%s" path)
+    (agent-repl--log ws "clipboard-image: opening over the feed path={path}" :path path)
     (agent-repl--input-open-feed-image ws image)))
 
 (defun agent-repl-input-open-image-at-mouse (event)
@@ -369,8 +369,8 @@ signalled as a `user-error'; nothing is asked of the daemon."
                                      agent-repl--input-image-marker-property)))
          (ws (agent-repl--buffer-owner buffer)))
     (unless image
-      (agent-repl--fatal ws "clipboard-image: a click opened no image buffer=%s point=%s"
-                         (buffer-name buffer) (posn-point position)))
+      (agent-repl--fatal ws "clipboard-image: a click opened no image buffer={buffer} point={point}"
+                         :buffer (buffer-name buffer) :point (posn-point position)))
     (agent-repl--image-open image ws)))
 
 ;;;; ---- Pasting --------------------------------------------------------------
@@ -379,8 +379,8 @@ signalled as a `user-error'; nothing is asked of the daemon."
   "Keep the clipboard's ENTRY image for WS and attach it at point; return its path."
   (pcase-let ((`(,path . ,media-type) (agent-repl--image-capture ws entry)))
     (agent-repl-input-attach-image path media-type)
-    (agent-repl--info ws "clipboard-image: pasted ws=%s path=%s media-type=%s"
-                      ws path media-type)
+    (agent-repl--info ws "clipboard-image: pasted ws={ws} path={path} media-type={media_type}"
+                      :ws ws :path path :media_type media-type)
     path))
 
 ;; THE PASTE DECISIONS ARE SHARED by every place an image is pasted into
@@ -515,8 +515,8 @@ Return the image\='s path."
                      scope (agent-repl--global-state-file agent-repl--image-prompt-subdir)))
                   entry)))
       (insert (agent-repl--image-prompt-marker path media-type))
-      (agent-repl--info scope "clipboard-image: pasted into a creation prompt path=%s media-type=%s"
-                        path media-type)
+      (agent-repl--info scope "clipboard-image: pasted into a creation prompt path={path} media-type={media_type}"
+                        :path path :media_type media-type)
       path)))
 
 (defun agent-repl-prompt-attach-clipboard-image ()

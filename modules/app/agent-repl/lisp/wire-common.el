@@ -41,11 +41,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--error "core")
-(declare-function agent-repl--log "core")
 
 ;;;; ---- The contract-breach error ----
 
@@ -68,8 +70,8 @@ then ABORTS the caller with the TYPED error every wire consumer catches —
 carrying which message, which field, and why.  There is no
 `condition-case' anywhere in the codec: `agent-repl--error' is a pure
 logging rung that never signals, so nothing here can swallow anything."
-  (agent-repl--error '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.contract-breach message=%s field=%s reason=%s"
-                     message-name field reason)
+  (agent-repl--error '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.contract-breach message={message} field={field} reason={reason}"
+                     :message message-name :field field :reason reason)
   (signal 'agent-repl-wire-error (list message-name field reason)))
 
 ;;;; ---- One record per top-level codec call ----
@@ -122,11 +124,11 @@ its breach was recorded by `agent-repl-wire--fail'."
                      (funcall codec value))))
       (if (eq direction 'decode)
           (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace")
-                           "elisp.wire.decoded message=%s messages=%d codec=%s"
-                           (car tally) (cdr tally) codec)
+                           "elisp.wire.decoded message={message} messages={messages} codec={codec}"
+                           :message (car tally) :messages (cdr tally) :codec codec)
         (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace")
-                         "elisp.wire.encoded message=%s messages=%d codec=%s"
-                         (car tally) (cdr tally) codec))
+                         "elisp.wire.encoded message={message} messages={messages} codec={codec}"
+                         :message (car tally) :messages (cdr tally) :codec codec))
       result)))
 
 ;;;; ---- Shared decode primitives ----

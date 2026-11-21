@@ -53,6 +53,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 ;; wire-common.el (concurrent sibling module) owns the shared leaf codecs and
@@ -115,8 +119,6 @@
 (declare-function agent-repl-wire-decode-session-fault-keepalive-undelivered "agent-repl-wire-common" (json))
 
 ;; core.el's canonical logging ladder.
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-wire--decode-optional-double "wire-common" (message-name field object))
 
 
@@ -168,7 +170,7 @@ rather than silently dropped."
   "Decode an EMPTY protobuf MESSAGE from JSON, returning nil.
 Any field at all is unknown, so this is the whole validation."
   (agent-repl-wire-verbs--check-keys message json nil)
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-decode-empty message=%s" message)
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-decode-empty message={message}" :message message)
   nil)
 
 (defun agent-repl-wire-verbs--empty-arm (message)
@@ -199,8 +201,8 @@ both are contract breaches."
       (let* ((hit (car found))
              (arm (car hit))
              (cell (cdr hit)))
-        (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-decode-oneof message=%s field=%s arm=%s"
-                          message field (nth 1 arm))
+        (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-decode-oneof message={message} field={field} arm={arm}"
+                          :message message :field field :arm (nth 1 arm))
         (list :arm (nth 1 arm)
               :value (funcall (nth 2 arm) (cdr cell))))))))
 
@@ -328,8 +330,8 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
          (arm (assq keyword arms)))
     (unless arm
       (agent-repl-wire-verbs--fail message field "unknown oneof arm"))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-oneof message=%s field=%s arm=%s"
-                      message field keyword)
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-oneof message={message} field={field} arm={arm}"
+                      :message message :field field :arm keyword)
     (cons (nth 1 arm) (funcall (nth 2 arm) (plist-get value :value)))))
 
 ;;;; ---- The agent API's choices (workspace_topology.proto) -------------
@@ -550,8 +552,8 @@ unprioritized workspace, no ungated consent."
                   (agent-repl-wire-encode-create-workspace-request-allow-ungated
                    (plist-get request :allow-ungated)))
             out))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-create-workspace-request form=%s"
-                      (plist-get (plist-get request :form) :arm))
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-create-workspace-request form={form}"
+                      :form (plist-get (plist-get request :form) :arm))
     ;; THE OP ID OPTS INTO OPTION B. Present, the daemon acks at once and pushes
     ;; this create's progress on WatchDaemon keyed on it; absent, the create is
     ;; the legacy synchronous form.
@@ -2283,8 +2285,8 @@ the field entirely."
                           (agent-repl-wire-verbs--require
                            "SetWorkspacePriorityRequest" "workspace"
                            (plist-get request :workspace)))))))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-set-workspace-priority-request cleared=%S"
-                      (null (plist-get request :priority)))
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-set-workspace-priority-request cleared={cleared}"
+                      :cleared (prin1-to-string (null (plist-get request :priority))))
     (if (plist-get request :priority)
         (append out (list (cons 'priority
                                 (agent-repl-wire-encode-set-workspace-priority-request-priority
@@ -2813,8 +2815,8 @@ No reply target rides the request: the daemon holds the feed's selection
   (let ((message "SubmitPromptRequest")
         (delivery (plist-get request :delivery))
         (submitted-at (plist-get request :submitted-at-unix-ms)))
-    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s delivery=%S"
-                      (plist-get request :origin) delivery)
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin={origin} delivery={delivery}"
+                      :origin (plist-get request :origin) :delivery (prin1-to-string delivery))
     (append
      (list (cons 'workspace
                  (agent-repl-wire-encode-submit-prompt-request-workspace
@@ -4820,8 +4822,8 @@ REQUEST is (:workspace REF :target (:arm KEYWORD :value V) :confirm-agents
 BOOL).  `confirm_agents' is spelled EXPLICITLY even when false, mirroring
 `force' on RestartWorkspace and the footer: the challenge answer is a fact
 the request states, never an omitted default."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-interrupt-request confirm=%S"
-                    (and (plist-get request :confirm-agents) t))
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-interrupt-request confirm={confirm}"
+                    :confirm (prin1-to-string (and (plist-get request :confirm-agents) t)))
   (list (cons 'workspace
               (agent-repl-wire-encode-interrupt-request-workspace
                (agent-repl-wire-verbs--require "InterruptRequest" "workspace"
@@ -5800,8 +5802,8 @@ All three are required; an incomplete request errors here rather than
 reaching the wire."
   (let ((message "EditHeldPromptRequest"))
     (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace")
-                     "elisp.wire.verbs-encode-edit-held-prompt-request step=%S"
-                     (plist-get (plist-get request :action) :arm))
+                     "elisp.wire.verbs-encode-edit-held-prompt-request step={step}"
+                     :step (prin1-to-string (plist-get (plist-get request :action) :arm)))
     (list (cons 'workspace
                 (agent-repl-wire-encode-edit-held-prompt-request-workspace
                  (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))

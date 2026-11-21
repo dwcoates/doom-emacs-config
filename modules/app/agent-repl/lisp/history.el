@@ -2,17 +2,16 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--warn "core")
-(declare-function agent-repl--error "core")
 (declare-function agent-repl--write-file-atomically "core" (file text))
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--buffer-owner "core")
 (declare-function agent-repl--ws-current-log-name "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
@@ -89,21 +88,28 @@ Catches errors and displays a user-visible warning via
   `(condition-case err
        (progn ,@body)
      (error
-      (agent-repl--warn '(:agent-repl-central "state loading precedes workspace restoration")
-                        "%s error: %S" ,label err)
-      (agent-repl--log '(:agent-repl-central "state loading precedes workspace restoration")
-                       (concat ,label " error: %S") err)
+      (agent-repl--log-labelled-error ,label err)
       nil)))
+
+(defun agent-repl--log-labelled-error (label err)
+  "Record ERR, caught by `agent-repl--with-error-logging' under LABEL.
+A function, not part of the macro's expansion, so its two records are two
+sites of their own wherever the macro is used."
+  (agent-repl--warn '(:agent-repl-central "state loading precedes workspace restoration")
+                    "{label} error: {error}" :label label :error (prin1-to-string err))
+  (agent-repl--log '(:agent-repl-central "state loading precedes workspace restoration")
+                   "{label} error detail: {error}" :label label
+                   :error (prin1-to-string err)))
 
 ;;;; File I/O helpers
 
 (defun agent-repl--read-sexp-file (file)
   "Read and return the first sexp from FILE."
-  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file: file=%s" file)
+  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file: file={file}" :file file)
   (with-temp-buffer
     (insert-file-contents file)
     (let ((data (read (current-buffer))))
-      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file: complete file=%s value-type=%s" file (type-of data))
+      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file: complete file={file} value-type={value_type}" :file file :value_type (type-of data))
       data)))
 
 (defun agent-repl--write-sexp-file (file data)
@@ -116,7 +122,7 @@ either its previous contents or DATA in full and never a torn write: a
 crash mid-save cannot leave a file that no longer reads.  The text is
 UTF-8, so a non-ASCII string never asks which coding to use.  A failed
 write is recorded with the file and its cause, and re-signalled."
-  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: file=%s" file)
+  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: file={file}" :file file)
   (condition-case err
       (agent-repl--write-file-atomically
        file (let ((print-length nil)
@@ -124,16 +130,16 @@ write is recorded with the file and its cause, and re-signalled."
               (prin1-to-string data)))
     (error
      (agent-repl--error '(:agent-repl-central "saved workspace state spans workspaces")
-                        "write-sexp-file: failed file=%s value-type=%s cause=%S"
-                        file (type-of data) err)
+                        "write-sexp-file: failed file={file} value-type={value_type} cause={cause}"
+                        :file file :value_type (type-of data) :cause (prin1-to-string err))
      (signal (car err) (cdr err))))
-  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: complete file=%s value-type=%s" file (type-of data)))
+  (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "write-sexp-file: complete file={file} value-type={value_type}" :file file :value_type (type-of data)))
 
 (defun agent-repl--read-sexp-file-if-exists (file)
   "Read and return the first sexp from FILE, or nil if FILE does not exist."
   (if (file-exists-p file)
       (agent-repl--read-sexp-file file)
-    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file-if-exists: file not found file=%s" file)
+    (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "read-sexp-file-if-exists: file not found file={file}" :file file)
     nil))
 
 ;;;; Instantiation serialization
@@ -210,7 +216,7 @@ through `agent-repl-default-frontend'."
         (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "migrate-saved-state: dropping retired :frontend vterm")
         (setq out (plist-put out :frontend nil))
         (setq out (plist-put out :frontend-explicit nil)))
-      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "migrate-saved-state: complete sandbox-migrated=%s frontend-migrated=%s" sandbox-p vterm-p)
+      (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "migrate-saved-state: complete sandbox-migrated={sandbox_migrated} frontend-migrated={frontend_migrated}" :sandbox_migrated sandbox-p :frontend_migrated vterm-p)
       out)))
 
 ;;;; Persistence file paths
@@ -222,7 +228,7 @@ Used by writers to compose the destination path; readers use the
 locations."
   (if root
       (let ((dir (expand-file-name agent-repl-emacs-data-subdir root)))
-        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "data-dir: root=%s dir=%s" root dir)
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "data-dir: root={root} dir={dir}" :root root :dir dir)
         dir)
     (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "data-dir: root=nil outcome=nil")
     nil))
@@ -235,7 +241,7 @@ never the legacy file at the project root.  Use
   (if root
       (let ((file (expand-file-name agent-repl-history-filename
                                     (agent-repl--data-dir root))))
-        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file: root=%s file=%s" root file)
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file: root={root} file={file}" :root root :file file)
         file)
     (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file: root=nil outcome=nil")
     nil))
@@ -247,7 +253,7 @@ reads (which falls back to the legacy project-root path)."
   (if root
       (let ((file (expand-file-name agent-repl-state-filename
                                     (agent-repl--data-dir root))))
-        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file: root=%s file=%s" root file)
+        (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file: root={root} file={file}" :root root :file file)
         file)
     (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file: root=nil outcome=nil")
     nil))
@@ -262,13 +268,13 @@ working through the relocation transition)."
             (legacy (expand-file-name agent-repl--legacy-history-filename root)))
         (cond
          ((file-exists-p new)
-          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=%s source=new file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root={root} source=new file={file}" :root root :file new)
           new)
          ((file-exists-p legacy)
-          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=%s source=legacy file=%s" root legacy)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root={root} source=legacy file={file}" :root root :file legacy)
           legacy)
          (t
-          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=%s source=new-missing file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root={root} source=new-missing file={file}" :root root :file new)
           new)))
     (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "history-file-for-read: root=nil outcome=nil")
     nil))
@@ -281,13 +287,13 @@ Same fallback semantics as `agent-repl--history-file-for-read'."
             (legacy (expand-file-name agent-repl--legacy-state-filename root)))
         (cond
          ((file-exists-p new)
-          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=%s source=new file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root={root} source=new file={file}" :root root :file new)
           new)
          ((file-exists-p legacy)
-          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=%s source=legacy file=%s" root legacy)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root={root} source=legacy file={file}" :root root :file legacy)
           legacy)
          (t
-          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=%s source=new-missing file=%s" root new)
+          (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root={root} source=new-missing file={file}" :root root :file new)
           new)))
     (agent-repl--log '(:agent-repl-central "saved workspace state spans workspaces") "state-file-for-read: root=nil outcome=nil")
     nil))
@@ -333,10 +339,10 @@ WS defaults to the current workspace name."
          (buf (and ws (agent-repl--input-buffer ws))))
     (if buf
         (progn
-          (agent-repl--log ws "ws-live-input-buffer: live ws=%s buffer=%s" ws (buffer-name buf))
+          (agent-repl--log ws "ws-live-input-buffer: live ws={ws} buffer={buffer}" :ws ws :buffer (buffer-name buf))
           buf)
-      (agent-repl--log ws "ws-live-input-buffer: no live input buffer ws=%s recorded=%s"
-                       ws (and ws (agent-repl--ws-get ws :input-buffer)))
+      (agent-repl--log ws "ws-live-input-buffer: no live input buffer ws={ws} recorded={recorded}"
+                       :ws ws :recorded (and ws (agent-repl--ws-get ws :input-buffer)))
       nil)))
 
 (defun agent-repl--history-save (&optional ws)
@@ -345,37 +351,37 @@ Resolves the project root via `agent-repl--ws-dir' so the location
 follows the workspace record rather than whatever buffer is current.
 WS defaults to the current workspace name."
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (agent-repl--log ws "history-save: begin ws=%s" ws)
+    (agent-repl--log ws "history-save: begin ws={ws}" :ws ws)
     (if-let ((buf (agent-repl--ws-live-input-buffer ws)))
         (let* ((root (agent-repl--ws-dir ws))
                (history (buffer-local-value 'agent-repl--input-history buf))
                (file (when root (agent-repl--history-file root))))
           (cond
            ((null root)
-            (agent-repl--log ws "history-save: missing project-dir ws=%s history-count=%d" ws (length history))
+            (agent-repl--log ws "history-save: missing project-dir ws={ws} history-count={history_count}" :ws ws :history_count (length history))
             (error "agent-repl: history-save requires :project-dir for workspace %s" ws))
            (history
             (let ((unsent (agent-repl--history-head-unsent-p
                            history (buffer-local-value 'agent-repl--history-discard-entry buf))))
-              (agent-repl--log ws "history-save: writing ws=%s file=%s history-count=%d unsent-head=%s"
-                               ws file (length history) unsent)
+              (agent-repl--log ws "history-save: writing ws={ws} file={file} history-count={history_count} unsent-head={unsent_head}"
+                               :ws ws :file file :history_count (length history) :unsent_head unsent)
               (agent-repl--write-sexp-file
                file (if unsent (agent-repl--history-mark-unsent-head history) history))
-              (agent-repl--log ws "history-save: write complete ws=%s file=%s history-count=%d" ws file (length history))))
+              (agent-repl--log ws "history-save: write complete ws={ws} file={file} history-count={history_count}" :ws ws :file file :history_count (length history))))
            (t
-            (agent-repl--log ws "history-save: no history to save ws=%s file=%s" ws file))))
-      (agent-repl--log ws "history-save: no live input buffer ws=%s" ws))))
+            (agent-repl--log ws "history-save: no history to save ws={ws} file={file}" :ws ws :file file))))
+      (agent-repl--log ws "history-save: no live input buffer ws={ws}" :ws ws))))
 
 (defun agent-repl--history-restore (ws)
   "Load input history from disk into the current buffer for workspace WS.
 Resolves the history file location via `agent-repl--ws-dir', preferring
 the new `<root>/.claude/emacs/' location and falling back to the legacy
 project-root path when only the legacy file exists."
-  (agent-repl--log ws "history-restore: begin ws=%s" ws)
+  (agent-repl--log ws "history-restore: begin ws={ws}" :ws ws)
   (let* ((root (condition-case err
                    (agent-repl--ws-dir ws)
                  (error
-                  (agent-repl--log ws "history-restore: project-dir resolution failed ws=%s err=%S" ws err)
+                  (agent-repl--log ws "history-restore: project-dir resolution failed ws={ws} err={err}" :ws ws :err (prin1-to-string err))
                   (signal (car err) (cdr err)))))
          (data (when root
                  (agent-repl--read-sexp-file-if-exists
@@ -388,9 +394,9 @@ project-root path when only the legacy file exists."
                   data))
           (setq agent-repl--history-discard-entry
                 (and unsent (car agent-repl--input-history)))
-          (agent-repl--log ws "history-restore: loaded ws=%s root=%s history-count=%d unsent-head=%s"
-                           ws root (length data) unsent))
-      (agent-repl--log ws "history-restore: no data found ws=%s root=%s history-unchanged=t" ws root))))
+          (agent-repl--log ws "history-restore: loaded ws={ws} root={root} history-count={history_count} unsent-head={unsent_head}"
+                           :ws ws :root root :history_count (length data) :unsent_head unsent))
+      (agent-repl--log ws "history-restore: no data found ws={ws} root={root} history-unchanged=t" :ws ws :root root))))
 
 ;;;; Session state persistence
 
@@ -398,7 +404,7 @@ project-root path when only the legacy file exists."
   "Return a plist of serialized instantiation state for each environment in WS.
 Iterates over `agent-repl--environment-keys', converting each
 environment's instantiation struct to a plist."
-  (agent-repl--log ws "collect-env-state: ws=%s keys=%S" ws agent-repl--environment-keys)
+  (agent-repl--log ws "collect-env-state: ws={ws} keys={keys}" :ws ws :keys (prin1-to-string agent-repl--environment-keys))
   (cl-loop for key in agent-repl--environment-keys
            nconc (list key (agent-repl--instantiation-to-plist
                             (agent-repl--ws-get ws key)))))
@@ -450,20 +456,20 @@ requires the directory to exist, so once nothing re-creates it the
 workspace's records route centrally on their own."
   (let* ((root (agent-repl--ws-get ws :project-dir))
          (file (agent-repl--state-file root)))
-    (agent-repl--log ws "state-save ws=%s file=%s" ws file)
+    (agent-repl--log ws "state-save ws={ws} file={file}" :ws ws :file file)
     (cond
      ((null file)
-      (agent-repl--log ws "state-save: no :project-dir for ws=%s, skipping" ws))
+      (agent-repl--log ws "state-save: no :project-dir for ws={ws}, skipping" :ws ws))
      ((not (file-directory-p root))
       (agent-repl--info
        '(:agent-repl-central "a workspace with no directory owns no durable sink")
-       "elisp.history.state-save: skipped ws=%s reason=root-gone root=%s" ws root))
+       "elisp.history.state-save: skipped ws={ws} reason=root-gone root={root}" :ws ws :root root))
      (t
       (let* ((existing (when (file-exists-p file)
                          (condition-case err
                              (agent-repl--read-sexp-file file)
                            (error
-                            (agent-repl--log ws "state-save: existing-state read failed ws=%s file=%s err=%S" ws file err)
+                            (agent-repl--log ws "state-save: existing-state read failed ws={ws} file={file} err={err}" :ws ws :file file :err (prin1-to-string err))
                             (signal (car err) (cdr err))))))
              (created-at (or (agent-repl--ws-get ws :created-at)
                              (plist-get existing :created-at)
@@ -492,13 +498,13 @@ workspace's records route centrally on their own."
              ;; and Emacs asking the transcript was a second, weaker answer to a
              ;; question it should not have been asking at all.
              (model (agent-repl--ws-get ws :model)))
-        (agent-repl--log ws "state-save: inputs ws=%s existing-file=%s existing-state=%s created-at-source=%s last-killed-at-present=%s last-viewed-at-present=%s model=%S"
-                         ws (file-exists-p file) (not (null existing))
-                         (cond ((agent-repl--ws-get ws :created-at) :workspace)
+        (agent-repl--log ws "state-save: inputs ws={ws} existing-file={existing_file} existing-state={existing_state} created-at-source={created_at_source} last-killed-at-present={last_killed_at_present} last-viewed-at-present={last_viewed_at_present} model={model}"
+                         :ws ws :existing_file (file-exists-p file) :existing_state (not (null existing))
+                         :created_at_source (cond ((agent-repl--ws-get ws :created-at) :workspace)
                                ((plist-get existing :created-at) :persisted)
                                (t :current-time))
-                         (not (null last-killed-at)) (not (null last-viewed-at))
-                         model)
+                         :last_killed_at_present (not (null last-killed-at)) :last_viewed_at_present (not (null last-viewed-at))
+                         :model (prin1-to-string model))
         (agent-repl--ws-put ws :created-at created-at)
         (when last-killed-at
           (agent-repl--ws-put ws :last-killed-at last-killed-at))
@@ -528,28 +534,28 @@ workspace's records route centrally on their own."
                              (agent-repl--collect-env-state ws))))
           (agent-repl--with-error-logging "state-save"
             (agent-repl--write-sexp-file file state)
-            (agent-repl--log ws "state-save: write complete ws=%s file=%s" ws file))))))))
+            (agent-repl--log ws "state-save: write complete ws={ws} file={file}" :ws ws :file file))))))))
 
 (defun agent-repl--validate-ws-env (ws)
   "Validate that workspace WS has well-formed environment state.
 Signals an error with a descriptive message when validation fails."
   (let ((active-env (agent-repl--ws-get ws :active-env)))
     (unless (memq active-env agent-repl--environment-keys)
-      (agent-repl--log ws "validate-ws-env: invalid active-env ws=%s active-env=%S allowed=%S" ws active-env agent-repl--environment-keys)
+      (agent-repl--log ws "validate-ws-env: invalid active-env ws={ws} active-env={active_env} allowed={allowed}" :ws ws :active_env (prin1-to-string active-env) :allowed (prin1-to-string agent-repl--environment-keys))
       (error "agent-repl: ws %s has invalid :active-env %S (expected one of %S)"
              ws active-env agent-repl--environment-keys))
     (dolist (key agent-repl--environment-keys)
       (let ((inst (agent-repl--ws-get ws key)))
         (unless (agent-repl-instantiation-p inst)
-          (agent-repl--log ws "validate-ws-env: invalid instantiation ws=%s env=%s value-type=%s" ws key (type-of inst))
+          (agent-repl--log ws "validate-ws-env: invalid instantiation ws={ws} env={env} value-type={value_type}" :ws ws :env key :value_type (type-of inst))
           (error "agent-repl: ws %s missing instantiation struct for %s (got %S)"
                  ws key inst))
         (let ((sid (agent-repl-instantiation-session-id inst)))
           (unless (or (null sid) (stringp sid))
-            (agent-repl--log ws "validate-ws-env: invalid session-id ws=%s env=%s session-id-type=%s" ws key (type-of sid))
+            (agent-repl--log ws "validate-ws-env: invalid session-id ws={ws} env={env} session-id-type={session_id_type}" :ws ws :env key :session_id_type (type-of sid))
             (error "agent-repl: ws %s env %s has invalid session-id %S (expected string or nil)"
                    ws key sid))))))
-  (agent-repl--log ws "validate-ws-env: ws=%s passed" ws))
+  (agent-repl--log ws "validate-ws-env: ws={ws} passed" :ws ws))
 
 ;;;; Input history
 
@@ -572,7 +578,7 @@ Skips empty strings and duplicates of the most recent entry."
         (ws (agent-repl--buffer-owner (current-buffer))))
     (cond
      ((string-empty-p text)
-      (agent-repl--log ws "history-push: skipped empty input ws=%s history-count=%d" ws (length agent-repl--input-history)))
+      (agent-repl--log ws "history-push: skipped empty input ws={ws} history-count={history_count}" :ws ws :history_count (length agent-repl--input-history)))
      ((and (equal text (car agent-repl--input-history))
            (agent-repl--history-head-unsent-p
             agent-repl--input-history agent-repl--history-discard-entry))
@@ -580,12 +586,12 @@ Skips empty strings and duplicates of the most recent entry."
       ;; stays, but it is no longer unsent, so it is never put back in the
       ;; composer after a restart.
       (setq agent-repl--history-discard-entry nil)
-      (agent-repl--log ws "history-push: the unsent discard at the head is now recorded ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history)))
+      (agent-repl--log ws "history-push: the unsent discard at the head is now recorded ws={ws} input-chars={input_chars} history-count={history_count}" :ws ws :input_chars (length text) :history_count (length agent-repl--input-history)))
      ((equal text (car agent-repl--input-history))
-      (agent-repl--log ws "history-push: skipped duplicate input ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history)))
+      (agent-repl--log ws "history-push: skipped duplicate input ws={ws} input-chars={input_chars} history-count={history_count}" :ws ws :input_chars (length text) :history_count (length agent-repl--input-history)))
      (t
       (push text agent-repl--input-history)
-      (agent-repl--log ws "history-push: recorded input ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history))))))
+      (agent-repl--log ws "history-push: recorded input ws={ws} input-chars={input_chars} history-count={history_count}" :ws ws :input_chars (length text) :history_count (length agent-repl--input-history))))))
 
 (defvar-local agent-repl--history-discard-entry nil
   "The history item the discard command added, as that very string object, or nil.
@@ -609,7 +615,7 @@ pushed as `agent-repl--history-push' does."
         (progn
           (setcar agent-repl--input-history text)
           (setq agent-repl--history-discard-entry (car agent-repl--input-history))
-          (agent-repl--log ws "history-push-discard: replaced the previous discard ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history)))
+          (agent-repl--log ws "history-push-discard: replaced the previous discard ws={ws} input-chars={input_chars} history-count={history_count}" :ws ws :input_chars (length text) :history_count (length agent-repl--input-history)))
       (let ((count (length agent-repl--input-history)))
         (agent-repl--history-push text)
         (when (> (length agent-repl--input-history) count)
@@ -640,13 +646,13 @@ created without one.  Persists the ring when it records.  Returns
                      (plist-get (agent-repl--input-said-parts said) :parts))))))
     (cond
      ((or (null text) (string-empty-p text))
-      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws=%s outcome=none" ws)
+      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws={ws} outcome=none" :ws ws)
       'none)
      ((null buf)
-      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws=%s outcome=no-composer" ws)
+      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws={ws} outcome=no-composer" :ws ws)
       'no-composer)
      ((member text (buffer-local-value 'agent-repl--input-history buf))
-      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws=%s outcome=present" ws)
+      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws={ws} outcome=present" :ws ws)
       'present)
      (t
       (let ((before (buffer-local-value 'agent-repl--input-history buf)))
@@ -660,12 +666,12 @@ created without one.  Persists the ring when it records.  Returns
           (error
            (with-current-buffer buf
              (setq agent-repl--input-history before))
-           (agent-repl--error ws "elisp.history.initial-prompt ws=%s outcome=save-failed input-chars=%d history-count=%d err=%S"
-                              ws (length text) (length before) err)
+           (agent-repl--error ws "elisp.history.initial-prompt ws={ws} outcome=save-failed input-chars={input_chars} history-count={history_count} err={err}"
+                              :ws ws :input_chars (length text) :history_count (length before) :err (prin1-to-string err))
            (signal (car err) (cdr err)))))
-      (agent-repl--info ws "elisp.history.initial-prompt ws=%s outcome=recorded input-chars=%d history-count=%d"
-                        ws (length text)
-                        (length (buffer-local-value 'agent-repl--input-history buf)))
+      (agent-repl--info ws "elisp.history.initial-prompt ws={ws} outcome=recorded input-chars={input_chars} history-count={history_count}"
+                        :ws ws :input_chars (length text)
+                        :history_count (length (buffer-local-value 'agent-repl--input-history buf)))
       'recorded))))
 
 (defun agent-repl--history-on-host-update (ws host)
@@ -678,7 +684,7 @@ Registered on `agent-repl-host-update-functions'."
 (defun agent-repl--history-reset ()
   "Reset history browsing index to the default (not browsing) state."
   (agent-repl--log-verbose (agent-repl--buffer-owner (current-buffer))
-                           "history-reset: index=%d -> -1" agent-repl--history-index)
+                           "history-reset: index={index} -> -1" :index agent-repl--history-index)
   (setq agent-repl--history-index -1))
 
 (defun agent-repl--history-replace-buffer-text (text)
@@ -692,8 +698,8 @@ Binds `agent-repl--history-navigating' to suppress `history-on-change'."
   "Display the history entry at INDEX, or the stash when INDEX is negative.
 Updates `agent-repl--history-index' and replaces the buffer contents."
   (agent-repl--log (agent-repl--buffer-owner (current-buffer))
-                   "history-show-entry: index=%d history-count=%d source=%s"
-                   index (length agent-repl--input-history) (if (< index 0) :stash :history))
+                   "history-show-entry: index={index} history-count={history_count} source={source}"
+                   :index index :history_count (length agent-repl--input-history) :source (if (< index 0) :stash :history))
   (setq agent-repl--history-index index)
   (agent-repl--history-replace-buffer-text
    (if (< index 0)
@@ -707,15 +713,15 @@ Updates `agent-repl--history-index' and replaces the buffer contents."
         (history-count (length agent-repl--input-history)))
     (cond
      ((zerop history-count)
-      (agent-repl--log ws "history-prev: no-op empty-history ws=%s index=%d" ws agent-repl--history-index))
+      (agent-repl--log ws "history-prev: no-op empty-history ws={ws} index={index}" :ws ws :index agent-repl--history-index))
      ((>= (1+ agent-repl--history-index) history-count)
-      (agent-repl--log ws "history-prev: no-op oldest-entry ws=%s index=%d history-count=%d" ws agent-repl--history-index history-count))
+      (agent-repl--log ws "history-prev: no-op oldest-entry ws={ws} index={index} history-count={history_count}" :ws ws :index agent-repl--history-index :history_count history-count))
      (t
       (let ((next-index (1+ agent-repl--history-index)))
         (when (= agent-repl--history-index -1)
           (setq agent-repl--history-stash (buffer-string))
-          (agent-repl--log ws "history-prev: stashed draft ws=%s draft-chars=%d" ws (length agent-repl--history-stash)))
-        (agent-repl--log ws "history-prev: showing ws=%s from-index=%d to-index=%d history-count=%d" ws agent-repl--history-index next-index history-count)
+          (agent-repl--log ws "history-prev: stashed draft ws={ws} draft-chars={draft_chars}" :ws ws :draft_chars (length agent-repl--history-stash)))
+        (agent-repl--log ws "history-prev: showing ws={ws} from-index={from_index} to-index={to_index} history-count={history_count}" :ws ws :from_index agent-repl--history-index :to_index next-index :history_count history-count)
         (agent-repl--history-show-entry next-index))))))
 
 (defun agent-repl--history-next ()
@@ -724,9 +730,9 @@ Updates `agent-repl--history-index' and replaces the buffer contents."
   (let ((ws (agent-repl--buffer-owner (current-buffer))))
     (if (>= agent-repl--history-index 0)
         (let ((next-index (1- agent-repl--history-index)))
-          (agent-repl--log ws "history-next: showing ws=%s from-index=%d to-index=%d history-count=%d" ws agent-repl--history-index next-index (length agent-repl--input-history))
+          (agent-repl--log ws "history-next: showing ws={ws} from-index={from_index} to-index={to_index} history-count={history_count}" :ws ws :from_index agent-repl--history-index :to_index next-index :history_count (length agent-repl--input-history))
           (agent-repl--history-show-entry next-index))
-      (agent-repl--log ws "history-next: no-op at-draft ws=%s history-count=%d" ws (length agent-repl--input-history)))))
+      (agent-repl--log ws "history-next: no-op at-draft ws={ws} history-count={history_count}" :ws ws :history_count (length agent-repl--input-history)))))
 
 (defun agent-repl--history-on-change (&rest _)
   "Reset history browsing when the user edits the buffer directly."
@@ -734,10 +740,10 @@ Updates `agent-repl--history-index' and replaces the buffer contents."
          (index agent-repl--history-index)
          (reset-p (and (not agent-repl--history-navigating) (>= index 0))))
     (when reset-p
-      (agent-repl--log ws "history-on-change resetting from index=%d" index)
+      (agent-repl--log ws "history-on-change resetting from index={index}" :index index)
       (agent-repl--history-reset))
     ;; This hook runs for every user edit, so skipped branches remain verbose.
-    (agent-repl--log-verbose ws "history-on-change: navigating=%s index=%d reset=%s" agent-repl--history-navigating index reset-p)))
+    (agent-repl--log-verbose ws "history-on-change: navigating={navigating} index={index} reset={reset}" :navigating agent-repl--history-navigating :index index :reset reset-p)))
 
 ;;;; History search (completing-read)
 
@@ -755,7 +761,7 @@ Index is the position into `agent-repl--input-history' (0 = most recent)."
   (let ((candidates (cl-loop for entry in agent-repl--input-history
                              for i from 0
                              collect (cons (agent-repl--history-format-candidate entry i) i))))
-    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "history-search-candidates: history-count=%d candidate-count=%d" (length agent-repl--input-history) (length candidates))
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "history-search-candidates: history-count={history_count} candidate-count={candidate_count}" :history_count (length agent-repl--input-history) :candidate_count (length candidates))
     candidates))
 
 (defun agent-repl-history-search ()
@@ -766,8 +772,8 @@ the selection.  Stashes the in-progress text on first navigation so
 arrow-key navigation flow.  No-op (with a message) when history is
 empty."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-log-name) "history-search: entries=%d"
-                    (length agent-repl--input-history))
+  (agent-repl--log (agent-repl--ws-current-log-name) "history-search: entries={entries}"
+                    :entries (length agent-repl--input-history))
   (if (null agent-repl--input-history)
       (progn
         (agent-repl--log (agent-repl--ws-current-log-name) "history-search: no-op empty-history")
@@ -776,14 +782,14 @@ empty."
            (choice (condition-case err
                        (completing-read "Claude history: " (mapcar #'car candidates) nil t)
                      (quit
-                      (agent-repl--log (agent-repl--ws-current-log-name) "history-search: cancelled entries=%d" (length candidates))
+                      (agent-repl--log (agent-repl--ws-current-log-name) "history-search: cancelled entries={entries}" :entries (length candidates))
                       (signal (car err) (cdr err)))))
            (index (cdr (assoc choice candidates))))
       (unless index
-        (agent-repl--log (agent-repl--ws-current-log-name) "history-search: invalid selection candidate-count=%d" (length candidates))
+        (agent-repl--log (agent-repl--ws-current-log-name) "history-search: invalid selection candidate-count={candidate_count}" :candidate_count (length candidates))
         (error "agent-repl: history search selection was not a candidate"))
       (when (= agent-repl--history-index -1)
         (setq agent-repl--history-stash (buffer-string))
-        (agent-repl--log (agent-repl--ws-current-log-name) "history-search: stashed draft draft-chars=%d" (length agent-repl--history-stash)))
-      (agent-repl--log (agent-repl--ws-current-log-name) "history-search: selected index=%d candidate-count=%d" index (length candidates))
+        (agent-repl--log (agent-repl--ws-current-log-name) "history-search: stashed draft draft-chars={draft_chars}" :draft_chars (length agent-repl--history-stash)))
+      (agent-repl--log (agent-repl--ws-current-log-name) "history-search: selected index={index} candidate-count={candidate_count}" :index index :candidate_count (length candidates))
       (agent-repl--history-show-entry index))))

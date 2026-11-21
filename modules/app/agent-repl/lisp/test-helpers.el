@@ -1105,31 +1105,34 @@ clock every suite uses (test-test-helpers.el holds every suite to it)."
 
 (defmacro agent-repl-test--record-into (place)
   "A stand-in for a logging rung that records each record's text into PLACE.
-The lambda takes the rung's arguments (SCOPE FMT &rest ARGS), formats the
-record and pushes it onto PLACE, so PLACE holds the records newest first.
-Stub a rung with it: ((symbol-function \='agent-repl--error)
+The lambda takes the rung emitter's arguments (SCOPE SITE &rest VALUES),
+renders the record's message and pushes it onto PLACE, so PLACE holds the
+records newest first.  Stub a rung by its emitter:
+\((symbol-function \='agent-repl--emit-error)
 \(agent-repl-test--record-into errors)).  THE ONE such recorder every suite
 uses (test-test-helpers.el holds every suite to it)."
-  `(lambda (_scope fmt &rest args) (push (apply #'format fmt args) ,place)))
+  `(lambda (_scope site &rest values)
+     (push (agent-repl-log-site-render site values) ,place)))
 
 (defmacro agent-repl-test--record-leveled-into (place level)
   "A stand-in for a logging rung that records each record as (LEVEL . TEXT) into PLACE.
 `agent-repl-test--record-into' with the rung's LEVEL kept, for a case that
 reads which rung a record went to: stub each rung with its own LEVEL, as
-in ((symbol-function \='agent-repl--warn)
+in ((symbol-function \='agent-repl--emit-warn)
 \(agent-repl-test--record-leveled-into records \='warn)).  PLACE holds the
 records newest first.  THE ONE such recorder every suite uses
 \(test-test-helpers.el holds every suite to it)."
-  `(lambda (_scope fmt &rest args) (push (cons ,level (apply #'format fmt args)) ,place)))
+  `(lambda (_scope site &rest values)
+     (push (cons ,level (agent-repl-log-site-render site values)) ,place)))
 
 (defmacro agent-repl-test--fatal-into (place)
-  "A stand-in for `agent-repl--fatal' that records into PLACE, then signals.
+  "A stand-in for `agent-repl--emit-fatal' that records into PLACE, then signals.
 Like `agent-repl-test--record-into', it pushes each record's text onto
 PLACE, newest first; then it signals an `error' carrying that text, as
 the real rung aborts its caller.  THE ONE such stand-in every suite uses
 \(test-test-helpers.el holds every suite to it)."
-  `(lambda (_scope fmt &rest args)
-     (let ((text (apply #'format fmt args)))
+  `(lambda (_scope site &rest values)
+     (let ((text (agent-repl-log-site-render site values)))
        (push text ,place)
        (error "%s" text))))
 

@@ -85,7 +85,7 @@ EVENTS is a list of recorder-shaped plists (`:time', `:keys',
     (let ((warnings nil))
       (cl-letf (((symbol-function 'this-command-keys-vector)
                  (lambda () (error "recorder boom")))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings)))
         (agent-repl--interaction-record-capture)
         (should (string-match-p "capture failed" (car warnings)))))))
@@ -94,7 +94,7 @@ EVENTS is a list of recorder-shaped plists (`:time', `:keys',
   "Exceeding capacity drops the OLDEST events and keeps the newest."
   (agent-repl-test--with-interaction-recorder
     (let ((agent-repl-interaction-record-capacity 10))
-      (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) #'ignore))
         (dotimes (i 11)
           (let ((this-command (intern (format "cmd-%d" i))))
             (agent-repl--interaction-record-capture)))
@@ -241,7 +241,7 @@ EVENTS is a list of recorder-shaped plists (`:time', `:keys',
   (agent-repl-test--with-interaction-recorder
     (let ((agent-repl-interaction-replay-execute-function
            (lambda (_keys) (error "replay boom"))))
-      (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) #'ignore))
         (agent-repl--interaction-replay-run-event
          "replay-test" (list :index 0 :keys [97] :command 'cmd-a))
         (should (= agent-repl--interaction-replay-failures 1))))))

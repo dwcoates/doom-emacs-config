@@ -36,6 +36,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; `magit-section' objects are EIEIO instances; `eieio-oref' reads their
 ;; slots.
 (require 'eieio)
@@ -44,13 +48,9 @@
 (require 'subr-x)
 
 (declare-function agent-repl-status-tab-state "status" (ws))
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (defvar agent-repl--color-merging-purple)
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
@@ -230,7 +230,7 @@ gated, wrapped into a `UserSaid' and submitted with an idempotency key
 and this call site's own origin -- a canned prompt is not a privileged
 path, it is a prompt whose words the editor happened to compose."
   (let ((ws (agent-repl--ws-current-name)))
-    (agent-repl--log ws "elisp.commands.send-to-agent len=%d origin=%S" (length text) origin)
+    (agent-repl--log ws "elisp.commands.send-to-agent len={len} origin={origin}" :len (length text) :origin (prin1-to-string origin))
     (agent-repl--send origin text ws)))
 
 ;;;; ---- File reference helpers --------------------------------------------
@@ -240,11 +240,11 @@ path, it is a prompt whose words the editor happened to compose."
   (let ((file (buffer-file-name))
         (ws (agent-repl--ws-current-name)))
     (unless file
-      (agent-repl--log ws "elisp.commands.relative-path-refused buffer=%s" (buffer-name))
+      (agent-repl--log ws "elisp.commands.relative-path-refused buffer={buffer}" :buffer (buffer-name))
       (user-error "Buffer %s is not visiting a file" (buffer-name)))
     (let ((rel (file-relative-name (agent-repl--path-canonical file)
                                    (agent-repl--ws-dir ws))))
-      (agent-repl--log ws "elisp.commands.relative-path path=%s" rel)
+      (agent-repl--log ws "elisp.commands.relative-path path={path}" :path rel)
       rel)))
 
 (defun agent-repl--format-file-ref ()
@@ -257,12 +257,12 @@ deactivated.  Without one: file:line."
               (end-line (line-number-at-pos (region-end))))
           (deactivate-mark)
           (agent-repl--log (agent-repl--ws-current-log-name)
-                           "elisp.commands.file-ref branch=region start=%d end=%d"
-                           start-line end-line)
+                           "elisp.commands.file-ref branch=region start={start} end={end}"
+                           :start start-line :end end-line)
           (format "%s:%d-%d" rel start-line end-line))
       (agent-repl--log (agent-repl--ws-current-log-name)
-                       "elisp.commands.file-ref branch=single-line line=%d"
-                       (line-number-at-pos (point)))
+                       "elisp.commands.file-ref branch=single-line line={line}"
+                       :line (line-number-at-pos (point)))
       (format "%s:%d" rel (line-number-at-pos (point))))))
 
 (eval-when-compile
@@ -285,7 +285,7 @@ Returns \"file:startline-endline\" from the hunk's to-range."
                (agent-repl--ws-dir (agent-repl--ws-current-name))))
          (ref (format "%s:%d-%d" rel start end)))
     (agent-repl--log (agent-repl--ws-current-log-name)
-                     "elisp.commands.magit-hunk-ref ref=%s" ref)
+                     "elisp.commands.magit-hunk-ref ref={ref}" :ref ref)
     ref))
 
 (defun agent-repl--context-reference ()
@@ -321,8 +321,8 @@ than leaking into whichever one happened to be current."
     (when (and workspace buf)
       (when-let ((persp (agent-repl--ws-resolve-persp workspace)))
         (agent-repl--ws-add-buffer buf persp nil)))
-    (agent-repl--log ws "elisp.commands.link-code file=%s line=%s workspace=%s"
-                     path start-line (and workspace t))
+    (agent-repl--log ws "elisp.commands.link-code file={file} line={line} workspace={workspace}"
+                     :file path :line start-line :workspace (and workspace t))
     buf))
 
 ;;;; ---- Diff analysis families --------------------------------------------
@@ -332,7 +332,7 @@ than leaking into whichever one happened to be current."
 CHANGE-SPEC describes which changes; PROMPT is the analysis instruction."
   (let ((msg (format agent-repl-diff-analysis-message-template change-spec prompt)))
     (agent-repl--log (agent-repl--ws-current-log-name)
-                     "elisp.commands.diff-analysis scope=%s" change-spec)
+                     "elisp.commands.diff-analysis scope={scope}" :scope change-spec)
     (agent-repl--send-to-agent msg :command-diff-analysis)))
 
 ;; The scope tables and the two helpers below are read by
@@ -377,16 +377,16 @@ CHANGE-SPEC describes which changes; PROMPT is the analysis instruction."
     (let ((override (and scope-overrides (cdr (assq scope (eval scope-overrides))))))
       (cond
        (override
-        (when (fboundp 'agent-repl--log)
-          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=override scope=%s" scope))
+        (when (fboundp 'agent-repl--emit-log-record)
+          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=override scope={scope}" :scope scope))
         override)
        ((eq default-spec :use-branch-diff-spec)
-        (when (fboundp 'agent-repl--log)
-          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=branch-spec scope=%s" scope))
+        (when (fboundp 'agent-repl--emit-log-record)
+          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=branch-spec scope={scope}" :scope scope))
         'agent-repl-branch-diff-spec)
        (t
-        (when (fboundp 'agent-repl--log)
-          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=default scope=%s" scope))
+        (when (fboundp 'agent-repl--emit-log-record)
+          (agent-repl--log '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.change-spec branch=default scope={scope}" :scope scope))
         default-spec))))
 
   (defun agent-repl--diff-command-form (scope-entry family doc-verb prompt-var scope-overrides)
@@ -446,7 +446,7 @@ region: the file path and line range.  Otherwise: file path and line."
   (interactive)
   (let* ((ref (agent-repl--context-reference))
          (msg (format agent-repl-explain-prompt-template ref)))
-    (agent-repl--log (agent-repl--ws-current-log-name) "elisp.commands.explain ref=%s" ref)
+    (agent-repl--log (agent-repl--ws-current-log-name) "elisp.commands.explain ref={ref}" :ref ref)
     (agent-repl--send-to-agent msg :command-explain-context)))
 
 (defun agent-repl-explain-prompt ()
@@ -457,7 +457,7 @@ region: the file path and line range.  Otherwise: file path and line."
     (if (and msg (not (string-empty-p msg)))
         (progn
           (agent-repl--log (agent-repl--ws-current-log-name)
-                           "elisp.commands.explain-prompt len=%d" (length msg))
+                           "elisp.commands.explain-prompt len={len}" :len (length msg))
           (agent-repl--send-to-agent msg :command-explain-prompt))
       (agent-repl--log (agent-repl--ws-current-log-name)
                        "elisp.commands.explain-prompt-empty -- nothing sent"))))
@@ -475,20 +475,20 @@ region: the file path and line range.  Otherwise: file path and line."
 On failure the agent dispatch is SKIPPED and the git error is surfaced:
 rebasing against a stale `origin/master' would silently do the wrong
 thing, which is worse than not rebasing."
-  (agent-repl--log ws "elisp.commands.rebase-fetch ok=%s output=%s" ok output)
+  (agent-repl--log ws "elisp.commands.rebase-fetch ok={ok} output={output}" :ok ok :output output)
   (if ok
       (progn
-        (agent-repl--info ws "elisp.commands.rebase-fetch-complete ws=%s" ws)
+        (agent-repl--info ws "elisp.commands.rebase-fetch-complete ws={ws}" :ws ws)
         (agent-repl--send-to-agent agent-repl-rebase-onto-origin-master-prompt
                                    :command-rebase))
-    (agent-repl--warn ws "elisp.commands.rebase-fetch-failed ws=%s output=%s" ws output)))
+    (agent-repl--warn ws "elisp.commands.rebase-fetch-failed ws={ws} output={output}" :ws ws :output output)))
 
 (defun agent-repl-rebase-onto-origin-master ()
   "Fetch origin, then ask the agent to rebase onto origin/master."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (project-dir (agent-repl--ws-dir ws)))
-    (agent-repl--info ws "elisp.commands.rebase-fetch-start ws=%s dir=%s" ws project-dir)
+    (agent-repl--info ws "elisp.commands.rebase-fetch-start ws={ws} dir={dir}" :ws ws :dir project-dir)
     (agent-repl--async-git
      "rebase-fetch" project-dir '("fetch" "origin")
      (lambda (ok output)
@@ -514,10 +514,10 @@ echo area shows either way.  A script killed before it printed has none."
     (if ok
         (progn
           (agent-repl--info agent-repl--push-release-log-scope
-                            "elisp.commands.push-release-complete output=%S" output)
+                            "elisp.commands.push-release-complete output={output}" :output (prin1-to-string output))
           (message "agent-repl: %s" verdict))
       (agent-repl--error agent-repl--push-release-log-scope
-                         "elisp.commands.push-release-failed output=%S" output)
+                         "elisp.commands.push-release-failed output={output}" :output (prin1-to-string output))
       (message "agent-repl: release push failed: %s" verdict))))
 
 (defun agent-repl-push-release ()
@@ -526,7 +526,7 @@ echo area shows either way.  A script killed before it printed has none."
   (let* ((dir (file-name-directory agent-repl--config-file))
          (script (expand-file-name "bin/push-release.sh" dir)))
     (agent-repl--info agent-repl--push-release-log-scope
-                      "elisp.commands.push-release-start script=%s" script)
+                      "elisp.commands.push-release-start script={script}" :script script)
     (message "agent-repl: pushing master to origin as a release...")
     (agent-repl--async-command "push-release" dir (list script)
                                #'agent-repl--push-release-callback)))
@@ -536,10 +536,10 @@ echo area shows either way.  A script killed before it printed has none."
 E.g. \\='no-self-certified becomes \"--self-certified\"."
   (let ((name (symbol-name sym)))
     (unless (string-prefix-p "no-" name)
-      (agent-repl--log ws "elisp.commands.exclusion-invalid sym=%S" sym)
+      (agent-repl--log ws "elisp.commands.exclusion-invalid sym={sym}" :sym (prin1-to-string sym))
       (error "agent-repl: exclusion symbol must start with `no-': %S" sym))
     (let ((flag (concat "--" (substring name 3))))
-      (agent-repl--log ws "elisp.commands.exclusion sym=%S flag=%s" sym flag)
+      (agent-repl--log ws "elisp.commands.exclusion sym={sym} flag={flag}" :sym (prin1-to-string sym) :flag flag)
       flag)))
 
 (defun agent-repl--build-create-or-update-pr-prompt (excluded &optional ws)
@@ -552,8 +552,8 @@ send the flag it meant to drop."
          (mapcar (lambda (sym)
                    (let ((flag (agent-repl--exclusion-symbol-to-flag sym ws)))
                      (unless (member flag agent-repl-create-or-update-pr-base-flags)
-                       (agent-repl--log ws "elisp.commands.exclusion-unknown sym=%S flag=%s"
-                                        sym flag)
+                       (agent-repl--log ws "elisp.commands.exclusion-unknown sym={sym} flag={flag}"
+                                        :sym (prin1-to-string sym) :flag flag)
                        (error "agent-repl: %S excludes %s, not in base flags" sym flag))
                      flag))
                  excluded)))
@@ -562,7 +562,7 @@ send the flag it meant to drop."
                          (cl-remove-if (lambda (f) (member f excluded-flags))
                                        agent-repl-create-or-update-pr-base-flags))
                    " ")))
-      (agent-repl--log ws "elisp.commands.pr-prompt excluded=%S prompt=%s" excluded prompt)
+      (agent-repl--log ws "elisp.commands.pr-prompt excluded={excluded} prompt={prompt}" :excluded (prin1-to-string excluded) :prompt prompt)
       prompt)))
 
 (defun agent-repl-create-or-update-pr (&optional excluded)
@@ -577,8 +577,8 @@ the daemon accepts the submission."
          (prefix (and raw-prefix (string-trim-right raw-prefix)))
          (has-prefix (and prefix (not (string-empty-p prefix))))
          (prompt (if has-prefix (concat prefix " " base) base)))
-    (agent-repl--log ws "elisp.commands.create-or-update-pr prefix-len=%d"
-                     (length (or prefix "")))
+    (agent-repl--log ws "elisp.commands.create-or-update-pr prefix-len={prefix_len}"
+                     :prefix_len (length (or prefix "")))
     (agent-repl--send-to-agent prompt :command-create-or-update-pr)))
 
 (defun agent-repl-create-or-update-pr-no-self-certified ()
@@ -593,7 +593,7 @@ touched and the agent is not contacted."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (prompt (agent-repl--build-create-or-update-pr-prompt excluded ws)))
-    (agent-repl--log ws "elisp.commands.pr-paste prompt=%s" prompt)
+    (agent-repl--log ws "elisp.commands.pr-paste prompt={prompt}" :prompt prompt)
     (insert "`" prompt "`")))
 
 (defun agent-repl-create-or-update-pr-no-self-certified-paste ()
@@ -609,7 +609,7 @@ touched and the agent is not contacted."
   (let ((ref (agent-repl--format-file-ref)))
     (kill-new ref)
     (agent-repl--log (agent-repl--ws-current-log-name)
-                     "elisp.commands.copy-reference ref=%s" ref)
+                     "elisp.commands.copy-reference ref={ref}" :ref ref)
     (message "Copied: %s" ref)))
 
 (defun agent-repl-copy-workspace-name ()
@@ -619,7 +619,7 @@ touched and the agent is not contacted."
     (unless ws
       (user-error "No current workspace to copy the name of"))
     (kill-new ws)
-    (agent-repl--log ws "elisp.commands.copy-workspace-name ws=%s" ws)
+    (agent-repl--log ws "elisp.commands.copy-workspace-name ws={ws}" :ws ws)
     (message "Copied workspace name: %s" ws)))
 
 ;;;; ---- The most-recent-file cache ---------------------------------------
@@ -695,7 +695,7 @@ moves the user nowhere: there is no workspace to come up on."
         (dispatched-at (agent-repl-host-editor-switch-count)))
     (unless (file-directory-p canonical)
       (user-error "agent-repl: %s is not a directory" canonical))
-    (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project dir=%s" canonical)
+    (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project dir={dir}" :dir canonical)
     (agent-repl--ws-register-project canonical)
     ;; THE GESTURE LEAVES A MARK IMMEDIATELY, like every other way of putting
     ;; a workspace on the roster: the register round-trips to the daemon, and
@@ -707,8 +707,8 @@ moves the user nowhere: there is no workspace to come up on."
      (lambda (ref)
        (if ref
            (progn
-             (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-registered dir=%s id=%s"
-                               canonical (plist-get ref :id))
+             (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-registered dir={dir} id={id}"
+                               :dir canonical :id (plist-get ref :id))
              ;; A REGISTERED DIRECTORY COMES UP ON ITS PANELS like every
              ;; other way of opening a workspace (owner ruling,
              ;; 2026-09-13, item 6); the roster row is where that happens,
@@ -721,8 +721,8 @@ moves the user nowhere: there is no workspace to come up on."
          ;; reached the log before, so a refused or unanswered register was
          ;; indistinguishable from one that worked and simply did not move
          ;; the user -- the exact ambiguity this whole ladder is against.
-         (agent-repl--warn '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-not-registered dir=%s"
-                           canonical)
+         (agent-repl--warn '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-not-registered dir={dir}"
+                           :dir canonical)
          (agent-repl-workspace-progress-report
           :register :failed (format "the daemon did not register %s" canonical))))
      nil
@@ -761,9 +761,9 @@ that is not a workspace arms nothing either -- there is no panel to show."
     (cond
      ((null ws)
       (agent-repl--log (agent-repl--ws-current-log-name)
-                       "switch-project-arm-panels: path=%s branch=not-a-workspace" project))
+                       "switch-project-arm-panels: path={path} branch=not-a-workspace" :path project))
      ((equal ws current)
-      (agent-repl--log ws "switch-project-arm-panels: ws=%s branch=already-current" ws))
+      (agent-repl--log ws "switch-project-arm-panels: ws={ws} branch=already-current" :ws ws))
      (t
       (agent-repl--arm-landing-panels ws)))))
 
@@ -948,8 +948,8 @@ sink, naming OPERATION, the entry and what it lacks, then signals.
 The one way a switcher ranking reports an entry that breaks its
 invariant."
   (agent-repl--error '(:agent-repl-central "the workspace switcher reads the whole roster")
-                     "elisp.commands.%s: name=%s has no %s"
-                     operation (plist-get entry :name) missing)
+                     "elisp.commands.{operation}: name={name} has no {missing}"
+                     :operation operation :name (plist-get entry :name) :missing missing)
   (error "agent-repl: switcher entry %s has no %s" (plist-get entry :name) missing))
 
 (defun agent-repl--switch-most-recent (entries instant)
@@ -1267,8 +1267,8 @@ daemon-minted and there is no spelling of it Emacs could construct."
     (let* ((current (agent-repl--ws-current-name))
            (main (agent-repl--switch-repository-main candidates current))
            (_ (agent-repl--log (agent-repl--ws-current-log-name)
-                               "elisp.commands.switch-repository-main current=%s main=%s"
-                               current main))
+                               "elisp.commands.switch-repository-main current={current} main={main}"
+                               :current current :main main))
            (choice (agent-repl--switch-read (if all "Switch to any workspace: "
                                               "Switch to workspace: ")
                                             (agent-repl--switch-table
@@ -1279,10 +1279,10 @@ daemon-minted and there is no spelling of it Emacs could construct."
            (ref (plist-get entry :ref)))
       (cond
        ((and ws (eq (plist-get entry :section) :hidden))
-        (agent-repl--info ws "elisp.commands.switch-unhides ws=%s" ws)
+        (agent-repl--info ws "elisp.commands.switch-unhides ws={ws}" :ws ws)
         (agent-repl-verb-set-hidden ws nil))
        (ws
-        (agent-repl--info ws "elisp.commands.switch-chosen ws=%s all=%s" ws (and all t))
+        (agent-repl--info ws "elisp.commands.switch-chosen ws={ws} all={all}" :ws ws :all (and all t))
         (agent-repl-host-request-switch ws 'picker))
        ;; A HIDDEN OR FOLDED WORKSPACE THIS EDITOR DOES NOT HOLD is open, so
        ;; it is not reopened: a hidden one is shown (as a held one is), a
@@ -1290,25 +1290,25 @@ daemon-minted and there is no spelling of it Emacs could construct."
        ;; the selection (owner ruling, 2026-11-21).
        ((and ref (eq (plist-get entry :section) :hidden))
         (agent-repl--info (agent-repl--ws-current-log-name)
-                          "elisp.commands.switch-unhides-unheld name=%s id=%s"
-                          (plist-get entry :name) (plist-get ref :id))
+                          "elisp.commands.switch-unhides-unheld name={name} id={id}"
+                          :name (plist-get entry :name) :id (plist-get ref :id))
         (agent-repl-verb-show-ref ref))
        ((and ref (eq (plist-get entry :section) :repository))
         (agent-repl--info (agent-repl--ws-current-log-name)
-                          "elisp.commands.switch-selects-unheld name=%s id=%s"
-                          (plist-get entry :name) (plist-get ref :id))
+                          "elisp.commands.switch-selects-unheld name={name} id={id}"
+                          :name (plist-get entry :name) :id (plist-get ref :id))
         (agent-repl-host-request-switch-ref ref 'picker))
        (ref
         (agent-repl--info (agent-repl--ws-current-log-name)
-                          "elisp.commands.switch-opens-absent name=%s id=%s"
-                          (plist-get entry :name) (plist-get ref :id))
+                          "elisp.commands.switch-opens-absent name={name} id={id}"
+                          :name (plist-get entry :name) :id (plist-get ref :id))
         (let ((dispatched-at (agent-repl-host-editor-switch-count)))
           (agent-repl-verb-open ref)
           (agent-repl-verbs-select-minted
            ref dispatched-at #'agent-repl-verbs--land-on-tab)))
        (t
         (agent-repl--warn (agent-repl--ws-current-log-name)
-                          "elisp.commands.switch-no-ref name=%S" choice)
+                          "elisp.commands.switch-no-ref name={name}" :name (prin1-to-string choice))
         (user-error "agent-repl: %s has no daemon identity to open" choice))))))
 
 (defun agent-repl-switch-to-project (&optional project)
@@ -1335,7 +1335,7 @@ two timers."
              (scope (if target target
                       '(:agent-repl-context "plain project switch has no workspace target"))))
         (agent-repl--log scope
-                         "elisp.commands.switch-to-project path=%s" project)
+                         "elisp.commands.switch-to-project path={path}" :path project)
         (agent-repl--switch-project-arm-panels project)
         (agent-repl--ws-switch-project project)
         (run-at-time
@@ -1344,11 +1344,11 @@ two timers."
            (let ((recent-file (agent-repl--most-recent-project-file project)))
              (if (and recent-file (file-exists-p recent-file))
                  (progn
-                   (agent-repl--log scope "elisp.commands.switch-open-recent file=%s"
-                                    recent-file)
+                   (agent-repl--log scope "elisp.commands.switch-open-recent file={file}"
+                                    :file recent-file)
                    (find-file recent-file))
                (agent-repl--log scope
-                                "elisp.commands.switch-no-recent project=%s" project))))))
+                                "elisp.commands.switch-no-recent project={project}" :project project))))))
     (agent-repl--switch-to-known-workspace)))
 
 (defun agent-repl-switch-to-any-workspace ()
@@ -1419,7 +1419,7 @@ resets."
         (progn
           (push target agent-repl--opened-recent-cycle)
           (agent-repl--info (agent-repl--ws-log-name current)
-                            "elisp.commands.open-most-recent target=%s" target)
+                            "elisp.commands.open-most-recent target={target}" :target target)
           (agent-repl-host-request-switch target 'most-recent))
       (setq agent-repl--opened-recent-cycle nil)
       (agent-repl--info (agent-repl--ws-log-name current)
@@ -1460,9 +1460,9 @@ target is REQUESTED of the daemon, never switched to here."
          (target (car (remove shown (agent-repl--recent-workspace-and-thread-names)))))
     (if (null target)
         (progn
-          (agent-repl--info log-ws "elisp.commands.previous-none from=%s" shown)
+          (agent-repl--info log-ws "elisp.commands.previous-none from={from}" :from shown)
           (message "[agent-repl] No previous workspace or thread to switch to"))
-      (agent-repl--info log-ws "elisp.commands.previous from=%s target=%s" shown target)
+      (agent-repl--info log-ws "elisp.commands.previous from={from} target={target}" :from shown :target target)
       (agent-repl-host-request-switch target 'previous))))
 
 ;;;; ---- SPC SPC : the other sidebar app ----------------------------------
@@ -1508,15 +1508,15 @@ switched to here."
          (app (agent-repl-roster-shown-app)))
     (pcase app
       ('nil
-       (agent-repl--info log-ws "elisp.commands.sidebar-app-none from=%s reason=no-roster" shown)
+       (agent-repl--info log-ws "elisp.commands.sidebar-app-none from={from} reason=no-roster" :from shown)
        (message "[agent-repl] The sidebar shows no app yet to switch from"))
       (:chat
        (let ((target (car (remove shown (agent-repl--roster-recent-names)))))
          (if (null target)
              (progn
-               (agent-repl--info log-ws "elisp.commands.sidebar-app-none from=%s app=chat reason=no-workspace" shown)
+               (agent-repl--info log-ws "elisp.commands.sidebar-app-none from={from} app=chat reason=no-workspace" :from shown)
                (message "[agent-repl] No workspace to switch to"))
-           (agent-repl--info log-ws "elisp.commands.sidebar-app from=%s app=chat target=%s" shown target)
+           (agent-repl--info log-ws "elisp.commands.sidebar-app from={from} app=chat target={target}" :from shown :target target)
            (agent-repl-host-request-switch target 'sidebar-app))))
       (:workspaces
        (let ((thread (agent-repl--sidebar-app-last-thread)))
@@ -1524,15 +1524,15 @@ switched to here."
                   (agent-repl--thread-viewed-within-p
                    thread (current-time) agent-repl-sidebar-app-thread-fresh-seconds))
              (progn
-               (agent-repl--info log-ws "elisp.commands.sidebar-app from=%s app=workspaces target=%s"
-                                 shown thread)
+               (agent-repl--info log-ws "elisp.commands.sidebar-app from={from} app=workspaces target={target}"
+                                 :from shown :target thread)
                (agent-repl-host-request-switch thread 'sidebar-app))
-           (agent-repl--info log-ws "elisp.commands.sidebar-app-new-thread from=%s last-thread=%s reason=%s"
-                             shown (or thread "none") (if thread "stale" "no-thread"))
+           (agent-repl--info log-ws "elisp.commands.sidebar-app-new-thread from={from} last-thread={last_thread} reason={reason}"
+                             :from shown :last_thread (or thread "none") :reason (if thread "stale" "no-thread"))
            (call-interactively #'agent-repl-thread-new))))
       ;; The wire decoder answers only the two arms, so a third is a bug.
       (_
-       (agent-repl--error log-ws "elisp.commands.sidebar-app-unknown from=%s app=%S" shown app)
+       (agent-repl--error log-ws "elisp.commands.sidebar-app-unknown from={from} app={app}" :from shown :app (prin1-to-string app))
        (error "agent-repl: the roster shows an unknown sidebar app %S" app)))))
 
 (defun agent-repl--jump-to-ranked-workspace (rank-fn instant-fn slug none-message)
@@ -1551,11 +1551,11 @@ NONE-MESSAGE.  The target is REQUESTED of the daemon, never switched to here."
          (target (funcall rank-fn names)))
     (if (null target)
         (progn
-          (agent-repl--info log-ws (format "elisp.commands.%s-none from=%%s candidates=%%d" slug)
-                            shown (length names))
+          (agent-repl--info log-ws "elisp.commands.{slug}-none from={from} candidates={candidates}" :slug slug
+                            :from shown :candidates (length names))
           (message "[agent-repl] %s" none-message))
-      (agent-repl--info log-ws (format "elisp.commands.%s from=%%s target=%%s instant-ms=%%s" slug)
-                        shown target (funcall instant-fn target))
+      (agent-repl--info log-ws "elisp.commands.{slug} from={from} target={target} instant-ms={instant_ms}" :slug slug
+                        :from shown :target target :instant_ms (funcall instant-fn target))
       (agent-repl-host-request-switch target (intern slug)))))
 
 (defun agent-repl-switch-to-last-finished-workspace ()
@@ -1704,10 +1704,10 @@ harvest fails a run on every warning."
          (log-ws (agent-repl--gesture-log-ws shown op))
          (target (funcall target-fn current names)))
     (if (null target)
-        (agent-repl--info log-ws (format "elisp.commands.%s-no-position n=%%d tabs=%%d from=%%s" op)
-                          n (length names) current)
-      (agent-repl--info log-ws (format "elisp.commands.%s n=%%d from=%%s target=%%s" op)
-                        n current target)
+        (agent-repl--info log-ws "elisp.commands.{op}-no-position n={n} tabs={tabs} from={from}" :op op
+                          :n n :tabs (length names) :from current)
+      (agent-repl--info log-ws "elisp.commands.{op} n={n} from={from} target={target}" :op op
+                        :n n :from current :target target)
       (agent-repl-host-request-switch target trigger))))
 
 (defun agent-repl--workspace-cycle (n)
@@ -1892,25 +1892,25 @@ afterwards is a logging defect."
          (tab (and index (agent-repl--numbered-tab index names))))
     (cond
      ((null names)
-      (agent-repl--info log-ws "elisp.commands.switch-to-workspace-no-tabs n=%S" n)
+      (agent-repl--info log-ws "elisp.commands.switch-to-workspace-no-tabs n={n}" :n (prin1-to-string n))
       (message "[agent-repl] No workspace tabs on the bar"))
      ((null index)
       (let ((choice (completing-read "Switch to workspace: " names nil t)))
-        (agent-repl--info log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
+        (agent-repl--info log-ws "elisp.commands.switch-to-workspace-chosen ws={ws}" :ws choice)
         (agent-repl-host-request-switch choice 'picker)))
      ((null tab)
       (let ((last (agent-repl--last-drawn-tab-number names)))
         (agent-repl--info log-ws
-                          "elisp.commands.switch-to-workspace-out-of-range n=%d last=%S"
-                          index last)
+                          "elisp.commands.switch-to-workspace-out-of-range n={n} last={last}"
+                          :n index :last (prin1-to-string last))
         (message "[agent-repl] No workspace tab %d -- the bar's last is %S" index last)))
      ((not (cdr tab))
-      (agent-repl--info log-ws "elisp.commands.switch-to-workspace-opening n=%d target=%s"
-                        index (car tab))
+      (agent-repl--info log-ws "elisp.commands.switch-to-workspace-opening n={n} target={target}"
+                        :n index :target (car tab))
       (message "[agent-repl] Tab %d (%s) is still opening" index (car tab)))
      (t
-      (agent-repl--info log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
-                        index (car tab))
+      (agent-repl--info log-ws "elisp.commands.switch-to-workspace n={n} target={target}"
+                        :n index :target (car tab))
       (agent-repl-host-request-switch (car tab) 'slot)))))
 
 (defun agent-repl--tab-slot (char)
@@ -1944,19 +1944,19 @@ every other navigation gesture."
          (target (car (agent-repl--numbered-tab slot names))))
     (cond
      ((not (member current names))
-      (agent-repl--info log-ws (format "elisp.commands.%s-no-tab current=%%s slot=%%d" op) current slot)
+      (agent-repl--info log-ws "elisp.commands.{op}-no-tab current={current} slot={slot}" :op op :current current :slot slot)
       (message "[agent-repl] The current workspace has no tab to %s" op))
      ((null target)
       (let ((last (agent-repl--last-drawn-tab-number names)))
-        (agent-repl--info log-ws (format "elisp.commands.%s-out-of-range slot=%%d last=%%S" op)
-                          slot last)
+        (agent-repl--info log-ws "elisp.commands.{op}-out-of-range slot={slot} last={last}" :op op
+                          :slot slot :last (prin1-to-string last))
         (message "[agent-repl] No workspace tab %d -- the bar's last is %S" slot last)))
      ((equal target current)
-      (agent-repl--info log-ws (format "elisp.commands.%s-own-slot slot=%%d ws=%%s" op) slot current)
+      (agent-repl--info log-ws "elisp.commands.{op}-own-slot slot={slot} ws={ws}" :op op :slot slot :ws current)
       (message "[agent-repl] %s is already tab %d" current slot))
      (t
-      (agent-repl--info log-ws (format "elisp.commands.%s slot=%%d ws=%%s target=%%s" op)
-                        slot current target)
+      (agent-repl--info log-ws "elisp.commands.{op} slot={slot} ws={ws} target={target}" :op op
+                        :slot slot :ws current :target target)
       (funcall verb current target)))))
 
 (defun agent-repl-workspace-swap (slot)

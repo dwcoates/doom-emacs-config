@@ -455,7 +455,7 @@ the latch cannot change a closed tab's already-partial extent."
   (agent-repl-test--with-clean-state
     (let ((records nil)
           (agent-repl--tab-background-modes (make-hash-table :test 'equal)))
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                  (agent-repl-test--record-into records)))
         (agent-repl--note-tab-background-mode "ws1" :full "panels-open")
         ;; Act
@@ -471,7 +471,7 @@ the latch cannot change a closed tab's already-partial extent."
   (agent-repl-test--with-clean-state
     (let ((records 0)
           (agent-repl--tab-background-modes (make-hash-table :test 'equal)))
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                  (lambda (&rest _) (cl-incf records))))
         (agent-repl--note-tab-background-mode "ws1" :full "panels-open")
         ;; Act
@@ -580,7 +580,7 @@ instead of dialling the daemon."
                     'stub-timer))
                  ((symbol-function 'cancel-timer) #'ignore)
                  ((symbol-function 'timerp) (lambda (x) (eq x 'stub-timer)))
-                 ((symbol-function 'agent-repl--log)
+                 ((symbol-function 'agent-repl--emit-log)
                   (agent-repl-test--record-into agent-repl-test--dwell-logs))
                  ((symbol-function 'agent-repl-host-mark-viewed)
                   (lambda (ws) (push ws agent-repl-test--viewed-reports) t))
@@ -664,7 +664,7 @@ The status-change and viewed-cleared reactions to one push must agree."
   "An origin outside the three named ones is a caller defect and signals."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) #'ignore))
       (agent-repl-test--viewing "ws1" :done
         ;; Act / Assert
         (should-error (agent-repl--tab-dwell-seconds "ws1" 'heartbeat))))))
@@ -2057,7 +2057,7 @@ line-count contract therefore requires the redraw path never to call it."
                (lambda () "ws"))
               ((symbol-function 'agent-repl--ws-known-p)
                (lambda (_ws) t))
-              ((symbol-function 'agent-repl--log-verbose) #'ignore))
+              ((symbol-function 'agent-repl--emit-log-verbose) #'ignore))
       ;; Act
       (agent-repl--force-tab-bar-redraw)
       ;; Assert
@@ -2913,9 +2913,9 @@ without a stub so the suite covers the live-runtime dependency surface."
                (lambda () "caller-trace"))
               ((symbol-function 'agent-repl--ws-current-name)
                (lambda () nil))
-              ((symbol-function 'agent-repl--log)
+              ((symbol-function 'agent-repl--emit-log)
                (lambda (_ws format-string &rest args)
-                 (setq record (apply #'format format-string args)))))
+                 (setq record (agent-repl-log-site-render format-string args)))))
       ;; Act
       (let ((result
              (agent-repl--tabbar-audit-set-frame-parameter
@@ -2934,7 +2934,7 @@ without a stub so the suite covers the live-runtime dependency surface."
   ;; Arrange.
   (let (logged-workspace)
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil))
-              ((symbol-function 'agent-repl--log)
+              ((symbol-function 'agent-repl--emit-log)
                (lambda (ws &rest _args) (setq logged-workspace ws))))
       ;; Act.
       (agent-repl--tabbar-log-frame-lines-mutation
@@ -2954,9 +2954,9 @@ without a stub so the suite covers the live-runtime dependency surface."
                (lambda () "bulk-caller-trace"))
               ((symbol-function 'agent-repl--ws-current-name)
                (lambda () nil))
-              ((symbol-function 'agent-repl--log)
+              ((symbol-function 'agent-repl--emit-log)
                (lambda (_ws format-string &rest args)
-                 (setq record (apply #'format format-string args)))))
+                 (setq record (agent-repl-log-site-render format-string args)))))
       ;; Act / Assert
       (should-error
        (agent-repl--tabbar-audit-modify-frame-parameters
@@ -2992,7 +2992,7 @@ without a stub so the suite covers the live-runtime dependency surface."
                (lambda () "ws"))
               ((symbol-function 'agent-repl--ws-known-p)
                (lambda (_ws) t))
-              ((symbol-function 'agent-repl--log-verbose)
+              ((symbol-function 'agent-repl--emit-log-verbose)
                (lambda (&rest _) (cl-incf log-count))))
       ;; Act
       (should (eq first (agent-repl--tabbar-audit-keymap first)))
@@ -3032,7 +3032,7 @@ without a stub so the suite covers the live-runtime dependency surface."
               ((symbol-function 'frame-char-width) (lambda (&optional _frame) 10))
               ((symbol-function 'agent-repl--ws-known-p)
                (lambda (_ws) t))
-              ((symbol-function 'agent-repl--log-verbose)
+              ((symbol-function 'agent-repl--emit-log-verbose)
                (lambda (&rest _) (cl-incf log-count))))
       ;; Act: two identical observations followed by one changed raw row.
       (dotimes (_ 2)
@@ -3165,7 +3165,7 @@ is logged once."
                         29
                       0))))
               ((symbol-function 'frame-char-width) (lambda (&rest _) 1))
-              ((symbol-function 'agent-repl--log-verbose)
+              ((symbol-function 'agent-repl--emit-log-verbose)
                (lambda (&rest _) (cl-incf log-count))))
       (let ((entries (list "aa" (propertize " " 'display "badge") "bb")) ; 30 columns
             (ranks '(1 3 2)))
@@ -3378,7 +3378,7 @@ watchdog cleanup and the log are stubbed out, and `pinned' collects each
                   (setf (alist-get 'tab-bar-lines default-frame-alist) 1)))
                ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
                 (lambda () '(:timer-cancelled nil :hook-present nil)))
-               ((symbol-function 'agent-repl--log) #'ignore))
+               ((symbol-function 'agent-repl--emit-log) #'ignore))
        ,@body)))
 
 (ert-deftest agent-repl-test-fixed-height-tab-bar-default-covers-future-frames ()
@@ -3409,7 +3409,7 @@ watchdog cleanup and the log are stubbed out, and `pinned' collects each
                (lambda (frame parameter value)
                  (push (list frame parameter value) applied)
                  (setf (alist-get parameter params) value)))
-              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl--emit-log) #'ignore)
               ((symbol-function 'message) #'ignore))
       ;; Act
       (let ((result (agent-repl-tabbar-apply-row-count)))
@@ -3440,7 +3440,7 @@ watchdog cleanup and the log are stubbed out, and `pinned' collects each
                  (setf (alist-get parameter params) value)))
               ((symbol-function 'agent-repl--ws-current-name)
                (lambda () nil))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       (should (= 2 (agent-repl--tabbar-pin-frame 'frame-a 2)))
       (should
        (equal (nreverse applied)
@@ -3471,7 +3471,7 @@ test can assert the re-assertion left an already-correct frame alone, and
                         (alist-get 'tab-bar-lines-keep-state frame-params) t)
                   rows))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () nil))
-               ((symbol-function 'agent-repl--log) #'ignore))
+               ((symbol-function 'agent-repl--emit-log) #'ignore))
        ,@body)))
 
 (ert-deftest agent-repl-test-tabbar-reassert-repairs-startup-frame-reset ()
@@ -3672,7 +3672,7 @@ but nothing stops Emacs's own line recalculation from moving it."
                (lambda (_frame parameter) (alist-get parameter params)))
               ((symbol-function 'agent-repl--tabbar-pin-frame)
                (lambda (frame rows) (push (list frame rows) pinned) rows))
-              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl--emit-log) #'ignore)
               ((symbol-function 'message) #'ignore))
       ;; Act
       (let ((result (agent-repl-tabbar-apply-row-count)))
@@ -3765,7 +3765,7 @@ The buffer and the prior window configuration are both restored after."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         (agent-repl-test-status--with-arm "alpha" :thinking
           ;; Act
@@ -3779,7 +3779,7 @@ The buffer and the prior window configuration are both restored after."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         (agent-repl-test-status--with-arm "alpha" :thinking
           (agent-repl-status-tab-state "alpha"))
@@ -3804,7 +3804,7 @@ The buffer and the prior window configuration are both restored after."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged))
                 ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) t)))
         ;; Act
@@ -3955,7 +3955,7 @@ session booting (owner ruling, 2026-10-13)."
   "An arm this build does not know is a breach the codec already refused;
 reaching the palette with one paints nothing rather than guessing."
   ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+  (cl-letf (((symbol-function 'agent-repl--emit-error) #'ignore))
     ;; Act / Assert
     (should (equal (agent-repl-status-tab-color :not-an-arm) "none"))))
 
@@ -4017,7 +4017,7 @@ purple already says a merge is in flight, and a landed merge shows nothing
   "An ink this renderer has no color for is logged and signalled."
   ;; Arrange
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into logged)))
       (let ((agent-repl-status-glyph-inks '((:thinking . "chartreuse"))))
         ;; Act / Assert
@@ -4156,7 +4156,7 @@ text\='s does."
      (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
                ((symbol-function 'face-font) (lambda (&rest _) "Menlo-13"))
                ((symbol-function 'frame-scale-factor) (lambda (&rest _) ,scale))
-               ((symbol-function 'agent-repl--log) #'ignore)
+               ((symbol-function 'agent-repl--emit-log) #'ignore)
                ((symbol-function 'agent-repl-status--row-height) (lambda (_frame _text) ,row)))
        ,@body)))
 
@@ -4188,7 +4188,7 @@ violation: logged with its measurements, then signalled, and nothing cached."
     (agent-repl-test-status--on-graphic-frame 15 2.0
       (cl-letf (((symbol-function 'agent-repl-status--row-height)
                  (lambda (_frame text) (if (= (length text) 1) 15 16)))
-                ((symbol-function 'agent-repl--error)
+                ((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into logged)))
         ;; Act / Assert
         (should-error (agent-repl-status-glyph-image-height))
@@ -4274,7 +4274,7 @@ at one height, every glyph is that tall on screen."
   "A glyph name with no picture is a broken checkout: logged, then signalled."
   ;; Arrange
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into logged)))
       ;; Act / Assert
       (should-error (agent-repl-status--glyph-file "no-such-glyph"))
@@ -4285,7 +4285,7 @@ at one height, every glyph is that tall on screen."
   "A glyph name with no character is an inconsistent table: logged, then signalled."
   ;; Arrange
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into logged)))
       ;; Act / Assert
       (should-error (agent-repl-status--glyph-char "no-such-glyph"))
@@ -4915,7 +4915,7 @@ bracket-only paint, which is the blessed treatment."
 (ert-deftest agent-repl-test-status-name-prefix-empty-emoji-ack-fails-hard ()
   "An emoji-ack glyph with no text is refused by the decoder, so drawing one fails."
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into logged)))
       (should-error (agent-repl-status--name-emoji-ack-string "" (selected-frame)))
       (should (string-match-p "elisp.status.name-emoji-ack: glyph \"\" carries no glyph" (car logged))))))
 
@@ -4931,7 +4931,7 @@ bracket-only paint, which is the blessed treatment."
 (ert-deftest agent-repl-test-status-name-prefix-with-no-mark-fails-hard ()
   "A prefix carrying no mark is refused by the decoder, so drawing one fails."
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into logged)))
       (should-error (agent-repl-name-prefix-string '(:priority nil) 15))
       (should (string-match-p "elisp.status.name-prefix: prefix .* carries no mark" (car logged))))))
 
@@ -4939,7 +4939,7 @@ bracket-only paint, which is the blessed treatment."
   "A level outside the four is never decoded, so drawing one fails loudly."
   (let (logged)
     (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+              ((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into logged)))
       (should-error (agent-repl-name-prefix-string '(:priority "p9") 15))
       (should (string-match-p "elisp.status.name-priority: priority \"p9\" is no level" (car logged))))))
 
@@ -4947,7 +4947,7 @@ bracket-only paint, which is the blessed treatment."
   "A level whose picture the checkout lacks fails at the file, logged."
   (let (logged
         (agent-repl-status--priority-dir (make-temp-file "agent-repl-no-pictures-" t)))
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into logged)))
       (should-error (agent-repl-status--priority-file "p1"))
       (should (string-match-p "elisp.status.priority-file: priority \"p1\" has no picture" (car logged))))))
 
@@ -4987,7 +4987,7 @@ bracket-only paint, which is the blessed treatment."
                 ((symbol-function 'agent-repl--ws-current-name)
                  (lambda () "none"))
                 ((symbol-function 'agent-repl--ws-known-p) (lambda (_) nil))
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (lambda (scope &rest _args) (setq logged-scope scope)))
                 ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
         ;; Act
@@ -5286,7 +5286,7 @@ extent's color — and gains the underline besides."
   "An arm missing from the shared assignment is logged and signalled."
   ;; Arrange
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into logged)))
       ;; Act / Assert
       (should-error (agent-repl-status-roster-mark-color :no-such-arm))

@@ -2,13 +2,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--register-timer "core")
 (declare-function agent-repl--ws-all-persps "workspace")
 (declare-function agent-repl--ws-buffers "workspace")
@@ -57,20 +59,20 @@ workspace summary; save failures are always recorded before they propagate."
             (error
              (agent-repl--log
               ws
-              "save-buffer-if-modified: outcome=save-failed buffer=%S name=%S file=%S live=%s modified=%s error=%S"
-              buf buffer-name file live modified err)
+              "save-buffer-if-modified: outcome=save-failed buffer={buffer} name={name} file={file} live={live} modified={modified} error={error}"
+              :buffer (prin1-to-string buf) :name (prin1-to-string buffer-name) :file (prin1-to-string file) :live live :modified modified :error (prin1-to-string err))
              (signal (car err) (cdr err))))
           (unless aggregate-p
             (agent-repl--log-verbose
              ws
-             "save-buffer-if-modified: outcome=saved buffer=%S name=%S file=%S live=%s modified=%s"
-             buf buffer-name file live modified))
+             "save-buffer-if-modified: outcome=saved buffer={buffer} name={name} file={file} live={live} modified={modified}"
+             :buffer (prin1-to-string buf) :name (prin1-to-string buffer-name) :file (prin1-to-string file) :live live :modified modified))
           t)
       (unless aggregate-p
         (agent-repl--log-verbose
          ws
-         "save-buffer-if-modified: outcome=skipped buffer=%S name=%S file=%S live=%s modified=%s"
-         buf buffer-name file live modified))
+         "save-buffer-if-modified: outcome=skipped buffer={buffer} name={name} file={file} live={live} modified={modified}"
+         :buffer (prin1-to-string buf) :name (prin1-to-string buffer-name) :file (prin1-to-string file) :live live :modified modified))
       nil)))
 
 (defun agent-repl--autosave-workspace-buffers ()
@@ -85,23 +87,23 @@ Runs silently every 5 minutes to prevent data loss."
            (saved 0))
       (agent-repl--log-verbose
        '(:agent-repl-central "the autosave sweep spans workspaces")
-       "autosave-workspace-buffers: outcome=scanning workspace-system-available=t perspective-count=%d"
-       persp-count)
+       "autosave-workspace-buffers: outcome=scanning workspace-system-available=t perspective-count={perspective_count}"
+       :perspective_count persp-count)
       (dolist (persp persps)
         (cond
          ;; nil is persp-mode's "no perspective" container — expected, skip silently.
          ((null persp)
           (agent-repl--log-verbose
            '(:agent-repl-central "the autosave sweep spans workspaces")
-           "autosave-workspace-buffers: outcome=skipped-nil-perspective entry=%S" persp))
+           "autosave-workspace-buffers: outcome=skipped-nil-perspective entry={entry}" :entry (prin1-to-string persp)))
          ((not (symbolp persp))
           (let* ((ws (agent-repl--ws-persp-name persp))
                  (perspective-identity (agent-repl--ws-persp-identity persp)))
             (unless (and (stringp ws) (not (string-empty-p ws)))
               (agent-repl--log
                '(:agent-repl-central "the autosave sweep spans workspaces")
-               "autosave-workspace-buffers: rejected perspective-identity=%s workspace-name=%S reason=invalid-workspace-name"
-               perspective-identity ws)
+               "autosave-workspace-buffers: rejected perspective-identity={perspective_identity} workspace-name={workspace_name} reason=invalid-workspace-name"
+               :perspective_identity perspective-identity :workspace_name (prin1-to-string ws))
               (error "agent-repl--autosave-workspace-buffers: perspective has no workspace name"))
             (let* ((buffers (agent-repl--ws-buffers persp))
                    (buffer-count (length buffers))
@@ -115,15 +117,15 @@ Runs silently every 5 minutes to prevent data loss."
                   (cl-incf workspace-saved)))
               (agent-repl--log-verbose
                ws
-               "autosave-workspace-buffers: outcome=workspace-complete workspace-name=%s perspective-identity=%s buffer-count=%d modified-count=%d saved-count=%d"
-               ws perspective-identity buffer-count modified-count workspace-saved))))
+               "autosave-workspace-buffers: outcome=workspace-complete workspace-name={workspace_name} perspective-identity={perspective_identity} buffer-count={buffer_count} modified-count={modified_count} saved-count={saved_count}"
+               :workspace_name ws :perspective_identity perspective-identity :buffer_count buffer-count :modified_count modified-count :saved_count workspace-saved))))
          (t
-          (agent-repl--log '(:agent-repl-central "the autosave sweep spans workspaces") "WARN: autosave encountered non-perspective entry: %S" persp))))
+          (agent-repl--log '(:agent-repl-central "the autosave sweep spans workspaces") "WARN: autosave encountered non-perspective entry: {entry}" :entry (prin1-to-string persp)))))
       (if (> saved 0)
-          (agent-repl--log '(:agent-repl-central "the autosave sweep spans workspaces") "autosave: saved %d buffer(s) outcome=saved perspective-count=%d" saved persp-count)
+          (agent-repl--log '(:agent-repl-central "the autosave sweep spans workspaces") "autosave: saved {saved} buffer(s) outcome=saved perspective-count={perspective_count}" :saved saved :perspective_count persp-count)
         (agent-repl--log-verbose
          '(:agent-repl-central "the autosave sweep spans workspaces")
-         "autosave-workspace-buffers: outcome=no-buffers-saved perspective-count=%d" persp-count)))))
+         "autosave-workspace-buffers: outcome=no-buffers-saved perspective-count={perspective_count}" :perspective_count persp-count)))))
 
 (defcustom agent-repl-autosave-initial-delay 300
   "Seconds before the first autosave sweep fires after load."
@@ -147,8 +149,8 @@ sweep scheduled instead of stacking a second.  Returns the timer."
                                 #'agent-repl--autosave-workspace-buffers))))
     (agent-repl--log
      '(:agent-repl-central "the autosave sweep spans workspaces")
-     "autosave: timer-scheduled initial-delay=%S interval=%S timer=%S"
-     agent-repl-autosave-initial-delay agent-repl-autosave-interval timer)
+     "autosave: timer-scheduled initial-delay={initial_delay} interval={interval} timer={timer}"
+     :initial_delay (prin1-to-string agent-repl-autosave-initial-delay) :interval (prin1-to-string agent-repl-autosave-interval) :timer (prin1-to-string timer))
     timer))
 
 (agent-repl--arm-autosave-timer)

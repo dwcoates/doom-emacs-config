@@ -22,14 +22,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 
 (require 'cl-lib)
 
 (declare-function agent-repl--panels-mount-awaited-view "panels" (ws))
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--frontend-precreate-refusal "agent-repl-frontend" (ws))
 
@@ -66,9 +67,9 @@ not cost the rest their pages."
             (agent-repl--panels-mount-awaited-view ws)
             (setq made (1+ made))
             (agent-repl--info agent-repl--webview-precreate-central
-                              "elisp.webview-recovery.precreate-created ws=%s" ws))
-        (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
-                                 ws err))))
+                              "elisp.webview-recovery.precreate-created ws={ws}" :ws ws))
+        (error (agent-repl--warn ws "webview-precreate: ws={ws} outcome=failed err={err}"
+                                 :ws ws :err (prin1-to-string err)))))
     made))
 
 (defun agent-repl-webview-precreate-all ()
@@ -85,7 +86,7 @@ ARMED for Emacs's own input wait to turn into the `C-g' the read aborts on."
                 (agent-repl--webview-precreate-pass))))
     (when (> made 0)
       (agent-repl--info agent-repl--webview-precreate-central
-                        "elisp.webview-recovery.precreate-all: made=%d" made))
+                        "elisp.webview-recovery.precreate-all: made={made}" :made made))
     made))
 
 (defun agent-repl--webview-precreate-on-link-up (&optional _conn)

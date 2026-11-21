@@ -218,12 +218,12 @@ which restores a known prior handler rather than keeping the current one."
   "Run BODY binding `records' to every answer record, as (LEVEL SCOPE TEXT), newest first."
   (declare (indent 0))
   `(let ((records nil))
-     (cl-letf (((symbol-function 'agent-repl--log)
-                (lambda (scope fmt &rest args) (push (list 'log scope (apply #'format fmt args)) records)))
-               ((symbol-function 'agent-repl--warn)
-                (lambda (scope fmt &rest args) (push (list 'warn scope (apply #'format fmt args)) records)))
-               ((symbol-function 'agent-repl--error)
-                (lambda (scope fmt &rest args) (push (list 'error scope (apply #'format fmt args)) records))))
+     (cl-letf (((symbol-function 'agent-repl--emit-log)
+                (lambda (scope fmt &rest args) (push (list 'log scope (agent-repl-log-site-render fmt args)) records)))
+               ((symbol-function 'agent-repl--emit-warn)
+                (lambda (scope fmt &rest args) (push (list 'warn scope (agent-repl-log-site-render fmt args)) records)))
+               ((symbol-function 'agent-repl--emit-error)
+                (lambda (scope fmt &rest args) (push (list 'error scope (agent-repl-log-site-render fmt args)) records))))
        ,@body)))
 
 (ert-deftest agent-repl-test-wh-a-view-answer-is-recorded-under-its-scope-and-prefix ()
@@ -368,12 +368,12 @@ Binds `reloads' (the daemon each reload was asked on) and `records', newest firs
                ((symbol-function 'agent-repl-link-successor) (lambda () agent-repl-test-wh--successor))
                ((symbol-function 'agent-repl-webhost-reload)
                 (lambda () (push (agent-repl-webhost-daemon-conn) reloads)))
-               ((symbol-function 'agent-repl--log) #'ignore)
-               ((symbol-function 'agent-repl--info)
+               ((symbol-function 'agent-repl--emit-log) #'ignore)
+               ((symbol-function 'agent-repl--emit-info)
                 (agent-repl-test--record-leveled-into records 'info))
-               ((symbol-function 'agent-repl--warn)
+               ((symbol-function 'agent-repl--emit-warn)
                 (agent-repl-test--record-leveled-into records 'warn))
-               ((symbol-function 'agent-repl--error)
+               ((symbol-function 'agent-repl--emit-error)
                 (agent-repl-test--record-leveled-into records 'error)))
        ,@body)))
 
@@ -499,7 +499,7 @@ Binds `reloads' (the daemon each reload was asked on) and `records', newest firs
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--webhost-answered "{\"op\":\"show\",\"id\":null,\"outcome\":\"shown\",\"notes\":[]}"))
@@ -510,12 +510,12 @@ Binds `reloads' (the daemon each reload was asked on) and `records', newest firs
   "Call FN and return (LEVEL . LINE) for every INFO, WARN and ERROR line it logged.
 A DEBUG line (`agent-repl--log') is dropped."
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
-              ((symbol-function 'agent-repl--info)
+    (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore)
+              ((symbol-function 'agent-repl--emit-info)
                (agent-repl-test--record-leveled-into logged 'info))
-              ((symbol-function 'agent-repl--warn)
+              ((symbol-function 'agent-repl--emit-warn)
                (agent-repl-test--record-leveled-into logged 'warn))
-              ((symbol-function 'agent-repl--error)
+              ((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-leveled-into logged 'error)))
       (funcall fn))
     (nreverse logged)))
@@ -530,7 +530,7 @@ A DEBUG line (`agent-repl--log') is dropped."
     ;; Act
     (let ((logged (agent-repl-test-wh--leveled
                    (lambda ()
-                     (agent-repl--info nil "a %s" "i")
+                     (agent-repl--info nil "a {value}" :value "i")
                      (agent-repl--warn nil "b")
                      (agent-repl--error nil "c")))))
       ;; Assert
@@ -586,7 +586,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let (errors)
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--webhost-answered "not json"))
@@ -624,8 +624,8 @@ A DEBUG line (`agent-repl--log') is dropped."
       (cl-letf (((symbol-function 'agent-repl-webhost-parse-answer)
                  (lambda (text) (push text parsed) (funcall real text)))
                 ((symbol-function 'agent-repl--ws-by-ref-id) #'ignore)
-                ((symbol-function 'agent-repl--info) #'ignore)
-                ((symbol-function 'agent-repl--log) #'ignore))
+                ((symbol-function 'agent-repl--emit-info) #'ignore)
+                ((symbol-function 'agent-repl--emit-log) #'ignore))
         ;; Act
         (agent-repl--webhost-answered raw))
       ;; Assert
@@ -686,7 +686,7 @@ A DEBUG line (`agent-repl--log') is dropped."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-webhost-ensure-page "alpha")
@@ -1022,7 +1022,7 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
                  (lambda (_xw uri) (push uri navigated)))
                 ((symbol-function 'agent-repl-sidebar-view-navigate)
                  (lambda (conn) (push conn navigated)))
-                ((symbol-function 'agent-repl--warn) (agent-repl-test--record-into warned)))
+                ((symbol-function 'agent-repl--emit-warn) (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl--webhost-navigate))
       ;; Assert
@@ -1371,7 +1371,7 @@ The current tab's page, not shown here, is the nearest of all."
     (let ((logged nil))
       (agent-repl-test-wh--with-order '("alpha") nil
         (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (_ws) t))
-                  ((symbol-function 'agent-repl--info)
+                  ((symbol-function 'agent-repl--emit-info)
                    (agent-repl-test--record-into logged)))
           ;; Act
           (agent-repl-test-wh--load "load-committed")))
@@ -1384,7 +1384,7 @@ The current tab's page, not shown here, is the nearest of all."
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-test-wh--load "load-committed"))
@@ -1421,7 +1421,7 @@ The current tab's page, not shown here, is the nearest of all."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-webhost-hold-back "alpha")
@@ -1436,7 +1436,7 @@ The current tab's page, not shown here, is the nearest of all."
   (agent-repl-test-wh--with-host
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--error)
+                ((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into logged)))
         ;; Act / Assert
         (should-error (agent-repl-webhost-hold-back "alpha"))
@@ -1914,7 +1914,7 @@ The current tab's page, not shown here, is the nearest of all."
     (let* ((closure (lambda (_xw _event) 'earlier-build))
            (props (list 'callback closure))
            (logged nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         (agent-repl-test-wh--with-props props
           ;; Act
@@ -2010,7 +2010,7 @@ The current tab's page, not shown here, is the nearest of all."
   "A perspective killing its buffers must not take every page with it."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-warn) #'ignore))
       ;; Act / Assert
       (should-not (agent-repl--webhost-refuse-kill)))))
 
@@ -2019,7 +2019,7 @@ The current tab's page, not shown here, is the nearest of all."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let (warned)
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl--webhost-refuse-kill))
@@ -2074,7 +2074,7 @@ The current tab's page, not shown here, is the nearest of all."
                  (lambda (url &rest _) (setq made url) (generate-new-buffer " host-test")))
                 ((symbol-function 'agent-repl--frontend-webview-live-widget) (lambda (_buf) 'host-xwidget))
                 ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
-                ((symbol-function 'agent-repl--info) #'ignore))
+                ((symbol-function 'agent-repl--emit-info) #'ignore))
         ;; Act
         (agent-repl-webhost-ensure))
       ;; Assert
@@ -2131,7 +2131,7 @@ host that has not reloaded yet from one that ignored its reload."
     (let (navigated infos)
       (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                  (lambda (_xw uri) (setq navigated uri)))
-                ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+                ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242")))
       ;; Assert
@@ -2145,7 +2145,7 @@ host that has not reloaded yet from one that ignored its reload."
     (let (navigated errors)
       (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                  (lambda (_xw uri) (setq navigated uri)))
-                ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+                ((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242") "not json"))
       ;; Assert
@@ -2228,7 +2228,7 @@ and seven rows drew severed on every webapp deploy."
     (let (infos)
       (cl-letf (((symbol-function 'agent-repl-host-report-page-unloading)
                  (lambda (_ws _on-reported on-not-reported) (funcall on-not-reported)))
-                ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+                ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--webhost-reload-now))
       ;; Assert
@@ -2261,7 +2261,7 @@ and seven rows drew severed on every webapp deploy."
   (agent-repl-test-wh--with-host
     (agent-repl-test-wh--with-committed-uri "https://github.com/x/y/pull/1"
       (let (errors)
-        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
           ;; Act
           (agent-repl-test-wh--load "load-committed"))
         ;; Assert
@@ -2302,7 +2302,7 @@ and seven rows drew severed on every webapp deploy."
   (agent-repl-test-wh--with-host
     (agent-repl-test-wh--with-committed-uri "about:blank"
       (let (errors)
-        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
           ;; Act
           (agent-repl-test-wh--load "load-committed"))
         ;; Assert

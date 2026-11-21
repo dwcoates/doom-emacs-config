@@ -74,13 +74,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--capture-log-scope "core" (scope))
 (declare-function agent-repl--global-state-file "core" (relative))
 
@@ -148,7 +148,7 @@ at ERROR and signals `agent-repl-connect-error'."
   (let ((file (agent-repl-connect-daemon-addr-file)))
     (if (not (file-readable-p file))
         (progn
-          (agent-repl--log '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.daemon-addr-absent file=%S" file)
+          (agent-repl--log '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.daemon-addr-absent file={file}" :file (prin1-to-string file))
           nil)
       (let ((raw (with-temp-buffer
                    (insert-file-contents file)
@@ -156,11 +156,11 @@ at ERROR and signals `agent-repl-connect-error'."
         (let ((address (agent-repl-connect--first-line raw)))
           (if (string-match-p agent-repl-connect--address-regexp address)
               (progn
-                (agent-repl--log '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.daemon-addr-read file=%S address=%S"
-                                 file address)
+                (agent-repl--log '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.daemon-addr-read file={file} address={address}"
+                                 :file (prin1-to-string file) :address (prin1-to-string address))
                 address)
-            (agent-repl--error '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.daemon-addr-malformed file=%S content=%S"
-                               file raw)
+            (agent-repl--error '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.daemon-addr-malformed file={file} content={content}"
+                               :file (prin1-to-string file) :content (prin1-to-string raw))
             (signal 'agent-repl-connect-error
                     (list (agent-repl-connect--failure
                            :malformed-addr
@@ -489,7 +489,7 @@ dialing something else."
    ((and (stringp address) (string-match "\\`\\(.+\\):\\([0-9]+\\)\\'" address))
     (cons (match-string 1 address) (string-to-number (match-string 2 address))))
    (t
-    (agent-repl--error '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.unsplittable-address address=%S" address)
+    (agent-repl--error '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.unsplittable-address address={address}" :address (prin1-to-string address))
     (signal 'agent-repl-connect-error
             (list (agent-repl-connect--failure
                    :malformed-addr
@@ -575,8 +575,8 @@ connection\='s filter and sentinel closures included, so printing ERR
 wrote ~7KB of byte-code into every record (2026-11-15: a dial loop filled
 a 5x64MB rotation in ten minutes).  LOG-SCOPE is the exchange\='s own."
   (let ((message (agent-repl-connect--error-text err)))
-    (agent-repl--error log-scope "elisp.connect.dial-failed name=%S host=%S port=%S error=%S"
-                       name host port message)
+    (agent-repl--error log-scope "elisp.connect.dial-failed name={name} host={host} port={port} error={error}"
+                       :name (prin1-to-string name) :host (prin1-to-string host) :port (prin1-to-string port) :error (prin1-to-string message))
     message))
 
 (defun agent-repl-connect--record-send-failed (log-scope name err)
@@ -585,8 +585,8 @@ Answers ERR\='s message; the record carries it alone, for the reason
 `agent-repl-connect--record-dial-failed' gives.  LOG-SCOPE is the
 exchange\='s own."
   (let ((message (agent-repl-connect--error-text err)))
-    (agent-repl--error log-scope "elisp.connect.request-send-failed name=%S error=%S"
-                       name message)
+    (agent-repl--error log-scope "elisp.connect.request-send-failed name={name} error={error}"
+                       :name (prin1-to-string name) :error (prin1-to-string message))
     message))
 
 (defun agent-repl-connect--open-socket (name host port request filter sentinel log-scope)
@@ -701,20 +701,20 @@ socket: Connect exchanges each dial their own, and this object is the
 address plus the bookkeeping of the streams standing on it."
   (unless (and (stringp address)
                (string-match-p agent-repl-connect--address-regexp address))
-    (agent-repl--error '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.open-invalid-address address=%S" address)
+    (agent-repl--error '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.open-invalid-address address={address}" :address (prin1-to-string address))
     (signal 'agent-repl-connect-error
             (list (agent-repl-connect--failure
                    :malformed-addr (format "invalid daemon address: %S" address)))))
-  (agent-repl--info '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.open address=%S" address)
+  (agent-repl--info '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.open address={address}" :address (prin1-to-string address))
   (agent-repl-connect-connection-create :address address))
 
 (defun agent-repl-connect-close (conn)
   "Mark CONN dead and cancel every stream still standing on it.
 Each cancelled stream's ON-CLOSE runs with `(:cancelled)' — a client-side
 close is never an error."
-  (agent-repl--info '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.close address=%S streams=%d"
-                    (agent-repl-connect-connection-address conn)
-                    (length (agent-repl-connect-connection-streams conn)))
+  (agent-repl--info '(:agent-repl-central "the daemon address and connection lifecycle span workspaces") "elisp.connect.close address={address} streams={streams}"
+                    :address (prin1-to-string (agent-repl-connect-connection-address conn))
+                    :streams (length (agent-repl-connect-connection-streams conn)))
   (setf (agent-repl-connect-connection-alive-p conn) nil)
   (dolist (stream (copy-sequence (agent-repl-connect-connection-streams conn)))
     (agent-repl-connect-stream-cancel stream))
@@ -723,8 +723,8 @@ close is never an error."
 (defun agent-repl-connect--check-alive (conn method log-scope)
   "Signal `agent-repl-connect-error' when CONN is closed, naming METHOD."
   (unless (agent-repl-connect-connection-alive-p conn)
-    (agent-repl--error log-scope "elisp.connect.call-on-closed-connection method=%S address=%S"
-                       method (agent-repl-connect-connection-address conn))
+    (agent-repl--error log-scope "elisp.connect.call-on-closed-connection method={method} address={address}"
+                       :method (prin1-to-string method) :address (prin1-to-string (agent-repl-connect-connection-address conn)))
     (signal 'agent-repl-connect-error
             (list (agent-repl-connect--failure
                    :transport
@@ -771,15 +771,15 @@ the call is idempotent.  Returns the socket process."
              (when timer (cancel-timer timer) (setq timer nil))
              (pcase kind
                (:response
-                (agent-repl--log log-scope "elisp.connect.unary-response method=%S address=%S request-id=%S"
-                                 method address request-id)
+                (agent-repl--log log-scope "elisp.connect.unary-response method={method} address={address} request-id={request_id}"
+                                 :method (prin1-to-string method) :address (prin1-to-string address) :request_id (prin1-to-string request-id))
                 (when on-response (funcall on-response value)))
                (:failure
-                (agent-repl--warn log-scope "elisp.connect.unary-failure method=%S address=%S detail=%S request-id=%S"
-                                  method address value request-id)
+                (agent-repl--warn log-scope "elisp.connect.unary-failure method={method} address={address} detail={detail} request-id={request_id}"
+                                  :method (prin1-to-string method) :address (prin1-to-string address) :detail (prin1-to-string value) :request_id (prin1-to-string request-id))
                 (when on-failure (funcall on-failure value)))))))
-      (agent-repl--log log-scope "elisp.connect.unary-send method=%S address=%S bytes=%d request-id=%S"
-                       method address (string-bytes json-string) request-id)
+      (agent-repl--log log-scope "elisp.connect.unary-send method={method} address={address} bytes={bytes} request-id={request_id}"
+                       :method (prin1-to-string method) :address (prin1-to-string address) :bytes (string-bytes json-string) :request_id (prin1-to-string request-id))
       (setq process
             (agent-repl-connect--open-socket
              (format "agent-repl-connect-%s" method)
@@ -845,8 +845,8 @@ the call is idempotent.  Returns the socket process."
       ;; refuses on the spot and the sentinel runs from inside the write.  An
       ;; exchange already settled must not arm a timer nothing will cancel.
       (when (eq timeout :none)
-        (agent-repl--log log-scope "elisp.connect.unary-untimed method=%S address=%S"
-                         method address))
+        (agent-repl--log log-scope "elisp.connect.unary-untimed method={method} address={address}"
+                         :method (prin1-to-string method) :address (prin1-to-string address)))
       (unless (or settled (eq timeout :none))
         (setq timer
               (run-at-time (or timeout agent-repl-connect-unary-timeout-seconds) nil
@@ -859,11 +859,11 @@ the call is idempotent.  Returns the socket process."
                                ;; body is one cut mid-way (2026-11-13: 14
                                ;; handover adoptions timed out though the
                                ;; daemon had answered them).
-                               (agent-repl--warn log-scope "elisp.connect.unary-timeout method=%S address=%S status=%S received=%d request-id=%S"
-                                                 method address
-                                                 (agent-repl-connect--reader-status reader)
-                                                 (string-bytes body)
-                                                 request-id)
+                               (agent-repl--warn log-scope "elisp.connect.unary-timeout method={method} address={address} status={status} received={received} request-id={request_id}"
+                                                 :method (prin1-to-string method) :address (prin1-to-string address)
+                                                 :status (prin1-to-string (agent-repl-connect--reader-status reader))
+                                                 :received (string-bytes body)
+                                                 :request_id (prin1-to-string request-id))
                                (delete-process process))))))
       process))))
 
@@ -894,7 +894,7 @@ slot, and every synchronous call in the editor paid it."
         (accept-process-output nil 0.002)))
     (cond
      ((null outcome)
-      (agent-repl--error log-scope "elisp.connect.unary-sync-abandoned method=%S" method)
+      (agent-repl--error log-scope "elisp.connect.unary-sync-abandoned method={method}" :method (prin1-to-string method))
       (signal 'agent-repl-connect-error
               (list (agent-repl-connect--failure
                      :timeout (format "%s: no answer before the sync deadline" method)))))
@@ -970,11 +970,11 @@ must not tear down a standing subscription."
           (condition-case push-err
               (funcall (agent-repl-connect-stream-on-push stream) parsed)
             (error
-             (agent-repl--error log-scope "elisp.connect.push-handler-error method=%S error=%S payload=%S"
-                                method push-err payload))))
+             (agent-repl--error log-scope "elisp.connect.push-handler-error method={method} error={error} payload={payload}"
+                                :method (prin1-to-string method) :error (prin1-to-string push-err) :payload (prin1-to-string payload)))))
       (error
-       (agent-repl--error log-scope "elisp.connect.push-unparsable method=%S error=%S payload=%S"
-                          method err payload)))))
+       (agent-repl--error log-scope "elisp.connect.push-unparsable method={method} error={error} payload={payload}"
+                          :method (prin1-to-string method) :error (prin1-to-string err) :payload (prin1-to-string payload))))))
 
 (defun agent-repl-connect--dispatch-open (stream)
   "Run STREAM's ON-OPEN once, the instant its HTTP 200 headers landed.
@@ -990,13 +990,13 @@ the stream stays open."
     (setf (agent-repl-connect-stream-opened-p stream) t)
     (let ((method (agent-repl-connect-stream-method stream))
           (log-scope (agent-repl-connect-stream-log-scope stream)))
-      (agent-repl--info log-scope "elisp.connect.stream-accepted method=%S" method)
+      (agent-repl--info log-scope "elisp.connect.stream-accepted method={method}" :method (prin1-to-string method))
       (when (agent-repl-connect-stream-on-open stream)
         (condition-case err
             (funcall (agent-repl-connect-stream-on-open stream))
           (error
-           (agent-repl--error log-scope "elisp.connect.open-handler-error method=%S error=%S"
-                              method err)))))))
+           (agent-repl--error log-scope "elisp.connect.open-handler-error method={method} error={error}"
+                              :method (prin1-to-string method) :error (prin1-to-string err))))))))
 
 (defconst agent-repl-connect--handover-refusals '("transferring_away" "not_yet_adopted")
   "The refusal arms of a handover, which a stream's owner walks as a handover.")
@@ -1040,8 +1040,8 @@ OUTCOME is `(:cancelled)', `(:ended)', or `(:error DETAIL)'."
         (setf (agent-repl-connect-connection-streams conn)
               (delq stream (agent-repl-connect-connection-streams conn))))
       (pcase (car outcome)
-        (:cancelled (agent-repl--info log-scope "elisp.connect.stream-cancelled method=%S" method))
-        (:ended (agent-repl--info log-scope "elisp.connect.stream-ended method=%S" method))
+        (:cancelled (agent-repl--info log-scope "elisp.connect.stream-cancelled method={method}" :method (prin1-to-string method)))
+        (:ended (agent-repl--info log-scope "elisp.connect.stream-ended method={method}" :method (prin1-to-string method)))
         (:error
          (let ((arm (agent-repl-connect-refused-arm (cadr outcome))))
            ;; A HANDOVER REFUSAL IS THE CONTRACT'S ANSWER, NOT A FAILURE: the
@@ -1050,16 +1050,16 @@ OUTCOME is `(:cancelled)', `(:ended)', or `(:error DETAIL)'."
            ;; started during a rollout wrote one per workspace (2026-10-26:
            ;; 45 at one start).
            (if (member arm agent-repl-connect--handover-refusals)
-               (agent-repl--info log-scope "elisp.connect.stream-refused-handover method=%S arm=%s detail=%S"
-                                 method arm (cadr outcome))
-             (agent-repl--error log-scope "elisp.connect.stream-error method=%S detail=%S"
-                                method (cadr outcome))))))
+               (agent-repl--info log-scope "elisp.connect.stream-refused-handover method={method} arm={arm} detail={detail}"
+                                 :method (prin1-to-string method) :arm arm :detail (prin1-to-string (cadr outcome)))
+             (agent-repl--error log-scope "elisp.connect.stream-error method={method} detail={detail}"
+                                :method (prin1-to-string method) :detail (prin1-to-string (cadr outcome)))))))
       (when (agent-repl-connect-stream-on-close stream)
         (condition-case err
             (funcall (agent-repl-connect-stream-on-close stream) outcome)
           (error
-           (agent-repl--error log-scope "elisp.connect.close-handler-error method=%S error=%S outcome=%S"
-                              method err outcome)))))))
+           (agent-repl--error log-scope "elisp.connect.close-handler-error method={method} error={error} outcome={outcome}"
+                              :method (prin1-to-string method) :error (prin1-to-string err) :outcome (prin1-to-string outcome))))))))
 
 (defun agent-repl-connect-stream (conn method json-string on-push on-close
                                       &optional on-open)
@@ -1090,7 +1090,7 @@ nothing.  Returns the stream object."
          (stream (agent-repl-connect-stream-create
                   :method method :conn conn :on-push on-push :on-close on-close
                   :on-open on-open :log-scope log-scope)))
-    (agent-repl--info log-scope "elisp.connect.stream-open method=%S address=%S" method address)
+    (agent-repl--info log-scope "elisp.connect.stream-open method={method} address={address}" :method (prin1-to-string method) :address (prin1-to-string address))
     ;; REGISTERED BEFORE IT IS DIALED.  A refused connect answers from inside
     ;; the dial, so a stream registered afterwards would be pushed onto the
     ;; connection by a call whose own close had already taken it off.
@@ -1120,8 +1120,8 @@ nothing.  Returns the stream object."
                     ;; THE END FRAME IS THE END.  Anything after it is the
                     ;; producer contradicting itself, never a push to deliver.
                     ((agent-repl-connect-stream-closed-p stream)
-                     (agent-repl--warn log-scope "elisp.connect.frame-after-end method=%S flags=%S"
-                                       method (car frame)))
+                     (agent-repl--warn log-scope "elisp.connect.frame-after-end method={method} flags={flags}"
+                                       :method (prin1-to-string method) :flags (prin1-to-string (car frame))))
                     ((agent-repl-connect-envelope-end-frame-p (car frame))
                      ;; ON-CLOSE runs HERE, from the frame that ended the
                      ;; stream, and not from the sentinel: the producer has
@@ -1180,8 +1180,8 @@ Never an error, and idempotent — a stream already closed is left alone."
   (unless (agent-repl-connect-stream-closed-p stream)
     (setf (agent-repl-connect-stream-cancelled-p stream) t)
     (agent-repl--log (agent-repl-connect-stream-log-scope stream)
-                     "elisp.connect.stream-cancel method=%S"
-                     (agent-repl-connect-stream-method stream))
+                     "elisp.connect.stream-cancel method={method}"
+                     :method (prin1-to-string (agent-repl-connect-stream-method stream)))
     (let ((proc (agent-repl-connect-stream-process stream)))
       (if (process-live-p proc)
           (delete-process proc)

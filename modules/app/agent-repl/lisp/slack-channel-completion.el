@@ -43,13 +43,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-sigil-word-bounds "sigil-word" (sigil))
@@ -195,26 +196,26 @@ too, since the daemon's next read may succeed."
        (pcase (plist-get listing :arm)
          (:listed
           (let ((channels (plist-get (plist-get listing :value) :channels)))
-            (agent-repl--log ws "elisp.slack-channel-completion.answered ws=%s outcome=listed channels=%d"
-                             ws (length channels))
+            (agent-repl--log ws "elisp.slack-channel-completion.answered ws={ws} outcome=listed channels={channels}"
+                             :ws ws :channels (length channels))
             (agent-repl--slack-channel-completion-install channels)))
          (:pending
-          (agent-repl--log ws "elisp.slack-channel-completion.answered ws=%s outcome=pending" ws))
+          (agent-repl--log ws "elisp.slack-channel-completion.answered ws={ws} outcome=pending" :ws ws))
          (other
-          (agent-repl--error ws "elisp.slack-channel-completion.unknown-listing-arm ws=%s arm=%S"
-                             ws other)))))
+          (agent-repl--error ws "elisp.slack-channel-completion.unknown-listing-arm ws={ws} arm={arm}"
+                             :ws ws :arm (prin1-to-string other))))))
     (:error
      (let ((cause (plist-get (plist-get response :value) :cause)))
        (pcase (plist-get cause :arm)
          (:read-failed
-          (agent-repl--warn ws "elisp.slack-channel-completion.read-failed ws=%s detail=%S"
-                            ws (plist-get (plist-get cause :value) :detail)))
+          (agent-repl--warn ws "elisp.slack-channel-completion.read-failed ws={ws} detail={detail}"
+                            :ws ws :detail (prin1-to-string (plist-get (plist-get cause :value) :detail))))
          (other
-          (agent-repl--error ws "elisp.slack-channel-completion.unknown-cause-arm ws=%s arm=%S"
-                             ws other)))))
+          (agent-repl--error ws "elisp.slack-channel-completion.unknown-cause-arm ws={ws} arm={arm}"
+                             :ws ws :arm (prin1-to-string other))))))
     (other
-     (agent-repl--error ws "elisp.slack-channel-completion.unknown-response-arm ws=%s arm=%S"
-                        ws other))))
+     (agent-repl--error ws "elisp.slack-channel-completion.unknown-response-arm ws={ws} arm={arm}"
+                        :ws ws :arm (prin1-to-string other)))))
 
 (defun agent-repl-slack-channel-completion-refresh (ws)
   "Ask the daemon for the user's Slack channels, on behalf of WS's composer.
@@ -223,15 +224,15 @@ arrives.  No connection asks nothing and says so in the log -- the next
 hash word asks again."
   (let ((conn (agent-repl-host-conn-or-primary ws)))
     (if (null conn)
-        (agent-repl--log ws "elisp.slack-channel-completion.refresh-skipped ws=%s reason=no-connection" ws)
-      (agent-repl--log ws "elisp.slack-channel-completion.refresh ws=%s" ws)
+        (agent-repl--log ws "elisp.slack-channel-completion.refresh-skipped ws={ws} reason=no-connection" :ws ws)
+      (agent-repl--log ws "elisp.slack-channel-completion.refresh ws={ws}" :ws ws)
       (agent-repl-rpc-list-slack-channels
        conn nil
        :on-response (lambda (response)
                       (agent-repl--slack-channel-completion-answered ws response))
        :on-failure (lambda (detail)
-                     (agent-repl--warn ws "elisp.slack-channel-completion.transport-failure ws=%s detail=%S"
-                                       ws detail))))))
+                     (agent-repl--warn ws "elisp.slack-channel-completion.transport-failure ws={ws} detail={detail}"
+                                       :ws ws :detail (prin1-to-string detail)))))))
 
 ;;;; ---- completion-at-point ----
 

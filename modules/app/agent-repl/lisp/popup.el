@@ -36,9 +36,10 @@
 
 ;;; Code:
 
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--error "core")
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function +popup/quit-window "ext:popup" (&optional arg))
 
@@ -90,12 +91,12 @@ Returns non-nil when installed.  `set-popup-rule!' is absent only under
   (if (fboundp 'set-popup-rule!)
       (progn
         (apply 'set-popup-rule! #'agent-repl-popup-buffer-p agent-repl-popup-rule)
-        (agent-repl--info agent-repl-popup--log-scope "elisp.popup.rule-installed rule=%S"
-                          agent-repl-popup-rule)
+        (agent-repl--info agent-repl-popup--log-scope "elisp.popup.rule-installed rule={rule}"
+                          :rule (prin1-to-string agent-repl-popup-rule))
         t)
     (agent-repl--info agent-repl-popup--log-scope
-                      "elisp.popup.rule-skipped reason=no-popup-module rule=%S"
-                      agent-repl-popup-rule)
+                      "elisp.popup.rule-skipped reason=no-popup-module rule={rule}"
+                      :rule (prin1-to-string agent-repl-popup-rule))
     nil))
 
 ;;;###autoload
@@ -105,26 +106,26 @@ Marks BUFFER for `agent-repl-popup-rule' and enables `agent-repl-popup-mode'
 in it, so it opens on the right at 40% width and `q' closes it and kills it.
 A display that yields no window is a broken popup system, and signals."
   (unless (buffer-live-p buffer)
-    (agent-repl--error agent-repl-popup--log-scope "elisp.popup.show: rejected reason=dead-buffer buffer=%S"
-                       buffer)
+    (agent-repl--error agent-repl-popup--log-scope "elisp.popup.show: rejected reason=dead-buffer buffer={buffer}"
+                       :buffer (prin1-to-string buffer))
     (error "agent-repl: cannot show a dead buffer in a popup: %S" buffer))
   (with-current-buffer buffer
     (setq agent-repl-popup--owned t)
     (agent-repl-popup-mode 1))
   (let ((window (display-buffer buffer)))
     (unless (window-live-p window)
-      (agent-repl--error agent-repl-popup--log-scope "elisp.popup.show: rejected reason=no-window buffer=%s"
-                         (buffer-name buffer))
+      (agent-repl--error agent-repl-popup--log-scope "elisp.popup.show: rejected reason=no-window buffer={buffer}"
+                         :buffer (buffer-name buffer))
       (error "agent-repl: the popup system showed no window for %s" (buffer-name buffer)))
-    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.show: buffer=%s window=%S"
-                     (buffer-name buffer) window)
+    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.show: buffer={buffer} window={window}"
+                     :buffer (buffer-name buffer) :window (prin1-to-string window))
     window))
 
 (defun agent-repl-popup-quit ()
   "Close the current agent-repl popup; its `:ttl 0' kills the buffer.
 Bound to `q' in Evil normal state inside every agent-repl popup."
   (interactive)
-  (agent-repl--log agent-repl-popup--log-scope "elisp.popup.quit: buffer=%s" (buffer-name))
+  (agent-repl--log agent-repl-popup--log-scope "elisp.popup.quit: buffer={buffer}" :buffer (buffer-name))
   (+popup/quit-window))
 
 (defun agent-repl-popup--path-buffer (path)
@@ -133,9 +134,9 @@ PATH must already exist — the caller checks, because a missing path is a
 refusal and not a buffer this function could invent."
   (if (file-directory-p path)
       (progn
-        (agent-repl--log agent-repl-popup--log-scope "elisp.popup.buffer: kind=directory path=%s" path)
+        (agent-repl--log agent-repl-popup--log-scope "elisp.popup.buffer: kind=directory path={path}" :path path)
         (dired-noselect path))
-    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.buffer: kind=file path=%s" path)
+    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.buffer: kind=file path={path}" :path path)
     (find-file-noselect path)))
 
 (defun agent-repl-popup--goto-line (buffer line)
@@ -146,8 +147,8 @@ still open the file."
   (with-current-buffer buffer
     (goto-char (point-min))
     (forward-line (1- line))
-    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.goto-line: buffer=%s line=%d point=%d"
-                     (buffer-name buffer) line (point))
+    (agent-repl--log agent-repl-popup--log-scope "elisp.popup.goto-line: buffer={buffer} line={line} point={point}"
+                     :buffer (buffer-name buffer) :line line :point (point))
     (point)))
 
 ;;;###autoload
@@ -161,22 +162,22 @@ relay a location someone else observed, so inventing an empty buffer for
 a stale one would hide the staleness."
   (interactive "fOpen in popup: ")
   (unless (and (stringp path) (not (string-empty-p path)))
-    (agent-repl--error agent-repl-popup--log-scope "elisp.popup.open: rejected reason=empty-path path=%S" path)
+    (agent-repl--error agent-repl-popup--log-scope "elisp.popup.open: rejected reason=empty-path path={path}" :path (prin1-to-string path))
     (user-error "agent-repl: no path to open"))
   (let ((expanded (expand-file-name path)))
     (unless (file-exists-p expanded)
-      (agent-repl--error agent-repl-popup--log-scope "elisp.popup.open: rejected reason=missing-path path=%s"
-                         expanded)
+      (agent-repl--error agent-repl-popup--log-scope "elisp.popup.open: rejected reason=missing-path path={path}"
+                         :path expanded)
       (user-error "agent-repl: no such path: %s" expanded))
     (let ((buffer (agent-repl-popup--path-buffer expanded)))
       (when (and line (not (file-directory-p expanded)))
         (agent-repl-popup--goto-line buffer line))
       (when (and line (file-directory-p expanded))
-        (agent-repl--log agent-repl-popup--log-scope "elisp.popup.open: line ignored reason=directory path=%s line=%s"
-                         expanded line))
+        (agent-repl--log agent-repl-popup--log-scope "elisp.popup.open: line ignored reason=directory path={path} line={line}"
+                         :path expanded :line line))
       (agent-repl-popup-show buffer)
-      (agent-repl--info agent-repl-popup--log-scope "elisp.popup.open: opened path=%s line=%s buffer=%s"
-                        expanded (or line "none") (buffer-name buffer))
+      (agent-repl--info agent-repl-popup--log-scope "elisp.popup.open: opened path={path} line={line} buffer={buffer}"
+                        :path expanded :line (or line "none") :buffer (buffer-name buffer))
       buffer)))
 
 (provide 'agent-repl-popup)

@@ -698,7 +698,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     ;; Arrange
     (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
     (cl-letf (((symbol-function 'agent-repl-host-route-handover) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--warn) #'ignore))
+              ((symbol-function 'agent-repl--emit-warn) #'ignore))
       ;; Act
       (agent-repl-command-completion-refresh "ws-1"))
     ;; Assert
@@ -712,7 +712,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     ;; Arrange
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl-host-route-handover) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
@@ -728,7 +728,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     (let ((routed nil) (warned nil))
       (cl-letf (((symbol-function 'agent-repl-host-route-handover)
                  (lambda (ws cause slug) (push (list ws cause slug) routed) t))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
@@ -743,7 +743,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     ;; Arrange
     (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
@@ -760,7 +760,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     ;; Arrange
     (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
@@ -774,7 +774,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
   (agent-repl-test-command-completion--with '(:response (:arm :accepted :value nil))
     ;; Arrange
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
@@ -798,7 +798,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     ;; Arrange
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
@@ -812,7 +812,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     ;; Arrange
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))

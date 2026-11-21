@@ -61,22 +61,21 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--warn-once "agent-repl-core" (ws fingerprint fmt &rest args))
 (declare-function agent-repl--async-command "agent-repl-core" (label dir command callback &optional input))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-of-composer "agent-repl-workspace" (buffer))
 (declare-function agent-repl--executable-find "agent-repl-core" (program))
 (declare-function flyspell-mode "flyspell" (&optional arg))
 (declare-function flyspell-highlight-incorrect-region "flyspell" (beg end poss))
 (declare-function flyspell-get-word "flyspell" (&optional following extra-otherchars))
 (declare-function ispell-kill-ispell "ispell" (&optional no-error clear))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 
 (defvar flyspell-mode)
 (defvar flyspell-mode-map)
@@ -85,7 +84,6 @@
 (defvar ispell-local-dictionary)
 (defvar ispell-local-dictionary-alist)
 
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 
 (defcustom agent-repl-input-spellcheck t
   "Non-nil spellchecks the composer as you type.
@@ -126,8 +124,8 @@ is signalled, on WS's log."
                                              agent-repl--spell-requirement-id))
                           (gethash "requirements" root))))
     (unless entry
-      (agent-repl--fatal ws "elisp.spell.manifest ws=%s manifest=%s outcome=no-entry id=%s"
-                         ws manifest agent-repl--spell-requirement-id))
+      (agent-repl--fatal ws "elisp.spell.manifest ws={ws} manifest={manifest} outcome=no-entry id={id}"
+                         :ws ws :manifest manifest :id agent-repl--spell-requirement-id))
     entry))
 
 (defun agent-repl--spell-dictionary (ws &optional manifest)
@@ -144,12 +142,12 @@ dictionary, which is a broken manifest and is signalled, on WS's log."
          (names (mapcar (lambda (f) (gethash "to" f)) (gethash "files" entry)))
          (affixes (seq-filter (lambda (n) (string-suffix-p ".aff" n)) names)))
     (unless (= (length affixes) 1)
-      (agent-repl--fatal ws "elisp.spell.manifest ws=%s manifest=%s outcome=not-one-affix id=%s affixes=%d files=%S"
-                         ws manifest agent-repl--spell-requirement-id (length affixes) names))
+      (agent-repl--fatal ws "elisp.spell.manifest ws={ws} manifest={manifest} outcome=not-one-affix id={id} affixes={affixes} files={files}"
+                         :ws ws :manifest manifest :id agent-repl--spell-requirement-id :affixes (length affixes) :files (prin1-to-string names)))
     (let ((name (file-name-sans-extension (car affixes))))
       (unless (member (concat name ".dic") names)
-        (agent-repl--fatal ws "elisp.spell.manifest ws=%s manifest=%s outcome=no-dic id=%s name=%s files=%S"
-                           ws manifest agent-repl--spell-requirement-id name names))
+        (agent-repl--fatal ws "elisp.spell.manifest ws={ws} manifest={manifest} outcome=no-dic id={id} name={name} files={files}"
+                           :ws ws :manifest manifest :id agent-repl--spell-requirement-id :name name :files (prin1-to-string names)))
       (list :name name
             :dir dir
             :files (mapcar (lambda (n) (expand-file-name n dir)) names)))))
@@ -334,10 +332,10 @@ hunspell worked takes nothing."
   (unwind-protect
       (cond
        ((not ok)
-        (agent-repl--warn ws "elisp.spell.check-failed ws=%s buffer=%s span-length=%d output=%S"
-                          ws (buffer-name buffer)
-                          (- (or (marker-position (cdr span)) 0) (or (marker-position (car span)) 0))
-                          (string-trim output)))
+        (agent-repl--warn ws "elisp.spell.check-failed ws={ws} buffer={buffer} span-length={span_length} output={output}"
+                          :ws ws :buffer (buffer-name buffer)
+                          :span_length (- (or (marker-position (cdr span)) 0) (or (marker-position (car span)) 0))
+                          :output (prin1-to-string (string-trim output))))
        ((buffer-live-p buffer)
         (with-current-buffer buffer
           (when flyspell-mode
@@ -435,10 +433,10 @@ check starts on a fresh one; the word itself is left unchecked."
              (word agent-repl--spell-exchange-word)
              (ws (agent-repl--spell-ws)))
          (agent-repl--error ws
-                            "elisp.spell.no-reply ws=%s buffer=%s word=%S process=%S pid=%s cause=%s outcome=reset"
-                            ws (buffer-name) word
-                            (and process (process-name process))
-                            (and process (process-id process)) (cadr err))
+                            "elisp.spell.no-reply ws={ws} buffer={buffer} word={word} process={process} pid={pid} cause={cause} outcome=reset"
+                            :ws ws :buffer (buffer-name) :word (prin1-to-string word)
+                            :process (prin1-to-string (and process (process-name process)))
+                            :pid (and process (process-id process)) :cause (cadr err))
          (message "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
                   (or (and process (process-name process)) "hunspell") word (cadr err))
          (ispell-kill-ispell t)
@@ -477,8 +475,8 @@ when it changes; DIR leads hunspell's `DICPATH'; NAME is registered in
 set your own, so ispell.el's discovery, which asks hunspell for its
 default dictionary, finds one.  Idempotent."
   (unless (equal ispell-program-name program)
-    (agent-repl--info ws "elisp.spell.configure ws=%s program-from=%s program-to=%s"
-                      ws ispell-program-name program)
+    (agent-repl--info ws "elisp.spell.configure ws={ws} program-from={program_from} program-to={program_to}"
+                      :ws ws :program_from ispell-program-name :program_to program)
     (setq ispell-program-name program))
   (let ((paths (split-string (or (getenv "DICPATH") "") ":" t)))
     (unless (equal (car paths) dir)
@@ -495,15 +493,15 @@ manifest's dictionary missing, the composer is not spellchecked and the
 log says what is missing and how to install it, once per Emacs."
   (require 'flyspell)
   (if (not agent-repl-input-spellcheck)
-      (agent-repl--log ws "elisp.spell.enable ws=%s outcome=off reason=agent-repl-input-spellcheck-nil" ws)
+      (agent-repl--log ws "elisp.spell.enable ws={ws} outcome=off reason=agent-repl-input-spellcheck-nil" :ws ws)
     (let* ((dictionary (agent-repl--spell-dictionary ws))
            (program (agent-repl--executable-find agent-repl--spell-program))
            (unmet (agent-repl--spell-unmet program dictionary)))
       (if unmet
           (agent-repl--warn-once
            ws (format "spell-unmet:%S" unmet)
-           "elisp.spell.enable ws=%s outcome=unavailable unmet=%S fix=%s"
-           ws unmet "run bin/requirements.sh install (or /agent-repl-install)")
+           "elisp.spell.enable ws={ws} outcome=unavailable unmet={unmet} fix={fix}"
+           :ws ws :unmet (prin1-to-string unmet) :fix "run bin/requirements.sh install (or /agent-repl-install)")
         (let ((name (plist-get dictionary :name))
               (dir (plist-get dictionary :dir)))
           (agent-repl--spell-configure-ispell ws program name dir)
@@ -514,8 +512,8 @@ log says what is missing and how to install it, once per Emacs."
                             minor-mode-overriding-map-alist))
           (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
           (agent-repl--spell-flyspell-on)
-          (agent-repl--log ws "elisp.spell.enable ws=%s outcome=on program=%s dictionary=%s dir=%s"
-                           ws program name dir))))))
+          (agent-repl--log ws "elisp.spell.enable ws={ws} outcome=on program={program} dictionary={dictionary} dir={dir}"
+                           :ws ws :program program :dictionary name :dir dir))))))
 
 (provide 'agent-repl-spell)
 

@@ -167,7 +167,7 @@
                   ((symbol-function 'process-name) (lambda (_p) "test"))
                   ((symbol-function 'process-buffer) (lambda (_p) buf))
                   ((symbol-function 'process-get) (lambda (_p _key) nil))
-                  ((symbol-function 'agent-repl--error)
+                  ((symbol-function 'agent-repl--emit-error)
                    (lambda (ws &rest _args) (setq logged-workspace ws))))
           ;; Act / Assert.
           (should-error (agent-repl--async-git-settle 'fake-proc)

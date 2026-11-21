@@ -43,9 +43,9 @@
      (agent-repl-test--with-clock 100.0
        (cl-letf (((symbol-function 'input-pending-p)
                   (lambda (&rest _) agent-repl-test-bc--input-pending))
-                 ((symbol-function 'agent-repl--info)
+                 ((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-into agent-repl-test-bc--infos))
-                 ((symbol-function 'agent-repl--error)
+                 ((symbol-function 'agent-repl--emit-error)
                   (agent-repl-test--record-into agent-repl-test-bc--errors))
                  ((symbol-function 'run-with-timer) (lambda (&rest _) (timer-create)))
                  ((symbol-function 'agent-repl--register-timer)

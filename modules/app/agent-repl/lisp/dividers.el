@@ -48,13 +48,16 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'seq)
 
 (declare-function agent-repl--agent-panel-buffer-p "core" (&optional buf))
 (declare-function agent-repl-sidebar-view-window-p "sidebar-view" (win))
 (declare-function agent-repl-sidebar-view-buffer "sidebar-view" ())
 (declare-function agent-repl-webhost-buffer "webhost" ())
-(declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-frame-border-set-panels "frame-border" (frame shows))
 (defvar agent-repl-input-background)
 (defvar agent-repl-frontend-webview-mode)
@@ -97,8 +100,8 @@ A frame showing no panels keeps its own colors, and paints the ground
 only when it is hidden."
   (dolist (frame (agent-repl--dividers-hidden-frames))
     (agent-repl--log agent-repl--dividers-log-scope
-                     "elisp.dividers.repaint frame=%S color=%s"
-                     frame agent-repl-input-background)
+                     "elisp.dividers.repaint frame={frame} color={color}"
+                     :frame (prin1-to-string frame) :color agent-repl-input-background)
     (agent-repl--dividers-paint frame)))
 
 (defun agent-repl--dividers-hide (frame)
@@ -108,8 +111,8 @@ A frame already hidden is left as it is."
     (let ((kept (mapcar (lambda (face) (cons face (face-attribute face :foreground frame)))
                         agent-repl--dividers-faces)))
       (agent-repl--log agent-repl--dividers-log-scope
-                       "elisp.dividers.hide frame=%S color=%s kept=%S"
-                       frame agent-repl-input-background kept)
+                       "elisp.dividers.hide frame={frame} color={color} kept={kept}"
+                       :frame (prin1-to-string frame) :color agent-repl-input-background :kept (prin1-to-string kept))
       (agent-repl--dividers-paint frame)
       (set-frame-parameter frame agent-repl--dividers-hidden kept))))
 
@@ -118,7 +121,7 @@ A frame already hidden is left as it is."
 A frame not hidden is left as it is."
   (when-let ((kept (frame-parameter frame agent-repl--dividers-hidden)))
     (agent-repl--log agent-repl--dividers-log-scope
-                     "elisp.dividers.restore frame=%S kept=%S" frame kept)
+                     "elisp.dividers.restore frame={frame} kept={kept}" :frame (prin1-to-string frame) :kept (prin1-to-string kept))
     (dolist (entry kept)
       (set-face-attribute (car entry) frame :foreground (cdr entry)))
     (set-frame-parameter frame agent-repl--dividers-hidden nil)))
@@ -135,8 +138,8 @@ one already at its buffer\='s width is left alone."
     (let ((width (buffer-local-value 'agent-repl--dividers-fixed-fringe (window-buffer win))))
       (when (and width (not (equal (seq-take (window-fringes win) 2) (list width width))))
         (agent-repl--log agent-repl--dividers-log-scope
-                         "elisp.dividers.fit-fringes window=%S buffer=%s width=%S from=%S"
-                         win (buffer-name (window-buffer win)) width (window-fringes win))
+                         "elisp.dividers.fit-fringes window={window} buffer={buffer} width={width} from={from}"
+                         :window (prin1-to-string win) :buffer (buffer-name (window-buffer win)) :width (prin1-to-string width) :from (prin1-to-string (window-fringes win)))
         (set-window-fringes win width width)))))
 
 (defun agent-repl-dividers-sync (&optional frame)
@@ -175,7 +178,7 @@ the frame is painted afresh.  Every other face kept its color from before."
                                 entry))
                             (frame-parameter frame agent-repl--dividers-hidden))))
         (agent-repl--log agent-repl--dividers-log-scope
-                         "elisp.dividers.theme frame=%S theme=%S kept=%S" frame theme rekept)
+                         "elisp.dividers.theme frame={frame} theme={theme} kept={kept}" :frame (prin1-to-string frame) :theme (prin1-to-string theme) :kept (prin1-to-string rekept))
         (agent-repl--dividers-paint frame)
         (set-frame-parameter frame agent-repl--dividers-hidden rekept)))))
 
@@ -188,8 +191,8 @@ each of Emacs\='s own web views as it is made (webhost.el) and for a
 workspace\='s slot as `agent-repl-frontend-webview-mode\=' turns on or off."
   (let ((windows (get-buffer-window-list buf nil t)))
     (agent-repl--log agent-repl--dividers-log-scope
-                     "elisp.dividers.fix-fringes buffer=%s width=%S windows=%d"
-                     (buffer-name buf) width (length windows))
+                     "elisp.dividers.fix-fringes buffer={buffer} width={width} windows={windows}"
+                     :buffer (buffer-name buf) :width (prin1-to-string width) :windows (length windows))
     (with-current-buffer buf
       (setq agent-repl--dividers-fixed-fringe width)
       (if width

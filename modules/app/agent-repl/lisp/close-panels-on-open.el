@@ -45,11 +45,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--agent-panel-buffer-p "core")
-(declare-function agent-repl--log "core")
 (declare-function agent-repl--panels-visible-p "panels")
 (declare-function agent-repl--simple-hide-and-preserve-status "panels")
 (declare-function agent-repl--ws-current-name "workspace")
@@ -94,9 +97,8 @@ machinery uses to place panels into their own windows."
          (panel-p (and live-p (agent-repl--agent-panel-buffer-p buf))))
     (agent-repl--log
      ws
-     (concat "close-panels-open: classified target arg=%S kind=%S "
-             "resolved-buffer=%S live=%s panel=%s")
-     arg arg-kind (and live-p (buffer-name buf)) live-p panel-p)
+     "close-panels-open: classified target arg={arg} kind={kind} resolved-buffer={resolved_buffer} live={live} panel={panel}"
+     :arg (prin1-to-string arg) :kind (prin1-to-string arg-kind) :resolved_buffer (prin1-to-string (and live-p (buffer-name buf))) :live live-p :panel panel-p)
     panel-p))
 
 (defun agent-repl--close-panels-before-open (&rest args)
@@ -112,30 +114,28 @@ close leaves selected."
   (let ((ws (agent-repl--ws-current-name)))
     (if agent-repl--closing-panels-for-open
         (agent-repl--log ws
-                         "close-panels-open: skipped re-entrant advice args=%S"
-                         args)
+                         "close-panels-open: skipped re-entrant advice args={args}"
+                         :args (prin1-to-string args))
       (let ((panels-visible-p (agent-repl--panels-visible-p)))
         (if (not panels-visible-p)
             (agent-repl--log ws
-                             "close-panels-open: skipped hidden panels args=%S visible=%s"
-                             args panels-visible-p)
+                             "close-panels-open: skipped hidden panels args={args} visible={visible}"
+                             :args (prin1-to-string args) :visible panels-visible-p)
           (let ((target-is-panel-p (agent-repl--open-target-is-panel-p args ws)))
             (if target-is-panel-p
                 (agent-repl--log
                  ws
-                 (concat "close-panels-open: skipped panel target args=%S "
-                         "visible=%s panel-target=%s")
-                 args panels-visible-p target-is-panel-p)
+                 "close-panels-open: skipped panel target args={args} visible={visible} panel-target={panel_target}"
+                 :args (prin1-to-string args) :visible panels-visible-p :panel_target target-is-panel-p)
               (let ((agent-repl--closing-panels-for-open t))
                 (agent-repl--log
                  ws
-                 (concat "close-panels-open: closing panels before target open "
-                         "args=%S visible=%s panel-target=%s")
-                 args panels-visible-p target-is-panel-p)
+                 "close-panels-open: closing panels before target open args={args} visible={visible} panel-target={panel_target}"
+                 :args (prin1-to-string args) :visible panels-visible-p :panel_target target-is-panel-p)
                 (agent-repl--simple-hide-and-preserve-status)
                 (agent-repl--log ws
-                                 "close-panels-open: panel close completed args=%S"
-                                 args)))))))))
+                                 "close-panels-open: panel close completed args={args}"
+                                 :args (prin1-to-string args))))))))))
 
 (dolist (fn agent-repl-close-panels-on-open-fns)
   (advice-add fn :before #'agent-repl--close-panels-before-open))

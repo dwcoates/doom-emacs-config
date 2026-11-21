@@ -151,15 +151,15 @@ a case binds it."
                 (lambda (root modules) (push (list root modules) agent-repl-test-eb--compiles)))
                ((symbol-function 'agent-repl-latency-report-editor)
                 (lambda (kind seconds) (push (list kind seconds) agent-repl-test-eb--reported)))
-               ((symbol-function 'agent-repl--log)
+               ((symbol-function 'agent-repl--emit-log)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :log (apply #'format fmt args)) agent-repl-test-eb--logs)))
-               ((symbol-function 'agent-repl--info)
+                  (push (cons :log (agent-repl-log-site-render fmt args)) agent-repl-test-eb--logs)))
+               ((symbol-function 'agent-repl--emit-info)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :info (apply #'format fmt args)) agent-repl-test-eb--logs)))
-               ((symbol-function 'agent-repl--error)
+                  (push (cons :info (agent-repl-log-site-render fmt args)) agent-repl-test-eb--logs)))
+               ((symbol-function 'agent-repl--emit-error)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :error (apply #'format fmt args)) agent-repl-test-eb--logs)))
+                  (push (cons :error (agent-repl-log-site-render fmt args)) agent-repl-test-eb--logs)))
                ((symbol-function 'message)
                 (lambda (fmt &rest args)
                   (push (apply #'format fmt args) agent-repl-test-eb--messages)))
@@ -239,9 +239,11 @@ a case binds it."
     (should-error (agent-repl-elisp-build))))
 
 (ert-deftest agent-repl-test-eb-harness-records-the-loaded-module-set ()
-  "The batch load of config.el recorded one entry per module source, core first."
+  "The batch load of config.el recorded one entry per module source, log-site first.
+config.el loads log-site.el as its first module: every later source's log
+calls are log-site macros."
   ;; Arrange / Act / Assert
-  (should (equal (caar agent-repl--elisp-module-builds) "core")))
+  (should (equal (caar agent-repl--elisp-module-builds) "log-site")))
 
 ;;;; ---- config.el's module list ----
 

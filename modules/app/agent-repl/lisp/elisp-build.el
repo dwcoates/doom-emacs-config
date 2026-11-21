@@ -44,14 +44,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--now "core" ())
-(declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl--assert-heartbeat-armed "core" ())
 (declare-function agent-repl--elisp-file-sha256 "config" (file))
 (declare-function agent-repl--elisp-module-file "config" (root module))
@@ -100,12 +100,12 @@ failure, never an empty build: WatchDaemon's elisp_build is REQUIRED, and a
 daemon told nothing could not tell whether this Emacs runs its elisp."
   (unless agent-repl--elisp-module-builds
     (agent-repl--fatal agent-repl--elisp-build-log-scope
-                       "elisp.elisp-build.no-modules-recorded reason=%s"
-                       "config.el recorded no loaded module, so this Emacs has no elisp build to report"))
+                       "elisp.elisp-build.no-modules-recorded reason={reason}"
+                       :reason "config.el recorded no loaded module, so this Emacs has no elisp build to report"))
   (let ((build (agent-repl-elisp-build-of agent-repl--elisp-module-builds)))
     (agent-repl--log agent-repl--elisp-build-log-scope
-                     "elisp.elisp-build.current modules=%d build=%s"
-                     (length agent-repl--elisp-module-builds) build)
+                     "elisp.elisp-build.current modules={modules} build={build}"
+                     :modules (length agent-repl--elisp-module-builds) :build build)
     build))
 
 ;;;; ---- config.el's module list ----
@@ -158,8 +158,8 @@ of the comparison, since no change of it can be told."
       (cons t (eval (car (get symbol 'standard-value)) t))
     (error
      (agent-repl--error agent-repl--elisp-build-log-scope
-                        "elisp.elisp-build.default-unevaluable symbol=%s form=%S error=%S"
-                        symbol (car (get symbol 'standard-value)) err)
+                        "elisp.elisp-build.default-unevaluable symbol={symbol} form={form} error={error}"
+                        :symbol symbol :form (prin1-to-string (car (get symbol 'standard-value))) :error (prin1-to-string err))
      nil)))
 
 (defun agent-repl--elisp-defaults-snapshot ()
@@ -186,16 +186,16 @@ default, in SNAPSHOT order."
           (cond
            ((or (get symbol 'saved-value) (get symbol 'customized-value) (get symbol 'theme-value))
             (agent-repl--log agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.default-kept symbol=%s reason=customized default=%S"
-                             symbol (cdr new)))
+                             "elisp.elisp-build.default-kept symbol={symbol} reason=customized default={default}"
+                             :symbol symbol :default (prin1-to-string (cdr new))))
            ((not (equal (default-value symbol) old))
             (agent-repl--log agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.default-kept symbol=%s reason=set-outside-custom value=%S default=%S"
-                             symbol (default-value symbol) (cdr new)))
+                             "elisp.elisp-build.default-kept symbol={symbol} reason=set-outside-custom value={value} default={default}"
+                             :symbol symbol :value (prin1-to-string (default-value symbol)) :default (prin1-to-string (cdr new))))
            (t
             (agent-repl--info agent-repl--elisp-build-log-scope
-                              "elisp.elisp-build.default-applied symbol=%s from=%S to=%S"
-                              symbol old (cdr new))
+                              "elisp.elisp-build.default-applied symbol={symbol} from={from} to={to}"
+                              :symbol symbol :from (prin1-to-string old) :to (prin1-to-string (cdr new)))
             (custom-reevaluate-setting symbol)
             (push symbol applied))))))
     (nreverse applied)))
@@ -218,7 +218,7 @@ so the verb fails loudly.  Returns t."
    (lambda ()
      (dolist (file files)
        (agent-repl--info agent-repl--elisp-build-log-scope
-                         "elisp.elisp-build.hot-load file=%S" file)
+                         "elisp.elisp-build.hot-load file={file}" :file (prin1-to-string file))
        (agent-repl--elisp-reload-load-file file))
      t)))
 
@@ -249,14 +249,14 @@ scheduled."
     (if (not (string= theirs ours))
         (progn
           (agent-repl--error agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.reload-refused reason=root-mismatch pushed-root=%S running-root=%S build=%S"
-                             theirs ours build)
+                             "elisp.elisp-build.reload-refused reason=root-mismatch pushed-root={pushed_root} running-root={running_root} build={build}"
+                             :pushed_root (prin1-to-string theirs) :running_root (prin1-to-string ours) :build (prin1-to-string build))
           (message "agent-repl: elisp reload REFUSED -- the deploy is for %s, this Emacs runs %s"
                    theirs ours)
           nil)
       (agent-repl--info agent-repl--elisp-build-log-scope
-                        "elisp.elisp-build.reload-scheduled root=%S build=%S"
-                        ours build)
+                        "elisp.elisp-build.reload-scheduled root={root} build={build}"
+                        :root (prin1-to-string ours) :build (prin1-to-string build))
       (run-at-time 0 nil #'agent-repl--elisp-reload-then ours build on-done)
       t)))
 
@@ -288,26 +288,26 @@ failure would strand every later module's timers too."
           ;; state.  config.el never names one, so this is a broken loader.
           (push (cons module "a test file is never loaded into a running Emacs") failures)
           (agent-repl--error agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.reload-test-module-refused module=%s file=%S"
-                             module file))
+                             "elisp.elisp-build.reload-test-module-refused module={module} file={file}"
+                             :module module :file (prin1-to-string file)))
          ((null sha)
           (push (cons module "the file is absent") failures)
           (agent-repl--error agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.reload-module-absent module=%s file=%S"
-                             module file))
+                             "elisp.elisp-build.reload-module-absent module={module} file={file}"
+                             :module module :file (prin1-to-string file)))
          (t
           (push (cons module sha) entries)
           (condition-case err
               (progn
                 (agent-repl--elisp-reload-load-file file)
                 (agent-repl--log agent-repl--elisp-build-log-scope
-                                 "elisp.elisp-build.reload-module-loaded module=%s sha256=%s"
-                                 module sha))
+                                 "elisp.elisp-build.reload-module-loaded module={module} sha256={sha256}"
+                                 :module module :sha256 sha))
             (error
              (push (cons module (error-message-string err)) failures)
              (agent-repl--error agent-repl--elisp-build-log-scope
-                                "elisp.elisp-build.reload-module-failed module=%s file=%S error=%S"
-                                module file err)))))))
+                                "elisp.elisp-build.reload-module-failed module={module} file={file} error={error}"
+                                :module module :file (prin1-to-string file) :error (prin1-to-string err))))))))
     (cons (nreverse entries) (nreverse failures))))
 
 (defun agent-repl--elisp-reload-report-heartbeat (result)
@@ -315,15 +315,15 @@ failure would strand every later module's timers too."
   (let ((rearmed (plist-get result :rearmed))
         (failed (plist-get result :failed)))
     (agent-repl--info agent-repl--elisp-build-log-scope
-                      "elisp.elisp-build.reload-heartbeat armed=%d rearmed=%d failed=%d unavailable=%d"
-                      (length (plist-get result :armed)) (length rearmed)
-                      (length failed) (length (plist-get result :unavailable)))
+                      "elisp.elisp-build.reload-heartbeat armed={armed} rearmed={rearmed} failed={failed} unavailable={unavailable}"
+                      :armed (length (plist-get result :armed)) :rearmed (length rearmed)
+                      :failed (length failed) :unavailable (length (plist-get result :unavailable)))
     (when rearmed
       (agent-repl--info agent-repl--elisp-build-log-scope
-                        "elisp.elisp-build.reload-heartbeat-rearmed keys=%S" rearmed))
+                        "elisp.elisp-build.reload-heartbeat-rearmed keys={keys}" :keys (prin1-to-string rearmed)))
     (when failed
       (agent-repl--error agent-repl--elisp-build-log-scope
-                         "elisp.elisp-build.reload-heartbeat-failed keys=%S" failed)
+                         "elisp.elisp-build.reload-heartbeat-failed keys={keys}" :keys (prin1-to-string failed))
       (message "agent-repl: elisp reload left required timers unarmed: %s"
                (mapconcat (lambda (key) (format "%s" key)) failed ", ")))))
 
@@ -386,12 +386,11 @@ at the debug rung."
   (let ((functions (plist-get result :functions)))
     (if functions
         (agent-repl--info agent-repl--elisp-build-log-scope
-                          "elisp.elisp-build.retired count=%d functions=%S hooks=%S timers=%S"
-                          (length functions) functions
-                          (plist-get result :hooks) (plist-get result :timers))
+                          "elisp.elisp-build.retired count={count} functions={functions} hooks={hooks} timers={timers}"
+                          :count (length functions) :functions (prin1-to-string functions) :hooks (prin1-to-string (plist-get result :hooks)) :timers (prin1-to-string (plist-get result :timers)))
       (agent-repl--log agent-repl--elisp-build-log-scope
-                       "elisp.elisp-build.retired-none reason=%s"
-                       "every agent-repl function is defined by a loaded file"))))
+                       "elisp.elisp-build.retired-none reason={reason}"
+                       :reason "every agent-repl function is defined by a loaded file"))))
 
 (defun agent-repl--elisp-reload-run (root build)
   "Hot-load the module set from ROOT, which the daemon built as BUILD.
@@ -408,19 +407,19 @@ failure is already recorded at ERROR."
   (let ((config (expand-file-name "config.el" root))
         (modules nil))
     (agent-repl--info agent-repl--elisp-build-log-scope
-                      "elisp.elisp-build.reload-begin root=%S build=%S" root build)
+                      "elisp.elisp-build.reload-begin root={root} build={build}" :root (prin1-to-string root) :build (prin1-to-string build))
     (condition-case err
         (progn
           (setq modules (agent-repl--elisp-config-modules config))
           (unless modules
             (agent-repl--error agent-repl--elisp-build-log-scope
-                               "elisp.elisp-build.reload-config-names-no-module config=%S"
-                               config)
+                               "elisp.elisp-build.reload-config-names-no-module config={config}"
+                               :config (prin1-to-string config))
             (message "agent-repl: elisp reload FAILED -- %s names no module" config)))
       (error
        (agent-repl--error agent-repl--elisp-build-log-scope
-                          "elisp.elisp-build.reload-config-unreadable config=%S error=%S"
-                          config err)
+                          "elisp.elisp-build.reload-config-unreadable config={config} error={error}"
+                          :config (prin1-to-string config) :error (prin1-to-string err))
        (message "agent-repl: elisp reload FAILED -- %s could not be read: %s"
                 config (error-message-string err))))
     (when modules
@@ -440,8 +439,8 @@ failure is already recorded at ERROR."
          :elisp-reload (max 0.0 (- (agent-repl--now) started)))
         (when failures
           (agent-repl--error agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.reload-module-failures count=%d failures=%S"
-                             (length failures) failures)
+                             "elisp.elisp-build.reload-module-failures count={count} failures={failures}"
+                             :count (length failures) :failures (prin1-to-string failures))
           (message "agent-repl: elisp reload: %d module(s) failed to load: %s"
                    (length failures)
                    (mapconcat #'car failures ", ")))
@@ -449,20 +448,19 @@ failure is already recorded at ERROR."
         ;; good load defined, which its new `load-history' entry may not name.
         (if failures
             (agent-repl--info agent-repl--elisp-build-log-scope
-                              "elisp.elisp-build.retire-skipped failed=%d reason=%s"
-                              (length failures)
-                              "a module failed to load, so its functions may still be needed")
+                              "elisp.elisp-build.retire-skipped failed={failed} reason={reason}"
+                              :failed (length failures) :reason "a module failed to load, so its functions may still be needed")
           (agent-repl--elisp-reload-report-retired (agent-repl--elisp-retire-undefined)))
         (let ((loaded-build (agent-repl-elisp-build-of entries)))
           (unless (string= loaded-build build)
             (agent-repl--error agent-repl--elisp-build-log-scope
-                               "elisp.elisp-build.reload-build-mismatch pushed=%S loaded=%S reason=%s"
-                               build loaded-build
-                               "the files changed between the deploy and the load"))
+                               "elisp.elisp-build.reload-build-mismatch pushed={pushed} loaded={loaded} reason={reason}"
+                               :pushed (prin1-to-string build) :loaded (prin1-to-string loaded-build)
+                               :reason "the files changed between the deploy and the load"))
           (agent-repl--info agent-repl--elisp-build-log-scope
-                            "elisp.elisp-build.reload-complete modules=%d recorded=%d failed=%d build=%S"
-                            (length modules) (length entries) (length failures)
-                            loaded-build)
+                            "elisp.elisp-build.reload-complete modules={modules} recorded={recorded} failed={failed} build={build}"
+                            :modules (length modules) :recorded (length entries) :failed (length failures)
+                            :build (prin1-to-string loaded-build))
           (and (null failures) (string= loaded-build build)))))))
 
 (defun agent-repl-elisp-reload-if-stale (root)
@@ -482,19 +480,19 @@ stand-down it fixes.  Returns a string the caller prints:
     (if (not (string= theirs ours))
         (progn
           (agent-repl--info agent-repl--elisp-build-log-scope
-                            "elisp.elisp-build.reload-if-stale outcome=other-root asked-root=%S running-root=%S"
-                            theirs ours)
+                            "elisp.elisp-build.reload-if-stale outcome=other-root asked-root={asked_root} running-root={running_root}"
+                            :asked_root (prin1-to-string theirs) :running_root (prin1-to-string ours))
           "other-root")
       (let* ((modules (agent-repl--elisp-config-modules (expand-file-name "config.el" ours)))
              (fresh (agent-repl-elisp-build-of (agent-repl-elisp-build-entries ours modules))))
         (cond
          ((string= fresh (agent-repl-elisp-build))
           (agent-repl--info agent-repl--elisp-build-log-scope
-                            "elisp.elisp-build.reload-if-stale outcome=current build=%S" fresh)
+                            "elisp.elisp-build.reload-if-stale outcome=current build={build}" :build (prin1-to-string fresh))
           "current")
          ((agent-repl--elisp-reload-run ours fresh)
           (agent-repl--info agent-repl--elisp-build-log-scope
-                            "elisp.elisp-build.reload-if-stale outcome=reloaded build=%S" fresh)
+                            "elisp.elisp-build.reload-if-stale outcome=reloaded build={build}" :build (prin1-to-string fresh))
           "reloaded")
          (t "failed"))))))
 

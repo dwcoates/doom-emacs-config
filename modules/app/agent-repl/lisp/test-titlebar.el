@@ -23,7 +23,7 @@ frame\='s paint is undone afterwards, so no case leaks into another."
          (logs nil))
      (cl-letf (((symbol-function 'agent-repl--titlebar-frames) (lambda () (list frame)))
                ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) ,focused))
-               ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+               ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
        (unwind-protect
            (progn ,@body)
          (agent-repl--titlebar-unpaint frame)))))
@@ -235,7 +235,7 @@ install makes on macOS is stubbed out."
          (enable-theme-functions nil)
          (infos nil))
      (cl-letf (((symbol-function 'agent-repl-titlebar-sync) #'ignore)
-               ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+               ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
        (agent-repl--titlebar-install ,system)
        ,@body)))
 

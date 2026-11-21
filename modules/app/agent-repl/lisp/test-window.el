@@ -749,7 +749,7 @@ naturally."
   "A sweep that does not name its caller and predicate is refused."
   (agent-repl-window-test--with-temp-frame
     (let ((fatals nil))
-      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+      (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
         ;; Act
         (should-error (agent-repl-window--delete-where (lambda (_w) nil)))
         ;; Assert
@@ -768,7 +768,7 @@ neither the caller nor the predicate."
       (unwind-protect
           (cl-letf (((symbol-function 'delete-window)
                      (lambda (&rest _) (error "Deletion failed")))
-                    ((symbol-function 'agent-repl--warn)
+                    ((symbol-function 'agent-repl--emit-warn)
                      (agent-repl-test--record-into warns)))
             ;; Act
             (agent-repl-window--delete-where
@@ -791,7 +791,7 @@ neither the caller nor the predicate."
   "The sweep\='s first record names who asked and what it matches."
   (agent-repl-window-test--with-temp-frame
     (let ((logs nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-window--delete-where (lambda (_w) nil)
@@ -816,7 +816,7 @@ one that is a routing error."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((logged 'no-record))
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                  (lambda (ws &rest _)
                    (when (eq logged 'no-record) (setq logged ws)))))
         ;; Act
@@ -937,7 +937,7 @@ routing error again whenever it runs outside one."
       (unwind-protect
           (progn
             (agent-repl--ws-put "ws1" :project-dir project)
-            (cl-letf (((symbol-function 'agent-repl--log-verbose)
+            (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                        (lambda (ws &rest _)
                          (when (eq logged 'no-record) (setq logged ws)))))
               ;; Act
@@ -1001,8 +1001,8 @@ took that window object, and the restore kept its `window-side'."
       ;; Arrange
       (let ((config (agent-repl-window--save-configuration))
             (records nil))
-        (cl-letf (((symbol-function 'agent-repl--log)
-                   (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) records))))
+        (cl-letf (((symbol-function 'agent-repl--emit-log)
+                   (lambda (ws fmt &rest args) (push (list ws (agent-repl-log-site-render fmt args)) records))))
           ;; Act
           (agent-repl-window--restore-configuration config "main"))
         ;; Assert
@@ -1204,7 +1204,7 @@ asked in their place."
           (warned nil))
       (unwind-protect
           (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fallback))
-                    ((symbol-function 'agent-repl--warn)
+                    ((symbol-function 'agent-repl--emit-warn)
                      (agent-repl-test--record-into warned)))
             (set-window-buffer sole buf)
             ;; Act
@@ -1252,7 +1252,7 @@ asked in their place."
   "Run BODY capturing the debug rung into `agent-repl-window-test--debug'."
   (declare (indent 0))
   `(let ((agent-repl-window-test--debug nil))
-     (cl-letf (((symbol-function 'agent-repl--log)
+     (cl-letf (((symbol-function 'agent-repl--emit-log)
                 (agent-repl-test--record-into agent-repl-window-test--debug)))
        ,@body)))
 
@@ -1492,7 +1492,7 @@ the input window goes and the webview grows into its space."
                   (lambda (ws) (push (cons ws reconciled) told) 100))
                  ((symbol-function 'agent-repl-window--ensure-layout)
                   (lambda () (cl-incf reconciled)))
-                 ((symbol-function 'agent-repl--info)
+                 ((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-into said)))
          ,@body))))
 
@@ -1611,7 +1611,7 @@ frame's line height: the gate neither overlaps the feed nor leaves a gap."
     (let ((said nil))
       (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 10))
                 ((symbol-function 'agent-repl-webhost-set-gate-dock) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--info)
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into said)))
         ;; Act
         (agent-repl-window-tell-gate-dock "ws")
@@ -1636,7 +1636,7 @@ frame's line height: the gate neither overlaps the feed nor leaves a gap."
     (let ((said nil))
       (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 137))
                 ((symbol-function 'agent-repl-webhost-set-gate-dock) (lambda (&rest _) t))
-                ((symbol-function 'agent-repl--info)
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into said)))
         ;; Act
         (agent-repl-window-tell-gate-dock "ws")
@@ -1676,7 +1676,7 @@ the foreign window stood), :selected (`:input', `:view' or `:other'), and
                 (set-window-buffer (split-window view-win) input-buf))
               (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () current-ws))
-                        ((symbol-function 'agent-repl--log)
+                        ((symbol-function 'agent-repl--emit-log)
                          (agent-repl-test--record-into logs)))
                 (let* ((other-win
                         (cond (foreign (split-window view-win nil 'right))

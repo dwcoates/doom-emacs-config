@@ -73,7 +73,7 @@
                       ((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _ws) 'test-conn))
                       ((symbol-function 'agent-repl-host-handle-refusal)
                        (lambda (_ws arm) (push arm agent-repl-test-he--handovers)))
-                      ((symbol-function 'agent-repl--info)
+                      ((symbol-function 'agent-repl--emit-info)
                        (agent-repl-test--record-into agent-repl-test-he--info))
                       ((symbol-function 'message)
                        (lambda (fmt &rest args)

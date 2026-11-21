@@ -25,16 +25,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
 (declare-function agent-repl--assert-main-thread "core" (what))
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl--backend-phase "core" (ws fmt &rest args))
 (declare-function agent-repl--logfile-path "core" ())
 
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
@@ -79,32 +77,32 @@ restarts whichever one is not running what was just installed."
   (unless (and (functionp on-success) (functionp on-failure))
     (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.build needs callable continuations"))
   (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
-                    "elisp.services.build-begin targets=%S store=%s sidecar=%s"
-                    agent-repl--shim-service-build-targets
-                    agent-repl--shim-store-binary
-                    agent-repl--shim-sidecar-binary)
+                    "elisp.services.build-begin targets={targets} store={store} sidecar={sidecar}"
+                    :targets (prin1-to-string agent-repl--shim-service-build-targets)
+                    :store agent-repl--shim-store-binary
+                    :sidecar agent-repl--shim-sidecar-binary)
   ;; The build is ASYNCHRONOUS: the continuation runs from its sentinel.
   (agent-repl-daemon--build
    agent-repl--shim-service-build-targets
    (lambda (build-failure)
      (if build-failure
          (progn
-           (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.build-failed detail=%s" build-failure)
+           (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.build-failed detail={detail}" :detail build-failure)
            (funcall on-failure build-failure))
        (let ((store-present (agent-repl--frontend-artifact-exists-p
                              agent-repl--shim-store-binary))
              (sidecar-present (agent-repl--frontend-artifact-exists-p
                                agent-repl--shim-sidecar-binary)))
          (agent-repl--log '(:agent-repl-central "host service management spans workspaces")
-                          "elisp.services.artifacts store-present=%s sidecar-present=%s"
-                          (if store-present "t" "nil") (if sidecar-present "t" "nil"))
+                          "elisp.services.artifacts store-present={store_present} sidecar-present={sidecar_present}"
+                          :store_present (if store-present "t" "nil") :sidecar_present (if sidecar-present "t" "nil"))
          (if (and store-present sidecar-present)
              (funcall on-success)
            (let ((detail (format "shim service build completed without both binaries: store=%s present=%s sidecar=%s present=%s"
                                  agent-repl--shim-store-binary (if store-present "t" "nil")
                                  agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))))
              (agent-repl--error '(:agent-repl-central "host service management spans workspaces")
-                                "elisp.services.build-artifacts-missing detail=%s" detail)
+                                "elisp.services.build-artifacts-missing detail={detail}" :detail detail)
              (funcall on-failure detail)))))))
   :pending)
 
@@ -133,28 +131,28 @@ or accepted shutdown request is not completion."
         ((fail (detail)
            (unless settled
              (setq settled t)
-             (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-failed elapsed=%.3f detail=%s"
-                                (- (float-time) started) detail)
+             (agent-repl--error '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-failed elapsed={elapsed} detail={detail}"
+                                :elapsed (format "%.3f" (- (float-time) started)) :detail detail)
              (agent-repl--backend-phase
               '(:agent-repl-central "host service management spans workspaces")
-              "backend restart FAILED: %s — full output in %s"
-              detail (agent-repl--logfile-path))
+              "backend restart FAILED: {failed} — full output in {log_file}"
+              :failed detail :log_file (agent-repl--logfile-path))
              (funcall on-failure detail)))
          (complete (before after)
            (unless settled
              (setq settled t)
              (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
-                               "elisp.services.runtime-complete elapsed=%.3f old-instance=%S old-pid=%S new-instance=%S new-pid=%S new-build-sha=%S"
-                               (- (float-time) started)
-                               (plist-get before :instance-id)
-                               (plist-get before :pid)
-                               (plist-get after :instance-id)
-                               (plist-get after :pid)
-                               (plist-get after :build-sha))
+                               "elisp.services.runtime-complete elapsed={elapsed} old-instance={old_instance} old-pid={old_pid} new-instance={new_instance} new-pid={new_pid} new-build-sha={new_build_sha}"
+                               :elapsed (format "%.3f" (- (float-time) started))
+                               :old_instance (prin1-to-string (plist-get before :instance-id))
+                               :old_pid (prin1-to-string (plist-get before :pid))
+                               :new_instance (prin1-to-string (plist-get after :instance-id))
+                               :new_pid (prin1-to-string (plist-get after :pid))
+                               :new_build_sha (prin1-to-string (plist-get after :build-sha)))
              (agent-repl--backend-phase
               '(:agent-repl-central "host service management spans workspaces")
-              "backend restart complete (%.1fs)"
-                                       (- (float-time) started))
+              "backend restart complete ({seconds}s)"
+                                       :seconds (format "%.1f" (- (float-time) started)))
              (funcall on-success)))
          (replacement-observed (before after)
            (cond
@@ -175,9 +173,9 @@ or accepted shutdown request is not completion."
            (agent-repl-frontend-daemon-stop
             (lambda (outcome)
               (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
-                                "elisp.services.daemon-stop-outcome arm=%S reason=%S before=%S"
-                                (plist-get outcome :arm)
-                                (plist-get outcome :reason) before)
+                                "elisp.services.daemon-stop-outcome arm={arm} reason={reason} before={before}"
+                                :arm (prin1-to-string (plist-get outcome :arm))
+                                :reason (prin1-to-string (plist-get outcome :reason)) :before (prin1-to-string before))
               (pcase (plist-get outcome :arm)
                 (:accepted
                  (agent-repl-link-teardown)
@@ -218,11 +216,11 @@ or accepted shutdown request is not completion."
              (error (fail (error-message-string err)))))
          (before-observed (before)
            (agent-repl--info '(:agent-repl-central "host service management spans workspaces")
-                             "elisp.services.runtime-current-identity instance=%S pid=%S build-sha=%S legacy=%s"
-                             (plist-get before :instance-id)
-                             (plist-get before :pid)
-                             (plist-get before :build-sha)
-                             (if before "nil" "t"))
+                             "elisp.services.runtime-current-identity instance={instance} pid={pid} build-sha={build_sha} legacy={legacy}"
+                             :instance (prin1-to-string (plist-get before :instance-id))
+                             :pid (prin1-to-string (plist-get before :pid))
+                             :build_sha (prin1-to-string (plist-get before :build-sha))
+                             :legacy (if before "nil" "t"))
            (build-then-replace before)))
       ;; Resolve the daemon link and its identity before mutating any runtime
       ;; state. A missing link is the exact production defect that used to be
@@ -241,14 +239,14 @@ Build script, then the services' binaries, then the daemon: stop it (a
 request, never a kill) and ensure a fresh one, whose boot restarts the
 services onto what was built."
   (interactive)
-  (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-restart-command interactive=%s"
-                    (if (called-interactively-p 'interactive) "t" "nil"))
+  (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-restart-command interactive={interactive}"
+                    :interactive (if (called-interactively-p 'interactive) "t" "nil"))
   (agent-repl--runtime-prepare
    ;; `agent-repl--runtime-prepare' already echoes the completion phase line
    ;; with its elapsed time; a second message would only overwrite it.
    #'ignore
    (lambda (detail)
-     (agent-repl--warn '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-restart-failed detail=%s" detail))))
+     (agent-repl--warn '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-restart-failed detail={detail}" :detail detail))))
 
 (provide 'services)
 

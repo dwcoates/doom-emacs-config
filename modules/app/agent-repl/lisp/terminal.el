@@ -45,11 +45,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--error "core")
-(declare-function agent-repl--info "core")
 (declare-function agent-repl--ws-dir "status")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--send "input")
@@ -119,8 +121,8 @@ WS's worktree is the project root a newly opened terminal starts in."
          (buffer (condition-case err
                      (agent-repl-terminal--show (file-name-as-directory dir))
                    (error
-                    (agent-repl--error ws "elisp.terminal.show-failed ws=%s dir=%S cause=%S"
-                                       ws dir err)
+                    (agent-repl--error ws "elisp.terminal.show-failed ws={ws} dir={dir} cause={cause}"
+                                       :ws ws :dir (prin1-to-string dir) :cause (prin1-to-string err))
                     nil))))
     (when buffer
       (let* ((token (format "%d" (cl-incf agent-repl-terminal--next-token)))
@@ -133,9 +135,9 @@ WS's worktree is the project root a newly opened terminal starts in."
                  agent-repl-terminal--runs)
         (with-current-buffer buffer
           (add-hook 'kill-buffer-hook #'agent-repl-terminal--forget nil t))
-        (agent-repl--info ws "elisp.terminal.run ws=%s buffer=%S token=%s characters=%d replaced=%s"
-                          ws (buffer-name buffer) token (length command)
-                          (plist-get replaced :token))
+        (agent-repl--info ws "elisp.terminal.run ws={ws} buffer={buffer} token={token} characters={characters} replaced={replaced}"
+                          :ws ws :buffer (prin1-to-string (buffer-name buffer)) :token token :characters (length command)
+                          :replaced (plist-get replaced :token))
         (funcall agent-repl-terminal-send-function buffer
                  (agent-repl-terminal-wrap command token output status))))))
 
@@ -199,11 +201,11 @@ sent to its workspace's agent, whatever STATUS."
          (run (gethash buffer agent-repl-terminal--runs))
          (ws (plist-get run :ws)))
     (if (not (equal (plist-get run :token) token))
-        (agent-repl--info ws "elisp.terminal.stale-finish buffer=%S token=%s awaited=%s status=%s"
-                          (buffer-name buffer) token (plist-get run :token) status)
+        (agent-repl--info ws "elisp.terminal.stale-finish buffer={buffer} token={token} awaited={awaited} status={status}"
+                          :buffer (prin1-to-string (buffer-name buffer)) :token token :awaited (plist-get run :token) :status status)
       (remhash buffer agent-repl-terminal--runs)
-      (agent-repl--info ws "elisp.terminal.finished ws=%s buffer=%S token=%s status=%s"
-                        ws (buffer-name buffer) token status)
+      (agent-repl--info ws "elisp.terminal.finished ws={ws} buffer={buffer} token={token} status={status}"
+                        :ws ws :buffer (prin1-to-string (buffer-name buffer)) :token token :status status)
       (unless (equal status "0")
         (message "agent-repl: the command exited with status %s; SPC o t shows its output" status))
       (when-let* ((window (get-buffer-window buffer)))
@@ -219,12 +221,12 @@ A report that cannot be built is an error in the log and nothing is sent."
     (condition-case err
         (let ((report (agent-repl-terminal-report (plist-get run :command) status output-file)))
           (setq inlined (cdr report))
-          (agent-repl--info ws "elisp.terminal.deliver ws=%s token=%s status=%s inline=%s output=%s"
-                            ws (plist-get run :token) status inlined output-file)
+          (agent-repl--info ws "elisp.terminal.deliver ws={ws} token={token} status={status} inline={inline} output={output}"
+                            :ws ws :token (plist-get run :token) :status status :inline inlined :output output-file)
           (agent-repl--send :command-terminal-output (car report) ws))
       (error
-       (agent-repl--error ws "elisp.terminal.deliver-failed ws=%s token=%s status=%s output=%s cause=%S"
-                          ws (plist-get run :token) status output-file err)))
+       (agent-repl--error ws "elisp.terminal.deliver-failed ws={ws} token={token} status={status} output={output} cause={cause}"
+                          :ws ws :token (plist-get run :token) :status status :output output-file :cause (prin1-to-string err))))
     (agent-repl-terminal--discard run (unless inlined :output))))
 
 (defun agent-repl-terminal-install ()

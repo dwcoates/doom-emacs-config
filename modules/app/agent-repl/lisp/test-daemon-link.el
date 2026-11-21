@@ -146,18 +146,18 @@ refuses another checkout's.")
                 (lambda (seconds _repeat function &rest _args)
                   (push (cons seconds function) agent-repl-test-link--timers)
                   (timer-create)))
-               ((symbol-function 'agent-repl--log)
+               ((symbol-function 'agent-repl--emit-log)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :log (apply #'format fmt args)) agent-repl-test-link--logs)))
-               ((symbol-function 'agent-repl--info)
+                  (push (cons :log (agent-repl-log-site-render fmt args)) agent-repl-test-link--logs)))
+               ((symbol-function 'agent-repl--emit-info)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :info (apply #'format fmt args)) agent-repl-test-link--logs)))
-               ((symbol-function 'agent-repl--warn)
+                  (push (cons :info (agent-repl-log-site-render fmt args)) agent-repl-test-link--logs)))
+               ((symbol-function 'agent-repl--emit-warn)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :warn (apply #'format fmt args)) agent-repl-test-link--logs)))
-               ((symbol-function 'agent-repl--error)
+                  (push (cons :warn (agent-repl-log-site-render fmt args)) agent-repl-test-link--logs)))
+               ((symbol-function 'agent-repl--emit-error)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :error (apply #'format fmt args)) agent-repl-test-link--logs))))
+                  (push (cons :error (agent-repl-log-site-render fmt args)) agent-repl-test-link--logs))))
        ,@body)))
 
 (defun agent-repl-test-link--stand (address)
@@ -2370,7 +2370,7 @@ Returns the pending successor connection."
     ;; Arrange
     (agent-repl-link--schedule-reconnect)
     ;; Act
-    (agent-repl-link--stood-up "elisp.link.up address=%S" "127.0.0.1:9001")
+    (agent-repl-link--stood-up (agent-repl--log-msg "elisp.link.up address={address}" :address (prin1-to-string "127.0.0.1:9001")))
     ;; Assert
     (should (null agent-repl-link--reconnect-timer))
     (should (null agent-repl-link--reconnect-interval))))
@@ -2382,7 +2382,7 @@ Returns the pending successor connection."
     (setq agent-repl-link--quiet-until-ms (+ (agent-repl--now-unix-ms) 60000)
           agent-repl-link--bounce-cause (list :arm :self-merge-rollout :value nil))
     ;; Act
-    (agent-repl-link--stood-up "elisp.link.up address=%S" "127.0.0.1:9001")
+    (agent-repl-link--stood-up (agent-repl--log-msg "elisp.link.up address={address}" :address (prin1-to-string "127.0.0.1:9001")))
     ;; Assert
     (should (null agent-repl-link--quiet-until-ms))
     (should (null agent-repl-link--bounce-cause))
@@ -2392,7 +2392,7 @@ Returns the pending successor connection."
   "Each way up keeps its own record, at INFO."
   (agent-repl-test-link--with-harness
     ;; Act
-    (agent-repl-link--stood-up "elisp.link.reconnected address=%S" "127.0.0.1:9001")
+    (agent-repl-link--stood-up (agent-repl--log-msg "elisp.link.reconnected address={address}" :address (prin1-to-string "127.0.0.1:9001")))
     ;; Assert
     (should (agent-repl-test-link--logged-p :info "elisp.link.reconnected address=\"127.0.0.1:9001\""))))
 
@@ -2404,7 +2404,7 @@ Returns the pending successor connection."
       (setq agent-repl-link--primary conn)
       (add-hook 'agent-repl-link-up-functions (agent-repl-test-link--record-hook :up))
       ;; Act
-      (agent-repl-link--stood-up "elisp.link.up address=%S" "127.0.0.1:9001")
+      (agent-repl-link--stood-up (agent-repl--log-msg "elisp.link.up address={address}" :address (prin1-to-string "127.0.0.1:9001")))
       ;; Assert
       (should (equal (cdr (assq :up agent-repl-test-link--hooks)) (list conn))))))
 

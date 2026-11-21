@@ -90,11 +90,11 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
                       (lambda (type) (cdr (assq type agent-repl-test-image--clipboard))))
                      ((symbol-function 'agent-repl--image-call-process)
                       #'agent-repl-test-image--run)
-                     ((symbol-function 'agent-repl--error)
+                     ((symbol-function 'agent-repl--emit-error)
                       (lambda (_ws fmt &rest args)
                         (setq agent-repl-test-image--errors
                               (append agent-repl-test-image--errors
-                                      (list (apply #'format fmt args))))))
+                                      (list (agent-repl-log-site-render fmt args))))))
                      ((symbol-function 'display-images-p) (lambda (&rest _) nil))
                      ;; Images name files no test writes: each is present
                      ;; unless a test says its file is gone.

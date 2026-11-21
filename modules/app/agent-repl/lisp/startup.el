@@ -13,13 +13,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function doom-run-hooks "doom-lib" (&rest hooks))
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl-daemon--spawned-here-p "daemon" ())
 (declare-function agent-repl-latency-report-startup "latency-report" (milestones))
 (declare-function agent-repl-verbs-fold-hidden-section "verbs" (conn))
@@ -69,7 +69,7 @@ After the startup's end it is handed to the report at once."
   (let ((cell (cons milestone seconds)))
     (setq agent-repl-startup--milestones (append agent-repl-startup--milestones (list cell)))
     (agent-repl--info agent-repl-startup--central
-                      "elisp.startup.milestone milestone=%s seconds=%.3f" milestone seconds)
+                      "elisp.startup.milestone milestone={milestone} seconds={seconds}" :milestone milestone :seconds (format "%.3f" seconds))
     (when agent-repl-startup--ended
       (agent-repl-startup--report (list cell)))))
 
@@ -108,10 +108,10 @@ before any link-up named no daemon, which the open's order makes
 impossible: it is an invariant violation."
   (unless agent-repl-startup--daemon
     (agent-repl--fatal agent-repl-startup--central
-                       "elisp.startup.report no-daemon milestones=%S" milestones))
+                       "elisp.startup.report no-daemon milestones={milestones}" :milestones (prin1-to-string milestones)))
   (agent-repl--info agent-repl-startup--central
-                    "elisp.startup.report queued milestones=%d daemon=%s"
-                    (length milestones) agent-repl-startup--daemon)
+                    "elisp.startup.report queued milestones={milestones} daemon={daemon}"
+                    :milestones (length milestones) :daemon agent-repl-startup--daemon)
   (agent-repl-latency-report-startup
    (mapcar (lambda (cell)
              (list :milestone (car cell) :daemon agent-repl-startup--daemon :seconds (cdr cell)))
@@ -204,14 +204,14 @@ to run again -- and the failure is recorded and re-signalled."
                   (doom-run-hooks hook)
                 (error
                  (agent-repl--error agent-repl-startup--central
-                                    "elisp.startup.first-hooks-idle hook=%s failed: %S"
-                                    hook err)
+                                    "elisp.startup.first-hooks-idle hook={hook} failed: {failed}"
+                                    :hook hook :failed (prin1-to-string err))
                  (signal (car err) (cdr err))))
             (set hook nil)))
         (agent-repl--info agent-repl-startup--central
-                          "elisp.startup.first-hooks-idle ran=%s ms=%d"
-                          (mapconcat #'symbol-name hooks ",")
-                          (round (* 1000 (- (float-time) start))))))))
+                          "elisp.startup.first-hooks-idle ran={ran} ms={ms}"
+                          :ran (mapconcat #'symbol-name hooks ",")
+                          :ms (round (* 1000 (- (float-time) start))))))))
 
 (provide 'agent-repl-startup)
 ;;; startup.el ends here

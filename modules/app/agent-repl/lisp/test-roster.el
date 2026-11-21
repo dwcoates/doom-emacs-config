@@ -661,7 +661,7 @@ start's reconcile on its first row and drew no tabs at all."
                  (when (equal ws "first") (error "no such directory"))
                  (agent-repl--ws-put ws :project-dir (or dir "/w/x"))
                  ws))
-              ((symbol-function 'agent-repl--error) #'ignore))
+              ((symbol-function 'agent-repl--emit-error) #'ignore))
       ;; Act
       (agent-repl-roster-apply
        (agent-repl-test-roster--roster
@@ -679,7 +679,7 @@ start's reconcile on its first row and drew no tabs at all."
     (let ((logs nil))
       (cl-letf (((symbol-function 'agent-repl--ws-create)
                  (lambda (_ws &optional _dir) (error "no such directory")))
-                ((symbol-function 'agent-repl--error)
+                ((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
@@ -700,7 +700,7 @@ start's reconcile on its first row and drew no tabs at all."
       (cl-letf (((symbol-function 'agent-repl--ws-create)
                  (lambda (_ws &optional _dir) (error "no such directory")))
                 ((symbol-function 'agent-repl--ws-log-name) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--error)
+                ((symbol-function 'agent-repl--emit-error)
                  (lambda (ws _fmt &rest _args) (push ws scopes))))
         ;; Act
         (agent-repl-roster-apply
@@ -719,7 +719,7 @@ start's reconcile on its first row and drew no tabs at all."
                  (when (equal ws "second") (error "no such directory"))
                  (agent-repl--ws-put ws :project-dir (or dir "/w/x"))
                  ws))
-              ((symbol-function 'agent-repl--error) #'ignore))
+              ((symbol-function 'agent-repl--emit-error) #'ignore))
       ;; Act
       (agent-repl-roster-apply
        (agent-repl-test-roster--roster
@@ -745,7 +745,7 @@ start's reconcile on its first row and drew no tabs at all."
                    (when (equal ws "first") (error "registry write failed"))
                    (push ws tombstoned)
                    (agent-repl--ws-put ws :killed-at (current-time))))
-                ((symbol-function 'agent-repl--error) #'ignore))
+                ((symbol-function 'agent-repl--emit-error) #'ignore))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
       ;; Assert: the walk still reached the second row's tombstone.
@@ -786,7 +786,7 @@ reading."
       ;; Act
       (cl-letf (((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (_ws) (error "Window is dedicated to `*agent-panel-input-first*'")))
-                ((symbol-function 'agent-repl--error)
+                ((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into logs)))
         (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
       ;; Assert
@@ -1227,7 +1227,7 @@ for a landing."
       (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
                 ((symbol-function 'agent-repl--ws-all-names) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
@@ -1425,7 +1425,7 @@ that follows must not care which of the two got there first."
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section "repo" nil))))
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply
@@ -1542,7 +1542,7 @@ half-applied."
         :sections (list (agent-repl-test-roster--section
                          "repo" (list (agent-repl-test-roster--row "b" "stays" :ready))))))
       ;; Act
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into logs)))
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -1651,7 +1651,7 @@ own choice (2026-10-07): the view decides nothing once its stream ended."
     (setq agent-repl-test-roster--current-name "one")
     (setq agent-repl-roster--stream nil)
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply
@@ -1764,7 +1764,7 @@ activation hook sends no SelectWorkspace echo."
   (agent-repl-test-roster--with-editor
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "one")
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply
@@ -1782,7 +1782,7 @@ activation hook sends no SelectWorkspace echo."
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "one"
             agent-repl-host--select-in-flight '(:id "a" :dir "/w/a"))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
@@ -1828,7 +1828,7 @@ changed while the user typed is followed once, to where it ended."
   (agent-repl-test-roster--with-editor
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "one")
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
@@ -1846,7 +1846,7 @@ changed while the user typed is followed once, to where it ended."
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "one"
             agent-repl-host-last-request (cons "two" (float-time)))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
@@ -1860,7 +1860,7 @@ changed while the user typed is followed once, to where it ended."
   (agent-repl-test-roster--with-editor
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "two")
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
@@ -1874,7 +1874,7 @@ changed while the user typed is followed once, to where it ended."
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "two")
       (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
@@ -1985,7 +1985,7 @@ user's next sidebar click."
                                      "repo" (list (agent-repl-test-roster--row "a" "one" :thinking)))))))))
       (funcall push)
       (let (logged)
-        (cl-letf (((symbol-function 'agent-repl--log)
+        (cl-letf (((symbol-function 'agent-repl--emit-log)
                    (agent-repl-test--record-into logged)))
           ;; Act
           (funcall push))
@@ -2001,7 +2001,7 @@ user's next sidebar click."
       :sections (list (agent-repl-test-roster--section
                        "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply
@@ -2516,7 +2516,7 @@ on finishes would miss a workspace going back to work."
           (agent-repl-roster--stream nil))
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
-                ((symbol-function 'agent-repl--info)
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-on-link-promote old successor)
@@ -2591,7 +2591,7 @@ on finishes would miss a workspace going back to work."
           (agent-repl-roster--stream nil))
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
-                ((symbol-function 'agent-repl--info)
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-on-link-handover old successor)
@@ -2660,7 +2660,7 @@ on finishes would miss a workspace going back to work."
           (agent-repl-roster--stream nil))
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
-                ((symbol-function 'agent-repl--info)
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-subscribe 'conn-1))
@@ -2680,7 +2680,7 @@ on finishes would miss a workspace going back to work."
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional on-open)
                    (setq accepted on-open) 'fake-stream))
-                ((symbol-function 'agent-repl--info)
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logs)))
         (agent-repl-roster-subscribe conn)
         ;; Act
@@ -2701,7 +2701,7 @@ on finishes would miss a workspace going back to work."
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional on-open)
                    (setq accepted on-open) 'fake-stream))
-                ((symbol-function 'agent-repl--info)
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logs)))
         (agent-repl-roster-subscribe conn)
         ;; Act
@@ -2763,7 +2763,7 @@ Each subscribe answers a fresh stream record `(:conn C :on-push F
           (live (agent-repl-connect-open "127.0.0.1:58175"))
           (logs nil))
       (agent-repl-test-roster--with-stream live
-        (cl-letf (((symbol-function 'agent-repl--info)
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
                    (agent-repl-test--record-into logs)))
           (agent-repl-roster-subscribe dead)
           (funcall (plist-get (car streams) :on-open))
@@ -2834,7 +2834,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
   (let ((logs nil)
         (agent-repl-roster--stream 'standing)
         (agent-repl-roster--ending-stream nil))
-    (agent-repl-test-roster--capturing 'agent-repl--info
+    (agent-repl-test-roster--capturing 'agent-repl--emit-info
       ;; Act
       (agent-repl-roster-on-push '(:arm :ending :value nil) 'standing))
     ;; Assert
@@ -2845,7 +2845,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
   ;; Arrange
   (let ((logs nil) (applied nil))
     (cl-letf (((symbol-function 'agent-repl-roster-apply) (lambda (&rest _) (setq applied t))))
-      (agent-repl-test-roster--capturing 'agent-repl--error
+      (agent-repl-test-roster--capturing 'agent-repl--emit-error
         ;; Act
         (agent-repl-roster-on-push '(:arm :teleport :value nil))))
     ;; Assert
@@ -2862,7 +2862,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
       (agent-repl-test-roster--with-stream live
         (agent-repl-roster-subscribe old)
         (funcall (plist-get (car streams) :on-open))
-        (agent-repl-test-roster--capturing 'agent-repl--info
+        (agent-repl-test-roster--capturing 'agent-repl--emit-info
           ;; Act
           (agent-repl-test-roster--end-planned (car streams)))
         ;; Assert
@@ -2878,7 +2878,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
       (agent-repl-test-roster--with-stream live
         (agent-repl-roster-subscribe old)
         (funcall (plist-get (car streams) :on-open))
-        (agent-repl-test-roster--capturing 'agent-repl--error
+        (agent-repl-test-roster--capturing 'agent-repl--emit-error
           ;; Act
           (agent-repl-test-roster--end-planned (car streams)))
         ;; Assert
@@ -2925,7 +2925,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
       (agent-repl-test-roster--with-stream leaving
         (agent-repl-roster-subscribe leaving)
         (funcall (plist-get (car streams) :on-open))
-        (agent-repl-test-roster--capturing 'agent-repl--info
+        (agent-repl-test-roster--capturing 'agent-repl--emit-info
           ;; Act
           (agent-repl-test-roster--end-planned (car streams)))
         ;; Assert
@@ -2968,7 +2968,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
       (agent-repl-test-roster--with-stream live
         (agent-repl-roster-subscribe old)
         (funcall (plist-get (car streams) :on-open))
-        (agent-repl-test-roster--capturing 'agent-repl--error
+        (agent-repl-test-roster--capturing 'agent-repl--emit-error
           ;; Act
           (funcall (plist-get (car streams) :on-close) '(:ended)))
         ;; Assert
@@ -2985,7 +2985,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
         (agent-repl-roster-subscribe old)
         (funcall (plist-get (car streams) :on-open))
         (funcall (plist-get (car streams) :on-push) '(:arm :ending :value nil))
-        (agent-repl-test-roster--capturing 'agent-repl--error
+        (agent-repl-test-roster--capturing 'agent-repl--emit-error
           ;; Act
           (funcall (plist-get (car streams) :on-close) '(:error (:kind :transport))))
         ;; Assert
@@ -3079,7 +3079,7 @@ record reached no file at all."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let (logs)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
@@ -3096,7 +3096,7 @@ record reached no file at all."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let (logs)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
@@ -3175,7 +3175,7 @@ count never moves; the tabs opening is the only bring-up there is."
                    (when (equal ws "one") (error "no such directory"))
                    (agent-repl--ws-put ws :project-dir (or dir "/w/x"))
                    ws))
-                ((symbol-function 'agent-repl--error) #'ignore))
+                ((symbol-function 'agent-repl--emit-error) #'ignore))
         (agent-repl-test-roster--recording-bringup seen
           ;; Act
           (agent-repl-roster-apply
@@ -3192,7 +3192,7 @@ count never moves; the tabs opening is the only bring-up there is."
   (agent-repl-test-roster--with-editor
     (let ((agent-repl-roster-bringup-functions
            (list (lambda (&rest _) (error "display blew up")))))
-      (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) #'ignore))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -3208,7 +3208,7 @@ count never moves; the tabs opening is the only bring-up there is."
     (let ((agent-repl-roster-bringup-functions
            (list (lambda (&rest _) (error "display blew up"))))
           (logs nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
@@ -3229,7 +3229,7 @@ saying the roster had been asked for one and declined."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let (logs)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-desired-tabs
@@ -3248,7 +3248,7 @@ saying the roster had been asked for one and declined."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let (logs)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-desired-tabs
@@ -3354,7 +3354,7 @@ saying the roster had been asked for one and declined."
                           (car (plist-get (plist-get roster :repository) :sections)))))
            errors)
       (plist-put second :tab (list :tab (list :arm :numbered :value (list :number 5))))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (let ((applied (agent-repl-roster-apply roster)))
@@ -3629,7 +3629,7 @@ saying the roster had been asked for one and declined."
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--input-save-unsent)
                  (lambda (_ws) (error "disk full")))
-                ((symbol-function 'agent-repl--error)
+                ((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Arrange
         (agent-repl-roster-reconcile (agent-repl-test-roster--fold-roster nil))
@@ -3953,9 +3953,9 @@ Every request is recorded in `asked' as its list of ref ids."
 Each element is (WS LINE)."
   (declare (indent 1))
   `(let ((,var nil))
-     (cl-letf (((symbol-function 'agent-repl--info)
+     (cl-letf (((symbol-function 'agent-repl--emit-info)
                 (lambda (ws fmt &rest args)
-                  (let ((line (apply #'format fmt args)))
+                  (let ((line (agent-repl-log-site-render fmt args)))
                     (when (string-prefix-p "elisp.roster.drawn-status:" line)
                       (setq ,var (append ,var (list (list ws line)))))))))
        ,@body)))
@@ -4309,7 +4309,7 @@ workspace the user left."
           agent-repl-roster-view (agent-repl-test-roster--two-tabs "a")
           agent-repl-roster--view-stream 'old-stream)
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply-current))
@@ -4400,7 +4400,7 @@ the closed, queue and merged streams beside them, and the push revision."
   (agent-repl-test-roster--with-editor
     ;; Arrange
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+      (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-roster-apply-push
          (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4 :closed)))
@@ -4510,7 +4510,7 @@ what it sent, while the view stays the last accepted one."
                       :sections (list (agent-repl-test-roster--section
                                        "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
                                                     (agent-repl-test-roster--row "a" "dup" :ready)))))))
-      (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-error) #'ignore))
         ;; Act
         (agent-repl-roster-apply-push
          (agent-repl-test-roster--push duplicate 5 :closed :merge-queue :recently-merged)))
@@ -4634,7 +4634,7 @@ in `requests', oldest first."
 SIGNAL-DATA is `agent-repl-roster-merged-error''s, and ERRORS the ERROR
 records written, newest first."
   (let ((errors nil) (data nil))
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
       (agent-repl-test-roster--with-pages answers
         (condition-case err
             (agent-repl-roster-merged-entries-sync 'conn)
@@ -4714,7 +4714,7 @@ handed to `:on-failure'."
     (agent-repl-test-roster--with-async-pages
         (list '(:arm :error :value (:cause (:arm :not-ready :value nil))))
       (let ((got nil) (failed nil) (errors nil))
-        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
           ;; Act
           (agent-repl-roster-merged-entries 'conn
                                             (lambda (entries) (push entries got))
@@ -4731,7 +4731,7 @@ handed to `:on-failure'."
         (list (agent-repl-test-roster--merged-answer 3 '("m1") t)
               '(:failure (:kind :refused)))
       (let ((got nil) (failed nil) (errors nil))
-        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
           ;; Act
           (agent-repl-roster-merged-entries 'conn
                                             (lambda (entries) (push entries got))

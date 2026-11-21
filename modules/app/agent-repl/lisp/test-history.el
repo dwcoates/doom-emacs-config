@@ -54,9 +54,9 @@ to `dir', and every info and error record is collected into `infos' and
              (setq-local agent-repl--history-discard-entry nil)
              (agent-repl--ws-put "test-ws" :project-dir dir)
              (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
-             (cl-letf (((symbol-function 'agent-repl--info)
+             (cl-letf (((symbol-function 'agent-repl--emit-info)
                         (agent-repl-test--record-into infos))
-                       ((symbol-function 'agent-repl--error)
+                       ((symbol-function 'agent-repl--emit-error)
                         (agent-repl-test--record-into errors)))
                ,@body))
          (delete-directory dir t)))))
@@ -321,7 +321,7 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test--with-temp-buffer " *test-hist-owner*"
     (setq-local agent-repl--owning-workspace "owner-ws")
     (let (logged-workspace)
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                  (lambda (ws &rest _args) (setq logged-workspace ws))))
         ;; Act.
         (agent-repl--history-on-change)
@@ -1150,7 +1150,7 @@ produced the `snapshot skipped' warning twice per run."
     (let ((tmpdir (make-temp-file "test-state-nowarn-" t))
           (warnings nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--warn)
+          (cl-letf (((symbol-function 'agent-repl--emit-warn)
                      (agent-repl-test--record-into warnings)))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
@@ -1288,10 +1288,10 @@ silently start round-tripping back onto disk."
   "with-error-logging marks its process-wide state-write error as central."
   (let ((logged-msg nil)
         (logged-workspace nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (lambda (ws fmt &rest args)
                  (setq logged-workspace ws
-                       logged-msg (apply #'format fmt args)))))
+                       logged-msg (agent-repl-log-site-render fmt args)))))
       (agent-repl--with-error-logging "my-label"
         (error "kaboom"))
       (should (agent-repl--central-log-scope-reason logged-workspace))
@@ -1394,7 +1394,7 @@ cause, and the error reaches the caller."
           (agent-repl--write-sexp-file file '("before"))
           (cl-letf (((symbol-function 'rename-file)
                      (lambda (&rest _) (signal 'file-error '("rename refused"))))
-                    ((symbol-function 'agent-repl--error)
+                    ((symbol-function 'agent-repl--emit-error)
                      (agent-repl-test--record-into logged)))
             ;; Act.
             (should-error (agent-repl--write-sexp-file file '("after")) :type 'file-error))

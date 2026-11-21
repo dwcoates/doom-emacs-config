@@ -12,15 +12,16 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--git-string-quiet "core")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
-(declare-function agent-repl--warn "core")
 (declare-function agent-repl--ws-current-log-name "workspace")
 
 (defconst agent-repl--emoji-categories
@@ -65,10 +66,10 @@ wrapper) so the call is mocked by the test-time runtime guards."
       (agent-repl--log ws "emoji-current-branch: unresolved reason=empty-git-output")
       nil)
      ((string= out "HEAD")
-      (agent-repl--log ws "emoji-current-branch: unresolved reason=detached-head output=%S" out)
+      (agent-repl--log ws "emoji-current-branch: unresolved reason=detached-head output={output}" :output (prin1-to-string out))
       nil)
      (t
-      (agent-repl--log ws "emoji-current-branch: resolved branch=%S" out)
+      (agent-repl--log ws "emoji-current-branch: resolved branch={branch}" :branch (prin1-to-string out))
       out))))
 
 (defun agent-repl--commit-prefix-regex (branch)
@@ -109,16 +110,16 @@ Tolerant of any scope: looks at the leading `<type>(' substring."
           (if (assq type agent-repl--emoji-categories)
               (progn
                 (agent-repl--log-verbose ws
-                  "emoji-commit-type: message=%S parsed-type=%S category-known=t"
-                  msg type)
+                  "emoji-commit-type: message={message} parsed-type={parsed_type} category-known=t"
+                  :message (prin1-to-string msg) :parsed_type (prin1-to-string type))
                 type)
             (agent-repl--log-verbose ws
-              "emoji-commit-type: message=%S parsed-type=%S category-known=nil effective-type=wildcard"
-              msg type)
+              "emoji-commit-type: message={message} parsed-type={parsed_type} category-known=nil effective-type=wildcard"
+              :message (prin1-to-string msg) :parsed_type (prin1-to-string type))
             'wildcard))
       (agent-repl--log-verbose ws
-        "emoji-commit-type: message=%S parsed-type=nil effective-type=wildcard"
-        msg)
+        "emoji-commit-type: message={message} parsed-type=nil effective-type=wildcard"
+        :message (prin1-to-string msg))
       'wildcard)))
 
 (defun agent-repl--extract-commit-emoji (line)
@@ -139,8 +140,8 @@ The token must start with a non-ASCII character to qualify."
                          (> (length token) 0)
                          (> (aref token 0) 127))))
       (agent-repl--log-verbose ws
-        "emoji-extract-commit-emoji: line=%S token=%S accepted=%s"
-        line token accepted)
+        "emoji-extract-commit-emoji: line={line} token={token} accepted={accepted}"
+        :line (prin1-to-string line) :token (prin1-to-string token) :accepted accepted)
       (and accepted token))))
 
 (defun agent-repl--recent-commit-emojis (&optional lookback)
@@ -165,29 +166,29 @@ string would miss commits authored under the new format."
                       "--format=%s")
                    (error
                     (agent-repl--warn ws
-                      "emoji-recent-commit-emojis: git-log failed lookback=%s error=%S"
-                      n err)
+                      "emoji-recent-commit-emojis: git-log failed lookback={lookback} error={error}"
+                      :lookback n :error (prin1-to-string err))
                     nil)))
          (lines (and (stringp output) (split-string output "\n" t)))
          (emojis '()))
     (agent-repl--log ws
-      "emoji-recent-commit-emojis: git-log completed lookback=%s output-type=%S line-count=%s"
-      n (type-of output) (length lines))
+      "emoji-recent-commit-emojis: git-log completed lookback={lookback} output-type={output_type} line-count={line_count}"
+      :lookback n :output_type (prin1-to-string (type-of output)) :line_count (length lines))
     (dolist (line lines)
       (when-let ((emoji (agent-repl--extract-commit-emoji line)))
         (push emoji emojis)))
     (setq emojis (nreverse emojis))
     (agent-repl--log ws
-      "emoji-recent-commit-emojis: extracted emoji-count=%s emojis=%S"
-      (length emojis) emojis)
+      "emoji-recent-commit-emojis: extracted emoji-count={emoji_count} emojis={emojis}"
+      :emoji_count (length emojis) :emojis (prin1-to-string emojis))
     emojis))
 
 (defun agent-repl--filter-pool (pool exclude)
   "Return POOL with any emoji string in EXCLUDE removed."
   (let ((filtered (cl-remove-if (lambda (e) (member e exclude)) pool)))
     (agent-repl--log-verbose (agent-repl--emoji-log-ws)
-      "emoji-filter-pool: pool-count=%s exclude-count=%s candidate-count=%s"
-      (length pool) (length exclude) (length filtered))
+      "emoji-filter-pool: pool-count={pool_count} exclude-count={exclude_count} candidate-count={candidate_count}"
+      :pool_count (length pool) :exclude_count (length exclude) :candidate_count (length filtered))
     filtered))
 
 (defun agent-repl--random-commit-emoji (&optional commit-type recents)
@@ -210,25 +211,25 @@ RECENTS, then to the full wildcard pool as a final guarantee of progress."
                       (cdr (assq effective-type agent-repl--emoji-categories))
                       recents)))
     (agent-repl--log ws
-      "emoji-random: requested-type=%S effective-type=%S use-wildcard=%s wildcard-chance=%s recents-count=%s initial-candidate-count=%s"
-      commit-type effective-type use-wildcard agent-repl-emoji-wildcard-chance
-      (length recents) (length candidates))
+      "emoji-random: requested-type={requested_type} effective-type={effective_type} use-wildcard={use_wildcard} wildcard-chance={wildcard_chance} recents-count={recents_count} initial-candidate-count={initial_candidate_count}"
+      :requested_type (prin1-to-string commit-type) :effective_type (prin1-to-string effective-type) :use_wildcard use-wildcard :wildcard_chance agent-repl-emoji-wildcard-chance
+      :recents_count (length recents) :initial_candidate_count (length candidates))
     (when (null candidates)
       (agent-repl--log ws
-        "emoji-random: typed-pool-exhausted requested-type=%S effective-type=%S action=use-filtered-wildcard"
-        commit-type effective-type)
+        "emoji-random: typed-pool-exhausted requested-type={requested_type} effective-type={effective_type} action=use-filtered-wildcard"
+        :requested_type (prin1-to-string commit-type) :effective_type (prin1-to-string effective-type))
       (setq candidates (agent-repl--filter-pool
                         (cdr (assq 'wildcard agent-repl--emoji-categories))
                         recents)))
     (when (null candidates)
       (agent-repl--log ws
-        "emoji-random: filtered-wildcard-pool-exhausted requested-type=%S action=use-full-wildcard"
-        commit-type)
+        "emoji-random: filtered-wildcard-pool-exhausted requested-type={requested_type} action=use-full-wildcard"
+        :requested_type (prin1-to-string commit-type))
       (setq candidates (cdr (assq 'wildcard agent-repl--emoji-categories))))
     (let ((emoji (nth (random (length candidates)) candidates)))
       (agent-repl--log ws
-        "emoji-random: selected emoji=%S final-candidate-count=%s"
-        emoji (length candidates))
+        "emoji-random: selected emoji={emoji} final-candidate-count={final_candidate_count}"
+        :emoji (prin1-to-string emoji) :final_candidate_count (length candidates))
       emoji)))
 
 (defun agent-repl--description-has-emoji-prefix-p (description)
@@ -236,8 +237,8 @@ RECENTS, then to the full wildcard pool as a final guarantee of progress."
   (let ((has-prefix (and (> (length description) 0)
                          (> (aref description 0) 127))))
     (agent-repl--log-verbose (agent-repl--emoji-log-ws)
-      "emoji-description-prefix: description=%S has-emoji-prefix=%s"
-      description has-prefix)
+      "emoji-description-prefix: description={description} has-emoji-prefix={has_emoji_prefix}"
+      :description (prin1-to-string description) :has_emoji_prefix has-prefix)
     has-prefix))
 
 ;; Backward-compat alias — older tests still call this name.
@@ -275,8 +276,8 @@ without going through `git rev-parse'."
   (let* ((ws (agent-repl--emoji-log-ws))
          (branch (or branch-override (agent-repl--current-branch))))
     (agent-repl--log ws
-      "emoji-prefix-commit-message: entry branch-override=%S resolved-branch=%S message=%S"
-      branch-override branch msg)
+      "emoji-prefix-commit-message: entry branch-override={branch_override} resolved-branch={resolved_branch} message={message}"
+      :branch_override (prin1-to-string branch-override) :resolved_branch (prin1-to-string branch) :message (prin1-to-string msg))
     (if (or (null branch) (string-empty-p branch))
         (progn
           (agent-repl--log ws
@@ -292,8 +293,8 @@ without going through `git rev-parse'."
             (if (agent-repl--description-has-emoji-prefix-p description)
                 (progn
                   (agent-repl--log ws
-                    "emoji-prefix-commit-message: unchanged reason=branch-scope-description-has-emoji type=%S branch=%S"
-                    type-str branch)
+                    "emoji-prefix-commit-message: unchanged reason=branch-scope-description-has-emoji type={type} branch={branch}"
+                    :type (prin1-to-string type-str) :branch (prin1-to-string branch))
                   msg)
               (let* ((type (agent-repl--commit-type-from-message msg))
                      (recents (agent-repl--recent-commit-emojis))
@@ -301,8 +302,8 @@ without going through `git rev-parse'."
                 (let ((result (concat type-str "(" branch "): "
                                     emoji " " description rest)))
                   (agent-repl--log ws
-                    "emoji-prefix-commit-message: changed reason=branch-scope-injected type=%S branch=%S emoji=%S result=%S"
-                    type-str branch emoji result)
+                    "emoji-prefix-commit-message: changed reason=branch-scope-injected type={type} branch={branch} emoji={emoji} result={result}"
+                    :type (prin1-to-string type-str) :branch (prin1-to-string branch) :emoji (prin1-to-string emoji) :result (prin1-to-string result))
                   result)))))
          ;; No scope at all: inject branch as scope, plus emoji unless
          ;; description already starts with one.
@@ -313,8 +314,8 @@ without going through `git rev-parse'."
             (if (agent-repl--description-has-emoji-prefix-p description)
                 (let ((result (concat type-str "(" branch "): " description rest)))
                   (agent-repl--log ws
-                    "emoji-prefix-commit-message: changed reason=no-scope-emoji-preserved type=%S branch=%S result=%S"
-                    type-str branch result)
+                    "emoji-prefix-commit-message: changed reason=no-scope-emoji-preserved type={type} branch={branch} result={result}"
+                    :type (prin1-to-string type-str) :branch (prin1-to-string branch) :result (prin1-to-string result))
                   result)
               (let* ((type-sym (intern type-str))
                      (effective-type (if (assq type-sym agent-repl--emoji-categories)
@@ -325,15 +326,15 @@ without going through `git rev-parse'."
                 (let ((result (concat type-str "(" branch "): "
                                     emoji " " description rest)))
                   (agent-repl--log ws
-                    "emoji-prefix-commit-message: changed reason=no-scope-injected type=%S effective-type=%S branch=%S emoji=%S result=%S"
-                    type-str effective-type branch emoji result)
+                    "emoji-prefix-commit-message: changed reason=no-scope-injected type={type} effective-type={effective_type} branch={branch} emoji={emoji} result={result}"
+                    :type (prin1-to-string type-str) :effective_type (prin1-to-string effective-type) :branch (prin1-to-string branch) :emoji (prin1-to-string emoji) :result (prin1-to-string result))
                   result)))))
          ;; Scope present but not the branch (or no conventional prefix
          ;; at all): leave unchanged.
          (t
           (agent-repl--log ws
-            "emoji-prefix-commit-message: unchanged reason=nonmatching-scope-or-prefix branch=%S message=%S"
-            branch msg)
+            "emoji-prefix-commit-message: unchanged reason=nonmatching-scope-or-prefix branch={branch} message={message}"
+            :branch (prin1-to-string branch) :message (prin1-to-string msg))
           msg))))))
 
 ;;; Magit integration
@@ -350,23 +351,23 @@ recent-emojis list through `--random-commit-emoji')."
   (let* ((ws (agent-repl--emoji-log-ws))
          (branch (agent-repl--current-branch)))
     (agent-repl--log ws
-      "magit-emoji-setup: entry branch=%S buffer=%S point=%s"
-      branch (buffer-name) (point))
+      "magit-emoji-setup: entry branch={branch} buffer={buffer} point={point}"
+      :branch (prin1-to-string branch) :buffer (prin1-to-string (buffer-name)) :point (point))
     (if (and branch (not (string-empty-p branch)))
         (let* ((msg (buffer-string))
                (replaced (agent-repl--emoji-prefix-commit-message msg branch)))
           (if (equal replaced msg)
               (agent-repl--log ws
-                "magit-emoji-setup: unchanged branch=%S reason=prefixer-returned-input" branch)
+                "magit-emoji-setup: unchanged branch={branch} reason=prefixer-returned-input" :branch (prin1-to-string branch))
             (let ((point-pos (point)))
               (erase-buffer)
               (insert replaced)
               (goto-char (min point-pos (point-max)))
               (agent-repl--log ws
-                "magit-emoji-setup: changed branch=%S old-point=%s new-point=%s result=%S"
-                branch point-pos (point) replaced))))
+                "magit-emoji-setup: changed branch={branch} old-point={old_point} new-point={new_point} result={result}"
+                :branch (prin1-to-string branch) :old_point point-pos :new_point (point) :result (prin1-to-string replaced)))))
       (agent-repl--log ws
-        "magit-emoji-setup: unchanged reason=unresolved-branch branch=%S" branch))))
+        "magit-emoji-setup: unchanged reason=unresolved-branch branch={branch}" :branch (prin1-to-string branch)))))
 
 (with-eval-after-load 'git-commit
   (add-hook 'git-commit-setup-hook #'agent-repl--magit-emoji-setup))
@@ -392,10 +393,10 @@ Tests\")."
              (not (string-prefix-p "fatal" git-dir)))
         (let ((hooks-dir (expand-file-name "hooks" git-dir)))
           (agent-repl--log ws
-            "emoji-git-hooks-dir: resolved git-dir=%S hooks-dir=%S" git-dir hooks-dir)
+            "emoji-git-hooks-dir: resolved git-dir={git_dir} hooks-dir={hooks_dir}" :git_dir (prin1-to-string git-dir) :hooks_dir (prin1-to-string hooks-dir))
           hooks-dir)
       (agent-repl--log ws
-        "emoji-git-hooks-dir: unresolved git-dir=%S reason=empty-or-fatal-output" git-dir)
+        "emoji-git-hooks-dir: unresolved git-dir={git_dir} reason=empty-or-fatal-output" :git_dir (prin1-to-string git-dir))
       nil)))
 
 ;;;###autoload
@@ -407,31 +408,31 @@ If an existing prepare-commit-msg hook is found, backs it up first."
   (let ((ws (agent-repl--emoji-log-ws))
         (hooks-dir (agent-repl--git-hooks-dir)))
     (agent-repl--log ws
-      "install-commit-emoji-hook: entry hooks-dir=%S source=%S"
-      hooks-dir agent-repl--prepare-commit-msg-hook-source)
+      "install-commit-emoji-hook: entry hooks-dir={hooks_dir} source={source}"
+      :hooks_dir (prin1-to-string hooks-dir) :source (prin1-to-string agent-repl--prepare-commit-msg-hook-source))
     (unless hooks-dir
       (agent-repl--log ws "install-commit-emoji-hook: abort reason=not-in-git-repository")
       (user-error "Not inside a git repository"))
     (unless (file-exists-p agent-repl--prepare-commit-msg-hook-source)
       (agent-repl--log ws
-        "install-commit-emoji-hook: abort reason=missing-hook-source source=%S"
-        agent-repl--prepare-commit-msg-hook-source)
+        "install-commit-emoji-hook: abort reason=missing-hook-source source={source}"
+        :source (prin1-to-string agent-repl--prepare-commit-msg-hook-source))
       (user-error "Hook source not found: %s" agent-repl--prepare-commit-msg-hook-source))
     (let ((dest (expand-file-name "prepare-commit-msg" hooks-dir)))
-      (agent-repl--log ws "install-commit-emoji-hook: destination=%S exists=%s"
-        dest (file-exists-p dest))
+      (agent-repl--log ws "install-commit-emoji-hook: destination={destination} exists={exists}"
+        :destination (prin1-to-string dest) :exists (file-exists-p dest))
       (when (file-exists-p dest)
         (let ((backup (concat dest ".bak")))
           (copy-file dest backup t)
           (agent-repl--log ws
-            "install-commit-emoji-hook: existing-hook-backed-up source=%S backup=%S"
-            dest backup)
+            "install-commit-emoji-hook: existing-hook-backed-up source={source} backup={backup}"
+            :source (prin1-to-string dest) :backup (prin1-to-string backup))
           (message "Backed up existing hook to %s" backup)))
       (copy-file agent-repl--prepare-commit-msg-hook-source dest t)
       (set-file-modes dest #o755)
       (agent-repl--log ws
-        "install-commit-emoji-hook: installed source=%S destination=%S mode=%o"
-        agent-repl--prepare-commit-msg-hook-source dest #o755)
+        "install-commit-emoji-hook: installed source={source} destination={destination} mode={mode}"
+        :source (prin1-to-string agent-repl--prepare-commit-msg-hook-source) :destination (prin1-to-string dest) :mode (format "%o" #o755))
       (message "Installed prepare-commit-msg hook to %s" dest))))
 
 (provide 'agent-repl-emoji)

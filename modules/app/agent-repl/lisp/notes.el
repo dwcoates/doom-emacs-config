@@ -18,13 +18,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'subr-x)
 
 (declare-function agent-repl--global-state-file "core" (relative))
-(declare-function agent-repl--log "core" (ws format-string &rest args))
-(declare-function agent-repl--info "core" (ws format-string &rest args))
-(declare-function agent-repl--warn "core" (ws format-string &rest args))
-(declare-function agent-repl--error "core" (ws format-string &rest args))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--save-buffer-if-modified "autosave" (buf &optional ws aggregate-p))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
@@ -39,7 +39,7 @@ subdirectory of the global state root, resolved through core.el's
 `agent-repl--global-state-file' so the `AGENT_REPL_STATE_DIR' override
 governs it like every other piece of Emacs-local state."
   (let ((dir (file-name-as-directory (agent-repl--global-state-file "notes"))))
-    (agent-repl--log '(:agent-repl-central "the notes directory is shared storage") "elisp.notes.dir: dir=%s" dir)
+    (agent-repl--log '(:agent-repl-central "the notes directory is shared storage") "elisp.notes.dir: dir={dir}" :dir dir)
     dir))
 
 (defun agent-repl--notes-file (workspace)
@@ -49,11 +49,11 @@ workspace to name it would collide with every other workspace's, so the
 missing name is surfaced rather than defaulted."
   (unless (and (stringp workspace) (not (string-empty-p workspace)))
     (agent-repl--error '(:agent-repl-central "the rejected notes request names no workspace")
-                       "elisp.notes.file: rejected workspace=%S reason=not-a-nonempty-string"
-                       workspace)
+                       "elisp.notes.file: rejected workspace={workspace} reason=not-a-nonempty-string"
+                       :workspace (prin1-to-string workspace))
     (error "agent-repl--notes-file: workspace must be a nonempty string, got %S" workspace))
   (let ((file (expand-file-name (format "%s.org" workspace) (agent-repl--notes-dir))))
-    (agent-repl--log workspace "elisp.notes.file: workspace=%s file=%s" workspace file)
+    (agent-repl--log workspace "elisp.notes.file: workspace={workspace} file={file}" :workspace workspace :file file)
     file))
 
 ;;;; ---- Seeding ---------------------------------------------------------
@@ -64,14 +64,14 @@ Returns the file path.  Idempotent: an existing file is left untouched."
   (let ((file (agent-repl--notes-file workspace))
         (created nil))
     (unless (file-exists-p file)
-      (agent-repl--log workspace "elisp.notes.ensure: create workspace=%s file=%s" workspace file)
+      (agent-repl--log workspace "elisp.notes.ensure: create workspace={workspace} file={file}" :workspace workspace :file file)
       (make-directory (file-name-directory file) t)
       (with-temp-file file
         (insert (format "#+TITLE: %s\n#+CREATED: %s\n\n"
                         workspace (format-time-string "%Y-%m-%d %H:%M"))))
       (setq created t))
-    (agent-repl--log workspace "elisp.notes.ensure: ready workspace=%s file=%s outcome=%s"
-                     workspace file (if created 'created 'existing))
+    (agent-repl--log workspace "elisp.notes.ensure: ready workspace={workspace} file={file} outcome={outcome}"
+                     :workspace workspace :file file :outcome (if created 'created 'existing))
     file))
 
 ;;;; ---- Opening ---------------------------------------------------------
@@ -86,8 +86,8 @@ so the save rides the kill rather than the user's memory."
                 (agent-repl--save-buffer-if-modified (current-buffer) workspace))
               nil t))
   (agent-repl--log workspace
-                   "elisp.notes.save-on-kill: installed workspace=%s buffer=%s"
-                   workspace (buffer-name buf))
+                   "elisp.notes.save-on-kill: installed workspace={workspace} buffer={buffer}"
+                   :workspace workspace :buffer (buffer-name buf))
   buf)
 
 ;;;###autoload
@@ -100,17 +100,17 @@ by workspace and there is nothing to key them by."
   (let ((workspace (agent-repl--ws-current-name)))
     (unless (and (stringp workspace) (not (string-empty-p workspace)))
       (agent-repl--error '(:agent-repl-central "the notes command has no current workspace")
-                         "elisp.notes.open: rejected reason=no-current-workspace workspace=%S"
-                         workspace)
+                         "elisp.notes.open: rejected reason=no-current-workspace workspace={workspace}"
+                         :workspace (prin1-to-string workspace))
       (user-error "agent-repl: no current workspace to open notes for"))
-    (agent-repl--log workspace "elisp.notes.open: begin workspace=%s" workspace)
+    (agent-repl--log workspace "elisp.notes.open: begin workspace={workspace}" :workspace workspace)
     (let ((file (agent-repl--notes-ensure workspace)))
       ;; The ONE shared popup subroutine (popup.el).  Every agent-repl popup
       ;; goes through it, and a local `find-file' here would be the
       ;; divergence that rule forbids.
       (agent-repl-popup-open file)
       (agent-repl--notes-install-save-on-kill (get-file-buffer file) workspace)
-      (agent-repl--info workspace "elisp.notes.open: opened workspace=%s file=%s" workspace file)
+      (agent-repl--info workspace "elisp.notes.open: opened workspace={workspace} file={file}" :workspace workspace :file file)
       (current-buffer))))
 
 (provide 'agent-repl-notes)

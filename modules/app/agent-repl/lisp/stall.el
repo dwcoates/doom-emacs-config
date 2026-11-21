@@ -53,7 +53,10 @@
 
 ;;; Code:
 
-(declare-function agent-repl--info "core" (ws fmt &rest args))
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (declare-function agent-repl--now "core" ())
 (declare-function agent-repl--register-timer "core" (key timer))
 (declare-function agent-repl-latency-report-editor "latency-report" (kind seconds))
@@ -109,8 +112,8 @@ one seen by two runs or more is reported from its first run to NOW."
       ;; about the loop.
       (setq agent-repl-stall--input nil)
       (agent-repl--info agent-repl-stall--central
-                        "elisp.stall.unclassified gap=%.3f reason=longer-than-any-stall"
-                        (+ stall agent-repl-stall-interval)))
+                        "elisp.stall.unclassified gap={gap} reason=longer-than-any-stall"
+                        :gap (format "%.3f" (+ stall agent-repl-stall-interval))))
      (t
       (agent-repl-latency-report-editor :stall stall)))
     (agent-repl-stall--sample-input now)))
@@ -150,8 +153,8 @@ buffer-local one, which leaves the global value as it was."
 Runs as the debugger is entered (before `debug'), and once at load."
   (unless (eq debug-on-quit agent-repl-stall--debug-on-quit-lisp)
     (agent-repl--info agent-repl-stall--central
-                      "elisp.stall.debug-on-quit-restored from=%S to=%S reason=set-outside-lisp event=%S"
-                      debug-on-quit agent-repl-stall--debug-on-quit-lisp debug-on-event)
+                      "elisp.stall.debug-on-quit-restored from={from} to={to} reason=set-outside-lisp event={event}"
+                      :from (prin1-to-string debug-on-quit) :to (prin1-to-string agent-repl-stall--debug-on-quit-lisp) :event (prin1-to-string debug-on-event))
     (setq debug-on-quit agent-repl-stall--debug-on-quit-lisp)))
 
 (add-variable-watcher 'debug-on-quit #'agent-repl-stall--note-debug-on-quit)

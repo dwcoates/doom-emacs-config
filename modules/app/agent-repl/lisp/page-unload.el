@@ -42,7 +42,10 @@
 ;;
 ;;; Code:
 
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
@@ -92,12 +95,12 @@ than kept as a flag beside them."
 (defun agent-repl-page-unload--return (ws)
   "Put WS's unloaded page back in the host, its slot being shown.
 The slot and its windows stood throughout; only the page comes back."
-  (agent-repl--info ws "elisp.page-unload.returned ws=%s" ws)
+  (agent-repl--info ws "elisp.page-unload.returned ws={ws}" :ws ws)
   (agent-repl-webhost-ensure-page ws))
 
 (defun agent-repl-page-unload--hold-back (ws)
   "Hold back WS's unloaded page, WS being shown at its cold gate."
-  (agent-repl--info ws "elisp.page-unload.held-back ws=%s" ws)
+  (agent-repl--info ws "elisp.page-unload.held-back ws={ws}" :ws ws)
   (agent-repl-webhost-hold-back ws))
 
 (defun agent-repl-page-unload-load-requested (ws)
@@ -106,9 +109,9 @@ A page already loaded is left as it is: a second click, or one that
 crossed a load the gate's answer made, has nothing left to load."
   (if (agent-repl-page-unloaded-p ws)
       (progn
-        (agent-repl--info ws "elisp.page-unload.load-requested ws=%s outcome=loaded" ws)
+        (agent-repl--info ws "elisp.page-unload.load-requested ws={ws} outcome=loaded" :ws ws)
         (agent-repl-page-unload--return ws))
-    (agent-repl--info ws "elisp.page-unload.load-requested ws=%s outcome=already-loaded" ws)))
+    (agent-repl--info ws "elisp.page-unload.load-requested ws={ws} outcome=already-loaded" :ws ws)))
 
 (defun agent-repl-page-unload--load-ungated (ws)
   "Load WS's page when it is held back on screen but no gate holds it now.
@@ -118,7 +121,7 @@ stood; nothing holds the page back any more.  Non-nil if loaded."
              (equal ws agent-repl-page-unload--shown)
              (agent-repl-webhost-held-back-p ws)
              (not (agent-repl-page-unload--gated-p ws)))
-    (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=ungated" ws)
+    (agent-repl--info ws "elisp.page-unload.loaded ws={ws} reason=ungated" :ws ws)
     (agent-repl-page-unload--return ws)
     t))
 

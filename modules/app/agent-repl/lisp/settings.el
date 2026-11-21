@@ -31,12 +31,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'seq)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl--write-file-atomically "core" (file text &optional binary))
 (declare-function agent-repl-defface "core" (face spec doc &rest args))
 (declare-function agent-repl-refill-keymap "core" (map fill))
@@ -99,8 +100,8 @@ shape is fatal: a broken settings file is surfaced, never ignored."
                         (read (current-buffer)))
                     (error
                      (agent-repl--fatal agent-repl-settings--log-scope
-                                        "elisp.settings.read: unreadable file=%s cause=%S"
-                                        file err)))))
+                                        "elisp.settings.read: unreadable file={file} cause={cause}"
+                                        :file file :cause (prin1-to-string err))))))
         (unless (and (listp data)
                      (listp (plist-get data :keybindings))
                      (cl-every #'agent-repl-settings--valid-override-p (plist-get data :keybindings))
@@ -108,7 +109,7 @@ shape is fatal: a broken settings file is surfaced, never ignored."
                      (cl-every (lambda (pair) (and (consp pair) (symbolp (car pair))))
                                (plist-get data :variables)))
           (agent-repl--fatal agent-repl-settings--log-scope
-                             "elisp.settings.read: malformed file=%s data=%S" file data))
+                             "elisp.settings.read: malformed file={file} data={data}" :file file :data (prin1-to-string data)))
         data))))
 
 (defun agent-repl-settings--save ()
@@ -121,9 +122,9 @@ shape is fatal: a broken settings file is surfaced, never ignored."
              (pp-to-string (list :keybindings agent-repl-settings-overrides
                                  :variables agent-repl-settings-variables))))
     (agent-repl--log agent-repl-settings--log-scope
-                     "elisp.settings.save: file=%s overrides=%d variables=%d"
-                     file (length agent-repl-settings-overrides)
-                     (length agent-repl-settings-variables))))
+                     "elisp.settings.save: file={file} overrides={overrides} variables={variables}"
+                     :file file :overrides (length agent-repl-settings-overrides)
+                     :variables (length agent-repl-settings-variables))))
 
 ;;;; ---- Applying the layer ---------------------------------------------
 
@@ -162,9 +163,9 @@ keymap's load (`agent-repl-settings--apply-pending')."
     (when agent-repl-settings--pending
       (add-hook 'after-load-functions #'agent-repl-settings--apply-pending))
     (agent-repl--log agent-repl-settings--log-scope
-                     "elisp.settings.apply: overrides=%d pending=%d variables=%d"
-                     (length agent-repl-settings-overrides) (length agent-repl-settings--pending)
-                     (length agent-repl-settings-variables))
+                     "elisp.settings.apply: overrides={overrides} pending={pending} variables={variables}"
+                     :overrides (length agent-repl-settings-overrides) :pending (length agent-repl-settings--pending)
+                     :variables (length agent-repl-settings-variables))
     (- (length agent-repl-settings-overrides) (length agent-repl-settings--pending))))
 
 ;;;; ---- Changing the layer ---------------------------------------------
@@ -193,8 +194,8 @@ drops its override."
                     (list (list :keymap variable :key key :command command :was was)))))
     (agent-repl-settings--bind variable key command)
     (agent-repl--log agent-repl-settings--log-scope
-                     "elisp.settings.set-key: keymap=%s key=%S command=%s was=%s"
-                     variable key command was)
+                     "elisp.settings.set-key: keymap={keymap} key={key} command={command} was={was}"
+                     :keymap variable :key (prin1-to-string key) :command command :was was)
     (agent-repl-settings--save)))
 
 (defun agent-repl-settings--reset (overrides)
@@ -203,8 +204,8 @@ drops its override."
     (agent-repl-settings--bind (plist-get override :keymap) (plist-get override :key)
                                (plist-get override :was))
     (setq agent-repl-settings-overrides (delq override agent-repl-settings-overrides)))
-  (agent-repl--log agent-repl-settings--log-scope "elisp.settings.reset: overrides=%d"
-                   (length overrides))
+  (agent-repl--log agent-repl-settings--log-scope "elisp.settings.reset: overrides={overrides}"
+                   :overrides (length overrides))
   (agent-repl-settings--save))
 
 (defun agent-repl-settings--overrides-of (commands)
@@ -218,8 +219,8 @@ drops its override."
   "Set VARIABLE to VALUE, and save it with the settings."
   (set-default variable value)
   (setf (alist-get variable agent-repl-settings-variables) value)
-  (agent-repl--log agent-repl-settings--log-scope "elisp.settings.set-variable: variable=%s value=%S"
-                   variable value)
+  (agent-repl--log agent-repl-settings--log-scope "elisp.settings.set-variable: variable={variable} value={value}"
+                   :variable variable :value (prin1-to-string value))
   (agent-repl-settings--save))
 
 ;;;; ---- Entering a key -------------------------------------------------
@@ -446,8 +447,8 @@ CONTEXTS maps a topic id to its binding context."
   "Show the Settings page: every key binding, editable."
   (interactive)
   (agent-repl-settings--redraw)
-  (agent-repl--log agent-repl-settings--log-scope "elisp.settings.show: open=%S"
-                   (buffer-local-value 'agent-repl-settings--open (agent-repl-settings--buffer)))
+  (agent-repl--log agent-repl-settings--log-scope "elisp.settings.show: open={open}"
+                   :open (prin1-to-string (buffer-local-value 'agent-repl-settings--open (agent-repl-settings--buffer))))
   (agent-repl-popup-show (agent-repl-settings--buffer)))
 
 (defun agent-repl-settings-toggle (id)
@@ -521,7 +522,7 @@ test-settings.el here, webapp/test/styles.test.ts there.")
 (defun agent-repl-settings--color (name)
   "Return the page color NAME from `agent-repl-settings--colors'."
   (or (alist-get name agent-repl-settings--colors)
-      (agent-repl--fatal agent-repl-settings--log-scope "elisp.settings.color: unknown name=%s" name)))
+      (agent-repl--fatal agent-repl-settings--log-scope "elisp.settings.color: unknown name={name}" :name name)))
 
 (agent-repl-defface 'agent-repl-settings-text
   `((t :foreground ,(agent-repl-settings--color 'text)))
@@ -615,7 +616,7 @@ stays for the answer."
                 (not (window-live-p window))
                 (minibufferp (window-buffer selected)))
       (agent-repl--log agent-repl-settings--log-scope
-                       "elisp.settings.close-when-left: window=%S selected=%S" window selected)
+                       "elisp.settings.close-when-left: window={window} selected={selected}" :window (prin1-to-string window) :selected (prin1-to-string selected))
       (delete-window window))))
 
 (define-derived-mode agent-repl-settings-mode special-mode "Settings"

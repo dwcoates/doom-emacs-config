@@ -28,11 +28,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--history-push "agent-repl-history" (&optional text))
 (declare-function agent-repl--history-reset "agent-repl-history" ())
@@ -83,7 +85,7 @@ daemon and the shim; one the daemon could not take is held on disk
       (user-error "No current workspace to queue a prompt for"))
     (if empty-p
         (progn
-          (agent-repl--log ws "elisp.prompt-queue.defer-empty ws=%s -- nothing to queue" ws)
+          (agent-repl--log ws "elisp.prompt-queue.defer-empty ws={ws} -- nothing to queue" :ws ws)
           (message "agent-repl: no input to queue"))
       (agent-repl--input-refuse-missing-images ws parts)
       (let* ((said (agent-repl--input-said (agent-repl--prepare-input-parts ws parts)))
@@ -94,9 +96,9 @@ daemon and the shim; one the daemon could not take is held on disk
             (agent-repl--history-reset)
             (erase-buffer)))
         (agent-repl--history-save ws)
-        (agent-repl--info ws "elisp.prompt-queue.deferred ws=%s origin=%S delivery=%S"
-                          ws agent-repl--prompt-queue-drain-origin
-                          agent-repl--prompt-queue-delivery)
+        (agent-repl--info ws "elisp.prompt-queue.deferred ws={ws} origin={origin} delivery={delivery}"
+                          :ws ws :origin (prin1-to-string agent-repl--prompt-queue-drain-origin)
+                          :delivery (prin1-to-string agent-repl--prompt-queue-delivery))
         ;; FROM-BUFFER: the words WERE the composer's, cleared and recorded
         ;; above, so the accept must not record them a second time.
         (prog1 (agent-repl--input-submit ws said agent-repl--prompt-queue-drain-origin raw

@@ -29,14 +29,16 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
 (declare-function agent-repl-verbs--send "verbs")
 (declare-function agent-repl-verbs--conn "verbs")
 (declare-function agent-repl-rpc-update-persistent-wifi-mode "rpc")
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--log "core")
 (declare-function agent-repl--cancel-timer-key "core" (key))
 (defvar agent-repl--required-timer-keys)
 (defvar agent-repl--quiet-paused-timer-keys)
@@ -192,13 +194,13 @@ told, and a resubscribe's replay of the same one, are only recorded."
     (cond
      ((equal previous state)
       (agent-repl--log agent-repl-persistent-wifi--log-scope
-                       "elisp.persistent-wifi.unchanged standing=%S" state))
+                       "elisp.persistent-wifi.unchanged standing={standing}" :standing (prin1-to-string state)))
      ((null previous)
       (agent-repl--info agent-repl-persistent-wifi--log-scope
-                        "elisp.persistent-wifi.standing standing=%S" state))
+                        "elisp.persistent-wifi.standing standing={standing}" :standing (prin1-to-string state)))
      (t
       (agent-repl--info agent-repl-persistent-wifi--log-scope
-                        "elisp.persistent-wifi.changed was=%S standing=%S" previous state)
+                        "elisp.persistent-wifi.changed was={was} standing={standing}" :was (prin1-to-string previous) :standing (prin1-to-string state))
       (message "agent-repl: %s" (agent-repl-persistent-wifi-describe state))))))
 
 ;;;; ---- The lid-closed quiet state ---------------------------------------
@@ -223,8 +225,8 @@ re-arms each paused one through its arm function.  Both then run
           (funcall (alist-get key agent-repl--required-timer-keys)))
         (setq agent-repl--quiet-paused-timer-keys nil))
       (agent-repl--info agent-repl-persistent-wifi--log-scope
-                        "elisp.persistent-wifi.quiet quiet=%s paused=%S"
-                        (if now "entered" "left") agent-repl--quiet-paused-timer-keys)
+                        "elisp.persistent-wifi.quiet quiet={quiet} paused={paused}"
+                        :quiet (if now "entered" "left") :paused (prin1-to-string agent-repl--quiet-paused-timer-keys))
       (run-hook-with-args 'agent-repl-persistent-wifi-quiet-functions now))))
 
 ;;;; ---- The toggle ------------------------------------------------------
@@ -236,9 +238,9 @@ push of the same standing then reads as unchanged."
   (let ((state (plist-get value :state)))
     (setq agent-repl-persistent-wifi-state state)
     (agent-repl--info agent-repl-persistent-wifi--log-scope
-                      "elisp.persistent-wifi.toggled standing=%S hotspot=%S energy-mode=%S display=%S"
-                      state (plist-get value :hotspot) (plist-get value :energy-mode)
-                      (plist-get value :display))
+                      "elisp.persistent-wifi.toggled standing={standing} hotspot={hotspot} energy-mode={energy_mode} display={display}"
+                      :standing (prin1-to-string state) :hotspot (prin1-to-string (plist-get value :hotspot)) :energy_mode (prin1-to-string (plist-get value :energy-mode))
+                      :display (prin1-to-string (plist-get value :display)))
     (message "agent-repl: %s · %s · %s · %s"
              (agent-repl-persistent-wifi-describe state)
              (agent-repl-persistent-wifi--hotspot-text (plist-get value :hotspot))

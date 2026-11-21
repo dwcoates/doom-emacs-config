@@ -79,12 +79,12 @@ be skipped — liveness alone must be what defeats it here."
     (with-current-buffer buf
       (setq-local agent-repl--owning-workspace "logging-ws"))
     (let (log-call)
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                  (lambda (&rest args) (setq log-call args))))
         (should (agent-repl--prev-buffer-skip-agent-panel nil buf 'kill)))
       (should (equal (car log-call) "logging-ws"))
-      (should (equal (cadr log-call)
-                     "prevent-select: candidate buffer=%S live=%s panel=%s bury-or-kill=%S skip=%s"))
+      (should (equal (agent-repl-log-site-template (cadr log-call))
+                     "prevent-select: candidate buffer={buffer} live={live} panel={panel} bury-or-kill={bury_or_kill} skip={skip}"))
       (should (equal (nth 5 log-call) 'kill))
       (should (nth 6 log-call)))))
 

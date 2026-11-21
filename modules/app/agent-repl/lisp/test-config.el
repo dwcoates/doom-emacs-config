@@ -150,7 +150,7 @@ SHA is nil."
   (let ((agent-repl--version "feedface1234")
         (agent-repl--version-computed t)
         logged-scope)
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (lambda (scope &rest _args) (setq logged-scope scope)))
               ((symbol-function 'message) #'ignore))
       ;; Act
@@ -195,7 +195,7 @@ i.e. only when the line actually reached the echo area / modeline."
 (ert-deftest agent-repl-config-test-boot-info/fallback-expands-format-args ()
   "Pre-core, `--boot-info' expands its &rest ARGS into FMT."
   (let ((res (agent-repl-test-config--capture-emission
-              (lambda () (agent-repl--boot-info "loaded %d of %d" 3 7)))))
+              (lambda () (agent-repl--boot-info "loaded {value} of {value_2}" :value 3 :value_2 7)))))
     (should (string-match-p "loaded 3 of 7" (plist-get res :text)))))
 
 (ert-deftest agent-repl-config-test-boot-info/delegates-once-core-loaded ()
@@ -203,11 +203,11 @@ i.e. only when the line actually reached the echo area / modeline."
   ;; Arrange.
   (let ((delegated nil)
         (agent-repl--global-log-scope :test-central-scope))
-    (cl-letf (((symbol-function 'agent-repl--info)
+    (cl-letf (((symbol-function 'agent-repl--emit-info)
                (lambda (ws fmt &rest args)
-                 (setq delegated (list ws (apply #'format fmt args))))))
+                 (setq delegated (list ws (agent-repl-log-site-render fmt args))))))
       ;; Act.
-      (agent-repl--boot-info "hello %s" "world")
+      (agent-repl--boot-info "hello {value}" :value "world")
       ;; Assert.
       (should (equal delegated '(:test-central-scope "hello world"))))))
 
@@ -215,22 +215,24 @@ i.e. only when the line actually reached the echo area / modeline."
   "Pre-core (ladder undefined), `--boot-warn' MUST still reach the echo area —
 core.el failing to load breaks the whole logging system, which is exactly the
 genuine fatal condition the user has to see.  The harness loads core.el, so
-`agent-repl--warn' is unbound here to force the true fallback branch."
-  (let ((orig (symbol-function 'agent-repl--warn)))
+`agent-repl--emit-log-record', the ladder's record builder whose presence
+`agent-repl--boot-emit' asks, is unbound here to force the true fallback
+branch."
+  (let ((orig (symbol-function 'agent-repl--emit-log-record)))
     (unwind-protect
         (progn
-          (fmakunbound 'agent-repl--warn)
+          (fmakunbound 'agent-repl--emit-log-record)
           (let ((res (agent-repl-test-config--capture-emission
                       (lambda () (agent-repl--boot-warn "core.el exploded")))))
             (should (plist-get res :echoed))
             (should (string-match-p "WARNING: core.el exploded" (plist-get res :text)))))
-      (fset 'agent-repl--warn orig))))
+      (fset 'agent-repl--emit-log-record orig))))
 
 (ert-deftest agent-repl-config-test-boot-warn/delegated-is-quiet ()
   "Post-core, `--boot-warn' delegates to the now-quiet `agent-repl--warn', so a
 delegated boot-warning is recorded but must NOT reach the echo area / modeline."
   (let ((res (agent-repl-test-config--capture-emission
-              (lambda () (agent-repl--boot-warn "recoverable %s" "hiccup")))))
+              (lambda () (agent-repl--boot-warn "recoverable {value}" :value "hiccup")))))
     (should-not (plist-get res :echoed))
     (should (string-match-p "WARNING: recoverable hiccup" (plist-get res :text)))))
 
@@ -239,11 +241,11 @@ delegated boot-warning is recorded but must NOT reach the echo area / modeline."
   ;; Arrange.
   (let ((delegated nil)
         (agent-repl--global-log-scope :test-central-scope))
-    (cl-letf (((symbol-function 'agent-repl--warn)
+    (cl-letf (((symbol-function 'agent-repl--emit-warn)
                (lambda (ws fmt &rest args)
-                 (setq delegated (list ws (apply #'format fmt args))))))
+                 (setq delegated (list ws (agent-repl-log-site-render fmt args))))))
       ;; Act.
-      (agent-repl--boot-warn "bad %s" "thing")
+      (agent-repl--boot-warn "bad {value}" :value "thing")
       ;; Assert.
       (should (equal delegated '(:test-central-scope "bad thing"))))))
 
@@ -316,7 +318,7 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
     ;; Arrange
     (let ((agent-repl--elisp-module-builds nil))
       ;; Act
-      (cl-letf (((symbol-function 'agent-repl--boot-info) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--boot-emit) #'ignore))
         (agent-repl--elisp-record-module-build root "ghost"))
       ;; Assert
       (should (null agent-repl--elisp-module-builds)))))
@@ -331,7 +333,7 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
             (agent-repl--load-errors nil)
             (load-file-name (expand-file-name "config.el" root)))
         ;; Act
-        (cl-letf (((symbol-function 'agent-repl--boot-info) #'ignore))
+        (cl-letf (((symbol-function 'agent-repl--boot-emit) #'ignore))
           (eval '(agent-repl--load-module "probe") t))
         ;; Assert
         (should (equal agent-repl--elisp-module-builds
@@ -349,10 +351,10 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
           (infos nil)
           (warns nil))
       ;; Act
-      (cl-letf (((symbol-function 'agent-repl--boot-info)
-                 (lambda (fmt &rest args) (push (apply #'format fmt args) infos)))
-                ((symbol-function 'agent-repl--boot-warn)
-                 (lambda (fmt &rest args) (push (apply #'format fmt args) warns))))
+      (cl-letf (((symbol-function 'agent-repl--boot-emit)
+                 (lambda (warn message)
+                   (let ((text (agent-repl-log-site-render (car message) (cdr message))))
+                     (if warn (push text warns) (push text infos))))))
         (eval '(agent-repl--load-module "probe") t))
       ;; Assert
       (should (equal agent-repl--load-errors '(("probe" error "probe boom"))))
@@ -372,8 +374,7 @@ module); stubbed so here, the failing module is still recorded."
           (load-file-name (expand-file-name "config.el" root)))
       ;; Act
       (cl-letf (((symbol-function 'doom-load) #'ignore)
-                ((symbol-function 'agent-repl--boot-info) #'ignore)
-                ((symbol-function 'agent-repl--boot-warn) #'ignore))
+                ((symbol-function 'agent-repl--boot-emit) #'ignore))
         (eval '(agent-repl--load-module "probe") t))
       ;; Assert
       (should (equal (mapcar #'car agent-repl--load-errors) '("probe"))))))
@@ -421,10 +422,10 @@ Binds `infos' and `warns', the formatted boot records, newest first."
          (agent-repl-frontend-auto-start t)
          (infos nil)
          (warns nil))
-     (cl-letf (((symbol-function 'agent-repl--boot-info)
-                (lambda (fmt &rest args) (push (apply #'format fmt args) infos)))
-               ((symbol-function 'agent-repl--boot-warn)
-                (lambda (fmt &rest args) (push (apply #'format fmt args) warns))))
+     (cl-letf (((symbol-function 'agent-repl--boot-emit)
+                (lambda (warn message)
+                  (let ((text (agent-repl-log-site-render (car message) (cdr message))))
+                    (if warn (push text warns) (push text infos))))))
        ,@body)))
 
 (ert-deftest agent-repl-config-test-lifecycle-registers-the-daemon-ensure ()
@@ -616,7 +617,7 @@ nothing."
                     entries))))
 
 (defvar agent-repl-config-test--doctor-records nil
-  "Every doctor log record the current test made, formatted, oldest first.")
+  "Every doctor log record the current test made, rendered, oldest first.")
 
 (defmacro agent-repl-config-test--with-requirements (exit output &rest body)
   "Run BODY with the doctor's runner answering EXIT and OUTPUT.
@@ -626,10 +627,11 @@ Every doctor log record lands in `agent-repl-config-test--doctor-records'."
      (setq agent-repl-config-test--doctor-records nil)
      (cl-letf (((symbol-function 'agent-repl--doctor-run-requirements)
                 (lambda () (cons ,exit ,output)))
-               ((symbol-function 'agent-repl--doctor-log)
-                (lambda (fmt &rest args)
+               ((symbol-function 'agent-repl--doctor-emit)
+                (lambda (message)
                   (setq agent-repl-config-test--doctor-records
-                        (append agent-repl-config-test--doctor-records (list (apply #'format fmt args)))))))
+                        (append agent-repl-config-test--doctor-records
+                                (list (agent-repl-log-site-render (car message) (cdr message))))))))
        ,@body)))
 
 (ert-deftest agent-repl-config-test-doctor-requirements-all-met-is-no-finding ()
@@ -703,7 +705,7 @@ Every doctor log record lands in `agent-repl-config-test--doctor-records'."
   (declare (indent 2))
   `(agent-repl-config-test--with-doctor
      (cl-letf (((symbol-function 'agent-repl--doctor-run-workspace-list) (lambda () (cons ,exit ,output)))
-               ((symbol-function 'agent-repl--doctor-log) #'ignore))
+               ((symbol-function 'agent-repl--doctor-emit) #'ignore))
        ,@body)))
 
 (ert-deftest agent-repl-config-test-doctor-spotlight-reads-each-worktree-root-once ()

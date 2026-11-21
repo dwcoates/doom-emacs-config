@@ -67,6 +67,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
@@ -75,11 +79,7 @@
 (declare-function agent-repl-host-notification-clicked "host" (ref))
 (declare-function agent-repl-host-select-requested "host" (ref))
 (declare-function agent-repl-host-evaluate "host" (conn request))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-persistent-wifi-handle "persistent-wifi" (state))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 
 (declare-function agent-repl-connect-read-daemon-addr "connect" ())
 (declare-function agent-repl-connect-open "connect" (address))
@@ -179,8 +179,8 @@ stopped at this boundary."
         (apply consumer args)
       (error
        (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
-                          "elisp.link.hook-consumer-failed hook=%S consumer=%S error=%S"
-                          hook consumer err)))))
+                          "elisp.link.hook-consumer-failed hook={hook} consumer={consumer} error={error}"
+                          :hook (prin1-to-string hook) :consumer (prin1-to-string consumer) :error (prin1-to-string err))))))
 
 (defun agent-repl-link--hook-consumers (hook)
   "Return HOOK's consumers, resolving the buffer-local `t' marker.
@@ -381,7 +381,7 @@ rather than sending anything to an unproven daemon."
      ;; acts on -- never a second connection recorded as its own successor.
      ((agent-repl-connect-connection-at-p live address)
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                        "elisp.link.successor-at-primary address=%S" address)
+                        "elisp.link.successor-at-primary address={address}" :address (prin1-to-string address))
       live)
      ((agent-repl-connect-connection-at-p standing address)
       standing)
@@ -479,13 +479,13 @@ exited, its workspaces re-homed) is dropped here rather than reused."
                                   (agent-repl-connect-connection-streams conn)))
                    (remhash kept agent-repl-link--serving-conns)
                    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                                     "elisp.link.serving-conn-dropped address=%S" kept)))
+                                     "elisp.link.serving-conn-dropped address={address}" :address (prin1-to-string kept))))
                agent-repl-link--serving-conns)
       (let ((kept (gethash address agent-repl-link--serving-conns)))
         (if (and kept (agent-repl-connect-connection-alive-p kept))
             kept
           (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                            "elisp.link.serving-conn-opened address=%S" address)
+                            "elisp.link.serving-conn-opened address={address}" :address (prin1-to-string address))
           (puthash address (agent-repl-connect-open address) agent-repl-link--serving-conns)))))))
 
 ;;;; ---- Connecting ----
@@ -516,17 +516,17 @@ reload (`agent-repl-link--redial-after-reload')."
                            (lambda (outcome) (agent-repl-link--handle-close conn outcome))
                            (lambda ()
                              (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces")
-                                              "elisp.link.awaiting-verdict address=%S" address)))))
-              (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open address=%S" address)
+                                              "elisp.link.awaiting-verdict address={address}" :address (prin1-to-string address))))))
+              (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open address={address}" :address (prin1-to-string address))
               (cons conn stream))
           (error
-           (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.watch-daemon-failed address=%S error=%S"
-                             address stream-err)
+           (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.watch-daemon-failed address={address} error={error}"
+                             :address (prin1-to-string address) :error (prin1-to-string stream-err))
            (remhash conn agent-repl-link--verdicts)
            (agent-repl-connect-close conn)
            nil)))
     (error
-     (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open-failed address=%S error=%S" address err)
+     (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open-failed address={address} error={error}" :address (prin1-to-string address) :error (prin1-to-string err))
      nil)))
 
 (defun agent-repl-link-connect ()
@@ -536,12 +536,12 @@ legal no-daemon state and runs `agent-repl-link-no-daemon-functions' —
 the cold start's entry point — rather than failing."
   (cond
    ((agent-repl-link-up-p)
-    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.connect-noop address=%S"
-                     (agent-repl-connect-connection-address agent-repl-link--primary))
+    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.connect-noop address={address}"
+                     :address (prin1-to-string (agent-repl-connect-connection-address agent-repl-link--primary)))
     agent-repl-link--primary)
    (agent-repl-link--pending
-    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.connect-pending address=%S"
-                     (agent-repl-connect-connection-address agent-repl-link--pending))
+    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.connect-pending address={address}"
+                     :address (prin1-to-string (agent-repl-connect-connection-address agent-repl-link--pending)))
     agent-repl-link--pending)
    (t
     (let ((address (agent-repl-connect-read-daemon-addr)))
@@ -563,13 +563,13 @@ stays nil and no up hook runs until `agent-repl-link--accept-primary'."
                  (lambda () (agent-repl-link--open-primary address reconnect-p)))))
     (if (null opened)
         (progn
-          (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.connect-failed address=%S" address)
+          (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.connect-failed address={address}" :address (prin1-to-string address))
           nil)
       (setq agent-repl-link--pending (car opened)
             agent-repl-link--pending-stream (cdr opened)
             agent-repl-link--pending-reconnect-p reconnect-p)
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open-pending address=%S reconnect=%S"
-                        address (and reconnect-p t))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open-pending address={address} reconnect={reconnect}"
+                        :address (prin1-to-string address) :reconnect (prin1-to-string (and reconnect-p t)))
       agent-repl-link--pending)))
 
 (defun agent-repl-link--accept-primary (address)
@@ -580,7 +580,7 @@ any bounce quiet window is dropped, the indicator is redrawn, and
 `agent-repl-link-up-functions' run — so no consumer ever registers a
 workspace against a connection the daemon never answered."
   (if (null agent-repl-link--pending)
-      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.accept-without-pending address=%S" address)
+      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.accept-without-pending address={address}" :address (prin1-to-string address))
     (setq agent-repl-link--primary agent-repl-link--pending
           agent-repl-link--primary-stream agent-repl-link--pending-stream)
     (let ((reconnect-p agent-repl-link--pending-reconnect-p))
@@ -588,29 +588,34 @@ workspace against a connection the daemon never answered."
             agent-repl-link--pending-stream nil
             agent-repl-link--pending-reconnect-p nil)
       (agent-repl-link--stood-up
-       (if reconnect-p "elisp.link.reconnected address=%S" "elisp.link.up address=%S")
-       address))))
+       (if reconnect-p
+           (agent-repl--log-msg "elisp.link.reconnected address={address}"
+                                :address (prin1-to-string address))
+         (agent-repl--log-msg "elisp.link.up address={address}"
+                              :address (prin1-to-string address)))))))
 
-(defun agent-repl-link--stood-up (fmt &rest args)
+(defun agent-repl-link--stood-up (message)
   "Do what every link-up owes its consumers, once the primary is set.
 The reconnect loop is disarmed, any bounce quiet window is dropped, the
-indicator is redrawn, the link-up is recorded at INFO from FMT and ARGS,
+indicator is redrawn, the link-up is recorded at INFO as MESSAGE (a log
+message the caller words, `agent-repl--log-msg', so the site is its own),
 and `agent-repl-link-up-functions' run with the primary.  The one walk
 for every way the link comes up, so none of them can skip a step."
   (agent-repl-link--cancel-reconnect)
   (setq agent-repl-link--quiet-until-ms nil
         agent-repl-link--bounce-cause nil)
   (agent-repl-link--refresh-indicator)
-  (apply #'agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") fmt args)
+  (apply #'agent-repl--emit-info '(:agent-repl-central "the resident daemon link spans workspaces")
+         message)
   (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))
 
 (defun agent-repl-link-teardown ()
   "Close every connection this link holds and forget all of its state.
 The client-side close is the graceful one: each standing stream's
 ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
-  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.teardown primary=%s successor=%s"
-                    (if agent-repl-link--primary "t" "nil")
-                    (if agent-repl-link--successor "t" "nil"))
+  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.teardown primary={primary} successor={successor}"
+                    :primary (if agent-repl-link--primary "t" "nil")
+                    :successor (if agent-repl-link--successor "t" "nil"))
   (agent-repl-link--cancel-reconnect)
   (let ((conns (delq nil (list agent-repl-link--primary
                                agent-repl-link--pending
@@ -657,8 +662,8 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
   (when (timerp agent-repl-link--reconnect-timer)
     (cancel-timer agent-repl-link--reconnect-timer))
   (let ((interval (agent-repl-link--next-interval)))
-    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-scheduled interval=%.3f quiet-until=%S"
-                     interval agent-repl-link--quiet-until-ms)
+    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-scheduled interval={interval} quiet-until={quiet_until}"
+                     :interval (format "%.3f" interval) :quiet_until (prin1-to-string agent-repl-link--quiet-until-ms))
     (setq agent-repl-link--reconnect-timer
           (run-with-timer interval nil #'agent-repl-link--reconnect-tick))))
 
@@ -704,12 +709,12 @@ the cold start's hook runs, which treats the file as stale."
     (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-already-up")
     (agent-repl-link--cancel-reconnect))
    ((agent-repl-link--quiet-p)
-    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-quiet until=%S now=%S"
-                     agent-repl-link--quiet-until-ms (agent-repl--now-unix-ms))
+    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-quiet until={until} now={now}"
+                     :until (prin1-to-string agent-repl-link--quiet-until-ms) :now (prin1-to-string (agent-repl--now-unix-ms)))
     (agent-repl-link--schedule-reconnect))
    ((agent-repl-link--daemon-gone-p)
-    (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-daemon-gone pending=%S"
-                      (and agent-repl-link--pending t))
+    (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-daemon-gone pending={pending}"
+                      :pending (prin1-to-string (and agent-repl-link--pending t)))
     (agent-repl-link--abandon-pending)
     (agent-repl-link--run-hook 'agent-repl-link-no-daemon-functions)
     (agent-repl-link--schedule-reconnect))
@@ -722,7 +727,7 @@ the cold start's hook runs, which treats the file as stale."
     (let ((address (condition-case err
                        (agent-repl-connect-read-daemon-addr)
                      (error
-                      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-addr-unreadable error=%S" err)
+                      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-addr-unreadable error={error}" :error (prin1-to-string err))
                       nil))))
       (if (null address)
           ;; NO DAEMON AT ALL, after the link was up: the one that served it
@@ -737,9 +742,9 @@ the cold start's hook runs, which treats the file as stale."
             (agent-repl-link--run-hook 'agent-repl-link-no-daemon-functions)
             (agent-repl-link--schedule-reconnect))
         (if (agent-repl-link--open-primary address t)
-            (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-awaiting-acceptance address=%S"
-                             address)
-          (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-refused address=%S" address)
+            (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-awaiting-acceptance address={address}"
+                             :address (prin1-to-string address))
+          (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-refused address={address}" :address (prin1-to-string address))
           (agent-repl-link--schedule-reconnect)))))))
 
 ;;;; ---- Stream close: death, cancel, promotion ----
@@ -758,8 +763,8 @@ the reconnect hooks would re-register a fleet that is already registered."
           agent-repl-link--promotions (1+ agent-repl-link--promotions))
     (when (eq agent-repl-link--ending-conn old)
       (setq agent-repl-link--ending-conn nil))
-    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-promoted address=%S"
-                      (agent-repl-connect-connection-address agent-repl-link--primary))
+    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-promoted address={address}"
+                      :address (prin1-to-string (agent-repl-connect-connection-address agent-repl-link--primary)))
     ;; BEFORE the close, and BEFORE any consumer sees the old connection
     ;; die: a promotion kills every stream that rode OLD, so the consumers
     ;; holding connection-scoped streams re-subscribe from here.  This is
@@ -773,7 +778,7 @@ the reconnect hooks would re-register a fleet that is already registered."
   "Complete the handover: the old primary\='s stream ended with OUTCOME.
 The accepted successor is promoted.  The one completion for both orders
 in which Emacs reads the old end and the successor\='s acceptance."
-  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome=%S" outcome)
+  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome={outcome}" :outcome (prin1-to-string outcome))
   (agent-repl-link--promote-successor))
 
 (defun agent-repl-link--handle-close (conn outcome)
@@ -793,8 +798,8 @@ nothing here."
         (verdict (gethash conn agent-repl-link--verdicts)))
     (if (plist-get verdict :reloading)
         (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                          "elisp.link.reloading-stream-closed address=%S outcome=%S"
-                          (plist-get verdict :address) outcome)
+                          "elisp.link.reloading-stream-closed address={address} outcome={outcome}"
+                          :address (prin1-to-string (plist-get verdict :address)) :outcome (prin1-to-string outcome))
       (remhash conn agent-repl-link--verdicts)
       (agent-repl-link--handle-dial-close conn kind outcome))))
 
@@ -811,8 +816,8 @@ leave to a reload."
             agent-repl-link--pending-reconnect-p nil)
       (if (eq kind :cancelled)
           (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.pending-stream-cancelled")
-        (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open-refused address=%S outcome=%S"
-                          (agent-repl-connect-connection-address conn) outcome)
+        (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open-refused address={address} outcome={outcome}"
+                          :address (prin1-to-string (agent-repl-connect-connection-address conn)) :outcome (prin1-to-string outcome))
         (agent-repl-connect-close conn)
         (agent-repl-link--schedule-reconnect)))
      ((eq conn agent-repl-link--pending-successor)
@@ -823,15 +828,15 @@ leave to a reload."
             agent-repl-link--pending-successor-stream nil)
       (if (eq kind :cancelled)
           (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.pending-successor-cancelled")
-        (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-open-refused address=%S outcome=%S"
-                           (agent-repl-connect-connection-address conn) outcome)
+        (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-open-refused address={address} outcome={outcome}"
+                           :address (prin1-to-string (agent-repl-connect-connection-address conn)) :outcome (prin1-to-string outcome))
         (agent-repl-connect-close conn))
       ;; The old daemon's stream had already ended, waiting on this
       ;; acceptance to complete the handover: with no successor to promote,
       ;; that end is the link going down after all.
       (when agent-repl-link--primary-ended
-        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-abandoned primary-outcome=%S"
-                          agent-repl-link--primary-ended)
+        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-abandoned primary-outcome={primary_outcome}"
+                          :primary_outcome (prin1-to-string agent-repl-link--primary-ended))
         (agent-repl-link--primary-ended-down agent-repl-link--primary
                                              agent-repl-link--primary-ended)))
      ((eq conn agent-repl-link--successor)
@@ -846,11 +851,11 @@ leave to a reload."
               agent-repl-link--successor-stream nil)
         (if (eq kind :cancelled)
             (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-cancelled")
-          (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-lost outcome=%S" outcome)
+          (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-lost outcome={outcome}" :outcome (prin1-to-string outcome))
           (agent-repl-connect-close successor))))
      ((not (eq conn agent-repl-link--primary))
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.stale-stream-close address=%S outcome=%S"
-                      (agent-repl-connect-connection-address conn) outcome))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.stale-stream-close address={address} outcome={outcome}"
+                      :address (prin1-to-string (agent-repl-connect-connection-address conn)) :outcome (prin1-to-string outcome)))
      ((eq kind :cancelled)
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-stream-cancelled"))
      (agent-repl-link--successor
@@ -865,10 +870,10 @@ leave to a reload."
       ;; link down and never ran the handover hooks.  The acceptance
       ;; completes the handover from here.
       (setq agent-repl-link--primary-ended outcome)
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-ended-before-successor address=%S successor=%S outcome=%S"
-                        (agent-repl-connect-connection-address conn)
-                        (agent-repl-connect-connection-address agent-repl-link--pending-successor)
-                        outcome))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-ended-before-successor address={address} successor={successor} outcome={outcome}"
+                        :address (prin1-to-string (agent-repl-connect-connection-address conn))
+                        :successor (prin1-to-string (agent-repl-connect-connection-address agent-repl-link--pending-successor))
+                        :outcome (prin1-to-string outcome)))
      (agent-repl-link--shared-handover
       (agent-repl-link--shared-reconnect conn outcome))
      (t (agent-repl-link--primary-ended-down conn outcome))))
@@ -882,8 +887,8 @@ still on CONN (`agent-repl-host-on-link-promote').  Nothing goes down."
   (let ((address (agent-repl-connect-connection-address conn)))
     (setq agent-repl-link--shared-handover nil
           agent-repl-link--primary-ended outcome)
-    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.shared-handover-redial address=%S outcome=%S"
-                      address outcome)
+    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.shared-handover-redial address={address} outcome={outcome}"
+                      :address (prin1-to-string address) :outcome (prin1-to-string outcome))
     (agent-repl-link--dial-successor conn address nil)))
 
 (defun agent-repl-link--primary-ended-down (conn outcome)
@@ -896,11 +901,11 @@ is recorded at INFO; any other end is a loss and is a WARNING."
         ;; THE DAEMON SAID SO FIRST: a planned stand-down with no successor
         ;; to promote.  The same walk as an unannounced loss -- down hooks,
         ;; then the reconnect loop that resolves the live daemon -- at INFO.
-        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down-planned address=%S"
-                          (agent-repl-connect-connection-address conn))
+        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down-planned address={address}"
+                          :address (prin1-to-string (agent-repl-connect-connection-address conn)))
         (agent-repl-link--primary-down conn t))
-    (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down outcome=%S address=%S" outcome
-                      (agent-repl-connect-connection-address conn))
+    (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down outcome={outcome} address={address}" :outcome (prin1-to-string outcome)
+                      :address (prin1-to-string (agent-repl-connect-connection-address conn)))
     (agent-repl-link--primary-down conn)))
 
 (defun agent-repl-link--primary-down (conn &optional planned)
@@ -963,10 +968,10 @@ non-nil says the daemon announced the ending first; the hooks read it as
       (:ending
        (setq agent-repl-link--ending-conn conn)
        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                         "elisp.link.stream-ending address=%S"
-                         (agent-repl-connect-connection-address conn)))
-      (_ (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.unknown-daemon-push arm=%S push=%S"
-                            arm push)))))
+                         "elisp.link.stream-ending address={address}"
+                         :address (prin1-to-string (agent-repl-connect-connection-address conn))))
+      (_ (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.unknown-daemon-push arm={arm} push={push}"
+                            :arm (prin1-to-string arm) :push (prin1-to-string push))))))
 
 (defun agent-repl-link--elisp-current (conn current)
   "Accept the link on CONN: its verdict CURRENT says this Emacs's elisp is current.
@@ -976,15 +981,14 @@ a contract breach: recorded at ERROR and signalled."
   (let ((verdict (gethash conn agent-repl-link--verdicts)))
     (when (or (null verdict) (plist-get verdict :reloading))
       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
-                         "elisp.link.verdict-unexpected arm=elisp-current address=%S build=%S reloading=%S"
-                         (agent-repl-connect-connection-address conn)
-                         (plist-get current :build) (and (plist-get verdict :reloading) t))
+                         "elisp.link.verdict-unexpected arm=elisp-current address={address} build={build} reloading={reloading}"
+                         :address (prin1-to-string (agent-repl-connect-connection-address conn)) :build (prin1-to-string (plist-get current :build)) :reloading (prin1-to-string (and (plist-get verdict :reloading) t)))
       (error "agent-repl: an elisp_current verdict reached a stream at %s not awaiting one"
              (agent-repl-connect-connection-address conn)))
     (remhash conn agent-repl-link--verdicts)
     (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                      "elisp.link.verdict-current address=%S build=%S"
-                      (plist-get verdict :address) (plist-get current :build))
+                      "elisp.link.verdict-current address={address} build={build}"
+                      :address (prin1-to-string (plist-get verdict :address)) :build (prin1-to-string (plist-get current :build)))
     (funcall (plist-get verdict :accept))))
 
 (defun agent-repl-link--reload-elisp (conn reload)
@@ -1001,14 +1005,14 @@ end, which the reconnect loop takes as any refused dial."
      ((null verdict) (agent-repl-elisp-reload-handle reload))
      ((plist-get verdict :reloading)
       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
-                         "elisp.link.verdict-unexpected arm=reload-elisp address=%S build=%S reloading=t"
-                         (plist-get verdict :address) build)
+                         "elisp.link.verdict-unexpected arm=reload-elisp address={address} build={build} reloading=t"
+                         :address (prin1-to-string (plist-get verdict :address)) :build (prin1-to-string build))
       (error "agent-repl: a second verdict reached the stream at %s"
              (plist-get verdict :address)))
      (t
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                        "elisp.link.verdict-stale address=%S running=%S fresh=%S"
-                        (plist-get verdict :address) (agent-repl-elisp-build) build)
+                        "elisp.link.verdict-stale address={address} running={running} fresh={fresh}"
+                        :address (prin1-to-string (plist-get verdict :address)) :running (prin1-to-string (agent-repl-elisp-build)) :fresh (prin1-to-string build))
       (puthash conn (plist-put verdict :reloading t) agent-repl-link--verdicts)
       (unless (agent-repl-elisp-reload-handle
                reload (lambda (_loaded) (agent-repl-link--redial-after-reload conn build)))
@@ -1033,19 +1037,19 @@ stand is refused the same way."
     (cond
      ((not (agent-repl-link--dial-held-p conn))
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                        "elisp.link.reload-redial-superseded address=%S build=%S"
-                        (plist-get verdict :address) build)
+                        "elisp.link.reload-redial-superseded address={address} build={build}"
+                        :address (prin1-to-string (plist-get verdict :address)) :build (prin1-to-string build))
       (agent-repl-connect-close conn))
      ((not (string= loaded build))
       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
-                         "elisp.link.reload-left-stale address=%S pushed=%S loaded=%S"
-                         (plist-get verdict :address) build loaded)
+                         "elisp.link.reload-left-stale address={address} pushed={pushed} loaded={loaded}"
+                         :address (prin1-to-string (plist-get verdict :address)) :pushed (prin1-to-string build) :loaded (prin1-to-string loaded))
       (agent-repl-link--handle-dial-close
        conn :error (list :error "the elisp reload did not leave this Emacs at the pushed build")))
      (t
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                        "elisp.link.reload-redial address=%S build=%S"
-                        (plist-get verdict :address) build)
+                        "elisp.link.reload-redial address={address} build={build}"
+                        :address (prin1-to-string (plist-get verdict :address)) :build (prin1-to-string build))
       (funcall (plist-get verdict :redial))
       (if (agent-repl-link--dial-held-p conn)
           (agent-repl-link--handle-dial-close
@@ -1068,20 +1072,20 @@ is what makes a resubscribe's replay silent."
     (dolist (fault faults)
       (let ((id (plist-get fault :fault-id)))
         (if (gethash id agent-repl-link--surfaced-faults)
-            (agent-repl--log central "elisp.link.fault-already-surfaced fault-id=%s" id)
+            (agent-repl--log central "elisp.link.fault-already-surfaced fault-id={fault_id}" :fault_id id)
           (puthash id t agent-repl-link--surfaced-faults)
           (push fault fresh))))
     (setq fresh (nreverse fresh))
     (dolist (fault fresh)
       (agent-repl--error central
-                         "elisp.link.daemon-fault fault-id=%s line=%S opened-at-ms=%S fault=%S"
-                         (plist-get fault :fault-id) (plist-get fault :line)
-                         (plist-get fault :opened-at-ms) (plist-get fault :fault)))
+                         "elisp.link.daemon-fault fault-id={fault_id} line={line} opened-at-ms={opened_at_ms} fault={fault}"
+                         :fault_id (plist-get fault :fault-id) :line (prin1-to-string (plist-get fault :line))
+                         :opened_at_ms (prin1-to-string (plist-get fault :opened-at-ms)) :fault (prin1-to-string (plist-get fault :fault))))
     (when fresh
       (message "agent-repl: %s"
                (mapconcat (lambda (fault) (plist-get fault :line)) fresh "; ")))
-    (agent-repl--log central "elisp.link.faults-standing standing=%d surfaced=%d"
-                     (length faults) (length fresh))))
+    (agent-repl--log central "elisp.link.faults-standing standing={standing} surfaced={surfaced}"
+                     :standing (length faults) :surfaced (length fresh))))
 
 (defun agent-repl-link--shutdown-announced (conn announcement)
   "React to a `shutdown_announced' ANNOUNCEMENT received on CONN.
@@ -1097,9 +1101,9 @@ window from the announced instants."
       (setq agent-repl-link--quiet-until-ms (+ minted outage)
             agent-repl-link--bounce-cause cause)
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
-                        "elisp.link.plain-bounce cause=%S minted-at-ms=%S expected-outage-ms=%S quiet-until-ms=%S"
-                        (plist-get cause :arm) minted outage
-                        agent-repl-link--quiet-until-ms)
+                        "elisp.link.plain-bounce cause={cause} minted-at-ms={minted_at_ms} expected-outage-ms={expected_outage_ms} quiet-until-ms={quiet_until_ms}"
+                        :cause (prin1-to-string (plist-get cause :arm)) :minted_at_ms (prin1-to-string minted) :expected_outage_ms (prin1-to-string outage)
+                        :quiet_until_ms (prin1-to-string agent-repl-link--quiet-until-ms))
       (agent-repl-link--refresh-indicator))))
 
 (defun agent-repl-link--attach-successor (old address cause &optional announced)
@@ -1130,12 +1134,12 @@ loudly (audit-3 #8), as is any changed address a refusal names (audit-3
       ;; own: the incumbent forwards a transferred workspace\'s calls, and the
       ;; primary\'s end dials this address afresh (`agent-repl-link--shared-reconnect').
       (when announced (setq agent-repl-link--shared-handover t))
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-is-primary address=%S announced=%S"
-                        address (and announced t)))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-is-primary address={address} announced={announced}"
+                        :address (prin1-to-string address) :announced (prin1-to-string (and announced t))))
      ((and attached (not (agent-repl-connect-connection-alive-p attached)))
       ;; A CLOSED SUCCESSOR BLOCKS NOTHING: its handover is over.
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-dead-dropped address=%S new=%S"
-                        (agent-repl-connect-connection-address attached) address)
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-dead-dropped address={address} new={new}"
+                        :address (prin1-to-string (agent-repl-connect-connection-address attached)) :new (prin1-to-string address))
       (agent-repl-link--drop-standing-successor)
       (agent-repl-link--attach-successor old address cause announced))
      ((and attached live
@@ -1146,24 +1150,24 @@ loudly (audit-3 #8), as is any changed address a refusal names (audit-3
       ;; unrepresentable, so reaching here is a breach.  It is said at ERROR
       ;; and dropped, because a handover no daemon will ever end must not
       ;; refuse the real one.
-      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-was-primary-dropped address=%S new=%S"
-                         (agent-repl-connect-connection-address attached) address)
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-was-primary-dropped address={address} new={new}"
+                         :address (prin1-to-string (agent-repl-connect-connection-address attached)) :new (prin1-to-string address))
       (agent-repl-link--drop-standing-successor)
       (agent-repl-link--attach-successor old address cause announced))
      ((agent-repl-connect-connection-at-p attached address)
-      (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-already-attached address=%S" address))
+      (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-already-attached address={address}" :address (prin1-to-string address)))
      ((and announced
            attached
            (eq attached agent-repl-link--pending-successor)
            (eq old agent-repl-link--primary))
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-superseded old=%S new=%S"
-                        (agent-repl-connect-connection-address attached) address)
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-superseded old={old} new={new}"
+                        :old (prin1-to-string (agent-repl-connect-connection-address attached)) :new (prin1-to-string address))
       (agent-repl-link--drop-standing-successor)
       (agent-repl-link--dial-successor old address cause))
      (attached
-      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-address-changed old=%S new=%S"
-                         (agent-repl-connect-connection-address attached)
-                         address))
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-address-changed old={old} new={new}"
+                         :old (prin1-to-string (agent-repl-connect-connection-address attached))
+                         :new (prin1-to-string address)))
      (t (agent-repl-link--dial-successor old address cause)))))
 
 (defun agent-repl-link--drop-standing-successor ()
@@ -1186,12 +1190,12 @@ cancels its stream, which then matches no slot and is recorded stale."
                   (lambda () (agent-repl-link--dial-successor old address cause)))))
     (setq conn (car opened))
     (if (null opened)
-        (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-attach-failed address=%S cause=%S"
-                           address (plist-get cause :arm))
+        (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-attach-failed address={address} cause={cause}"
+                           :address (prin1-to-string address) :cause (prin1-to-string (plist-get cause :arm)))
       (setq agent-repl-link--pending-successor (car opened)
             agent-repl-link--pending-successor-stream (cdr opened))
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-pending address=%S cause=%S"
-                        address (plist-get cause :arm)))))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-pending address={address} cause={cause}"
+                        :address (prin1-to-string address) :cause (prin1-to-string (plist-get cause :arm))))))
 
 (defun agent-repl-link-dial-successor (address)
   "Dial the successor daemon at ADDRESS outside a shutdown announcement.
@@ -1202,7 +1206,7 @@ same fact the announcement would have carried.  Idempotent by address,
 exactly like the announced path: an already attached or already pending
 successor at ADDRESS is a no-op.  Returns `agent-repl-link-successor',
 which is still nil while the dial awaits acceptance."
-  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.dial-successor address=%S" address)
+  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.dial-successor address={address}" :address (prin1-to-string address))
   (agent-repl-link--attach-successor (agent-repl-link-primary) address nil)
   (agent-repl-link-successor))
 
@@ -1219,20 +1223,20 @@ the successor is promoted at once: the order in which Emacs reads the
 old end and this acceptance changes nothing a consumer sees.  A successor
 dialed while the link was down (OLD nil) is the link itself now."
   (if (not (and conn (eq conn agent-repl-link--pending-successor)))
-      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accept-without-pending address=%S pending=%S"
-                        address (and agent-repl-link--pending-successor
+      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accept-without-pending address={address} pending={pending}"
+                        :address (prin1-to-string address) :pending (prin1-to-string (and agent-repl-link--pending-successor
                                      (agent-repl-connect-connection-address
-                                      agent-repl-link--pending-successor)))
+                                      agent-repl-link--pending-successor))))
     (setq agent-repl-link--successor agent-repl-link--pending-successor
           agent-repl-link--successor-stream agent-repl-link--pending-successor-stream
           agent-repl-link--pending-successor nil
           agent-repl-link--pending-successor-stream nil)
-    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accepted address=%S cause=%S"
-                      address (plist-get cause :arm))
+    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accepted address={address} cause={cause}"
+                      :address (prin1-to-string address) :cause (prin1-to-string (plist-get cause :arm)))
     (cond
      (agent-repl-link--primary
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-announced address=%S cause=%S"
-                        address (plist-get cause :arm))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-announced address={address} cause={cause}"
+                        :address (prin1-to-string address) :cause (prin1-to-string (plist-get cause :arm)))
       (agent-repl-link--run-hook 'agent-repl-link-handover-functions
                                  old agent-repl-link--successor)
       (when agent-repl-link--primary-ended
@@ -1240,8 +1244,8 @@ dialed while the link was down (OLD nil) is the link itself now."
      (old
       ;; A primary that ended with a successor pending stays the primary
       ;; until the acceptance, so the one it was announced on cannot be gone.
-      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accepted-primary-vanished address=%S old=%S"
-                         address (agent-repl-connect-connection-address old))
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accepted-primary-vanished address={address} old={old}"
+                         :address (prin1-to-string address) :old (prin1-to-string (agent-repl-connect-connection-address old)))
       (error "agent-repl: the successor at %s was accepted after its announcing primary %s vanished"
              address (agent-repl-connect-connection-address old)))
      (t (agent-repl-link--successor-becomes-link address)))))
@@ -1261,15 +1265,15 @@ transport it left awaiting acceptance are retired: one link, never two."
           agent-repl-link--pending-stream nil
           agent-repl-link--pending-reconnect-p nil)
     (when pending (agent-repl-connect-close pending))
-    (agent-repl-link--stood-up "elisp.link.successor-became-link address=%S retired-pending=%S"
-                               address (and pending (agent-repl-connect-connection-address pending)))))
+    (agent-repl-link--stood-up (agent-repl--log-msg "elisp.link.successor-became-link address={address} retired-pending={retired_pending}"
+                               :address (prin1-to-string address) :retired_pending (prin1-to-string (and pending (agent-repl-connect-connection-address pending)))))))
 
 (defun agent-repl-link--drain-scheduled (schedule)
   "Record the standing drain SCHEDULE and redraw the indicator."
   (setq agent-repl-link-drain schedule)
-  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.drain-scheduled at-ms=%S reason=%S"
-                    (plist-get schedule :at-ms)
-                    (plist-get (plist-get schedule :reason) :arm))
+  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.drain-scheduled at-ms={at_ms} reason={reason}"
+                    :at_ms (prin1-to-string (plist-get schedule :at-ms))
+                    :reason (prin1-to-string (plist-get (plist-get schedule :reason) :arm)))
   (agent-repl-link--refresh-indicator)
   (agent-repl-link--run-hook 'agent-repl-link-drain-functions agent-repl-link-drain))
 
@@ -1296,10 +1300,10 @@ naming rather than an empty segment."
        (let ((note (plist-get value :note)))
          (if (and (stringp note) (not (string-blank-p note)))
              note
-           (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.drain-operator-note-blank reason=%S" reason)
+           (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.drain-operator-note-blank reason={reason}" :reason (prin1-to-string reason))
            "operator")))
       (_
-       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.drain-reason-unknown arm=%S" arm)
+       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.drain-reason-unknown arm={arm}" :arm (prin1-to-string arm))
        "unknown"))))
 
 (defun agent-repl-link--cause-text (cause)
@@ -1321,7 +1325,7 @@ the arm is the whole fact there."
        (format "immediate: %s"
                (agent-repl-link--reason-text (plist-get value :reason))))
       (_
-       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.shutdown-cause-unknown arm=%S" arm)
+       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.shutdown-cause-unknown arm={arm}" :arm (prin1-to-string arm))
        "unknown"))))
 
 (defun agent-repl-link--compute-drain-segment ()
@@ -1344,7 +1348,7 @@ stands, which is what keeps the segment off the mode line entirely."
 (defun agent-repl-link--refresh-indicator ()
   "Recompute `agent-repl-link-drain-segment' and log what it now says."
   (setq agent-repl-link-drain-segment (agent-repl-link--compute-drain-segment))
-  (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.indicator segment=%S" agent-repl-link-drain-segment)
+  (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.indicator segment={segment}" :segment (prin1-to-string agent-repl-link-drain-segment))
   (force-mode-line-update t)
   agent-repl-link-drain-segment)
 

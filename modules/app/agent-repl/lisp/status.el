@@ -2,6 +2,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 ;; Cross-file forward declarations.  These sources load in the dependency
@@ -16,14 +20,9 @@
 (declare-function agent-repl--agent-input-buffer-name-p "core")
 (declare-function agent-repl--agent-input-buffer-p "core")
 (declare-function agent-repl--cancel-timer-key "core")
-(declare-function agent-repl--error "core")
-(declare-function agent-repl--info "core")
 (declare-function agent-repl-count-noun "core" (n one &optional many))
 (declare-function agent-repl-display-width "core" (string))
 (declare-function agent-repl-name-glyph-height "core" (glyph &optional frame))
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
-(declare-function agent-repl--log-decision "core" (key decision ws fmt &rest args))
 (declare-function agent-repl--register-timer "core")
 (declare-function agent-repl--ws-add-activated-hook "workspace")
 (declare-function agent-repl--ws-after-system-load "workspace")
@@ -286,11 +285,11 @@ is deliberately soft rather than an assertion: the buffer can legitimately
 exist before its workspace directory is known."
   (cond
    ((not (buffer-live-p buf))
-    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws=%s skipped dead-buffer=%S" ws buf)
+    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws={ws} skipped dead-buffer={dead_buffer}" :ws ws :dead_buffer (prin1-to-string buf))
     nil)
    ((not (agent-repl--ws-get ws :project-dir))
-    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws=%s skipped missing-project-dir buffer=%s"
-                              ws (buffer-name buf))
+    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws={ws} skipped missing-project-dir buffer={buffer}"
+                              :ws ws :buffer (buffer-name buf))
     nil)
    (t
     (let ((dir (agent-repl--ws-get ws :project-dir)))
@@ -299,8 +298,8 @@ exist before its workspace directory is known."
               (resolved (file-name-as-directory dir)))
           (setq default-directory resolved)
           (agent-repl--log ws
-                            "align-buffer-to-ws-dir: ws=%s buffer=%s previous=%s next=%s"
-                            ws (buffer-name buf) previous resolved)))))))
+                            "align-buffer-to-ws-dir: ws={ws} buffer={buffer} previous={previous} next={next}"
+                            :ws ws :buffer (buffer-name buf) :previous previous :next resolved)))))))
 
 ;;; Tab-bar rendering ---------------------------------------------------------
 ;;
@@ -1115,7 +1114,7 @@ second answer to a question only the daemon answers."
   (let ((arm (and (fboundp 'agent-repl-roster-status-for-ws)
                   (agent-repl-roster-status-for-ws ws))))
     (agent-repl--log-decision (list 'tab-state ws) arm
-                              ws "elisp.status.tab-state: ws=%s arm=%s" ws arm)
+                              ws "elisp.status.tab-state: ws={ws} arm={arm}" :ws ws :arm arm)
     arm))
 
 (defun agent-repl-status-tab-async-merging (ws)
@@ -1127,8 +1126,8 @@ spoken about WS, exactly as `agent-repl-status-tab-state\=' is."
                       (agent-repl-roster-async-merging-for-ws ws)
                       t)))
     (agent-repl--log-decision (list 'tab-async-merging ws) merging
-                              ws "elisp.status.tab-async-merging: ws=%s async-merging=%s"
-                              ws merging)
+                              ws "elisp.status.tab-async-merging: ws={ws} async-merging={async_merging}"
+                              :ws ws :async_merging merging)
     merging))
 
 (defun agent-repl-status-tab-unread-turn-end (ws)
@@ -1141,8 +1140,8 @@ row carries no marker, exactly as `agent-repl-status-tab-state\=' is."
   (let ((end (and (fboundp 'agent-repl-roster-idle-async-unread-for-ws)
                   (agent-repl-roster-idle-async-unread-for-ws ws))))
     (agent-repl--log-decision (list 'tab-unread-turn-end ws) end
-                              ws "elisp.status.tab-unread-turn-end: ws=%s turn-end=%s"
-                              ws end)
+                              ws "elisp.status.tab-unread-turn-end: ws={ws} turn-end={turn_end}"
+                              :ws ws :turn_end end)
     end))
 
 (defun agent-repl-status-tab-color (arm)
@@ -1156,7 +1155,7 @@ at ERROR rather than painted."
    ((null arm) "none")
    ((alist-get arm agent-repl-status-tab-bar-color-table))
    (t
-    (agent-repl--error '(:agent-repl-central "tab rendering and shared assets span workspaces") "elisp.status.tab-color: unknown arm=%S" arm)
+    (agent-repl--error '(:agent-repl-central "tab rendering and shared assets span workspaces") "elisp.status.tab-color: unknown arm={arm}" :arm (prin1-to-string arm))
     "none")))
 
 (defun agent-repl-status-tab-glyph (ws arm)
@@ -1177,8 +1176,8 @@ question or cold gate), the one-shot mark while the one-shot works
                    (and (agent-repl-status-attention-visible-p ws)
                         agent-repl-status-attention-glyph))))
     (agent-repl--log-decision (list 'tab-glyph ws) (cons arm glyph)
-                              ws "elisp.status.tab-glyph: ws=%s arm=%s glyph=%s"
-                              ws arm (or glyph "none"))
+                              ws "elisp.status.tab-glyph: ws={ws} arm={arm} glyph={glyph}"
+                              :ws ws :arm arm :glyph (or glyph "none"))
     glyph))
 
 (defun agent-repl-status-tab-one-shot-glyph (ws arm)
@@ -1250,30 +1249,32 @@ name here has its picture at images/glyphs/<NAME>.svg, which the suite checks.")
   "Cache: the tab bar\='s text font name -> the pixel height glyph images draw at.
 Keyed by the text font, so a frame whose font changes measures again.")
 
-(defun agent-repl-status--glyph-fail (fmt &rest args)
-  "Record FMT and ARGS as an ERROR, then signal it.
+(defun agent-repl-status--glyph-fail (message)
+  "Record log MESSAGE as an ERROR, then signal its text.
+MESSAGE is the caller's (`agent-repl--log-msg'), so the site is its own.
 The tab glyph is computed from invariants the layout guarantees; a
 violation is logged through `agent-repl--error' at the point it is
 found and then fails hard."
-  (let ((message (apply #'format fmt args)))
-    (agent-repl--error '(:agent-repl-central "tab rendering and shared assets span workspaces")
-                       "%s" message)
-    (error "%s" message)))
+  (let ((text (agent-repl-log-site-render (car message) (cdr message))))
+    (apply #'agent-repl--emit-error
+           '(:agent-repl-central "tab rendering and shared assets span workspaces")
+           message)
+    (error "%s" text)))
 
 (defun agent-repl-status--glyph-char (name)
   "Return the character under glyph NAME\='s image.
 A NAME with no row in `agent-repl-status-glyph-chars' is a table this
 build ships inconsistent, so it fails hard."
   (or (cdr (assoc name agent-repl-status-glyph-chars))
-      (agent-repl-status--glyph-fail "elisp.status.glyph-char: glyph %S has no character" name)))
+      (agent-repl-status--glyph-fail (agent-repl--log-msg "elisp.status.glyph-char: glyph {name} has no character" :name (prin1-to-string name)))))
 
 (defun agent-repl-status--glyph-file (name)
   "Return the path of glyph NAME\='s picture, images/glyphs/NAME.svg.
 A missing file is a checkout this build ships broken, so it fails hard."
   (let ((file (expand-file-name (concat name ".svg") agent-repl-status--glyph-dir)))
     (unless (file-exists-p file)
-      (agent-repl-status--glyph-fail "elisp.status.glyph-file: glyph %S has no picture at %s"
-                                     name file))
+      (agent-repl-status--glyph-fail (agent-repl--log-msg "elisp.status.glyph-file: glyph {name} has no picture at {file}"
+                                     :name (prin1-to-string name) :file file)))
     file))
 
 (defun agent-repl-status--glyph-image (name height color frame)
@@ -1320,11 +1321,11 @@ text font."
                                           agent-repl-status-dot-glyph height nil frame))))))
           (unless (= row height)
             (agent-repl-status--glyph-fail
-             "elisp.status.glyph-image-height: text-font=%s text-row=%d image-row=%d: an image as tall as the text row changed the row"
-             text-font height row))
+             (agent-repl--log-msg "elisp.status.glyph-image-height: text-font={text_font} text-row={text_row} image-row={image_row}: an image as tall as the text row changed the row"
+             :text_font text-font :text_row height :image_row row)))
           (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces")
-                           "elisp.status.glyph-image-height: text-font=%s height=%d"
-                           text-font height)
+                           "elisp.status.glyph-image-height: text-font={text_font} height={height}"
+                           :text_font text-font :height height)
           (puthash text-font height agent-repl-status--glyph-image-heights)))))
 
 (defun agent-repl-status--glyph-ink-color (arm)
@@ -1334,7 +1335,7 @@ The ink is `agent-repl-status-glyph-inks'\='s; an ink with no color in
   (when-let ((ink (alist-get arm agent-repl-status-glyph-inks)))
     (or (cdr (assoc ink agent-repl--ink-by-name))
         (agent-repl-status--glyph-fail
-         "elisp.status.glyph-ink-color: ink %S of arm %S has no color" ink arm))))
+         (agent-repl--log-msg "elisp.status.glyph-ink-color: ink {ink} of arm {arm} has no color" :ink (prin1-to-string ink) :arm (prin1-to-string arm))))))
 
 (defun agent-repl-status-roster-mark-color (arm)
   "Return the color the sidebar inks a row standing on ARM with, or nil.
@@ -1347,7 +1348,7 @@ inconsistent, so it fails hard."
   (let ((name (alist-get arm agent-repl-status-color-table)))
     (unless name
       (agent-repl-status--glyph-fail
-       "elisp.status.roster-mark-color: arm %S has no color in the shared assignment" arm))
+       (agent-repl--log-msg "elisp.status.roster-mark-color: arm {arm} has no color in the shared assignment" :arm (prin1-to-string arm))))
     (or (agent-repl-status--glyph-ink-color arm)
         (cdr (assoc name agent-repl--color-by-name)))))
 
@@ -1419,8 +1420,8 @@ picture shows.")
 A missing file is a checkout this build ships broken, so it fails hard."
   (let ((file (expand-file-name (concat level ".png") agent-repl-status--priority-dir)))
     (unless (file-exists-p file)
-      (agent-repl-status--glyph-fail "elisp.status.priority-file: priority %S has no picture at %s"
-                                     level file))
+      (agent-repl-status--glyph-fail (agent-repl--log-msg "elisp.status.priority-file: priority {level} has no picture at {file}"
+                                     :level (prin1-to-string level) :file file)))
     file))
 
 (defun agent-repl-status--name-priority-string (level height frame)
@@ -1430,7 +1431,7 @@ on the text; on a text frame, the label itself.  A LEVEL with no label is
 one the decoder never yields, so it fails hard."
   (let ((label (or (cdr (assoc level agent-repl-status--priority-labels))
                    (agent-repl-status--glyph-fail
-                    "elisp.status.name-priority: priority %S is no level" level))))
+                    (agent-repl--log-msg "elisp.status.name-priority: priority {level} is no level" :level (prin1-to-string level))))))
     (if (display-graphic-p frame)
         (propertize label 'display
                     (create-image (agent-repl-status--priority-file level) 'png nil
@@ -1443,7 +1444,7 @@ Scaled by `agent-repl-name-glyph-height' so the emoji stands exactly as
 high as the name\='s own line; a frame with no fonts draws it unscaled.
 A GLYPH with no text is one the decoder refuses, so it fails hard."
   (unless (and (stringp glyph) (not (string-empty-p glyph)))
-    (agent-repl-status--glyph-fail "elisp.status.name-emoji-ack: glyph %S carries no glyph" glyph))
+    (agent-repl-status--glyph-fail (agent-repl--log-msg "elisp.status.name-emoji-ack: glyph {glyph} carries no glyph" :glyph (prin1-to-string glyph))))
   (let ((scale (agent-repl-name-glyph-height glyph frame)))
     (if scale (propertize glyph 'face (list :height scale)) glyph)))
 
@@ -1464,7 +1465,7 @@ the decoder refuses, so it fails hard."
                             (when-let ((glyph (plist-get prefix :emoji-ack)))
                               (agent-repl-status--name-emoji-ack-string glyph frame))))))
     (unless marks
-      (agent-repl-status--glyph-fail "elisp.status.name-prefix: prefix %S carries no mark" prefix))
+      (agent-repl-status--glyph-fail (agent-repl--log-msg "elisp.status.name-prefix: prefix {prefix} carries no mark" :prefix (prin1-to-string prefix))))
     (string-join marks " ")))
 
 ;;; The attention marker and its blink ---------------------------------------
@@ -1528,7 +1529,7 @@ held under the key."
 (defun agent-repl-status--set-marker (ws on)
   "Draw or undraw WS's attention marker and repaint the tab bar."
   (puthash ws on agent-repl-status--marker-on)
-  (agent-repl--log ws "elisp.status.blink-step: ws=%s marker=%s" ws (if on "on" "off"))
+  (agent-repl--log ws "elisp.status.blink-step: ws={ws} marker={marker}" :ws ws :marker (if on "on" "off"))
   (agent-repl--force-tab-bar-redraw))
 
 (defun agent-repl-status-attention-visible-p (ws)
@@ -1549,8 +1550,8 @@ cadence rather than interleaving with it, because each step is armed
 under a deterministic per-workspace key that replaces its predecessor.
 The marker is cleared by `agent-repl-status-clear-attention', which the
 roster drives when the marker leaves the row."
-  (agent-repl--info ws "elisp.status.blink: ws=%s steps=%d"
-                    ws (length agent-repl-status-blink-schedule))
+  (agent-repl--info ws "elisp.status.blink: ws={ws} steps={steps}"
+                    :ws ws :steps (length agent-repl-status-blink-schedule))
   (agent-repl-status--arm-schedule
    agent-repl-status-blink-schedule
    (lambda (index) (agent-repl-status--blink-timer-key ws index))
@@ -1568,7 +1569,7 @@ finished must not paint a marker the daemon has already retracted."
   (if (gethash ws agent-repl-status--marker-on)
       (progn
         (remhash ws agent-repl-status--marker-on)
-        (agent-repl--log ws "elisp.status.attention-cleared: ws=%s" ws)
+        (agent-repl--log ws "elisp.status.attention-cleared: ws={ws}" :ws ws)
         (agent-repl--force-tab-bar-redraw))))
 
 (defun agent-repl-status-sync-attention (roster)
@@ -1635,7 +1636,7 @@ arrival's flash still has pending."
 (defun agent-repl-status--set-switch-flash (ws on)
   "Draw WS's tab-bar entry flashed when ON, normally otherwise, and repaint."
   (setq agent-repl-status--switch-flash-ws (and on ws))
-  (agent-repl--log ws "elisp.status.switch-flash-step: ws=%s flash=%s" ws (if on "on" "off"))
+  (agent-repl--log ws "elisp.status.switch-flash-step: ws={ws} flash={flash}" :ws ws :flash (if on "on" "off"))
   (agent-repl--force-tab-bar-redraw))
 
 (defun agent-repl-status-switch-flash-on-p (ws)
@@ -1646,8 +1647,8 @@ arrival's flash still has pending."
   "Flash WS's tab-bar entry once, WS being the workspace just switched to.
 Runs `agent-repl-status-switch-flash-schedule'; a call while a flash is in
 flight restarts the schedule on WS."
-  (agent-repl--info ws "elisp.status.switch-flash: ws=%s steps=%d"
-                    ws (length agent-repl-status-switch-flash-schedule))
+  (agent-repl--info ws "elisp.status.switch-flash: ws={ws} steps={steps}"
+                    :ws ws :steps (length agent-repl-status-switch-flash-schedule))
   (agent-repl-status--arm-schedule
    agent-repl-status-switch-flash-schedule
    #'agent-repl-status--switch-flash-timer-key
@@ -1874,12 +1875,12 @@ for the cache-buster rationale."
         (agent-repl--log-verbose
          (agent-repl--status-log-scope
           "frame-wide redraw can run before workspace activation")
-         "tabbar-redraw: frame=%S prior-toggle=%S toggle=%S tabs-set-available=%S tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S format=%S"
-         frame prior-toggle agent-repl--tabline-space-toggle
-         tabs-set-available (frame-parameter frame 'tab-bar-lines)
-         (frame-parameter frame 'tab-bar-lines-keep-state)
-         tab-bar-mode tab-bar-show auto-resize-tab-bars tab-bar-auto-width
-         tab-bar-format)))))
+         "tabbar-redraw: frame={frame} prior-toggle={prior_toggle} toggle={toggle} tabs-set-available={tabs_set_available} tab-bar-lines={tab_bar_lines} keep-state={keep_state} tab-bar-mode={tab_bar_mode} tab-bar-show={tab_bar_show} auto-resize={auto_resize} auto-width={auto_width} format={format}"
+         :frame (prin1-to-string frame) :prior_toggle (prin1-to-string prior-toggle) :toggle (prin1-to-string agent-repl--tabline-space-toggle)
+         :tabs_set_available (prin1-to-string tabs-set-available) :tab_bar_lines (prin1-to-string (frame-parameter frame 'tab-bar-lines))
+         :keep_state (prin1-to-string (frame-parameter frame 'tab-bar-lines-keep-state))
+         :tab_bar_mode (prin1-to-string tab-bar-mode) :tab_bar_show (prin1-to-string tab-bar-show) :auto_resize (prin1-to-string auto-resize-tab-bars) :auto_width (prin1-to-string tab-bar-auto-width)
+         :format (prin1-to-string tab-bar-format))))))
 
 (defun agent-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
@@ -2067,8 +2068,8 @@ went to and which fact decided it."
     (unless (eq previous mode)
       (puthash ws mode agent-repl--tab-background-modes)
       (agent-repl--log-verbose
-       ws "tab-background: ws=%s mode=%s previous=%s reason=%s"
-       ws mode previous reason))))
+       ws "tab-background: ws={ws} mode={mode} previous={previous} reason={reason}"
+       :ws ws :mode mode :previous previous :reason reason))))
 
 ;;; The view-dwell demotion --------------------------------------------------
 ;;
@@ -2457,9 +2458,9 @@ changes because tab-bar redisplay is an extremely hot path."
             (agent-repl--log-verbose
              (agent-repl--status-log-scope
               "tab-row truncation can run before workspace activation")
-             "tabline-truncate-row: budget=%d original-columns=%d original-chars=%d original=%S result-columns=%d result-chars=%d result=%S"
-             width original-width (length row) (substring-no-properties row)
-             result-width (length result) (substring-no-properties result)))
+             "tabline-truncate-row: budget={budget} original-columns={original_columns} original-chars={original_chars} original={original} result-columns={result_columns} result-chars={result_chars} result={result}"
+             :budget width :original_columns original-width :original_chars (length row) :original (prin1-to-string (substring-no-properties row))
+             :result_columns result-width :result_chars (length result) :result (prin1-to-string (substring-no-properties result))))
           result)))))
 
 (defvar agent-repl--tabbar-observation-states
@@ -2550,8 +2551,8 @@ listed as inactive."
          (states (mapcar (lambda (n)
                            (cons n (agent-repl--ws-display-state n)))
                          resolved-names)))
-    (agent-repl--log-verbose '(:agent-repl-central "tab rendering and shared assets span workspaces") "tabline-advice: current=%s states=%S"
-                              current-name states)
+    (agent-repl--log-verbose '(:agent-repl-central "tab rendering and shared assets span workspaces") "tabline-advice: current={current} states={states}"
+                              :current current-name :states (prin1-to-string states))
     (concat
      (mapconcat #'identity entries " ")
      ;; Cache-buster toggle — DO NOT REMOVE.  See the block comment
@@ -2639,16 +2640,16 @@ runs before the canonical logger."
       (agent-repl--log-verbose
        (agent-repl--status-log-scope
         "tab-bar rendering can run before workspace activation")
-       "tabbar-render: frame=%S frame-width=%d frame-pixel-width=%d frame-char-width=%d line-width=%d configured-rows=%d tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S inhibit-implied-resize=%S format=%S names=%S states=%S current=%S entry-widths=%S ranks=%S rows=%S row-widths=%S padded-widths=%S centered=%S centered-widths=%S joined-newlines=%d output-newlines=%d output-chars=%d output=%S"
-       frame width (frame-pixel-width frame) (frame-char-width frame)
-       line-width agent-repl--tabline-row-count
-       (frame-parameter frame 'tab-bar-lines)
-       (frame-parameter frame 'tab-bar-lines-keep-state)
-       tab-bar-mode tab-bar-show auto-resize-tab-bars tab-bar-auto-width
-       frame-inhibit-implied-resize tab-bar-format names states current widths
-       ranks plain-rows row-widths padded-widths plain-centered
-       centered-widths (cl-count ?\n plain-joined)
-       (cl-count ?\n plain-output) (length output) plain-output))))
+       "tabbar-render: frame={frame} frame-width={frame_width} frame-pixel-width={frame_pixel_width} frame-char-width={frame_char_width} line-width={line_width} configured-rows={configured_rows} tab-bar-lines={tab_bar_lines} keep-state={keep_state} tab-bar-mode={tab_bar_mode} tab-bar-show={tab_bar_show} auto-resize={auto_resize} auto-width={auto_width} inhibit-implied-resize={inhibit_implied_resize} format={format} names={names} states={states} current={current} entry-widths={entry_widths} ranks={ranks} rows={rows} row-widths={row_widths} padded-widths={padded_widths} centered={centered} centered-widths={centered_widths} joined-newlines={joined_newlines} output-newlines={output_newlines} output-chars={output_chars} output={output}"
+       :frame (prin1-to-string frame) :frame_width width :frame_pixel_width (frame-pixel-width frame) :frame_char_width (frame-char-width frame)
+       :line_width line-width :configured_rows agent-repl--tabline-row-count
+       :tab_bar_lines (prin1-to-string (frame-parameter frame 'tab-bar-lines))
+       :keep_state (prin1-to-string (frame-parameter frame 'tab-bar-lines-keep-state))
+       :tab_bar_mode (prin1-to-string tab-bar-mode) :tab_bar_show (prin1-to-string tab-bar-show) :auto_resize (prin1-to-string auto-resize-tab-bars) :auto_width (prin1-to-string tab-bar-auto-width)
+       :inhibit_implied_resize (prin1-to-string frame-inhibit-implied-resize) :format (prin1-to-string tab-bar-format) :names (prin1-to-string names) :states (prin1-to-string states) :current (prin1-to-string current) :entry_widths (prin1-to-string widths)
+       :ranks (prin1-to-string ranks) :rows (prin1-to-string plain-rows) :row_widths (prin1-to-string row-widths) :padded_widths (prin1-to-string padded-widths) :centered (prin1-to-string plain-centered)
+       :centered_widths (prin1-to-string centered-widths) :joined_newlines (cl-count ?\n plain-joined)
+       :output_newlines (cl-count ?\n plain-output) :output_chars (length output) :output (prin1-to-string plain-output)))))
 
 (defun agent-repl-workspace-tabline-formatted ()
   "Format the workspace tabs for the tab-bar as ONE fixed row.
@@ -2855,10 +2856,10 @@ logging every redisplay."
       (agent-repl--log-verbose
        (agent-repl--status-log-scope
         "the frame-wide keymap boundary can run before workspace activation")
-       "tabbar-keymap-boundary: frame=%S tab-bar-lines=%S keep-state=%S auto-width=%S captions=%S"
-       frame (frame-parameter frame 'tab-bar-lines)
-       (frame-parameter frame 'tab-bar-lines-keep-state)
-       tab-bar-auto-width captions))
+       "tabbar-keymap-boundary: frame={frame} tab-bar-lines={tab_bar_lines} keep-state={keep_state} auto-width={auto_width} captions={captions}"
+       :frame (prin1-to-string frame) :tab_bar_lines (prin1-to-string (frame-parameter frame 'tab-bar-lines))
+       :keep_state (prin1-to-string (frame-parameter frame 'tab-bar-lines-keep-state))
+       :auto_width (prin1-to-string tab-bar-auto-width) :captions (prin1-to-string captions)))
     keymap))
 
 (advice-add 'tab-bar-make-keymap :filter-return
@@ -2916,8 +2917,8 @@ the record identifies the caller that initiated the mutation."
     (agent-repl--log
      (agent-repl--status-log-scope
       "a frame parameter mutation can run before workspace activation")
-     "tabbar-lines-mutation: api=%S frame=%S prior=%S requested=%S final=%S outcome=%S backtrace=%S"
-     api frame prior requested final outcome backtrace)))
+     "tabbar-lines-mutation: api={api} frame={frame} prior={prior} requested={requested} final={final} outcome={outcome} backtrace={backtrace}"
+     :api (prin1-to-string api) :frame (prin1-to-string frame) :prior (prin1-to-string prior) :requested (prin1-to-string requested) :final (prin1-to-string final) :outcome (prin1-to-string outcome) :backtrace (prin1-to-string backtrace))))
 
 (defun agent-repl--tabbar-audit-set-frame-parameter
     (original frame parameter value)
@@ -3074,20 +3075,20 @@ the outer window.  Returns ROWS after logging the complete transition."
                  (frame-parameter frame 'tab-bar-lines-keep-state)))
             (agent-repl--log
              ws
-             "tabbar-pin-frame: outcome=installed frame=%S display-type=%S rows=%d native-zero-transition=%s prior-lines=%S zero-lines=%S final-lines=%S prior-keep-state=%S final-keep-state=%S inhibit-implied-resize=%S"
-             frame display-type rows native-zero-transition-p prior-lines
-             zero-lines final-lines prior-keep-state final-keep-state
-             frame-inhibit-implied-resize)
+             "tabbar-pin-frame: outcome=installed frame={frame} display-type={display_type} rows={rows} native-zero-transition={native_zero_transition} prior-lines={prior_lines} zero-lines={zero_lines} final-lines={final_lines} prior-keep-state={prior_keep_state} final-keep-state={final_keep_state} inhibit-implied-resize={inhibit_implied_resize}"
+             :frame (prin1-to-string frame) :display_type (prin1-to-string display-type) :rows rows :native_zero_transition native-zero-transition-p :prior_lines (prin1-to-string prior-lines)
+             :zero_lines (prin1-to-string zero-lines) :final_lines (prin1-to-string final-lines) :prior_keep_state (prin1-to-string prior-keep-state) :final_keep_state (prin1-to-string final-keep-state)
+             :inhibit_implied_resize (prin1-to-string frame-inhibit-implied-resize))
             rows))
       (error
        (agent-repl--log
         ws
-        "tabbar-pin-frame: outcome=error frame=%S display-type=%S rows=%d native-zero-transition=%s stage=%S prior-lines=%S zero-lines=%S current-lines=%S prior-keep-state=%S current-keep-state=%S inhibit-implied-resize=%S err=%S"
-        frame display-type rows native-zero-transition-p stage prior-lines
-        zero-lines (frame-parameter frame 'tab-bar-lines)
-        prior-keep-state
-        (frame-parameter frame 'tab-bar-lines-keep-state)
-        frame-inhibit-implied-resize error-data)
+        "tabbar-pin-frame: outcome=error frame={frame} display-type={display_type} rows={rows} native-zero-transition={native_zero_transition} stage={stage} prior-lines={prior_lines} zero-lines={zero_lines} current-lines={current_lines} prior-keep-state={prior_keep_state} current-keep-state={current_keep_state} inhibit-implied-resize={inhibit_implied_resize} err={err}"
+        :frame (prin1-to-string frame) :display_type (prin1-to-string display-type) :rows rows :native_zero_transition native-zero-transition-p :stage (prin1-to-string stage) :prior_lines (prin1-to-string prior-lines)
+        :zero_lines (prin1-to-string zero-lines) :current_lines (prin1-to-string (frame-parameter frame 'tab-bar-lines))
+        :prior_keep_state (prin1-to-string prior-keep-state)
+        :current_keep_state (prin1-to-string (frame-parameter frame 'tab-bar-lines-keep-state))
+        :inhibit_implied_resize (prin1-to-string frame-inhibit-implied-resize) :err (prin1-to-string error-data))
        (signal (car error-data) (cdr error-data))))))
 
 (defun agent-repl-tabbar-apply-row-count ()
@@ -3108,10 +3109,10 @@ frame showing the webview stays hidden.  Returns the applied row count."
     (agent-repl--log
      (agent-repl--status-log-scope
       "manual frame-height repair can run outside a workspace")
-     "tab-bar-apply-row-count: frame=%S rows=%d prior-lines=%S lines=%S prior-keep-state=%S keep-state=%S"
-     frame rows prior-lines (frame-parameter frame 'tab-bar-lines)
-     prior-keep-state
-     (frame-parameter frame 'tab-bar-lines-keep-state))
+     "tab-bar-apply-row-count: frame={frame} rows={rows} prior-lines={prior_lines} lines={lines} prior-keep-state={prior_keep_state} keep-state={keep_state}"
+     :frame (prin1-to-string frame) :rows rows :prior_lines (prin1-to-string prior-lines) :lines (prin1-to-string (frame-parameter frame 'tab-bar-lines))
+     :prior_keep_state (prin1-to-string prior-keep-state)
+     :keep_state (prin1-to-string (frame-parameter frame 'tab-bar-lines-keep-state)))
     (message "agent-repl: tab-bar set to %s on this frame"
              (agent-repl-count-noun rows "line"))
     rows))
@@ -3200,20 +3201,20 @@ parameters, and the watchdog cleanup result."
     (agent-repl--log
      (agent-repl--status-log-scope
       "tab-bar installation runs before workspace activation")
-     "tab-bar-fixed-height: rows=%d frames=%d prior-auto-resize=%S auto-resize=%S prior-auto-width=%S auto-width=%S prior-format=%S format=%S prior-default-lines=%S default-lines=%S prior-default-keep-state=%S default-keep-state=%S prior-frame-state=%S frame-state=%S watchdog-cleanup=%S"
-     rows (length frames) prior-auto-resize auto-resize-tab-bars
-     prior-auto-width tab-bar-auto-width prior-format tab-bar-format
-     prior-default-lines (alist-get 'tab-bar-lines default-frame-alist)
-     prior-default-keep-state
-     (alist-get 'tab-bar-lines-keep-state default-frame-alist)
-     prior-frame-state
-     (mapcar (lambda (frame)
+     "tab-bar-fixed-height: rows={rows} frames={frames} prior-auto-resize={prior_auto_resize} auto-resize={auto_resize} prior-auto-width={prior_auto_width} auto-width={auto_width} prior-format={prior_format} format={format} prior-default-lines={prior_default_lines} default-lines={default_lines} prior-default-keep-state={prior_default_keep_state} default-keep-state={default_keep_state} prior-frame-state={prior_frame_state} frame-state={frame_state} watchdog-cleanup={watchdog_cleanup}"
+     :rows rows :frames (length frames) :prior_auto_resize (prin1-to-string prior-auto-resize) :auto_resize (prin1-to-string auto-resize-tab-bars)
+     :prior_auto_width (prin1-to-string prior-auto-width) :auto_width (prin1-to-string tab-bar-auto-width) :prior_format (prin1-to-string prior-format) :format (prin1-to-string tab-bar-format)
+     :prior_default_lines (prin1-to-string prior-default-lines) :default_lines (prin1-to-string (alist-get 'tab-bar-lines default-frame-alist))
+     :prior_default_keep_state (prin1-to-string prior-default-keep-state)
+     :default_keep_state (prin1-to-string (alist-get 'tab-bar-lines-keep-state default-frame-alist))
+     :prior_frame_state (prin1-to-string prior-frame-state)
+     :frame_state (prin1-to-string (mapcar (lambda (frame)
                (list frame
                      :lines (frame-parameter frame 'tab-bar-lines)
                      :keep-state
                      (frame-parameter frame 'tab-bar-lines-keep-state)))
-             frames)
-     watchdog-cleanup)))
+             frames))
+     :watchdog_cleanup (prin1-to-string watchdog-cleanup))))
 
 (defun agent-repl--tabbar-reassert-row-count (&rest _)
   "Re-pin the tab-bar row contract in both scopes Emacs reads.
@@ -3275,9 +3276,9 @@ re-pinned, in `frame-list' order."
       (agent-repl--log
        (agent-repl--status-log-scope
         "frame-wide tab-bar repair can run before workspace activation")
-       "tabbar-reassert: rows=%d default-repaired=%s prior-default-lines=%S prior-default-keep-state=%S repinned=%S"
-       rows default-repaired prior-default-lines prior-default-keep-state
-       repinned))
+       "tabbar-reassert: rows={rows} default-repaired={default_repaired} prior-default-lines={prior_default_lines} prior-default-keep-state={prior_default_keep_state} repinned={repinned}"
+       :rows rows :default_repaired default-repaired :prior_default_lines (prin1-to-string prior-default-lines) :prior_default_keep_state (prin1-to-string prior-default-keep-state)
+       :repinned (prin1-to-string repinned)))
     repinned))
 
 ;; Install after persp-mode loads so workspace names resolve during render.
@@ -3427,8 +3428,8 @@ to its unviewed colour at once (`agent-repl-host-report-view-dwell')."
         (when (timerp timer)
           (cancel-timer timer)))
       (agent-repl--log (plist-get pending :ws)
-                       "tab-view: dwell dropped ws=%s generation=%s reason=%s"
-                       (plist-get pending :ws) (plist-get pending :generation) reason)
+                       "tab-view: dwell dropped ws={ws} generation={generation} reason={reason}"
+                       :ws (plist-get pending :ws) :generation (plist-get pending :generation) :reason reason)
       (setq agent-repl--tab-dwell-pending nil)
       (cl-incf agent-repl--tab-dwell-generation)
       (agent-repl-host-report-view-dwell (plist-get pending :ws) '(:arm :stopped :value nil)))))
@@ -3470,7 +3471,7 @@ to one push can never choose differently.
 
 An ORIGIN outside the three is a caller defect and signals."
   (unless (memq origin '(activation status-change viewed-cleared))
-    (agent-repl--error ws "tab-view: dwell armed by unknown origin=%S ws=%s" origin ws)
+    (agent-repl--error ws "tab-view: dwell armed by unknown origin={origin} ws={ws}" :origin (prin1-to-string origin) :ws ws)
     (error "agent-repl: view dwell armed by unknown origin %S" origin))
   (let* ((status (agent-repl--ws-render-status ws))
          (rule (cond ((not (eq status :done)) "standard")
@@ -3479,8 +3480,8 @@ An ORIGIN outside the three is a caller defect and signals."
          (seconds (if (equal rule "standard")
                       agent-repl-tab-dwell-demote-seconds
                     agent-repl-tab-dwell-fast-demote-seconds)))
-    (agent-repl--log ws "tab-view: dwell threshold ws=%s origin=%s status=%s seconds=%s rule=%s"
-                     ws origin status seconds rule)
+    (agent-repl--log ws "tab-view: dwell threshold ws={ws} origin={origin} status={status} seconds={seconds} rule={rule}"
+                     :ws ws :origin origin :status status :seconds seconds :rule rule)
     seconds))
 
 (defun agent-repl--tab-dwell-note (ws now)
@@ -3522,8 +3523,8 @@ deadline, and a dwell that will not demote must not leave it there."
             (unless (agent-repl--tab-dwell-eligible-p ws)
               (agent-repl--tab-dwell-drop "not-eligible-at-deadline")
               nil))
-      (agent-repl--log ws "tab-view: superseded dwell timer ignored ws=%s generation=%s pending=%s"
-                       ws generation (and pending (plist-get pending :generation)))
+      (agent-repl--log ws "tab-view: superseded dwell timer ignored ws={ws} generation={generation} pending={pending}"
+                       :ws ws :generation generation :pending (and pending (plist-get pending :generation)))
       nil)))
 
 (defun agent-repl--tab-dwell-arm (ws now origin)
@@ -3545,7 +3546,7 @@ long the user has looked at another one.
 Does NOT clear the demotion — only the daemon does that."
   (if (not (agent-repl--tab-dwell-eligible-p ws))
       (progn
-        (agent-repl--log ws "tab-view: dwell not armed ws=%s origin=%s reason=not-eligible" ws origin)
+        (agent-repl--log ws "tab-view: dwell not armed ws={ws} origin={origin} reason=not-eligible" :ws ws :origin origin)
         (when (equal ws (plist-get agent-repl--tab-dwell-pending :ws))
           (agent-repl--tab-dwell-drop "not-eligible")))
     (agent-repl--tab-dwell-drop "re-armed")
@@ -3557,8 +3558,8 @@ Does NOT clear the demotion — only the daemon does that."
                                          ws generation)))
       (agent-repl-host-report-view-dwell
        ws (list :arm :counting :value (list :length-ms (round (* 1000 seconds)))))
-      (agent-repl--log ws "tab-view: dwell armed ws=%s origin=%s seconds=%s generation=%s"
-                       ws origin seconds generation))))
+      (agent-repl--log ws "tab-view: dwell armed ws={ws} origin={origin} seconds={seconds} generation={generation}"
+                       :ws ws :origin origin :seconds seconds :generation generation))))
 
 (defun agent-repl--tab-view-partial (ws reason)
   "Draw WS PARTIAL everywhere, because REASON says the user has seen it.
@@ -3580,8 +3581,8 @@ There is no matching notification on the RESTORE — see
 `agent-repl--tab-view-restore-full'."
   (agent-repl--log
    ws
-   "tab-view: PARTIAL ws=%s reason=%s — the tab name falls back to default and [N] keeps the status color; the sidebar row's name greys"
-   ws reason)
+   "tab-view: PARTIAL ws={ws} reason={reason} — the tab name falls back to default and [N] keeps the status color; the sidebar row's name greys"
+   :ws ws :reason reason)
   (agent-repl--force-tab-bar-redraw)
   (agent-repl-host-mark-viewed ws))
 
@@ -3595,7 +3596,7 @@ frame away before the news arrived.  A workspace already demoted has
 nothing left to report, and says so.  Whether the report takes is the
 daemon's decision, as for the dwell's."
   (if (agent-repl--tab-dwell-demoted-p ws)
-      (agent-repl--log ws "tab-view: link followed ws=%s already viewed" ws)
+      (agent-repl--log ws "tab-view: link followed ws={ws} already viewed" :ws ws)
     (when (equal ws (plist-get agent-repl--tab-dwell-pending :ws))
       (agent-repl--tab-dwell-drop "link-followed"))
     (agent-repl--tab-view-partial ws "link-followed")))
@@ -3643,7 +3644,7 @@ Registered on `agent-repl-roster-viewed-cleared-functions', which fires
 once per row whose marker went present->absent.  The daemon drops the
 marker on any change that leaves a read turn-end state, from any origin,
 so this reaction never has to enumerate origins."
-  (agent-repl--log ws "tab-view: FULL ws=%s reason=viewed-cleared" ws)
+  (agent-repl--log ws "tab-view: FULL ws={ws} reason=viewed-cleared" :ws ws)
   (agent-repl--tab-view-restore-full ws (current-time)))
 
 (add-hook 'agent-repl-roster-viewed-cleared-functions
@@ -3662,8 +3663,8 @@ one-shot dwell on the running turn, and the finished response would never go
 PARTIAL.  Every status change therefore restarts the clock, and the next
 report lands on whatever the row has become; whether it takes is the
 daemon's decision, never this one's."
-  (agent-repl--log ws "tab-view: dwell re-armed ws=%s reason=status-change from=%s to=%s"
-                   ws previous current)
+  (agent-repl--log ws "tab-view: dwell re-armed ws={ws} reason=status-change from={from} to={to}"
+                   :ws ws :from previous :to current)
   (agent-repl--tab-dwell-arm ws (current-time) 'status-change))
 
 (add-hook 'agent-repl-roster-status-change-functions

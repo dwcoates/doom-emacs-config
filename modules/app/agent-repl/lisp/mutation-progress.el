@@ -17,10 +17,10 @@
 
 ;;; Code:
 
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--error "core")
-(declare-function agent-repl--backend-phase "core" (ws fmt &rest args))
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 
 (defconst agent-repl-mutation-progress--scope
   '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
@@ -42,6 +42,7 @@
 ;; already are.  That is deliberate -- a workspace coming up is the same kind
 ;; of event as the backend coming up, and it should read the same.
 
+(eval-and-compile
 (defconst agent-repl-workspace-progress-phases
   '((:create
      (:requested . "creating workspace…")
@@ -102,7 +103,47 @@ daemon: which process does the work is not the user\='s concern.
 The wording follows the startup phases\=' own: a lowercase clause, a
 trailing ellipsis while the work is in flight, none once it has landed,
 and FAILED in capitals because a failure has to be readable at a glance
-in a line the user was not watching for.")
+in a line the user was not watching for.
+
+The table is read at COMPILE time too: each entry is its own log site
+\(`agent-repl-workspace-progress--record').")
+
+(defun agent-repl-workspace-progress--site-template (template)
+  "Return phase TEMPLATE as its log site's template.
+Each `%s' hole becomes the next placeholder, {detail_1}, {detail_2} ...,
+and a literal brace is doubled, so the site renders from the details
+exactly as `format' fills TEMPLATE from them."
+  (let ((n 0))
+    (replace-regexp-in-string
+     "%s" (lambda (_) (format "{detail_%d}" (cl-incf n)))
+     (replace-regexp-in-string "[{}]" "\\&\\&" template t)
+     t t))))
+
+(defmacro agent-repl-workspace-progress--record (kind phase details)
+  "Record and echo KIND's PHASE, filled from DETAILS, at the phase's own site.
+Expands to one literal `agent-repl--backend-phase' call per entry of
+`agent-repl-workspace-progress-phases', so every phase is its own log site:
+its template is the phase's sentence (each `%s' a {detail_N}), its
+operation names the phase, and the details ride as its named values.  A
+KIND/PHASE the table does not hold signals."
+  (let ((k (make-symbol "kind")) (p (make-symbol "phase")) (d (make-symbol "details")))
+    `(let ((,k ,kind) (,p ,phase) (,d ,details))
+       (pcase (cons ,k ,p)
+         ,@(cl-loop
+            for (kind-key . phases) in agent-repl-workspace-progress-phases
+            append
+            (cl-loop
+             for (phase-key . template) in phases
+             collect
+             (let* ((site-template (agent-repl-workspace-progress--site-template template))
+                    (holes (length (agent-repl-log-site-placeholders site-template))))
+               `(',(cons kind-key phase-key)
+                 (agent-repl--backend-phase
+                  agent-repl-workspace-progress--scope ,site-template
+                  ,@(cl-loop for i from 1 to holes
+                             append (list (intern (format ":detail_%d" i))
+                                          `(nth ,(1- i) ,d))))))))
+         (_ (error "agent-repl-workspace-progress--record: %S %S is no phase" ,k ,p))))))
 
 (defconst agent-repl-workspace-progress--scope
   agent-repl-mutation-progress--scope
@@ -130,15 +171,20 @@ which is a bug in the caller, reported and never guessed at."
     (if (null template)
         (progn
           (agent-repl--error agent-repl-workspace-progress--scope
-                             "elisp.workspace-progress.unknown-phase kind=%S phase=%S details=%S"
-                             kind phase details)
+                             "elisp.workspace-progress.unknown-phase kind={kind} phase={phase} details={details}"
+                             :kind (prin1-to-string kind) :phase (prin1-to-string phase) :details (prin1-to-string details))
           nil)
       (when (eq phase :failed)
         (agent-repl--error agent-repl-workspace-progress--scope
-                           "elisp.workspace-progress.failed kind=%S details=%S" kind details))
-      (apply #'agent-repl--backend-phase agent-repl-workspace-progress--scope
-             template details)
-      (apply #'format template details))))
+                           "elisp.workspace-progress.failed kind={kind} details={details}" :kind (prin1-to-string kind) :details (prin1-to-string details)))
+      ;; The sentence is the user's copy, worded per phase by the table, and
+      ;; each phase is its own site, rendered from the details as `format'
+      ;; fills the sentence: what echoes is exactly the sentence.  The
+      ;; sentence is made first so a phase given too few details signals,
+      ;; as `format' does, before anything is recorded.
+      (let ((sentence (apply #'format template details)))
+        (agent-repl-workspace-progress--record kind phase details)
+        sentence))))
 
 (defvar agent-repl-mutation-progress--pending (make-hash-table :test 'equal)
   "Map of op id -> callback plist for an in-flight workspace mutation.
@@ -169,7 +215,7 @@ for its requester's first turn),
 with the failure ARM and VALUE).  Each is optional."
   (puthash op-id callbacks agent-repl-mutation-progress--pending)
   (agent-repl--info agent-repl-mutation-progress--scope
-                    "elisp.mutation-progress.register op-id=%s" op-id))
+                    "elisp.mutation-progress.register op-id={op_id}" :op_id op-id))
 
 (defun agent-repl-mutation-progress-forget (op-id)
   "Drop any pending callbacks for OP-ID."
@@ -216,8 +262,8 @@ the terminal rule below holds for all of them."
          (apply fn (funcall failure value))))
       (_
        (agent-repl--error agent-repl-mutation-progress--scope
-                          "elisp.mutation-progress.unknown-step op-id=%s step=%S"
-                          op-id step)))))
+                          "elisp.mutation-progress.unknown-step op-id={op_id} step={step}"
+                          :op_id op-id :step (prin1-to-string step))))))
 
 (defun agent-repl-mutation-progress--dispatch-create (op-id callbacks create)
   "Dispatch one decoded WorkspaceCreateProgress CREATE for OP-ID to CALLBACKS.
@@ -236,8 +282,8 @@ stage."
   (let ((stage (plist-get open :stage)))
     (if (null stage)
         (agent-repl--error agent-repl-mutation-progress--scope
-                           "elisp.mutation-progress.open-without-a-stage op-id=%s open=%S"
-                           op-id open)
+                           "elisp.mutation-progress.open-without-a-stage op-id={op_id} open={open}"
+                           :op_id op-id :open (prin1-to-string open))
       (when-let ((fn (plist-get callbacks :on-stage)))
         (funcall fn stage)))))
 
@@ -250,7 +296,7 @@ for another client's op, or a replayed stale one, is expected."
          (callbacks (gethash op-id agent-repl-mutation-progress--pending)))
     (if (null callbacks)
         (agent-repl--log agent-repl-mutation-progress--scope
-                         "elisp.mutation-progress.unknown-op op-id=%S" op-id)
+                         "elisp.mutation-progress.unknown-op op-id={op_id}" :op_id (prin1-to-string op-id))
       (let* ((event (plist-get progress :event))
              (arm (plist-get event :arm))
              (value (plist-get event :value)))
@@ -266,8 +312,8 @@ for another client's op, or a replayed stale one, is expected."
                   op-id callbacks value #'agent-repl-mutation-progress--arm-failure))
           (_
            (agent-repl--error agent-repl-mutation-progress--scope
-                              "elisp.mutation-progress.unknown-mutation op-id=%s arm=%S"
-                              op-id arm)))))))
+                              "elisp.mutation-progress.unknown-mutation op-id={op_id} arm={arm}"
+                              :op_id op-id :arm (prin1-to-string arm))))))))
 
 (provide 'mutation-progress)
 

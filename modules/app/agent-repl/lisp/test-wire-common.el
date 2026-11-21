@@ -27,8 +27,8 @@ through; the typed `agent-repl-wire-error' these tests assert comes from
 the codec's own `signal' afterwards.  Stubbed here only so a breach case
 does not write to the durable sink."
   (declare (indent 0))
-  `(cl-letf (((symbol-function 'agent-repl--error) (lambda (&rest _) nil))
-             ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+  `(cl-letf (((symbol-function 'agent-repl--emit-error) (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
      ,@body))
 
 (defun agent-repl-test-wire-common--parse (json)
@@ -1166,9 +1166,9 @@ RECORDS names a variable the caller has bound."
   (declare (indent 1))
   `(progn
      (setq ,records nil)
-     (cl-letf (((symbol-function 'agent-repl--log)
+     (cl-letf (((symbol-function 'agent-repl--emit-log)
                 (agent-repl-test--record-into ,records))
-               ((symbol-function 'agent-repl--error) (lambda (&rest _) nil)))
+               ((symbol-function 'agent-repl--emit-error) (lambda (&rest _) nil)))
        ,@body)
      (setq ,records (nreverse ,records))))
 
@@ -1248,9 +1248,9 @@ RECORDS names a variable the caller has bound."
   "A breach inside a top-level call keeps its ERROR record."
   ;; Arrange
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into errors))
-              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+              ((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
       ;; Act
       (ignore-errors
         (agent-repl-wire-call 'decode #'agent-repl-wire-decode-turn-id '((value . 7)))))

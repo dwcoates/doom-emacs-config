@@ -62,14 +62,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 (require 'minibuffer)
 
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
@@ -212,23 +213,23 @@ as it stood and is logged; a handover arm is walked by host.el."
        (pcase (plist-get catalog :arm)
          (:stated
           (let ((commands (plist-get (plist-get (plist-get catalog :value) :catalog) :commands)))
-            (agent-repl--log ws "elisp.command-completion.answered ws=%s outcome=stated commands=%d"
-                             ws (length commands))
+            (agent-repl--log ws "elisp.command-completion.answered ws={ws} outcome=stated commands={commands}"
+                             :ws ws :commands (length commands))
             (agent-repl--command-completion-install buf commands)))
          (:unstated
-          (agent-repl--log ws "elisp.command-completion.answered ws=%s outcome=unstated" ws)
+          (agent-repl--log ws "elisp.command-completion.answered ws={ws} outcome=unstated" :ws ws)
           (agent-repl--command-completion-install buf nil))
          (other
-          (agent-repl--error ws "elisp.command-completion.unknown-catalog-arm ws=%s arm=%S"
-                             ws other)))))
+          (agent-repl--error ws "elisp.command-completion.unknown-catalog-arm ws={ws} arm={arm}"
+                             :ws ws :arm (prin1-to-string other))))))
     (:error
      (let ((cause (plist-get (plist-get response :value) :cause)))
        (unless (agent-repl-host-route-handover
                 ws cause "elisp.command-completion.handover-refusal")
-         (agent-repl--warn ws "elisp.command-completion.refused ws=%s cause=%S" ws cause))))
+         (agent-repl--warn ws "elisp.command-completion.refused ws={ws} cause={cause}" :ws ws :cause (prin1-to-string cause)))))
     (other
-     (agent-repl--error ws "elisp.command-completion.unknown-response-arm ws=%s arm=%S"
-                        ws other))))
+     (agent-repl--error ws "elisp.command-completion.unknown-response-arm ws={ws} arm={arm}"
+                        :ws ws :arm (prin1-to-string other)))))
 
 (defun agent-repl-command-completion-refresh (ws)
   "Ask the daemon for WS's slash commands, for WS's composer (the current buffer).
@@ -240,18 +241,18 @@ and says so in the log -- the next slash word asks again."
         (buf (current-buffer)))
     (cond
      ((null ref)
-      (agent-repl--log ws "elisp.command-completion.refresh-skipped ws=%s reason=no-ref" ws))
+      (agent-repl--log ws "elisp.command-completion.refresh-skipped ws={ws} reason=no-ref" :ws ws))
      ((null conn)
-      (agent-repl--log ws "elisp.command-completion.refresh-skipped ws=%s reason=no-connection" ws))
+      (agent-repl--log ws "elisp.command-completion.refresh-skipped ws={ws} reason=no-connection" :ws ws))
      (t
-      (agent-repl--log ws "elisp.command-completion.refresh ws=%s" ws)
+      (agent-repl--log ws "elisp.command-completion.refresh ws={ws}" :ws ws)
       (agent-repl-rpc-list-slash-commands
        conn (list :workspace ref)
        :on-response (lambda (response)
                       (agent-repl--command-completion-answered ws buf response))
        :on-failure (lambda (detail)
-                     (agent-repl--warn ws "elisp.command-completion.transport-failure ws=%s detail=%S"
-                                       ws detail)))))))
+                     (agent-repl--warn ws "elisp.command-completion.transport-failure ws={ws} detail={detail}"
+                                       :ws ws :detail (prin1-to-string detail))))))))
 
 ;;;; ---- completion-at-point ----
 

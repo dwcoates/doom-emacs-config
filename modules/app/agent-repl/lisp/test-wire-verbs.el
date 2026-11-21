@@ -72,8 +72,8 @@ logging rung that never signals, so the stub is a no-op: the typed
               (lambda (feedid) (list (cons 'value (plist-get feedid :value)))))
              ((symbol-function 'agent-repl-wire-decode-feed-id)
               (lambda (json) (list :value (cdr (assq 'value json)))))
-             ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-             ((symbol-function 'agent-repl--error) (lambda (&rest _) nil)))
+             ((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl--emit-error) (lambda (&rest _) nil)))
      ,@body))
 
 (defconst agent-repl-test-wire-verbs--ref '(:id "ws-1" :dir "/w/one")
@@ -2134,7 +2134,7 @@ Recording the failure and aborting the caller are separate acts: the
 logging rung returns normally, and the typed signal follows it."
   (agent-repl-test-wire-verbs--with-common
     (let (calls)
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (lambda (&rest args) (push args calls) nil)))
         (should-error (agent-repl-wire-encode-submit-prompt-request
                        (list :workspace agent-repl-test-wire-verbs--ref

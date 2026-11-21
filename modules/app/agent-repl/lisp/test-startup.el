@@ -41,8 +41,8 @@ rebinds `agent-repl-test-startup--spawned'."
                 (lambda (&optional at) (if at 0.5 (setq clock (1+ clock)))))
                ((symbol-function 'agent-repl-daemon--spawned-here-p)
                 (lambda () agent-repl-test-startup--spawned))
-               ((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args) (push (list 'info (apply #'format fmt args)) agent-repl-test-startup--records)))
+               ((symbol-function 'agent-repl--emit-info)
+                (lambda (_ws fmt &rest args) (push (list 'info (agent-repl-log-site-render fmt args)) agent-repl-test-startup--records)))
                ((symbol-function 'agent-repl-latency-report-startup)
                 (lambda (milestones) (push milestones agent-repl-test-startup--queued)))
                ((symbol-function 'agent-repl-verbs-fold-hidden-section)
@@ -157,7 +157,7 @@ rebinds `agent-repl-test-startup--spawned'."
   "A startup that ended naming no daemon is an invariant violation, raised loudly."
   (agent-repl-test-startup--with-milestones
     (let (fatals)
-      (cl-letf (((symbol-function 'agent-repl--fatal)
+      (cl-letf (((symbol-function 'agent-repl--emit-fatal)
                  (agent-repl-test--fatal-into fatals)))
         ;; Act / Assert
         (should-error (agent-repl-startup-ended))
@@ -271,7 +271,7 @@ idle run's own timers are recorded (Emacs arms others, such as undo's)."
   (agent-repl-test-startup--with-first-hooks nil
     ;; Arrange
     (setq agent-repl-test-startup--buffer-hook (list (lambda () (error "Boom"))))
-    (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) #'ignore))
       ;; Act
       (ignore-errors (agent-repl-startup--first-hooks-run)))
     ;; Assert
@@ -282,7 +282,7 @@ idle run's own timers are recorded (Emacs arms others, such as undo's)."
   (agent-repl-test-startup--with-first-hooks nil
     ;; Arrange
     (setq agent-repl-test-startup--buffer-hook (list (lambda () (error "Boom"))))
-    (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) #'ignore))
       ;; Act / Assert
       (should-error (agent-repl-startup--first-hooks-run)))))
 
@@ -292,7 +292,7 @@ idle run's own timers are recorded (Emacs arms others, such as undo's)."
     ;; Arrange
     (setq agent-repl-test-startup--buffer-hook (list (lambda () (error "Boom"))))
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (ignore-errors (agent-repl-startup--first-hooks-run)))
@@ -306,7 +306,7 @@ idle run's own timers are recorded (Emacs arms others, such as undo's)."
     ;; Arrange
     (setq agent-repl-test-startup--buffer-hook (list #'ignore))
     (let ((infos nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-startup--first-hooks-run))

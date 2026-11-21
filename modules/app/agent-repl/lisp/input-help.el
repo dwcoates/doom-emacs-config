@@ -20,11 +20,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'seq)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl-popup-show "popup" (buffer))
 (declare-function agent-repl-defface "core" (face spec doc &rest args))
 (declare-function agent-repl-refill-keymap "core" (map fill))
@@ -391,8 +393,8 @@ its topic's features are loaded is a broken table, and is fatal."
   (list :maps (mapcar (lambda (variable)
                         (unless (and (boundp variable) (keymapp (symbol-value variable)))
                           (agent-repl--fatal agent-repl-input-help--log-scope
-                                             "elisp.input-help.context: unbound keymap=%s topic=%s"
-                                             variable (plist-get topic :id)))
+                                             "elisp.input-help.context: unbound keymap={keymap} topic={topic}"
+                                             :keymap variable :topic (plist-get topic :id)))
                         (cons variable (symbol-value variable)))
                       (plist-get topic :keymaps))
         :global (list (cons "insert" (cons 'evil-insert-state-map evil-insert-state-map))
@@ -569,7 +571,7 @@ A command no map binds is a broken help table, and is fatal."
             (mapcan (lambda (one)
                       (or (agent-repl--input-help-key-sources one context)
                           (agent-repl--fatal agent-repl-input-help--log-scope
-                                             "elisp.input-help.keys: unbound command=%s" one)))
+                                             "elisp.input-help.keys: unbound command={command}" :command one)))
                     (if (listp command) (copy-sequence command) (list command)))))))
 
 ;;;; ---- The popup ------------------------------------------------------
@@ -579,9 +581,9 @@ A command no map binds is a broken help table, and is fatal."
 No such topic is fatal."
   (or (seq-find (lambda (topic) (equal (plist-get topic key) value)) agent-repl-input-help-topics)
       (agent-repl--fatal agent-repl-input-help--log-scope
-                         "elisp.input-help.topic: unknown %s=%S known=%S"
-                         key value (mapcar (lambda (topic) (plist-get topic key))
-                                           agent-repl-input-help-topics))))
+                         "elisp.input-help.topic: unknown {key}={value} known={known}"
+                         :key key :value (prin1-to-string value) :known (prin1-to-string (mapcar (lambda (topic) (plist-get topic key))
+                                           agent-repl-input-help-topics)))))
 
 (defconst agent-repl-input-help--key-column-max 24
   "The widest key cell a popup row keeps beside its description.
@@ -605,8 +607,8 @@ command no map binds, or a variable that is not bound, is fatal."
                 (dolist (variable variables)
                   (unless (boundp variable)
                     (agent-repl--fatal agent-repl-input-help--log-scope
-                                       "elisp.input-help.rows: unbound variable=%s command=%s"
-                                       variable command)))
+                                       "elisp.input-help.rows: unbound variable={variable} command={command}"
+                                       :variable variable :command command)))
                 (list (agent-repl--input-help-key-cell
                        (agent-repl--input-help-keys command context))
                       description variables))))
@@ -685,8 +687,8 @@ Its lines wrap at word boundaries, each under its own column."
   "Show help topic ID's keys and features in the shared agent-repl popup."
   (let* ((topic (agent-repl--input-help-topic :id id))
          (buf (agent-repl--input-help-buffer topic (agent-repl--input-help-binding-context topic))))
-    (agent-repl--log agent-repl-input-help--log-scope "elisp.input-help.show: id=%s buffer=%s"
-                     id (buffer-name buf))
+    (agent-repl--log agent-repl-input-help--log-scope "elisp.input-help.show: id={id} buffer={buffer}"
+                     :id id :buffer (buffer-name buf))
     (agent-repl-popup-show buf)))
 
 (defun agent-repl--input-help-choice (topic)
@@ -703,7 +705,7 @@ Its lines wrap at word boundaries, each under its own column."
    (plist-get (or (seq-find (lambda (topic) (equal (agent-repl--input-help-choice topic) choice))
                             agent-repl-input-help-topics)
                   (agent-repl--fatal agent-repl-input-help--log-scope
-                                     "elisp.input-help: unknown choice=%S" choice))
+                                     "elisp.input-help: unknown choice={choice}" :choice (prin1-to-string choice)))
               :id)))
 
 (provide 'input-help)

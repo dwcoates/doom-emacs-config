@@ -36,12 +36,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'seq)
 
 (declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function agent-repl-status--color-value "status" (color))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl-frame-border-set-pinned "frame-border" (frame color))
 (defvar agent-repl--focus-log-scope)
 (defvar agent-repl-focus-settled-hook)
@@ -69,8 +71,8 @@ A frame already painted is left as it is."
   (unless (frame-parameter frame agent-repl--titlebar-painted)
     (let ((background (face-background 'default frame)))
       (agent-repl--log agent-repl--focus-log-scope
-                       "elisp.titlebar.paint frame=%S background=%s color=%s"
-                       frame background agent-repl-titlebar-unfocused-color)
+                       "elisp.titlebar.paint frame={frame} background={background} color={color}"
+                       :frame (prin1-to-string frame) :background background :color agent-repl-titlebar-unfocused-color)
       (agent-repl-frame-border-set-pinned frame background)
       ;; THE FRAME KEEPS ITS LIGHT OR DARK MODE.  Setting `background-color'
       ;; has Emacs derive the frame's `background-mode' from the new color
@@ -86,7 +88,7 @@ A frame already painted is left as it is."
   "Return FRAME\='s title bar to the theme\='s color.
 A frame not painted is left as it is."
   (when (frame-parameter frame agent-repl--titlebar-painted)
-    (agent-repl--log agent-repl--focus-log-scope "elisp.titlebar.unpaint frame=%S" frame)
+    (agent-repl--log agent-repl--focus-log-scope "elisp.titlebar.unpaint frame={frame}" :frame (prin1-to-string frame))
     (agent-repl-frame-border-set-pinned frame nil)
     (face-spec-recalc 'default frame)
     (set-frame-parameter frame agent-repl--titlebar-painted nil)))
@@ -99,7 +101,7 @@ argument `after-make-frame-functions\=' hands it."
   (let ((focused (agent-repl--emacs-focused-p))
         (frames (agent-repl--titlebar-frames)))
     (agent-repl--log agent-repl--focus-log-scope
-                     "elisp.titlebar.sync focused=%s frames=%d" (and focused t) (length frames))
+                     "elisp.titlebar.sync focused={focused} frames={frames}" :focused (and focused t) :frames (length frames))
     (dolist (frame frames)
       (if focused
           (agent-repl--titlebar-unpaint frame)
@@ -127,8 +129,8 @@ the title bar is unavailable and why."
         (add-hook 'after-make-frame-functions #'agent-repl-titlebar-sync)
         (add-hook 'enable-theme-functions #'agent-repl--titlebar-on-theme)
         (agent-repl-titlebar-sync))
-    (agent-repl--info '(:agent-repl-central "the title bar belongs to Emacs's frames, not a workspace") "elisp.titlebar.unavailable system-type=%s: the unfocused orange title bar is macOS's alone; this window manager draws the title bar, so it keeps the window manager's color"
-                      system)))
+    (agent-repl--info '(:agent-repl-central "the title bar belongs to Emacs's frames, not a workspace") "elisp.titlebar.unavailable system-type={system_type}: the unfocused orange title bar is macOS's alone; this window manager draws the title bar, so it keeps the window manager's color"
+                      :system_type system)))
 
 (agent-repl--titlebar-install system-type)
 

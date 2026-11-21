@@ -33,7 +33,7 @@
   "Run BODY with every `agent-repl--fatal' recorded, then signalled as it is."
   (declare (indent 0))
   `(let ((agent-repl-test-input-help--fatals nil))
-     (cl-letf (((symbol-function 'agent-repl--fatal)
+     (cl-letf (((symbol-function 'agent-repl--emit-fatal)
                 (agent-repl-test--fatal-into agent-repl-test-input-help--fatals)))
        ,@body)))
 
@@ -538,7 +538,7 @@ Compared in description order: a keymap's own order says nothing."
         logged)
     (agent-repl-test--recording-popups
       (cl-letf (((symbol-function 'agent-repl--input-help-binding-context) (lambda (_topic) context))
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         (agent-repl-input-help-show 'merge-queue))
       (let ((buf (car agent-repl-test--popups-shown)))

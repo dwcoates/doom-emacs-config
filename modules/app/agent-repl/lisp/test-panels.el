@@ -397,7 +397,7 @@ layout."
       (cl-letf (((symbol-function 'agent-repl--sync-panels) #'ignore)
                 ((symbol-function 'agent-repl-window--ensure-layout)
                  (lambda () (error "Attempt to delete main window")))
-                ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+                ((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
         ;; Act
         (ignore-errors (agent-repl--on-window-change)))
       ;; Assert
@@ -413,7 +413,7 @@ layout."
     (cl-letf (((symbol-function 'agent-repl--sync-panels) #'ignore)
               ((symbol-function 'agent-repl-window--ensure-layout)
                (lambda () (error "Attempt to delete main window")))
-              ((symbol-function 'agent-repl--error) #'ignore))
+              ((symbol-function 'agent-repl--emit-error) #'ignore))
       ;; Act / Assert
       (should-error (agent-repl--on-window-change)))))
 
@@ -1849,7 +1849,7 @@ answers a real but never-armed timer, so cancellation is observable;
         (cl-letf (((symbol-function 'agent-repl--on-workspace-switch)
                    (lambda (&optional _ws) (error "Attempt to delete main window")))
                   ((symbol-function 'agent-repl--ws-log-scope) #'identity)
-                  ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+                  ((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
           ;; Arrange
           (agent-repl--schedule-switch-activation "ws-b")
           ;; Act
@@ -1864,7 +1864,7 @@ answers a real but never-armed timer, so cancellation is observable;
     (agent-repl-test--with-switch-activations
       (cl-letf (((symbol-function 'agent-repl--on-workspace-switch)
                  (lambda (&optional _ws) (error "Attempt to delete main window")))
-                ((symbol-function 'agent-repl--error) #'ignore))
+                ((symbol-function 'agent-repl--emit-error) #'ignore))
         ;; Arrange
         (agent-repl--schedule-switch-activation "ws-b")
         ;; Act / Assert
@@ -1911,7 +1911,7 @@ had already gone on to C."
     (agent-repl-test--with-switch-activations
       ;; Arrange.
       (let ((records nil))
-        (cl-letf (((symbol-function 'agent-repl--info)
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
                    (agent-repl-test--record-into records)))
           (agent-repl--schedule-switch-activation "ws-b")
           (agent-repl--schedule-switch-activation "ws-c")
@@ -1927,7 +1927,7 @@ had already gone on to C."
     (agent-repl-test--with-switch-activations
       ;; Arrange.
       (let ((records nil))
-        (cl-letf (((symbol-function 'agent-repl--info)
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
                    (agent-repl-test--record-into records)))
           (agent-repl--schedule-switch-activation "ws-b")
           (agent-repl--schedule-switch-activation "ws-c")
@@ -1944,7 +1944,7 @@ had already gone on to C."
       ;; Arrange.
       (let ((records nil)
             (now 100.0))
-        (cl-letf (((symbol-function 'agent-repl--info)
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
                    (agent-repl-test--record-into records))
                   ((symbol-function 'float-time) (lambda (&optional _) now)))
           (agent-repl--schedule-switch-activation "ws-b")
@@ -2109,7 +2109,7 @@ answers.  BODY runs with the other window selected; `input-buf' is bound."
   "The gated landing is recorded at INFO."
   (agent-repl-test-panels--with-visible-input t
     (let ((infos nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--maybe-autoselect-input "test-ws"))
@@ -3438,7 +3438,7 @@ is set, dispatching through WS's own frontend (the webview + input layout)."
                       ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                      ((symbol-function 'agent-repl--info)
+                      ((symbol-function 'agent-repl--emit-info)
                        (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
@@ -3462,7 +3462,7 @@ workspace rather than a persp placeholder."
                  ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) ,hidden))
                  ((symbol-function 'agent-repl--panels-mount-awaited-view)
                   (lambda (ws) (push ws mounted)))
-                 ((symbol-function 'agent-repl--info)
+                 ((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-into infos)))
          ,@body))))
 
@@ -3516,7 +3516,7 @@ never left for the staggered pre-creation pass to make later."
                       ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                      ((symbol-function 'agent-repl--info)
+                      ((symbol-function 'agent-repl--emit-info)
                        (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
@@ -3538,7 +3538,7 @@ never left for the staggered pre-creation pass to make later."
                       ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                      ((symbol-function 'agent-repl--info)
+                      ((symbol-function 'agent-repl--emit-info)
                        (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
@@ -3559,7 +3559,7 @@ never left for the staggered pre-creation pass to make later."
                       ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                      ((symbol-function 'agent-repl--info)
+                      ((symbol-function 'agent-repl--emit-info)
                        (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
@@ -4109,7 +4109,7 @@ own no durable sink, so the record is global by design."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none"))
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (lambda (ws &rest _)
                    (when (eq logged 'no-record) (setq logged ws)))))
         ;; Act
@@ -4130,7 +4130,7 @@ Screening the log name must not demote records that legitimately own a sink."
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
-                      ((symbol-function 'agent-repl--log)
+                      ((symbol-function 'agent-repl--emit-log)
                        (lambda (ws &rest _)
                          (when (eq logged 'no-record) (setq logged ws)))))
               ;; Act
@@ -4159,10 +4159,10 @@ owns a `:project-dir', so a record attributed to one is unroutable and
                               (push ws unroutable))))
                  ((symbol-function '+workspace-current-name) (lambda () "main"))
                  ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                 ((symbol-function 'agent-repl--log) collect)
-                 ((symbol-function 'agent-repl--log-verbose) collect)
-                 ((symbol-function 'agent-repl--info) collect)
-                 ((symbol-function 'agent-repl--warn) collect))
+                 ((symbol-function 'agent-repl--emit-log) collect)
+                 ((symbol-function 'agent-repl--emit-log-verbose) collect)
+                 ((symbol-function 'agent-repl--emit-info) collect)
+                 ((symbol-function 'agent-repl--emit-warn) collect))
         ;; Act
         (agent-repl--on-workspace-switch "main"))
       ;; Assert
@@ -4195,7 +4195,7 @@ Screening the log name must not demote records that legitimately own a sink."
             (agent-repl--ws-put "ws1" :project-dir project)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                       ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                      ((symbol-function 'agent-repl--log)
+                      ((symbol-function 'agent-repl--emit-log)
                        (lambda (ws &rest _)
                          (when (eq logged 'no-record) (setq logged ws)))))
               ;; Act
@@ -4391,9 +4391,9 @@ press."
   (declare (indent 0))
   `(let ((agent-repl-test-panels--info nil)
          (agent-repl-test-panels--debug nil))
-     (cl-letf (((symbol-function 'agent-repl--info)
+     (cl-letf (((symbol-function 'agent-repl--emit-info)
                 (agent-repl-test--record-into agent-repl-test-panels--info))
-               ((symbol-function 'agent-repl--log)
+               ((symbol-function 'agent-repl--emit-log)
                 (agent-repl-test--record-into agent-repl-test-panels--debug)))
        ,@body)))
 
@@ -4650,7 +4650,7 @@ exemption has its own test."
                  ((symbol-function 'agent-repl-host-stream) (lambda (_ws) t))
                  ((symbol-function 'agent-repl--open-progress-show)
                   (lambda (_ws buf) buf))
-                 ((symbol-function 'agent-repl--info)
+                 ((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-into records))
                  ((symbol-function 'agent-repl--ws-frontend)
                   (lambda (_ws)
@@ -5371,7 +5371,7 @@ Binds `buf', `first', `second' and `records', the INFO records made, newest firs
        (unwind-protect
            (progn
              (set-window-buffer first buf)
-             (cl-letf (((symbol-function 'agent-repl--info)
+             (cl-letf (((symbol-function 'agent-repl--emit-info)
                         (agent-repl-test--record-into records)))
                ,@body))
          (kill-buffer buf)))))
