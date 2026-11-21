@@ -42,9 +42,11 @@ const testServiceStopBound = 2 * 5 * time.Second
 var testServices sync.Map
 
 // TestsSocketFor is the socket of the test service of the daemons over
-// STATEDIR: a sibling of the state root, as the lock directory is.
+// STATEDIR: a sibling of the state root, as the lock directory is, named for
+// that root, so two state roots under one parent (the steps of an e2e
+// lifecycle family, which share their lock directory) never bind one socket.
 func TestsSocketFor(stateDir string) string {
-	return filepath.Join(filepath.Dir(stateDir), "tests", "tests.sock")
+	return filepath.Join(filepath.Dir(stateDir), "tests-"+filepath.Base(stateDir), "tests.sock")
 }
 
 // ensureTestService answers the socket of the test service of the daemons
