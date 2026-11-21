@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strings"
@@ -436,16 +438,41 @@ func (s *ShimControl) close() {
 // cut off here; a command with its own TimeoutMS still hands the fake that.
 func (s *ShimControl) send(cmd controlCommand) controlReply {
 	s.t.Helper()
+	reply, err := s.exchange(cmd)
+	if err != nil {
+		// The connection to the shim this control dialed ended: the daemon parked its workspace
+		// (a finished workspace's session is parked while its merge waits in
+		// line) and the merge's first prompt revived it as a NEW fake on the
+		// same socket. The control follows that successor, once; a shim that never
+		// comes back fails the wait on its socket loudly.
+		s.close()
+		s.connect()
+		reply, err = s.exchange(cmd)
+	}
+	if err != nil {
+		s.t.Fatalf("fake shim control %s: %s: %v", s.Socket, cmd.Op, err)
+	}
+	if !reply.OK {
+		s.t.Fatalf("fake shim control %s: %s refused: %s", s.Socket, cmd.Op, reply.Error)
+	}
+	return reply
+}
+
+// exchange writes one command and reads its reply. A transport failure is
+// answered as an error for send to judge; a budget that ended, a departed
+// shim and a malformed reply fail the test here.
+func (s *ShimControl) exchange(cmd controlCommand) (controlReply, error) {
+	s.t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.c == nil && s.departed {
 		s.t.Fatalf("fake shim control %s: the shim (pid %d) exited before the harness connected, so it cannot take %s", s.Socket, s.pid, cmd.Op)
 	}
 	if s.c == nil {
-		s.t.Fatalf("fake shim control %s is closed", s.Socket)
+		return controlReply{}, errors.New("the control is closed")
 	}
 	if err := s.enc.Encode(cmd); err != nil {
-		s.t.Fatalf("fake shim control %s: send %s: %v", s.Socket, cmd.Op, err)
+		return controlReply{}, fmt.Errorf("send: %w", err)
 	}
 	conn := s.c
 	stop := context.AfterFunc(s.d.Ctx(), func() { _ = conn.SetReadDeadline(time.Now()) })
@@ -454,16 +481,13 @@ func (s *ShimControl) send(cmd controlCommand) controlReply {
 		if budget := s.d.Ctx(); budget.Err() != nil {
 			s.t.Fatalf("fake shim control %s: no reply to %s within the run budget: %v", s.Socket, cmd.Op, grantedclock.Explain(budget))
 		}
-		s.t.Fatalf("fake shim control %s: no reply to %s: %v", s.Socket, cmd.Op, s.dec.Err())
+		return controlReply{}, fmt.Errorf("no reply: %v", s.dec.Err())
 	}
 	var reply controlReply
 	if err := json.Unmarshal(s.dec.Bytes(), &reply); err != nil {
 		s.t.Fatalf("fake shim control %s: malformed reply %q: %v", s.Socket, s.dec.Text(), err)
 	}
-	if !reply.OK {
-		s.t.Fatalf("fake shim control %s: %s refused: %s", s.Socket, cmd.Op, reply.Error)
-	}
-	return reply
+	return reply, nil
 }
 
 // sendAllowingRefusal is send without the failure, for the callers that treat

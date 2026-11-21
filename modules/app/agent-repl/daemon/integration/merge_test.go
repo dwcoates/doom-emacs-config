@@ -1312,11 +1312,13 @@ func TestAQueuedMergeWhoseSessionParksAtItsColdGateKeepsItsPlaceInTheQueue(t *te
 		ContextTokens: 160210, LastRequestAtMS: 1_700_000_000_000, RequestedModel: "opus", CacheTTLMS: 300_000,
 	}})
 
-	// Act: the successor boots, and behind's session comes up parked at its
-	// cold gate.
+	// Act: the successor boots, and a prompt revives behind's session, which
+	// the daemon parked when its merge was queued; the session comes up
+	// parked at its cold gate.
 	d2 := harness.StartDaemon(t, d.SuccessorOpts())
 	d2.DefaultConfigDir = d.DefaultConfigDir
 	roster := d2.WatchRoster()
+	(&fixture{d: d2, ws: behind.ws, t: t}).submit("wake up", "wake-behind", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Assert: the merge kept its place in the queue, and the keeping is
 	// recorded at INFO.
