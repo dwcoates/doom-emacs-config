@@ -1027,6 +1027,12 @@ type DB interface {
 	UnsubscribePullRequest(ctx context.Context, subscriber WorkspaceID, pr PullRequestKey) (bool, error)
 	// LivePullRequestSubscriptions loads every subscription not yet ended.
 	LivePullRequestSubscriptions(ctx context.Context) ([]PullRequestSubscription, error)
+	// LinkedPullRequests loads every pull request an open workspace's link
+	// names whose state can still change (pullrequeststates.go).
+	LinkedPullRequests(ctx context.Context) ([]PullRequestKey, error)
+	// RecordPullRequestState records a read pull request's state, answering
+	// the open workspaces linking it when the state changed.
+	RecordPullRequestState(ctx context.Context, pr PullRequestKey, state PullRequestState, at time.Time) ([]WorkspaceID, error)
 	// WorkspacePullRequestSubscriptions loads a workspace's subscriptions.
 	WorkspacePullRequestSubscriptions(ctx context.Context, subscriber WorkspaceID) ([]PullRequestSubscription, error)
 	// AdvancePullRequestTold compares and sets a subscription's told

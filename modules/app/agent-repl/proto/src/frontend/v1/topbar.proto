@@ -505,7 +505,45 @@ message TopbarTitleLinkMenuItem {
   bool owned = 3;
   // The service the url's host names, drawn as an icon on the row's left.
   TopbarTitleLinkIcon icon = 4;
+  // How the GitHub pull request the url names stands, drawn as a small
+  // colored badge in the row's right margin. UNSET for a url that names no
+  // pull request, and for a pull request the daemon has not yet read; the row
+  // then draws no badge. The daemon reads every linked pull request on its
+  // pull-request cadence, so the badge follows a merge or a close without the
+  // link being set again.
+  optional TopbarTitleLinkBadge badge = 5;
 }
+
+// A menu row's pull request badge. THE ARM IS THE STATE the badge draws, in
+// the menu's own words: the client draws the arm's word and color and never
+// reads the pull request itself. A set badge with no arm set is a state this
+// schema revision does not name, and draws no badge.
+message TopbarTitleLinkBadge {
+  // How the pull request stands, as the daemon's latest read of it found.
+  oneof state {
+    // Open for review: "open", in the foreground white.
+    TopbarTitleLinkBadgeOpen open = 1;
+    // Open and still a draft: "draft", in the muted grey.
+    TopbarTitleLinkBadgeDraft draft = 2;
+    // Merged: "merged", in green.
+    TopbarTitleLinkBadgeMerged merged = 3;
+    // Closed without merging: "closed", in red. A reopened pull request
+    // draws open again at the next read.
+    TopbarTitleLinkBadgeClosed closed = 4;
+  }
+}
+
+// The pull request is open. DELIBERATELY EMPTY: the arm is the state.
+message TopbarTitleLinkBadgeOpen {}
+
+// The pull request is a draft. DELIBERATELY EMPTY: the arm is the state.
+message TopbarTitleLinkBadgeDraft {}
+
+// The pull request merged. DELIBERATELY EMPTY: the arm is the state.
+message TopbarTitleLinkBadgeMerged {}
+
+// The pull request closed unmerged. DELIBERATELY EMPTY: the arm is the state.
+message TopbarTitleLinkBadgeClosed {}
 
 // The service icon a menu row draws before its label, decided by the daemon
 // from the url's host so the client never inspects a url.

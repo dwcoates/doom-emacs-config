@@ -629,3 +629,202 @@ func TestAnUnusableConfigFailsTheSubscription(t *testing.T) {
 		t.Fatalf("records = %+v, want the failed read recorded with its cause", r.log.Records())
 	}
 }
+
+// failingStates is the rig's store with its linked pull requests' list, or
+// its state record, failing.
+type failingStates struct {
+	Store
+	linkedErr, recordErr error
+}
+
+func (f failingStates) LinkedPullRequests(ctx context.Context) ([]wsm.PullRequestKey, error) {
+	if f.linkedErr != nil {
+		return nil, f.linkedErr
+	}
+	return f.Store.LinkedPullRequests(ctx)
+}
+
+func (f failingStates) RecordPullRequestState(ctx context.Context, pr wsm.PullRequestKey, state wsm.PullRequestState, at time.Time) ([]ids.WorkspaceID, error) {
+	if f.recordErr != nil {
+		return nil, f.recordErr
+	}
+	return f.Store.RecordPullRequestState(ctx, pr, state, at)
+}
+
+func TestAFollowedPullRequestsReadRecordsItsState(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.link(t)
+	r.subscribe(t, wsm.PullRequestEventComment)
+	r.gh.set(pathPull(), pullJSON("open", true, false, "head1"))
+
+	// Act
+	r.tick()
+
+	// Assert: the subscription's own read records it, and nothing reads the
+	// pull request a second time for its state.
+	if got := r.linkState(t); got != wsm.PullRequestStateDraft {
+		t.Fatalf("link state = %q, want draft", got)
+	}
+	reads := 0
+	for _, call := range r.gh.calls {
+		if call == "GET "+pathPull() {
+			reads++
+		}
+	}
+	if reads != 2 {
+		t.Fatalf("pull request read %d times (anchor and tick), want 2: %v", reads, r.gh.calls)
+	}
+}
+
+func TestALinkNoSubscriptionFollowsIsReadForItsStateAlone(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.link(t)
+	r.gh.set(pathPull(), pullJSON("closed", false, false, "head1"))
+
+	// Act
+	r.tick()
+
+	// Assert
+	if want := []string{"GET " + pathPull()}; !reflect.DeepEqual(r.gh.calls, want) {
+		t.Fatalf("calls = %v, want %v", r.gh.calls, want)
+	}
+	if got := r.linkState(t); got != wsm.PullRequestStateClosed {
+		t.Fatalf("link state = %q, want closed", got)
+	}
+}
+
+func TestAChangedStateRedrawsTheLinkingWorkspaceOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.link(t)
+
+	// Act: a first read, an unchanged one, and a merge.
+	r.tick()
+	afterFirst := len(r.linksRedrawn)
+	r.tick()
+	afterUnchanged := len(r.linksRedrawn)
+	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
+	r.tick()
+
+	// Assert
+	if got := []int{afterFirst, afterUnchanged, len(r.linksRedrawn)}; !reflect.DeepEqual(got, []int{1, 1, 2}) {
+		t.Fatalf("redraws after each tick = %v, want [1 1 2]", got)
+	}
+	if r.linksRedrawn[1] != r.ws {
+		t.Fatalf("redrew %v, want the rig's workspace", r.linksRedrawn)
+	}
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opLinked, Message: "the pull request's state changed; every workspace linking it draws its links again"}); !ok {
+		t.Fatalf("records = %+v, want the change recorded", r.log.Records())
+	}
+}
+
+func TestAMergedLinkedPullRequestIsNeverReadAgain(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.link(t)
+	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
+	r.tick()
+	reads := len(r.gh.calls)
+
+	// Act
+	r.tick()
+
+	// Assert
+	if len(r.gh.calls) != reads {
+		t.Fatalf("calls %v, want no read of a merged pull request", r.gh.calls[reads:])
+	}
+}
+
+func TestAFailedStateReadKeepsTheStateAndIsRecorded(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.link(t)
+	r.tick()
+	r.gh.set(pathPull(), &ghclient.Failure{Kind: ghclient.KindUnreachable, Message: "dns"})
+
+	// Act
+	r.tick()
+
+	// Assert
+	if got := r.linkState(t); got != wsm.PullRequestStateOpen {
+		t.Fatalf("link state = %q, want open as last read", got)
+	}
+	rec, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opLinked, Message: "could not read the linked pull request's state; its badge stands until a later read"})
+	if !ok || rec.Context["pull_request"] != prK.String() || rec.Context["kind"] != string(wsm.PullRequestFailureUnreachable) {
+		t.Fatalf("record = %+v, %v; want the failure naming the pull request and its kind", rec, ok)
+	}
+}
+
+func TestASpentRateLimitOnAStateReadIsWaitedOut(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.link(t)
+	r.gh.set(pathPull(), &ghclient.Failure{Kind: ghclient.KindRateLimited, ResetsAt: t0.Add(time.Hour)})
+	r.tick()
+	reads := len(r.gh.calls)
+
+	// Act: before the reset, and after it.
+	r.clock.Set(t0.Add(time.Minute))
+	r.tick()
+	waited := len(r.gh.calls) - reads
+	r.clock.Set(t0.Add(2 * time.Hour))
+	r.tick()
+
+	// Assert
+	if got := []int{waited, len(r.gh.calls) - reads}; !reflect.DeepEqual(got, []int{0, 1}) {
+		t.Fatalf("reads before and after the reset = %v, want [0 1]", got)
+	}
+}
+
+func TestStateFailuresAreRecorded(t *testing.T) {
+	storeErr := errors.New("disk gone")
+	tests := []struct {
+		name    string
+		arrange func(r *rig)
+		message string
+	}{
+		{name: "the linked pull requests cannot be listed",
+			arrange: func(r *rig) { r.overStore(failingStates{Store: r.db, linkedErr: storeErr}) },
+			message: "could not read the linked pull requests; no state is read this tick"},
+		{name: "a state cannot be recorded",
+			arrange: func(r *rig) { r.overStore(failingStates{Store: r.db, recordErr: storeErr}) },
+			message: "could not record the pull request's state; its links' badges stand until a later read"},
+		{name: "a workspace's links cannot be drawn again",
+			arrange: func(r *rig) { r.linksRedrawnErr = storeErr },
+			message: "could not draw a workspace's links again after its pull request's state changed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			r.link(t)
+			tt.arrange(r)
+
+			// Act
+			r.tick()
+
+			// Assert
+			rec, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opLinked, Message: tt.message})
+			if !ok || !strings.Contains(fmt.Sprint(rec.Context), storeErr.Error()) {
+				t.Fatalf("records = %+v, want %q at error with its cause", r.log.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestNewRefusesAWatcherThatCannotRedrawLinks(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	deps := r.deps
+	deps.LinksRedrawn = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatal("New without LinksRedrawn = nil, want refused")
+	}
+}

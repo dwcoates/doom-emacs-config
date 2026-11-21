@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
@@ -838,8 +839,18 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, cause revivalCau
 		life = shimlife.StartSettings
 	}
 	if err := q.deps.Revive(shimlife.WithStart(ctx, life), ws); err != nil {
-		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
-			dlog.Context{"cause": err.Error()})
+		// A REVIVAL A STAND-DOWN THIS DAEMON ORDERED CUT SHORT IS NOT A FAILED
+		// REVIVAL (bringup.IsStandDown): the workspace's session was stopped
+		// or handed to a successor while the revival ran, which the stop's own
+		// record says. It still fails the submission, which waits for the
+		// session's next bring-up.
+		if bringup.IsStandDown(err) {
+			log.Info(opSubmit, "a stand-down this daemon ordered cut the revival short; the submission waits for the session's next bring-up",
+				dlog.Context{"cause": err.Error()})
+		} else {
+			log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
+				dlog.Context{"cause": err.Error()})
+		}
 		return false, fmt.Errorf("submit to %q: revive the session: %w", ws, err)
 	}
 	// A REVIVAL THAT PARKS AT ITS COLD GATE IS NOT A SESSION UP. The bring-up

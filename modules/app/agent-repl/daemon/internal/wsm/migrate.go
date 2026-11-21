@@ -331,6 +331,7 @@ var migrations = []migration{
 	{To: 174, Name: "settled_rounds_unheld", Kind: MigrationAdditive, DDL: settledRoundsUnheldDDL},
 	// IT IS ADDITIVE: it rewrites rows (retiredmergelabels.go).
 	{To: 175, Name: "durable_rows_retired_merge_labels", Kind: MigrationAdditive, Rewrite: carryRetiredMergeHeadLabelRows},
+	{To: 176, Name: "pull_request_states", Kind: MigrationAdditive, DDL: pullRequestStatesDDL, Rewrite: backfillPullRequestStates},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

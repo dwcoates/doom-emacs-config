@@ -1405,6 +1405,64 @@ func TestOwnedLinksLeadTheMenuAndReadAsOwned(t *testing.T) {
 	}
 }
 
+func TestAMenuRowCarriesItsPullRequestsBadge(t *testing.T) {
+	// Arrange
+	merged := Link{Label: "The pull request", URL: "https://github.com/o/r/pull/1", Owned: true, State: wsm.PullRequestStateMerged}
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSummary(testWS, "Title")
+
+	// Act
+	h.r.SetLinks(testWS, []Link{merged, docLink})
+
+	// Assert: the pull request's row carries its badge, the doc's none.
+	items := h.view(t).GetTitle().GetLinks().GetMenu().GetItems()
+	want := []*frontendv1.TopbarTitleLinkBadge{
+		{State: &frontendv1.TopbarTitleLinkBadge_Merged{Merged: &frontendv1.TopbarTitleLinkBadgeMerged{}}}, nil}
+	for i := range want {
+		if !proto.Equal(items[i].GetBadge(), want[i]) {
+			t.Errorf("item %d badge = %v, want %v", i, items[i].GetBadge(), want[i])
+		}
+	}
+}
+
+func TestLinkBadgeDrawsEachState(t *testing.T) {
+	tests := []struct {
+		name  string
+		state wsm.PullRequestState
+		want  *frontendv1.TopbarTitleLinkBadge
+	}{
+		{"no state draws none", "", nil},
+		{"open", wsm.PullRequestStateOpen, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Open{Open: &frontendv1.TopbarTitleLinkBadgeOpen{}}}},
+		{"draft", wsm.PullRequestStateDraft, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Draft{Draft: &frontendv1.TopbarTitleLinkBadgeDraft{}}}},
+		{"merged", wsm.PullRequestStateMerged, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Merged{Merged: &frontendv1.TopbarTitleLinkBadgeMerged{}}}},
+		{"closed", wsm.PullRequestStateClosed, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Closed{Closed: &frontendv1.TopbarTitleLinkBadgeClosed{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := linkBadge(tt.state)
+
+			// Assert
+			if !proto.Equal(got, tt.want) {
+				t.Errorf("linkBadge(%q) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLinkBadgeRefusesAStateItHasNoBadgeFor(t *testing.T) {
+	// Assert
+	defer func() {
+		if recover() == nil {
+			t.Fatal("linkBadge accepted an unknown state")
+		}
+	}()
+
+	// Act
+	linkBadge("locked")
+}
+
 func TestLinkIconNamesTheServiceOfTheHost(t *testing.T) {
 	tests := []struct {
 		name string

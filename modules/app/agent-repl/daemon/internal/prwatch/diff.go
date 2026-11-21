@@ -88,17 +88,18 @@ func encodeTold(t told) string {
 	return string(b)
 }
 
-// stateOf is the pull request's state as told spells it.
-func stateOf(pr remotePR) string {
+// stateOf is the pull request's state, as told spells it and the store
+// records it (wsm.PullRequestState).
+func stateOf(pr remotePR) wsm.PullRequestState {
 	switch {
 	case pr.Merged:
-		return "merged"
+		return wsm.PullRequestStateMerged
 	case !pr.Open:
-		return "closed"
+		return wsm.PullRequestStateClosed
 	case pr.Draft:
-		return "draft"
+		return wsm.PullRequestStateDraft
 	}
-	return "open"
+	return wsm.PullRequestStateOpen
 }
 
 // anchor is the snapshot a fresh subscription starts from: everything SNAP
@@ -180,7 +181,7 @@ func diff(snap snapshot, prev told, anchored bool) (told, []*agentreplv1.PullReq
 		}
 	}
 
-	next.State = stateOf(snap.PR)
+	next.State = string(stateOf(snap.PR))
 	var stateChanged []*agentreplv1.PullRequestActivity
 	if next.State != prev.State && (anchored || next.State == "merged" || next.State == "closed") {
 		change := &agentreplv1.PullRequestActivityStateChanged{State: stateProto(snap.PR)}
@@ -347,11 +348,11 @@ func conclusionProto(conclusion string) *agentreplv1.PullRequestCheckConclusion 
 // stateProto is the pull request's state.
 func stateProto(pr remotePR) *agentreplv1.PullRequestState {
 	switch stateOf(pr) {
-	case "merged":
+	case wsm.PullRequestStateMerged:
 		return &agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Merged{Merged: &agentreplv1.PullRequestStateMerged{MergeCommitSha: pr.MergeSHA}}}
-	case "closed":
+	case wsm.PullRequestStateClosed:
 		return &agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Closed{Closed: &agentreplv1.PullRequestStateClosed{}}}
-	case "draft":
+	case wsm.PullRequestStateDraft:
 		return &agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Draft{Draft: &agentreplv1.PullRequestStateDraft{}}}
 	}
 	return &agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Open{Open: &agentreplv1.PullRequestStateOpen{}}}

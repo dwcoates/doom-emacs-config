@@ -1,12 +1,11 @@
 package workspace
 
 import (
-	"errors"
 	"time"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
-	"agent-repld/internal/shimclient"
 )
 
 // sessionTiming times the steps of ONE workspace's session start for the
@@ -41,7 +40,7 @@ func (t sessionTiming) as(kind restarttiming.SessionKind) sessionTiming {
 // nothing about how long the step takes, exactly as the bring-up leaves such
 // a start untimed.
 func (t sessionTiming) since(p restarttiming.SessionPhase, from time.Time, err error) {
-	if errors.Is(err, shimclient.ErrStandDownOrdered) || errors.Is(err, shimclient.ErrStandingDown) {
+	if bringup.IsStandDown(err) {
 		return
 	}
 	t.recorder.ObserveRestart(restarttiming.OfSessionStart(t.ws, p, t.kind, restarttiming.OutcomeOf(err), t.now().Sub(from)))

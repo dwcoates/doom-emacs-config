@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/shimclient"
@@ -50,6 +51,7 @@ func TestSessionTimingRecordsAStepFromItsStart(t *testing.T) {
 		{"a step that failed", errors.New("refused"), []string{"vendor/resume/failed"}},
 		{"a step cut short by an ordered stand-down", shimclient.ErrStandDownOrdered, nil},
 		{"a step refused by a standing-down supervisor", shimclient.ErrStandingDown, nil},
+		{"a step of a workspace no longer served here", fmt.Errorf("start: %w", bringup.ErrNotServed), nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

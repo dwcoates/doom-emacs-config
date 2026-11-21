@@ -638,3 +638,23 @@ func TestPullRequestEndedTellsNothingWhenTheLinksCannotBeRead(t *testing.T) {
 		t.Errorf("submissions = %+v, want nothing told when the links cannot be read", f.queue.submissions)
 	}
 }
+
+func TestRepublishLinksCarriesEachPullRequestsState(t *testing.T) {
+	// Arrange.
+	merged := wsm.WorkspaceLink{URL: "https://github.com/a/b/pull/7", Label: "The fix itself", Shown: true, Owned: true, State: wsm.PullRequestStateMerged}
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": {merged, docLink}}
+
+	// Act.
+	err := f.verbs.RepublishLinks(context.Background(), "w1")
+
+	// Assert: the topbar takes each pull request's state for its badge.
+	if err != nil {
+		t.Fatalf("RepublishLinks: %v", err)
+	}
+	want := [][]topbar.Link{{{Label: merged.Label, URL: merged.URL, Owned: true, State: wsm.PullRequestStateMerged}, {Label: docLink.Label, URL: docLink.URL}}}
+	if !reflect.DeepEqual(f.topbarLinks, want) {
+		t.Errorf("topbar links = %+v, want %+v", f.topbarLinks, want)
+	}
+}

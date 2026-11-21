@@ -9,7 +9,6 @@ package prwatch
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,27 +17,11 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// pullPath is a github.com pull request's path: /owner/repo/pull/number
-// (pullrefs.PullPathPattern), optionally followed by a tab (/files, /commits)
-// or a fragment.
-var pullPath = regexp.MustCompile(`^` + pullrefs.PullPathPattern + `(?:/.*)?$`)
-
 // ParseURL answers the pull request a github.com url names, and false for any
-// other url.
+// other url (pullrefs.ParseURL).
 func ParseURL(raw string) (wsm.PullRequestKey, bool) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || !strings.EqualFold(u.Host, "github.com") {
-		return wsm.PullRequestKey{}, false
-	}
-	m := pullPath.FindStringSubmatch(u.Path)
-	if m == nil {
-		return wsm.PullRequestKey{}, false
-	}
-	n, err := strconv.ParseUint(m[3], 10, 32)
-	if err != nil {
-		return wsm.PullRequestKey{}, false
-	}
-	return wsm.PullRequestKey{Owner: m[1], Repo: m[2], Number: uint32(n)}, true
+	owner, repo, number, ok := pullrefs.ParseURL(raw)
+	return wsm.PullRequestKey{Owner: owner, Repo: repo, Number: number}, ok
 }
 
 // URLOf is the pull request's web address.

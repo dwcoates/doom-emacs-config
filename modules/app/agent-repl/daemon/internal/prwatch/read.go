@@ -151,6 +151,21 @@ func (r *reader) read(ctx context.Context, pr wsm.PullRequestKey, checks bool) (
 	return snap, nil
 }
 
+// readState reads PR itself and nothing of its lists: the state of a linked
+// pull request no subscription reads (Watcher.pollLinked). It shares read's
+// conditional page, so a pull request both kinds read costs one request.
+func (r *reader) readState(ctx context.Context, pr wsm.PullRequestKey) (wsm.PullRequestState, error) {
+	body, err := r.get(ctx, fmt.Sprintf("repos/%s/%s/pulls/%d", pr.Owner, pr.Repo, pr.Number))
+	if err != nil {
+		return "", err
+	}
+	remote, err := decodePR(body)
+	if err != nil {
+		return "", err
+	}
+	return stateOf(remote), nil
+}
+
 // get reads one resource conditionally, answering its body: the fresh one,
 // or the cached one on a 304.
 func (r *reader) get(ctx context.Context, path string) ([]byte, error) {

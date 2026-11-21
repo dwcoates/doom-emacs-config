@@ -3,12 +3,14 @@ package prwatch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/ghclient"
+	"agent-repld/internal/wsm"
 )
 
 func TestAFullPageIsFollowedByTheNext(t *testing.T) {
@@ -54,12 +56,12 @@ func TestDecodePRReadsItsState(t *testing.T) {
 	tests := []struct {
 		name  string
 		body  string
-		state string
+		state wsm.PullRequestState
 	}{
-		{name: "open", body: pullJSON("open", false, false, "h"), state: "open"},
-		{name: "a draft", body: pullJSON("open", true, false, "h"), state: "draft"},
-		{name: "merged", body: pullJSON("closed", false, true, "h"), state: "merged"},
-		{name: "closed", body: pullJSON("closed", false, false, "h"), state: "closed"},
+		{name: "open", body: pullJSON("open", false, false, "h"), state: wsm.PullRequestStateOpen},
+		{name: "a draft", body: pullJSON("open", true, false, "h"), state: wsm.PullRequestStateDraft},
+		{name: "merged", body: pullJSON("closed", false, true, "h"), state: wsm.PullRequestStateMerged},
+		{name: "closed", body: pullJSON("closed", false, false, "h"), state: wsm.PullRequestStateClosed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -180,5 +182,59 @@ func TestGateChecksAsksAgainAfterAFailedCall(t *testing.T) {
 	// Assert
 	if err != nil || len(gates) != 0 {
 		t.Fatalf("gateChecks = %v, %v; want the second call made and answered", gates, err)
+	}
+}
+
+func TestReadStateReadsOnlyThePullRequest(t *testing.T) {
+	tests := []struct {
+		name      string
+		answer    any
+		wantState wsm.PullRequestState
+		wantErr   bool
+	}{
+		{name: "a draft", answer: pullJSON("open", true, false, "h"), wantState: wsm.PullRequestStateDraft},
+		{name: "a merge", answer: pullJSON("closed", false, true, "h"), wantState: wsm.PullRequestStateMerged},
+		{name: "a failed read is the leaf's failure", answer: &ghclient.Failure{Kind: ghclient.KindNotFound}, wantErr: true},
+		{name: "an unreadable answer", answer: "{", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			gh := newGH()
+			gh.set(pathPull(), tt.answer)
+
+			// Act
+			got, err := newReader(gh).readState(context.Background(), prK)
+
+			// Assert
+			if (err != nil) != tt.wantErr || got != tt.wantState {
+				t.Fatalf("readState = %q, %v; want %q, error %v", got, err, tt.wantState, tt.wantErr)
+			}
+			var gf *ghclient.Failure
+			if _, isFailure := tt.answer.(*ghclient.Failure); isFailure && !errors.As(err, &gf) {
+				t.Fatalf("error = %v, want the leaf's *ghclient.Failure", err)
+			}
+			if want := []string{"GET " + pathPull()}; !reflect.DeepEqual(gh.calls, want) {
+				t.Fatalf("calls = %v, want %v", gh.calls, want)
+			}
+		})
+	}
+}
+
+func TestReadStateSharesReadsConditionalPage(t *testing.T) {
+	// Arrange: a full read caches the pull request's page.
+	gh := newGH()
+	gh.set(pathPull(), pullJSON("open", false, false, "h"))
+	r := newReader(gh)
+	if _, err := r.read(context.Background(), prK, false); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	// Act: GitHub answers the unchanged page 304, from the cache.
+	got, err := r.readState(context.Background(), prK)
+
+	// Assert
+	if err != nil || got != wsm.PullRequestStateOpen {
+		t.Fatalf("readState = %q, %v; want open from the cached page", got, err)
 	}
 }

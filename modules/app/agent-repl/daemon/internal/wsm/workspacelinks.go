@@ -58,6 +58,10 @@ type WorkspaceLink struct {
 	// Follow is the workspace's subscription to PullRequest, ended or not;
 	// nil when it holds none.
 	Follow *PullRequestSubscription
+	// State is how PullRequest stands, as the watcher last read it
+	// (pullrequeststates.go); empty for any other url, and for a pull request
+	// not yet read.
+	State PullRequestState
 	// Announces is the url of the stored link this owned link announces
 	// (agentrepl.v1.WorkspaceLinkOwned.announces), empty when it announces
 	// nothing.
@@ -316,18 +320,22 @@ func endOwnedFollowsInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, where 
 	return err
 }
 
-// linksOf reads ID's links, most recently set first, each owned pull request
-// with the workspace's subscription to it.
+// linksOf reads ID's links, most recently set first, each pull request with
+// its recorded state and the workspace's subscription to it.
 func linksOf(ctx context.Context, q querier, id WorkspaceID) ([]WorkspaceLink, error) {
-	links, err := listRows(ctx, q, `SELECT url, label, shown, owned, pr_owner, pr_repo, pr_number, announces FROM workspace_links WHERE workspace_id = ? ORDER BY set_seq DESC`,
+	links, err := listRows(ctx, q, `SELECT l.url, l.label, l.shown, l.owned, l.pr_owner, l.pr_repo, l.pr_number, l.announces, p.state
+		FROM workspace_links AS l
+		LEFT JOIN pull_request_states AS p ON p.owner = l.pr_owner AND p.repo = l.pr_repo AND p.number = l.pr_number
+		WHERE l.workspace_id = ? ORDER BY l.set_seq DESC`,
 		func(row interface{ Scan(...any) error }) (WorkspaceLink, error) {
 			var (
-				link                   WorkspaceLink
-				owner, repo, announces sql.NullString
-				number                 sql.NullInt64
+				link                          WorkspaceLink
+				owner, repo, announces, state sql.NullString
+				number                        sql.NullInt64
 			)
-			err := row.Scan(&link.URL, &link.Label, &link.Shown, &link.Owned, &owner, &repo, &number, &announces)
+			err := row.Scan(&link.URL, &link.Label, &link.Shown, &link.Owned, &owner, &repo, &number, &announces, &state)
 			link.Announces = announces.String
+			link.State = PullRequestState(state.String)
 			if number.Valid {
 				link.PullRequest = &PullRequestKey{Owner: owner.String, Repo: repo.String, Number: uint32(number.Int64)}
 			}

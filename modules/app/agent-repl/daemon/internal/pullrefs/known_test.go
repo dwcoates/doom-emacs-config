@@ -205,3 +205,46 @@ func TestRefsScansThePullPathPattern(t *testing.T) {
 		t.Fatalf("pullURL = %q, want it built on PullPathPattern", pullURL.String())
 	}
 }
+
+func TestParseURL(t *testing.T) {
+	type parsed struct {
+		owner, repo string
+		number      uint32
+		ok          bool
+	}
+	pr := parsed{owner: "ChessCom", repo: "explanation-engine", number: 8047, ok: true}
+	tests := []struct {
+		name string
+		url  string
+		want parsed
+	}{
+		{name: "the pull request", url: "https://github.com/ChessCom/explanation-engine/pull/8047", want: pr},
+		{name: "one of its tabs", url: "https://github.com/ChessCom/explanation-engine/pull/8047/files", want: pr},
+		{name: "a comment's anchor", url: "https://github.com/ChessCom/explanation-engine/pull/8047#issuecomment-1", want: pr},
+		{name: "surrounding whitespace", url: "  https://github.com/ChessCom/explanation-engine/pull/8047\n", want: pr},
+		{name: "an http address", url: "http://GitHub.com/ChessCom/explanation-engine/pull/8047", want: pr},
+		{name: "an issue", url: "https://github.com/ChessCom/explanation-engine/issues/8047"},
+		{name: "another host", url: "https://gitlab.com/ChessCom/explanation-engine/pull/8047"},
+		{name: "another scheme", url: "ftp://github.com/ChessCom/explanation-engine/pull/8047"},
+		{name: "a number past 32 bits", url: "https://github.com/ChessCom/explanation-engine/pull/4294967296"},
+		{name: "not a url", url: "#8047"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			owner, repo, number, ok := ParseURL(tt.url)
+
+			// Assert
+			if got := (parsed{owner, repo, number, ok}); got != tt.want {
+				t.Fatalf("ParseURL(%q) = %+v, want %+v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPullPathIsThePullPathPattern(t *testing.T) {
+	// Assert: the path ParseURL reads is the shape Refs scans text for.
+	if !strings.Contains(pullPath.String(), PullPathPattern) {
+		t.Fatalf("pullPath = %q, want it built on PullPathPattern", pullPath.String())
+	}
+}

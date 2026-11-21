@@ -364,6 +364,16 @@ func (f *verbsForwarder) pullRequestEnded(ctx context.Context, ws ids.WorkspaceI
 	return verbs.PullRequestEnded(ctx, ws, merged)
 }
 
+// republishLinks is a linked pull request's changed state
+// (prwatch.Deps.LinksRedrawn), whose watcher records a failure.
+func (f *verbsForwarder) republishLinks(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a linked pull request's state changed")
+	if err != nil {
+		return err
+	}
+	return verbs.RepublishLinks(ctx, ws)
+}
+
 // letQueueThroughAfterBypassTurn is the turn-end edge's queue resume
 // (workspace.NewBypassTurnEnds), read out of the verbs, which are built after
 // the edges.
