@@ -31,6 +31,7 @@
  */
 
 import { isClientFailureArm, type ClientFailureArm } from "../failure/sink.js";
+import { focusMovedCause, type FocusMovedCause } from "../focus-left.js";
 import type { WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 
 /** The tag every message of this protocol carries. */
@@ -69,14 +70,17 @@ interface DismissDigestMessage {
 }
 
 /**
- * host -> page: Emacs moved its focus: the selected Emacs window changed, or
- * Emacs's frame lost the focus. The page lets go of every notice the pointer
- * raised on it (focus-left.ts). Sent to every page, since a page the host
- * holds behind the shown one must not keep one either.
+ * host -> page: Emacs moved its focus: the selected Emacs window changed,
+ * Emacs's frame lost the focus (cause `window`), or the user typed or clicked
+ * in the composer (cause `composer`). The page lets go of every notice the
+ * pointer raised on it (focus-left.ts). Sent to every page, since a page the
+ * host holds behind the shown one must not keep one either. A message
+ * without a cause reads as `window` (`focusMovedCause`).
  */
 interface FocusMovedMessage {
   readonly channel: typeof HOST_CHANNEL;
   readonly kind: "focusMoved";
+  readonly cause: FocusMovedCause;
 }
 
 /**
@@ -313,8 +317,10 @@ export function parseHostToPage(data: unknown): HostToPage | null {
       return { channel: HOST_CHANNEL, kind: "dismissDigest" };
     case "restyleGranted":
       return { channel: HOST_CHANNEL, kind: "restyleGranted" };
-    case "focusMoved":
-      return { channel: HOST_CHANNEL, kind: "focusMoved" };
+    case "focusMoved": {
+      const cause = focusMovedCause(data.cause);
+      return cause === null ? null : { channel: HOST_CHANNEL, kind: "focusMoved", cause };
+    }
     case "quiet":
       return typeof data.quiet === "boolean" ? { channel: HOST_CHANNEL, kind: "quiet", quiet: data.quiet } : null;
     case "webhostPressed":

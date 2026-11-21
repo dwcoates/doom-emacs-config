@@ -323,10 +323,11 @@ The window itself is kept by webhost.el (`agent-repl--webhost-log-level')."
   (when (agent-repl-sidebar-view-xwidget)
     (agent-repl--sidebar-view-call "setQuiet" (if quiet t :json-false))))
 
-(defun agent-repl-sidebar-view-focus-moved ()
-  "Tell the sidebar page that Emacs moved its focus."
+(defun agent-repl-sidebar-view-focus-moved (cause)
+  "Tell the sidebar page that Emacs moved its focus over CAUSE.
+CAUSE is \"window\" or \"composer\" (`agent-repl--webhost-tell-focus-moved')."
   (when (agent-repl-sidebar-view-xwidget)
-    (agent-repl--sidebar-view-call "focusMoved")))
+    (agent-repl--sidebar-view-call "focusMoved" cause)))
 
 ;;;; ---- The window ------------------------------------------------------------
 

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ReportedLatencyKind } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 
-import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../../src/focus-left.js";
+import { FOCUS_LEFT_COMPOSER, FOCUS_LEFT_EMACS, type FocusLeftSource } from "../../src/focus-left.js";
 import { SIDEBAR_ID, SIDEBAR_ROOT_CLASS, startSidebarPage, type StartSidebarPageDeps } from "../../src/host/sidebar-page.js";
 import type { LatencyReporter } from "../../src/latency-report.js";
 import { log, setLogger, type ForwardingLogger } from "../../src/log.js";
@@ -393,21 +393,46 @@ describe("setQuiet", () => {
 });
 
 describe("focusMoved", () => {
-  it("tells the rail Emacs moved its focus", () => {
+  it.each([
+    ["Emacs moved its focus", "window", FOCUS_LEFT_EMACS],
+    ["the composer was used", "composer", FOCUS_LEFT_COMPOSER],
+    ["Emacs moved its focus, from an Emacs before the cause", undefined, FOCUS_LEFT_EMACS],
+  ])("tells the rail %s", (_name, cause, why) => {
     // Arrange
     const told: string[] = [];
     const focusLeft: FocusLeftSource = {
       onLeft: () => () => undefined,
-      left: (why) => void told.push(why),
+      left: (reason) => void told.push(reason),
       dispose: () => undefined,
     };
     const page = start({ focusLeft });
 
     // Act
-    const answer = page.focusMoved();
+    const answer = page.focusMoved(cause);
 
     // Assert
-    expect([outcome(answer), told]).toEqual(["sent", [FOCUS_LEFT_EMACS]]);
+    expect([outcome(answer), told]).toEqual(["sent", [why]]);
+  });
+
+  it("refuses a focus move naming no cause, and the rail lets go of nothing", () => {
+    // Arrange
+    const told: string[] = [];
+    const focusLeft: FocusLeftSource = {
+      onLeft: () => () => undefined,
+      left: (reason) => void told.push(reason),
+      dispose: () => undefined,
+    };
+    const page = start({ focusLeft });
+
+    // Act
+    const answer = JSON.parse(page.focusMoved("keyboard")) as { outcome: string; notes: unknown };
+
+    // Assert
+    expect([answer.outcome, answer.notes, told]).toEqual([
+      "refused",
+      [{ level: "warn", text: 'focusMoved was handed "keyboard", which is no cause' }],
+      [],
+    ]);
   });
 
   it("hands the rail the focus-left signal it fires", () => {

@@ -1122,13 +1122,39 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
     (should (= 1 (length (agent-repl-test-wh--sent "dismissDigest"))))))
 
 (ert-deftest agent-repl-test-wh-emacs-moving-its-focus-tells-the-pages ()
-  "The selected window changing is relayed to every page of the host."
+  "The selected window changing is relayed to every page of the host as a window's."
   ;; Arrange
   (agent-repl-test-wh--with-host
     ;; Act
     (agent-repl-webhost-focus-moved (selected-frame))
     ;; Assert
-    (should (= 1 (length (agent-repl-test-wh--sent "focusMoved"))))))
+    (let ((sent (agent-repl-test-wh--sent "focusMoved")))
+      (should (= 1 (length sent)))
+      (should (string-search "h.focusMoved(\"window\")" (car sent))))))
+
+(ert-deftest agent-repl-test-wh-using-the-composer-tells-the-pages ()
+  "A key or a click in the composer is relayed to every page as the composer's."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-composer-used)
+    ;; Assert
+    (let ((sent (agent-repl-test-wh--sent "focusMoved")))
+      (should (= 1 (length sent)))
+      (should (string-search "h.focusMoved(\"composer\")" (car sent))))))
+
+(ert-deftest agent-repl-test-wh-using-the-composer-with-no-host-sends-nothing ()
+  "With no host there are no pages to tell of the composer, and no call is attempted."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl-test-wh--host nil)
+          (attempted nil))
+      (cl-letf (((symbol-function 'agent-repl--webhost-call)
+                 (lambda (&rest args) (push args attempted))))
+        ;; Act
+        (agent-repl-webhost-composer-used)
+        ;; Assert
+        (should-not attempted)))))
 
 (ert-deftest agent-repl-test-wh-emacs-moving-its-focus-with-no-host-sends-nothing ()
   "With no host there are no pages to tell, and no call is attempted."
@@ -1524,7 +1550,14 @@ The current tab's page, not shown here, is the nearest of all."
   (agent-repl-test-wh--with-host
     (agent-repl-test-wh--with-sidebar-told
       (agent-repl-webhost-focus-moved)
-      (should (equal told '((focus-moved)))))))
+      (should (equal told '((focus-moved "window")))))))
+
+(ert-deftest agent-repl-test-wh-using-the-composer-reaches-the-sidebar ()
+  "A key or a click in the composer is told to the sidebar as to the pages."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-composer-used)
+      (should (equal told '((focus-moved "composer")))))))
 
 (ert-deftest agent-repl-test-wh-a-host-reload-reloads-the-sidebar-on-the-same-daemon ()
   "The sidebar reloads with the host, onto the daemon the host reloads onto."

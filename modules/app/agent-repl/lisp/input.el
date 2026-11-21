@@ -76,6 +76,7 @@
 (declare-function agent-repl--ws-put "workspace" (ws key val))
 (declare-function agent-repl--note-visit-prompted "workspace" (ws))
 (defvar agent-repl--prompt-queue-drain-origin)
+(declare-function agent-repl-webhost-composer-used "webhost" ())
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
 (declare-function agent-repl-webhost-show-editor-notice "webhost" (ws text))
 (declare-function agent-repl-prompt-entries-opening "prompt-entries" (label))
@@ -466,6 +467,9 @@ nothing, since the transient it raised lapses on its own."
   (add-hook 'after-change-functions #'agent-repl--workspace-completion-on-change nil t)
   ;; Only `TAB' takes a company completion (`agent-repl--input-use-company-map').
   (add-hook 'company-mode-hook #'agent-repl--input-use-company-map nil t)
+  ;; A KEY OR A CLICK IN THE COMPOSER CLOSES every popup the pointer raised
+  ;; in the sidebar or a page (`agent-repl-webhost-composer-used').
+  (add-hook 'post-command-hook #'agent-repl-webhost-composer-used nil t)
 )
 
 (defun agent-repl--input-buffer (ws)

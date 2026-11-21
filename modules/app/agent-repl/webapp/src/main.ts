@@ -205,7 +205,10 @@ export async function boot(): Promise<void> {
     // always one the page can show.
     const localFailures = createLocalFailures();
     // The chip lists the webhost's failures too: it has no chip of its own.
-    const topbar = mountTopbar(shell.topbar, { failures: mergeFailureViews(localFailures, webhostFailures) });
+    const topbar = mountTopbar(shell.topbar, {
+      failures: mergeFailureViews(localFailures, webhostFailures),
+      focusLeft: pageFocusLeft(),
+    });
     failures = localFailures;
 
     // Copying is a page-wide affordance, not a component's: it is installed

@@ -18,7 +18,7 @@ import { closeStandingImageOverlay } from "../image-overlay/image-overlay.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
 import type { QuietSource } from "../quiet.js";
-import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../focus-left.js";
+import { FOCUS_LEFT_EMACS, focusLeftReason, type FocusLeftSource } from "../focus-left.js";
 import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
 import { pageMutationObserver } from "../dom.js";
@@ -127,7 +127,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         applyLogLevel(message.level, message.untilMs);
         return;
       case "focusMoved":
-        focusLeft.left(FOCUS_LEFT_EMACS);
+        focusLeft.left(focusLeftReason(message.cause));
         return;
       case "quiet":
         if (message.quiet !== quiet.quiet()) {

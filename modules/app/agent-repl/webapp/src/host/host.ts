@@ -26,7 +26,7 @@
  * of the webhost's failures stand, and ends the pages above the gate band of
  * the page on screen.
  */
-import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
+import { focusLeftReason, focusMovedCause, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
 import { pageQuiet, type QuietSource } from "../quiet.js";
 import { endPage } from "../page-teardown.js";
 import {
@@ -199,10 +199,12 @@ export interface Host {
   /** Ask ID's page to close its standing news digest. */
   dismissDigest(id: string): string;
   /**
-   * Tell every page Emacs moved its focus (the selected window changed, or
-   * the frame lost the focus), so each lets go of what the pointer raised.
+   * Tell every page Emacs moved its focus over CAUSE (`window`: the selected
+   * window changed, or the frame lost the focus; `composer`: the user typed
+   * or clicked in the composer), so each lets go of what the pointer raised.
+   * A CAUSE that names none is refused; an absent one is `window`.
    */
-  focusMoved(): string;
+  focusMoved(cause?: unknown): string;
   /**
    * Tell the webhost and every page whether persistent wifi's lid-closed
    * quiet state stands (quiet.ts). A QUIET that is not a boolean is refused.
@@ -979,9 +981,14 @@ export function createHost(env: HostEnv): Host {
       broadcast({ channel: HOST_CHANNEL, kind: "quiet", quiet: value });
       return answer("setQuiet", null, value ? "quiet" : "unquiet");
     },
-    focusMoved() {
-      broadcast({ channel: HOST_CHANNEL, kind: "focusMoved" });
-      focusLeft.left(FOCUS_LEFT_EMACS);
+    focusMoved(value) {
+      const cause = focusMovedCause(value);
+      if (cause === null) {
+        note("warn", `focusMoved was handed ${JSON.stringify(value)}, which is no cause`);
+        return answer("focusMoved", null, "refused");
+      }
+      broadcast({ channel: HOST_CHANNEL, kind: "focusMoved", cause });
+      focusLeft.left(focusLeftReason(cause));
       return answer("focusMoved", null, "sent");
     },
     retireAll() {

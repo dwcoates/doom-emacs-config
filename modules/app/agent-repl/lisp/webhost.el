@@ -68,7 +68,7 @@
 (declare-function agent-repl-sidebar-view-mark-shown "sidebar-view" (id))
 (declare-function agent-repl-sidebar-view-follow-daemon "sidebar-view" (origin))
 (declare-function agent-repl-sidebar-view-set-log-level "sidebar-view" (level until-ms))
-(declare-function agent-repl-sidebar-view-focus-moved "sidebar-view" ())
+(declare-function agent-repl-sidebar-view-focus-moved "sidebar-view" (cause))
 (declare-function agent-repl-sidebar-view-navigate "sidebar-view" (conn))
 (declare-function agent-repl-sidebar-view-kill "sidebar-view" ())
 (declare-function xwidget-get "xwidget" (xwidget propname))
@@ -861,6 +861,16 @@ loads is told again by its replay."
 
 (add-hook 'agent-repl-persistent-wifi-quiet-functions #'agent-repl-webhost-set-quiet)
 
+(defun agent-repl--webhost-tell-focus-moved (cause)
+  "Tell the sidebar and every page of the host that Emacs moved its focus.
+CAUSE is \"window\" or \"composer\" (webapp/src/focus-left.ts
+`FocusMovedCause'): each page lets go of every notice and popup the pointer
+raised on it, and records CAUSE as why.  With no host there are no pages to
+tell, and nothing is sent to them."
+  (agent-repl-sidebar-view-focus-moved cause)
+  (when (agent-repl-webhost-xwidget)
+    (agent-repl--webhost-call "focusMoved" cause)))
+
 (defun agent-repl-webhost-focus-moved (&rest _)
   "Tell every page of the host that Emacs moved its focus.
 Run from `window-selection-change-functions' and `after-focus-change-function',
@@ -869,10 +879,19 @@ reaches the pages: each lets go of every notice the pointer raised on it
 \(webapp/src/focus-left.ts), such as the hovered response's line in the
 footer.  A key the web view forwards to Emacs selects another window without
 the web view ever losing the focus, so the pages cannot see this for
-themselves.  With no host there are no pages to tell, and nothing is sent."
-  (agent-repl-sidebar-view-focus-moved)
-  (when (agent-repl-webhost-xwidget)
-    (agent-repl--webhost-call "focusMoved")))
+themselves."
+  (agent-repl--webhost-tell-focus-moved "window"))
+
+(defun agent-repl-webhost-composer-used ()
+  "Tell the sidebar and every page of the host the user used the composer.
+THE COMPOSER CLOSES EVERY POPUP (owner request, 2026-11-19): a key or a
+click in the composer lets go of every hover panel and click menu the
+pointer raised in the sidebar or a page, as Emacs moving its focus does.
+The composer already holds Emacs's focus while such a popup stands, so
+neither gesture moves a focus `agent-repl-webhost-focus-moved' or the pages
+see.  The composer's buffer-local `post-command-hook' entry; unlogged, as it
+runs per keystroke."
+  (agent-repl--webhost-tell-focus-moved "composer"))
 
 (add-hook 'window-selection-change-functions #'agent-repl-webhost-focus-moved)
 (add-function :after after-focus-change-function #'agent-repl-webhost-focus-moved)

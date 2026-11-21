@@ -134,17 +134,19 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
     (agent-repl-sidebar-view-set-log-level 'debug 1700000060000)
     (should (string-search "h.setLogLevel(\"debug\",1700000060000)" (car (agent-repl-test-sv--sent "setLogLevel"))))))
 
-(ert-deftest agent-repl-test-sv-a-focus-move-reaches-the-page ()
-  "Emacs moving its focus is told to the page."
+(ert-deftest agent-repl-test-sv-a-focus-move-reaches-the-page-with-its-cause ()
+  "Emacs moving its focus is told to the page, with what moved it."
   (agent-repl-test-sv--with-sidebar
-    (agent-repl-sidebar-view-focus-moved)
-    (should (equal (length (agent-repl-test-sv--sent "focusMoved")) 1))))
+    (agent-repl-sidebar-view-focus-moved "composer")
+    (let ((sent (agent-repl-test-sv--sent "focusMoved")))
+      (should (= 1 (length sent)))
+      (should (string-search "h.focusMoved(\"composer\")" (car sent))))))
 
 (ert-deftest agent-repl-test-sv-a-focus-move-without-a-sidebar-sends-nothing ()
   "With no sidebar there is no page to tell of a focus move."
   (agent-repl-test-sv--with-sidebar
     (setq agent-repl-test-sv--xw nil)
-    (agent-repl-sidebar-view-focus-moved)
+    (agent-repl-sidebar-view-focus-moved "window")
     (should-not agent-repl-test-sv--calls)))
 
 ;;;; ---- Answers ----

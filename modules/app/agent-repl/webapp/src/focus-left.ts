@@ -13,7 +13,13 @@
  *     selected Emacs window changed, or Emacs's frame lost the focus. A key
  *     the web view forwards to Emacs (`C-h`, `C-l`) selects another Emacs
  *     window without the web view ever losing the focus, so the page cannot
- *     see this one for itself.
+ *     see this one for itself;
+ *   - the user typed or clicked in the composer (`left`, from the host's
+ *     `focusMoved` with the cause `composer`; owner request, 2026-11-19).
+ *     The composer is an Emacs buffer, so a key or a click there moves no
+ *     focus the page or Emacs's window hooks see when the composer already
+ *     held Emacs's focus, as it does while a popup the pointer raised over a
+ *     page stands.
  */
 import { createListeners } from "./listeners.js";
 import { log } from "./log.js";
@@ -42,6 +48,30 @@ export const FOCUS_LEFT_BLUR = "the page lost focus";
 export const FOCUS_LEFT_HIDDEN = "the page was hidden";
 /** Why the focus left the page when Emacs moved its own. */
 export const FOCUS_LEFT_EMACS = "Emacs moved its focus";
+/** Why the focus left the page when the user typed or clicked in the composer. */
+export const FOCUS_LEFT_COMPOSER = "the composer was used";
+
+/**
+ * What Emacs says moved its focus, on the host's `focusMoved`: `window` for
+ * the selected window or the frame's focus changing, `composer` for a key or
+ * a click in the composer.
+ */
+export type FocusMovedCause = "window" | "composer";
+
+/**
+ * CAUSE as a `FocusMovedCause`, or null when it names none. An absent CAUSE
+ * is `window`: Emacs and hosts from a build before the cause sent
+ * `focusMoved` only for a window, and send none.
+ */
+export function focusMovedCause(cause: unknown): FocusMovedCause | null {
+  if (cause === undefined) return "window";
+  return cause === "window" || cause === "composer" ? cause : null;
+}
+
+/** Why the focus left the page, for Emacs moving its focus over CAUSE. */
+export function focusLeftReason(cause: FocusMovedCause): string {
+  return cause === "composer" ? FOCUS_LEFT_COMPOSER : FOCUS_LEFT_EMACS;
+}
 
 /** The focus-left signal of the page in WIN, whose presence is PRESENCE. */
 export function createFocusLeft(win: Window, presence: Presence): FocusLeftSource {

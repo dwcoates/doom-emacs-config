@@ -13,6 +13,7 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import type { TopbarContext } from "../../src/topbar/context.js";
 import { mountRevealLayer, type RevealGeometry } from "../../src/topbar/reveal.js";
+import { pageFocusLeft } from "../../src/focus-left.js";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 export const NOW = 1_700_000_000_000;
@@ -77,7 +78,7 @@ export function topbarContext(
 ): { host: HTMLElement; tc: TopbarContext } {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
-  const reveals = mountRevealLayer(host, GEOMETRY);
+  const reveals = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
   return { host, tc: { ctx, reveals, openLogin, localFailures } };
 }
 

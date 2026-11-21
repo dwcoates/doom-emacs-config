@@ -2,6 +2,7 @@
 import { createControl } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountRevealLayer, type RevealGeometry } from "../../src/topbar/reveal.js";
+import { FOCUS_LEFT_COMPOSER, pageFocusLeft } from "../../src/focus-left.js";
 import { boxRect } from "../dom-rect.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 
@@ -37,15 +38,49 @@ const panels = (): string[] =>
     (el) => el.getAttribute("data-reveal") ?? "",
   );
 
+describe("mountRevealLayer: the focus leaving the page", () => {
+  it("closes the open reveal when the page's focus leaves it", () => {
+    // Arrange
+    anchor("model");
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
+    layer.open("model", "model", body("options"));
+
+    // Act
+    pageFocusLeft().left(FOCUS_LEFT_COMPOSER);
+
+    // Assert
+    expect([layer.current(), panels()]).toEqual([null, []]);
+    layer.dispose();
+  });
+
+  it("stops listening to the page's focus once disposed", () => {
+    // Arrange
+    const listening = new Set<(why: string) => void>();
+    const focusLeft = {
+      onLeft: (listener: (why: string) => void) => {
+        listening.add(listener);
+        return () => void listening.delete(listener);
+      },
+    };
+    const layer = mountRevealLayer(host, focusLeft, GEOMETRY);
+
+    // Act
+    layer.dispose();
+
+    // Assert
+    expect(listening.size).toBe(0);
+  });
+});
+
 describe("mountRevealLayer: opening", () => {
   it("ships with nothing open", () => {
     anchor("model");
-    expect(mountRevealLayer(host, GEOMETRY).current()).toBeNull();
+    expect(mountRevealLayer(host, pageFocusLeft(), GEOMETRY).current()).toBeNull();
   });
 
   it("draws the named reveal under its anchor", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("options"));
     expect(panels()).toEqual(["model"]);
   });
@@ -53,7 +88,7 @@ describe("mountRevealLayer: opening", () => {
   it("holds at most one, so a second open replaces the first", () => {
     anchor("model");
     anchor("context");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("options"));
     layer.open("context", "context", body("breakdown"));
     expect(panels()).toEqual(["context"]);
@@ -61,14 +96,14 @@ describe("mountRevealLayer: opening", () => {
 
   it("closes on a second toggle of the same reveal", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.toggle("model", "model", body("options"));
     layer.toggle("model", "model", body("options"));
     expect(layer.current()).toBeNull();
   });
 
   it("refuses to open a reveal whose anchor is not drawn", () => {
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("warnings", "warnings", body("list"));
     expect(layer.current()).toBeNull();
   });
@@ -78,7 +113,7 @@ describe("mountRevealLayer: surviving a push", () => {
   it("re-opens from the entry the latest draw registered", () => {
     // ARRANGE: the reader has the model list open.
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("old options"));
     // ACT: a push redraws the strip and re-registers with the new content.
     layer.register("model", "model", body("new options"));
@@ -90,7 +125,7 @@ describe("mountRevealLayer: surviving a push", () => {
   it("closes the reveal when its anchor is gone from the new view", () => {
     // ARRANGE
     const chip = anchor("warnings");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("warnings", "warnings", body("list"));
     // ACT: the warnings cleared, so the chip is not drawn any more.
     chip.remove();
@@ -101,7 +136,7 @@ describe("mountRevealLayer: surviving a push", () => {
 
   it("does nothing on a refresh with nothing open", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.register("model", "model", body("options"));
     layer.refresh();
     expect(panels()).toEqual([]);
@@ -111,7 +146,7 @@ describe("mountRevealLayer: surviving a push", () => {
 describe("mountRevealLayer: closing gestures", () => {
   it("closes on a click outside the layer", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("options"));
     document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(layer.current()).toBeNull();
@@ -119,7 +154,7 @@ describe("mountRevealLayer: closing gestures", () => {
 
   it("stays open for a click inside the reveal", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("options"));
     host
       .querySelector("[data-reveal]")
@@ -129,7 +164,7 @@ describe("mountRevealLayer: closing gestures", () => {
 
   it("leaves a click on an anchor to that anchor's own toggle", () => {
     const button = anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("options"));
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(layer.current()).toBe("model");
@@ -137,7 +172,7 @@ describe("mountRevealLayer: closing gestures", () => {
 
   it("closes on Escape", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("options"));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(layer.current()).toBeNull();
@@ -145,7 +180,7 @@ describe("mountRevealLayer: closing gestures", () => {
 
   it("ignores a key that is not Escape", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.open("model", "model", body("options"));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
     expect(layer.current()).toBe("model");
@@ -155,7 +190,7 @@ describe("mountRevealLayer: closing gestures", () => {
 describe("mountRevealLayer: dispose", () => {
   it("stops answering the document's gestures", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     const spy = vi.spyOn(document, "removeEventListener");
     layer.dispose();
     expect(spy).toHaveBeenCalledTimes(2);
@@ -164,7 +199,7 @@ describe("mountRevealLayer: dispose", () => {
 
   it("takes the layer out of the host", () => {
     anchor("model");
-    const layer = mountRevealLayer(host, GEOMETRY);
+    const layer = mountRevealLayer(host, pageFocusLeft(), GEOMETRY);
     layer.dispose();
     expect(host.querySelector(".topbar-reveal-layer")).toBeNull();
   });
@@ -203,7 +238,7 @@ describe("mountRevealLayer: the default DOM geometry", () => {
     rects.set(host, rect({ left: 4, top: 2, width: 1000, height: 40 }));
     const button = anchor("model");
     rects.set(button, anchorRect);
-    const layer = mountRevealLayer(host);
+    const layer = mountRevealLayer(host, pageFocusLeft());
     layer.open("model", "model", body("options"));
     const panel = host.querySelector<HTMLElement>("[data-reveal]")!;
     return panel;
