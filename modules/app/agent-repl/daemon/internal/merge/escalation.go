@@ -38,7 +38,7 @@ const BriefDeployCheckNotRun = "deploy-check-not-run"
 // and answered.
 //
 // IT NEVER NOTIFIES THE USER: the user was notified as the escalation was
-// recorded (holdBrief), whether or not this telling reaches the mediator, so
+// recorded (holdBrief, notifyHeld), whether or not this telling reaches the mediator, so
 // a telling the next pass makes again (remakeHeldEscalation) notifies no one
 // a second time.
 func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, told escalationBrief, window wsm.CheckWindow, said bool, fields dlog.Context) (ids.WorkspaceID, error) {

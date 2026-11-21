@@ -700,7 +700,7 @@ func TestAnEscalationWithNoMediatorRecordedNotifiesNoOneAndIsAnError(t *testing.
 		t.Fatal("a notice was raised with no mediator recorded to name it")
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the check is escalated with no deploy mediator recorded to name its notice; the user is not notified of it"}); !ok {
+		Message: "the check is held with no deploy mediator recorded to name its notice; the user is not notified of it"}); !ok {
 		t.Fatalf("records = %v, want the broken invariant at ERROR", h.logs.Records())
 	}
 }
@@ -755,5 +755,36 @@ func TestTheCheckNotRunBriefSaysWhetherTheMediatorWasTold(t *testing.T) {
 				t.Fatalf("told_standing = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestAnEscalationThatCannotBeRecordedStillNotifiesTheUser pins the hold
+// nothing would decide: the escalation's write failed, so no escalation
+// stands for the mediator to approve or the user to release, and the user
+// is notified the check is held and why.
+func TestAnEscalationThatCannotBeRecordedStillNotifiesTheUser(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	setDB(h, func(db *fakeDB) { db.escalateErr = errors.New("database is locked") })()
+
+	// Act
+	escalatedByTheDaemon(t, h, "the reaper errors on every pass")
+
+	// Assert
+	if m := owedCheck(t, h); m == nil || m.Escalated() {
+		t.Fatalf("check %+v, want it owed and not escalated", m)
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "the check could not be recorded as escalated; nothing is escalated and the queue stays held"})
+	if !ok || record.Context["error"] != "database is locked" {
+		t.Fatalf("records = %v, want the failed write at ERROR with its cause", h.logs.Records())
+	}
+	if !h.bannerRaisedFor(desktopnotify.KindDeployMediated, "ws-fixer") {
+		t.Fatal("the user was not notified of the held check")
+	}
+	if b := h.banners.seen(); !strings.Contains(fmt.Sprint(b), "could not be escalated (database is locked)") {
+		t.Fatalf("banners %+v, want the notice to say why the check is held", b)
 	}
 }

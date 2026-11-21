@@ -128,8 +128,10 @@ type fakeDB struct {
 	windowReadErr error
 	// promptMarkErr fails MarkMediationPrompted, and mediationReleaseErr
 	// ReleaseMediation.
-	promptMarkErr        error
-	mediationReleaseErr  error
+	promptMarkErr       error
+	mediationReleaseErr error
+	// escalateErr fails EscalateMediation.
+	escalateErr          error
 	remediationFinishErr error
 	// remediationFinishesErr fails RemediationFinishes.
 	remediationFinishesErr error
@@ -416,6 +418,12 @@ func (f *fakeDB) MarkMediationResumed(ctx context.Context, repo wsm.RepoKey, owe
 }
 
 func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time, brief string) (bool, error) {
+	f.mu.Lock()
+	err := f.escalateErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
 	return f.checks.EscalateMediation(ctx, repo, owed, brief)
 }
 
