@@ -1044,7 +1044,7 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 	}
 }
 
-func TestTrayDrawsNoCardForAPromptDrawnNowhere(t *testing.T) {
+func TestTrayDrawsNoCardForADaemonNotice(t *testing.T) {
 	// Arrange: a merge queue notice waiting behind a running turn, beside a
 	// prompt the user sent.
 	r, surfaces := newRenderer(t)
@@ -1062,7 +1062,7 @@ func TestTrayDrawsNoCardForAPromptDrawnNowhere(t *testing.T) {
 		t.Fatalf("cards = %+v, want only the sent prompt's", cards)
 	}
 	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.holds.convert",
-		Message: "a held prompt of an origin drawn nowhere was skipped: the tray draws no card for it"}); !ok {
+		Message: "a held daemon notice was skipped: the tray draws no card for it"}); !ok {
 		t.Fatalf("no record of the skipped notice: %+v", surfaces.Records())
 	}
 }
