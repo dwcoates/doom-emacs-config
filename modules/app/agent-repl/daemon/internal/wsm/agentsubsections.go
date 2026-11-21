@@ -15,7 +15,7 @@ import (
 // (Subsection.CreatedBy), and the write that leaves it with no open workspace
 // deletes it, its closed families returning to no subsection as a user's
 // delete returns them. A subsection the user created carries no creator and
-// survives empty.
+// survives empty, unless the user's own close empties it (usercloses.go).
 //
 // THE REMOVAL RIDES EVERY WRITE (writeTx), not the writes someone remembered
 // could empty a subsection: a close, a merge, a placement, a retarget and a
@@ -41,12 +41,19 @@ const opPruneAgentSubsection = "daemon.wsm.prune_agent_subsection"
 // Nothing is written.
 var ErrNoOpenConstituent = errors.New("wsm: an agent-created subsection would have no open workspace")
 
+// emptySubsectionsQuery selects every subsection no open workspace sits in,
+// a child counting where its root sits (rootSubsectionColumn), whoever
+// created it. Its WHERE clause takes further `AND` conditions.
+const emptySubsectionsQuery = `SELECT ` + subsectionColumns + ` FROM subsections
+WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE NOT workspaces.closed AND ` + rootSubsectionColumn + ` = subsections.id)`
+
 // emptyAgentSubsectionsQuery selects every agent-created subsection no open
-// workspace sits in, a child counting where its root sits
-// (rootSubsectionColumn).
-const emptyAgentSubsectionsQuery = `SELECT ` + subsectionColumns + ` FROM subsections
-WHERE created_by IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM workspaces WHERE NOT workspaces.closed AND ` + rootSubsectionColumn + ` = subsections.id)`
+// workspace sits in.
+const emptyAgentSubsectionsQuery = emptySubsectionsQuery + ` AND created_by IS NOT NULL`
+
+// emptyUserSubsectionsQuery selects every subsection the user created that no
+// open workspace sits in: the ones the user's close removes (usercloses.go).
+const emptyUserSubsectionsQuery = emptySubsectionsQuery + ` AND created_by IS NULL`
 
 // CreateAgentSubsection records a subsection named NAME (trimmed), created by
 // workspace CREATOR's agent, after the members' repository's other

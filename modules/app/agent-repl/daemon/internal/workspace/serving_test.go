@@ -2,11 +2,14 @@ package workspace
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/wsm"
 )
 
 // THE SERVING CLAIM IS MADE WHERE THE FLEET BEGINS HOLDING A CLIENT, so every
@@ -108,6 +111,36 @@ func TestAFailedServingClaimFailsTheBringUpLoudly(t *testing.T) {
 	}
 	if errors != 1 {
 		t.Fatalf("serving ERROR records = %d, want exactly one", errors)
+	}
+}
+
+func TestAServingClaimOfAForgottenWorkspaceEndsTheBringUpAtInfo(t *testing.T) {
+	// Arrange: the workspace was forgotten under its bring-up.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.claimErr = fmt.Errorf("wsm: workspace %s: %w", ws.ID, wsm.ErrNotFound)
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Fatalf("Start() = %v, want the bring-up ended on wsm.ErrNotFound", err)
+	}
+	var infos int
+	for _, rec := range f.log.logger.Records() {
+		if rec.Operation != opServing {
+			continue
+		}
+		if rec.Level == "error" {
+			t.Fatalf("serving record %+v at ERROR, want a forgotten workspace recorded at INFO", rec)
+		}
+		if rec.Level == "info" && rec.Context["workspace"] == string(ws.ID) && rec.Context["instance"] == string(fixtureInstance) {
+			infos++
+		}
+	}
+	if infos != 1 {
+		t.Fatalf("serving INFO records naming %s = %d, want exactly one", ws.ID, infos)
 	}
 }
 

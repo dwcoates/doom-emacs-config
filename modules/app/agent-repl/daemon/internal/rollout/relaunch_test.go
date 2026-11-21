@@ -363,6 +363,46 @@ func TestAResumeWhoseShimThisDaemonStoodDownEndsUnregistered(t *testing.T) {
 	}
 }
 
+// AN INSTALL WHOSE WORKSPACE WAS FORGOTTEN AFTER THE RESTART HOLD (a teardown
+// racing the bounce) ends the bounce unregistered: no fault, no ERROR, the
+// prelaunch retired and the hold released.
+func TestAnInstallOfAForgottenWorkspaceEndsUnregistered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.installErr[ws] = fmt.Errorf("claim serving: wsm: workspace %s: %w", ws, wsm.ErrNotFound)
+	h.fleet.live[ws].Reap()
+
+	// Act
+	err := runRelaunch(t, h, ws, ReasonRestartVerb)
+	faults, faultErr := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultRelaunchFailed})
+	_, held, leaseErr := h.db.Lease(context.Background(), ws)
+	h.fleet.mu.Lock()
+	fresh := h.fleet.prelaunched[ws]
+	h.fleet.mu.Unlock()
+
+	// Assert
+	if bounce.OutcomeOf(err) != bounce.OutcomeUnregistered {
+		t.Fatalf("bounce = %v, want it unregistered", err)
+	}
+	if faultErr != nil || len(faults) != 0 {
+		t.Fatalf("relaunch faults = %v (%v), want none", faults, faultErr)
+	}
+	if leaseErr != nil || held {
+		t.Fatalf("lease held %v (%v), want the restart hold released", held, leaseErr)
+	}
+	if fresh == nil || len(fresh.ForceKills()) != 1 {
+		t.Fatalf("the prelaunched shim was left running after the forgotten install")
+	}
+	if len(levelRecords(records(h.log, opRelaunch), "error")) != 0 {
+		t.Fatalf("relaunch records = %v, want no ERROR", records(h.log, opRelaunch))
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRelaunch,
+		Message: "the workspace was forgotten before the new shim was installed; nothing is left to relaunch"}); !ok {
+		t.Fatalf("relaunch records = %v, want the forgotten install at INFO", records(h.log, opRelaunch))
+	}
+}
+
 func TestTheHoldIsReleasedAfterASuccessfulRelaunch(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

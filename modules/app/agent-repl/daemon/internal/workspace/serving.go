@@ -2,10 +2,12 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // opServing is the operation every serving claim the fleet makes is recorded
@@ -42,7 +44,17 @@ const opServing = "daemon.workspace.serving"
 // nothing holding it: this daemon can still stop it, and its handover still
 // sees the live session (and says so at ERROR, since the row disagrees).
 func (f *Fleet) claimServing(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
-	if err := f.deps.DB.ClaimServing(ctx, ws, f.deps.Instance); err != nil {
+	err := f.deps.DB.ClaimServing(ctx, ws, f.deps.Instance)
+	if errors.Is(err, wsm.ErrNotFound) {
+		// A WORKSPACE FORGOTTEN UNDER ITS BRING-UP has no row to claim: the
+		// forget owns its outcome, and the caller ends the bring-up on the
+		// wrapped ErrNotFound (a relaunch ends unregistered, relaunch.go).
+		log.Info(opServing, "the workspace was forgotten before this daemon could claim its serving ownership; nothing is served", dlog.Context{
+			"workspace": string(ws), "instance": string(f.deps.Instance), "cause": err.Error(),
+		})
+		return fmt.Errorf("workspace: claim serving for %q: %w", ws, err)
+	}
+	if err != nil {
 		log.Error(opServing, "could not claim the workspace's serving ownership for a session this daemon now holds", dlog.Context{
 			"workspace": string(ws), "instance": string(f.deps.Instance), "cause": err.Error(),
 		})

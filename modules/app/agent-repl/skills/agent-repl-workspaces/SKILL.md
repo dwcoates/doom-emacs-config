@@ -462,7 +462,8 @@ creating workspaces there with `-repository DIR`.
 - `workspace place WS... -new-subsection NAME` creates a subsection named
   NAME as this workspace's agent, with the named workspaces in it. A
   subsection an agent creates is removed on its own once none of its
-  workspaces is open; one the user creates stays even when empty.
+  workspaces is open; one the user creates stays even when empty, unless
+  the user's own close, kill or nuke of its last open workspace emptied it.
 - A repository's main workspace is never filed into a subsection by an agent,
   nor is any workspace whose family has it for a root: the daemon refuses
   `place` with `main_workspace_not_sortable`. Only the user arranges the main

@@ -321,7 +321,16 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
 	// and the prelaunched one takes them at its StartSession.
 	installed := c.deps.Clock.Now()
-	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
+	if err := c.deps.Shims.Install(ctx, ws, fresh); errors.Is(err, wsm.ErrNotFound) {
+		// THE WORKSPACE WAS FORGOTTEN AFTER THE RESTART HOLD, before the
+		// install could claim it (2026-11-21, e2e
+		// TestFaults/QueryEofEndsTheTurnAsQueryDied: the test's teardown
+		// forgot the workspace under its query_died bounce). It ends the
+		// bounce unregistered, as a forget before the hold does.
+		c.log.Info(opRelaunch, "the workspace was forgotten before the new shim was installed; nothing is left to relaunch", dlog.WithCause(fields, err))
+		c.retirePrelaunch(ctx, fresh, reason, fields)
+		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: install the new shim: the workspace is gone: %w", ws, bounce.ErrUnregistered)
+	} else if err != nil {
 		c.log.Error(opRelaunch, "could not install the prelaunched shim", dlog.WithCause(fields, err))
 		c.retirePrelaunch(ctx, fresh, reason, fields)
 		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
