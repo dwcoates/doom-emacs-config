@@ -77,7 +77,7 @@ func describeRequeueRefusal(ws string, e *agentreplv1.RequeueMergeError) (string
 	case *agentreplv1.RequeueMergeError_VersionAlreadyRecorded:
 		return fmt.Sprintf("%s's request recorded its own version increment; requeue it without -version-part or -changelog-line", ws), nil
 	case *agentreplv1.RequeueMergeError_PlacementBehindNotInLine:
-		return fmt.Sprintf("the merge %s that %s was to go behind is not in its queue", r.PlacementBehindNotInLine.GetBehind(), ws), nil
+		return sayBehindNotInLine(ws, r.PlacementBehindNotInLine), nil
 	case *agentreplv1.RequeueMergeError_WorkspaceClosed:
 		return fmt.Sprintf("%s was closed since it was named, and a merge request never outlives its workspace's close", ws), nil
 	case *agentreplv1.RequeueMergeError_NotInCatalog:
