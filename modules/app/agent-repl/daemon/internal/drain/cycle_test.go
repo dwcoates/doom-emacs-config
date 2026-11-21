@@ -561,3 +561,82 @@ func TestAColdParkOrAVisitStandsDownAClosedOrWithheldWorkspace(t *testing.T) {
 		})
 	}
 }
+func TestCycleDownThenReportsHowTheStandDownSettled(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) ids.WorkspaceID
+		want    CycleOutcome
+	}{
+		{name: "an idle visible session is parked", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return h.workspace(t, instant)
+		}, want: CycleOutcome{Down: true, Why: cycleReason.done}},
+		{name: "the workspace in view is kept up", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			if err := h.db.SetCurrent(context.Background(), ws, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+			return ws
+		}, want: CycleOutcome{Why: "the user is looking at the workspace; its session is kept up"}},
+		{name: "a session a real turn ran on since is kept up", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.turnClosed(t, ws, beatAfter.Add(time.Minute))
+			return ws
+		}, want: CycleOutcome{Why: "a real turn ran since; the session is kept up"}},
+		{name: "a workspace with no session is already down", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.bare(t)
+			if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOff); err != nil {
+				t.Fatalf("SetRemoteControlMode: %v", err)
+			}
+			return ws
+		}, want: CycleOutcome{Down: true, Why: "the workspace has no live session; nothing to stand down"}},
+		{name: "a workspace in remote control is kept up", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOn); err != nil {
+				t.Fatalf("SetRemoteControlMode: %v", err)
+			}
+			return ws
+		}, want: CycleOutcome{Why: "remote control is on; the shim stays up for claude.ai"}},
+		{name: "a hibernate directive that fails is a failure", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.stand.hibernateErr[ws] = fmt.Errorf("the shim hung up")
+			return ws
+		}, want: CycleOutcome{Failed: true, Why: "the park failed; its record above says why"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.arrange(t, h)
+			var got []CycleOutcome
+
+			// Act
+			h.c.CycleDownThen(ws, beatAfter, func(o CycleOutcome) { got = append(got, o) })
+
+			// Assert
+			if len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("reports = %+v, want one %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCycleDownThenWaitsWhileTheStandDownIsPending(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.freeness.SetFree(ws, false)
+	var got []CycleOutcome
+	h.c.CycleDownThen(ws, beatAfter, func(o CycleOutcome) { got = append(got, o) })
+	if len(got) != 0 {
+		t.Fatalf("reports = %+v under work, want none yet", got)
+	}
+	h.freeness.SetFree(ws, true)
+
+	// Act
+	h.c.RetryWithheld(ws)
+
+	// Assert
+	if len(got) != 1 || !got[0].Down {
+		t.Fatalf("reports = %+v, want the one park once the session fell free", got)
+	}
+}
