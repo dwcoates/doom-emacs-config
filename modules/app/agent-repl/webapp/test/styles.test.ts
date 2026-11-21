@@ -6472,6 +6472,10 @@ describe("the repository's subsections and the drag", () => {
     ]).toEqual([expect.stringMatching(/color:\s*var\(--repo-head-collapsed\)/), expect.stringMatching(/color:\s*var\(--repo-head-collapsed\)/)]);
   });
 
+  it("draws a row's child count in the subsection count's ink and size", () => {
+    expect(declarationsOf("#ws-sidebar .row .sb-child-count")).toMatch(/font-size:\s*0\.85em;\s*color:\s*var\(--repo-head-expanded\)/);
+  });
+
   it("draws a subsection's nonzero count in the open name's ink, folded, empty or open", () => {
     expect(declarationsOf(`#ws-sidebar .sb-subsection-head .sb-count:not([${ZERO_COUNT_ATTRIBUTE}])`)).toMatch(
       /color:\s*var\(--repo-head-expanded\)/,

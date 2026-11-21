@@ -1826,8 +1826,11 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 #ws-sidebar .sb-deploys-more[hidden] { display: none; }
 
 /* A ROW'S CHILD COUNT (owner request, 2026-11-15) is a subsection header's
-   count: slightly smaller, in the muted grey, never shrunk away by a long name. */
-#ws-sidebar .row .sb-child-count { font-size: 0.85em; color: var(--muted); flex: none; margin-left: 0.3em; }
+   count (owner request, 2026-11-20: the one parenthetical, drawn by
+   showWorkspaceCountParenthetical): slightly smaller, its parentheses, slashes
+   and total in the subsection count's ink, never shrunk away by a long name.
+   Its working and merging numbers wear their own tones (.tone-red, .tone-purple). */
+#ws-sidebar .row .sb-child-count { font-size: 0.85em; color: var(--repo-head-expanded); flex: none; margin-left: 0.3em; }
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A NAME'S PREFIX (src/name-prefix.ts) stands right before the name, its
    marks never taller than the name: each takes the line's em and no line
