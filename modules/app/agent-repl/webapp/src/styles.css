@@ -1492,7 +1492,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
   flex: 0 0 0;
   width: 0;
   align-self: stretch;
-  margin-right: -0.45rem;
+  margin-right: calc(-1 * var(--row-gap));
   position: relative;
   --gutter-strength: 100%;
 }

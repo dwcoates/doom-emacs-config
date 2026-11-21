@@ -7280,6 +7280,10 @@ describe("the recency gutter", () => {
     expect(declarationsOf("#ws-sidebar .sb-gutter[data-recency]::before")).toContain("var(--gutter-hue) var(--gutter-strength)");
     expect(declarationsOf("#ws-sidebar .sb-gutter")).not.toContain("background");
   });
+
+  it("hands back exactly the row's gap token, so the slot takes no width", () => {
+    expect(declarationsOf("#ws-sidebar .sb-gutter")).toMatch(/margin-right:\s*calc\(-1 \* var\(--row-gap\)\)/);
+  });
 });
 
 // THE WALK'S HOLD (scroll.ts createWalkHold): the attribute the hold sets on
