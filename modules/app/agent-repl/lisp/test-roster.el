@@ -68,30 +68,37 @@ COLLAPSED non-nil makes the daemon hold the section collapsed."
         :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
 (defun agent-repl-test-roster--merged-group (label rows)
-  "Return a decoded `RosterMergedRepoGroup' for repository LABEL holding ROWS."
+  "Return a decoded `RosterMergedRepoGroup' for repository LABEL summarizing ROWS.
+A group carries its SUMMARY, never its rows: a merged workspace is in no
+stream, so ROWS are only counted."
   (list :key (list :repository (list :id (concat "r-" label) :dir (concat "/r/" label)))
         :header (list :label (list :text label))
-        :merged-rows (agent-repl-test--merged-rows rows)))
+        :summary (list :count (list :merges (length rows))
+                       :latest (list :merged-at-ms 1)
+                       :recent nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups closed current threads)
-  "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
-SECTIONS' open rows get their tabs numbered as the daemon numbers them
+(cl-defun agent-repl-test-roster--roster (&key sections hidden merged closed current threads)
+  "Return an assembled roster view from SECTIONS, HIDDEN, MERGED and CURRENT.
+The shape `agent-repl-roster-view' holds: the workspaces stream\='s keys
+with `:closed' and `:recently-merged' beside them.  SECTIONS\=' open rows get
+their tabs numbered as the daemon numbers them
 \(`agent-repl-test--number-tabs').  HIDDEN is the hidden section's rows;
 the section itself is always there, expanded, as the daemon always sends
-it.  MERGED is the recently-merged rows, carried in one shown group;
-MERGED-GROUPS, when given, is the band's groups instead.  CLOSED is the
-closed list's rows.  THREADS are the thread section's rows, each
+it.  MERGED are merged workspaces\=' rows, which no stream carries: the
+Recently Merged summary only counts them, in one group.  CLOSED is the
+closed stream's rows.  THREADS are the thread section's rows, each
 `(ID . NAME)', the one last interacted with first."
   (list :repository (list :sections (agent-repl-test--number-tabs sections))
         :hidden (list :header (list :label (list :text "Hidden"))
                       :hidden-rows (agent-repl-test--hidden-rows hidden)
                       :fold (list :arm :expanded :value nil))
         :closed (agent-repl-test--closed-rows closed)
-        :recently-merged (list :header (list :label (list :text "Recently Merged"))
-                               :groups (or merged-groups
-                                           (and merged
-                                                (list (agent-repl-test-roster--merged-group
-                                                       "alpha" merged)))))
+        :recently-merged (list :header (list :label (list :text "Recently Merged")
+                                             :count (list :workspaces (length merged)))
+                               :groups (and merged
+                                            (list (agent-repl-test-roster--merged-group
+                                                   "alpha" merged)))
+                               :merged-revision (list :revision 1))
         :current (and current (list :workspace (list :id current :dir (concat "/w/" current))))
         :threads (list :new-thread "New thread"
                        :rows (mapcar (lambda (thread)
@@ -141,6 +148,7 @@ whose calls are the observation."
            (agent-repl-test-roster--killed nil)
            (agent-repl-test-roster--current-name nil)
            (agent-repl-roster-view nil)
+           (agent-repl-roster--streams nil)
            (agent-repl-roster--tab-order nil)
            (agent-repl-roster--hidden-tabs nil)
            (agent-repl-roster--walked-folded nil)
@@ -232,13 +240,13 @@ whose calls are the observation."
   (let (seen)
     (cl-letf (((symbol-function 'agent-repl--next-log-request-id)
                (lambda () "roster-1"))
-              ((symbol-function 'agent-repl-roster-apply)
-               (lambda (roster &optional _stream)
-                 (setq seen (list roster
+              ((symbol-function 'agent-repl-roster-apply-push)
+               (lambda (push &optional _stream)
+                 (setq seen (list push
                                   agent-repl--log-context-workspace
                                   agent-repl--log-context-request-id)))))
       ;; Act
-      (agent-repl-roster-on-push '(:arm :roster :value roster-value))
+      (agent-repl-roster-on-push '(:arm :streams :value roster-value))
       ;; Assert
       (should (equal seen
                      (list 'roster-value agent-repl--global-log-scope
@@ -426,7 +434,7 @@ whose calls are the observation."
     (should-not (agent-repl-roster-repository-of "nope" roster))))
 
 (ert-deftest agent-repl-test-roster-repository-of-ignores-the-merged-section ()
-  "The recently-merged section carries no repository key, so it answers nothing."
+  "A merged workspace is in no stream, only counted, so it answers nothing."
   ;; Arrange
   (let ((roster (agent-repl-test-roster--roster
                  :merged (list (agent-repl-test-roster--row "m" "m-row" :ready)))))
@@ -498,8 +506,8 @@ A hand-rolled ref-to-section walk there would drift from the helper."
       ;; Assert
       (should (equal ids '("par" "kid" "sib"))))))
 
-(ert-deftest agent-repl-test-roster-walk-puts-recently-merged-last ()
-  "The recently-merged rows come after every repository section."
+(ert-deftest agent-repl-test-roster-walk-holds-no-merged-row ()
+  "A merged workspace is in no stream: the walk holds the open rows alone."
   ;; Arrange
   (let ((roster (agent-repl-test-roster--roster
                  :sections (list (agent-repl-test-roster--section
@@ -509,33 +517,20 @@ A hand-rolled ref-to-section walk there would drift from the helper."
     (let ((ids (mapcar (lambda (e) (agent-repl-roster-row-id (plist-get e :row)))
                        (agent-repl-roster-walk roster))))
       ;; Assert
-      (should (equal ids '("a" "m"))))))
+      (should (equal ids '("a"))))))
 
-(ert-deftest agent-repl-test-roster-walk-visits-merged-groups-in-order ()
-  "The recently-merged band's groups are walked in the band's order."
+(ert-deftest agent-repl-test-roster-walk-puts-the-closed-stream-last ()
+  "The closed stream's rows come after every repository section."
   ;; Arrange
   (let ((roster (agent-repl-test-roster--roster
-                 :merged-groups
-                 (list (agent-repl-test-roster--merged-group
-                        "alpha" (list (agent-repl-test-roster--row "m1" "m1" :merged)))
-                       (agent-repl-test-roster--merged-group
-                        "beta" (list (agent-repl-test-roster--row "m2" "m2" :merged)))))))
+                 :sections (list (agent-repl-test-roster--section
+                                  "repo" (list (agent-repl-test-roster--row "a" "a" :ready))))
+                 :closed (list (agent-repl-test-roster--row "x" "x" :ready :closed t)))))
     ;; Act
     (let ((ids (mapcar (lambda (e) (agent-repl-roster-row-id (plist-get e :row)))
                        (agent-repl-roster-walk roster))))
       ;; Assert
-      (should (equal ids '("m1" "m2"))))))
-
-(ert-deftest agent-repl-test-roster-walk-keeps-a-merged-group-on-the-bar ()
-  "A Recently Merged group's rows are walked as drawn, under the band's label."
-  ;; Arrange
-  (let ((roster (agent-repl-test-roster--roster
-                 :merged (list (agent-repl-test-roster--row "m1" "m1" :merged)))))
-    ;; Act
-    (let ((entry (car (agent-repl-roster-walk roster))))
-      ;; Assert
-      (should-not (plist-get entry :collapsed))
-      (should (equal (plist-get entry :label) "Recently Merged")))))
+      (should (equal ids '("a" "x"))))))
 
 (ert-deftest agent-repl-test-roster-walk-names-each-rows-section ()
   "Every walked entry names the section its row sits in, children included."
@@ -547,14 +542,14 @@ A hand-rolled ref-to-section walk there would drift from the helper."
                                          "p" "p" :ready
                                          :children (list (agent-repl-test-roster--row "c" "c" :ready))))))
                  :hidden (list (agent-repl-test-roster--row "h" "h" :ready))
-                 :merged (list (agent-repl-test-roster--row "m" "m" :merged)))))
+                 :closed (list (agent-repl-test-roster--row "x" "x" :ready :closed t)))))
     ;; Act
     (let ((sections (mapcar (lambda (e) (cons (agent-repl-roster-row-id (plist-get e :row))
                                               (plist-get e :section)))
                             (agent-repl-roster-walk roster))))
       ;; Assert
       (should (equal sections '(("p" . :repository) ("c" . :repository)
-                                ("h" . :hidden) ("m" . :merged)))))))
+                                ("h" . :hidden) ("x" . :closed)))))))
 
 ;;;; ---- Reconciliation ----
 
@@ -1593,8 +1588,9 @@ half-applied."
     (should (equal (agent-repl-test-roster--tabs) '("fix" "other")))))
 
 (ert-deftest agent-repl-test-roster-a-recently-merged-row-has-no-tab ()
-  "A merged workspace is never open, so its row has no tab: OPEN BEATS MERGED.
-A merged workspace that is reopened is listed in the Open section instead."
+  "A merged workspace is in no stream, only counted, so it has no tab.
+OPEN BEATS MERGED: a merged workspace that is reopened is listed in the
+Open section instead."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     ;; Act
@@ -3635,14 +3631,14 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
                                  :children (list (agent-repl-test-roster--row "w3" "three" :ready))))))))
     (should (equal (mapcar (lambda (entry) (plist-get entry :collapsed)) walked) '(nil t t)))))
 
-(ert-deftest agent-repl-test-roster-walk-puts-the-hidden-section-before-recently-merged ()
-  "The walk is repositories, then hidden, then recently merged."
+(ert-deftest agent-repl-test-roster-walk-puts-the-hidden-section-before-the-closed-stream ()
+  "The walk is repositories, then hidden, then the closed stream."
   (let ((walked (agent-repl-roster-walk
                  (agent-repl-test-roster--roster
                   :sections (list (agent-repl-test-roster--section
                                    "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
                   :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))
-                  :merged (list (agent-repl-test-roster--row "w3" "three" :merged))))))
+                  :closed (list (agent-repl-test-roster--row "w3" "three" :ready :closed t))))))
     (should (equal (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row))) walked)
                    '("w1" "w2" "w3")))))
 
@@ -4123,7 +4119,9 @@ workspace is the daemon's newer word, and is followed."
   "The push handler hands its stream to the apply."
   (agent-repl-test-roster--with-editor
     ;; Act
-    (agent-repl-roster-on-push (list :arm :roster :value (agent-repl-test-roster--two-tabs "a"))
+    (agent-repl-roster-on-push (list :arm :streams
+                                     :value (agent-repl-test-roster--push
+                                             (agent-repl-test-roster--two-tabs "a") 1))
                                'old-stream)
     ;; Assert
     (should (eq agent-repl-roster--view-stream 'old-stream))))
@@ -4198,6 +4196,405 @@ judged as any roster is."
       (agent-repl-roster-note-row row 3)
       ;; Assert
       (should (eq (gethash "a" agent-repl-roster--rows-by-id) row)))))
+
+;;;; ---- The streams: one push, four snapshots ----
+
+(defconst agent-repl-test-roster--queue
+  '(:header (:label (:text "Merge Queue")) :groups nil :fold (:arm :expanded :value nil))
+  "An empty merge queue stream's snapshot.")
+
+(defun agent-repl-test-roster--push (roster revision &rest absent)
+  "Return the decoded `RosterPush' at REVISION carrying ROSTER\='s streams.
+ROSTER is an assembled view (`agent-repl-test-roster--roster'); its
+workspaces stream is every key but the three other streams\=' and the
+revision.  ABSENT are stream keys the push leaves out (unchanged)."
+  (let ((workspaces (copy-sequence roster)))
+    (dolist (key '(:closed :recently-merged :merge-queue :revision))
+      (cl-remf workspaces key))
+    (let ((push (list :revision revision
+                      :workspaces workspaces
+                      :merge-queue (or (plist-get roster :merge-queue) agent-repl-test-roster--queue)
+                      :recently-merged (plist-get roster :recently-merged)
+                      :closed (plist-get roster :closed))))
+      (dolist (key absent)
+        (setq push (plist-put push key nil)))
+      push)))
+
+(defun agent-repl-test-roster--ids ()
+  "Return the ref ids of the held view\='s walk, in order."
+  (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row)))
+          (agent-repl-roster-walk agent-repl-roster-view)))
+
+(ert-deftest agent-repl-test-roster-a-complete-first-push-is-assembled-into-the-view ()
+  "The first push's streams become one view: the workspaces stream's keys,
+the closed, queue and merged streams beside them, and the push revision."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (let ((push (agent-repl-test-roster--push
+                 (agent-repl-test-roster--roster
+                  :sections (list (agent-repl-test-roster--section
+                                   "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))
+                  :closed (list (agent-repl-test-roster--row "x" "gone" :ready :closed t)))
+                 4)))
+      ;; Act
+      (agent-repl-roster-apply-push push)
+      ;; Assert
+      (should (equal (list (plist-get agent-repl-roster-view :revision)
+                           (plist-get agent-repl-roster-view :merge-queue)
+                           (plist-get agent-repl-roster-view :recently-merged)
+                           (plist-get agent-repl-roster-view :closed)
+                           (plist-get agent-repl-roster-view :repository))
+                     (list 4
+                           (plist-get push :merge-queue)
+                           (plist-get push :recently-merged)
+                           (plist-get push :closed)
+                           (plist-get (plist-get push :workspaces) :repository)))))))
+
+(ert-deftest agent-repl-test-roster-an-incomplete-first-push-is-refused-at-error ()
+  "A first push missing a stream breaks the contract: ERROR, naming what is missing."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        ;; Act
+        (agent-repl-roster-apply-push
+         (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4 :closed)))
+      ;; Assert
+      (should (equal errors
+                     '("elisp.roster.push: refused reason=first-push-incomplete missing=(:closed) revision=4"))))))
+
+(ert-deftest agent-repl-test-roster-an-incomplete-first-push-leaves-the-view-and-streams ()
+  "A refused first push is never half-applied: no view, no snapshots, no tab."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (let ((answer (agent-repl-roster-apply-push
+                   (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4
+                                                 :merge-queue))))
+      ;; Assert
+      (should (equal (list answer agent-repl-roster-view agent-repl-roster--streams
+                           (agent-repl-test-roster--tabs))
+                     '(nil nil nil nil))))))
+
+(ert-deftest agent-repl-test-roster-a-new-subscriptions-incomplete-first-push-is-refused ()
+  "Snapshots held from another subscription do not complete a new one's first push."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4) 'old-stream)
+    (let ((held agent-repl-roster-view))
+      ;; Act
+      (agent-repl-roster-apply-push
+       (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "b") 1 :closed)
+       'new-stream)
+      ;; Assert
+      (should (eq agent-repl-roster-view held)))))
+
+(ert-deftest agent-repl-test-roster-a-later-push-replaces-only-the-streams-it-carries ()
+  "A stream a later push leaves out is unchanged: the closed rows stay while
+the workspaces stream is replaced."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push
+      (agent-repl-test-roster--roster
+       :sections (list (agent-repl-test-roster--section
+                        "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))
+       :closed (list (agent-repl-test-roster--row "x" "gone" :ready :closed t)))
+      4))
+    ;; Act
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push
+      (agent-repl-test-roster--roster
+       :sections (list (agent-repl-test-roster--section
+                        "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                     (agent-repl-test-roster--row "b" "two" :ready)))))
+      5 :closed :merge-queue :recently-merged))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--ids) '("a" "b" "x")))))
+
+(ert-deftest agent-repl-test-roster-a-later-push-of-one-stream-keeps-the-workspaces ()
+  "A push carrying only the closed stream replaces it and keeps the workspaces."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4))
+    ;; Act
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push
+      (agent-repl-test-roster--roster
+       :closed (list (agent-repl-test-roster--row "x" "gone" :ready :closed t)))
+      5 :workspaces :merge-queue :recently-merged))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--ids) '("a" "b" "x")))))
+
+(ert-deftest agent-repl-test-roster-a-partial-push-raises-the-held-revision ()
+  "The revision is the push's: a push leaving the workspaces stream out still
+raises what every revision reader compares against."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4))
+    ;; Act
+    (agent-repl-roster-apply-push
+     (list :revision 9 :merge-queue agent-repl-test-roster--queue))
+    ;; Assert
+    (should (equal (agent-repl-roster--held-revision) 9))))
+
+(ert-deftest agent-repl-test-roster-a-partial-pushs-revision-keeps-an-older-answer-row-out ()
+  "An answer row from before the push revision is older than the held roster."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4))
+    (agent-repl-roster-apply-push (list :revision 9 :closed '(:rows nil)))
+    (let ((held (gethash "a" agent-repl-roster--rows-by-id)))
+      ;; Act
+      (agent-repl-roster-note-row (agent-repl-test-roster--row "a" "one" :thinking) 8)
+      ;; Assert
+      (should (eq (gethash "a" agent-repl-roster--rows-by-id) held)))))
+
+(ert-deftest agent-repl-test-roster-a-dropped-pushs-streams-are-still-held ()
+  "A complete push an invariant drops keeps its snapshots, the daemon's word of
+what it sent, while the view stays the last accepted one."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-roster-apply-push
+     (agent-repl-test-roster--push (agent-repl-test-roster--two-tabs "a") 4))
+    (let ((held agent-repl-roster-view)
+          (duplicate (agent-repl-test-roster--roster
+                      :sections (list (agent-repl-test-roster--section
+                                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                                    (agent-repl-test-roster--row "a" "dup" :ready)))))))
+      (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+        ;; Act
+        (agent-repl-roster-apply-push
+         (agent-repl-test-roster--push duplicate 5 :closed :merge-queue :recently-merged)))
+      ;; Assert
+      (should (equal (list (eq agent-repl-roster-view held)
+                           (plist-get agent-repl-roster--streams :revision)
+                           (plist-get agent-repl-roster--streams :workspaces))
+                     (list t 5 (plist-get (agent-repl-test-roster--push duplicate 5) :workspaces)))))))
+
+;;;; ---- The merged pages ----
+
+(defun agent-repl-test-roster--merged-answer (token ids &optional more)
+  "Return a decoded ListMergedWorkspaces success at TOKEN holding IDS' rows.
+MORE non-nil makes it a `more' page, else the last."
+  (let ((rows (list :rows (mapcar (lambda (id)
+                                    (list :row (agent-repl-test-roster--row
+                                                id (concat "m-" id) :merged :closed t)))
+                                  ids))))
+    (list :arm :success
+          :value (list :revision (list :revision token)
+                       :extent (if more
+                                   (list :arm :more :value (list :rows rows :omitted 10))
+                                 (list :arm :last :value (list :rows rows)))))))
+
+(defmacro agent-repl-test-roster--with-pages (answers &rest body)
+  "Run BODY with the sync merged-page verb answering ANSWERS, page by call.
+ANSWERS is a list; each element is a response, or a function called with
+the request that answers one (or signals).  The requests are recorded
+in `requests', oldest first."
+  (declare (indent 1))
+  `(let ((answers ,answers) (requests nil))
+     (cl-letf (((symbol-function 'agent-repl-rpc-list-merged-workspaces-sync)
+                (lambda (_conn request &optional _timeout)
+                  (setq requests (append requests (list request)))
+                  (let ((answer (pop answers)))
+                    (if (functionp answer) (funcall answer request) answer)))))
+       ,@body)))
+
+(defun agent-repl-test-roster--entry-ids (entries)
+  "Return the ref ids of walk ENTRIES."
+  (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row))) entries))
+
+(ert-deftest agent-repl-test-roster-merged-pages-are-read-until-the-last ()
+  "With no page limit every page is read, in order, until the last."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--with-pages
+        (list (agent-repl-test-roster--merged-answer 3 '("m1" "m2") t)
+              (agent-repl-test-roster--merged-answer 3 '("m3")))
+      ;; Act
+      (let ((entries (agent-repl-roster-merged-entries-sync 'conn)))
+        ;; Assert
+        (should (equal (list (agent-repl-test-roster--entry-ids entries)
+                             (mapcar (lambda (r) (plist-get r :page)) requests))
+                       '(("m1" "m2" "m3") (0 1))))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-ask-every-repository-most-recently-merged ()
+  "Every page asks for every repository, most recently merged first."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--with-pages
+        (list (agent-repl-test-roster--merged-answer 3 nil))
+      ;; Act
+      (agent-repl-roster-merged-entries-sync 'conn)
+      ;; Assert
+      (should (equal requests
+                     '((:repository nil :order (:arm :most-recently-merged :value nil) :page 0)))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-stop-at-the-page-limit ()
+  "A page limit stops the read though the daemon says more follow."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--with-pages
+        (list (agent-repl-test-roster--merged-answer 3 '("m1") t)
+              (agent-repl-test-roster--merged-answer 3 '("m2") t)
+              (agent-repl-test-roster--merged-answer 3 '("m3") t))
+      ;; Act
+      (let ((entries (agent-repl-roster-merged-entries-sync 'conn 2)))
+        ;; Assert
+        (should (equal (list (agent-repl-test-roster--entry-ids entries) (length requests))
+                       '(("m1" "m2") 2)))))))
+
+(ert-deftest agent-repl-test-roster-merged-entries-are-walk-entries-of-the-merged-section ()
+  "A paged row is a walk entry of `:merged', under the band's label, with no tab."
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-roster-view (agent-repl-test-roster--roster))
+    (agent-repl-test-roster--with-pages
+        (list (agent-repl-test-roster--merged-answer 3 '("m1")))
+      ;; Act
+      (let ((entry (car (agent-repl-roster-merged-entries-sync 'conn))))
+        ;; Assert
+        (should (equal (list (plist-get entry :section) (plist-get entry :label)
+                             (plist-get entry :collapsed) (plist-get entry :tab))
+                       '(:merged "Recently Merged" nil nil)))))))
+
+(ert-deftest agent-repl-test-roster-merged-entries-leave-out-a-workspace-the-streams-hold ()
+  "A workspace both paged and on a stream (a push in flight) is the stream's."
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-roster-view (agent-repl-test-roster--two-tabs "a"))
+    (agent-repl-test-roster--with-pages
+        (list (agent-repl-test-roster--merged-answer 3 '("a" "m1")))
+      ;; Act / Assert
+      (should (equal (agent-repl-test-roster--entry-ids
+                      (agent-repl-roster-merged-entries-sync 'conn))
+                     '("m1"))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-of-a-moved-set-are-read-again ()
+  "Pages naming two sets were read across a change: the walk reads again."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--with-pages
+        (list (agent-repl-test-roster--merged-answer 3 '("m1") t)
+              (agent-repl-test-roster--merged-answer 4 '("m0"))
+              (agent-repl-test-roster--merged-answer 4 '("m0") t)
+              (agent-repl-test-roster--merged-answer 4 '("m1")))
+      ;; Act
+      (let ((entries (agent-repl-roster-merged-entries-sync 'conn)))
+        ;; Assert
+        (should (equal (list (agent-repl-test-roster--entry-ids entries)
+                             (mapcar (lambda (r) (plist-get r :page)) requests))
+                       '(("m0" "m1") (0 1 0 1))))))))
+
+(defun agent-repl-test-roster--merged-failure (answers)
+  "Read the merged pages over ANSWERS; return (SIGNAL-DATA ERRORS).
+SIGNAL-DATA is `agent-repl-roster-merged-error''s, and ERRORS the ERROR
+records written, newest first."
+  (let ((errors nil) (data nil))
+    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+      (agent-repl-test-roster--with-pages answers
+        (condition-case err
+            (agent-repl-roster-merged-entries-sync 'conn)
+          (agent-repl-roster-merged-error (setq data (cdr err))))))
+    (list data errors)))
+
+(ert-deftest agent-repl-test-roster-merged-pages-not-ready-is-a-surfaced-failure ()
+  "The daemon's `not_ready' is no empty list: it is recorded and signalled."
+  (agent-repl-test-roster--with-editor
+    (should (equal (agent-repl-test-roster--merged-failure
+                    (list '(:arm :error :value (:cause (:arm :not-ready :value nil)))))
+                   '((0 "error-arm :not-ready")
+                     ("elisp.roster.merged-page-failed: page=0 cause=error-arm :not-ready"))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-unknown-repository-is-a-surfaced-failure ()
+  "The daemon's `unknown_repository' is recorded and signalled, naming its page."
+  (agent-repl-test-roster--with-editor
+    (should (equal (agent-repl-test-roster--merged-failure
+                    (list (agent-repl-test-roster--merged-answer 3 '("m1") t)
+                          '(:arm :error :value (:cause (:arm :unknown-repository
+                                                        :value (:repository (:id "r" :dir "/r")))))))
+                   '((1 "error-arm :unknown-repository")
+                     ("elisp.roster.merged-page-failed: page=1 cause=error-arm :unknown-repository"))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-transport-failure-is-a-surfaced-failure ()
+  "A transport failure is recorded and signalled as the merged error."
+  (agent-repl-test-roster--with-editor
+    (should (equal (agent-repl-test-roster--merged-failure
+                    (list (lambda (_request)
+                            (signal 'agent-repl-connect-error '(:kind :refused)))))
+                   '((0 "agent-repl-connect-error (:kind :refused)")
+                     ("elisp.roster.merged-page-failed: page=0 cause=agent-repl-connect-error (:kind :refused)"))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-of-a-set-moving-under-every-read-fail ()
+  "A set that changes under every read is a failure, never a mixed list."
+  (agent-repl-test-roster--with-editor
+    (should (equal (car (agent-repl-test-roster--merged-failure
+                         (list (agent-repl-test-roster--merged-answer 3 '("m1") t)
+                               (agent-repl-test-roster--merged-answer 4 '("m2"))
+                               (agent-repl-test-roster--merged-answer 4 '("m1") t)
+                               (agent-repl-test-roster--merged-answer 5 '("m2")))))
+                   '(0 "the merged set changed under 2 reads")))))
+
+(defmacro agent-repl-test-roster--with-async-pages (answers &rest body)
+  "Run BODY with the async merged-page verb answering ANSWERS, page by call.
+Each element is a response handed to `:on-response', or `(:failure D)'
+handed to `:on-failure'."
+  (declare (indent 1))
+  `(let ((answers ,answers))
+     (cl-letf (((symbol-function 'agent-repl-rpc-list-merged-workspaces)
+                (cl-function
+                 (lambda (_conn _request &key on-response on-failure _timeout)
+                   (let ((answer (pop answers)))
+                     (if (eq (car answer) :failure)
+                         (funcall on-failure (cadr answer))
+                       (funcall on-response answer)))))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-merged-pages-read-async-hand-every-entry-over ()
+  "The async read walks every page and hands the entries over once."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--with-async-pages
+        (list (agent-repl-test-roster--merged-answer 3 '("m1") t)
+              (agent-repl-test-roster--merged-answer 3 '("m2")))
+      (let ((got nil) (failed nil))
+        ;; Act
+        (agent-repl-roster-merged-entries 'conn
+                                          (lambda (entries) (push entries got))
+                                          (lambda (data) (push data failed)))
+        ;; Assert
+        (should (equal (list (mapcar #'agent-repl-test-roster--entry-ids got) failed)
+                       '((("m1" "m2")) nil)))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-read-async-surface-an-error-arm ()
+  "An error arm on an async read is recorded and handed to the failure alone."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--with-async-pages
+        (list '(:arm :error :value (:cause (:arm :not-ready :value nil))))
+      (let ((got nil) (failed nil) (errors nil))
+        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+          ;; Act
+          (agent-repl-roster-merged-entries 'conn
+                                            (lambda (entries) (push entries got))
+                                            (lambda (data) (push data failed))))
+        ;; Assert
+        (should (equal (list got failed errors)
+                       '(nil ((0 "error-arm :not-ready"))
+                         ("elisp.roster.merged-page-failed: page=0 cause=error-arm :not-ready"))))))))
+
+(ert-deftest agent-repl-test-roster-merged-pages-read-async-surface-a-transport-failure ()
+  "A transport failure on an async read is recorded and handed to the failure."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--with-async-pages
+        (list (agent-repl-test-roster--merged-answer 3 '("m1") t)
+              '(:failure (:kind :refused)))
+      (let ((got nil) (failed nil) (errors nil))
+        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+          ;; Act
+          (agent-repl-roster-merged-entries 'conn
+                                            (lambda (entries) (push entries got))
+                                            (lambda (data) (push data failed))))
+        ;; Assert
+        (should (equal (list got failed errors)
+                       '(nil ((1 "transport (:kind :refused)"))
+                         ("elisp.roster.merged-page-failed: page=1 cause=transport (:kind :refused)"))))))))
 
 ;;;; ---- Threads are workspaces off the bar ----
 

@@ -32,7 +32,7 @@ func requireOpenChildRefusal(t *testing.T, f *retargetFamily, arm *agentreplv1.W
 // subscription, whose first frame is the roster as it stands.
 func requireStillNested(t *testing.T, f *retargetFamily) {
 	t.Helper()
-	awaitRoster(t, f.d, f.d.WatchRoster(), "the family still open and nested", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, f.d.WatchRoster(), "the family still open and nested", func(r *frontendv1.RosterPush) bool {
 		return f.nested(r)
 	})
 }

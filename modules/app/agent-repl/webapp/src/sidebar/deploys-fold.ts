@@ -60,6 +60,12 @@ const OTHER_WORKSPACE_SELECTOR = "[data-roster-row]";
 export interface DeploysFold {
   /** Whether GROUP is folded now: the hand's choice while it stands, else open. */
   folded(group: HTMLElement): boolean;
+  /**
+   * Whether REPOSITORY's Recently Merged group is folded now, drawn or not:
+   * what its merged pages are loaded by (`merged-pages.ts`). A Recently
+   * Merged group states no line, so its choice stands until it is reset.
+   */
+  mergedFolded(repository: string): boolean;
   /** Fold GROUP when it is open, open it when it is folded; the header's click. */
   toggle(group: HTMLElement): void;
   /** Drop every choice made by hand, WHY naming what the user did; nothing when none stands. */
@@ -119,11 +125,12 @@ export function foldKeyOf(group: HTMLElement): string {
  */
 export function createDeploysFold(root: ParentNode, changed: () => void): DeploysFold {
   const choices = new Map<string, Choice>();
-  const folded = (group: HTMLElement): boolean => {
-    const choice = choices.get(foldKeyOf(group));
-    if (choice === undefined || choice.line !== group.getAttribute(DEPLOYS_LINE_ATTRIBUTE)) return false;
+  const foldedAt = (groupKey: string, line: string | null): boolean => {
+    const choice = choices.get(groupKey);
+    if (choice === undefined || choice.line !== line) return false;
     return choice.folded;
   };
+  const folded = (group: HTMLElement): boolean => foldedAt(foldKeyOf(group), group.getAttribute(DEPLOYS_LINE_ATTRIBUTE));
   const paint = (group: HTMLElement): void => {
     group.classList.toggle(FOLDED_CLASS, folded(group));
   };
@@ -133,6 +140,7 @@ export function createDeploysFold(root: ParentNode, changed: () => void): Deploy
   };
   return {
     folded,
+    mergedFolded: (repository) => foldedAt(`recently-merged:${repository}`, null),
     toggle: (group) => {
       const groupKey = foldKeyOf(group);
       const to = !folded(group);

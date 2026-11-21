@@ -9,14 +9,13 @@
  * view state: it is transient to the page that opened it.
  */
 import type { DeploysFold } from "./deploys-fold.js";
-import type { DeploysMore } from "./deploys-more.js";
 import type { DrawnStatusLog } from "../drawn-status.js";
+import type { MergedPages } from "./merged-pages.js";
 import type { DaemonContext } from "../rpc/context.js";
 import type { ArrangeHold } from "./arrange.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
 import type { RowMenus } from "./row-menu.js";
-import type { RowReveal } from "./reveal.js";
 import type { SelectionFade } from "./selection-fade.js";
 import type { FoldFade } from "./fold-fade.js";
 import type { DrawnView, SidebarView } from "./view.js";
@@ -60,8 +59,6 @@ export interface RailContext {
   rowMenus: RowMenus;
   /** Where a drawn row's attention marker is registered (`attention.ts`). */
   attention: AttentionMarks;
-  /** Draws a row the first time it comes into view (`reveal.ts`). */
-  reveal: RowReveal;
   /** The highlighted row's number fade, across redraws (`selection-fade.ts`). */
   selectionFade: SelectionFade;
   /** The fade of a row a fold stops drawing, across redraws (`fold-fade.ts`). */
@@ -76,8 +73,8 @@ export interface RailContext {
   arrange: ArrangeContext;
   /** Whether each Merge Queue and Recently Merged group is folded, this page's own (`deploys-fold.ts`). */
   deploysFold: DeploysFold;
-  /** How many older merges each Recently Merged group shows, this page's own (`deploys-more.ts`). */
-  deploysMore: DeploysMore;
+  /** The Recently Merged groups' pages of rows this page has loaded (`merged-pages.ts`). */
+  mergedPages: MergedPages;
 }
 
 /**

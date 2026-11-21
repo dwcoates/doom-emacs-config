@@ -608,9 +608,10 @@ AT-MS, or 0 when neither is given: every row states one."
 
 (defun agent-repl-test-commands--roster (rows &optional hidden merged)
   "Return a decoded roster carrying ROWS: the open ones in one repo section.
-A closed one of ROWS is listed in the closed list, as the daemon lists
-it.  HIDDEN is the hidden section's rows and MERGED the recently-merged
-band's, in one group."
+A closed one of ROWS is listed in the closed stream, as the daemon lists
+it.  HIDDEN is the hidden section's rows.  MERGED are merged rows, which
+no stream carries: the Recently Merged summary only counts them, and
+their rows are paged (`agent-repl-test-commands--with-merged-pages')."
   (let ((open (seq-remove #'agent-repl-roster-row-closed-p rows))
         (closed (seq-filter #'agent-repl-roster-row-closed-p rows)))
     (list :repository
@@ -620,10 +621,12 @@ band's, in one group."
                                        :entries (agent-repl-test--row-entries open)))))
           :hidden (list :header (list :label (list :text "Hidden"))
                         :hidden-rows (agent-repl-test--hidden-rows hidden))
-          :recently-merged (list :header (list :label (list :text "m"))
+          :recently-merged (list :header (list :label (list :text "m")
+                                               :count (list :workspaces (length merged)))
                                  :groups (and merged
                                               (list (list :header (list :label (list :text "repo"))
-                                                          :merged-rows (agent-repl-test--merged-rows merged)))))
+                                                          :summary (list :count (list :merges (length merged))))))
+                                 :merged-revision (list :revision 1))
           :closed (agent-repl-test--closed-rows closed)
           :current nil)))
 
@@ -640,6 +643,46 @@ SELECTED-MS is its last-selected instant, 100 when not given."
   (let ((row (agent-repl-test-commands--row name (concat "id-" name) (or selected-ms 100) t at-ms)))
     (plist-put row :status '(:arm :merged :value nil))
     (plist-put row :when (list :arm :merged :value (list :at-ms at-ms)))))
+
+(defvar agent-repl-test-commands--pages-read nil
+  "The merged pages the switcher asked the daemon for, oldest first.")
+
+(defun agent-repl-test-commands--merged-pages (merged)
+  "Return MERGED rows as the daemon pages them, ten to a page.
+Most recently merged first, as `ListMergedWorkspaces' orders them; every
+page but the last is a `more' page.  No merged row is one empty last page."
+  (let* ((sorted (sort (copy-sequence merged)
+                       (lambda (a b) (> (agent-repl-roster-row-merged-at a)
+                                        (agent-repl-roster-row-merged-at b)))))
+         (pages (or (seq-partition sorted 10) (list nil))))
+    (seq-map-indexed
+     (lambda (rows i)
+       (let ((wrapped (list :rows (mapcar (lambda (row) (list :row row)) rows))))
+         (list :arm :success
+               :value (list :revision (list :revision 1)
+                            :extent (if (< (1+ i) (length pages))
+                                        (list :arm :more :value (list :rows wrapped :omitted 1))
+                                      (list :arm :last :value (list :rows wrapped)))))))
+     pages)))
+
+(defmacro agent-repl-test-commands--with-merged-pages (merged &rest body)
+  "Run BODY with the daemon paging MERGED, and no link to stand up.
+Each page asked for is recorded in `agent-repl-test-commands--pages-read',
+emptied first, which a test reading it binds around the run; a page past
+the last answers an empty last page."
+  (declare (indent 1))
+  `(let ((pages (agent-repl-test-commands--merged-pages ,merged)))
+     (setq agent-repl-test-commands--pages-read nil)
+     (cl-letf (((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _ws) 'conn))
+               ((symbol-function 'agent-repl-rpc-list-merged-workspaces-sync)
+                (lambda (_conn request &optional _timeout)
+                  (let ((page (plist-get request :page)))
+                    (setq agent-repl-test-commands--pages-read
+                          (append agent-repl-test-commands--pages-read (list page)))
+                    (or (nth page pages)
+                        '(:arm :success :value (:revision (:revision 1)
+                                                :extent (:arm :last :value (:rows (:rows nil))))))))))
+       ,@body)))
 
 (defmacro agent-repl-test-commands--with-rows (rows history &rest body)
   "Run BODY over a roster of ROWS, with HISTORY as this session's switches.
@@ -2205,7 +2248,8 @@ workspaces only."
                 ((symbol-function 'agent-repl-host-request-switch) (lambda (_ws _trigger) nil))
                 ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil)))
         ;; Act
-        (agent-repl-switch-to-project))
+        (agent-repl-test-commands--with-merged-pages nil
+          (agent-repl-switch-to-project)))
       ;; Assert
       (should (equal offered '("real-ws"))))))
 
@@ -2214,7 +2258,8 @@ workspaces only."
 nothing to switch to."
   (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
             ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil)))
-    (should-error (agent-repl-switch-to-project) :type 'user-error)))
+    (agent-repl-test-commands--with-merged-pages nil
+      (should-error (agent-repl-switch-to-project) :type 'user-error))))
 
 ;;;; ---- The `SPC p p' switcher offers EVERY KNOWN workspace ----
 
@@ -2266,7 +2311,8 @@ and `--switched' to the workspace whose switch was requested of the daemon."
                ((symbol-function 'agent-repl-verbs-select-minted)
                 (lambda (ref _dispatched-at &optional lander)
                   (setq agent-repl-test-commands--landed (cons ref lander)))))
-       ,@body)))
+       (agent-repl-test-commands--with-merged-pages nil
+         ,@body))))
 
 (ert-deftest agent-repl-test-commands-switcher-offers-a-closed-workspace ()
   "A workspace the user closed is a workspace you can switch to, so it is offered."
@@ -2428,7 +2474,7 @@ and `--switched' to the workspace whose switch was requested of the daemon."
   ;; Arrange
   (agent-repl-test-commands--switcher nil nil
     (cl-letf (((symbol-function 'agent-repl--switch-candidates)
-               (lambda () '((:name "orphan" :dir nil :ref nil :ws nil :state :closed))))
+               (lambda (&optional _all) '((:name "orphan" :dir nil :ref nil :ws nil :state :closed))))
               ((symbol-function 'completing-read)
                (agent-repl-test-commands--pick "orphan")))
       ;; Act / Assert
@@ -2437,10 +2483,12 @@ and `--switched' to the workspace whose switch was requested of the daemon."
 ;;;; ---- `SPC p p' offers the current and recent workspaces ----
 
 (defun agent-repl-test-commands--offered-by (command rows &optional hidden merged)
-  "Run COMMAND over a roster of ROWS, HIDDEN and MERGED; answer what it offered."
+  "Run COMMAND over a roster of ROWS, HIDDEN and MERGED; answer what it offered.
+MERGED are paged by the daemon (`agent-repl-test-commands--with-merged-pages')."
   (let ((agent-repl-test-commands--offered nil)
         (agent-repl-roster-view (agent-repl-test-commands--roster rows hidden merged)))
-    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+    (agent-repl-test-commands--with-merged-pages merged
+     (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
               ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
               ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
               ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
@@ -2451,7 +2499,7 @@ and `--switched' to the workspace whose switch was requested of the daemon."
                  (setq agent-repl-test-commands--offered (all-completions "" table))
                  (car agent-repl-test-commands--offered))))
       (funcall command)
-      agent-repl-test-commands--offered)))
+      agent-repl-test-commands--offered))))
 
 (ert-deftest agent-repl-test-commands-switcher-unhides-a-chosen-hidden-workspace ()
   "Choosing a hidden workspace in `SPC p p' shows it rather than only switching."
@@ -2471,7 +2519,8 @@ and `--switched' to the workspace whose switch was requested of the daemon."
               ((symbol-function 'agent-repl-host-request-switch)
                (lambda (ws _t) (setq switched ws))))
       ;; Act
-      (agent-repl-switch-to-project)
+      (agent-repl-test-commands--with-merged-pages nil
+        (agent-repl-switch-to-project))
       ;; Assert
       (should (equal unhidden '(("tucked" nil))))
       (should-not switched))))
@@ -2586,6 +2635,70 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (= (length offered) agent-repl--switch-recent-limit))
       (should (equal (car offered) "m30"))
       (should (equal (car (last offered)) "m06")))))
+
+(ert-deftest agent-repl-test-commands-switcher-reads-the-three-pages-of-the-recent-merges ()
+  "`SPC p p' reads just the pages holding the 25 most recently merged."
+  ;; Arrange
+  (let ((merged (cl-loop for i from 1 to 45
+                         collect (agent-repl-test-commands--merged-row
+                                  (format "m%02d" i) (* 1000 i)))))
+    (let ((agent-repl-test-commands--pages-read nil))
+      ;; Act
+      (agent-repl-test-commands--offered-by #'agent-repl-switch-to-project nil nil merged)
+      ;; Assert
+      (should (equal agent-repl-test-commands--pages-read '(0 1 2))))))
+
+(ert-deftest agent-repl-test-commands-switch-to-any-reads-every-merged-page ()
+  "`SPC p P' reads every merged page, until the daemon says it is the last."
+  ;; Arrange
+  (let ((merged (cl-loop for i from 1 to 45
+                         collect (agent-repl-test-commands--merged-row
+                                  (format "m%02d" i) (* 1000 i)))))
+    (let* ((agent-repl-test-commands--pages-read nil)
+           ;; Act
+           (offered (agent-repl-test-commands--offered-by
+                     #'agent-repl-switch-to-any-workspace nil nil merged)))
+      ;; Assert
+      (should (equal (list agent-repl-test-commands--pages-read (length offered))
+                     '((0 1 2 3 4) 45))))))
+
+(ert-deftest agent-repl-test-commands-switcher-marks-a-paged-workspace-merged ()
+  "A paged merged workspace keeps the merged section, so its line says merged."
+  ;; Arrange
+  (let ((agent-repl-roster-view (agent-repl-test-commands--roster nil)))
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      (agent-repl-test-commands--with-merged-pages
+          (list (agent-repl-test-commands--merged-row "landed" 700))
+        ;; Act
+        (let ((entry (car (agent-repl--switch-candidates))))
+          ;; Assert
+          (should (equal (list (plist-get entry :name) (plist-get entry :section)
+                               (agent-repl--switch-state-label entry))
+                         '("landed" :merged "merged"))))))))
+
+(ert-deftest agent-repl-test-commands-switcher-surfaces-a-merged-page-it-could-not-read ()
+  "A merged page the daemon refuses fails the switcher loudly, offering nothing."
+  ;; Arrange
+  (let ((agent-repl-roster-view (agent-repl-test-commands--roster
+                                 (list (agent-repl-test-commands--row "open" "id-open" 100))))
+        (offered :never)
+        (errors nil))
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _ws) 'conn))
+              ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors))
+              ((symbol-function 'agent-repl-rpc-list-merged-workspaces-sync)
+               (lambda (&rest _) '(:arm :error :value (:cause (:arm :not-ready :value nil)))))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _) (setq offered :asked) "open")))
+      ;; Act
+      (let ((err (should-error (agent-repl-switch-to-project)
+                               :type 'agent-repl-roster-merged-error)))
+        ;; Assert
+        (should (equal (list (cdr err) offered errors)
+                       '((0 "error-arm :not-ready") :never
+                         ("elisp.roster.merged-page-failed: page=0 cause=error-arm :not-ready"))))))))
 
 (ert-deftest agent-repl-test-commands-switcher-offers-the-25-most-recently-user-closed ()
   "Only the ones the user most recently closed are offered, newest first."

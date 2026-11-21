@@ -56,14 +56,14 @@ func quietResolver(t *testing.T) (sidebar.Resolver, *viewquiet.Gate, *skipCounte
 func TestAQuietRosterPublishesNothingButStillReportsTheStatusChange(t *testing.T) {
 	// Arrange
 	r, gate, counter, changes, _ := quietResolver(t)
-	before := latest(t, r).GetRevision()
+	before := latestPush(t, r).GetRevision()
 	gate.Set(true)
 
 	// Act: the arm moves from ready to submitting while the lid is closed.
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Assert
-	if got := latest(t, r).GetRevision(); got != before {
+	if got := latestPush(t, r).GetRevision(); got != before {
 		t.Fatalf("revision = %d, want %d: a quiet roster publishes nothing", got, before)
 	}
 	if got := changes(); len(got) != 1 || got[0] != theWS {
@@ -77,7 +77,7 @@ func TestAQuietRosterPublishesNothingButStillReportsTheStatusChange(t *testing.T
 func TestLeavingTheQuietStatePublishesTheCurrentRosterOnce(t *testing.T) {
 	// Arrange
 	r, gate, _, changes, _ := quietResolver(t)
-	before := latest(t, r).GetRevision()
+	before := latestPush(t, r).GetRevision()
 	gate.Set(true)
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetSummary(theWS, "a summary while the lid is closed")
@@ -108,14 +108,14 @@ func TestLeavingTheQuietStatePublishesTheCurrentRosterOnce(t *testing.T) {
 func TestLeavingAQuietStateThatSkippedNothingPublishesNothing(t *testing.T) {
 	// Arrange
 	r, gate, _, _, _ := quietResolver(t)
-	before := latest(t, r).GetRevision()
+	before := latestPush(t, r).GetRevision()
 	gate.Set(true)
 
 	// Act
 	gate.Set(false)
 
 	// Assert
-	if got := latest(t, r).GetRevision(); got != before {
+	if got := latestPush(t, r).GetRevision(); got != before {
 		t.Fatalf("revision = %d, want %d: nothing moved", got, before)
 	}
 }
@@ -136,14 +136,14 @@ func TestAQuietRosterPublishesARowMovingOntoADepartureArm(t *testing.T) {
 			for _, state := range tt.merge[:len(tt.merge)-1] {
 				r.SetMerge(theWS, mergeStates[state])
 			}
-			before := latest(t, r).GetRevision()
+			before := latestPush(t, r).GetRevision()
 			gate.Set(true)
 
 			// Act
 			r.SetMerge(theWS, mergeStates[tt.merge[len(tt.merge)-1]])
 
 			// Assert
-			if got := latest(t, r).GetRevision(); got != before+1 {
+			if got := latestPush(t, r).GetRevision(); got != before+1 {
 				t.Fatalf("revision = %d, want %d: a departure is published while quiet", got, before+1)
 			}
 			if got := statusName(onlyRow(t, r)); got != tt.want {
@@ -159,14 +159,14 @@ func TestAQuietRosterPublishesARowMovingOntoADepartureArm(t *testing.T) {
 func TestAQuietRosterHoldsBackAMergeThatHasNotStarted(t *testing.T) {
 	// Arrange
 	r, gate, _, _, surfaces := quietResolver(t)
-	before := latest(t, r).GetRevision()
+	before := latestPush(t, r).GetRevision()
 	gate.Set(true)
 
 	// Act: the merge is only queued, so no worktree is leaving yet.
 	r.SetMerge(theWS, mergeStates["queued"])
 
 	// Assert
-	if got := latest(t, r).GetRevision(); got != before {
+	if got := latestPush(t, r).GetRevision(); got != before {
 		t.Fatalf("revision = %d, want %d: a queued merge is not a departure", got, before)
 	}
 	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.quiet_departure"}); ok {
@@ -180,13 +180,13 @@ func TestLeavingTheQuietStateAfterAPublishedDepartureRepublishesNothing(t *testi
 	r.SetMerge(theWS, mergeStates["queued"])
 	gate.Set(true)
 	r.SetMerge(theWS, mergeStates["merging"])
-	published := latest(t, r).GetRevision()
+	published := latestPush(t, r).GetRevision()
 
 	// Act
 	gate.Set(false)
 
 	// Assert
-	if got := latest(t, r).GetRevision(); got != published {
+	if got := latestPush(t, r).GetRevision(); got != published {
 		t.Fatalf("revision = %d, want %d: the departure's roster was already current", got, published)
 	}
 }
@@ -212,5 +212,67 @@ func TestDepartureArmNamesTheArmsAMergeRemovesAWorktreeUnder(t *testing.T) {
 				t.Fatalf("DepartureArm(%q) = %v, want %v", tt.arm, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAQuietRosterPublishesAChangedMergedSet(t *testing.T) {
+	tests := []struct {
+		name      string
+		after     sidebar.Registry
+		wantMoved bool
+	}{
+		{name: "a merged workspace nuked while quiet is published", after: registry(workspace(string(theWS), "one")), wantMoved: true},
+		{name: "a change that leaves the merged set alone waits for the lid", after: registry(workspace(string(theWS), "renamed"), mergedAt("m", time.Hour)), wantMoved: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a merged workspace beside the live one, then the lid
+			// closes.
+			r, gate, _, _, surfaces := quietResolver(t)
+			r.SetRegistry(registry(workspace(string(theWS), "one"), mergedAt("m", time.Hour)))
+			before := latestPush(t, r).GetRevision()
+			gate.Set(true)
+
+			// Act.
+			r.SetRegistry(tt.after)
+
+			// Assert: a changed set is published while quiet, so a page and
+			// the summary it is drawn beside never name two sets.
+			if moved := latestPush(t, r).GetRevision() != before; moved != tt.wantMoved {
+				t.Fatalf("published = %v, want %v", moved, tt.wantMoved)
+			}
+			_, recorded := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sidebar.quiet_merged_set"})
+			if recorded != tt.wantMoved {
+				t.Fatalf("quiet_merged_set recorded = %v, want %v", recorded, tt.wantMoved)
+			}
+			if tt.wantMoved {
+				page, err := r.MergedPage(sidebar.MergedPageQuery{Order: sidebar.MergedByMerge})
+				if err != nil || page.Revision != latestPush(t, r).GetRecentlyMerged().GetMergedRevision().GetRevision() || len(page.Rows) != 0 {
+					t.Fatalf("page = %v (%v), want no rows under the published summary's token", page, err)
+				}
+			}
+		})
+	}
+}
+
+func TestAMergedWorkspaceMovingOntoADepartureArmWhileQuietIsStillADeparture(t *testing.T) {
+	// Arrange: the registry closed the live workspace as merged before the
+	// orchestrator's merged facts arrived, so it is in the merged set, in no
+	// stream, while its arm still projects the merge's run.
+	r, gate, _, changes, surfaces := quietResolver(t)
+	r.SetMerge(theWS, mergeStates["queued"])
+	r.SetRegistry(registry(mergedAt(string(theWS), 0)))
+	gate.Set(true)
+
+	// Act: the merge's run starts, a departure arm.
+	r.SetMerge(theWS, mergeStates["merging"])
+
+	// Assert: its status change is reported and the departure recorded, as
+	// for a row a stream carries.
+	if got := changes(); len(got) == 0 || got[len(got)-1] != theWS {
+		t.Fatalf("status changes = %v, want %s's move onto merging", got, theWS)
+	}
+	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sidebar.quiet_departure"}); !ok {
+		t.Fatalf("no daemon.sidebar.quiet_departure record: %v", surfaces.Records())
 	}
 }

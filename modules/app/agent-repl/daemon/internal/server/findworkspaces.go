@@ -79,11 +79,13 @@ func (s *server) FindWorkspaces(
 		}
 		query.LoginRepos = s.loginRepos(repositories, record)
 	}
-	roster, ok := s.deps.Sidebar.Topic().Latest()
+	// THE MERGED ROWS AND THE PUSH ARE READ TOGETHER, under the sidebar's one
+	// lock, so no workspace that merged between two reads is drawn twice.
+	merged, roster, ok := s.deps.Sidebar.MergedRows()
 	if !ok {
 		return nil, fail(s.log, rpc, fmt.Errorf("read the roster: the daemon has published no roster yet"))
 	}
-	drawn, err := workspacefind.Placements(roster)
+	drawn, err := workspacefind.Placements(roster, merged)
 	if err != nil {
 		return nil, fail(s.log, rpc, err)
 	}

@@ -2603,8 +2603,8 @@ func joiningMirror(t *testing.T) (*harness, ids.WorkspaceID, *rostermirrortest.S
 
 // incumbentRoster is a roster push carrying WS's row drawing `thinking`.
 func incumbentRoster(ws ids.WorkspaceID) *agentreplv1.WatchWorkspaceRosterResponse {
-	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{
-		Roster: &frontendv1.WorkspaceRoster{Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Streams{
+		Streams: &frontendv1.RosterPush{Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{
 			Row: &frontendv1.RosterRow{
 				Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: string(ws)}},
 				Status:    &frontendv1.RosterRow_Thinking{Thinking: &frontendv1.RosterRowStatusThinking{}},

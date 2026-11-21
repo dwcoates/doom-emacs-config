@@ -412,7 +412,7 @@ func TestArrangeSidebarAnswersTheRevisionOfTheRosterThatCarriesTheChange(t *test
 			// Arrange
 			h, _ := arrangeHarness(t)
 			for _, revision := range tt.published {
-				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{Revision: revision})
+				h.Sidebar.topic.Publish(&frontendv1.RosterPush{Revision: revision})
 			}
 
 			// Act

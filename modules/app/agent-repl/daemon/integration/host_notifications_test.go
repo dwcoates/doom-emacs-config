@@ -105,7 +105,7 @@ func TestQuestionAskedRaisesABannerAndSetsAttention(t *testing.T) {
 	if !bannerCarrying(argvs, "Auth method") {
 		t.Fatalf("banners %q, want one carrying the question's line", argvs)
 	}
-	awaitRoster(t, f.d, roster, "the attention marker set by the question", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the attention marker set by the question", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetAttention() != nil
 	})
@@ -341,7 +341,7 @@ func TestAHandedBannersClickSelectsTheWorkspace(t *testing.T) {
 	}
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the click's SelectWorkspace stamped current", func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
+	awaitRoster(t, f.d, roster, "the click's SelectWorkspace stamped current", func(r *frontendv1.RosterPush) bool {
+		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
 	})
 }

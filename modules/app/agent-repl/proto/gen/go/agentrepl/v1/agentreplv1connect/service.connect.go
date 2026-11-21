@@ -114,6 +114,9 @@ const (
 	// AgentReplWatchWorkspaceRosterProcedure is the fully-qualified name of the AgentRepl's
 	// WatchWorkspaceRoster RPC.
 	AgentReplWatchWorkspaceRosterProcedure = "/agentrepl.v1.AgentRepl/WatchWorkspaceRoster"
+	// AgentReplListMergedWorkspacesProcedure is the fully-qualified name of the AgentRepl's
+	// ListMergedWorkspaces RPC.
+	AgentReplListMergedWorkspacesProcedure = "/agentrepl.v1.AgentRepl/ListMergedWorkspaces"
 	// AgentReplGetMemoryOverviewProcedure is the fully-qualified name of the AgentRepl's
 	// GetMemoryOverview RPC.
 	AgentReplGetMemoryOverviewProcedure = "/agentrepl.v1.AgentRepl/GetMemoryOverview"
@@ -512,6 +515,7 @@ var (
 	agentReplUpdateQuestionDraftMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("UpdateQuestionDraft")
 	agentReplAnswerColdGateMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
 	agentReplWatchWorkspaceRosterMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceRoster")
+	agentReplListMergedWorkspacesMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ListMergedWorkspaces")
 	agentReplGetMemoryOverviewMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("GetMemoryOverview")
 	agentReplGetWorkspaceMemoryMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceMemory")
 	agentReplCreateWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("CreateWorkspace")
@@ -740,9 +744,14 @@ type AgentReplClient interface {
 	UpdateQuestionDraft(context.Context, *connect.Request[v1.UpdateQuestionDraftRequest]) (*connect.Response[v1.UpdateQuestionDraftResponse], error)
 	// The cold-context gate's buttons — pay, clear, or compact{model, scope}.
 	AnswerColdGate(context.Context, *connect.Request[v1.AnswerColdGateRequest]) (*connect.Response[v1.AnswerColdGateResponse], error)
-	// The one global stream: the roster, whole, for every webview alike. See
+	// The one global stream: the roster's four snapshot streams, each resent
+	// whole only when it changes, for every webview alike. See
 	// endpoint_watch_workspace_roster.proto.
 	WatchWorkspaceRoster(context.Context, *connect.Request[v1.WatchWorkspaceRosterRequest]) (*connect.ServerStreamForClient[v1.WatchWorkspaceRosterResponse], error)
+	// One page of ten merged workspaces' rows, of one repository or all, most
+	// recently merged or created first: the rows no roster stream carries. See
+	// endpoint_list_merged_workspaces.proto.
+	ListMergedWorkspaces(context.Context, *connect.Request[v1.ListMergedWorkspacesRequest]) (*connect.Response[v1.ListMergedWorkspacesResponse], error)
 	// agent-repl's memory as a whole, for the version's hover. See
 	// endpoint_get_memory_overview.proto.
 	GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error)
@@ -1347,6 +1356,13 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplWatchWorkspaceRosterProcedure,
 			connect.WithSchema(agentReplWatchWorkspaceRosterMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		listMergedWorkspaces: connect.NewClient[v1.ListMergedWorkspacesRequest, v1.ListMergedWorkspacesResponse](
+			httpClient,
+			baseURL+AgentReplListMergedWorkspacesProcedure,
+			connect.WithSchema(agentReplListMergedWorkspacesMethodDescriptor),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
@@ -2206,6 +2222,7 @@ type agentReplClient struct {
 	updateQuestionDraft                *connect.Client[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse]
 	answerColdGate                     *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
 	watchWorkspaceRoster               *connect.Client[v1.WatchWorkspaceRosterRequest, v1.WatchWorkspaceRosterResponse]
+	listMergedWorkspaces               *connect.Client[v1.ListMergedWorkspacesRequest, v1.ListMergedWorkspacesResponse]
 	getMemoryOverview                  *connect.Client[v1.GetMemoryOverviewRequest, v1.GetMemoryOverviewResponse]
 	getWorkspaceMemory                 *connect.Client[v1.GetWorkspaceMemoryRequest, v1.GetWorkspaceMemoryResponse]
 	createWorkspace                    *connect.Client[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse]
@@ -2475,6 +2492,11 @@ func (c *agentReplClient) AnswerColdGate(ctx context.Context, req *connect.Reque
 // WatchWorkspaceRoster calls agentrepl.v1.AgentRepl.WatchWorkspaceRoster.
 func (c *agentReplClient) WatchWorkspaceRoster(ctx context.Context, req *connect.Request[v1.WatchWorkspaceRosterRequest]) (*connect.ServerStreamForClient[v1.WatchWorkspaceRosterResponse], error) {
 	return c.watchWorkspaceRoster.CallServerStream(ctx, req)
+}
+
+// ListMergedWorkspaces calls agentrepl.v1.AgentRepl.ListMergedWorkspaces.
+func (c *agentReplClient) ListMergedWorkspaces(ctx context.Context, req *connect.Request[v1.ListMergedWorkspacesRequest]) (*connect.Response[v1.ListMergedWorkspacesResponse], error) {
+	return c.listMergedWorkspaces.CallUnary(ctx, req)
 }
 
 // GetMemoryOverview calls agentrepl.v1.AgentRepl.GetMemoryOverview.
@@ -3240,9 +3262,14 @@ type AgentReplHandler interface {
 	UpdateQuestionDraft(context.Context, *connect.Request[v1.UpdateQuestionDraftRequest]) (*connect.Response[v1.UpdateQuestionDraftResponse], error)
 	// The cold-context gate's buttons — pay, clear, or compact{model, scope}.
 	AnswerColdGate(context.Context, *connect.Request[v1.AnswerColdGateRequest]) (*connect.Response[v1.AnswerColdGateResponse], error)
-	// The one global stream: the roster, whole, for every webview alike. See
+	// The one global stream: the roster's four snapshot streams, each resent
+	// whole only when it changes, for every webview alike. See
 	// endpoint_watch_workspace_roster.proto.
 	WatchWorkspaceRoster(context.Context, *connect.Request[v1.WatchWorkspaceRosterRequest], *connect.ServerStream[v1.WatchWorkspaceRosterResponse]) error
+	// One page of ten merged workspaces' rows, of one repository or all, most
+	// recently merged or created first: the rows no roster stream carries. See
+	// endpoint_list_merged_workspaces.proto.
+	ListMergedWorkspaces(context.Context, *connect.Request[v1.ListMergedWorkspacesRequest]) (*connect.Response[v1.ListMergedWorkspacesResponse], error)
 	// agent-repl's memory as a whole, for the version's hover. See
 	// endpoint_get_memory_overview.proto.
 	GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error)
@@ -3843,6 +3870,13 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplWatchWorkspaceRosterProcedure,
 		svc.WatchWorkspaceRoster,
 		connect.WithSchema(agentReplWatchWorkspaceRosterMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplListMergedWorkspacesHandler := connect.NewUnaryHandler(
+		AgentReplListMergedWorkspacesProcedure,
+		svc.ListMergedWorkspaces,
+		connect.WithSchema(agentReplListMergedWorkspacesMethodDescriptor),
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
@@ -4726,6 +4760,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplAnswerColdGateHandler.ServeHTTP(w, r)
 		case AgentReplWatchWorkspaceRosterProcedure:
 			agentReplWatchWorkspaceRosterHandler.ServeHTTP(w, r)
+		case AgentReplListMergedWorkspacesProcedure:
+			agentReplListMergedWorkspacesHandler.ServeHTTP(w, r)
 		case AgentReplGetMemoryOverviewProcedure:
 			agentReplGetMemoryOverviewHandler.ServeHTTP(w, r)
 		case AgentReplGetWorkspaceMemoryProcedure:
@@ -5109,6 +5145,10 @@ func (UnimplementedAgentReplHandler) AnswerColdGate(context.Context, *connect.Re
 
 func (UnimplementedAgentReplHandler) WatchWorkspaceRoster(context.Context, *connect.Request[v1.WatchWorkspaceRosterRequest], *connect.ServerStream[v1.WatchWorkspaceRosterResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchWorkspaceRoster is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListMergedWorkspaces(context.Context, *connect.Request[v1.ListMergedWorkspacesRequest]) (*connect.Response[v1.ListMergedWorkspacesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListMergedWorkspaces is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error) {

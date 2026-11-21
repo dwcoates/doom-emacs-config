@@ -14,9 +14,10 @@ import (
 	"connectrpc.com/connect"
 )
 
-// rosterNaming is a roster push naming ID current, as a selection's answer.
+// rosterNaming is a roster push naming ID current, as a selection's answer:
+// its workspaces stream, the one that carries the selection.
 func rosterNaming(id string) string {
-	return fmt.Sprintf(`{"roster":{"current":{"workspace":{"id":%q,"dir":"/tmp/%s"}}}}`, id, id)
+	return fmt.Sprintf(`{"streams":{"workspaces":{"current":{"workspace":{"id":%q,"dir":"/tmp/%s"}}}}}`, id, id)
 }
 
 // answersBody is a /_fake/selection-answers body answering each of IDS.
@@ -54,7 +55,7 @@ func rosterPushes(t *testing.T, baseURL string, stream *connect.ServerStreamForC
 	}
 	var ids []string
 	for stream.Receive() {
-		ids = append(ids, stream.Msg().GetRoster().GetCurrent().GetWorkspace().GetId())
+		ids = append(ids, stream.Msg().GetStreams().GetWorkspaces().GetCurrent().GetWorkspace().GetId())
 	}
 	if stream.Err() != nil {
 		t.Fatalf("roster stream ended with %v, want a clean end", stream.Err())
@@ -159,7 +160,7 @@ func TestSelectionAnswersRefuseAnInvalidRosterAndKeepTheEarlierAnswers(t *testin
 	controlPost(t, baseURL, "/_fake/selection-answers", answersBody("ws-a"))
 
 	// Act
-	status, body := controlPost(t, baseURL, "/_fake/selection-answers", `{"answers":{"ws-b":{"roster":{"noSuchField":1}}}}`)
+	status, body := controlPost(t, baseURL, "/_fake/selection-answers", `{"answers":{"ws-b":{"streams":{"noSuchField":1}}}}`)
 	selectWorkspace(t, client, "ws-a")
 
 	// Assert

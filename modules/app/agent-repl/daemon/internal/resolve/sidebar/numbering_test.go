@@ -94,9 +94,10 @@ func TestEveryWorkspaceIsInOneList(t *testing.T) {
 
 	// Assert: the hidden one only under Hidden, the reopened merge under Open
 	// (OPEN BEATS MERGED), the closed one only under Closed.
-	roster := latest(t, r)
+	push := latestPush(t, r)
+	roster := push.GetWorkspaces()
 	seen := map[string]int{}
-	for _, row := range rosterwalk.AllRows(roster) {
+	for _, row := range append(rosterwalk.AllRows(push), mergedRows(t, r)...) {
 		seen[row.GetWorkspace().GetWorkspace().GetId()]++
 	}
 	for id, n := range seen {
@@ -104,7 +105,7 @@ func TestEveryWorkspaceIsInOneList(t *testing.T) {
 			t.Fatalf("%s is listed %d times, want once", id, n)
 		}
 	}
-	if rowFor(hiddenRows(roster), "h") == nil || rowFor(rosterwalk.MergedRows(roster), "m") != nil || rowFor(rosterwalk.ClosedRows(roster), "x") == nil {
+	if rowFor(hiddenRows(roster), "h") == nil || rowFor(mergedRows(t, r), "m") != nil || rowFor(rosterwalk.ClosedRows(push.GetClosed()), "x") == nil {
 		t.Fatalf("lists = %v, want h hidden, m open, x closed", seen)
 	}
 }

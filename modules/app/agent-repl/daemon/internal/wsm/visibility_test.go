@@ -1,6 +1,11 @@
 package wsm
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,6 +61,89 @@ func TestInHiddenSection(t *testing.T) {
 				t.Fatalf("InHiddenSection = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestMergeSettled(t *testing.T) {
+	merged := time.Unix(100, 0)
+	cases := []struct {
+		name string
+		ws   Workspace
+		want bool
+	}{
+		{name: "an open workspace has not", ws: Workspace{}, want: false},
+		{name: "a closed workspace that never merged has not", ws: Workspace{Closed: true}, want: false},
+		{name: "a reopened merged workspace has not", ws: Workspace{MergedAt: &merged}, want: false},
+		{name: "a closed merged workspace has", ws: Workspace{Closed: true, MergedAt: &merged}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.ws.MergeSettled()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("MergeSettled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInMergedBand(t *testing.T) {
+	merged := time.Unix(100, 0)
+	cases := []struct {
+		name string
+		ws   Workspace
+		want bool
+	}{
+		{name: "a settled merge is", ws: Workspace{Closed: true, MergedAt: &merged}, want: true},
+		{name: "a reopened merged workspace is not", ws: Workspace{MergedAt: &merged}, want: false},
+		{name: "a closed workspace that never merged is not", ws: Workspace{Closed: true}, want: false},
+		{name: "a settled chat thread is not", ws: Workspace{Kind: WorkspaceKindThread, Closed: true, MergedAt: &merged}, want: false},
+		{name: "a landed merge workspace is", ws: Workspace{MergeOf: &MergeOrigin{Requester: "requester"}, Closed: true, MergedAt: &merged}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.ws.InMergedBand()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("InMergedBand = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNoSourceSpellsASettledMergeByHand(t *testing.T) {
+	// Arrange
+	settled := regexp.MustCompile(`\.Closed\s*&&\s*\w+\.MergedAt\s*!=\s*nil`)
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || path == filepath.Join("..", "wsm", "visibility.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if settled.Match(src) {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walking internal/: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("these sources spell a settled merge by hand instead of through Workspace.MergeSettled: %v", offenders)
 	}
 }
 

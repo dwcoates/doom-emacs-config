@@ -136,7 +136,9 @@ func productionCLIDeps() cliDeps {
 	}
 }
 
-// readRoster reads the first roster the daemon pushes.
+// readRoster reads the workspaces stream of the first push the daemon
+// sends, which carries every stream: the open and hidden workspaces the CLI
+// names.
 func readRoster(ctx context.Context, client agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
 	stream, err := openDaemonStream(ctx, client.WatchWorkspaceRoster, &agentreplv1.WatchWorkspaceRosterRequest{})
 	if err != nil {
@@ -144,10 +146,10 @@ func readRoster(ctx context.Context, client agentreplv1connect.AgentReplClient) 
 	}
 	defer stream.Close()
 	if stream.Receive() {
-		if roster := stream.Msg().GetRoster(); roster != nil {
+		if roster := stream.Msg().GetStreams().GetWorkspaces(); roster != nil {
 			return roster, nil
 		}
-		return nil, errors.New("the daemon's first roster frame carried no roster")
+		return nil, errors.New("the daemon's first roster frame carried no workspaces stream")
 	}
 	if err := stream.Err(); err != nil {
 		return nil, err

@@ -1070,7 +1070,7 @@ func watchStatusWalk(t *testing.T, r sidebar.Resolver) *statusWalk {
 	// subscribe's own cleanup guarantees.
 	go func() {
 		for roster := range rosters {
-			sections := roster.GetRepository().GetSections()
+			sections := roster.GetWorkspaces().GetRepository().GetSections()
 			if len(sections) == 0 || len(innerRows(rosterwalk.UnsectionedRows(sections[0]))) == 0 {
 				continue
 			}

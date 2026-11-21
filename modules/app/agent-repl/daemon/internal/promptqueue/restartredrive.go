@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -186,6 +187,16 @@ func (q *queue) resumeShimCrash(ctx context.Context, ws ids.WorkspaceID, turn id
 		log.Info(opResume, "the shim died again under the resumption of work a cut ended; it is not resumed again, and its failure stands", nil)
 		return how
 	}
+	redelivered, err := q.redeliversCutTurn(ctx, ws, turn)
+	if err != nil {
+		log.Error(opResume, "could not read whether the cut turn's prompt is held for redelivery; it is not resumed and its failure stands",
+			dlog.Context{"cause": err.Error()})
+		return how
+	}
+	if redelivered {
+		log.Info(opResume, "the shim died before it accepted the turn; its prompt is held and delivered again as itself, so nothing is resumed", nil)
+		return wsm.CloseKilled
+	}
 	if err := q.deps.DB.OweResumption(ctx, ws, turn, q.deps.Now()); err != nil {
 		log.Error(opResume, "could not record the resumption the shim's death owes; the cut turn will not be resumed and its failure stands",
 			dlog.Context{"cause": err.Error()})
@@ -193,6 +204,37 @@ func (q *queue) resumeShimCrash(ctx context.Context, ws ids.WorkspaceID, turn id
 	}
 	log.Info(opResume, "the shim died under the turn; it ends interrupted and the revived session resumes it", nil)
 	return wsm.CloseKilled
+}
+
+// redeliversCutTurn reports whether the prompt of TURN, which the shim's
+// death cut, is held to be delivered again as itself, so the turn is owed no
+// resumption: the revived session would otherwise run both the "continue"
+// prompt and the prompt it continues.
+//
+// A DEATH UNDER ITS OWN StartTurn. The watcher learns a turn before the shim
+// does (OnTurnOpening), so a shim that dies while the turn's StartTurn stands
+// cuts a turn it never accepted, and that delivery then holds the prompt for
+// the revived session (holdForReconnect). The delivery's outcome is read
+// only once it has settled: its call is waited out, and the delivery lock
+// taken, which the delivering path holds until it has held the prompt or
+// accepted the turn. A turn whose call does not stand is not this case.
+func (q *queue) redeliversCutTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	call, standing := q.standingCall(ws)
+	if !standing || !call.opensTurn || call.turn != turn {
+		return false, nil
+	}
+	select {
+	case <-call.settled:
+	case <-ctx.Done():
+		return false, fmt.Errorf("await the StartTurn of cut turn %q: %w", turn, ctx.Err())
+	}
+	d := q.lockDelivery(ws)
+	d.unlock()
+	hold, found, err := q.deps.DB.HeldPromptByTurn(ctx, turn)
+	if err != nil {
+		return false, fmt.Errorf("read the hold of cut turn %q: %w", turn, err)
+	}
+	return found && hold.Tombstone == nil, nil
 }
 
 // redriveOwedLocked resumes what the workspace is owed, as the first turn the

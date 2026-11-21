@@ -33,7 +33,7 @@ var File_agentrepl_v1_service_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a2agentrepl/v1/endpoint_subscribe_pull_request.proto\x1a4agentrepl/v1/endpoint_unsubscribe_pull_request.proto\x1a;agentrepl/v1/endpoint_list_pull_request_subscriptions.proto\x1a3agentrepl/v1/endpoint_comment_on_pull_request.proto\x1a8agentrepl/v1/endpoint_subscribe_github_merge_queue.proto\x1a:agentrepl/v1/endpoint_unsubscribe_github_merge_queue.proto\x1aAagentrepl/v1/endpoint_list_github_merge_queue_subscriptions.proto\x1a9agentrepl/v1/endpoint_subscribe_github_workflow_run.proto\x1a;agentrepl/v1/endpoint_unsubscribe_github_workflow_run.proto\x1aBagentrepl/v1/endpoint_list_github_workflow_run_subscriptions.proto\x1a2agentrepl/v1/endpoint_adjust_feed_text_scale.proto\x1a3agentrepl/v1/endpoint_accept_handed_workspace.proto\x1a0agentrepl/v1/endpoint_adopt_host_workspace.proto\x1a/agentrepl/v1/endpoint_adopt_web_workspace.proto\x1a,agentrepl/v1/endpoint_answer_cold_gate.proto\x1a4agentrepl/v1/endpoint_answer_editor_evaluation.proto\x1a4agentrepl/v1/endpoint_answer_merge_queue_offer.proto\x1a-agentrepl/v1/endpoint_answer_permission.proto\x1a+agentrepl/v1/endpoint_answer_question.proto\x1a+agentrepl/v1/endpoint_arrange_sidebar.proto\x1a1agentrepl/v1/endpoint_assign_workspace_task.proto\x1a2agentrepl/v1/endpoint_bind_workspace_session.proto\x1a2agentrepl/v1/endpoint_change_workspace_links.proto\x1a&agentrepl/v1/endpoint_client_log.proto\x1a,agentrepl/v1/endpoint_close_feed_image.proto\x1a'agentrepl/v1/endpoint_close_login.proto\x1a+agentrepl/v1/endpoint_close_workspace.proto\x1a-agentrepl/v1/endpoint_compact_workspace.proto\x1a'agentrepl/v1/endpoint_create_task.proto\x1a)agentrepl/v1/endpoint_create_thread.proto\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a&agentrepl/v1/endpoint_await_idle.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a\"agentrepl/v1/endpoint_deploy.proto\x1a/agentrepl/v1/endpoint_dismiss_news_digest.proto\x1a,agentrepl/v1/endpoint_edit_held_prompt.proto\x1a.agentrepl/v1/endpoint_evaluate_in_editor.proto\x1a/agentrepl/v1/endpoint_find_entry_neighbor.proto\x1a+agentrepl/v1/endpoint_find_workspaces.proto\x1a,agentrepl/v1/endpoint_finish_workspace.proto\x1a,agentrepl/v1/endpoint_fold_held_prompt.proto\x1a-agentrepl/v1/endpoint_fold_merge_bubble.proto\x1a+agentrepl/v1/endpoint_fold_repository.proto\x1a,agentrepl/v1/endpoint_forget_workspace.proto\x1a)agentrepl/v1/endpoint_get_feed_page.proto\x1a/agentrepl/v1/endpoint_get_memory_overview.proto\x1a2agentrepl/v1/endpoint_get_merge_queue_status.proto\x1a/agentrepl/v1/endpoint_list_merge_landings.proto\x1a1agentrepl/v1/endpoint_record_direct_landing.proto\x1a3agentrepl/v1/endpoint_get_sidebar_arrangement.proto\x1a0agentrepl/v1/endpoint_get_workspace_memory.proto\x1a0agentrepl/v1/endpoint_get_workspace_status.proto\x1a,agentrepl/v1/endpoint_locate_workspace.proto\x1a6agentrepl/v1/endpoint_inspect_chess_board_square.proto\x1a%agentrepl/v1/endpoint_interrupt.proto\x1a/agentrepl/v1/endpoint_keep_live_workspace.proto\x1a*agentrepl/v1/endpoint_kill_workspace.proto\x1a1agentrepl/v1/endpoint_list_rollback_prompts.proto\x1a/agentrepl/v1/endpoint_list_slack_channels.proto\x1a/agentrepl/v1/endpoint_list_slash_commands.proto\x1a6agentrepl/v1/endpoint_list_workspace_transcripts.proto\x1a-agentrepl/v1/endpoint_load_feed_through.proto\x1a1agentrepl/v1/endpoint_mark_workspace_viewed.proto\x1a-agentrepl/v1/endpoint_report_view_dwell.proto\x1a*agentrepl/v1/endpoint_move_workspace.proto\x1a*agentrepl/v1/endpoint_nuke_workspace.proto\x1a,agentrepl/v1/endpoint_notify_workspace.proto\x1a*agentrepl/v1/endpoint_pass_cold_gate.proto\x1a)agentrepl/v1/endpoint_open_external.proto\x1a%agentrepl/v1/endpoint_open_feed.proto\x1a+agentrepl/v1/endpoint_open_feed_image.proto\x1a*agentrepl/v1/endpoint_open_in_editor.proto\x1a&agentrepl/v1/endpoint_open_login.proto\x1a%agentrepl/v1/endpoint_open_tabs.proto\x1a*agentrepl/v1/endpoint_open_workspace.proto\x1a*agentrepl/v1/endpoint_park_workspace.proto\x1a)agentrepl/v1/endpoint_plan_rollback.proto\x1a)agentrepl/v1/endpoint_prune_storage.proto\x1a*agentrepl/v1/endpoint_reap_worktrees.proto\x1a)agentrepl/v1/endpoint_requeue_merge.proto\x1a)agentrepl/v1/endpoint_discard_merge.proto\x1a/agentrepl/v1/endpoint_refresh_news_digest.proto\x1a/agentrepl/v1/endpoint_register_repository.proto\x1a.agentrepl/v1/endpoint_register_workspace.proto\x1a/agentrepl/v1/endpoint_register_workspaces.proto\x1a1agentrepl/v1/endpoint_report_chat_sightings.proto\x1a3agentrepl/v1/endpoint_report_composer_entries.proto\x1a/agentrepl/v1/endpoint_report_editor_focus.proto\x1a0agentrepl/v1/endpoint_report_recency_reach.proto\x1a,agentrepl/v1/endpoint_report_latencies.proto\x1a-agentrepl/v1/endpoint_report_page_drawn.proto\x1a1agentrepl/v1/endpoint_report_page_residency.proto\x1a1agentrepl/v1/endpoint_report_page_unloading.proto\x1a3agentrepl/v1/endpoint_request_command_support.proto\x1a.agentrepl/v1/endpoint_request_new_thread.proto\x1a-agentrepl/v1/endpoint_restart_workspace.proto\x1a.agentrepl/v1/endpoint_retry_vendor_error.proto\x1a%agentrepl/v1/endpoint_roll_back.proto\x1a,agentrepl/v1/endpoint_roll_out_landing.proto\x1a*agentrepl/v1/endpoint_run_redundancy.proto\x1a%agentrepl/v1/endpoint_run_tests.proto\x1a(agentrepl/v1/endpoint_search_chats.proto\x1a*agentrepl/v1/endpoint_select_account.proto\x1a,agentrepl/v1/endpoint_select_chat_text.proto\x1a+agentrepl/v1/endpoint_select_feed_row.proto\x1a,agentrepl/v1/endpoint_select_in_editor.proto\x1a/agentrepl/v1/endpoint_load_page_in_editor.proto\x1a.agentrepl/v1/endpoint_ask_about_response.proto\x1a0agentrepl/v1/endpoint_select_response_text.proto\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a2agentrepl/v1/endpoint_send_hidden_keepalives.proto\x1a,agentrepl/v1/endpoint_send_login_input.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a-agentrepl/v1/endpoint_set_default_model.proto\x1a&agentrepl/v1/endpoint_set_effort.proto\x1a%agentrepl/v1/endpoint_set_model.proto\x1a/agentrepl/v1/endpoint_set_permission_mode.proto\x1a8agentrepl/v1/endpoint_set_workspace_correspondence.proto\x1a0agentrepl/v1/endpoint_set_workspace_hidden.proto\x1a.agentrepl/v1/endpoint_set_workspace_name.proto\x1a1agentrepl/v1/endpoint_set_workspace_summary.proto\x1a2agentrepl/v1/endpoint_set_workspace_one_shot.proto\x1a0agentrepl/v1/endpoint_set_workspace_parent.proto\x1a2agentrepl/v1/endpoint_set_workspace_priority.proto\x1a*agentrepl/v1/endpoint_show_chat_node.proto\x1a,agentrepl/v1/endpoint_show_sidebar_app.proto\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a-agentrepl/v1/endpoint_gather_workspaces.proto\x1a-agentrepl/v1/endpoint_get_gather_status.proto\x1a1agentrepl/v1/endpoint_subscribe_merge_queue.proto\x1a/agentrepl/v1/endpoint_subscribe_workspace.proto\x1a+agentrepl/v1/endpoint_swap_workspaces.proto\x1a/agentrepl/v1/endpoint_switch_chat_sibling.proto\x1a3agentrepl/v1/endpoint_unsubscribe_merge_queue.proto\x1a1agentrepl/v1/endpoint_unsubscribe_workspace.proto\x1a4agentrepl/v1/endpoint_update_classifier_prompt.proto\x1a.agentrepl/v1/endpoint_update_deploy_hold.proto\x1a.agentrepl/v1/endpoint_update_held_prompt.proto\x1a.agentrepl/v1/endpoint_update_merge_queue.proto\x1a7agentrepl/v1/endpoint_update_persistent_wifi_mode.proto\x1a6agentrepl/v1/endpoint_update_remote_control_mode.proto\x1a4agentrepl/v1/endpoint_update_queue_bypass_mode.proto\x1a1agentrepl/v1/endpoint_update_question_draft.proto\x1a4agentrepl/v1/endpoint_update_shutdown_schedule.proto\x1a/agentrepl/v1/endpoint_update_sidebar_view.proto\x1a'agentrepl/v1/endpoint_update_task.proto\x1a3agentrepl/v1/endpoint_validate_workspace_name.proto\x1a0agentrepl/v1/endpoint_list_creation_models.proto\x1a&agentrepl/v1/endpoint_watch_chat.proto\x1a(agentrepl/v1/endpoint_watch_daemon.proto\x1a&agentrepl/v1/endpoint_watch_feed.proto\x1a(agentrepl/v1/endpoint_watch_footer.proto\x1a0agentrepl/v1/endpoint_watch_host_workspace.proto\x1a0agentrepl/v1/endpoint_watch_login_terminal.proto\x1a&agentrepl/v1/endpoint_watch_page.proto\x1a(agentrepl/v1/endpoint_watch_topbar.proto\x1a4agentrepl/v1/endpoint_watch_workspace_mentions.proto\x1a/agentrepl/v1/endpoint_watch_web_workspace.proto\x1a2agentrepl/v1/endpoint_watch_workspace_roster.proto2\xcf~\n" +
+	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a2agentrepl/v1/endpoint_subscribe_pull_request.proto\x1a4agentrepl/v1/endpoint_unsubscribe_pull_request.proto\x1a;agentrepl/v1/endpoint_list_pull_request_subscriptions.proto\x1a3agentrepl/v1/endpoint_comment_on_pull_request.proto\x1a8agentrepl/v1/endpoint_subscribe_github_merge_queue.proto\x1a:agentrepl/v1/endpoint_unsubscribe_github_merge_queue.proto\x1aAagentrepl/v1/endpoint_list_github_merge_queue_subscriptions.proto\x1a9agentrepl/v1/endpoint_subscribe_github_workflow_run.proto\x1a;agentrepl/v1/endpoint_unsubscribe_github_workflow_run.proto\x1aBagentrepl/v1/endpoint_list_github_workflow_run_subscriptions.proto\x1a2agentrepl/v1/endpoint_adjust_feed_text_scale.proto\x1a3agentrepl/v1/endpoint_accept_handed_workspace.proto\x1a0agentrepl/v1/endpoint_adopt_host_workspace.proto\x1a/agentrepl/v1/endpoint_adopt_web_workspace.proto\x1a,agentrepl/v1/endpoint_answer_cold_gate.proto\x1a4agentrepl/v1/endpoint_answer_editor_evaluation.proto\x1a4agentrepl/v1/endpoint_answer_merge_queue_offer.proto\x1a-agentrepl/v1/endpoint_answer_permission.proto\x1a+agentrepl/v1/endpoint_answer_question.proto\x1a+agentrepl/v1/endpoint_arrange_sidebar.proto\x1a1agentrepl/v1/endpoint_assign_workspace_task.proto\x1a2agentrepl/v1/endpoint_bind_workspace_session.proto\x1a2agentrepl/v1/endpoint_change_workspace_links.proto\x1a&agentrepl/v1/endpoint_client_log.proto\x1a,agentrepl/v1/endpoint_close_feed_image.proto\x1a'agentrepl/v1/endpoint_close_login.proto\x1a+agentrepl/v1/endpoint_close_workspace.proto\x1a-agentrepl/v1/endpoint_compact_workspace.proto\x1a'agentrepl/v1/endpoint_create_task.proto\x1a)agentrepl/v1/endpoint_create_thread.proto\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a&agentrepl/v1/endpoint_await_idle.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a\"agentrepl/v1/endpoint_deploy.proto\x1a/agentrepl/v1/endpoint_dismiss_news_digest.proto\x1a,agentrepl/v1/endpoint_edit_held_prompt.proto\x1a.agentrepl/v1/endpoint_evaluate_in_editor.proto\x1a/agentrepl/v1/endpoint_find_entry_neighbor.proto\x1a+agentrepl/v1/endpoint_find_workspaces.proto\x1a,agentrepl/v1/endpoint_finish_workspace.proto\x1a,agentrepl/v1/endpoint_fold_held_prompt.proto\x1a-agentrepl/v1/endpoint_fold_merge_bubble.proto\x1a+agentrepl/v1/endpoint_fold_repository.proto\x1a,agentrepl/v1/endpoint_forget_workspace.proto\x1a)agentrepl/v1/endpoint_get_feed_page.proto\x1a/agentrepl/v1/endpoint_get_memory_overview.proto\x1a2agentrepl/v1/endpoint_get_merge_queue_status.proto\x1a/agentrepl/v1/endpoint_list_merge_landings.proto\x1a1agentrepl/v1/endpoint_record_direct_landing.proto\x1a3agentrepl/v1/endpoint_get_sidebar_arrangement.proto\x1a0agentrepl/v1/endpoint_get_workspace_memory.proto\x1a0agentrepl/v1/endpoint_get_workspace_status.proto\x1a,agentrepl/v1/endpoint_locate_workspace.proto\x1a6agentrepl/v1/endpoint_inspect_chess_board_square.proto\x1a%agentrepl/v1/endpoint_interrupt.proto\x1a/agentrepl/v1/endpoint_keep_live_workspace.proto\x1a*agentrepl/v1/endpoint_kill_workspace.proto\x1a1agentrepl/v1/endpoint_list_rollback_prompts.proto\x1a/agentrepl/v1/endpoint_list_slack_channels.proto\x1a/agentrepl/v1/endpoint_list_slash_commands.proto\x1a6agentrepl/v1/endpoint_list_workspace_transcripts.proto\x1a-agentrepl/v1/endpoint_load_feed_through.proto\x1a1agentrepl/v1/endpoint_mark_workspace_viewed.proto\x1a-agentrepl/v1/endpoint_report_view_dwell.proto\x1a*agentrepl/v1/endpoint_move_workspace.proto\x1a*agentrepl/v1/endpoint_nuke_workspace.proto\x1a,agentrepl/v1/endpoint_notify_workspace.proto\x1a*agentrepl/v1/endpoint_pass_cold_gate.proto\x1a)agentrepl/v1/endpoint_open_external.proto\x1a%agentrepl/v1/endpoint_open_feed.proto\x1a+agentrepl/v1/endpoint_open_feed_image.proto\x1a*agentrepl/v1/endpoint_open_in_editor.proto\x1a&agentrepl/v1/endpoint_open_login.proto\x1a%agentrepl/v1/endpoint_open_tabs.proto\x1a*agentrepl/v1/endpoint_open_workspace.proto\x1a*agentrepl/v1/endpoint_park_workspace.proto\x1a)agentrepl/v1/endpoint_plan_rollback.proto\x1a)agentrepl/v1/endpoint_prune_storage.proto\x1a*agentrepl/v1/endpoint_reap_worktrees.proto\x1a)agentrepl/v1/endpoint_requeue_merge.proto\x1a)agentrepl/v1/endpoint_discard_merge.proto\x1a/agentrepl/v1/endpoint_refresh_news_digest.proto\x1a/agentrepl/v1/endpoint_register_repository.proto\x1a.agentrepl/v1/endpoint_register_workspace.proto\x1a/agentrepl/v1/endpoint_register_workspaces.proto\x1a1agentrepl/v1/endpoint_report_chat_sightings.proto\x1a3agentrepl/v1/endpoint_report_composer_entries.proto\x1a/agentrepl/v1/endpoint_report_editor_focus.proto\x1a0agentrepl/v1/endpoint_report_recency_reach.proto\x1a,agentrepl/v1/endpoint_report_latencies.proto\x1a-agentrepl/v1/endpoint_report_page_drawn.proto\x1a1agentrepl/v1/endpoint_report_page_residency.proto\x1a1agentrepl/v1/endpoint_report_page_unloading.proto\x1a3agentrepl/v1/endpoint_request_command_support.proto\x1a.agentrepl/v1/endpoint_request_new_thread.proto\x1a-agentrepl/v1/endpoint_restart_workspace.proto\x1a.agentrepl/v1/endpoint_retry_vendor_error.proto\x1a%agentrepl/v1/endpoint_roll_back.proto\x1a,agentrepl/v1/endpoint_roll_out_landing.proto\x1a*agentrepl/v1/endpoint_run_redundancy.proto\x1a%agentrepl/v1/endpoint_run_tests.proto\x1a(agentrepl/v1/endpoint_search_chats.proto\x1a*agentrepl/v1/endpoint_select_account.proto\x1a,agentrepl/v1/endpoint_select_chat_text.proto\x1a+agentrepl/v1/endpoint_select_feed_row.proto\x1a,agentrepl/v1/endpoint_select_in_editor.proto\x1a/agentrepl/v1/endpoint_load_page_in_editor.proto\x1a.agentrepl/v1/endpoint_ask_about_response.proto\x1a0agentrepl/v1/endpoint_select_response_text.proto\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a2agentrepl/v1/endpoint_send_hidden_keepalives.proto\x1a,agentrepl/v1/endpoint_send_login_input.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a-agentrepl/v1/endpoint_set_default_model.proto\x1a&agentrepl/v1/endpoint_set_effort.proto\x1a%agentrepl/v1/endpoint_set_model.proto\x1a/agentrepl/v1/endpoint_set_permission_mode.proto\x1a8agentrepl/v1/endpoint_set_workspace_correspondence.proto\x1a0agentrepl/v1/endpoint_set_workspace_hidden.proto\x1a.agentrepl/v1/endpoint_set_workspace_name.proto\x1a1agentrepl/v1/endpoint_set_workspace_summary.proto\x1a2agentrepl/v1/endpoint_set_workspace_one_shot.proto\x1a0agentrepl/v1/endpoint_set_workspace_parent.proto\x1a2agentrepl/v1/endpoint_set_workspace_priority.proto\x1a*agentrepl/v1/endpoint_show_chat_node.proto\x1a,agentrepl/v1/endpoint_show_sidebar_app.proto\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a-agentrepl/v1/endpoint_gather_workspaces.proto\x1a-agentrepl/v1/endpoint_get_gather_status.proto\x1a1agentrepl/v1/endpoint_subscribe_merge_queue.proto\x1a/agentrepl/v1/endpoint_subscribe_workspace.proto\x1a+agentrepl/v1/endpoint_swap_workspaces.proto\x1a/agentrepl/v1/endpoint_switch_chat_sibling.proto\x1a3agentrepl/v1/endpoint_unsubscribe_merge_queue.proto\x1a1agentrepl/v1/endpoint_unsubscribe_workspace.proto\x1a4agentrepl/v1/endpoint_update_classifier_prompt.proto\x1a.agentrepl/v1/endpoint_update_deploy_hold.proto\x1a.agentrepl/v1/endpoint_update_held_prompt.proto\x1a.agentrepl/v1/endpoint_update_merge_queue.proto\x1a7agentrepl/v1/endpoint_update_persistent_wifi_mode.proto\x1a6agentrepl/v1/endpoint_update_remote_control_mode.proto\x1a4agentrepl/v1/endpoint_update_queue_bypass_mode.proto\x1a1agentrepl/v1/endpoint_update_question_draft.proto\x1a4agentrepl/v1/endpoint_update_shutdown_schedule.proto\x1a/agentrepl/v1/endpoint_update_sidebar_view.proto\x1a'agentrepl/v1/endpoint_update_task.proto\x1a3agentrepl/v1/endpoint_validate_workspace_name.proto\x1a0agentrepl/v1/endpoint_list_creation_models.proto\x1a&agentrepl/v1/endpoint_watch_chat.proto\x1a(agentrepl/v1/endpoint_watch_daemon.proto\x1a&agentrepl/v1/endpoint_watch_feed.proto\x1a(agentrepl/v1/endpoint_watch_footer.proto\x1a0agentrepl/v1/endpoint_watch_host_workspace.proto\x1a0agentrepl/v1/endpoint_watch_login_terminal.proto\x1a&agentrepl/v1/endpoint_watch_page.proto\x1a(agentrepl/v1/endpoint_watch_topbar.proto\x1a4agentrepl/v1/endpoint_watch_workspace_mentions.proto\x1a/agentrepl/v1/endpoint_watch_web_workspace.proto\x1a2agentrepl/v1/endpoint_watch_workspace_roster.proto\x1a2agentrepl/v1/endpoint_list_merged_workspaces.proto2\xc3\x7f\n" +
 	"\tAgentRepl\x12U\n" +
 	"\fSubmitPrompt\x12!.agentrepl.v1.SubmitPromptRequest\x1a\".agentrepl.v1.SubmitPromptResponse\x12X\n" +
 	"\rSelectFeedRow\x12\".agentrepl.v1.SelectFeedRowRequest\x1a#.agentrepl.v1.SelectFeedRowResponse\x12g\n" +
@@ -61,7 +61,8 @@ const file_agentrepl_v1_service_proto_rawDesc = "" +
 	"\x0eAnswerQuestion\x12#.agentrepl.v1.AnswerQuestionRequest\x1a$.agentrepl.v1.AnswerQuestionResponse\x12j\n" +
 	"\x13UpdateQuestionDraft\x12(.agentrepl.v1.UpdateQuestionDraftRequest\x1a).agentrepl.v1.UpdateQuestionDraftResponse\x12[\n" +
 	"\x0eAnswerColdGate\x12#.agentrepl.v1.AnswerColdGateRequest\x1a$.agentrepl.v1.AnswerColdGateResponse\x12t\n" +
-	"\x14WatchWorkspaceRoster\x12).agentrepl.v1.WatchWorkspaceRosterRequest\x1a*.agentrepl.v1.WatchWorkspaceRosterResponse\"\x03\x90\x02\x010\x01\x12i\n" +
+	"\x14WatchWorkspaceRoster\x12).agentrepl.v1.WatchWorkspaceRosterRequest\x1a*.agentrepl.v1.WatchWorkspaceRosterResponse\"\x03\x90\x02\x010\x01\x12r\n" +
+	"\x14ListMergedWorkspaces\x12).agentrepl.v1.ListMergedWorkspacesRequest\x1a*.agentrepl.v1.ListMergedWorkspacesResponse\"\x03\x90\x02\x01\x12i\n" +
 	"\x11GetMemoryOverview\x12&.agentrepl.v1.GetMemoryOverviewRequest\x1a'.agentrepl.v1.GetMemoryOverviewResponse\"\x03\x90\x02\x01\x12l\n" +
 	"\x12GetWorkspaceMemory\x12'.agentrepl.v1.GetWorkspaceMemoryRequest\x1a(.agentrepl.v1.GetWorkspaceMemoryResponse\"\x03\x90\x02\x01\x12^\n" +
 	"\x0fCreateWorkspace\x12$.agentrepl.v1.CreateWorkspaceRequest\x1a%.agentrepl.v1.CreateWorkspaceResponse\x12u\n" +
@@ -228,301 +229,303 @@ var file_agentrepl_v1_service_proto_goTypes = []any{
 	(*UpdateQuestionDraftRequest)(nil),                 // 24: agentrepl.v1.UpdateQuestionDraftRequest
 	(*AnswerColdGateRequest)(nil),                      // 25: agentrepl.v1.AnswerColdGateRequest
 	(*WatchWorkspaceRosterRequest)(nil),                // 26: agentrepl.v1.WatchWorkspaceRosterRequest
-	(*GetMemoryOverviewRequest)(nil),                   // 27: agentrepl.v1.GetMemoryOverviewRequest
-	(*GetWorkspaceMemoryRequest)(nil),                  // 28: agentrepl.v1.GetWorkspaceMemoryRequest
-	(*CreateWorkspaceRequest)(nil),                     // 29: agentrepl.v1.CreateWorkspaceRequest
-	(*ValidateWorkspaceNameRequest)(nil),               // 30: agentrepl.v1.ValidateWorkspaceNameRequest
-	(*ListCreationModelsRequest)(nil),                  // 31: agentrepl.v1.ListCreationModelsRequest
-	(*RegisterRepositoryRequest)(nil),                  // 32: agentrepl.v1.RegisterRepositoryRequest
-	(*OpenWorkspaceRequest)(nil),                       // 33: agentrepl.v1.OpenWorkspaceRequest
-	(*ListWorkspaceTranscriptsRequest)(nil),            // 34: agentrepl.v1.ListWorkspaceTranscriptsRequest
-	(*BindWorkspaceSessionRequest)(nil),                // 35: agentrepl.v1.BindWorkspaceSessionRequest
-	(*CloseWorkspaceRequest)(nil),                      // 36: agentrepl.v1.CloseWorkspaceRequest
-	(*KillWorkspaceRequest)(nil),                       // 37: agentrepl.v1.KillWorkspaceRequest
-	(*NukeWorkspaceRequest)(nil),                       // 38: agentrepl.v1.NukeWorkspaceRequest
-	(*ForgetWorkspaceRequest)(nil),                     // 39: agentrepl.v1.ForgetWorkspaceRequest
-	(*FinishWorkspaceRequest)(nil),                     // 40: agentrepl.v1.FinishWorkspaceRequest
-	(*CompactWorkspaceRequest)(nil),                    // 41: agentrepl.v1.CompactWorkspaceRequest
-	(*SetWorkspaceOneShotRequest)(nil),                 // 42: agentrepl.v1.SetWorkspaceOneShotRequest
-	(*SetWorkspaceCorrespondenceRequest)(nil),          // 43: agentrepl.v1.SetWorkspaceCorrespondenceRequest
-	(*ChangeWorkspaceLinksRequest)(nil),                // 44: agentrepl.v1.ChangeWorkspaceLinksRequest
-	(*SetWorkspaceNameRequest)(nil),                    // 45: agentrepl.v1.SetWorkspaceNameRequest
-	(*SetWorkspaceSummaryRequest)(nil),                 // 46: agentrepl.v1.SetWorkspaceSummaryRequest
-	(*RestartWorkspaceRequest)(nil),                    // 47: agentrepl.v1.RestartWorkspaceRequest
-	(*ParkWorkspaceRequest)(nil),                       // 48: agentrepl.v1.ParkWorkspaceRequest
-	(*SetWorkspacePriorityRequest)(nil),                // 49: agentrepl.v1.SetWorkspacePriorityRequest
-	(*SetWorkspaceHiddenRequest)(nil),                  // 50: agentrepl.v1.SetWorkspaceHiddenRequest
-	(*SendHiddenKeepalivesRequest)(nil),                // 51: agentrepl.v1.SendHiddenKeepalivesRequest
-	(*SetWorkspaceParentRequest)(nil),                  // 52: agentrepl.v1.SetWorkspaceParentRequest
-	(*SwapWorkspacesRequest)(nil),                      // 53: agentrepl.v1.SwapWorkspacesRequest
-	(*MoveWorkspaceRequest)(nil),                       // 54: agentrepl.v1.MoveWorkspaceRequest
-	(*FoldRepositoryRequest)(nil),                      // 55: agentrepl.v1.FoldRepositoryRequest
-	(*UpdateSidebarViewRequest)(nil),                   // 56: agentrepl.v1.UpdateSidebarViewRequest
-	(*ArrangeSidebarRequest)(nil),                      // 57: agentrepl.v1.ArrangeSidebarRequest
-	(*GetSidebarArrangementRequest)(nil),               // 58: agentrepl.v1.GetSidebarArrangementRequest
-	(*CreateTaskRequest)(nil),                          // 59: agentrepl.v1.CreateTaskRequest
-	(*UpdateTaskRequest)(nil),                          // 60: agentrepl.v1.UpdateTaskRequest
-	(*AssignWorkspaceTaskRequest)(nil),                 // 61: agentrepl.v1.AssignWorkspaceTaskRequest
-	(*ShowSidebarAppRequest)(nil),                      // 62: agentrepl.v1.ShowSidebarAppRequest
-	(*CreateThreadRequest)(nil),                        // 63: agentrepl.v1.CreateThreadRequest
-	(*RequestNewThreadRequest)(nil),                    // 64: agentrepl.v1.RequestNewThreadRequest
-	(*WatchChatRequest)(nil),                           // 65: agentrepl.v1.WatchChatRequest
-	(*SwitchChatSiblingRequest)(nil),                   // 66: agentrepl.v1.SwitchChatSiblingRequest
-	(*ShowChatNodeRequest)(nil),                        // 67: agentrepl.v1.ShowChatNodeRequest
-	(*ReportChatSightingsRequest)(nil),                 // 68: agentrepl.v1.ReportChatSightingsRequest
-	(*SelectChatTextRequest)(nil),                      // 69: agentrepl.v1.SelectChatTextRequest
-	(*SearchChatsRequest)(nil),                         // 70: agentrepl.v1.SearchChatsRequest
-	(*WatchTopbarRequest)(nil),                         // 71: agentrepl.v1.WatchTopbarRequest
-	(*SetModelRequest)(nil),                            // 72: agentrepl.v1.SetModelRequest
-	(*SetDefaultModelRequest)(nil),                     // 73: agentrepl.v1.SetDefaultModelRequest
-	(*SetEffortRequest)(nil),                           // 74: agentrepl.v1.SetEffortRequest
-	(*UpdateRemoteControlModeRequest)(nil),             // 75: agentrepl.v1.UpdateRemoteControlModeRequest
-	(*UpdateQueueBypassModeRequest)(nil),               // 76: agentrepl.v1.UpdateQueueBypassModeRequest
-	(*SetPermissionModeRequest)(nil),                   // 77: agentrepl.v1.SetPermissionModeRequest
-	(*SelectAccountRequest)(nil),                       // 78: agentrepl.v1.SelectAccountRequest
-	(*WatchFooterRequest)(nil),                         // 79: agentrepl.v1.WatchFooterRequest
-	(*UpdateHeldPromptRequest)(nil),                    // 80: agentrepl.v1.UpdateHeldPromptRequest
-	(*EditHeldPromptRequest)(nil),                      // 81: agentrepl.v1.EditHeldPromptRequest
-	(*FoldHeldPromptRequest)(nil),                      // 82: agentrepl.v1.FoldHeldPromptRequest
-	(*UpdateClassifierPromptRequest)(nil),              // 83: agentrepl.v1.UpdateClassifierPromptRequest
-	(*AnswerMergeQueueOfferRequest)(nil),               // 84: agentrepl.v1.AnswerMergeQueueOfferRequest
-	(*UpdateShutdownScheduleRequest)(nil),              // 85: agentrepl.v1.UpdateShutdownScheduleRequest
-	(*DeployRequest)(nil),                              // 86: agentrepl.v1.DeployRequest
-	(*UpdateMergeQueueRequest)(nil),                    // 87: agentrepl.v1.UpdateMergeQueueRequest
-	(*UpdateDeployHoldRequest)(nil),                    // 88: agentrepl.v1.UpdateDeployHoldRequest
-	(*RollOutLandingRequest)(nil),                      // 89: agentrepl.v1.RollOutLandingRequest
-	(*PruneStorageRequest)(nil),                        // 90: agentrepl.v1.PruneStorageRequest
-	(*ReapWorktreesRequest)(nil),                       // 91: agentrepl.v1.ReapWorktreesRequest
-	(*AwaitIdleRequest)(nil),                           // 92: agentrepl.v1.AwaitIdleRequest
-	(*DaemonHealthRequest)(nil),                        // 93: agentrepl.v1.DaemonHealthRequest
-	(*SessionHealthRequest)(nil),                       // 94: agentrepl.v1.SessionHealthRequest
-	(*ClientLogRequest)(nil),                           // 95: agentrepl.v1.ClientLogRequest
-	(*ReportLatenciesRequest)(nil),                     // 96: agentrepl.v1.ReportLatenciesRequest
-	(*UpdatePersistentWifiModeRequest)(nil),            // 97: agentrepl.v1.UpdatePersistentWifiModeRequest
-	(*RegisterWorkspaceRequest)(nil),                   // 98: agentrepl.v1.RegisterWorkspaceRequest
-	(*RegisterWorkspacesRequest)(nil),                  // 99: agentrepl.v1.RegisterWorkspacesRequest
-	(*SelectWorkspaceRequest)(nil),                     // 100: agentrepl.v1.SelectWorkspaceRequest
-	(*MarkWorkspaceViewedRequest)(nil),                 // 101: agentrepl.v1.MarkWorkspaceViewedRequest
-	(*ReportViewDwellRequest)(nil),                     // 102: agentrepl.v1.ReportViewDwellRequest
-	(*ReportPageUnloadingRequest)(nil),                 // 103: agentrepl.v1.ReportPageUnloadingRequest
-	(*ReportPageResidencyRequest)(nil),                 // 104: agentrepl.v1.ReportPageResidencyRequest
-	(*ReportEditorFocusRequest)(nil),                   // 105: agentrepl.v1.ReportEditorFocusRequest
-	(*ReportRecencyReachRequest)(nil),                  // 106: agentrepl.v1.ReportRecencyReachRequest
-	(*WatchHostWorkspaceRequest)(nil),                  // 107: agentrepl.v1.WatchHostWorkspaceRequest
-	(*WatchDaemonRequest)(nil),                         // 108: agentrepl.v1.WatchDaemonRequest
-	(*OpenTabsRequest)(nil),                            // 109: agentrepl.v1.OpenTabsRequest
-	(*AdoptHostWorkspaceRequest)(nil),                  // 110: agentrepl.v1.AdoptHostWorkspaceRequest
-	(*AcceptHandedWorkspaceRequest)(nil),               // 111: agentrepl.v1.AcceptHandedWorkspaceRequest
-	(*ListSlashCommandsRequest)(nil),                   // 112: agentrepl.v1.ListSlashCommandsRequest
-	(*ListSlackChannelsRequest)(nil),                   // 113: agentrepl.v1.ListSlackChannelsRequest
-	(*WatchWebWorkspaceRequest)(nil),                   // 114: agentrepl.v1.WatchWebWorkspaceRequest
-	(*OpenLoginRequest)(nil),                           // 115: agentrepl.v1.OpenLoginRequest
-	(*WatchLoginTerminalRequest)(nil),                  // 116: agentrepl.v1.WatchLoginTerminalRequest
-	(*SendLoginInputRequest)(nil),                      // 117: agentrepl.v1.SendLoginInputRequest
-	(*CloseLoginRequest)(nil),                          // 118: agentrepl.v1.CloseLoginRequest
-	(*OpenExternalRequest)(nil),                        // 119: agentrepl.v1.OpenExternalRequest
-	(*OpenInEditorRequest)(nil),                        // 120: agentrepl.v1.OpenInEditorRequest
-	(*SelectInEditorRequest)(nil),                      // 121: agentrepl.v1.SelectInEditorRequest
-	(*LoadPageInEditorRequest)(nil),                    // 122: agentrepl.v1.LoadPageInEditorRequest
-	(*AdoptWebWorkspaceRequest)(nil),                   // 123: agentrepl.v1.AdoptWebWorkspaceRequest
-	(*WatchPageRequest)(nil),                           // 124: agentrepl.v1.WatchPageRequest
-	(*SubscribePageRequest)(nil),                       // 125: agentrepl.v1.SubscribePageRequest
-	(*UnsubscribePageRequest)(nil),                     // 126: agentrepl.v1.UnsubscribePageRequest
-	(*ReportPageDrawnRequest)(nil),                     // 127: agentrepl.v1.ReportPageDrawnRequest
-	(*DismissNewsDigestRequest)(nil),                   // 128: agentrepl.v1.DismissNewsDigestRequest
-	(*RefreshNewsDigestRequest)(nil),                   // 129: agentrepl.v1.RefreshNewsDigestRequest
-	(*GetWorkspaceStatusRequest)(nil),                  // 130: agentrepl.v1.GetWorkspaceStatusRequest
-	(*GetMergeQueueStatusRequest)(nil),                 // 131: agentrepl.v1.GetMergeQueueStatusRequest
-	(*ListMergeLandingsRequest)(nil),                   // 132: agentrepl.v1.ListMergeLandingsRequest
-	(*RecordDirectLandingRequest)(nil),                 // 133: agentrepl.v1.RecordDirectLandingRequest
-	(*FindWorkspacesRequest)(nil),                      // 134: agentrepl.v1.FindWorkspacesRequest
-	(*LocateWorkspaceRequest)(nil),                     // 135: agentrepl.v1.LocateWorkspaceRequest
-	(*SubscribeWorkspaceRequest)(nil),                  // 136: agentrepl.v1.SubscribeWorkspaceRequest
-	(*UnsubscribeWorkspaceRequest)(nil),                // 137: agentrepl.v1.UnsubscribeWorkspaceRequest
-	(*GatherWorkspacesRequest)(nil),                    // 138: agentrepl.v1.GatherWorkspacesRequest
-	(*GetGatherStatusRequest)(nil),                     // 139: agentrepl.v1.GetGatherStatusRequest
-	(*SubscribeMergeQueueRequest)(nil),                 // 140: agentrepl.v1.SubscribeMergeQueueRequest
-	(*UnsubscribeMergeQueueRequest)(nil),               // 141: agentrepl.v1.UnsubscribeMergeQueueRequest
-	(*RequeueMergeRequest)(nil),                        // 142: agentrepl.v1.RequeueMergeRequest
-	(*DiscardMergeRequest)(nil),                        // 143: agentrepl.v1.DiscardMergeRequest
-	(*SubscribePullRequestRequest)(nil),                // 144: agentrepl.v1.SubscribePullRequestRequest
-	(*UnsubscribePullRequestRequest)(nil),              // 145: agentrepl.v1.UnsubscribePullRequestRequest
-	(*ListPullRequestSubscriptionsRequest)(nil),        // 146: agentrepl.v1.ListPullRequestSubscriptionsRequest
-	(*CommentOnPullRequestRequest)(nil),                // 147: agentrepl.v1.CommentOnPullRequestRequest
-	(*SubscribeGithubMergeQueueRequest)(nil),           // 148: agentrepl.v1.SubscribeGithubMergeQueueRequest
-	(*UnsubscribeGithubMergeQueueRequest)(nil),         // 149: agentrepl.v1.UnsubscribeGithubMergeQueueRequest
-	(*ListGithubMergeQueueSubscriptionsRequest)(nil),   // 150: agentrepl.v1.ListGithubMergeQueueSubscriptionsRequest
-	(*SubscribeGithubWorkflowRunRequest)(nil),          // 151: agentrepl.v1.SubscribeGithubWorkflowRunRequest
-	(*UnsubscribeGithubWorkflowRunRequest)(nil),        // 152: agentrepl.v1.UnsubscribeGithubWorkflowRunRequest
-	(*ListGithubWorkflowRunSubscriptionsRequest)(nil),  // 153: agentrepl.v1.ListGithubWorkflowRunSubscriptionsRequest
-	(*NotifyWorkspaceRequest)(nil),                     // 154: agentrepl.v1.NotifyWorkspaceRequest
-	(*PassColdGateRequest)(nil),                        // 155: agentrepl.v1.PassColdGateRequest
-	(*KeepLiveWorkspaceRequest)(nil),                   // 156: agentrepl.v1.KeepLiveWorkspaceRequest
-	(*RunTestsRequest)(nil),                            // 157: agentrepl.v1.RunTestsRequest
-	(*RunRedundancyRequest)(nil),                       // 158: agentrepl.v1.RunRedundancyRequest
-	(*EvaluateInEditorRequest)(nil),                    // 159: agentrepl.v1.EvaluateInEditorRequest
-	(*AnswerEditorEvaluationRequest)(nil),              // 160: agentrepl.v1.AnswerEditorEvaluationRequest
-	(*SubmitPromptResponse)(nil),                       // 161: agentrepl.v1.SubmitPromptResponse
-	(*SelectFeedRowResponse)(nil),                      // 162: agentrepl.v1.SelectFeedRowResponse
-	(*SelectResponseTextResponse)(nil),                 // 163: agentrepl.v1.SelectResponseTextResponse
-	(*AskAboutResponseResponse)(nil),                   // 164: agentrepl.v1.AskAboutResponseResponse
-	(*ReportComposerEntriesResponse)(nil),              // 165: agentrepl.v1.ReportComposerEntriesResponse
-	(*FindEntryNeighborResponse)(nil),                  // 166: agentrepl.v1.FindEntryNeighborResponse
-	(*FoldMergeBubbleResponse)(nil),                    // 167: agentrepl.v1.FoldMergeBubbleResponse
-	(*AdjustFeedTextScaleResponse)(nil),                // 168: agentrepl.v1.AdjustFeedTextScaleResponse
-	(*OpenFeedImageResponse)(nil),                      // 169: agentrepl.v1.OpenFeedImageResponse
-	(*CloseFeedImageResponse)(nil),                     // 170: agentrepl.v1.CloseFeedImageResponse
-	(*RequestCommandSupportResponse)(nil),              // 171: agentrepl.v1.RequestCommandSupportResponse
-	(*OpenFeedResponse)(nil),                           // 172: agentrepl.v1.OpenFeedResponse
-	(*WatchFeedResponse)(nil),                          // 173: agentrepl.v1.WatchFeedResponse
-	(*WatchWorkspaceMentionsResponse)(nil),             // 174: agentrepl.v1.WatchWorkspaceMentionsResponse
-	(*GetFeedPageResponse)(nil),                        // 175: agentrepl.v1.GetFeedPageResponse
-	(*LoadFeedThroughResponse)(nil),                    // 176: agentrepl.v1.LoadFeedThroughResponse
-	(*InterruptResponse)(nil),                          // 177: agentrepl.v1.InterruptResponse
-	(*RetryVendorErrorResponse)(nil),                   // 178: agentrepl.v1.RetryVendorErrorResponse
-	(*InspectChessBoardSquareResponse)(nil),            // 179: agentrepl.v1.InspectChessBoardSquareResponse
-	(*PlanRollbackResponse)(nil),                       // 180: agentrepl.v1.PlanRollbackResponse
-	(*RollBackResponse)(nil),                           // 181: agentrepl.v1.RollBackResponse
-	(*ListRollbackPromptsResponse)(nil),                // 182: agentrepl.v1.ListRollbackPromptsResponse
-	(*AnswerPermissionResponse)(nil),                   // 183: agentrepl.v1.AnswerPermissionResponse
-	(*AnswerQuestionResponse)(nil),                     // 184: agentrepl.v1.AnswerQuestionResponse
-	(*UpdateQuestionDraftResponse)(nil),                // 185: agentrepl.v1.UpdateQuestionDraftResponse
-	(*AnswerColdGateResponse)(nil),                     // 186: agentrepl.v1.AnswerColdGateResponse
-	(*WatchWorkspaceRosterResponse)(nil),               // 187: agentrepl.v1.WatchWorkspaceRosterResponse
-	(*GetMemoryOverviewResponse)(nil),                  // 188: agentrepl.v1.GetMemoryOverviewResponse
-	(*GetWorkspaceMemoryResponse)(nil),                 // 189: agentrepl.v1.GetWorkspaceMemoryResponse
-	(*CreateWorkspaceResponse)(nil),                    // 190: agentrepl.v1.CreateWorkspaceResponse
-	(*ValidateWorkspaceNameResponse)(nil),              // 191: agentrepl.v1.ValidateWorkspaceNameResponse
-	(*ListCreationModelsResponse)(nil),                 // 192: agentrepl.v1.ListCreationModelsResponse
-	(*RegisterRepositoryResponse)(nil),                 // 193: agentrepl.v1.RegisterRepositoryResponse
-	(*OpenWorkspaceResponse)(nil),                      // 194: agentrepl.v1.OpenWorkspaceResponse
-	(*ListWorkspaceTranscriptsResponse)(nil),           // 195: agentrepl.v1.ListWorkspaceTranscriptsResponse
-	(*BindWorkspaceSessionResponse)(nil),               // 196: agentrepl.v1.BindWorkspaceSessionResponse
-	(*CloseWorkspaceResponse)(nil),                     // 197: agentrepl.v1.CloseWorkspaceResponse
-	(*KillWorkspaceResponse)(nil),                      // 198: agentrepl.v1.KillWorkspaceResponse
-	(*NukeWorkspaceResponse)(nil),                      // 199: agentrepl.v1.NukeWorkspaceResponse
-	(*ForgetWorkspaceResponse)(nil),                    // 200: agentrepl.v1.ForgetWorkspaceResponse
-	(*FinishWorkspaceResponse)(nil),                    // 201: agentrepl.v1.FinishWorkspaceResponse
-	(*CompactWorkspaceResponse)(nil),                   // 202: agentrepl.v1.CompactWorkspaceResponse
-	(*SetWorkspaceOneShotResponse)(nil),                // 203: agentrepl.v1.SetWorkspaceOneShotResponse
-	(*SetWorkspaceCorrespondenceResponse)(nil),         // 204: agentrepl.v1.SetWorkspaceCorrespondenceResponse
-	(*ChangeWorkspaceLinksResponse)(nil),               // 205: agentrepl.v1.ChangeWorkspaceLinksResponse
-	(*SetWorkspaceNameResponse)(nil),                   // 206: agentrepl.v1.SetWorkspaceNameResponse
-	(*SetWorkspaceSummaryResponse)(nil),                // 207: agentrepl.v1.SetWorkspaceSummaryResponse
-	(*RestartWorkspaceResponse)(nil),                   // 208: agentrepl.v1.RestartWorkspaceResponse
-	(*ParkWorkspaceResponse)(nil),                      // 209: agentrepl.v1.ParkWorkspaceResponse
-	(*SetWorkspacePriorityResponse)(nil),               // 210: agentrepl.v1.SetWorkspacePriorityResponse
-	(*SetWorkspaceHiddenResponse)(nil),                 // 211: agentrepl.v1.SetWorkspaceHiddenResponse
-	(*SendHiddenKeepalivesResponse)(nil),               // 212: agentrepl.v1.SendHiddenKeepalivesResponse
-	(*SetWorkspaceParentResponse)(nil),                 // 213: agentrepl.v1.SetWorkspaceParentResponse
-	(*SwapWorkspacesResponse)(nil),                     // 214: agentrepl.v1.SwapWorkspacesResponse
-	(*MoveWorkspaceResponse)(nil),                      // 215: agentrepl.v1.MoveWorkspaceResponse
-	(*FoldRepositoryResponse)(nil),                     // 216: agentrepl.v1.FoldRepositoryResponse
-	(*UpdateSidebarViewResponse)(nil),                  // 217: agentrepl.v1.UpdateSidebarViewResponse
-	(*ArrangeSidebarResponse)(nil),                     // 218: agentrepl.v1.ArrangeSidebarResponse
-	(*GetSidebarArrangementResponse)(nil),              // 219: agentrepl.v1.GetSidebarArrangementResponse
-	(*CreateTaskResponse)(nil),                         // 220: agentrepl.v1.CreateTaskResponse
-	(*UpdateTaskResponse)(nil),                         // 221: agentrepl.v1.UpdateTaskResponse
-	(*AssignWorkspaceTaskResponse)(nil),                // 222: agentrepl.v1.AssignWorkspaceTaskResponse
-	(*ShowSidebarAppResponse)(nil),                     // 223: agentrepl.v1.ShowSidebarAppResponse
-	(*CreateThreadResponse)(nil),                       // 224: agentrepl.v1.CreateThreadResponse
-	(*RequestNewThreadResponse)(nil),                   // 225: agentrepl.v1.RequestNewThreadResponse
-	(*WatchChatResponse)(nil),                          // 226: agentrepl.v1.WatchChatResponse
-	(*SwitchChatSiblingResponse)(nil),                  // 227: agentrepl.v1.SwitchChatSiblingResponse
-	(*ShowChatNodeResponse)(nil),                       // 228: agentrepl.v1.ShowChatNodeResponse
-	(*ReportChatSightingsResponse)(nil),                // 229: agentrepl.v1.ReportChatSightingsResponse
-	(*SelectChatTextResponse)(nil),                     // 230: agentrepl.v1.SelectChatTextResponse
-	(*SearchChatsResponse)(nil),                        // 231: agentrepl.v1.SearchChatsResponse
-	(*WatchTopbarResponse)(nil),                        // 232: agentrepl.v1.WatchTopbarResponse
-	(*SetModelResponse)(nil),                           // 233: agentrepl.v1.SetModelResponse
-	(*SetDefaultModelResponse)(nil),                    // 234: agentrepl.v1.SetDefaultModelResponse
-	(*SetEffortResponse)(nil),                          // 235: agentrepl.v1.SetEffortResponse
-	(*UpdateRemoteControlModeResponse)(nil),            // 236: agentrepl.v1.UpdateRemoteControlModeResponse
-	(*UpdateQueueBypassModeResponse)(nil),              // 237: agentrepl.v1.UpdateQueueBypassModeResponse
-	(*SetPermissionModeResponse)(nil),                  // 238: agentrepl.v1.SetPermissionModeResponse
-	(*SelectAccountResponse)(nil),                      // 239: agentrepl.v1.SelectAccountResponse
-	(*WatchFooterResponse)(nil),                        // 240: agentrepl.v1.WatchFooterResponse
-	(*UpdateHeldPromptResponse)(nil),                   // 241: agentrepl.v1.UpdateHeldPromptResponse
-	(*EditHeldPromptResponse)(nil),                     // 242: agentrepl.v1.EditHeldPromptResponse
-	(*FoldHeldPromptResponse)(nil),                     // 243: agentrepl.v1.FoldHeldPromptResponse
-	(*UpdateClassifierPromptResponse)(nil),             // 244: agentrepl.v1.UpdateClassifierPromptResponse
-	(*AnswerMergeQueueOfferResponse)(nil),              // 245: agentrepl.v1.AnswerMergeQueueOfferResponse
-	(*UpdateShutdownScheduleResponse)(nil),             // 246: agentrepl.v1.UpdateShutdownScheduleResponse
-	(*DeployResponse)(nil),                             // 247: agentrepl.v1.DeployResponse
-	(*UpdateMergeQueueResponse)(nil),                   // 248: agentrepl.v1.UpdateMergeQueueResponse
-	(*UpdateDeployHoldResponse)(nil),                   // 249: agentrepl.v1.UpdateDeployHoldResponse
-	(*RollOutLandingResponse)(nil),                     // 250: agentrepl.v1.RollOutLandingResponse
-	(*PruneStorageResponse)(nil),                       // 251: agentrepl.v1.PruneStorageResponse
-	(*ReapWorktreesResponse)(nil),                      // 252: agentrepl.v1.ReapWorktreesResponse
-	(*AwaitIdleResponse)(nil),                          // 253: agentrepl.v1.AwaitIdleResponse
-	(*DaemonHealthResponse)(nil),                       // 254: agentrepl.v1.DaemonHealthResponse
-	(*SessionHealthResponse)(nil),                      // 255: agentrepl.v1.SessionHealthResponse
-	(*ClientLogResponse)(nil),                          // 256: agentrepl.v1.ClientLogResponse
-	(*ReportLatenciesResponse)(nil),                    // 257: agentrepl.v1.ReportLatenciesResponse
-	(*UpdatePersistentWifiModeResponse)(nil),           // 258: agentrepl.v1.UpdatePersistentWifiModeResponse
-	(*RegisterWorkspaceResponse)(nil),                  // 259: agentrepl.v1.RegisterWorkspaceResponse
-	(*RegisterWorkspacesResponse)(nil),                 // 260: agentrepl.v1.RegisterWorkspacesResponse
-	(*SelectWorkspaceResponse)(nil),                    // 261: agentrepl.v1.SelectWorkspaceResponse
-	(*MarkWorkspaceViewedResponse)(nil),                // 262: agentrepl.v1.MarkWorkspaceViewedResponse
-	(*ReportViewDwellResponse)(nil),                    // 263: agentrepl.v1.ReportViewDwellResponse
-	(*ReportPageUnloadingResponse)(nil),                // 264: agentrepl.v1.ReportPageUnloadingResponse
-	(*ReportPageResidencyResponse)(nil),                // 265: agentrepl.v1.ReportPageResidencyResponse
-	(*ReportEditorFocusResponse)(nil),                  // 266: agentrepl.v1.ReportEditorFocusResponse
-	(*ReportRecencyReachResponse)(nil),                 // 267: agentrepl.v1.ReportRecencyReachResponse
-	(*WatchHostWorkspaceResponse)(nil),                 // 268: agentrepl.v1.WatchHostWorkspaceResponse
-	(*WatchDaemonResponse)(nil),                        // 269: agentrepl.v1.WatchDaemonResponse
-	(*OpenTabsResponse)(nil),                           // 270: agentrepl.v1.OpenTabsResponse
-	(*AdoptHostWorkspaceResponse)(nil),                 // 271: agentrepl.v1.AdoptHostWorkspaceResponse
-	(*AcceptHandedWorkspaceResponse)(nil),              // 272: agentrepl.v1.AcceptHandedWorkspaceResponse
-	(*ListSlashCommandsResponse)(nil),                  // 273: agentrepl.v1.ListSlashCommandsResponse
-	(*ListSlackChannelsResponse)(nil),                  // 274: agentrepl.v1.ListSlackChannelsResponse
-	(*WatchWebWorkspaceResponse)(nil),                  // 275: agentrepl.v1.WatchWebWorkspaceResponse
-	(*OpenLoginResponse)(nil),                          // 276: agentrepl.v1.OpenLoginResponse
-	(*LoginTerminalOutput)(nil),                        // 277: agentrepl.v1.LoginTerminalOutput
-	(*SendLoginInputResponse)(nil),                     // 278: agentrepl.v1.SendLoginInputResponse
-	(*CloseLoginResponse)(nil),                         // 279: agentrepl.v1.CloseLoginResponse
-	(*OpenExternalResponse)(nil),                       // 280: agentrepl.v1.OpenExternalResponse
-	(*OpenInEditorResponse)(nil),                       // 281: agentrepl.v1.OpenInEditorResponse
-	(*SelectInEditorResponse)(nil),                     // 282: agentrepl.v1.SelectInEditorResponse
-	(*LoadPageInEditorResponse)(nil),                   // 283: agentrepl.v1.LoadPageInEditorResponse
-	(*AdoptWebWorkspaceResponse)(nil),                  // 284: agentrepl.v1.AdoptWebWorkspaceResponse
-	(*WatchPageResponse)(nil),                          // 285: agentrepl.v1.WatchPageResponse
-	(*SubscribePageResponse)(nil),                      // 286: agentrepl.v1.SubscribePageResponse
-	(*UnsubscribePageResponse)(nil),                    // 287: agentrepl.v1.UnsubscribePageResponse
-	(*ReportPageDrawnResponse)(nil),                    // 288: agentrepl.v1.ReportPageDrawnResponse
-	(*DismissNewsDigestResponse)(nil),                  // 289: agentrepl.v1.DismissNewsDigestResponse
-	(*RefreshNewsDigestResponse)(nil),                  // 290: agentrepl.v1.RefreshNewsDigestResponse
-	(*GetWorkspaceStatusResponse)(nil),                 // 291: agentrepl.v1.GetWorkspaceStatusResponse
-	(*GetMergeQueueStatusResponse)(nil),                // 292: agentrepl.v1.GetMergeQueueStatusResponse
-	(*ListMergeLandingsResponse)(nil),                  // 293: agentrepl.v1.ListMergeLandingsResponse
-	(*RecordDirectLandingResponse)(nil),                // 294: agentrepl.v1.RecordDirectLandingResponse
-	(*FindWorkspacesResponse)(nil),                     // 295: agentrepl.v1.FindWorkspacesResponse
-	(*LocateWorkspaceResponse)(nil),                    // 296: agentrepl.v1.LocateWorkspaceResponse
-	(*SubscribeWorkspaceResponse)(nil),                 // 297: agentrepl.v1.SubscribeWorkspaceResponse
-	(*UnsubscribeWorkspaceResponse)(nil),               // 298: agentrepl.v1.UnsubscribeWorkspaceResponse
-	(*GatherWorkspacesResponse)(nil),                   // 299: agentrepl.v1.GatherWorkspacesResponse
-	(*GetGatherStatusResponse)(nil),                    // 300: agentrepl.v1.GetGatherStatusResponse
-	(*SubscribeMergeQueueResponse)(nil),                // 301: agentrepl.v1.SubscribeMergeQueueResponse
-	(*UnsubscribeMergeQueueResponse)(nil),              // 302: agentrepl.v1.UnsubscribeMergeQueueResponse
-	(*RequeueMergeResponse)(nil),                       // 303: agentrepl.v1.RequeueMergeResponse
-	(*DiscardMergeResponse)(nil),                       // 304: agentrepl.v1.DiscardMergeResponse
-	(*SubscribePullRequestResponse)(nil),               // 305: agentrepl.v1.SubscribePullRequestResponse
-	(*UnsubscribePullRequestResponse)(nil),             // 306: agentrepl.v1.UnsubscribePullRequestResponse
-	(*ListPullRequestSubscriptionsResponse)(nil),       // 307: agentrepl.v1.ListPullRequestSubscriptionsResponse
-	(*CommentOnPullRequestResponse)(nil),               // 308: agentrepl.v1.CommentOnPullRequestResponse
-	(*SubscribeGithubMergeQueueResponse)(nil),          // 309: agentrepl.v1.SubscribeGithubMergeQueueResponse
-	(*UnsubscribeGithubMergeQueueResponse)(nil),        // 310: agentrepl.v1.UnsubscribeGithubMergeQueueResponse
-	(*ListGithubMergeQueueSubscriptionsResponse)(nil),  // 311: agentrepl.v1.ListGithubMergeQueueSubscriptionsResponse
-	(*SubscribeGithubWorkflowRunResponse)(nil),         // 312: agentrepl.v1.SubscribeGithubWorkflowRunResponse
-	(*UnsubscribeGithubWorkflowRunResponse)(nil),       // 313: agentrepl.v1.UnsubscribeGithubWorkflowRunResponse
-	(*ListGithubWorkflowRunSubscriptionsResponse)(nil), // 314: agentrepl.v1.ListGithubWorkflowRunSubscriptionsResponse
-	(*NotifyWorkspaceResponse)(nil),                    // 315: agentrepl.v1.NotifyWorkspaceResponse
-	(*PassColdGateResponse)(nil),                       // 316: agentrepl.v1.PassColdGateResponse
-	(*KeepLiveWorkspaceResponse)(nil),                  // 317: agentrepl.v1.KeepLiveWorkspaceResponse
-	(*RunTestsResponse)(nil),                           // 318: agentrepl.v1.RunTestsResponse
-	(*RunRedundancyResponse)(nil),                      // 319: agentrepl.v1.RunRedundancyResponse
-	(*EvaluateInEditorResponse)(nil),                   // 320: agentrepl.v1.EvaluateInEditorResponse
-	(*AnswerEditorEvaluationResponse)(nil),             // 321: agentrepl.v1.AnswerEditorEvaluationResponse
+	(*ListMergedWorkspacesRequest)(nil),                // 27: agentrepl.v1.ListMergedWorkspacesRequest
+	(*GetMemoryOverviewRequest)(nil),                   // 28: agentrepl.v1.GetMemoryOverviewRequest
+	(*GetWorkspaceMemoryRequest)(nil),                  // 29: agentrepl.v1.GetWorkspaceMemoryRequest
+	(*CreateWorkspaceRequest)(nil),                     // 30: agentrepl.v1.CreateWorkspaceRequest
+	(*ValidateWorkspaceNameRequest)(nil),               // 31: agentrepl.v1.ValidateWorkspaceNameRequest
+	(*ListCreationModelsRequest)(nil),                  // 32: agentrepl.v1.ListCreationModelsRequest
+	(*RegisterRepositoryRequest)(nil),                  // 33: agentrepl.v1.RegisterRepositoryRequest
+	(*OpenWorkspaceRequest)(nil),                       // 34: agentrepl.v1.OpenWorkspaceRequest
+	(*ListWorkspaceTranscriptsRequest)(nil),            // 35: agentrepl.v1.ListWorkspaceTranscriptsRequest
+	(*BindWorkspaceSessionRequest)(nil),                // 36: agentrepl.v1.BindWorkspaceSessionRequest
+	(*CloseWorkspaceRequest)(nil),                      // 37: agentrepl.v1.CloseWorkspaceRequest
+	(*KillWorkspaceRequest)(nil),                       // 38: agentrepl.v1.KillWorkspaceRequest
+	(*NukeWorkspaceRequest)(nil),                       // 39: agentrepl.v1.NukeWorkspaceRequest
+	(*ForgetWorkspaceRequest)(nil),                     // 40: agentrepl.v1.ForgetWorkspaceRequest
+	(*FinishWorkspaceRequest)(nil),                     // 41: agentrepl.v1.FinishWorkspaceRequest
+	(*CompactWorkspaceRequest)(nil),                    // 42: agentrepl.v1.CompactWorkspaceRequest
+	(*SetWorkspaceOneShotRequest)(nil),                 // 43: agentrepl.v1.SetWorkspaceOneShotRequest
+	(*SetWorkspaceCorrespondenceRequest)(nil),          // 44: agentrepl.v1.SetWorkspaceCorrespondenceRequest
+	(*ChangeWorkspaceLinksRequest)(nil),                // 45: agentrepl.v1.ChangeWorkspaceLinksRequest
+	(*SetWorkspaceNameRequest)(nil),                    // 46: agentrepl.v1.SetWorkspaceNameRequest
+	(*SetWorkspaceSummaryRequest)(nil),                 // 47: agentrepl.v1.SetWorkspaceSummaryRequest
+	(*RestartWorkspaceRequest)(nil),                    // 48: agentrepl.v1.RestartWorkspaceRequest
+	(*ParkWorkspaceRequest)(nil),                       // 49: agentrepl.v1.ParkWorkspaceRequest
+	(*SetWorkspacePriorityRequest)(nil),                // 50: agentrepl.v1.SetWorkspacePriorityRequest
+	(*SetWorkspaceHiddenRequest)(nil),                  // 51: agentrepl.v1.SetWorkspaceHiddenRequest
+	(*SendHiddenKeepalivesRequest)(nil),                // 52: agentrepl.v1.SendHiddenKeepalivesRequest
+	(*SetWorkspaceParentRequest)(nil),                  // 53: agentrepl.v1.SetWorkspaceParentRequest
+	(*SwapWorkspacesRequest)(nil),                      // 54: agentrepl.v1.SwapWorkspacesRequest
+	(*MoveWorkspaceRequest)(nil),                       // 55: agentrepl.v1.MoveWorkspaceRequest
+	(*FoldRepositoryRequest)(nil),                      // 56: agentrepl.v1.FoldRepositoryRequest
+	(*UpdateSidebarViewRequest)(nil),                   // 57: agentrepl.v1.UpdateSidebarViewRequest
+	(*ArrangeSidebarRequest)(nil),                      // 58: agentrepl.v1.ArrangeSidebarRequest
+	(*GetSidebarArrangementRequest)(nil),               // 59: agentrepl.v1.GetSidebarArrangementRequest
+	(*CreateTaskRequest)(nil),                          // 60: agentrepl.v1.CreateTaskRequest
+	(*UpdateTaskRequest)(nil),                          // 61: agentrepl.v1.UpdateTaskRequest
+	(*AssignWorkspaceTaskRequest)(nil),                 // 62: agentrepl.v1.AssignWorkspaceTaskRequest
+	(*ShowSidebarAppRequest)(nil),                      // 63: agentrepl.v1.ShowSidebarAppRequest
+	(*CreateThreadRequest)(nil),                        // 64: agentrepl.v1.CreateThreadRequest
+	(*RequestNewThreadRequest)(nil),                    // 65: agentrepl.v1.RequestNewThreadRequest
+	(*WatchChatRequest)(nil),                           // 66: agentrepl.v1.WatchChatRequest
+	(*SwitchChatSiblingRequest)(nil),                   // 67: agentrepl.v1.SwitchChatSiblingRequest
+	(*ShowChatNodeRequest)(nil),                        // 68: agentrepl.v1.ShowChatNodeRequest
+	(*ReportChatSightingsRequest)(nil),                 // 69: agentrepl.v1.ReportChatSightingsRequest
+	(*SelectChatTextRequest)(nil),                      // 70: agentrepl.v1.SelectChatTextRequest
+	(*SearchChatsRequest)(nil),                         // 71: agentrepl.v1.SearchChatsRequest
+	(*WatchTopbarRequest)(nil),                         // 72: agentrepl.v1.WatchTopbarRequest
+	(*SetModelRequest)(nil),                            // 73: agentrepl.v1.SetModelRequest
+	(*SetDefaultModelRequest)(nil),                     // 74: agentrepl.v1.SetDefaultModelRequest
+	(*SetEffortRequest)(nil),                           // 75: agentrepl.v1.SetEffortRequest
+	(*UpdateRemoteControlModeRequest)(nil),             // 76: agentrepl.v1.UpdateRemoteControlModeRequest
+	(*UpdateQueueBypassModeRequest)(nil),               // 77: agentrepl.v1.UpdateQueueBypassModeRequest
+	(*SetPermissionModeRequest)(nil),                   // 78: agentrepl.v1.SetPermissionModeRequest
+	(*SelectAccountRequest)(nil),                       // 79: agentrepl.v1.SelectAccountRequest
+	(*WatchFooterRequest)(nil),                         // 80: agentrepl.v1.WatchFooterRequest
+	(*UpdateHeldPromptRequest)(nil),                    // 81: agentrepl.v1.UpdateHeldPromptRequest
+	(*EditHeldPromptRequest)(nil),                      // 82: agentrepl.v1.EditHeldPromptRequest
+	(*FoldHeldPromptRequest)(nil),                      // 83: agentrepl.v1.FoldHeldPromptRequest
+	(*UpdateClassifierPromptRequest)(nil),              // 84: agentrepl.v1.UpdateClassifierPromptRequest
+	(*AnswerMergeQueueOfferRequest)(nil),               // 85: agentrepl.v1.AnswerMergeQueueOfferRequest
+	(*UpdateShutdownScheduleRequest)(nil),              // 86: agentrepl.v1.UpdateShutdownScheduleRequest
+	(*DeployRequest)(nil),                              // 87: agentrepl.v1.DeployRequest
+	(*UpdateMergeQueueRequest)(nil),                    // 88: agentrepl.v1.UpdateMergeQueueRequest
+	(*UpdateDeployHoldRequest)(nil),                    // 89: agentrepl.v1.UpdateDeployHoldRequest
+	(*RollOutLandingRequest)(nil),                      // 90: agentrepl.v1.RollOutLandingRequest
+	(*PruneStorageRequest)(nil),                        // 91: agentrepl.v1.PruneStorageRequest
+	(*ReapWorktreesRequest)(nil),                       // 92: agentrepl.v1.ReapWorktreesRequest
+	(*AwaitIdleRequest)(nil),                           // 93: agentrepl.v1.AwaitIdleRequest
+	(*DaemonHealthRequest)(nil),                        // 94: agentrepl.v1.DaemonHealthRequest
+	(*SessionHealthRequest)(nil),                       // 95: agentrepl.v1.SessionHealthRequest
+	(*ClientLogRequest)(nil),                           // 96: agentrepl.v1.ClientLogRequest
+	(*ReportLatenciesRequest)(nil),                     // 97: agentrepl.v1.ReportLatenciesRequest
+	(*UpdatePersistentWifiModeRequest)(nil),            // 98: agentrepl.v1.UpdatePersistentWifiModeRequest
+	(*RegisterWorkspaceRequest)(nil),                   // 99: agentrepl.v1.RegisterWorkspaceRequest
+	(*RegisterWorkspacesRequest)(nil),                  // 100: agentrepl.v1.RegisterWorkspacesRequest
+	(*SelectWorkspaceRequest)(nil),                     // 101: agentrepl.v1.SelectWorkspaceRequest
+	(*MarkWorkspaceViewedRequest)(nil),                 // 102: agentrepl.v1.MarkWorkspaceViewedRequest
+	(*ReportViewDwellRequest)(nil),                     // 103: agentrepl.v1.ReportViewDwellRequest
+	(*ReportPageUnloadingRequest)(nil),                 // 104: agentrepl.v1.ReportPageUnloadingRequest
+	(*ReportPageResidencyRequest)(nil),                 // 105: agentrepl.v1.ReportPageResidencyRequest
+	(*ReportEditorFocusRequest)(nil),                   // 106: agentrepl.v1.ReportEditorFocusRequest
+	(*ReportRecencyReachRequest)(nil),                  // 107: agentrepl.v1.ReportRecencyReachRequest
+	(*WatchHostWorkspaceRequest)(nil),                  // 108: agentrepl.v1.WatchHostWorkspaceRequest
+	(*WatchDaemonRequest)(nil),                         // 109: agentrepl.v1.WatchDaemonRequest
+	(*OpenTabsRequest)(nil),                            // 110: agentrepl.v1.OpenTabsRequest
+	(*AdoptHostWorkspaceRequest)(nil),                  // 111: agentrepl.v1.AdoptHostWorkspaceRequest
+	(*AcceptHandedWorkspaceRequest)(nil),               // 112: agentrepl.v1.AcceptHandedWorkspaceRequest
+	(*ListSlashCommandsRequest)(nil),                   // 113: agentrepl.v1.ListSlashCommandsRequest
+	(*ListSlackChannelsRequest)(nil),                   // 114: agentrepl.v1.ListSlackChannelsRequest
+	(*WatchWebWorkspaceRequest)(nil),                   // 115: agentrepl.v1.WatchWebWorkspaceRequest
+	(*OpenLoginRequest)(nil),                           // 116: agentrepl.v1.OpenLoginRequest
+	(*WatchLoginTerminalRequest)(nil),                  // 117: agentrepl.v1.WatchLoginTerminalRequest
+	(*SendLoginInputRequest)(nil),                      // 118: agentrepl.v1.SendLoginInputRequest
+	(*CloseLoginRequest)(nil),                          // 119: agentrepl.v1.CloseLoginRequest
+	(*OpenExternalRequest)(nil),                        // 120: agentrepl.v1.OpenExternalRequest
+	(*OpenInEditorRequest)(nil),                        // 121: agentrepl.v1.OpenInEditorRequest
+	(*SelectInEditorRequest)(nil),                      // 122: agentrepl.v1.SelectInEditorRequest
+	(*LoadPageInEditorRequest)(nil),                    // 123: agentrepl.v1.LoadPageInEditorRequest
+	(*AdoptWebWorkspaceRequest)(nil),                   // 124: agentrepl.v1.AdoptWebWorkspaceRequest
+	(*WatchPageRequest)(nil),                           // 125: agentrepl.v1.WatchPageRequest
+	(*SubscribePageRequest)(nil),                       // 126: agentrepl.v1.SubscribePageRequest
+	(*UnsubscribePageRequest)(nil),                     // 127: agentrepl.v1.UnsubscribePageRequest
+	(*ReportPageDrawnRequest)(nil),                     // 128: agentrepl.v1.ReportPageDrawnRequest
+	(*DismissNewsDigestRequest)(nil),                   // 129: agentrepl.v1.DismissNewsDigestRequest
+	(*RefreshNewsDigestRequest)(nil),                   // 130: agentrepl.v1.RefreshNewsDigestRequest
+	(*GetWorkspaceStatusRequest)(nil),                  // 131: agentrepl.v1.GetWorkspaceStatusRequest
+	(*GetMergeQueueStatusRequest)(nil),                 // 132: agentrepl.v1.GetMergeQueueStatusRequest
+	(*ListMergeLandingsRequest)(nil),                   // 133: agentrepl.v1.ListMergeLandingsRequest
+	(*RecordDirectLandingRequest)(nil),                 // 134: agentrepl.v1.RecordDirectLandingRequest
+	(*FindWorkspacesRequest)(nil),                      // 135: agentrepl.v1.FindWorkspacesRequest
+	(*LocateWorkspaceRequest)(nil),                     // 136: agentrepl.v1.LocateWorkspaceRequest
+	(*SubscribeWorkspaceRequest)(nil),                  // 137: agentrepl.v1.SubscribeWorkspaceRequest
+	(*UnsubscribeWorkspaceRequest)(nil),                // 138: agentrepl.v1.UnsubscribeWorkspaceRequest
+	(*GatherWorkspacesRequest)(nil),                    // 139: agentrepl.v1.GatherWorkspacesRequest
+	(*GetGatherStatusRequest)(nil),                     // 140: agentrepl.v1.GetGatherStatusRequest
+	(*SubscribeMergeQueueRequest)(nil),                 // 141: agentrepl.v1.SubscribeMergeQueueRequest
+	(*UnsubscribeMergeQueueRequest)(nil),               // 142: agentrepl.v1.UnsubscribeMergeQueueRequest
+	(*RequeueMergeRequest)(nil),                        // 143: agentrepl.v1.RequeueMergeRequest
+	(*DiscardMergeRequest)(nil),                        // 144: agentrepl.v1.DiscardMergeRequest
+	(*SubscribePullRequestRequest)(nil),                // 145: agentrepl.v1.SubscribePullRequestRequest
+	(*UnsubscribePullRequestRequest)(nil),              // 146: agentrepl.v1.UnsubscribePullRequestRequest
+	(*ListPullRequestSubscriptionsRequest)(nil),        // 147: agentrepl.v1.ListPullRequestSubscriptionsRequest
+	(*CommentOnPullRequestRequest)(nil),                // 148: agentrepl.v1.CommentOnPullRequestRequest
+	(*SubscribeGithubMergeQueueRequest)(nil),           // 149: agentrepl.v1.SubscribeGithubMergeQueueRequest
+	(*UnsubscribeGithubMergeQueueRequest)(nil),         // 150: agentrepl.v1.UnsubscribeGithubMergeQueueRequest
+	(*ListGithubMergeQueueSubscriptionsRequest)(nil),   // 151: agentrepl.v1.ListGithubMergeQueueSubscriptionsRequest
+	(*SubscribeGithubWorkflowRunRequest)(nil),          // 152: agentrepl.v1.SubscribeGithubWorkflowRunRequest
+	(*UnsubscribeGithubWorkflowRunRequest)(nil),        // 153: agentrepl.v1.UnsubscribeGithubWorkflowRunRequest
+	(*ListGithubWorkflowRunSubscriptionsRequest)(nil),  // 154: agentrepl.v1.ListGithubWorkflowRunSubscriptionsRequest
+	(*NotifyWorkspaceRequest)(nil),                     // 155: agentrepl.v1.NotifyWorkspaceRequest
+	(*PassColdGateRequest)(nil),                        // 156: agentrepl.v1.PassColdGateRequest
+	(*KeepLiveWorkspaceRequest)(nil),                   // 157: agentrepl.v1.KeepLiveWorkspaceRequest
+	(*RunTestsRequest)(nil),                            // 158: agentrepl.v1.RunTestsRequest
+	(*RunRedundancyRequest)(nil),                       // 159: agentrepl.v1.RunRedundancyRequest
+	(*EvaluateInEditorRequest)(nil),                    // 160: agentrepl.v1.EvaluateInEditorRequest
+	(*AnswerEditorEvaluationRequest)(nil),              // 161: agentrepl.v1.AnswerEditorEvaluationRequest
+	(*SubmitPromptResponse)(nil),                       // 162: agentrepl.v1.SubmitPromptResponse
+	(*SelectFeedRowResponse)(nil),                      // 163: agentrepl.v1.SelectFeedRowResponse
+	(*SelectResponseTextResponse)(nil),                 // 164: agentrepl.v1.SelectResponseTextResponse
+	(*AskAboutResponseResponse)(nil),                   // 165: agentrepl.v1.AskAboutResponseResponse
+	(*ReportComposerEntriesResponse)(nil),              // 166: agentrepl.v1.ReportComposerEntriesResponse
+	(*FindEntryNeighborResponse)(nil),                  // 167: agentrepl.v1.FindEntryNeighborResponse
+	(*FoldMergeBubbleResponse)(nil),                    // 168: agentrepl.v1.FoldMergeBubbleResponse
+	(*AdjustFeedTextScaleResponse)(nil),                // 169: agentrepl.v1.AdjustFeedTextScaleResponse
+	(*OpenFeedImageResponse)(nil),                      // 170: agentrepl.v1.OpenFeedImageResponse
+	(*CloseFeedImageResponse)(nil),                     // 171: agentrepl.v1.CloseFeedImageResponse
+	(*RequestCommandSupportResponse)(nil),              // 172: agentrepl.v1.RequestCommandSupportResponse
+	(*OpenFeedResponse)(nil),                           // 173: agentrepl.v1.OpenFeedResponse
+	(*WatchFeedResponse)(nil),                          // 174: agentrepl.v1.WatchFeedResponse
+	(*WatchWorkspaceMentionsResponse)(nil),             // 175: agentrepl.v1.WatchWorkspaceMentionsResponse
+	(*GetFeedPageResponse)(nil),                        // 176: agentrepl.v1.GetFeedPageResponse
+	(*LoadFeedThroughResponse)(nil),                    // 177: agentrepl.v1.LoadFeedThroughResponse
+	(*InterruptResponse)(nil),                          // 178: agentrepl.v1.InterruptResponse
+	(*RetryVendorErrorResponse)(nil),                   // 179: agentrepl.v1.RetryVendorErrorResponse
+	(*InspectChessBoardSquareResponse)(nil),            // 180: agentrepl.v1.InspectChessBoardSquareResponse
+	(*PlanRollbackResponse)(nil),                       // 181: agentrepl.v1.PlanRollbackResponse
+	(*RollBackResponse)(nil),                           // 182: agentrepl.v1.RollBackResponse
+	(*ListRollbackPromptsResponse)(nil),                // 183: agentrepl.v1.ListRollbackPromptsResponse
+	(*AnswerPermissionResponse)(nil),                   // 184: agentrepl.v1.AnswerPermissionResponse
+	(*AnswerQuestionResponse)(nil),                     // 185: agentrepl.v1.AnswerQuestionResponse
+	(*UpdateQuestionDraftResponse)(nil),                // 186: agentrepl.v1.UpdateQuestionDraftResponse
+	(*AnswerColdGateResponse)(nil),                     // 187: agentrepl.v1.AnswerColdGateResponse
+	(*WatchWorkspaceRosterResponse)(nil),               // 188: agentrepl.v1.WatchWorkspaceRosterResponse
+	(*ListMergedWorkspacesResponse)(nil),               // 189: agentrepl.v1.ListMergedWorkspacesResponse
+	(*GetMemoryOverviewResponse)(nil),                  // 190: agentrepl.v1.GetMemoryOverviewResponse
+	(*GetWorkspaceMemoryResponse)(nil),                 // 191: agentrepl.v1.GetWorkspaceMemoryResponse
+	(*CreateWorkspaceResponse)(nil),                    // 192: agentrepl.v1.CreateWorkspaceResponse
+	(*ValidateWorkspaceNameResponse)(nil),              // 193: agentrepl.v1.ValidateWorkspaceNameResponse
+	(*ListCreationModelsResponse)(nil),                 // 194: agentrepl.v1.ListCreationModelsResponse
+	(*RegisterRepositoryResponse)(nil),                 // 195: agentrepl.v1.RegisterRepositoryResponse
+	(*OpenWorkspaceResponse)(nil),                      // 196: agentrepl.v1.OpenWorkspaceResponse
+	(*ListWorkspaceTranscriptsResponse)(nil),           // 197: agentrepl.v1.ListWorkspaceTranscriptsResponse
+	(*BindWorkspaceSessionResponse)(nil),               // 198: agentrepl.v1.BindWorkspaceSessionResponse
+	(*CloseWorkspaceResponse)(nil),                     // 199: agentrepl.v1.CloseWorkspaceResponse
+	(*KillWorkspaceResponse)(nil),                      // 200: agentrepl.v1.KillWorkspaceResponse
+	(*NukeWorkspaceResponse)(nil),                      // 201: agentrepl.v1.NukeWorkspaceResponse
+	(*ForgetWorkspaceResponse)(nil),                    // 202: agentrepl.v1.ForgetWorkspaceResponse
+	(*FinishWorkspaceResponse)(nil),                    // 203: agentrepl.v1.FinishWorkspaceResponse
+	(*CompactWorkspaceResponse)(nil),                   // 204: agentrepl.v1.CompactWorkspaceResponse
+	(*SetWorkspaceOneShotResponse)(nil),                // 205: agentrepl.v1.SetWorkspaceOneShotResponse
+	(*SetWorkspaceCorrespondenceResponse)(nil),         // 206: agentrepl.v1.SetWorkspaceCorrespondenceResponse
+	(*ChangeWorkspaceLinksResponse)(nil),               // 207: agentrepl.v1.ChangeWorkspaceLinksResponse
+	(*SetWorkspaceNameResponse)(nil),                   // 208: agentrepl.v1.SetWorkspaceNameResponse
+	(*SetWorkspaceSummaryResponse)(nil),                // 209: agentrepl.v1.SetWorkspaceSummaryResponse
+	(*RestartWorkspaceResponse)(nil),                   // 210: agentrepl.v1.RestartWorkspaceResponse
+	(*ParkWorkspaceResponse)(nil),                      // 211: agentrepl.v1.ParkWorkspaceResponse
+	(*SetWorkspacePriorityResponse)(nil),               // 212: agentrepl.v1.SetWorkspacePriorityResponse
+	(*SetWorkspaceHiddenResponse)(nil),                 // 213: agentrepl.v1.SetWorkspaceHiddenResponse
+	(*SendHiddenKeepalivesResponse)(nil),               // 214: agentrepl.v1.SendHiddenKeepalivesResponse
+	(*SetWorkspaceParentResponse)(nil),                 // 215: agentrepl.v1.SetWorkspaceParentResponse
+	(*SwapWorkspacesResponse)(nil),                     // 216: agentrepl.v1.SwapWorkspacesResponse
+	(*MoveWorkspaceResponse)(nil),                      // 217: agentrepl.v1.MoveWorkspaceResponse
+	(*FoldRepositoryResponse)(nil),                     // 218: agentrepl.v1.FoldRepositoryResponse
+	(*UpdateSidebarViewResponse)(nil),                  // 219: agentrepl.v1.UpdateSidebarViewResponse
+	(*ArrangeSidebarResponse)(nil),                     // 220: agentrepl.v1.ArrangeSidebarResponse
+	(*GetSidebarArrangementResponse)(nil),              // 221: agentrepl.v1.GetSidebarArrangementResponse
+	(*CreateTaskResponse)(nil),                         // 222: agentrepl.v1.CreateTaskResponse
+	(*UpdateTaskResponse)(nil),                         // 223: agentrepl.v1.UpdateTaskResponse
+	(*AssignWorkspaceTaskResponse)(nil),                // 224: agentrepl.v1.AssignWorkspaceTaskResponse
+	(*ShowSidebarAppResponse)(nil),                     // 225: agentrepl.v1.ShowSidebarAppResponse
+	(*CreateThreadResponse)(nil),                       // 226: agentrepl.v1.CreateThreadResponse
+	(*RequestNewThreadResponse)(nil),                   // 227: agentrepl.v1.RequestNewThreadResponse
+	(*WatchChatResponse)(nil),                          // 228: agentrepl.v1.WatchChatResponse
+	(*SwitchChatSiblingResponse)(nil),                  // 229: agentrepl.v1.SwitchChatSiblingResponse
+	(*ShowChatNodeResponse)(nil),                       // 230: agentrepl.v1.ShowChatNodeResponse
+	(*ReportChatSightingsResponse)(nil),                // 231: agentrepl.v1.ReportChatSightingsResponse
+	(*SelectChatTextResponse)(nil),                     // 232: agentrepl.v1.SelectChatTextResponse
+	(*SearchChatsResponse)(nil),                        // 233: agentrepl.v1.SearchChatsResponse
+	(*WatchTopbarResponse)(nil),                        // 234: agentrepl.v1.WatchTopbarResponse
+	(*SetModelResponse)(nil),                           // 235: agentrepl.v1.SetModelResponse
+	(*SetDefaultModelResponse)(nil),                    // 236: agentrepl.v1.SetDefaultModelResponse
+	(*SetEffortResponse)(nil),                          // 237: agentrepl.v1.SetEffortResponse
+	(*UpdateRemoteControlModeResponse)(nil),            // 238: agentrepl.v1.UpdateRemoteControlModeResponse
+	(*UpdateQueueBypassModeResponse)(nil),              // 239: agentrepl.v1.UpdateQueueBypassModeResponse
+	(*SetPermissionModeResponse)(nil),                  // 240: agentrepl.v1.SetPermissionModeResponse
+	(*SelectAccountResponse)(nil),                      // 241: agentrepl.v1.SelectAccountResponse
+	(*WatchFooterResponse)(nil),                        // 242: agentrepl.v1.WatchFooterResponse
+	(*UpdateHeldPromptResponse)(nil),                   // 243: agentrepl.v1.UpdateHeldPromptResponse
+	(*EditHeldPromptResponse)(nil),                     // 244: agentrepl.v1.EditHeldPromptResponse
+	(*FoldHeldPromptResponse)(nil),                     // 245: agentrepl.v1.FoldHeldPromptResponse
+	(*UpdateClassifierPromptResponse)(nil),             // 246: agentrepl.v1.UpdateClassifierPromptResponse
+	(*AnswerMergeQueueOfferResponse)(nil),              // 247: agentrepl.v1.AnswerMergeQueueOfferResponse
+	(*UpdateShutdownScheduleResponse)(nil),             // 248: agentrepl.v1.UpdateShutdownScheduleResponse
+	(*DeployResponse)(nil),                             // 249: agentrepl.v1.DeployResponse
+	(*UpdateMergeQueueResponse)(nil),                   // 250: agentrepl.v1.UpdateMergeQueueResponse
+	(*UpdateDeployHoldResponse)(nil),                   // 251: agentrepl.v1.UpdateDeployHoldResponse
+	(*RollOutLandingResponse)(nil),                     // 252: agentrepl.v1.RollOutLandingResponse
+	(*PruneStorageResponse)(nil),                       // 253: agentrepl.v1.PruneStorageResponse
+	(*ReapWorktreesResponse)(nil),                      // 254: agentrepl.v1.ReapWorktreesResponse
+	(*AwaitIdleResponse)(nil),                          // 255: agentrepl.v1.AwaitIdleResponse
+	(*DaemonHealthResponse)(nil),                       // 256: agentrepl.v1.DaemonHealthResponse
+	(*SessionHealthResponse)(nil),                      // 257: agentrepl.v1.SessionHealthResponse
+	(*ClientLogResponse)(nil),                          // 258: agentrepl.v1.ClientLogResponse
+	(*ReportLatenciesResponse)(nil),                    // 259: agentrepl.v1.ReportLatenciesResponse
+	(*UpdatePersistentWifiModeResponse)(nil),           // 260: agentrepl.v1.UpdatePersistentWifiModeResponse
+	(*RegisterWorkspaceResponse)(nil),                  // 261: agentrepl.v1.RegisterWorkspaceResponse
+	(*RegisterWorkspacesResponse)(nil),                 // 262: agentrepl.v1.RegisterWorkspacesResponse
+	(*SelectWorkspaceResponse)(nil),                    // 263: agentrepl.v1.SelectWorkspaceResponse
+	(*MarkWorkspaceViewedResponse)(nil),                // 264: agentrepl.v1.MarkWorkspaceViewedResponse
+	(*ReportViewDwellResponse)(nil),                    // 265: agentrepl.v1.ReportViewDwellResponse
+	(*ReportPageUnloadingResponse)(nil),                // 266: agentrepl.v1.ReportPageUnloadingResponse
+	(*ReportPageResidencyResponse)(nil),                // 267: agentrepl.v1.ReportPageResidencyResponse
+	(*ReportEditorFocusResponse)(nil),                  // 268: agentrepl.v1.ReportEditorFocusResponse
+	(*ReportRecencyReachResponse)(nil),                 // 269: agentrepl.v1.ReportRecencyReachResponse
+	(*WatchHostWorkspaceResponse)(nil),                 // 270: agentrepl.v1.WatchHostWorkspaceResponse
+	(*WatchDaemonResponse)(nil),                        // 271: agentrepl.v1.WatchDaemonResponse
+	(*OpenTabsResponse)(nil),                           // 272: agentrepl.v1.OpenTabsResponse
+	(*AdoptHostWorkspaceResponse)(nil),                 // 273: agentrepl.v1.AdoptHostWorkspaceResponse
+	(*AcceptHandedWorkspaceResponse)(nil),              // 274: agentrepl.v1.AcceptHandedWorkspaceResponse
+	(*ListSlashCommandsResponse)(nil),                  // 275: agentrepl.v1.ListSlashCommandsResponse
+	(*ListSlackChannelsResponse)(nil),                  // 276: agentrepl.v1.ListSlackChannelsResponse
+	(*WatchWebWorkspaceResponse)(nil),                  // 277: agentrepl.v1.WatchWebWorkspaceResponse
+	(*OpenLoginResponse)(nil),                          // 278: agentrepl.v1.OpenLoginResponse
+	(*LoginTerminalOutput)(nil),                        // 279: agentrepl.v1.LoginTerminalOutput
+	(*SendLoginInputResponse)(nil),                     // 280: agentrepl.v1.SendLoginInputResponse
+	(*CloseLoginResponse)(nil),                         // 281: agentrepl.v1.CloseLoginResponse
+	(*OpenExternalResponse)(nil),                       // 282: agentrepl.v1.OpenExternalResponse
+	(*OpenInEditorResponse)(nil),                       // 283: agentrepl.v1.OpenInEditorResponse
+	(*SelectInEditorResponse)(nil),                     // 284: agentrepl.v1.SelectInEditorResponse
+	(*LoadPageInEditorResponse)(nil),                   // 285: agentrepl.v1.LoadPageInEditorResponse
+	(*AdoptWebWorkspaceResponse)(nil),                  // 286: agentrepl.v1.AdoptWebWorkspaceResponse
+	(*WatchPageResponse)(nil),                          // 287: agentrepl.v1.WatchPageResponse
+	(*SubscribePageResponse)(nil),                      // 288: agentrepl.v1.SubscribePageResponse
+	(*UnsubscribePageResponse)(nil),                    // 289: agentrepl.v1.UnsubscribePageResponse
+	(*ReportPageDrawnResponse)(nil),                    // 290: agentrepl.v1.ReportPageDrawnResponse
+	(*DismissNewsDigestResponse)(nil),                  // 291: agentrepl.v1.DismissNewsDigestResponse
+	(*RefreshNewsDigestResponse)(nil),                  // 292: agentrepl.v1.RefreshNewsDigestResponse
+	(*GetWorkspaceStatusResponse)(nil),                 // 293: agentrepl.v1.GetWorkspaceStatusResponse
+	(*GetMergeQueueStatusResponse)(nil),                // 294: agentrepl.v1.GetMergeQueueStatusResponse
+	(*ListMergeLandingsResponse)(nil),                  // 295: agentrepl.v1.ListMergeLandingsResponse
+	(*RecordDirectLandingResponse)(nil),                // 296: agentrepl.v1.RecordDirectLandingResponse
+	(*FindWorkspacesResponse)(nil),                     // 297: agentrepl.v1.FindWorkspacesResponse
+	(*LocateWorkspaceResponse)(nil),                    // 298: agentrepl.v1.LocateWorkspaceResponse
+	(*SubscribeWorkspaceResponse)(nil),                 // 299: agentrepl.v1.SubscribeWorkspaceResponse
+	(*UnsubscribeWorkspaceResponse)(nil),               // 300: agentrepl.v1.UnsubscribeWorkspaceResponse
+	(*GatherWorkspacesResponse)(nil),                   // 301: agentrepl.v1.GatherWorkspacesResponse
+	(*GetGatherStatusResponse)(nil),                    // 302: agentrepl.v1.GetGatherStatusResponse
+	(*SubscribeMergeQueueResponse)(nil),                // 303: agentrepl.v1.SubscribeMergeQueueResponse
+	(*UnsubscribeMergeQueueResponse)(nil),              // 304: agentrepl.v1.UnsubscribeMergeQueueResponse
+	(*RequeueMergeResponse)(nil),                       // 305: agentrepl.v1.RequeueMergeResponse
+	(*DiscardMergeResponse)(nil),                       // 306: agentrepl.v1.DiscardMergeResponse
+	(*SubscribePullRequestResponse)(nil),               // 307: agentrepl.v1.SubscribePullRequestResponse
+	(*UnsubscribePullRequestResponse)(nil),             // 308: agentrepl.v1.UnsubscribePullRequestResponse
+	(*ListPullRequestSubscriptionsResponse)(nil),       // 309: agentrepl.v1.ListPullRequestSubscriptionsResponse
+	(*CommentOnPullRequestResponse)(nil),               // 310: agentrepl.v1.CommentOnPullRequestResponse
+	(*SubscribeGithubMergeQueueResponse)(nil),          // 311: agentrepl.v1.SubscribeGithubMergeQueueResponse
+	(*UnsubscribeGithubMergeQueueResponse)(nil),        // 312: agentrepl.v1.UnsubscribeGithubMergeQueueResponse
+	(*ListGithubMergeQueueSubscriptionsResponse)(nil),  // 313: agentrepl.v1.ListGithubMergeQueueSubscriptionsResponse
+	(*SubscribeGithubWorkflowRunResponse)(nil),         // 314: agentrepl.v1.SubscribeGithubWorkflowRunResponse
+	(*UnsubscribeGithubWorkflowRunResponse)(nil),       // 315: agentrepl.v1.UnsubscribeGithubWorkflowRunResponse
+	(*ListGithubWorkflowRunSubscriptionsResponse)(nil), // 316: agentrepl.v1.ListGithubWorkflowRunSubscriptionsResponse
+	(*NotifyWorkspaceResponse)(nil),                    // 317: agentrepl.v1.NotifyWorkspaceResponse
+	(*PassColdGateResponse)(nil),                       // 318: agentrepl.v1.PassColdGateResponse
+	(*KeepLiveWorkspaceResponse)(nil),                  // 319: agentrepl.v1.KeepLiveWorkspaceResponse
+	(*RunTestsResponse)(nil),                           // 320: agentrepl.v1.RunTestsResponse
+	(*RunRedundancyResponse)(nil),                      // 321: agentrepl.v1.RunRedundancyResponse
+	(*EvaluateInEditorResponse)(nil),                   // 322: agentrepl.v1.EvaluateInEditorResponse
+	(*AnswerEditorEvaluationResponse)(nil),             // 323: agentrepl.v1.AnswerEditorEvaluationResponse
 }
 var file_agentrepl_v1_service_proto_depIdxs = []int32{
 	0,   // 0: agentrepl.v1.AgentRepl.SubmitPrompt:input_type -> agentrepl.v1.SubmitPromptRequest
@@ -552,303 +555,305 @@ var file_agentrepl_v1_service_proto_depIdxs = []int32{
 	24,  // 24: agentrepl.v1.AgentRepl.UpdateQuestionDraft:input_type -> agentrepl.v1.UpdateQuestionDraftRequest
 	25,  // 25: agentrepl.v1.AgentRepl.AnswerColdGate:input_type -> agentrepl.v1.AnswerColdGateRequest
 	26,  // 26: agentrepl.v1.AgentRepl.WatchWorkspaceRoster:input_type -> agentrepl.v1.WatchWorkspaceRosterRequest
-	27,  // 27: agentrepl.v1.AgentRepl.GetMemoryOverview:input_type -> agentrepl.v1.GetMemoryOverviewRequest
-	28,  // 28: agentrepl.v1.AgentRepl.GetWorkspaceMemory:input_type -> agentrepl.v1.GetWorkspaceMemoryRequest
-	29,  // 29: agentrepl.v1.AgentRepl.CreateWorkspace:input_type -> agentrepl.v1.CreateWorkspaceRequest
-	30,  // 30: agentrepl.v1.AgentRepl.ValidateWorkspaceName:input_type -> agentrepl.v1.ValidateWorkspaceNameRequest
-	31,  // 31: agentrepl.v1.AgentRepl.ListCreationModels:input_type -> agentrepl.v1.ListCreationModelsRequest
-	32,  // 32: agentrepl.v1.AgentRepl.RegisterRepository:input_type -> agentrepl.v1.RegisterRepositoryRequest
-	33,  // 33: agentrepl.v1.AgentRepl.OpenWorkspace:input_type -> agentrepl.v1.OpenWorkspaceRequest
-	34,  // 34: agentrepl.v1.AgentRepl.ListWorkspaceTranscripts:input_type -> agentrepl.v1.ListWorkspaceTranscriptsRequest
-	35,  // 35: agentrepl.v1.AgentRepl.BindWorkspaceSession:input_type -> agentrepl.v1.BindWorkspaceSessionRequest
-	36,  // 36: agentrepl.v1.AgentRepl.CloseWorkspace:input_type -> agentrepl.v1.CloseWorkspaceRequest
-	37,  // 37: agentrepl.v1.AgentRepl.KillWorkspace:input_type -> agentrepl.v1.KillWorkspaceRequest
-	38,  // 38: agentrepl.v1.AgentRepl.NukeWorkspace:input_type -> agentrepl.v1.NukeWorkspaceRequest
-	39,  // 39: agentrepl.v1.AgentRepl.ForgetWorkspace:input_type -> agentrepl.v1.ForgetWorkspaceRequest
-	40,  // 40: agentrepl.v1.AgentRepl.FinishWorkspace:input_type -> agentrepl.v1.FinishWorkspaceRequest
-	41,  // 41: agentrepl.v1.AgentRepl.CompactWorkspace:input_type -> agentrepl.v1.CompactWorkspaceRequest
-	42,  // 42: agentrepl.v1.AgentRepl.SetWorkspaceOneShot:input_type -> agentrepl.v1.SetWorkspaceOneShotRequest
-	43,  // 43: agentrepl.v1.AgentRepl.SetWorkspaceCorrespondence:input_type -> agentrepl.v1.SetWorkspaceCorrespondenceRequest
-	44,  // 44: agentrepl.v1.AgentRepl.ChangeWorkspaceLinks:input_type -> agentrepl.v1.ChangeWorkspaceLinksRequest
-	45,  // 45: agentrepl.v1.AgentRepl.SetWorkspaceName:input_type -> agentrepl.v1.SetWorkspaceNameRequest
-	46,  // 46: agentrepl.v1.AgentRepl.SetWorkspaceSummary:input_type -> agentrepl.v1.SetWorkspaceSummaryRequest
-	47,  // 47: agentrepl.v1.AgentRepl.RestartWorkspace:input_type -> agentrepl.v1.RestartWorkspaceRequest
-	48,  // 48: agentrepl.v1.AgentRepl.ParkWorkspace:input_type -> agentrepl.v1.ParkWorkspaceRequest
-	49,  // 49: agentrepl.v1.AgentRepl.SetWorkspacePriority:input_type -> agentrepl.v1.SetWorkspacePriorityRequest
-	50,  // 50: agentrepl.v1.AgentRepl.SetWorkspaceHidden:input_type -> agentrepl.v1.SetWorkspaceHiddenRequest
-	51,  // 51: agentrepl.v1.AgentRepl.SendHiddenKeepalives:input_type -> agentrepl.v1.SendHiddenKeepalivesRequest
-	52,  // 52: agentrepl.v1.AgentRepl.SetWorkspaceParent:input_type -> agentrepl.v1.SetWorkspaceParentRequest
-	53,  // 53: agentrepl.v1.AgentRepl.SwapWorkspaces:input_type -> agentrepl.v1.SwapWorkspacesRequest
-	54,  // 54: agentrepl.v1.AgentRepl.MoveWorkspace:input_type -> agentrepl.v1.MoveWorkspaceRequest
-	55,  // 55: agentrepl.v1.AgentRepl.FoldRepository:input_type -> agentrepl.v1.FoldRepositoryRequest
-	56,  // 56: agentrepl.v1.AgentRepl.UpdateSidebarView:input_type -> agentrepl.v1.UpdateSidebarViewRequest
-	57,  // 57: agentrepl.v1.AgentRepl.ArrangeSidebar:input_type -> agentrepl.v1.ArrangeSidebarRequest
-	58,  // 58: agentrepl.v1.AgentRepl.GetSidebarArrangement:input_type -> agentrepl.v1.GetSidebarArrangementRequest
-	59,  // 59: agentrepl.v1.AgentRepl.CreateTask:input_type -> agentrepl.v1.CreateTaskRequest
-	60,  // 60: agentrepl.v1.AgentRepl.UpdateTask:input_type -> agentrepl.v1.UpdateTaskRequest
-	61,  // 61: agentrepl.v1.AgentRepl.AssignWorkspaceTask:input_type -> agentrepl.v1.AssignWorkspaceTaskRequest
-	62,  // 62: agentrepl.v1.AgentRepl.ShowSidebarApp:input_type -> agentrepl.v1.ShowSidebarAppRequest
-	63,  // 63: agentrepl.v1.AgentRepl.CreateThread:input_type -> agentrepl.v1.CreateThreadRequest
-	64,  // 64: agentrepl.v1.AgentRepl.RequestNewThread:input_type -> agentrepl.v1.RequestNewThreadRequest
-	65,  // 65: agentrepl.v1.AgentRepl.WatchChat:input_type -> agentrepl.v1.WatchChatRequest
-	66,  // 66: agentrepl.v1.AgentRepl.SwitchChatSibling:input_type -> agentrepl.v1.SwitchChatSiblingRequest
-	67,  // 67: agentrepl.v1.AgentRepl.ShowChatNode:input_type -> agentrepl.v1.ShowChatNodeRequest
-	68,  // 68: agentrepl.v1.AgentRepl.ReportChatSightings:input_type -> agentrepl.v1.ReportChatSightingsRequest
-	69,  // 69: agentrepl.v1.AgentRepl.SelectChatText:input_type -> agentrepl.v1.SelectChatTextRequest
-	70,  // 70: agentrepl.v1.AgentRepl.SearchChats:input_type -> agentrepl.v1.SearchChatsRequest
-	71,  // 71: agentrepl.v1.AgentRepl.WatchTopbar:input_type -> agentrepl.v1.WatchTopbarRequest
-	72,  // 72: agentrepl.v1.AgentRepl.SetModel:input_type -> agentrepl.v1.SetModelRequest
-	73,  // 73: agentrepl.v1.AgentRepl.SetDefaultModel:input_type -> agentrepl.v1.SetDefaultModelRequest
-	74,  // 74: agentrepl.v1.AgentRepl.SetEffort:input_type -> agentrepl.v1.SetEffortRequest
-	75,  // 75: agentrepl.v1.AgentRepl.UpdateRemoteControlMode:input_type -> agentrepl.v1.UpdateRemoteControlModeRequest
-	76,  // 76: agentrepl.v1.AgentRepl.UpdateQueueBypassMode:input_type -> agentrepl.v1.UpdateQueueBypassModeRequest
-	77,  // 77: agentrepl.v1.AgentRepl.SetPermissionMode:input_type -> agentrepl.v1.SetPermissionModeRequest
-	78,  // 78: agentrepl.v1.AgentRepl.SelectAccount:input_type -> agentrepl.v1.SelectAccountRequest
-	79,  // 79: agentrepl.v1.AgentRepl.WatchFooter:input_type -> agentrepl.v1.WatchFooterRequest
-	80,  // 80: agentrepl.v1.AgentRepl.UpdateHeldPrompt:input_type -> agentrepl.v1.UpdateHeldPromptRequest
-	81,  // 81: agentrepl.v1.AgentRepl.EditHeldPrompt:input_type -> agentrepl.v1.EditHeldPromptRequest
-	82,  // 82: agentrepl.v1.AgentRepl.FoldHeldPrompt:input_type -> agentrepl.v1.FoldHeldPromptRequest
-	83,  // 83: agentrepl.v1.AgentRepl.UpdateClassifierPrompt:input_type -> agentrepl.v1.UpdateClassifierPromptRequest
-	84,  // 84: agentrepl.v1.AgentRepl.AnswerMergeQueueOffer:input_type -> agentrepl.v1.AnswerMergeQueueOfferRequest
-	85,  // 85: agentrepl.v1.AgentRepl.UpdateShutdownSchedule:input_type -> agentrepl.v1.UpdateShutdownScheduleRequest
-	86,  // 86: agentrepl.v1.AgentRepl.Deploy:input_type -> agentrepl.v1.DeployRequest
-	87,  // 87: agentrepl.v1.AgentRepl.UpdateMergeQueue:input_type -> agentrepl.v1.UpdateMergeQueueRequest
-	88,  // 88: agentrepl.v1.AgentRepl.UpdateDeployHold:input_type -> agentrepl.v1.UpdateDeployHoldRequest
-	89,  // 89: agentrepl.v1.AgentRepl.RollOutLanding:input_type -> agentrepl.v1.RollOutLandingRequest
-	90,  // 90: agentrepl.v1.AgentRepl.PruneStorage:input_type -> agentrepl.v1.PruneStorageRequest
-	91,  // 91: agentrepl.v1.AgentRepl.ReapWorktrees:input_type -> agentrepl.v1.ReapWorktreesRequest
-	92,  // 92: agentrepl.v1.AgentRepl.AwaitIdle:input_type -> agentrepl.v1.AwaitIdleRequest
-	93,  // 93: agentrepl.v1.AgentRepl.DaemonHealth:input_type -> agentrepl.v1.DaemonHealthRequest
-	94,  // 94: agentrepl.v1.AgentRepl.SessionHealth:input_type -> agentrepl.v1.SessionHealthRequest
-	95,  // 95: agentrepl.v1.AgentRepl.ClientLog:input_type -> agentrepl.v1.ClientLogRequest
-	96,  // 96: agentrepl.v1.AgentRepl.ReportLatencies:input_type -> agentrepl.v1.ReportLatenciesRequest
-	97,  // 97: agentrepl.v1.AgentRepl.UpdatePersistentWifiMode:input_type -> agentrepl.v1.UpdatePersistentWifiModeRequest
-	98,  // 98: agentrepl.v1.AgentRepl.RegisterWorkspace:input_type -> agentrepl.v1.RegisterWorkspaceRequest
-	99,  // 99: agentrepl.v1.AgentRepl.RegisterWorkspaces:input_type -> agentrepl.v1.RegisterWorkspacesRequest
-	100, // 100: agentrepl.v1.AgentRepl.SelectWorkspace:input_type -> agentrepl.v1.SelectWorkspaceRequest
-	101, // 101: agentrepl.v1.AgentRepl.MarkWorkspaceViewed:input_type -> agentrepl.v1.MarkWorkspaceViewedRequest
-	102, // 102: agentrepl.v1.AgentRepl.ReportViewDwell:input_type -> agentrepl.v1.ReportViewDwellRequest
-	103, // 103: agentrepl.v1.AgentRepl.ReportPageUnloading:input_type -> agentrepl.v1.ReportPageUnloadingRequest
-	104, // 104: agentrepl.v1.AgentRepl.ReportPageResidency:input_type -> agentrepl.v1.ReportPageResidencyRequest
-	105, // 105: agentrepl.v1.AgentRepl.ReportEditorFocus:input_type -> agentrepl.v1.ReportEditorFocusRequest
-	106, // 106: agentrepl.v1.AgentRepl.ReportRecencyReach:input_type -> agentrepl.v1.ReportRecencyReachRequest
-	107, // 107: agentrepl.v1.AgentRepl.WatchHostWorkspace:input_type -> agentrepl.v1.WatchHostWorkspaceRequest
-	108, // 108: agentrepl.v1.AgentRepl.WatchDaemon:input_type -> agentrepl.v1.WatchDaemonRequest
-	109, // 109: agentrepl.v1.AgentRepl.OpenTabs:input_type -> agentrepl.v1.OpenTabsRequest
-	110, // 110: agentrepl.v1.AgentRepl.AdoptHostWorkspace:input_type -> agentrepl.v1.AdoptHostWorkspaceRequest
-	111, // 111: agentrepl.v1.AgentRepl.AcceptHandedWorkspace:input_type -> agentrepl.v1.AcceptHandedWorkspaceRequest
-	112, // 112: agentrepl.v1.AgentRepl.ListSlashCommands:input_type -> agentrepl.v1.ListSlashCommandsRequest
-	113, // 113: agentrepl.v1.AgentRepl.ListSlackChannels:input_type -> agentrepl.v1.ListSlackChannelsRequest
-	114, // 114: agentrepl.v1.AgentRepl.WatchWebWorkspace:input_type -> agentrepl.v1.WatchWebWorkspaceRequest
-	115, // 115: agentrepl.v1.AgentRepl.OpenLogin:input_type -> agentrepl.v1.OpenLoginRequest
-	116, // 116: agentrepl.v1.AgentRepl.WatchLoginTerminal:input_type -> agentrepl.v1.WatchLoginTerminalRequest
-	117, // 117: agentrepl.v1.AgentRepl.SendLoginInput:input_type -> agentrepl.v1.SendLoginInputRequest
-	118, // 118: agentrepl.v1.AgentRepl.CloseLogin:input_type -> agentrepl.v1.CloseLoginRequest
-	119, // 119: agentrepl.v1.AgentRepl.OpenExternal:input_type -> agentrepl.v1.OpenExternalRequest
-	120, // 120: agentrepl.v1.AgentRepl.OpenInEditor:input_type -> agentrepl.v1.OpenInEditorRequest
-	121, // 121: agentrepl.v1.AgentRepl.SelectInEditor:input_type -> agentrepl.v1.SelectInEditorRequest
-	122, // 122: agentrepl.v1.AgentRepl.LoadPageInEditor:input_type -> agentrepl.v1.LoadPageInEditorRequest
-	123, // 123: agentrepl.v1.AgentRepl.AdoptWebWorkspace:input_type -> agentrepl.v1.AdoptWebWorkspaceRequest
-	124, // 124: agentrepl.v1.AgentRepl.WatchPage:input_type -> agentrepl.v1.WatchPageRequest
-	125, // 125: agentrepl.v1.AgentRepl.SubscribePage:input_type -> agentrepl.v1.SubscribePageRequest
-	126, // 126: agentrepl.v1.AgentRepl.UnsubscribePage:input_type -> agentrepl.v1.UnsubscribePageRequest
-	127, // 127: agentrepl.v1.AgentRepl.ReportPageDrawn:input_type -> agentrepl.v1.ReportPageDrawnRequest
-	128, // 128: agentrepl.v1.AgentRepl.DismissNewsDigest:input_type -> agentrepl.v1.DismissNewsDigestRequest
-	129, // 129: agentrepl.v1.AgentRepl.RefreshNewsDigest:input_type -> agentrepl.v1.RefreshNewsDigestRequest
-	130, // 130: agentrepl.v1.AgentRepl.GetWorkspaceStatus:input_type -> agentrepl.v1.GetWorkspaceStatusRequest
-	131, // 131: agentrepl.v1.AgentRepl.GetMergeQueueStatus:input_type -> agentrepl.v1.GetMergeQueueStatusRequest
-	132, // 132: agentrepl.v1.AgentRepl.ListMergeLandings:input_type -> agentrepl.v1.ListMergeLandingsRequest
-	133, // 133: agentrepl.v1.AgentRepl.RecordDirectLanding:input_type -> agentrepl.v1.RecordDirectLandingRequest
-	134, // 134: agentrepl.v1.AgentRepl.FindWorkspaces:input_type -> agentrepl.v1.FindWorkspacesRequest
-	135, // 135: agentrepl.v1.AgentRepl.LocateWorkspace:input_type -> agentrepl.v1.LocateWorkspaceRequest
-	136, // 136: agentrepl.v1.AgentRepl.SubscribeWorkspace:input_type -> agentrepl.v1.SubscribeWorkspaceRequest
-	137, // 137: agentrepl.v1.AgentRepl.UnsubscribeWorkspace:input_type -> agentrepl.v1.UnsubscribeWorkspaceRequest
-	138, // 138: agentrepl.v1.AgentRepl.GatherWorkspaces:input_type -> agentrepl.v1.GatherWorkspacesRequest
-	139, // 139: agentrepl.v1.AgentRepl.GetGatherStatus:input_type -> agentrepl.v1.GetGatherStatusRequest
-	140, // 140: agentrepl.v1.AgentRepl.SubscribeMergeQueue:input_type -> agentrepl.v1.SubscribeMergeQueueRequest
-	141, // 141: agentrepl.v1.AgentRepl.UnsubscribeMergeQueue:input_type -> agentrepl.v1.UnsubscribeMergeQueueRequest
-	142, // 142: agentrepl.v1.AgentRepl.RequeueMerge:input_type -> agentrepl.v1.RequeueMergeRequest
-	143, // 143: agentrepl.v1.AgentRepl.DiscardMerge:input_type -> agentrepl.v1.DiscardMergeRequest
-	144, // 144: agentrepl.v1.AgentRepl.SubscribePullRequest:input_type -> agentrepl.v1.SubscribePullRequestRequest
-	145, // 145: agentrepl.v1.AgentRepl.UnsubscribePullRequest:input_type -> agentrepl.v1.UnsubscribePullRequestRequest
-	146, // 146: agentrepl.v1.AgentRepl.ListPullRequestSubscriptions:input_type -> agentrepl.v1.ListPullRequestSubscriptionsRequest
-	147, // 147: agentrepl.v1.AgentRepl.CommentOnPullRequest:input_type -> agentrepl.v1.CommentOnPullRequestRequest
-	148, // 148: agentrepl.v1.AgentRepl.SubscribeGithubMergeQueue:input_type -> agentrepl.v1.SubscribeGithubMergeQueueRequest
-	149, // 149: agentrepl.v1.AgentRepl.UnsubscribeGithubMergeQueue:input_type -> agentrepl.v1.UnsubscribeGithubMergeQueueRequest
-	150, // 150: agentrepl.v1.AgentRepl.ListGithubMergeQueueSubscriptions:input_type -> agentrepl.v1.ListGithubMergeQueueSubscriptionsRequest
-	151, // 151: agentrepl.v1.AgentRepl.SubscribeGithubWorkflowRun:input_type -> agentrepl.v1.SubscribeGithubWorkflowRunRequest
-	152, // 152: agentrepl.v1.AgentRepl.UnsubscribeGithubWorkflowRun:input_type -> agentrepl.v1.UnsubscribeGithubWorkflowRunRequest
-	153, // 153: agentrepl.v1.AgentRepl.ListGithubWorkflowRunSubscriptions:input_type -> agentrepl.v1.ListGithubWorkflowRunSubscriptionsRequest
-	154, // 154: agentrepl.v1.AgentRepl.NotifyWorkspace:input_type -> agentrepl.v1.NotifyWorkspaceRequest
-	155, // 155: agentrepl.v1.AgentRepl.PassColdGate:input_type -> agentrepl.v1.PassColdGateRequest
-	156, // 156: agentrepl.v1.AgentRepl.KeepLiveWorkspace:input_type -> agentrepl.v1.KeepLiveWorkspaceRequest
-	157, // 157: agentrepl.v1.AgentRepl.RunTests:input_type -> agentrepl.v1.RunTestsRequest
-	158, // 158: agentrepl.v1.AgentRepl.RunRedundancy:input_type -> agentrepl.v1.RunRedundancyRequest
-	159, // 159: agentrepl.v1.AgentRepl.EvaluateInEditor:input_type -> agentrepl.v1.EvaluateInEditorRequest
-	160, // 160: agentrepl.v1.AgentRepl.AnswerEditorEvaluation:input_type -> agentrepl.v1.AnswerEditorEvaluationRequest
-	161, // 161: agentrepl.v1.AgentRepl.SubmitPrompt:output_type -> agentrepl.v1.SubmitPromptResponse
-	162, // 162: agentrepl.v1.AgentRepl.SelectFeedRow:output_type -> agentrepl.v1.SelectFeedRowResponse
-	163, // 163: agentrepl.v1.AgentRepl.SelectResponseText:output_type -> agentrepl.v1.SelectResponseTextResponse
-	164, // 164: agentrepl.v1.AgentRepl.AskAboutResponse:output_type -> agentrepl.v1.AskAboutResponseResponse
-	165, // 165: agentrepl.v1.AgentRepl.ReportComposerEntries:output_type -> agentrepl.v1.ReportComposerEntriesResponse
-	166, // 166: agentrepl.v1.AgentRepl.FindEntryNeighbor:output_type -> agentrepl.v1.FindEntryNeighborResponse
-	167, // 167: agentrepl.v1.AgentRepl.FoldMergeBubble:output_type -> agentrepl.v1.FoldMergeBubbleResponse
-	168, // 168: agentrepl.v1.AgentRepl.AdjustFeedTextScale:output_type -> agentrepl.v1.AdjustFeedTextScaleResponse
-	169, // 169: agentrepl.v1.AgentRepl.OpenFeedImage:output_type -> agentrepl.v1.OpenFeedImageResponse
-	170, // 170: agentrepl.v1.AgentRepl.CloseFeedImage:output_type -> agentrepl.v1.CloseFeedImageResponse
-	171, // 171: agentrepl.v1.AgentRepl.RequestCommandSupport:output_type -> agentrepl.v1.RequestCommandSupportResponse
-	172, // 172: agentrepl.v1.AgentRepl.OpenFeed:output_type -> agentrepl.v1.OpenFeedResponse
-	173, // 173: agentrepl.v1.AgentRepl.WatchFeed:output_type -> agentrepl.v1.WatchFeedResponse
-	174, // 174: agentrepl.v1.AgentRepl.WatchWorkspaceMentions:output_type -> agentrepl.v1.WatchWorkspaceMentionsResponse
-	175, // 175: agentrepl.v1.AgentRepl.GetFeedPage:output_type -> agentrepl.v1.GetFeedPageResponse
-	176, // 176: agentrepl.v1.AgentRepl.LoadFeedThrough:output_type -> agentrepl.v1.LoadFeedThroughResponse
-	177, // 177: agentrepl.v1.AgentRepl.Interrupt:output_type -> agentrepl.v1.InterruptResponse
-	178, // 178: agentrepl.v1.AgentRepl.RetryVendorError:output_type -> agentrepl.v1.RetryVendorErrorResponse
-	179, // 179: agentrepl.v1.AgentRepl.InspectChessBoardSquare:output_type -> agentrepl.v1.InspectChessBoardSquareResponse
-	180, // 180: agentrepl.v1.AgentRepl.PlanRollback:output_type -> agentrepl.v1.PlanRollbackResponse
-	181, // 181: agentrepl.v1.AgentRepl.RollBack:output_type -> agentrepl.v1.RollBackResponse
-	182, // 182: agentrepl.v1.AgentRepl.ListRollbackPrompts:output_type -> agentrepl.v1.ListRollbackPromptsResponse
-	183, // 183: agentrepl.v1.AgentRepl.AnswerPermission:output_type -> agentrepl.v1.AnswerPermissionResponse
-	184, // 184: agentrepl.v1.AgentRepl.AnswerQuestion:output_type -> agentrepl.v1.AnswerQuestionResponse
-	185, // 185: agentrepl.v1.AgentRepl.UpdateQuestionDraft:output_type -> agentrepl.v1.UpdateQuestionDraftResponse
-	186, // 186: agentrepl.v1.AgentRepl.AnswerColdGate:output_type -> agentrepl.v1.AnswerColdGateResponse
-	187, // 187: agentrepl.v1.AgentRepl.WatchWorkspaceRoster:output_type -> agentrepl.v1.WatchWorkspaceRosterResponse
-	188, // 188: agentrepl.v1.AgentRepl.GetMemoryOverview:output_type -> agentrepl.v1.GetMemoryOverviewResponse
-	189, // 189: agentrepl.v1.AgentRepl.GetWorkspaceMemory:output_type -> agentrepl.v1.GetWorkspaceMemoryResponse
-	190, // 190: agentrepl.v1.AgentRepl.CreateWorkspace:output_type -> agentrepl.v1.CreateWorkspaceResponse
-	191, // 191: agentrepl.v1.AgentRepl.ValidateWorkspaceName:output_type -> agentrepl.v1.ValidateWorkspaceNameResponse
-	192, // 192: agentrepl.v1.AgentRepl.ListCreationModels:output_type -> agentrepl.v1.ListCreationModelsResponse
-	193, // 193: agentrepl.v1.AgentRepl.RegisterRepository:output_type -> agentrepl.v1.RegisterRepositoryResponse
-	194, // 194: agentrepl.v1.AgentRepl.OpenWorkspace:output_type -> agentrepl.v1.OpenWorkspaceResponse
-	195, // 195: agentrepl.v1.AgentRepl.ListWorkspaceTranscripts:output_type -> agentrepl.v1.ListWorkspaceTranscriptsResponse
-	196, // 196: agentrepl.v1.AgentRepl.BindWorkspaceSession:output_type -> agentrepl.v1.BindWorkspaceSessionResponse
-	197, // 197: agentrepl.v1.AgentRepl.CloseWorkspace:output_type -> agentrepl.v1.CloseWorkspaceResponse
-	198, // 198: agentrepl.v1.AgentRepl.KillWorkspace:output_type -> agentrepl.v1.KillWorkspaceResponse
-	199, // 199: agentrepl.v1.AgentRepl.NukeWorkspace:output_type -> agentrepl.v1.NukeWorkspaceResponse
-	200, // 200: agentrepl.v1.AgentRepl.ForgetWorkspace:output_type -> agentrepl.v1.ForgetWorkspaceResponse
-	201, // 201: agentrepl.v1.AgentRepl.FinishWorkspace:output_type -> agentrepl.v1.FinishWorkspaceResponse
-	202, // 202: agentrepl.v1.AgentRepl.CompactWorkspace:output_type -> agentrepl.v1.CompactWorkspaceResponse
-	203, // 203: agentrepl.v1.AgentRepl.SetWorkspaceOneShot:output_type -> agentrepl.v1.SetWorkspaceOneShotResponse
-	204, // 204: agentrepl.v1.AgentRepl.SetWorkspaceCorrespondence:output_type -> agentrepl.v1.SetWorkspaceCorrespondenceResponse
-	205, // 205: agentrepl.v1.AgentRepl.ChangeWorkspaceLinks:output_type -> agentrepl.v1.ChangeWorkspaceLinksResponse
-	206, // 206: agentrepl.v1.AgentRepl.SetWorkspaceName:output_type -> agentrepl.v1.SetWorkspaceNameResponse
-	207, // 207: agentrepl.v1.AgentRepl.SetWorkspaceSummary:output_type -> agentrepl.v1.SetWorkspaceSummaryResponse
-	208, // 208: agentrepl.v1.AgentRepl.RestartWorkspace:output_type -> agentrepl.v1.RestartWorkspaceResponse
-	209, // 209: agentrepl.v1.AgentRepl.ParkWorkspace:output_type -> agentrepl.v1.ParkWorkspaceResponse
-	210, // 210: agentrepl.v1.AgentRepl.SetWorkspacePriority:output_type -> agentrepl.v1.SetWorkspacePriorityResponse
-	211, // 211: agentrepl.v1.AgentRepl.SetWorkspaceHidden:output_type -> agentrepl.v1.SetWorkspaceHiddenResponse
-	212, // 212: agentrepl.v1.AgentRepl.SendHiddenKeepalives:output_type -> agentrepl.v1.SendHiddenKeepalivesResponse
-	213, // 213: agentrepl.v1.AgentRepl.SetWorkspaceParent:output_type -> agentrepl.v1.SetWorkspaceParentResponse
-	214, // 214: agentrepl.v1.AgentRepl.SwapWorkspaces:output_type -> agentrepl.v1.SwapWorkspacesResponse
-	215, // 215: agentrepl.v1.AgentRepl.MoveWorkspace:output_type -> agentrepl.v1.MoveWorkspaceResponse
-	216, // 216: agentrepl.v1.AgentRepl.FoldRepository:output_type -> agentrepl.v1.FoldRepositoryResponse
-	217, // 217: agentrepl.v1.AgentRepl.UpdateSidebarView:output_type -> agentrepl.v1.UpdateSidebarViewResponse
-	218, // 218: agentrepl.v1.AgentRepl.ArrangeSidebar:output_type -> agentrepl.v1.ArrangeSidebarResponse
-	219, // 219: agentrepl.v1.AgentRepl.GetSidebarArrangement:output_type -> agentrepl.v1.GetSidebarArrangementResponse
-	220, // 220: agentrepl.v1.AgentRepl.CreateTask:output_type -> agentrepl.v1.CreateTaskResponse
-	221, // 221: agentrepl.v1.AgentRepl.UpdateTask:output_type -> agentrepl.v1.UpdateTaskResponse
-	222, // 222: agentrepl.v1.AgentRepl.AssignWorkspaceTask:output_type -> agentrepl.v1.AssignWorkspaceTaskResponse
-	223, // 223: agentrepl.v1.AgentRepl.ShowSidebarApp:output_type -> agentrepl.v1.ShowSidebarAppResponse
-	224, // 224: agentrepl.v1.AgentRepl.CreateThread:output_type -> agentrepl.v1.CreateThreadResponse
-	225, // 225: agentrepl.v1.AgentRepl.RequestNewThread:output_type -> agentrepl.v1.RequestNewThreadResponse
-	226, // 226: agentrepl.v1.AgentRepl.WatchChat:output_type -> agentrepl.v1.WatchChatResponse
-	227, // 227: agentrepl.v1.AgentRepl.SwitchChatSibling:output_type -> agentrepl.v1.SwitchChatSiblingResponse
-	228, // 228: agentrepl.v1.AgentRepl.ShowChatNode:output_type -> agentrepl.v1.ShowChatNodeResponse
-	229, // 229: agentrepl.v1.AgentRepl.ReportChatSightings:output_type -> agentrepl.v1.ReportChatSightingsResponse
-	230, // 230: agentrepl.v1.AgentRepl.SelectChatText:output_type -> agentrepl.v1.SelectChatTextResponse
-	231, // 231: agentrepl.v1.AgentRepl.SearchChats:output_type -> agentrepl.v1.SearchChatsResponse
-	232, // 232: agentrepl.v1.AgentRepl.WatchTopbar:output_type -> agentrepl.v1.WatchTopbarResponse
-	233, // 233: agentrepl.v1.AgentRepl.SetModel:output_type -> agentrepl.v1.SetModelResponse
-	234, // 234: agentrepl.v1.AgentRepl.SetDefaultModel:output_type -> agentrepl.v1.SetDefaultModelResponse
-	235, // 235: agentrepl.v1.AgentRepl.SetEffort:output_type -> agentrepl.v1.SetEffortResponse
-	236, // 236: agentrepl.v1.AgentRepl.UpdateRemoteControlMode:output_type -> agentrepl.v1.UpdateRemoteControlModeResponse
-	237, // 237: agentrepl.v1.AgentRepl.UpdateQueueBypassMode:output_type -> agentrepl.v1.UpdateQueueBypassModeResponse
-	238, // 238: agentrepl.v1.AgentRepl.SetPermissionMode:output_type -> agentrepl.v1.SetPermissionModeResponse
-	239, // 239: agentrepl.v1.AgentRepl.SelectAccount:output_type -> agentrepl.v1.SelectAccountResponse
-	240, // 240: agentrepl.v1.AgentRepl.WatchFooter:output_type -> agentrepl.v1.WatchFooterResponse
-	241, // 241: agentrepl.v1.AgentRepl.UpdateHeldPrompt:output_type -> agentrepl.v1.UpdateHeldPromptResponse
-	242, // 242: agentrepl.v1.AgentRepl.EditHeldPrompt:output_type -> agentrepl.v1.EditHeldPromptResponse
-	243, // 243: agentrepl.v1.AgentRepl.FoldHeldPrompt:output_type -> agentrepl.v1.FoldHeldPromptResponse
-	244, // 244: agentrepl.v1.AgentRepl.UpdateClassifierPrompt:output_type -> agentrepl.v1.UpdateClassifierPromptResponse
-	245, // 245: agentrepl.v1.AgentRepl.AnswerMergeQueueOffer:output_type -> agentrepl.v1.AnswerMergeQueueOfferResponse
-	246, // 246: agentrepl.v1.AgentRepl.UpdateShutdownSchedule:output_type -> agentrepl.v1.UpdateShutdownScheduleResponse
-	247, // 247: agentrepl.v1.AgentRepl.Deploy:output_type -> agentrepl.v1.DeployResponse
-	248, // 248: agentrepl.v1.AgentRepl.UpdateMergeQueue:output_type -> agentrepl.v1.UpdateMergeQueueResponse
-	249, // 249: agentrepl.v1.AgentRepl.UpdateDeployHold:output_type -> agentrepl.v1.UpdateDeployHoldResponse
-	250, // 250: agentrepl.v1.AgentRepl.RollOutLanding:output_type -> agentrepl.v1.RollOutLandingResponse
-	251, // 251: agentrepl.v1.AgentRepl.PruneStorage:output_type -> agentrepl.v1.PruneStorageResponse
-	252, // 252: agentrepl.v1.AgentRepl.ReapWorktrees:output_type -> agentrepl.v1.ReapWorktreesResponse
-	253, // 253: agentrepl.v1.AgentRepl.AwaitIdle:output_type -> agentrepl.v1.AwaitIdleResponse
-	254, // 254: agentrepl.v1.AgentRepl.DaemonHealth:output_type -> agentrepl.v1.DaemonHealthResponse
-	255, // 255: agentrepl.v1.AgentRepl.SessionHealth:output_type -> agentrepl.v1.SessionHealthResponse
-	256, // 256: agentrepl.v1.AgentRepl.ClientLog:output_type -> agentrepl.v1.ClientLogResponse
-	257, // 257: agentrepl.v1.AgentRepl.ReportLatencies:output_type -> agentrepl.v1.ReportLatenciesResponse
-	258, // 258: agentrepl.v1.AgentRepl.UpdatePersistentWifiMode:output_type -> agentrepl.v1.UpdatePersistentWifiModeResponse
-	259, // 259: agentrepl.v1.AgentRepl.RegisterWorkspace:output_type -> agentrepl.v1.RegisterWorkspaceResponse
-	260, // 260: agentrepl.v1.AgentRepl.RegisterWorkspaces:output_type -> agentrepl.v1.RegisterWorkspacesResponse
-	261, // 261: agentrepl.v1.AgentRepl.SelectWorkspace:output_type -> agentrepl.v1.SelectWorkspaceResponse
-	262, // 262: agentrepl.v1.AgentRepl.MarkWorkspaceViewed:output_type -> agentrepl.v1.MarkWorkspaceViewedResponse
-	263, // 263: agentrepl.v1.AgentRepl.ReportViewDwell:output_type -> agentrepl.v1.ReportViewDwellResponse
-	264, // 264: agentrepl.v1.AgentRepl.ReportPageUnloading:output_type -> agentrepl.v1.ReportPageUnloadingResponse
-	265, // 265: agentrepl.v1.AgentRepl.ReportPageResidency:output_type -> agentrepl.v1.ReportPageResidencyResponse
-	266, // 266: agentrepl.v1.AgentRepl.ReportEditorFocus:output_type -> agentrepl.v1.ReportEditorFocusResponse
-	267, // 267: agentrepl.v1.AgentRepl.ReportRecencyReach:output_type -> agentrepl.v1.ReportRecencyReachResponse
-	268, // 268: agentrepl.v1.AgentRepl.WatchHostWorkspace:output_type -> agentrepl.v1.WatchHostWorkspaceResponse
-	269, // 269: agentrepl.v1.AgentRepl.WatchDaemon:output_type -> agentrepl.v1.WatchDaemonResponse
-	270, // 270: agentrepl.v1.AgentRepl.OpenTabs:output_type -> agentrepl.v1.OpenTabsResponse
-	271, // 271: agentrepl.v1.AgentRepl.AdoptHostWorkspace:output_type -> agentrepl.v1.AdoptHostWorkspaceResponse
-	272, // 272: agentrepl.v1.AgentRepl.AcceptHandedWorkspace:output_type -> agentrepl.v1.AcceptHandedWorkspaceResponse
-	273, // 273: agentrepl.v1.AgentRepl.ListSlashCommands:output_type -> agentrepl.v1.ListSlashCommandsResponse
-	274, // 274: agentrepl.v1.AgentRepl.ListSlackChannels:output_type -> agentrepl.v1.ListSlackChannelsResponse
-	275, // 275: agentrepl.v1.AgentRepl.WatchWebWorkspace:output_type -> agentrepl.v1.WatchWebWorkspaceResponse
-	276, // 276: agentrepl.v1.AgentRepl.OpenLogin:output_type -> agentrepl.v1.OpenLoginResponse
-	277, // 277: agentrepl.v1.AgentRepl.WatchLoginTerminal:output_type -> agentrepl.v1.LoginTerminalOutput
-	278, // 278: agentrepl.v1.AgentRepl.SendLoginInput:output_type -> agentrepl.v1.SendLoginInputResponse
-	279, // 279: agentrepl.v1.AgentRepl.CloseLogin:output_type -> agentrepl.v1.CloseLoginResponse
-	280, // 280: agentrepl.v1.AgentRepl.OpenExternal:output_type -> agentrepl.v1.OpenExternalResponse
-	281, // 281: agentrepl.v1.AgentRepl.OpenInEditor:output_type -> agentrepl.v1.OpenInEditorResponse
-	282, // 282: agentrepl.v1.AgentRepl.SelectInEditor:output_type -> agentrepl.v1.SelectInEditorResponse
-	283, // 283: agentrepl.v1.AgentRepl.LoadPageInEditor:output_type -> agentrepl.v1.LoadPageInEditorResponse
-	284, // 284: agentrepl.v1.AgentRepl.AdoptWebWorkspace:output_type -> agentrepl.v1.AdoptWebWorkspaceResponse
-	285, // 285: agentrepl.v1.AgentRepl.WatchPage:output_type -> agentrepl.v1.WatchPageResponse
-	286, // 286: agentrepl.v1.AgentRepl.SubscribePage:output_type -> agentrepl.v1.SubscribePageResponse
-	287, // 287: agentrepl.v1.AgentRepl.UnsubscribePage:output_type -> agentrepl.v1.UnsubscribePageResponse
-	288, // 288: agentrepl.v1.AgentRepl.ReportPageDrawn:output_type -> agentrepl.v1.ReportPageDrawnResponse
-	289, // 289: agentrepl.v1.AgentRepl.DismissNewsDigest:output_type -> agentrepl.v1.DismissNewsDigestResponse
-	290, // 290: agentrepl.v1.AgentRepl.RefreshNewsDigest:output_type -> agentrepl.v1.RefreshNewsDigestResponse
-	291, // 291: agentrepl.v1.AgentRepl.GetWorkspaceStatus:output_type -> agentrepl.v1.GetWorkspaceStatusResponse
-	292, // 292: agentrepl.v1.AgentRepl.GetMergeQueueStatus:output_type -> agentrepl.v1.GetMergeQueueStatusResponse
-	293, // 293: agentrepl.v1.AgentRepl.ListMergeLandings:output_type -> agentrepl.v1.ListMergeLandingsResponse
-	294, // 294: agentrepl.v1.AgentRepl.RecordDirectLanding:output_type -> agentrepl.v1.RecordDirectLandingResponse
-	295, // 295: agentrepl.v1.AgentRepl.FindWorkspaces:output_type -> agentrepl.v1.FindWorkspacesResponse
-	296, // 296: agentrepl.v1.AgentRepl.LocateWorkspace:output_type -> agentrepl.v1.LocateWorkspaceResponse
-	297, // 297: agentrepl.v1.AgentRepl.SubscribeWorkspace:output_type -> agentrepl.v1.SubscribeWorkspaceResponse
-	298, // 298: agentrepl.v1.AgentRepl.UnsubscribeWorkspace:output_type -> agentrepl.v1.UnsubscribeWorkspaceResponse
-	299, // 299: agentrepl.v1.AgentRepl.GatherWorkspaces:output_type -> agentrepl.v1.GatherWorkspacesResponse
-	300, // 300: agentrepl.v1.AgentRepl.GetGatherStatus:output_type -> agentrepl.v1.GetGatherStatusResponse
-	301, // 301: agentrepl.v1.AgentRepl.SubscribeMergeQueue:output_type -> agentrepl.v1.SubscribeMergeQueueResponse
-	302, // 302: agentrepl.v1.AgentRepl.UnsubscribeMergeQueue:output_type -> agentrepl.v1.UnsubscribeMergeQueueResponse
-	303, // 303: agentrepl.v1.AgentRepl.RequeueMerge:output_type -> agentrepl.v1.RequeueMergeResponse
-	304, // 304: agentrepl.v1.AgentRepl.DiscardMerge:output_type -> agentrepl.v1.DiscardMergeResponse
-	305, // 305: agentrepl.v1.AgentRepl.SubscribePullRequest:output_type -> agentrepl.v1.SubscribePullRequestResponse
-	306, // 306: agentrepl.v1.AgentRepl.UnsubscribePullRequest:output_type -> agentrepl.v1.UnsubscribePullRequestResponse
-	307, // 307: agentrepl.v1.AgentRepl.ListPullRequestSubscriptions:output_type -> agentrepl.v1.ListPullRequestSubscriptionsResponse
-	308, // 308: agentrepl.v1.AgentRepl.CommentOnPullRequest:output_type -> agentrepl.v1.CommentOnPullRequestResponse
-	309, // 309: agentrepl.v1.AgentRepl.SubscribeGithubMergeQueue:output_type -> agentrepl.v1.SubscribeGithubMergeQueueResponse
-	310, // 310: agentrepl.v1.AgentRepl.UnsubscribeGithubMergeQueue:output_type -> agentrepl.v1.UnsubscribeGithubMergeQueueResponse
-	311, // 311: agentrepl.v1.AgentRepl.ListGithubMergeQueueSubscriptions:output_type -> agentrepl.v1.ListGithubMergeQueueSubscriptionsResponse
-	312, // 312: agentrepl.v1.AgentRepl.SubscribeGithubWorkflowRun:output_type -> agentrepl.v1.SubscribeGithubWorkflowRunResponse
-	313, // 313: agentrepl.v1.AgentRepl.UnsubscribeGithubWorkflowRun:output_type -> agentrepl.v1.UnsubscribeGithubWorkflowRunResponse
-	314, // 314: agentrepl.v1.AgentRepl.ListGithubWorkflowRunSubscriptions:output_type -> agentrepl.v1.ListGithubWorkflowRunSubscriptionsResponse
-	315, // 315: agentrepl.v1.AgentRepl.NotifyWorkspace:output_type -> agentrepl.v1.NotifyWorkspaceResponse
-	316, // 316: agentrepl.v1.AgentRepl.PassColdGate:output_type -> agentrepl.v1.PassColdGateResponse
-	317, // 317: agentrepl.v1.AgentRepl.KeepLiveWorkspace:output_type -> agentrepl.v1.KeepLiveWorkspaceResponse
-	318, // 318: agentrepl.v1.AgentRepl.RunTests:output_type -> agentrepl.v1.RunTestsResponse
-	319, // 319: agentrepl.v1.AgentRepl.RunRedundancy:output_type -> agentrepl.v1.RunRedundancyResponse
-	320, // 320: agentrepl.v1.AgentRepl.EvaluateInEditor:output_type -> agentrepl.v1.EvaluateInEditorResponse
-	321, // 321: agentrepl.v1.AgentRepl.AnswerEditorEvaluation:output_type -> agentrepl.v1.AnswerEditorEvaluationResponse
-	161, // [161:322] is the sub-list for method output_type
-	0,   // [0:161] is the sub-list for method input_type
+	27,  // 27: agentrepl.v1.AgentRepl.ListMergedWorkspaces:input_type -> agentrepl.v1.ListMergedWorkspacesRequest
+	28,  // 28: agentrepl.v1.AgentRepl.GetMemoryOverview:input_type -> agentrepl.v1.GetMemoryOverviewRequest
+	29,  // 29: agentrepl.v1.AgentRepl.GetWorkspaceMemory:input_type -> agentrepl.v1.GetWorkspaceMemoryRequest
+	30,  // 30: agentrepl.v1.AgentRepl.CreateWorkspace:input_type -> agentrepl.v1.CreateWorkspaceRequest
+	31,  // 31: agentrepl.v1.AgentRepl.ValidateWorkspaceName:input_type -> agentrepl.v1.ValidateWorkspaceNameRequest
+	32,  // 32: agentrepl.v1.AgentRepl.ListCreationModels:input_type -> agentrepl.v1.ListCreationModelsRequest
+	33,  // 33: agentrepl.v1.AgentRepl.RegisterRepository:input_type -> agentrepl.v1.RegisterRepositoryRequest
+	34,  // 34: agentrepl.v1.AgentRepl.OpenWorkspace:input_type -> agentrepl.v1.OpenWorkspaceRequest
+	35,  // 35: agentrepl.v1.AgentRepl.ListWorkspaceTranscripts:input_type -> agentrepl.v1.ListWorkspaceTranscriptsRequest
+	36,  // 36: agentrepl.v1.AgentRepl.BindWorkspaceSession:input_type -> agentrepl.v1.BindWorkspaceSessionRequest
+	37,  // 37: agentrepl.v1.AgentRepl.CloseWorkspace:input_type -> agentrepl.v1.CloseWorkspaceRequest
+	38,  // 38: agentrepl.v1.AgentRepl.KillWorkspace:input_type -> agentrepl.v1.KillWorkspaceRequest
+	39,  // 39: agentrepl.v1.AgentRepl.NukeWorkspace:input_type -> agentrepl.v1.NukeWorkspaceRequest
+	40,  // 40: agentrepl.v1.AgentRepl.ForgetWorkspace:input_type -> agentrepl.v1.ForgetWorkspaceRequest
+	41,  // 41: agentrepl.v1.AgentRepl.FinishWorkspace:input_type -> agentrepl.v1.FinishWorkspaceRequest
+	42,  // 42: agentrepl.v1.AgentRepl.CompactWorkspace:input_type -> agentrepl.v1.CompactWorkspaceRequest
+	43,  // 43: agentrepl.v1.AgentRepl.SetWorkspaceOneShot:input_type -> agentrepl.v1.SetWorkspaceOneShotRequest
+	44,  // 44: agentrepl.v1.AgentRepl.SetWorkspaceCorrespondence:input_type -> agentrepl.v1.SetWorkspaceCorrespondenceRequest
+	45,  // 45: agentrepl.v1.AgentRepl.ChangeWorkspaceLinks:input_type -> agentrepl.v1.ChangeWorkspaceLinksRequest
+	46,  // 46: agentrepl.v1.AgentRepl.SetWorkspaceName:input_type -> agentrepl.v1.SetWorkspaceNameRequest
+	47,  // 47: agentrepl.v1.AgentRepl.SetWorkspaceSummary:input_type -> agentrepl.v1.SetWorkspaceSummaryRequest
+	48,  // 48: agentrepl.v1.AgentRepl.RestartWorkspace:input_type -> agentrepl.v1.RestartWorkspaceRequest
+	49,  // 49: agentrepl.v1.AgentRepl.ParkWorkspace:input_type -> agentrepl.v1.ParkWorkspaceRequest
+	50,  // 50: agentrepl.v1.AgentRepl.SetWorkspacePriority:input_type -> agentrepl.v1.SetWorkspacePriorityRequest
+	51,  // 51: agentrepl.v1.AgentRepl.SetWorkspaceHidden:input_type -> agentrepl.v1.SetWorkspaceHiddenRequest
+	52,  // 52: agentrepl.v1.AgentRepl.SendHiddenKeepalives:input_type -> agentrepl.v1.SendHiddenKeepalivesRequest
+	53,  // 53: agentrepl.v1.AgentRepl.SetWorkspaceParent:input_type -> agentrepl.v1.SetWorkspaceParentRequest
+	54,  // 54: agentrepl.v1.AgentRepl.SwapWorkspaces:input_type -> agentrepl.v1.SwapWorkspacesRequest
+	55,  // 55: agentrepl.v1.AgentRepl.MoveWorkspace:input_type -> agentrepl.v1.MoveWorkspaceRequest
+	56,  // 56: agentrepl.v1.AgentRepl.FoldRepository:input_type -> agentrepl.v1.FoldRepositoryRequest
+	57,  // 57: agentrepl.v1.AgentRepl.UpdateSidebarView:input_type -> agentrepl.v1.UpdateSidebarViewRequest
+	58,  // 58: agentrepl.v1.AgentRepl.ArrangeSidebar:input_type -> agentrepl.v1.ArrangeSidebarRequest
+	59,  // 59: agentrepl.v1.AgentRepl.GetSidebarArrangement:input_type -> agentrepl.v1.GetSidebarArrangementRequest
+	60,  // 60: agentrepl.v1.AgentRepl.CreateTask:input_type -> agentrepl.v1.CreateTaskRequest
+	61,  // 61: agentrepl.v1.AgentRepl.UpdateTask:input_type -> agentrepl.v1.UpdateTaskRequest
+	62,  // 62: agentrepl.v1.AgentRepl.AssignWorkspaceTask:input_type -> agentrepl.v1.AssignWorkspaceTaskRequest
+	63,  // 63: agentrepl.v1.AgentRepl.ShowSidebarApp:input_type -> agentrepl.v1.ShowSidebarAppRequest
+	64,  // 64: agentrepl.v1.AgentRepl.CreateThread:input_type -> agentrepl.v1.CreateThreadRequest
+	65,  // 65: agentrepl.v1.AgentRepl.RequestNewThread:input_type -> agentrepl.v1.RequestNewThreadRequest
+	66,  // 66: agentrepl.v1.AgentRepl.WatchChat:input_type -> agentrepl.v1.WatchChatRequest
+	67,  // 67: agentrepl.v1.AgentRepl.SwitchChatSibling:input_type -> agentrepl.v1.SwitchChatSiblingRequest
+	68,  // 68: agentrepl.v1.AgentRepl.ShowChatNode:input_type -> agentrepl.v1.ShowChatNodeRequest
+	69,  // 69: agentrepl.v1.AgentRepl.ReportChatSightings:input_type -> agentrepl.v1.ReportChatSightingsRequest
+	70,  // 70: agentrepl.v1.AgentRepl.SelectChatText:input_type -> agentrepl.v1.SelectChatTextRequest
+	71,  // 71: agentrepl.v1.AgentRepl.SearchChats:input_type -> agentrepl.v1.SearchChatsRequest
+	72,  // 72: agentrepl.v1.AgentRepl.WatchTopbar:input_type -> agentrepl.v1.WatchTopbarRequest
+	73,  // 73: agentrepl.v1.AgentRepl.SetModel:input_type -> agentrepl.v1.SetModelRequest
+	74,  // 74: agentrepl.v1.AgentRepl.SetDefaultModel:input_type -> agentrepl.v1.SetDefaultModelRequest
+	75,  // 75: agentrepl.v1.AgentRepl.SetEffort:input_type -> agentrepl.v1.SetEffortRequest
+	76,  // 76: agentrepl.v1.AgentRepl.UpdateRemoteControlMode:input_type -> agentrepl.v1.UpdateRemoteControlModeRequest
+	77,  // 77: agentrepl.v1.AgentRepl.UpdateQueueBypassMode:input_type -> agentrepl.v1.UpdateQueueBypassModeRequest
+	78,  // 78: agentrepl.v1.AgentRepl.SetPermissionMode:input_type -> agentrepl.v1.SetPermissionModeRequest
+	79,  // 79: agentrepl.v1.AgentRepl.SelectAccount:input_type -> agentrepl.v1.SelectAccountRequest
+	80,  // 80: agentrepl.v1.AgentRepl.WatchFooter:input_type -> agentrepl.v1.WatchFooterRequest
+	81,  // 81: agentrepl.v1.AgentRepl.UpdateHeldPrompt:input_type -> agentrepl.v1.UpdateHeldPromptRequest
+	82,  // 82: agentrepl.v1.AgentRepl.EditHeldPrompt:input_type -> agentrepl.v1.EditHeldPromptRequest
+	83,  // 83: agentrepl.v1.AgentRepl.FoldHeldPrompt:input_type -> agentrepl.v1.FoldHeldPromptRequest
+	84,  // 84: agentrepl.v1.AgentRepl.UpdateClassifierPrompt:input_type -> agentrepl.v1.UpdateClassifierPromptRequest
+	85,  // 85: agentrepl.v1.AgentRepl.AnswerMergeQueueOffer:input_type -> agentrepl.v1.AnswerMergeQueueOfferRequest
+	86,  // 86: agentrepl.v1.AgentRepl.UpdateShutdownSchedule:input_type -> agentrepl.v1.UpdateShutdownScheduleRequest
+	87,  // 87: agentrepl.v1.AgentRepl.Deploy:input_type -> agentrepl.v1.DeployRequest
+	88,  // 88: agentrepl.v1.AgentRepl.UpdateMergeQueue:input_type -> agentrepl.v1.UpdateMergeQueueRequest
+	89,  // 89: agentrepl.v1.AgentRepl.UpdateDeployHold:input_type -> agentrepl.v1.UpdateDeployHoldRequest
+	90,  // 90: agentrepl.v1.AgentRepl.RollOutLanding:input_type -> agentrepl.v1.RollOutLandingRequest
+	91,  // 91: agentrepl.v1.AgentRepl.PruneStorage:input_type -> agentrepl.v1.PruneStorageRequest
+	92,  // 92: agentrepl.v1.AgentRepl.ReapWorktrees:input_type -> agentrepl.v1.ReapWorktreesRequest
+	93,  // 93: agentrepl.v1.AgentRepl.AwaitIdle:input_type -> agentrepl.v1.AwaitIdleRequest
+	94,  // 94: agentrepl.v1.AgentRepl.DaemonHealth:input_type -> agentrepl.v1.DaemonHealthRequest
+	95,  // 95: agentrepl.v1.AgentRepl.SessionHealth:input_type -> agentrepl.v1.SessionHealthRequest
+	96,  // 96: agentrepl.v1.AgentRepl.ClientLog:input_type -> agentrepl.v1.ClientLogRequest
+	97,  // 97: agentrepl.v1.AgentRepl.ReportLatencies:input_type -> agentrepl.v1.ReportLatenciesRequest
+	98,  // 98: agentrepl.v1.AgentRepl.UpdatePersistentWifiMode:input_type -> agentrepl.v1.UpdatePersistentWifiModeRequest
+	99,  // 99: agentrepl.v1.AgentRepl.RegisterWorkspace:input_type -> agentrepl.v1.RegisterWorkspaceRequest
+	100, // 100: agentrepl.v1.AgentRepl.RegisterWorkspaces:input_type -> agentrepl.v1.RegisterWorkspacesRequest
+	101, // 101: agentrepl.v1.AgentRepl.SelectWorkspace:input_type -> agentrepl.v1.SelectWorkspaceRequest
+	102, // 102: agentrepl.v1.AgentRepl.MarkWorkspaceViewed:input_type -> agentrepl.v1.MarkWorkspaceViewedRequest
+	103, // 103: agentrepl.v1.AgentRepl.ReportViewDwell:input_type -> agentrepl.v1.ReportViewDwellRequest
+	104, // 104: agentrepl.v1.AgentRepl.ReportPageUnloading:input_type -> agentrepl.v1.ReportPageUnloadingRequest
+	105, // 105: agentrepl.v1.AgentRepl.ReportPageResidency:input_type -> agentrepl.v1.ReportPageResidencyRequest
+	106, // 106: agentrepl.v1.AgentRepl.ReportEditorFocus:input_type -> agentrepl.v1.ReportEditorFocusRequest
+	107, // 107: agentrepl.v1.AgentRepl.ReportRecencyReach:input_type -> agentrepl.v1.ReportRecencyReachRequest
+	108, // 108: agentrepl.v1.AgentRepl.WatchHostWorkspace:input_type -> agentrepl.v1.WatchHostWorkspaceRequest
+	109, // 109: agentrepl.v1.AgentRepl.WatchDaemon:input_type -> agentrepl.v1.WatchDaemonRequest
+	110, // 110: agentrepl.v1.AgentRepl.OpenTabs:input_type -> agentrepl.v1.OpenTabsRequest
+	111, // 111: agentrepl.v1.AgentRepl.AdoptHostWorkspace:input_type -> agentrepl.v1.AdoptHostWorkspaceRequest
+	112, // 112: agentrepl.v1.AgentRepl.AcceptHandedWorkspace:input_type -> agentrepl.v1.AcceptHandedWorkspaceRequest
+	113, // 113: agentrepl.v1.AgentRepl.ListSlashCommands:input_type -> agentrepl.v1.ListSlashCommandsRequest
+	114, // 114: agentrepl.v1.AgentRepl.ListSlackChannels:input_type -> agentrepl.v1.ListSlackChannelsRequest
+	115, // 115: agentrepl.v1.AgentRepl.WatchWebWorkspace:input_type -> agentrepl.v1.WatchWebWorkspaceRequest
+	116, // 116: agentrepl.v1.AgentRepl.OpenLogin:input_type -> agentrepl.v1.OpenLoginRequest
+	117, // 117: agentrepl.v1.AgentRepl.WatchLoginTerminal:input_type -> agentrepl.v1.WatchLoginTerminalRequest
+	118, // 118: agentrepl.v1.AgentRepl.SendLoginInput:input_type -> agentrepl.v1.SendLoginInputRequest
+	119, // 119: agentrepl.v1.AgentRepl.CloseLogin:input_type -> agentrepl.v1.CloseLoginRequest
+	120, // 120: agentrepl.v1.AgentRepl.OpenExternal:input_type -> agentrepl.v1.OpenExternalRequest
+	121, // 121: agentrepl.v1.AgentRepl.OpenInEditor:input_type -> agentrepl.v1.OpenInEditorRequest
+	122, // 122: agentrepl.v1.AgentRepl.SelectInEditor:input_type -> agentrepl.v1.SelectInEditorRequest
+	123, // 123: agentrepl.v1.AgentRepl.LoadPageInEditor:input_type -> agentrepl.v1.LoadPageInEditorRequest
+	124, // 124: agentrepl.v1.AgentRepl.AdoptWebWorkspace:input_type -> agentrepl.v1.AdoptWebWorkspaceRequest
+	125, // 125: agentrepl.v1.AgentRepl.WatchPage:input_type -> agentrepl.v1.WatchPageRequest
+	126, // 126: agentrepl.v1.AgentRepl.SubscribePage:input_type -> agentrepl.v1.SubscribePageRequest
+	127, // 127: agentrepl.v1.AgentRepl.UnsubscribePage:input_type -> agentrepl.v1.UnsubscribePageRequest
+	128, // 128: agentrepl.v1.AgentRepl.ReportPageDrawn:input_type -> agentrepl.v1.ReportPageDrawnRequest
+	129, // 129: agentrepl.v1.AgentRepl.DismissNewsDigest:input_type -> agentrepl.v1.DismissNewsDigestRequest
+	130, // 130: agentrepl.v1.AgentRepl.RefreshNewsDigest:input_type -> agentrepl.v1.RefreshNewsDigestRequest
+	131, // 131: agentrepl.v1.AgentRepl.GetWorkspaceStatus:input_type -> agentrepl.v1.GetWorkspaceStatusRequest
+	132, // 132: agentrepl.v1.AgentRepl.GetMergeQueueStatus:input_type -> agentrepl.v1.GetMergeQueueStatusRequest
+	133, // 133: agentrepl.v1.AgentRepl.ListMergeLandings:input_type -> agentrepl.v1.ListMergeLandingsRequest
+	134, // 134: agentrepl.v1.AgentRepl.RecordDirectLanding:input_type -> agentrepl.v1.RecordDirectLandingRequest
+	135, // 135: agentrepl.v1.AgentRepl.FindWorkspaces:input_type -> agentrepl.v1.FindWorkspacesRequest
+	136, // 136: agentrepl.v1.AgentRepl.LocateWorkspace:input_type -> agentrepl.v1.LocateWorkspaceRequest
+	137, // 137: agentrepl.v1.AgentRepl.SubscribeWorkspace:input_type -> agentrepl.v1.SubscribeWorkspaceRequest
+	138, // 138: agentrepl.v1.AgentRepl.UnsubscribeWorkspace:input_type -> agentrepl.v1.UnsubscribeWorkspaceRequest
+	139, // 139: agentrepl.v1.AgentRepl.GatherWorkspaces:input_type -> agentrepl.v1.GatherWorkspacesRequest
+	140, // 140: agentrepl.v1.AgentRepl.GetGatherStatus:input_type -> agentrepl.v1.GetGatherStatusRequest
+	141, // 141: agentrepl.v1.AgentRepl.SubscribeMergeQueue:input_type -> agentrepl.v1.SubscribeMergeQueueRequest
+	142, // 142: agentrepl.v1.AgentRepl.UnsubscribeMergeQueue:input_type -> agentrepl.v1.UnsubscribeMergeQueueRequest
+	143, // 143: agentrepl.v1.AgentRepl.RequeueMerge:input_type -> agentrepl.v1.RequeueMergeRequest
+	144, // 144: agentrepl.v1.AgentRepl.DiscardMerge:input_type -> agentrepl.v1.DiscardMergeRequest
+	145, // 145: agentrepl.v1.AgentRepl.SubscribePullRequest:input_type -> agentrepl.v1.SubscribePullRequestRequest
+	146, // 146: agentrepl.v1.AgentRepl.UnsubscribePullRequest:input_type -> agentrepl.v1.UnsubscribePullRequestRequest
+	147, // 147: agentrepl.v1.AgentRepl.ListPullRequestSubscriptions:input_type -> agentrepl.v1.ListPullRequestSubscriptionsRequest
+	148, // 148: agentrepl.v1.AgentRepl.CommentOnPullRequest:input_type -> agentrepl.v1.CommentOnPullRequestRequest
+	149, // 149: agentrepl.v1.AgentRepl.SubscribeGithubMergeQueue:input_type -> agentrepl.v1.SubscribeGithubMergeQueueRequest
+	150, // 150: agentrepl.v1.AgentRepl.UnsubscribeGithubMergeQueue:input_type -> agentrepl.v1.UnsubscribeGithubMergeQueueRequest
+	151, // 151: agentrepl.v1.AgentRepl.ListGithubMergeQueueSubscriptions:input_type -> agentrepl.v1.ListGithubMergeQueueSubscriptionsRequest
+	152, // 152: agentrepl.v1.AgentRepl.SubscribeGithubWorkflowRun:input_type -> agentrepl.v1.SubscribeGithubWorkflowRunRequest
+	153, // 153: agentrepl.v1.AgentRepl.UnsubscribeGithubWorkflowRun:input_type -> agentrepl.v1.UnsubscribeGithubWorkflowRunRequest
+	154, // 154: agentrepl.v1.AgentRepl.ListGithubWorkflowRunSubscriptions:input_type -> agentrepl.v1.ListGithubWorkflowRunSubscriptionsRequest
+	155, // 155: agentrepl.v1.AgentRepl.NotifyWorkspace:input_type -> agentrepl.v1.NotifyWorkspaceRequest
+	156, // 156: agentrepl.v1.AgentRepl.PassColdGate:input_type -> agentrepl.v1.PassColdGateRequest
+	157, // 157: agentrepl.v1.AgentRepl.KeepLiveWorkspace:input_type -> agentrepl.v1.KeepLiveWorkspaceRequest
+	158, // 158: agentrepl.v1.AgentRepl.RunTests:input_type -> agentrepl.v1.RunTestsRequest
+	159, // 159: agentrepl.v1.AgentRepl.RunRedundancy:input_type -> agentrepl.v1.RunRedundancyRequest
+	160, // 160: agentrepl.v1.AgentRepl.EvaluateInEditor:input_type -> agentrepl.v1.EvaluateInEditorRequest
+	161, // 161: agentrepl.v1.AgentRepl.AnswerEditorEvaluation:input_type -> agentrepl.v1.AnswerEditorEvaluationRequest
+	162, // 162: agentrepl.v1.AgentRepl.SubmitPrompt:output_type -> agentrepl.v1.SubmitPromptResponse
+	163, // 163: agentrepl.v1.AgentRepl.SelectFeedRow:output_type -> agentrepl.v1.SelectFeedRowResponse
+	164, // 164: agentrepl.v1.AgentRepl.SelectResponseText:output_type -> agentrepl.v1.SelectResponseTextResponse
+	165, // 165: agentrepl.v1.AgentRepl.AskAboutResponse:output_type -> agentrepl.v1.AskAboutResponseResponse
+	166, // 166: agentrepl.v1.AgentRepl.ReportComposerEntries:output_type -> agentrepl.v1.ReportComposerEntriesResponse
+	167, // 167: agentrepl.v1.AgentRepl.FindEntryNeighbor:output_type -> agentrepl.v1.FindEntryNeighborResponse
+	168, // 168: agentrepl.v1.AgentRepl.FoldMergeBubble:output_type -> agentrepl.v1.FoldMergeBubbleResponse
+	169, // 169: agentrepl.v1.AgentRepl.AdjustFeedTextScale:output_type -> agentrepl.v1.AdjustFeedTextScaleResponse
+	170, // 170: agentrepl.v1.AgentRepl.OpenFeedImage:output_type -> agentrepl.v1.OpenFeedImageResponse
+	171, // 171: agentrepl.v1.AgentRepl.CloseFeedImage:output_type -> agentrepl.v1.CloseFeedImageResponse
+	172, // 172: agentrepl.v1.AgentRepl.RequestCommandSupport:output_type -> agentrepl.v1.RequestCommandSupportResponse
+	173, // 173: agentrepl.v1.AgentRepl.OpenFeed:output_type -> agentrepl.v1.OpenFeedResponse
+	174, // 174: agentrepl.v1.AgentRepl.WatchFeed:output_type -> agentrepl.v1.WatchFeedResponse
+	175, // 175: agentrepl.v1.AgentRepl.WatchWorkspaceMentions:output_type -> agentrepl.v1.WatchWorkspaceMentionsResponse
+	176, // 176: agentrepl.v1.AgentRepl.GetFeedPage:output_type -> agentrepl.v1.GetFeedPageResponse
+	177, // 177: agentrepl.v1.AgentRepl.LoadFeedThrough:output_type -> agentrepl.v1.LoadFeedThroughResponse
+	178, // 178: agentrepl.v1.AgentRepl.Interrupt:output_type -> agentrepl.v1.InterruptResponse
+	179, // 179: agentrepl.v1.AgentRepl.RetryVendorError:output_type -> agentrepl.v1.RetryVendorErrorResponse
+	180, // 180: agentrepl.v1.AgentRepl.InspectChessBoardSquare:output_type -> agentrepl.v1.InspectChessBoardSquareResponse
+	181, // 181: agentrepl.v1.AgentRepl.PlanRollback:output_type -> agentrepl.v1.PlanRollbackResponse
+	182, // 182: agentrepl.v1.AgentRepl.RollBack:output_type -> agentrepl.v1.RollBackResponse
+	183, // 183: agentrepl.v1.AgentRepl.ListRollbackPrompts:output_type -> agentrepl.v1.ListRollbackPromptsResponse
+	184, // 184: agentrepl.v1.AgentRepl.AnswerPermission:output_type -> agentrepl.v1.AnswerPermissionResponse
+	185, // 185: agentrepl.v1.AgentRepl.AnswerQuestion:output_type -> agentrepl.v1.AnswerQuestionResponse
+	186, // 186: agentrepl.v1.AgentRepl.UpdateQuestionDraft:output_type -> agentrepl.v1.UpdateQuestionDraftResponse
+	187, // 187: agentrepl.v1.AgentRepl.AnswerColdGate:output_type -> agentrepl.v1.AnswerColdGateResponse
+	188, // 188: agentrepl.v1.AgentRepl.WatchWorkspaceRoster:output_type -> agentrepl.v1.WatchWorkspaceRosterResponse
+	189, // 189: agentrepl.v1.AgentRepl.ListMergedWorkspaces:output_type -> agentrepl.v1.ListMergedWorkspacesResponse
+	190, // 190: agentrepl.v1.AgentRepl.GetMemoryOverview:output_type -> agentrepl.v1.GetMemoryOverviewResponse
+	191, // 191: agentrepl.v1.AgentRepl.GetWorkspaceMemory:output_type -> agentrepl.v1.GetWorkspaceMemoryResponse
+	192, // 192: agentrepl.v1.AgentRepl.CreateWorkspace:output_type -> agentrepl.v1.CreateWorkspaceResponse
+	193, // 193: agentrepl.v1.AgentRepl.ValidateWorkspaceName:output_type -> agentrepl.v1.ValidateWorkspaceNameResponse
+	194, // 194: agentrepl.v1.AgentRepl.ListCreationModels:output_type -> agentrepl.v1.ListCreationModelsResponse
+	195, // 195: agentrepl.v1.AgentRepl.RegisterRepository:output_type -> agentrepl.v1.RegisterRepositoryResponse
+	196, // 196: agentrepl.v1.AgentRepl.OpenWorkspace:output_type -> agentrepl.v1.OpenWorkspaceResponse
+	197, // 197: agentrepl.v1.AgentRepl.ListWorkspaceTranscripts:output_type -> agentrepl.v1.ListWorkspaceTranscriptsResponse
+	198, // 198: agentrepl.v1.AgentRepl.BindWorkspaceSession:output_type -> agentrepl.v1.BindWorkspaceSessionResponse
+	199, // 199: agentrepl.v1.AgentRepl.CloseWorkspace:output_type -> agentrepl.v1.CloseWorkspaceResponse
+	200, // 200: agentrepl.v1.AgentRepl.KillWorkspace:output_type -> agentrepl.v1.KillWorkspaceResponse
+	201, // 201: agentrepl.v1.AgentRepl.NukeWorkspace:output_type -> agentrepl.v1.NukeWorkspaceResponse
+	202, // 202: agentrepl.v1.AgentRepl.ForgetWorkspace:output_type -> agentrepl.v1.ForgetWorkspaceResponse
+	203, // 203: agentrepl.v1.AgentRepl.FinishWorkspace:output_type -> agentrepl.v1.FinishWorkspaceResponse
+	204, // 204: agentrepl.v1.AgentRepl.CompactWorkspace:output_type -> agentrepl.v1.CompactWorkspaceResponse
+	205, // 205: agentrepl.v1.AgentRepl.SetWorkspaceOneShot:output_type -> agentrepl.v1.SetWorkspaceOneShotResponse
+	206, // 206: agentrepl.v1.AgentRepl.SetWorkspaceCorrespondence:output_type -> agentrepl.v1.SetWorkspaceCorrespondenceResponse
+	207, // 207: agentrepl.v1.AgentRepl.ChangeWorkspaceLinks:output_type -> agentrepl.v1.ChangeWorkspaceLinksResponse
+	208, // 208: agentrepl.v1.AgentRepl.SetWorkspaceName:output_type -> agentrepl.v1.SetWorkspaceNameResponse
+	209, // 209: agentrepl.v1.AgentRepl.SetWorkspaceSummary:output_type -> agentrepl.v1.SetWorkspaceSummaryResponse
+	210, // 210: agentrepl.v1.AgentRepl.RestartWorkspace:output_type -> agentrepl.v1.RestartWorkspaceResponse
+	211, // 211: agentrepl.v1.AgentRepl.ParkWorkspace:output_type -> agentrepl.v1.ParkWorkspaceResponse
+	212, // 212: agentrepl.v1.AgentRepl.SetWorkspacePriority:output_type -> agentrepl.v1.SetWorkspacePriorityResponse
+	213, // 213: agentrepl.v1.AgentRepl.SetWorkspaceHidden:output_type -> agentrepl.v1.SetWorkspaceHiddenResponse
+	214, // 214: agentrepl.v1.AgentRepl.SendHiddenKeepalives:output_type -> agentrepl.v1.SendHiddenKeepalivesResponse
+	215, // 215: agentrepl.v1.AgentRepl.SetWorkspaceParent:output_type -> agentrepl.v1.SetWorkspaceParentResponse
+	216, // 216: agentrepl.v1.AgentRepl.SwapWorkspaces:output_type -> agentrepl.v1.SwapWorkspacesResponse
+	217, // 217: agentrepl.v1.AgentRepl.MoveWorkspace:output_type -> agentrepl.v1.MoveWorkspaceResponse
+	218, // 218: agentrepl.v1.AgentRepl.FoldRepository:output_type -> agentrepl.v1.FoldRepositoryResponse
+	219, // 219: agentrepl.v1.AgentRepl.UpdateSidebarView:output_type -> agentrepl.v1.UpdateSidebarViewResponse
+	220, // 220: agentrepl.v1.AgentRepl.ArrangeSidebar:output_type -> agentrepl.v1.ArrangeSidebarResponse
+	221, // 221: agentrepl.v1.AgentRepl.GetSidebarArrangement:output_type -> agentrepl.v1.GetSidebarArrangementResponse
+	222, // 222: agentrepl.v1.AgentRepl.CreateTask:output_type -> agentrepl.v1.CreateTaskResponse
+	223, // 223: agentrepl.v1.AgentRepl.UpdateTask:output_type -> agentrepl.v1.UpdateTaskResponse
+	224, // 224: agentrepl.v1.AgentRepl.AssignWorkspaceTask:output_type -> agentrepl.v1.AssignWorkspaceTaskResponse
+	225, // 225: agentrepl.v1.AgentRepl.ShowSidebarApp:output_type -> agentrepl.v1.ShowSidebarAppResponse
+	226, // 226: agentrepl.v1.AgentRepl.CreateThread:output_type -> agentrepl.v1.CreateThreadResponse
+	227, // 227: agentrepl.v1.AgentRepl.RequestNewThread:output_type -> agentrepl.v1.RequestNewThreadResponse
+	228, // 228: agentrepl.v1.AgentRepl.WatchChat:output_type -> agentrepl.v1.WatchChatResponse
+	229, // 229: agentrepl.v1.AgentRepl.SwitchChatSibling:output_type -> agentrepl.v1.SwitchChatSiblingResponse
+	230, // 230: agentrepl.v1.AgentRepl.ShowChatNode:output_type -> agentrepl.v1.ShowChatNodeResponse
+	231, // 231: agentrepl.v1.AgentRepl.ReportChatSightings:output_type -> agentrepl.v1.ReportChatSightingsResponse
+	232, // 232: agentrepl.v1.AgentRepl.SelectChatText:output_type -> agentrepl.v1.SelectChatTextResponse
+	233, // 233: agentrepl.v1.AgentRepl.SearchChats:output_type -> agentrepl.v1.SearchChatsResponse
+	234, // 234: agentrepl.v1.AgentRepl.WatchTopbar:output_type -> agentrepl.v1.WatchTopbarResponse
+	235, // 235: agentrepl.v1.AgentRepl.SetModel:output_type -> agentrepl.v1.SetModelResponse
+	236, // 236: agentrepl.v1.AgentRepl.SetDefaultModel:output_type -> agentrepl.v1.SetDefaultModelResponse
+	237, // 237: agentrepl.v1.AgentRepl.SetEffort:output_type -> agentrepl.v1.SetEffortResponse
+	238, // 238: agentrepl.v1.AgentRepl.UpdateRemoteControlMode:output_type -> agentrepl.v1.UpdateRemoteControlModeResponse
+	239, // 239: agentrepl.v1.AgentRepl.UpdateQueueBypassMode:output_type -> agentrepl.v1.UpdateQueueBypassModeResponse
+	240, // 240: agentrepl.v1.AgentRepl.SetPermissionMode:output_type -> agentrepl.v1.SetPermissionModeResponse
+	241, // 241: agentrepl.v1.AgentRepl.SelectAccount:output_type -> agentrepl.v1.SelectAccountResponse
+	242, // 242: agentrepl.v1.AgentRepl.WatchFooter:output_type -> agentrepl.v1.WatchFooterResponse
+	243, // 243: agentrepl.v1.AgentRepl.UpdateHeldPrompt:output_type -> agentrepl.v1.UpdateHeldPromptResponse
+	244, // 244: agentrepl.v1.AgentRepl.EditHeldPrompt:output_type -> agentrepl.v1.EditHeldPromptResponse
+	245, // 245: agentrepl.v1.AgentRepl.FoldHeldPrompt:output_type -> agentrepl.v1.FoldHeldPromptResponse
+	246, // 246: agentrepl.v1.AgentRepl.UpdateClassifierPrompt:output_type -> agentrepl.v1.UpdateClassifierPromptResponse
+	247, // 247: agentrepl.v1.AgentRepl.AnswerMergeQueueOffer:output_type -> agentrepl.v1.AnswerMergeQueueOfferResponse
+	248, // 248: agentrepl.v1.AgentRepl.UpdateShutdownSchedule:output_type -> agentrepl.v1.UpdateShutdownScheduleResponse
+	249, // 249: agentrepl.v1.AgentRepl.Deploy:output_type -> agentrepl.v1.DeployResponse
+	250, // 250: agentrepl.v1.AgentRepl.UpdateMergeQueue:output_type -> agentrepl.v1.UpdateMergeQueueResponse
+	251, // 251: agentrepl.v1.AgentRepl.UpdateDeployHold:output_type -> agentrepl.v1.UpdateDeployHoldResponse
+	252, // 252: agentrepl.v1.AgentRepl.RollOutLanding:output_type -> agentrepl.v1.RollOutLandingResponse
+	253, // 253: agentrepl.v1.AgentRepl.PruneStorage:output_type -> agentrepl.v1.PruneStorageResponse
+	254, // 254: agentrepl.v1.AgentRepl.ReapWorktrees:output_type -> agentrepl.v1.ReapWorktreesResponse
+	255, // 255: agentrepl.v1.AgentRepl.AwaitIdle:output_type -> agentrepl.v1.AwaitIdleResponse
+	256, // 256: agentrepl.v1.AgentRepl.DaemonHealth:output_type -> agentrepl.v1.DaemonHealthResponse
+	257, // 257: agentrepl.v1.AgentRepl.SessionHealth:output_type -> agentrepl.v1.SessionHealthResponse
+	258, // 258: agentrepl.v1.AgentRepl.ClientLog:output_type -> agentrepl.v1.ClientLogResponse
+	259, // 259: agentrepl.v1.AgentRepl.ReportLatencies:output_type -> agentrepl.v1.ReportLatenciesResponse
+	260, // 260: agentrepl.v1.AgentRepl.UpdatePersistentWifiMode:output_type -> agentrepl.v1.UpdatePersistentWifiModeResponse
+	261, // 261: agentrepl.v1.AgentRepl.RegisterWorkspace:output_type -> agentrepl.v1.RegisterWorkspaceResponse
+	262, // 262: agentrepl.v1.AgentRepl.RegisterWorkspaces:output_type -> agentrepl.v1.RegisterWorkspacesResponse
+	263, // 263: agentrepl.v1.AgentRepl.SelectWorkspace:output_type -> agentrepl.v1.SelectWorkspaceResponse
+	264, // 264: agentrepl.v1.AgentRepl.MarkWorkspaceViewed:output_type -> agentrepl.v1.MarkWorkspaceViewedResponse
+	265, // 265: agentrepl.v1.AgentRepl.ReportViewDwell:output_type -> agentrepl.v1.ReportViewDwellResponse
+	266, // 266: agentrepl.v1.AgentRepl.ReportPageUnloading:output_type -> agentrepl.v1.ReportPageUnloadingResponse
+	267, // 267: agentrepl.v1.AgentRepl.ReportPageResidency:output_type -> agentrepl.v1.ReportPageResidencyResponse
+	268, // 268: agentrepl.v1.AgentRepl.ReportEditorFocus:output_type -> agentrepl.v1.ReportEditorFocusResponse
+	269, // 269: agentrepl.v1.AgentRepl.ReportRecencyReach:output_type -> agentrepl.v1.ReportRecencyReachResponse
+	270, // 270: agentrepl.v1.AgentRepl.WatchHostWorkspace:output_type -> agentrepl.v1.WatchHostWorkspaceResponse
+	271, // 271: agentrepl.v1.AgentRepl.WatchDaemon:output_type -> agentrepl.v1.WatchDaemonResponse
+	272, // 272: agentrepl.v1.AgentRepl.OpenTabs:output_type -> agentrepl.v1.OpenTabsResponse
+	273, // 273: agentrepl.v1.AgentRepl.AdoptHostWorkspace:output_type -> agentrepl.v1.AdoptHostWorkspaceResponse
+	274, // 274: agentrepl.v1.AgentRepl.AcceptHandedWorkspace:output_type -> agentrepl.v1.AcceptHandedWorkspaceResponse
+	275, // 275: agentrepl.v1.AgentRepl.ListSlashCommands:output_type -> agentrepl.v1.ListSlashCommandsResponse
+	276, // 276: agentrepl.v1.AgentRepl.ListSlackChannels:output_type -> agentrepl.v1.ListSlackChannelsResponse
+	277, // 277: agentrepl.v1.AgentRepl.WatchWebWorkspace:output_type -> agentrepl.v1.WatchWebWorkspaceResponse
+	278, // 278: agentrepl.v1.AgentRepl.OpenLogin:output_type -> agentrepl.v1.OpenLoginResponse
+	279, // 279: agentrepl.v1.AgentRepl.WatchLoginTerminal:output_type -> agentrepl.v1.LoginTerminalOutput
+	280, // 280: agentrepl.v1.AgentRepl.SendLoginInput:output_type -> agentrepl.v1.SendLoginInputResponse
+	281, // 281: agentrepl.v1.AgentRepl.CloseLogin:output_type -> agentrepl.v1.CloseLoginResponse
+	282, // 282: agentrepl.v1.AgentRepl.OpenExternal:output_type -> agentrepl.v1.OpenExternalResponse
+	283, // 283: agentrepl.v1.AgentRepl.OpenInEditor:output_type -> agentrepl.v1.OpenInEditorResponse
+	284, // 284: agentrepl.v1.AgentRepl.SelectInEditor:output_type -> agentrepl.v1.SelectInEditorResponse
+	285, // 285: agentrepl.v1.AgentRepl.LoadPageInEditor:output_type -> agentrepl.v1.LoadPageInEditorResponse
+	286, // 286: agentrepl.v1.AgentRepl.AdoptWebWorkspace:output_type -> agentrepl.v1.AdoptWebWorkspaceResponse
+	287, // 287: agentrepl.v1.AgentRepl.WatchPage:output_type -> agentrepl.v1.WatchPageResponse
+	288, // 288: agentrepl.v1.AgentRepl.SubscribePage:output_type -> agentrepl.v1.SubscribePageResponse
+	289, // 289: agentrepl.v1.AgentRepl.UnsubscribePage:output_type -> agentrepl.v1.UnsubscribePageResponse
+	290, // 290: agentrepl.v1.AgentRepl.ReportPageDrawn:output_type -> agentrepl.v1.ReportPageDrawnResponse
+	291, // 291: agentrepl.v1.AgentRepl.DismissNewsDigest:output_type -> agentrepl.v1.DismissNewsDigestResponse
+	292, // 292: agentrepl.v1.AgentRepl.RefreshNewsDigest:output_type -> agentrepl.v1.RefreshNewsDigestResponse
+	293, // 293: agentrepl.v1.AgentRepl.GetWorkspaceStatus:output_type -> agentrepl.v1.GetWorkspaceStatusResponse
+	294, // 294: agentrepl.v1.AgentRepl.GetMergeQueueStatus:output_type -> agentrepl.v1.GetMergeQueueStatusResponse
+	295, // 295: agentrepl.v1.AgentRepl.ListMergeLandings:output_type -> agentrepl.v1.ListMergeLandingsResponse
+	296, // 296: agentrepl.v1.AgentRepl.RecordDirectLanding:output_type -> agentrepl.v1.RecordDirectLandingResponse
+	297, // 297: agentrepl.v1.AgentRepl.FindWorkspaces:output_type -> agentrepl.v1.FindWorkspacesResponse
+	298, // 298: agentrepl.v1.AgentRepl.LocateWorkspace:output_type -> agentrepl.v1.LocateWorkspaceResponse
+	299, // 299: agentrepl.v1.AgentRepl.SubscribeWorkspace:output_type -> agentrepl.v1.SubscribeWorkspaceResponse
+	300, // 300: agentrepl.v1.AgentRepl.UnsubscribeWorkspace:output_type -> agentrepl.v1.UnsubscribeWorkspaceResponse
+	301, // 301: agentrepl.v1.AgentRepl.GatherWorkspaces:output_type -> agentrepl.v1.GatherWorkspacesResponse
+	302, // 302: agentrepl.v1.AgentRepl.GetGatherStatus:output_type -> agentrepl.v1.GetGatherStatusResponse
+	303, // 303: agentrepl.v1.AgentRepl.SubscribeMergeQueue:output_type -> agentrepl.v1.SubscribeMergeQueueResponse
+	304, // 304: agentrepl.v1.AgentRepl.UnsubscribeMergeQueue:output_type -> agentrepl.v1.UnsubscribeMergeQueueResponse
+	305, // 305: agentrepl.v1.AgentRepl.RequeueMerge:output_type -> agentrepl.v1.RequeueMergeResponse
+	306, // 306: agentrepl.v1.AgentRepl.DiscardMerge:output_type -> agentrepl.v1.DiscardMergeResponse
+	307, // 307: agentrepl.v1.AgentRepl.SubscribePullRequest:output_type -> agentrepl.v1.SubscribePullRequestResponse
+	308, // 308: agentrepl.v1.AgentRepl.UnsubscribePullRequest:output_type -> agentrepl.v1.UnsubscribePullRequestResponse
+	309, // 309: agentrepl.v1.AgentRepl.ListPullRequestSubscriptions:output_type -> agentrepl.v1.ListPullRequestSubscriptionsResponse
+	310, // 310: agentrepl.v1.AgentRepl.CommentOnPullRequest:output_type -> agentrepl.v1.CommentOnPullRequestResponse
+	311, // 311: agentrepl.v1.AgentRepl.SubscribeGithubMergeQueue:output_type -> agentrepl.v1.SubscribeGithubMergeQueueResponse
+	312, // 312: agentrepl.v1.AgentRepl.UnsubscribeGithubMergeQueue:output_type -> agentrepl.v1.UnsubscribeGithubMergeQueueResponse
+	313, // 313: agentrepl.v1.AgentRepl.ListGithubMergeQueueSubscriptions:output_type -> agentrepl.v1.ListGithubMergeQueueSubscriptionsResponse
+	314, // 314: agentrepl.v1.AgentRepl.SubscribeGithubWorkflowRun:output_type -> agentrepl.v1.SubscribeGithubWorkflowRunResponse
+	315, // 315: agentrepl.v1.AgentRepl.UnsubscribeGithubWorkflowRun:output_type -> agentrepl.v1.UnsubscribeGithubWorkflowRunResponse
+	316, // 316: agentrepl.v1.AgentRepl.ListGithubWorkflowRunSubscriptions:output_type -> agentrepl.v1.ListGithubWorkflowRunSubscriptionsResponse
+	317, // 317: agentrepl.v1.AgentRepl.NotifyWorkspace:output_type -> agentrepl.v1.NotifyWorkspaceResponse
+	318, // 318: agentrepl.v1.AgentRepl.PassColdGate:output_type -> agentrepl.v1.PassColdGateResponse
+	319, // 319: agentrepl.v1.AgentRepl.KeepLiveWorkspace:output_type -> agentrepl.v1.KeepLiveWorkspaceResponse
+	320, // 320: agentrepl.v1.AgentRepl.RunTests:output_type -> agentrepl.v1.RunTestsResponse
+	321, // 321: agentrepl.v1.AgentRepl.RunRedundancy:output_type -> agentrepl.v1.RunRedundancyResponse
+	322, // 322: agentrepl.v1.AgentRepl.EvaluateInEditor:output_type -> agentrepl.v1.EvaluateInEditorResponse
+	323, // 323: agentrepl.v1.AgentRepl.AnswerEditorEvaluation:output_type -> agentrepl.v1.AnswerEditorEvaluationResponse
+	162, // [162:324] is the sub-list for method output_type
+	0,   // [0:162] is the sub-list for method input_type
 	0,   // [0:0] is the sub-list for extension type_name
 	0,   // [0:0] is the sub-list for extension extendee
 	0,   // [0:0] is the sub-list for field type_name
@@ -1018,6 +1023,7 @@ func file_agentrepl_v1_service_proto_init() {
 	file_agentrepl_v1_endpoint_watch_workspace_mentions_proto_init()
 	file_agentrepl_v1_endpoint_watch_web_workspace_proto_init()
 	file_agentrepl_v1_endpoint_watch_workspace_roster_proto_init()
+	file_agentrepl_v1_endpoint_list_merged_workspaces_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

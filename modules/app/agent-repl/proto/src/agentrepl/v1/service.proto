@@ -170,6 +170,7 @@ import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_watch_workspace_mentions.proto";
 import "agentrepl/v1/endpoint_watch_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
+import "agentrepl/v1/endpoint_list_merged_workspaces.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -294,9 +295,17 @@ service AgentRepl {
 
   // ---- SIDEBAR ----
 
-  // The one global stream: the roster, whole, for every webview alike. See
+  // The one global stream: the roster's four snapshot streams, each resent
+  // whole only when it changes, for every webview alike. See
   // endpoint_watch_workspace_roster.proto.
   rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // One page of ten merged workspaces' rows, of one repository or all, most
+  // recently merged or created first: the rows no roster stream carries. See
+  // endpoint_list_merged_workspaces.proto.
+  rpc ListMergedWorkspaces(ListMergedWorkspacesRequest) returns (ListMergedWorkspacesResponse) {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
     option idempotency_level = NO_SIDE_EFFECTS;
   }

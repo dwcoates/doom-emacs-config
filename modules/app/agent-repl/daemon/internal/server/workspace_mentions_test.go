@@ -71,21 +71,33 @@ func closedRowIn(id, name, repository string, ago time.Duration) *frontendv1.Ros
 	return row
 }
 
-// withClosed is ROSTER with MERGED in its recently-merged band and CLOSED in
-// its closed list.
-func withClosed(roster *frontendv1.WorkspaceRoster, merged, closed []*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
-	var mergedRows []*frontendv1.RosterMergedRow
-	for _, row := range merged {
-		mergedRows = append(mergedRows, &frontendv1.RosterMergedRow{Row: row})
-	}
-	roster.RecentlyMerged = &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{
-		{MergedRows: &frontendv1.RosterMergedRows{Rows: mergedRows}},
-	}}
-	roster.Closed = &frontendv1.RosterClosedRows{}
+// mentionInput is what mention targets resolve from: a whole push, and the
+// merged rows the roster no longer carries.
+type mentionInput struct {
+	push   *frontendv1.RosterPush
+	merged []*frontendv1.RosterRow
+}
+
+// openOnly is ROSTER as a push whose closed stream is empty, beside no merged
+// rows.
+func openOnly(roster *frontendv1.WorkspaceRoster) mentionInput {
+	return mentionInput{push: &frontendv1.RosterPush{Workspaces: roster, Closed: &frontendv1.RosterClosedRows{}}}
+}
+
+// withClosed is ROSTER beside MERGED merged rows, with CLOSED in the push's
+// closed stream.
+func withClosed(roster *frontendv1.WorkspaceRoster, merged, closed []*frontendv1.RosterRow) mentionInput {
+	in := openOnly(roster)
+	in.merged = merged
 	for _, row := range closed {
-		roster.Closed.Rows = append(roster.Closed.Rows, &frontendv1.RosterClosedRow{Row: row})
+		in.push.Closed.Rows = append(in.push.Closed.Rows, &frontendv1.RosterClosedRow{Row: row})
 	}
-	return roster
+	return in
+}
+
+// resolveMentions resolves VIEWER's targets from IN at mentionNow.
+func resolveMentions(in mentionInput, viewer string) *frontendv1.WorkspaceMentionTargets {
+	return mentionTargets(in.push, in.merged, viewer, mentionNow)
 }
 
 // targetNames reads TARGETS back as "name=id" pairs, in order, a closed
@@ -221,7 +233,7 @@ func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := targetNames(mentionTargets(tc.roster, tc.viewer, mentionNow))
+			got := targetNames(resolveMentions(openOnly(tc.roster), tc.viewer))
 
 			// Assert.
 			if !slices.Equal(got, tc.want) {
@@ -241,7 +253,7 @@ func TestMentionTargetsLinksRecentlyClosedWorkspaces(t *testing.T) {
 	unrecorded := mentionRow("u", "unrecorded").GetRow()
 	cases := []struct {
 		name   string
-		roster *frontendv1.WorkspaceRoster
+		roster mentionInput
 		want   []string
 	}{
 		{
@@ -315,7 +327,7 @@ func TestMentionTargetsLinksRecentlyClosedWorkspaces(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := targetNames(mentionTargets(tc.roster, "v", mentionNow))
+			got := targetNames(resolveMentions(tc.roster, "v"))
 
 			// Assert.
 			if !slices.Equal(got, tc.want) {
@@ -343,7 +355,7 @@ func TestMentionTargetsStateEachTargetsRepository(t *testing.T) {
 			roster := mentionRoster([]*frontendv1.RosterOpenRow{mentionRowIn("a", "alpha", tc.repository)})
 
 			// Act.
-			got := mentionTargets(roster, "v", mentionNow).GetTargets()
+			got := resolveMentions(openOnly(roster), "v").GetTargets()
 
 			// Assert.
 			if len(got) != 1 {
@@ -360,7 +372,10 @@ func TestMentionTargetsStateEachTargetsRepository(t *testing.T) {
 // filter: the first set is a change, an equal set is not, a different one is.
 func TestMentionTargetsTrackerAnswersOnlyChanges(t *testing.T) {
 	// Arrange.
-	tracker := mentionTargetsTracker{viewer: "v", now: func() time.Time { return mentionNow }}
+	tracker := mentionTargetsTracker{viewer: "v", now: func() time.Time { return mentionNow },
+		mergedRows: func() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool) {
+			return nil, &frontendv1.RosterPush{}, true
+		}}
 	alpha := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")})
 	beta := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
 
@@ -377,7 +392,7 @@ func TestMentionTargetsTrackerAnswersOnlyChanges(t *testing.T) {
 	for _, step := range steps {
 		t.Run(step.name, func(t *testing.T) {
 			// Act.
-			set, changed := tracker.next(step.roster)
+			set, changed := tracker.next(&frontendv1.RosterPush{Workspaces: step.roster})
 
 			// Assert.
 			if changed != step.wantChanged {
@@ -388,6 +403,73 @@ func TestMentionTargetsTrackerAnswersOnlyChanges(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMentionTargetsTrackerReadsMergedRowsOnlyWhenTheMergedStreamChanges
+// pins the tracker's merged-row cache: the merged rows are read for the
+// first push, not again for a push whose recently merged stream is the same
+// one, and again for a push carrying a new one, whose rows then link.
+func TestMentionTargetsTrackerReadsMergedRowsOnlyWhenTheMergedStreamChanges(t *testing.T) {
+	// Arrange.
+	reads := 0
+	merged := []*frontendv1.RosterRow{closedRow("m", "landed", time.Hour)}
+	tracker := mentionTargetsTracker{viewer: "v", now: func() time.Time { return mentionNow },
+		mergedRows: func() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool) {
+			reads++
+			return merged, &frontendv1.RosterPush{}, true
+		}}
+	first := &frontendv1.RosterMergedSection{}
+	second := &frontendv1.RosterMergedSection{}
+	push := func(section *frontendv1.RosterMergedSection) *frontendv1.RosterPush {
+		return &frontendv1.RosterPush{Workspaces: mentionRoster(nil), RecentlyMerged: section, Closed: &frontendv1.RosterClosedRows{}}
+	}
+
+	steps := []struct {
+		name      string
+		section   *frontendv1.RosterMergedSection
+		before    func()
+		wantReads int
+		wantNames []string
+	}{
+		{name: "the first push reads the merged rows", section: first, wantReads: 1, wantNames: []string{"landed=m (closed)"}},
+		{name: "the same merged stream reads nothing", section: first, before: func() { merged = nil }, wantReads: 1, wantNames: []string{"landed=m (closed)"}},
+		{name: "a new merged stream reads them again", section: second, wantReads: 2, wantNames: nil},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			if step.before != nil {
+				step.before()
+			}
+
+			// Act.
+			set := tracker.targets(push(step.section))
+
+			// Assert.
+			if reads != step.wantReads {
+				t.Fatalf("merged reads = %d, want %d", reads, step.wantReads)
+			}
+			if got := targetNames(set); !slices.Equal(got, step.wantNames) {
+				t.Fatalf("targets = %v, want %v", got, step.wantNames)
+			}
+		})
+	}
+}
+
+// TestMentionTargetsTrackerPanicsWhenTheResolverNeverPublished pins the
+// invariant the tracker asserts: a push the roster topic delivered means the
+// resolver has published, so a merged read answering otherwise is a bug.
+func TestMentionTargetsTrackerPanicsWhenTheResolverNeverPublished(t *testing.T) {
+	// Arrange.
+	tracker := mentionTargetsTracker{viewer: "v", now: func() time.Time { return mentionNow },
+		mergedRows: func() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool) { return nil, nil, false }}
+
+	// Act / Assert.
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("the tracker did not panic on a merged read the resolver never published")
+		}
+	}()
+	tracker.targets(&frontendv1.RosterPush{Workspaces: mentionRoster(nil), RecentlyMerged: &frontendv1.RosterMergedSection{}})
 }
 
 // mentionSink records every frame a changedOnlySink let through, failing
@@ -412,7 +494,7 @@ func mentionFrame(names ...string) *agentreplv1.WatchWorkspaceMentionsResponse {
 		rows = append(rows, mentionRow(name, name))
 	}
 	return &agentreplv1.WatchWorkspaceMentionsResponse{
-		Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: mentionTargets(mentionRoster(rows), "v", mentionNow)},
+		Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: resolveMentions(openOnly(mentionRoster(rows)), "v")},
 	}
 }
 
@@ -515,18 +597,17 @@ func TestWatchWorkspaceMentionsPushesOnlyAChangedSet(t *testing.T) {
 	}
 	first := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("v", "viewer"), mentionRow("a", "alpha")})
 	sameTargets := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("v", "viewer"), mentionRow("a", "alpha")})
-	sameTargets.Revision = 2
 	changed := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
 
 	// Act.
-	h.Sidebar.topic.Publish(first)
+	h.Sidebar.topic.Publish(pushWith(first, 1))
 	var got [][]string
 	if !stream.Receive() {
 		t.Fatalf("receive the first set: %v", stream.Err())
 	}
 	got = append(got, targetNames(stream.Msg().GetTargets()))
-	h.Sidebar.topic.Publish(sameTargets)
-	h.Sidebar.topic.Publish(changed)
+	h.Sidebar.topic.Publish(pushWith(sameTargets, 2))
+	h.Sidebar.topic.Publish(pushWith(changed, 3))
 	if !stream.Receive() {
 		t.Fatalf("receive the changed set: %v", stream.Err())
 	}
@@ -578,7 +659,7 @@ func TestAPageCarriesItsWorkspaceMentions(t *testing.T) {
 			WorkspaceMentions: &agentreplv1.WatchWorkspaceMentionsRequest{Viewer: &workspacev1.WorkspaceRef{Id: "v"}},
 		},
 	})
-	h.Sidebar.topic.Publish(mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}))
+	h.Sidebar.topic.Publish(pushWith(mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}), 1))
 
 	// Assert.
 	if !stream.Receive() {
@@ -616,16 +697,15 @@ func TestTheHostStreamPushesOnlyAChangedSetOfMentionTargets(t *testing.T) {
 	viewer := string(testWorkspaceID)
 	first := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow(viewer, "viewer"), mentionRow("a", "alpha")})
 	sameTargets := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow(viewer, "viewer"), mentionRow("a", "alpha")})
-	sameTargets.Revision = 2
 	changed := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
-	h.Sidebar.topic.Publish(first)
+	h.Sidebar.topic.Publish(pushWith(first, 1))
 	stream := dialHostStream(t, h, ctx)
 
 	// Act.
 	var got [][]string
 	got = append(got, targetNames(receiveHostMentionTargets(t, stream)))
-	h.Sidebar.topic.Publish(sameTargets)
-	h.Sidebar.topic.Publish(changed)
+	h.Sidebar.topic.Publish(pushWith(sameTargets, 2))
+	h.Sidebar.topic.Publish(pushWith(changed, 3))
 	got = append(got, targetNames(receiveHostMentionTargets(t, stream)))
 
 	// Assert.
@@ -645,13 +725,13 @@ func TestTheComposerCompletesExactlyTheNamesThePageLinks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	viewer := string(testWorkspaceID)
-	h.Sidebar.topic.Publish(mentionRoster(
+	h.Sidebar.topic.Publish(pushWith(mentionRoster(
 		[]*frontendv1.RosterOpenRow{
 			mentionRowIn(viewer, "viewer", "doom"), mentionRowIn("a", "fix", "doom"), mentionRowIn("b", "fix", "zettel"),
 			mentionRowIn("c", "gamma", "zettel"),
 		},
 		mentionRowIn("h", "hidden", "doom"),
-	))
+	), 1))
 	host := dialHostStream(t, h, ctx)
 	page, err := h.Client.WatchWorkspaceMentions(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceMentionsRequest{
 		Viewer: &workspacev1.WorkspaceRef{Id: viewer},

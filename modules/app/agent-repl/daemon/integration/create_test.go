@@ -157,7 +157,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	child := childResp.Msg.GetSuccess().GetWorkspace()
 
 	// Assert: the roster nests the child under the parent.
-	awaitRoster(t, d, roster, "the child nested under its parent", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the child nested under its parent", func(r *frontendv1.RosterPush) bool {
 		return rosterNests(r, parent.GetId(), child.GetId())
 	})
 
@@ -169,9 +169,11 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	// The merge has to have REACHED ITS TERMINAL before the git calls say
 	// anything: `merge_queued` is published before the run starts, so waiting
 	// on it would read the trace of a merge that has not run yet.
-	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, child.GetId())
-		return row != nil && row.GetMerged() != nil
+	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.RosterPush) bool {
+		if row := rosterRow(r, child.GetId()); row != nil {
+			return row.GetMerged() != nil
+		}
+		return leftForMerged(t, d, r, child.GetId(), func(*frontendv1.RosterRow) bool { return true })
 	})
 	// The git client selects its directory with `-C <dir>` and never with the
 	// child process's cwd, so "inside the parent's worktree" is read off the
@@ -570,10 +572,10 @@ func createRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *w
 	t.Helper()
 	ws := harness.Register(t, d, repo.Dir)
 	roster := d.WatchRoster()
-	got := harness.AwaitView(t, d.Ctx(), roster, "the repository section", func(r *frontendv1.WorkspaceRoster) bool {
+	got := harness.AwaitView(t, d.Ctx(), roster, "the repository section", func(r *frontendv1.RosterPush) bool {
 		return rosterRepoRow(r, ws.GetId()) != nil
 	})
-	for _, s := range got.GetRepository().GetSections() {
+	for _, s := range got.GetWorkspaces().GetRepository().GetSections() {
 		for _, open := range rosterwalk.SectionOpenRows(s) {
 			if open.GetRow().GetWorkspace().GetWorkspace().GetId() == ws.GetId() {
 				return s.GetKey().GetRepository()

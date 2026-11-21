@@ -124,7 +124,7 @@ func TestPerfSubmitPromptToRosterArm(t *testing.T) {
 	for i := 0; i < PerfSamples; i++ {
 		start := time.Now()
 		turn := perfSubmit(t, w, ws, "perf roster arm")
-		harness.AwaitView(t, w.Ctx(), roster, "the roster arm to leave idle", func(r *frontendv1.WorkspaceRoster) bool {
+		harness.AwaitView(t, w.Ctx(), roster, "the roster arm to leave idle", func(r *frontendv1.RosterPush) bool {
 			return perfRosterArmBusy(r, ws.GetId())
 		})
 		rec.Record(time.Since(start))
@@ -329,7 +329,7 @@ func perfSubmit(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, text
 
 // perfRosterArmBusy answers whether the roster's row for ID reports an arm a
 // just-submitted prompt produces.
-func perfRosterArmBusy(r *frontendv1.WorkspaceRoster, id string) bool {
+func perfRosterArmBusy(r *frontendv1.RosterPush, id string) bool {
 	busy := false
 	perfWalkRosterRows(r, func(row *frontendv1.RosterRow) {
 		if row.GetWorkspace().GetWorkspace().GetId() != id {
@@ -344,9 +344,9 @@ func perfRosterArmBusy(r *frontendv1.WorkspaceRoster, id string) bool {
 
 // perfDrainRoster reads roster frames until the workspace's arm is settled, so
 // the next sample's wait cannot be satisfied by a stale frame.
-func perfDrainRoster(t *testing.T, w *stack.World, roster *harness.Stream[*frontendv1.WorkspaceRoster], ws *workspacev1.WorkspaceRef) {
+func perfDrainRoster(t *testing.T, w *stack.World, roster *harness.Stream[*frontendv1.RosterPush], ws *workspacev1.WorkspaceRef) {
 	t.Helper()
-	harness.AwaitView(t, w.Ctx(), roster, "the roster arm to settle", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, w.Ctx(), roster, "the roster arm to settle", func(r *frontendv1.RosterPush) bool {
 		return !perfRosterArmBusy(r, ws.GetId())
 	})
 }
@@ -355,7 +355,7 @@ func perfDrainRoster(t *testing.T, w *stack.World, roster *harness.Stream[*front
 // families, through rosterwalk.AllRows. Its own name rather than the Emacs
 // area's `walkRosterRows`: the perf phase must not couple to a file another
 // layer owns.
-func perfWalkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.RosterRow)) {
+func perfWalkRosterRows(r *frontendv1.RosterPush, visit func(*frontendv1.RosterRow)) {
 	for _, row := range rosterwalk.AllRows(r) {
 		visit(row)
 	}

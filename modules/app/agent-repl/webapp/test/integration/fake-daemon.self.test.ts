@@ -268,7 +268,7 @@ describe("unset-field injection", () => {
     // Act
     const [push] = await take(client.watchWorkspaceRoster({}), 1);
     // Assert
-    const first = (push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.entries[0]?.entry;
+    const first = (push.push.case === "streams" ? push.push.value.workspaces : undefined)?.repository?.sections[0]?.entries[0]?.entry;
     const row = first?.case === "row" ? first.value.row : undefined;
     expect(row?.status.case).toBeUndefined();
   });
@@ -358,7 +358,7 @@ describe("view streams", () => {
     // Act
     const [push] = await take(client.watchWorkspaceRoster({}), 1);
     // Assert
-    const first = (push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.entries[0]?.entry;
+    const first = (push.push.case === "streams" ? push.push.value.workspaces : undefined)?.repository?.sections[0]?.entries[0]?.entry;
     expect((first?.case === "row" ? first.value.row : undefined)?.name?.text).toBe("ported");
   });
 

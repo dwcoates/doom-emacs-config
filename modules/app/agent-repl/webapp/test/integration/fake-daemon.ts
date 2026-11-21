@@ -45,7 +45,8 @@ import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_to
 import type { FeedPage, FeedRow, FeedSelection } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterPush } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { ListMergedWorkspacesResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_list_merged_workspaces_pb";
 import type { FeedHeld } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 import {
@@ -163,6 +164,7 @@ import {
   emptyFooterView,
   emptyRoster,
   emptyTopbarView,
+  mergedRowsOf,
   emptyHeld,
   hostWorkspacePush,
   shutdownAnnounced,
@@ -268,7 +270,8 @@ export interface FakeDaemon {
   // --- scripted views: each setter also pushes to every live subscriber ----
   setFooter(workspace: string, view: FooterView): void;
   setTopbar(workspace: string, view: TopbarView): void;
-  setRoster(roster: WorkspaceRoster): void;
+  /** Push ROSTER, every stream of it, as the daemon's first push of a subscription carries them. */
+  setRoster(roster: RosterPush): void;
   /**
    * The root feed's held section: what the root feed's open states, pushed as
    * a held-section frame (carrying ROWS, the rows that moved with it) to every
@@ -480,20 +483,23 @@ const FIELD_STRIPPERS: Partial<Record<RpcName, { path: string; strip(message: ob
     path: "RosterRow.status",
     strip: (message) => {
       const response = message as {
-        push?: { case?: string; value?: { repository?: { sections?: readonly object[] } } };
+        push?: { case?: string; value?: { workspaces?: { repository?: { sections?: readonly object[] } } } };
       };
       const push = required(response.push, "WatchWorkspaceRosterResponse.push");
-      const roster = required(
-        push.case === "roster" ? push.value : undefined,
-        "WatchWorkspaceRosterResponse.roster",
+      const streams = required(
+        push.case === "streams" ? push.value : undefined,
+        "WatchWorkspaceRosterResponse.streams",
       );
+      const roster = required(streams.workspaces, "RosterPush.workspaces");
       const repository = required(roster.repository, "WorkspaceRoster.repository");
       const sections = required(repository.sections, "RosterGrouping.sections");
       return {
         ...response,
         push: {
-          case: "roster",
+          case: "streams",
           value: {
+            ...streams,
+            workspaces: {
             ...roster,
             repository: {
               ...repository,
@@ -513,6 +519,7 @@ const FIELD_STRIPPERS: Partial<Record<RpcName, { path: string; strip(message: ob
                   }),
                 };
               }),
+            },
             },
           },
         },
@@ -756,7 +763,7 @@ export function createFakeDaemon(): FakeDaemon {
   const loginScrollback = new Map<string, Uint8Array[]>();
   /** Which workspace each known feed belongs to, for the submission check. */
   const feedOwners = new Map<FeedKey, string>();
-  let roster: WorkspaceRoster = emptyRoster();
+  let roster: RosterPush = emptyRoster();
 
   const scripted = new Map<RpcName, unknown>();
   const failures = new Map<RpcName, string[]>();
@@ -912,7 +919,7 @@ export function createFakeDaemon(): FakeDaemon {
     record("watchWorkspaceRoster", request);
     consumeFailure("watchWorkspaceRoster");
     const { channel, iterate } = openStream("watchWorkspaceRoster", "", signal);
-    channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster } })));
+    channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { push: { case: "streams", value: roster } })));
     return iterate();
   };
 
@@ -1350,6 +1357,29 @@ export function createFakeDaemon(): FakeDaemon {
         record("arrangeSidebar", request);
         return answerFor("arrangeSidebar", ArrangeSidebarResponseSchema, {
           result: { case: "success", value: { rosterRevision: 0n } },
+        });
+      },
+      // A Recently Merged group's page, ten rows at a time, from the rows the
+      // roster fixture last set gave its group (fixtures.ts `mergedRowsOf`),
+      // at the summary's own token, as the daemon resolves both from one set.
+      listMergedWorkspaces(request) {
+        record("listMergedWorkspaces", request);
+        const section = roster.recentlyMerged;
+        const group = section?.groups.find((g) => g.key?.repository?.id === request.repository?.id);
+        const rows = group === undefined ? [] : mergedRowsOf(group);
+        const slice = rows.slice(request.page * 10, (request.page + 1) * 10);
+        const omitted = Math.max(0, rows.length - (request.page + 1) * 10);
+        return answerFor("listMergedWorkspaces", ListMergedWorkspacesResponseSchema, {
+          result: {
+            case: "success",
+            value: {
+              revision: { revision: section?.mergedRevision?.revision ?? 0n },
+              extent:
+                omitted > 0
+                  ? { case: "more", value: { rows: { rows: slice }, omitted } }
+                  : { case: "last", value: { rows: { rows: slice } } },
+            },
+          },
         });
       },
       // The fold lands on the NEXT roster push, as the daemon's does; a test
@@ -1860,7 +1890,7 @@ export function createFakeDaemon(): FakeDaemon {
         "watchWorkspaceRoster",
         undefined,
         undefined,
-        create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: next } }),
+        create(WatchWorkspaceRosterResponseSchema, { push: { case: "streams", value: next } }),
       );
     },
     setHeld(workspace, held, rows = []) {

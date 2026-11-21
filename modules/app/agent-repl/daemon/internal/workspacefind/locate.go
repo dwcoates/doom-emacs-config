@@ -14,8 +14,10 @@ import (
 // directory, or a directory inside a worktree names.
 //
 // THE REGISTRY ANSWERS, NOT THE ROSTER. A workspace is locatable when it is
-// open, hidden merge workspaces and undrawn children included, or when the
-// roster draws it (a merged or closed row the sidebar still shows). The agent
+// open, hidden merge workspaces and undrawn children included, when the
+// roster's streams draw it (a closed row), or when it is merged: closed with
+// its merge landed, which no stream carries (its row is paged by
+// agentrepl.v1.ListMergedWorkspaces), so the registry says so. The agent
 // CLI resolved its caller off the roster alone until 2026-11-14, so a merge
 // workspace's fixing turn, and every open workspace the sidebar did not draw,
 // was refused "inside no workspace the daemon serves" from its own worktree.
@@ -33,16 +35,17 @@ type LocateBy struct {
 }
 
 // Locate answers the locatable workspaces of WORKSPACES that BY matches, in
-// registry order; ROSTER is the roster the sidebar publishes now.
-func Locate(workspaces []wsm.Workspace, roster *frontendv1.WorkspaceRoster, by LocateBy) []wsm.Workspace {
+// registry order; PUSH is the push the sidebar publishes now, every stream
+// set.
+func Locate(workspaces []wsm.Workspace, push *frontendv1.RosterPush, by LocateBy) []wsm.Workspace {
 	drawn := map[wsm.WorkspaceID]bool{}
-	for _, row := range rosterwalk.AllRows(roster) {
+	for _, row := range rosterwalk.AllRows(push) {
 		drawn[wsm.WorkspaceID(row.GetWorkspace().GetWorkspace().GetId())] = true
 	}
 	var out []wsm.Workspace
 	var deepest *wsm.Workspace
 	for _, ws := range workspaces {
-		if ws.IsThread() || ws.Dir == "" || (ws.Closed && !drawn[ws.ID]) {
+		if ws.IsThread() || ws.Dir == "" || (ws.Closed && !drawn[ws.ID] && !ws.InMergedBand()) {
 			continue
 		}
 		dir := filepath.Clean(ws.Dir)

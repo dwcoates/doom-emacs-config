@@ -5,12 +5,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { WebhostFailure } from "../../src/host/protocol.js";
-import { startWebhostServices, type WebhostServicesDeps } from "../../src/host/services.js";
+import { startWebhostServices, watchColdGates, type WebhostServicesDeps } from "../../src/host/services.js";
 import type { Host } from "../../src/host/host.js";
 import { daemonUnreachable } from "../../src/failure/sink.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { captureLogRecords } from "../log-capture.js";
+import { create } from "@bufbuild/protobuf";
+import { RosterColdGateSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { appContext, pushOf, roster, rosterStream } from "../sidebar/harness.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { quietWebhostRuntime } from "./webhost-runtime.js";
 import { beginPage, tearDownPage } from "../../src/page-teardown.js";
 
@@ -297,5 +299,60 @@ describe("startWebhostServices", () => {
     capture.logger.flush();
     const record = capture.sent.find((r) => r.operation === "webhost.services-start");
     expect(record?.context?.["webhost_document"]).toBe("host");
+  });
+});
+
+describe("watchColdGates", () => {
+  /** Every stream, its workspaces naming the cold gate of workspace GATED. */
+  const withGate = (gated: string, revision: bigint) => {
+    const streams = roster({ revision });
+    streams.workspaces.coldGates = [create(RosterColdGateSchema, { workspace: { id: gated, dir: `/w/${gated}` } })];
+    return streams;
+  };
+
+  /** Watch the cold gates over PUSHES, resolving once WANT gate lists were told. */
+  function watching(pushes: Parameters<typeof rosterStream>[0], want: number) {
+    const told: string[][] = [];
+    let done: () => void = () => undefined;
+    const settled = new Promise<void>((resolve) => (done = resolve));
+    const handle = watchColdGates(appContext(rosterStream(pushes)), (gates) => {
+      told.push(gates.map((gate) => gate.workspace?.id ?? ""));
+      if (told.length === want) done();
+    });
+    return { told, settled, handle };
+  }
+
+  it("tells the gates of the workspaces stream the first push carries", async () => {
+    // Arrange / Act
+    const { told, settled, handle } = watching([withGate("ws-1", 1n)], 1);
+    await settled;
+    // Assert
+    expect(told).toEqual([["ws-1"]]);
+    handle.cancel();
+  });
+
+  it("tells nothing for a push that leaves the workspaces stream out", async () => {
+    // Arrange: the middle push carries the merge queue alone; the last one's gates are told after it.
+    const { told, settled, handle } = watching(
+      [withGate("ws-1", 1n), pushOf(roster({ revision: 2n }), ["merge_queue"]), pushOf(withGate("ws-3", 3n), ["workspaces"])],
+      2,
+    );
+    // Act
+    await settled;
+    // Assert
+    expect(told).toEqual([["ws-1"], ["ws-3"]]);
+    handle.cancel();
+  });
+
+  it("refuses a first push missing a stream, telling none of its gates, and logs why", async () => {
+    // Arrange: the refused push, then a whole one, whose gates are told after it.
+    const capture = captureLogRecords("error");
+    const { told, settled, handle } = watching([pushOf(withGate("ws-bad", 1n), ["workspaces"]), withGate("ws-2", 2n)], 1);
+    // Act
+    await settled;
+    // Assert
+    const record = await forwardedRecord(capture, "rpc.stream-frame-undecodable");
+    expect([told, record.context?.path]).toEqual([[["ws-2"]], "WatchWorkspaceRosterResponse.streams"]);
+    handle.cancel();
   });
 });

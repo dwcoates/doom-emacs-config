@@ -1,7 +1,9 @@
 // endpoint_watch_workspace_roster.proto — WatchWorkspaceRoster: the sidebar's
 // stream. SIDEBAR section. THE ONE GLOBAL STREAM: no workspace — every
 // webview watches the same roster, and the daemon's stream order is the only
-// order. The response wraps frontend.v1.WorkspaceRoster itself, whole.
+// order. Each response carries one frontend.v1.RosterPush: the roster's four
+// snapshot streams, each one whole whenever it is carried, the first push
+// carrying every one.
 
 syntax = "proto3";
 
@@ -17,10 +19,18 @@ message WatchWorkspaceRosterRequest {}
 
 // The current roster, delivered live.
 message WatchWorkspaceRosterResponse {
-  // What this frame carries: the roster, or the planned end of the stream.
+  // `roster` (field 1, the whole roster re-pushed on every change) is
+  // RETIRED (owner ruling, 2026-11-16): the roster is four snapshot streams,
+  // and a change resends only the streams it changed (`streams`).
+  reserved 1;
+  reserved "roster";
+  // What this frame carries: a push of the roster's streams, or the planned
+  // end of the stream.
   oneof push {
-    // The whole roster, re-pushed on every change.
-    frontend.v1.WorkspaceRoster roster = 1;
+    // Every stream whose snapshot changed since the last frame this
+    // subscription was sent, each whole, and every stream on the first
+    // frame. See the message.
+    frontend.v1.RosterPush streams = 3;
     // The daemon is standing down in a planned exit and this is the stream's
     // last frame; the client reattaches to the live daemon without treating
     // the end as a fault. See the message.

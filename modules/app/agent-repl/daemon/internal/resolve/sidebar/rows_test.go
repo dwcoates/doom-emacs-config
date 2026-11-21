@@ -572,7 +572,7 @@ func TestMergedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Assert: that the workspace is done is the more interesting fact.
-	row := rowFor(rosterwalk.MergedRows(latest(t, r)), string(theWS))
+	row := rowFor(mergedRows(t, r), string(theWS))
 	if got := row.GetWhen().GetMerged().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the merge instant", row.GetWhen())
 	}
@@ -671,7 +671,7 @@ func TestRowDetailCarriesTheCommitCount(t *testing.T) {
 			// Assert.
 			var got []*frontendv1.RosterRow
 			if tc.merged {
-				got = rosterwalk.MergedRows(latest(t, r))
+				got = mergedRows(t, r)
 			} else {
 				got = []*frontendv1.RosterRow{onlyRow(t, r)}
 			}
@@ -776,7 +776,7 @@ func TestRowDetailListsTheWorkspacesChildren(t *testing.T) {
 			r.SetRegistry(reg)
 
 			// Assert.
-			row := rowFor(rosterwalk.AllRows(latest(t, r)), string(parent.ID))
+			row := rowFor(rosterwalk.AllRows(latestPush(t, r)), string(parent.ID))
 			if row == nil {
 				t.Fatal("the roster drew no row for the parent")
 			}
@@ -883,7 +883,7 @@ func TestRowRecedesWhenTheWorkspaceMerged(t *testing.T) {
 	r.SetRegistry(registry(merged))
 
 	// Assert.
-	row := rowFor(rosterwalk.MergedRows(latest(t, r)), "w1")
+	row := rowFor(mergedRows(t, r), "w1")
 	if !row.GetClosed().GetClosed() {
 		t.Fatal("a merged workspace's row did not recede")
 	}
@@ -1133,7 +1133,7 @@ func dwellDone(t *testing.T) sidebarResolver {
 	r := live(t, arrange(t, workspace(string(theWS), "one"), workspace("w2", "two")))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 	r.SetTurnEnded(theWS, wsm.CloseCompleted)
-	if got := statusName(rowFor(rosterwalk.AllRows(latest(t, r)), string(theWS))); got != "done" {
+	if got := statusName(rowFor(rosterwalk.AllRows(latestPush(t, r)), string(theWS))); got != "done" {
 		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
 	}
 	return r
@@ -1230,7 +1230,7 @@ func TestRowCarriesTheViewDwellOnlyWhileItWillRecedeTheName(t *testing.T) {
 			tc.act(r)
 
 			// Assert.
-			got := rowFor(rosterwalk.AllRows(latest(t, r)), string(theWS)).GetViewDwell()
+			got := rowFor(rosterwalk.AllRows(latestPush(t, r)), string(theWS)).GetViewDwell()
 			if (got == nil) != (tc.want == nil) || (got != nil && (got.GetStartedAtMs() != tc.want.GetStartedAtMs() || got.GetLengthMs() != tc.want.GetLengthMs())) {
 				t.Fatalf("view_dwell = %v, want %v", got, tc.want)
 			}
@@ -1786,7 +1786,7 @@ func TestAHiddenMergeWorkspaceIsInNoSection(t *testing.T) {
 	r.SetRegistry(registry(requester, hiddenMergeWorkspace(requester.ID)))
 
 	// Assert
-	for _, row := range rosterwalk.AllRows(latest(t, r)) {
+	for _, row := range rosterwalk.AllRows(latestPush(t, r)) {
 		if row.GetWorkspace().GetWorkspace().GetId() == "w2" {
 			t.Fatalf("the hidden merge workspace has a row: %v", row)
 		}
@@ -1826,7 +1826,7 @@ func TestALandedHiddenMergeWorkspaceIsInRecentlyMerged(t *testing.T) {
 	r.SetRegistry(registry(requester, merged))
 
 	// Assert
-	if row := rowFor(rosterwalk.MergedRows(latest(t, r)), "w2"); row == nil {
+	if row := rowFor(mergedRows(t, r), "w2"); row == nil {
 		t.Fatal("the landed merge workspace is not under Recently Merged")
 	}
 }
@@ -2300,7 +2300,7 @@ func TestOpenOwnedPullRequestUnchangedPublishesNothing(t *testing.T) {
 	r.SetSummary(theWS, "a change")
 
 	// Assert.
-	row := rowFor(repoRows(t, <-ch), string(theWS))
+	row := rowFor(repoRows(t, (<-ch).GetWorkspaces()), string(theWS))
 	if got := row.GetDetail().GetSummary().GetText(); got != "a change" {
 		t.Fatalf("next delivery carried %q, want the change: the unchanged fact published a push", got)
 	}

@@ -23,7 +23,7 @@
  * makes its workspace current (that push is the newest, so it is the one
  * drawn), and on the page's presence turning seen (the held one is drawn then).
  */
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterStreams } from "./roster-streams.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 import type { PageSeen } from "../page-seen.js";
@@ -38,8 +38,8 @@ export interface UnseenEnv {
 
 /** The gate between the roster stream and the rail's drawing. */
 export interface UnseenGate {
-  /** Draw ROSTER now when the page is seen, or hold it as the latest. */
-  offer(roster: WorkspaceRoster): void;
+  /** Draw STREAMS (every roster stream as of one push) now when the page is seen, or hold them as the latest. */
+  offer(streams: RosterStreams): void;
   /** How many pushes are held, undrawn, right now. */
   held(): number;
   /** Detach the seen listener and drop what is held. */
@@ -51,8 +51,9 @@ export function unseenEnv(seen: PageSeen): UnseenEnv {
   return { seen, now: () => performance.now() };
 }
 
-/** The workspace id ROSTER names current, or null when it names none. */
-function currentOf(roster: WorkspaceRoster): string | null {
+/** The workspace id STREAMS' workspaces stream names current, or null when it names none. */
+function currentOf(streams: RosterStreams): string | null {
+  const roster = streams.workspaces;
   return roster.current === undefined
     ? null
     : requireMessage(roster.current.workspace, "WorkspaceRoster.current.workspace").id;
@@ -62,13 +63,13 @@ function currentOf(roster: WorkspaceRoster): string | null {
  * Gate the rail of the page for workspace OWN: DRAW is called with exactly
  * the rosters a reader can see, newest last.
  */
-export function createUnseenGate(own: string, draw: (roster: WorkspaceRoster) => void, env: UnseenEnv): UnseenGate {
+export function createUnseenGate(own: string, draw: (streams: RosterStreams) => void, env: UnseenEnv): UnseenGate {
   const { seen, now } = env;
-  let latest: WorkspaceRoster | null = null;
+  let latest: RosterStreams | null = null;
   let heldCount = 0;
 
   /** Draw ROSTER as the end of a hold that SKIPPED pushes never drawn. */
-  const drawHeld = (cause: "seen" | "current", roster: WorkspaceRoster, skipped: number): void => {
+  const drawHeld = (cause: "seen" | "current", roster: RosterStreams, skipped: number): void => {
     latest = null;
     heldCount = 0;
     const started = now();
@@ -92,7 +93,7 @@ export function createUnseenGate(own: string, draw: (roster: WorkspaceRoster) =>
   });
 
   return {
-    offer(roster: WorkspaceRoster): void {
+    offer(roster: RosterStreams): void {
       const current = currentOf(roster);
       seen.noteCurrent(current);
       if (!seen.isSeen()) {

@@ -1,5 +1,5 @@
-// Package rosterwalk is THE ONE WALK over a frontend.v1.WorkspaceRoster's
-// rows. A child workspace's row nests under its parent's in its list's own
+// Package rosterwalk is THE ONE WALK over the rows of a frontend.v1.RosterPush's
+// streams. A child workspace's row nests under its parent's in its list's own
 // row type (RosterOpenRow.children, RosterHiddenRow.children), so a reader
 // that hand-rolls its own loop can miss every child while the others see
 // them -- the merge-queue verb once refused a child's own merge that way.
@@ -122,37 +122,57 @@ func HiddenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	return out
 }
 
-// MergedRows lists every row of the recently-merged band, group by group in
-// the band's order -- a collapsed repository's group included, because the
-// band carries it for every reader but the sidebar's drawing.
-func MergedRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+// ClosedRows lists every row of the closed stream's snapshot
+// (frontend.v1.RosterPush.closed).
+func ClosedRows(closed *frontendv1.RosterClosedRows) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
-	for _, group := range roster.GetRecentlyMerged().GetGroups() {
-		for _, merged := range group.GetMergedRows().GetRows() {
-			out = append(out, merged.GetRow())
-		}
+	for _, row := range closed.GetRows() {
+		out = append(out, row.GetRow())
 	}
 	return out
 }
 
-// ClosedRows lists every row of the roster's closed list.
-func ClosedRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+// AllRows lists every row a push's streams carry -- the workspaces stream's
+// Open section walk and hidden section, then the closed stream. Each
+// workspace appears once. A MERGED WORKSPACE IS IN NO STREAM
+// (agentrepl.v1.ListMergedWorkspaces pages its row), so none is listed. The
+// push must hold every stream: a subscription's first push does, and so does
+// every value the daemon's topic carries; a later wire push leaves out the
+// streams it did not change.
+func AllRows(push *frontendv1.RosterPush) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
-	for _, closed := range roster.GetClosed().GetRows() {
-		out = append(out, closed.GetRow())
-	}
-	return out
-}
-
-// AllRows lists every row the roster carries -- the Open section's walk, the
-// hidden section, the recently-merged section, then the closed list. Each
-// workspace appears once.
-func AllRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
-	var out []*frontendv1.RosterRow
-	for _, open := range OpenRows(roster) {
+	for _, open := range OpenRows(push.GetWorkspaces()) {
 		out = append(out, open.GetRow())
 	}
-	out = append(out, HiddenRows(roster)...)
-	out = append(out, MergedRows(roster)...)
-	return append(out, ClosedRows(roster)...)
+	out = append(out, HiddenRows(push.GetWorkspaces())...)
+	return append(out, ClosedRows(push.GetClosed())...)
+}
+
+// Hold answers the roster HELD with PUSH applied: PUSH's revision, and each
+// stream PUSH carries in place of the one held, every stream it leaves out
+// kept as held (frontend.v1.RosterPush: an absent stream is unchanged, never
+// empty). HELD is not changed, so a value taken from an earlier push stays as
+// it was. A nil HELD holds nothing yet. It is the ONE place a Go reader of
+// the roster stream folds a push into what it holds.
+func Hold(held, push *frontendv1.RosterPush) *frontendv1.RosterPush {
+	out := &frontendv1.RosterPush{
+		Revision:       push.GetRevision(),
+		Workspaces:     held.GetWorkspaces(),
+		MergeQueue:     held.GetMergeQueue(),
+		RecentlyMerged: held.GetRecentlyMerged(),
+		Closed:         held.GetClosed(),
+	}
+	if w := push.GetWorkspaces(); w != nil {
+		out.Workspaces = w
+	}
+	if q := push.GetMergeQueue(); q != nil {
+		out.MergeQueue = q
+	}
+	if m := push.GetRecentlyMerged(); m != nil {
+		out.RecentlyMerged = m
+	}
+	if c := push.GetClosed(); c != nil {
+		out.Closed = c
+	}
+	return out
 }

@@ -41,12 +41,23 @@ type resolver struct {
 
 	mu    sync.Mutex
 	state *rosterState
-	topic publish.Topic[*frontendv1.WorkspaceRoster]
-	// revision is the last roster's WorkspaceRoster.revision: raised for
-	// every roster resolved, never lowered for the daemon's life.
+	topic publish.Topic[*frontendv1.RosterPush]
+	// revision is the last push's RosterPush.revision: raised for every push
+	// whose streams differ from the last, never lowered for the daemon's
+	// life.
 	revision uint64
-	// last is the roster last resolved and published, which Row reads.
-	last *frontendv1.WorkspaceRoster
+	// last is the push last resolved and published, which Row reads. EVERY
+	// STREAM IS SET on it: the topic hands a new subscriber its latest value
+	// first, so a partial one would hand it an incomplete roster. A stream
+	// unchanged since the push before keeps that push's own message, so the
+	// stream server can tell what changed by pointer (streams.go).
+	last *frontendv1.RosterPush
+	// mergedSet is the merged set the last push was resolved from (its ids,
+	// sorted), and mergedRevision its token
+	// (frontend.v1.RosterMergedSection.merged_revision): the revision of the
+	// push in which the set last changed.
+	mergedSet      []ids.WorkspaceID
+	mergedRevision uint64
 
 	// results is told every change of a workspace's last turn result, so the
 	// daemon keeps it durable (wsm.SetResult). nil tells nobody.
@@ -76,9 +87,14 @@ type resolver struct {
 	// (departureArm), collected for the span of one combined commit so a
 	// quiet commit can tell whether it must publish anyway. Caller holds mu.
 	departures []departure
-	// factsOnly is set for the span of a renderFacts: row derives its facts
-	// and builds no row.
+	// factsOnly is set for the span of a renderFacts, and of each merged
+	// workspace's facts in a render (rowFacts): row derives its facts and
+	// builds no row.
 	factsOnly bool
+	// readOnly is set for the span of an on-demand row (readRow): row builds
+	// the row from the facts last derived and derives none, so a read feeds
+	// no durable sink and no departure.
+	readOnly bool
 	// batchCauses names, for the span of a combined commit's render, the
 	// operation that last changed each workspace in the batch.
 	batchCauses map[ids.WorkspaceID]string
@@ -157,7 +173,7 @@ func (r *resolver) FooterStatusChanged(ws ids.WorkspaceID) {
 }
 
 // Topic is the one editor-global roster publication.
-func (r *resolver) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { return &r.topic }
+func (r *resolver) Topic() *publish.Topic[*frontendv1.RosterPush] { return &r.topic }
 
 // logFor answers the logger a workspace-scoped record goes to. It resolves the
 // workspace's OWN durable sink from the registry's directory; a fact for a
@@ -273,10 +289,15 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 	r.departures = nil
 	if quiet {
 		r.renderFacts(last.log, last.operation)
-		if len(r.departures) == 0 {
-			r.quietStale = true
-			r.quiet.Skipped(QuietViewName)
-		} else {
+		// THE MERGED SET IS PUBLISHED EVEN WHILE QUIET. A page of merged rows
+		// is resolved from the current merged set and carries the last
+		// push's token (MergedPage), so a set the roster took and did not
+		// publish would be paged under the token of the set before it.
+		// Before any push no page is answered (ErrMergedNotReady), so there
+		// is no token yet to disagree with.
+		mergedMoved := r.last != nil && !slices.Equal(mergedSetOf(r.partition().merged), r.mergedSet)
+		switch {
+		case len(r.departures) > 0:
 			for _, d := range r.departures {
 				r.logFor(d.ws).Info("daemon.sidebar.quiet_departure",
 					"the lid is closed and quiet, but a row moved onto a departure arm, so the roster was published",
@@ -284,23 +305,21 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 			}
 			quiet = false
 			r.quietStale = false
+		case mergedMoved:
+			last.log.Info("daemon.sidebar.quiet_merged_set",
+				"the lid is closed and quiet, but the set of merged workspaces changed, so the roster was published",
+				dlog.Context{"merged": len(r.partition().merged)})
+			quiet = false
+			r.quietStale = false
+		default:
+			r.quietStale = true
+			r.quiet.Skipped(QuietViewName)
 		}
 	}
 	r.departures = nil
-	var roster *frontendv1.WorkspaceRoster
+	var push *frontendv1.RosterPush
 	if ready && !quiet {
-		roster = r.render(last.log, last.operation)
-		// EVERY RESOLVED ROSTER TAKES THE NEXT REVISION, under the lock that
-		// rendered it, so the revision orders rosters exactly as they were
-		// resolved (frontend.v1 WorkspaceRoster.revision). A render identical
-		// to the last one is not a new roster: it keeps the last revision, so
-		// the topic still drops it as the duplicate it is.
-		roster.Revision = r.revision
-		if r.last == nil || !proto.Equal(roster, r.last) {
-			r.revision++
-			roster.Revision = r.revision
-			r.last = roster
-		}
+		push = r.resolvePush(last.log, last.operation)
 	}
 	out := batchOutcome{
 		applied:       true,
@@ -317,11 +336,56 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 	// newer one on the wire (2026-10-02: the roster walked submitting, ready,
 	// thinking for an accepted prompt). Topic.Publish only enqueues, so it
 	// never waits on a subscriber.
-	if ready && !quiet {
-		r.topic.Publish(roster)
+	if push != nil {
+		r.topic.Publish(push)
 	}
 	r.mu.Unlock()
 	return out
+}
+
+// resolvePush renders the roster's four streams and answers the push to
+// publish: every stream set, each one whose snapshot is equal to the last
+// push's REUSING THAT PUSH'S MESSAGE, and the next revision when any stream
+// differs. A render identical to the last one answers the last push itself,
+// which the topic drops as the duplicate it is. Caller holds mu.
+func (r *resolver) resolvePush(log dlog.Logger, cause string) *frontendv1.RosterPush {
+	streams, set, token := r.render(log, cause)
+	if r.last == nil {
+		r.revision++
+		streams.Revision = r.revision
+		r.last, r.mergedSet, r.mergedRevision = streams, set, token
+		return streams
+	}
+	changed := false
+	reuse := func(fresh, last proto.Message) bool {
+		if proto.Equal(fresh, last) {
+			return true
+		}
+		changed = true
+		return false
+	}
+	if reuse(streams.Workspaces, r.last.Workspaces) {
+		streams.Workspaces = r.last.Workspaces
+	}
+	if reuse(streams.MergeQueue, r.last.MergeQueue) {
+		streams.MergeQueue = r.last.MergeQueue
+	}
+	if reuse(streams.RecentlyMerged, r.last.RecentlyMerged) {
+		streams.RecentlyMerged = r.last.RecentlyMerged
+	}
+	if reuse(streams.Closed, r.last.Closed) {
+		streams.Closed = r.last.Closed
+	}
+	if !changed {
+		return r.last
+	}
+	// EVERY PUSH WHOSE STREAMS DIFFER TAKES THE NEXT REVISION, under the lock
+	// that rendered it, so the revision orders pushes exactly as they were
+	// resolved (frontend.v1 RosterPush.revision).
+	r.revision++
+	streams.Revision = r.revision
+	r.last, r.mergedSet, r.mergedRevision = streams, set, token
+	return streams
 }
 
 // report hands a combined commit's results and status changes to their
@@ -365,7 +429,7 @@ const QuietViewName = "sidebar"
 func (r *resolver) renderFacts(log dlog.Logger, cause string) {
 	r.factsOnly = true
 	defer func() { r.factsOnly = false }()
-	r.render(log, cause)
+	_, _, _ = r.render(log, cause)
 }
 
 // followQuiet is the quiet gate's follower: leaving the quiet state publishes
@@ -415,10 +479,32 @@ func (r *resolver) mutateWorkspaceIf(ws ids.WorkspaceID, operation, message stri
 	})
 }
 
-// render builds the WHOLE roster: every grouping, the hoisted merged section
-// and the selection. CAUSE is the operation whose fact is being rendered, named
-// on every status arm change the render publishes.
-func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRoster {
+// rowContext is what every row of one resolve shares; CAUSE is the
+// operation whose fact is being rendered. Caller holds mu.
+func (r *resolver) rowContext(cause string) rowContext {
+	return rowContext{
+		sessions: r.state.sessions(),
+		selected: r.state.selected,
+		cause:    cause,
+		causes:   r.batchCauses,
+		children: childrenOf(r.state.reg.Workspaces),
+	}
+}
+
+// render resolves the roster's FOUR STREAMS in one walk under the one lock
+// (frontend.v1.RosterPush): the workspaces stream (the open repository view,
+// the hidden section, the selection and the rail's chrome), the merge queue,
+// the Recently Merged summary and the closed rows. It answers them unstamped
+// (no revision), with the merged set they were resolved from and that set's
+// token. CAUSE is the operation whose fact is being rendered, named on every
+// status arm change the render publishes.
+//
+// A MERGED WORKSPACE HAS NO ROW IN ANY STREAM, BUT ITS FACTS ARE DERIVED ON
+// EVERY RENDER (rowFacts), exactly as when its row was drawn in the band: its
+// status arm still moves after it merged (merged, then inactive once its
+// session ends), and each move is a status change the durable record keeps
+// and a departure a quiet roster publishes.
+func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush, []ids.WorkspaceID, uint64) {
 	if dlog.Enabled(log, dlog.LevelDebug) {
 		if r.state.renderLogs == nil {
 			r.state.renderLogs = map[string]string{}
@@ -427,55 +513,44 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		defer filter.flush()
 		log = filter
 	}
-	rc := rowContext{
-		sessions: r.state.sessions(),
-		selected: r.state.selected,
-		cause:    cause,
-		causes:   r.batchCauses,
-		children: childrenOf(r.state.reg.Workspaces),
+	rc := r.rowContext(cause)
+	lists := r.partition()
+	set := mergedSetOf(lists.merged)
+	token := r.mergedToken(set)
+
+	workspaces := &frontendv1.WorkspaceRoster{
+		Repository: r.repositoryView(rc, log),
+		Hidden:     r.hiddenSection(lists.hidden, rc, log),
+		Open:       r.openSection(),
 	}
-
-	// EVERY WORKSPACE IS IN ONE LIST (taborder.go). OPEN is neither closed nor
-	// hidden, whatever its merge time (OPEN BEATS MERGED: a merged workspace
-	// that was reopened is open); HIDDEN is open but hidden; MERGED is merged
-	// AND closed; CLOSED is closed and never merged. A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it
-	// needs the user (owner ruling, 2026-10-11): not even in the hidden
-	// section. A CHAT THREAD is listed only in the thread section.
-	var hidden, settled, closed, threads []wsm.Workspace
-	for _, ws := range r.state.reg.Workspaces {
-		switch {
-		case ws.IsThread():
-			threads = append(threads, ws)
-		case ws.MergeHidden():
-		case ws.Closed && ws.MergedAt != nil:
-			settled = append(settled, ws)
-		case ws.Closed:
-			closed = append(closed, ws)
-		case ws.Hidden:
-			hidden = append(hidden, ws)
-		}
+	for _, ws := range sortMergedNewestFirst(lists.merged) {
+		r.rowFacts(ws, rc, log)
 	}
-
-	merged := recentMerges(settled)
-
-	out := &frontendv1.WorkspaceRoster{
-		Repository:     r.repositoryView(rc, log),
-		Hidden:         r.hiddenSection(hidden, rc, log),
-		Open:           r.openSection(),
-		RecentlyMerged: r.mergedSection(merged, rc, log),
+	out := &frontendv1.RosterPush{
+		Workspaces:     workspaces,
+		RecentlyMerged: r.mergedSection(lists.merged, token, log),
 		MergeQueue:     r.mergeQueueSection(log),
-		Closed:         r.closedRows(closed, rc, log),
-		AppSwitcher:    r.appSwitcher(),
-		Threads:        r.threadSection(threads),
-		ColdGates:      r.coldGates(),
+		Closed:         r.closedRows(lists.closed, rc, log),
 	}
+	workspaces.AppSwitcher = r.appSwitcher()
+	workspaces.Threads = r.threadSection(lists.threads)
+	workspaces.ColdGates = r.coldGates()
 	if cur := r.currentWorkspace(); cur != nil {
-		out.Current = cur
+		workspaces.Current = cur
 	}
 	if v := r.state.version; v != nil {
-		out.Version = &frontendv1.RosterVersion{Text: v.String()}
+		workspaces.Version = &frontendv1.RosterVersion{Text: v.String()}
 	}
-	return out
+	return out, set, token
+}
+
+// rowFacts derives WS's row facts and builds no row (row under factsOnly).
+// Caller holds mu.
+func (r *resolver) rowFacts(ws wsm.Workspace, rc rowContext, log dlog.Logger) {
+	was := r.factsOnly
+	r.factsOnly = true
+	defer func() { r.factsOnly = was }()
+	r.row(ws, rc, log)
 }
 
 // currentWorkspace resolves the roster's selection, or nil when nothing is

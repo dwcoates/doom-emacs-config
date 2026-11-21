@@ -194,7 +194,7 @@ type SetWorkspaceNameSuccess struct {
 	// sidebar draws and what every later CLI call names the workspace by.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// The revision of the roster the daemon resolved after the rename
-	// (frontend.v1.WorkspaceRoster.revision): every roster at or above it
+	// (frontend.v1.RosterPush.revision): every roster at or above it
 	// carries the new name. A sidebar that renamed a row holds its drawing
 	// until a push at or above it arrives, as it does for
 	// ArrangeSidebarSuccess.roster_revision. 0 when the daemon has resolved no

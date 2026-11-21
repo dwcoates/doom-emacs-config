@@ -42,24 +42,26 @@ func mergeWorkspaceOf(t *testing.T, d *harness.Daemon, requester *workspacev1.Wo
 }
 
 // rosterNow answers the roster as a fresh watch first states it.
-func rosterNow(t *testing.T, d *harness.Daemon) *frontendv1.WorkspaceRoster {
+func rosterNow(t *testing.T, d *harness.Daemon) *frontendv1.RosterPush {
 	t.Helper()
-	return awaitRoster(t, d, d.WatchRoster(), "the roster as it stands", func(*frontendv1.WorkspaceRoster) bool { return true })
+	return awaitRoster(t, d, d.WatchRoster(), "the roster as it stands", func(*frontendv1.RosterPush) bool { return true })
 }
 
-// liveRow answers WS's row in the roster's live sections, nil when it has none.
-func liveRow(roster *frontendv1.WorkspaceRoster, ws string) *frontendv1.RosterRow {
-	for _, row := range rosterwalk.AllRows(roster) {
-		if row.GetWorkspace().GetWorkspace().GetId() == ws {
-			for _, merged := range rosterwalk.MergedRows(roster) {
-				if merged.GetWorkspace().GetWorkspace().GetId() == ws {
-					return nil
-				}
-			}
-			return row
-		}
+// liveRow answers WS's row in the roster's streams, nil when it has none. A
+// merged workspace is in no stream.
+func liveRow(roster *frontendv1.RosterPush, ws string) *frontendv1.RosterRow {
+	return rosterRow(roster, ws)
+}
+
+// leftForMerged reports whether PUSH has taken WS out of its streams into
+// the Recently Merged summary, and its merged page draws it as OK says.
+func leftForMerged(t *testing.T, d *harness.Daemon, push *frontendv1.RosterPush, ws string, ok func(*frontendv1.RosterRow) bool) bool {
+	t.Helper()
+	if rosterRow(push, ws) != nil || push.GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces() == 0 {
+		return false
 	}
-	return nil
+	row := mergedRowOf(t, d, ws)
+	return row != nil && ok(row)
 }
 
 func TestAnAsyncMergeLandsWithItsBubblePlacedInTheRequestersFeed(t *testing.T) {
@@ -84,13 +86,8 @@ func TestAnAsyncMergeLandsWithItsBubblePlacedInTheRequestersFeed(t *testing.T) {
 		t.Fatal("the async merge's head was pinned, want it placed")
 	}
 	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
-	awaitRoster(t, s.d, roster, "the merge workspace under Recently Merged", func(r *frontendv1.WorkspaceRoster) bool {
-		for _, row := range rosterwalk.MergedRows(r) {
-			if row.GetWorkspace().GetWorkspace().GetId() == mergeWS.GetId() {
-				return row.GetName().GetText() == "async-fix"
-			}
-		}
-		return false
+	awaitRoster(t, s.d, roster, "the merge workspace under Recently Merged", func(r *frontendv1.RosterPush) bool {
+		return leftForMerged(t, s.d, r, mergeWS.GetId(), func(row *frontendv1.RosterRow) bool { return row.GetName().GetText() == "async-fix" })
 	})
 	if row := liveRow(rosterNow(t, s.d), mergeWS.GetId()); row != nil {
 		t.Fatalf("the landed merge workspace has a live row %v, want it under Recently Merged alone", row)
@@ -132,7 +129,7 @@ func TestAnAsyncMergeWorkspaceStaysHiddenEvenAfterItsMergeFails(t *testing.T) {
 	if row := liveRow(hidden, mergeWS.GetId()); row != nil {
 		t.Fatalf("the merge workspace had a row %v while hidden, want none", row)
 	}
-	for _, open := range rosterwalk.OpenRows(hidden) {
+	for _, open := range rosterwalk.OpenRows(hidden.GetWorkspaces()) {
 		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == mergeWS.GetId() {
 			t.Fatalf("the merge workspace had a tab %v while hidden, want none", open.GetTab())
 		}
@@ -144,7 +141,7 @@ func TestAnAsyncMergeWorkspaceStaysHiddenEvenAfterItsMergeFails(t *testing.T) {
 	if row := liveRow(settled, mergeWS.GetId()); row != nil {
 		t.Fatalf("the failed merge workspace has a row %v, want it left hidden", row)
 	}
-	for _, open := range rosterwalk.OpenRows(settled) {
+	for _, open := range rosterwalk.OpenRows(settled.GetWorkspaces()) {
 		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == mergeWS.GetId() {
 			t.Fatalf("the failed merge workspace has a tab %v, want it left hidden", open.GetTab())
 		}

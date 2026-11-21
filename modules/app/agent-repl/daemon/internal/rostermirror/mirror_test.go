@@ -142,11 +142,31 @@ func done(r *frontendv1.RosterRow) {
 	r.Status = &frontendv1.RosterRow_Done{Done: &frontendv1.RosterRowStatusDone{}}
 }
 
-// rosterFrame is one roster push carrying ROWS.
+// rosterFrame is one roster push carrying ROWS on its closed stream alone.
 func rosterFrame(rows ...*frontendv1.RosterClosedRow) *agentreplv1.WatchWorkspaceRosterResponse {
-	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{
-		Roster: &frontendv1.WorkspaceRoster{Closed: &frontendv1.RosterClosedRows{Rows: rows}},
-	}}
+	return streamsFrame(&frontendv1.RosterPush{Closed: &frontendv1.RosterClosedRows{Rows: rows}})
+}
+
+// streamsFrame is one roster push carrying PUSH's streams.
+func streamsFrame(push *frontendv1.RosterPush) *agentreplv1.WatchWorkspaceRosterResponse {
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Streams{Streams: push}}
+}
+
+// workspacesStream is a workspaces stream drawing OPEN in the open section
+// and HIDDEN in the hidden section.
+func workspacesStream(open, hidden []*frontendv1.RosterClosedRow) *frontendv1.WorkspaceRoster {
+	var entries []*frontendv1.RosterRepoEntry
+	for _, r := range open {
+		entries = append(entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: r.GetRow()}}})
+	}
+	var hiddenRows []*frontendv1.RosterHiddenRow
+	for _, r := range hidden {
+		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: r.GetRow()})
+	}
+	return &frontendv1.WorkspaceRoster{
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{Entries: entries}}},
+		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
+	}
 }
 
 func endingFrame() *agentreplv1.WatchWorkspaceRosterResponse {
@@ -230,6 +250,72 @@ func TestARosterPushMirrorsTheRowsNotYetAdopted(t *testing.T) {
 
 			// Assert
 			if got := f.awaitSunk(t); !maps.Equal(got, tc.want) {
+				t.Fatalf("mirrored = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPartialPushKeepsTheStreamsItLeavesOut(t *testing.T) {
+	cases := []struct {
+		name  string
+		first *frontendv1.RosterPush
+		next  *frontendv1.RosterPush
+		want  map[ids.WorkspaceID]string
+	}{
+		{
+			name: "the first push mirrors the open, hidden and closed rows",
+			first: &frontendv1.RosterPush{
+				Workspaces: workspacesStream([]*frontendv1.RosterClosedRow{row("ws-o", thinking)}, []*frontendv1.RosterClosedRow{row("ws-h", done)}),
+				Closed:     &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{row("ws-c", done)}},
+			},
+			want: map[ids.WorkspaceID]string{"ws-o": "thinking", "ws-h": "done", "ws-c": "done"},
+		},
+		{
+			name: "a push of the workspaces stream alone keeps the closed rows",
+			first: &frontendv1.RosterPush{
+				Workspaces: workspacesStream([]*frontendv1.RosterClosedRow{row("ws-o", thinking)}, nil),
+				Closed:     &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{row("ws-c", done)}},
+			},
+			next: &frontendv1.RosterPush{Workspaces: workspacesStream([]*frontendv1.RosterClosedRow{row("ws-o", done)}, nil)},
+			want: map[ids.WorkspaceID]string{"ws-o": "done", "ws-c": "done"},
+		},
+		{
+			name: "a push of the closed stream alone keeps the open rows",
+			first: &frontendv1.RosterPush{
+				Workspaces: workspacesStream([]*frontendv1.RosterClosedRow{row("ws-o", thinking)}, nil),
+				Closed:     &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{row("ws-c", done)}},
+			},
+			next: &frontendv1.RosterPush{Closed: &frontendv1.RosterClosedRows{}},
+			want: map[ids.WorkspaceID]string{"ws-o": "thinking"},
+		},
+		{
+			name: "a push of the other streams alone changes nothing",
+			first: &frontendv1.RosterPush{
+				Workspaces: workspacesStream([]*frontendv1.RosterClosedRow{row("ws-o", thinking)}, nil),
+			},
+			next: &frontendv1.RosterPush{MergeQueue: &frontendv1.RosterMergeQueueSection{}, RecentlyMerged: &frontendv1.RosterMergedSection{}},
+			want: map[ids.WorkspaceID]string{"ws-o": "thinking"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			s := f.run(t, ctx)
+			s.Frames <- streamsFrame(tc.first)
+			got := f.awaitSunk(t)
+
+			// Act
+			if tc.next != nil {
+				s.Frames <- streamsFrame(tc.next)
+				got = f.awaitSunk(t)
+			}
+
+			// Assert
+			if !maps.Equal(got, tc.want) {
 				t.Fatalf("mirrored = %v, want %v", got, tc.want)
 			}
 		})
@@ -443,7 +529,7 @@ func TestAPushAfterTheEndMirrorsNothing(t *testing.T) {
 	f.awaitSunk(t)
 
 	// Act
-	f.m.take(rosterFrame(row("ws-a", thinking)).GetRoster(), dlog.Context{})
+	f.m.take(rosterFrame(row("ws-a", thinking)).GetStreams(), dlog.Context{})
 
 	// Assert
 	select {

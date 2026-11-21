@@ -29,11 +29,9 @@ import {
   drawRosterRow,
   returnFromBand,
   type BandReturn,
-  drawRosterRowStandIn,
   appendRowKids,
   KIDS_CLASS,
   kidsBoxOf,
-  STAND_IN_ATTRIBUTE,
   drawRosterRowOneShot,
   drawRosterRowAsyncMerging,
   drawRosterRowMergePaused,
@@ -139,6 +137,9 @@ async function click(control: Element): Promise<void> {
   (control as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 }
+
+/** A divider's main-workspace selection a test never clicks. */
+const selectsNothing = (): void => undefined;
 
 describe("the row's identity and hooks", () => {
   it("is addressed by the workspace id the daemon minted", () => {
@@ -480,13 +481,6 @@ describe("the name's prefix", () => {
   it("draws no prefix for an unprioritized workspace", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     expect(drawn.querySelector(".name-prefix")).toBeNull();
-  });
-
-  it("draws the priority icon before the stand-in's name too", () => {
-    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", priority: "p3" })), "R");
-    const prefix = standIn.querySelector(".row > .name-prefix");
-    expect(prefix?.querySelector("img[data-priority='p3']")).not.toBeNull();
-    expect(prefix?.nextElementSibling?.classList.contains("name")).toBe(true);
   });
 });
 
@@ -1145,12 +1139,12 @@ describe("a repository block", () => {
 
   it("refuses a block naming no repository", () => {
     const bad = create(RosterOpenRowRepositoryBlockSchema, { divider: { name: "beta" }, rows: [openRow(row({ id: "ws-3" }))] });
-    expect(() => drawRosterOpenRowRepositoryBlock(bad, "R.b", () => document.createElement("div"), null)).toThrow(/R\.b\.repository/);
+    expect(() => drawRosterOpenRowRepositoryBlock(bad, "R.b", () => document.createElement("div"), selectsNothing)).toThrow(/R\.b\.repository/);
   });
 
   it("refuses a block holding no row", () => {
     const bad = create(RosterOpenRowRepositoryBlockSchema, { repository: { id: "repo-beta" }, divider: { name: "beta" } });
-    expect(() => drawRosterOpenRowRepositoryBlock(bad, "R.b", () => document.createElement("div"), null)).toThrow(/R\.b\.rows/);
+    expect(() => drawRosterOpenRowRepositoryBlock(bad, "R.b", () => document.createElement("div"), selectsNothing)).toThrow(/R\.b\.rows/);
   });
 
   /** Parent ws-1 with a beta block of ws-3, its divider naming MAIN as the repository's main workspace. */
@@ -1198,18 +1192,13 @@ describe("a repository block", () => {
     expect([label.hasAttribute("data-select"), label.hasAttribute(DIVIDER_MAIN_WORKSPACE_ATTRIBUTE)]).toEqual([false, false]);
   });
 
-  it("draws a stand-in's divider name as plain text", () => {
-    const label = drawRosterRowStandIn(blockWithMain("ws-beta-main"), "R").querySelector(`.${REPOSITORY_DIVIDER_CLASS} > .sb-label`)!;
-    expect(label.hasAttribute("data-select")).toBe(false);
-  });
-
   it("refuses a main workspace naming no workspace", () => {
     const divider = create(RosterOpenRowRepositoryDividerSchema, { name: "beta", mainWorkspace: { id: "" } });
     expect(() => drawRosterOpenRowRepositoryDivider(divider, "R.d", () => {})).toThrow(/R\.d\.main_workspace/);
   });
 
   it("refuses a divider naming no repository", () => {
-    expect(() => drawRosterOpenRowRepositoryDivider(create(RosterOpenRowRepositoryDividerSchema, { name: "" }), "R.d", null)).toThrow(/R\.d\.name/);
+    expect(() => drawRosterOpenRowRepositoryDivider(create(RosterOpenRowRepositoryDividerSchema, { name: "" }), "R.d", selectsNothing)).toThrow(/R\.d\.name/);
   });
 });
 
@@ -1430,7 +1419,7 @@ describe("returnFromBand", () => {
     group.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, "r1");
     const folds = createDeploysFold(document, () => undefined);
     folds.toggle(group);
-    const sc = sidebarContext(appContext({ selectInEditor: () => SELECT_OK }), undefined, undefined, undefined, undefined, folds);
+    const sc = sidebarContext(appContext({ selectInEditor: () => SELECT_OK }), undefined, undefined, undefined, folds);
     // Act
     await returnFromBand(band(answer, [], resets), document.createElement("div"), sc, ws);
     // Assert
@@ -3267,65 +3256,6 @@ describe("the hidden section's rows", () => {
   });
 });
 
-describe("drawRosterRowStandIn", () => {
-  it("is the row's box, line and name, marked as a stand-in", () => {
-    // Act
-    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", name: "alpha" })), "row");
-
-    // Assert
-    expect([
-      standIn.getAttribute("data-roster-row"),
-      standIn.hasAttribute(STAND_IN_ATTRIBUTE),
-      standIn.querySelector(":scope > .row > .name")?.textContent,
-    ]).toEqual(["ws-1", true, "alpha"]);
-  });
-
-  it("draws the name's emoji-ack glyph in its prefix before the name, as the row does", () => {
-    // Act
-    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", name: "acked", glyph: "👍" })), "row");
-
-    // Assert
-    expect([...standIn.querySelector(":scope > .row")!.children].map((el) => [el.className, el.textContent])).toEqual([
-      ["name-prefix", "👍"],
-      ["name", "acked"],
-    ]);
-  });
-
-  it("draws nothing of the row but its line", () => {
-    // Act
-    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1" })), "row");
-
-    // Assert
-    expect(standIn.querySelectorAll("*").length).toBe(2);
-  });
-
-  it("carries a stand-in for each visible child, where the search looks for one", () => {
-    // Act
-    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", children: [row({ id: "ws-2", name: "beta" })] })), "row");
-
-    // Assert
-    expect(standIn.querySelector(":scope > .kids > [data-roster-row='ws-2'] > .row > .name")?.textContent).toBe("beta");
-  });
-
-  it("refuses a row naming no workspace as a malformed view", () => {
-    // Arrange
-    const bad = row({ id: "ws-1" });
-    bad.workspace = undefined;
-
-    // Act / Assert
-    expect(() => drawRosterRowStandIn(openRow(bad), "row")).toThrow(MalformedView);
-  });
-
-  it("refuses a row with no name as a malformed view", () => {
-    // Arrange
-    const bad = row({ id: "ws-1" });
-    bad.name = undefined;
-
-    // Act / Assert
-    expect(() => drawRosterRowStandIn(openRow(bad), "row")).toThrow(MalformedView);
-  });
-});
-
 describe("appendRowKids", () => {
   it("draws each visible child into one kids box, in order", () => {
     // Arrange
@@ -3333,7 +3263,7 @@ describe("appendRowKids", () => {
     const parent = row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] });
 
     // Act
-    appendRowKids(ws, { children: openRow(parent).children }, "row", (child) => drawRosterRowStandIn(child, "child"), null);
+    appendRowKids(ws, { children: openRow(parent).children }, "row", (child, childPath) => drawRosterFamily(child, sidebarContext(), childPath), selectsNothing);
 
     // Assert
     expect([...ws.querySelectorAll(":scope > .kids > [data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))).toEqual([
@@ -3351,7 +3281,7 @@ describe("appendRowKids", () => {
     appendRowKids(document.createElement("div"), { children: openRow(parent).children }, "row", (child, childPath) => {
       paths.push(childPath);
       return document.createElement("div");
-    }, null);
+    }, selectsNothing);
 
     // Assert
     expect(paths).toEqual(["row.children[0]"]);
@@ -3362,7 +3292,7 @@ describe("appendRowKids", () => {
     const ws = document.createElement("div");
 
     // Act
-    appendRowKids(ws, {}, "row", () => document.createElement("div"), null);
+    appendRowKids(ws, {}, "row", () => document.createElement("div"), selectsNothing);
 
     // Assert
     expect(ws.querySelector(".kids")).toBeNull();
@@ -3377,7 +3307,7 @@ describe("appendRowKids", () => {
     appendRowKids(document.createElement("div"), parent, "row", (child, childPath) => {
       paths.push(childPath);
       return document.createElement("div");
-    }, null);
+    }, selectsNothing);
 
     // Assert
     expect(paths).toEqual(["row.repositoryBlocks[0].rows[0]"]);
@@ -3389,13 +3319,13 @@ describe("appendRowKids", () => {
     const parent = withRepositoryBlocks(openRow(row({ id: "ws-1" })), [{ repo: "repo-beta", rows: [row({ id: "ws-2" })] }]);
 
     // Act
-    appendRowKids(ws, parent, "row", (child) => drawRosterRowStandIn(child, "child"), null);
+    appendRowKids(ws, parent, "row", (child, childPath) => drawRosterFamily(child, sidebarContext(), childPath), selectsNothing);
 
     // Assert
     expect(ws.querySelector(`:scope > .kids > .${REPOSITORY_BLOCK_CLASS} > [data-roster-row='ws-2']`)).not.toBeNull();
   });
 
-  it("is how both a drawn row and its stand-in nest their children", () => {
+  it("is the one place a row nests its children", () => {
     // Arrange
     const source = readFileSync(join(__dirname, "../../src/sidebar/row.ts"), "utf8");
 

@@ -681,7 +681,7 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 	awaitFooter(t, f, footer, "disconnected.severed after the link dies", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil
 	})
-	awaitRoster(t, f.d, roster, "the roster's severed status", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the roster's severed status", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetSevered() != nil
 	})
@@ -738,7 +738,7 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	awaitFooter(t, f, footer, "disconnected.dead after the shim exits", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetAgentReplFault().GetDead() != nil
 	})
-	awaitRoster(t, f.d, roster, "the roster's dead status", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the roster's dead status", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetDead() != nil
 	})

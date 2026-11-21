@@ -1,0 +1,112 @@
+// endpoint_list_merged_workspaces.proto — ListMergedWorkspaces: one page of
+// merged workspaces' rows. SIDEBAR section. A pull, answered at once.
+//
+// A MERGED WORKSPACE IS IN NO ROSTER STREAM (frontend.v1.RosterPush): it is
+// finished, and the roster carries only the Recently Merged band's summary
+// (frontend.v1.RosterMergedSection). Its row is fetched here, ten at a time,
+// by whoever draws or reads it: the sidebar while the band is unfolded (each
+// group's first page, then the next as the reader scrolls to the group's
+// end), and the editor's switcher and name lookups.
+//
+// PAGES AGREE WITH THE SUMMARY BY TOKEN. Every answer states which set of
+// merged workspaces it was resolved from (`revision`), the same token the
+// band's summary carries (frontend.v1.RosterMergedSection.merged_revision).
+// A client draws a page beside a summary only when the two are equal, and
+// fetches again when the summary's token moves, so a page can never put a
+// workspace in the band that the workspaces stream still draws open, nor
+// leave out one it no longer does.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/sidebar.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Which page of which merged workspaces.
+message ListMergedWorkspacesRequest {
+  // Only this repository's merged workspaces: one Recently Merged group's.
+  // UNSET = every repository's, in one order (the editor's switcher). A ref
+  // naming no registered repository is the unknown_repository answer.
+  optional workspace.v1.RepositoryRef repository = 1;
+  // The order the pages walk. Always set: an order that sets no arm is
+  // malformed (Connect InvalidArgument).
+  ListMergedWorkspacesOrder order = 2;
+  // Which page, 0-based: page N holds the merged workspaces at places
+  // 10N through 10N+9 of the order. A page past the last is an answer, a
+  // complete extent with no rows, never an error.
+  uint32 page = 3;
+}
+
+// The order merged workspaces are paged in. THE ARM IS THE ORDER. Both put
+// the newest first, ties kept in the registry's order so the order is
+// stable.
+message ListMergedWorkspacesOrder {
+  oneof order {
+    // Most recently merged first: the Recently Merged band's order.
+    ListMergedWorkspacesOrderMerged most_recently_merged = 1;
+    // Most recently created first.
+    ListMergedWorkspacesOrderCreated most_recently_created = 2;
+  }
+}
+// By merge instant. DELIBERATELY EMPTY: the arm is the order.
+message ListMergedWorkspacesOrderMerged {}
+// By creation instant. DELIBERATELY EMPTY: the arm is the order.
+message ListMergedWorkspacesOrderCreated {}
+
+// The page, or why none could be answered.
+message ListMergedWorkspacesResponse {
+  oneof result {
+    ListMergedWorkspacesSuccess success = 1;
+    ListMergedWorkspacesError error = 2;
+  }
+}
+
+// One page of merged rows, and the set it was resolved from.
+message ListMergedWorkspacesSuccess {
+  // WHICH SET OF MERGED WORKSPACES the page was resolved from: equal to the
+  // band summary's frontend.v1.RosterMergedSection.merged_revision when both
+  // were resolved from the same set. A client draws the page only beside a
+  // summary carrying the same token. Always set.
+  frontend.v1.RosterMergedRevision revision = 1;
+  // Whether pages follow this one. THE ARM IS THE COMPLETENESS, so no caller
+  // compares a count against the page size to learn whether to fetch on.
+  oneof extent {
+    ListMergedWorkspacesSuccessLast last = 2;
+    ListMergedWorkspacesSuccessMore more = 3;
+  }
+}
+// The last page: no merged workspace follows these. Its rows may be empty,
+// for a repository with no merges or a page past the end.
+message ListMergedWorkspacesSuccessLast {
+  // At most ten rows, in the order asked for, each as the band draws it.
+  frontend.v1.RosterMergedRows rows = 1;
+}
+// A full page of ten, with more after it.
+message ListMergedWorkspacesSuccessMore {
+  // Exactly ten rows, in the order asked for, each as the band draws it.
+  frontend.v1.RosterMergedRows rows = 1;
+  // How many merged workspaces follow this page in the order: what is left
+  // to fetch, stated rather than derived from a total.
+  uint32 omitted = 2;
+}
+
+// Why no page could be answered.
+message ListMergedWorkspacesError {
+  oneof cause {
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    ListMergedWorkspacesUnknownRepository unknown_repository = 1;
+    // The roster has resolved no registry yet (the daemon is still booting),
+    // so it holds no set of merged workspaces to page.
+    ListMergedWorkspacesNotReady not_ready = 2;
+  }
+}
+// The repository named is not registered.
+message ListMergedWorkspacesUnknownRepository {
+  // The ref as the request carried it.
+  workspace.v1.RepositoryRef repository = 1;
+}
+// No registry is installed yet. DELIBERATELY EMPTY: the arm is the fact.
+message ListMergedWorkspacesNotReady {}

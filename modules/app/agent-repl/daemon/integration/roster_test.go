@@ -30,7 +30,7 @@ func TestRegisteringAWorkspaceDrawsOneRowWithStatusNone(t *testing.T) {
 	ws := harness.Register(t, d, repo.Dir)
 
 	// Assert
-	got := awaitRoster(t, d, roster, "the new workspace's row", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, d, roster, "the new workspace's row", func(r *frontendv1.RosterPush) bool {
 		return rosterRepoRow(r, ws.GetId()) != nil
 	})
 	row := rosterRepoRow(got, ws.GetId())
@@ -45,8 +45,8 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
-	statusIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
-		return func(r *frontendv1.WorkspaceRoster) bool {
+	statusIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.RosterPush) bool {
+		return func(r *frontendv1.RosterPush) bool {
 			row := rosterRow(r, f.ws.GetId())
 			return row != nil && pred(row)
 		}
@@ -90,9 +90,9 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 
 // tabBarIDs lists the roster's tabs -- its open rows in the Open section's
 // walk, folded ones included -- first tab first.
-func tabBarIDs(r *frontendv1.WorkspaceRoster) []string {
+func tabBarIDs(r *frontendv1.RosterPush) []string {
 	var out []string
-	for _, open := range rosterwalk.OpenRows(r) {
+	for _, open := range rosterwalk.OpenRows(r.GetWorkspaces()) {
 		out = append(out, open.GetRow().GetWorkspace().GetWorkspace().GetId())
 	}
 	return out
@@ -125,7 +125,7 @@ func TestSettingAPriorityMovesTheWorkspaceSecondToLast(t *testing.T) {
 	})
 
 	// Assert.
-	awaitRoster(t, d, roster, "the bar a, b, c with b's name wearing the p05 icon", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the bar a, b, c with b's name wearing the p05 icon", func(r *frontendv1.RosterPush) bool {
 		return sameOrder(tabBarIDs(r), []string{a.GetId(), b.GetId(), c.GetId()}) &&
 			rosterRow(r, b.GetId()).GetName().GetPrefix().GetPriority().GetP05() != nil
 	})
@@ -150,7 +150,7 @@ func TestReopeningAWorkspaceRestoresItsPlace(t *testing.T) {
 	harness.Register(t, d, cDir)
 
 	// Assert: c is back where it was, before d.
-	awaitRoster(t, d, roster, "the bar a, c, d, b", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the bar a, c, d, b", func(r *frontendv1.RosterPush) bool {
 		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), dd.GetId(), b.GetId()})
 	})
 }
@@ -169,7 +169,7 @@ func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
 	swapWorkspaces(t, d, a, b)
 
 	// Assert: a and b exchange places and c, between them, stays put.
-	awaitRoster(t, d, roster, "the bar b, c, a", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the bar b, c, a", func(r *frontendv1.RosterPush) bool {
 		return sameOrder(tabBarIDs(r), []string{b.GetId(), c.GetId(), a.GetId()})
 	})
 }
@@ -183,7 +183,7 @@ func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
 	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
 	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
-	awaitRoster(t, d, roster, "the bar a, c, b", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the bar a, c, b", func(r *frontendv1.RosterPush) bool {
 		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), b.GetId()})
 	})
 
@@ -195,7 +195,7 @@ func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
 	}
 
 	// Assert: c and b shift left and a takes the last tab.
-	awaitRoster(t, d, roster, "the bar c, b, a", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the bar c, b, a", func(r *frontendv1.RosterPush) bool {
 		return sameOrder(tabBarIDs(r), []string{c.GetId(), b.GetId(), a.GetId()})
 	})
 }
@@ -253,9 +253,9 @@ func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *t
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
 	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
 	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
-	first := awaitRoster(t, d, roster, "three tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 3 })
+	first := awaitRoster(t, d, roster, "three tabs", func(r *frontendv1.RosterPush) bool { return len(tabBarIDs(r)) == 3 })
 	head := tabBarIDs(first)[0]
-	section := first.GetRepository().GetSections()[0]
+	section := first.GetWorkspaces().GetRepository().GetSections()[0]
 	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
 		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: section.GetKey().GetRepository(), Name: "later"}}}).GetCreated()
 
@@ -274,9 +274,9 @@ func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *t
 		}}})
 
 	// Assert.
-	awaitRoster(t, d, roster, "the first tab now last", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the first tab now last", func(r *frontendv1.RosterPush) bool {
 		ids := tabBarIDs(r)
-		return len(ids) == 3 && ids[2] == head && len(rosterwalk.Subsections(r.GetRepository().GetSections()[0])) == 1
+		return len(ids) == 3 && ids[2] == head && len(rosterwalk.Subsections(r.GetWorkspaces().GetRepository().GetSections()[0])) == 1
 	})
 }
 
@@ -289,14 +289,14 @@ func TestASubsectionMovedBeforeAWorkspaceTakesItsTabsThere(t *testing.T) {
 	for _, name := range []string{"a", "b", "c", "d"} {
 		harness.Register(t, d, worktreeOf(t, repo, name))
 	}
-	first := awaitRoster(t, d, roster, "four tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 4 })
+	first := awaitRoster(t, d, roster, "four tabs", func(r *frontendv1.RosterPush) bool { return len(tabBarIDs(r)) == 4 })
 	order := tabBarIDs(first)
 	refs := map[string]*workspacev1.WorkspaceRef{}
-	for _, open := range rosterwalk.OpenRows(first) {
+	for _, open := range rosterwalk.OpenRows(first.GetWorkspaces()) {
 		refs[open.GetRow().GetWorkspace().GetWorkspace().GetId()] = open.GetRow().GetWorkspace().GetWorkspace()
 	}
 	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
-		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "foo"}}}).GetCreated()
+		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetWorkspaces().GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "foo"}}}).GetCreated()
 	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
 		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
 			Workspace: refs[order[3]],
@@ -311,8 +311,8 @@ func TestASubsectionMovedBeforeAWorkspaceTakesItsTabsThere(t *testing.T) {
 
 	// Assert: the sidebar draws it between the first two rows, and the tab
 	// bar walks its workspace there.
-	awaitRoster(t, d, roster, "the subsection between the first two rows", func(r *frontendv1.WorkspaceRoster) bool {
-		entries := r.GetRepository().GetSections()[0].GetEntries()
+	awaitRoster(t, d, roster, "the subsection between the first two rows", func(r *frontendv1.RosterPush) bool {
+		entries := r.GetWorkspaces().GetRepository().GetSections()[0].GetEntries()
 		return len(entries) == 4 && entries[1].GetSubsection().GetNamed().GetKey().GetSubsectionId() == created.GetId() &&
 			sameOrder(tabBarIDs(r), []string{order[0], order[3], order[1], order[2]})
 	})
@@ -320,9 +320,9 @@ func TestASubsectionMovedBeforeAWorkspaceTakesItsTabsThere(t *testing.T) {
 
 // unsectionedMarks answers R's first repository's rows in no subsection, in
 // drawn order, each by its workspace id and whether it draws the one-shot mark.
-func unsectionedMarks(r *frontendv1.WorkspaceRoster) (ids []string, oneShot map[string]bool) {
+func unsectionedMarks(r *frontendv1.RosterPush) (ids []string, oneShot map[string]bool) {
 	oneShot = map[string]bool{}
-	sections := r.GetRepository().GetSections()
+	sections := r.GetWorkspaces().GetRepository().GetSections()
 	if len(sections) == 0 {
 		return nil, oneShot
 	}
@@ -358,11 +358,11 @@ func TestAOneShotIsDrawnWhereItIsPlacedAndKeepsItsMark(t *testing.T) {
 	}
 	oneShot := resp.Msg.GetSuccess().GetWorkspace()
 	var before []string
-	awaitRoster(t, d, roster, "the marked one-shot beside a, in no subsection", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the marked one-shot beside a, in no subsection", func(r *frontendv1.RosterPush) bool {
 		ids, marks := unsectionedMarks(r)
 		before = ids
 		return marks[oneShot.GetId()] && slices.Contains(ids, a.GetId()) &&
-			len(rosterwalk.Subsections(r.GetRepository().GetSections()[0])) == 0
+			len(rosterwalk.Subsections(r.GetWorkspaces().GetRepository().GetSections()[0])) == 0
 	})
 	// The one-shot is moved to the other side of a, whichever side it was
 	// drawn on.
@@ -380,7 +380,7 @@ func TestAOneShotIsDrawnWhereItIsPlacedAndKeepsItsMark(t *testing.T) {
 	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{PlaceWorkspace: at}})
 
 	// Assert: the one-shot stands where it was placed, still marked.
-	awaitRoster(t, d, roster, "the placed one-shot on a's other side, still marked", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the placed one-shot on a's other side, still marked", func(r *frontendv1.RosterPush) bool {
 		ids, marks := unsectionedMarks(r)
 		above := slices.Index(ids, oneShot.GetId()) < slices.Index(ids, a.GetId())
 		return marks[oneShot.GetId()] && slices.Contains(ids, a.GetId()) && above == wantAbove
@@ -395,9 +395,9 @@ func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
 	roster := d.WatchRoster()
 	harness.Register(t, d, worktreeOf(t, repo, "a"))
 	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
-	first := awaitRoster(t, d, roster, "two tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 2 })
+	first := awaitRoster(t, d, roster, "two tabs", func(r *frontendv1.RosterPush) bool { return len(tabBarIDs(r)) == 2 })
 	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
-		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "later"}}}).GetCreated()
+		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetWorkspaces().GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "later"}}}).GetCreated()
 	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
 		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
 			Workspace: b,
@@ -416,12 +416,12 @@ func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("UpdateSidebarView = (%v, %v), want success", resp, err)
 	}
-	awaitRoster(t, d, roster, "the subsection collapsed and b's tab folded", func(r *frontendv1.WorkspaceRoster) bool {
-		subs := rosterwalk.Subsections(r.GetRepository().GetSections()[0])
+	awaitRoster(t, d, roster, "the subsection collapsed and b's tab folded", func(r *frontendv1.RosterPush) bool {
+		subs := rosterwalk.Subsections(r.GetWorkspaces().GetRepository().GetSections()[0])
 		if len(subs) != 1 || subs[0].GetCollapsed() == nil {
 			return false
 		}
-		for _, open := range rosterwalk.OpenRows(r) {
+		for _, open := range rosterwalk.OpenRows(r.GetWorkspaces()) {
 			id := open.GetRow().GetWorkspace().GetWorkspace().GetId()
 			if id == b.GetId() && open.GetTab().GetFolded() == nil {
 				return false
@@ -441,10 +441,10 @@ func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
 	roster := d.WatchRoster()
 	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
 	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
-	r := awaitRoster(t, d, roster, "two sections", func(r *frontendv1.WorkspaceRoster) bool {
-		return len(r.GetRepository().GetSections()) == 2 && len(tabBarIDs(r)) == 2
+	r := awaitRoster(t, d, roster, "two sections", func(r *frontendv1.RosterPush) bool {
+		return len(r.GetWorkspaces().GetRepository().GetSections()) == 2 && len(tabBarIDs(r)) == 2
 	})
-	firstRepo := r.GetRepository().GetSections()[0].GetKey().GetRepository()
+	firstRepo := r.GetWorkspaces().GetRepository().GetSections()[0].GetKey().GetRepository()
 	before := tabBarIDs(r)
 
 	// Act.
@@ -452,7 +452,7 @@ func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
 		MoveRepository: &agentreplv1.ArrangeMoveRepository{Repository: firstRepo, To: &agentreplv1.ArrangeMoveRepository_End{End: &agentreplv1.ArrangeEnd{}}}}})
 
 	// Assert.
-	awaitRoster(t, d, roster, "the tabs swapped with their repositories", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the tabs swapped with their repositories", func(r *frontendv1.RosterPush) bool {
 		return sameOrder(tabBarIDs(r), []string{before[1], before[0]})
 	})
 }
@@ -484,7 +484,7 @@ func TestClearingAPriorityRemovesTheNamesIcon(t *testing.T) {
 	setPriority(t, f.d, f.ws, &agentreplv1.WorkspacePriority{
 		Level: &agentreplv1.WorkspacePriority_P1{P1: &agentreplv1.WorkspacePriorityP1{}},
 	})
-	awaitRoster(t, f.d, roster, "the name's p1 icon", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the name's p1 icon", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetName().GetPrefix().GetPriority().GetP1() != nil
 	})
@@ -493,7 +493,7 @@ func TestClearingAPriorityRemovesTheNamesIcon(t *testing.T) {
 	setPriority(t, f.d, f.ws, nil)
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the name's prefix removed", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the name's prefix removed", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetName().GetPrefix() == nil
 	})
@@ -511,12 +511,12 @@ func TestAttentionMarkerIsSetOnNotificationAndClearedOnSelect(t *testing.T) {
 	}))
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the attention marker set on a notification", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the attention marker set on a notification", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetAttention() != nil
 	})
 	f.selectWorkspace()
-	awaitRoster(t, f.d, roster, "the attention marker cleared by SelectWorkspace", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the attention marker cleared by SelectWorkspace", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetAttention() == nil
 	})
@@ -535,7 +535,7 @@ func TestAttentionMarkerIsClearedWhenTheLastAskSettles(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-settle", "act-settle")},
 	}))
-	awaitRoster(t, f.d, roster, "the attention marker set by the ask", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the attention marker set by the ask", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetAttention() != nil
 	})
@@ -546,7 +546,7 @@ func TestAttentionMarkerIsClearedWhenTheLastAskSettles(t *testing.T) {
 	}))
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the attention marker cleared by the answer", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the attention marker cleared by the answer", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetAttention() == nil
 	})
@@ -572,7 +572,7 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 	}
 
 	// Assert
-	got := awaitRoster(t, d, roster, "the closed row marked and the nuked row gone", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, d, roster, "the closed row marked and the nuked row gone", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, closed.GetId())
 		return row != nil && row.GetClosed().GetClosed() && rosterRow(r, nuked.GetId()) == nil
 	})
@@ -607,7 +607,7 @@ func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 	}
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "the roster row start_failed after a bring-up death", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "the roster row start_failed after a bring-up death", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetStartFailed() != nil
 	})
@@ -661,7 +661,7 @@ func TestRosterRowIsClearingWhileAClearRuns(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "ready before the clear", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "ready before the clear", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetReady() != nil
 	})
@@ -674,7 +674,7 @@ func TestRosterRowIsClearingWhileAClearRuns(t *testing.T) {
 	f.shim.ExpectStartTurn()
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "clearing while the cut runs", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "clearing while the cut runs", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetClearing() != nil
 	})
@@ -691,7 +691,7 @@ func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "ready before the compact", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "ready before the compact", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetReady() != nil
 	})
@@ -704,7 +704,7 @@ func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
 	f.shim.ExpectStartTurn()
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "compacting while the cut runs", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "compacting while the cut runs", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetCompacting() != nil
 	})
@@ -729,7 +729,7 @@ func TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn(t *testing.T) {
 	f.d.ExpectWarnings("daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 	roster := f.d.WatchRoster()
 	f.submit("go", "k-query-died", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	awaitRoster(t, f.d, roster, "the turn in flight before the query dies", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the turn in flight before the query dies", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && (row.GetSubmitting() != nil || row.GetThinking() != nil)
 	})
@@ -740,7 +740,7 @@ func TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn(t *testing.T) {
 	})
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "turn_died after the query died", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "turn_died after the query died", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetTurnDied() != nil
 	})
@@ -848,7 +848,7 @@ func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
 	// prompt so every push of the walk is on the stream.
 	f := newRegistered(t, harness.Opts{})
 	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()) != nil
 	})
 
@@ -914,7 +914,7 @@ func TestTheFirstRosterStatesTheDeployedVersion(t *testing.T) {
 	first := harness.AwaitNext(t, d.Ctx(), roster, "the first roster")
 
 	// Assert
-	if got := first.GetVersion().GetText(); got != harness.PinnedVersion {
+	if got := first.GetWorkspaces().GetVersion().GetText(); got != harness.PinnedVersion {
 		t.Fatalf("the first roster's version = %q, want the pinned checkout's %s", got, harness.PinnedVersion)
 	}
 }

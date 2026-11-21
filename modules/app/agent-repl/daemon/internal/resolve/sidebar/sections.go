@@ -784,45 +784,6 @@ func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspa
 	}
 }
 
-// mergedSection resolves the Recently Merged section: ONE GROUP PER
-// REPOSITORY that has a recently merged workspace, in the repository
-// grouping's order, its merged rows in merge order, the latest merge first
-// (sortMergedNewestFirst, owner request 2026-10-13). The merged rows are
-// hoisted out of every grouping, because that these workspaces are done is
-// the interesting fact, and they are FLAT — a settled merge has no family
-// left to draw.
-//
-// A group follows no repository fold: it folds by itself on the page.
-func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterMergedSection {
-	byRepo := map[ids.RepoID][]wsm.Workspace{}
-	for _, ws := range merged {
-		byRepo[ws.Repo] = append(byRepo[ws.Repo], ws)
-	}
-	section := &frontendv1.RosterMergedSection{
-		Header: &frontendv1.RosterSectionHeader{Label: &frontendv1.RosterLabel{Text: MergedSectionLabel}},
-	}
-	for _, repo := range sortRepositories(r.state.reg.Repositories) {
-		workspaces, hasMerged := byRepo[repo.ID]
-		delete(byRepo, repo.ID)
-		if !hasMerged {
-			continue
-		}
-		rows := &frontendv1.RosterMergedRows{}
-		for _, ws := range sortMergedNewestFirst(workspaces) {
-			rows.Rows = append(rows.Rows, &frontendv1.RosterMergedRow{Row: r.row(ws, rc, log)})
-		}
-		section.Groups = append(section.Groups, &frontendv1.RosterMergedRepoGroup{
-			Key:        repoKey(repo),
-			Header:     repoGroupHeader(repo),
-			MergedRows: rows,
-		})
-	}
-	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.merged_section", "the Recently Merged band", log)
-	setMergedFold(section, r.state.reg.View.MergedFolded)
-	setMergedHeight(section, r.state.reg.View.MergedHeight)
-	return section
-}
-
 // mergeQueueSection resolves the Merge Queue section: ONE GROUP PER
 // REPOSITORY whose queue is active (repoQueue.listed), in the repository
 // grouping's order (owner request, 2026-11-01). A group follows no

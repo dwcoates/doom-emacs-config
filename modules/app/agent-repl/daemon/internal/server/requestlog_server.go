@@ -1014,6 +1014,13 @@ func (s *requestLoggingServer) FindWorkspaces(
 	return serveUnary(s, ctx, "FindWorkspaces", req, s.server.FindWorkspaces)
 }
 
+func (s *requestLoggingServer) ListMergedWorkspaces(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListMergedWorkspacesRequest],
+) (*connect.Response[agentreplv1.ListMergedWorkspacesResponse], error) {
+	return serveUnary(s, ctx, "ListMergedWorkspaces", req, s.server.ListMergedWorkspaces)
+}
+
 func (s *requestLoggingServer) LocateWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.LocateWorkspaceRequest],

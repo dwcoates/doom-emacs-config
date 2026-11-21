@@ -18,7 +18,8 @@ import { CloseWorkspaceResponseSchema, type CloseWorkspaceRequest } from "../../
 import { SearchChatsResponseSchema, type SearchChatsRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_search_chats_pb";
 import { ARCHIVED_HEADING, OPEN_HEADING, labelOutline } from "../../src/sidebar/threads.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import { RosterThreadOutlineLabelSchema, type RosterThreadOutlineSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterThreadOutlineLabelSchema, type RosterThreadOutlineSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterStreams } from "../../src/sidebar/roster-streams.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { mountSidebar } from "../../src/sidebar/sidebar.js";
 import { frameQueue, type FrameQueue } from "../frame-queue.js";
@@ -33,7 +34,7 @@ beforeEach(() => {
 let timers: ReturnType<typeof fakeTimers>;
 
 /** Mount a rail fed ROSTERS over a daemon answering IMPL. */
-function mount(rosters: WorkspaceRoster[], impl: Partial<ServiceImpl<typeof AgentRepl>> = {}): HTMLElement {
+function mount(rosters: RosterStreams[], impl: Partial<ServiceImpl<typeof AgentRepl>> = {}): HTMLElement {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       updateSidebarView: () => create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } }),

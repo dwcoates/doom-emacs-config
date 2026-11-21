@@ -117,6 +117,9 @@ would abort the very branch a test is asserting."
     ("ListCreationModels" agent-repl-rpc-list-creation-models
      agent-repl-wire-encode-list-creation-models-request
      agent-repl-wire-decode-list-creation-models-response)
+    ("ListMergedWorkspaces" agent-repl-rpc-list-merged-workspaces
+     agent-repl-wire-encode-list-merged-workspaces-request
+     agent-repl-wire-decode-list-merged-workspaces-response)
     ("SetWorkspaceHidden" agent-repl-rpc-set-workspace-hidden
      agent-repl-wire-encode-set-workspace-hidden-request
      agent-repl-wire-decode-set-workspace-hidden-response)

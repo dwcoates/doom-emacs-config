@@ -35,7 +35,7 @@ import (
 // The view types the three resolver topics carry, aliased so the pump's wrap
 // functions read as the view they send rather than as a package path.
 type (
-	frontendRoster = frontendv1.WorkspaceRoster
+	frontendRoster = frontendv1.RosterPush
 	frontendFooter = frontendv1.FooterView
 	frontendTopbar = frontendv1.TopbarView
 )
@@ -232,8 +232,8 @@ func refusalAddress(r refusal) string {
 	return address
 }
 
-// WatchWorkspaceRoster serves the ONE editor-global stream: the roster, whole,
-// for Emacs and every webview alike.
+// WatchWorkspaceRoster serves the ONE editor-global stream: the roster's
+// four snapshot streams, for Emacs and every webview alike.
 func (s *server) WatchWorkspaceRoster(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.WatchWorkspaceRosterRequest],
@@ -254,17 +254,56 @@ func rosterEnding() *agentreplv1.WatchWorkspaceRosterResponse {
 
 // watchWorkspaceRoster is the body, written to whatever sink carries it: the
 // dedicated rpc's own stream, or one page's mux.
+//
+// EACH SUBSCRIPTION IS SENT ONLY THE STREAMS IT HAS NOT SEEN. Every value the
+// sidebar's topic carries is a whole push, every stream set, and a stream
+// unchanged since the value before keeps that value's own message
+// (sidebar.Resolver.Topic). So this subscription keeps the message of each
+// stream it last sent (rosterStreams) and leaves out of each wire push every
+// stream whose message it already sent: its first frame carries every
+// stream, and a coalesced or late subscriber is still sent every stream it
+// has not seen.
 func (s *server) watchWorkspaceRoster(
 	ctx context.Context,
 	_ *agentreplv1.WatchWorkspaceRosterRequest,
 	out streamSink[agentreplv1.WatchWorkspaceRosterResponse],
 ) error {
+	sent := &rosterStreams{}
 	return serveTopic(s, ctx, "WatchWorkspaceRoster", s.log, s.deps.Sidebar.Topic(), out,
-		func(roster *frontendRoster) *agentreplv1.WatchWorkspaceRosterResponse {
+		func(push *frontendRoster) *agentreplv1.WatchWorkspaceRosterResponse {
 			return &agentreplv1.WatchWorkspaceRosterResponse{
-				Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: roster},
+				Push: &agentreplv1.WatchWorkspaceRosterResponse_Streams{Streams: sent.unsent(push)},
 			}
 		})
+}
+
+// rosterStreams is the message of each roster stream one subscription was
+// last sent, nil before its first frame.
+type rosterStreams struct {
+	workspaces     *frontendv1.WorkspaceRoster
+	mergeQueue     *frontendv1.RosterMergeQueueSection
+	recentlyMerged *frontendv1.RosterMergedSection
+	closed         *frontendv1.RosterClosedRows
+}
+
+// unsent answers the wire push for PUSH, a whole push off the topic: its
+// revision and every stream whose message differs from the one last sent,
+// and records those as sent. The pump calls it once per frame, in order.
+func (r *rosterStreams) unsent(push *frontendv1.RosterPush) *frontendv1.RosterPush {
+	out := &frontendv1.RosterPush{Revision: push.GetRevision()}
+	if push.Workspaces != r.workspaces {
+		out.Workspaces, r.workspaces = push.Workspaces, push.Workspaces
+	}
+	if push.MergeQueue != r.mergeQueue {
+		out.MergeQueue, r.mergeQueue = push.MergeQueue, push.MergeQueue
+	}
+	if push.RecentlyMerged != r.recentlyMerged {
+		out.RecentlyMerged, r.recentlyMerged = push.RecentlyMerged, push.RecentlyMerged
+	}
+	if push.Closed != r.closed {
+		out.Closed, r.closed = push.Closed, push.Closed
+	}
+	return out
 }
 
 // WatchFooter serves one workspace's footer view.
@@ -399,7 +438,7 @@ func (s *server) serveHost(
 	// this workspace's page links (mentionTargets), resolved from the roster
 	// topic, which replays the roster in force, and sent only when it changes.
 	rosters, ackRoster := s.deps.Sidebar.Topic().SubscribeStream(streamCtx)
-	targets := mentionTargetsTracker{viewer: string(ws), now: s.now}
+	targets := s.mentionTracker(string(ws))
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 

@@ -31,8 +31,8 @@ func TestRosterAndFooterAgreeOnBackgroundWork(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
-	rowIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
-		return func(r *frontendv1.WorkspaceRoster) bool {
+	rowIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.RosterPush) bool {
+		return func(r *frontendv1.RosterPush) bool {
 			row := rosterRow(r, f.ws.GetId())
 			return row != nil && pred(row)
 		}

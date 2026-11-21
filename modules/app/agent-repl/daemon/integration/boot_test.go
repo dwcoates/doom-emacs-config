@@ -844,7 +844,7 @@ func TestBootClosesAWorkspaceWhoseDirectoryAndBranchAreGone(t *testing.T) {
 	// Assert: and the roster Emacs receives carries the row as closed, so no
 	// tab is opened for it.
 	roster := nd.WatchRoster()
-	got := awaitRoster(t, nd, roster, "the missing-directory row receded", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, nd, roster, "the missing-directory row receded", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, ws.GetId())
 		return row != nil && row.GetClosed().GetClosed()
 	})
@@ -881,7 +881,7 @@ func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
 		t.Fatalf("the workspace directory after the boot: %v, want it recreated", err)
 	}
 	roster := nd.WatchRoster()
-	awaitRoster(t, nd, roster, "the recreated row open", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, nd, roster, "the recreated row open", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, ws.GetId())
 		return row != nil && !row.GetClosed().GetClosed()
 	})

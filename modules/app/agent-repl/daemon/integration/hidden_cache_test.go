@@ -23,8 +23,8 @@ import (
 // down to it, and the session is stood down when it comes.
 
 // hiddenRow finds a workspace's row in the hidden section.
-func hiddenRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
-	for _, r := range rosterwalk.HiddenRows(roster) {
+func hiddenRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
+	for _, r := range rosterwalk.HiddenRows(roster.GetWorkspaces()) {
 		if r.GetWorkspace().GetWorkspace().GetId() == id {
 			return r
 		}
@@ -76,7 +76,7 @@ func TestAHiddenRowCountsDownToTheLapseItsShimProjected(t *testing.T) {
 	f.d.OpenedShim(f.ws).PushSessionUpdate(cacheLapse(lapsesAt, 0))
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the hidden row counting down to the lapse", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the hidden row counting down to the lapse", func(r *frontendv1.RosterPush) bool {
 		return hiddenRow(r, f.ws.GetId()).GetWhen().GetHidden().GetCache().GetLapsesAtMs() == lapsesAt.UnixMilli()
 	})
 }
@@ -98,7 +98,7 @@ func TestAHiddenWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *t
 	if killed.GetForce() {
 		t.Fatal("the lapsed workspace's KillSession was forced, want a graceful stand-down")
 	}
-	awaitRoster(t, f.d, roster, "the hidden row struck through at its cold gate", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the hidden row struck through at its cold gate", func(r *frontendv1.RosterPush) bool {
 		return hiddenRow(r, f.ws.GetId()).GetColdGate() != nil
 	})
 }
@@ -149,7 +149,7 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 	shim.PushSessionUpdate(cacheLapse(later, 0))
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the hidden row counting down to the later lapse", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the hidden row counting down to the later lapse", func(r *frontendv1.RosterPush) bool {
 		return hiddenRow(r, f.ws.GetId()).GetWhen().GetHidden().GetCache().GetLapsesAtMs() == later.UnixMilli()
 	})
 }

@@ -18,7 +18,8 @@ const (
 	OpenSection Section = iota + 1
 	// HiddenSection is the roster's hidden section.
 	HiddenSection
-	// MergedSection is the roster's recently merged band.
+	// MergedSection is the roster's recently merged band, whose rows are
+	// paged on demand (agentrepl.v1.ListMergedWorkspaces).
 	MergedSection
 )
 
@@ -44,13 +45,17 @@ type Drawn struct {
 	Status  string
 }
 
-// Placements answers how ROSTER draws each workspace it carries a row for in
-// its open, hidden and recently merged sections. A row with no status arm is
-// a roster contract breach, and a workspace drawn twice breaks the roster's
-// one-row-per-workspace rule: both fail rather than answer a guess.
-func Placements(roster *frontendv1.WorkspaceRoster) (map[wsm.WorkspaceID]Drawn, error) {
+// Placements answers how the roster draws each workspace it draws in its
+// open, hidden and recently merged sections: the open and hidden rows off
+// PUSH's workspaces stream, and the merged ones off MERGED, the rows the
+// sidebar's pages resolve for the registry's merged set
+// (sidebar.Resolver.MergedRows), since a merged workspace is in no stream. A
+// row with no status arm is a roster contract breach, and a workspace drawn
+// twice breaks the roster's one-row-per-workspace rule: both fail rather than
+// answer a guess.
+func Placements(push *frontendv1.RosterPush, merged []*frontendv1.RosterRow) (map[wsm.WorkspaceID]Drawn, error) {
 	var open []*frontendv1.RosterRow
-	for _, row := range rosterwalk.OpenRows(roster) {
+	for _, row := range rosterwalk.OpenRows(push.GetWorkspaces()) {
 		open = append(open, row.GetRow())
 	}
 	out := map[wsm.WorkspaceID]Drawn{}
@@ -59,8 +64,8 @@ func Placements(roster *frontendv1.WorkspaceRoster) (map[wsm.WorkspaceID]Drawn, 
 		rows    []*frontendv1.RosterRow
 	}{
 		{OpenSection, open},
-		{HiddenSection, rosterwalk.HiddenRows(roster)},
-		{MergedSection, rosterwalk.MergedRows(roster)},
+		{HiddenSection, rosterwalk.HiddenRows(push.GetWorkspaces())},
+		{MergedSection, merged},
 	} {
 		for _, row := range section.rows {
 			id := wsm.WorkspaceID(row.GetWorkspace().GetWorkspace().GetId())

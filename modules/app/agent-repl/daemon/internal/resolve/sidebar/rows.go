@@ -66,75 +66,94 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// the sink of whichever workspace's change ran the render.
 	rowLog := r.logFor(rec.ID)
 
-	if s.restoreResult(rec) {
-		rowLog.Info("daemon.sidebar.result_restored",
-			"the roster drew the last turn result from the durable record, as it stood before this daemon", dlog.Context{
-				"end": s.restoredEnd, "result": s.result.String(),
-			})
-	}
-	armName, mirrored := r.state.incumbentArms[rec.ID]
-	if mirrored {
-		// A ROW THIS JOINING DAEMON HAS NOT ADOPTED YET DRAWS THE
-		// INCUMBENT'S OWN ARM. This daemon's footer state for the workspace
-		// is frozen at what it last read, since the incumbent still serves
-		// it; the incumbent's arm is its own footer's resolved claim, checked
-		// there against that footer (statusArm), so the projection is
-		// skipped here rather than run against a frozen footer.
-		rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace not yet adopted",
-			dlog.Context{"arm": armName, "source": "incumbent"})
-	} else {
-		armName = statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
-	}
-	r.noteResult(rec.ID, s, rowLog)
-	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
-	// status, so the row's display mode cannot lag its status by a push and a
-	// read result is never drawn as unread (`wsState.viewedOn`).
-	wasViewed := s.lastArmSeen && s.viewedOn(s.lastArm)
-	previousArm, armChanged := s.noteArm(armName)
-	if armChanged {
-		// A STATUS CHANGE ENDS THE DWELL: the row's name returns to its
-		// unviewed colour, and an editor still viewing the workspace counts a
-		// fresh dwell against the new status.
-		s.dwell = nil
-		r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
-		r.noteStatusChange(rec.ID, s, !mirrored)
-		if departureArm(armName) {
-			r.departures = append(r.departures, departure{ws: rec.ID, arm: armName})
+	var armName string
+	var wasViewed, armChanged bool
+	if r.readOnly {
+		// AN ON-DEMAND ROW IS A READ (readRow): it draws the arm the roster
+		// last derived for the workspace and derives nothing, so it reports no
+		// result, no status change and no departure. A workspace no render
+		// has derived yet is projected, and nothing of it is noted.
+		armName = s.lastArm
+		if !s.lastArmSeen {
+			armName = statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
 		}
-	}
-	if r.factsOnly {
-		// A FACTS-ONLY RENDER (renderFacts) stops here: everything above is
-		// what an agent or the durable record depends on, everything below
-		// draws the row for a page nobody can see.
-		return &frontendv1.RosterRow{}
+		wasViewed = s.viewedOn(armName)
+	} else {
+		if s.restoreResult(rec) {
+			rowLog.Info("daemon.sidebar.result_restored",
+				"the roster drew the last turn result from the durable record, as it stood before this daemon", dlog.Context{
+					"end": s.restoredEnd, "result": s.result.String(),
+				})
+		}
+		mirroredArm, mirrored := r.state.incumbentArms[rec.ID]
+		if mirrored {
+			// A ROW THIS JOINING DAEMON HAS NOT ADOPTED YET DRAWS THE
+			// INCUMBENT'S OWN ARM. This daemon's footer state for the
+			// workspace is frozen at what it last read, since the incumbent
+			// still serves it; the incumbent's arm is its own footer's
+			// resolved claim, checked there against that footer (statusArm),
+			// so the projection is skipped here rather than run against a
+			// frozen footer.
+			armName = mirroredArm
+			rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace not yet adopted",
+				dlog.Context{"arm": armName, "source": "incumbent"})
+		} else {
+			armName = statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
+		}
+		r.noteResult(rec.ID, s, rowLog)
+		// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
+		// status, so the row's display mode cannot lag its status by a push
+		// and a read result is never drawn as unread (`wsState.viewedOn`).
+		wasViewed = s.lastArmSeen && s.viewedOn(s.lastArm)
+		var previousArm string
+		previousArm, armChanged = s.noteArm(armName)
+		if armChanged {
+			// A STATUS CHANGE ENDS THE DWELL: the row's name returns to its
+			// unviewed colour, and an editor still viewing the workspace
+			// counts a fresh dwell against the new status.
+			s.dwell = nil
+			r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
+			r.noteStatusChange(rec.ID, s, !mirrored)
+			if departureArm(armName) {
+				r.departures = append(r.departures, departure{ws: rec.ID, arm: armName})
+			}
+		}
+		if r.factsOnly {
+			// A FACTS-ONLY RENDER (renderFacts) stops here: everything above
+			// is what an agent or the durable record depends on, everything
+			// below draws the row for a page nobody can see.
+			return &frontendv1.RosterRow{}
+		}
 	}
 	viewed := s.viewedOn(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
 	detachedLive := s.asyncLive()
 
-	rowLog.Debug("daemon.sidebar.row", "the roster resolved a row", dlog.Context{
-		"status":   armName,
-		"current":  current,
-		"closed":   closed,
-		"viewed":   viewed,
-		"result":   s.result.String(),
-		"reviving": s.reviving,
-		// The editor chooses its dwell threshold from this fact.
-		"detached_live": detachedLive,
-	})
-	switch {
-	case wasViewed && !viewed:
-		rowLog.Debug("daemon.sidebar.row_viewed_cleared",
-			"the row left its read turn-end state, so it is drawn FULL", dlog.Context{
-				"status": armName,
-				"result": s.result.String(),
-			})
-	case armChanged && !wasViewed && viewed:
-		rowLog.Debug("daemon.sidebar.row_viewed_restored",
-			"the row returned to its turn-end arm with the result already read, so it is drawn PARTIAL", dlog.Context{
-				"status": armName,
-			})
+	if !r.readOnly {
+		rowLog.Debug("daemon.sidebar.row", "the roster resolved a row", dlog.Context{
+			"status":   armName,
+			"current":  current,
+			"closed":   closed,
+			"viewed":   viewed,
+			"result":   s.result.String(),
+			"reviving": s.reviving,
+			// The editor chooses its dwell threshold from this fact.
+			"detached_live": detachedLive,
+		})
+		switch {
+		case wasViewed && !viewed:
+			rowLog.Debug("daemon.sidebar.row_viewed_cleared",
+				"the row left its read turn-end state, so it is drawn FULL", dlog.Context{
+					"status": armName,
+					"result": s.result.String(),
+				})
+		case armChanged && !wasViewed && viewed:
+			rowLog.Debug("daemon.sidebar.row_viewed_restored",
+				"the row returned to its turn-end arm with the result already read, so it is drawn PARTIAL", dlog.Context{
+					"status": armName,
+				})
+		}
 	}
 	r.assertArm(armName, rowLog)
 

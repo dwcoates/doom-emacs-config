@@ -13,14 +13,23 @@
 ;; WHAT THIS FILE OWNS:
 ;;
 ;; - the subscription (started on link-up, restarted after a link bounce);
-;; - `agent-repl-roster-view', the last decoded roster, and
+;; - THE STREAMS: each push (`frontend.v1.RosterPush') carries the roster's
+;;   four snapshot streams -- the workspaces, the merge queue, the Recently
+;;   Merged summary and the closed rows -- each WHOLE when it changed and
+;;   absent when it did not.  The latest snapshot of each is held
+;;   (`agent-repl-roster--streams'); a subscription's first push carries
+;;   every one, and a first push missing one is refused;
+;; - `agent-repl-roster-view', the streams ASSEMBLED into one plist, and
 ;;   `agent-repl-roster-update-functions', run after every accepted push;
+;; - THE MERGED PAGES: a merged workspace is in no stream, so a reader that
+;;   needs one pages `ListMergedWorkspaces' (`agent-repl-roster-merged-entries-sync',
+;;   `agent-repl-roster-merged-entries');
 ;; - TAB RECONCILIATION from the rows' `closed' flag: a row with
 ;;   `closed = false' has a tab, one with `closed = true' has none, and the
 ;;   tab order is the roster's walk order strictly (repository sections in
-;;   order, rows depth-first, then the recently-merged rows).  The task view
-;;   is IGNORED: it is the same rows regrouped, and drawing both would
-;;   double every tab;
+;;   order, rows depth-first, then the hidden rows, then the closed rows).
+;;   The task view is IGNORED: it is the same rows regrouped, and drawing
+;;   both would double every tab;
 ;; - TAB IDENTITY IS THE REF ID.  A row whose id matches an existing tab is
 ;;   the same workspace whatever its name, so a renamed row RENAMES its tab
 ;;   rather than opening a second one.  Names collide across repos; ids do
@@ -99,13 +108,36 @@
 ;;;; ---- The view ---------------------------------------------------------
 
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
+(declare-function agent-repl-rpc-list-merged-workspaces "rpc"
+                  (conn request &key on-response on-failure timeout))
+(declare-function agent-repl-rpc-list-merged-workspaces-sync "rpc"
+                  (conn request &optional timeout))
 (declare-function agent-repl-open-tabs-reconcile "open-tabs" (rows))
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
 
 (defvar agent-repl-roster-view nil
-  "The last roster the daemon pushed, decoded, or nil before the first push.
-Whole, never a delta — a partially-applied roster is unrepresentable by
-construction, so a new push REPLACES this value outright.")
+  "The last accepted roster, assembled from its streams, or nil before one.
+ONE PLIST, so its readers read one roster: the WORKSPACES stream\='s keys
+\(`agent-repl-wire-decode-workspace-roster'), plus `:closed' (the closed
+stream), `:merge-queue' (the merge queue stream), `:recently-merged' (the
+Recently Merged summary, never a row) and `:revision', the PUSH\='s
+revision.  Every stream is a whole snapshot, never a delta, and a push
+REPLACES this value outright with the streams it carries and the ones the
+last push left unchanged (`agent-repl-roster-apply-push').")
+
+(defconst agent-repl-roster-stream-keys
+  '(:workspaces :merge-queue :recently-merged :closed)
+  "The roster\='s four snapshot streams, as `RosterPush' decodes their keys.")
+
+(defvar agent-repl-roster--streams nil
+  "The latest snapshot of each roster stream, or nil before any push.
+A plist `(:stream S :revision R :workspaces W :merge-queue Q
+:recently-merged M :closed C)': S is the subscription the snapshots came
+on, and a push on any OTHER subscription is that subscription\='s first,
+which must carry every stream (`agent-repl-roster-apply-push').  It
+mirrors what the daemon holds this Emacs was sent, so it is replaced on
+every complete push, also one whose assembled view an invariant then
+drops: the next push leaves out exactly the streams it already sent.")
 
 (defvar agent-repl-roster-update-functions nil
   "Abnormal hook run with the decoded ROSTER after every accepted push.
@@ -470,15 +502,18 @@ sits in exactly one list.  The Open section first -- repository sections in
 the resolver's order, each section's rows (its subsections' included,
 `agent-repl-roster-section-rows') depth-first, each open row's `:collapsed'
 read off its own folded tab -- then the hidden section's rows, then the
-recently-merged band's rows, group by group, then the closed list.
+closed stream's rows.
 
 THE OPEN SECTION IS THE TAB BAR, so its walk is the bar's order and its
 numbers are the bar's (`agent-repl-roster--misnumbered').  A HIDDEN
 WORKSPACE IS WALKED AS A FOLDED ONE IS: it keeps an undrawn tab (its session
 is untouched, so its perspective stays), `:collapsed' taking it off the
 bar's drawing, numbering and navigation by the one hiding machinery there
-is.  Merged and closed rows have no tab; they are walked for the readers
-that reach every workspace (the switcher, the log retention)."
+is.  Closed rows have no tab; they are walked for the readers that reach
+every workspace (the switcher, the log retention).
+
+A MERGED WORKSPACE IS IN NO STREAM, so the walk holds none: a reader that
+needs merged rows pages them (`agent-repl-roster-merged-entries-sync')."
   (let ((acc (list nil)))
     (dolist (section (plist-get (plist-get roster :repository) :sections))
       (agent-repl-roster--walk-rows
@@ -494,15 +529,6 @@ that reach every workspace (the switcher, the log retention)."
        :hidden
        acc
        (lambda (_) t)))
-    (let* ((merged (plist-get roster :recently-merged))
-           (label (plist-get (plist-get (plist-get merged :header) :label) :text)))
-      (dolist (group (plist-get merged :groups))
-        (agent-repl-roster--walk-rows
-         (plist-get (plist-get group :merged-rows) :rows)
-         label
-         :merged
-         acc
-         #'ignore)))
     (agent-repl-roster--walk-rows
      (plist-get (plist-get roster :closed) :rows) nil :closed acc (lambda (_) t))
     (nreverse (car acc))))
@@ -536,6 +562,194 @@ repository\" reader in Emacs shares.  Nil when WS is nil or no workspace
 \(a persp-mode placeholder), or when no section holds it yet."
   (let ((id (and ws (plist-get (agent-repl--ws-get ws :ref) :id))))
     (and id (agent-repl-roster-repository-of id))))
+
+;;;; ---- The merged pages ------------------------------------------------
+;;
+;; A MERGED WORKSPACE IS IN NO STREAM (`frontend.v1.RosterPush'): it is
+;; finished, and the roster carries only the Recently Merged summary.  A
+;; reader that needs merged workspaces -- the switcher, a name lookup, the
+;; log retention -- pages `ListMergedWorkspaces' across every repository,
+;; most recently merged first, ten to a page.  Every page states the merged
+;; set it was resolved from; a walk whose pages disagree was read across a
+;; change of the set, and is read again from its first page.
+
+(define-error 'agent-repl-roster-merged-error
+  "agent-repl: the merged workspaces could not be listed")
+
+(defconst agent-repl-roster-merged-page-size 10
+  "How many merged workspaces one `ListMergedWorkspaces' page holds.
+Fixed by the daemon (endpoint_list_merged_workspaces.proto).")
+
+(defconst agent-repl-roster-merged-walk-attempts 2
+  "How many times a merged walk is read from its first page.
+A second read is for a set that changed between two pages of the first;
+a set that changes under both is a failure, surfaced, never a mixed list.")
+
+(defconst agent-repl-roster--merged-scope
+  '(:agent-repl-central "the merged workspaces span every repository")
+  "The log scope of the merged pages\=' records.")
+
+(defun agent-repl-roster--merged-request (page)
+  "Return the `ListMergedWorkspacesRequest' for PAGE of every repository."
+  (list :repository nil :order '(:arm :most-recently-merged :value nil) :page page))
+
+(defun agent-repl-roster--merged-fail (page fmt &rest args)
+  "Record the failure of merged PAGE at ERROR and signal it.
+FMT and ARGS say why.  The record names the page; the signal carries the
+same sentence, so a caller surfaces the very cause the log holds."
+  (let ((cause (apply #'format fmt args)))
+    (agent-repl--error agent-repl-roster--merged-scope
+                       "elisp.roster.merged-page-failed: page=%d cause=%s" page cause)
+    (signal 'agent-repl-roster-merged-error (list page cause))))
+
+(defun agent-repl-roster--merged-page (response page)
+  "Read RESPONSE, a decoded `ListMergedWorkspacesResponse' for PAGE.
+Answers `(TOKEN ROWS MORE)': TOKEN the merged set\='s revision, ROWS the
+page\='s `RosterRow's in order, MORE non-nil when pages follow.  The
+daemon\='s error arm is a failure (`agent-repl-roster--merged-fail'):
+`not_ready' is no empty list, and an empty list would claim no merges."
+  (pcase response
+    (`(:arm :success :value ,success)
+     (let* ((extent (plist-get success :extent))
+            (rows (mapcar (lambda (merged) (plist-get merged :row))
+                          (plist-get (plist-get (plist-get extent :value) :rows) :rows))))
+       (list (plist-get (plist-get success :revision) :revision)
+             rows
+             (eq (plist-get extent :arm) :more))))
+    (`(:arm :error :value ,error)
+     (agent-repl-roster--merged-fail
+      page "error-arm %S" (plist-get (plist-get error :cause) :arm)))
+    (_ (agent-repl-roster--merged-fail page "unknown answer %S" response))))
+
+(defun agent-repl-roster--merged-ids-in-view ()
+  "Return a hash of the ref ids the streams\=' walk holds, for the dedupe.
+A page is resolved from the daemon\='s set as of its answer and the view
+as of its last push, so a workspace may stand in both while a push is in
+flight; the stream\='s row wins, as open beats merged."
+  (let ((ids (make-hash-table :test 'equal)))
+    (when agent-repl-roster-view
+      (dolist (entry (agent-repl-roster-walk agent-repl-roster-view))
+        (puthash (agent-repl-roster-row-id (plist-get entry :row)) t ids)))
+    ids))
+
+(defun agent-repl-roster--merged-label ()
+  "Return the Recently Merged band\='s drawn label, or nil before a push."
+  (plist-get (plist-get (plist-get (plist-get agent-repl-roster-view :recently-merged)
+                                   :header)
+                        :label)
+             :text))
+
+(defun agent-repl-roster--merged-entries-of (rows)
+  "Return merged ROWS as walk entries, less those the streams hold.
+Each is `(:row ROW :label L :section :merged :collapsed nil :tab nil)',
+the shape `agent-repl-roster-walk' answers, so a reader treats a paged
+merged row as it treated a walked one."
+  (let ((ids (agent-repl-roster--merged-ids-in-view))
+        (label (agent-repl-roster--merged-label)))
+    (delq nil
+          (mapcar (lambda (row)
+                    (unless (gethash (agent-repl-roster-row-id row) ids)
+                      (list :row row :label label :section :merged
+                            :collapsed nil :tab nil)))
+                  rows))))
+
+(defun agent-repl-roster--merged-walk-sync (conn max-pages)
+  "Read merged pages 0.. on CONN, at most MAX-PAGES (nil: until the last).
+Answers `(TOKEN ROWS AGREED)', AGREED nil when a page named another set
+than page 0\='s.  A transport failure or an undecodable answer is a
+failure (`agent-repl-roster--merged-fail')."
+  (let ((page 0) (token nil) (rows nil) (agreed t) (more t))
+    (while (and more agreed (or (null max-pages) (< page max-pages)))
+      (let* ((response
+              (condition-case err
+                  (agent-repl-rpc-list-merged-workspaces-sync
+                   conn (agent-repl-roster--merged-request page))
+                ((agent-repl-connect-error agent-repl-wire-error)
+                 (agent-repl-roster--merged-fail page "%s %S" (car err) (cdr err)))))
+             (read (agent-repl-roster--merged-page response page)))
+        (if (and token (not (equal token (nth 0 read))))
+            (setq agreed nil)
+          (setq token (nth 0 read)
+                rows (append rows (nth 1 read))
+                more (nth 2 read)
+                page (1+ page)))))
+    (list token rows agreed)))
+
+(defun agent-repl-roster-merged-entries-sync (conn &optional max-pages)
+  "Return the merged workspaces as walk entries, most recently merged first.
+Pages `ListMergedWorkspaces' on CONN across every repository, at most
+MAX-PAGES pages (nil: every page until the last), BLOCKING the caller:
+for a command the user is waiting on.  A workspace the streams hold is
+left out (`agent-repl-roster--merged-entries-of').
+
+Every failure -- the transport, an undecodable answer, the daemon\='s
+error arm, or a set that changed under every read
+\(`agent-repl-roster-merged-walk-attempts') -- is recorded at ERROR and
+SIGNALLED as `agent-repl-roster-merged-error': a list nobody could read
+is never offered as the list."
+  (let ((attempt 0) (walked nil))
+    (while (and (< attempt agent-repl-roster-merged-walk-attempts)
+                (not (nth 2 walked)))
+      (setq attempt (1+ attempt)
+            walked (agent-repl-roster--merged-walk-sync conn max-pages))
+      (unless (nth 2 walked)
+        (agent-repl--info agent-repl-roster--merged-scope
+                          "elisp.roster.merged-set-moved: attempt=%d" attempt)))
+    (unless (nth 2 walked)
+      (agent-repl-roster--merged-fail
+       0 "the merged set changed under %d reads" attempt))
+    (let ((entries (agent-repl-roster--merged-entries-of (nth 1 walked))))
+      (agent-repl--log agent-repl-roster--merged-scope
+                       "elisp.roster.merged-listed: rows=%d entries=%d max-pages=%S revision=%s"
+                       (length (nth 1 walked)) (length entries) max-pages (nth 0 walked))
+      entries)))
+
+(defun agent-repl-roster-merged-entries (conn on-entries on-failure)
+  "Page every merged workspace on CONN asynchronously, as walk entries.
+ON-ENTRIES receives the entries `agent-repl-roster-merged-entries-sync'
+would answer; ON-FAILURE receives the failure\='s signal data
+\(`agent-repl-roster-merged-error''s `(PAGE CAUSE)'), which was recorded
+at ERROR first.  Exactly one of them is called.  Nothing blocks: for a
+reader running off a push, where a blocking walk would stall the editor."
+  (let ((attempt 1))
+    (cl-labels
+        ((fail (page fmt &rest args)
+           (condition-case err
+               (apply #'agent-repl-roster--merged-fail page fmt args)
+             (agent-repl-roster-merged-error (funcall on-failure (cdr err)))))
+         (step (page token rows)
+           (agent-repl-rpc-list-merged-workspaces
+            conn (agent-repl-roster--merged-request page)
+            :on-response
+            (lambda (response)
+              (let ((read (condition-case err
+                              (agent-repl-roster--merged-page response page)
+                            (agent-repl-roster-merged-error
+                             (funcall on-failure (cdr err))
+                             nil))))
+                (when read
+                  (cond
+                   ((and token (not (equal token (nth 0 read))))
+                    (if (< attempt agent-repl-roster-merged-walk-attempts)
+                        (progn
+                          (setq attempt (1+ attempt))
+                          (agent-repl--info agent-repl-roster--merged-scope
+                                            "elisp.roster.merged-set-moved: attempt=%d" (1- attempt))
+                          (step 0 nil nil))
+                      (fail 0 "the merged set changed under %d reads" attempt)))
+                   ((nth 2 read)
+                    (step (1+ page) (nth 0 read) (append rows (nth 1 read))))
+                   (t
+                    (let ((entries (agent-repl-roster--merged-entries-of
+                                    (append rows (nth 1 read)))))
+                      (agent-repl--log agent-repl-roster--merged-scope
+                                       "elisp.roster.merged-listed: rows=%d entries=%d max-pages=nil revision=%s"
+                                       (+ (length rows) (length (nth 1 read)))
+                                       (length entries) (nth 0 read))
+                      (funcall on-entries entries)))))))
+            :on-failure
+            (lambda (detail) (fail page "transport %S" detail)))))
+      (step 0 nil nil))))
 
 ;;;; ---- Invariants -------------------------------------------------------
 
@@ -1760,6 +1974,56 @@ order, or nil when the push was dropped."
                          (length entries) (length order))
         order)))))
 
+(defun agent-repl-roster--assemble (streams)
+  "Return the one roster plist STREAMS, `agent-repl-roster--streams', assemble.
+The workspaces stream\='s keys, then `:closed', `:merge-queue',
+`:recently-merged' and the push\='s `:revision' (`agent-repl-roster-view')."
+  (append (list :revision (plist-get streams :revision)
+                :closed (plist-get streams :closed)
+                :merge-queue (plist-get streams :merge-queue)
+                :recently-merged (plist-get streams :recently-merged))
+          (plist-get streams :workspaces)))
+
+(defun agent-repl-roster-apply-push (push &optional stream)
+  "Apply PUSH, a decoded `RosterPush' received on STREAM (nil: the standing one).
+NEVER A DIFF: each stream PUSH carries REPLACES the held snapshot whole,
+and a stream it leaves out is UNCHANGED, never empty.  The held snapshots
+\(`agent-repl-roster--streams') are this subscription\='s, so a push on a
+subscription that has delivered none yet is its FIRST, and the contract
+says a first push carries every stream.  A first push missing one is a
+contract breach: it is logged at ERROR and REFUSED whole, the snapshots
+and the view untouched, never half-applied.
+
+A complete push replaces the snapshots, and their assembly
+\(`agent-repl-roster--assemble') is then applied as one roster
+\(`agent-repl-roster-apply'), whose own invariants may still drop it.
+Returns what `agent-repl-roster-apply' returns, or nil when refused."
+  (let* ((stream (or stream agent-repl-roster--stream))
+         (held (and agent-repl-roster--streams
+                    (eq (plist-get agent-repl-roster--streams :stream) stream)
+                    agent-repl-roster--streams))
+         (missing (and (null held)
+                       (seq-remove (lambda (key) (plist-get push key))
+                                   agent-repl-roster-stream-keys))))
+    (if missing
+        (progn
+          (agent-repl--error '(:agent-repl-central
+                               "a subscription's first roster push must carry every stream")
+                             "elisp.roster.push: refused reason=first-push-incomplete missing=%S revision=%s"
+                             missing (plist-get push :revision))
+          nil)
+      (let ((streams (list :stream stream :revision (plist-get push :revision))))
+        (dolist (key agent-repl-roster-stream-keys)
+          (setq streams (plist-put streams key (or (plist-get push key)
+                                                   (plist-get held key)))))
+        (setq agent-repl-roster--streams streams)
+        (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
+                         "elisp.roster.push: streams revision=%s carried=%S"
+                         (plist-get push :revision)
+                         (seq-filter (lambda (key) (plist-get push key))
+                                     agent-repl-roster-stream-keys))
+        (agent-repl-roster-apply (agent-repl-roster--assemble streams) stream)))))
+
 (defvar agent-repl-roster--ending-stream nil
   "The roster stream that carried the planned ending, or nil.
 Its daemon is standing down in a PLANNED exit and the frame was the
@@ -1768,15 +2032,16 @@ recorded at INFO rather than as a stream the producer dropped.")
 
 (defun agent-repl-roster-on-push (push &optional stream)
   "Handle one decoded WatchWorkspaceRoster PUSH received on STREAM.
-THE ARM IS WHAT THE FRAME CARRIES: `:roster' is applied whole, and
-`:ending' marks STREAM (nil: the standing one) as ending on purpose.
-Any other arm is a contract breach, recorded at ERROR and not applied."
+THE ARM IS WHAT THE FRAME CARRIES: `:streams' is a push of the roster\='s
+streams (`agent-repl-roster-apply-push'), and `:ending' marks STREAM (nil:
+the standing one) as ending on purpose.  Any other arm is a contract
+breach, recorded at ERROR and not applied."
   (pcase (plist-get push :arm)
-    (:roster
+    (:streams
      (let ((request-id (agent-repl--next-log-request-id)))
        (agent-repl--with-log-context
         agent-repl--global-log-scope request-id
-        (lambda () (agent-repl-roster-apply (plist-get push :value) stream)))))
+        (lambda () (agent-repl-roster-apply-push (plist-get push :value) stream)))))
     (:ending
      (setq agent-repl-roster--ending-stream (or stream agent-repl-roster--stream))
      (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")

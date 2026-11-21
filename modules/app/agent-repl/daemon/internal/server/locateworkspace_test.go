@@ -36,7 +36,7 @@ func TestLocateWorkspaceAnswersTheRegistrysWorkspaces(t *testing.T) {
 		{name: "a hidden merge workspace by name",
 			req:  &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: "merge-one"}}},
 			want: []string{"ws-merge"}},
-		{name: "a drawn landed workspace at its directory",
+		{name: "a merged workspace, in no stream, at its directory",
 			req:  &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: "/src/landed"}}},
 			want: []string{"ws-landed"}},
 		{name: "a directory in no worktree",
@@ -98,7 +98,7 @@ func TestLocateWorkspaceFailsAndRecordsAFailedRead(t *testing.T) {
 		cause string
 	}{
 		{name: "the workspaces", edit: func(h *harness) { h.DB.listWorkspacesErr = errors.New("disk gone") }, cause: "list the workspaces: disk gone"},
-		{name: "no roster published yet", edit: func(h *harness) { h.Sidebar.topic.ClearIf(func(*frontendv1.WorkspaceRoster) bool { return true }) },
+		{name: "no roster published yet", edit: func(h *harness) { h.Sidebar.topic.ClearIf(func(*frontendv1.RosterPush) bool { return true }) },
 			cause: "read the roster: the daemon has published no roster yet"},
 	}
 	for _, tt := range tests {

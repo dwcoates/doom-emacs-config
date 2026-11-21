@@ -86,7 +86,7 @@ func mqRepositoryRef(t *testing.T, w *stack.World, repo *harness.Repo) *workspac
 	t.Helper()
 	harness.Register(t, w.Daemon, repo.Dir)
 	roster := w.WatchRoster()
-	got := harness.AwaitView(t, w.Ctx(), roster, "the repository's roster section", func(r *frontendv1.WorkspaceRoster) bool {
+	got := harness.AwaitView(t, w.Ctx(), roster, "the repository's roster section", func(r *frontendv1.RosterPush) bool {
 		return mqFindRepoKey(r, repo.Dir) != nil
 	})
 	ref := mqFindRepoKey(got, repo.Dir)
@@ -99,8 +99,8 @@ func mqRepositoryRef(t *testing.T, w *stack.World, repo *harness.Repo) *workspac
 // mqFindRepoKey finds a repository section by its worktree dir. A
 // repository is keyed by its COMMON DIR, which for an ordinary checkout is
 // `<worktree>/.git`, so a worktree's section is found under either spelling.
-func mqFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
-	for _, s := range r.GetRepository().GetSections() {
+func mqFindRepoKey(r *frontendv1.RosterPush, dir string) *workspacev1.RepositoryRef {
+	for _, s := range r.GetWorkspaces().GetRepository().GetSections() {
 		switch s.GetKey().GetRepository().GetDir() {
 		case dir, filepath.Join(dir, ".git"):
 			return s.GetKey().GetRepository()

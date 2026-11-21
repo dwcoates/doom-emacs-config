@@ -4,6 +4,13 @@
  * of each (owner ruling, 2026-10-15). Nothing is re-grouped, re-sorted or
  * counted here.
  *
+ * THE ROSTER IS FOUR SNAPSHOT STREAMS (`roster-streams.ts`): the workspaces
+ * (the open sections and the hidden band), the merge queue, the Recently
+ * Merged summary and the closed rows, which no section draws. A stream a push
+ * did not replace is the very snapshot already drawn, so its sections are
+ * kept without even being compared; a replaced one is compared section by
+ * section, and only what changed is drawn anew.
+ *
  * THE MERGE QUEUE AND RECENTLY MERGED SECTIONS (owner request, 2026-11-01,
  * splitting the Deploys section in two) have no key of their own (the roster
  * carries exactly one of each), so their fold identities are fixed. Each
@@ -23,7 +30,6 @@
 import { drawRosterSectionHeight, drawSectionHeight, type RosterSectionHeight } from "./section-resize.js";
 import { FOLDED_CLASS } from "./folded-class.js";
 import {
-  BAND_FLOOR,
   HIDDEN_SECTION_CLASS,
   MERGED_AT_ATTRIBUTE,
   MERGED_SECTION_CLASS,
@@ -45,6 +51,8 @@ import {
   type RosterMergedSection,
   type RosterMergeQueueRepoGroup,
   type RosterMergeQueueSection,
+  type RosterMergedRepoGroupSummary,
+  type RosterOpenCount,
   type RosterOpenSection,
   type RosterRepoDivergence,
   type RosterRepoKey,
@@ -55,6 +63,7 @@ import {
   type RosterOpenHeader,
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { changedStreams, type RosterStreams } from "./roster-streams.js";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { clone, equals } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
@@ -62,7 +71,7 @@ import { decorativeElement, queryAll } from "../dom.js";
 import { disposeKeyedRows, drawKeyedEntries, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
 import { repoEntries, repoSectionRegions, sectionOpenRows, sectionSubsections, unsectionedRows, type PathedOpenRow } from "./entries.js";
 import { log } from "../log.js";
-import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
 import {
   HIDDEN_FOLD_KEY,
@@ -107,13 +116,10 @@ import {
   DEPLOYS_SECTION_ATTRIBUTE,
   type DeploysGroupSection,
 } from "./deploys-fold.js";
-import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreSpinner } from "./deploys-more.js";
+import { MERGED_PAGE_CLASS, drawMergedMoreSpinner, mergedRowAtMs, type MergedGroupPages, type MergedPages } from "./merged-pages.js";
 import { drawEscalationRelease, drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { coldGatedOf, sameColdGated, type ColdGated } from "./cold-gate-name.js";
 import {
-  drawRosterRowDetailCommits,
-  drawRosterRowWhenMerged,
-  drawRosterRowWhenShown,
   drawRosterFamily,
   type RowFamily,
   pathedFamilies,
@@ -128,10 +134,11 @@ import { paintTabNumbers, tabNumbers } from "./tab-numbers.js";
 import { drawRosterOpenCount, openCountText } from "./open-count.js";
 
 /**
- * The whole roster, drawn through RAIL's one roster drawer (`createRosterDrawer`):
- * a section the push leaves unchanged is the one already drawn.
+ * Every roster stream as of one push, drawn through RAIL's one roster drawer
+ * (`createRosterDrawer`): a section the push leaves unchanged is the one
+ * already drawn.
  */
-export function drawWorkspaceRoster(u: WorkspaceRoster, rail: RailContext): HTMLElement {
+export function drawWorkspaceRoster(u: RosterStreams, rail: RailContext): HTMLElement {
   let drawer = drawers.get(rail);
   if (drawer === undefined) {
     drawer = createRosterDrawer(rail);
@@ -152,7 +159,7 @@ const drawers = new WeakMap<RailContext, RosterDrawer>();
 /** One rail's roster, drawn push after push. */
 export interface RosterDrawer {
   /** Draw U, keeping every section it leaves unchanged; answers the rail's one roster root. */
-  draw(u: WorkspaceRoster): HTMLElement;
+  draw(u: RosterStreams): HTMLElement;
   /** Tear down every section's registrations. */
   dispose(): void;
 }
@@ -203,8 +210,10 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   /** The open section, and the box its repository sections are placed in. */
   let open: DrawnSection<{ open: RosterOpenSection; count: string }, Drawn & { body: HTMLElement }> | null = null;
   let hidden: DrawnSection<RosterHiddenSection> | null = null;
-  let merged: DrawnSection<RosterMergedSection> | null = null;
+  let merged: DrawnSection<{ summary: RosterMergedSection; pages: number }> | null = null;
   let mergeQueue: DrawnSection<{ queue: RosterMergeQueueSection; coldGated: ColdGated }> | null = null;
+  /** The streams last drawn, null before the first draw. */
+  let drawnStreams: RosterStreams | null = null;
 
   /** SECTION kept when WIRE equals what it was drawn from, else drawn anew by DRAW. */
   const keepOrDraw = <W, D extends Drawn>(
@@ -224,146 +233,199 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
     return { wire, drawn: draw(scope.context), scope };
   };
 
-  return {
-    draw(u: WorkspaceRoster): HTMLElement {
-      const path = "WorkspaceRoster";
-      const repository = requireMessage(u.repository, `${path}.repository`);
-      const mergedWire = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
-      const mergeQueueWire = requireMessage(u.mergeQueue, `${path}.merge_queue`);
-      const hiddenWire = requireMessage(u.hidden, `${path}.hidden`);
-      const openWire = requireMessage(u.open, `${path}.open`);
-      const coldGated = coldGatedOf(u.coldGates, `${path}.cold_gates`);
-      const current =
-        u.current === undefined
-          ? null
-          : drawRosterCurrentWorkspace(u.current, `${path}.current`);
-      const openCount = openCountText(
-        drawRosterOpenCount(
-          requireMessage(repository.openCount, `${path}.repository.open_count`),
-          `${path}.repository.open_count`,
-        ),
-      );
-      const discarded: Array<DrawnSection<unknown>> = [];
+  /** Whether no drag rearranged SECTION's box, so a wire it was drawn from still says what it shows. */
+  const untouched = (section: DrawnSection<unknown>): boolean => !section.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE);
 
-      const nextRepos = new Map<string, DrawnSection<RosterRepoSection, DrawnRepoSection>>();
-      let patchedRows = 0;
-      for (const [index, section] of repository.sections.entries()) {
-        const sectionPath = `${path}.repository.sections[${index}]`;
-        const key = drawRosterRepoKey(requireMessage(section.key, `${sectionPath}.key`), `${sectionPath}.key`).id;
-        if (nextRepos.has(key)) {
-          throw new MalformedView(`${sectionPath}.key`, `repository ${key} has two sections`);
-        }
-        let kept = repos.get(key) ?? null;
-        repos.delete(key);
-        // A SECTION A DRAG REARRANGED IS DRAWN ANEW (drag.ts): its DOM no
-        // longer matches the wire it was drawn from.
-        if (kept !== null && kept.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE)) {
-          discarded.push(kept);
-          kept = null;
-        }
-        // A SECTION WHOSE ROWS ALONE CHANGED KEEPS ITS BOX and redraws only
-        // the rows that changed (`keyed-rows.ts`): a switch changes the two
-        // rows it moves the highlight between, never their sections.
-        if (kept !== null && !equals(RosterRepoSectionSchema, kept.wire, section) && sameButRows(kept.wire, section)) {
-          const regions = kept.drawn.regions;
-          const before = regions.map((rows) => rows.entries.map((entry) => entry.element));
-          const wires = repoSectionRegions(section, sectionPath);
-          if (patchKeyedRegions(regions.map((rows, r) => ({ kept: rows, rows: wires[r] })), rail, "grouping")) {
-            regions.forEach((rows, r) => {
-              patchedRows += rows.entries.filter((entry, i) => entry.element !== before[r][i]).length;
-              remarkKeyedRows(rows, rail.attention);
-            });
-            kept.wire = section;
-            paintRepoSection(kept.drawn.element, section, sectionPath);
-            kept.scope.remark(rail.attention);
-            nextRepos.set(key, kept);
-            continue;
-          }
-        }
-        const drawnSection = keepOrDraw(
-          kept,
-          section,
-          (a, b) => equals(RosterRepoSectionSchema, a, b),
-          (scoped) => {
-            // The section's rows in no subsection, then each subsection's.
-            const regions: KeyedRows[] = repoSectionRegions(section, sectionPath).map(() => ({ entries: [] }));
-            // The rows' scopes go down with the section's.
-            scoped.onDispose(() => regions.forEach(disposeKeyedRows));
-            const element = drawRosterRepoSection(section, scoped, sectionPath, {
-              own: (rows) => drawKeyedEntries(rows, rail, "grouping", regions[0]),
-              subsection: (rows, p, region) => drawKeyedRows(rows, rail, p, "grouping", regions[region]),
-            });
-            return { element, regions };
-          },
-          discarded,
-        );
-        if (drawnSection === kept) kept.drawn.regions.forEach((rows) => remarkKeyedRows(rows, rail.attention));
-        nextRepos.set(key, drawnSection);
-      }
-      for (const gone of repos.values()) discarded.push(gone);
-      repos = nextRepos;
+  /** Keep SECTION as drawn: its attention markers are marked again for this pass. */
+  const keep = <W, D extends Drawn>(section: DrawnSection<W, D>): DrawnSection<W, D> => {
+    section.scope.remark(rail.attention);
+    return section;
+  };
 
-      // THE OPEN SECTION'S COUNT IS PATCHED IN PLACE (owner report, 2026-11-06):
-      // a workspace opened or closed changes only the heading's count, and
-      // drawing the section anew brings a new rows region that starts at its
-      // top, so the rail scrolled to the top and back (`scrollKept`) and
-      // flashed its bar. The section keeps its box and its scroll position.
-      if (
-        open !== null &&
-        open.wire.count !== openCount &&
-        !open.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE) &&
-        equals(RosterOpenSectionSchema, open.wire.open, openWire)
-      ) {
-        paintOpenCount(open.drawn.element, openCount);
-        open.wire = { open: openWire, count: openCount };
+  /**
+   * Draw the WORKSPACES stream's sections (the repositories, the open
+   * heading, the hidden band) from U, into DISCARDED what they replace;
+   * answers how many rows were patched in place.
+   */
+  const drawWorkspaces = (u: RosterStreams["workspaces"], discarded: Array<DrawnSection<unknown>>): number => {
+    const path = "WorkspaceRoster";
+    const repository = requireMessage(u.repository, `${path}.repository`);
+    const hiddenWire = requireMessage(u.hidden, `${path}.hidden`);
+    const openWire = requireMessage(u.open, `${path}.open`);
+    const openCount = openCountText(
+      drawRosterOpenCount(
+        requireMessage(repository.openCount, `${path}.repository.open_count`),
+        `${path}.repository.open_count`,
+      ),
+    );
+
+    const nextRepos = new Map<string, DrawnSection<RosterRepoSection, DrawnRepoSection>>();
+    let patchedRows = 0;
+    for (const [index, section] of repository.sections.entries()) {
+      const sectionPath = `${path}.repository.sections[${index}]`;
+      const key = drawRosterRepoKey(requireMessage(section.key, `${sectionPath}.key`), `${sectionPath}.key`).id;
+      if (nextRepos.has(key)) {
+        throw new MalformedView(`${sectionPath}.key`, `repository ${key} has two sections`);
       }
-      open = keepOrDraw(
-        open,
-        { open: openWire, count: openCount },
-        (a, b) => a.count === b.count && equals(RosterOpenSectionSchema, a.open, b.open),
+      let kept = repos.get(key) ?? null;
+      repos.delete(key);
+      // A SECTION A DRAG REARRANGED IS DRAWN ANEW (drag.ts): its DOM no
+      // longer matches the wire it was drawn from.
+      if (kept !== null && kept.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE)) {
+        discarded.push(kept);
+        kept = null;
+      }
+      // A SECTION WHOSE ROWS ALONE CHANGED KEEPS ITS BOX and redraws only
+      // the rows that changed (`keyed-rows.ts`): a switch changes the two
+      // rows it moves the highlight between, never their sections.
+      if (kept !== null && !equals(RosterRepoSectionSchema, kept.wire, section) && sameButRows(kept.wire, section)) {
+        const regions = kept.drawn.regions;
+        const before = regions.map((rows) => rows.entries.map((entry) => entry.element));
+        const wires = repoSectionRegions(section, sectionPath);
+        if (patchKeyedRegions(regions.map((rows, r) => ({ kept: rows, rows: wires[r] })), rail, "grouping")) {
+          regions.forEach((rows, r) => {
+            patchedRows += rows.entries.filter((entry, i) => entry.element !== before[r][i]).length;
+            remarkKeyedRows(rows, rail.attention);
+          });
+          kept.wire = section;
+          paintRepoSection(kept.drawn.element, section, sectionPath);
+          kept.scope.remark(rail.attention);
+          nextRepos.set(key, kept);
+          continue;
+        }
+      }
+      const drawnSection = keepOrDraw(
+        kept,
+        section,
+        (a, b) => equals(RosterRepoSectionSchema, a, b),
         (scoped) => {
-          const body = document.createElement("div");
-          body.className = OPEN_REGION_CLASS;
-          return { element: drawRosterOpenSection(openWire, { body, openCount }, scoped, `${path}.open`), body };
+          // The section's rows in no subsection, then each subsection's.
+          const regions: KeyedRows[] = repoSectionRegions(section, sectionPath).map(() => ({ entries: [] }));
+          // The rows' scopes go down with the section's.
+          scoped.onDispose(() => regions.forEach(disposeKeyedRows));
+          const element = drawRosterRepoSection(section, scoped, sectionPath, {
+            own: (rows) => drawKeyedEntries(rows, rail, "grouping", regions[0]),
+            subsection: (rows, p, region) => drawKeyedRows(rows, rail, p, "grouping", regions[region]),
+          });
+          return { element, regions };
         },
         discarded,
       );
-      placeChildren(open.drawn.body, [...repos.values()].map((section) => section.drawn.element));
-      // EVERY PUSH RENUMBERS EVERY OPEN ROW, kept sections too: a tab opened
-      // anywhere shifts the numbers of rows whose own wire did not change.
-      paintTabNumbers(open.drawn.body, tabNumbers(repository, `${path}.repository`));
-      // Every switch moves every reach, so every push repaints every gutter too.
-      paintRecencyGutters(open.drawn.body, recencyGutters(repository, `${path}.repository`));
+      if (drawnSection === kept) kept.drawn.regions.forEach((rows) => remarkKeyedRows(rows, rail.attention));
+      nextRepos.set(key, drawnSection);
+    }
+    for (const gone of repos.values()) discarded.push(gone);
+    repos = nextRepos;
 
-      hidden = keepOrDraw(
-        hidden,
-        hiddenWire,
-        (a, b) => equals(RosterHiddenSectionSchema, a, b),
-        (scoped) => ({ element: drawRosterHiddenSection(hiddenWire, scoped, `${path}.hidden`) }),
-        discarded,
-      );
-      merged = keepOrDraw(
-        merged,
-        mergedWire,
-        (a, b) => equals(RosterMergedSectionSchema, a, b),
-        (scoped) => ({ element: drawRosterMergedSection(mergedWire, scoped, `${path}.recently_merged`) }),
-        discarded,
-      );
-      // THE QUEUE'S LINES READ THE STANDING COLD GATES (cold-gate-name.ts), so
-      // a gate raised or answered draws the section anew.
-      mergeQueue = keepOrDraw(
-        mergeQueue,
-        { queue: mergeQueueWire, coldGated },
-        (a, b) => equals(RosterMergeQueueSectionSchema, a.queue, b.queue) && sameColdGated(a.coldGated, b.coldGated),
-        (scoped) => ({ element: drawRosterMergeQueueSection(mergeQueueWire, scoped, `${path}.merge_queue`, coldGated) }),
-        discarded,
-      );
+    // THE OPEN SECTION'S COUNT IS PATCHED IN PLACE (owner report, 2026-11-06):
+    // a workspace opened or closed changes only the heading's count, and
+    // drawing the section anew brings a new rows region that starts at its
+    // top, so the rail scrolled to the top and back (`scrollKept`) and
+    // flashed its bar. The section keeps its box and its scroll position.
+    if (
+      open !== null &&
+      open.wire.count !== openCount &&
+      !open.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE) &&
+      equals(RosterOpenSectionSchema, open.wire.open, openWire)
+    ) {
+      paintOpenCount(open.drawn.element, openCount);
+      open.wire = { open: openWire, count: openCount };
+    }
+    open = keepOrDraw(
+      open,
+      { open: openWire, count: openCount },
+      (a, b) => a.count === b.count && equals(RosterOpenSectionSchema, a.open, b.open),
+      (scoped) => {
+        const body = document.createElement("div");
+        body.className = OPEN_REGION_CLASS;
+        return { element: drawRosterOpenSection(openWire, { body, openCount }, scoped, `${path}.open`), body };
+      },
+      discarded,
+    );
+    placeChildren(open.drawn.body, [...repos.values()].map((section) => section.drawn.element));
+    // EVERY PUSH RENUMBERS EVERY OPEN ROW, kept sections too: a tab opened
+    // anywhere shifts the numbers of rows whose own wire did not change.
+    paintTabNumbers(open.drawn.body, tabNumbers(repository, `${path}.repository`));
+    // Every switch moves every reach, so every push repaints every gutter too.
+    paintRecencyGutters(open.drawn.body, recencyGutters(repository, `${path}.repository`));
+
+    hidden = keepOrDraw(
+      hidden,
+      hiddenWire,
+      (a, b) => equals(RosterHiddenSectionSchema, a, b),
+      (scoped) => ({ element: drawRosterHiddenSection(hiddenWire, scoped, `${path}.hidden`) }),
+      discarded,
+    );
+    return patchedRows;
+  };
+
+  /** Whether a section of the workspaces stream was rearranged by a drag, so its unchanged snapshot is drawn anew anyway. */
+  const workspacesRearranged = (): boolean =>
+    [...repos.values(), open, hidden].some((section) => section !== null && !untouched(section));
+
+  return {
+    draw(u: RosterStreams): HTMLElement {
+      const changed = changedStreams(drawnStreams, u);
+      const discarded: Array<DrawnSection<unknown>> = [];
+      let patchedRows = 0;
+      // A STREAM THE PUSH DID NOT REPLACE IS THE SNAPSHOT ALREADY DRAWN: its
+      // sections are kept as they stand, uncompared.
+      if (open === null || hidden === null || changed.includes("workspaces") || workspacesRearranged()) {
+        patchedRows = drawWorkspaces(u.workspaces, discarded);
+      } else {
+        for (const section of repos.values()) {
+          keep(section).drawn.regions.forEach((rows) => remarkKeyedRows(rows, rail.attention));
+        }
+        keep(open);
+        keep(hidden);
+      }
+      const openDrawn = requireDrawn(open, "the open section");
+      const hiddenDrawn = requireDrawn(hidden, "the hidden section");
+      // THE RECENTLY MERGED SECTION is the summary and the pages loaded beside
+      // it (`merged-pages.ts`), drawn anew when either moved.
+      const mergedWire = u.recentlyMerged;
+      const pages = rail.mergedPages.version();
+      merged =
+        merged !== null && untouched(merged) && merged.wire.summary === mergedWire && merged.wire.pages === pages
+          ? keep(merged)
+          : keepOrDraw(
+              merged,
+              { summary: mergedWire, pages },
+              (a, b) => a.pages === b.pages && equals(RosterMergedSectionSchema, a.summary, b.summary),
+              (scoped) => ({ element: drawRosterMergedSection(mergedWire, rail.mergedPages, scoped, "RosterPush.recently_merged") }),
+              discarded,
+            );
+      // THE QUEUE'S LINES READ THE STANDING COLD GATES (cold-gate-name.ts),
+      // which ride the workspaces stream, so a gate raised or answered draws
+      // the section anew though the queue's own stream is unchanged.
+      const mergeQueueWire = u.mergeQueue;
+      const coldGated = coldGatedOf(u.workspaces.coldGates, "WorkspaceRoster.cold_gates");
+      mergeQueue =
+        mergeQueue !== null &&
+        untouched(mergeQueue) &&
+        mergeQueue.wire.queue === mergeQueueWire &&
+        sameColdGated(mergeQueue.wire.coldGated, coldGated)
+          ? keep(mergeQueue)
+          : keepOrDraw(
+              mergeQueue,
+              { queue: mergeQueueWire, coldGated },
+              (a, b) => equals(RosterMergeQueueSectionSchema, a.queue, b.queue) && sameColdGated(a.coldGated, b.coldGated),
+              (scoped) => ({
+                element: drawRosterMergeQueueSection(mergeQueueWire, scoped, "RosterPush.merge_queue", coldGated),
+              }),
+              discarded,
+            );
+      const workspaces = u.workspaces;
+      const current =
+        workspaces.current === undefined
+          ? null
+          : drawRosterCurrentWorkspace(workspaces.current, "WorkspaceRoster.current");
       // A SECTION LEFT OUT OF THE RAIL (`HeadedBoxShape.leftOut`) is not
       // placed, so each section placed stands beside the one drawn next to
       // it, which the stylesheet's rules between sections read.
       placeChildren(
         pane,
-        [open.drawn.element, mergeQueue.drawn.element, merged.drawn.element, hidden.drawn.element].filter(
+        [openDrawn.drawn.element, mergeQueue.drawn.element, merged.drawn.element, hiddenDrawn.drawn.element].filter(
           (element) => !element.hidden,
         ),
       );
@@ -371,13 +433,16 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       // Disposed only once every kept section has moved into the new drawing,
       // so a discarded box's teardown never reaches a kept section's rows.
       for (const section of discarded) section.scope.dispose(section.drawn.element);
+      drawnStreams = u;
       log.debug("drew the workspace roster", {
         operation: "sidebar.roster",
         context: {
-          repo_sections: repository.sections.length,
+          revision: String(u.revision),
+          changed_streams: changed,
+          repo_sections: repos.size,
           merged_groups: mergedWire.groups.length,
           merge_queue_groups: mergeQueueWire.groups.length,
-          hidden_rows: hiddenWire.hiddenRows?.rows.length ?? 0,
+          hidden_rows: hiddenDrawn.wire.hiddenRows?.rows.length ?? 0,
           redrawn_sections: discarded.length,
           redrawn_rows: patchedRows,
           current,
@@ -393,9 +458,16 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       for (const section of drawn) section.scope.dispose(section.drawn.element);
       repos = new Map();
       open = hidden = merged = mergeQueue = null;
+      drawnStreams = null;
       pane.replaceChildren();
     },
   };
+}
+
+/** SECTION, which every draw has drawn by the time it is read; WHAT names it for the invariant. */
+function requireDrawn<T>(section: T | null, what: string): T {
+  if (section === null) throw new Error(`invariant: ${what} is drawn before it is placed`);
+  return section;
 }
 
 /** A drawn repository section: its element, and its rows, its own first, then each subsection's. */
@@ -770,31 +842,38 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
 /**
  * The Recently Merged section (owner request, 2026-11-01; it was the merges
  * of the Deploys section), drawn directly under the Merge Queue section and
- * above Hidden: ONE GROUP PER REPOSITORY with a merge, each its merged
- * workspaces hoisted out of every grouping.
+ * above Hidden: ONE GROUP PER REPOSITORY with a merge, from the band's
+ * SUMMARY (U) and the pages of rows this page has loaded beside it (PAGES,
+ * `merged-pages.ts`): the stream carries no merged row.
  *
- * ITS HEADER CARRIES NO WIRE COUNT: each group's header carries its
+ * ITS HEADER'S COUNT, every merged workspace of every group, is drawn while
+ * the section is folded or holds a group whose merges are not all loaded
+ * (`MERGED_PARTLY_LOADED_ATTRIBUTE`), since the count is then the only
+ * account of the merges not drawn. Each group's header carries its
  * repository's "(K today, last D ago)", with the commits today's merges
  * brought in on its hover, and the section's header carries the same
- * "(K today, last D ago)" summed over every group (owner request,
- * 2026-11-06). Its label is always the purple of a merge in progress.
+ * "(K today, last D ago)" over every group (owner request, 2026-11-06), all
+ * from the summary, so they count the merges no page has loaded too. Its
+ * label is always the purple of a merge in progress.
  *
  * A SECTION WITH NO GROUPS IS NOT DRAWN (frontend.v1.RosterMergedSection).
  *
- * EVERY MERGE THE DAEMON SENDS IS DRAWN (a day of them); once the section is
- * laid out, `fitBands` (band-fit.ts) sizes its scrolling viewport against
- * the other sections', its merges of today claiming room first.
+ * Once the section is laid out, `fitBands` (band-fit.ts) sizes its scrolling
+ * viewport against the other sections', the loaded merges of today claiming
+ * room first.
  */
 export function drawRosterMergedSection(
   u: RosterMergedSection,
+  pages: MergedPages,
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
-  const drawnNow = { left: MERGED_DRAWN_AT_ONCE };
   const facts = u.groups.map((group, index) => mergedGroupFacts(group, `${path}.groups[${index}]`));
+  const loaded = u.groups.map((group, index) => pages.loaded(group, `${path}.groups[${index}]`));
   const groups = u.groups.map((group, index) =>
-    drawRosterMergedRepoGroup(group, facts[index], sc, `${path}.groups[${index}]`, drawnNow),
+    drawRosterMergedRepoGroup(group, facts[index], loaded[index], sc, `${path}.groups[${index}]`),
   );
+  const partly = facts.some((group, index) => loaded[index].rows < group.count);
   return drawGroupedSection(
     u,
     sc,
@@ -803,12 +882,22 @@ export function drawRosterMergedSection(
       foldKey: MERGED_FOLD_KEY,
       className: MERGED_SECTION_CLASS,
       target: { case: "recentlyMerged", value: {} },
-      decorateHeader: (header) => header.appendChild(drawMergedTodayCount(facts.flat(), sc)),
+      decorateHeader: (header, section) => {
+        header.appendChild(drawMergedTodayCount(mergedSectionFacts(facts), sc));
+        section.toggleAttribute(MERGED_PARTLY_LOADED_ATTRIBUTE, partly);
+      },
       resizable: true,
     },
     groups,
+    true,
   );
 }
+
+/**
+ * The attribute the Recently Merged section wears while a group's merges are
+ * not all loaded: its header's count is then drawn though it is unfolded.
+ */
+export const MERGED_PARTLY_LOADED_ATTRIBUTE = "data-partly-loaded";
 
 /** The attribute a section with no groups wears while the rail leaves it out. */
 export const GROUPLESS_ATTRIBUTE = "data-groupless";
@@ -816,9 +905,9 @@ export const GROUPLESS_ATTRIBUTE = "data-groupless";
 /**
  * A section of repository GROUPS under the shared header: the one shape the
  * Merge Queue and Recently Merged sections share, so the two draw alike.
- * ITS HEADER CARRIES NO WIRE COUNT (DECORATE_HEADER may add the kind's own),
- * and A SECTION WITH NO GROUPS IS LEFT OUT of the
- * rail (`GROUPLESS_ATTRIBUTE`).
+ * ITS HEADER CARRIES A WIRE COUNT ONLY WHEN COUNTED (the Recently Merged
+ * section's; DECORATE_HEADER may add the kind's own), and A SECTION WITH NO
+ * GROUPS IS LEFT OUT of the rail (`GROUPLESS_ATTRIBUTE`).
  */
 export function drawGroupedSection(
   u: HeadedBoxWire,
@@ -826,12 +915,17 @@ export function drawGroupedSection(
   path: string,
   shape: Pick<HeadedBoxShape, "foldKey" | "className" | "target" | "decorateHeader" | "resizable">,
   groups: HTMLElement[],
+  counted = false,
 ): HTMLElement {
   return drawHeadedBox(
     u,
     sc,
     path,
-    { ...shape, countless: true, leftOut: { when: () => groups.length === 0, attribute: GROUPLESS_ATTRIBUTE } },
+    {
+      ...shape,
+      ...(counted ? {} : { countless: true as const }),
+      leftOut: { when: () => groups.length === 0, attribute: GROUPLESS_ATTRIBUTE },
+    },
     () => {
       const region = document.createElement("div");
       region.className = "rows";
@@ -881,14 +975,6 @@ export function drawRosterMergeQueueSection(
   );
 }
 
-/**
- * How many of the band's rows are drawn with the band; every later one is a
- * stand-in until it comes into view (`reveal.ts`, owner ruling 2026-10-15:
- * a row scrolled out of the band's viewport is not drawn). Twice the bands'
- * whole share of the rail, so a band opened or fitted shows drawn rows at once.
- */
-export const MERGED_DRAWN_AT_ONCE = BAND_FLOOR * 4;
-
 /** The class of one repository's group inside either section, and of its header. */
 export const MERGED_GROUP_CLASS = DEPLOYS_GROUP_CLASS;
 export const MERGED_GROUP_HEAD_CLASS = "merged-group-head";
@@ -899,12 +985,27 @@ export const MERGED_GROUP_BODY_CLASS = "rows";
 /** The attribute a merged row states its merged instant (epoch ms) on (`band-fit.ts` reads it). */
 export { MERGED_AT_ATTRIBUTE };
 
-/** One merged row's facts a group's header counts. */
+/** One recent merge's facts a header counts: a summary's `RosterMergedRepoGroupRecentMerge`. */
 export interface MergedRowFacts {
   /** When the merge landed (epoch ms). */
   atMs: number;
   /** The commits the merge brought in; undefined when the daemon has no count. */
   commits: number | undefined;
+}
+
+/** What a header says about merges: the last day's, and the latest's instant. */
+export interface MergedSummaryFacts {
+  /** Every merge of the day before the summary was resolved, most recent first. */
+  recent: MergedRowFacts[];
+  /** When the latest merge landed (epoch ms), or null when there is none. */
+  latestMs: number | null;
+}
+
+/** A Recently Merged group's summary facts, with how many merges it holds. */
+export interface MergedGroupFacts extends MergedSummaryFacts {
+  /** Every merged workspace of the group, loaded or not. */
+  count: number;
+  latestMs: number;
 }
 
 /**
@@ -990,81 +1091,69 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
 }
 
 /**
- * The facts of every merged row in a Recently Merged group U at PATH, the
- * ones its header and the section's header count. A merged row is always
- * on the `when.merged` arm; one that is not is malformed.
+ * What a Recently Merged group U at PATH says about ALL its merges, loaded or
+ * not: its summary's count, latest instant and the last day's merges.
  */
-export function mergedGroupFacts(u: RosterMergedRepoGroup, path: string): MergedRowFacts[] {
-  const rows = requireMessage(u.mergedRows, `${path}.merged_rows`);
-  return rows.rows.map((merged, i): MergedRowFacts => {
-    const rowPath = `${path}.merged_rows.rows[${i}].row`;
-    const row = requireMessage(merged.row, rowPath);
-    const when = requireMessage(row.when, `${rowPath}.when`);
-    const arm = requireCase(when.shown, `${rowPath}.when.shown`);
-    if (arm.case !== "merged") return unreachableArm(`${rowPath}.when.shown`, arm.case);
-    const commits = requireMessage(row.detail, `${rowPath}.detail`).commits;
-    return {
-      atMs: drawRosterRowWhenMerged(arm.value, `${rowPath}.when.merged`),
-      commits: commits === undefined ? undefined : drawRosterRowDetailCommits(commits, `${rowPath}.detail.commits`),
-    };
-  });
+export function mergedGroupFacts(u: RosterMergedRepoGroup, path: string): MergedGroupFacts {
+  const summaryPath = `${path}.summary`;
+  const summary: RosterMergedRepoGroupSummary = requireMessage(u.summary, summaryPath);
+  return {
+    count: requireMessage(summary.count, `${summaryPath}.count`).merges,
+    latestMs: msOf(requireMessage(summary.latest, `${summaryPath}.latest`).mergedAtMs, `${summaryPath}.latest.merged_at_ms`),
+    recent: summary.recent.map((merge, i) => ({
+      atMs: msOf(merge.mergedAtMs, `${summaryPath}.recent[${i}].merged_at_ms`),
+      commits: merge.commits,
+    })),
+  };
+}
+
+/** The section header's facts: every group's last day of merges together, and the latest of their latest. */
+export function mergedSectionFacts(groups: readonly MergedGroupFacts[]): MergedSummaryFacts {
+  return {
+    recent: groups.flatMap((group) => group.recent),
+    latestMs: groups.length === 0 ? null : Math.max(...groups.map((group) => group.latestMs)),
+  };
 }
 
 /**
  * One repository's group inside the Recently Merged section: its header,
- * then its merged rows, most recently merged first. MERGES are the group's
- * row facts (`mergedGroupFacts`), in the rows' order.
- *
- * THE GROUP SHOWS ITS TEN MOST RECENT MERGES (owner request, 2026-10-31;
- * `deploys-more.ts`): every older one waits in a hidden page of ten, which
- * the arrow under the group shows.
+ * from its summary FACTS, then the rows of its LOADED pages, most recently
+ * merged first: page 0's in the group's body, each later page in its own box
+ * (`MERGED_PAGE_CLASS`) so it can be let go as a whole once it lies below
+ * the viewport, and the loading spinner at the end while more pages exist
+ * (`merged-pages.ts`).
  *
  * Each row carries its merged instant (`data-merged-at`), the one the row
  * already draws.
  */
 export function drawRosterMergedRepoGroup(
   u: RosterMergedRepoGroup,
-  merges: MergedRowFacts[],
+  facts: MergedGroupFacts,
+  loaded: MergedGroupPages,
   sc: SidebarContext,
   path: string,
-  drawnNow: { left: number },
 ): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
-  const rows = requireMessage(u.mergedRows, `${path}.merged_rows`);
   const head = drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`);
-  head.appendChild(drawMergedTodayCount(merges, sc));
-  tickGroupHover(head, merges, sc);
+  head.appendChild(drawMergedTodayCount(facts, sc));
+  tickGroupHover(head, facts.recent, sc);
   const body = document.createElement("div");
   const group = drawRepositoryGroup("recently-merged", key, head, body, sc);
-  // AN OLDER MERGE WAITS IN ITS PAGE OF TEN (deploys-more.ts), drawn once
-  // it comes into view, as every row past the band's first is.
-  const pages: HTMLElement[] = [];
-  rows.rows.forEach((row, i) => {
-    const rowPath = `${path}.merged_rows.rows[${i}]`;
-    const stamp = (drawn: HTMLElement): void => drawn.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs));
-    if (i >= DEPLOYS_PAGE_SIZE) {
-      const index = Math.floor(i / DEPLOYS_PAGE_SIZE) - 1;
-      if (index === pages.length) {
-        const page = document.createElement("div");
-        page.className = DEPLOYS_PAGE_CLASS;
-        pages.push(page);
-        body.appendChild(page);
-      }
-      drawRosterRowWhenShown(pages[index], row, sc, rowPath, "merged", stamp);
-      return;
+  loaded.pages.forEach((rows, page) => {
+    const into = page === 0 ? body : document.createElement("div");
+    if (page > 0) {
+      into.className = MERGED_PAGE_CLASS;
+      body.appendChild(into);
     }
-    if (drawnNow.left > 0) {
-      drawnNow.left -= 1;
-      const drawn = drawRosterFamily(row, sc, rowPath, "merged");
-      stamp(drawn);
-      body.appendChild(drawn);
-      return;
-    }
-    drawRosterRowWhenShown(body, row, sc, rowPath, "merged", stamp);
+    rows.forEach((merged, i) => {
+      const rowPath = `${path}.pages[${page}].rows[${i}]`;
+      const drawn = drawRosterFamily(merged, sc, rowPath, "merged");
+      drawn.setAttribute(MERGED_AT_ATTRIBUTE, String(mergedRowAtMs(merged, rowPath)));
+      into.appendChild(drawn);
+    });
   });
-  if (rows.rows.length > DEPLOYS_PAGE_SIZE) body.appendChild(drawDeploysMoreSpinner());
+  if (loaded.more) body.appendChild(drawMergedMoreSpinner());
   sc.deploysFold.paint(group);
-  sc.deploysMore.paint(group);
   return group;
 }
 
@@ -1082,31 +1171,30 @@ export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
 /**
  * A group header's, or the Recently Merged section header's (every group's
  * merges together), "(K today, last D ago)": how many of its merges landed
- * TODAY (local date), counted over every row the daemon sent, including those
- * scrolled out of view or folded away, and how long ago the latest of them
- * landed (`mergedTodayCountText`). The shared ticker repaints it, so the age
- * counts up and the count drops at midnight together with the green names.
+ * TODAY (local date), counted over the summary's last day of merges, loaded
+ * or not, and how long ago the latest landed (`mergedTodayCountText`). The
+ * shared ticker repaints it, so the age counts up and the count drops at
+ * midnight together with the green names, with no push.
  */
-export function drawMergedTodayCount(merges: MergedRowFacts[], sc: SidebarContext): HTMLElement {
+export function drawMergedTodayCount(facts: MergedSummaryFacts, sc: SidebarContext): HTMLElement {
   const count = document.createElement("span");
   count.className = `sb-count ${MERGED_TODAY_COUNT_CLASS}`;
   tickPaint(sc, (nowMs) => {
-    count.textContent = mergedTodayCountText(merges, nowMs);
+    count.textContent = mergedTodayCountText(facts, nowMs);
   });
   return count;
 }
 
 /**
- * The today count's words for MERGES at NOW_MS: "(K today, last D ago)",
- * K counting the merges of NOW_MS's local date and D the latest merge's age
- * in at most two units (`formatAge`: `1h 5m`, `5m 30s`; owner request,
- * 2026-10-27), or "(K today)" while the group has no merge at all.
+ * The today count's words for FACTS at NOW_MS: "(K today, last D ago)",
+ * K counting the recent merges of NOW_MS's local date and D the latest
+ * merge's age in at most two units (`formatAge`: `1h 5m`, `5m 30s`; owner
+ * request, 2026-10-27), or "(K today)" while there is no merge at all.
  */
-export function mergedTodayCountText(merges: MergedRowFacts[], nowMs: number): string {
-  const today = todaysMerges(merges, nowMs).length;
-  if (merges.length === 0) return `(${today} today)`;
-  const last = Math.max(...merges.map((m) => m.atMs));
-  return `(${today} today, last ${formatAge(nowMs - last)} ago)`;
+export function mergedTodayCountText(facts: MergedSummaryFacts, nowMs: number): string {
+  const today = todaysMerges(facts.recent, nowMs).length;
+  if (facts.latestMs === null) return `(${today} today)`;
+  return `(${today} today, last ${formatAge(nowMs - facts.latestMs)} ago)`;
 }
 
 /**

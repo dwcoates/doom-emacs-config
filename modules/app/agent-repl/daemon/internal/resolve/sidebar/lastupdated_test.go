@@ -18,9 +18,11 @@ import (
 
 // ---- the update recency the editor's switcher orders by ----
 
-// rowsEverywhere is every row the roster draws, through the one walk.
-func rowsEverywhere(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
-	return rosterwalk.AllRows(roster)
+// rowsEverywhere is every row the roster draws: its streams' rows through
+// the one walk, then every merged row a page resolves.
+func rowsEverywhere(t *testing.T, r sidebar.Resolver) []*frontendv1.RosterRow {
+	t.Helper()
+	return append(rosterwalk.AllRows(latestPush(t, r)), mergedRows(t, r)...)
 }
 
 func TestTheRowStatesTheLatestUpdateItsRecordHolds(t *testing.T) {
@@ -56,7 +58,7 @@ func TestTheRowStatesTheLatestUpdateItsRecordHolds(t *testing.T) {
 			r.SetRegistry(registry(rec))
 
 			// Assert.
-			row := rowFor(rowsEverywhere(latest(t, r)), string(theWS))
+			row := rowFor(rowsEverywhere(t, r), string(theWS))
 			if row == nil {
 				t.Fatalf("no row for %s", theWS)
 			}

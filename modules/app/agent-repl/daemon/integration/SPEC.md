@@ -143,7 +143,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - the when-column counts from the last turn END: `created` while the first
   turn runs, `turn_ended` at its close, and the next turn's start leaves it
 - WatchWorkspaceRoster delivers the latest roster first to a late
-  subscriber (subscription invariant)
+  subscriber, every stream set (subscription invariant), and later frames
+  only the streams that changed
 - two subscribers receive identical sequences
 - registering a workspace produces exactly one roster push with the new row
   under its repo section with status `none`
@@ -167,7 +168,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - attention marker set on a notification push, cleared by SelectWorkspace and
   by the last open ask settling
 - closed workspace draws `closed:true`; nuked workspace leaves the roster
-- recently_merged lists a merged workspace with `when.merged`
+- a merged workspace leaves the roster's streams for the Recently Merged
+  summary, and its ListMergedWorkspaces page row carries `when.merged`
 - task view: CreateTask/UpdateTask/AssignWorkspaceTask group rows under the
   task section with the done check; unassign returns the row to the repo
   grouping; blank title refused with the intended arm

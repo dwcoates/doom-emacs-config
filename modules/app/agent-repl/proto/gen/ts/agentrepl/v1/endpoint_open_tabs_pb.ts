@@ -657,7 +657,7 @@ export type OpenTabsOpenedReady = Message<"agentrepl.v1.OpenTabsOpenedReady"> & 
   } | { case: undefined; value?: undefined };
 
   /**
-   * The revision of the roster `row` was taken from (WorkspaceRoster.revision):
+   * The revision of the roster `row` was taken from (frontend.v1.RosterPush.revision):
    * a consumer that already holds that revision or a later one already holds
    * this row or a newer one, and keeps what it has.
    *

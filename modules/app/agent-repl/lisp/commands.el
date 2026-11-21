@@ -117,6 +117,11 @@
 (declare-function agent-repl-verbs--roster-or-view "agent-repl-verbs" (roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
 (declare-function agent-repl-roster-ws-repository "agent-repl-roster" (ws))
+(declare-function agent-repl-roster-merged-entries-sync "agent-repl-roster"
+                  (conn &optional max-pages))
+(declare-function agent-repl-verbs--conn "agent-repl-verbs" (&optional ws))
+(defvar agent-repl-roster-merged-page-size)
+(declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-row-status "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-instant-ms "agent-repl-roster" (row field))
 (declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
@@ -800,8 +805,18 @@ A dotted ring: the workspace is there but kept out of sight.  It is inked
 with the row's status color, so the switcher still says what the sidebar
 says about the workspace's status.")
 
-(defun agent-repl--switch-candidates ()
+(defun agent-repl--switch-merged-pages (all)
+  "Return how many merged pages the switcher reads: nil (every page) when ALL.
+`SPC p p' offers the `agent-repl--switch-recent-limit' most recently
+merged, so it reads just the pages that hold them; `SPC p P' offers every
+known workspace, so it reads every page until the last."
+  (unless all
+    (ceiling agent-repl--switch-recent-limit agent-repl-roster-merged-page-size)))
+
+(defun agent-repl--switch-candidates (&optional all)
   "Return every KNOWN workspace the `SPC p p' switcher can land on.
+With ALL non-nil, every merged workspace is among them; otherwise only
+the merged pages `SPC p p' can offer from (`agent-repl--switch-merged-pages').
 
 THE DAEMON'S ROSTER IS THE SOURCE OF WHAT EXISTS, so it is the source
 here (owner ruling, 2026-09-20).  The switcher used to complete over
@@ -813,6 +828,11 @@ one the daemon knows that this Emacs has not reconciled yet (a
 just-registered repo whose landing is still pending), and one with no
 local perspective yet for any other reason.
 
+A MERGED WORKSPACE IS IN NO ROSTER STREAM: its entries come from the
+merged pages (`agent-repl-roster-merged-entries-sync'), most recently
+merged first, after the streams\=' walk.  A page that cannot be read is
+signalled, never offered as an empty list of merges.
+
 Each entry is a plist:
 
   :name   what the roster calls the row, or the workspace name
@@ -823,8 +843,8 @@ Each entry is a plist:
           `:not-here' (the daemon knows it, this Emacs has no tab)
   :row    the roster row, nil for a live local workspace with none yet
   :section  the roster section the row sits in (`:repository',
-          `:hidden' or `:merged', `agent-repl-roster-walk'), nil
-          without a row
+          `:hidden', `:closed' (`agent-repl-roster-walk') or `:merged'
+          (a merged page), nil without a row
 
 A LIVE LOCAL WORKSPACE THE ROSTER DOES NOT CARRY IS STILL OFFERED: the
 roster push and the registry are reconciled asynchronously, and the
@@ -834,8 +854,11 @@ are persp-mode's, not workspaces -- and `agent-repl--live-ws-names'
 excludes them at its source."
   (let ((entries nil)
         (claimed nil))
-    (dolist (walked (agent-repl-roster-walk
-                     (agent-repl-verbs--roster-or-view nil)))
+    (dolist (walked (append (agent-repl-roster-walk
+                             (agent-repl-verbs--roster-or-view nil))
+                            (agent-repl-roster-merged-entries-sync
+                             (agent-repl-verbs--conn)
+                             (agent-repl--switch-merged-pages all))))
       (let* ((row (plist-get walked :row))
              (ref (agent-repl-roster-row-ref row))
              (id (plist-get ref :id)))
@@ -1234,7 +1257,7 @@ perspective of its own and re-point the workspace being left.
 A CANDIDATE WITH NO REF CANNOT BE OPENED and says so: the ref is
 daemon-minted and there is no spelling of it Emacs could construct."
   (let* ((now-ms (agent-repl--now-unix-ms))
-         (known (agent-repl--switch-candidates))
+         (known (agent-repl--switch-candidates all))
          (candidates (agent-repl--switch-display-alist
                       (agent-repl--switch-by-recency
                        (if all known (agent-repl--switch-curated known now-ms))))))

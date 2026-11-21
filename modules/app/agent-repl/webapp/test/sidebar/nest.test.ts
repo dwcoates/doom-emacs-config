@@ -6,14 +6,13 @@ import {
   SetWorkspaceParentResponseSchema,
   type SetWorkspaceParentRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_parent_pb";
-import { WorkspaceRosterSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { buildNestRequest, sendNest, setWorkspaceParentRefusal } from "../../src/sidebar/nest.js";
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
 import { log } from "../../src/log.js";
 import { refusalSentence } from "../../src/rpc/refusal.js";
 import { oneofArms } from "../arms.js";
-import { appContext, sidebarContext } from "./harness.js";
+import { appContext, roster, sidebarContext } from "./harness.js";
 
 const CHILD = create(WorkspaceRefSchema, { id: "ws-child", dir: "/w/child" });
 const PARENT = create(WorkspaceRefSchema, { id: "ws-parent", dir: "/w/parent" });
@@ -31,7 +30,7 @@ function nestContext(response: Parameters<typeof create<typeof SetWorkspaceParen
   );
   const drawn: number[] = [];
   sc.arrange.hold = createArrangeHold((roster) => drawn.push(Number(roster.revision)));
-  sc.arrange.hold.offer(create(WorkspaceRosterSchema, { revision: 6n }));
+  sc.arrange.hold.offer(roster({ revision: 6n }));
   const host = document.createElement("div");
   host.appendChild(sc.arrange.status);
   return { sc, asked, drawn, host };
@@ -88,7 +87,7 @@ describe("sending a nesting", () => {
     const { sc, drawn } = nestContext({ result: { case: "success", value: { rosterRevision: 7n } } });
     const took = await sendNest(sc, sc.arrange.status, CHILD, PARENT);
     const heldBefore = sc.arrange.hold.holding();
-    sc.arrange.hold.offer(create(WorkspaceRosterSchema, { revision: 7n }));
+    sc.arrange.hold.offer(roster({ revision: 7n }));
     expect([took, heldBefore, drawn, sc.arrange.hold.holding()]).toEqual([true, true, [6, 7], false]);
   });
 

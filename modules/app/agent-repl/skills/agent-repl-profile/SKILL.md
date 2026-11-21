@@ -160,13 +160,13 @@ which every runtime stops by itself.
 - **Flagged by**: the owner, 2026-10-12.
 
 ### Sidebar re-render per state change
-- **Interaction**: every state change of any workspace re-renders every roster row.
-- **Budget**: background, but it is CPU on every change and grows with the number of workspaces.
-- **Measured**: 4 debug records per row per render; sidebar records were 26% of a daemon's records in a 58-test sample, 2026-10-12.
-- **Code paths**: daemon/internal/resolve/sidebar (render, sectionRows, row, statusArm).
-- **Contributors**: whole-roster re-render and per-row decision logging on unchanged rows.
-- **Status / next step**: proposed: log a row's decisions only when its result changes; awaiting the owner.
-- **Flagged by**: found by profiling, 2026-10-12.
+- **Interaction**: every state change of any workspace resent and redrew the whole roster on every page's rail.
+- **Budget**: the rail draws a push within one frame (16ms) under a deploy's push rate.
+- **Measured (before, 2026-11-16, owner's live logs and a profile session)**: every push was the whole roster, 1,154 rows per render (`daemon.sidebar.unchanged_rows` `drawn: 1154`), 657 of them landed workspaces in Recently Merged. About 30 pushes a minute between deploys, up to 140 a minute during one. In a 3-minute debug window the drivers were 74 `daemon.sidebar.set_merge` (14 for the running merge's steps, the rest 28 queued workspaces each re-stamped whenever the queue moved), 29 `footer_status_changed`, 20 `set_repo_divergence`, 12 `set_selection`. The webapp's `sidebar.roster-draw` took a median 41ms push to next frame (p90 98ms, max 779ms) over about 800 `.row` elements and 8,500 nodes, about 12s of drawing in a deploy minute. Earlier (2026-10-12): 4 debug records per row per render, 26% of a daemon's records in a 58-test sample.
+- **Code paths**: daemon/internal/resolve/sidebar (render, mergedSection, merged pages), daemon/internal/server/streams.go (per-subscription stream filtering), webapp/src/sidebar (roster.ts, the merged page loader), lisp/wire-roster.el and lisp/roster.el.
+- **Contributors**: measured: the whole roster in every push; every merged row built, sent, decoded and drawn as a stand-in with an observer, even while folded; reflective equality over every merged row each push.
+- **Status / next step**: fixed on branch `sidebar-roster-streams` (design: docs/protobuf-design/sidebar-roster-streams.md). The roster is four snapshot streams (`frontend.v1.RosterPush`: workspaces, merge queue, recently merged summary, closed), each resent whole only when it changes. Merged rows are on no stream, and `agentrepl.v1.ListMergedWorkspaces` pages them ten at a time, loading nothing while the band is folded. A queue move resends only the merge queue stream. Next: re-measure `sidebar.roster-draw` and the push rate per stream across a deploy against the figures above.
+- **Flagged by**: found by profiling, 2026-10-12; the rail's lag under load flagged by the owner, 2026-11-16.
 
 ### Sidebar animation smoothness under load
 - **Interaction**: watching the rail while workspaces work: a working workspace's name breathes, and a reviving one's shimmers; under load both stutter or freeze.

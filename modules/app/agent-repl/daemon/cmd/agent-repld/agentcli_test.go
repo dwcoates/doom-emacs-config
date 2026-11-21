@@ -399,7 +399,7 @@ func locateOver(rows ...*frontendv1.RosterRow) func(context.Context, agentreplv1
 		}
 		by := workspacefind.LocateBy{Name: req.GetNamed().GetName(), At: req.GetAt().GetDir(), Containing: req.GetContaining().GetDir()}
 		var refs []*workspacev1.WorkspaceRef
-		for _, ws := range workspacefind.Locate(records, &frontendv1.WorkspaceRoster{}, by) {
+		for _, ws := range workspacefind.Locate(records, &frontendv1.RosterPush{}, by) {
 			refs = append(refs, ws.Ref())
 		}
 		return refs, nil

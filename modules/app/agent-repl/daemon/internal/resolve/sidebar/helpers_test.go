@@ -251,19 +251,49 @@ func (f *fanned) openFault(ws ids.WorkspaceID, id, kind string) {
 	})
 }
 
-// latest reads the roster the resolver last published, failing when it
-// published none.
+// latest reads the workspaces stream of the push the resolver last
+// published, failing when it published none.
 func latest(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster {
 	t.Helper()
-	roster, ok := r.Topic().Latest()
+	return latestPush(t, r).GetWorkspaces()
+}
+
+// latestPush reads the push the resolver last published, failing when it
+// published none or one that leaves a stream out: every value the topic
+// carries holds every stream.
+func latestPush(t *testing.T, r sidebar.Resolver) *frontendv1.RosterPush {
+	t.Helper()
+	push, ok := r.Topic().Latest()
 	if !ok {
 		t.Fatal("the roster published nothing")
 	}
-	return roster
+	if push.Workspaces == nil || push.MergeQueue == nil || push.RecentlyMerged == nil || push.Closed == nil {
+		t.Fatalf("the roster published a push missing a stream: %v", push)
+	}
+	return push
+}
+
+// mergedRows pages every merged workspace's row, most recently merged
+// first, across every repository: the rows the band draws.
+func mergedRows(t *testing.T, r sidebar.Resolver) []*frontendv1.RosterRow {
+	t.Helper()
+	var out []*frontendv1.RosterRow
+	for page := uint32(0); ; page++ {
+		got, err := r.MergedPage(sidebar.MergedPageQuery{Order: sidebar.MergedByMerge, Page: page})
+		if err != nil {
+			t.Fatalf("MergedPage(%d): %v", page, err)
+		}
+		for _, row := range got.Rows {
+			out = append(out, row.GetRow())
+		}
+		if !got.More {
+			return out
+		}
+	}
 }
 
 // subscribe opens a subscription that is torn down with the test.
-func subscribe(t *testing.T, r sidebar.Resolver) <-chan *frontendv1.WorkspaceRoster {
+func subscribe(t *testing.T, r sidebar.Resolver) <-chan *frontendv1.RosterPush {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -394,7 +424,7 @@ func rowFor(rows []*frontendv1.RosterRow, id string) *frontendv1.RosterRow {
 // onlyRow reads the roster's single row, in whichever list it is.
 func onlyRow(t *testing.T, r sidebar.Resolver) *frontendv1.RosterRow {
 	t.Helper()
-	rows := rosterwalk.AllRows(latest(t, r))
+	rows := append(rosterwalk.AllRows(latestPush(t, r)), mergedRows(t, r)...)
 	if len(rows) != 1 {
 		t.Fatalf("the section carried %d rows, want exactly 1", len(rows))
 	}

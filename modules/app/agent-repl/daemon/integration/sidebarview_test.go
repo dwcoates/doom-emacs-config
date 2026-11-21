@@ -37,7 +37,7 @@ func collapseMergedBand() *agentreplv1.UpdateSidebarViewRequest {
 	})
 }
 
-func mergedBandCollapsed(r *frontendv1.WorkspaceRoster) bool {
+func mergedBandCollapsed(r *frontendv1.RosterPush) bool {
 	return r.GetRecentlyMerged().GetCollapsed() != nil
 }
 

@@ -50,7 +50,25 @@ func (ws Workspace) Withheld(folded bool) Withholding {
 // workspace that was reopened and hidden is hidden like any other; only a
 // settled merge (merged and closed) is listed under recently merged instead.
 func (ws Workspace) InHiddenSection() bool {
-	return ws.Hidden && !(ws.Closed && ws.MergedAt != nil)
+	return ws.Hidden && !ws.MergeSettled()
+}
+
+// MergeSettled reports whether the workspace's merge has settled: it is
+// closed and its merge landed. OPEN BEATS MERGED, so a merged workspace that
+// was reopened has not.
+func (ws Workspace) MergeSettled() bool {
+	return ws.Closed && ws.MergedAt != nil
+}
+
+// InMergedBand reports whether the workspace is in the sidebar's merged set:
+// the workspaces the Recently Merged band counts and
+// agentrepl.v1.ListMergedWorkspaces pages. Its merge has settled, and it is
+// no chat thread (listed only in the thread section). A hidden merge
+// workspace is never in it: a landed one is an ordinary closed workspace
+// (MergeHidden). It is the ONE spelling of that set, for the roster and every
+// registry reader that answers for it.
+func (ws Workspace) InMergedBand() bool {
+	return !ws.IsThread() && ws.MergeSettled()
 }
 
 // KeptWarm reports whether the workspace's prompt cache is kept warm by

@@ -24,7 +24,7 @@ import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { createPresence } from "../../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import foldSource from "../../src/sidebar/deploys-fold.ts?raw";
-import moreSource from "../../src/sidebar/deploys-more.ts?raw";
+import pagesSource from "../../src/sidebar/merged-pages.ts?raw";
 
 /**
  * A group of REPOSITORY in SECTION: a Merge Queue group stating LINE when one
@@ -281,7 +281,7 @@ describe("deploysGroupRepository", () => {
 
   it.each([
     { name: "the fold", source: foldSource },
-    { name: "the older deploys", source: moreSource },
+    { name: "the merged pages", source: pagesSource },
   ])("is the one read of a group's repository for $name", ({ source }) => {
     const reads = source.match(/getAttribute\(DEPLOYS_REPOSITORY_ATTRIBUTE\)/g) ?? [];
     const calls = source.match(/deploysGroupRepository\(group, /g) ?? [];

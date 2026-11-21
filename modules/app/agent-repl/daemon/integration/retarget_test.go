@@ -28,7 +28,7 @@ type retargetFamily struct {
 	repo   *harness.Repo
 	parent *workspacev1.WorkspaceRef
 	child  *workspacev1.WorkspaceRef
-	roster *harness.Stream[*frontendv1.WorkspaceRoster]
+	roster *harness.Stream[*frontendv1.RosterPush]
 }
 
 // newRetargetFamily creates a parent workspace and a child of it.
@@ -62,12 +62,12 @@ func newRetargetFamily(t *testing.T, opts harness.Opts, repo *harness.Repo) *ret
 }
 
 // nested reports whether the roster draws the child under the parent.
-func (f *retargetFamily) nested(r *frontendv1.WorkspaceRoster) bool {
+func (f *retargetFamily) nested(r *frontendv1.RosterPush) bool {
 	return rosterNests(r, f.parent.GetId(), f.child.GetId())
 }
 
 // topLevel reports whether the roster draws the child as a row of its own.
-func (f *retargetFamily) topLevel(r *frontendv1.WorkspaceRoster) bool {
+func (f *retargetFamily) topLevel(r *frontendv1.RosterPush) bool {
 	return rosterRepoRow(r, f.child.GetId()) != nil && !f.nested(r)
 }
 
@@ -122,7 +122,7 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	if _, err := f.d.Client().FinishWorkspace(f.d.Ctx(), connect.NewRequest(harness.FinishRequest(f.child))); err != nil {
 		t.Fatalf("FinishWorkspace(child) = error %v, want the merge enqueued", err)
 	}
-	awaitRoster(t, f.d, f.roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, f.roster, "the child's merge landed", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.child.GetId())
 		return row != nil && row.GetMerged() != nil
 	})
@@ -166,7 +166,7 @@ func TestRosterNestsReadsOnlyTheParentsChildren(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := rosterNests(roster, tt.parent, tt.child)
+			got := rosterNests(&frontendv1.RosterPush{Workspaces: roster}, tt.parent, tt.child)
 
 			// Assert
 			if got != tt.want {

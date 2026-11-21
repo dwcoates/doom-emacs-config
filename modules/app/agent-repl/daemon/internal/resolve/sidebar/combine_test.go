@@ -129,7 +129,7 @@ func TestTheCombinedCommit(t *testing.T) {
 	t.Run("changes queued while a render runs are published by one further render", func(t *testing.T) {
 		// Arrange
 		fx := newCombineFixture(t)
-		before := latest(t, fx.r).GetRevision()
+		before := latestPush(t, fx.r).GetRevision()
 		leader := fx.holdRender(t, func() { fx.r.SetBringingUp(wsA, true) })
 		waiters := fx.queueBehind(t,
 			func() { fx.r.SetBringingUp(wsB, true) },
@@ -143,7 +143,7 @@ func TestTheCombinedCommit(t *testing.T) {
 		}
 
 		// Assert
-		if got, want := latest(t, fx.r).GetRevision(), before+2; got != want {
+		if got, want := latestPush(t, fx.r).GetRevision(), before+2; got != want {
 			t.Fatalf("revision = %d after three changes, two of them queued together, want %d", got, want)
 		}
 	})

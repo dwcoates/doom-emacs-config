@@ -620,6 +620,10 @@ func (s *fakeServer) ListCreationModels(ctx context.Context, req *connect.Reques
 	return handleUnary[v1.ListCreationModelsRequest, v1.ListCreationModelsResponse](ctx, s, "ListCreationModels", req.Msg)
 }
 
+func (s *fakeServer) ListMergedWorkspaces(ctx context.Context, req *connect.Request[v1.ListMergedWorkspacesRequest]) (*connect.Response[v1.ListMergedWorkspacesResponse], error) {
+	return handleUnary[v1.ListMergedWorkspacesRequest, v1.ListMergedWorkspacesResponse](ctx, s, "ListMergedWorkspaces", req.Msg)
+}
+
 func (s *fakeServer) ValidateWorkspaceName(ctx context.Context, req *connect.Request[v1.ValidateWorkspaceNameRequest]) (*connect.Response[v1.ValidateWorkspaceNameResponse], error) {
 	return handleUnary[v1.ValidateWorkspaceNameRequest, v1.ValidateWorkspaceNameResponse](ctx, s, "ValidateWorkspaceName", req.Msg)
 }

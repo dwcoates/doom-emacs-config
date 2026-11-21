@@ -205,7 +205,7 @@ func TestTheBootAdoptionStandsTheGateTheSurvivorHoldsOpen(t *testing.T) {
 			harness.AwaitView(t, ctx, successor.WatchFooter(f.ws), "the gate on the successor's strip", func(v *frontendv1.FooterView) bool {
 				return tt.footer(v.GetStrip().GetStatus())
 			})
-			awaitRoster(t, successor, successor.WatchRoster(), "the gate on the successor's row", func(r *frontendv1.WorkspaceRoster) bool {
+			awaitRoster(t, successor, successor.WatchRoster(), "the gate on the successor's row", func(r *frontendv1.RosterPush) bool {
 				row := rosterRow(r, f.ws.GetId())
 				return row != nil && tt.roster(row)
 			})

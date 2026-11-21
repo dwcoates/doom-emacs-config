@@ -41,8 +41,8 @@ func TestASelectOnTheSuccessorReachesTheIncumbentsRosterMidHandover(t *testing.T
 		t.Fatalf("SelectWorkspace(held) on the incumbent = error %v, want a success", err)
 	}
 	roster := d.WatchRoster()
-	harness.AwaitView(t, d.Ctx(), roster, "the incumbent's roster naming the held workspace", func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == held.ws.GetId()
+	harness.AwaitView(t, d.Ctx(), roster, "the incumbent's roster naming the held workspace", func(r *frontendv1.RosterPush) bool {
+		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == held.ws.GetId()
 	})
 	daemonStream := d.WatchDaemonStream()
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
@@ -64,8 +64,8 @@ func TestASelectOnTheSuccessorReachesTheIncumbentsRosterMidHandover(t *testing.T
 	}
 
 	// Assert: the incumbent's roster, still the editor's, names the switch.
-	harness.AwaitView(t, d.Ctx(), roster, "the incumbent's roster naming the moved workspace", func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == moved.ws.GetId()
+	harness.AwaitView(t, d.Ctx(), roster, "the incumbent's roster naming the moved workspace", func(r *frontendv1.RosterPush) bool {
+		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == moved.ws.GetId()
 	})
 
 	// Cleanup: the held workspace transfers too, so the incumbent leaves in

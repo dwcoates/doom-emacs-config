@@ -1,17 +1,20 @@
 // The shared drawing hold. See src/hold.ts.
 import { describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
-import { WorkspaceRosterSchema, type WorkspaceRoster } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createDrawingHold, type DrawingHold } from "../src/hold.js";
 import { log } from "../src/log.js";
 
-/** A roster carrying nothing but REVISION. */
-function at(revision: number): WorkspaceRoster {
-  return create(WorkspaceRosterSchema, { revision: BigInt(revision) });
+/** A push carrying nothing but REVISION. */
+interface Pushed {
+  revision: bigint;
+}
+
+/** A push carrying nothing but REVISION. */
+function at(revision: number): Pushed {
+  return { revision: BigInt(revision) };
 }
 
 /** A hold whose draws are recorded by revision. */
-function recordedHold(): { hold: DrawingHold<WorkspaceRoster>; drawn: number[] } {
+function recordedHold(): { hold: DrawingHold<Pushed>; drawn: number[] } {
   const drawn: number[] = [];
   return {
     hold: createDrawingHold({ draw: (roster) => drawn.push(Number(roster.revision)), revisionOf: (roster) => roster.revision, operation: "test.hold" }),

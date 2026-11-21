@@ -113,7 +113,7 @@ export const SelectWorkspaceResponseSchema: GenMessage<SelectWorkspaceResponse> 
 export type SelectWorkspaceSuccess = Message<"agentrepl.v1.SelectWorkspaceSuccess"> & {
   /**
    * THE ROSTER REVISION THE SELECTION IS IN (frontend.v1
-   * WorkspaceRoster.revision): every roster at this revision or later carries
+   * RosterPush.revision): every roster at this revision or later carries
    * it. The answer and the roster ride separate streams, so a roster resolved
    * before the selection can arrive after the answer; a client that moved on
    * the selection judges the roster's `current` only once it holds a roster at
