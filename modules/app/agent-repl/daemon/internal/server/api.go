@@ -68,6 +68,9 @@ type Deps struct {
 	// a test harness started (AGENT_REPL_TEST_BARRIER=1), which every other
 	// daemon refuses.
 	TestBarrier bool
+	// TestCoverageWindows serves CoverageWindowRoute: set only for a daemon
+	// a test harness started cover-built (AGENT_REPL_TEST_COVERAGE_WINDOWS=1).
+	TestCoverageWindows bool
 	// InFlight is the work count the barrier waits on; nil is
 	// inflight.Default, the daemon's one tracker.
 	InFlight *inflight.Tracker
@@ -793,6 +796,9 @@ func New(deps Deps) (Server, error) {
 	// The Connect routes and the image origin sit on their own longer
 	// prefixes, so http.ServeMux gives them precedence over the asset origin
 	// at "/".
+	if deps.TestCoverageWindows {
+		mux.Handle(CoverageWindowRoute, newCoverageWindowHandler(runtimeCoverage, s.log))
+	}
 	mux.Handle(imageorigin.Route, deps.ImageOrigin)
 	mux.Handle(chessboard.BundleRoute, deps.ChessWidgetBundle)
 	mux.Handle("/", s.assets())

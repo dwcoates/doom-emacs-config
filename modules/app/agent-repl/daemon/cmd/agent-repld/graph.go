@@ -2012,8 +2012,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			// THE TEST BARRIER IS SERVED ONLY TO A HARNESS'S DAEMON: the harness
 			// sets the environment, and no real client can come to rely on it.
 			TestBarrier: os.Getenv(testBarrierEnv) == "1",
-			Instance:    p.Instance,
-			Tests:       scripts,
+			// THE COVERAGE WINDOWS likewise belong to a harness's daemon alone.
+			TestCoverageWindows: os.Getenv(testCoverageWindowsEnv) == "1",
+			Instance:            p.Instance,
+			Tests:               scripts,
 			SubagentMakers: subagentmaker.New(subagentmaker.Deps{
 				Workspaces: p.DB.ListWorkspaces,
 				Session:    p.DB.Session,
