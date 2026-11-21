@@ -1150,15 +1150,19 @@ func (w *World) ServiceBinaries() harness.ServiceBinaries {
 // the sidecar never globs.
 func (w *World) SuccessorOpts(t testing.TB) harness.Opts {
 	t.Helper()
-	return harness.Opts{
-		StateDir:        w.StateDir,
-		ShimNode:        requireNode(t),
-		ShimMain:        requireShimBundle(t),
-		StoreSocket:     w.Store.Socket,
-		RealStore:       true,
-		ServiceBinaries: w.ServiceBinaries(),
-		ExtraEnv:        kit.WorldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t)),
-	}
+	// The predecessor's own successor shape carries its account roots: a
+	// successor on a fresh account root finds no transcript to resume, so a
+	// revival after the bounce would come up with an empty conversation.
+	opts := w.Daemon.SuccessorOpts()
+	opts.ExtraArgs = append(opts.ExtraArgs, "--multi-repo-config-dir", w.Daemon.MultiRepoConfigDir)
+	opts.StateDir = w.StateDir
+	opts.StoreSocket = w.Store.Socket
+	opts.ShimNode = requireNode(t)
+	opts.ShimMain = requireShimBundle(t)
+	opts.RealStore = true
+	opts.ServiceBinaries = w.ServiceBinaries()
+	opts.ExtraEnv = kit.WorldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t))
+	return opts
 }
 
 // awaitBuildReport waits until service's build report in lockDir names pid —

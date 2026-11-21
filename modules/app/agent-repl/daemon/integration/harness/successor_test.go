@@ -91,3 +91,30 @@ func TestEverySuccessorStartsThroughSuccessorOpts(t *testing.T) {
 		}
 	}
 }
+
+func TestAdoptConfigDirArgsKeepsTheStructWhereTheArgvPoints(t *testing.T) {
+	tests := []struct {
+		name                   string
+		extra                  []string
+		wantDefault, wantMulti string
+	}{
+		{name: "no override keeps the minted roots", extra: nil, wantDefault: "/minted/default", wantMulti: "/minted/multi"},
+		{name: "a default override replaces the default root", extra: []string{"--default-config-dir", "/carried"}, wantDefault: "/carried", wantMulti: "/minted/multi"},
+		{name: "a multi-repo override replaces the multi-repo root", extra: []string{"--multi-repo-config-dir", "/carried-m"}, wantDefault: "/minted/default", wantMulti: "/carried-m"},
+		{name: "the last of two overrides wins, as at the daemon", extra: []string{"--default-config-dir", "/a", "--default-config-dir", "/b"}, wantDefault: "/b", wantMulti: "/minted/multi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			d := &Daemon{DefaultConfigDir: "/minted/default", MultiRepoConfigDir: "/minted/multi"}
+
+			// Act
+			d.adoptConfigDirArgs(tt.extra)
+
+			// Assert
+			if d.DefaultConfigDir != tt.wantDefault || d.MultiRepoConfigDir != tt.wantMulti {
+				t.Fatalf("roots after %q = (%q, %q), want (%q, %q)", tt.extra, d.DefaultConfigDir, d.MultiRepoConfigDir, tt.wantDefault, tt.wantMulti)
+			}
+		})
+	}
+}

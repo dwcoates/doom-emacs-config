@@ -933,6 +933,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		args = append(args, "--pprof", opts.Pprof)
 	}
 	args = append(args, opts.ExtraArgs...)
+	d.adoptConfigDirArgs(opts.ExtraArgs)
 	args = omitFlags(args, opts.OmitArgs)
 
 	env := append(os.Environ(),
