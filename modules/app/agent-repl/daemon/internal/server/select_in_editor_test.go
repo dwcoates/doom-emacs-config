@@ -29,6 +29,11 @@ func holdHostStream(t *testing.T, h *harness) *connect.ServerStreamForClient[age
 	return stream
 }
 
+// holdEditor stands one Emacs daemon stream, which a relayed click reaches.
+func holdEditor(h *harness) *daemonWatcher {
+	return emacsWatcher(h.Server.(*server))
+}
+
 // selectInEditor calls SelectInEditor for the harness's workspace, failing the
 // test on a transport error.
 func selectInEditor(t *testing.T, h *harness) *agentreplv1.SelectInEditorResponse {
@@ -41,10 +46,10 @@ func selectInEditor(t *testing.T, h *harness) *agentreplv1.SelectInEditorRespons
 	return resp.Msg
 }
 
-func TestSelectInEditorWithAHostStreamAnswersRelayed(t *testing.T) {
+func TestSelectInEditorWithAnEditorAnswersRelayed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	holdHostStream(t, h)
+	holdEditor(h)
 
 	// Act.
 	resp := selectInEditor(t, h)
@@ -55,25 +60,27 @@ func TestSelectInEditorWithAHostStreamAnswersRelayed(t *testing.T) {
 	}
 }
 
-func TestSelectInEditorWithAHostStreamPushesSelectRequested(t *testing.T) {
-	// Arrange.
+func TestSelectInEditorWithAnEditorPushesSelectRequestedNamingTheWorkspace(t *testing.T) {
+	// Arrange: no host stream holds the workspace, as for one the editor
+	// does not hold.
 	h := newHarness(t)
-	stream := holdHostStream(t, h)
+	w := holdEditor(h)
 
 	// Act.
 	selectInEditor(t, h)
-	push := receiveHostEvent(t, stream)
+	push := <-w.elisp
+	push.sent()
 
 	// Assert.
-	if push.GetSelectRequested() == nil {
-		t.Fatalf("push = %v, want select_requested", push)
+	if got := push.push.GetSelectRequested().GetWorkspace(); got.GetId() != string(testWorkspaceID) {
+		t.Fatalf("push = %v, want select_requested naming the workspace", push.push)
 	}
 }
 
-func TestSelectInEditorWithAHostStreamSelectsNothingItself(t *testing.T) {
+func TestSelectInEditorWithAnEditorSelectsNothingItself(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	holdHostStream(t, h)
+	holdEditor(h)
 
 	// Act.
 	selectInEditor(t, h)
@@ -84,13 +91,13 @@ func TestSelectInEditorWithAHostStreamSelectsNothingItself(t *testing.T) {
 	}
 }
 
-func TestSelectInEditorWithAHostStreamRevealsNoMergeWorkspace(t *testing.T) {
+func TestSelectInEditorWithAnEditorRevealsNoMergeWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	record := h.DB.workspaces[testWorkspaceID]
 	record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
 	h.DB.workspaces[testWorkspaceID] = record
-	holdHostStream(t, h)
+	holdEditor(h)
 
 	// Act.
 	selectInEditor(t, h)
@@ -106,7 +113,7 @@ func TestSelectInEditorRecordsTheRelayAtInfo(t *testing.T) {
 	h := newHarness(t)
 	log := dlog.NewTestLogger()
 	h.Surfaces.workspace = log
-	holdHostStream(t, h)
+	holdEditor(h)
 
 	// Act.
 	selectInEditor(t, h)
@@ -115,14 +122,14 @@ func TestSelectInEditorRecordsTheRelayAtInfo(t *testing.T) {
 	for _, rec := range log.Records() {
 		if rec.Operation == "SelectInEditor" && rec.Level == "info" &&
 			rec.Message == "relayed a row click to the editor, which makes the switch" &&
-			rec.Context["host_streams"] == 1 {
+			rec.Context["editors"] == 1 {
 			return
 		}
 	}
-	t.Fatalf("records = %+v, want the relay at info naming one host stream", log.Records())
+	t.Fatalf("records = %+v, want the relay at info naming one editor", log.Records())
 }
 
-func TestSelectInEditorWithNoHostStreamSelectsTheWorkspace(t *testing.T) {
+func TestSelectInEditorWithNoEditorSelectsTheWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Deps.Sidebar.(*fakeSidebar).revision = 42
@@ -142,7 +149,7 @@ func TestSelectInEditorWithNoHostStreamSelectsTheWorkspace(t *testing.T) {
 	}
 }
 
-func TestSelectInEditorWithNoHostStreamRecordsTheDaemonsRoute(t *testing.T) {
+func TestSelectInEditorWithNoEditorRecordsTheDaemonsRoute(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	log := dlog.NewTestLogger()
@@ -154,14 +161,14 @@ func TestSelectInEditorWithNoHostStreamRecordsTheDaemonsRoute(t *testing.T) {
 	// Assert.
 	for _, rec := range log.Records() {
 		if rec.Operation == "SelectInEditor" && rec.Level == "info" &&
-			rec.Message == "no host stream holds the workspace; the daemon selects it" {
+			rec.Message == "no Emacs daemon stream stands; the daemon selects the workspace" {
 			return
 		}
 	}
 	t.Fatalf("records = %+v, want the daemon's route at info", log.Records())
 }
 
-func TestSelectInEditorWithNoHostStreamAnswersTheSelectsRefusal(t *testing.T) {
+func TestSelectInEditorWithNoEditorAnswersTheSelectsRefusal(t *testing.T) {
 	// Arrange.
 	h := standingDownSelect(t)
 
@@ -232,7 +239,7 @@ func TestTheDaemonsSelectIsOneSelectForBothRpcs(t *testing.T) {
 			},
 		},
 		{
-			name: "SelectInEditor with no host stream",
+			name: "SelectInEditor with no editor",
 			call: func(h *harness) (uint64, error) {
 				resp, err := h.Client.SelectInEditor(context.Background(),
 					connect.NewRequest(&agentreplv1.SelectInEditorRequest{Workspace: ref()}))
@@ -290,21 +297,21 @@ func selectInEditorRevealing(t *testing.T, h *harness, row string) *agentreplv1.
 func TestSelectInEditorNamingARowRevealsItOnThePage(t *testing.T) {
 	tests := []struct {
 		name          string
-		hostStream    bool
+		editor        bool
 		attachedFirst bool
 		wantRelayed   bool
 	}{
-		{name: "relayed, to a page that listens", hostStream: true, attachedFirst: true, wantRelayed: true},
-		{name: "relayed, to a page that attaches after the click", hostStream: true, attachedFirst: false, wantRelayed: true},
-		{name: "the daemon's route, to a page that listens", hostStream: false, attachedFirst: true},
-		{name: "the daemon's route, to a page that attaches after the click", hostStream: false, attachedFirst: false},
+		{name: "relayed, to a page that listens", editor: true, attachedFirst: true, wantRelayed: true},
+		{name: "relayed, to a page that attaches after the click", editor: true, attachedFirst: false, wantRelayed: true},
+		{name: "the daemon's route, to a page that listens", editor: false, attachedFirst: true},
+		{name: "the daemon's route, to a page that attaches after the click", editor: false, attachedFirst: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
-			if tt.hostStream {
-				holdHostStream(t, h)
+			if tt.editor {
+				holdEditor(h)
 			}
 			var stream *connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse]
 			if tt.attachedFirst {
@@ -331,7 +338,7 @@ func TestSelectInEditorNamingARowRevealsItOnThePage(t *testing.T) {
 func TestSelectInEditorRelayedNamingNoRowRevealsNothing(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	holdHostStream(t, h)
+	holdEditor(h)
 	selectInEditorRevealing(t, h, "")
 	stream := openWeb(t, h)
 
@@ -349,7 +356,7 @@ func TestSelectInEditorRecordsTheRelaysRevealAtInfo(t *testing.T) {
 	h := newHarness(t)
 	log := dlog.NewTestLogger()
 	h.Surfaces.workspace = log
-	holdHostStream(t, h)
+	holdEditor(h)
 
 	// Act.
 	selectInEditorRevealing(t, h, "row-merge-head")
@@ -365,31 +372,32 @@ func TestSelectInEditorRecordsTheRelaysRevealAtInfo(t *testing.T) {
 	t.Fatalf("records = %+v, want the relay at info naming the reveal", log.Records())
 }
 
-func TestSelectInEditorFollowedFromAFeedTellsTheSourceBeforeTheSwitch(t *testing.T) {
-	// Arrange: the page's own workspace is the source and the target alike,
-	// so one host stream carries both pushes in the order they were made.
+func TestSelectInEditorFollowedFromAFeedTellsTheSourceAndRelaysTheSwitch(t *testing.T) {
+	// Arrange: the page's own workspace is the source and the target alike.
 	h := newHarness(t)
 	stream := holdHostStream(t, h)
+	w := holdEditor(h)
 
 	// Act.
 	_, err := h.Client.SelectInEditor(context.Background(),
 		connect.NewRequest(&agentreplv1.SelectInEditorRequest{Workspace: ref(), FollowedFrom: ref()}))
-	first := receiveHostEvent(t, stream)
-	second := receiveHostEvent(t, stream)
+	followed := receiveHostEvent(t, stream)
+	relayed := <-w.elisp
+	relayed.sent()
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("SelectInEditor: %v", err)
 	}
-	if first.GetLinkFollowed() == nil || second.GetSelectRequested() == nil {
-		t.Fatalf("pushes = %v, %v, want link_followed then select_requested", first, second)
+	if followed.GetLinkFollowed() == nil || relayed.push.GetSelectRequested() == nil {
+		t.Fatalf("pushes = %v, %v, want link_followed on the host stream and select_requested to the editor", followed, relayed.push)
 	}
 }
 
 func TestSelectInEditorFollowedFromAnUnknownWorkspaceIsRefusedByArm(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	holdHostStream(t, h)
+	holdEditor(h)
 
 	// Act.
 	resp, err := h.Client.SelectInEditor(context.Background(),

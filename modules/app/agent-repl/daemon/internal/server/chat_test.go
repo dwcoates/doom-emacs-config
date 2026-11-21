@@ -795,7 +795,7 @@ func TestSearchChatsAnswersAGraphFailure(t *testing.T) {
 
 // TestSelectChatTextHighlightAsksTheHostToFocusTheComposer pins that only a
 // highlight pushes chat_text_highlighted: each selection is followed by a
-// notification click, which must then be the first event the thread's host
+// mark (markHostStream), which must then be the first event the thread's host
 // stream carries when no focus was asked.
 func TestSelectChatTextHighlightAsksTheHostToFocusTheComposer(t *testing.T) {
 	cases := []struct {
@@ -824,7 +824,7 @@ func TestSelectChatTextHighlightAsksTheHostToFocusTheComposer(t *testing.T) {
 			if _, err := h.Client.SelectChatText(context.Background(), connect.NewRequest(&agentreplv1.SelectChatTextRequest{Thread: thread, Selection: tc.selection})); err != nil {
 				t.Fatalf("SelectChatText: %v", err)
 			}
-			h.Server.NotificationClicked(testThreadID)
+			markHostStream(h, testThreadID)
 			first := receiveHostEventPastSelection(t, stream)
 
 			// Assert

@@ -262,7 +262,7 @@ func TestSelectResponseTextRefusesAMalformedSelection(t *testing.T) {
 
 // TestSelectResponseTextAsksTheHostToFocusTheComposerOnlyForAHighlight pins
 // which selections push response_text_highlighted: only a highlight the
-// daemon takes. Each selection is followed by a notification click, which
+// daemon takes. Each selection is followed by the mark (markHostStream), which
 // must then be the first event the host stream carries when no focus was
 // asked, so a stray response_text_highlighted shows as the wrong first event.
 func TestSelectResponseTextAsksTheHostToFocusTheComposerOnlyForAHighlight(t *testing.T) {
@@ -296,7 +296,7 @@ func TestSelectResponseTextAsksTheHostToFocusTheComposerOnlyForAHighlight(t *tes
 			})); err != nil {
 				t.Fatalf("SelectResponseText: %v", err)
 			}
-			h.Server.NotificationClicked(testWorkspaceID)
+			markHostStream(h, testWorkspaceID)
 			first := receiveHostEventPastSelection(t, stream)
 
 			// Assert.

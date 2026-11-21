@@ -638,7 +638,7 @@ func TestEveryEditorPushGoesThroughPushToEditors(t *testing.T) {
 // emacsWatcher registers one Emacs WatchDaemon stream on the surface, as an
 // accepted stream does, without a client.
 func emacsWatcher(s *server) *daemonWatcher {
-	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, 4), emacs: true, id: "stream-1"}
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, editorPushQueue), emacs: true, id: "stream-1"}
 	s.addDaemonWatcher(w)
 	return w
 }

@@ -138,6 +138,12 @@ func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
 
 // fakeDB answers the registry lookups the handlers make.
 type fakeDB struct {
+	// composerDrafts is each workspace's kept composer draft; draftWriteErr
+	// fails PutComposerDraft and ClearComposerDraft, and draftReadErr fails
+	// ComposerDraft.
+	composerDrafts map[ids.WorkspaceID]string
+	draftWriteErr  error
+	draftReadErr   error
 	// workspaceLinks is each workspace's stored links (WorkspaceLinks);
 	// workspaceLinksErr fails the read.
 	workspaceLinks    map[ids.WorkspaceID][]wsm.WorkspaceLink
@@ -382,6 +388,36 @@ func (f *fakeDB) PutFeedTextScale(_ context.Context, scale float64) error {
 	}
 	f.feedScalePut = append(f.feedScalePut, scale)
 	return nil
+}
+
+// PutComposerDraft keeps TEXT as WS's draft, or fails with draftWriteErr.
+func (f *fakeDB) PutComposerDraft(_ context.Context, ws ids.WorkspaceID, text string) error {
+	if f.draftWriteErr != nil {
+		return f.draftWriteErr
+	}
+	if f.composerDrafts == nil {
+		f.composerDrafts = map[ids.WorkspaceID]string{}
+	}
+	f.composerDrafts[ws] = text
+	return nil
+}
+
+// ClearComposerDraft forgets WS's draft, or fails with draftWriteErr.
+func (f *fakeDB) ClearComposerDraft(_ context.Context, ws ids.WorkspaceID) error {
+	if f.draftWriteErr != nil {
+		return f.draftWriteErr
+	}
+	delete(f.composerDrafts, ws)
+	return nil
+}
+
+// ComposerDraft answers WS's kept draft, or fails with draftReadErr.
+func (f *fakeDB) ComposerDraft(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+	if f.draftReadErr != nil {
+		return "", false, f.draftReadErr
+	}
+	text, found := f.composerDrafts[ws]
+	return text, found, nil
 }
 
 // FeedTextScale answers the seeded scale, defaulting to 1.0 like the real
@@ -3005,6 +3041,18 @@ func receiveWebEvent(
 // event a test waits for.
 func hostStandingState(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 	return r.GetHost() != nil || r.GetMentionTargets() != nil
+}
+
+// markHostStream pushes the event a test raises to mark where a host stream's
+// next event must be: a load-page request (LoadPageInEditor), which only a
+// held workspace's page can raise, so it rides that workspace's host stream.
+func markHostStream(h *harness, ws ids.WorkspaceID) {
+	h.Server.(*server).pushLoadPageRequested(ws)
+}
+
+// isHostMark reports whether PUSH is the event markHostStream raises.
+func isHostMark(push *agentreplv1.WatchHostWorkspaceResponse) bool {
+	return push.GetLoadPageRequested() != nil
 }
 
 func receiveHostEvent(

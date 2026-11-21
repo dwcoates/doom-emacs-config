@@ -1250,9 +1250,9 @@ func (s *server) SelectInEditor(
 		s.pushLinkFollowed(source.Log, rpc, source.Record.ID)
 	}
 	reveal := req.Msg.GetReveal()
-	if heard := s.pushSelectRequested(subject.Record.ID); heard > 0 {
+	if heard := s.pushSelectRequested(subject.Record.Ref()); heard > 0 {
 		subject.Log.Info(rpc, "relayed a row click to the editor, which makes the switch",
-			dlog.Context{"host_streams": heard, "reveal": reveal.GetValue()})
+			dlog.Context{"editors": heard, "reveal": reveal.GetValue()})
 		if reveal.GetValue() != "" {
 			s.revealRow(subject.Log, subject.Record.ID, reveal)
 		}
@@ -1261,7 +1261,7 @@ func (s *server) SelectInEditor(
 		}}
 		return connect.NewResponse(resp), nil
 	}
-	subject.Log.Info(rpc, "no host stream holds the workspace; the daemon selects it", nil)
+	subject.Log.Info(rpc, "no Emacs daemon stream stands; the daemon selects the workspace", nil)
 	selected, cerr := s.selectSubject(ctx, rpc, subject, workspace.Switch{History: workspace.RecordSelection}, reveal, resp)
 	if selected == nil {
 		return answer(resp, cerr)

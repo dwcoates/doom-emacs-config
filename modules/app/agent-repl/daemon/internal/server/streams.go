@@ -705,7 +705,7 @@ func (s *server) watchDaemon(
 	events, ackEvent := s.daemonEventTopic.SubscribeStream(streamCtx)
 	ackFault, ackWifi, ackDigest := func() {}, func() {}, func() {}
 
-	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, 4)}
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, editorPushQueue)}
 	// THE STANDING LOUD FAULTS ARE AN EMACS STREAM'S ALONE: a webview draws
 	// them on the topbar and footer views it already holds. A nil channel is
 	// never ready, so a webview's select never takes that case.
@@ -984,8 +984,6 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	// stream or is retired here.
 	if host && delta < 0 && !hops.hostStream {
 		s.deps.Queue.EditorGone(ws)
-		// The editor's evaluations are answered by nobody now.
-		s.evals.editorGone(ws)
 	}
 
 	// INFO, NOT DEBUG: the participant set is what a handover's adoption

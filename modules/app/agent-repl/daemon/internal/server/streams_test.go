@@ -1528,12 +1528,12 @@ func TestDialHostStreamLeavesTheFirstEventToTheTest(t *testing.T) {
 	stream := dialHostStream(t, h, ctx)
 
 	// Act.
-	h.Server.NotificationClicked(testWorkspaceID)
+	markHostStream(h, testWorkspaceID)
 	push := receiveHostEvent(t, stream)
 
 	// Assert.
-	if push.GetNotificationClicked() == nil {
-		t.Fatalf("first event = %v, want the notification the test raised", push)
+	if !isHostMark(push) {
+		t.Fatalf("first event = %v, want the mark the test raised", push)
 	}
 }
 

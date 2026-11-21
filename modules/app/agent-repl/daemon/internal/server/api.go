@@ -22,6 +22,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/briefprompt"
 	"agent-repld/internal/chessboard"
@@ -322,7 +323,7 @@ type Server interface {
 	// be methods of one type; the relay wraps the same push topics.
 	Relay() workspace.HostRelay
 
-	// NotificationClicked pushes notification_clicked onto a workspace's host
+	// NotificationClicked pushes notification_clicked onto every Emacs daemon
 	// stream. It is the desktop notifier's ClickSink.
 	NotificationClicked(ws ids.WorkspaceID)
 
@@ -969,29 +970,38 @@ func (s *server) pushReloadWebapp(ws ids.WorkspaceID, build *string) {
 	})
 }
 
-// NotificationClicked pushes notification_clicked onto the workspace's host
+// NotificationClicked pushes notification_clicked onto every Emacs daemon
 // stream: the user clicked the workspace's desktop banner, and Emacs raises its
-// frame and selects the tab. It is the desktop notifier's ClickSink.
+// frame and switches to the workspace, held or not (frontend.v1.RosterRowHeld).
+// It is the desktop notifier's ClickSink. A workspace the registry cannot read
+// is recorded at ERROR and pushes nothing: the click names no workspace Emacs
+// could switch to.
 func (s *server) NotificationClicked(ws ids.WorkspaceID) {
-	s.log.Info("daemon.server.notification_clicked", "relayed a desktop banner click to the host stream",
-		dlog.Context{"workspace": string(ws)})
-	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
-		Push: &agentreplv1.WatchHostWorkspaceResponse_NotificationClicked{
-			NotificationClicked: &agentreplv1.HostWorkspaceNotificationClicked{},
+	const op = "daemon.server.notification_clicked"
+	fields := dlog.Context{"workspace": string(ws)}
+	record, err := s.deps.DB.Workspace(context.Background(), ws)
+	if err != nil {
+		s.log.Error(op, "could not read the clicked banner's workspace; the click switches nothing", dlog.WithCause(fields, err))
+		return
+	}
+	editors := s.pushToEditors(op, &agentreplv1.WatchDaemonResponse{
+		Push: &agentreplv1.WatchDaemonResponse_NotificationClicked{
+			NotificationClicked: &agentreplv1.DaemonWorkspaceNotificationClicked{Workspace: record.Ref()},
 		},
-	})
+	}, func(*daemonWatcher) bool { return true }, nil)
+	s.log.Info(op, "relayed a desktop banner click to the editors", dlog.Merge(fields, dlog.Context{"editors": editors}))
 }
 
-// pushSelectRequested pushes select_requested onto the workspace's host
-// stream: the user clicked its row in a page's rail, and Emacs switches to it
-// as it switches for a key (SelectInEditor). It answers how many host streams
-// the event was handed to.
-func (s *server) pushSelectRequested(ws ids.WorkspaceID) int {
-	return s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
-		Push: &agentreplv1.WatchHostWorkspaceResponse_SelectRequested{
-			SelectRequested: &agentreplv1.HostWorkspaceSelectRequested{},
+// pushSelectRequested pushes select_requested onto every Emacs daemon stream:
+// the user clicked REF's row in a page's rail, and Emacs switches to it as it
+// switches for a key (SelectInEditor), held or not. It answers how many Emacs
+// streams the event was handed to.
+func (s *server) pushSelectRequested(ref *workspacev1.WorkspaceRef) int {
+	return s.pushToEditors("SelectInEditor", &agentreplv1.WatchDaemonResponse{
+		Push: &agentreplv1.WatchDaemonResponse_SelectRequested{
+			SelectRequested: &agentreplv1.DaemonWorkspaceSelectRequested{Workspace: ref},
 		},
-	})
+	}, func(*daemonWatcher) bool { return true }, nil)
 }
 
 // pushLinkFollowed pushes link_followed onto WS's host stream: the reader
@@ -1200,6 +1210,13 @@ type daemonWatcher struct {
 
 func (w *daemonWatcher) done() { w.once.Do(func() { close(w.sent) }) }
 
+// editorPushQueue is how many addressed pushes an Emacs daemon stream holds
+// before a push to it is dropped and recorded at ERROR (pushToEditors). The
+// stream's own loop writes each as it comes, so the queue only absorbs a
+// burst: a rail or banner click, and an agent's evaluation each, besides the
+// deploy's reloads, and several agents may evaluate at once.
+const editorPushQueue = 64
+
 // addressedPush is one push addressed to a single WatchDaemon stream, and the
 // end of its count: the stream calls sent once it has sent it.
 type addressedPush struct {
@@ -1218,6 +1235,10 @@ func (s *server) addDaemonWatcher(w *daemonWatcher) {
 func (s *server) removeDaemonWatcher(w *daemonWatcher) {
 	s.mu.Lock()
 	delete(s.daemonWatchers, w)
+	// THE EVALUATIONS THIS STREAM TOOK are answered by nobody once it is the
+	// last stream they reached. Under the lock a push is queued under, so no
+	// evaluation can reach it after this.
+	s.evals.editorGone(w)
 	s.mu.Unlock()
 	w.done()
 	// NOTHING IS SENT TO A REMOVED STREAM: pushes are queued under the lock
