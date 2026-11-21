@@ -16,7 +16,7 @@ import (
 
 // KeyVersion is part of every key. Changing what a key covers, or how it is
 // spelled, bumps it, so no record made under the old meaning is ever reused.
-const KeyVersion = "reuse-key-v2"
+const KeyVersion = "reuse-key-v3"
 
 // Facts are the non-file inputs of a suite: everything besides the checkout
 // that decides what its tests observe.
@@ -72,7 +72,7 @@ func ComputeKeyCached(repo string, set *InputSet, facts Facts, env KeyEnv) (Key,
 		m["@tool "+name] = v
 	}
 	for name, v := range facts.Env {
-		m["@env "+name] = v
+		m[envEntryPrefix+name] = v
 	}
 	h := hasher{repo: repo, generated: set.Generated(), ignored: env.Ignored, bindings: env.Bindings, m: m, cache: env.Cache, use: &bindingUse{named: map[int]bool{}}}
 	for _, p := range set.Files() {

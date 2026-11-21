@@ -61,6 +61,7 @@ func ExecGoList(dir, tags string, tests bool, patterns ...string) ([]GoPackage, 
 	args = append(args, patterns...)
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
+	cmd.Env = CanonicalOver(os.Environ())
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

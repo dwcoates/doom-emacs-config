@@ -332,6 +332,18 @@ unit".
   named in `Reuse.Never` and runs unconfined, never recorded. A run that is
   itself sandboxed cannot confine, so it reuses and records nothing, and says
   so.
+- **Every keyed unit runs in ONE canonical environment**, whichever process
+  started its run (the daemon, from Doom's env file, or the launchd tests
+  service): the runner keeps only the variables a test can behave
+  differently on, and keys their values (`HOME`, `PATH`, `USER`, `LOGNAME`,
+  `SHELL`, and the `GO*` and `CGO_*` build settings), sets
+  `reuse.canonicalEnv` (`GOENV=off`, so the go env file never changes a build
+  unseen) over them, and drops everything else, the module-fetch settings
+  (`GOPRIVATE`, `GOPROXY`, ...) and the locale and zone included
+  (`testrun/internal/reuse/confine.go`). Before it, every gate whose records
+  a workspace made reran every unit on `@env GOPRIVATE` (2026-11-20). A unit
+  rerun because a value differs from its record's logs it at INFO, with both
+  values, secrets redacted.
 - **Every suite declares its inputs**, or a written reason it never can be
   reused (`NeverReused`: a container's daemon reads outside any profile, a
   scan walks the whole module, a latency measurement). `roster.Check`

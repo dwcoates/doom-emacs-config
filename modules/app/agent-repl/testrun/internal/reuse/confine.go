@@ -14,16 +14,55 @@ import (
 // SandboxExec is the seatbelt launcher every keyed unit starts under.
 const SandboxExec = "/usr/bin/sandbox-exec"
 
+// A KEYED UNIT RUNS IN ONE CANONICAL ENVIRONMENT, whichever process started
+// its run. A workspace's run inherits the daemon's environment (Doom's saved
+// env file) and a merge gate's the launchd tests service's, and the two
+// differ: on 2026-11-20 every daemon-started run carried GOPRIVATE and LANG
+// and every gate run neither, so a gate keyed on records a workspace made
+// reran every unit ("@env GOPRIVATE and 1 more"). So an inherited variable is
+// kept only when its value can change what a test observes, and then its
+// value is part of the key (keyedEnvNames, keyedEnvPrefixes); a variable that
+// only names where one run puts things is kept unkeyed (runScopedEnvNames);
+// the runner sets canonicalEnv itself, over whatever was inherited; and
+// everything else, droppedGoEnvNames and the locale and zone variables
+// included, never reaches a unit. Which variables a unit's tests read cannot
+// be enumerated soundly (any library may call getenv), so the environment is
+// fixed instead of the key narrowed.
+
 // keyedEnvNames are the inherited variables a keyed unit keeps whose VALUES
-// are part of the key: what a test could behave differently on.
+// are part of the key: who and where the host's user is, and what the unit's
+// commands resolve to.
 var keyedEnvNames = map[string]bool{
 	"HOME": true, "PATH": true, "USER": true, "LOGNAME": true, "SHELL": true,
-	"LANG": true, "LC_ALL": true, "LC_CTYPE": true, "TZ": true,
 }
 
 // keyedEnvPrefixes extend keyedEnvNames to whole families: the Go
-// toolchain's own settings decide what a build compiles.
+// toolchain's own settings decide what a build compiles (GOFLAGS,
+// GOEXPERIMENT, GODEBUG, CGO_ENABLED), so a change to one reruns every unit.
 var keyedEnvPrefixes = []string{"GO", "CGO_"}
+
+// droppedGoEnvNames are the Go settings that only govern fetching modules,
+// never what a build compiles: every module's bytes are pinned by go.sum,
+// which is itself an input, so a fetch either yields those bytes or fails.
+// They are dropped rather than keyed, so a host whose processes disagree on
+// them (GOPRIVATE, set in a shell and in Doom's env file but not in launchd's)
+// keys alike. GOENV names the go env file, which canonicalEnv turns off.
+var droppedGoEnvNames = map[string]bool{
+	"GOPRIVATE": true, "GONOPROXY": true, "GONOSUMDB": true, "GONOSUMCHECK": true,
+	"GOPROXY": true, "GOSUMDB": true, "GOINSECURE": true, "GOAUTH": true, "GOVCS": true,
+	"GOENV": true,
+}
+
+// canonicalEnv are the variables the runner sets for every keyed unit, over
+// any inherited value, and keys like any other.
+//
+// GOENV=off: the go env file (`go env -w`) is read by every go command and is
+// no input the key reads, so a GOFLAGS written there would change a build
+// without changing its key. Off, a Go setting reaches a unit only as an
+// inherited variable, which the key holds.
+var canonicalEnv = map[string]string{
+	"GOENV": "off",
+}
 
 // runScopedEnvNames are the inherited variables a keyed unit keeps whose
 // values are NOT part of the key: each names one run's own directories or
@@ -47,6 +86,9 @@ func keyedEnv(name string) bool {
 	if keyedEnvNames[name] {
 		return true
 	}
+	if droppedGoEnvNames[name] {
+		return false
+	}
 	for _, p := range keyedEnvPrefixes {
 		if strings.HasPrefix(name, p) {
 			return true
@@ -55,8 +97,9 @@ func keyedEnv(name string) bool {
 	return false
 }
 
-// KeyedEnv is the part of environ whose values go into every keyed suite's
-// key: exactly the inherited variables Confine keeps for their value.
+// KeyedEnv is the part of a keyed unit's environment whose values go into
+// its key: the inherited variables Confine keeps for their value, and
+// canonicalEnv.
 func KeyedEnv(environ []string) map[string]string {
 	out := map[string]string{}
 	for _, kv := range environ {
@@ -65,13 +108,17 @@ func KeyedEnv(environ []string) map[string]string {
 			out[name] = value
 		}
 	}
+	for name, value := range canonicalEnv {
+		out[name] = value
+	}
 	return out
 }
 
 // ConfinedEnv filters a unit's environment to what a keyed unit may see: the
 // keyed and run-scoped variables, and the unit's own variables (unitNames),
-// which the runner sets from its roster entry and its run layout. Everything
-// else the runner inherited (a session's own settings, an agent's markers) is
+// which the runner sets from its roster entry and its run layout, then
+// canonicalEnv, which overrides all three. Everything else the runner
+// inherited (a session's own settings, an agent's markers, the locale) is
 // dropped, so a test cannot depend on a variable the key does not cover.
 func ConfinedEnv(environ []string, unitNames map[string]bool) []string {
 	var out []string
@@ -83,6 +130,29 @@ func ConfinedEnv(environ []string, unitNames map[string]bool) []string {
 		if keyedEnv(name) || runScopedEnvNames[name] || unitNames[name] {
 			out = append(out, kv)
 		}
+	}
+	return CanonicalOver(out)
+}
+
+// CanonicalOver is environ with canonicalEnv set over it: every inherited
+// value of a canonical name replaced. Each Go command the runner starts for
+// a keyed unit, the unit's own and the `go list` that derives its inputs,
+// runs under it, so both see the same Go settings.
+func CanonicalOver(environ []string) []string {
+	var out []string
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if _, canonical := canonicalEnv[name]; !canonical {
+			out = append(out, kv)
+		}
+	}
+	names := make([]string, 0, len(canonicalEnv))
+	for name := range canonicalEnv {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		out = append(out, name+"="+canonicalEnv[name])
 	}
 	return out
 }
