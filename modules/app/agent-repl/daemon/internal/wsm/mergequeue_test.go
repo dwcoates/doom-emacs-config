@@ -1807,12 +1807,13 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
 
 	// Assert: the helper's own query, and one call per reordering (move,
-	// move to a place, prioritize, a merge stepping aside, a remediated
+	// move to a place, move to a named place (PlaceMerge), prioritize, a
+	// merge stepping aside, a remediated
 	// merge returning, the place a returned merge answers (returnPlaceOf),
 	// and an admitted merge moving ahead of the merges it passed over) and
 	// per state write guarded on its prior state (setMergeQueueState).
-	if reads != 1 || calls != 8 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 8", reads, calls)
+	if reads != 1 || calls != 9 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 9", reads, calls)
 	}
 }
 

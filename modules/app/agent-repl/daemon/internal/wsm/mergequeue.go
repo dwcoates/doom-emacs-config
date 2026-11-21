@@ -583,9 +583,8 @@ func (s *store) PlaceMerge(ctx context.Context, repo RepoKey, id WorkspaceID, pl
 		s.log.Error(op, "refused an undeclared merge place", withError(fields, err))
 		return false, err
 	}
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return false, err
 	}
 	fields["repo"] = string(key)
