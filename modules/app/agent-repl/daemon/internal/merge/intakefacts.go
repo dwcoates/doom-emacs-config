@@ -408,11 +408,9 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		return "", wsm.CheckWindow{}, err
 	}
 	brief, err := o.deps.Briefs(BriefDeployIntake, map[string]string{
-		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
+		"occasion":       RenderOccasion(m.DeployEnding, q.repository.Dir, m.OwedAt, mediationVersion(m)),
 		"ending":         RenderEnding(m.DeployEnding),
 		"window_started": since.UTC().Format(time.RFC3339),
-		"repo_dir":       q.repository.Dir,
-		"version":        mediationVersion(m),
 		"gate_log":       gateLog,
 		"digest":         digest,
 	})
@@ -447,11 +445,26 @@ func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.
 	return m.OwedAt, nil
 }
 
+// RenderOccasion is the brief's first sentence: what the check owed at OWED
+// in REPO checks. A check of a deploy names the deploy and the build it
+// installed (VERSION); a check of a crash names no deploy, since none ran:
+// the daemon restarted because the one before it died without its orderly
+// exit.
+func RenderOccasion(ending wsm.DeployEnding, repo string, owed time.Time, version string) string {
+	at := owed.UTC().Format(time.RFC3339)
+	if ending == wsm.DaemonCrashed {
+		return fmt.Sprintf("No deploy ran: the daemon serving `%s` restarted at %s (%s) because the one before it died without its orderly exit.", repo, at, version)
+	}
+	return fmt.Sprintf("A deploy of `%s` began at %s (%s).", repo, at, version)
+}
+
 // RenderEnding is how the checked deploy ended, as the intake's brief says
 // it: a deploy that stopped short is a problem of the deploy itself, its
 // records in the window like any other's.
 func RenderEnding(ending wsm.DeployEnding) string {
 	switch ending {
+	case wsm.DaemonCrashed:
+		return "Find what killed it and fix it: `daemon.boot.predecessor_died` in the digest names the panic and the site it died at."
 	case wsm.DeployFinished:
 		return "It finished: every component built and rolled out."
 	case wsm.DeployUnchanged:

@@ -794,13 +794,13 @@ func TestTheDeployEscalationBriefSaysItsFinishLandsDirectly(t *testing.T) {
 }
 
 // TestTheDeployIntakeBriefMakesAFailureOfTheChecksTheMediators pins the owner
-// ruling of 2026-11-21: a failure of the deploy checks themselves is the one
-// older problem the mediator fixes.
+// rulings of 2026-11-21: a failure of the deploy checks themselves, and a
+// crash of the daemon, are the older problems the mediator fixes.
 func TestTheDeployIntakeBriefMakesAFailureOfTheChecksTheMediators(t *testing.T) {
 	// Arrange
 	want := []string{
 		"A problem that was there before this deploy is not yours to address: name it on the approval.",
-		"The one exception is a failure of the deploy checks themselves, which is always yours to fix, whenever it was first logged.",
+		"The exceptions are a failure of the deploy checks themselves and a crash of the daemon (`daemon.boot.predecessor_died`, which names the panic and the site it died at), each always yours to fix, whenever it was first logged.",
 	}
 
 	// Act
