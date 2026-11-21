@@ -11,6 +11,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
+
+	"agent-repld/internal/testcases"
 )
 
 // testcli.go — `agent-repld test`: every test run on the host goes through
@@ -236,7 +238,7 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_EverySuite{EverySuite: &testrunv1.TestSelectionEverySuite{}}})
 	}
 	for _, name := range sel.suites {
-		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Suite{Suite: &testrunv1.TestSelectionSuite{Name: name}}})
+		run.Selections = append(run.Selections, testcases.Suite(name))
 	}
 	for _, v := range goSel {
 		dir, names, named := strings.Cut(v, "=")
@@ -244,17 +246,13 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 		if err != nil {
 			return nil, err
 		}
-		pkg := &testrunv1.TestSelectionGoPackage{PackageDir: path}
-		if !named {
-			pkg.Tests = &testrunv1.TestSelectionGoPackage_All{All: &testrunv1.TestSelectionGoAllTests{}}
-		} else {
-			tests, err := goTests(v, names)
-			if err != nil {
+		var list []string
+		if named {
+			if list, err = commaList("-go "+v, names); err != nil {
 				return nil, err
 			}
-			pkg.Tests = &testrunv1.TestSelectionGoPackage_Named{Named: &testrunv1.TestSelectionGoNamedTests{Tests: tests}}
 		}
-		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_GoPackage{GoPackage: pkg}})
+		run.Selections = append(run.Selections, testcases.GoPackage(path, list))
 	}
 	vitest := map[string]*testrunv1.TestSelectionVitestFile{}
 	for _, v := range vitestSel {
@@ -287,15 +285,13 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 		if err != nil {
 			return nil, err
 		}
-		sel := &testrunv1.TestSelectionErtFile{File: path, Tests: &testrunv1.TestSelectionErtFile_All{All: &testrunv1.TestSelectionErtAllTests{}}}
+		var list []string
 		if named {
-			list, err := commaList("-ert "+v, names)
-			if err != nil {
+			if list, err = commaList("-ert "+v, names); err != nil {
 				return nil, err
 			}
-			sel.Tests = &testrunv1.TestSelectionErtFile_Named{Named: &testrunv1.TestSelectionErtNamedTests{TestNames: list}}
 		}
-		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_ErtFile{ErtFile: sel}})
+		run.Selections = append(run.Selections, testcases.ErtFile(path, list))
 	}
 	for _, v := range harnessSel {
 		script, groups, named := strings.Cut(v, "=")
@@ -303,15 +299,13 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 		if err != nil {
 			return nil, err
 		}
-		sel := &testrunv1.TestSelectionHarness{Script: path, Groups: &testrunv1.TestSelectionHarness_All{All: &testrunv1.TestSelectionHarnessAllGroups{}}}
+		var list []string
 		if named {
-			list, err := commaList("-harness "+v, groups)
-			if err != nil {
+			if list, err = commaList("-harness "+v, groups); err != nil {
 				return nil, err
 			}
-			sel.Groups = &testrunv1.TestSelectionHarness_Named{Named: &testrunv1.TestSelectionHarnessNamedGroups{Names: list}}
 		}
-		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Harness{Harness: sel}})
+		run.Selections = append(run.Selections, testcases.Harness(path, list))
 	}
 	return run, nil
 }
@@ -341,36 +335,6 @@ func worktreePath(worktree, cwd string) func(string) (string, error) {
 		}
 		return filepath.ToSlash(rel), nil
 	}
-}
-
-// goTests reads a -go flag's test list: each TestName whole, or
-// TestName/segment/... as one subtest path.
-func goTests(flagValue, names string) ([]*testrunv1.TestSelectionGoTest, error) {
-	list, err := commaList("-go "+flagValue, names)
-	if err != nil {
-		return nil, err
-	}
-	var tests []*testrunv1.TestSelectionGoTest
-	byName := map[string]*testrunv1.TestSelectionGoTest{}
-	for _, n := range list {
-		top, path, sub := strings.Cut(n, "/")
-		t, seen := byName[top]
-		if !seen {
-			t = &testrunv1.TestSelectionGoTest{Name: top}
-			byName[top] = t
-			tests = append(tests, t)
-		}
-		switch {
-		case !sub || t.GetWhole() != nil:
-			t.Scope = &testrunv1.TestSelectionGoTest_Whole{Whole: &testrunv1.TestSelectionGoWholeTest{}}
-		default:
-			if t.GetSubtests() == nil {
-				t.Scope = &testrunv1.TestSelectionGoTest_Subtests{Subtests: &testrunv1.TestSelectionGoSubtests{}}
-			}
-			t.GetSubtests().Paths = append(t.GetSubtests().Paths, &testrunv1.TestSelectionGoSubtestPath{Segments: strings.Split(path, "/")})
-		}
-	}
-	return tests, nil
 }
 
 // commaList splits a flag's comma list, refusing an empty entry.
