@@ -169,7 +169,7 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 	if tip == "" || targetBranch == "" {
 		return *r.contradiction(ctx, fmt.Sprintf("the record of its %s step names no tip or target branch", res.Step)), false, nil
 	}
-	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed, head: res.BranchHead}
+	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed, head: res.BranchHead, tip: tip}
 	finish := func(gaveUp *outcome, err error) (outcome, bool, error, bool) {
 		if gaveUp != nil {
 			return *gaveUp, false, nil, true
@@ -304,6 +304,12 @@ type replay struct {
 	// .BranchHead): where a rebase that dropped every commit puts it back
 	// (keptCommits).
 	head string
+	// tip is the target's tip the rebase replays onto.
+	tip string
+	// continued is whether the rebase is the one the merge's own conflict
+	// repair worked on, continued rather than started (continueResolved):
+	// a git-only rebase that meets a conflict in it leaves it standing.
+	continued bool
 }
 
 // rebase replays the branch onto tip, commit by commit, in the branch's
@@ -377,17 +383,37 @@ func (r *run) untilCommitted(ctx context.Context, tip, targetBranch string, firs
 	}
 }
 
-// rebaseOnce is one attempt at the rebase: the worktree checked, then the
-// branch's own commits replayed.
+// rebaseOnce is one attempt at the rebase: the rebase standing in the
+// worktree settled (settleStandingRebase), then the branch rebased from it
+// (rebaseFrom).
 func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcome, error) {
-	const op = "daemon.merge.rebase"
-	dir, branch := r.subject.dir, r.subject.branch
 	resolved, err := r.settleStandingRebase(ctx, tip)
 	if err != nil {
 		return nil, err
 	}
+	return r.rebaseFrom(ctx, tip, targetBranch, resolved)
+}
+
+// rebaseFrom rebases the branch onto TIP once the rebase standing in its
+// worktree was settled: RESOLVED, when not nil, is the rebase the merge's own
+// conflict repair worked on, continued first.
+//
+// A RESOLUTION IS NEVER LOST TO A MOVED TARGET (2026-11-20:
+// gh-workflow-run-subscribe met the same conflict after every landing). The
+// resolved rebase is continued onto the tip it was resolved on, so the branch
+// moves to the resolved commits, and only then is it rebased onto TIP, from
+// them: a conflict met there aborts to the resolved commits, never to the
+// branch's old base.
+func (r *run) rebaseFrom(ctx context.Context, tip, targetBranch string, resolved *wsm.ResolvedRebase) (*outcome, error) {
+	const op = "daemon.merge.rebase"
+	dir, branch := r.subject.dir, r.subject.branch
 	if resolved != nil {
-		return r.continueResolved(ctx, tip, targetBranch, *resolved)
+		gaveUp, err := r.continueResolved(ctx, targetBranch, *resolved)
+		if err != nil || gaveUp != nil || resolved.Tip == tip {
+			return gaveUp, err
+		}
+		r.o.log(ctx, r.ws).Info(op, "the resolved rebase is continued and kept; the branch now rebases from its resolved commits onto the target's new tip", dlog.Context{
+			"workspace": string(r.ws), "branch": branch, "worktree": dir, "resolved_tip": resolved.Tip, "onto": tip})
 	}
 	clean, err := r.git.IsClean(ctx, dir)
 	if err != nil {
@@ -410,7 +436,7 @@ func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcom
 	if err != nil {
 		return nil, fmt.Errorf("merge: listing what %s replays onto %s: %w", branch, short(tip), err)
 	}
-	p := &replay{round: r.openTab(ctx, TabRebasing), commits: commits}
+	p := &replay{round: r.openTab(ctx, TabRebasing), commits: commits, tip: tip}
 	r.rebasing.beginReplay(commits, p.round.started.UnixMilli())
 	based, err := r.git.IsAncestor(ctx, dir, tip, branch)
 	if err != nil {
@@ -468,19 +494,20 @@ func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcom
 	return r.replayLoop(ctx, p, step, err, tip, targetBranch)
 }
 
-// continueResolved goes on with RESOLVED, the rebase onto TIP the merge's own
-// conflict repair worked on, which stands in the worktree: its commits are
-// what the branch, still at its head before the rebase, replays, its record
-// is written as any rebase's (recordRebase), and it goes on from where git
-// stopped it (resumeRebase) -- a conflict still unresolved is prompted again,
-// and the rest is continued.
-func (r *run) continueResolved(ctx context.Context, tip, targetBranch string, resolved wsm.ResolvedRebase) (*outcome, error) {
-	dir, branch := r.subject.dir, r.subject.branch
+// continueResolved goes on with RESOLVED, the rebase onto its own tip the
+// merge's own conflict repair worked on, which stands in the worktree: its
+// commits are what the branch, still at its head before the rebase, replays,
+// its record is written as any rebase's (recordRebase), and it goes on from
+// where git stopped it (resumeRebase) -- a conflict still unresolved is
+// prompted again, and the rest is continued. A git-only rebase prompts
+// nothing: a conflict it meets leaves the rebase standing (conflict).
+func (r *run) continueResolved(ctx context.Context, targetBranch string, resolved wsm.ResolvedRebase) (*outcome, error) {
+	dir, branch, tip := r.subject.dir, r.subject.branch, resolved.Tip
 	commits, err := r.git.CommitsBetween(ctx, dir, r.ownBase(tip), branch)
 	if err != nil {
 		return nil, fmt.Errorf("merge: listing what %s replays onto %s: %w", branch, short(tip), err)
 	}
-	p := &replay{round: r.openTab(ctx, TabRebasing), commits: commits, head: resolved.BranchHead}
+	p := &replay{round: r.openTab(ctx, TabRebasing), commits: commits, head: resolved.BranchHead, tip: tip, continued: true}
 	r.rebasing.beginReplay(commits, p.round.started.UnixMilli())
 	if err := r.recordRebase(ctx, targetBranch, tip, resolved.BranchHead, commits); err != nil {
 		return nil, err
@@ -569,6 +596,12 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 		if step.Done {
 			if err := r.keptCommits(ctx, p, tip, targetBranch); err != nil {
 				return nil, err
+			}
+			// THE RESOLVED REBASE STANDS NO LONGER: the fact it was recorded
+			// by (promptConflict) is retired with it, so no later rebase is
+			// ever taken for it.
+			if _, err := r.o.deps.DB.ClearResolvedRebase(ctx, r.repo, r.ws); err != nil {
+				return nil, fmt.Errorf("merge: clearing the resolved rebase of %s once its rebase onto %s finished: %w", branch, short(tip), err)
 			}
 		}
 		r.replayed(ctx, p, step.Done)
@@ -790,7 +823,7 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	// its caller makes (settleBackground).
 	if r.background && !r.resolving {
 		r.settleRebasing(ctx, p, "the rebase conflicted; the merge resolves it in the resolving-conflicts slot")
-		return nil, &waitingConflict{commit: commit.SHA, files: files}
+		return nil, &waitingConflict{commit: commit.SHA, files: files, kept: p.continued}
 	}
 	// THE ATTEMPTS COUNT PER COMMIT (owner ruling, 2026-10-12): a conflict on
 	// a commit the rebase has not met before starts its count afresh, so a
@@ -824,6 +857,13 @@ func (r *run) promptConflict(ctx context.Context, p *replay, commit gitclient.Co
 		return nil, err
 	}
 	turn := wsm.NewTurnID()
+	// THE REBASE THE TURN RESOLVES IS THE MERGE'S OWN STATE before the turn
+	// exists (wsm.RecordResolvedRebase): whatever cuts this run, the next
+	// one continues the rebase rather than aborting it as a cut run's
+	// leftover (settleStandingRebase).
+	if err := r.o.deps.DB.RecordResolvedRebase(ctx, r.repo, r.ws, wsm.ResolvedRebase{Tip: p.tip, BranchHead: p.head, Turn: turn}); err != nil {
+		return nil, fmt.Errorf("merge: recording the rebase of %s onto %s that turn %s resolves: %w", r.subject.branch, short(p.tip), turn, err)
+	}
 	// A HEAD WITH A MERGE IN LINE BEHIND IT steps aside to resolve out of
 	// line, for the resolving-conflicts slot, so that merge takes its place
 	// (remediate.go); otherwise it resolves in place.

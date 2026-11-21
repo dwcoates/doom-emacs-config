@@ -3046,32 +3046,87 @@ func TestEveryRebaseRecordIsWrittenByRecordRebase(t *testing.T) {
 	}
 }
 
-func TestAFreshStartAbortsAResolvedRebaseWhoseTargetMovedAndRebasesOntoTheNewTip(t *testing.T) {
-	// Arrange: the merge's own repair worked on a rebase onto a tip the
-	// target has since left.
+func TestAConflictTurnIsHandedOverOnlyOnceItsRebaseIsRecordedOnTheEntry(t *testing.T) {
+	// Arrange
 	h := newHarness(t)
 	landing(h, 1)
-	h.git.leftStanding = true
-	enqueue(t, h)
-	h.db.carryResolved(t, h.repoKey(), theWorkspace, &wsm.ResolvedRebase{Tip: "old-tip", BranchHead: "head-1", Turn: "turn-1"})
-
-	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Logf("the merge ended on: %v", err)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	var atSubmit *wsm.ResolvedRebase
+	var turn ids.TurnID
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR || turn != "" {
+			return
+		}
+		turn = sub.Turn
+		entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+		for _, entry := range entries {
+			if entry.Workspace == theWorkspace && entry.Resolved != nil {
+				recorded := *entry.Resolved
+				atSubmit = &recorded
+			}
+		}
 	}
 
-	// Assert.
-	h.git.mu.Lock()
-	commands := append([]string(nil), h.git.rebaseCommands...)
-	h.git.mu.Unlock()
-	if len(commands) < 2 || commands[0] != "abort" || !strings.HasPrefix(commands[1], "start ") || strings.HasSuffix(commands[1], "old-tip") {
-		t.Fatalf("rebase commands = %v, want the resolved rebase aborted before a rebase onto the new tip", commands)
-	}
-	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.rebase", text: "the target moved since the merge's own conflict repair worked on the rebase",
-		context: map[string]string{"verdict": "abort_target_moved", "resolved_tip": "old-tip"}}) {
-		t.Fatal("the decision was not recorded with its context")
+	// Act
+	admitted(t, h)
+
+	// Assert
+	if atSubmit == nil || atSubmit.Turn != turn || atSubmit.Tip == "" || atSubmit.BranchHead == "" {
+		t.Fatalf("resolved rebase at the conflict turn's submission = %+v, want one naming the turn %s, its tip and its branch head", atSubmit, turn)
 	}
 	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
 		t.Fatalf("facts = %+v, want the merge landed", facts)
+	}
+}
+
+// faultNaming reports whether h's log holds the merge's fault record whose
+// summary names text.
+func faultNaming(h *harness, text string) bool {
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.merge.fault" && rec.Context["workspace"] == string(theWorkspace) &&
+			strings.Contains(fmt.Sprint(rec.Context["summary"]), text) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAConflictTurnWhoseRebaseCannotBeRecordedIsNeverHandedOver(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.rebaseConflicts[1] = []string{"a.go"}
+	h.db.recordResolvedErr = errors.New("store broke")
+
+	// Act
+	admitted(t, h)
+
+	// Assert
+	if n := (&chain{h: h}).prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); n != 0 {
+		t.Fatalf("conflict prompts = %d, want none: the turn is never handed over unrecorded", n)
+	}
+	if !faultNaming(h, "recording the rebase of feature") || !faultNaming(h, "store broke") {
+		t.Fatalf("no fault record naming the recording and its cause: %+v", h.logs.Records())
+	}
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
+		t.Fatalf("facts = %+v, want the merge failed", facts)
+	}
+}
+
+func TestARebaseWhoseResolvedRebaseCannotBeClearedOnceItFinishedFailsTheMerge(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landing(h, 1)
+	h.db.clearResolvedErr = errors.New("store broke")
+
+	// Act
+	admitted(t, h)
+
+	// Assert
+	if !faultNaming(h, "clearing the resolved rebase of feature once its rebase onto") || !faultNaming(h, "store broke") {
+		t.Fatalf("no fault record naming the clearing and its cause: %+v", h.logs.Records())
+	}
+	if len(h.git.fastForwards) != 0 {
+		t.Fatalf("a failed merge moved the target: %v", h.git.fastForwards)
 	}
 }

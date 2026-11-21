@@ -820,30 +820,21 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 // of a merge that had fixed its tests). That is decided from those merges'
 // own records, once, here; it holds them no place afterwards.
 //
-// RESOLVED is the rebase the merge's own conflict repair worked on, written
-// on the entry in the same write (mergeresolvedrebase.go), or nil for a
-// return that leaves no rebase standing. Only a merge that stepped aside from
-// the head for its conflicts carries one; any other return naming one is a
-// refusal.
+// THE RETURN LEAVES THE RESOLVED REBASE AS IT STANDS: the rebase the
+// merge's own conflict repair works on is recorded when its turn is handed
+// over (RecordResolvedRebase), so the return neither writes nor clears it.
 //
 // WORKED ON IS THE CALLER'S WORD, not the entries' states: a merge the
 // orchestrator has taken up (its chain's member joining behind the head) is
 // still waiting in the store until its admission is written, and the return
 // that read it as waiting stood ahead of a merge already being worked on.
-func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, workedOn []WorkspaceID, resolved *ResolvedRebase) (MergeReturn, error) {
+func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, workedOn []WorkspaceID) (MergeReturn, error) {
 	const op = "daemon.wsm.return_remediated_merge"
 	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
 		return MergeReturn{}, err
 	}
-	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "resolved_rebase": resolved != nil}
-	if resolved != nil {
-		if err := resolved.validate(); err != nil {
-			s.log.Error(op, "refused a merge's return carrying a malformed resolved rebase", withError(fields, err))
-			return MergeReturn{}, err
-		}
-	}
-	resolvedTip, resolvedHead, resolvedTurn := resolvedRebaseColumns(resolved)
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease)}
 	var placed MergeReturn
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		_, state, err := entryPlace(ctx, tx, key, id)
@@ -873,16 +864,13 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 		default:
 			return fmt.Errorf("wsm: workspace %s in repo %q returns from remediating for %s, which names no repair", id, key, reason)
 		}
-		if resolved != nil && reason != MergeAsideConflicts {
-			return fmt.Errorf("%w: workspace %s in repo %q returns from %s", errResolvedRebaseAside, id, key, reason)
-		}
 		back, err := nextSeq(ctx, tx, key)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 0,
-resolved_tip = ?, resolved_branch_head = ?, resolved_turn = ? WHERE repo_key = ? AND workspace_id = ?`,
-			int(MergeQueued), int(MergeAsideNone), back, resolvedTip, resolvedHead, resolvedTurn, key, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 0
+WHERE repo_key = ? AND workspace_id = ?`,
+			int(MergeQueued), int(MergeAsideNone), back, key, id); err != nil {
 			return err
 		}
 		if err := takeFirstWaitingPlace(ctx, tx, key, id, reason != MergeAsideTests, workedOn); err != nil {

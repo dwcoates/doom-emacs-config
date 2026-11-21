@@ -1478,7 +1478,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 	}
 	summary := r.o.abandonedSentence(r.ws, cause, true)
 	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause)}
-	if r.abortStandingRebase(ctx, op, fields) {
+	if r.abortStandingRebase(ctx, op, fields, cause.requeues()) {
 		summary += "; the rebase it left standing was aborted, and the branch keeps its base"
 		fields["rebase_aborted"] = true
 	}

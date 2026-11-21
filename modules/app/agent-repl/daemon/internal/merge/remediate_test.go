@@ -1249,39 +1249,17 @@ func TestReRegisteringAnUnarmedRemediationReplacesIt(t *testing.T) {
 	}
 }
 
-func TestResolvedRebaseOf(t *testing.T) {
-	conflicts := progressDoc{Step: TabConflicts, Tip: "tip-1", BranchHead: "head-1", Turn: "turn-1"}
-	tests := []struct {
-		name string
-		rem  *remediation
-		want *wsm.ResolvedRebase
-	}{
-		{name: "a merge back from its conflicts carries the rebase its record names", rem: &remediation{doc: conflicts},
-			want: &wsm.ResolvedRebase{Tip: "tip-1", BranchHead: "head-1", Turn: "turn-1"}},
-		{name: "a merge back from fixing its tests carries none", rem: &remediation{doc: progressDoc{Step: TabFixes, Tip: "tip-1", Turn: "turn-1"}}},
-		{name: "a waiting merge's conflict carries none", rem: &remediation{waiting: true}},
-		{name: "no remediation carries none"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			got := resolvedRebaseOf(tc.rem)
-
-			// Assert
-			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
-				t.Fatalf("resolvedRebaseOf = %+v, want %+v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestAMergeBackFromItsConflictsCarriesTheRebaseItsRepairWorkedOn(t *testing.T) {
-	// Arrange
+	// Arrange: the head stepped aside for its conflict, its turn recorded.
 	c := conflictAsideScenario(t)
 	stored, _, _ := c.h.db.MergeProgressOf(context.Background(), theWorkspace)
 	doc, err := decodeProgress(stored)
 	if err != nil {
 		t.Fatalf("decodeProgress: %v", err)
+	}
+	want := wsm.ResolvedRebase{Tip: doc.Tip, BranchHead: doc.BranchHead, Turn: ids.TurnID(doc.Turn)}
+	if entry, _ := c.entryOf(t, theWorkspace); entry.Resolved == nil || *entry.Resolved != want || want.Tip == "" || want.BranchHead == "" || want.Turn == "" {
+		t.Fatalf("resolved before the return = %+v, want the conflict turn's %+v", entry.Resolved, want)
 	}
 
 	// Act
@@ -1291,14 +1269,8 @@ func TestAMergeBackFromItsConflictsCarriesTheRebaseItsRepairWorkedOn(t *testing.
 	if err != nil {
 		t.Fatalf("returnRemediated: %v", err)
 	}
-	entry, _ := c.entryOf(t, theWorkspace)
-	want := wsm.ResolvedRebase{Tip: doc.Tip, BranchHead: doc.BranchHead, Turn: ids.TurnID(doc.Turn)}
-	if entry.Resolved == nil || *entry.Resolved != want || want.Tip == "" || want.BranchHead == "" || want.Turn == "" {
-		t.Fatalf("resolved = %+v, want %+v", entry.Resolved, want)
-	}
-	if !loggedLike(c.h, logLike{level: "info", op: opRemediate, text: "the merge's repair ended",
-		context: map[string]string{"resolved_tip": doc.Tip, "resolved_turn": doc.Turn}}) {
-		t.Fatal("the return record does not name the resolved rebase")
+	if entry, _ := c.entryOf(t, theWorkspace); entry.Resolved == nil || *entry.Resolved != want {
+		t.Fatalf("resolved after the return = %+v, want %+v kept", entry.Resolved, want)
 	}
 }
 
@@ -1520,5 +1492,64 @@ func TestTheBackgroundRebasePassesOverAWaitingReturner(t *testing.T) {
 	}
 	if rebased[string(theWorkspace)] || !rebased["ws-c"] {
 		t.Fatalf("background rebases = %v, want ws-c rebased and the returner passed over", rebased)
+	}
+}
+
+// TestARequeuedMergeBackFromItsConflictsWhoseTargetMovedKeepsItsResolution
+// is the 2026-11-20 gh-workflow-run-subscribe loss: a merge whose rebase its
+// own repair resolved met a target that moved since, and must continue and
+// keep the resolution, then rebase from the resolved commits, never abort
+// it and meet the same conflict again.
+func TestARequeuedMergeBackFromItsConflictsWhoseTargetMovedKeepsItsResolution(t *testing.T) {
+	// Arrange: the head stepped aside for its conflict, returned, headed the
+	// queue and was put back in line to start over, and the target moved on
+	// meanwhile.
+	c := conflictAsideScenario(t)
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	if front, _, admitted, err := c.h.o.admitFront(context.Background(), c.h.repoKey()); err != nil || !admitted || front != theWorkspace {
+		t.Fatalf("admitFront = %s, %v, %v; want the returner admitted at the head", front, admitted, err)
+	}
+	if err := c.h.o.requeueAdmitted(context.Background(), "daemon.merge.resume", c.h.repoKey(), theWorkspace, requeueWhy{
+		unleased: "unleased", failed: "failed", done: "requeued to start over",
+	}); err != nil {
+		t.Fatalf("requeueAdmitted: %v", err)
+	}
+	entry, _ := c.entryOf(t, theWorkspace)
+	if entry.Resolved == nil {
+		t.Fatal("the merge back in line carries no resolved rebase")
+	}
+	resolvedOn, original := entry.Resolved.Tip, c.git.ref(chainBranch(theWorkspace))
+	c.git.commitOn("master", "m2")
+
+	// Act
+	c.drain(t)
+
+	// Assert
+	if n := c.prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); n != 0 {
+		t.Fatalf("conflict prompts = %d, want none: the resolution is kept", n)
+	}
+	c.git.cmu.Lock()
+	aborts := c.git.aborts
+	c.git.cmu.Unlock()
+	if aborts != 0 {
+		t.Fatalf("aborts = %d, want the resolved rebase never aborted", aborts)
+	}
+	commits, parents := c.git.lastStart(c.dirs[theWorkspace])
+	if len(commits) != 1 || commits[0] == original || parents[0] != resolvedOn {
+		t.Fatalf("the rebase onto the new tip replays %v (made on %v), want the resolved commit made on %s, not the original %s", commits, parents, resolvedOn, original)
+	}
+	if !loggedLike(c.h, logLike{level: "info", op: "daemon.merge.rebase", text: "it is continued and kept, never aborted",
+		context: map[string]string{"verdict": "continue_then_rebase", "resolved_tip": resolvedOn}}) {
+		t.Fatal("the continuation was not recorded with its context")
+	}
+	if !loggedLike(c.h, logLike{level: "info", op: "daemon.merge.rebase", text: "the branch now rebases from its resolved commits onto the target's new tip",
+		context: map[string]string{"resolved_tip": resolvedOn}}) {
+		t.Fatal("the rebase from the resolved commits was not recorded")
+	}
+	got := c.git.landedOwn()
+	if len(got) != 2 || !slices.Equal(got[0], []string{"a1"}) || !slices.Equal(got[1], []string{"b1"}) {
+		t.Fatalf("landings brought %v, want a1 then b1", got)
 	}
 }
