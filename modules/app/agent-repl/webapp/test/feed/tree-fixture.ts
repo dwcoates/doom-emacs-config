@@ -13,7 +13,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import type { LengthResolver, SubtreeBox } from "../../src/feed/subtree-box.js";
 import { TREE_CLASS, TREE_NODE_ATTRIBUTE, renderTreeHtml, columnMeasure } from "../../src/metaprompt-tree.js";
-import { entryTreeHtml } from "../../src/feed/entries.js";
+import { entryTreeHtml } from "../../src/feed/entry-tree.js";
 import { inline } from "../../src/markdown.js";
 import { promptProse } from "../prose.js";
 
