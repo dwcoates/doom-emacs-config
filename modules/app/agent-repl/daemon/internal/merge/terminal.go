@@ -119,7 +119,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		if deploy == LandingDeployOwed {
 			r.recordUndeployed(ctx, log, out)
 		}
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), MergedInto: out.target, Deploy: deploy})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: landedSummary(out), MergedInto: out.target, Deploy: deploy})
 		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
@@ -128,6 +128,11 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		}
 		log.Info(op, "a merge landed", fields)
 	}
+}
+
+// landedSummary is the one-line account of a landing the requester is told.
+func landedSummary(out outcome) string {
+	return fmt.Sprintf("it landed as commit %s", out.landed)
 }
 
 // recordUndeployed records a landing whose deploy is owed as waiting for

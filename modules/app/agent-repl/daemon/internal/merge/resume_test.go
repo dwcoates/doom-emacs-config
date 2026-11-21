@@ -1200,3 +1200,73 @@ func TestBringTurnOnNeverWaitsForTheTurn(t *testing.T) {
 		})
 	}
 }
+
+// landingRecordedForDeploy is the landing the dead run recorded when its
+// target moved, as a run resumed past its committing step reads it back.
+func landingRecordedForDeploy() *outcomeDoc {
+	return toOutcomeDoc(outcome{landed: mergeSHA, target: "master", commits: commits(3)})
+}
+
+func TestAMergeResumedAtItsDeployReportsTheLandingItRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, func(d *progressDoc) {
+		atStep(TabDeploy, 1)(d)
+		d.MergeCommit = mergeSHA
+		d.Outcome = landingRecordedForDeploy()
+	})
+
+	// Act.
+	resume(t, h)
+
+	// Assert: the log, the stamped count and the summary all carry the commit.
+	record, logged := h.recordFor(dlog.LevelInfo, "daemon.merge.finish")
+	if !logged || record.Message != "a merge landed" {
+		t.Fatalf("no 'a merge landed' record; got %+v (logged %v)", record, logged)
+	}
+	if record.Context["commit"] != mergeSHA || record.Context["commits"] != 3 {
+		t.Fatalf("landing log fields = %v, want commit %s and 3 commits", record.Context, mergeSHA)
+	}
+	h.db.mu.Lock()
+	count, stamped := h.db.landedCommits[theWorkspace]
+	h.db.mu.Unlock()
+	if !stamped || count != 3 {
+		t.Fatalf("landed commit count = %d (stamped %v), want 3", count, stamped)
+	}
+	restored, err := landingRecordedForDeploy().outcome()
+	if err != nil {
+		t.Fatalf("reading the record back: %v", err)
+	}
+	if got := landedSummary(restored); got != "it landed as commit "+mergeSHA {
+		t.Fatalf("summary = %q, want it to name %s", got, mergeSHA)
+	}
+}
+
+func TestAMergeResumedAtItsDeployWithNoRecordedLandingFailsHard(t *testing.T) {
+	// Arrange: a record past the landing that never recorded one.
+	h := newHarness(t)
+	interruptedAt(t, h, func(d *progressDoc) {
+		atStep(TabDeploy, 1)(d)
+		d.MergeCommit = mergeSHA
+		d.Outcome = nil
+	})
+
+	// Act.
+	resume(t, h)
+
+	// Assert: the invariant violation is logged with its context, and nothing
+	// is reported as landed.
+	record, logged := h.recordFor(dlog.LevelError, "daemon.merge.resume")
+	if !logged || record.Context["step"] != TabDeploy || record.Context["merge_commit"] != mergeSHA {
+		t.Fatalf("resume error record = %+v (logged %v), want the deploy step and merge commit named", record, logged)
+	}
+	if _, landed := h.recordFor(dlog.LevelInfo, "daemon.merge.finish"); landed {
+		t.Fatal("a merge with no recorded landing was reported as landed")
+	}
+	h.db.mu.Lock()
+	_, stamped := h.db.landedCommits[theWorkspace]
+	h.db.mu.Unlock()
+	if stamped {
+		t.Fatal("a merge with no recorded landing was stamped merged")
+	}
+}
