@@ -44,7 +44,7 @@ import "@fontsource-variable/source-serif-4/opsz-italic.css";
 import "katex/dist/katex.min.css";
 import { createTicker, DEFAULT_TICK_MS } from "./clock.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
-import { createRowRenderers } from "./feed/renderers.js";
+import { createRowRenderers } from "./feed/row-renderers.js";
 import { mountFeed } from "./feed/feed.js";
 import { mountChat } from "./chat/chat.js";
 import { landChatAtEnd } from "./scroll.js";

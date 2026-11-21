@@ -312,7 +312,7 @@ async function runBoot(rec: BootRecord): Promise<void> {
       return { dispose: vi.fn() };
     }),
   }));
-  vi.doMock("../src/feed/renderers.js", () => ({
+  vi.doMock("../src/feed/row-renderers.js", () => ({
     createRowRenderers: vi.fn(() => ({})),
   }));
   vi.doMock("../src/footer/footer.js", () => ({

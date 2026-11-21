@@ -26,7 +26,8 @@ src/log.ts                the canonical logging API
 src/link.ts               renderExternalLink / renderEditorLink / renderMergeTestLogLink
 src/bubble/               THE ONE BUBBLE: draw (drawBubble, the spec) and body (the pipeline)
 src/feed/                 the feed mechanism (feed, feed-view, bubble, rows)
-  renderers.ts              THE SEAM, plus createRowRenderers: the registry
+  renderers.ts              THE SEAM
+  row-renderers.ts          createRowRenderers: the registry
   cards/ asks/ merge/       the fifteen row renderers
 src/footer/ src/topbar/ src/sidebar/ src/held/ src/composer/ src/panels/
 src/login/ src/lifecycle/ src/failure/      the remaining components
@@ -104,10 +105,12 @@ scale (src/feed/feed-text-scale.ts) is the first user.
 ## The seams
 
 - **`RowRenderers` (src/feed/renderers.ts).** The feed mechanism and the cards
-  meet here and nowhere else. `createRowRenderers(ctx)` is the ONE place the
-  fifteen keys are filled in; `main.ts` and the integration harness both call
-  exactly it. A key added to the interface and not to the assembler does not
-  compile.
+  meet here and nowhere else. `createRowRenderers(ctx)`
+  (src/feed/row-renderers.ts) is the ONE place the fifteen keys are filled in;
+  `main.ts` and the integration harness both call exactly it. A key added to
+  the interface and not to the assembler does not compile. The assembler is
+  its own module because it alone imports the cards: every card imports the
+  seam, so a seam that imported the cards would be an import cycle.
 - **The composer gate.** `footer.onStatus` drives `ComposerGate`: closed on
   `merging`, `closing` and `disconnected` (R7), and the reason shown is the
   FOOTER's own status word, never a second vocabulary for the same three states.
