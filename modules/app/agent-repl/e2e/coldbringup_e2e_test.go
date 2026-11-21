@@ -85,8 +85,10 @@ func cbuBringUp(t *testing.T, w *stack.World) string {
 //
 // Seam: daemon and shim -> store, a cold bring-up's registrations in the order the store accepts
 func testColdBringUpEarnsNoStoreRefusal(t *testing.T) {
-	// Arrange.
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	// Arrange: the shared World. The store's log is shared too, so the
+	// assertion reads every case's open refusals; a refusal any cold bring-up
+	// earns is the defect, whichever case's it is.
+	w := stack.SharedWorld(t)
 
 	// Act.
 	workspaceDir := cbuBringUp(t, w)

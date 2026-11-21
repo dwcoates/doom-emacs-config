@@ -28,7 +28,8 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
   - It asserts only on its slice: a glob of the account root narrows to its own project directory (`harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())`), never every project's.
   - A warning it provokes is declared for its workspace, `w.ExpectWarningsFor(ws, ops...)`, after the workspace exists.
 - A step that needs other `WorldOpts` (a daemon option such as a keep-alive interval or an idle cutoff, a sidecar window, a real zettel) takes the group World for them, `stack.GroupWorld(t, "<group>", opts)`: one World per group per test process, shared by every step that asks for the group, built with the same options (an ask under others fails the step). The groups today are `keepalive` (`keepaliveWorld`) and `hibernation`.
-- Only a step whose subject is a process's own lifecycle (it deploys, relaunches, stops or restarts the daemon, store or sidecar, or cold-boots a successor) builds its own World with `stack.NewWorld`, and its doc comment says which lifecycle it drives.
+- A step whose state is the whole account's or the whole daemon's (the weekly allowance its rate limits move) takes a group World named for that state (`weekly-allowance`), so other steps' cases cannot move it.
+- Only a step whose subject is a process's own lifecycle (it deploys, relaunches, stops or restarts the daemon, store or sidecar, or cold-boots a successor), or whose precondition is its own alone (an environment value only it sets, such as detached bash's gate path), builds its own World with `stack.NewWorld`, and its doc comment says why.
 - The shared and group Worlds' store and sidecar are shared: stopping or restarting them from a step fails it.
 - The rule is `modules/app/agent-repl/AGENTS.md`, "Integration tests share one canonical process, each case on its own slice".
 
