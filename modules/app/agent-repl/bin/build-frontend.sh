@@ -633,6 +633,29 @@ write_webapp_build_id() {
     write_built_sha_value "$WEBAPP_BUILD_ID_STAMP" "$entry"
 }
 
+# seeded_typecheck DIR SUITE COMMAND... — run COMMAND, a build whose first step
+# is the package's incremental typecheck (its `npm run typecheck`), in DIR
+# under `testrun typecheck`: the one implementation of the test typecheck's
+# seeding (testrun/internal/typecheck). A package with no incremental state of
+# its own starts from the host's newest passing typecheck of SUITE, and a build
+# that passes publishes its state as that seed.
+#
+# The webapp's typecheck is the same command in a deploy and in the merge gate,
+# so the gate's seed is the deploy's and the other way round. Measured
+# 2026-11-21: a full `tsc --noEmit` of the webapp costs 19-20 CPU-seconds, an
+# incremental one after a body edit about 5; a deploy's webapp step took p50
+# 10.5s over the seven days before (agentrepl deploy_build, step webapp). The
+# testrun binary costs 1.3s to build warm, into a directory removed with it.
+seeded_typecheck() {
+    local dir="$1" suite="$2"; shift 2
+    (
+        tool="$(mktemp -d "${TMPDIR:-/tmp}/build-frontend-testrun.XXXXXX")"
+        trap 'rm -rf "$tool"' EXIT
+        go_build "$ROOT/testrun" "$tool/testrun" .
+        cd "$dir" && "$tool/testrun" typecheck -name "$suite" -- "$@"
+    )
+}
+
 build_webapp() {
     link_node_modules "$WEBAPP_DIR"
     if ! source_is_stale webapp "$WEBAPP_ARTIFACT" "$WEBAPP_TREE_STAMP"; then
@@ -644,13 +667,14 @@ build_webapp() {
         return 0
     fi
     require_bin npm "install Node.js"
+    require_bin go "install the Go toolchain"
     echo "[build-frontend] webapp: building..."
     if [ -n "$OUT_DIR" ]; then
         # The whole dist goes to the staging slot. --emptyOutDir because Vite
         # refuses to empty an outDir outside the project root without it.
-        ( cd "$WEBAPP_DIR" && npm run build -- --outDir "$WEBAPP_DIST" --emptyOutDir )
+        seeded_typecheck "$WEBAPP_DIR" webapp npm run build -- --outDir "$WEBAPP_DIST" --emptyOutDir
     else
-        ( cd "$WEBAPP_DIR" && npm run build )
+        seeded_typecheck "$WEBAPP_DIR" webapp npm run build
     fi
     write_built_sha "$WEBAPP_SHA_STAMP" "$ROOT"
     stamp_source_tree webapp "$WEBAPP_TREE_STAMP"

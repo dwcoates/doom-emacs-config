@@ -239,3 +239,24 @@ func TestEveryTypecheckKeepsItsStateWhereSeedReadsIt(t *testing.T) {
 		}
 	}
 }
+
+// TestTheWebappBuildStartsWithItsIncrementalTypecheck pins that the webapp's
+// production build (bin/build-frontend.sh, under `testrun typecheck`) runs the
+// same incremental typecheck as the gate, so the two share one seed.
+func TestTheWebappBuildStartsWithItsIncrementalTypecheck(t *testing.T) {
+	// Arrange
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+
+	// Act
+	err := json.Unmarshal([]byte(readFile(t, filepath.Join("..", "..", "..", "webapp", "package.json"))), &manifest)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Scripts["build"]; !strings.HasPrefix(got, "npm run typecheck && ") {
+		t.Fatalf("the webapp's build = %q, want it to start with its incremental typecheck", got)
+	}
+}

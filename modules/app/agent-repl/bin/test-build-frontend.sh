@@ -88,6 +88,7 @@ make_tree() {
              "$root/agent-shim/shim-lock" \
              "$root/zettel" \
              "$root/testservice" \
+             "$root/testrun" \
              "$root/agent-shim/logging/go" \
              "$root/proto/gen/go" \
              "$root/proto/helpers/go" \
@@ -108,6 +109,7 @@ make_tree() {
     echo "package main" > "$root/agent-shim/shim-lock/main.go"
     echo "package main" > "$root/zettel/main.go"
     echo "package main" > "$root/testservice/main.go"
+    echo "package main" > "$root/testrun/main.go"
     echo "package logging" > "$root/agent-shim/logging/go/timestamp.go"
     echo "package proto" > "$root/proto/gen/go/proto.go"
     mkdir -p "$root/proto/src/conversation/v1"
@@ -278,6 +280,25 @@ while [ $# -gt 0 ]; do
     [ "$1" = "-o" ] && { out="$2"; shift 2; continue; }
     shift
 done
+# The testrun binary build-frontend.sh builds for the seeded typecheck is
+# itself a stub: it logs its argv and runs the command after `--`, so the
+# build under it runs. FAKE_GO_FAIL=testrun fails that build.
+case "$out" in
+    */testrun)
+        [ "${FAKE_GO_FAIL:-}" = testrun ] && exit 1
+        mkdir -p "$(dirname "$out")"
+        cat > "$out" <<'EOT'
+#!/usr/bin/env bash
+echo "testrun $* (in $PWD)" >> "$STUB_LOG"
+while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
+shift
+[ -n "${FAKE_TYPECHECK_FAIL:-}" ] && exit 1
+exec "$@"
+EOT
+        chmod +x "$out"
+        exit 0
+        ;;
+esac
 [ -n "$out" ] && { mkdir -p "$(dirname "$out")"; echo built > "$out"; }
 exit 0
 EOF
@@ -2431,6 +2452,65 @@ build_group_proto() {
     t_proto_failed_gate_fails_an_unchanged_tree
 }
 
+# --- the webapp's production typecheck: incremental and seeded -------------
+
+t_webapp_build_runs_under_the_seeded_typecheck() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    if run_script "$root" --out "$root/staging" webapp >/dev/null &&
+           grep -q "^testrun typecheck -name webapp -- npm run build -- --outDir $root/staging/webapp/dist --emptyOutDir (in .*/webapp)$" "$root/stub.log" &&
+           grep -q "^npm run build -- --outDir" "$root/stub.log"; then
+        pass "webapp: the build runs in the webapp under testrun's seeded typecheck"
+    else
+        fail "webapp: the build runs in the webapp under testrun's seeded typecheck" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_webapp_build_leaves_no_testrun_binary_behind() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    mkdir -p "$root/tmp"
+    if TMPDIR="$root/tmp" run_script "$root" webapp >/dev/null &&
+           [ -z "$(ls -A "$root/tmp")" ]; then
+        pass "webapp: the seeded typecheck removes the testrun binary it built"
+    else
+        fail "webapp: the seeded typecheck removes the testrun binary it built" "left: $(ls -A "$root/tmp")"
+    fi
+    rm -rf "$root"
+}
+
+t_webapp_failed_typecheck_fails_the_build() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    if ! FAKE_TYPECHECK_FAIL=1 run_script "$root" webapp >/dev/null 2>&1 &&
+           [ ! -e "$root/webapp/dist/.source-tree" ]; then
+        pass "webapp: a failed seeded typecheck fails the build and stamps nothing"
+    else
+        fail "webapp: a failed seeded typecheck fails the build and stamps nothing" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_webapp_failed_testrun_build_fails_the_build() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    if ! FAKE_GO_FAIL=testrun run_script "$root" webapp >/dev/null 2>&1 &&
+           ! grep -q "^npm run build" "$root/stub.log"; then
+        pass "webapp: a testrun binary that fails to build fails the build before it runs"
+    else
+        fail "webapp: a testrun binary that fails to build fails the build before it runs" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+build_group_webapp_typecheck() {
+    t_webapp_build_runs_under_the_seeded_typecheck
+    t_webapp_build_leaves_no_testrun_binary_behind
+    t_webapp_failed_typecheck_fails_the_build
+    t_webapp_failed_testrun_build_fails_the_build
+}
+
 test_split_run core build_group_core
 test_split_run store-gc build_group_store_gc
 test_split_run stamps build_group_stamps
@@ -2440,5 +2520,6 @@ test_split_run healing build_group_healing
 test_split_run dependencies build_group_dependencies
 test_split_run staging build_group_staging
 test_split_run proto build_group_proto
+test_split_run webapp-typecheck build_group_webapp_typecheck
 
 harness_finish
