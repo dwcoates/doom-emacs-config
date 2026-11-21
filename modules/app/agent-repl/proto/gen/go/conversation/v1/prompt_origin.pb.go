@@ -33,6 +33,24 @@ const (
 // daemon-generated submit site MUST choose a non-UNSPECIFIED value, and Emacs
 // send sites intentionally never share a value: a stored TurnStarted can
 // therefore be traced back to the exact editor situation that caused it.
+//
+// A PROMPT DELIVERED ON ARRIVAL IS NEVER HELD. Every daemon notice to an agent
+// (MERGE_HANDBACK, WORKSPACE_RETARGETED, WORKSPACE_CREATE_FAILED,
+// MERGE_QUEUE_NOTICE, DERIVED_WORKSPACE_NOTICE, WORKSPACE_NOTICE,
+// SUBSECTION_PLACEMENT, MAIN_SYNC_REPAIR, PULL_REQUEST_NOTICE,
+// GITHUB_MERGE_QUEUE_NOTICE, GITHUB_WORKFLOW_RUN_NOTICE, LINK_UNRESOLVED) and
+// every prompt one workspace's agent sent another (AGENT_SENT) goes the
+// moment it arrives:
+// into an idle session as its own turn, into a running turn as a join after
+// that turn's current tool call (the vendor folds it in, or runs it next).
+// It is never classified, never interjects, and never stands in the held
+// section. One that genuinely cannot go yet -- the session is not up, is
+// parked at its cold gate, is being bounced, a merge drives it, the daemon is
+// exiting, the vendor refuses it, or the running turn takes no join (a
+// context cut, a turn the vendor started) -- waits under a named arrival wait
+// that the one event it waits on ends, and that wait outlives a daemon
+// restart. The comments below that say such a prompt is "submitted through
+// the prompt queue" mean this path.
 type PromptOrigin int32
 
 const (
@@ -110,25 +128,26 @@ const (
 	PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED PromptOrigin = 29
 	// The daemon's question after a link the user clicked in a bubble resolved
 	// to no file: it quotes the bubble and asks the agent which file it meant
-	// and how agent-repl could avoid or resolve such links. Submitted without
-	// interrupting the running turn.
+	// and how agent-repl could avoid or resolve such links. Delivered on
+	// arrival (see the enum's header): it joins a running turn without
+	// interrupting it.
 	PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED PromptOrigin = 30
 	// The daemon's report to a workspace's session that a merge it asked for
 	// has ended: an ASYNC merge (agentrepl.v1.CreateWorkspaceAsyncMerge) that landed
 	// or failed, or a ONE-SHOT (agentrepl.v1.MergeWorkspaceOneShot) that
 	// failed — a one-shot that lands closes the workspace and is not reported.
 	// It says that the branch landed, or what failed and where the user
-	// finishes it. Submitted through the prompt queue like any
-	// submission, so it waits behind a running turn. The feed draws it as the
+	// finishes it. Delivered on arrival (see the enum's header): it joins a
+	// running turn rather than waiting for its end. The feed draws it as the
 	// FeedRow.merge_handback marker, never as a prompt bubble: the words are
 	// the daemon's, and the merge itself is read in its bubble.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK PromptOrigin = 31
 	// The daemon's notice to a workspace's session that its merge target was
 	// changed (agentrepl.v1.SetWorkspaceParent): it names the new target — the
 	// parent workspace's name and checkout, or the repository's default branch
-	// — and says the workspace's own-branch merge now lands there. Submitted
-	// through the prompt queue as a deferred prompt, so it waits behind a
-	// running turn and wakes an idle agent. Drawn as an ordinary prompt bubble.
+	// — and says the workspace's own-branch merge now lands there. Delivered
+	// on arrival (see the enum's header): it joins a running turn and wakes
+	// an idle agent. Drawn as an ordinary prompt bubble.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED PromptOrigin = 32
 	// The daemon's resolving brief: the first turn of an ASYNC merge workspace
 	// whose request carries an instruction
@@ -154,17 +173,17 @@ const (
 	// being handed to a successor daemon opens the main-worktree workspace when
 	// it is closed and submits this. It names what was asked for and the
 	// failure's cause, and asks the agent to analyze the failure without
-	// changing anything until the user answers. Submitted through the prompt
-	// queue as a deferred prompt, so it waits behind a running turn and wakes
-	// an idle agent. Drawn as an ordinary prompt bubble. A merge's own
+	// changing anything until the user answers. Delivered on arrival (see the
+	// enum's header): it joins a running turn and wakes an idle agent. Drawn
+	// as an ordinary prompt bubble. A merge's own
 	// workspace (the hidden one an async merge runs in) is not reported here:
 	// the merge queue hands its failure back to the requester.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED PromptOrigin = 35
 	// The daemon's notice to a workspace's session that a merge queue it
 	// subscribed to changed (agentrepl.v1.UpdateMergeQueueSubscribe): it names
-	// each change and carries the queue as it stands after it. Submitted
-	// through the prompt queue as a deferred prompt, the way a merge handback
-	// is, so it waits behind a running turn and wakes an idle agent. The feed
+	// each change and carries the queue as it stands after it. Delivered on
+	// arrival (see the enum's header), the way a merge handback is: it joins
+	// a running turn and wakes an idle agent. The feed
 	// draws NO row for it: the notice is the daemon's word to the agent, not
 	// anything the user said or needs to read, and the agent's reply is drawn
 	// as any reply is.
@@ -186,8 +205,8 @@ const (
 	// derived from it -- cut from its branch, or created with its conversation
 	// forked -- sent when the derived workspace is created, when it lands, and
 	// when it closes without landing (one combined notice when it is both). It
-	// names the derived workspace and what happened. Submitted as a deferred
-	// prompt, like a merge-queue notice, and drawn as NO row: it is the daemon's
+	// names the derived workspace and what happened. Delivered on arrival, like
+	// a merge-queue notice, and drawn as NO row: it is the daemon's
 	// word to the agent. Never sent to the workspace that asked for the create.
 	PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE PromptOrigin = 38
 	// A notice to a child's OWNER that landing the child's work was the owner's
@@ -208,6 +227,10 @@ const (
 	// prompt of this origin that begins with a slash command is refused
 	// (agentrepl.v1.SubmitPromptError.slash_command_from_agent): an agent's acts
 	// on a conversation are the ones the API names, such as compaction.
+	// Delivered on arrival (see the enum's header): it joins a running turn
+	// after its current tool call and is never held, and at a standing cold
+	// gate it is refused (agentrepl.v1.SubmitPromptColdGate) so the sending
+	// agent learns it did not go.
 	PromptOrigin_PROMPT_ORIGIN_AGENT_SENT PromptOrigin = 41
 	// The compaction CompactWorkspace submitted. Waits behind a running turn
 	// like any deferred prompt; drawn as the context cut it produces.
@@ -239,8 +262,8 @@ const (
 	// The daemon's brief asking a repository's main workspace to repair its
 	// main checkout after the daemon's fast-forward of the primary branch to
 	// its upstream failed in the index or the worktree
-	// (agentrepl.v1.MainSyncFailure). Submitted as a deferred prompt, reopening
-	// a closed main workspace first, and drawn as an ordinary prompt bubble, so
+	// (agentrepl.v1.MainSyncFailure). Delivered on arrival (see the enum's
+	// header), reopening a closed main workspace first, and drawn as an ordinary prompt bubble, so
 	// the user follows the repair from the workspace's feed.
 	PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR PromptOrigin = 46
 	// A notice of a followed GitHub pull request's activity
@@ -262,7 +285,7 @@ const (
 	// A notice of a followed GitHub merge queue's movement
 	// (agentrepl.v1.GithubMergeQueueNotice): entries that joined, merged or
 	// were removed, and the new head, since the subscriber was last told.
-	// Submitted and drawn as a workspace notice is: no row, no held card.
+	// Delivered on arrival and drawn as a workspace notice is: no row.
 	PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE PromptOrigin = 50
 	// The outcome of a shell command a person ran from a bubble's code block
 	// run control, sent to that workspace's agent once the command exited
@@ -278,7 +301,7 @@ const (
 	// The one notice of a followed GitHub Actions workflow run
 	// (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
 	// workflow's name, its conclusion, its head commit and its web address.
-	// Submitted and drawn as a workspace notice is: no row, no held card.
+	// Delivered on arrival and drawn as a workspace notice is: no row.
 	PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE PromptOrigin = 53
 )
 

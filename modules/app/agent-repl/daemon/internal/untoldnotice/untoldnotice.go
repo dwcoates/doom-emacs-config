@@ -3,9 +3,10 @@
 // most one untold notice per subject, the next change supersedes it, and the
 // new notice says every change the superseded one said, oldest first.
 //
-// A notice waits as a deferred prompt behind the subscriber's running turn, so
-// a busy subscriber was otherwise told each change as its own turn long after
-// its subject had moved on (2026-10-22). Each notifier keeps its untold notice
+// A notice that cannot go yet waits under a named arrival wait (promptqueue's
+// arrival.go), and before notices were delivered on arrival a busy subscriber
+// was told each change as its own turn long after its subject had moved on
+// (2026-10-22). Each notifier keeps its untold notice
 // durably, in a table of its own subject, and asks this package what the next
 // notice must say again.
 package untoldnotice

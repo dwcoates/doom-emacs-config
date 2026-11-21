@@ -12,7 +12,7 @@
 //
 // A WORKSPACE IS TOLD ONLY WHAT IT MUST REPAIR. When the fast-forward itself
 // fails in the index or the worktree, the daemon submits a MainSyncFailure to
-// the repository's main workspace as a deferred prompt of origin
+// the repository's main workspace as a prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_MAIN_SYNC_REPAIR, asking it to
 // bring the branch to the upstream tip; a closed main workspace is reopened
 // to receive it. One failure is told once per upstream commit and cause: the

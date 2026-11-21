@@ -164,6 +164,9 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	}
 
 	delivered, err := q.popAndDeliver(ctx, d, log)
+	// A TURN'S END ENDS THE ARRIVAL WAITS ON IT (arrival.go): each joins the
+	// turn the pop started, or starts its own.
+	q.driveArrivalsLocked(ctx, d, arrivalTurnEnded, log)
 	if err != nil {
 		log.Error(opTurnEnded, "the next held prompt was not delivered", dlog.Context{"cause": err.Error()})
 		return
@@ -533,6 +536,9 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	// end takes one, deferring to a shim call in flight. It is a LEASE edge:
 	// it never re-judges a replacement deferred behind live work (edgeSet).
 	defer q.checkRegistryLocked(d, edgeLease, log)
+	// A LEASE CHANGE ENDS THE ARRIVAL WAITS ON A LEASE (arrival.go), driven
+	// once the holds below are re-judged.
+	defer q.driveArrivalsLocked(ctx, d, arrivalLeaseChanged, log)
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {

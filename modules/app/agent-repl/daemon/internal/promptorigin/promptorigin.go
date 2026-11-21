@@ -3,6 +3,7 @@
 // shim ADOPTED, which no queue delivered (Adopted); whether the prompt
 // is DRAWN, shared by the two resolvers that draw a prompt (the feed's prompt
 // rows in resolve/feed and the held section's cards in resolve/holds), and
+// whether it is DELIVERED ON ARRIVAL, never held (DeliveredOnArrival),
 // whether it NAMES ITS SENDER, shared by every layer that carries a prompt's
 // sender (the rpc, the prompt handler, the queue, the store and the feed). It
 // is a leaf, so every one of them reads the one answer.
@@ -71,6 +72,49 @@ func Unseen(origin conversationv1.PromptOrigin) bool {
 // is not unseen.
 func UnseenNamed(origin string) bool {
 	return Unseen(Named(origin))
+}
+
+// DeliveredOnArrival reports whether a prompt of ORIGIN is delivered the
+// moment it arrives and is never held (owner ruling, 2026-11-21): every
+// daemon notice to an agent, and every prompt one workspace's agent sent
+// another (`agent-repld workspace prompt`). Into an idle session it starts a
+// turn; into a running turn it joins after the turn's current tool call. One
+// that genuinely cannot go yet waits under a NAMED wait the event it waits on
+// ends (wsm.ArrivalWait), never as a held prompt.
+//
+// The notices are: a merge queue's, a workspace subscription's, a derived
+// workspace's, a GitHub pull request's and a GitHub merge queue's notice, an
+// async merge's handback, a retarget's notice, a failed create's report to
+// the main workspace, the main checkout's sync repair, an unresolved link's
+// question, a GitHub workflow run's notice, and the retired
+// subsection-placement brief. A merge's own briefs
+// (its repairs, its actions, its hooks, its revert) drive the merge's work
+// and are not notices, nor is a deploy mediator's brief, which drives its own
+// hidden workspace's work.
+func DeliveredOnArrival(origin conversationv1.PromptOrigin) bool {
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT:
+		return true
+	}
+	return false
+}
+
+// DeliveredOnArrivalNamed is DeliveredOnArrival for an origin spelled as
+// conversation.v1.PromptOrigin names it, as the store records it.
+func DeliveredOnArrivalNamed(origin string) bool {
+	return DeliveredOnArrival(Named(origin))
 }
 
 // UserSent reports whether a prompt of ORIGIN is the user's own, typed into

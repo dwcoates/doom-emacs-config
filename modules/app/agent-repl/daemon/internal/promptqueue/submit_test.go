@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
 	"reflect"
 	"testing"
 
@@ -826,7 +827,7 @@ func TestSubmitHoldsAGateWaitingPromptAtAStandingColdGate(t *testing.T) {
 	}
 }
 
-func TestAGateWaitingPromptStandsOnTheGatesHold(t *testing.T) {
+func TestAGateWaitingPromptStandsOnTheGatesHoldOrWait(t *testing.T) {
 	for _, origin := range gateWaitingOrigins {
 		t.Run(origin.String(), func(t *testing.T) {
 			// Arrange
@@ -836,7 +837,12 @@ func TestAGateWaitingPromptStandsOnTheGatesHold(t *testing.T) {
 			if _, err := h.q.Submit(context.Background(), gateWaitingSubmission("t1", origin)); err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			// Assert
+			// Assert: a notice is never held; it waits out the gate instead.
+			if promptorigin.DeliveredOnArrival(origin) {
+				waitsUnder(t, h, "t1", wsm.WaitColdGate)
+				noHolds(t, h)
+				return
+			}
 			held, err := h.db.HeldPrompts(context.Background(), theWorkspace)
 			if err != nil {
 				t.Fatalf("HeldPrompts: %v", err)
@@ -2080,5 +2086,33 @@ func TestAStandDownBeforeTheRevivalBeganDoesNotExcuseIt(t *testing.T) {
 	// Assert
 	if !logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
 		t.Fatalf("records = %+v, want the lying revival at ERROR", h.log.Records())
+	}
+}
+
+// EVERY MERGE REFUSAL IS refuseMerging's: the held path and the arrival path
+// refuse a submission under a refusing lease with the one answer.
+func TestEveryMergeRefusalIsRefuseMergings(t *testing.T) {
+	// Arrange
+	fset, funcs := productionFuncs(t)
+
+	// Act
+	var found []string
+	for _, fn := range funcs {
+		if fn.Name.Name == "refuseMerging" {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if kv, ok := n.(*ast.KeyValueExpr); ok {
+				if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "RefusedArm" {
+					found = append(found, fset.Position(kv.Pos()).String()+" in "+fn.Name.Name)
+				}
+			}
+			return true
+		})
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these functions compose a merge refusal instead of calling refuseMerging: %v", found)
 	}
 }

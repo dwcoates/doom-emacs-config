@@ -1,7 +1,8 @@
 // Package briefprompt is the one way the daemon submits a prompt it composed
 // from a brief to a workspace's agent under the hood: compose the brief, mint
-// the submission's idempotency key, and submit it as a DEFERRED prompt of its
-// origin, which waits behind a running turn and wakes an idle agent. Every
+// the submission's idempotency key, and submit it under its origin, which is
+// delivered on arrival (promptqueue's arrival.go): it joins a running turn
+// after its current tool call and wakes an idle agent. Every
 // notifier (merge-queue, workspace, derived-workspace and pull-request
 // notices, the main sync's repair prompt) submits through it, so the three
 // steps cannot drift apart between them.

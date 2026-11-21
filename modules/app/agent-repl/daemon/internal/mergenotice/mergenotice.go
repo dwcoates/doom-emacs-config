@@ -22,14 +22,16 @@
 // THE NOTICE TAKES THE PATH EVERY UNDER-THE-HOOD REPORT TO AN AGENT TAKES: a
 // deferred prompt submitted through the prompt handler, exactly as an async
 // merge's handback is (mergeworkspace.Service.HandBack), under its own origin
-// (PROMPT_ORIGIN_MERGE_QUEUE_NOTICE), which the feed draws no row for. It
-// waits behind a running turn and wakes an idle agent.
+// (PROMPT_ORIGIN_MERGE_QUEUE_NOTICE), which the feed draws no row for. It is
+// delivered on arrival (promptqueue's arrival.go): it joins a running turn
+// after its current tool call and wakes an idle agent, and is never held.
 //
 // A SUBSCRIBER IS NEVER TOLD A QUEUE THAT NO LONGER STANDS, AND ITS NOTICES
-// NEVER PILE UP. A notice waits behind the subscriber's running turn, and a
-// busy subscriber was handed each change as its own turn long after the queue
-// had moved on ("pt1-path-test testing ... now" arriving twenty minutes after
-// pt1-path-test landed, 2026-10-22). So each subscriber holds at most ONE
+// NEVER PILE UP. A notice can wait under a named arrival wait (the session not
+// up, its cold gate, a merge driving it), and before notices were delivered
+// on arrival a busy subscriber was handed each change as its own turn long
+// after the queue had moved on ("pt1-path-test testing ... now" arriving
+// twenty minutes after pt1-path-test landed, 2026-10-22). So each subscriber holds at most ONE
 // untold notice per queue, recorded DURABLY (wsm UntoldMergeNotice) so a
 // restart cannot forget it: a new change supersedes it (promptqueue
 // Supersede) and the new notice says everything the superseded one said, then

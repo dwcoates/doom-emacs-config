@@ -118,6 +118,22 @@ type fakeQueue struct {
 	leaseChanged []wsm.WorkspaceID
 	// reconnects records every ReleaseReconnectHolds, in order.
 	reconnects []wsm.WorkspaceID
+	// drives counts every DriveArrivalWaits; reconnectsAtDrive is how many
+	// releases had been asked for when the first was; driveErr answers it.
+	drives            int
+	reconnectsAtDrive int
+	driveErr          error
+}
+
+// DriveArrivalWaits records the boot's drive of the arrival waits.
+func (q *fakeQueue) DriveArrivalWaits(context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.drives == 0 {
+		q.reconnectsAtDrive = len(q.reconnects)
+	}
+	q.drives++
+	return q.driveErr
 }
 
 // ReleaseReconnectHolds records the release the boot asked for.

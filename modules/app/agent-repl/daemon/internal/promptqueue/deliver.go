@@ -414,6 +414,10 @@ func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause erro
 		why = "no watch stood to see the turn; the prompt is held until the session comes up again"
 	}
 	log.Info(opDeliver, why, dlog.Context{"cause": cause.Error()})
+	// A PROMPT DELIVERED ON ARRIVAL IS NEVER HELD: it waits for the session.
+	if deliveredOnArrival(sub) {
+		return q.awaitArrival(ctx, sub, wsm.WaitSession, why, log)
+	}
 	if !sub.fromHold {
 		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
 	}

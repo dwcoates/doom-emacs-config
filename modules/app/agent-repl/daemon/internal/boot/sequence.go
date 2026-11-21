@@ -744,6 +744,13 @@ func (s *sequence) restoreHolds(ctx context.Context, log dlog.Logger, report *Re
 	for _, adopted := range report.AdoptedSessions {
 		s.deps.Queue.ReleaseReconnectHolds(adopted.Workspace)
 	}
+	// THE PROMPTS DELIVERED ON ARRIVAL THAT WAITED ACROSS THE RESTART are
+	// driven once the adopted sessions are released: the boot is the event a
+	// wait on the predecessor's exit waits on.
+	if err := s.deps.Queue.DriveArrivalWaits(ctx); err != nil {
+		log.Error("daemon.boot.restore_holds", "the arrival waits could not be driven", dlog.Context{"error": err.Error()})
+		return fmt.Errorf("boot: drive the arrival waits: %w", err)
+	}
 	return nil
 }
 

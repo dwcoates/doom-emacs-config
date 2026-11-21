@@ -241,3 +241,75 @@ func TestAdopted(t *testing.T) {
 		})
 	}
 }
+
+func TestOnlyTheNoticesAndAgentPromptsAreDeliveredOnArrival(t *testing.T) {
+	onArrival := map[conversationv1.PromptOrigin]bool{
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:         true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE:           true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:   true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE:        true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE:  true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:       true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK:             true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED:       true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED:    true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR:           true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED:            true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE: true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT:                 true,
+	}
+	for value := range conversationv1.PromptOrigin_name {
+		origin := conversationv1.PromptOrigin(value)
+		t.Run(origin.String(), func(t *testing.T) {
+			// Act
+			got := DeliveredOnArrival(origin)
+
+			// Assert
+			if got != onArrival[origin] {
+				t.Fatalf("DeliveredOnArrival(%s) = %v, want %v", origin, got, onArrival[origin])
+			}
+		})
+	}
+}
+
+// EVERY UNSEEN NOTICE IS DELIVERED ON ARRIVAL: a notice drawn nowhere that
+// could be held would wait where nothing draws it.
+func TestEveryUnseenOriginIsDeliveredOnArrival(t *testing.T) {
+	for value := range conversationv1.PromptOrigin_name {
+		origin := conversationv1.PromptOrigin(value)
+		if !Unseen(origin) {
+			continue
+		}
+		t.Run(origin.String(), func(t *testing.T) {
+			// Act
+			got := DeliveredOnArrival(origin)
+
+			// Assert
+			if !got {
+				t.Fatalf("Unseen(%s) but not DeliveredOnArrival", origin)
+			}
+		})
+	}
+}
+
+func TestDeliveredOnArrivalNamedReadsTheStoredSpelling(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "PROMPT_ORIGIN_AGENT_SENT", want: true},
+		{name: "PROMPT_ORIGIN_USER_SENT", want: false},
+		{name: "NO_SUCH_ORIGIN", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := DeliveredOnArrivalNamed(tt.name)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("DeliveredOnArrivalNamed(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

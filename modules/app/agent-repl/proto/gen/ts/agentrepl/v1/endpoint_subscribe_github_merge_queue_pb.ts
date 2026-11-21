@@ -8,9 +8,10 @@
 // does). This rpc is for watching the whole queue.
 //
 // DELIVERY. Each notice (GithubMergeQueueNotice) is submitted to the
-// subscriber's session as a deferred prompt of origin
+// subscriber's session as a prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE: it
-// waits behind a running turn, wakes an idle agent, and the feed draws no row
+// is delivered on arrival -- it joins a running turn after its current tool
+// call, never held behind it -- wakes an idle agent, and the feed draws no row
 // for it.
 //
 // NOTHING SLIPS BETWEEN READING AND FOLLOWING. The answer carries the queue

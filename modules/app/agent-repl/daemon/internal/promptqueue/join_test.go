@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
 	"testing"
 
 	"agent-repld/internal/classifier"
@@ -929,5 +930,32 @@ func TestAJoinStandingInItsTurnsPlaceIsNotRecordedAtError(t *testing.T) {
 	// Assert
 	if record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opJoin}); ok {
 		t.Fatalf("record = %+v, want no ERROR for the healthy join", record)
+	}
+}
+
+// EVERY JOIN IS SENT BY sendJoinLocked: no other function of the queue asks
+// the shim to join the running turn, so a held prompt's join and an
+// arrival's cannot drift apart.
+func TestEveryJoinIsSentBySendJoinLocked(t *testing.T) {
+	// Arrange
+	fset, funcs := productionFuncs(t)
+
+	// Act
+	var found []string
+	for _, fn := range funcs {
+		if fn.Name.Name == "sendJoinLocked" {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "JoinRunningTurn" {
+				found = append(found, fset.Position(sel.Pos()).String()+" in "+fn.Name.Name)
+			}
+			return true
+		})
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these functions ask the shim to join the running turn instead of calling sendJoinLocked: %v", found)
 	}
 }

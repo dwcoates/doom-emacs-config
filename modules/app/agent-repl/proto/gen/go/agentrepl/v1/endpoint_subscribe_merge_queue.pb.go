@@ -10,9 +10,10 @@
 // told what any one merge does.
 //
 // DELIVERY: each notice is submitted to the subscriber's session as a
-// deferred prompt of origin
+// prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, the same
-// path an async merge's handback takes: it waits behind a running turn, wakes
+// path an async merge's handback takes: delivered on arrival, it joins a
+// running turn after its current tool call (never held behind it), wakes
 // an idle agent, and the feed draws no row for it.
 //
 // WHAT IS TOLD: a queue DEPLETING (a merge left it and none is left in line,

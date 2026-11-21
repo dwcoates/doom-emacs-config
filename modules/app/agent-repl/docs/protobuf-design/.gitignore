@@ -1,0 +1,2 @@
+# A conversation is never version controlled: a transcript of one stays out of the repository.
+*.transcript.md

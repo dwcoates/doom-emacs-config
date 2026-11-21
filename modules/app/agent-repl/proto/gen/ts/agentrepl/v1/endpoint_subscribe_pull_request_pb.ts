@@ -9,9 +9,10 @@
 // explicitly (PullRequestSubscriptionOriginRequested).
 //
 // DELIVERY. Each notice (PullRequestNotice) is submitted to the subscriber's
-// session as a deferred prompt of origin
-// conversation.v1.PromptOrigin.PROMPT_ORIGIN_PULL_REQUEST_NOTICE: it waits
-// behind a running turn, wakes an idle agent, and the feed draws no row for
+// session as a prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_PULL_REQUEST_NOTICE: it is
+// delivered on arrival -- it joins a running turn after its current tool
+// call, never held behind it -- wakes an idle agent, and the feed draws no row for
 // it. How the daemon reads GitHub, and why nothing can be lost or told twice,
 // is pull_request.proto's header.
 //

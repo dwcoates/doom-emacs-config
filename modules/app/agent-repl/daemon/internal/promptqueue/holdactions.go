@@ -352,6 +352,11 @@ func (q *queue) Supersede(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 	d := q.lockDelivery(ws)
 	defer d.unlock()
 
+	// A NOTICE IS NEVER HELD (arrival.go): one that has not gone stands as
+	// its arrival wait, which the supersession ends.
+	if superseded, err := q.supersedeArrival(ctx, turn, log); err != nil || superseded {
+		return superseded, err
+	}
 	held, err := q.standingHold(ctx, ws, turn)
 	switch {
 	case errors.Is(err, ErrAlreadyDelivered), errors.Is(err, ErrNoSuchHold):

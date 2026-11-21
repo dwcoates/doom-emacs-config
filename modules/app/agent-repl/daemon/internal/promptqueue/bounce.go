@@ -1249,6 +1249,9 @@ func (q *queue) resumeDispatchLocked(ctx context.Context, d *delivery, log dlog.
 	if !q.releaseDrainHoldsLocked(ctx, ws, log) {
 		return
 	}
+	// THE REPLACEMENT TAKING OVER ENDS THE ARRIVAL WAITS ON THE BOUNCE
+	// (arrival.go), driven once what was held through it has gone.
+	defer q.driveArrivalsLocked(ctx, d, arrivalBounceEnded, log)
 	if _, running := q.turnInFlight(ws); running {
 		log.Debug(opBounce, "a turn is already in flight on the new shim; the held prompts wait for its end", nil)
 		return

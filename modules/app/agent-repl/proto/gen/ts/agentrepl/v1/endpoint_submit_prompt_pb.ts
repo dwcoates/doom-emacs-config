@@ -242,7 +242,10 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
   outcome: {
     /**
      * It is a prompt: the daemon minted the turn (delivered now or held — a
-     * hold is visible in the held section, not an error here).
+     * hold is visible in the held section, not an error here). A prompt
+     * delivered on arrival (conversation.v1.PromptOrigin's header: a daemon
+     * notice, an agent-sent prompt) is never held: it went, or it waits
+     * under a named arrival wait that no section draws.
      *
      * @generated from field: agentrepl.v1.SubmitPromptTurn turn = 1;
      */

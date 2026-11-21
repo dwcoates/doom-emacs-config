@@ -156,7 +156,10 @@ message SubmitPromptSuccess {
   reserved "question_forked";
   oneof outcome {
     // It is a prompt: the daemon minted the turn (delivered now or held — a
-    // hold is visible in the held section, not an error here).
+    // hold is visible in the held section, not an error here). A prompt
+    // delivered on arrival (conversation.v1.PromptOrigin's header: a daemon
+    // notice, an agent-sent prompt) is never held: it went, or it waits
+    // under a named arrival wait that no section draws.
     SubmitPromptTurn turn = 1;
     // It is a programmatically handled command: here is its panel, resolved.
     SubmitPromptCommandPanel command_panel = 2;

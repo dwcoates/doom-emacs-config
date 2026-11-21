@@ -3017,6 +3017,9 @@ func (q *fakeQueue) OnLeaseChanged(ws ids.WorkspaceID) {
 }
 func (q *fakeQueue) RestoreHolds(context.Context) error { return nil }
 
+// DriveArrivalWaits is the boot's, which the merge orchestrator never reaches.
+func (q *fakeQueue) DriveArrivalWaits(context.Context) error { return nil }
+
 // HeldSince is never reached by the merge orchestrator; answering it loudly
 // keeps a new caller from passing silently.
 func (q *fakeQueue) HeldSince(context.Context, ids.WorkspaceID, time.Time) ([]ids.TurnID, error) {

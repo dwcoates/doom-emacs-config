@@ -1083,31 +1083,6 @@ func TestDeliverMirrorsAnAgentSentPromptUnderItsSender(t *testing.T) {
 	}
 }
 
-func TestAHeldAgentSentPromptIsDeliveredWithItsSender(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
-	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	h.q.waitForClassifications()
-	held, ok, err := h.db.HeldPromptByTurn(context.Background(), "t1")
-	if err != nil || !ok || held.SentBy == nil || *held.SentBy != theSender {
-		t.Fatalf("hold = (%+v, %v, %v), want it held with sender %s", held, ok, err, theSender)
-	}
-
-	// Act
-	h.watcher.idle()
-	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
-
-	// Assert
-	record, ok := h.db.startedTurn("t1")
-	if !ok || record.SentBy == nil || *record.SentBy != theSender {
-		t.Fatalf("turn = (%+v, %v), want it delivered with sender %s", record, ok, theSender)
-	}
-}
-
 // registerSender records theSender as a workspace named NAME whose session
 // runs in MODE.
 func registerSender(h *harness, name, mode string) {
