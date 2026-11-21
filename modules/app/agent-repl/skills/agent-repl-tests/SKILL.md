@@ -1,6 +1,6 @@
 ---
 name: agent-repl-tests
-description: 'Load BEFORE beginning any work on agent-repl tests: writing, changing, reviewing, assessing, auditing, running, speeding up, stabilizing or measuring a test anywhere under modules/app/agent-repl, a fixture or harness helper, a suite or roster entry, the test runner and its CPU governor, or profiling where a test run's CPU goes (`-profile`). Keeps tests fast and cheap WITHOUT losing coverage, under the host CPU governor and the test performance standards; every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
+description: 'Load BEFORE beginning any work on agent-repl tests: writing, changing, reviewing, assessing, auditing, running, speeding up, stabilizing or measuring a test anywhere under modules/app/agent-repl, a fixture or harness helper, a suite or roster entry, the test runner and its CPU governor, or profiling where the CPU of a test run goes (`-profile`). Keeps tests fast and cheap WITHOUT losing coverage, under the host CPU governor and the test performance standards; every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 

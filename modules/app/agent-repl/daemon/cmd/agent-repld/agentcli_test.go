@@ -1902,13 +1902,21 @@ func TestAMergeOrAFinishAsksForItsGateProfiledOnlyWithTheFlag(t *testing.T) {
 		got  func(*testing.T, *cliFixture) bool
 	}{
 		{name: "an async merge asking", args: []string{"async-merge", "-branch", "b", "-maker-subagent", "a1", "-context-fork", "here", "-target", "primary", "-placement", "back", "-profile-gate"}, want: true,
-			got: func(t *testing.T, f *cliFixture) bool { return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate() }},
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate()
+			}},
 		{name: "an async merge not asking", args: []string{"async-merge", "-branch", "b", "-maker-subagent", "a1", "-context-fork", "here", "-target", "primary", "-placement", "back"}, want: false,
-			got: func(t *testing.T, f *cliFixture) bool { return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate() }},
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate()
+			}},
 		{name: "a finish asking", args: []string{"finished", "here", "-placement", "back", "-profile-gate"}, want: true,
-			got: func(t *testing.T, f *cliFixture) bool { return only[*agentreplv1.FinishWorkspaceRequest](t, f).GetProfileGate() }},
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.FinishWorkspaceRequest](t, f).GetProfileGate()
+			}},
 		{name: "a finish not asking", args: []string{"finished", "here", "-placement", "back"}, want: false,
-			got: func(t *testing.T, f *cliFixture) bool { return only[*agentreplv1.FinishWorkspaceRequest](t, f).GetProfileGate() }},
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.FinishWorkspaceRequest](t, f).GetProfileGate()
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

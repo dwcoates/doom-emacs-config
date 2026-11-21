@@ -305,7 +305,9 @@ func TestTestRunSendsItsOptions(t *testing.T) {
 		{name: "a run without -debug-info drops debug info", args: []string{"-go", "pkg=TestA"},
 			check: func(r *agentreplv1.RunTestsRequest) bool { return !r.GetRun().GetDebugInfo() }},
 		{name: "a profiling run", args: []string{"-go", "pkg=TestA", "-profile"},
-			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRun().GetProfile() && r.GetRequester().GetWorkspace() != nil }},
+			check: func(r *agentreplv1.RunTestsRequest) bool {
+				return r.GetRun().GetProfile() && r.GetRequester().GetWorkspace() != nil
+			}},
 		{name: "a run that does not profile", args: []string{"-go", "pkg=TestA"},
 			check: func(r *agentreplv1.RunTestsRequest) bool { return !r.GetRun().GetProfile() }},
 		{name: "the user's fresh run reusing nothing", args: []string{"-suite", "webapp", "-no-reuse", "-as-user"},

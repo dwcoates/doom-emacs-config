@@ -1847,8 +1847,15 @@ func TestRunARunThatDoesNotProfileLeavesItsUnitsAlone(t *testing.T) {
 	code := h.run(t, "--suites", "store")
 
 	// Assert
-	if code != 0 || len(h.exec.env["store"]) != 0 {
-		t.Fatalf("exit = %d, env = %q; want 0 and no profiling environment", code, h.exec.env["store"])
+	// The unit keeps whatever else the run gives it (its CPU tag,
+	// cputime.UnitEnv); only the profiling entries must be absent.
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, kv := range h.exec.env["store"] {
+		if strings.HasPrefix(kv, testenv.ProfileDir+"=") || strings.HasPrefix(kv, testenv.ExitProfileEnv+"=") {
+			t.Fatalf("env = %q; want no profiling environment", h.exec.env["store"])
+		}
 	}
 	if evs := eventsOf(t, &stream); evs[len(evs)-1].GetEnded().GetProfileDir() != "" {
 		t.Fatalf("ended = %v, want no profiles directory", evs[len(evs)-1].GetEnded())
