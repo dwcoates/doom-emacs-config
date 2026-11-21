@@ -17,16 +17,16 @@ func ListenRecorded(path string, probe time.Duration, log *recordlog.Logger) (ne
 	ln, res, err := Listen(path, probe)
 	if err != nil {
 		var step *Error
-		ctx := recordlog.Context{"socket": path, "cause": err.Error()}
 		if errors.As(err, &step) {
-			ctx["step"] = string(step.Step)
+			log.Error(runtime+".listen", "binding the {service} socket failed", recordlog.Context{"service": runtime, "socket": path, "step": string(step.Step), "cause": err.Error()})
+		} else {
+			log.Error(runtime+".listen", "binding the {service} socket failed at a step it does not name", recordlog.Context{"service": runtime, "socket": path, "cause": err.Error()})
 		}
-		log.Error(runtime+".listen", "binding the "+runtime+" socket failed", ctx)
 		return nil, err
 	}
 	if res.Reclaimed {
-		log.Warn(runtime+".listen.reclaim", "reclaimed a stale socket a previous "+runtime+" left behind", recordlog.Context{"socket": res.Path})
+		log.Warn(runtime+".listen.reclaim", "reclaimed a stale socket a previous {service} left behind", recordlog.Context{"service": runtime, "socket": res.Path})
 	}
-	log.Info(runtime+".listen", "listening on the "+runtime+" socket", recordlog.Context{"socket": res.Path})
+	log.Info(runtime+".listen", "listening on the {service} socket", recordlog.Context{"service": runtime, "socket": res.Path})
 	return ln, nil
 }

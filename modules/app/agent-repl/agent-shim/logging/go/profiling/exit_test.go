@@ -93,7 +93,7 @@ func TestStartExitProfileFailsLoudly(t *testing.T) {
 			if len(rec.events) != 1 || rec.events[0].Kind != Failed || rec.events[0].Reason != "exit_profile" || !errors.Is(rec.events[0].Err, err) {
 				t.Fatalf("events = %+v, want one failure recording the cause", rec.events)
 			}
-			if d := Describe("store", rec.events[0]); d.Level != "error" || !strings.Contains(d.Text(), tt.wantErr) {
+			if d := Describe("store", rec.events[0]); d.Level != "error" || !strings.Contains(fmt.Sprint(d.Context()["cause"]), tt.wantErr) {
 				t.Fatalf("the failure is recorded as %+v, want an error naming the cause", d)
 			}
 		})

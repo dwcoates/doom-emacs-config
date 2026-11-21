@@ -212,58 +212,41 @@ func stripGenerics(name string) string {
 	return b.String()
 }
 
-// Callers resolves the function a log call is written in from its program
-// counter, once per call site: the frames above a logging helper's own
-// package are walked until the first that is not the helper's, and the
-// answer is cached by that frame's program counter.
-type Callers struct {
-	// helpers are the helper packages' import paths, each with its trailing
-	// dot ("pkg."), whose frames are skipped.
-	helpers []string
-	cache   sync.Map // uintptr -> string
-}
+// callerCache maps a log call's program counter to the normalized function
+// it is written in, so each call site walks its frames once.
+var callerCache sync.Map // uintptr -> string
 
-// NewCallers answers a resolver that skips the frames of every package in
-// HELPERS (import paths), the logging helper's own and any it wraps.
-func NewCallers(helpers ...string) *Callers {
-	prefixes := make([]string, len(helpers))
-	for i, h := range helpers {
-		prefixes[i] = h + "."
-	}
-	return &Callers{helpers: prefixes}
-}
-
-// Function answers the normalized function of the first frame above the
-// caller of Function that lies outside the helper packages. A stack with no
-// such frame is a helper calling itself, which never happens: it panics.
-func (c *Callers) Function() string {
-	var pcs [32]uintptr
+// Caller answers the normalized function that called the logging helper
+// entry point calling Caller: the function a log call is written in. Every
+// entry point (a logger's Debug, Info, Warn and Error, and Msg) calls it
+// directly, so the call site is always exactly one frame above that entry
+// point, whatever package it lies in: a log call written in the helper's own
+// package (its own records, its tests) is keyed by its own function. A
+// wrapper that forwards to another logger resolves its caller at its own
+// entry point and forwards the function with the template, so the wrapped
+// logger never resolves it again.
+//
+// The answer is cached by the call site's program counter.
+func Caller() string {
+	var pcs [8]uintptr
+	// Skip runtime.Callers and Caller; frames then start at the entry point.
 	n := runtime.Callers(2, pcs[:])
 	frames := runtime.CallersFrames(pcs[:n])
-	for {
-		frame, more := frames.Next()
-		if !c.isHelper(frame.Function) {
-			if cached, ok := c.cache.Load(frame.PC); ok {
-				return cached.(string)
-			}
-			fn := NormalizeFunction(frame.Function)
-			c.cache.Store(frame.PC, fn)
-			return fn
-		}
-		if !more {
-			panic("logsite: every frame of the log call lies in the logging helper; no call site to key")
-		}
+	if _, more := frames.Next(); !more {
+		panic("logsite: Caller was called with no entry point above it")
 	}
-}
-
-// isHelper reports whether FUNCTION lies in one of the helper packages.
-func (c *Callers) isHelper(function string) bool {
-	for _, p := range c.helpers {
-		if strings.HasPrefix(function, p) {
-			return true
-		}
+	site, _ := frames.Next()
+	if site.Function == "" || strings.HasPrefix(site.Function, "runtime.") {
+		// A log entry point is never a goroutine's root function: Caller was
+		// called from something that is not an entry point.
+		panic(fmt.Sprintf("logsite: Caller's entry point was called from %q, which is no log call", site.Function))
 	}
-	return false
+	if cached, ok := callerCache.Load(site.PC); ok {
+		return cached.(string)
+	}
+	fn := NormalizeFunction(site.Function)
+	callerCache.Store(site.PC, fn)
+	return fn
 }
 
 // template is a log message's template as Msg takes it: a string constant,
@@ -282,9 +265,6 @@ type Message struct {
 	function string
 }
 
-// msgCallers resolves Msg's caller.
-var msgCallers = NewCallers("agentrepl/logging/logsite")
-
 // Msg answers the message written as TEMPLATE in the function that calls it.
 //
 // TEMPLATE MUST BE A STRING LITERAL (or a constant): its parameter's type is
@@ -294,7 +274,7 @@ var msgCallers = NewCallers("agentrepl/logging/logsite")
 // sites"). Put each dynamic value in the record's context under a name, and
 // name it in the template as {name}.
 func Msg(t template) Message {
-	return Message{template: string(t), function: msgCallers.Function()}
+	return Message{template: string(t), function: Caller()}
 }
 
 // Template is the message's template.

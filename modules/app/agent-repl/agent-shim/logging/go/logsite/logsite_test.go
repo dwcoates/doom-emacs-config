@@ -174,41 +174,46 @@ func TestNormalizeFunctionKeepsOnlyTheEnclosingNamedFunction(t *testing.T) {
 	}
 }
 
-// logVia is a stand-in logging helper: Function skips its frames.
-func logVia(c *Callers) string { return c.Function() }
+// entryPoint is a stand-in logging helper entry point: Caller answers the
+// function that called it.
+func entryPoint() string { return Caller() }
 
-func TestCallersAnswersTheFirstFunctionOutsideTheHelpers(t *testing.T) {
-	// Arrange
-	direct := NewCallers()
+// inPackageSite is a log call written in the helper's own package.
+func inPackageSite() string { return entryPoint() }
 
-	// Act
-	viaClosure := func() string { return direct.Function() }()
+func TestCallerAnswersTheFunctionCallingTheEntryPoint(t *testing.T) {
+	tests := []struct {
+		name string
+		call func() string
+		want string
+	}{
+		{
+			name: "a call from a closure is keyed by its enclosing function",
+			call: func() string { return entryPoint() },
+			want: "agentrepl/logging/logsite.TestCallerAnswersTheFunctionCallingTheEntryPoint",
+		},
+		{
+			name: "a call written in the helper's own package is keyed by its own function",
+			call: inPackageSite,
+			want: "agentrepl/logging/logsite.inPackageSite",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.call()
 
-	// Assert
-	if got, want := viaClosure, "agentrepl/logging/logsite.TestCallersAnswersTheFirstFunctionOutsideTheHelpers"; got != want {
-		t.Errorf("a call from a closure resolved to %q, want its enclosing test %q", got, want)
+			// Assert
+			if got != tc.want {
+				t.Errorf("Caller = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestCallersSkipsEveryHelperFrame(t *testing.T) {
+func TestCallerAnswersTheSameFunctionFromItsCache(t *testing.T) {
 	// Arrange
-	c := NewCallers("agentrepl/logging/logsite")
-
-	// Act
-	got := func() string { return logVia(c) }()
-
-	// Assert
-	// Every frame up to the test runner lies in this package, so the first
-	// frame outside it is the testing package's.
-	if !strings.HasPrefix(got, "testing.") {
-		t.Errorf("Function = %q, want the first frame outside the helper package", got)
-	}
-}
-
-func TestCallersAnswersTheSameFunctionFromItsCache(t *testing.T) {
-	// Arrange
-	c := NewCallers()
-	resolve := func() string { return c.Function() }
+	resolve := func() string { return entryPoint() }
 
 	// Act
 	first, second := resolve(), resolve()
@@ -216,6 +221,26 @@ func TestCallersAnswersTheSameFunctionFromItsCache(t *testing.T) {
 	// Assert
 	if first != second {
 		t.Errorf("one call site resolved to %q, then %q", first, second)
+	}
+}
+
+func TestCallerWithNoEntryPointPanics(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Error("Caller called from a goroutine's root function returned, want a panic")
+		}
+	}()
+	done := make(chan any)
+
+	// Act
+	go func() {
+		defer func() { done <- recover() }()
+		Caller()
+	}()
+	if r := <-done; r != nil {
+		panic(r)
 	}
 }
 

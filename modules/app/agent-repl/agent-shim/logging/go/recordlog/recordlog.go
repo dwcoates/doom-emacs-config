@@ -2,8 +2,12 @@
 // services (zettel, the test service): every record a service writes goes
 // through a Logger, as one JSON line in the record shape every agent-repl
 // runtime shares (timestamp, runtime, pid, level, verbosity, operation,
-// message, context), so bin/logs.sh merges it with the others. Each service
-// names its runtime once, at New.
+// message, site, template, context), so bin/logs.sh merges it with the
+// others. Each service names its runtime once, at New.
+//
+// Every record names its SITE (logging-contract.md "Log sites"): the key of
+// the log call that wrote it, logsite.Key over the runtime, the function the
+// call is written in and its template, and the template itself.
 package recordlog
 
 import (
@@ -17,7 +21,18 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/logsite"
 )
+
+// template is a log message's template: a string constant, never a value
+// built at run time. It is unexported so no other package can convert a
+// run-time string to it; an untyped string constant converts implicitly.
+//
+// A template is the call's site summary and part of its key, so a dynamic
+// value goes in the record's context under a name, and the template names it
+// as {name}: "binding the {runtime} socket failed" with Context{"runtime":
+// r}. A literal brace is written {{ or }}.
+type template string
 
 // Context is a record's structured fields.
 type Context map[string]any
@@ -58,24 +73,35 @@ func (l *Logger) With(ctx Context) *Logger {
 	return &copy
 }
 
-// Debug writes a debug record.
-func (l *Logger) Debug(operation, message string, ctx Context) {
-	l.write("debug", operation, message, ctx)
+// Debug writes a debug record of MESSAGE, a constant template rendered from
+// the record's fields (base and ctx merged).
+func (l *Logger) Debug(operation string, message template, ctx Context) {
+	l.write("debug", operation, string(message), logsite.Caller(), ctx)
 }
 
 // Info writes an info record.
-func (l *Logger) Info(operation, message string, ctx Context) {
-	l.write("info", operation, message, ctx)
+func (l *Logger) Info(operation string, message template, ctx Context) {
+	l.write("info", operation, string(message), logsite.Caller(), ctx)
 }
 
 // Warn writes a warn record.
-func (l *Logger) Warn(operation, message string, ctx Context) {
-	l.write("warn", operation, message, ctx)
+func (l *Logger) Warn(operation string, message template, ctx Context) {
+	l.write("warn", operation, string(message), logsite.Caller(), ctx)
 }
 
 // Error writes an error record.
-func (l *Logger) Error(operation, message string, ctx Context) {
-	l.write("error", operation, message, ctx)
+func (l *Logger) Error(operation string, message template, ctx Context) {
+	l.write("error", operation, string(message), logsite.Caller(), ctx)
+}
+
+// Log writes a LEVEL record of MESSAGE, keyed by the function that made it
+// with logsite.Msg: the path of a helper that logs its caller's message (the
+// level window's notes). A Message no Msg made names no call: it panics.
+func (l *Logger) Log(level, operation string, message logsite.Message, ctx Context) {
+	if message.IsZero() {
+		panic("recordlog: a forwarded message must be made by logsite.Msg")
+	}
+	l.write(level, operation, message.Template(), message.Function(), ctx)
 }
 
 type record struct {
@@ -86,25 +112,36 @@ type record struct {
 	Verbosity string  `json:"verbosity"`
 	Operation string  `json:"operation"`
 	Message   string  `json:"message"`
+	Site      string  `json:"site"`
+	Template  string  `json:"template"`
 	Context   Context `json:"context"`
 }
 
-func (l *Logger) write(level, operation, message string, ctx Context) {
+// write records the call written as TEMPLATE in FUNCTION. A template naming
+// a field the record does not hold, or one whose braces do not parse, is a
+// defect of the call, which each module's static scan test exists to catch:
+// it panics.
+func (l *Logger) write(level, operation, template, function string, ctx Context) {
 	if operation == "" {
 		panic("recordlog: a record needs an operation")
 	}
 	allowed, ended := l.window.Allows(level)
 	if ended != nil {
-		l.write("info", l.runtime+".logging.level-window", ended.Message(), Context(ended.Context()))
+		l.Log("info", l.runtime+".logging.level-window", ended.Message(), Context(ended.Context()))
 	}
 	if !allowed {
 		return
 	}
 	merged := maps.Clone(l.base)
 	maps.Copy(merged, ctx)
+	message, err := logsite.RenderFields(template, merged)
+	if err != nil {
+		panic(fmt.Sprintf("recordlog: the record of operation %s cannot be rendered: %v", operation, err))
+	}
 	line, err := json.Marshal(record{
 		Timestamp: sharedlogging.Timestamp(l.clock()), Runtime: l.runtime, PID: l.pid,
-		Level: level, Verbosity: "normal", Operation: operation, Message: message, Context: merged,
+		Level: level, Verbosity: "normal", Operation: operation, Message: message,
+		Site: logsite.Key(l.runtime, function, template), Template: template, Context: merged,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("recordlog: encoding a record failed operation=%s: %v", operation, err))
@@ -136,7 +173,7 @@ func Open(runtime, path string, terminal io.Writer, getenv func(string) string, 
 	}
 	log := New(runtime, file, terminal, sharedlogging.NewWindow(selection, clock), clock)
 	if message, ok := selection.Note(); ok {
-		log.Info(runtime+".logging.level-window", message, Context(selection.Context()))
+		log.Log("info", runtime+".logging.level-window", message, Context(selection.Context()))
 	}
 	return log, file.Close, nil
 }

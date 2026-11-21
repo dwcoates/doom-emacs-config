@@ -9,18 +9,27 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"agentrepl/logging/logsite"
 )
 
-// recorded is every record a service surface wrote.
+// recorded is every record a service surface wrote, its message rendered
+// from its values, and the function each message was made in.
 type recorded struct {
-	mu   sync.Mutex
-	recs [][2]string
+	mu        sync.Mutex
+	recs      [][2]string
+	functions []string
 }
 
-func (r *recorded) record(level, message string) {
+func (r *recorded) record(level string, message logsite.Message, values map[string]any) {
+	text, err := logsite.RenderFields(message.Template(), values)
+	if err != nil {
+		panic(err)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.recs = append(r.recs, [2]string{level, message})
+	r.recs = append(r.recs, [2]string{level, text})
+	r.functions = append(r.functions, message.Function())
 }
 
 func (r *recorded) has(level, text string) bool {
@@ -129,5 +138,20 @@ func TestOpenServiceHandsItsExtraCollectorsToTheSurface(t *testing.T) {
 	// Assert
 	if len(got) != 1 || got[0] != extra {
 		t.Fatalf("collectors handed to the surface = %v, want the one extra", got)
+	}
+}
+
+func TestOpenServicesRecordsAreKeyedWhereTheyAreWritten(t *testing.T) {
+	// Arrange
+	rec := &recorded{}
+
+	// Act
+	if _, err := OpenService(ProgramStore, "", rec.record); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if len(rec.functions) != 1 || rec.functions[0] != "agentrepl/logging/metrics.openService" {
+		t.Fatalf("functions = %v, want the one record made in openService", rec.functions)
 	}
 }
