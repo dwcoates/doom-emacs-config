@@ -4195,6 +4195,23 @@ arm, never an error."
                     (agent-repl-test-wire-verbs--parse "{\"success\":{\"nothingRunning\":{}}}"))
                    '(:arm :success :value (:arm :nothing-running :value (:rollback nil)))))))
 
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-turn-still-running ()
+  "A detached stop that reached nothing while the turn runs decodes to the
+turn_still_running SUCCESS arm naming the turn, never nothing_running."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"turnStillRunning\":{\"turn\":{\"value\":\"t-busy\"}}}}"))
+                   '(:arm :success :value (:arm :turn-still-running
+                                                :value (:turn (:value "t-busy"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-turn-still-running-needs-its-turn ()
+  "A turn_still_running answer that names no turn is malformed."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{\"turnStillRunning\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-interrupt-response-merge-queue-offered ()
   "A stop that raised the merge-queue question decodes to its own SUCCESS arm."
   (agent-repl-test-wire-verbs--with-common
@@ -4329,12 +4346,13 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
                  (sort (list "turn" "detached" "allAgents" "mergeTab") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-success-arms-pinned ()
-  "InterruptSuccess's outcome oneof has exactly the six arms decoded here."
+  "InterruptSuccess's outcome oneof has exactly the seven arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptSuccess")
                        #'string<)
                  (sort (list "interruptedTurn" "interruptedDetached" "nothingRunning"
-                             "mergeQueueOffered" "rolledBackUnanswered" "interruptedRevisions")
+                             "mergeQueueOffered" "rolledBackUnanswered" "interruptedRevisions"
+                             "turnStillRunning")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-error-arms-pinned ()

@@ -10,6 +10,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
@@ -694,18 +695,18 @@ func runningShells(f *fixture, shells int) {
 // non-empty — the one thing the caller asked it to empty.
 func TestInterruptAllAgentsStopsEveryLiveDetachedItem(t *testing.T) {
 	tests := []struct {
-		name        string
-		agents      int
-		shells      int
-		wantCount   int
-		wantAgents  int
-		wantShells  int
-		wantNothing bool
+		name          string
+		agents        int
+		shells        int
+		wantCount     int
+		wantAgents    int
+		wantShells    int
+		wantTurnStill bool
 	}{
 		{name: "agents and a shell", agents: 2, shells: 1, wantCount: 3, wantAgents: 2, wantShells: 1},
 		{name: "shells alone", agents: 0, shells: 2, wantCount: 2, wantAgents: 0, wantShells: 2},
 		{name: "agents alone", agents: 3, shells: 0, wantCount: 3, wantAgents: 3, wantShells: 0},
-		{name: "an empty live set", agents: 0, shells: 0, wantNothing: true},
+		{name: "an empty live set", agents: 0, shells: 0, wantTurnStill: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -722,8 +723,10 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedItem(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Interrupt: %v", err)
 			}
-			if outcome.NothingRunning != tc.wantNothing {
-				t.Fatalf("outcome = %+v, want nothing_running=%v", outcome, tc.wantNothing)
+			// The turn is open in every case, so a sweep that reaches no
+			// detached work answers the turn still running, never nothing_running.
+			if outcome.NothingRunning || (outcome.TurnStillRunning != nil) != tc.wantTurnStill {
+				t.Fatalf("outcome = %+v, want turn_still_running=%v and never nothing_running", outcome, tc.wantTurnStill)
 			}
 			if outcome.DetachedCount != tc.wantCount {
 				t.Fatalf("stopped count = %d, want %d", outcome.DetachedCount, tc.wantCount)
@@ -793,29 +796,29 @@ func TestInterruptAllAgentsPropagatesAShellRefusal(t *testing.T) {
 // items are gone, which is exactly what the caller asked for.
 func TestInterruptAllAgentsSkipsItemsTheShimHasForgotten(t *testing.T) {
 	tests := []struct {
-		name         string
-		agents       int
-		shells       int
-		stopAgentErr error
-		stopBashErr  error
-		wantNothing  bool
-		wantCount    int
+		name          string
+		agents        int
+		shells        int
+		stopAgentErr  error
+		stopBashErr   error
+		wantTurnStill bool
+		wantCount     int
 	}{
 		{
 			name: "every agent forgotten", agents: 2,
-			stopAgentErr: &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
-			wantNothing:  true,
+			stopAgentErr:  &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
+			wantTurnStill: true,
 		},
 		{
 			name: "every shell forgotten", shells: 2,
-			stopBashErr: &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
-			wantNothing: true,
+			stopBashErr:   &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
+			wantTurnStill: true,
 		},
 		{
 			name: "the whole live set forgotten", agents: 2, shells: 1,
-			stopAgentErr: &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
-			stopBashErr:  &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
-			wantNothing:  true,
+			stopAgentErr:  &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
+			stopBashErr:   &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
+			wantTurnStill: true,
 		},
 		{
 			name: "a forgotten agent beside a live shell", agents: 2, shells: 1,
@@ -840,8 +843,10 @@ func TestInterruptAllAgentsSkipsItemsTheShimHasForgotten(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Interrupt(all_agents) = error %v, want a success", err)
 			}
-			if outcome.NothingRunning != tc.wantNothing {
-				t.Fatalf("outcome = %+v, want nothing_running=%v", outcome, tc.wantNothing)
+			// The turn is open in every case, so a sweep that reaches no
+			// detached work answers the turn still running, never nothing_running.
+			if outcome.NothingRunning || (outcome.TurnStillRunning != nil) != tc.wantTurnStill {
+				t.Fatalf("outcome = %+v, want turn_still_running=%v and never nothing_running", outcome, tc.wantTurnStill)
 			}
 			if outcome.DetachedCount != tc.wantCount {
 				t.Fatalf("stopped count = %d, want %d", outcome.DetachedCount, tc.wantCount)
@@ -1247,5 +1252,139 @@ func TestInterruptTurnWithNothingRunningAwaitsNoStart(t *testing.T) {
 	// Assert.
 	if len(f.queue.startAwaits) != 0 {
 		t.Fatalf("start awaits = %v, want none with no turn open", f.queue.startAwaits)
+	}
+}
+
+// TestInterruptOfDetachedWorkAnswersWhatStillRuns pins that a stop of detached
+// work which reaches none of it answers nothing_running ONLY when the
+// workspace really has nothing running: with a turn open (the session's own,
+// or the accepted turn waiting on a bring-up) it answers the turn still
+// running, naming the turn, and leaves the turn untouched.
+func TestInterruptOfDetachedWorkAnswersWhatStillRuns(t *testing.T) {
+	gone := &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNothingRunning}
+	agentRow := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedSubagent, ID: "agent-7"}}
+	tests := []struct {
+		name     string
+		arrange  func(f *fixture)
+		target   InterruptTarget
+		wantTurn ids.TurnID // empty: want nothing_running
+	}{
+		{
+			name:     "all agents with a turn open and no detached work",
+			arrange:  func(f *fixture) { runningTurn(f, 0) },
+			target:   InterruptTarget{AllAgents: true},
+			wantTurn: "t1",
+		},
+		{
+			name: "all agents with a turn open and every agent already gone",
+			arrange: func(f *fixture) {
+				runningTurn(f, 2)
+				f.shim.stopAgentErr = gone
+			},
+			target:   InterruptTarget{AllAgents: true},
+			wantTurn: "t1",
+		},
+		{
+			name:    "all agents with no turn and no detached work",
+			arrange: func(f *fixture) {},
+			target:  InterruptTarget{AllAgents: true},
+		},
+		{
+			name: "all agents with no turn and every agent already gone",
+			arrange: func(f *fixture) {
+				f.running.LiveWork.Agents = []*conversationv1.AgentId{{Value: "a"}}
+				f.shim.stopAgentErr = gone
+			},
+			target: InterruptTarget{AllAgents: true},
+		},
+		{
+			name: "a detached agent already gone while a turn is open",
+			arrange: func(f *fixture) {
+				runningTurn(f, 0)
+				f.shim.stopAgentErr = gone
+			},
+			target:   InterruptTarget{Detached: &agentRow},
+			wantTurn: "t1",
+		},
+		{
+			name: "all agents with no session and an accepted turn waiting on the bring-up",
+			arrange: func(f *fixture) {
+				f.hasSession = false
+				f.queue.revivalTurn, f.queue.revivalWaiting = "t-revive", true
+			},
+			target:   InterruptTarget{AllAgents: true},
+			wantTurn: "t-revive",
+		},
+		{
+			name: "a detached agent with no session and an accepted turn waiting on the bring-up",
+			arrange: func(f *fixture) {
+				f.hasSession = false
+				f.queue.revivalTurn, f.queue.revivalWaiting = "t-revive", true
+			},
+			target:   InterruptTarget{Detached: &agentRow},
+			wantTurn: "t-revive",
+		},
+		{
+			name:    "all agents with no session and nothing waiting on a bring-up",
+			arrange: func(f *fixture) { f.hasSession = false },
+			target:  InterruptTarget{AllAgents: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			tt.arrange(f)
+
+			// Act.
+			outcome, err := f.verbs.Interrupt(context.Background(), "w1", tt.target, false)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt: %v", err)
+			}
+			if len(f.shim.killedTurns) != 0 {
+				t.Fatalf("killed turns = %+v, want none: a detached stop never stops the turn", f.shim.killedTurns)
+			}
+			if tt.wantTurn == "" {
+				if outcome != (InterruptOutcome{NothingRunning: true}) {
+					t.Fatalf("outcome = %+v, want only nothing_running", outcome)
+				}
+				return
+			}
+			if outcome.NothingRunning || outcome.TurnStillRunning == nil || *outcome.TurnStillRunning != tt.wantTurn {
+				t.Fatalf("outcome = %+v, want the turn %q still running and never nothing_running", outcome, tt.wantTurn)
+			}
+			r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+				Level: "info", Operation: opInterrupt,
+				Message: "no detached work was running, but the turn is; the turn runs on",
+			})
+			if !ok || r.Context["turn"] != string(tt.wantTurn) {
+				t.Fatalf("records = %+v, want the turn still running recorded at info with turn %q", f.log.logger.Records(), tt.wantTurn)
+			}
+		})
+	}
+}
+
+func TestInterruptOfDetachedWorkSurfacesAFailedBringUpRead(t *testing.T) {
+	// Arrange: no session, and the queue cannot read what waits on the bring-up.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.queue.revivalErr = errors.New("the database is locked")
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+	// Assert.
+	if err == nil || outcome != (InterruptOutcome{}) {
+		t.Fatalf("Interrupt() = (%+v, %v), want the read failure surfaced and no answer", outcome, err)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: "error", Operation: opInterrupt, Message: "could not read the turn waiting on the bring-up",
+	})
+	if !ok || r.Context["cause"] != "the database is locked" {
+		t.Fatalf("records = %+v, want the failed read recorded at error with its cause", f.log.logger.Records())
 	}
 }

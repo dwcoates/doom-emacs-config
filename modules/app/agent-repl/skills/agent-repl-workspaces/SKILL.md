@@ -981,9 +981,14 @@ queue_drained:
   - Restarting this workspace itself is not one of these cases.
   - Tell the user in the same response which workspace you restarted (or
     scheduled) and why.
-- `workspace interrupt WS` stops WS's running turn. A stop while WS has live
-  detached agents is refused once, naming them: `-confirm-agents` stops them
-  too, and `-all-agents` stops every live agent instead of the turn.
+- `workspace interrupt WS` (the bare form) stops WS's running turn.
+  - While WS has live detached agents it is refused once, naming them.
+  - `-confirm-agents` stops the turn and those agents together.
+- `workspace interrupt WS -all-agents` stops WS's live detached agents and
+  shells only, never the turn.
+  - It answers `turnStillRunning`, naming the turn, when no detached work was
+    live but the turn runs: stop that turn with the bare form.
+  - `nothingRunning` means WS has neither a turn nor detached work running.
 - `workspace select WS` makes WS the workspace the editor and the webapp show.
 
 ## Keeping a workspace live (`workspace keep-live`)

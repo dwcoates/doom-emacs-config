@@ -20,8 +20,13 @@ type InterruptOutcome struct {
 	// DetachedCount is how many detached items were stopped, zero when none
 	// were.
 	DetachedCount int
-	// NothingRunning reports that there was nothing to interrupt.
+	// NothingRunning reports that there was nothing to interrupt: the
+	// workspace has neither a turn in flight nor live detached work.
 	NothingRunning bool
+	// TurnStillRunning is the turn in flight when a stop of detached work (the
+	// detached or all-agents target) reached no detached work: the turn runs
+	// on, untouched, and only the turn target stops it. Nil otherwise.
+	TurnStillRunning *ids.TurnID
 	// MergeQueueOffered reports that nothing was running and the interrupt
 	// raised the merge-queue question in the workspace's pinned merge bubble
 	// instead: the interrupt is about the queued merge, and changed nothing.
@@ -58,7 +63,11 @@ func (c *ConfirmRequired) Error() string {
 //     (UpdateAgent.stop) or a detached shell (StopBash) — the row kind decides,
 //     never a guess.
 //   - ALL AGENTS: every live detached item — agents AND shells — is stopped
-//     and the count is reported.
+//     and the count is reported. The turn is never stopped by it.
+//
+// A STOP OF DETACHED WORK THAT REACHES NONE NEVER CLAIMS NOTHING IS RUNNING
+// WHILE A TURN IS: it answers the turn still running (noDetachedWork), so a
+// caller reading the answer never concludes a busy workspace is idle.
 //
 // The footer's waiting-interrupting status fires the MOMENT the interrupt
 // registers, before the real turn end arrives, because the turn end is what the
@@ -93,8 +102,23 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 		if target.Turn && v.offerMergeQueue(ctx, log, ws) {
 			return InterruptOutcome{MergeQueueOffered: true}, nil
 		}
-		log.Debug(opInterrupt, "nothing is running", dlog.Context{"reason": "no live session"})
-		return InterruptOutcome{NothingRunning: true}, nil
+		if target.Turn {
+			log.Debug(opInterrupt, "nothing is running", dlog.Context{"reason": "no live session"})
+			return InterruptOutcome{NothingRunning: true}, nil
+		}
+		// A DETACHED STOP WITH NO SESSION UP may still land on a workspace
+		// whose accepted turn waits on the bring-up: the status surfaces show
+		// that turn, so the answer must too. A turn stop withdrew it above.
+		turn, waiting, err := v.deps.TurnStops.RevivalTurn(ctx, ws)
+		if err != nil {
+			log.Error(opInterrupt, "could not read the turn waiting on the bring-up", dlog.Context{"cause": err.Error()})
+			return InterruptOutcome{}, fmt.Errorf("interrupt %q: %w", ws, err)
+		}
+		var open *ids.TurnID
+		if waiting {
+			open = &turn
+		}
+		return noDetachedWork(log, open, dlog.Context{"reason": "no live session"}), nil
 	}
 
 	switch {
@@ -111,7 +135,7 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 		}
 		return v.interruptTurn(ctx, log, ws, shim, running, confirm)
 	case target.Detached != nil:
-		return v.interruptDetached(ctx, log, ws, shim, *target.Detached)
+		return v.interruptDetached(ctx, log, ws, shim, running, *target.Detached)
 	case target.AllAgents:
 		return v.interruptAllAgents(ctx, log, ws, shim, running)
 	default:
@@ -343,7 +367,7 @@ func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.W
 // row's FeedId exactly as the feed served it", so the activity-with-a-subagent
 // form is the form that actually arrives, and the agent to stop is the row's
 // Sub.
-func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, ref feedid.Ref) (InterruptOutcome, error) {
+func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running, ref feedid.Ref) (InterruptOutcome, error) {
 	fields := dlog.Context{"row_kind": string(ref.Row.Kind), "row_id": ref.Row.ID}
 	switch {
 	case ref.Row.Kind == feedid.KindDetachedSubagent || subagentBubble(ref.Row):
@@ -351,8 +375,8 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		agent := &conversationv1.AgentId{Value: subagentOf(ref.Row)}
 		fields["agent"] = agent.GetValue()
 		if err := shim.StopAgent(ctx, agent); err != nil {
-			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
-				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, opInterrupt, \"Interrupt\", fields, err); handled"})
+			if outcome, refusal, handled := v.shimOutcome(log, running, "Interrupt", fields, err); handled {
+				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled"})
 				return outcome, refusal
 			}
 			log.Error(opInterrupt, "could not stop the detached agent", dlog.WithCause(fields, err))
@@ -367,8 +391,8 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case ref.Row.Kind == feedid.KindShellHead"})
 		work := &conversationv1.DetachedWorkId{Value: ref.Row.ID}
 		if err := shim.StopBash(ctx, work); err != nil {
-			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
-				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, opInterrupt, \"Interrupt\", fields, err); handled"})
+			if outcome, refusal, handled := v.shimOutcome(log, running, "Interrupt", fields, err); handled {
+				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "outcome, refusal, handled := v.shimOutcome(log, running, \"Interrupt\", fields, err); handled"})
 				return outcome, refusal
 			}
 			log.Error(opInterrupt, "could not stop the detached shell", dlog.WithCause(fields, err))
@@ -392,8 +416,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 // only; see interruptTurn.)
 func (v *verbs) interruptAllAgents(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running) (InterruptOutcome, error) {
 	if len(running.LiveWork.Agents) == 0 && len(running.LiveWork.Shells) == 0 {
-		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "all_agents"})
-		return InterruptOutcome{NothingRunning: true}, nil
+		return noDetachedWork(log, running.Turn, dlog.Context{"target": "all_agents"}), nil
 	}
 	stopped, err := v.stopEveryDetached(ctx, log, ws, shim, running)
 	if err != nil {
@@ -401,10 +424,9 @@ func (v *verbs) interruptAllAgents(ctx context.Context, log dlog.Logger, ws ids.
 	}
 	if stopped == 0 {
 		// Every item in the freeness snapshot turned out already gone, so the
-		// sweep reached nothing. That is the `nothing_running` ANSWER, not an
-		// `interrupted_detached` of zero: the stop found the session quiet.
-		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "all_agents", "reason": "every live item was already gone"})
-		return InterruptOutcome{NothingRunning: true}, nil
+		// sweep reached nothing. That is an ANSWER about what runs, not an
+		// `interrupted_detached` of zero.
+		return noDetachedWork(log, running.Turn, dlog.Context{"target": "all_agents", "reason": "every live item was already gone"}), nil
 	}
 	log.Info(opInterrupt, "stopped every live detached item", dlog.Context{"count": stopped})
 	return InterruptOutcome{DetachedCount: stopped}, nil
@@ -427,23 +449,38 @@ func subagentOf(row feedid.RowKey) string {
 	return row.ID
 }
 
+// noDetachedWork answers a stop of detached work that reached none of it. With
+// TURN open the answer is the turn still running, never "nothing running": the
+// stop's targets leave the turn alone, and a caller told nothing runs would
+// take a busy workspace for an idle one. With no turn the workspace really is
+// quiet, and nothing_running is the true answer.
+func noDetachedWork(log dlog.Logger, turn *ids.TurnID, fields dlog.Context) InterruptOutcome {
+	if turn != nil {
+		log.Info(opInterrupt, "no detached work was running, but the turn is; the turn runs on",
+			dlog.Merge(fields, dlog.Context{"turn": string(*turn)}))
+		return InterruptOutcome{TurnStillRunning: turn}
+	}
+	log.Debug(opInterrupt, "nothing is running", fields)
+	return InterruptOutcome{NothingRunning: true}
+}
+
 // shimOutcome translates a single-target stop's error into an interrupt answer.
 // It reports handled=false for anything that is not a typed shim refusal, so
 // the caller still surfaces a transport failure as a failure.
 //
-// A BENIGN refusal is the "nothing running" answer: the thing the caller asked
-// to stop had already stopped, which is exactly what they wanted. Every other
-// arm is propagated by NAME, because "the row is stale" and "the SDK has no
-// route" are different answers and the caller acts on them differently.
-func (v *verbs) shimOutcome(log dlog.Logger, operation, rpc string, fields dlog.Context, err error) (InterruptOutcome, error, bool) {
+// A BENIGN refusal means the detached item the caller asked to stop had
+// already stopped, which is exactly what they wanted; it is answered by
+// noDetachedWork, so a turn still in flight is said rather than hidden. Every
+// other arm is propagated by NAME, because "the row is stale" and "the SDK has
+// no route" are different answers and the caller acts on them differently.
+func (v *verbs) shimOutcome(log dlog.Logger, running Running, rpc string, fields dlog.Context, err error) (InterruptOutcome, error, bool) {
 	refusal, ok := AsShimRefusal(err)
 	if !ok {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok"})
 		return InterruptOutcome{}, nil, false
 	}
 	if refusal.Benign() {
-		log.Debug(operation, "nothing is running", withArm(fields, refusal))
-		return InterruptOutcome{NothingRunning: true}, nil, true
+		return noDetachedWork(log, running.Turn, withArm(fields, refusal)), nil, true
 	}
 	return InterruptOutcome{}, refuse(log, rpc, refusal.Arm, refusal.Detail, false), true
 }
@@ -451,11 +488,5 @@ func (v *verbs) shimOutcome(log dlog.Logger, operation, rpc string, fields dlog.
 // withArm adds a shim refusal's arm to a record's context without mutating the
 // caller's map.
 func withArm(fields dlog.Context, refusal *ShimRefusal) dlog.Context {
-	out := make(dlog.Context, len(fields)+2)
-	for k, val := range fields {
-		out[k] = val
-	}
-	out["shim_arm"] = refusal.Arm
-	out["shim_detail"] = refusal.Detail
-	return out
+	return dlog.Merge(fields, dlog.Context{"shim_arm": refusal.Arm, "shim_detail": refusal.Detail})
 }

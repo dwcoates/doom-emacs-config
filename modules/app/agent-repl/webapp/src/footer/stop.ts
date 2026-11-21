@@ -294,6 +294,11 @@ export function drawInterruptSuccess(success: InterruptSuccess, path: string): H
     case "nothingRunning":
       note.textContent = "nothing running";
       break;
+    case "turnStillRunning":
+      // The fan-wide stop found no detached work, and the turn runs on: the
+      // note says so rather than "nothing running", which would read as idle.
+      note.textContent = "no agents running; the turn is still running";
+      break;
     case "mergeQueueOffered":
       // The turn ended before the stop reached it, and the workspace's merge
       // is queued: the question now stands in the merge bubble.

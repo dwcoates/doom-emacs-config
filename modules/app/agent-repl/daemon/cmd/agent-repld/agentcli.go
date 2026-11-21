@@ -194,7 +194,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"select":                 {usage: "select WS", run: workspaceSelect},
 		"restart":                {usage: "restart WS [-when-idle]", run: workspaceRestart},
 		"park":                   {usage: "park WS|-all", run: workspacePark},
-		"interrupt":              {usage: "interrupt WS [-all-agents] [-confirm-agents]", run: workspaceInterrupt},
+		"interrupt":              {usage: "interrupt WS [-confirm-agents] | interrupt WS -all-agents", run: workspaceInterrupt},
 		"compact":                {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
 		"status":                 {usage: "status WS", run: workspaceStatus},
 		"list":                   {usage: "list [-login here|WS]", run: workspaceList},
@@ -1556,12 +1556,14 @@ func workspacePark(c *cliCall, args []string) int {
 }
 
 // workspaceInterrupt stops WS's running turn, or with -all-agents every live
-// detached agent. A turn stop while agents are live is refused once, naming
-// them; -confirm-agents stops them with it.
+// detached agent and shell, never the turn. A turn stop while agents are live
+// is refused once, naming them; -confirm-agents stops them with it. An
+// -all-agents stop that finds no detached work while the turn runs answers
+// turnStillRunning, naming the turn the bare form would stop.
 func workspaceInterrupt(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	allAgents := fs.Bool("all-agents", false, "stop every live detached agent instead of the turn")
-	confirmAgents := fs.Bool("confirm-agents", false, "stop the live agents along with the turn")
+	allAgents := fs.Bool("all-agents", false, "stop every live detached agent and shell, NEVER the turn; the bare form stops the turn")
+	confirmAgents := fs.Bool("confirm-agents", false, "stop the turn and its live detached agents with it")
 	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure

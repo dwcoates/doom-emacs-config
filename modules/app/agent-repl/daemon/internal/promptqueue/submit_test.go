@@ -1494,6 +1494,70 @@ func TestWithdrawRevivalTurnFailsWhenTheDurableRetireFails(t *testing.T) {
 	}
 }
 
+func TestRevivalTurnAnswersTheFirstWaitingTurnAndRetiresNothing(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1", "t2")
+	turnsBefore := len(h.footer.startedTurns())
+	// Act
+	turn, waiting, err := h.q.RevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err != nil || !waiting || turn != "t1" {
+		t.Fatalf("RevivalTurn = %q, %v, %v; want t1 waiting", turn, waiting, err)
+	}
+	if h.db.hold("t1").Tombstone != nil || h.db.hold("t2").Tombstone != nil {
+		t.Fatal("a read retired a waiting prompt")
+	}
+	if got := len(h.footer.startedTurns()); got != turnsBefore {
+		t.Fatalf("footer was told %d more turns, want none from a read", got-turnsBefore)
+	}
+	if !logged(h.log.Records(), "debug", opRevivalTurn, "an accepted turn waits on the bring-up") {
+		t.Fatalf("records = %+v, want the waiting turn recorded", h.log.Records())
+	}
+}
+
+func TestRevivalTurnAnswersNoneWithNoRevivalInFlight(t *testing.T) {
+	// Arrange: a live session, so nothing waits on a bring-up.
+	h := newHarness(t)
+	// Act
+	turn, waiting, err := h.q.RevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err != nil || waiting || turn != "" {
+		t.Fatalf("RevivalTurn = %q, %v, %v; want none with no error", turn, waiting, err)
+	}
+	if !logged(h.log.Records(), "debug", opRevivalTurn, "no revival is in flight; no accepted turn waits on a bring-up") {
+		t.Fatalf("records = %+v, want the no-revival branch recorded", h.log.Records())
+	}
+}
+
+func TestRevivalTurnAnswersNoneWhenNoPromptWaits(t *testing.T) {
+	// Arrange: the revival is still running, but its prompt was dropped.
+	h := revivalPending(t, "t1")
+	if err := h.q.Drop(context.Background(), theWorkspace, "t1"); err != nil {
+		t.Fatalf("Drop: %v", err)
+	}
+	// Act
+	turn, waiting, err := h.q.RevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err != nil || waiting || turn != "" {
+		t.Fatalf("RevivalTurn = %q, %v, %v; want none with no error", turn, waiting, err)
+	}
+}
+
+func TestRevivalTurnFailsWhenTheHoldsCannotBeRead(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1")
+	h.db.heldErr = errors.New("the database is locked")
+	// Act
+	_, waiting, err := h.q.RevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err == nil || waiting {
+		t.Fatalf("RevivalTurn = %v, %v; want the read failure surfaced", waiting, err)
+	}
+	if !logged(h.log.Records(), "error", opRevivalTurn, "could not read the holds waiting on the bring-up") {
+		t.Fatalf("records = %+v, want the read failure recorded at error", h.log.Records())
+	}
+}
+
 // awaitDuringStart submits T1 and, from inside its StartTurn call, asks
 // AwaitTurnStarted for TURN under CTX, answering what the ask returned.
 func awaitDuringStart(t *testing.T, h *harness, ctx context.Context, turn ids.TurnID) error {

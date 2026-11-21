@@ -644,23 +644,11 @@ func (q *queue) WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bo
 	d := q.lockDelivery(ws)
 	defer d.unlock()
 
-	if !q.isReviving(ws) {
-		log.Debug(opWithdraw, "no revival is in flight; no accepted turn waits on a bring-up", nil)
-		return false, nil
-	}
-	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
+	waiting, err := q.revivalHoldsLocked(ctx, ws, opWithdraw, log)
 	if err != nil {
-		log.Error(opWithdraw, "could not read the holds waiting on the bring-up", dlog.Context{"cause": err.Error()})
 		return false, fmt.Errorf("withdraw the revival turn on %q: %w", ws, err)
 	}
-	var waiting []wsm.HeldPrompt
-	for _, h := range standing {
-		if standingSessionHold(h) {
-			waiting = append(waiting, h)
-		}
-	}
 	if len(waiting) == 0 {
-		log.Debug(opWithdraw, "the revival holds no prompt; the accepted turn has been delivered", dlog.Context{"holds": len(standing)})
 		return false, nil
 	}
 	withdrawn := waiting[0]
@@ -675,6 +663,60 @@ func (q *queue) WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bo
 		"still_held": len(waiting) - 1,
 	})
 	return true, nil
+}
+
+// RevivalTurn implements TurnStops.
+//
+// UNDER THE DELIVERY LOCK, for the same reason WithdrawRevivalTurn takes it:
+// the revival's release hands the turn to the session under that lock, so the
+// answer is either the turn still waiting on the bring-up or none, never a turn
+// half handed over.
+func (q *queue) RevivalTurn(ctx context.Context, ws ids.WorkspaceID) (ids.TurnID, bool, error) {
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return "", false, err
+	}
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+
+	waiting, err := q.revivalHoldsLocked(ctx, ws, opRevivalTurn, log)
+	if err != nil {
+		return "", false, fmt.Errorf("read the revival turn on %q: %w", ws, err)
+	}
+	if len(waiting) == 0 {
+		return "", false, nil
+	}
+	turn := waiting[0].Turn
+	log.Debug(opRevivalTurn, "an accepted turn waits on the bring-up", dlog.Context{
+		"turn": string(turn), "held": len(waiting),
+	})
+	return turn, true, nil
+}
+
+// revivalHoldsLocked answers the prompts that wait on WS's bring-up, oldest
+// first: the first of them is the accepted turn the status surfaces show. It
+// answers none when no revival is in flight or every prompt was delivered. The
+// caller holds the delivery lock, and records under OP.
+func (q *queue) revivalHoldsLocked(ctx context.Context, ws ids.WorkspaceID, op string, log dlog.Logger) ([]wsm.HeldPrompt, error) {
+	if !q.isReviving(ws) {
+		log.Debug(op, "no revival is in flight; no accepted turn waits on a bring-up", nil)
+		return nil, nil
+	}
+	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
+	if err != nil {
+		log.Error(op, "could not read the holds waiting on the bring-up", dlog.Context{"cause": err.Error()})
+		return nil, err
+	}
+	var waiting []wsm.HeldPrompt
+	for _, h := range standing {
+		if standingSessionHold(h) {
+			waiting = append(waiting, h)
+		}
+	}
+	if len(waiting) == 0 {
+		log.Debug(op, "the revival holds no prompt; the accepted turn has been delivered", dlog.Context{"holds": len(standing)})
+	}
+	return waiting, nil
 }
 
 // AwaitTurnStarted implements TurnStops.

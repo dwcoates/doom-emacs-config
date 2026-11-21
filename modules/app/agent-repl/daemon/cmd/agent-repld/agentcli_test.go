@@ -20,6 +20,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
@@ -56,6 +57,8 @@ type cliClient struct {
 	retargeted *agentreplv1.SetWorkspaceParentResponse
 	oneShot    *agentreplv1.SetWorkspaceOneShotResponse
 	queues     *agentreplv1.GetMergeQueueStatusResponse
+	// interrupted answers Interrupt, an empty answer when nil.
+	interrupted *agentreplv1.InterruptResponse
 	// found answers FindWorkspaces, an empty complete find when nil.
 	found *agentreplv1.FindWorkspacesResponse
 	// located answers LocateWorkspace.
@@ -212,6 +215,9 @@ func (c *cliClient) ParkWorkspace(_ context.Context, req *connect.Request[agentr
 }
 
 func (c *cliClient) Interrupt(_ context.Context, req *connect.Request[agentreplv1.InterruptRequest]) (*connect.Response[agentreplv1.InterruptResponse], error) {
+	if c.interrupted != nil {
+		return connect.NewResponse(c.interrupted), c.record(req.Msg)
+	}
 	return connect.NewResponse(&agentreplv1.InterruptResponse{}), c.record(req.Msg)
 }
 
@@ -2269,6 +2275,28 @@ func TestInterruptChoosesItsTarget(t *testing.T) {
 				t.Fatalf("exit %d, request %v; want all-agents %v, confirm %v", code, req, tt.allAgents, tt.confirm)
 			}
 		})
+	}
+}
+
+func TestInterruptAllAgentsPrintsTheTurnStillRunning(t *testing.T) {
+	// Arrange: no detached work was live, but the turn runs.
+	f := newCLIFixture()
+	f.client.interrupted = &agentreplv1.InterruptResponse{Result: &agentreplv1.InterruptResponse_Success{
+		Success: &agentreplv1.InterruptSuccess{Outcome: &agentreplv1.InterruptSuccess_TurnStillRunning{
+			TurnStillRunning: &agentreplv1.InterruptTurnStillRunning{Turn: &conversationv1.TurnId{Value: "t-busy"}},
+		}},
+	}}
+
+	// Act
+	code := f.run(workspaceNoun, "interrupt", "peer", "-all-agents")
+
+	// Assert
+	var printed agentreplv1.InterruptResponse
+	if err := protojson.Unmarshal(f.out.Bytes(), &printed); err != nil {
+		t.Fatalf("stdout %q is no protojson answer: %v", f.out.String(), err)
+	}
+	if code != exitSuccess || printed.GetSuccess().GetTurnStillRunning().GetTurn().GetValue() != "t-busy" {
+		t.Fatalf("exit %d, printed %v; want success naming the running turn t-busy", code, &printed)
 	}
 }
 
