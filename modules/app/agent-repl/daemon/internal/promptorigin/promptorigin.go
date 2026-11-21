@@ -86,9 +86,11 @@ func UnseenNamed(origin string) bool {
 // workspace's, a GitHub pull request's and a GitHub merge queue's notice, an
 // async merge's handback, a retarget's notice, a failed create's report to
 // the main workspace, the main checkout's sync repair, an unresolved link's
-// question, and the retired subsection-placement brief. A merge's own briefs
+// question, a GitHub workflow run's notice, and the retired
+// subsection-placement brief. A merge's own briefs
 // (its repairs, its actions, its hooks, its revert) drive the merge's work
-// and are not notices.
+// and are not notices, nor is a deploy mediator's brief, which drives its own
+// hidden workspace's work.
 func DeliveredOnArrival(origin conversationv1.PromptOrigin) bool {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
@@ -102,6 +104,7 @@ func DeliveredOnArrival(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT:
 		return true
 	}

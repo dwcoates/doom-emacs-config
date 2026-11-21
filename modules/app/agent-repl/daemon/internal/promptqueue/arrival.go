@@ -98,7 +98,7 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 		// any submission does, and the revived session's coming up delivers it.
 		if q.deps.Revive == nil {
 			refusalLevel(ctx, log, log.Warn)(opArrival, "the workspace has no session to deliver to", nil)
-			return Disposition{}, ErrNoSession
+			return Disposition{}, noSession(causeNoRevival)
 		}
 		disposition, err := q.awaitArrival(ctx, sub, wsm.WaitSession, "the workspace has no shim; its session is revived", log)
 		if err != nil {
@@ -120,7 +120,7 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 	watcher, ok := q.deps.Watcher(sub.WS)
 	if !ok {
 		refusalLevel(ctx, log, log.Warn)(opArrival, "the workspace has no session watcher", nil)
-		return Disposition{}, ErrNoSession
+		return Disposition{}, noSession(causeNoWatcher)
 	}
 	running := watcher.TurnInFlight()
 	if cut, ok := q.runningCut(sub.WS); ok {

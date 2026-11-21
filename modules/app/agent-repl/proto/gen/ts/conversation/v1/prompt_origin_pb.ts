@@ -29,8 +29,9 @@ export const file_conversation_v1_prompt_origin: GenFile = /*@__PURE__*/
  * (MERGE_HANDBACK, WORKSPACE_RETARGETED, WORKSPACE_CREATE_FAILED,
  * MERGE_QUEUE_NOTICE, DERIVED_WORKSPACE_NOTICE, WORKSPACE_NOTICE,
  * SUBSECTION_PLACEMENT, MAIN_SYNC_REPAIR, PULL_REQUEST_NOTICE,
- * GITHUB_MERGE_QUEUE_NOTICE, LINK_UNRESOLVED) and every prompt one
- * workspace's agent sent another (AGENT_SENT) goes the moment it arrives:
+ * GITHUB_MERGE_QUEUE_NOTICE, GITHUB_WORKFLOW_RUN_NOTICE, LINK_UNRESOLVED) and
+ * every prompt one workspace's agent sent another (AGENT_SENT) goes the
+ * moment it arrives:
  * into an idle session as its own turn, into a running turn as a join after
  * that turn's current tool call (the vendor folds it in, or runs it next).
  * It is never classified, never interjects, and never stands in the held
@@ -530,7 +531,7 @@ export enum PromptOrigin {
    * The one notice of a followed GitHub Actions workflow run
    * (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
    * workflow's name, its conclusion, its head commit and its web address.
-   * Submitted and drawn as a workspace notice is: no row, no held card.
+   * Delivered on arrival and drawn as a workspace notice is: no row.
    *
    * @generated from enum value: PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE = 53;
    */

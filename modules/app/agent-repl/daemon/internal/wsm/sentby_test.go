@@ -71,7 +71,9 @@ func TestATurnStoredWithASenderThatDisagreesWithItsOriginFailsTheRead(t *testing
 	}
 }
 
-func TestPutHeldPromptRoundTripsTheSender(t *testing.T) {
+// AN AGENT'S PROMPT IS NEVER HELD (arrivalwaits.go): one that waits carries
+// its sender on its arrival wait.
+func TestPutArrivalWaitRoundTripsTheSender(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
@@ -79,16 +81,17 @@ func TestPutHeldPromptRoundTripsTheSender(t *testing.T) {
 	turn := NewTurnID()
 
 	// Act
-	if err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+	if err := s.PutArrivalWait(context.Background(), ArrivalWait{
 		Workspace: ws.ID, Turn: turn, Said: said("hello"), Origin: agentSent, SentBy: &sender.ID, QueuedAt: instant,
+		Reason: WaitSession, Why: "the workspace has no shim",
 	}); err != nil {
-		t.Fatalf("PutHeldPrompt: %v", err)
+		t.Fatalf("PutArrivalWait: %v", err)
 	}
-	got, ok, err := s.HeldPromptByTurn(context.Background(), turn)
+	got, err := s.ArrivalWaits(context.Background(), ws.ID)
 
 	// Assert
-	if err != nil || !ok || got.SentBy == nil || *got.SentBy != sender.ID {
-		t.Fatalf("hold = (%+v, %v, %v), want sender %s", got, ok, err, sender.ID)
+	if err != nil || len(got) != 1 || got[0].SentBy == nil || *got[0].SentBy != sender.ID {
+		t.Fatalf("waits = (%+v, %v), want one carrying sender %s", got, err, sender.ID)
 	}
 }
 

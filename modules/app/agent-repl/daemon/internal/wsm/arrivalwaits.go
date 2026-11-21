@@ -218,20 +218,10 @@ const arrivalWaitColumns = `turn_id, workspace_id, said, origin, sent_by, queued
 func (s *store) loadArrivalWaits(ctx context.Context, op string, fields dlog.Context, where string, args ...any) ([]ArrivalWait, error) {
 	var out []ArrivalWait
 	err := s.read(ctx, op, fields, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx,
-			`SELECT `+arrivalWaitColumns+` FROM arrival_waits `+where+` ORDER BY queued_at, turn_id`, args...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			w, err := scanArrivalWait(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, w)
-		}
-		return rows.Err()
+		var err error
+		out, err = listRows(ctx, s.q(ctx),
+			`SELECT `+arrivalWaitColumns+` FROM arrival_waits `+where+` ORDER BY queued_at, turn_id`, scanArrivalWait, args...)
+		return err
 	})
 	if err != nil {
 		return nil, err

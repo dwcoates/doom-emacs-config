@@ -274,7 +274,6 @@ func putHold(t *testing.T, h *harness, held wsm.HeldPrompt) {
 // a turn runs, only the newest prompt the user sent, only when no agent
 // output was drawn since it was queued, and never one a delivery claims.
 func TestRollBackHeld(t *testing.T) {
-	sender := ids.WorkspaceID("ws-peer")
 	user := func(turn ids.TurnID, at time.Time) wsm.HeldPrompt {
 		return wsm.HeldPrompt{Turn: turn, Origin: "PROMPT_ORIGIN_USER_SENT", QueuedAt: at}
 	}
@@ -308,11 +307,11 @@ func TestRollBackHeld(t *testing.T) {
 			level:   "info", message: "nothing answered the held prompt since it was queued, so it was taken back",
 		},
 		{
-			name: "a session act or another sender's prompt behind it is passed over",
+			name: "a session act or a prompt the user did not send behind it is passed over",
 			holds: []wsm.HeldPrompt{
 				user("t1", since),
-				{Turn: "t2", Origin: "PROMPT_ORIGIN_AGENT_SENT", SentBy: &sender, QueuedAt: since.Add(time.Minute)},
-				{Turn: "t3", Origin: "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE", QueuedAt: since.Add(2 * time.Minute)},
+				{Turn: "t2", Origin: "PROMPT_ORIGIN_MERGE_REVERT", QueuedAt: since.Add(time.Minute)},
+				{Turn: "t3", Origin: "PROMPT_ORIGIN_DEPLOY_MEDIATION", QueuedAt: since.Add(2 * time.Minute)},
 				{Turn: "t4", Origin: "PROMPT_ORIGIN_USER_SENT", QueuedAt: since.Add(3 * time.Minute), Act: &wsm.HeldAct{Kind: wsm.ActModel, Value: "m"}},
 			},
 			running: "t0",
@@ -338,7 +337,7 @@ func TestRollBackHeld(t *testing.T) {
 		},
 		{
 			name:    "no prompt the user sent stands",
-			holds:   []wsm.HeldPrompt{{Turn: "t1", Origin: "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE", QueuedAt: since}},
+			holds:   []wsm.HeldPrompt{{Turn: "t1", Origin: "PROMPT_ORIGIN_MERGE_REVERT", QueuedAt: since}},
 			running: "t0",
 			level:   "debug", message: "no prompt the user sent stands held",
 		},

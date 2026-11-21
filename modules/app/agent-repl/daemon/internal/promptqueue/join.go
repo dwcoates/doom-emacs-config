@@ -522,19 +522,22 @@ func (q *queue) reholdWithdrawn(ctx context.Context, ws ids.WorkspaceID, turn id
 // running turn's end, under a new turn id for the reason reholdWithdrawn's
 // prompt takes one. Its turn record holds what it said.
 func (q *queue) rewaitWithdrawnArrival(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, fields dlog.Context, log dlog.Logger) {
+	// EVERY JOINING PROMPT WAS SENT FROM A STANDING HOLD OR ARRIVED, and its
+	// turn was recorded before it was sent: one with neither is lost, at
+	// ERROR, naming what is missing.
 	record, err := q.deps.DB.Turn(ctx, ws, turn)
-	if err != nil {
-		log.Error(opJoin, "could not read the withdrawn prompt's turn; it is lost from the queue", dlog.WithCause(fields, err))
+	if err != nil || !promptorigin.DeliveredOnArrival(promptorigin.Named(record.Origin)) {
+		missing := dlog.Context{
+			"origin":              record.Origin,
+			"invariant_violation": "every prompt sent to join the running turn was sent from a standing hold or arrived",
+		}
+		if err != nil {
+			missing["cause"] = err.Error()
+		}
+		log.Error(opJoin, "the withdrawn prompt has no hold to restore; it is lost from the queue", dlog.Merge(fields, missing))
 		return
 	}
 	origin := promptorigin.Named(record.Origin)
-	if !promptorigin.DeliveredOnArrival(origin) {
-		log.Error(opJoin, "the withdrawn prompt has no hold to restore; it is lost from the queue", dlog.Merge(fields, dlog.Context{
-			"origin":              record.Origin,
-			"invariant_violation": "every prompt sent to join the running turn was sent from a standing hold or arrived",
-		}))
-		return
-	}
 	again := wsm.NewTurnID()
 	fields["waiting_turn"] = string(again)
 	if err := q.deps.DB.RecordTurnSuccession(ctx, wsm.TurnSuccession{
