@@ -152,7 +152,9 @@ for await (const line of lines) {
   const request = JSON.parse(line);
   const path = resolve(LAYER_DIR, request.file);
   project.provide("webappLayerWorld", request.world);
-  await vitest.rerunFiles([path]);
+  // BY ITS SPECIFICATION, never `rerunFiles`: vitest 5 narrows a rerun to
+  // the filename filter `start` set, the warm-up's, so every area ran no file.
+  await vitest.runTestSpecifications([project.createSpecification(path)]);
   const file = vitest.state.getFiles([path])[0];
   const answer = { file: request.file, ok: false, tests: 0, failures: [] };
   if (file === undefined) {
