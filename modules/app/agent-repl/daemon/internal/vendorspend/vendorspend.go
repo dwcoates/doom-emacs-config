@@ -44,11 +44,21 @@ func ContextLabel(e *conversationv1.VendorSpend) string {
 	return strconv.FormatUint(e.GetContextLeTokens(), 10)
 }
 
-// The prices the outcome rule compares, as multiples of the base input
-// price: a cache read, and a write at the hour tier.
+// THE DAEMON'S ONE HOME OF THE VENDOR'S CACHE PRICES, in tenths of the base
+// input price: a read at a tenth of it, a write at the one-hour tier at twice
+// it. The outcome rule compares them, and the keep-alive run cap derives its
+// break-even from them (cachelapse.KeepaliveRunCap). The shim's coverage rule
+// names the same two (shim.engine.cold.CACHE_READ_PRICE, CACHE_WRITE_PRICE),
+// and the skill's weights state them (skills/agent-repl-metrics
+// spend-weights.json); the vocabulary test pins the weights file to these.
 const (
-	readPrice  = 0.1
-	writePrice = 2
+	CacheReadPriceTenths  = 1
+	CacheWritePriceTenths = 20
+)
+
+const (
+	readPrice  = float64(CacheReadPriceTenths) / 10
+	writePrice = float64(CacheWritePriceTenths) / 10
 )
 
 // OutcomeOf is THE ONE CACHE-OUTCOME RULE of conversation.v1.VendorCacheOutcome

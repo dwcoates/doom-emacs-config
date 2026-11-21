@@ -20,7 +20,7 @@ import {
   type ChainCall,
   type ReasonFacts,
 } from "../../src/engine/vendor-spend.js";
-import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS, type TranscriptFacts } from "../../src/engine/cold.js";
+import { CACHE_READ_PRICE, CACHE_TTL_1H_MS, CACHE_TTL_5M_MS, CACHE_WRITE_PRICE, type TranscriptFacts } from "../../src/engine/cold.js";
 import { conversationv1 } from "../../src/proto.js";
 
 const VOCAB = JSON.parse(readFileSync(new URL("../../../../../proto/vocab/vendor-spend.json", import.meta.url), "utf8")) as {
@@ -72,6 +72,16 @@ describe("contextBucketOf", () => {
 
   it("files a context above every bound in no bucket", () => {
     expect(contextBucketOf(1_000_001)).toBeUndefined();
+  });
+});
+
+describe("the cache prices", () => {
+  const WEIGHTS = JSON.parse(readFileSync(new URL("../../../../../skills/agent-repl-metrics/spend-weights.json", import.meta.url), "utf8")) as {
+    kinds: Record<string, number>;
+  };
+
+  it("are the skill's weights for a cache read and a write at the hour tier", () => {
+    expect([CACHE_READ_PRICE, CACHE_WRITE_PRICE]).toEqual([WEIGHTS.kinds.cache_read, WEIGHTS.kinds.cache_write_1h]);
   });
 });
 

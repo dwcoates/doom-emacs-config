@@ -23,7 +23,7 @@ import type { NormalizedApiUsage } from "../api-usage.js";
 import { normalizeApiUsage } from "../api-usage.js";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
-import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS, isCliSynthesized, type TranscriptFacts } from "./cold.js";
+import { CACHE_READ_PRICE, CACHE_TTL_1H_MS, CACHE_TTL_5M_MS, CACHE_WRITE_PRICE, isCliSynthesized, type TranscriptFacts } from "./cold.js";
 
 const LOGGER = bindLog({
   component: "shim-vendor-spend",
@@ -53,15 +53,12 @@ export interface CallInput {
   readonly uncached: number;
 }
 
-/** The read price and the 1-hour write price the outcome rule compares, as multiples of the base input price. */
-const READ_PRICE = 0.1;
-const WRITE_PRICE = 2;
 
 /** THE ONE CACHE-OUTCOME RULE of conversation.v1.VendorCacheOutcome, cased in proto/vocab/vendor-spend.json. */
 export function cacheOutcomeOf(input: CallInput): conversationv1.VendorCacheOutcome {
   const context = input.cacheRead + input.cacheWrite + input.uncached;
   const fresh = input.cacheWrite + input.uncached;
-  if (fresh * WRITE_PRICE <= context * READ_PRICE) return conversationv1.VendorCacheOutcome.WARM;
+  if (fresh * CACHE_WRITE_PRICE <= context * CACHE_READ_PRICE) return conversationv1.VendorCacheOutcome.WARM;
   if (input.cacheWrite === 0) return conversationv1.VendorCacheOutcome.UNCACHED_NO_WRITE;
   if (fresh > input.cacheRead) return conversationv1.VendorCacheOutcome.COLD_REWRITE;
   return conversationv1.VendorCacheOutcome.PARTIAL;

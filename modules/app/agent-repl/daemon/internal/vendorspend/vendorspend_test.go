@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"agent-repld/internal/sourcescan"
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -202,5 +203,41 @@ func TestValidate(t *testing.T) {
 				t.Errorf("the error %v does not wrap ErrInvalid", err)
 			}
 		})
+	}
+}
+
+func TestTheSkillsWeightsStateTheCachePrices(t *testing.T) {
+	// Arrange
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "skills", "agent-repl-metrics", "spend-weights.json"))
+	if err != nil {
+		t.Fatalf("read the weights: %v", err)
+	}
+	var weights struct {
+		Kinds map[string]float64 `json:"kinds"`
+	}
+	if err := json.Unmarshal(raw, &weights); err != nil {
+		t.Fatalf("parse the weights: %v", err)
+	}
+	// Assert
+	if got, want := weights.Kinds[KindCacheRead], float64(CacheReadPriceTenths)/10; got != want {
+		t.Errorf("the weights read %s at %v, the daemon at %v", KindCacheRead, got, want)
+	}
+	if got, want := weights.Kinds[KindCacheWrite1h], float64(CacheWritePriceTenths)/10; got != want {
+		t.Errorf("the weights write %s at %v, the daemon at %v", KindCacheWrite1h, got, want)
+	}
+	for _, kind := range Kinds {
+		if _, ok := weights.Kinds[kind]; !ok {
+			t.Errorf("the weights weigh no %s", kind)
+		}
+	}
+}
+
+func TestTheCachePricesHaveOneDefinition(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "PriceTenths  = ")
+	// Assert: the run cap reads them through cachelapse's alias, which
+	// names this package's constants, never a figure of its own.
+	if len(sites) != 1 || sites[0] != "vendorspend.go" {
+		t.Fatalf("the cache prices are defined in %v, want vendorspend.go alone", sites)
 	}
 }
