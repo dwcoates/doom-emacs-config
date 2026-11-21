@@ -340,6 +340,16 @@ type DB interface {
 	// AllHeldPrompts loads every standing hold for the boot restore,
 	// all-or-nothing: a corrupt row fails the read and nothing is loaded.
 	AllHeldPrompts(ctx context.Context) ([]HeldPrompt, error)
+	// PutArrivalWait records a prompt delivered on arrival that waits under
+	// its named reason, or records it again under a new one (arrivalwaits.go).
+	PutArrivalWait(ctx context.Context, w ArrivalWait) error
+	// DeleteArrivalWait ends a turn's arrival wait, answering whether one
+	// stood.
+	DeleteArrivalWait(ctx context.Context, turn TurnID) (bool, error)
+	// ArrivalWaits loads one workspace's arrival waits, oldest first.
+	ArrivalWaits(ctx context.Context, id WorkspaceID) ([]ArrivalWait, error)
+	// AllArrivalWaits loads every arrival wait for the boot's drive.
+	AllArrivalWaits(ctx context.Context) ([]ArrivalWait, error)
 
 	// PutTurn records a turn's durable origin and address. It NEVER writes a
 	// close: a record carrying one is refused, and an existing row's close is

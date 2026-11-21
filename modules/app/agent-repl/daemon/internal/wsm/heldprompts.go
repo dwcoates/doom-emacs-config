@@ -197,6 +197,13 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		s.log.Error(op, "refused a held prompt whose sender and origin disagree", withError(fields, err))
 		return err
 	}
+	// A PROMPT DELIVERED ON ARRIVAL IS NEVER HELD (arrivalwaits.go): one that
+	// cannot go yet waits under a named arrival wait instead.
+	if promptorigin.DeliveredOnArrivalNamed(h.Origin) {
+		err := fmt.Errorf("%w (origin %s)", ErrHeldOnArrival, h.Origin)
+		s.log.Error(op, "refused to hold a prompt delivered on arrival", withError(fields, err))
+		return err
+	}
 	askParent, err := encodeThreadAsk(h.Ask)
 	if err != nil {
 		s.log.Error(op, "refused an unencodable thread ask", withError(fields, err))
