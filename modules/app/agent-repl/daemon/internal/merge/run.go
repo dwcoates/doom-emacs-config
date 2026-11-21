@@ -986,7 +986,7 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 	if r.target.localMerge() != nil {
 		if r.resumingPast(TabCommitting) {
 			var err error
-			if out, err = r.resume.Outcome.outcome(); err != nil {
+			if out, err = r.recordedLanding(ctx); err != nil {
 				return outcome{}, err
 			}
 		} else {
@@ -994,6 +994,12 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 			out, err = r.process(ctx)
 			if err != nil || out.failed != "" {
 				return out, err
+			}
+			// THE LANDING IS RECORDED THE MOMENT IT HAPPENS, so a run resumed
+			// at any later step reports the same outcome an uninterrupted
+			// one does.
+			if err := r.checkpoint(ctx, TabCommitting, func(d *progressDoc) { d.Outcome = toOutcomeDoc(out) }); err != nil {
+				return outcome{}, err
 			}
 		}
 	}
@@ -1010,6 +1016,20 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 		return outcome{}, err
 	}
 	return r.postDeploy(ctx, out)
+}
+
+// recordedLanding is the landing a resumed run carries past its committing
+// step. A run resumed past that step has landed, so a record without its
+// landing is an invariant violation: it fails hard and is logged, with no
+// outcome invented in its place.
+func (r *run) recordedLanding(ctx context.Context) (outcome, error) {
+	if r.resume.Outcome == nil {
+		err := fmt.Errorf("merge: the run resumed at %s past its landing, but its progress record holds no landing", r.resume.Step)
+		r.o.log(ctx, r.ws).Error("daemon.merge.resume", "a merge resumed past its landing has no recorded landing; the merge fails rather than report an empty one", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "step": r.resume.Step, "merge_commit": r.resume.MergeCommit, "error": err.Error()})
+		return outcome{}, err
+	}
+	return r.resume.Outcome.outcome()
 }
 
 // configuredPrompt runs prompt hook i of a stage in its own tab round, and
