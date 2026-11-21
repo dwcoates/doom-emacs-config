@@ -17,7 +17,8 @@ import (
 // dispatches itself, in sight in its repository's section; and settles an
 // escalation with the user. Its conversation carries what the earlier checks
 // found, fixed and settled, and is never cleared, only compacted
-// (compactMediator). It stays open and warm
+// (compactMediator): when a remediation's deploy starts, and after a quiet
+// check only past QuietCheckCompactionTokens. It stays open and warm
 // (wsm.Workspace.DeployMediator). The daemon makes it only for a queue
 // that has none, and reopens it when the user closed it.
 
@@ -177,37 +178,53 @@ func (o *orchestrator) markBriefed(ctx context.Context, q checkedQueue, fields d
 	}
 }
 
-// noteCheckWork records that check work came for queue Q (a dispatch or an
-// escalation): its quiet run starts over, and its mediator owes a
-// compaction once the next quiet run completes.
-func (o *orchestrator) noteCheckWork(ctx context.Context, q wsm.RepoKey, fields dlog.Context) {
-	if err := o.deps.DB.NoteDeployCheckWork(ctx, q); err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not record the check's work; the mediator's compaction is not armed by it", withField(fields, "error", err.Error()))
-	}
-}
+// QuietCheckCompactionTokens is the context, in tokens, past which a check
+// that approved a deploy with nothing to fix compacts the mediator (owner
+// ruling, 2026-11-20). A check that fixed or escalated something compacts it
+// whatever its context (compactMediatorAfterRemediation).
+const QuietCheckCompactionTokens = 200_000
 
-// noteQuietCheck records that a check of queue Q ended with no dispatch and
-// no escalation, and compacts its mediator when that completes an armed
-// quiet run (owner ruling, 2026-11-17).
+// noteQuietCheck compacts queue Q's mediator after a check that ended with no
+// dispatch and no escalation only when its context passed
+// QuietCheckCompactionTokens: an approval that changed nothing leaves the
+// conversation warm for the next brief.
 func (o *orchestrator) noteQuietCheck(ctx context.Context, q wsm.RepoKey, fields dlog.Context) {
-	compact, err := o.deps.DB.NoteQuietDeployCheck(ctx, q)
+	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not count the quiet check; the mediator is not compacted by it", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to size its context; it is not compacted", withField(fields, "error", err.Error()))
 		return
 	}
-	if compact {
-		o.compactMediator(ctx, q, fields)
+	if !found {
+		return
 	}
+	tokens, err := o.deps.DeployChecks.ContextTokens(recorded.Workspace)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator's context; it is not compacted", withField(fields, "error", err.Error()))
+		return
+	}
+	fields = withField(withField(fields, "context_tokens", tokens), "bound", QuietCheckCompactionTokens)
+	if tokens <= QuietCheckCompactionTokens {
+		o.deps.Log.Global().Info(opMediation, "the quiet check left the mediator's context within its bound; it is not compacted", fields)
+		return
+	}
+	o.compactMediator(ctx, q, "the mediator's context passed its bound after a quiet check", fields)
+}
+
+// compactMediatorAfterRemediation compacts queue Q's mediator as a
+// remediation or an escalation's fix deploys (owner ruling, 2026-11-20): its
+// work is concluded, so its conversation is carried over as a summary.
+func (o *orchestrator) compactMediatorAfterRemediation(ctx context.Context, q wsm.RepoKey, fields dlog.Context) {
+	o.compactMediator(ctx, q, "the mediator's remediation concluded and its deploy started", fields)
 }
 
 // compactMediator compacts queue Q's mediator by Haiku NOW (owner ruling,
-// 2026-11-17): a conversation is never cleared, only compacted, once a quiet
-// run follows work, and never left for a later check to wait on. A quiet
+// 2026-11-17): a conversation is never cleared, only compacted, and never left for
+// a later check to wait on. WHY says what called for it. A quiet
 // check's approving turn may still be ending: a turn under way is never cut,
 // and its next start compacts it (workspace.CompactDeployCheck). The
 // compaction runs off the decision's path, under the mediation's lifetime,
 // since it takes a summarizer's run.
-func (o *orchestrator) compactMediator(ctx context.Context, q wsm.RepoKey, fields dlog.Context) {
+func (o *orchestrator) compactMediator(ctx context.Context, q wsm.RepoKey, why string, fields dlog.Context) {
 	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to compact; it is not compacted", withField(fields, "error", err.Error()))
@@ -216,16 +233,16 @@ func (o *orchestrator) compactMediator(ctx context.Context, q wsm.RepoKey, field
 	if !found {
 		return
 	}
-	fields = withField(fields, "workspace", string(recorded.Workspace))
+	fields = withField(withField(fields, "workspace", string(recorded.Workspace)), "why", why)
 	compact := func(ctx context.Context) {
 		started := o.deps.Now()
 		compacted, err := o.deps.DeployChecks.Compact(ctx, recorded.Workspace)
 		o.deps.Meter.ObserveMediatorCompaction(mediatorCompactionOutcome(compacted, err), o.deps.Now().Sub(started))
 		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "the quiet run after the checks' work could not compact the deploy mediator", withField(fields, "error", err.Error()))
+			o.deps.Log.Global().Error(opMediation, "the deploy mediator could not be compacted", withField(fields, "error", err.Error()))
 			return
 		}
-		o.deps.Log.Global().Info(opMediation, "the quiet run after the checks' work compacted the deploy mediator", withField(fields, "compacted", compacted))
+		o.deps.Log.Global().Info(opMediation, "compacted the deploy mediator", withField(fields, "compacted", compacted))
 	}
 	life, leave, entered := o.enterMediation()
 	if !entered {

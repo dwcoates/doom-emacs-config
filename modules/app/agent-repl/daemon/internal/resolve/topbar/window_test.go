@@ -168,3 +168,48 @@ func TestTheContextWindowIsTheAssumedMillionWhenTheVendorStatesNone(t *testing.T
 		t.Errorf("ContextWindow = %d, want the assumed 1000000", got)
 	}
 }
+
+func TestContextTokensAreTheVendorsLastReportedTotal(t *testing.T) {
+	tests := []struct {
+		name   string
+		report bool
+		want   int64
+	}{
+		{name: "a stated usage answers its total", report: true, want: 50_000},
+		{name: "no usage stated answers zero"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.report {
+				h.ready(t)
+				h.r.OnSessionUpdate(testWS, contextUsage(50_000, 200_000, 25, "claude-opus-5"))
+			}
+
+			// Act.
+			got := h.r.ContextTokens(testWS)
+
+			// Assert.
+			if got != tt.want {
+				t.Errorf("ContextTokens = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContextTokensAreTheColdGatesCountWhileAGateStands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 100_000})
+
+	// Act.
+	got := h.r.ContextTokens(testWS)
+
+	// Assert.
+	if got != 100_000 {
+		t.Errorf("ContextTokens = %d, want the gate's 100000", got)
+	}
+}

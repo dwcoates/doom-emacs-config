@@ -569,6 +569,10 @@ func (o *orchestrator) remediationDeploy(ctx context.Context, f wsm.RemediationF
 		return err
 	}
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy starts; it owes the chain's next check", fields)
+	// THE GATE PASSED AND THE LANDING IS DONE, SO THE MEDIATOR'S WORK IS
+	// CONCLUDED (owner ruling, 2026-11-20): it is compacted as the rollout
+	// starts, off this path, before its next brief.
+	o.compactMediatorAfterRemediation(ctx, f.Repo, fields)
 	o.deps.Rollout.Landed(ctx, nil)
 	return nil
 }

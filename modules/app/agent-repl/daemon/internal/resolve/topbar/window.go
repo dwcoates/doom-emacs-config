@@ -60,3 +60,10 @@ func (r *resolver) ContextWindow(ws ids.WorkspaceID) int64 {
 	window, _ := contextWindow(r.stateLocked(ws))
 	return window
 }
+
+// ContextTokens implements Resolver: the figure the chip resolves from.
+func (r *resolver) ContextTokens(ws ids.WorkspaceID) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return contextTokens(r.stateLocked(ws))
+}

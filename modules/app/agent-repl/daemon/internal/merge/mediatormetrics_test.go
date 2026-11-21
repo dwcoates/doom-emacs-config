@@ -283,7 +283,7 @@ func TestEachCompactionOfTheMediatorIsTimedByHowItEnded(t *testing.T) {
 			h.checks.compactErr = tt.compactErr
 
 			// Act
-			h.o.compactMediator(context.Background(), mediationKey(h), dlog.Context{})
+			h.o.compactMediator(context.Background(), mediationKey(h), "a test compacts it", dlog.Context{})
 
 			// Assert
 			var got []string

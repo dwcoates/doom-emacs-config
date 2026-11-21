@@ -139,6 +139,13 @@ func (v *verbs) CompactDeployCheck(ctx context.Context, ws wsm.WorkspaceID) (boo
 	return true, nil
 }
 
+// DeployCheckContextTokens implements Verbs: the context chip's figure for
+// deploy check WS, which the merge queue weighs against the bound past which
+// a quiet check compacts the mediator.
+func (v *verbs) DeployCheckContextTokens(ws wsm.WorkspaceID) int64 {
+	return v.deps.Topbar.ContextTokens(ws)
+}
+
 // AnswerDeployCheckColdGate implements Verbs: answers the cold gate that
 // stands on standing deploy check WS with compact-and-resume at once, by the
 // cold gate's default summarizer (Haiku), so a held brief goes on without
