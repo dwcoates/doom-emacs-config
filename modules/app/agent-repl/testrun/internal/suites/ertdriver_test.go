@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/testtimes"
+	"agentrepl/testrun/testenv"
 )
 
 // The ERT chunk driver (testrun/ert/driver.el) is run here the way an ERT
@@ -47,8 +48,23 @@ func runDriverNamed(t *testing.T, dir string, chunk, roster []string, names map[
 // DIR, and answers its output and exit status.
 func runDriverForm(t *testing.T, dir, form string) (string, int) {
 	t.Helper()
+	return runDriverFormProfiled(t, dir, form, "")
+}
+
+// runDriverFormProfiled is runDriverForm with PROFILEDIR as the run's
+// profiles directory (testenv.ProfileDir), "" for a run that does not
+// profile. The test's own environment never leaks one in, so a test run
+// under a profiling run still drives an unprofiled chunk.
+func runDriverFormProfiled(t *testing.T, dir, form, profileDir string) (string, int) {
+	t.Helper()
 	cmd := exec.Command("emacs", "-batch", "-Q", "-l", "ert", "-l", ertDriver(t), "--eval", form)
 	cmd.Dir = dir
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, testenv.ProfileDir+"=") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, testenv.ProfileDir+"="+profileDir)
 	out, err := cmd.CombinedOutput()
 	var exitErr *exec.ExitError
 	switch {
@@ -297,5 +313,83 @@ func TestERTDriverStampsEveryTestsStartForItsCPUShare(t *testing.T) {
 		if tt.Start.Before(before.Add(-time.Millisecond)) || tt.Start.After(after) {
 			t.Fatalf("%s started %v, outside the chunk's run %v..%v\n%s", tt.Name, tt.Start, before, after, out)
 		}
+	}
+}
+
+// chunkForm is the driver call running CHUNK of DIR against ROSTER.
+func chunkForm(dir string, chunk, roster []string) string {
+	return "(agent-repl-testrun-ert " + strconv.Quote(dir+"/") + " " + lispList(chunk) + " " + lispList(roster) + ")"
+}
+
+func TestERTDriverProfilesAChunkIntoItsProfilesDirectory(t *testing.T) {
+	// Arrange: a test that spends its time in one named function.
+	busy := "(defun fixture-busy-work () (let ((n 0)) (dotimes (i 3000000) (setq n (+ n i))) n))\n" +
+		"(ert-deftest fixture-a-busy () (should (fixture-busy-work)))\n"
+	dir := ertFixture(t, map[string]string{"test-a.el": busy})
+	profiles := t.TempDir()
+
+	// Act
+	out, exit := runDriverFormProfiled(t, dir, chunkForm(dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}), profiles)
+
+	// Assert: the profile and its top list, which names the busy function.
+	if exit != 0 {
+		t.Fatalf("exit = %d\n%s", exit, out)
+	}
+	if _, err := os.Stat(filepath.Join(profiles, "ert.cpu.eprofile")); err != nil {
+		t.Fatalf("no ert.cpu.eprofile: %v\n%s", err, out)
+	}
+	top, err := os.ReadFile(filepath.Join(profiles, "ert.cpu.top.tsv"))
+	if err != nil {
+		t.Fatalf("no ert.cpu.top.tsv: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(top), "samples\tshare\tkind\tfunction\n") ||
+		!strings.Contains(string(top), "\ttotal\tfixture-busy-work\n") ||
+		!strings.Contains(string(top), "\tself\t") {
+		t.Fatalf("ert.cpu.top.tsv lacks the header or the busy function's total and self rows:\n%s", top)
+	}
+}
+
+func TestERTDriverWritesNoProfileOutsideAProfilingRun(t *testing.T) {
+	// Arrange
+	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n"})
+
+	// Act
+	out, exit := runDriverFormProfiled(t, dir, chunkForm(dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}), "")
+
+	// Assert: it passes, and nothing was written beside its files.
+	if exit != 0 {
+		t.Fatalf("exit = %d\n%s", exit, out)
+	}
+	for _, name := range []string{"ert.cpu.eprofile", "ert.cpu.top.tsv"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s appeared in the chunk's directory (stat: %v)", name, err)
+		}
+	}
+}
+
+func TestERTDriverBreaksARunWhoseProfilesDirectoryIsRelative(t *testing.T) {
+	// Arrange
+	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n"})
+
+	// Act
+	out, exit := runDriverFormProfiled(t, dir, chunkForm(dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}), "profiles")
+
+	// Assert: a broken run exits 2 naming the variable.
+	if exit != 2 || !strings.Contains(out, testenv.ProfileDir+" names") || !strings.Contains(out, "which is not absolute") {
+		t.Fatalf("exit = %d, want 2 naming the relative directory\n%s", exit, out)
+	}
+}
+
+func TestERTDriverBreaksARunThatCannotWriteItsProfile(t *testing.T) {
+	// Arrange: the profiles directory does not exist.
+	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n"})
+	missing := filepath.Join(t.TempDir(), "absent")
+
+	// Act
+	out, exit := runDriverFormProfiled(t, dir, chunkForm(dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}), missing)
+
+	// Assert: never a passing run with its profile silently missing.
+	if exit != 2 {
+		t.Fatalf("exit = %d, want 2 for a profile that could not be written\n%s", exit, out)
 	}
 }
