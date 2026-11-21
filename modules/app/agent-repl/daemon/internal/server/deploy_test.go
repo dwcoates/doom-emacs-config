@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -747,33 +745,11 @@ func TestReloadElispPushNamesTheRootAndTheBuild(t *testing.T) {
 }
 
 func TestEveryReloadElispFrameIsBuiltByReloadElispPush(t *testing.T) {
-	// Arrange: the server's sources, but for the helper's own file.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	// Arrange / Act: every production site that builds a reload_elisp frame.
+	sites := sourcescan.Sites(t, "WatchDaemonResponse_ReloadElisp{")
 
-	// Act
-	var handRolled []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		n := strings.Count(string(body), "WatchDaemonResponse_ReloadElisp{")
-		if file == "deploy.go" {
-			n-- // reloadElispPush itself
-		}
-		if n > 0 {
-			handRolled = append(handRolled, file)
-		}
-	}
-
-	// Assert
-	if len(handRolled) != 0 {
-		t.Fatalf("files building reload_elisp by hand: %v; use reloadElispPush", handRolled)
+	// Assert: reloadElispPush's own, in deploy.go, and no other.
+	if strings.Join(sites, ",") != "deploy.go" {
+		t.Fatalf("reload_elisp frames built at %v, want only reloadElispPush's in deploy.go; use reloadElispPush", sites)
 	}
 }
