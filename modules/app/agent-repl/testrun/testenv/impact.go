@@ -1,10 +1,8 @@
 package testenv
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,21 +55,7 @@ func AppendImpactWindow(getenv func(string) string, w ImpactWindow) error {
 	if path == "" {
 		return nil
 	}
-	line, err := json.Marshal(w)
-	if err != nil {
-		return fmt.Errorf("testenv: encode %s's impact window: %w", w.Test, err)
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("testenv: open the impact windows %s: %w", path, err)
-	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return errors.Join(fmt.Errorf("testenv: write %s's impact window to %s: %w", w.Test, path, err), f.Close())
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("testenv: close the impact windows %s: %w", path, err)
-	}
-	return nil
+	return appendJSONLine(path, "impact windows", w)
 }
 
 // ImpactReach is one test's windows, merged: the union of every file any of
@@ -88,22 +72,12 @@ type ImpactReach struct {
 // shared boot under ""). A file no harness wrote answers none; a line that is
 // not a window is an error.
 func ReadImpactWindows(path string) (map[string]*ImpactReach, error) {
-	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("testenv: open the impact windows %s: %w", path, err)
-	}
-	defer f.Close()
 	sets := map[string]map[string]bool{}
 	out := map[string]*ImpactReach{}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(nil, 64<<20)
-	for n := 1; sc.Scan(); n++ {
+	ok, err := readJSONLines(path, "impact windows", func(n int, line []byte) error {
 		var w ImpactWindow
-		if err := json.Unmarshal(sc.Bytes(), &w); err != nil {
-			return nil, fmt.Errorf("testenv: %s line %d is not an impact window: %w", path, n, err)
+		if err := json.Unmarshal(line, &w); err != nil {
+			return fmt.Errorf("testenv: %s line %d is not an impact window: %w", path, n, err)
 		}
 		r := out[w.Test]
 		if r == nil {
@@ -119,9 +93,10 @@ func ReadImpactWindows(path string) (map[string]*ImpactReach, error) {
 		if w.Incomplete != "" && !slices.Contains(r.Incomplete, w.Incomplete) {
 			r.Incomplete = append(r.Incomplete, w.Incomplete)
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("testenv: read the impact windows %s: %w", path, err)
+		return nil
+	})
+	if err != nil || !ok {
+		return nil, err
 	}
 	for test, set := range sets {
 		for e := range set {
