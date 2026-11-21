@@ -70,6 +70,8 @@ import {
   scrollFloor,
   feedAnchorRows,
   revealGeometry,
+  centerTarget,
+  elementsSpan,
 } from "../scroll.js";
 import {
   OpenFeedResponseSchema,
@@ -982,9 +984,11 @@ export function mountFeed(
       context: { row: id.value, cause },
     });
     if (scrollBox !== null && tail !== null) {
-      const geometry = revealGeometry(scrollBox, element);
-      if (cause === "detachedWorkSelected") tail.detachedWorkSelected(geometry);
-      else tail.entryJumped(geometry);
+      // The row's OWN box, read on every pass the jump's hold makes, so a
+      // sub-feed drawing in after the expansion is centered as it lands.
+      const target = centerTarget(scrollBox, () => elementsSpan([element]));
+      if (cause === "detachedWorkSelected") tail.detachedWorkSelected(target);
+      else tail.entryJumped(target);
     }
     // STATED on the row, not only styled: "this is the row you asked for" is
     // a fact about the row while it stands, and a jump's caller has no other

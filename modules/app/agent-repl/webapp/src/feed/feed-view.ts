@@ -77,7 +77,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { guardMalformed } from "../rpc/guard.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
-import type { ScrollPosition, TailFollow } from "../scroll.js";
+import { centerTarget, elementsSpan, type ScrollPosition, type TailFollow, type VerticalSpan } from "../scroll.js";
 import type { AppContext } from "../rpc/context.js";
 import { clone, equals } from "@bufbuild/protobuf";
 import {
@@ -126,7 +126,7 @@ import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { glideSentPrompt } from "./send-glide.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { childrenMatching, queryAll } from "../dom.js";
-import { flashEntryOncePainted } from "./entries.js";
+import { entryLines, flashEntryOncePainted } from "./entries.js";
 import { FEED_ROW_ATTRIBUTE, feedRowId } from "./row-id.js";
 import { applyRevealedNode } from "./revealed-node.js";
 
@@ -1168,7 +1168,7 @@ export function createFeedController(
             centerOnRow(row);
             return;
           case "reveal":
-            centerOnRow(row);
+            centerOnEntry(row, viewport.value.entryLabel);
             revealEntry(row, viewport.value.entryLabel);
             return;
           case "revealNode":
@@ -1244,12 +1244,6 @@ export function createFeedController(
     );
   }
 
-  /**
-   * Scroll the box so the CENTER row sits in the middle of the viewport,
-   * clamped at the feed's edges (`centerDelta`), read in the box's own scroll
-   * coordinates through `offsetTop`. A row this feed has not drawn centers
-   * nothing, but the follow is still released.
-   */
   /** Flash ROW's entry answering LABEL, which a linked label revealed (entries.ts). */
   function revealEntry(row: FeedId, label: string): void {
     const node = findRowElement(row);
@@ -1264,57 +1258,62 @@ export function createFeedController(
   }
 
   /**
-   * Center the subtree of ROW's node LABEL, the node a prompt's entry
-   * revealed, once a capped bubble it is drawn in has brought it into its own
-   * view (node-reveal.ts). A node not laid out (its row not drawn, its tree
-   * not yet painted) centers its row, as every other selection does.
+   * THE SELECTION'S JUMPS CENTER THE THING THEY NAME (owner rule, 2026-11-20),
+   * each through the one centering jump (`TailFollow.selectionMoved` with a
+   * `centerTarget`): the selected row's own box; a prompt's entry a linked
+   * label revealed, its own lines; a response's node, its subtree's lines, never
+   * the bubble around them. Each target is read again on every pass the jump
+   * holds, so an entry that paints after its prompt expanded, or a tree that
+   * re-wraps to the width its expansion gave it, is centered as it finally
+   * lies. A thing not yet laid out stands in its row until it is.
    */
-  function centerOnNode(row: FeedId, label: string): void {
+  function centerOn(
+    row: FeedId,
+    named: (node: HTMLElement) => VerticalSpan | null,
+    what: { kind: "node" | "entry"; label: string } | null,
+  ): void {
     if (opts.scroll === undefined) return;
     const node = findRowElement(row);
-    const lines =
-      node === null
-        ? []
-        : queryAll<HTMLElement>(node, `.${TREE_CLASS}`).flatMap((tree) => subtreeSpan(tree, label)?.lines ?? []);
-    const span = revealInBubbles(lines, `the node ${label}`);
-    if (span === null) {
-      log.debug("the revealed node is not laid out; its row is centered", {
-        operation: "feed.selection-node-absent",
-        context: { feed: feedName(), row: row.value, label },
-      });
-      centerOnRow(row);
-      return;
-    }
-    const box = opts.scroll.box;
-    opts.scroll.tail.selectionMoved({
-      nodeOffsetTop: span.top - box.getBoundingClientRect().top + box.scrollTop,
-      nodeHeight: span.bottom - span.top,
-      clientHeight: box.clientHeight,
-      scrollHeight: box.scrollHeight,
-      scrollTop: box.scrollTop,
-    });
-  }
-
-  function centerOnRow(center: FeedId): void {
-    if (opts.scroll === undefined) return;
-    const node = findRowElement(center);
     if (node === null) {
       log.debug("the selection centers a row this feed has not drawn", {
         operation: "feed.selection-center-absent",
-        context: { feed: feedName(), row: center.value },
+        context: { feed: feedName(), row: row.value },
+      });
+      opts.scroll.tail.selectionMoved(null);
+      return;
+    }
+    if (what !== null && named(node) === null) {
+      log.debug("the thing the selection names is not laid out yet; its row stands in until it is", {
+        operation: "feed.selection-node-absent",
+        context: { feed: feedName(), row: row.value, label: what.label, what: what.kind },
       });
     }
-    const box = opts.scroll.box;
-    opts.scroll.tail.selectionMoved(
-      node === null
-        ? null
-        : {
-            nodeOffsetTop: node.offsetTop,
-            nodeHeight: node.offsetHeight,
-            clientHeight: box.clientHeight,
-            scrollHeight: box.scrollHeight,
-            scrollTop: box.scrollTop,
-          },
+    opts.scroll.tail.selectionMoved(centerTarget(opts.scroll.box, () => named(node) ?? elementsSpan([node])));
+  }
+
+  /** Center the selected ROW's own box. */
+  function centerOnRow(row: FeedId): void {
+    centerOn(row, () => null, null);
+  }
+
+  /** Center the lines of ROW's entry answering LABEL, which a linked label revealed. */
+  function centerOnEntry(row: FeedId, label: string): void {
+    centerOn(row, (node) => elementsSpan(entryLines(node, label)), { kind: "entry", label });
+  }
+
+  /**
+   * Center the subtree of ROW's node LABEL, the node a prompt's entry
+   * revealed, centered first inside any capped bubble it is drawn in
+   * (node-reveal.ts).
+   */
+  function centerOnNode(row: FeedId, label: string): void {
+    centerOn(row, (node) =>
+      revealInBubbles(
+        queryAll<HTMLElement>(node, `.${TREE_CLASS}`).flatMap((tree) => subtreeSpan(tree, label)?.lines ?? []),
+        `the node ${label}`,
+        "center",
+      ),
+      { kind: "node", label },
     );
   }
 

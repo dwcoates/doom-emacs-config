@@ -5,27 +5,17 @@
  * (`BUBBLE_SCROLL_CLASS`): the feed's scroll box counts it in view while the
  * bubble's box clips it. So every reveal of a node first brings the node's
  * lines into view inside each bubble box around them, innermost first, only as
- * far as they need (`nearestEdgeOffset`), and then measures what those boxes
- * leave visible. The feed's own reveal moves against that span, never against
+ * far as they need (`nearestEdgeOffset`) for the composer's reveal and
+ * centered (`centerOffset`) for a jump that names the node, and then measures
+ * what those boxes leave visible. The feed's own reveal moves against that span, never against
  * lines a bubble hides.
  *
  * Its callers: the composer's reveal (composer-entry.ts) and the revealed-node
  * selection's centering (feed-view.ts).
  */
 import { log } from "../log.js";
-import { bubbleNodeRevealed, nearestEdgeOffset, type VerticalSpan } from "../scroll.js";
+import { bubbleNodeRevealed, centerOffset, elementsSpan, nearestEdgeOffset, type VerticalSpan } from "../scroll.js";
 import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
-
-/**
- * The span LINES are laid out over, from the first's top to the last's
- * bottom, in viewport coordinates; null when no line is laid out (its row not
- * drawn, or drawn folded away). A line of no height is not laid out.
- */
-export function linesSpan(lines: readonly HTMLElement[]): VerticalSpan | null {
-  const rects = lines.map((line) => line.getBoundingClientRect()).filter((rect) => rect.height > 0);
-  if (rects.length === 0) return null;
-  return { top: Math.min(...rects.map((r) => r.top)), bottom: Math.max(...rects.map((r) => r.bottom)) };
-}
 
 /** The bubble scroll boxes around LINE, innermost first. */
 function bubbleBoxesAround(line: HTMLElement): HTMLElement[] {
@@ -39,28 +29,36 @@ function bubbleBoxesAround(line: HTMLElement): HTMLElement[] {
 }
 
 /**
+ * How a reveal places a node inside a bubble's box: only as far as it needs
+ * (`nearestEdgeOffset`, the composer's reveal), or centered
+ * (`centerOffset`, a jump that names the node).
+ */
+export type BubblePlacement = "nearest" | "center";
+
+/**
  * Bring LINES, one node's laid-out lines in one tree, into view inside every
- * bubble scroll box around them, innermost first and each only as far as the
- * lines need, and answer the span of them those boxes leave visible; null when
- * no line is laid out. Lines in no bubble box are answered as laid out, and
+ * bubble scroll box around them, innermost first, each placed as PLACEMENT
+ * says, and answer the span of them those boxes leave visible; null when no
+ * line is laid out. Lines in no bubble box are answered as laid out, and
  * nothing moves. WHAT names the reveal in its records.
  */
-export function revealInBubbles(lines: readonly HTMLElement[], what: string): VerticalSpan | null {
-  if (linesSpan(lines) === null) return null;
+export function revealInBubbles(lines: readonly HTMLElement[], what: string, placement: BubblePlacement): VerticalSpan | null {
+  if (elementsSpan(lines) === null) return null;
   const boxes = bubbleBoxesAround(lines[0]);
   for (const box of boxes) {
-    const span = linesSpan(lines) as VerticalSpan;
+    const span = elementsSpan(lines) as VerticalSpan;
     const view = box.getBoundingClientRect();
-    const offset = nearestEdgeOffset({ top: view.top, bottom: view.bottom }, span);
-    if (offset === 0) continue;
+    const visible = { top: view.top, bottom: view.bottom };
+    const offset = placement === "center" ? centerOffset(visible, span) : nearestEdgeOffset(visible, span);
+    if (Math.abs(offset) < 1) continue;
     const before = box.scrollTop;
     bubbleNodeRevealed(box, offset);
     log.debug(`brought ${what} into view inside its bubble`, {
       operation: "feed.node-reveal.bubble-scrolled",
-      context: { what, from: before, to: box.scrollTop },
+      context: { what, placement, from: before, to: box.scrollTop },
     });
   }
-  let visible = linesSpan(lines) as VerticalSpan;
+  let visible = elementsSpan(lines) as VerticalSpan;
   for (const box of boxes) {
     const view = box.getBoundingClientRect();
     visible = { top: Math.max(visible.top, view.top), bottom: Math.min(visible.bottom, view.bottom) };

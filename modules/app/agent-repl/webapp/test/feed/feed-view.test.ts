@@ -77,8 +77,8 @@ import {
 } from "../feed-order.js";
 import {
   TailFollow,
-  centerDelta,
-  type CenterGeometry,
+  revealCenterDelta,
+  type CenterTarget,
 } from "../../src/scroll.js";
 import { responseCapLines } from "../../src/feed/cards/response.js";
 import { codeOf } from "../source-text.js";
@@ -2064,16 +2064,17 @@ describe("createFeedController: the feed selection", () => {
     const box = {
       ...geometry,
       querySelector: () => null,
-      getBoundingClientRect: boxRect,
+      getBoundingClientRect: () => scriptedRect({ height: geometry.clientHeight }),
     };
     const tail = {
       isFollowing: () => false,
       follow: () => undefined,
       selectionCleared: () => acts.push("selectionCleared"),
       selectionEnded: () => acts.push("selectionEnded"),
-      selectionMoved: (g: CenterGeometry | null) => {
+      selectionMoved: (target: CenterTarget | null) => {
         acts.push("selectionMoved");
-        if (g !== null) shifts.push(centerDelta(g));
+        const g = target?.() ?? null;
+        if (g !== null) shifts.push(revealCenterDelta(g, box));
       },
       selectionClicked: (row: Element | null, selected: boolean) => {
         const id = row?.getAttribute("data-feed-row") ?? "none";
@@ -2131,16 +2132,9 @@ describe("createFeedController: the feed selection", () => {
     };
   }
 
-  /** Script a row element's box, which jsdom lays out not at all. */
-  function withRowGeometry(
-    el: HTMLElement,
-    offsetTop: number,
-    offsetHeight: number,
-  ): void {
-    Object.defineProperties(el, {
-      offsetTop: { get: () => offsetTop },
-      offsetHeight: { get: () => offsetHeight },
-    });
+  /** Script a row element's box, which jsdom lays out not at all: TOP down the viewport, HEIGHT tall. */
+  function withRowGeometry(el: HTMLElement, top: number, height: number): void {
+    el.getBoundingClientRect = () => scriptedRect({ top, height });
   }
 
   it("recolors the selected final-response bubble blue", () => {
@@ -2319,6 +2313,60 @@ describe("createFeedController: the feed selection", () => {
     controller.applySelection(selectionOf({ response: "r1", viewport: { revealNode: "3.1" } }));
     // Assert: the subtree's top, 600, less half of what the feed shows beside it, (300 - 40) / 2.
     expect(shifts).toEqual([470]);
+  });
+
+  it("centers a subtree inside a tall response, not the response", () => {
+    // Arrange: a 2000px response from 100, whose node 4.2 runs 1400-1440, in a 300-high view of a 5000px feed.
+    const { controller, host, shifts } = selecting({ scrollTop: 0, scrollHeight: 5000, clientHeight: 300 });
+    controller.upsert(responseRow("r1"));
+    const row = host.querySelector<HTMLElement>('[data-feed-row="r1"]') as HTMLElement;
+    withRowGeometry(row, 100, 2000);
+    const tree = document.createElement("div");
+    tree.className = "mp-tree";
+    for (const [node, top] of [["4", 1360], ["4.2", 1400], ["4.2.1", 1420], ["4.3", 1500]] as const) {
+      const line = document.createElement("div");
+      line.className = "mp-line";
+      line.setAttribute("data-node", node);
+      line.setAttribute("data-label-at", "0ch");
+      line.setAttribute("data-text-end", "9ch");
+      line.getBoundingClientRect = () => scriptedRect({ top, height: 20 });
+      tree.append(line);
+    }
+    row.append(tree);
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: { revealNode: "4.2" } }));
+    // Assert: the subtree's center, 1420, on the view's 150.
+    expect(shifts).toEqual([1270]);
+  });
+
+  it("centers the entry a linked label reveals, not its prompt", () => {
+    // Arrange: a 900px prompt from 200 whose entry 2.1 draws two lines, 700-720 and 720-740.
+    const { controller, host, shifts } = selecting({ scrollTop: 0, scrollHeight: 5000, clientHeight: 300 });
+    controller.upsert(responseRow("r1"));
+    const row = host.querySelector<HTMLElement>('[data-feed-row="r1"]') as HTMLElement;
+    withRowGeometry(row, 200, 900);
+    for (const top of [700, 720]) {
+      const line = document.createElement("div");
+      line.className = "mp-entry";
+      line.setAttribute("data-entry-label", "2.1");
+      line.getBoundingClientRect = () => scriptedRect({ top, height: 20 });
+      row.append(line);
+    }
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: { reveal: "2.1" } }));
+    // Assert: the entry's center, 720, on the view's 150.
+    expect(shifts).toEqual([570]);
+  });
+
+  it("centers the prompt of a revealed entry that is not drawn yet", () => {
+    // Arrange
+    const { controller, host, shifts } = selecting({ scrollTop: 0, scrollHeight: 5000, clientHeight: 300 });
+    controller.upsert(responseRow("r1"));
+    withRowGeometry(host.querySelector<HTMLElement>('[data-feed-row="r1"]') as HTMLElement, 1000, 100);
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: { reveal: "2.1" } }));
+    // Assert
+    expect(shifts).toEqual([900]);
   });
 
   it("centers the row of a revealed node that is not laid out, and records it", async () => {

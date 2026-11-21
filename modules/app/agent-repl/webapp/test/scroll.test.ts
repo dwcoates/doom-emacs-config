@@ -35,7 +35,10 @@ import {
   nearestEdgeOffset,
   revealNearestDelta,
   revealGeometry,
-  centerDelta,
+  centerOffset,
+  centerTarget,
+  elementsSpan,
+  type CenterTarget,
   observeScrollBox,
   holdViewOnClicks,
   scrollFloor,
@@ -823,16 +826,29 @@ describe("TailFollow.prependCompensation", () => {
   });
 });
 
+/**
+ * A centering jump's target that reads G when first read and, given BOX,
+ * moves with the box's scroll afterwards, as content laid out in it does.
+ */
+function at(g: RevealGeometry, box?: { scrollTop: number }): CenterTarget {
+  let from: number | null = null;
+  return () => {
+    if (box === undefined) return g;
+    from ??= box.scrollTop;
+    return { ...g, nodeTop: g.nodeTop - (box.scrollTop - from) };
+  };
+}
+
 describe("TailFollow.selectionMoved", () => {
-  /** A 300px viewport over 1000px, and a 100px row at 500. */
-  const centered = { clientHeight: 300, scrollHeight: 1000, nodeOffsetTop: 500, nodeHeight: 100 };
+  /** A 300px viewport at the screen's top, and a 100px row 500px down the content, seen from scrollTop TOP. */
+  const centered = (top: number) => at({ boxTop: 0, boxHeight: 300, nodeTop: 500 - top, nodeHeight: 100 });
 
   it("centers the selected row", () => {
     // Arrange
     const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
     // Act
-    a.tail.selectionMoved({ ...centered, scrollTop: 0 });
+    a.tail.selectionMoved(centered(0));
     // Assert — (300 - 100) / 2 = 100 above the row: 400.
     expect(box.scrollTop).toBe(400);
   });
@@ -841,7 +857,7 @@ describe("TailFollow.selectionMoved", () => {
     // Arrange
     const f = following();
     // Act
-    f.tail.selectionMoved({ ...centered, scrollTop: 1000 });
+    f.tail.selectionMoved(centered(1000));
     // Assert
     expect(f.tail.isFollowing()).toBe(false);
   });
@@ -861,7 +877,7 @@ describe("TailFollow.selectionMoved", () => {
     const capture = captureLogRecords("debug");
     const a = armed({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
     // Act
-    a.tail.selectionMoved({ ...centered, scrollTop: 0 });
+    a.tail.selectionMoved(centered(0));
     // Assert
     expect(await moves(capture)).toEqual([
       { cause: "selectionMoved", from: 0, to: 400, follow: false },
@@ -875,7 +891,7 @@ describe("TailFollow.detachedWorkSelected", () => {
     const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
     // Act
-    a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    a.tail.detachedWorkSelected(at({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 }));
     // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
     expect(box.scrollTop).toBe(300);
   });
@@ -884,7 +900,7 @@ describe("TailFollow.detachedWorkSelected", () => {
     // Arrange
     const f = following();
     // Act
-    f.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    f.tail.detachedWorkSelected(at({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 }));
     // Assert
     expect(f.tail.isFollowing()).toBe(false);
   });
@@ -894,7 +910,7 @@ describe("TailFollow.detachedWorkSelected", () => {
     const capture = captureLogRecords("debug");
     const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
     // Act
-    a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    a.tail.detachedWorkSelected(at({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 }));
     // Assert
     expect(await moves(capture)).toEqual([
       { cause: "detachedWorkSelected", from: 100, to: 300, follow: false },
@@ -908,7 +924,7 @@ describe("TailFollow.entryJumped", () => {
     const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
     // Act
-    a.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    a.tail.entryJumped(at({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 }));
     // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
     expect(box.scrollTop).toBe(300);
   });
@@ -918,7 +934,7 @@ describe("TailFollow.entryJumped", () => {
     const box = { scrollTop: 600, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
     // Act
-    a.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 50 });
+    a.tail.entryJumped(at({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 50 }));
     // Assert
     expect(box.scrollTop).toBe(700);
   });
@@ -928,9 +944,254 @@ describe("TailFollow.entryJumped", () => {
     const capture = captureLogRecords("debug");
     const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
     // Act
-    a.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    a.tail.entryJumped(at({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 }));
     // Assert
     expect(await moves(capture)).toEqual([{ cause: "entryJumped", from: 100, to: 300, follow: false }]);
+  });
+});
+
+/**
+ * THE ONE CENTERING JUMP (owner rule, 2026-11-20): every jump centers the
+ * thing it names, its own box, clamped at the feed's edges, and holds it there
+ * as the layout settles until the reader's next input, a click, a park or
+ * another reveal.
+ */
+describe("TailFollow's centering jumps", () => {
+  /** A 300px viewport at the screen's top over a 3000px feed. */
+  function feedBox(scrollTop = 0) {
+    return { scrollTop, scrollHeight: 3000, clientHeight: 300 };
+  }
+
+  /** A target laid out at content TOP, HEIGHT tall (null: no box), read against BOX as it now scrolls. */
+  function laidOut(box: { scrollTop: number }, node: { top: number; height: number } | null): {
+    target: CenterTarget;
+    move: (next: { top: number; height: number } | null) => void;
+  } {
+    let at = node;
+    return {
+      target: () => (at === null ? null : { boxTop: 0, boxHeight: 300, nodeTop: at.top - box.scrollTop, nodeHeight: at.height }),
+      move: (next) => {
+        at = next;
+      },
+    };
+  }
+
+  const jumps: Array<[string, (tail: TailFollow, target: CenterTarget) => void]> = [
+    ["selectionMoved", (tail, target) => tail.selectionMoved(target)],
+    ["detachedWorkSelected", (tail, target) => tail.detachedWorkSelected(target)],
+    ["entryJumped", (tail, target) => tail.entryJumped(target)],
+  ];
+
+  it.each(jumps)("%s puts the target's center on the viewport's center", (_name, jump) => {
+    // Arrange: a 100px node at 1000 in the content.
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 100 });
+    // Act
+    jump(new TailFollow(box), node.target);
+    // Assert: its center, 1050, on the viewport's 150.
+    expect(box.scrollTop).toBe(900);
+  });
+
+  it.each(jumps)("%s clamps a target near the feed's end at the last position", (_name, jump) => {
+    // Arrange
+    const box = feedBox();
+    const node = laidOut(box, { top: 2950, height: 40 });
+    // Act
+    jump(new TailFollow(box), node.target);
+    // Assert
+    expect(box.scrollTop).toBe(2700);
+  });
+
+  it.each(jumps)("%s clamps a target near the feed's start at the top", (_name, jump) => {
+    // Arrange
+    const box = feedBox(500);
+    const node = laidOut(box, { top: 20, height: 40 });
+    // Act
+    jump(new TailFollow(box), node.target);
+    // Assert
+    expect(box.scrollTop).toBe(0);
+  });
+
+  it.each(jumps)("%s puts a target taller than the viewport top on top", (_name, jump) => {
+    // Arrange
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 600 });
+    // Act
+    jump(new TailFollow(box), node.target);
+    // Assert
+    expect(box.scrollTop).toBe(1000);
+  });
+
+  it.each(jumps)("%s centers the target again when the layout moves it after the jump", (_name, jump) => {
+    // Arrange
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 100 });
+    const tail = new TailFollow(box);
+    jump(tail, node.target);
+    // Act: the target re-wraps 40px taller and lands 200px lower.
+    node.move({ top: 1200, height: 140 });
+    tail.onResize();
+    // Assert: its center, 1270, on the viewport's 150.
+    expect(box.scrollTop).toBe(1120);
+  });
+
+  it("moves nothing for a target with no box yet, and centers it once it is laid out", () => {
+    // Arrange
+    const box = feedBox(400);
+    const node = laidOut(box, null);
+    const tail = new TailFollow(box);
+    tail.entryJumped(node.target);
+    const before = box.scrollTop;
+    // Act
+    node.move({ top: 1000, height: 100 });
+    tail.onResize();
+    // Assert
+    expect([before, box.scrollTop]).toEqual([400, 900]);
+  });
+
+  it("lets the reader's input end the hold", () => {
+    // Arrange
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 100 });
+    const tail = new TailFollow(box);
+    tail.entryJumped(node.target);
+    // Act
+    tail.onInput("wheel");
+    node.move({ top: 1200, height: 100 });
+    tail.onResize();
+    // Assert
+    expect(box.scrollTop).toBe(900);
+  });
+
+  it("lets a park end the hold", () => {
+    // Arrange
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 100 });
+    const tail = new TailFollow(box);
+    tail.entryJumped(node.target);
+    // Act
+    tail.promptSent();
+    node.move({ top: 1200, height: 100 });
+    tail.onResize();
+    // Assert: the follow keeps the tail (this box keeps the write unclamped).
+    expect(box.scrollTop).toBe(3000);
+  });
+
+  it("lets a click end the hold", () => {
+    // Arrange
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 100 });
+    const tail = new TailFollow(box);
+    tail.entryJumped(node.target);
+    // Act
+    tail.readerClicked(document.createElement("div"));
+    node.move({ top: 1200, height: 100 });
+    tail.onResize();
+    // Assert
+    expect(box.scrollTop).toBe(900);
+  });
+
+  it("drops the hold once the target loses its box, and records it", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 100 });
+    const tail = new TailFollow(box);
+    tail.entryJumped(node.target);
+    node.move(null);
+    tail.onResize();
+    // Act: the target comes back; the dropped hold no longer follows it.
+    node.move({ top: 1200, height: 100 });
+    tail.onResize();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.center-absent");
+    expect([box.scrollTop, record.context]).toEqual([900, expect.objectContaining({ cause: "entryJumped", trigger: "resize", held: false })]);
+  });
+
+  it("records each centering of a held target at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const box = feedBox();
+    const node = laidOut(box, { top: 1000, height: 100 });
+    const tail = new TailFollow(box);
+    tail.selectionMoved(node.target);
+    // Act
+    node.move({ top: 1200, height: 100 });
+    tail.onResize();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.center-held");
+    expect(record.context).toMatchObject({ cause: "selectionMoved", trigger: "resize", delta: 200 });
+  });
+
+  it("records the reader's input ending the hold at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const box = feedBox();
+    const tail = new TailFollow(box);
+    tail.detachedWorkSelected(laidOut(box, { top: 1000, height: 100 }).target);
+    // Act
+    tail.onInput("wheel");
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.center-released");
+    expect(record.context).toMatchObject({ cause: "detachedWorkSelected", by: "wheel" });
+  });
+});
+
+/** The one measure of a centering jump's target. */
+describe("centerTarget", () => {
+  it("reads the span against the box's viewport, afresh on every read", () => {
+    // Arrange
+    let top = 400;
+    const box = { getBoundingClientRect: () => boxRect({ top: 50, height: 300 }) };
+    const target = centerTarget(box, () => ({ top, bottom: top + 20 }));
+    // Act
+    const first = target();
+    top = 600;
+    const second = target();
+    // Assert
+    expect([first, second]).toEqual([
+      { boxTop: 50, boxHeight: 300, nodeTop: 400, nodeHeight: 20 },
+      { boxTop: 50, boxHeight: 300, nodeTop: 600, nodeHeight: 20 },
+    ]);
+  });
+
+  it("is null while the span has no box", () => {
+    // Arrange
+    const box = { getBoundingClientRect: () => boxRect({ top: 50, height: 300 }) };
+    // Act
+    const got = centerTarget(box, () => null)();
+    // Assert
+    expect(got).toBeNull();
+  });
+});
+
+describe("elementsSpan", () => {
+  /** An element laid out at TOP, HEIGHT tall. */
+  function laid(top: number, height: number): HTMLElement {
+    const el = document.createElement("div");
+    el.getBoundingClientRect = () => boxRect({ top, height });
+    return el;
+  }
+
+  it("spans the laid-out elements from the first's top to the last's bottom", () => {
+    // Arrange, Act
+    const got = elementsSpan([laid(280, 20), laid(300, 25)]);
+    // Assert
+    expect(got).toEqual({ top: 280, bottom: 325 });
+  });
+
+  it("leaves out an element that is not laid out", () => {
+    // Arrange, Act
+    const got = elementsSpan([laid(280, 20), laid(500, 0)]);
+    // Assert
+    expect(got).toEqual({ top: 280, bottom: 300 });
+  });
+
+  it("is null when no element is laid out", () => {
+    // Arrange, Act
+    const got = elementsSpan([laid(280, 0)]);
+    // Assert
+    expect(got).toBeNull();
   });
 });
 
@@ -997,8 +1258,8 @@ describe("TailFollow.composerEntryRevealed", () => {
 describe("TailFollow's centering reveals land where their arithmetic says", () => {
   type Delta = (g: RevealGeometry, box: { scrollTop: number; scrollHeight: number; clientHeight: number }) => number;
   const reveals: Array<[string, (tail: TailFollow, g: RevealGeometry) => void, Delta]> = [
-    ["detachedWorkSelected", (tail, g) => tail.detachedWorkSelected(g), revealCenterDelta],
-    ["entryJumped", (tail, g) => tail.entryJumped(g), revealCenterDelta],
+    ["detachedWorkSelected", (tail, g) => tail.detachedWorkSelected(at(g)), revealCenterDelta],
+    ["entryJumped", (tail, g) => tail.entryJumped(at(g)), revealCenterDelta],
   ];
   const geometries: RevealGeometry[] = [
     { boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 },
@@ -1339,7 +1600,7 @@ describe("TailFollow's latest-visible latch", () => {
     const l = withLatest(500);
     // Act — centering the card (its middle 200px below the viewport's) brings
     // the box to 700, its tail, where the latest entry shows.
-    l.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    l.tail.detachedWorkSelected(at({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 }));
     // Assert
     expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 700]);
   });
@@ -1350,7 +1611,7 @@ describe("TailFollow's latest-visible latch", () => {
     l.tail.promptSent();
     // Act — centering a card above the viewport top (its middle 725px above
     // the viewport's) brings the box from its parked 1000 up to 275.
-    l.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: -600, nodeHeight: 50 });
+    l.tail.detachedWorkSelected(at({ boxTop: 0, boxHeight: 300, nodeTop: -600, nodeHeight: 50 }));
     // Assert
     expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 275]);
   });
@@ -1452,7 +1713,7 @@ describe("TailFollow's latest-visible latch", () => {
     const l = withLatest(100);
     const c = counted(l);
     // Act — centering brings the box to its tail, where the latest entry shows.
-    l.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 800, nodeHeight: 50 });
+    l.tail.entryJumped(at({ boxTop: 0, boxHeight: 300, nodeTop: 800, nodeHeight: 50 }));
     // Assert
     expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
   });
@@ -1721,6 +1982,49 @@ describe("no scroll write outside scroll.ts", () => {
   it("holds scroll.ts to no scrollIntoView, scrollTo or scrollBy call", () => {
     // Arrange + Act + Assert
     expect(/\b(?:scrollIntoView|scrollTo|scrollBy)\s*\(/.test(own)).toBe(false);
+  });
+});
+
+describe("every centering jump goes through the one centering jump", () => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- as above: tsc reads import.meta.glob's raw result as `unknown` without it.
+  const sources = import.meta.glob("../src/**/*.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+  const own = Object.entries(sources).find(([path]) => path.endsWith("/scroll.ts"))?.[1] ?? "";
+  const others = Object.entries(sources).filter(([path]) => !path.endsWith("/scroll.ts"));
+
+  /** The body of TailFollow's method NAME, from its signature to its closing brace. */
+  function methodBody(name: string): string {
+    const start = own.indexOf(`\n  ${name}(`);
+    if (start < 0) throw new Error(`no method ${name}`);
+    return own.slice(start, own.indexOf("\n  }\n", start));
+  }
+
+  it.each(["selectionMoved", "detachedWorkSelected", "entryJumped"])("routes %s through centerOn", (name) => {
+    // Arrange, Act
+    const body = methodBody(name);
+    // Assert
+    expect(/this\.(?:centerOn|revealCentered)\(/.test(body)).toBe(true);
+  });
+
+  it("computes a centering move in one place only, the hold's", () => {
+    // Arrange, Act
+    const calls = own.match(/revealCenterDelta\(/g)?.length;
+    // Assert: its definition and the one call in `recenter`.
+    expect([calls, methodBody("private recenter").includes("revealCenterDelta(")]).toEqual([2, true]);
+  });
+
+  it("hands every jump a target made by centerTarget, never a measured geometry", () => {
+    // Arrange
+    const jumpCalls = others.flatMap(([path, src]) =>
+      [...src.matchAll(/\.(selectionMoved|detachedWorkSelected|entryJumped)\(([^;]*)\);/g)].map((m) => [path, m[2]]),
+    );
+    // Act
+    const strays = jumpCalls.filter(([, arg]) => arg !== "null" && arg !== "target" && !arg.startsWith("centerTarget("));
+    // Assert
+    expect([jumpCalls.length > 0, strays]).toEqual([true, []]);
   });
 });
 
@@ -2041,7 +2345,10 @@ describe("observeScrollBox", () => {
     box.element.dispatchEvent(new Event("scroll"));
     // Assert
     const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
-    expect(record.context).toMatchObject({ from: 700, to: 600, returned_to: 1, ms_since_write: expect.any(Number) });
+    expect([record.context, typeof record.context?.ms_since_write]).toMatchObject([
+      { from: 700, to: 600, returned_to: 1 },
+      "number",
+    ]);
   });
 
   it("says the browser moved the box to none of its own writes", async () => {
@@ -2495,39 +2802,22 @@ describe("nearestEdgeOffset", () => {
   });
 });
 
-describe("centerDelta", () => {
-  /** A 300px viewport over a 1000px feed, currently scrolled to the top. */
-  const box = { clientHeight: 300, scrollHeight: 1000, scrollTop: 0 };
+/** THE ONE CENTERING ARITHMETIC, for the feed's box and a bubble's own box alike. */
+describe("centerOffset", () => {
+  /** A 300px view starting 100px down the screen. */
+  const view = { top: 100, bottom: 400 };
 
-  it("centers a row with room on both sides", () => {
-    // Arrange — a 100px row whose top sits at 500 in the feed.
-    // Act / Assert — its center (550) lands on the viewport center (150 from
-    // the box top), so the target scrollTop is 500 - (300 - 100)/2 = 400.
-    expect(centerDelta({ ...box, nodeOffsetTop: 500, nodeHeight: 100 })).toBe(400);
-  });
-
-  it("clamps at the feed start when centering would scroll above the top", () => {
-    // Arrange — a row so near the start there is not room above to center it.
-    // Act / Assert — the ideal top is negative, so it is clamped to scrollTop
-    // 0 and the delta is 0 (already at the top).
-    expect(centerDelta({ ...box, nodeOffsetTop: 20, nodeHeight: 100 })).toBe(0);
-  });
-
-  it("clamps at the feed end when centering would scroll past the bottom", () => {
-    // Arrange — a row at the very end of a feed scrolled to its top; the last
-    // reachable position is scrollHeight - clientHeight = 700.
-    // Act / Assert — centering would ask for 900 - 100 = 800, past 700, so it
-    // is clamped and the delta is 700.
-    expect(centerDelta({ ...box, nodeOffsetTop: 900, nodeHeight: 100 })).toBe(700);
-  });
-
-  it("moves nothing when the row is already centered", () => {
-    // Arrange — the box is already scrolled so the row's center is on the
-    // viewport center (scrollTop 400 for a row-top of 500).
-    // Act / Assert — the delta is zero.
-    expect(
-      centerDelta({ clientHeight: 300, scrollHeight: 1000, scrollTop: 400, nodeOffsetTop: 500, nodeHeight: 100 }),
-    ).toBe(0);
+  it.each([
+    { name: "puts a node that fits midpoint on midpoint", node: { top: 500, bottom: 600 }, want: 300 },
+    { name: "moves nothing for a node already centered", node: { top: 200, bottom: 300 }, want: 0 },
+    { name: "brings a node above the view down to center", node: { top: -100, bottom: 0 }, want: -300 },
+    { name: "puts a node taller than the view top on top", node: { top: 700, bottom: 1100 }, want: 600 },
+    { name: "centers a node exactly as tall as the view", node: { top: 150, bottom: 450 }, want: 50 },
+  ])("$name", ({ node, want }) => {
+    // Arrange, Act
+    const got = centerOffset(view, node);
+    // Assert
+    expect(got).toBe(want);
   });
 });
 
@@ -4331,7 +4621,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     // Arrange
     const f = floored(700);
     f.tail.readerClicked(document.createElement("div"));
-    f.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 0, nodeHeight: 50 });
+    f.tail.entryJumped(at({ boxTop: 0, boxHeight: 300, nodeTop: 0, nodeHeight: 50 }, f.box));
     // Act
     f.shrink(400);
     // Assert -- the box's own clamp, which only a click hold resists.

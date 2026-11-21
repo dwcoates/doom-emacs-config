@@ -197,13 +197,18 @@ export function answeringEntryLines(host: ParentNode, target: Element): HTMLElem
   });
 }
 
+/** Every line ROW draws its entry answering LABEL on, as ROW is drawn now. */
+export function entryLines(row: HTMLElement, label: string): HTMLElement[] {
+  return queryAll<HTMLElement>(row, `.${ENTRY_CLASS}`).filter((el) => el.getAttribute(ENTRY_ATTRIBUTE) === label);
+}
+
 /**
  * Flash ROW's entry answering LABEL, which a linked label revealed: every line
  * the entry is drawn on, as the row is drawn now. A row that draws no such
  * entry is recorded, because the daemon named an entry this drawing lacks.
  */
 export function flashEntry(row: HTMLElement, label: string): void {
-  const lines = queryAll<HTMLElement>(row, `.${ENTRY_CLASS}`).filter((el) => el.getAttribute(ENTRY_ATTRIBUTE) === label);
+  const lines = entryLines(row, label);
   if (lines.length === 0) {
     log.warn("a revealed prompt draws no entry answering the label", {
       operation: "feed.entries.flash-absent",
