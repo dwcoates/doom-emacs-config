@@ -24,7 +24,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { afterAll, afterEach, describe, expect, onTestFinished, test } from "vitest";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
-import { canonicalSession, endsTurn, groupSession, releaseShared, since, uniqueTurn, type CanonicalSession, type Since } from "../integration-support/canonical.js";
+import { canonicalSession, endsTurn, groupSession, releaseShared, since, sliceOf, uniqueTurn, type CanonicalSession, type Since } from "../integration-support/canonical.js";
 import type { LogRecord } from "../integration-support/log.js";
 import { detachGate } from "../integration-support/detach-gate.js";
 import {
@@ -1582,6 +1582,51 @@ describe("a subagent a network outage cut off", () => {
     return { shim, gate };
   }
 
+  /** The API gate each window's group shim reads, made once for the file. */
+  const groupGates = new Map<number, string>();
+  afterAll(() => {
+    for (const gate of groupGates.values()) rmSync(join(gate, ".."), { recursive: true, force: true });
+  });
+
+  /**
+   * The group session for an outage window ("network-outage <ms>"), the API
+   * DOWN when a case takes it (its gate removed). The view the case gets reads
+   * only its own slice of the log (`sliceOf`). A wait the case leaves standing
+   * would be a sibling's, so when the case finishes it brings the API back and
+   * awaits each of its waits' end: the next case starts with none standing.
+   */
+  async function outageSession(windowMs = 60_000): Promise<{ shim: Awaited<ReturnType<typeof spawnShim>>; gate: string }> {
+    let gate = groupGates.get(windowMs);
+    if (gate === undefined) {
+      gate = join(mkdtempSync(join(tmpdir(), "shim-api-gate-")), "reachable");
+      groupGates.set(windowMs, gate);
+    }
+    const reachable = gate;
+    const { shim } = await groupSession(`network-outage ${String(windowMs)}`, {
+      env: {
+        AGENT_REPL_FAKE_API_REACHABLE_GATE: reachable,
+        AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS: "20",
+        AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS: String(windowMs),
+      },
+    });
+    rmSync(reachable, { force: true });
+    const view = sliceOf(shim);
+    onTestFinished(async () => {
+      writeFileSync(reachable, "");
+      const waited = view.log.records().filter(outcome("waiting")).map((record) => record.context.task_id);
+      for (const task of waited) {
+        await view.log.record(
+          (record) =>
+            record.operation === NETWORK_RESUME_OP &&
+            record.context.task_id === task &&
+            (record.context.outcome === "gave_up" ||
+              record.message === "an agent resumed after a network outage ended without failing again"),
+        );
+      }
+    });
+    return { shim: view, gate: reachable };
+  }
+
   /** The network-resume record whose outcome is `outcome`. */
   function outcome(value: string): (record: { operation?: unknown; context: Record<string, unknown> }) => boolean {
     return (record) => record.operation === NETWORK_RESUME_OP && record.context.outcome === value;
@@ -1589,10 +1634,10 @@ describe("a subagent a network outage cut off", () => {
 
   test("waits while the API is unreachable", async () => {
     // Arrange
-    const { shim } = await outageShim();
+    const { shim } = await outageSession();
 
     // Act
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
 
     // Assert
     const waiting = await shim.log.record(outcome("waiting"));
@@ -1601,8 +1646,8 @@ describe("a subagent a network outage cut off", () => {
 
   test("resumes the SAME agent once the API is reachable again", async () => {
     // Arrange
-    const { shim, gate } = await outageShim();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    const { shim, gate } = await outageSession();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
     const waiting = await shim.log.record(outcome("waiting"));
 
     // Act
@@ -1615,8 +1660,8 @@ describe("a subagent a network outage cut off", () => {
 
   test("the resumed agent runs to completion", async () => {
     // Arrange
-    const { shim, gate } = await outageShim();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    const { shim, gate } = await outageSession();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
     const waiting = await shim.log.record(outcome("waiting"));
 
     // Act
@@ -1633,8 +1678,8 @@ describe("a subagent a network outage cut off", () => {
 
   test("the resume path records no warning and no error", async () => {
     // Arrange
-    const { shim, gate } = await outageShim();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    const { shim, gate } = await outageSession();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
     await shim.log.record(outcome("waiting"));
 
     // Act
@@ -1655,10 +1700,10 @@ describe("a subagent a network outage cut off", () => {
 
   test("gives up at ERROR when the API stays unreachable for the whole window", async () => {
     // Arrange
-    const { shim } = await outageShim(200);
+    const { shim } = await outageSession(200);
 
     // Act
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
 
     // Assert
     const gaveUp = await shim.log.record(outcome("gave_up"));
@@ -1667,10 +1712,10 @@ describe("a subagent a network outage cut off", () => {
 
   test("an agent that failed for another reason is not resumed", async () => {
     // Arrange
-    const { shim } = await outageShim();
+    const { shim } = await outageSession();
 
     // Act
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-failed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-failed" }));
 
     // Assert
     const notResumed = await shim.log.record(outcome("not_resumed"));
@@ -1698,6 +1743,22 @@ describe("a subagent a network outage cut off", () => {
     return update?.case === "networkResumeWaits" ? update.value.waits : [];
   }
 
+  /**
+   * The first waiting set the stream states that holds a wait: the case's own.
+   * A watch opened on a session that has had waits re-announces its set as it
+   * stands, the empty set every case leaves, which is not the case's wait.
+   */
+  async function nextStandingWaits(
+    watch: ReturnType<typeof openSessionUpdates>,
+  ): Promise<conversationv1.SessionNetworkResumeWait[]> {
+    const frame = await watch.until((candidate) => {
+      const update = updateOf(candidate);
+      return update?.case === "networkResumeWaits" && update.value.waits.length > 0;
+    });
+    const update = updateOf(frame);
+    return update?.case === "networkResumeWaits" ? update.value.waits : [];
+  }
+
   /** The next outcome the stream states. */
   async function nextOutcome(
     watch: ReturnType<typeof openSessionUpdates>,
@@ -1709,14 +1770,14 @@ describe("a subagent a network outage cut off", () => {
 
   test("the session stream states the wait, its window and no resumes yet", async () => {
     // Arrange
-    const { shim } = await outageShim();
+    const { shim } = await outageSession();
     const watch = watchSession(shim);
 
     // Act
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
 
     // Assert
-    const [wait, ...rest] = await nextWaits(watch);
+    const [wait, ...rest] = await nextStandingWaits(watch);
     watch.close();
     expect([
       rest.length,
@@ -1728,8 +1789,8 @@ describe("a subagent a network outage cut off", () => {
 
   test("a consumer that opens mid-wait is told the standing wait", async () => {
     // Arrange
-    const { shim } = await outageShim();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    const { shim } = await outageSession();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
     await shim.log.record(outcome("waiting"));
 
     // Act
@@ -1743,10 +1804,10 @@ describe("a subagent a network outage cut off", () => {
 
   test("the session stream states the resume for the work that waited", async () => {
     // Arrange
-    const { shim, gate } = await outageShim();
+    const { shim, gate } = await outageSession();
     const watch = watchSession(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
-    const [wait] = await nextWaits(watch);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
+    const [wait] = await nextStandingWaits(watch);
 
     // Act
     writeFileSync(gate, "");
@@ -1759,10 +1820,10 @@ describe("a subagent a network outage cut off", () => {
 
   test("the session stream states the empty set once the resume is delivered", async () => {
     // Arrange
-    const { shim, gate } = await outageShim();
+    const { shim, gate } = await outageSession();
     const watch = watchSession(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
-    await nextWaits(watch);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
+    await nextStandingWaits(watch);
 
     // Act
     writeFileSync(gate, "");
@@ -1775,11 +1836,11 @@ describe("a subagent a network outage cut off", () => {
 
   test("the session stream states a give-up", async () => {
     // Arrange
-    const { shim } = await outageShim(200);
+    const { shim } = await outageSession(200);
     const watch = watchSession(shim);
 
     // Act
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!subagent-network-failed" }));
 
     // Assert
     const ended = await nextOutcome(watch);
@@ -1789,6 +1850,7 @@ describe("a subagent a network outage cut off", () => {
 
   test("the session stream states the wait abandoned at stand-down, then the empty set", async () => {
     // Arrange
+    // ITS OWN SHIM: the subject is the stand-down, which ends the session.
     const { shim } = await outageShim();
     const watch = watchSession(shim);
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
@@ -1812,6 +1874,7 @@ describe("a subagent a network outage cut off", () => {
 
   test("stand-down abandons the wait", async () => {
     // Arrange
+    // ITS OWN SHIM: the subject is the stand-down, which ends the session.
     const { shim } = await outageShim();
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-network-failed" }));
     await shim.log.record(outcome("waiting"));
