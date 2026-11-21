@@ -84,6 +84,15 @@ const (
 	MergeQueuePauserHost
 )
 
+// String names the kind as the log and the paused_by column do; a pause
+// whose asker was not recorded is "unrecorded".
+func (k MergeQueuePauserKind) String() string {
+	if k == MergeQueuePauserUnrecorded {
+		return "unrecorded"
+	}
+	return k.column()
+}
+
 // column is the kind's paused_by value.
 func (k MergeQueuePauserKind) column() string {
 	switch k {
