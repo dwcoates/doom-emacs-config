@@ -110,6 +110,15 @@ test_docs_reports_are_skipped_but_the_user_guide_is_not() {
     report "docs/ reports are skipped and docs/USER-GUIDE.md is checked" $c $ok
 }
 
+test_build_caches_are_skipped() {
+    local c=caches ok=0
+    file $c webapp/.vite-cache/vitest-modules/abc "$FAKE_HOME/webapp/src/a.ts"
+    file $c webapp/.typecheck-cache/tsbuildinfo "$FAKE_HOME"
+    act $c
+    [ "$RUN_RC" -eq 0 ] && ok=1
+    report "vite's caches and the typecheck's state are skipped" $c $ok
+}
+
 test_lineage_root_line_is_skipped() {
     local c=lineage ok=0
     file $c skills/x/SKILL.md '---
@@ -140,6 +149,7 @@ test_home_slug_in_a_path_fails
 test_account_email_fails
 test_names_are_opt_in
 test_docs_reports_are_skipped_but_the_user_guide_is_not
+test_build_caches_are_skipped
 test_lineage_root_line_is_skipped
 test_real_module_is_clean
 
