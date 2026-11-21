@@ -48,9 +48,9 @@ type BuildObserver interface {
 	BuildStepEnded(step string, err error)
 }
 
-// NotifierTarget is build-frontend.sh's target for the notifier app, staged
-// after Targets on a platform that has one (ScriptBuilder.Notifier).
-const NotifierTarget = "notifier"
+// LauncherTarget is build-frontend.sh's target for the launcher, staged after
+// Targets on a platform that has one (ScriptBuilder.Launcher).
+const LauncherTarget = "launcher"
 
 // ScriptBuilder is the production Builder.
 //
@@ -82,9 +82,9 @@ type ScriptBuilder struct {
 	Restarts restarttiming.Recorder
 	// Observer is told every step as it begins and ends. REQUIRED.
 	Observer BuildObserver
-	// Notifier stages the notifier app too: macOS, where Zettel.app posts
-	// the desktop banners.
-	Notifier bool
+	// Launcher stages the launcher too: macOS, where Zettel.app posts the
+	// desktop banners.
+	Launcher bool
 }
 
 // buildStep is one command of a build.
@@ -140,8 +140,8 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 	}
 	steps := []buildStep{{name: "proto", argv: []string{"make", "-C", filepath.Join(b.ModuleRoot, "proto"), "all"}}}
 	targets := Targets
-	if b.Notifier {
-		targets = append(append([]string(nil), Targets...), NotifierTarget)
+	if b.Launcher {
+		targets = append(append([]string(nil), Targets...), LauncherTarget)
 	}
 	for _, target := range targets {
 		steps = append(steps, buildStep{

@@ -42,7 +42,7 @@ const (
 	ServiceSidecar  = "sidecar"
 	ServiceZettel   = "zettel"
 	ServiceTests    = "test service"
-	ServiceNotifier = "notifier"
+	ServiceLauncher = "launcher"
 	ServiceDaemon   = "daemon"
 	ServiceShim     = "shim"
 	ServiceWebapp   = "webapp"
@@ -85,8 +85,8 @@ var specs = []serviceSpec{
 		about: "Serves the zettel chats. A stale one is restarted at once; nothing else depends on it."},
 	{name: ServiceTests, reload: "restart", built: true, current: "already running the fresh build",
 		about: "Runs test suites for the merge queue and the workspaces. A stale one is restarted at once."},
-	{name: ServiceNotifier, reload: "restart", built: true, current: "already running the fresh build",
-		about: "Posts the desktop banners as Zettel.app, on macOS alone. A stale app, or none attached, is restarted at once."},
+	{name: ServiceLauncher, reload: "restart", built: true, current: "already running the fresh build",
+		about: "Zettel.app, which opens Emacs and posts every desktop banner, on macOS alone. A stale launcher is restarted at once; a banner posted meanwhile waits for it on its held socket."},
 	{name: ServiceDaemon, reload: "hand over", built: true, current: "already running the fresh build",
 		about: "Serves every workspace. A stale daemon starts its fresh build beside itself and hands each workspace over when it is free, so no turn is cut."},
 	{name: ServiceShim, reload: "replace", built: true, counted: "replaced", current: "every shim runs the fresh build",
@@ -109,7 +109,7 @@ var buildTargets = map[string]struct{ service, step string }{
 	"sidecar":  {ServiceSidecar, stepBuild},
 	"zettel":   {ServiceZettel, stepBuild},
 	"tests":    {ServiceTests, stepBuild},
-	"notifier": {ServiceNotifier, stepBuild},
+	"launcher": {ServiceLauncher, stepBuild},
 }
 
 // buildEverything is the one step a builder override runs in place of every
@@ -130,9 +130,9 @@ type Deps struct {
 	Mediator func(ctx context.Context) (ids.WorkspaceID, bool, error)
 	// WorkspaceName answers a workspace's name, which an instance is drawn as.
 	WorkspaceName func(ctx context.Context, ws ids.WorkspaceID) (string, error)
-	// Notifier reports whether the platform deploys the notifier app (macOS):
-	// a card lists the notifier only where a deploy reloads it.
-	Notifier bool
+	// Launcher reports whether the platform deploys the launcher (macOS): a
+	// card lists the launcher only where a deploy reloads it.
+	Launcher bool
 	// Now is the tracker's clock.
 	Now func() time.Time
 	Log dlog.Logger
@@ -255,13 +255,13 @@ func spec(name string) serviceSpec {
 }
 
 // newCard is a fresh card for a deploy that began at STARTED, drawn for WS:
-// every step scheduled. NOTIFIER lists the notifier app, which only a
+// every step scheduled. LAUNCHER lists the launcher, which only a
 // platform that deploys it reloads.
-func newCard(ws ids.WorkspaceID, started time.Time, notifier bool) *Card {
+func newCard(ws ids.WorkspaceID, started time.Time, launcher bool) *Card {
 	c := &Card{Workspace: ws, StartedMS: started.UnixMilli(),
 		Steps: []Step{{Name: stepProtobufs, State: State{Kind: KindScheduled, Words: "scheduled"}}}}
 	for _, s := range specs {
-		if s.name == ServiceNotifier && !notifier {
+		if s.name == ServiceLauncher && !launcher {
 			continue
 		}
 		svc := &Service{Name: s.name}
@@ -332,7 +332,7 @@ func (t *Tracker) Begin(ctx context.Context, started time.Time) {
 		t.card = nil
 		return
 	}
-	t.card, t.publishing, t.settled = newCard(ws, started, t.deps.Notifier), true, false
+	t.card, t.publishing, t.settled = newCard(ws, started, t.deps.Launcher), true, false
 	t.deps.Log.Info(opHotReload, "drawing the deploy's hot reload in the deploy mediator's feed", dlog.Merge(fields, dlog.Context{"workspace": string(ws)}))
 	t.publishLocked()
 }

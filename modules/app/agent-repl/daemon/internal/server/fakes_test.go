@@ -2465,9 +2465,6 @@ type harness struct {
 	Emacs *fakeEmacsMeasure
 	// Banners is the desktop banners a ReportEditorFocus gain claims.
 	Banners *fakeBanners
-	// NotifierApp is the real notifier app's side: in-memory, so a test opens
-	// its stream and answers its posts over the wire.
-	NotifierApp *desktopnotify.App
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
 	// HiddenKeepalives is the cache keeper SendHiddenKeepalives delegates to.
@@ -2641,7 +2638,6 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:       desktopnotify.NewFocus(dlog.NewTestLogger()),
 		Emacs:       &fakeEmacsMeasure{},
 		Banners:     &fakeBanners{},
-		NotifierApp: desktopnotify.NewApp(dlog.NewTestLogger(), time.Minute),
 		WebappDist:  dist,
 
 		PersistentWifi:   &fakePersistentWifi{},
@@ -2730,7 +2726,6 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:             h.Focus,
 		Emacs:             h.Emacs,
 		Banners:           h.Banners,
-		NotifierApp:       h.NotifierApp,
 		PersistentWifi:    h.PersistentWifi,
 		HiddenKeepalives:  h.HiddenKeepalives,
 		KeepLives:         h.KeepLives,

@@ -21,7 +21,7 @@ const EnvNotifierCmd = "AGENT_REPL_NOTIFIER_CMD"
 // ClickTimeout is how long a banner that is READ BACK stays clickable before
 // the program dismisses it itself: such a program (notify-send) blocks until a
 // click, a dismissal or this timeout, which is what lets the daemon read the
-// click back. A banner HANDED to the platform (macOS, through the Zettel app)
+// click back. A banner HANDED to the platform (macOS, through the launcher)
 // has no such wait: macOS keeps it, and its click is reported separately.
 const ClickTimeout = 10 * time.Second
 
@@ -123,7 +123,7 @@ type Platform struct {
 
 // PlatformFor answers the banner program for a GOOS: notify-send on Linux
 // (libnotify, whose --wait prints the invoked action), READ BACK. macOS has no
-// banner program: its banners are posted by the Zettel app (App).
+// banner program: its banners are posted by the launcher (Launcher).
 func PlatformFor(goos string) (Platform, error) {
 	switch goos {
 	case "linux":

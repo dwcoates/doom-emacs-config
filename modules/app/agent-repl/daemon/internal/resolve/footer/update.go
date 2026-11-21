@@ -159,8 +159,8 @@ func updateComponent(c deployprogress.Component) *frontendv1.FooterStatusActivit
 		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Zettel{Zettel: &frontendv1.FooterStatusActivityUpdateComponentZettel{}}
 	case deployprogress.Tests:
 		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Tests{Tests: &frontendv1.FooterStatusActivityUpdateComponentTests{}}
-	case deployprogress.Notifier:
-		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Notifier{Notifier: &frontendv1.FooterStatusActivityUpdateComponentNotifier{}}
+	case deployprogress.Launcher:
+		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Launcher{Launcher: &frontendv1.FooterStatusActivityUpdateComponentLauncher{}}
 	}
 	return out
 }

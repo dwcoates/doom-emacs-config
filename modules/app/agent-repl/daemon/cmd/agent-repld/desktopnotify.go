@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"runtime"
 
-	"agent-repld/internal/deploy"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -19,14 +18,15 @@ import (
 const opDesktopNotify = "daemon.cmd.desktop_notify"
 
 // resolveBannerBackend resolves the platform's banner poster once, at boot.
-// On macOS it is the Zettel notifier app, which posts each banner through the
-// notification center under its own name and icon, over its own stream
-// (desktopnotify.App); everywhere else it is the platform's banner program.
-func resolveBannerBackend(log dlog.Logger, app *desktopnotify.App) (desktopnotify.Backend, error) {
+// On macOS it is the launcher (Zettel.app), which posts each banner through
+// the notification center under its own name and icon, handed to it on its
+// own socket (desktopnotify.Launcher); everywhere else it is the platform's
+// banner program.
+func resolveBannerBackend(log dlog.Logger, launcher *desktopnotify.Launcher) (desktopnotify.Backend, error) {
 	return resolveNotifyProgram(log, "banner", desktopnotify.EnvNotifierCmd,
 		func(goos, override string) (desktopnotify.Backend, error) {
 			if goos == "darwin" {
-				return app, nil
+				return launcher, nil
 			}
 			platform, err := desktopnotify.PlatformFor(goos)
 			if err != nil {
@@ -137,11 +137,6 @@ func (f *clickForwarder) NotificationClicked(ws ids.WorkspaceID) {
 	target.NotificationClicked(ws)
 }
 
-// deployedNotifier is the notifier app a deploy builds, installs and restarts:
-// the app on macOS, where it posts the banners, and none elsewhere.
-func deployedNotifier(app *desktopnotify.App) deploy.Notifier {
-	if runtime.GOOS != "darwin" {
-		return nil
-	}
-	return app
-}
+// launcherDeployed reports whether a deploy on GOOS builds, installs and
+// restarts the launcher: macOS, where it posts the banners, alone.
+func launcherDeployed(goos string) bool { return goos == "darwin" }

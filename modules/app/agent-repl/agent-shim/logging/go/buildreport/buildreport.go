@@ -42,6 +42,10 @@ const (
 	ServiceZettel = "zettel"
 	// ServiceTests is the test service, which runs every merge gate.
 	ServiceTests = "agent-repl-tests"
+	// ServiceLauncher is the launcher, Zettel.app (launcher/), which writes
+	// its report from Swift in this same shape (Sources/ZettelLauncher/
+	// BuildReport.swift).
+	ServiceLauncher = "launcher"
 )
 
 // Report is one service's statement of what it runs.

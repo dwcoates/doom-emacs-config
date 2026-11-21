@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -1072,15 +1073,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE DAEMON POSTS EVERY DESKTOP BANNER. Emacs's focus rides its
 	// WatchDaemon stream (server.Deps.Focus) and decides each one; a click is
 	// relayed to the host stream through the server, bound late. On macOS the
-	// Zettel notifier app posts every banner, over the stream the server
-	// attaches it on (server.Deps.NotifierApp).
+	// launcher (Zettel.app) posts every banner, handed to it on its own
+	// socket, which outlives this daemon.
 	selfExe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: resolve this daemon's own binary: %w", err)
 	}
 	focus := desktopnotify.NewFocus(log)
-	notifierApp := desktopnotify.NewApp(log, desktopnotify.AppAnswerBound)
-	backend, backendErr := resolveBannerBackend(log, notifierApp)
+	launcher := desktopnotify.NewLauncher(p.Opts.launcherSocket, desktopnotify.LauncherPostBound, log)
+	backend, backendErr := resolveBannerBackend(log, launcher)
 	chime, chimeErr := resolveChime(log)
 	clicks := &clickForwarder{}
 	// A MADE BANNER IS READ ALOUD with persistent wifi mode on and a private
@@ -1303,7 +1304,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// A DEPLOY'S HOT RELOAD is drawn in the deploy mediator's feed of the
 	// repository this daemon is deployed from (hotreload.Tracker). The
 	// deploy, the rollout and the server each tell it what they did.
-	hotReload, err := newHotReloadTracker(git, p.DB, feedResolver, paths.Checkout, deployedNotifier(notifierApp) != nil, log)
+	hotReload, err := newHotReloadTracker(git, p.DB, feedResolver, paths.Checkout, launcherDeployed(runtime.GOOS), log)
 	if err != nil {
 		return nil, err
 	}
@@ -1397,31 +1398,32 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The metrics surface's version series and the rail's header state it.
 	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics, sidebarResolver)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
-		WifiTools:   wifiConfig.Tools,
-		Surfaces:    p.Surfaces,
-		Checkout:    paths.Checkout,
-		ShimMain:    paths.ShimMain,
-		WebappDist:  paths.WebappDist,
-		StateDir:    p.Layout.Dir(),
-		SelfExe:     selfExe,
-		Bundle:      shimBundle,
-		Rollout:     rolloutController,
-		Reports:     detachedRef,
-		Clients:     clients,
-		Runner:      scripts,
-		Store:       p.Opts.storeSocket,
-		Workspace:   fleet.Workspaces,
-		Progress:    deployEdges,
-		Faults:      p.DB,
-		Joining:     p.Opts.joining != "",
-		Getenv:      os.Getenv,
-		Deployed:    deployedVersion.Kick,
-		Restarts:    p.Metrics,
-		Windows:     p.Metrics,
-		Reconnects:  p.Reconnects,
-		HotReload:   hotReload,
-		FoldSweep:   foldSweepRef,
-		NotifierApp: deployedNotifier(notifierApp),
+		WifiTools:      wifiConfig.Tools,
+		Surfaces:       p.Surfaces,
+		Checkout:       paths.Checkout,
+		ShimMain:       paths.ShimMain,
+		WebappDist:     paths.WebappDist,
+		StateDir:       p.Layout.Dir(),
+		SelfExe:        selfExe,
+		Bundle:         shimBundle,
+		Rollout:        rolloutController,
+		Reports:        detachedRef,
+		Clients:        clients,
+		Runner:         scripts,
+		Store:          p.Opts.storeSocket,
+		Workspace:      fleet.Workspaces,
+		Progress:       deployEdges,
+		Faults:         p.DB,
+		Joining:        p.Opts.joining != "",
+		Getenv:         os.Getenv,
+		Deployed:       deployedVersion.Kick,
+		Restarts:       p.Metrics,
+		Windows:        p.Metrics,
+		Reconnects:     p.Reconnects,
+		FoldSweep:      foldSweepRef,
+		HotReload:      hotReload,
+		Launcher:       launcherDeployed(runtime.GOOS),
+		LauncherSocket: p.Opts.launcherSocket,
 	})
 	if err != nil {
 		return nil, err
@@ -2023,7 +2025,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Focus:             focus,
 			Emacs:             p.Metrics,
 			Banners:           notifier,
-			NotifierApp:       notifierApp,
 			PersistentWifi:    wifi,
 			HiddenKeepalives:  cacheKeeper,
 			KeepLives:         cacheKeeper,

@@ -99,7 +99,7 @@ func TestPlatformForRefusesAPlatformWithNoBannerProgram(t *testing.T) {
 
 			// Assert
 			if err == nil {
-				t.Fatalf("%s was given a banner program; macOS banners are the Zettel app's and Windows has none", goos)
+				t.Fatalf("%s was given a banner program; macOS banners are the launcher's and Windows has none", goos)
 			}
 		})
 	}

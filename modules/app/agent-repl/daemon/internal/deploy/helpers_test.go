@@ -106,9 +106,9 @@ type artifacts struct {
 	// wifi is the Wi-Fi helper app's source hash; empty stages and installs
 	// no helper.
 	wifi string
-	// notifier is the notifier app's executable, staged and installed only
-	// when set (a macOS deploy, newNotifierHarness).
-	notifier string
+	// launcher is the launcher's executable, staged and installed only when
+	// set (a macOS deploy, newLauncherHarness).
+	launcher string
 }
 
 // writeWifiApp writes a Wi-Fi helper app at APP built from the sources HASH
@@ -137,9 +137,9 @@ func (a artifacts) stageInto(t *testing.T, staging string) {
 	if a.wifi != "" {
 		writeWifiApp(t, s.WifiApp(), a.wifi)
 	}
-	if a.notifier != "" {
-		writeFile(t, filepath.Join(s.CacheBin(NotifierBundle), NotifierExecutable), a.notifier)
-		writeFile(t, filepath.Join(s.CacheBin(NotifierBundle), "Contents", "Info.plist"), "plist "+a.notifier)
+	if a.launcher != "" {
+		writeFile(t, filepath.Join(s.CacheBin(LauncherBundle), LauncherExecutable), a.launcher)
+		writeFile(t, filepath.Join(s.CacheBin(LauncherBundle), "Contents", "Info.plist"), "plist "+a.launcher)
 	}
 }
 
@@ -157,8 +157,8 @@ func (a artifacts) installInto(t *testing.T, live Live) {
 	if live.WifiApp != "" && a.wifi != "" {
 		writeWifiApp(t, live.WifiApp, a.wifi)
 	}
-	if a.notifier != "" {
-		writeFile(t, filepath.Join(live.NotifierApp(), NotifierExecutable), a.notifier)
+	if a.launcher != "" {
+		writeFile(t, filepath.Join(live.LauncherApp(), LauncherExecutable), a.launcher)
 	}
 }
 
@@ -421,7 +421,7 @@ type fakeServices struct {
 	sidecarErr error
 	// standaloneErr fails a standalone service's restart, by component.
 	standaloneErr map[Component]error
-	notifierErr   error
+	launcherErr   error
 	// recovers makes a failing restart fail ONCE: every later restart of
 	// that service succeeds.
 	recovers bool
@@ -847,44 +847,40 @@ func (h *harness) report(t *testing.T, service string, pid int, build string) {
 	h.alive[pid] = true
 }
 
-func (s *fakeServices) RestartNotifier(context.Context) error {
+func (s *fakeServices) RestartLauncher(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls = append(s.calls, "notifier")
-	err := s.notifierErr
+	s.calls = append(s.calls, "launcher")
+	err := s.launcherErr
 	if s.recovers {
-		s.notifierErr = nil
+		s.launcherErr = nil
 	}
 	return err
 }
 
-// fakeNotifier is the notifier app as a deploy sees it: the build its stream
-// reported, or none attached.
-type fakeNotifier struct {
-	build    string
-	attached bool
-}
+// launcherPID is the pid a launcher harness's build report names.
+const launcherPID = 104
 
-func (n *fakeNotifier) RunningBuild() (string, bool) { return n.build, n.attached }
-
-// newNotifierHarness is a macOS deploy's harness: the notifier app is built,
-// installed in an Applications directory of the test's, and judged on the
-// build the attached app reports (none attached when running is empty).
-func newNotifierHarness(t *testing.T, running string) (*harness, *fakeNotifier) {
+// newLauncherHarness is a macOS deploy's harness: the launcher is built,
+// installed in an Applications directory of the test's, and judged on its
+// build report, which names RUNNING (no report when running is empty).
+func newLauncherHarness(t *testing.T, running string) *harness {
 	t.Helper()
 	h := newHarness(t)
-	notifier := &fakeNotifier{build: running, attached: running != ""}
 	deps := h.d.deps
 	deps.Live.Applications = t.TempDir()
-	deps.Notifier = notifier
+	deps.Launcher = true
 	old, fresh := theOld, theFresh
-	old.notifier, fresh.notifier = "notifier-1", "notifier-2"
+	old.launcher, fresh.launcher = "launcher-1", "launcher-2"
 	old.installInto(t, deps.Live)
 	h.builder.build = fresh
+	if running != "" {
+		h.report(t, buildreport.ServiceLauncher, launcherPID, running)
+	}
 	d, err := New(deps)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	h.d, h.live = d, deps.Live
-	return h, notifier
+	return h
 }

@@ -69,8 +69,9 @@ const (
 	Webapp  Component = "webapp"
 	Zettel  Component = "zettel"
 	Tests   Component = "tests"
-	// Notifier is Zettel.app, the macOS desktop notifier.
-	Notifier Component = "notifier"
+	// Launcher is the launcher, Zettel.app, which posts every macOS desktop
+	// banner.
+	Launcher Component = "launcher"
 )
 
 // Note is one thing a deploy deferred on one workspace.

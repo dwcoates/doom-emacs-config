@@ -13,24 +13,24 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-func TestTheNotifierAppIsInstalledAndRestartedWhenItsRunningBuildIsStale(t *testing.T) {
+func TestTheLauncherIsInstalledAndRestartedWhenItsReportedBuildIsStale(t *testing.T) {
 	cases := []struct {
 		name      string
 		running   func(t *testing.T) string
 		wantCalls []string
 		want      OutcomeKind
 	}{
-		{name: "the attached app runs the fresh build: nothing restarts",
-			running: func(t *testing.T) string { return hashOf(t, "notifier-2") }, want: UpToDate},
-		{name: "the attached app runs an older build: it alone restarts",
-			running: func(t *testing.T) string { return hashOf(t, "notifier-1") }, wantCalls: []string{"notifier"}, want: Restarted},
-		{name: "no app is attached: the restart starts it",
-			running: func(*testing.T) string { return "" }, wantCalls: []string{"notifier"}, want: Restarted},
+		{name: "the reported launcher runs the fresh build: nothing restarts",
+			running: func(t *testing.T) string { return hashOf(t, "launcher-2") }, want: UpToDate},
+		{name: "the reported launcher runs an older build: it alone restarts",
+			running: func(t *testing.T) string { return hashOf(t, "launcher-1") }, wantCalls: []string{"launcher"}, want: Restarted},
+		{name: "no launcher reports a build: the restart starts it",
+			running: func(*testing.T) string { return "" }, wantCalls: []string{"launcher"}, want: Restarted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			h, _ := newNotifierHarness(t, tc.running(t))
+			h := newLauncherHarness(t, tc.running(t))
 
 			// Act
 			result, err := h.d.Deploy(context.Background(), false)
@@ -42,36 +42,36 @@ func TestTheNotifierAppIsInstalledAndRestartedWhenItsRunningBuildIsStale(t *test
 			if got := h.services.Calls(); !reflect.DeepEqual(got, tc.wantCalls) {
 				t.Fatalf("restarts = %v, want %v", got, tc.wantCalls)
 			}
-			if got := outcome(t, result, ComponentNotifier).Kind; got != tc.want {
-				t.Fatalf("notifier = %s, want %s", got, tc.want)
+			if got := outcome(t, result, ComponentLauncher).Kind; got != tc.want {
+				t.Fatalf("launcher = %s, want %s", got, tc.want)
 			}
-			if got := readFile(t, filepath.Join(h.live.NotifierApp(), NotifierExecutable)); got != "notifier-2" {
-				t.Fatalf("installed notifier = %q, want the fresh build", got)
+			if got := readFile(t, filepath.Join(h.live.LauncherApp(), LauncherExecutable)); got != "launcher-2" {
+				t.Fatalf("installed launcher = %q, want the fresh build", got)
 			}
-			if got := readFile(t, filepath.Join(h.live.NotifierApp(), "Contents", "Info.plist")); got != "plist notifier-2" {
+			if got := readFile(t, filepath.Join(h.live.LauncherApp(), "Contents", "Info.plist")); got != "plist launcher-2" {
 				t.Fatalf("installed bundle's plist = %q, want the fresh bundle whole", got)
 			}
 		})
 	}
 }
 
-func TestTheNotifierTellsItsHotReload(t *testing.T) {
+func TestTheLauncherTellsItsHotReload(t *testing.T) {
 	cases := []struct {
 		name    string
 		running func(t *testing.T) string
 		want    []string
 	}{
-		{name: "the attached app runs the fresh build",
-			running: func(t *testing.T) string { return hashOf(t, "notifier-2") },
-			want:    []string{"built:9", "current:test service", "current:notifier", "daemon_current"}},
-		{name: "the attached app runs an older build",
-			running: func(t *testing.T) string { return hashOf(t, "notifier-1") },
-			want:    []string{"built:9", "current:test service", "restarting:notifier", "restarted:notifier", "daemon_current"}},
+		{name: "the reported launcher runs the fresh build",
+			running: func(t *testing.T) string { return hashOf(t, "launcher-2") },
+			want:    []string{"built:9", "current:test service", "current:launcher", "daemon_current"}},
+		{name: "the reported launcher runs an older build",
+			running: func(t *testing.T) string { return hashOf(t, "launcher-1") },
+			want:    []string{"built:9", "current:test service", "restarting:launcher", "restarted:launcher", "daemon_current"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			h, _ := newNotifierHarness(t, tc.running(t))
+			h := newLauncherHarness(t, tc.running(t))
 
 			// Act
 			if _, err := h.d.Deploy(context.Background(), false); err != nil {
@@ -86,10 +86,10 @@ func TestTheNotifierTellsItsHotReload(t *testing.T) {
 	}
 }
 
-func TestAFailedNotifierRestartIsTheDeploysAnswerAndItsRollbackRestartsItAgain(t *testing.T) {
+func TestAFailedLauncherRestartIsTheDeploysAnswerAndItsRollbackRestartsItAgain(t *testing.T) {
 	// Arrange
-	h, _ := newNotifierHarness(t, "")
-	h.services.notifierErr = errors.New("kickstart refused")
+	h := newLauncherHarness(t, "")
+	h.services.launcherErr = errors.New("kickstart refused")
 	h.services.recovers = true
 
 	// Act
@@ -97,18 +97,18 @@ func TestAFailedNotifierRestartIsTheDeploysAnswerAndItsRollbackRestartsItAgain(t
 
 	// Assert
 	var failed *ServiceRestartFailed
-	if !errors.As(err, &failed) || failed.Component != ComponentNotifier {
-		t.Fatalf("Deploy = %v, want the notifier's restart failure", err)
+	if !errors.As(err, &failed) || failed.Component != ComponentLauncher {
+		t.Fatalf("Deploy = %v, want the launcher's restart failure", err)
 	}
-	if got := h.services.Calls(); !reflect.DeepEqual(got, []string{"notifier", "notifier"}) {
+	if got := h.services.Calls(); !reflect.DeepEqual(got, []string{"launcher", "launcher"}) {
 		t.Fatalf("restarts = %v, want the failed restart and the rollback's", got)
 	}
-	if got := readFile(t, filepath.Join(h.live.NotifierApp(), NotifierExecutable)); got != "notifier-1" {
-		t.Fatalf("installed notifier = %q, want the rollback's restored build", got)
+	if got := readFile(t, filepath.Join(h.live.LauncherApp(), LauncherExecutable)); got != "launcher-1" {
+		t.Fatalf("installed launcher = %q, want the rollback's restored build", got)
 	}
 }
 
-func TestAPlatformWithNoNotifierDeploysNone(t *testing.T) {
+func TestAPlatformWithNoLauncherDeploysNone(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -120,36 +120,36 @@ func TestAPlatformWithNoNotifierDeploysNone(t *testing.T) {
 		t.Fatalf("Deploy: %v", err)
 	}
 	for _, o := range result.Outcomes {
-		if o.Component == ComponentNotifier {
-			t.Fatalf("outcomes carry the notifier %+v on a platform with none", o)
+		if o.Component == ComponentLauncher {
+			t.Fatalf("outcomes carry the launcher %+v on a platform with none", o)
 		}
 	}
 }
 
-func TestTheNotifierComponentHasItsWireArm(t *testing.T) {
-	if got := ComponentNotifier.Arm(); got != agentreplv1.DeployComponent_DEPLOY_COMPONENT_NOTIFIER {
-		t.Fatalf("Arm = %v, want DEPLOY_COMPONENT_NOTIFIER", got)
+func TestTheLauncherComponentHasItsWireArm(t *testing.T) {
+	if got := ComponentLauncher.Arm(); got != agentreplv1.DeployComponent_DEPLOY_COMPONENT_LAUNCHER {
+		t.Fatalf("Arm = %v, want DEPLOY_COMPONENT_LAUNCHER", got)
 	}
 }
 
-func TestTheBuilderStagesTheNotifierOnlyWhenAsked(t *testing.T) {
+func TestTheBuilderStagesTheLauncherOnlyWhenAsked(t *testing.T) {
 	cases := []struct {
-		notifier bool
+		launcher bool
 		want     bool
-	}{{notifier: false, want: false}, {notifier: true, want: true}}
+	}{{launcher: false, want: false}, {launcher: true, want: true}}
 	for _, tc := range cases {
 		// Arrange
-		b := &ScriptBuilder{ModuleRoot: "/m", Notifier: tc.notifier}
+		b := &ScriptBuilder{ModuleRoot: "/m", Launcher: tc.launcher}
 
 		// Act
 		steps := b.steps("/staging")
 
 		// Assert
 		last := steps[len(steps)-1]
-		got := last.name == NotifierTarget && reflect.DeepEqual(last.argv,
-			[]string{"bash", "/m/bin/build-frontend.sh", "--out", "/staging", NotifierTarget})
+		got := last.name == LauncherTarget && reflect.DeepEqual(last.argv,
+			[]string{"bash", "/m/bin/build-frontend.sh", "--out", "/staging", LauncherTarget})
 		if got != tc.want {
-			t.Fatalf("Notifier %v: last step %+v, want the notifier staged: %v", tc.notifier, last, tc.want)
+			t.Fatalf("Launcher %v: last step %+v, want the launcher staged: %v", tc.launcher, last, tc.want)
 		}
 	}
 }
@@ -193,28 +193,34 @@ func TestLSRegisterRegistersTheBundle(t *testing.T) {
 	}
 }
 
-func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
+func TestRestartLauncherRegistersThenRestartsTheService(t *testing.T) {
 	cases := []struct {
 		name              string
+		noHolder          bool
+		holderErr         error
 		registerErr       error
 		restartErr        error
 		notLoaded         bool
 		definitionWritten bool
 		defineErr         error
+		wantRegistered    bool
 		wantRestart       bool
 		wantStart         bool
 		wantErr           string
 		wantRecord        string
 	}{
-		{name: "a loaded service is restarted", wantRestart: true},
-		{name: "a failed registration restarts nothing", registerErr: errors.New("lsregister died"),
-			wantErr: "lsregister died", wantRecord: "registering the notifier app with LaunchServices failed"},
-		{name: "a failed restart is its error", restartErr: errors.New("no such label"), wantRestart: true,
-			wantErr: "no such label", wantRecord: "the notifier app restart failed"},
+		{name: "a loaded service is restarted", wantRegistered: true, wantRestart: true},
+		{name: "a socket no declared holder holds ensures no holder", noHolder: true, wantRegistered: true, wantRestart: true},
+		{name: "a socket holder that cannot be ensured registers and restarts nothing", holderErr: errors.New("holder refused"),
+			wantErr: "holder refused"},
+		{name: "a failed registration restarts nothing", registerErr: errors.New("lsregister died"), wantRegistered: true,
+			wantErr: "lsregister died", wantRecord: "registering the launcher with LaunchServices failed"},
+		{name: "a failed restart is its error", restartErr: errors.New("no such label"), wantRegistered: true, wantRestart: true,
+			wantErr: "no such label", wantRecord: "the launcher restart failed"},
 		{name: "an unloaded service whose definition is installed is started, not restarted",
-			notLoaded: true, definitionWritten: true, wantStart: true},
-		{name: "an unloaded service with no definition has it written, then is started", notLoaded: true, wantStart: true},
-		{name: "a definition that cannot be written is the error", notLoaded: true, defineErr: errors.New("no entry"),
+			notLoaded: true, definitionWritten: true, wantRegistered: true, wantStart: true},
+		{name: "an unloaded service with no definition has it written, then is started", notLoaded: true, wantRegistered: true, wantStart: true},
+		{name: "a definition that cannot be written is the error", notLoaded: true, defineErr: errors.New("no entry"), wantRegistered: true,
 			wantErr: "no entry", wantRecord: "a service's definition could not be written from its requirements entry"},
 	}
 	for _, tc := range cases {
@@ -223,11 +229,19 @@ func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
 			log := dlog.NewTestLogger()
 			dir := t.TempDir()
 			if tc.definitionWritten {
-				writeFile(t, filepath.Join(dir, NotifierLabel+".plist"), "<plist/>")
+				writeFile(t, filepath.Join(dir, LauncherLabel+".plist"), "<plist/>")
 			}
 			services := &restartRecorder{err: tc.restartErr, loaded: !tc.notLoaded, dir: dir}
-			var registered []string
-			r := &Restarter{Services: services, Log: log, NotifierApp: "/Apps/Zettel.app",
+			holder, wantEnsured := "socket-holder-launcher", []string{"socket-holder-launcher"}
+			if tc.noHolder {
+				holder, wantEnsured = "", nil
+			}
+			var registered, ensured []string
+			r := &Restarter{Services: services, Log: log, LauncherApp: "/Apps/Zettel.app", LauncherHolder: holder,
+				EnsureHolder: func(_ context.Context, id string) error {
+					ensured = append(ensured, id)
+					return tc.holderErr
+				},
 				// Define writes the definition from its requirements entry, as
 				// bin/requirements.sh define-service does.
 				Define: func(_ context.Context, label string) error {
@@ -243,17 +257,20 @@ func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
 				}}
 
 			// Act
-			err := r.RestartNotifier(context.Background())
+			err := r.RestartLauncher(context.Background())
 
 			// Assert
-			if !reflect.DeepEqual(registered, []string{"/Apps/Zettel.app"}) {
-				t.Fatalf("registered %v", registered)
+			if !reflect.DeepEqual(ensured, wantEnsured) {
+				t.Fatalf("ensured holders %v, want %v", ensured, wantEnsured)
+			}
+			if got := len(registered) == 1 && registered[0] == "/Apps/Zettel.app"; got != tc.wantRegistered {
+				t.Fatalf("registered %v, want registered: %v", registered, tc.wantRegistered)
 			}
 			if services.restarted != tc.wantRestart || services.started != tc.wantStart {
 				t.Fatalf("restarted = %v, started = %v; want restarted %v, started %v", services.restarted, services.started, tc.wantRestart, tc.wantStart)
 			}
 			if (tc.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
-				t.Fatalf("RestartNotifier = %v, want %q", err, tc.wantErr)
+				t.Fatalf("RestartLauncher = %v, want %q", err, tc.wantErr)
 			}
 			if tc.wantRecord != "" {
 				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Message: tc.wantRecord}); !ok {
@@ -264,7 +281,7 @@ func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
 	}
 }
 
-// restartRecorder is a ServiceManager holding the notifier's service loaded
+// restartRecorder is a ServiceManager holding the launcher's service loaded
 // or not, with its definition under dir, that records a restart and a start.
 type restartRecorder struct {
 	ServiceManager
@@ -276,7 +293,7 @@ type restartRecorder struct {
 }
 
 func (k *restartRecorder) Status(_ context.Context, label string) (bool, int, error) {
-	if label != NotifierLabel {
+	if label != LauncherLabel {
 		panic("restartRecorder: status of " + label)
 	}
 	return k.loaded, 0, nil
@@ -287,7 +304,7 @@ func (k *restartRecorder) Definition(label string) string {
 }
 
 func (k *restartRecorder) Start(_ context.Context, label string) error {
-	if label != NotifierLabel {
+	if label != LauncherLabel {
 		panic("restartRecorder: start of " + label)
 	}
 	k.started = true
@@ -295,7 +312,7 @@ func (k *restartRecorder) Start(_ context.Context, label string) error {
 }
 
 func (k *restartRecorder) Restart(_ context.Context, label string) error {
-	if label != NotifierLabel {
+	if label != LauncherLabel {
 		panic("restartRecorder: restart of " + label)
 	}
 	k.restarted = true

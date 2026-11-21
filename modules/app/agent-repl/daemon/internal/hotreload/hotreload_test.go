@@ -75,9 +75,9 @@ func newFixture(t *testing.T) *fixture {
 	return newFixtureOn(t, false)
 }
 
-// newFixtureOn is a tracker whose platform deploys the notifier app when
-// NOTIFIER is set.
-func newFixtureOn(t *testing.T, notifier bool) *fixture {
+// newFixtureOn is a tracker whose platform deploys the launcher when
+// LAUNCHER is set.
+func newFixtureOn(t *testing.T, launcher bool) *fixture {
 	t.Helper()
 	f := &fixture{feed: &fakeFeed{}, clock: &clock{now: start}, log: dlog.NewTestLogger()}
 	tracker, err := New(Deps{
@@ -86,7 +86,7 @@ func newFixtureOn(t *testing.T, notifier bool) *fixture {
 		WorkspaceName: func(_ context.Context, ws ids.WorkspaceID) (string, error) {
 			return "name-" + string(ws), nil
 		},
-		Notifier: notifier,
+		Launcher: launcher,
 		Now:      f.clock.Now,
 		Log:      f.log,
 	})
@@ -244,21 +244,21 @@ func TestBeginDrawsEveryServiceScheduledInTheMediatorsRootFeed(t *testing.T) {
 	}
 }
 
-func TestTheCardListsTheNotifierOnlyWhereThePlatformDeploysIt(t *testing.T) {
+func TestTheCardListsTheLauncherOnlyWhereThePlatformDeploysIt(t *testing.T) {
 	tests := []struct {
 		name     string
-		notifier bool
+		launcher bool
 		want     []string
 	}{
-		{"a platform with no notifier app", false,
+		{"a platform with no launcher", false,
 			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
-		{"macOS, which deploys the notifier app", true,
-			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceNotifier, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
+		{"macOS, which deploys the launcher", true,
+			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceLauncher, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			f := newFixtureOn(t, tt.notifier)
+			f := newFixtureOn(t, tt.launcher)
 
 			// Act
 			f.t.Begin(context.Background(), start)
@@ -275,16 +275,16 @@ func TestTheCardListsTheNotifierOnlyWhereThePlatformDeploysIt(t *testing.T) {
 	}
 }
 
-func TestTheNotifiersBuildTargetDrawsOnItsBuildStep(t *testing.T) {
+func TestTheLaunchersBuildTargetDrawsOnItsBuildStep(t *testing.T) {
 	// Arrange
 	f := newFixtureOn(t, true)
 	f.t.Begin(context.Background(), start)
 
 	// Act
-	f.t.BuildStepBegan("notifier")
+	f.t.BuildStepBegan("launcher")
 
 	// Assert
-	if got := arm(stepOf(t, service(t, f.feed.last(t), ServiceNotifier), "build").GetState()); got != "running:building" {
+	if got := arm(stepOf(t, service(t, f.feed.last(t), ServiceLauncher), "build").GetState()); got != "running:building" {
 		t.Fatalf("step = %s, want running:building", got)
 	}
 }

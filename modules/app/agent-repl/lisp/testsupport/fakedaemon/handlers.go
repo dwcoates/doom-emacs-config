@@ -788,29 +788,20 @@ func (s *fakeServer) AcceptHandedWorkspace(ctx context.Context, req *connect.Req
 	return handleUnary[v1.AcceptHandedWorkspaceRequest, v1.AcceptHandedWorkspaceResponse](ctx, s, "AcceptHandedWorkspace", req.Msg)
 }
 
-// The desktop notifier's surface. `WatchDesktopBanners`,
-// `ReportDesktopBannerPosted` and `ReportDesktopBannerClicked` are the Zettel
-// app's (endpoint_watch_desktop_banners.proto), never Emacs's, so this fake
-// refuses all three loudly rather than mocking a surface no Emacs scenario can
-// reach.
-
-func (s *fakeServer) WatchDesktopBanners(ctx context.Context, req *connect.Request[v1.WatchDesktopBannersRequest], stream *connect.ServerStream[v1.WatchDesktopBannersResponse]) error {
-	return s.notifierOnly(ctx, "WatchDesktopBanners", req.Msg)
-}
-
-func (s *fakeServer) ReportDesktopBannerPosted(ctx context.Context, req *connect.Request[v1.ReportDesktopBannerPostedRequest]) (*connect.Response[v1.ReportDesktopBannerPostedResponse], error) {
-	return nil, s.notifierOnly(ctx, "ReportDesktopBannerPosted", req.Msg)
-}
+// The launcher's surface. `ReportDesktopBannerClicked` is the launcher's
+// (Zettel.app, endpoint_report_desktop_banner_clicked.proto), never Emacs's,
+// so this fake refuses it loudly rather than mocking a surface no Emacs
+// scenario can reach.
 
 func (s *fakeServer) ReportDesktopBannerClicked(ctx context.Context, req *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error) {
-	return nil, s.notifierOnly(ctx, "ReportDesktopBannerClicked", req.Msg)
+	return nil, s.launcherOnly(ctx, "ReportDesktopBannerClicked", req.Msg)
 }
 
-// notifierOnly records and refuses one of the notifier app's rpcs.
-func (s *fakeServer) notifierOnly(ctx context.Context, method string, msg proto.Message) error {
+// launcherOnly records and refuses one of the launcher's rpcs.
+func (s *fakeServer) launcherOnly(ctx context.Context, method string, msg proto.Message) error {
 	s.record(ctx, method, msg)
-	logWarn("fakedaemon.stream.not-mocked", "an rpc of the notifier app's, which this fake does not mock, was called",
+	logWarn("fakedaemon.stream.not-mocked", "an rpc of the launcher's, which this fake does not mock, was called",
 		map[string]any{"method": method})
 	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's surface; %s is the Zettel notifier app's", method))
+		fmt.Errorf("fakedaemon mocks only Emacs's surface; %s is the launcher's", method))
 }

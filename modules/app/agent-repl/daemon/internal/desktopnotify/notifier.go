@@ -18,7 +18,7 @@ const opPost = "daemon.desktopnotify.post"
 const opChime = "daemon.desktopnotify.chime"
 
 // ClickSink is told a banner was clicked, read back (Linux) or reported by the
-// Zettel app (macOS): the server pushes the host stream's
+// launcher (macOS): the server pushes the host stream's
 // notification_clicked, and Emacs raises its frame and selects the tab.
 type ClickSink interface {
 	NotificationClicked(ws ids.WorkspaceID)
@@ -318,7 +318,7 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 }
 
 // Clicked relays the click on a banner the platform held (macOS, through the
-// Zettel app) for ws: exactly what a read-back banner's click does, so every
+// launcher) for ws: exactly what a read-back banner's click does, so every
 // click lets go of the held banners and asks Emacs to select its workspace,
 // whichever daemon posted the banner.
 func (n *Notifier) Clicked(ws ids.WorkspaceID) {

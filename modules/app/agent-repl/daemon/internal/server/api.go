@@ -217,10 +217,6 @@ type Deps struct {
 	// lets every held banner go: a workspace the user chose outranks any
 	// banner made before.
 	Banners Banners
-	// NotifierApp is the macOS notifier app's side (desktopnotify.App):
-	// WatchDesktopBanners attaches its stream and ReportDesktopBannerPosted
-	// answers its posts.
-	NotifierApp NotifierApp
 	// PersistentWifi backs UpdatePersistentWifiMode, and its topic is the
 	// `persistent_wifi` state every Emacs WatchDaemon stream subscribes to (a
 	// webview's never does: its topbar view carries the same standing).
@@ -678,8 +674,6 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the hot reload tracker")
 	case deps.Banners == nil:
 		return nil, missing("the desktop banners")
-	case deps.NotifierApp == nil:
-		return nil, missing("the notifier app's side")
 	case deps.PersistentWifi == nil:
 		return nil, missing("the persistent-wifi controller")
 	case deps.HiddenKeepalives == nil:

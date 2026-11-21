@@ -61,8 +61,8 @@ type previous struct {
 	// restarts it too.
 	store, sidecar bool
 	standalone     map[Component]bool
-	// notifier records that the deploy asked to restart the notifier app.
-	notifier bool
+	// launcher records that the deploy asked to restart the launcher.
+	launcher bool
 }
 
 // restartedStandalone records that the deploy asked standalone service C to
@@ -76,7 +76,7 @@ func (p *previous) restartedStandalone(c Component) {
 
 // touched reports whether the deploy changed anything a rollback restores.
 func (p *previous) touched() bool {
-	return len(p.kept) > 0 || p.store || p.sidecar || len(p.standalone) > 0 || p.notifier
+	return len(p.kept) > 0 || p.store || p.sidecar || len(p.standalone) > 0 || p.launcher
 }
 
 // keep copies what stands at one live path aside before an install writes it.
@@ -177,8 +177,8 @@ func (d *Deployer) rollback(ctx context.Context, p *previous, nonce string, caus
 		d.rollbackRestart(ctx, sv.Component, sv.Display,
 			sv.restartWith(d.deps.Services), fail)
 	}
-	if p.notifier {
-		d.rollbackRestart(ctx, ComponentNotifier, "the notifier app", d.deps.Services.RestartNotifier, fail)
+	if p.launcher {
+		d.rollbackRestart(ctx, ComponentLauncher, "the launcher", d.deps.Services.RestartLauncher, fail)
 	}
 	if len(failures) > 0 {
 		failed := &RollbackFailed{Component: first, Detail: strings.Join(failures, "; ")}

@@ -62,10 +62,10 @@ func TestADeployOfWhatAlreadyRunsDecidesEveryComponentUpToDate(t *testing.T) {
 		agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP, agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON,
 		agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM, agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP,
 	}
-	// On macOS the attached (fake) Zettel app reports the build the deploy
+	// On macOS the fake launcher's build report names the build the deploy
 	// stages, so it too is up to date and nothing kickstarts it.
 	if runtime.GOOS == "darwin" {
-		components = append(components, agentreplv1.DeployComponent_DEPLOY_COMPONENT_NOTIFIER)
+		components = append(components, agentreplv1.DeployComponent_DEPLOY_COMPONENT_LAUNCHER)
 	}
 	for _, component := range components {
 		o := outcomes[component]

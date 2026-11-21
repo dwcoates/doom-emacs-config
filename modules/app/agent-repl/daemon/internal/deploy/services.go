@@ -26,8 +26,8 @@ const (
 	SidecarLabel = "com.agentrepl.shim-claude-sidecar"
 	ZettelLabel  = "com.agentrepl.zettel"
 	TestsLabel   = "com.agentrepl.tests"
-	// NotifierLabel is the notifier app's launchd agent.
-	NotifierLabel = "com.agentrepl.notifier"
+	// LauncherLabel is the launcher's launchd agent.
+	LauncherLabel = "app.zettel.launcher"
 )
 
 // Standalone is a service no other service's restart moves, and that moves
@@ -178,11 +178,16 @@ type Restarter struct {
 	// empty when no declared holder holds that socket, and then the store
 	// binds its own and no holder is ensured for it.
 	StoreHolder string
-	// NotifierApp is the installed notifier app (Live.NotifierApp), and
-	// RegisterApp registers a bundle with LaunchServices (lsregister -f);
-	// both are set on macOS only, where RestartNotifier runs.
-	NotifierApp string
-	RegisterApp func(ctx context.Context, bundle string) error
+	// LauncherApp is the installed launcher (Live.LauncherApp), RegisterApp
+	// registers a bundle with LaunchServices (lsregister -f), and
+	// LauncherHolder is the id of the socket holder that holds the socket
+	// the launcher accepts banners on (holderensure.HolderOfSocket), ensured
+	// before the launcher starts or restarts; empty when no declared holder
+	// holds that socket (a harness's own), and then none is ensured. All three
+	// are set on macOS only, where RestartLauncher runs.
+	LauncherApp    string
+	RegisterApp    func(ctx context.Context, bundle string) error
+	LauncherHolder string
 }
 
 // serviceWindowBounds bound each service restart's resource window: about
@@ -303,35 +308,39 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 	return storeBootstrapped, sidecarBootstrapped, nil
 }
 
-// RestartNotifier registers the installed notifier app with LaunchServices,
-// so macOS attributes its banners to the bundle now standing, and restarts
-// its service onto it. A banner wanted while the app is out is recorded
-// unposted by the daemon's notifier; nothing else waits on it.
-func (r *Restarter) RestartNotifier(ctx context.Context) error {
-	fields := dlog.Context{"notifier": NotifierLabel, "app": r.NotifierApp}
-	if r.RegisterApp == nil || r.NotifierApp == "" {
-		panic("deploy: RestartNotifier on a restarter with no notifier app to register")
+// RestartLauncher ensures the launcher's socket holder serves, registers the
+// installed launcher with LaunchServices, so macOS attributes its banners to
+// the bundle now standing, and restarts its service onto it. A banner posted
+// while the launcher is out waits in its held socket's backlog until it
+// accepts again.
+func (r *Restarter) RestartLauncher(ctx context.Context) error {
+	fields := dlog.Context{"launcher": LauncherLabel, "app": r.LauncherApp, "holder": r.LauncherHolder}
+	if r.RegisterApp == nil || r.LauncherApp == "" {
+		panic("deploy: RestartLauncher on a restarter with no launcher to register")
 	}
-	if err := r.RegisterApp(ctx, r.NotifierApp); err != nil {
-		r.failed("registering the notifier app with LaunchServices failed", fields, err)
-		return fmt.Errorf("deploy: register %s: %w", r.NotifierApp, err)
+	if err := r.ensureHolderOf(ctx, "the launcher", r.LauncherHolder, fields); err != nil {
+		return err
+	}
+	if err := r.RegisterApp(ctx, r.LauncherApp); err != nil {
+		r.failed("registering the launcher with LaunchServices failed", fields, err)
+		return fmt.Errorf("deploy: register %s: %w", r.LauncherApp, err)
 	}
 	// A SERVICE THAT IS NOT LOADED IS STARTED from its installed definition,
 	// which starts the installed app; one whose definition the installer
 	// never wrote fails naming .claude/install.sh.
-	bootstrapped, err := r.ensureLoaded(ctx, NotifierLabel, fields)
+	bootstrapped, err := r.ensureLoaded(ctx, LauncherLabel, fields)
 	if err != nil {
 		return err
 	}
 	if bootstrapped {
-		r.Log.Info(opServices, "registered the notifier app and started its service", fields)
+		r.Log.Info(opServices, "registered the launcher and started its service", fields)
 		return nil
 	}
-	if err := r.Services.Restart(ctx, NotifierLabel); err != nil {
-		r.failed("the notifier app restart failed", fields, err)
-		return fmt.Errorf("deploy: restart %s: %w", NotifierLabel, err)
+	if err := r.Services.Restart(ctx, LauncherLabel); err != nil {
+		r.failed("the launcher restart failed", fields, err)
+		return fmt.Errorf("deploy: restart %s: %w", LauncherLabel, err)
 	}
-	r.Log.Info(opServices, "registered and restarted the notifier app", fields)
+	r.Log.Info(opServices, "registered and restarted the launcher", fields)
 	return nil
 }
 
@@ -613,13 +622,20 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 // ensureStoreHolder proves the store's socket holder serves, installing it
 // when none does: the store's definition takes its sockets from it.
 func (r *Restarter) ensureStoreHolder(ctx context.Context, fields dlog.Context) error {
-	if r.StoreHolder == "" {
-		r.Log.Debug(opServices, "no declared holder holds the store's socket; the store binds its own", fields)
+	return r.ensureHolderOf(ctx, "the store", r.StoreHolder, fields)
+}
+
+// ensureHolderOf ensures HOLDER, the socket holder that holds the socket
+// SERVICE accepts on, before SERVICE starts or restarts. An empty holder is a
+// socket no declared holder holds, which the service binds itself.
+func (r *Restarter) ensureHolderOf(ctx context.Context, service, holder string, fields dlog.Context) error {
+	if holder == "" {
+		r.Log.Debug(opServices, "no declared holder holds "+service+"'s socket; "+service+" binds its own", fields)
 		return nil
 	}
-	if err := r.EnsureHolder(ctx, r.StoreHolder); err != nil {
+	if err := r.EnsureHolder(ctx, holder); err != nil {
 		// The ensure recorded its own failure (holderensure).
-		return fmt.Errorf("deploy: the store's socket holder %s: %w", r.StoreHolder, err)
+		return fmt.Errorf("deploy: %s's socket holder %s: %w", service, holder, err)
 	}
 	return nil
 }

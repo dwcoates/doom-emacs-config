@@ -92,16 +92,16 @@ func TestClickForwarderRefusesAClickBeforeTheServerIsBound(t *testing.T) {
 }
 
 // TestResolveBannerBackendIsTheAppOnMacOS pins that on macOS every banner is
-// the Zettel app's, whatever program the environment names, and that
+// the launcher's, whatever program the environment names, and that
 // elsewhere the platform's program honors the override.
-func TestResolveBannerBackendIsTheAppOnMacOS(t *testing.T) {
+func TestResolveBannerBackendIsTheLauncherOnMacOS(t *testing.T) {
 	// Arrange
 	t.Setenv("AGENT_REPL_NOTIFIER_CMD", "/tmp/fake-banner")
 	log := dlog.NewTestLogger()
-	app := desktopnotify.NewApp(log, desktopnotify.AppAnswerBound)
+	launcher := desktopnotify.NewLauncher("/sock/launcher.sock", desktopnotify.LauncherPostBound, log)
 
 	// Act
-	backend, err := resolveBannerBackend(log, app)
+	backend, err := resolveBannerBackend(log, launcher)
 
 	// Assert
 	if err != nil {
@@ -109,10 +109,28 @@ func TestResolveBannerBackendIsTheAppOnMacOS(t *testing.T) {
 	}
 	want := "/tmp/fake-banner"
 	if runtime.GOOS == "darwin" {
-		want = desktopnotify.AppProgram
+		want = desktopnotify.LauncherProgram
 	}
 	if backend.Program() != want {
 		t.Fatalf("program = %q, want %q on %s", backend.Program(), want, runtime.GOOS)
+	}
+}
+
+func TestLauncherDeployedOnlyOnMacOS(t *testing.T) {
+	cases := []struct {
+		goos string
+		want bool
+	}{{"darwin", true}, {"linux", false}}
+	for _, tc := range cases {
+		t.Run(tc.goos, func(t *testing.T) {
+			// Act
+			got := launcherDeployed(tc.goos)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("launcherDeployed(%s) = %v, want %v", tc.goos, got, tc.want)
+			}
+		})
 	}
 }
 

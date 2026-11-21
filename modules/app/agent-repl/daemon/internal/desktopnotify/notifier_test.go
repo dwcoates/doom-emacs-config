@@ -802,7 +802,7 @@ func TestNotifierNoProgramCausePanicsWithAProgram(t *testing.T) {
 }
 
 // TestNotifierClickedLetsGoOfHeldBannersAndAsksEmacsToSelect pins a click the
-// Zettel app reports: every held banner is let go, so no later focus gain
+// launcher reports: every held banner is let go, so no later focus gain
 // steers anywhere, and Emacs is asked to select the clicked workspace.
 func TestNotifierClickedLetsGoOfHeldBannersAndAsksEmacsToSelect(t *testing.T) {
 	// Arrange

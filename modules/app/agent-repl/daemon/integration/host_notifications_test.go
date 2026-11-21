@@ -297,11 +297,11 @@ func TestAClickedBannerAsksEmacsToSelectTheWorkspace(t *testing.T) {
 }
 
 // TestAHandedBannersClickSelectsTheWorkspace pins a HANDED click (macOS): the
-// Zettel app reports the click with the banner's own token, and the host
+// launcher reports the click with the banner's own token, and the host
 // stream carries notification_clicked for the banner's workspace.
 func TestAHandedBannersClickSelectsTheWorkspace(t *testing.T) {
 	if runtime.GOOS != "darwin" {
-		t.Skip("only a macOS banner is handed to the Zettel app")
+		t.Skip("only a macOS banner is handed to the launcher")
 	}
 	t.Parallel()
 	// Arrange
@@ -309,7 +309,7 @@ func TestAHandedBannersClickSelectsTheWorkspace(t *testing.T) {
 	f.submit("go", "k-handed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 	awaitBannerSettled(t, f, "the handed turn banner")
-	banners := f.d.NotifierApp.Banners()
+	banners := f.d.Launcher.Banners()
 	if len(banners) != 1 {
 		t.Fatalf("banners %v, want exactly one", banners)
 	}

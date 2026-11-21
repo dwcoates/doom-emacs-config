@@ -743,3 +743,39 @@ func TestResolveFamilyNotices(t *testing.T) {
 		})
 	}
 }
+
+// TestParseFlagsResolvesTheLauncherSocket: the flag beats the environment,
+// which beats the launcher's held socket.
+func TestParseFlagsResolvesTheLauncherSocket(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		env  string
+		argv []string
+		want string
+	}{
+		{"neither names one: the held socket", "", nil, filepath.Join(home, ".cache/agent-repl/sock/launcher.sock")},
+		{"the environment names one", "/run/env-launcher.sock", nil, "/run/env-launcher.sock"},
+		{"the flag beats the environment", "/run/env-launcher.sock", []string{"-launcher-socket=/run/flag-launcher.sock"}, "/run/flag-launcher.sock"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv("AGENT_REPL_LAUNCHER_SOCKET", tc.env)
+
+			// Act.
+			opts, err := parseFlags("agent-repld", tc.argv)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("parseFlags(%q): %v", tc.argv, err)
+			}
+			if opts.launcherSocket != tc.want {
+				t.Fatalf("launcherSocket = %q, want %q", opts.launcherSocket, tc.want)
+			}
+		})
+	}
+}

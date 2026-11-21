@@ -500,17 +500,6 @@ func TestEveryWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
 			},
 		},
 		{
-			name: "WatchDesktopBanners",
-			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
-				s, err := c.WatchDesktopBanners(ctx, connect.NewRequest(&agentreplv1.WatchDesktopBannersRequest{}))
-				if err != nil {
-					t.Fatalf("open WatchDesktopBanners: %v", err)
-				}
-				s.Receive()
-				return s, s.Close
-			},
-		},
-		{
 			name: "WatchLoginTerminal",
 			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
 				s, err := c.WatchLoginTerminal(ctx, connect.NewRequest(&agentreplv1.WatchLoginTerminalRequest{}))

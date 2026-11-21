@@ -30,7 +30,7 @@ type Banners interface {
 	// NoProgramCause is why no banner program could be resolved, asked only
 	// after Notify answered desktopnotify.NoProgram.
 	NoProgramCause() string
-	// Clicked relays a click the notifier app reported for ws.
+	// Clicked relays a click the launcher reported for ws.
 	Clicked(ws ids.WorkspaceID)
 }
 
