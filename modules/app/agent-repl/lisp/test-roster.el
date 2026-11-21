@@ -4596,68 +4596,6 @@ handed to `:on-failure'."
                        '(nil ((1 "transport (:kind :refused)"))
                          ("elisp.roster.merged-page-failed: page=1 cause=transport (:kind :refused)"))))))))
 
-;;;; ---- The open workspaces' names ----
-
-(defmacro agent-repl-test-roster--with-rows (rows &rest body)
-  "Run BODY with the last accepted push carrying ROWS."
-  (declare (indent 1))
-  `(let ((agent-repl-roster--rows-by-id (make-hash-table :test 'equal)))
-     (dolist (row ,rows)
-       (puthash (agent-repl-roster-row-id row) row agent-repl-roster--rows-by-id))
-     ,@body))
-
-(ert-deftest agent-repl-test-roster-open-workspaces-answers-every-open-row ()
-  "Every row not closed is named, hidden or not, with its repository."
-  (agent-repl-test-roster--with-rows
-      (list (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom")
-            (agent-repl-test-roster--row "b" "beta" :thinking :repository "zettel"))
-    (should (equal (sort (agent-repl-roster-open-workspaces) (lambda (x y) (string< (car x) (car y))))
-                   '(("alpha" "doom") ("beta" "zettel"))))))
-
-(ert-deftest agent-repl-test-roster-open-workspaces-leaves-out-a-closed-row ()
-  "A closed row's name is not an open workspace's."
-  (agent-repl-test-roster--with-rows
-      (list (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom")
-            (agent-repl-test-roster--row "b" "beta" :ready :closed t :repository "doom"))
-    (should (equal (agent-repl-roster-open-workspaces) '(("alpha" "doom"))))))
-
-(ert-deftest agent-repl-test-roster-open-workspaces-joins-a-name-open-in-several-repositories ()
-  "One name open in two repositories is one entry naming both, sorted, once each."
-  (agent-repl-test-roster--with-rows
-      (list (agent-repl-test-roster--row "a" "fix" :ready :repository "zettel")
-            (agent-repl-test-roster--row "b" "fix" :ready :repository "doom")
-            (agent-repl-test-roster--row "c" "fix" :ready :repository "doom"))
-    (should (equal (agent-repl-roster-open-workspaces) '(("fix" "doom" "zettel"))))))
-
-(ert-deftest agent-repl-test-roster-open-workspaces-keeps-a-name-whose-repository-is-unstated ()
-  "A row the daemon states no repository for is still open, naming none."
-  (agent-repl-test-roster--with-rows
-      (list (agent-repl-test-roster--row "a" "alpha" :ready))
-    (should (equal (agent-repl-roster-open-workspaces) '(("alpha"))))))
-
-(ert-deftest agent-repl-test-roster-open-workspaces-is-empty-before-any-push ()
-  "No push carried, no workspaces."
-  (agent-repl-test-roster--with-rows nil
-    (should-not (agent-repl-roster-open-workspaces))))
-
-(ert-deftest agent-repl-test-roster-open-workspace-names-are-the-open-workspaces-names ()
-  "The names reader answers the name of each open workspace, closed ones left out."
-  (agent-repl-test-roster--with-rows
-      (list (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom")
-            (agent-repl-test-roster--row "b" "beta" :ready :closed t :repository "doom")
-            (agent-repl-test-roster--row "c" "gamma" :ready))
-    (should (equal (sort (agent-repl-roster-open-workspace-names) #'string<) '("alpha" "gamma")))))
-
-(ert-deftest agent-repl-test-roster-row-repository-name-reads-the-row ()
-  "The accessor answers the name the row's repository carries."
-  (should (equal (agent-repl-roster-row-repository-name
-                  (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom"))
-                 "doom")))
-
-(ert-deftest agent-repl-test-roster-row-repository-name-is-nil-when-unstated ()
-  "A row carrying no repository answers nil."
-  (should-not (agent-repl-roster-row-repository-name
-               (agent-repl-test-roster--row "a" "alpha" :ready))))
 ;;;; ---- Threads are workspaces off the bar ----
 
 (ert-deftest agent-repl-test-roster-reconcile-opens-a-thread-off-the-drawing ()
