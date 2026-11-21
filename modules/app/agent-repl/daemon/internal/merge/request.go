@@ -776,6 +776,12 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 		log.Error(op, "could not read the workspace a detached merge was asked for", withField(fields, "error", err.Error()))
 		return err
 	}
+	// A REQUESTER THAT HAS CLOSED forks nothing: its request goes as its close
+	// drops it (dropAsyncRequestsOf), which waits for this hand-off.
+	if record.Closed {
+		o.dropClosedRequest(ctx, log, op, fields, repo, source)
+		return nil
+	}
 	base := source.Branch
 	fields["base"] = base
 	target, parentBranch, err := o.detachedLanding(ctx, record, source)
@@ -792,6 +798,13 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 		CloseOnLanding: source.CloseOnLanding, CleanupWorktree: source.CleanupWorktree, CleanupDir: source.CleanupDir,
 		TargetDir: target, ParentBranch: parentBranch, Hooks: source.Hooks}
 	forked, err := o.deps.Detached.Fork(ctx, record, origin, source.DetachName, base)
+	var closed *wsm.ParentNotOpenError
+	if errors.As(err, &closed) && closed.Parent.ID == requester {
+		// THE REQUESTER CLOSED AFTER IT WAS READ: an ordinary race with the
+		// user's close, settled as the close settles its requests.
+		o.dropClosedRequest(ctx, log, op, fields, repo, source)
+		return nil
+	}
 	if err != nil {
 		log.Error(op, "could not fork the merge workspace for a detached merge; the request is dropped and the requester told", withField(fields, "error", err.Error()))
 		return o.dropDetached(ctx, requester, repo, source, fmt.Sprintf("the merge workspace could not be created: %v", err))

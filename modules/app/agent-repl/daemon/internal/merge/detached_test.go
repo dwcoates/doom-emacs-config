@@ -43,6 +43,11 @@ type fakeDetached struct {
 	// byName forks each merge workspace under an identity of its own,
 	// "ws-merge-<name>", rather than the harness's one theMergeWorkspace.
 	byName bool
+	// onFork, when set, runs inside each fork, before it answers: what
+	// happens to the daemon while a fork is being made.
+	onFork func()
+	// forkCtxErrs records each fork's context error once onFork has run.
+	forkCtxErrs []error
 }
 
 // handback is one HandBack the fake was handed.
@@ -52,7 +57,13 @@ type handback struct {
 	outcome   DetachedOutcome
 }
 
-func (d *fakeDetached) Fork(_ context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
+func (d *fakeDetached) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
+	if d.onFork != nil {
+		d.onFork()
+	}
+	d.mu.Lock()
+	d.forkCtxErrs = append(d.forkCtxErrs, ctx.Err())
+	d.mu.Unlock()
 	d.h.names.mu.Lock()
 	standing := len(d.h.names.claims) - d.h.names.releases
 	d.h.names.mu.Unlock()

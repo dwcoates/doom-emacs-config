@@ -91,7 +91,11 @@ func (o *orchestrator) runAsyncWait(wait *asyncWait) {
 			return
 		}
 		if len(readyRequests(requests, turn, inFlight)) > 0 {
-			if err := o.handOffReady(ctx, ws, ended); err != nil {
+			// A HAND-OFF BEGUN IS FINISHED. A withdrawal (the requester's
+			// close, a transfer) ends the wait, never a fork halfway made:
+			// cut, it left a creation job naming a workspace that never
+			// registered, and every write after it failed "context canceled".
+			if err := o.handOffReady(context.WithoutCancel(ctx), ws, ended); err != nil {
 				log.Error(op, "could not hand the async merge requests whose turn ended to their merge workspaces; they stay recorded for the next boot",
 					dlog.Context{"workspace": string(ws), "error": err.Error()})
 				o.retireAsyncWait(wait, true)
@@ -234,6 +238,11 @@ func (o *orchestrator) rearmAsyncRequests(requests []wsm.AsyncMergeRequest, serv
 func (o *orchestrator) dropAsyncRequestsOf(ctx context.Context, ws ids.WorkspaceID) {
 	const op = "daemon.merge.workspace_closed"
 	o.withdrawAsync(ws)
+	// ONE HAND-OFF OR DROP OF WS AT A TIME: a hand-off in flight ends first,
+	// and what it moved is no longer the workspace's to drop.
+	lock := o.handOffLock(ws)
+	lock.Lock()
+	defer lock.Unlock()
 	log := o.log(ctx, ws)
 	requests, err := o.deps.DB.AsyncMergeRequestsOf(ctx, ws)
 	if err != nil {
@@ -242,10 +251,17 @@ func (o *orchestrator) dropAsyncRequestsOf(ctx context.Context, ws ids.Workspace
 	}
 	for _, req := range requests {
 		fields := dlog.Context{"workspace": string(ws), "repo": string(req.Repo), "request": string(req.Source.Detach), "name": req.Source.DetachName}
-		if err := o.deps.DB.DropAsyncMergeRequest(ctx, req.Repo, req.Source.Detach, string(CauseWorkspaceClosed)); err != nil {
-			log.Error(op, "could not drop a closed workspace's async merge request", withField(fields, "error", err.Error()))
-			continue
-		}
-		log.Info(op, "dropped an async merge request its closed workspace never handed off", fields)
+		o.dropClosedRequest(ctx, log, op, fields, req.Repo, req.Source)
 	}
+}
+
+// dropClosedRequest drops the async request SOURCE of a workspace that has
+// closed, as its close does: nothing was reported of it, so nothing is drawn
+// and the requester is not told.
+func (o *orchestrator) dropClosedRequest(ctx context.Context, log dlog.Logger, op string, fields dlog.Context, repo wsm.RepoKey, source wsm.MergeSource) {
+	if err := o.deps.DB.DropAsyncMergeRequest(ctx, repo, source.Detach, string(CauseWorkspaceClosed)); err != nil {
+		log.Error(op, "could not drop a closed workspace's async merge request", withField(fields, "error", err.Error()))
+		return
+	}
+	log.Info(op, "dropped an async merge request its closed workspace never handed off", fields)
 }

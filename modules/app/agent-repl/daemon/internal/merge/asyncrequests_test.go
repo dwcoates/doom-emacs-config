@@ -395,3 +395,118 @@ func TestAnAsyncRequestMayBePlacedBehindAnEarlierRequestByItsSuppliedName(t *tes
 		t.Fatalf("Enqueue(second) = %v, want it placed behind the first", err)
 	}
 }
+
+// recordedRequest records one async request of the harness workspace whose
+// turn has ended, as a restart catches it, and arms its wait.
+func recordedRequest(t *testing.T, h *harness, name string) wsm.MergeSource {
+	t.Helper()
+	source := asyncSource
+	source.Detach, source.DetachName, source.DetachMaker = wsm.NewDetachedMergeID(), name, theWorkspace
+	if err := h.db.RequestAsyncMerge(context.Background(), h.repoKey(), theWorkspace, "turn-gone", source, h.clock()); err != nil {
+		t.Fatalf("RequestAsyncMerge(%s): %v", name, err)
+	}
+	h.o.awaitAsyncRequests(theWorkspace)
+	return source
+}
+
+// closeRequester marks the harness workspace closed in the fake registry.
+func closeRequester(h *harness) {
+	h.db.mu.Lock()
+	ws := h.db.workspaces[theWorkspace]
+	ws.Closed = true
+	h.db.workspaces[theWorkspace] = ws
+	h.db.mu.Unlock()
+}
+
+func TestAWithdrawalDuringAForkLetsTheHandOffFinish(t *testing.T) {
+	// Arrange: the requester's close withdraws its wait while the merge
+	// workspace is being forked.
+	h := newHarness(t)
+	h.detached.byName = true
+	recordedRequest(t, h, "first")
+	h.detached.onFork = func() { h.o.withdrawAsync(theWorkspace) }
+
+	// Act
+	h.runWait(t)
+
+	// Assert: the fork ran on a context the withdrawal did not end, and the
+	// request reached its merge workspace.
+	if errs := h.detached.forkCtxErrs; len(errs) != 1 || errs[0] != nil {
+		t.Fatalf("fork context errors = %v, want one fork whose context still stood", errs)
+	}
+	if line := h.lineOrder(); !slices.Equal(line, []ids.WorkspaceID{mergeWorkspaceNamed("first")}) {
+		t.Fatalf("line = %v, want the handed-off merge workspace", line)
+	}
+	for _, r := range h.logs.Records() {
+		if r.Level == dlog.LevelError {
+			t.Fatalf("records = %+v, want no ERROR", h.logs.Records())
+		}
+	}
+}
+
+func TestAClosedRequestersHandOffForksNothingAndDropsTheRequest(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness)
+		forks   int
+	}{
+		{name: "closed before the hand-off read it", arrange: closeRequester, forks: 0},
+		{name: "closed while its merge workspace was forked", arrange: func(h *harness) {
+			h.detached.forkErr = &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: theWorkspace}}
+		}, forks: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			source := recordedRequest(t, h, "first")
+			tc.arrange(h)
+
+			// Act
+			err := h.o.handOffDetached(context.Background(), theWorkspace, h.repoKey(), source)
+
+			// Assert: dropped as its close drops it, nobody told, nothing an error.
+			if err != nil {
+				t.Fatalf("handOffDetached = %v, want the request settled", err)
+			}
+			if got := len(h.detached.forks); got != tc.forks {
+				t.Fatalf("forks = %v, want %d", h.detached.forks, tc.forks)
+			}
+			if _, ok := h.asyncRequestOf(theWorkspace); ok {
+				t.Fatal("the closed requester's request still stands")
+			}
+			if sent := h.detached.sent(); len(sent) != 0 {
+				t.Fatalf("handbacks = %+v, want none: a closed requester is not told", sent)
+			}
+			if dropped := h.recordsFor("info", "daemon.merge.detached", "dropped an async merge request its closed workspace never handed off"); len(dropped) != 1 {
+				t.Fatalf("records = %+v, want the drop recorded at INFO", h.logs.Records())
+			}
+			for _, r := range h.logs.Records() {
+				if r.Level == dlog.LevelError {
+					t.Fatalf("records = %+v, want no ERROR", h.logs.Records())
+				}
+			}
+		})
+	}
+}
+
+func TestAForkRefusedForAnotherClosedParentStaysAFailure(t *testing.T) {
+	// Arrange: the parent that is not open is the maker, not the requester.
+	h := newHarness(t)
+	source := recordedRequest(t, h, "first")
+	h.detached.forkErr = &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-maker"}}
+
+	// Act
+	err := h.o.handOffDetached(context.Background(), theWorkspace, h.repoKey(), source)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("handOffDetached = %v, want the failure handed back", err)
+	}
+	if fail := h.recordsFor("error", "daemon.merge.detached", "could not fork the merge workspace for a detached merge; the request is dropped and the requester told"); len(fail) != 1 {
+		t.Fatalf("records = %+v, want the failed fork at ERROR", h.logs.Records())
+	}
+	if sent := h.detached.sent(); len(sent) != 1 || sent[0].outcome.Kind != DetachedAbandoned {
+		t.Fatalf("handbacks = %+v, want one abandoned handback", sent)
+	}
+}
