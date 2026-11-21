@@ -176,7 +176,7 @@ func (s *server) EvaluateInEditor(
 		Push: &agentreplv1.WatchDaemonResponse_Evaluate{Evaluate: &agentreplv1.DaemonEvaluate{
 			Workspace: subject.Record.Ref(),
 			Token:     &agentreplv1.EditorEvaluationToken{Value: token}, Text: req.Msg.GetText()}},
-	}, func(*daemonWatcher) bool { return true }, func(w *daemonWatcher) { s.evals.reach(token, w) })
+	}, everyEditor, func(w *daemonWatcher) { s.evals.reach(token, w) })
 	if editors == 0 {
 		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{Arm: "no_editor", Reason: "no Emacs daemon stream stands to evaluate the text", Info: true})))
 	}

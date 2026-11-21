@@ -635,6 +635,25 @@ func TestEveryEditorPushGoesThroughPushToEditors(t *testing.T) {
 	}
 }
 
+func TestEveryEditorKeepsEveryEmacsStream(t *testing.T) {
+	// Arrange / Act / Assert
+	for _, w := range []*daemonWatcher{{emacs: true, id: "stream-1"}, {emacs: true, id: "stream-2", elispBuild: "b"}} {
+		if !everyEditor(w) {
+			t.Fatalf("everyEditor(%s) = false, want every Emacs stream kept", w.id)
+		}
+	}
+}
+
+func TestNoPushToEveryEditorSpellsItsOwnFilter(t *testing.T) {
+	// Act
+	sites := sourcescan.Count(t, "func(*daemonWatcher) bool { return true }")
+
+	// Assert
+	if sites != 0 {
+		t.Fatalf("%d push sites spell the every-editor filter inline, want 0: use everyEditor", sites)
+	}
+}
+
 // emacsWatcher registers one Emacs WatchDaemon stream on the surface, as an
 // accepted stream does, without a client.
 func emacsWatcher(s *server) *daemonWatcher {
@@ -656,7 +675,7 @@ func TestAnAddressedPushIsCountedUntilItsStreamSendsIt(t *testing.T) {
 	w := emacsWatcher(s)
 
 	// Act.
-	reached := s.pushToEditors("daemon.test.push", reloadPush(), func(*daemonWatcher) bool { return true }, nil)
+	reached := s.pushToEditors("daemon.test.push", reloadPush(), everyEditor, nil)
 	queued := s.addressedPushes.InFlight()
 	(<-w.elisp).sent()
 
@@ -672,7 +691,7 @@ func TestARemovedStreamsQueuedPushesAreUncounted(t *testing.T) {
 	s := h.Server.(*server)
 	s.addressedPushes = &inflight.Tracker{}
 	w := emacsWatcher(s)
-	s.pushToEditors("daemon.test.push", reloadPush(), func(*daemonWatcher) bool { return true }, nil)
+	s.pushToEditors("daemon.test.push", reloadPush(), everyEditor, nil)
 
 	// Act.
 	s.removeDaemonWatcher(w)
@@ -692,7 +711,7 @@ func TestAPushAFullQueueRefusedIsUncounted(t *testing.T) {
 	s.addDaemonWatcher(w)
 
 	// Act.
-	reached := s.pushToEditors("daemon.test.push", reloadPush(), func(*daemonWatcher) bool { return true }, nil)
+	reached := s.pushToEditors("daemon.test.push", reloadPush(), everyEditor, nil)
 
 	// Assert.
 	if reached != 0 || s.addressedPushes.InFlight() != 0 {

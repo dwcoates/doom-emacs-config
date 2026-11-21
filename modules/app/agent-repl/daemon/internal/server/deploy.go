@@ -226,6 +226,10 @@ func reloadElispPush(moduleRoot, build string) *agentreplv1.WatchDaemonResponse 
 	}}
 }
 
+// everyEditor is the pushToEditors filter that keeps every Emacs stream: the
+// push is for whichever Emacs is linked, not one stream in particular.
+func everyEditor(*daemonWatcher) bool { return true }
+
 // pushToEditors hands PUSH to every Emacs WatchDaemon stream WANT names, on
 // the stream's own addressed queue, and answers how many it reached. REACHED,
 // when set, runs for each stream reached, under the server's lock. A full
@@ -352,7 +356,7 @@ func (s *server) PushReloadWebhost(build string) int {
 	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadWebhost{
 		ReloadWebhost: &agentreplv1.DaemonReloadWebhost{Build: build},
 	}}
-	return s.pushToEditors("daemon.server.reload_webhost", push, func(*daemonWatcher) bool { return true }, func(w *daemonWatcher) {
+	return s.pushToEditors("daemon.server.reload_webhost", push, everyEditor, func(w *daemonWatcher) {
 		s.log.Info("daemon.server.reload_webhost", "pushed the web view host's reload to an Emacs", dlog.Context{
 			"stream": w.id, "build": build,
 		})

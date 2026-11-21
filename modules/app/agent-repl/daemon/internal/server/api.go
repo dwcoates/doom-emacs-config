@@ -988,7 +988,7 @@ func (s *server) NotificationClicked(ws ids.WorkspaceID) {
 		Push: &agentreplv1.WatchDaemonResponse_NotificationClicked{
 			NotificationClicked: &agentreplv1.DaemonWorkspaceNotificationClicked{Workspace: record.Ref()},
 		},
-	}, func(*daemonWatcher) bool { return true }, nil)
+	}, everyEditor, nil)
 	s.log.Info(op, "relayed a desktop banner click to the editors", dlog.Merge(fields, dlog.Context{"editors": editors}))
 }
 
@@ -1001,7 +1001,7 @@ func (s *server) pushSelectRequested(ref *workspacev1.WorkspaceRef) int {
 		Push: &agentreplv1.WatchDaemonResponse_SelectRequested{
 			SelectRequested: &agentreplv1.DaemonWorkspaceSelectRequested{Workspace: ref},
 		},
-	}, func(*daemonWatcher) bool { return true }, nil)
+	}, everyEditor, nil)
 }
 
 // pushLinkFollowed pushes link_followed onto WS's host stream: the reader
