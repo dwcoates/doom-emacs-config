@@ -1142,6 +1142,125 @@ func TestADeferredPromptIsDeliveredAtOnceWhenNothingRuns(t *testing.T) {
 	}
 }
 
+// ---- a prompt sent now goes past the queue, never classified -------------
+//
+// agentrepl.v1 SubmitPromptDelivery.NOW: whatever would hold the prompt, it is
+// held already pressed "Send now", so it goes as a released held prompt does.
+
+// nowSubmission composes one submission sent now.
+func nowSubmission(turn ids.TurnID, text string) Submission {
+	sub := submission(turn, text)
+	sub.Delivery = wsm.DeliveryNow
+	return sub
+}
+
+func TestAPromptSentNowJoinsTheRunningTurnUnjudged(t *testing.T) {
+	// Arrange: a verdict that would interject, were the model ever asked.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "urgent"}
+
+	// Act
+	_, err := h.q.Submit(context.Background(), nowSubmission("t1", "do this now"))
+	h.q.waitForClassifications()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got := h.sender.joins; len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("joins = %v, want t1 sent to join the running turn at once", got)
+	}
+	if n := askedCount(h); n != 0 {
+		t.Fatalf("the judge was asked %d times, want never for a prompt sent now", n)
+	}
+	if !logged(h.log.Records(), "info", opClassify, "the prompt was sent now; it goes past every held prompt and is never classified") {
+		t.Fatalf("records = %+v, want the unjudged hold on disk", h.log.Records())
+	}
+}
+
+func TestAPromptSentNowGoesPastTheHeldPromptsAheadOfIt(t *testing.T) {
+	// Arrange: t1 is queued behind the running turn.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), nowSubmission("t2", "do this now")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if got := h.sender.joins; len(got) != 1 || got[0] != "t2" {
+		t.Fatalf("joins = %v, want only t2, past t1", got)
+	}
+	if held := h.db.hold("t1"); held.Tombstone != nil {
+		t.Fatalf("t1 = %+v, want it still queued", held)
+	}
+}
+
+func TestAPromptSentNowIsDeliveredAtOnceWhenNothingRuns(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got, err := h.q.Submit(context.Background(), nowSubmission("t1", "run the tests"))
+
+	// Assert
+	if err != nil || !got.Delivered {
+		t.Fatalf("Submit = (%+v, %v), want delivered at once", got, err)
+	}
+}
+
+func TestAPromptSentNowThatCannotGoYetWaitsMarkedSentNow(t *testing.T) {
+	// Arrange: a hibernated session holds every prompt until it comes up.
+	h := newHarness(t)
+	h.lease(wsm.HolderHibernate, wsm.PolicyHold)
+
+	// Act
+	_, err := h.q.Submit(context.Background(), nowSubmission("t1", "hello"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	held := h.db.hold("t1")
+	if held.SentNow == nil || held.Delivery != wsm.DeliveryNow {
+		t.Fatalf("hold = %+v, want it waiting marked sent now, its delivery stored", held)
+	}
+	if len(h.sender.started()) != 0 {
+		t.Fatalf("started = %v, want nothing sent before the session is up", h.sender.started())
+	}
+}
+
+func TestAPromptSentNowBehindAnEditStaysQueuedUnmarked(t *testing.T) {
+	// Arrange: t1 is held and open in the editor.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	beginEdit(t, h, "t1")
+	asked := askedCount(h)
+
+	// Act
+	_, err := h.q.Submit(context.Background(), nowSubmission("t2", "do this now"))
+	h.q.waitForClassifications()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	held := h.db.hold("t2")
+	if held.Tombstone != nil || held.SentNow != nil {
+		t.Fatalf("t2 = %+v, want it queued behind the edit with no Send now standing", held)
+	}
+	if len(h.sender.joins) != 0 || askedCount(h) != asked {
+		t.Fatalf("joins = %v, asked = %d more, want t2 neither sent nor judged", h.sender.joins, askedCount(h)-asked)
+	}
+	if !logged(h.log.Records(), "info", opRelease, msgReleaseWithdrawn) {
+		t.Fatalf("records = %+v, want the refused Send now on disk", h.log.Records())
+	}
+}
+
 func TestDeferredPromptsRunAsTheirOwnTurnsOneTurnEndAtATime(t *testing.T) {
 	// Arrange: two deferred prompts behind a running turn.
 	h := newHarness(t)

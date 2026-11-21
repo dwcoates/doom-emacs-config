@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -117,11 +118,18 @@ func (q *queue) markSentNow(ctx context.Context, d *delivery, held wsm.HeldPromp
 		return err
 	}
 	if mark != nil {
-		q.mu.Lock()
-		d.state.sentNowNone = false
-		q.mu.Unlock()
+		q.noteSentNowStanding(d.ws)
 	}
 	return q.pushTray(ctx, d.ws, log)
+}
+
+// noteSentNowStanding records that a "Send now" mark stands on WS, so the
+// next release of its delivery lock takes it (replaySentNow). It is the ONE
+// place a mark's recording clears the replay's "none waiting" shortcut.
+func (q *queue) noteSentNowStanding(ws ids.WorkspaceID) {
+	q.mu.Lock()
+	q.stateLocked(ws).sentNowNone = false
+	q.mu.Unlock()
 }
 
 // replaySentNow takes again every "Send now" waiting on the workspace, in the

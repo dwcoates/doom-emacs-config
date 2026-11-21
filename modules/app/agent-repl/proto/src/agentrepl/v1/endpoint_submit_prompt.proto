@@ -39,6 +39,15 @@ enum SubmitPromptDelivery {
   // the client -- and a turn end delivers held prompts one at a time, oldest
   // first, so several deferred prompts run as that many turns in order.
   SUBMIT_PROMPT_DELIVERY_DEFERRED = 1;
+  // NOW: sent now, past every held prompt and never classified (`C-RET` on a
+  // composer with text in it). It goes to the session at once when nothing
+  // runs. Whatever would hold it, it is held already pressed "Send now"
+  // (agentrepl.v1.UpdateHeldPromptRequest's release), so it goes exactly as a
+  // released held prompt does: it joins the running turn, interrupts a turn it
+  // cannot join, or waits on a blocker that clears on its own, ahead of every
+  // other held prompt. A release refusal (an edit standing ahead of it) leaves
+  // it held, queued in order and still never classified.
+  SUBMIT_PROMPT_DELIVERY_NOW = 2;
 }
 
 // What the user typed, submitted whole.

@@ -672,12 +672,14 @@ func feedPanel(panel *agentreplv1.SubmitPromptCommandPanel) *frontendv1.FeedComm
 }
 
 // answerable reports whether a submission can be a typed answer to a standing
-// ask: a plain user send (TypedAnswerOrigins), with the ordinary delivery,
-// that is not a re-drive of an earlier attempt, carrying typed words and no
-// image. A deferred prompt asked to run as its own turn; a re-drive's ask may
-// be long gone; an image cannot be part of an answer.
+// ask: a plain user send (TypedAnswerOrigins), with the ordinary delivery or
+// sent now, that is not a re-drive of an earlier attempt, carrying typed
+// words and no image. A deferred prompt asked to run as its own turn; a
+// prompt sent now asked for nothing that excludes answering the ask its
+// session waits on; a re-drive's ask may be long gone; an image cannot be
+// part of an answer.
 func answerable(ctx context.Context, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, delivery wsm.Delivery) bool {
-	if !TypedAnswerOrigins[origin] || delivery != wsm.DeliveryOrdinary || isRedrive(ctx) {
+	if !TypedAnswerOrigins[origin] || delivery == wsm.DeliveryDeferred || isRedrive(ctx) {
 		return false
 	}
 	words := false

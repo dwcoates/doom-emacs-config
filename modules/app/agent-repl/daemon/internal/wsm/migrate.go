@@ -483,7 +483,7 @@ ALTER TABLE workspaces ADD COLUMN result_read INTEGER NOT NULL DEFAULT 0;
 
 // heldPromptsDeliveryDDL adds how a held prompt asked to be delivered
 // (agentrepl.v1 SubmitPromptDelivery, as wsm.Delivery: 0 ordinary, 1
-// deferred). Every existing row is 0, the ordinary
+// deferred, 2 now; a later value needs no layout change). Every existing row is 0, the ordinary
 // delivery, by the column default -- exactly right: no build before this one
 // could hold a prompt any other way.
 //

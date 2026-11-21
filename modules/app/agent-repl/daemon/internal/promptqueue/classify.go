@@ -35,6 +35,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		Delivery:  sub.Delivery,
 		Act:       sub.Act,
 		Ask:       sub.Ask,
+		SentNow:   q.sentNowOnHold(sub),
 	}
 	if lease != nil {
 		kind := lease.kind
@@ -84,11 +85,16 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		}
 		return Disposition{}, fmt.Errorf("hold prompt %q on %q: %w", sub.Turn, sub.WS, err)
 	}
+	if held.SentNow != nil {
+		// The unlock's replay takes the mark (replaySentNow): the prompt goes
+		// on the path a press of "Send now" takes, under this very lock.
+		q.noteSentNowStanding(sub.WS)
+	}
 	if err := q.pushTray(ctx, sub.WS, log); err != nil {
 		return Disposition{}, err
 	}
 	log.Info(opHold, "the prompt is held", dlog.Context{
-		"lease_hold": lease != nil, "running_turn": string(running),
+		"lease_hold": lease != nil, "running_turn": string(running), "sent_now": held.SentNow != nil,
 	})
 
 	disposition := Disposition{Held: held.Hold, Classification: held.Classification}
@@ -241,6 +247,13 @@ func (q *queue) neverJudged(sub Submission) (verdict wsm.Classification, why fun
 			At:     q.deps.Now(),
 		}, func(log dlog.Logger, running ids.TurnID) { threadQuestionNeverClassified(log, sub.Turn, running) }, true
 	}
+	if sub.Delivery == wsm.DeliveryNow {
+		return wsm.Classification{
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "the prompt was sent now: it goes past every held prompt, and is never classified",
+			At:     q.deps.Now(),
+		}, func(log dlog.Logger, running ids.TurnID) { sentNowNeverClassified(log, sub.Turn, running) }, true
+	}
 	if verdict, isDeferred := q.deferredVerdict(sub); isDeferred {
 		return verdict, func(log dlog.Logger, running ids.TurnID) { deferredNeverClassified(log, sub.Turn, running) }, true
 	}
@@ -261,6 +274,25 @@ func (q *queue) deferredVerdict(sub Submission) (wsm.Classification, bool) {
 		Reason: "the prompt was deferred: it runs as its own turn after the running one, and is never classified",
 		At:     q.deps.Now(),
 	}, true
+}
+
+// sentNowOnHold answers the "Send now" mark a held prompt is recorded with:
+// one a prompt sent now carries from the moment it is held, so it goes as a
+// released held prompt does (agentrepl.v1.SubmitPromptDelivery NOW). Every
+// other prompt is held unmarked.
+func (q *queue) sentNowOnHold(sub Submission) *wsm.SentNow {
+	if sub.Delivery != wsm.DeliveryNow {
+		return nil
+	}
+	return &wsm.SentNow{At: q.deps.Now(), WaitsFor: waitsForSessionTake}
+}
+
+// sentNowNeverClassified records, at INFO, a prompt sent now kept from the
+// classifier.
+func sentNowNeverClassified(log dlog.Logger, held, running ids.TurnID) {
+	log.Info(opClassify, "the prompt was sent now; it goes past every held prompt and is never classified", dlog.Context{
+		"held_turn": string(held), "running_turn": string(running),
+	})
 }
 
 // deferredNeverClassified records, at INFO, a deferred prompt kept from the

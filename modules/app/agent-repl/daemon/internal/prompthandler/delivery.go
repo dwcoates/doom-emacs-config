@@ -24,6 +24,8 @@ func DeliveryOf(delivery *agentreplv1.SubmitPromptDelivery) (wsm.Delivery, error
 	switch *delivery {
 	case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED:
 		return wsm.DeliveryDeferred, nil
+	case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_NOW:
+		return wsm.DeliveryNow, nil
 	case agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED:
 		return 0, fmt.Errorf("a delivery, when set, is never UNSPECIFIED: the ordinary delivery is an absent field")
 	default:
