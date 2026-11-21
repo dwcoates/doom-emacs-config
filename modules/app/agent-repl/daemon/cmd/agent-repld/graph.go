@@ -1411,6 +1411,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Clients:        clients,
 		Runner:         scripts,
 		Store:          p.Opts.storeSocket,
+		TestsSocket:    p.Opts.testsSocket,
+		TestRuns:       mergeMover,
 		Workspace:      fleet.Workspaces,
 		Progress:       deployEdges,
 		Faults:         p.DB,

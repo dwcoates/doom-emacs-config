@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"regexp"
@@ -346,6 +347,43 @@ func (m *recordingMover) Drain(context.Context) {
 
 func (m *recordingMover) LeaseChanged(ws ids.WorkspaceID) {
 	m.calls = append(m.calls, "lease "+string(ws))
+}
+
+func (m *recordingMover) TakeTestRunsOff(context.Context) (func(error), error) {
+	m.calls = append(m.calls, "take_test_runs_off")
+	return func(answered error) { m.calls = append(m.calls, fmt.Sprintf("release %v", answered)) }, nil
+}
+
+func TestTheMergeForwarderCarriesTheTestServicesHold(t *testing.T) {
+	cases := []struct {
+		name  string
+		bound bool
+		want  []string
+	}{
+		{name: "bound, to the orchestrator", bound: true, want: []string{"take_test_runs_off", "release <nil>"}},
+		{name: "unbound, to nobody: no merge exists yet, so no gate holds a run", bound: false, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := &mergeForwarder{}
+			target := &recordingMover{}
+			if tc.bound {
+				f.bind(target)
+			}
+
+			// Act.
+			release, err := f.TakeTestRunsOff(context.Background())
+			if err == nil {
+				release(nil)
+			}
+
+			// Assert.
+			if err != nil || !reflect.DeepEqual(target.calls, tc.want) {
+				t.Fatalf("TakeTestRunsOff = %v, calls = %v, want %v", err, target.calls, tc.want)
+			}
+		})
+	}
 }
 
 func TestTheMergeForwarderCarriesALeaseChange(t *testing.T) {

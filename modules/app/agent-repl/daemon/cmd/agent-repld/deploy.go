@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/testsclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -92,6 +93,12 @@ type deployerParams struct {
 	WifiTools persistentwifi.Tools
 	// Store is the store's socket, which a store restart awaits.
 	Store string
+	// TestsSocket is the test service's socket, which a restart of the
+	// service awaits its answer on.
+	TestsSocket string
+	// TestRuns holds the merge gates' runs off the test service across its
+	// restart (the merge orchestrator, late-bound).
+	TestRuns deploy.TestRuns
 	// Workspace answers every workspace with a live session.
 	Workspace func() []ids.WorkspaceID
 	// Progress is the footer's update line, where the deploy states each phase.
@@ -281,6 +288,9 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		EnsureHolder:    ensurer.EnsureID,
 		HolderServing:   ensurer.ServingID,
 		StoreHolder:     storeHolder,
+		TestRuns:        p.TestRuns,
+		TestsSocket:     p.TestsSocket,
+		TestsAnswer:     testsclient.New(p.TestsSocket).Answers,
 	}
 	// THE LAUNCHER IS DEPLOYED ON MACOS ALONE: elsewhere the platform's
 	// banner program posts, and there is no app to build or install.

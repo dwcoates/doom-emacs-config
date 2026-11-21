@@ -626,6 +626,7 @@ type mergeTarget interface {
 	drain.MergeSuspension
 	promptqueue.LeaseWatcher
 	promptqueue.MergeRequests
+	deploy.TestRuns
 }
 
 // mergeForwarder carries a handover's merge moves and the immediate
@@ -707,6 +708,17 @@ func (f *mergeForwarder) LeaseChanged(ws ids.WorkspaceID) {
 func (f *mergeForwarder) TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool {
 	target, ok := f.load()
 	return ok && target.TakeRequestingTurn(ws, turn)
+}
+
+// TakeTestRunsOff holds the merge gates' runs off the test service across
+// its restart. Before the orchestrator is bound no merge exists, so no gate
+// holds a run on the service, and none is held: the release has nothing to
+// let go.
+func (f *mergeForwarder) TakeTestRunsOff(ctx context.Context) (func(answered error), error) {
+	if target, ok := f.load(); ok {
+		return target.TakeTestRunsOff(ctx)
+	}
+	return func(error) {}, nil
 }
 
 // errMergeMoverUnbound is a merge move or drain asked before the orchestrator
