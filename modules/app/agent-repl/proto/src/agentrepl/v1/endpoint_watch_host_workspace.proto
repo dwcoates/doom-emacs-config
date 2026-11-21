@@ -337,19 +337,6 @@ message HostWorkspace {
   // workspace exists, and the editor records it once however often it is
   // restated.
   optional conversation.v1.UserSaid initial_prompt = 8;
-  // THE COMPOSER DRAFT THE DAEMON KEEPS for this workspace
-  // (ReportComposerDraft): the text its composer held when the editor last
-  // closed the workspace. ABSENT when none is kept. STATE, not an event: on
-  // every push while it is kept. The editor puts it into the composer when
-  // the composer is empty, then reports it cleared; a composer that already
-  // holds text is left alone, so restating it never doubles a draft.
-  optional HostComposerDraft composer_draft = 9;
-}
-
-// The composer draft the daemon keeps (HostWorkspace.composer_draft).
-message HostComposerDraft {
-  // The composer's whole text, verbatim, as it was reported. Never empty.
-  string text = 1;
 }
 
 // What the daemon reads of the composer's reported entries.

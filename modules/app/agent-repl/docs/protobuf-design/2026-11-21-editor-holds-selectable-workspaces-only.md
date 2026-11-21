@@ -67,8 +67,8 @@ daemon stream's editor events, then the composer draft the daemon keeps.
 - **The ruling (owner, 2026-11-21, questions 4.4.1 and 3.1).** A workspace
   that stops being held loses its perspective and its stream. A folded
   workspace the user picks is held while it is current and closes again when
-  the user switches away. Its section stays folded. The daemon keeps the
-  composer's draft across the close.
+  the user switches away. Its section stays folded. The composer's draft
+  survives the close (see the correction under the draft entry below).
 - **Accepted cost.** The perspective's own window layout and the file buffers
   it held are no longer that perspective's when it reopens. Its panels are
   rebuilt by panels-on-arrival.
@@ -119,7 +119,23 @@ daemon stream's editor events, then the composer draft the daemon keeps.
     whose `default-directory` is the workspace's directory.
   - Emacs answers an evaluation on the connection that delivered it.
 
-### `agentrepl.v1.ReportComposerDraft` and `agentrepl.v1.HostWorkspace.composer_draft`
+### RETRACTED: `agentrepl.v1.ReportComposerDraft` and `agentrepl.v1.HostWorkspace.composer_draft`
+
+- **Correction (owner ruling, 2026-11-21).** The rpc, the host field and the
+  daemon's `composer_drafts` table below were landed and then removed. Emacs
+  already keeps a composer's text across the composer's death: its shutdown
+  save writes the text into the workspace's prompt history as the unsent head
+  (`agent-repl--input-save-on-shutdown`), and a new composer puts it back
+  (`agent-repl--input-restore-unsent`). Closing a workspace now runs that same
+  save. One mechanism restores a composer, it survives an Emacs restart, and
+  it keeps pasted images, which the daemon's plain text did not.
+- **Root cause of the error.** The recommendation (question 4.4.1) was made
+  from the composer's buffer alone, without reading how its contents already
+  outlive an Emacs restart. The existing persistence was the place to look
+  first.
+
+The retracted entry, as it was landed:
+
 
 - **What changed.** A new rpc, `endpoint_report_composer_draft.proto`, and a
   new host-state field, `agentrepl.v1.HostComposerDraft` (field 9).

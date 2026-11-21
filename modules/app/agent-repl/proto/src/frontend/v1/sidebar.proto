@@ -893,7 +893,8 @@ message RosterRowOpenOwnedPullRequest {}
 //
 // THE EDITOR'S OBLIGATION: open the workspace when the marker appears, and
 // close it in the editor alone when the marker goes (the daemon keeps the
-// workspace, its session and its composer draft, ReportComposerDraft). An
+// workspace and its session; the editor keeps the composer's text in the
+// workspace's prompt history, as it does at its own shutdown). An
 // event aimed at a workspace the editor does not hold rides the editor's
 // daemon stream (WatchDaemonResponse), never the host stream it lacks. The
 // sidebar draws nothing for the marker.
