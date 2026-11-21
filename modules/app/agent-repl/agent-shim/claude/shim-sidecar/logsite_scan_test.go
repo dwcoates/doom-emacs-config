@@ -8,11 +8,7 @@ import (
 )
 
 // logCalls are the sidecar logger's call shapes.
-var logCalls = []scan.Call{
-	{Selector: "Log", Args: 2, Template: 0, Context: 1},
-	{Selector: "LogVerbose", Args: 2, Template: 0, Context: 1},
-	scan.MsgCall,
-}
+var logCalls = scan.Calls(2, 0, 1, "Log", "LogVerbose")
 
 // TestEveryLogSiteIsSound scans the module's source for every log call and
 // fails on each fault scan.Check finds: a template that does not parse, a
@@ -23,17 +19,6 @@ func TestEveryLogSiteIsSound(t *testing.T) {
 	// Arrange
 	spec := scan.Spec{Runtime: logging.Runtime, Module: "agentrepl/shim-claude-sidecar", Root: ".", Calls: logCalls}
 
-	// Act
-	sites, err := scan.Scan(spec)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if len(sites) == 0 {
-		t.Fatal("the scan found no log call; it read no source")
-	}
-	for _, fault := range scan.Check(sites) {
-		t.Error(fault)
-	}
+	// Act and Assert
+	scan.Require(t, spec)
 }
