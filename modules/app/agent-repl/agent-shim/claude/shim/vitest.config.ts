@@ -72,7 +72,17 @@ export default defineConfig({
       // whole type-only modules (src/proto.ts and its siblings) with 100% of
       // nothing, which istanbul drops for carrying no executable statement.
       provider: "istanbul",
-      include: ["src/**/*.ts"],
+      // A CONFINED CHUNK REPORTS ONLY WHAT IT LOADED. A coverage run cuts the
+      // suite into chunks, each confined to its own files' inputs
+      // (testrun's AGENT_REPL_COVERAGE_LOADED_ONLY), and with an `include`
+      // set vitest also reads every included file the chunk never loaded, to
+      // report it at zero: reads outside the chunk's inputs. So a chunk runs
+      // without `include`, and the run's one merge (`--merge-reports`, which
+      // no confinement holds) applies it, adding the files no chunk loaded
+      // and, through `excludeAfterRemap`, keeping only what `include` and
+      // `exclude` name.
+      include: process.env.AGENT_REPL_COVERAGE_LOADED_ONLY === "1" ? undefined : ["src/**/*.ts"],
+      excludeAfterRemap: true,
       exclude: [
         "src/**/*.d.ts",
         "src/**/__generated__/**",

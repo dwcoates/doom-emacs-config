@@ -713,6 +713,13 @@ func TestVitestCoverageModes(t *testing.T) {
 			if chunkCoverage != coverage || report != coverage {
 				t.Fatalf("coverage=%v: chunk coverage=%v report=%v argv=%v", coverage, chunkCoverage, report, chunk.Argv)
 			}
+			loadedOnly := false
+			for _, e := range chunk.Env {
+				loadedOnly = loadedOnly || e == CoverageLoadedOnlyEnv+"=1"
+			}
+			if loadedOnly != coverage {
+				t.Fatalf("coverage=%v: chunk env %v, want %s=1 exactly in a coverage run", coverage, chunk.Env, CoverageLoadedOnlyEnv)
+			}
 		})
 	}
 }
@@ -1651,5 +1658,29 @@ func TestAGoChunksTestsAreGivenTheLogRecordsTheirHarnessCounted(t *testing.T) {
 	}
 	if !tests[0].HasLogRecords || tests[0].LogRecords != 5 || tests[1].HasLogRecords {
 		t.Fatalf("tests = %+v, want TestA with its 5 records and TestB uncounted", tests)
+	}
+}
+
+// TestEveryVitestConfigReportsOnlyLoadedFilesInACoverageChunk pins the
+// contract CoverageLoadedOnlyEnv names: each vitest suite's unit config reads
+// it and leaves coverage.include unset when it is set.
+func TestEveryVitestConfigReportsOnlyLoadedFilesInACoverageChunk(t *testing.T) {
+	for _, config := range []string{"webapp/vitest.config.ts", "agent-shim/claude/shim/vitest.config.ts"} {
+		// Arrange
+		path := filepath.Join("..", "..", "..", config)
+
+		// Act
+		b, err := os.ReadFile(path)
+
+		// Assert
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "process.env." + CoverageLoadedOnlyEnv + ` === "1" ? undefined : `; !strings.Contains(string(b), want) {
+			t.Errorf("%s does not leave coverage.include unset under %s", config, CoverageLoadedOnlyEnv)
+		}
+		if !strings.Contains(string(b), "excludeAfterRemap: true") {
+			t.Errorf("%s does not filter the merged coverage by include (excludeAfterRemap)", config)
+		}
 	}
 }
