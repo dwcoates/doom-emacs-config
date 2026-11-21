@@ -550,6 +550,17 @@ has now."
   (seq-find (lambda (ws) (eq (agent-repl--ws-get ws key) token))
             (agent-repl--live-ws-names)))
 
+(defun agent-repl--ws-of-composer (buffer)
+  "The live workspace whose composer is BUFFER, or nil when none owns it.
+A COMPOSER NAMES ITS WORKSPACE BY ITSELF, never by a name it captured: a
+rename moves the plist, and with it `:input-buffer', to the new name
+\(`agent-repl--ws-rename-state'), while a captured name keeps answering the
+old one, which owns no host ref and no log sink (2026-11-20: a renamed
+workspace's composer stopped reporting its entries, so the feed boxed no
+node).  The buffer's own name cannot answer either: it carries the
+sanitized name, which no lookup reverses."
+  (agent-repl--ws-holding :input-buffer buffer))
+
 (defun agent-repl--ws-live-p (ws)
   "Return non-nil iff WS is a live (non-tombstoned) registered workspace.
 A workspace is live when it has a hash entry AND no `:killed-at'

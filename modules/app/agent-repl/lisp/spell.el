@@ -70,6 +70,7 @@
 (declare-function agent-repl--warn-once "agent-repl-core" (ws fingerprint fmt &rest args))
 (declare-function agent-repl--async-command "agent-repl-core" (label dir command callback &optional input))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--ws-of-composer "agent-repl-workspace" (buffer))
 (declare-function agent-repl--executable-find "agent-repl-core" (program))
 (declare-function flyspell-mode "flyspell" (&optional arg))
 (declare-function flyspell-highlight-incorrect-region "flyspell" (beg end poss))
@@ -240,8 +241,12 @@ below flyspell, where it was bound before."
 
 ;;;; ---- Text that arrives whole --------------------------------------------
 
-(defvar-local agent-repl--spell-ws nil
-  "The workspace this composer spellchecks for, named on its log records.")
+(defun agent-repl--spell-ws ()
+  "The workspace the current composer spellchecks for, named on its log records.
+Asked each time, never captured at enable: a captured name goes stale when
+the workspace is renamed (`agent-repl--ws-of-composer').  Nil, which routes a
+record to the global sink, when no live workspace owns the composer."
+  (agent-repl--ws-of-composer (current-buffer)))
 
 (defvar-local agent-repl--spell-pending nil
   "(BEG . END) markers spanning insertions not yet checked, or nil.")
@@ -289,7 +294,7 @@ applied (`agent-repl--spell-apply')."
         (setq agent-repl--spell-pending nil)
         (if (not flyspell-mode)
             (agent-repl--spell-release pending)
-          (let ((ws agent-repl--spell-ws)
+          (let ((ws (agent-repl--spell-ws))
                 (text (buffer-substring-no-properties (car pending) (cdr pending))))
             (agent-repl--spell-run-hunspell
              (agent-repl--spell-hunspell-input text)
@@ -427,10 +432,11 @@ check starts on a fresh one; the word itself is left unchecked."
         (apply flyspell-word args)
       (agent-repl-spell-no-reply
        (let ((process (bound-and-true-p ispell-process))
-             (word agent-repl--spell-exchange-word))
-         (agent-repl--error agent-repl--spell-ws
+             (word agent-repl--spell-exchange-word)
+             (ws (agent-repl--spell-ws)))
+         (agent-repl--error ws
                             "elisp.spell.no-reply ws=%s buffer=%s word=%S process=%S pid=%s cause=%s outcome=reset"
-                            agent-repl--spell-ws (buffer-name) word
+                            ws (buffer-name) word
                             (and process (process-name process))
                             (and process (process-id process)) (cadr err))
          (message "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
@@ -501,7 +507,6 @@ log says what is missing and how to install it, once per Emacs."
         (let ((name (plist-get dictionary :name))
               (dir (plist-get dictionary :dir)))
           (agent-repl--spell-configure-ispell ws program name dir)
-          (setq-local agent-repl--spell-ws ws)
           (setq-local ispell-local-dictionary name)
           (setq-local flyspell-generic-check-word-predicate #'agent-repl--spell-check-word-p)
           (setq-local minor-mode-overriding-map-alist
