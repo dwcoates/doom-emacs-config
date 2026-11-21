@@ -102,6 +102,12 @@ const (
 	repoScans = "repo-scans"
 )
 
+// viteServerSuites is what a change to bin/vite-server.mjs, which every vite
+// and vitest config imports, selects: bin/'s own, and the webapp's and the
+// shim's.
+var viteServerSuites = append(append([]string(nil), scriptHarnessSuites...),
+	repoScans, "webapp", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e")
+
 // suiteRules is the mapping, most specific first: the FIRST rule that matches a
 // path decides it. Each entry answers "a change here can break what?".
 var suiteRules = []suiteRule{
@@ -114,6 +120,10 @@ var suiteRules = []suiteRule{
 	// The byte-compile gate and its prelude: the gate, and the harnesses.
 	{Kind: matchExact, Path: moduleRoot + "bin/byte-compile.sh", Suites: append(append([]string(nil), scriptHarnessSuites...), byteCompile, repoScans)},
 	{Kind: matchExact, Path: moduleRoot + "bin/compile-prelude.el", Suites: append(append([]string(nil), scriptHarnessSuites...), byteCompile, repoScans)},
+	// THE VITE SERVER EVERY VITE AND VITEST CONFIG SERVES THE MODULE THROUGH:
+	// the webapp's and the shim's suites and builds read it, and what runs them.
+	{Kind: matchExact, Path: moduleRoot + "bin/vite-server.mjs", Suites: viteServerSuites},
+	{Kind: matchExact, Path: moduleRoot + "bin/vite-server.d.mts", Suites: viteServerSuites},
 	// repo-scans reads the Go sources here too.
 	{Kind: matchSubtree, Path: moduleRoot + "bin/", Suites: append(append([]string(nil), scriptHarnessSuites...), repoScans)},
 
