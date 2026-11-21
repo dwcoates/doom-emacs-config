@@ -1,11 +1,21 @@
 /**
  * tree-fixture — drawn response trees for the tests of every highlight of a
- * response's node (subtree-box, composer-entry, branch-hover).
+ * response's node (subtree-box, composer-entry, branch-hover), and drawn
+ * prompt entry trees for the tests of what an entry draws and does
+ * (entry-tree, entries, branch-hover).
  */
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { ProseTreeNodeSchema, ProseTreeSchema, type ProseTree } from "../../../proto/gen/ts/frontend/v1/prose_pb";
+import {
+  ProseTreeNodeSchema,
+  ProseTreeSchema,
+  type ProseEntryTree,
+  type ProseTree,
+} from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import type { LengthResolver, SubtreeBox } from "../../src/feed/subtree-box.js";
-import { TREE_CLASS, renderTreeHtml, columnMeasure } from "../../src/metaprompt-tree.js";
+import { TREE_CLASS, TREE_NODE_ATTRIBUTE, renderTreeHtml, columnMeasure } from "../../src/metaprompt-tree.js";
+import { entryTreeHtml } from "../../src/feed/entries.js";
+import { inline } from "../../src/markdown.js";
+import { promptProse } from "../prose.js";
 
 /** A node's place: a root with no PARENT, else a branch under it. */
 function placeOf(parent: number | undefined): MessageInitShape<typeof ProseTreeNodeSchema>["place"] {
@@ -82,3 +92,21 @@ export const boxedBy = (el: HTMLElement, box: SubtreeBox): [string | null, strin
     l.style.getPropertyValue(box.leftProperty),
     l.style.getPropertyValue(box.rightProperty),
   ]);
+
+/** The entry tree the daemon parses PROMPT's one run of entries into. */
+export function entryTreeOf(prompt: string): ProseEntryTree {
+  const block = promptProse(prompt).blocks[0]?.block;
+  if (block?.case !== "entries") throw new Error(`no entry tree leads ${JSON.stringify(prompt)}`);
+  return block.value;
+}
+
+/** PROMPT's entry tree drawn within 80 columns, in a detached element. */
+export function drawnEntries(prompt: string): HTMLElement {
+  const el = document.createElement("div");
+  el.innerHTML = entryTreeHtml(entryTreeOf(prompt), inline, columnMeasure(80));
+  return el;
+}
+
+/** Every line of EL whose node is LABEL. */
+export const linesOf = (el: HTMLElement, label: string): Element[] =>
+  [...el.querySelectorAll(".mp-line")].filter((l) => l.getAttribute(TREE_NODE_ATTRIBUTE) === label);

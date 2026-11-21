@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { FeedResponseAnswerSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { ProseEntryTreeSchema, type ProseEntryTree } from "../../../proto/gen/ts/frontend/v1/prose_pb";
+import { ProseEntryTreeSchema } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import {
   ANSWERED_BY_ATTRIBUTE,
   ANSWER_PROMPT_ATTRIBUTE,
@@ -22,26 +22,12 @@ import {
 import { createBubbleBody, markdownSlot, paintBody } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
 import { useTreeLayout } from "../tree-layout.js";
-import { labelOf } from "./tree-fixture.js";
+import { drawnEntries, labelOf, linesOf } from "./tree-fixture.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { plainProse, promptProse } from "../prose.js";
 import { inline } from "../../src/markdown.js";
 import { TREE_NODE_ATTRIBUTE, columnMeasure } from "../../src/metaprompt-tree.js";
-
-/** The entry tree the daemon parses PROMPT's one run of entries into. */
-function entryTree(prompt: string): ProseEntryTree {
-  const block = promptProse(prompt).blocks[0]?.block;
-  if (block?.case !== "entries") throw new Error(`no entry tree leads ${JSON.stringify(prompt)}`);
-  return block.value;
-}
-
-/** PROMPT's entry tree drawn, in a detached element. */
-const drawnEntries = (prompt: string): HTMLElement => hosted(entryTreeHtml(entryTree(prompt), inline, columnMeasure(80)));
-
-/** The lines of EL whose node is LABEL. */
-const linesOf = (el: HTMLElement, label: string): Element[] =>
-  [...el.querySelectorAll(".mp-line")].filter((l) => l.getAttribute(TREE_NODE_ATTRIBUTE) === label);
 
 /** HTML in a detached element. */
 function hosted(html: string): HTMLElement {
