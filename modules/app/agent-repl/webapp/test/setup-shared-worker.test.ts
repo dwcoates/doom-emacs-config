@@ -43,6 +43,24 @@ describe("the shared worker's page", () => {
     expect(document.body.children).toHaveLength(0);
   });
 
+  it("leaves a test free to leave a range selected", () => {
+    // Arrange / Act
+    const p = document.createElement("p");
+    p.textContent = "selected";
+    document.body.append(p);
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    document.getSelection()?.addRange(range);
+
+    // Assert
+    expect(document.getSelection()?.rangeCount).toBe(1);
+  });
+
+  it("hands the next test no selection", () => {
+    // Assert
+    expect(document.getSelection()?.rangeCount).toBe(0);
+  });
+
   it("leaves a test free to mark the root element", () => {
     // Arrange / Act
     document.documentElement.setAttribute("data-conversation-drawn", "page");

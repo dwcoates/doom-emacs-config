@@ -23,11 +23,16 @@ import { afterEach, beforeEach, vi } from "vitest";
  *   page never showed behind a file that left the document hidden. The
  *   document's own properties as the environment made them (vitest's own
  *   among them, such as the `defaultView` that answers the global window)
- *   are recorded once per worker, and every test starts on exactly those.
+ *   are recorded once per worker, and every test starts on exactly those,
+ *   and
+ * - a range one test left in the document's selection would still stand for
+ *   the next, which jsdom then refuses to add its own range beside:
+ *   `selection.test.ts` read an empty selection behind any file that
+ *   selected text (2026-11-20).
  *
- * So every unit test starts on an empty page with a bare root element and
- * document and ENDS on the real clock; a file that wants a fake clock installs it in its
- * own hook. The clock is
+ * So every unit test starts on an empty page with no selection, a bare root
+ * element and the document as the environment made it, and ENDS on the real
+ * clock; a file that wants a fake clock installs it in its own hook. The clock is
  * handed back AFTER each test, not before the next: `test/setup.ts`'s
  * `beforeEach` runs ahead of this file's and arms a real timer through the
  * logger, and a fake clock left behind by the previous file's last test has
@@ -87,6 +92,7 @@ function resetDocument(doc: Document): void {
 beforeEach(() => {
   if (typeof document === "undefined") return;
   document.body.replaceChildren();
+  document.getSelection()?.removeAllRanges();
   const root = document.documentElement;
   for (const name of root.getAttributeNames()) root.removeAttribute(name);
   resetDocument(document);
