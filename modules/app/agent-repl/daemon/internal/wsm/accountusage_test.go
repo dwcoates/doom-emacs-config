@@ -21,7 +21,7 @@ func fullUsage(root string) AccountUsage {
 			Verdict: VerdictRejected, VerdictResetsAtS: 1_791_532_799},
 		WeeklySonnet: &AllowanceFigures{Utilization: 0.3, ResetsAtS: 1_791_532_799,
 			Verdict: VerdictAllowedWarning},
-		Overage: &AllowanceFigures{Utilization: 0.1, ResetsAtS: 1_793_000_000, Verdict: VerdictRejected, VerdictResetsAtS: 1_793_000_000},
+		Overage:      &AllowanceFigures{Utilization: 0.1, ResetsAtS: 1_793_000_000, Verdict: VerdictRejected, VerdictResetsAtS: 1_793_000_000},
 		MonthlySpend: &MonthlySpendFigures{SpentMinor: 199_396, LimitMinor: ptr[int64](1_200_000), Currency: "USD"},
 	}
 }
