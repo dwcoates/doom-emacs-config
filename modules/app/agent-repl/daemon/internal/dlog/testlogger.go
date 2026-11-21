@@ -24,13 +24,17 @@ type RecordQuery struct {
 	Level     string
 	Operation string
 	Message   string
+	// Match, when set, must also accept the record: a query on what the
+	// record's context says (a routing record's agent, a turn).
+	Match func(Record) bool
 }
 
 // matches reports whether R carries every field the query names.
 func (q RecordQuery) matches(r Record) bool {
 	return (q.Level == "" || r.Level == q.Level) &&
 		(q.Operation == "" || r.Operation == q.Operation) &&
-		(q.Message == "" || r.Message == q.Message)
+		(q.Message == "" || r.Message == q.Message) &&
+		(q.Match == nil || q.Match(r))
 }
 
 // FindRecord answers the first of RECORDS the query matches. It is THE ONE
