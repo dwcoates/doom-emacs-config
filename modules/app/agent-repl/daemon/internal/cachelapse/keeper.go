@@ -230,6 +230,9 @@ const (
 	// edgeKeepaliveFailed is a keep-alive whose turn ended in a failure, the
 	// answer its request gave when it re-anchored nothing.
 	edgeKeepaliveFailed
+	// edgeNetworkRestored is the network coming back after an outage, for no
+	// one workspace (outage.go).
+	edgeNetworkRestored
 )
 
 // edge is one queued event.
@@ -248,6 +251,9 @@ type edge struct {
 	// workEnded is a free edge's (edgeFree): work ended, rather than an
 	// attach coming up free.
 	workEnded bool
+	// down is how long the outage a network-restored edge ended stood
+	// (edgeNetworkRestored).
+	down time.Duration
 	// why names the edge for the records.
 	why string
 }
@@ -304,6 +310,10 @@ type Keeper struct {
 	// coldDue is when each session the cold park owns has been idle
 	// StandDownGrace, armed until then (standdown.go); owned by Run alone.
 	coldDue map[ids.WorkspaceID]time.Time
+	// early is each workspace's beat a long outage's end pulled forward, with
+	// the instant it was pulled to, until a beat is answered (outage.go);
+	// owned by Run alone.
+	early map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -363,6 +373,7 @@ func New(deps Deps) (*Keeper, error) {
 		noBeat:       map[ids.WorkspaceID]string{},
 		owners:       map[ids.WorkspaceID]standing{},
 		coldDue:      map[ids.WorkspaceID]time.Time{},
+		early:        map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -577,6 +588,8 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 		k.parkedAnswered(ctx, e.ws, e.parked, e.err)
 	case edgeKeepaliveFailed:
 		k.answeredFailed(e.ws, e.failed)
+	case edgeNetworkRestored:
+		k.networkRestored(e.down)
 	default:
 		k.reconcile(ctx, e.ws, e.why)
 	}
@@ -678,6 +691,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.parkedRetry, ws)
 	delete(k.owners, ws)
 	delete(k.coldDue, ws)
+	delete(k.early, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace

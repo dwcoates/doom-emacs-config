@@ -585,6 +585,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:   log,
 		Probe: netstate.NewHTTPProber(guard, os.Getenv, log),
 		After: time.After,
+		Now:   time.Now,
 	})
 	p.DB = health.ObserveFaults(p.DB, faultSinks{faultSurfaces, network}, p.Surfaces)
 
@@ -909,6 +910,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
 	}
 	lifecycle.caches = cacheKeeper
+	// A LONG OUTAGE PULLS THE NEAR KEEP-ALIVES FORWARD (cachelapse.outage.go):
+	// the restore edge tells the keeper how long the network was down.
+	network.OnRestored(func(outage netstate.Outage) { cacheKeeper.NetworkRestored(outage.Duration()) })
 	// EVERY CLOSE AND REOPEN RECONCILES THE CADENCE (cachelapse.ObserveClosures):
 	// a closed workspace's session gets one last keep-alive round and is then
 	// left to lapse. Every component built from here on writes through it; the

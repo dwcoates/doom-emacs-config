@@ -23,11 +23,17 @@
 // The probe beat is the detection, not the waiting: a hook-based detector
 // (macOS path monitoring) replaces it by ending the observed outage itself,
 // and nothing that awaits Restored changes.
+//
+// EVERY OUTAGE IS DATED. The outage begins at the first piece of evidence
+// that took the network down, and the restore edge tells every listener
+// (OnRestored) how long it stood, so a consumer that acts on a long outage
+// reads its length from this one owner rather than timing it itself.
 package netstate
 
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -95,7 +101,21 @@ type Deps struct {
 	Probe Prober
 	// After is the clock the probe beat waits on.
 	After func(time.Duration) <-chan time.Time
+	// Now is the clock every outage is dated by.
+	Now func() time.Time
 }
+
+// Outage is one stretch of the network being down, from the first evidence
+// that took it down to the edge that restored it.
+type Outage struct {
+	// Since is when the first evidence took the network down.
+	Since time.Time
+	// Restored is when the last evidence ended.
+	Restored time.Time
+}
+
+// Duration is how long the outage stood.
+func (o Outage) Duration() time.Duration { return o.Restored.Sub(o.Since) }
 
 // Monitor holds the network's state. It is a health.FaultSink.
 type Monitor struct {
@@ -115,12 +135,17 @@ type Monitor struct {
 	observations uint64
 	// restored announces the next edge from down to up.
 	restored changesignal.Signal
+	// downSince is when the standing outage began; zero while the network is
+	// up.
+	downSince time.Time
+	// listeners are told of every restore edge (OnRestored).
+	listeners []func(Outage)
 }
 
 // New answers a Monitor whose probe beat ends with LIFE.
 func New(life context.Context, deps Deps) *Monitor {
-	if deps.Log == nil || deps.Probe == nil || deps.After == nil {
-		panic("netstate: a Monitor needs its log, its probe and its clock")
+	if deps.Log == nil || deps.Probe == nil || deps.After == nil || deps.Now == nil {
+		panic("netstate: a Monitor needs its log, its probe and its clocks")
 	}
 	return &Monitor{life: life, deps: deps, faults: map[ids.FaultID]struct{}{}}
 }
@@ -128,15 +153,46 @@ func New(life context.Context, deps Deps) *Monitor {
 // downLocked reports whether the network is down. The caller holds m.mu.
 func (m *Monitor) downLocked() bool { return len(m.faults) > 0 || m.observed }
 
-// restoreIfUpLocked closes the restored latch and arms the next one when the
-// network is no longer down. The caller holds m.mu and has just ended one
-// piece of evidence while the network was down.
-func (m *Monitor) restoreIfUpLocked() bool {
-	if m.downLocked() {
-		return false
+// goDownLocked dates the outage that WASDOWN says just began: the caller
+// holds m.mu and has just added one piece of evidence.
+func (m *Monitor) goDownLocked(wasDown bool) {
+	if !wasDown {
+		m.downSince = m.deps.Now()
 	}
+}
+
+// restoreIfUpLocked closes the restored latch and arms the next one when the
+// network is no longer down, answering the outage that ended and the
+// listeners to tell of it (told by the caller once it drops m.mu). The caller
+// holds m.mu and has just ended one piece of evidence while the network was
+// down.
+func (m *Monitor) restoreIfUpLocked() (Outage, []func(Outage), bool) {
+	if m.downLocked() {
+		return Outage{}, nil, false
+	}
+	if m.downSince.IsZero() {
+		panic("netstate: the network was restored from an outage that was never dated")
+	}
+	outage := Outage{Since: m.downSince, Restored: m.deps.Now()}
+	m.downSince = time.Time{}
 	m.restored.Notify()
-	return true
+	return outage, slices.Clone(m.listeners), true
+}
+
+// OnRestored tells FN of every restore edge from here on, with the outage that
+// ended. FN runs on whatever ended the outage, outside the Monitor's lock, so
+// it must not block.
+func (m *Monitor) OnRestored(fn func(Outage)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listeners = append(m.listeners, fn)
+}
+
+// tell tells LISTENERS of OUTAGE.
+func tell(listeners []func(Outage), outage Outage) {
+	for _, fn := range listeners {
+		fn(outage)
+	}
 }
 
 // FaultOpened records a network_unreachable fault; every other kind is not
@@ -146,6 +202,7 @@ func (m *Monitor) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 		return
 	}
 	m.mu.Lock()
+	m.goDownLocked(m.downLocked())
 	m.faults[line.ID] = struct{}{}
 	standing := len(m.faults)
 	m.mu.Unlock()
@@ -164,11 +221,12 @@ func (m *Monitor) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	}
 	delete(m.faults, id)
 	standing, observed := len(m.faults), m.observed
-	restored := m.restoreIfUpLocked()
+	outage, listeners, restored := m.restoreIfUpLocked()
 	m.mu.Unlock()
 	fields := dlog.Context{"fault": string(id), "workspace": string(ws), "network_faults": standing, "observed_outage": observed}
 	if restored {
-		m.deps.Log.Info(op, "the last network fault closed; the network is restored", fields)
+		m.deps.Log.Info(op, "the last network fault closed; the network is restored", dlog.Merge(fields, outageFields(outage)))
+		tell(listeners, outage)
 		return
 	}
 	m.deps.Log.Debug(op, "a network fault closed; the network is still down", fields)
@@ -228,6 +286,7 @@ func (m *Monitor) verdict(v Verdict, observe bool) Verdict {
 // observe starts an observed outage, and its probe beat unless one runs.
 func (m *Monitor) observe() {
 	m.mu.Lock()
+	m.goDownLocked(m.downLocked())
 	m.observed = true
 	m.observations++
 	start := !m.probing
@@ -270,13 +329,23 @@ func (m *Monitor) probeUntilReachable() {
 		}
 		m.observed, m.probing = false, false
 		faults := len(m.faults)
-		restored := m.restoreIfUpLocked()
+		outage, listeners, restored := m.restoreIfUpLocked()
 		m.mu.Unlock()
-		m.deps.Log.Info(op, "the reachability check reached the API; the outage the daemon observed is over", dlog.Context{
-			"detail": answer.Detail, "network_faults": faults, "restored": restored,
-		})
+		fields := dlog.Context{"detail": answer.Detail, "network_faults": faults, "restored": restored}
+		if restored {
+			fields = dlog.Merge(fields, outageFields(outage))
+		}
+		m.deps.Log.Info(op, "the reachability check reached the API; the outage the daemon observed is over", fields)
+		if restored {
+			tell(listeners, outage)
+		}
 		return
 	}
+}
+
+// outageFields records OUTAGE.
+func outageFields(outage Outage) dlog.Context {
+	return dlog.Context{"down_since": outage.Since, "down_for": outage.Duration().String()}
 }
 
 // networkCodes are the socket errors that mean the API host could not be

@@ -3,10 +3,12 @@ package netstate
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -69,8 +71,11 @@ func newMonitor(t *testing.T, probe Prober) (*Monitor, *dlog.TestLogger, *beat) 
 	t.Cleanup(cancel)
 	log := dlog.NewTestLogger()
 	clock := newBeat()
-	return New(life, Deps{Log: log, Probe: probe, After: clock.After}), log, clock
+	return New(life, Deps{Log: log, Probe: probe, After: clock.After, Now: clocktest.New(t0).Now}), log, clock
 }
+
+// t0 is when every test's first outage begins.
+var t0 = time.Unix(1_800_000_000, 0).UTC()
 
 func networkFault(id string) health.FaultLine {
 	return health.FaultLine{ID: ids.FaultID(id), Kind: health.KindNetworkUnreachable}
@@ -223,7 +228,7 @@ func observedOutage(t *testing.T, beats ...probeStep) (*Monitor, signalLogger, *
 	t.Cleanup(cancel)
 	log := signalLogger{TestLogger: dlog.NewTestLogger(), said: make(chan string, 64)}
 	clock := newBeat()
-	m := New(life, Deps{Log: log, Probe: &scriptedProbe{answers: append([]probeStep{unreachable}, beats...)}, After: clock.After})
+	m := New(life, Deps{Log: log, Probe: &scriptedProbe{answers: append([]probeStep{unreachable}, beats...)}, After: clock.After, Now: clocktest.New(t0).Now})
 	m.Classify(context.Background(), "timeout")
 	return m, log, clock
 }
@@ -295,7 +300,7 @@ func TestANewerObservationOutlivesTheAnswerAskedBeforeIt(t *testing.T) {
 	log := signalLogger{TestLogger: dlog.NewTestLogger(), said: make(chan string, 64)}
 	clock := newBeat()
 	gate := &gatedProbe{first: unreachable.answer, asked: make(chan struct{}), release: make(chan ProbeAnswer)}
-	m := New(life, Deps{Log: log, Probe: gate, After: clock.After})
+	m := New(life, Deps{Log: log, Probe: gate, After: clock.After, Now: clocktest.New(t0).Now})
 	m.Classify(context.Background(), "timeout")
 	restored := m.Restored()
 	clock.tick()
@@ -365,4 +370,138 @@ func TestNetworkWords(t *testing.T) {
 			}
 		})
 	}
+}
+
+// toldOutages collects every outage a Monitor tells its listener of.
+type toldOutages struct {
+	mu   sync.Mutex
+	told []Outage
+}
+
+func (o *toldOutages) listen(outage Outage) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.told = append(o.told, outage)
+}
+
+func (o *toldOutages) all() []Outage {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.told)
+}
+
+func TestOnRestoredTellsTheOutageThatEnded(t *testing.T) {
+	at := func(d time.Duration) time.Time { return t0.Add(d) }
+	tests := []struct {
+		name string
+		// act drives the Monitor, moving WALL between edges.
+		act  func(m *Monitor, wall *clocktest.Scripted)
+		want []Outage
+	}{
+		{name: "one fault's outage is dated from its opening to its closing", act: func(m *Monitor, wall *clocktest.Scripted) {
+			m.FaultOpened("ws-1", networkFault("f-1"))
+			wall.Set(at(7 * time.Minute))
+			m.FaultClosed("ws-1", "f-1")
+		}, want: []Outage{{Since: t0, Restored: at(7 * time.Minute)}}},
+		{name: "overlapping faults are one outage, from the first opening to the last closing", act: func(m *Monitor, wall *clocktest.Scripted) {
+			m.FaultOpened("ws-1", networkFault("f-1"))
+			wall.Set(at(time.Minute))
+			m.FaultOpened("ws-2", networkFault("f-2"))
+			wall.Set(at(2 * time.Minute))
+			m.FaultClosed("ws-1", "f-1")
+			wall.Set(at(6 * time.Minute))
+			m.FaultClosed("ws-2", "f-2")
+		}, want: []Outage{{Since: t0, Restored: at(6 * time.Minute)}}},
+		{name: "an outage still standing is told of nothing", act: func(m *Monitor, wall *clocktest.Scripted) {
+			m.FaultOpened("ws-1", networkFault("f-1"))
+			wall.Set(at(30 * time.Minute))
+		}},
+		{name: "a later outage is dated afresh", act: func(m *Monitor, wall *clocktest.Scripted) {
+			m.FaultOpened("ws-1", networkFault("f-1"))
+			wall.Set(at(time.Minute))
+			m.FaultClosed("ws-1", "f-1")
+			wall.Set(at(10 * time.Minute))
+			m.FaultOpened("ws-1", networkFault("f-2"))
+			wall.Set(at(12 * time.Minute))
+			m.FaultClosed("ws-1", "f-2")
+		}, want: []Outage{{Since: t0, Restored: at(time.Minute)}, {Since: at(10 * time.Minute), Restored: at(12 * time.Minute)}}},
+		{name: "a fault of another kind dates no outage", act: func(m *Monitor, wall *clocktest.Scripted) {
+			m.FaultOpened("ws-1", health.FaultLine{ID: "f-9", Kind: health.KindShimReported})
+			wall.Set(at(time.Minute))
+			m.FaultClosed("ws-1", "f-9")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			life, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			wall := clocktest.New(t0)
+			m := New(life, Deps{Log: dlog.NewTestLogger(), Probe: &scriptedProbe{}, After: newBeat().After, Now: wall.Now})
+			told := &toldOutages{}
+			m.OnRestored(told.listen)
+			// Act
+			tc.act(m, wall)
+			// Assert
+			if got := told.all(); !slices.Equal(got, tc.want) {
+				t.Fatalf("told %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheProbeBeatTellsTheObservedOutageThatEnded(t *testing.T) {
+	// Arrange: an outage observed at t0, which the beat ends nine minutes on.
+	life, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	log := signalLogger{TestLogger: dlog.NewTestLogger(), said: make(chan string, 64)}
+	clock := newBeat()
+	wall := clocktest.New(t0)
+	m := New(life, Deps{Log: log, Probe: &scriptedProbe{answers: []probeStep{unreachable, reachable}}, After: clock.After, Now: wall.Now})
+	told := &toldOutages{}
+	m.OnRestored(told.listen)
+	m.Classify(context.Background(), "timeout")
+	wall.Set(t0.Add(9 * time.Minute))
+	// Act
+	clock.tick()
+	awaitSaid(log, saidBeatEnded)
+	// Assert
+	want := []Outage{{Since: t0, Restored: t0.Add(9 * time.Minute)}}
+	if got := told.all(); !slices.Equal(got, want) {
+		t.Fatalf("told %+v, want %+v", got, want)
+	}
+	record, _ := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: op, Message: saidBeatEnded})
+	if record.Context["down_for"] != (9 * time.Minute).String() {
+		t.Fatalf("the restoration record's down_for = %v, want %v: %+v", record.Context["down_for"], 9*time.Minute, record)
+	}
+}
+
+func TestTheRestorationRecordCarriesTheOutage(t *testing.T) {
+	// Arrange
+	life, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	log := dlog.NewTestLogger()
+	wall := clocktest.New(t0)
+	m := New(life, Deps{Log: log, Probe: &scriptedProbe{}, After: newBeat().After, Now: wall.Now})
+	m.FaultOpened("ws-1", networkFault("f-1"))
+	wall.Set(t0.Add(6 * time.Minute))
+	// Act
+	m.FaultClosed("ws-1", "f-1")
+	// Assert
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: op, Message: "the last network fault closed; the network is restored"})
+	if !ok || record.Context["down_for"] != (6*time.Minute).String() || record.Context["down_since"] != t0 {
+		t.Fatalf("restoration record = %+v (found %v), want down_for 6m0s since %v", record, ok, t0)
+	}
+}
+
+func TestNewRefusesAMonitorWithNoWallClock(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("New built a Monitor with no wall clock")
+		}
+	}()
+	// Act
+	New(context.Background(), Deps{Log: dlog.NewTestLogger(), Probe: &scriptedProbe{}, After: newBeat().After})
 }
