@@ -110,9 +110,21 @@ func (s *server) SubmitPrompt(
 	// (response_question.go), and takes the question. It outranks a highlight
 	// and the selection: the question is the one thing the user pressed for
 	// this prompt. An agent's prompt never does: the question is the user's.
+	var directQuestion *conversationv1.UserSaid
 	if sentBy == nil && target == nil {
 		if row, ok := s.questions.take(subject.Record.ID); ok {
-			return s.submitQuestion(ctx, subject, req.Msg, resp, row)
+			direct, err := s.questionStaysHere(ctx, subject)
+			if err != nil {
+				return nil, fail(subject.Log, rpc, err)
+			}
+			if !direct {
+				return s.submitQuestion(ctx, subject, req.Msg, resp, row)
+			}
+			questionSaid, refused := s.directQuestionSaid(subject, req.Msg, row)
+			if refused != nil {
+				return refuse(*refused)
+			}
+			directQuestion = questionSaid
 		}
 	}
 
@@ -120,7 +132,7 @@ func (s *server) SubmitPrompt(
 	// feed revises that response instead of starting a turn, and takes the
 	// highlight (response_text.go). An agent's prompt never does: the
 	// highlight is the user's, in the feed they are reading.
-	if sentBy == nil && target == nil {
+	if sentBy == nil && target == nil && directQuestion == nil {
 		if held, ok := s.takeResponseHighlight(subject.Record.ID); ok {
 			return s.submitRevision(subject, req.Msg, resp, held)
 		}
@@ -149,7 +161,9 @@ func (s *server) SubmitPrompt(
 		sentWith          *frontendv1.FeedId
 		sentWithSelection bool
 	)
-	if sentBy == nil {
+	if directQuestion != nil {
+		said = directQuestion
+	} else if sentBy == nil {
 		sentWith, _, sentWithSelection = s.currentSelection(subject.Record.ID)
 	}
 	if ref := sentWith; sentWithSelection {

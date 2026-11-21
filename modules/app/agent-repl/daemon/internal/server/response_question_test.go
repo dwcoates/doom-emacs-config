@@ -452,3 +452,99 @@ func TestAnAgentsPromptLeavesTheQuestionStanding(t *testing.T) {
 		t.Fatalf("an agent's prompt took the user's question")
 	}
 }
+
+// directQuestionCases are the workspaces that answer their own questions.
+var directQuestionCases = []struct {
+	name    string
+	arrange func(h *harness)
+}{
+	{name: "the deploy mediator", arrange: func(h *harness) {
+		ws := h.DB.workspaces[testWorkspaceID]
+		ws.DeployMediator = true
+		h.DB.workspaces[testWorkspaceID] = ws
+	}},
+	{name: "the holder of the queue bypass mode", arrange: func(h *harness) {
+		h.DB.bypass = map[ids.WorkspaceID]wsm.QueueBypass{testWorkspaceID: {Holds: true}}
+	}},
+}
+
+func TestAQuestionAskedInAStandingWorkspaceIsDeliveredToThatWorkspace(t *testing.T) {
+	for _, tc := range directQuestionCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			withAskable(h)
+			withQuestionIntake(h)
+			tc.arrange(h)
+			ask(t, h, "row-1")
+
+			// Act.
+			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+			if resp.Msg.GetSuccess().GetQuestionSent() != nil {
+				t.Fatalf("SubmitPrompt answered %v, want an ordinary prompt, not question_sent", resp.Msg)
+			}
+			if len(h.Verbs.intakeQuestions) != 0 {
+				t.Fatalf("intake questions = %+v, want none: no intake or addressee is asked", h.Verbs.intakeQuestions)
+			}
+			if h.Prompts.submits != 1 || h.Prompts.lastWorkspace != testWorkspaceID {
+				t.Fatalf("submits = %d to %q, want one to %q itself", h.Prompts.submits, h.Prompts.lastWorkspace, testWorkspaceID)
+			}
+			if h.Prompts.lastSentBy != nil {
+				t.Fatalf("sent by %v, want the person's own prompt", *h.Prompts.lastSentBy)
+			}
+			if text := h.Prompts.lastSaid.GetContent().GetBlocks()[0].GetText().GetText(); text != replyquote.QuestionText("1 🔎 the answer", "hello") {
+				t.Fatalf("delivered %q, want the quoted card and the words", text)
+			}
+			if _, ok := h.Server.(*server).questions.take(testWorkspaceID); ok {
+				t.Fatal("the question still stands after its prompt was delivered")
+			}
+		})
+	}
+}
+
+func TestAQuestionAboutAGoneCardInAStandingWorkspaceIsRefusedAndDeliversNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	withAskable(h)
+	directQuestionCases[0].arrange(h)
+	ask(t, h, "row-1")
+	delete(h.Feed.cards, "row-1")
+
+	// Act.
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeNotFound || h.Prompts.submits != 0 {
+		t.Fatalf("SubmitPrompt = %v with %d submits, want not_found and no delivery", err, h.Prompts.submits)
+	}
+}
+
+func TestAQuestionWhoseBypassStandingCannotBeReadFailsAndIsLogged(t *testing.T) {
+	// Arrange.
+	h, log := newLoggedHarness(t)
+	withAskable(h)
+	ask(t, h, "row-1")
+	h.DB.bypassErr = errors.New("store down")
+
+	// Act.
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("SubmitPrompt succeeded, want the read failure surfaced")
+	}
+	if h.Prompts.submits != 0 || len(h.Verbs.intakeQuestions) != 0 {
+		t.Fatalf("submits = %d, intake questions = %+v, want nothing delivered", h.Prompts.submits, h.Verbs.intakeQuestions)
+	}
+	for _, rec := range log.records {
+		if strings.Contains(rec.Message, "queue bypass standing to route its question") && rec.Context["workspace"] == string(testWorkspaceID) {
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the routing read failure with the workspace", log.records)
+}
