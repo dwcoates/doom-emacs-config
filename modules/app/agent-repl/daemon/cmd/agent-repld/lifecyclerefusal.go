@@ -182,6 +182,35 @@ func describeCompactRefusal(ws string, e *agentreplv1.CompactWorkspaceError) (st
 	return "", undescribed("compacting "+ws, e)
 }
 
+// describeSetWorkspaceModelRefusal says in one plain sentence why WS's model
+// was not set to MODEL. Every SetWorkspaceModelError arm has its own sentence.
+func describeSetWorkspaceModelRefusal(ws, model string, e *agentreplv1.SetWorkspaceModelError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.SetWorkspaceModelError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.SetWorkspaceModelError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.SetWorkspaceModelError_Closed:
+		return fmt.Sprintf("%s is closed, so no session runs to compact or set a model on", ws), nil
+	case *agentreplv1.SetWorkspaceModelError_NoSession:
+		return fmt.Sprintf("%s has no session to compact or set a model on", ws), nil
+	case *agentreplv1.SetWorkspaceModelError_ColdGate:
+		return fmt.Sprintf("%s is parked at its cold gate, where compacting is the gate's compact or compact-and-resume answer, which the user must ask for or approve; nothing was compacted and the model is unchanged", ws), nil
+	case *agentreplv1.SetWorkspaceModelError_ModelNotInCatalog:
+		n := r.ModelNotInCatalog
+		return fmt.Sprintf("the model %q is not in the catalog of login %q (%s), so %s was not compacted and its model is unchanged", n.GetModel(), n.GetConfigDir(), strings.Join(n.GetOptions(), ", "), ws), nil
+	case *agentreplv1.SetWorkspaceModelError_ModelCatalogUnknown:
+		return fmt.Sprintf("the model %q cannot be checked: no session on login %q has served a model catalog yet, so %s was not compacted and its model is unchanged", model, r.ModelCatalogUnknown.GetConfigDir(), ws), nil
+	case *agentreplv1.SetWorkspaceModelError_CompactionFailed:
+		return fmt.Sprintf("the compaction of %s ended %s, so its model is unchanged", ws, r.CompactionFailed.GetHow()), nil
+	case *agentreplv1.SetWorkspaceModelError_VendorRefused:
+		return fmt.Sprintf("%s was compacted, and the vendor refused the change to %q (%s)", ws, model, r.VendorRefused.GetDetail()), nil
+	case *agentreplv1.SetWorkspaceModelError_Cold:
+		return fmt.Sprintf("%s was compacted, and switching to %q raised its cold gate, which the user must answer", ws, model), nil
+	}
+	return "", undescribed("setting the model of "+ws, e)
+}
+
 // describeStatusRefusal says in one plain sentence why WS's status was not
 // read. Every GetWorkspaceStatusError arm has its own sentence.
 func describeStatusRefusal(ws string, e *agentreplv1.GetWorkspaceStatusError) (string, error) {

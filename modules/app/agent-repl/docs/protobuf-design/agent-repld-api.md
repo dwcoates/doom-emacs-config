@@ -172,6 +172,18 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     `/clear` cannot arrive as a prompt either. Nuking and forgetting stay out
     of the agent API: both destroy or drop records, and the owner asked for
     neither.
+    SETTING ANOTHER WORKSPACE'S MODEL (owner, 2026-11-21) is the same kind of
+    act: `SetWorkspaceModel` (`agent-repld workspace model WS -model M`) is the
+    one way an agent sets a model, since `/model` is refused as a prompt. It
+    first checks the model against the catalog `ListCreationModels` offers (an
+    unknown model is the typed refusal `model_not_in_catalog`, and nothing is
+    compacted), then compacts the workspace exactly as `CompactWorkspace`
+    does, awaits the compaction's turn ending as a latch, and only then sets
+    the model through the verb `SetModel` calls. A compaction that does not
+    complete is `compaction_failed` and leaves the model unchanged. The
+    slash-command refusal says slash commands are not supported from agents and
+    names `workspace compact` for `/compact` and `workspace model` for
+    `/model`, with the usage of the one whose command was refused.
 
 14. SELF-CLOSE WAITS FOR ITS TURN (owner, 2026-10-17). CloseWorkspace gains
     a required `requester`. When the requester is the workspace being closed,

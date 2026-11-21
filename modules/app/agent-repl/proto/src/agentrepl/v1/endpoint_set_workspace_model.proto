@@ -1,0 +1,110 @@
+// endpoint_set_workspace_model.proto — SetWorkspaceModel: set ANOTHER
+// workspace's model, compacting its conversation first. SIDEBAR section. The
+// agent API's one way to set a model (`agent-repld workspace model`): an
+// agent never sends `/model` as a prompt
+// (SubmitPromptError.slash_command_from_agent), and the topbar selector's own
+// request (SetModel) takes no requester.
+//
+// THE ORDER IS STRUCTURAL. The daemon (1) checks the model against the
+// catalog ListCreationModels offers for the workspace's repository, then (2)
+// submits the compaction exactly as CompactWorkspace does, then (3) awaits
+// the compaction's turn ending as a latch (never a sleep), and only then (4)
+// sets the model through the same verb SetModel calls. A model not in the
+// catalog is refused before anything is compacted. A compaction that does not
+// complete leaves the model unchanged.
+//
+// Success means the model is SET: unlike CompactWorkspace's success
+// (SUBMITTED), this rpc answers once the compaction has finished, which may
+// be after a running turn ends.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_topology.proto";
+import "conversation/v1/api.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspaceModelRequest {
+  // The workspace whose model is set. Must be open.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Who asked: the workspace itself, another workspace, or the user.
+  // REQUIRED.
+  WorkspaceRequester requester = 2;
+  // The model to set: a name from the catalog ListCreationModels offers
+  // (conversation.v1.ModelOption.model). A name outside it is refused
+  // (SetWorkspaceModelError.model_not_in_catalog), never guessed.
+  conversation.v1.AgentModel model = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspaceModelResponse {
+  oneof result {
+    SetWorkspaceModelSuccess success = 1;
+    SetWorkspaceModelError error = 2;
+  }
+}
+// The workspace was compacted and its model set.
+message SetWorkspaceModelSuccess {}
+message SetWorkspaceModelError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetWorkspaceModelUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetWorkspaceModelWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // The workspace is closed: no session runs to compact.
+    SetWorkspaceModelClosed closed = 3;
+    // The workspace has no session to compact or set a model on.
+    SetWorkspaceModelNoSession no_session = 4;
+    // The session is parked at its cold gate. Nothing was compacted and the
+    // model is unchanged; an agent passes the gate through PassColdGate.
+    SetWorkspaceModelColdGate cold_gate = 5;
+    // The model is not in the catalog. Nothing was compacted.
+    SetWorkspaceModelNotInCatalog model_not_in_catalog = 6;
+    // No session on the workspace's login has served a model catalog yet, so
+    // no model can be checked. Nothing was compacted.
+    SetWorkspaceModelCatalogUnknown model_catalog_unknown = 7;
+    // The compaction did not complete. The model is unchanged.
+    SetWorkspaceModelCompactionFailed compaction_failed = 8;
+    // The compaction completed and the vendor refused the model change.
+    SetWorkspaceModelVendorRefused vendor_refused = 9;
+    // The compaction completed and the model switch raised the cold gate.
+    SetWorkspaceModelCold cold = 10;
+  }
+}
+message SetWorkspaceModelUnknownWorkspace {}
+message SetWorkspaceModelWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetWorkspaceModelClosed {}
+message SetWorkspaceModelNoSession {}
+message SetWorkspaceModelColdGate {}
+message SetWorkspaceModelNotInCatalog {
+  // The model as the request named it.
+  string model = 1;
+  // The login whose catalog was checked.
+  string config_dir = 2;
+  // The model names the catalog offers, in the vendor's order.
+  repeated string options = 3;
+  // The refusal in one sentence.
+  string detail = 4;
+}
+message SetWorkspaceModelCatalogUnknown {
+  // The model as the request named it.
+  string model = 1;
+  // The login that has served no catalog.
+  string config_dir = 2;
+}
+message SetWorkspaceModelCompactionFailed {
+  // How the compaction's turn ended (wsm.TurnClose's spelling: failed,
+  // killed, orphaned, agent_died, folded, withdrawn).
+  string how = 1;
+}
+message SetWorkspaceModelVendorRefused {
+  // The vendor's own account of the refusal.
+  string detail = 1;
+}
+message SetWorkspaceModelCold {}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/agentverbs"
 )
 
 // errUndescribedRefusal is a SubmitPromptError whose arm this command has no
@@ -58,7 +60,7 @@ func describePromptRefusal(ws string, e *agentreplv1.SubmitPromptError) (string,
 	case *agentreplv1.SubmitPromptError_AskSessionEnded:
 		return fmt.Sprintf("the session in %s that asked the question this answer was for has ended, so nothing was sent", ws), nil
 	case *agentreplv1.SubmitPromptError_SlashCommandFromAgent:
-		return fmt.Sprintf("an agent may not send %s a slash command (%s); only the user runs those", ws, r.SlashCommandFromAgent.GetCommand()), nil
+		return agentverbs.SlashCommandRefusal(r.SlashCommandFromAgent.GetCommand()), nil
 	case *agentreplv1.SubmitPromptError_UnknownSender:
 		return fmt.Sprintf("the sending workspace is unknown to the daemon or is %s itself, and a workspace cannot prompt itself", ws), nil
 	case *agentreplv1.SubmitPromptError_ThreadAwaitingFirstAnswer:

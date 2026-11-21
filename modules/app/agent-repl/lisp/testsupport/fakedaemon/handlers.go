@@ -570,6 +570,10 @@ func (s *fakeServer) CompactWorkspace(ctx context.Context, req *connect.Request[
 	return handleUnary[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse](ctx, s, "CompactWorkspace", req.Msg)
 }
 
+func (s *fakeServer) SetWorkspaceModel(ctx context.Context, req *connect.Request[v1.SetWorkspaceModelRequest]) (*connect.Response[v1.SetWorkspaceModelResponse], error) {
+	return handleUnary[v1.SetWorkspaceModelRequest, v1.SetWorkspaceModelResponse](ctx, s, "SetWorkspaceModel", req.Msg)
+}
+
 func (s *fakeServer) EvaluateInEditor(ctx context.Context, req *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {
 	return handleUnary[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse](ctx, s, "EvaluateInEditor", req.Msg)
 }

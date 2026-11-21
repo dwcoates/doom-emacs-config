@@ -1184,6 +1184,34 @@ func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 	return f.outcome, f.err
 }
 
+// fakeTurns is Deps.AwaitTurnEnd: it answers each awaited turn's close, once
+// the test lets it. A test that must observe what stands while the await is
+// open sets entered and release: the await signals entered, then blocks on
+// release.
+type fakeTurns struct {
+	// closes is how every awaited turn ends.
+	closes wsm.TurnClose
+	// err fails every await.
+	err error
+	// entered, when set, is signalled once an await is standing.
+	entered chan struct{}
+	// release, when set, is what an await blocks on after entering.
+	release chan struct{}
+	// awaited records every (workspace, turn) awaited.
+	awaited []ids.TurnID
+}
+
+func (f *fakeTurns) await(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
+	f.awaited = append(f.awaited, turn)
+	if f.entered != nil {
+		f.entered <- struct{}{}
+	}
+	if f.release != nil {
+		<-f.release
+	}
+	return f.closes, f.err
+}
+
 // fakeQueue answers the three held-prompt verbs and the edit's steps.
 type fakeQueue struct {
 	promptqueue.Queue
@@ -2451,6 +2479,8 @@ type harness struct {
 	// one's private address (Deps.InstanceAddress). An instance not here does
 	// not run.
 	Instances map[ids.InstanceID]string
+	// Turns is what Deps.AwaitTurnEnd awaits turns on.
+	Turns *fakeTurns
 	// ColdGates are the standing cold gates ColdGateOf answers, by workspace.
 	ColdGates map[ids.WorkspaceID]*conversationv1.SessionCold
 	// Deps is the COMPLETE dependency set the surface was built from, so a
@@ -2651,6 +2681,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Creates:    creategate.New(),
 		Retarget:   &fakeRetarget{},
 		Prompts:    &fakePrompts{},
+		Turns:      &fakeTurns{},
 		Queue:      &fakeQueue{},
 		Merge:      &fakeMerge{},
 		Makers:     &fakeMakers{},
@@ -2743,6 +2774,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 			address, alive := h.Instances[instance]
 			return address, alive, nil
 		},
+		AwaitTurnEnd: h.Turns.await,
 		ColdGateOf: func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
 			cold, ok := h.ColdGates[ws]
 			return cold, ok

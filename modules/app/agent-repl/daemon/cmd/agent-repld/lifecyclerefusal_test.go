@@ -19,6 +19,7 @@ var lifecycleRefusals = func() []describedRefusal {
 	park := &agentreplv1.ParkWorkspaceError{}
 	interrupt := &agentreplv1.InterruptError{}
 	compact := &agentreplv1.CompactWorkspaceError{}
+	setModel := &agentreplv1.SetWorkspaceModelError{}
 	status := &agentreplv1.GetWorkspaceStatusError{}
 	gate := &agentreplv1.PassColdGateError{}
 	notify := &agentreplv1.NotifyWorkspaceError{}
@@ -95,6 +96,26 @@ var lifecycleRefusals = func() []describedRefusal {
 					want: "ws is parked at its cold gate, where compacting is the gate's compact or compact-and-resume answer, which the user must ask for or approve; nothing was submitted"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeCompactRefusal("ws", e.(*agentreplv1.CompactWorkspaceError))
+			}},
+		{name: "set_model", empty: setModel, oneof: "cause",
+			cases: append(sharedWorkspaceCases(setModel, "", "unknown_workspace", "workspace_ref_mismatch"),
+				refusalCase{name: "closed", err: armed(setModel, "closed", nil), want: "ws is closed, so no session runs to compact or set a model on"},
+				refusalCase{name: "no_session", err: armed(setModel, "no_session", nil), want: "ws has no session to compact or set a model on"},
+				refusalCase{name: "cold_gate", err: armed(setModel, "cold_gate", nil),
+					want: "ws is parked at its cold gate, where compacting is the gate's compact or compact-and-resume answer, which the user must ask for or approve; nothing was compacted and the model is unchanged"},
+				refusalCase{name: "model_not_in_catalog", err: &agentreplv1.SetWorkspaceModelError{Cause: &agentreplv1.SetWorkspaceModelError_ModelNotInCatalog{ModelNotInCatalog: &agentreplv1.SetWorkspaceModelNotInCatalog{
+					Model: "gpt", ConfigDir: "/home/.claude", Options: []string{"opus", "sonnet"}}}},
+					want: `the model "gpt" is not in the catalog of login "/home/.claude" (opus, sonnet), so ws was not compacted and its model is unchanged`},
+				refusalCase{name: "model_catalog_unknown", err: armedWith(setModel, "model_catalog_unknown", map[string]any{"config_dir": "/home/.claude"}),
+					want: `the model "opus" cannot be checked: no session on login "/home/.claude" has served a model catalog yet, so ws was not compacted and its model is unchanged`},
+				refusalCase{name: "compaction_failed", err: armedWith(setModel, "compaction_failed", map[string]any{"how": "failed"}),
+					want: "the compaction of ws ended failed, so its model is unchanged"},
+				refusalCase{name: "vendor_refused", err: armedWith(setModel, "vendor_refused", map[string]any{"detail": "no"}),
+					want: `ws was compacted, and the vendor refused the change to "opus" (no)`},
+				refusalCase{name: "cold", err: armed(setModel, "cold", nil),
+					want: `ws was compacted, and switching to "opus" raised its cold gate, which the user must answer`}),
+			describe: func(e proto.Message) (string, error) {
+				return describeSetWorkspaceModelRefusal("ws", "opus", e.(*agentreplv1.SetWorkspaceModelError))
 			}},
 		{name: "status", empty: status, oneof: "cause",
 			cases: sharedWorkspaceCases(status, "", "unknown_workspace", "workspace_ref_mismatch"),

@@ -28,6 +28,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
+	"agent-repld/internal/agentverbs"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/prompthandler"
@@ -197,7 +198,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"restart":                {usage: "restart WS [-when-idle]", run: workspaceRestart},
 		"park":                   {usage: "park WS|-all", run: workspacePark},
 		"interrupt":              {usage: "interrupt WS [-confirm-agents] | interrupt WS -all-agents", run: workspaceInterrupt},
-		"compact":                {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
+		"compact":                {usage: agentverbs.CompactUsage, run: workspaceCompact},
+		"model":                  {usage: agentverbs.ModelUsage, run: workspaceModel},
 		"status":                 {usage: "status WS", run: workspaceStatus},
 		"list":                   {usage: "list [-login here|WS]", run: workspaceList},
 		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
@@ -1679,6 +1681,34 @@ func workspaceCompact(c *cliCall, args []string) int {
 	resp, err := c.client.CompactWorkspace(c.ctx, connect.NewRequest(req))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.CompactWorkspaceResponse) (string, error) {
 		return describeCompactRefusal(named, msg.GetError())
+	})
+}
+
+// workspaceModel sets WS's model after compacting it
+// (agentrepl.v1.SetWorkspaceModel). It answers once the compaction has
+// finished and the model is set, which may be after WS's running turn ends.
+func workspaceModel(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	model := fs.String("model", "", "the model to set, a name from the catalog")
+	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("the command names its workspace and -model, and nothing after them")
+	}
+	if strings.TrimSpace(*model) == "" {
+		return c.usageFailed("the command names the model to set with -model")
+	}
+	requester, ok := c.requester(*asUser)
+	if !ok {
+		return exitFailure
+	}
+	resp, err := c.client.SetWorkspaceModel(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceModelRequest{
+		Workspace: ref, Requester: requester, Model: &conversationv1.AgentModel{Name: *model}}))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceModelResponse) (string, error) {
+		return describeSetWorkspaceModelRefusal(named, *model, msg.GetError())
 	})
 }
 

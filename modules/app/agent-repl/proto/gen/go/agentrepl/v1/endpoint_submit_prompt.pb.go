@@ -1401,9 +1401,11 @@ type SubmitPromptError_AskSessionEnded struct {
 
 type SubmitPromptError_SlashCommandFromAgent struct {
 	// A prompt of origin PROMPT_ORIGIN_AGENT_SENT begins with a slash command.
-	// Nothing was submitted: an agent performs acts on a conversation through
-	// the rpcs that name them (CompactWorkspace), and the rest -- clearing it
-	// among them -- are the user's alone.
+	// Nothing was submitted: slash commands are not supported from agents. An
+	// agent performs acts on a conversation through the rpcs that name them
+	// (CompactWorkspace for /compact, SetWorkspaceModel for /model), and the
+	// rest -- clearing it among them -- are the user's alone. The refusal
+	// names the verb that replaces the refused command.
 	SlashCommandFromAgent *SubmitPromptSlashCommandFromAgent `protobuf:"bytes,16,opt,name=slash_command_from_agent,json=slashCommandFromAgent,proto3,oneof"`
 }
 

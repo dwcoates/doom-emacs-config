@@ -129,6 +129,7 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 		var wg sync.WaitGroup
 		for i := 1; i < len(steps); i++ {
 			wg.Add(1)
+			// inflight: joined
 			go func(i int) {
 				defer wg.Done()
 				results[i] = b.runStep(ctx, steps[i], logPath)

@@ -177,6 +177,10 @@ type Deps struct {
 	// forwarded on (forward.go): h2c to that daemon's private address.
 	// Required.
 	Forward *http.Client
+	// AwaitTurnEnd blocks until one submitted turn of a workspace ends and
+	// reports how (workspace.Fleet.AwaitTurnEnd): SetWorkspaceModel awaits
+	// its compaction with it before setting the model. REQUIRED.
+	AwaitTurnEnd func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error)
 	// Creates admits every create this surface is asked for, and refuses one
 	// while the daemon stands down (creategate).
 	Creates *creategate.Gate

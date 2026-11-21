@@ -1650,6 +1650,19 @@ func validateCompactWorkspaceRequest(req *agentreplv1.CompactWorkspaceRequest) *
 	return nil
 }
 
+// validateSetWorkspaceModelRequest is SetWorkspaceModelRequest's base
+// function: the workspace, the requester, and the one model name a pick
+// carries.
+func validateSetWorkspaceModelRequest(req *agentreplv1.SetWorkspaceModelRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateWorkspaceRequester("requester", req.GetRequester()); err != nil {
+		return err
+	}
+	return validateAgentModel("model", req.GetModel())
+}
+
 // validateEvaluateInEditorRequest is EvaluateInEditorRequest's base function.
 func validateEvaluateInEditorRequest(req *agentreplv1.EvaluateInEditorRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
