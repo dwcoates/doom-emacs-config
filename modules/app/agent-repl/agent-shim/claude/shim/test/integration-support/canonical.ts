@@ -252,3 +252,46 @@ export function since(shim: ShimHandle, transcripts: readonly string[] = []): Si
     },
   };
 }
+
+/**
+ * SHIM as a case on a shared shim sees it: the same process and clients, but
+ * its `log` and `store` answer only what arrived after the mark (`since`), so
+ * a case body written against a shim of its own (counting every record,
+ * scanning every write, awaiting the first matching landed row) reads its own
+ * slice unchanged. Every other store lever (faults, holds, seeding) acts on
+ * the shared store as before.
+ */
+export function sliceOf(shim: ShimHandle): ShimHandle {
+  const mine = since(shim);
+  const log = {
+    ...shim.log,
+    records: () => mine.records(),
+    record: (predicate: LogPredicate) => mine.record(predicate),
+    close: () => shim.log.close(),
+    endOfRecords: (reason: string) => shim.log.endOfRecords(reason),
+  };
+  const store =
+    shim.store === null
+      ? null
+      : new Proxy(shim.store, {
+          get(target, property, receiver) {
+            switch (property) {
+              case "writes":
+                return () => mine.writes();
+              case "writeBatches":
+                return () => mine.writeBatches();
+              case "unserved":
+                return () => mine.unserved();
+              case "reads":
+                return () => mine.reads();
+              case "entryLanded":
+                return (matches: (entry: storev1.StoreEntry) => boolean) => mine.landed(matches);
+              default: {
+                const value: unknown = Reflect.get(target, property, receiver);
+                return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+              }
+            }
+          },
+        });
+  return { ...shim, log, store };
+}
