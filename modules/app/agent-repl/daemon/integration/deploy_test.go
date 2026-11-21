@@ -51,7 +51,9 @@ func deployOutcomes(t *testing.T, d *harness.Daemon, force bool) map[agentreplv1
 func TestADeployOfWhatAlreadyRunsDecidesEveryComponentUpToDate(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := canonicalView(t)
+	// A daemon of its own: a deploy is the daemon's one, and another case's
+	// running beside it answers already_deploying.
+	d := harness.StartDaemon(t, harness.Opts{})
 
 	// Act
 	outcomes := deployOutcomes(t, d, false)
@@ -178,7 +180,9 @@ func footerUpdated(v *frontendv1.FooterView) *frontendv1.FooterActivityTransient
 func TestADeployShowsItsPhasesOnTheFooterAndAnnouncesUpdated(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newCanonical(t)
+	// A daemon of its own: a deploy is the daemon's one, and another case's
+	// running beside it answers already_deploying.
+	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
