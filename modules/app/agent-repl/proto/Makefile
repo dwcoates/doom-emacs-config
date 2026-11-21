@@ -3,7 +3,7 @@
 # Outputs:
 #   Go    → gen/go/...    (consumed by daemon/, agent-shim/shim-store/, agent-shim/claude/shim-sidecar/)
 #   TS    → gen/ts/...    (consumed by agent-shim/claude/shim/, webapp/)
-#   Swift → gen/swift/... (consumed by notifier/, the Zettel app; SWIFT_PROTOS only)
+#   Swift → gen/swift/... (consumed by launcher/, Zettel.app; SWIFT_PROTOS only)
 #
 # Requires: protoc, protoc-gen-go, protoc-gen-connect-go (Connect service
 # handler interfaces — message types alone cannot serve an rpc), and
@@ -55,7 +55,7 @@ BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
 # the surface roots under it, and the unguarded `find` reported one "No such
 # file or directory" per root on every such run. The set comes out identical in
 # the real tree; the guard only stops the empty case from saying so.
-PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace shim store storeread repoconfig testrun testservice zettel; do \
+PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace launcher shim store storeread repoconfig testrun testservice zettel; do \
 	  [ -d "$$root" ] && find "$$root" -name '*.proto'; \
 	done | sort)
 
@@ -86,25 +86,23 @@ go: codegen-gate
 	protoc -I src --go_out=$(GEN)/go --go_opt=paths=source_relative \
 	  --connect-go_out=$(GEN)/go --connect-go_opt=paths=source_relative $(PROTOS)
 
-# THE SWIFT BINDINGS ARE THE NOTIFIER APP'S, AND ONLY WHAT IT SPEAKS: the
-# DESKTOP NOTIFIER section of agentrepl.v1 and that section's imports, never
-# the whole tree. The app (../notifier, Zettel.app) is a small resident
-# client of three rpcs; compiling every surface into it would be thousands of
-# types it never touches. A file the section comes to import is added here.
-# protoc-gen-swift is BUILT FROM THE APP'S OWN PINNED swift-protobuf
-# (../notifier/Package.resolved), never taken from PATH, so the generator and
-# the runtime library the app links are one version by construction.
+# THE SWIFT BINDINGS ARE THE LAUNCHER'S, AND ONLY WHAT IT SPEAKS: launcher.v1,
+# the click it reports on agentrepl.v1, and their imports, never the whole
+# tree. The launcher (../launcher, Zettel.app) serves one exchange and makes
+# one call; compiling every surface into it would be thousands of types it
+# never touches. A file those come to import is added here.
+# protoc-gen-swift is BUILT FROM THE LAUNCHER'S OWN PINNED swift-protobuf
+# (../launcher/Package.resolved), never taken from PATH, so the generator and
+# the runtime library the launcher links are one version by construction.
 # PROTOC_GEN_SWIFT is overridable so the check-generated self-test can stub it.
-PROTOC_GEN_SWIFT ?= ../notifier/.build/release/protoc-gen-swift
-SWIFT_PROTOS ?= agentrepl/v1/daemon_stream_ending.proto \
+PROTOC_GEN_SWIFT ?= ../launcher/.build/release/protoc-gen-swift
+SWIFT_PROTOS ?= launcher/v1/launcher.proto \
 	agentrepl/v1/desktop_banner.proto \
-	agentrepl/v1/endpoint_watch_desktop_banners.proto \
-	agentrepl/v1/endpoint_report_desktop_banner_posted.proto \
 	agentrepl/v1/endpoint_report_desktop_banner_clicked.proto \
 	workspace/v1/workspace.proto
 
-../notifier/.build/release/protoc-gen-swift: ../notifier/Package.swift ../notifier/Package.resolved
-	cd ../notifier && swift build -c release --product protoc-gen-swift
+../launcher/.build/release/protoc-gen-swift: ../launcher/Package.swift ../launcher/Package.resolved
+	cd ../launcher && swift build -c release --product protoc-gen-swift
 
 swift: codegen-gate $(PROTOC_GEN_SWIFT)
 	mkdir -p $(GEN)/swift

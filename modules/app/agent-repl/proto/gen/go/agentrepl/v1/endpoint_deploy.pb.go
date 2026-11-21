@@ -75,9 +75,10 @@ const (
 	DeployComponent_DEPLOY_COMPONENT_ELISP       DeployComponent = 6
 	DeployComponent_DEPLOY_COMPONENT_ZETTEL      DeployComponent = 7
 	DeployComponent_DEPLOY_COMPONENT_TESTS       DeployComponent = 8
-	// Zettel.app, the macOS desktop notifier (notifier/), installed at
-	// ~/Applications/Zettel.app and run by launchd as com.agentrepl.notifier.
-	DeployComponent_DEPLOY_COMPONENT_NOTIFIER DeployComponent = 9
+	// The launcher, Zettel.app (launcher/), which posts every macOS desktop
+	// banner: installed at ~/Applications/Zettel.app and run by launchd as
+	// app.zettel.launcher.
+	DeployComponent_DEPLOY_COMPONENT_LAUNCHER DeployComponent = 9
 )
 
 // Enum value maps for DeployComponent.
@@ -92,7 +93,7 @@ var (
 		6: "DEPLOY_COMPONENT_ELISP",
 		7: "DEPLOY_COMPONENT_ZETTEL",
 		8: "DEPLOY_COMPONENT_TESTS",
-		9: "DEPLOY_COMPONENT_NOTIFIER",
+		9: "DEPLOY_COMPONENT_LAUNCHER",
 	}
 	DeployComponent_value = map[string]int32{
 		"DEPLOY_COMPONENT_UNSPECIFIED": 0,
@@ -104,7 +105,7 @@ var (
 		"DEPLOY_COMPONENT_ELISP":       6,
 		"DEPLOY_COMPONENT_ZETTEL":      7,
 		"DEPLOY_COMPONENT_TESTS":       8,
-		"DEPLOY_COMPONENT_NOTIFIER":    9,
+		"DEPLOY_COMPONENT_LAUNCHER":    9,
 	}
 )
 
@@ -1609,7 +1610,7 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"\x16DEPLOY_COMPONENT_ELISP\x10\x06\x12\x1b\n" +
 	"\x17DEPLOY_COMPONENT_ZETTEL\x10\a\x12\x1a\n" +
 	"\x16DEPLOY_COMPONENT_TESTS\x10\b\x12\x1d\n" +
-	"\x19DEPLOY_COMPONENT_NOTIFIER\x10\tB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x19DEPLOY_COMPONENT_LAUNCHER\x10\tB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_deploy_proto_rawDescOnce sync.Once

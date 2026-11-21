@@ -9,10 +9,10 @@
 //   https://github.com/apple/swift-protobuf/
 
 // endpoint_report_desktop_banner_clicked.proto — ReportDesktopBannerClicked:
-// the user clicked a desktop banner the notifier app posted. DESKTOP NOTIFIER
-// section.
+// the user clicked a desktop banner the launcher (Zettel.app) posted. DESKTOP
+// BANNERS section.
 //
-// The app calls it from the click, having already brought Emacs forward (the
+// The launcher calls it from the click, having already brought Emacs forward (the
 // click is the one moment macOS lets one application activate another). The
 // daemon then does what any banner click does: it lets go of every banner it
 // holds and tells Emacs, on its host stream, to select the clicked workspace
@@ -20,7 +20,7 @@
 //
 // A click may land long after its banner was posted, and on a daemon that
 // never posted it: the token names a workspace, not a post, so it is served by
-// whichever daemon is advertised when the click happens.
+// whichever daemon serves when the click happens.
 
 import SwiftProtobuf
 
@@ -39,7 +39,7 @@ public nonisolated struct Agentrepl_V1_ReportDesktopBannerClickedRequest: Sendab
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// The clicked banner's token, exactly as WatchDesktopBanners handed it.
+  /// The clicked banner's token, exactly as launcher.v1.PostBanner handed it.
   /// REQUIRED.
   public var click: Agentrepl_V1_DesktopBannerClickToken {
     get {_click ?? Agentrepl_V1_DesktopBannerClickToken()}
@@ -133,8 +133,8 @@ public nonisolated struct Agentrepl_V1_ReportDesktopBannerClickedError: Sendable
     set {cause = .workspaceRefMismatch(newValue)}
   }
 
-  /// This daemon released the workspace to a successor; the app reports the
-  /// click again to `address`.
+  /// This daemon released the workspace to a successor; the launcher
+  /// reports the click again to `address`.
   public var transferringAway: Agentrepl_V1_ReportDesktopBannerClickedTransferringAway {
     get {
       if case .transferringAway(let v)? = cause {return v}
@@ -143,8 +143,9 @@ public nonisolated struct Agentrepl_V1_ReportDesktopBannerClickedError: Sendable
     set {cause = .transferringAway(newValue)}
   }
 
-  /// A joining daemon has not finished adopting the workspace yet; the app
-  /// reports the click to `address`, the daemon serving it meanwhile.
+  /// A joining daemon has not finished adopting the workspace yet; the
+  /// launcher reports the click to `address`, the daemon serving it
+  /// meanwhile.
   public var notYetAdopted: Agentrepl_V1_ReportDesktopBannerClickedNotYetAdopted {
     get {
       if case .notYetAdopted(let v)? = cause {return v}
@@ -163,11 +164,12 @@ public nonisolated struct Agentrepl_V1_ReportDesktopBannerClickedError: Sendable
     /// The token's directory disagrees with the registry's for its workspace
     /// (the workspace moved since the banner was posted).
     case workspaceRefMismatch(Agentrepl_V1_ReportDesktopBannerClickedWorkspaceRefMismatch)
-    /// This daemon released the workspace to a successor; the app reports the
-    /// click again to `address`.
+    /// This daemon released the workspace to a successor; the launcher
+    /// reports the click again to `address`.
     case transferringAway(Agentrepl_V1_ReportDesktopBannerClickedTransferringAway)
-    /// A joining daemon has not finished adopting the workspace yet; the app
-    /// reports the click to `address`, the daemon serving it meanwhile.
+    /// A joining daemon has not finished adopting the workspace yet; the
+    /// launcher reports the click to `address`, the daemon serving it
+    /// meanwhile.
     case notYetAdopted(Agentrepl_V1_ReportDesktopBannerClickedNotYetAdopted)
 
   }
@@ -222,7 +224,7 @@ public nonisolated struct Agentrepl_V1_ReportDesktopBannerClickedNotYetAdopted: 
 
   /// The `127.0.0.1:<port>` of the daemon serving the workspace until the
   /// adoption. UNSET when none serves it (a takeover after the incumbent
-  /// died); the click then selects nothing, and the app records why.
+  /// died); the click then selects nothing, and the launcher records why.
   public var address: String {
     get {_address ?? String()}
     set {_address = newValue}

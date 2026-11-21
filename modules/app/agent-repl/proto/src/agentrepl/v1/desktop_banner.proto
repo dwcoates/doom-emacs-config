@@ -1,14 +1,15 @@
-// desktop_banner.proto — the desktop banner the daemon hands its notifier
-// app (Zettel.app) to post, and the identities the app echoes back about it.
-// DESKTOP NOTIFIER section. Shared by WatchDesktopBanners (which carries each
-// banner), ReportDesktopBannerPosted (which answers whether one was posted)
-// and ReportDesktopBannerClicked (which reports one's click).
+// desktop_banner.proto — the desktop banner the daemon hands the launcher
+// (Zettel.app, launcher/) to post, what the platform did with it, and the
+// token its click echoes back. DESKTOP BANNERS section. Shared by
+// launcher.v1.PostBanner (the daemon hands the launcher a banner and reads
+// back its outcome) and ReportDesktopBannerClicked (the launcher reports a
+// banner's click).
 //
 // THE DAEMON OWNS EVERY BANNER. It decides whether a banner is wanted (Emacs
-// unfocused), composes its text, and resolves what its click selects; the app
-// only posts what it is handed through the platform's notification center and
-// relays the two things only it can observe: whether the platform took the
-// banner, and the user's click on it.
+// unfocused), composes its text, and resolves what its click selects; the
+// launcher only posts what it is handed through the platform's notification
+// center and relays the two things only it can observe: whether the platform
+// took the banner, and the user's click on it.
 
 syntax = "proto3";
 
@@ -18,30 +19,21 @@ import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-// One banner for the app to post, as the user sees it, plus what the app
-// needs to replace an earlier one and to report back on it.
+// One banner for the launcher to post, as the user sees it, plus what the
+// launcher needs to replace an earlier one and to report its click.
 message DesktopBanner {
-  // Which post this is, echoed on ReportDesktopBannerPosted so the daemon
-  // knows which of its waiting posts the answer settles. REQUIRED.
-  DesktopBannerPostId post_id = 1;
   // The banner's first, bold line. REQUIRED, never empty.
-  DesktopBannerTitle title = 2;
+  DesktopBannerTitle title = 1;
   // The banner's text below its title. REQUIRED, never empty.
-  DesktopBannerBody body = 3;
+  DesktopBannerBody body = 2;
   // The replacement group: a banner REPLACES the banner already shown with
   // the same group, so one workspace never stacks a pile of stale banners.
-  // The app uses it as the platform notification's identifier. REQUIRED.
-  DesktopBannerGroup group = 4;
+  // The launcher uses it as the platform notification's identifier.
+  // REQUIRED.
+  DesktopBannerGroup group = 3;
   // What the banner's click selects, stored on the platform notification and
   // echoed verbatim on ReportDesktopBannerClicked. REQUIRED.
-  DesktopBannerClickToken click = 5;
-}
-
-// The identity of one post, minted by the daemon per banner and unique for
-// the daemon's lifetime. Opaque to the app, which only echoes it.
-message DesktopBannerPostId {
-  // Increasing per post within one daemon process; never zero.
-  uint64 value = 1;
+  DesktopBannerClickToken click = 4;
 }
 
 // The banner's title line, as macOS draws it in bold.
@@ -60,12 +52,13 @@ message DesktopBannerBody {
 // The group banners of one subject share. Two banners with the same group
 // replace each other on the desktop and in Notification Center.
 message DesktopBannerGroup {
-  // Opaque to the app; the daemon keys it by workspace.
+  // Opaque to the launcher; the daemon keys it by workspace.
   string id = 1;
 }
 
 // A TYPED ECHO TOKEN: what a banner's click selects. Minted by the daemon,
-// stored by the app on the platform notification as serialized bytes, and
+// stored by the launcher on the platform notification as serialized bytes,
+// and
 // returned unchanged when the user clicks the banner, however long after the
 // post and whichever daemon serves by then. It names the workspace rather
 // than a post, so a click on a banner a previous daemon posted still selects
@@ -73,4 +66,33 @@ message DesktopBannerGroup {
 message DesktopBannerClickToken {
   // The workspace the click selects.
   workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// What the platform's notification center did with one banner.
+message DesktopBannerPostOutcome {
+  // THE ARM IS THE OUTCOME. REQUIRED.
+  oneof outcome {
+    // The notification center accepted the banner. Whether macOS then shows
+    // it at once, or files it in Notification Center because a Focus is on,
+    // is the user's setting and not reported.
+    DesktopBannerPostOutcomePosted posted = 1;
+    // The user has not allowed Zettel to post notifications, so the banner
+    // was refused. Remedied only in System Settings → Notifications → Zettel.
+    DesktopBannerPostOutcomeNotAllowed not_allowed = 2;
+    // The notification center refused the banner for another reason.
+    DesktopBannerPostOutcomeFailed failed = 3;
+  }
+}
+
+// The notification center accepted the banner.
+message DesktopBannerPostOutcomePosted {}
+
+// The user has not allowed Zettel to post notifications.
+message DesktopBannerPostOutcomeNotAllowed {}
+
+// The notification center refused the banner for a reason other than
+// permission.
+message DesktopBannerPostOutcomeFailed {
+  // The platform's own description of the error, verbatim, for the record.
+  string platform_error = 1;
 }

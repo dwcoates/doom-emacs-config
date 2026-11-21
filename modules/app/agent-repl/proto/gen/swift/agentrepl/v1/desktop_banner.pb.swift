@@ -8,17 +8,18 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
-// desktop_banner.proto — the desktop banner the daemon hands its notifier
-// app (Zettel.app) to post, and the identities the app echoes back about it.
-// DESKTOP NOTIFIER section. Shared by WatchDesktopBanners (which carries each
-// banner), ReportDesktopBannerPosted (which answers whether one was posted)
-// and ReportDesktopBannerClicked (which reports one's click).
+// desktop_banner.proto — the desktop banner the daemon hands the launcher
+// (Zettel.app, launcher/) to post, what the platform did with it, and the
+// token its click echoes back. DESKTOP BANNERS section. Shared by
+// launcher.v1.PostBanner (the daemon hands the launcher a banner and reads
+// back its outcome) and ReportDesktopBannerClicked (the launcher reports a
+// banner's click).
 //
 // THE DAEMON OWNS EVERY BANNER. It decides whether a banner is wanted (Emacs
-// unfocused), composes its text, and resolves what its click selects; the app
-// only posts what it is handed through the platform's notification center and
-// relays the two things only it can observe: whether the platform took the
-// banner, and the user's click on it.
+// unfocused), composes its text, and resolves what its click selects; the
+// launcher only posts what it is handed through the platform's notification
+// center and relays the two things only it can observe: whether the platform
+// took the banner, and the user's click on it.
 
 import SwiftProtobuf
 
@@ -32,23 +33,12 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
-/// One banner for the app to post, as the user sees it, plus what the app
-/// needs to replace an earlier one and to report back on it.
+/// One banner for the launcher to post, as the user sees it, plus what the
+/// launcher needs to replace an earlier one and to report its click.
 public nonisolated struct Agentrepl_V1_DesktopBanner: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
-
-  /// Which post this is, echoed on ReportDesktopBannerPosted so the daemon
-  /// knows which of its waiting posts the answer settles. REQUIRED.
-  public var postID: Agentrepl_V1_DesktopBannerPostId {
-    get {_postID ?? Agentrepl_V1_DesktopBannerPostId()}
-    set {_postID = newValue}
-  }
-  /// Returns true if `postID` has been explicitly set.
-  public var hasPostID: Bool {self._postID != nil}
-  /// Clears the value of `postID`. Subsequent reads from it will return its default value.
-  public mutating func clearPostID() {self._postID = nil}
 
   /// The banner's first, bold line. REQUIRED, never empty.
   public var title: Agentrepl_V1_DesktopBannerTitle {
@@ -72,7 +62,8 @@ public nonisolated struct Agentrepl_V1_DesktopBanner: Sendable {
 
   /// The replacement group: a banner REPLACES the banner already shown with
   /// the same group, so one workspace never stacks a pile of stale banners.
-  /// The app uses it as the platform notification's identifier. REQUIRED.
+  /// The launcher uses it as the platform notification's identifier.
+  /// REQUIRED.
   public var group: Agentrepl_V1_DesktopBannerGroup {
     get {_group ?? Agentrepl_V1_DesktopBannerGroup()}
     set {_group = newValue}
@@ -97,26 +88,10 @@ public nonisolated struct Agentrepl_V1_DesktopBanner: Sendable {
 
   public init() {}
 
-  fileprivate var _postID: Agentrepl_V1_DesktopBannerPostId? = nil
   fileprivate var _title: Agentrepl_V1_DesktopBannerTitle? = nil
   fileprivate var _body: Agentrepl_V1_DesktopBannerBody? = nil
   fileprivate var _group: Agentrepl_V1_DesktopBannerGroup? = nil
   fileprivate var _click: Agentrepl_V1_DesktopBannerClickToken? = nil
-}
-
-/// The identity of one post, minted by the daemon per banner and unique for
-/// the daemon's lifetime. Opaque to the app, which only echoes it.
-public nonisolated struct Agentrepl_V1_DesktopBannerPostId: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  /// Increasing per post within one daemon process; never zero.
-  public var value: UInt64 = 0
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
 }
 
 /// The banner's title line, as macOS draws it in bold.
@@ -155,7 +130,7 @@ public nonisolated struct Agentrepl_V1_DesktopBannerGroup: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Opaque to the app; the daemon keys it by workspace.
+  /// Opaque to the launcher; the daemon keys it by workspace.
   public var id: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -164,7 +139,8 @@ public nonisolated struct Agentrepl_V1_DesktopBannerGroup: Sendable {
 }
 
 /// A TYPED ECHO TOKEN: what a banner's click selects. Minted by the daemon,
-/// stored by the app on the platform notification as serialized bytes, and
+/// stored by the launcher on the platform notification as serialized bytes,
+/// and
 /// returned unchanged when the user clicks the banner, however long after the
 /// post and whichever daemon serves by then. It names the workspace rather
 /// than a post, so a click on a banner a previous daemon posted still selects
@@ -191,13 +167,108 @@ public nonisolated struct Agentrepl_V1_DesktopBannerClickToken: Sendable {
   fileprivate var _workspace: Workspace_V1_WorkspaceRef? = nil
 }
 
+/// What the platform's notification center did with one banner.
+public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// THE ARM IS THE OUTCOME. REQUIRED.
+  public var outcome: Agentrepl_V1_DesktopBannerPostOutcome.OneOf_Outcome? = nil
+
+  /// The notification center accepted the banner. Whether macOS then shows
+  /// it at once, or files it in Notification Center because a Focus is on,
+  /// is the user's setting and not reported.
+  public var posted: Agentrepl_V1_DesktopBannerPostOutcomePosted {
+    get {
+      if case .posted(let v)? = outcome {return v}
+      return Agentrepl_V1_DesktopBannerPostOutcomePosted()
+    }
+    set {outcome = .posted(newValue)}
+  }
+
+  /// The user has not allowed Zettel to post notifications, so the banner
+  /// was refused. Remedied only in System Settings → Notifications → Zettel.
+  public var notAllowed: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed {
+    get {
+      if case .notAllowed(let v)? = outcome {return v}
+      return Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed()
+    }
+    set {outcome = .notAllowed(newValue)}
+  }
+
+  /// The notification center refused the banner for another reason.
+  public var failed: Agentrepl_V1_DesktopBannerPostOutcomeFailed {
+    get {
+      if case .failed(let v)? = outcome {return v}
+      return Agentrepl_V1_DesktopBannerPostOutcomeFailed()
+    }
+    set {outcome = .failed(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  /// THE ARM IS THE OUTCOME. REQUIRED.
+  public nonisolated enum OneOf_Outcome: Equatable, Sendable {
+    /// The notification center accepted the banner. Whether macOS then shows
+    /// it at once, or files it in Notification Center because a Focus is on,
+    /// is the user's setting and not reported.
+    case posted(Agentrepl_V1_DesktopBannerPostOutcomePosted)
+    /// The user has not allowed Zettel to post notifications, so the banner
+    /// was refused. Remedied only in System Settings → Notifications → Zettel.
+    case notAllowed(Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed)
+    /// The notification center refused the banner for another reason.
+    case failed(Agentrepl_V1_DesktopBannerPostOutcomeFailed)
+
+  }
+
+  public init() {}
+}
+
+/// The notification center accepted the banner.
+public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcomePosted: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// The user has not allowed Zettel to post notifications.
+public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// The notification center refused the banner for a reason other than
+/// permission.
+public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcomeFailed: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The platform's own description of the error, verbatim, for the record.
+  public var platformError: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "agentrepl.v1"
 
 nonisolated extension Agentrepl_V1_DesktopBanner: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".DesktopBanner"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}title\0\u{1}body\0\u{1}group\0\u{1}click\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}body\0\u{1}group\0\u{1}click\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -205,11 +276,10 @@ nonisolated extension Agentrepl_V1_DesktopBanner: SwiftProtobuf.Message, SwiftPr
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._postID) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._title) }()
-      case 3: try { try decoder.decodeSingularMessageField(value: &self._body) }()
-      case 4: try { try decoder.decodeSingularMessageField(value: &self._group) }()
-      case 5: try { try decoder.decodeSingularMessageField(value: &self._click) }()
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._title) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._body) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._group) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._click) }()
       default: break
       }
     }
@@ -220,60 +290,26 @@ nonisolated extension Agentrepl_V1_DesktopBanner: SwiftProtobuf.Message, SwiftPr
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._postID {
+    try { if let v = self._title {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    try { if let v = self._title {
+    try { if let v = self._body {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
-    try { if let v = self._body {
+    try { if let v = self._group {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     } }()
-    try { if let v = self._group {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    } }()
     try { if let v = self._click {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Agentrepl_V1_DesktopBanner, rhs: Agentrepl_V1_DesktopBanner) -> Bool {
-    if lhs._postID != rhs._postID {return false}
     if lhs._title != rhs._title {return false}
     if lhs._body != rhs._body {return false}
     if lhs._group != rhs._group {return false}
     if lhs._click != rhs._click {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Agentrepl_V1_DesktopBannerPostId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostId"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.value) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.value != 0 {
-      try visitor.visitSingularUInt64Field(value: self.value, fieldNumber: 1)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Agentrepl_V1_DesktopBannerPostId, rhs: Agentrepl_V1_DesktopBannerPostId) -> Bool {
-    if lhs.value != rhs.value {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -398,6 +434,158 @@ nonisolated extension Agentrepl_V1_DesktopBannerClickToken: SwiftProtobuf.Messag
 
   public static func ==(lhs: Agentrepl_V1_DesktopBannerClickToken, rhs: Agentrepl_V1_DesktopBannerClickToken) -> Bool {
     if lhs._workspace != rhs._workspace {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Agentrepl_V1_DesktopBannerPostOutcome: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostOutcome"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}posted\0\u{3}not_allowed\0\u{1}failed\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: Agentrepl_V1_DesktopBannerPostOutcomePosted?
+        var hadOneofValue = false
+        if let current = self.outcome {
+          hadOneofValue = true
+          if case .posted(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.outcome = .posted(v)
+        }
+      }()
+      case 2: try {
+        var v: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed?
+        var hadOneofValue = false
+        if let current = self.outcome {
+          hadOneofValue = true
+          if case .notAllowed(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.outcome = .notAllowed(v)
+        }
+      }()
+      case 3: try {
+        var v: Agentrepl_V1_DesktopBannerPostOutcomeFailed?
+        var hadOneofValue = false
+        if let current = self.outcome {
+          hadOneofValue = true
+          if case .failed(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.outcome = .failed(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.outcome {
+    case .posted?: try {
+      guard case .posted(let v)? = self.outcome else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .notAllowed?: try {
+      guard case .notAllowed(let v)? = self.outcome else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .failed?: try {
+      guard case .failed(let v)? = self.outcome else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Agentrepl_V1_DesktopBannerPostOutcome, rhs: Agentrepl_V1_DesktopBannerPostOutcome) -> Bool {
+    if lhs.outcome != rhs.outcome {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Agentrepl_V1_DesktopBannerPostOutcomePosted: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostOutcomePosted"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Agentrepl_V1_DesktopBannerPostOutcomePosted, rhs: Agentrepl_V1_DesktopBannerPostOutcomePosted) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostOutcomeNotAllowed"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed, rhs: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Agentrepl_V1_DesktopBannerPostOutcomeFailed: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostOutcomeFailed"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}platform_error\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.platformError) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.platformError.isEmpty {
+      try visitor.visitSingularStringField(value: self.platformError, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Agentrepl_V1_DesktopBannerPostOutcomeFailed, rhs: Agentrepl_V1_DesktopBannerPostOutcomeFailed) -> Bool {
+    if lhs.platformError != rhs.platformError {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -8820,7 +8820,7 @@ type FooterStatusActivityUpdateComponent struct {
 	//	*FooterStatusActivityUpdateComponent_Webapp
 	//	*FooterStatusActivityUpdateComponent_Zettel
 	//	*FooterStatusActivityUpdateComponent_Tests
-	//	*FooterStatusActivityUpdateComponent_Notifier
+	//	*FooterStatusActivityUpdateComponent_Launcher
 	Component     isFooterStatusActivityUpdateComponent_Component `protobuf_oneof:"component"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -8926,10 +8926,10 @@ func (x *FooterStatusActivityUpdateComponent) GetTests() *FooterStatusActivityUp
 	return nil
 }
 
-func (x *FooterStatusActivityUpdateComponent) GetNotifier() *FooterStatusActivityUpdateComponentNotifier {
+func (x *FooterStatusActivityUpdateComponent) GetLauncher() *FooterStatusActivityUpdateComponentLauncher {
 	if x != nil {
-		if x, ok := x.Component.(*FooterStatusActivityUpdateComponent_Notifier); ok {
-			return x.Notifier
+		if x, ok := x.Component.(*FooterStatusActivityUpdateComponent_Launcher); ok {
+			return x.Launcher
 		}
 	}
 	return nil
@@ -8974,9 +8974,9 @@ type FooterStatusActivityUpdateComponent_Tests struct {
 	Tests *FooterStatusActivityUpdateComponentTests `protobuf:"bytes,7,opt,name=tests,proto3,oneof"`
 }
 
-type FooterStatusActivityUpdateComponent_Notifier struct {
-	// Zettel.app, the macOS desktop notifier.
-	Notifier *FooterStatusActivityUpdateComponentNotifier `protobuf:"bytes,8,opt,name=notifier,proto3,oneof"`
+type FooterStatusActivityUpdateComponent_Launcher struct {
+	// The launcher, Zettel.app, which posts every macOS desktop banner.
+	Launcher *FooterStatusActivityUpdateComponentLauncher `protobuf:"bytes,8,opt,name=launcher,proto3,oneof"`
 }
 
 func (*FooterStatusActivityUpdateComponent_Store) isFooterStatusActivityUpdateComponent_Component() {}
@@ -8997,7 +8997,7 @@ func (*FooterStatusActivityUpdateComponent_Zettel) isFooterStatusActivityUpdateC
 
 func (*FooterStatusActivityUpdateComponent_Tests) isFooterStatusActivityUpdateComponent_Component() {}
 
-func (*FooterStatusActivityUpdateComponent_Notifier) isFooterStatusActivityUpdateComponent_Component() {
+func (*FooterStatusActivityUpdateComponent_Launcher) isFooterStatusActivityUpdateComponent_Component() {
 }
 
 // The record store service.
@@ -9259,27 +9259,27 @@ func (*FooterStatusActivityUpdateComponentTests) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{127}
 }
 
-// Zettel.app, the macOS desktop notifier.
-type FooterStatusActivityUpdateComponentNotifier struct {
+// The launcher, Zettel.app, which posts every macOS desktop banner.
+type FooterStatusActivityUpdateComponentLauncher struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterStatusActivityUpdateComponentNotifier) Reset() {
-	*x = FooterStatusActivityUpdateComponentNotifier{}
+func (x *FooterStatusActivityUpdateComponentLauncher) Reset() {
+	*x = FooterStatusActivityUpdateComponentLauncher{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[128]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterStatusActivityUpdateComponentNotifier) String() string {
+func (x *FooterStatusActivityUpdateComponentLauncher) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterStatusActivityUpdateComponentNotifier) ProtoMessage() {}
+func (*FooterStatusActivityUpdateComponentLauncher) ProtoMessage() {}
 
-func (x *FooterStatusActivityUpdateComponentNotifier) ProtoReflect() protoreflect.Message {
+func (x *FooterStatusActivityUpdateComponentLauncher) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[128]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -9291,8 +9291,8 @@ func (x *FooterStatusActivityUpdateComponentNotifier) ProtoReflect() protoreflec
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterStatusActivityUpdateComponentNotifier.ProtoReflect.Descriptor instead.
-func (*FooterStatusActivityUpdateComponentNotifier) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterStatusActivityUpdateComponentLauncher.ProtoReflect.Descriptor instead.
+func (*FooterStatusActivityUpdateComponentLauncher) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{128}
 }
 
@@ -19918,7 +19918,7 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06webapp\x18\x05 \x01(\v26.frontend.v1.FooterStatusActivityUpdateComponentWebappH\x00R\x06webapp\x12P\n" +
 	"\x06zettel\x18\x06 \x01(\v26.frontend.v1.FooterStatusActivityUpdateComponentZettelH\x00R\x06zettel\x12M\n" +
 	"\x05tests\x18\a \x01(\v25.frontend.v1.FooterStatusActivityUpdateComponentTestsH\x00R\x05tests\x12V\n" +
-	"\bnotifier\x18\b \x01(\v28.frontend.v1.FooterStatusActivityUpdateComponentNotifierH\x00R\bnotifierB\v\n" +
+	"\blauncher\x18\b \x01(\v28.frontend.v1.FooterStatusActivityUpdateComponentLauncherH\x00R\blauncherB\v\n" +
 	"\tcomponent\"*\n" +
 	"(FooterStatusActivityUpdateComponentStore\",\n" +
 	"*FooterStatusActivityUpdateComponentSidecar\"+\n" +
@@ -19927,7 +19927,7 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	")FooterStatusActivityUpdateComponentWebapp\"+\n" +
 	")FooterStatusActivityUpdateComponentZettel\"*\n" +
 	"(FooterStatusActivityUpdateComponentTests\"-\n" +
-	"+FooterStatusActivityUpdateComponentNotifier\"\x89\x01\n" +
+	"+FooterStatusActivityUpdateComponentLauncher\"\x89\x01\n" +
 	"\x1eFooterStatusActivityUpdateNote\x12_\n" +
 	"\x0eshim_when_idle\x18\x01 \x01(\v27.frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdleH\x00R\fshimWhenIdleB\x06\n" +
 	"\x04note\",\n" +
@@ -20639,7 +20639,7 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterStatusActivityUpdateComponentWebapp)(nil),     // 126: frontend.v1.FooterStatusActivityUpdateComponentWebapp
 	(*FooterStatusActivityUpdateComponentZettel)(nil),     // 127: frontend.v1.FooterStatusActivityUpdateComponentZettel
 	(*FooterStatusActivityUpdateComponentTests)(nil),      // 128: frontend.v1.FooterStatusActivityUpdateComponentTests
-	(*FooterStatusActivityUpdateComponentNotifier)(nil),   // 129: frontend.v1.FooterStatusActivityUpdateComponentNotifier
+	(*FooterStatusActivityUpdateComponentLauncher)(nil),   // 129: frontend.v1.FooterStatusActivityUpdateComponentLauncher
 	(*FooterStatusActivityUpdateNote)(nil),                // 130: frontend.v1.FooterStatusActivityUpdateNote
 	(*FooterStatusActivityUpdateNoteShimWhenIdle)(nil),    // 131: frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdle
 	(*FooterStatusAgentReplFault)(nil),                    // 132: frontend.v1.FooterStatusAgentReplFault
@@ -20997,7 +20997,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	126, // 188: frontend.v1.FooterStatusActivityUpdateComponent.webapp:type_name -> frontend.v1.FooterStatusActivityUpdateComponentWebapp
 	127, // 189: frontend.v1.FooterStatusActivityUpdateComponent.zettel:type_name -> frontend.v1.FooterStatusActivityUpdateComponentZettel
 	128, // 190: frontend.v1.FooterStatusActivityUpdateComponent.tests:type_name -> frontend.v1.FooterStatusActivityUpdateComponentTests
-	129, // 191: frontend.v1.FooterStatusActivityUpdateComponent.notifier:type_name -> frontend.v1.FooterStatusActivityUpdateComponentNotifier
+	129, // 191: frontend.v1.FooterStatusActivityUpdateComponent.launcher:type_name -> frontend.v1.FooterStatusActivityUpdateComponentLauncher
 	131, // 192: frontend.v1.FooterStatusActivityUpdateNote.shim_when_idle:type_name -> frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdle
 	133, // 193: frontend.v1.FooterStatusAgentReplFault.degraded:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDegraded
 	134, // 194: frontend.v1.FooterStatusAgentReplFault.severed:type_name -> frontend.v1.FooterSubStatusAgentReplFaultSevered
@@ -21415,7 +21415,7 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterStatusActivityUpdateComponent_Webapp)(nil),
 		(*FooterStatusActivityUpdateComponent_Zettel)(nil),
 		(*FooterStatusActivityUpdateComponent_Tests)(nil),
-		(*FooterStatusActivityUpdateComponent_Notifier)(nil),
+		(*FooterStatusActivityUpdateComponent_Launcher)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[129].OneofWrappers = []any{
 		(*FooterStatusActivityUpdateNote_ShimWhenIdle)(nil),

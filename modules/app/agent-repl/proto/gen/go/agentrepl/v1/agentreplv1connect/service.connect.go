@@ -307,12 +307,6 @@ const (
 	// AgentReplUpdatePersistentWifiModeProcedure is the fully-qualified name of the AgentRepl's
 	// UpdatePersistentWifiMode RPC.
 	AgentReplUpdatePersistentWifiModeProcedure = "/agentrepl.v1.AgentRepl/UpdatePersistentWifiMode"
-	// AgentReplWatchDesktopBannersProcedure is the fully-qualified name of the AgentRepl's
-	// WatchDesktopBanners RPC.
-	AgentReplWatchDesktopBannersProcedure = "/agentrepl.v1.AgentRepl/WatchDesktopBanners"
-	// AgentReplReportDesktopBannerPostedProcedure is the fully-qualified name of the AgentRepl's
-	// ReportDesktopBannerPosted RPC.
-	AgentReplReportDesktopBannerPostedProcedure = "/agentrepl.v1.AgentRepl/ReportDesktopBannerPosted"
 	// AgentReplReportDesktopBannerClickedProcedure is the fully-qualified name of the AgentRepl's
 	// ReportDesktopBannerClicked RPC.
 	AgentReplReportDesktopBannerClickedProcedure = "/agentrepl.v1.AgentRepl/ReportDesktopBannerClicked"
@@ -596,8 +590,6 @@ var (
 	agentReplClientLogMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("ClientLog")
 	agentReplReportLatenciesMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ReportLatencies")
 	agentReplUpdatePersistentWifiModeMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
-	agentReplWatchDesktopBannersMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchDesktopBanners")
-	agentReplReportDesktopBannerPostedMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportDesktopBannerPosted")
 	agentReplReportDesktopBannerClickedMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("ReportDesktopBannerClicked")
 	agentReplRegisterWorkspaceMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplRegisterWorkspacesMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspaces")
@@ -979,12 +971,6 @@ type AgentReplClient interface {
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
-	// The notifier app's standing stream of banners to post. See
-	// endpoint_watch_desktop_banners.proto.
-	WatchDesktopBanners(context.Context, *connect.Request[v1.WatchDesktopBannersRequest]) (*connect.ServerStreamForClient[v1.WatchDesktopBannersResponse], error)
-	// Whether the platform took one banner the stream handed the app. See
-	// endpoint_report_desktop_banner_posted.proto.
-	ReportDesktopBannerPosted(context.Context, *connect.Request[v1.ReportDesktopBannerPostedRequest]) (*connect.Response[v1.ReportDesktopBannerPostedResponse], error)
 	// The user clicked a banner; Emacs selects its workspace. See
 	// endpoint_report_desktop_banner_clicked.proto.
 	ReportDesktopBannerClicked(context.Context, *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error)
@@ -1822,18 +1808,6 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdatePersistentWifiModeMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		watchDesktopBanners: connect.NewClient[v1.WatchDesktopBannersRequest, v1.WatchDesktopBannersResponse](
-			httpClient,
-			baseURL+AgentReplWatchDesktopBannersProcedure,
-			connect.WithSchema(agentReplWatchDesktopBannersMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		reportDesktopBannerPosted: connect.NewClient[v1.ReportDesktopBannerPostedRequest, v1.ReportDesktopBannerPostedResponse](
-			httpClient,
-			baseURL+AgentReplReportDesktopBannerPostedProcedure,
-			connect.WithSchema(agentReplReportDesktopBannerPostedMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
 		reportDesktopBannerClicked: connect.NewClient[v1.ReportDesktopBannerClickedRequest, v1.ReportDesktopBannerClickedResponse](
 			httpClient,
 			baseURL+AgentReplReportDesktopBannerClickedProcedure,
@@ -2333,8 +2307,6 @@ type agentReplClient struct {
 	clientLog                          *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
 	reportLatencies                    *connect.Client[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse]
 	updatePersistentWifiMode           *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
-	watchDesktopBanners                *connect.Client[v1.WatchDesktopBannersRequest, v1.WatchDesktopBannersResponse]
-	reportDesktopBannerPosted          *connect.Client[v1.ReportDesktopBannerPostedRequest, v1.ReportDesktopBannerPostedResponse]
 	reportDesktopBannerClicked         *connect.Client[v1.ReportDesktopBannerClickedRequest, v1.ReportDesktopBannerClickedResponse]
 	registerWorkspace                  *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	registerWorkspaces                 *connect.Client[v1.RegisterWorkspacesRequest, v1.RegisterWorkspacesResponse]
@@ -2894,16 +2866,6 @@ func (c *agentReplClient) ReportLatencies(ctx context.Context, req *connect.Requ
 // UpdatePersistentWifiMode calls agentrepl.v1.AgentRepl.UpdatePersistentWifiMode.
 func (c *agentReplClient) UpdatePersistentWifiMode(ctx context.Context, req *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
 	return c.updatePersistentWifiMode.CallUnary(ctx, req)
-}
-
-// WatchDesktopBanners calls agentrepl.v1.AgentRepl.WatchDesktopBanners.
-func (c *agentReplClient) WatchDesktopBanners(ctx context.Context, req *connect.Request[v1.WatchDesktopBannersRequest]) (*connect.ServerStreamForClient[v1.WatchDesktopBannersResponse], error) {
-	return c.watchDesktopBanners.CallServerStream(ctx, req)
-}
-
-// ReportDesktopBannerPosted calls agentrepl.v1.AgentRepl.ReportDesktopBannerPosted.
-func (c *agentReplClient) ReportDesktopBannerPosted(ctx context.Context, req *connect.Request[v1.ReportDesktopBannerPostedRequest]) (*connect.Response[v1.ReportDesktopBannerPostedResponse], error) {
-	return c.reportDesktopBannerPosted.CallUnary(ctx, req)
 }
 
 // ReportDesktopBannerClicked calls agentrepl.v1.AgentRepl.ReportDesktopBannerClicked.
@@ -3542,12 +3504,6 @@ type AgentReplHandler interface {
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
-	// The notifier app's standing stream of banners to post. See
-	// endpoint_watch_desktop_banners.proto.
-	WatchDesktopBanners(context.Context, *connect.Request[v1.WatchDesktopBannersRequest], *connect.ServerStream[v1.WatchDesktopBannersResponse]) error
-	// Whether the platform took one banner the stream handed the app. See
-	// endpoint_report_desktop_banner_posted.proto.
-	ReportDesktopBannerPosted(context.Context, *connect.Request[v1.ReportDesktopBannerPostedRequest]) (*connect.Response[v1.ReportDesktopBannerPostedResponse], error)
 	// The user clicked a banner; Emacs selects its workspace. See
 	// endpoint_report_desktop_banner_clicked.proto.
 	ReportDesktopBannerClicked(context.Context, *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error)
@@ -4381,18 +4337,6 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdatePersistentWifiModeMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplWatchDesktopBannersHandler := connect.NewServerStreamHandler(
-		AgentReplWatchDesktopBannersProcedure,
-		svc.WatchDesktopBanners,
-		connect.WithSchema(agentReplWatchDesktopBannersMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	agentReplReportDesktopBannerPostedHandler := connect.NewUnaryHandler(
-		AgentReplReportDesktopBannerPostedProcedure,
-		svc.ReportDesktopBannerPosted,
-		connect.WithSchema(agentReplReportDesktopBannerPostedMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
 	agentReplReportDesktopBannerClickedHandler := connect.NewUnaryHandler(
 		AgentReplReportDesktopBannerClickedProcedure,
 		svc.ReportDesktopBannerClicked,
@@ -4988,10 +4932,6 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplReportLatenciesHandler.ServeHTTP(w, r)
 		case AgentReplUpdatePersistentWifiModeProcedure:
 			agentReplUpdatePersistentWifiModeHandler.ServeHTTP(w, r)
-		case AgentReplWatchDesktopBannersProcedure:
-			agentReplWatchDesktopBannersHandler.ServeHTTP(w, r)
-		case AgentReplReportDesktopBannerPostedProcedure:
-			agentReplReportDesktopBannerPostedHandler.ServeHTTP(w, r)
 		case AgentReplReportDesktopBannerClickedProcedure:
 			agentReplReportDesktopBannerClickedHandler.ServeHTTP(w, r)
 		case AgentReplRegisterWorkspaceProcedure:
@@ -5523,14 +5463,6 @@ func (UnimplementedAgentReplHandler) ReportLatencies(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdatePersistentWifiMode is not implemented"))
-}
-
-func (UnimplementedAgentReplHandler) WatchDesktopBanners(context.Context, *connect.Request[v1.WatchDesktopBannersRequest], *connect.ServerStream[v1.WatchDesktopBannersResponse]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchDesktopBanners is not implemented"))
-}
-
-func (UnimplementedAgentReplHandler) ReportDesktopBannerPosted(context.Context, *connect.Request[v1.ReportDesktopBannerPostedRequest]) (*connect.Response[v1.ReportDesktopBannerPostedResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportDesktopBannerPosted is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) ReportDesktopBannerClicked(context.Context, *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error) {

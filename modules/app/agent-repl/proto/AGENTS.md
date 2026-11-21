@@ -17,11 +17,12 @@ decision there stands unless the new record reopens it by name.
 |---|---|---|---|
 | `conversation.v1` | `conversation/v1/` | the message model — `MessageEntry`, `MessagePayload`, the content model, `TokenUsage`. Imports nothing; the leaf everything shares | everyone |
 | `frontend.v1` | `frontend/v1/` | the UI components the webapp renders — `feed`, `topbar`, `sidebar`, `footer` | daemon, webapp |
-| `agentrepl.v1` | `agentrepl/v1/` | the agent-repl API surface — `service AgentRepl` (the endpoints clients call), the frame envelope a subscriber receives, the connect snapshot, and the acks | daemon, webapp; the notifier app (`notifier/`, Swift) its DESKTOP NOTIFIER section and that section's imports |
+| `agentrepl.v1` | `agentrepl/v1/` | the agent-repl API surface — `service AgentRepl` (the endpoints clients call), the frame envelope a subscriber receives, the connect snapshot, and the acks | daemon, webapp; the launcher (`launcher/`, Swift) its DESKTOP BANNERS section and that section's imports |
 | `shim.v1` | `shim/v1/` | what traverses the daemon↔shim boundary and only that boundary: handshakes, commands, receipts, health, replay and page requests, `BookkeepingEntry`, and the `ExternalEntry`/`EntryDelivery`/`MessagePage` read half | shim, daemon |
 | `store.v1` | `store/v1/` | the producer-side internal half: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
 | `state.v1` | `state/v1/` | daemon-internal only, including the schema the daemon marshals into its own SQLite store | daemon |
 | `zettel.v1` | `zettel/v1/` | the zettel service's API: the knowledge graph's threads, nodes, exchanges and sightings (`service Zettel`). The daemon is its only caller; `frontend.v1` imports its identities (`NodeId`, `NodeQuote`) as join keys the webapp echoes back | daemon, zettel service; identities: frontend.v1, agentrepl.v1, webapp |
+| `launcher.v1` | `launcher/v1/` | what a daemon says to the launcher (Zettel.app): each desktop banner to post and what macOS did with it, one length-delimited exchange per connection on the launcher's own socket, since the launcher serves no Connect | daemon, launcher |
 | `testservice.v1` | `testservice/v1/` | the test service's API: test gate runs started, watched by line and stopped (`service Tests`). The daemon is its only caller, so a daemon deploy never cuts a gate the service runs | daemon, test service |
 
 **What decides membership is who produces a message and where it is routed** —

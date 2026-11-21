@@ -1,0 +1,59 @@
+// launcher.proto — launcher.v1: what a daemon says to the launcher
+// (Zettel.app, launcher/), the resident macOS app that posts every desktop
+// banner under its own name and icon.
+//
+// THE LAUNCHER IS THE SERVER, AND IT OUTLIVES EVERY DAEMON. It accepts on
+// one unix socket that a socket holder owns for good
+// (app.zettel.sockethold.launcher; launcher/requirements.json), and every
+// daemon dials that socket to post a banner. So a daemon standing down, or
+// both daemons of a handover, post exactly like a daemon that is serving:
+// none of them needs a connection the launcher opened to it, and none can
+// find the launcher gone because it was talking to another daemon. While the
+// launcher restarts, a dial queues in the socket's backlog until it accepts.
+//
+// THE FRAMING. One exchange per connection, each message written as
+// protobuf's standard length-delimited form (a varint byte count, then the
+// message; Go's protodelim, Swift's BinaryDelimited): the daemon writes one
+// PostBannerRequest, the launcher writes one PostBannerResponse and closes.
+// The launcher answers only once macOS's notification center accepted or
+// refused the banner, so the daemon's read of the answer is the post.
+
+syntax = "proto3";
+
+package launcher.v1;
+
+import "agentrepl/v1/desktop_banner.proto";
+
+option go_package = "agentrepl/proto/launcher/v1;launcherv1";
+
+// One banner for the launcher to post.
+message PostBannerRequest {
+  // The banner, as the user sees it. REQUIRED.
+  agentrepl.v1.DesktopBanner banner = 1;
+  // The process posting it, for the launcher's record of which daemon each
+  // banner came from. REQUIRED, positive.
+  PostingDaemon daemon = 2;
+}
+
+// The daemon process posting a banner.
+message PostingDaemon {
+  // Its pid on the launcher's host.
+  int32 pid = 1;
+}
+
+// THE ARM IS THE ANSWER.
+message PostBannerResponse {
+  oneof result {
+    // What the platform's notification center did with the banner.
+    agentrepl.v1.DesktopBannerPostOutcome outcome = 1;
+    // The request could not be read as a banner to post, so nothing was
+    // posted.
+    PostBannerRefused refused = 2;
+  }
+}
+
+// The launcher could not take the request.
+message PostBannerRefused {
+  // Why, for the daemon's record: the field that was missing or unreadable.
+  string reason = 1;
+}
