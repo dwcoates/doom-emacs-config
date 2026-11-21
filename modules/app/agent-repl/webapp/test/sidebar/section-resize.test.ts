@@ -316,6 +316,29 @@ describe("installSectionResize", () => {
     expect([r.asked.length, r.queue.hasAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([0, false]);
   });
 
+  it("clears the resize cursor when the grip is detached before release", () => {
+    // Arrange
+    const r = rail({ sized: { queue: 1 } });
+    install(r, new Map([[r.queue, { stops: stops(6), lines: 1 }]]));
+    const g = drag(r.queue, 40, true);
+    g.remove();
+    // Act
+    primaryPointer("pointerup", document.body, 40);
+    // Assert
+    expect(document.documentElement.classList.contains(RESIZING_CLASS)).toBe(false);
+  });
+
+  it("clears the resize cursor when the pointer is cancelled", () => {
+    // Arrange
+    const r = rail({ sized: { queue: 1 } });
+    install(r, new Map([[r.queue, { stops: stops(6), lines: 1 }]]));
+    drag(r.queue, 40, true);
+    // Act
+    primaryPointer("pointercancel", document.body, 40);
+    // Assert
+    expect(document.documentElement.classList.contains(RESIZING_CLASS)).toBe(false);
+  });
+
   it("puts the wire's height back and asks nothing when Escape cancels the drag", () => {
     // Arrange
     const r = rail({ sized: { queue: 1 } });
