@@ -94,7 +94,21 @@ type TestRunRequest struct {
 	// not run, so it writes no profile. Off by default. Refused with
 	// `coverage`, whose instrumentation is what a profile would then measure,
 	// and with `record`, whose timings the profiler's overhead would skew.
-	Profile       bool `protobuf:"varint,8,opt,name=profile,proto3" json:"profile,omitempty"`
+	Profile bool `protobuf:"varint,8,opt,name=profile,proto3" json:"profile,omitempty"`
+	// A RERUN of cases recorded earlier (agentrepl.v1.RunTestsRerun): a
+	// selection naming a package, file, script, suite, test or group the tree no
+	// longer holds is DROPPED and reported (TestRunDropped) rather than refused,
+	// so a case renamed, moved or deleted since it was recorded never fails the
+	// run. Existence is the runner's own listing of the tree as it plans this
+	// run: a Go package's top-level tests, a vitest file's collected full names,
+	// an ERT file's loaded tests, a harness's --list groups, the roster's
+	// suites. Each selection names ONE case (one test, one group, or one whole
+	// target), so what is dropped is exactly one recorded case; a selection
+	// naming several is refused. A Go subtest path is never named, since no
+	// listing holds subtests: its top-level test is. When every selection is
+	// dropped the run is refused (TestRunRefused.nothing_left), never run as
+	// nothing.
+	DropMissing   bool `protobuf:"varint,9,opt,name=drop_missing,json=dropMissing,proto3" json:"drop_missing,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -181,6 +195,13 @@ func (x *TestRunRequest) GetDebugInfo() bool {
 func (x *TestRunRequest) GetProfile() bool {
 	if x != nil {
 		return x.Profile
+	}
+	return false
+}
+
+func (x *TestRunRequest) GetDropMissing() bool {
+	if x != nil {
+		return x.DropMissing
 	}
 	return false
 }
@@ -1382,7 +1403,7 @@ var File_testrun_v1_selection_proto protoreflect.FileDescriptor
 const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\n" +
 	"\x1atestrun/v1/selection.proto\x12\n" +
-	"testrun.v1\"\x8e\x02\n" +
+	"testrun.v1\"\xb1\x02\n" +
 	"\x0eTestRunRequest\x129\n" +
 	"\n" +
 	"selections\x18\x01 \x03(\v2\x19.testrun.v1.TestSelectionR\n" +
@@ -1394,7 +1415,8 @@ const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\tplan_only\x18\x06 \x01(\bR\bplanOnly\x12\x1d\n" +
 	"\n" +
 	"debug_info\x18\a \x01(\bR\tdebugInfo\x12\x18\n" +
-	"\aprofile\x18\b \x01(\bR\aprofile\"\xa3\x03\n" +
+	"\aprofile\x18\b \x01(\bR\aprofile\x12!\n" +
+	"\fdrop_missing\x18\t \x01(\bR\vdropMissing\"\xa3\x03\n" +
 	"\rTestSelection\x12C\n" +
 	"\n" +
 	"go_package\x18\x01 \x01(\v2\".testrun.v1.TestSelectionGoPackageH\x00R\tgoPackage\x12F\n" +
