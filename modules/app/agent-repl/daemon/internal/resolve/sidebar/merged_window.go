@@ -273,5 +273,5 @@ func (r *resolver) MergedRows() ([]*frontendv1.RosterRow, *frontendv1.RosterPush
 func (r *resolver) readRow(ws wsm.Workspace, rc rowContext) *frontendv1.RosterRow {
 	r.readOnly = true
 	defer func() { r.readOnly = false }()
-	return r.row(ws, rc, r.logFor(ws.ID))
+	return r.row(ws, false, rc, r.logFor(ws.ID))
 }

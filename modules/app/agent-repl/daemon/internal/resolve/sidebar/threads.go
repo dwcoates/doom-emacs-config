@@ -98,7 +98,12 @@ func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThre
 		if s, ok := r.state.workspaces[ws.ID]; ok && s.summary != "" {
 			row.Summary = &frontendv1.RosterThreadSummary{Text: s.summary}
 		}
-		if r.state.selected != nil && *r.state.selected == ws.ID {
+		current := r.state.selected != nil && *r.state.selected == ws.ID
+		// PRESENCE IS THE FACT, as `frontend.v1.RosterThreadHeld` states it.
+		if held(ws, false, current) {
+			row.Held = &frontendv1.RosterThreadHeld{}
+		}
+		if current {
 			row.Current = &frontendv1.RosterThreadCurrent{}
 			if s, ok := r.state.workspaces[ws.ID]; ok && s.outline != nil {
 				row.Outline = s.outline

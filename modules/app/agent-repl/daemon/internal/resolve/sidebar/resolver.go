@@ -550,7 +550,7 @@ func (r *resolver) rowFacts(ws wsm.Workspace, rc rowContext, log dlog.Logger) {
 	was := r.factsOnly
 	r.factsOnly = true
 	defer func() { r.factsOnly = was }()
-	r.row(ws, rc, log)
+	r.row(ws, false, rc, log)
 }
 
 // currentWorkspace resolves the roster's selection, or nil when nothing is

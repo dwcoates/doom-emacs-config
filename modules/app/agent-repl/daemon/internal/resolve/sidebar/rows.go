@@ -59,7 +59,10 @@ func (r *resolver) rowRepository(rec wsm.Workspace, log dlog.Logger) *frontendv1
 
 // row composes one workspace's row, as every list draws it. Its family is
 // its list's own row type's (openRow, hiddenRow).
-func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
+// row composes REC's row. FOLDED is whether a collapsed section folds its tab
+// (openRegion.folded); a row outside the Open section passes false, since only
+// a fold of the Open section folds a tab.
+func (r *resolver) row(rec wsm.Workspace, folded bool, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
 	s := r.state.workspace(rec.ID)
 	session := rc.sessions[rec.ID]
 	// THE ROW'S RECORDS ARE ITS WORKSPACE'S, in its own sink (logFor), never
@@ -174,6 +177,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		// ALWAYS SET: an editor opens the workspace only once this leaves
 		// `pending`, so a row without it would never be opened.
 		Availability: availability(s),
+	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowHeld` states it: the
+	// editor holds the workspace open.
+	if held(rec, folded, current) {
+		out.Held = &frontendv1.RosterRowHeld{}
 	}
 	out.Repository = r.rowRepository(rec, rowLog)
 	setStatus(out, armName, rowLog)
@@ -591,4 +599,13 @@ func departureArm(arm string) bool {
 func (r *resolver) logArmChange(ws ids.WorkspaceID, arm, previous, cause string) {
 	r.logFor(ws).Info("daemon.sidebar.status_arm_changed", "the roster published a new status arm for the row",
 		dlog.Context{"arm": arm, "previous_arm": previous, "cause": cause})
+}
+
+// held answers whether the editor holds WS open (wsm.Workspace.Holds), with
+// CURRENT the selection as the roster draws it: the marker is decided from the
+// same selection as the row's `current`, so the editor is never told to land
+// on a workspace the same push tells it not to hold.
+func held(ws wsm.Workspace, folded, current bool) bool {
+	ws.Current = current
+	return ws.Holds(folded)
 }
