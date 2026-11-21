@@ -165,7 +165,7 @@ message WatchHostWorkspaceResponse {
   // Retired (owner ruling, 2026-11-21): a banner click (7), an agent's
   // evaluation (10) and a rail click (12) ride the editor's daemon stream
   // (agentrepl.v1.WatchDaemonResponse), because each can name a workspace the
-  // editor holds no host stream for (frontend.v1.RosterRowHeld).
+  // editor holds no host stream for (frontend.v1.RosterRowVisibility).
   reserved 7, 10, 12;
   reserved "notification_clicked", "evaluate", "select_requested";
 }

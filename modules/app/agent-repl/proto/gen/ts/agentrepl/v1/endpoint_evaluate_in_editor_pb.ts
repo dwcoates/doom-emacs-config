@@ -4,7 +4,7 @@
 // ONE ROUND TRIP. The daemon pushes the text to the linked Emacs on its daemon
 // stream (agentrepl.v1.WatchDaemonResponse.evaluate, naming the workspace and
 // carrying a fresh EditorEvaluationToken), whether or not the editor holds the
-// workspace (frontend.v1.RosterRowHeld). The editor evaluates it in its one
+// workspace (frontend.v1.RosterRowVisibility). The editor evaluates it in its one
 // handler, with the workspace's composer current when it holds the workspace
 // and otherwise in a buffer of its own whose directory is the workspace's,
 // answers with AnswerEditorEvaluation, and this rpc returns that answer. An editor that does not answer within the

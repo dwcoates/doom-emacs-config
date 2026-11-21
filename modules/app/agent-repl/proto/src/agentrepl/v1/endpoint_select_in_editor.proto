@@ -18,7 +18,7 @@
 // by key took 10 (2026-10-23). Relayed, the click reaches Emacs as its daemon
 // stream's `select_requested` (WatchDaemonResponse), and Emacs requests the
 // switch through the same path every key takes, whether or not it holds the
-// workspace (frontend.v1.RosterRowHeld).
+// workspace (frontend.v1.RosterRowVisibility).
 //
 // WITH NO EMACS, THE DAEMON SELECTS. The event is handed to exactly the Emacs
 // daemon streams standing at that moment, and when there are none the daemon

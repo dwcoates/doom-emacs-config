@@ -5,7 +5,8 @@
 // naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
 // what that one workspace holds. Every figure is MEASURED: the daemon's
 // process collector (procmetrics) samples each process's physical footprint,
-// and Emacs reports each page's residency (agentrepl.v1 ReportPageResidency).
+// and a workspace's page is loaded exactly while it is visible
+// (frontend.v1.RosterRowVisibility).
 // Nothing here is estimated: the workspace pages share one WebKit web content
 // process, which reports one footprint for all of them, so no per-page byte
 // figure exists to draw and none is served.
@@ -553,10 +554,9 @@ type SidebarWorkspaceMemory struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace's shim.
 	Agent *SidebarWorkspaceMemoryAgent `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
-	// The workspace's page. UNSET until Emacs has reported it
-	// (ReportPageResidency), which it does for every open workspace it holds a
-	// slot for.
-	Page          *SidebarWorkspaceMemoryPage `protobuf:"bytes,2,opt,name=page,proto3,oneof" json:"page,omitempty"`
+	// The workspace's page, as its visibility decides it
+	// (frontend.v1.RosterRowVisibility). Always set.
+	Page          *SidebarWorkspaceMemoryPage `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -779,7 +779,8 @@ func (*SidebarWorkspaceMemoryAgentNotRunning) Descriptor() ([]byte, []int) {
 // The workspace's page.
 type SidebarWorkspaceMemoryPage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whether Emacs holds it.
+	// Whether the page is loaded: exactly while the workspace is visible
+	// (frontend.v1.RosterRowVisibility), and let go once it is not.
 	//
 	// Types that are valid to be assigned to State:
 	//
@@ -850,12 +851,12 @@ type isSidebarWorkspaceMemoryPage_State interface {
 }
 
 type SidebarWorkspaceMemoryPage_Loaded struct {
-	// It is loaded, and lets go as `release` says.
+	// It is loaded, held while the workspace is visible.
 	Loaded *SidebarWorkspaceMemoryPageLoaded `protobuf:"bytes,1,opt,name=loaded,proto3,oneof"`
 }
 
 type SidebarWorkspaceMemoryPage_NotLoaded struct {
-	// It is not loaded; the switch to the workspace loads it.
+	// It is not loaded: the workspace is not visible.
 	NotLoaded *SidebarWorkspaceMemoryPageNotLoaded `protobuf:"bytes,2,opt,name=not_loaded,json=notLoaded,proto3,oneof"`
 }
 
@@ -863,11 +864,11 @@ func (*SidebarWorkspaceMemoryPage_Loaded) isSidebarWorkspaceMemoryPage_State() {
 
 func (*SidebarWorkspaceMemoryPage_NotLoaded) isSidebarWorkspaceMemoryPage_State() {}
 
-// The page is loaded.
+// The page is loaded, held while the workspace is visible. Empty: presence is
+// the fact. Field 1 (`release`) is RETIRED: a page is let go when its
+// workspace stops being visible, and by no other rule.
 type SidebarWorkspaceMemoryPageLoaded struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// When it is unloaded.
-	Release       *SidebarWorkspaceMemoryPageRelease `protobuf:"bytes,1,opt,name=release,proto3" json:"release,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -902,238 +903,6 @@ func (*SidebarWorkspaceMemoryPageLoaded) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *SidebarWorkspaceMemoryPageLoaded) GetRelease() *SidebarWorkspaceMemoryPageRelease {
-	if x != nil {
-		return x.Release
-	}
-	return nil
-}
-
-// When a loaded page is unloaded (page-unload.el's rule for its status).
-type SidebarWorkspaceMemoryPageRelease struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The one rule that applies now.
-	//
-	// Types that are valid to be assigned to When:
-	//
-	//	*SidebarWorkspaceMemoryPageRelease_Held
-	//	*SidebarWorkspaceMemoryPageRelease_OnLeave
-	//	*SidebarWorkspaceMemoryPageRelease_At
-	When          isSidebarWorkspaceMemoryPageRelease_When `protobuf_oneof:"when"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarWorkspaceMemoryPageRelease) Reset() {
-	*x = SidebarWorkspaceMemoryPageRelease{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarWorkspaceMemoryPageRelease) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarWorkspaceMemoryPageRelease) ProtoMessage() {}
-
-func (x *SidebarWorkspaceMemoryPageRelease) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarWorkspaceMemoryPageRelease.ProtoReflect.Descriptor instead.
-func (*SidebarWorkspaceMemoryPageRelease) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *SidebarWorkspaceMemoryPageRelease) GetWhen() isSidebarWorkspaceMemoryPageRelease_When {
-	if x != nil {
-		return x.When
-	}
-	return nil
-}
-
-func (x *SidebarWorkspaceMemoryPageRelease) GetHeld() *SidebarWorkspaceMemoryPageReleaseHeld {
-	if x != nil {
-		if x, ok := x.When.(*SidebarWorkspaceMemoryPageRelease_Held); ok {
-			return x.Held
-		}
-	}
-	return nil
-}
-
-func (x *SidebarWorkspaceMemoryPageRelease) GetOnLeave() *SidebarWorkspaceMemoryPageReleaseOnLeave {
-	if x != nil {
-		if x, ok := x.When.(*SidebarWorkspaceMemoryPageRelease_OnLeave); ok {
-			return x.OnLeave
-		}
-	}
-	return nil
-}
-
-func (x *SidebarWorkspaceMemoryPageRelease) GetAt() *SidebarWorkspaceMemoryPageReleaseAt {
-	if x != nil {
-		if x, ok := x.When.(*SidebarWorkspaceMemoryPageRelease_At); ok {
-			return x.At
-		}
-	}
-	return nil
-}
-
-type isSidebarWorkspaceMemoryPageRelease_When interface {
-	isSidebarWorkspaceMemoryPageRelease_When()
-}
-
-type SidebarWorkspaceMemoryPageRelease_Held struct {
-	// Held while the workspace works; no unload is due.
-	Held *SidebarWorkspaceMemoryPageReleaseHeld `protobuf:"bytes,1,opt,name=held,proto3,oneof"`
-}
-
-type SidebarWorkspaceMemoryPageRelease_OnLeave struct {
-	// Unloaded the moment the user switches away from it.
-	OnLeave *SidebarWorkspaceMemoryPageReleaseOnLeave `protobuf:"bytes,2,opt,name=on_leave,json=onLeave,proto3,oneof"`
-}
-
-type SidebarWorkspaceMemoryPageRelease_At struct {
-	// Unloaded at an instant: an idle page an hour past its last prompt.
-	At *SidebarWorkspaceMemoryPageReleaseAt `protobuf:"bytes,3,opt,name=at,proto3,oneof"`
-}
-
-func (*SidebarWorkspaceMemoryPageRelease_Held) isSidebarWorkspaceMemoryPageRelease_When() {}
-
-func (*SidebarWorkspaceMemoryPageRelease_OnLeave) isSidebarWorkspaceMemoryPageRelease_When() {}
-
-func (*SidebarWorkspaceMemoryPageRelease_At) isSidebarWorkspaceMemoryPageRelease_When() {}
-
-// Held while the workspace works. Empty: presence is the fact.
-type SidebarWorkspaceMemoryPageReleaseHeld struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarWorkspaceMemoryPageReleaseHeld) Reset() {
-	*x = SidebarWorkspaceMemoryPageReleaseHeld{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarWorkspaceMemoryPageReleaseHeld) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarWorkspaceMemoryPageReleaseHeld) ProtoMessage() {}
-
-func (x *SidebarWorkspaceMemoryPageReleaseHeld) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarWorkspaceMemoryPageReleaseHeld.ProtoReflect.Descriptor instead.
-func (*SidebarWorkspaceMemoryPageReleaseHeld) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{15}
-}
-
-// Unloaded when the user switches away. Empty: presence is the fact.
-type SidebarWorkspaceMemoryPageReleaseOnLeave struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarWorkspaceMemoryPageReleaseOnLeave) Reset() {
-	*x = SidebarWorkspaceMemoryPageReleaseOnLeave{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarWorkspaceMemoryPageReleaseOnLeave) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarWorkspaceMemoryPageReleaseOnLeave) ProtoMessage() {}
-
-func (x *SidebarWorkspaceMemoryPageReleaseOnLeave) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarWorkspaceMemoryPageReleaseOnLeave.ProtoReflect.Descriptor instead.
-func (*SidebarWorkspaceMemoryPageReleaseOnLeave) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{16}
-}
-
-// Unloaded at an instant.
-type SidebarWorkspaceMemoryPageReleaseAt struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The instant, in Unix milliseconds; the page draws it as the time left
-	// ("unloads in 42 min") against its own clock, and as "soon" once past.
-	UnixMs        int64 `protobuf:"varint,1,opt,name=unix_ms,json=unixMs,proto3" json:"unix_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarWorkspaceMemoryPageReleaseAt) Reset() {
-	*x = SidebarWorkspaceMemoryPageReleaseAt{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarWorkspaceMemoryPageReleaseAt) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarWorkspaceMemoryPageReleaseAt) ProtoMessage() {}
-
-func (x *SidebarWorkspaceMemoryPageReleaseAt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarWorkspaceMemoryPageReleaseAt.ProtoReflect.Descriptor instead.
-func (*SidebarWorkspaceMemoryPageReleaseAt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *SidebarWorkspaceMemoryPageReleaseAt) GetUnixMs() int64 {
-	if x != nil {
-		return x.UnixMs
-	}
-	return 0
-}
-
 // The page is not loaded. Empty: presence is the fact.
 type SidebarWorkspaceMemoryPageNotLoaded struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1143,7 +912,7 @@ type SidebarWorkspaceMemoryPageNotLoaded struct {
 
 func (x *SidebarWorkspaceMemoryPageNotLoaded) Reset() {
 	*x = SidebarWorkspaceMemoryPageNotLoaded{}
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[18]
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1155,7 +924,7 @@ func (x *SidebarWorkspaceMemoryPageNotLoaded) String() string {
 func (*SidebarWorkspaceMemoryPageNotLoaded) ProtoMessage() {}
 
 func (x *SidebarWorkspaceMemoryPageNotLoaded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[18]
+	mi := &file_frontend_v1_sidebar_memory_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1168,7 +937,7 @@ func (x *SidebarWorkspaceMemoryPageNotLoaded) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use SidebarWorkspaceMemoryPageNotLoaded.ProtoReflect.Descriptor instead.
 func (*SidebarWorkspaceMemoryPageNotLoaded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{18}
+	return file_frontend_v1_sidebar_memory_proto_rawDescGZIP(), []int{14}
 }
 
 var File_frontend_v1_sidebar_memory_proto protoreflect.FileDescriptor
@@ -1207,11 +976,10 @@ const file_frontend_v1_sidebar_memory_proto_rawDesc = "" +
 	"\x0ffootprint_bytes\x18\x02 \x01(\x04H\x00R\x0efootprintBytes\x88\x01\x01B\x12\n" +
 	"\x10_footprint_bytes\"=\n" +
 	"\x12SidebarMemoryTotal\x12'\n" +
-	"\x0ffootprint_bytes\x18\x01 \x01(\x04R\x0efootprintBytes\"\xa3\x01\n" +
+	"\x0ffootprint_bytes\x18\x01 \x01(\x04R\x0efootprintBytes\"\x95\x01\n" +
 	"\x16SidebarWorkspaceMemory\x12>\n" +
-	"\x05agent\x18\x01 \x01(\v2(.frontend.v1.SidebarWorkspaceMemoryAgentR\x05agent\x12@\n" +
-	"\x04page\x18\x02 \x01(\v2'.frontend.v1.SidebarWorkspaceMemoryPageH\x00R\x04page\x88\x01\x01B\a\n" +
-	"\x05_page\"\xca\x01\n" +
+	"\x05agent\x18\x01 \x01(\v2(.frontend.v1.SidebarWorkspaceMemoryAgentR\x05agent\x12;\n" +
+	"\x04page\x18\x02 \x01(\v2'.frontend.v1.SidebarWorkspaceMemoryPageR\x04page\"\xca\x01\n" +
 	"\x1bSidebarWorkspaceMemoryAgent\x12K\n" +
 	"\arunning\x18\x01 \x01(\v2/.frontend.v1.SidebarWorkspaceMemoryAgentRunningH\x00R\arunning\x12U\n" +
 	"\vnot_running\x18\x02 \x01(\v22.frontend.v1.SidebarWorkspaceMemoryAgentNotRunningH\x00R\n" +
@@ -1225,18 +993,8 @@ const file_frontend_v1_sidebar_memory_proto_rawDesc = "" +
 	"\x06loaded\x18\x01 \x01(\v2-.frontend.v1.SidebarWorkspaceMemoryPageLoadedH\x00R\x06loaded\x12Q\n" +
 	"\n" +
 	"not_loaded\x18\x02 \x01(\v20.frontend.v1.SidebarWorkspaceMemoryPageNotLoadedH\x00R\tnotLoadedB\a\n" +
-	"\x05state\"l\n" +
-	" SidebarWorkspaceMemoryPageLoaded\x12H\n" +
-	"\arelease\x18\x01 \x01(\v2..frontend.v1.SidebarWorkspaceMemoryPageReleaseR\arelease\"\x8d\x02\n" +
-	"!SidebarWorkspaceMemoryPageRelease\x12H\n" +
-	"\x04held\x18\x01 \x01(\v22.frontend.v1.SidebarWorkspaceMemoryPageReleaseHeldH\x00R\x04held\x12R\n" +
-	"\bon_leave\x18\x02 \x01(\v25.frontend.v1.SidebarWorkspaceMemoryPageReleaseOnLeaveH\x00R\aonLeave\x12B\n" +
-	"\x02at\x18\x03 \x01(\v20.frontend.v1.SidebarWorkspaceMemoryPageReleaseAtH\x00R\x02atB\x06\n" +
-	"\x04when\"'\n" +
-	"%SidebarWorkspaceMemoryPageReleaseHeld\"*\n" +
-	"(SidebarWorkspaceMemoryPageReleaseOnLeave\">\n" +
-	"#SidebarWorkspaceMemoryPageReleaseAt\x12\x17\n" +
-	"\aunix_ms\x18\x01 \x01(\x03R\x06unixMs\"%\n" +
+	"\x05state\"1\n" +
+	" SidebarWorkspaceMemoryPageLoadedJ\x04\b\x01\x10\x02R\arelease\"%\n" +
 	"#SidebarWorkspaceMemoryPageNotLoadedB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
@@ -1251,27 +1009,23 @@ func file_frontend_v1_sidebar_memory_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_sidebar_memory_proto_rawDescData
 }
 
-var file_frontend_v1_sidebar_memory_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_frontend_v1_sidebar_memory_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_frontend_v1_sidebar_memory_proto_goTypes = []any{
-	(*SidebarMemoryOverview)(nil),                    // 0: frontend.v1.SidebarMemoryOverview
-	(*SidebarMemoryPages)(nil),                       // 1: frontend.v1.SidebarMemoryPages
-	(*SidebarMemoryStrain)(nil),                      // 2: frontend.v1.SidebarMemoryStrain
-	(*SidebarMemoryAgents)(nil),                      // 3: frontend.v1.SidebarMemoryAgents
-	(*SidebarMemoryAgentsNone)(nil),                  // 4: frontend.v1.SidebarMemoryAgentsNone
-	(*SidebarMemoryAgentsRunning)(nil),               // 5: frontend.v1.SidebarMemoryAgentsRunning
-	(*SidebarMemoryProcess)(nil),                     // 6: frontend.v1.SidebarMemoryProcess
-	(*SidebarMemoryTotal)(nil),                       // 7: frontend.v1.SidebarMemoryTotal
-	(*SidebarWorkspaceMemory)(nil),                   // 8: frontend.v1.SidebarWorkspaceMemory
-	(*SidebarWorkspaceMemoryAgent)(nil),              // 9: frontend.v1.SidebarWorkspaceMemoryAgent
-	(*SidebarWorkspaceMemoryAgentRunning)(nil),       // 10: frontend.v1.SidebarWorkspaceMemoryAgentRunning
-	(*SidebarWorkspaceMemoryAgentNotRunning)(nil),    // 11: frontend.v1.SidebarWorkspaceMemoryAgentNotRunning
-	(*SidebarWorkspaceMemoryPage)(nil),               // 12: frontend.v1.SidebarWorkspaceMemoryPage
-	(*SidebarWorkspaceMemoryPageLoaded)(nil),         // 13: frontend.v1.SidebarWorkspaceMemoryPageLoaded
-	(*SidebarWorkspaceMemoryPageRelease)(nil),        // 14: frontend.v1.SidebarWorkspaceMemoryPageRelease
-	(*SidebarWorkspaceMemoryPageReleaseHeld)(nil),    // 15: frontend.v1.SidebarWorkspaceMemoryPageReleaseHeld
-	(*SidebarWorkspaceMemoryPageReleaseOnLeave)(nil), // 16: frontend.v1.SidebarWorkspaceMemoryPageReleaseOnLeave
-	(*SidebarWorkspaceMemoryPageReleaseAt)(nil),      // 17: frontend.v1.SidebarWorkspaceMemoryPageReleaseAt
-	(*SidebarWorkspaceMemoryPageNotLoaded)(nil),      // 18: frontend.v1.SidebarWorkspaceMemoryPageNotLoaded
+	(*SidebarMemoryOverview)(nil),                 // 0: frontend.v1.SidebarMemoryOverview
+	(*SidebarMemoryPages)(nil),                    // 1: frontend.v1.SidebarMemoryPages
+	(*SidebarMemoryStrain)(nil),                   // 2: frontend.v1.SidebarMemoryStrain
+	(*SidebarMemoryAgents)(nil),                   // 3: frontend.v1.SidebarMemoryAgents
+	(*SidebarMemoryAgentsNone)(nil),               // 4: frontend.v1.SidebarMemoryAgentsNone
+	(*SidebarMemoryAgentsRunning)(nil),            // 5: frontend.v1.SidebarMemoryAgentsRunning
+	(*SidebarMemoryProcess)(nil),                  // 6: frontend.v1.SidebarMemoryProcess
+	(*SidebarMemoryTotal)(nil),                    // 7: frontend.v1.SidebarMemoryTotal
+	(*SidebarWorkspaceMemory)(nil),                // 8: frontend.v1.SidebarWorkspaceMemory
+	(*SidebarWorkspaceMemoryAgent)(nil),           // 9: frontend.v1.SidebarWorkspaceMemoryAgent
+	(*SidebarWorkspaceMemoryAgentRunning)(nil),    // 10: frontend.v1.SidebarWorkspaceMemoryAgentRunning
+	(*SidebarWorkspaceMemoryAgentNotRunning)(nil), // 11: frontend.v1.SidebarWorkspaceMemoryAgentNotRunning
+	(*SidebarWorkspaceMemoryPage)(nil),            // 12: frontend.v1.SidebarWorkspaceMemoryPage
+	(*SidebarWorkspaceMemoryPageLoaded)(nil),      // 13: frontend.v1.SidebarWorkspaceMemoryPageLoaded
+	(*SidebarWorkspaceMemoryPageNotLoaded)(nil),   // 14: frontend.v1.SidebarWorkspaceMemoryPageNotLoaded
 }
 var file_frontend_v1_sidebar_memory_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.SidebarMemoryOverview.pages:type_name -> frontend.v1.SidebarMemoryPages
@@ -1286,16 +1040,12 @@ var file_frontend_v1_sidebar_memory_proto_depIdxs = []int32{
 	10, // 9: frontend.v1.SidebarWorkspaceMemoryAgent.running:type_name -> frontend.v1.SidebarWorkspaceMemoryAgentRunning
 	11, // 10: frontend.v1.SidebarWorkspaceMemoryAgent.not_running:type_name -> frontend.v1.SidebarWorkspaceMemoryAgentNotRunning
 	13, // 11: frontend.v1.SidebarWorkspaceMemoryPage.loaded:type_name -> frontend.v1.SidebarWorkspaceMemoryPageLoaded
-	18, // 12: frontend.v1.SidebarWorkspaceMemoryPage.not_loaded:type_name -> frontend.v1.SidebarWorkspaceMemoryPageNotLoaded
-	14, // 13: frontend.v1.SidebarWorkspaceMemoryPageLoaded.release:type_name -> frontend.v1.SidebarWorkspaceMemoryPageRelease
-	15, // 14: frontend.v1.SidebarWorkspaceMemoryPageRelease.held:type_name -> frontend.v1.SidebarWorkspaceMemoryPageReleaseHeld
-	16, // 15: frontend.v1.SidebarWorkspaceMemoryPageRelease.on_leave:type_name -> frontend.v1.SidebarWorkspaceMemoryPageReleaseOnLeave
-	17, // 16: frontend.v1.SidebarWorkspaceMemoryPageRelease.at:type_name -> frontend.v1.SidebarWorkspaceMemoryPageReleaseAt
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	14, // 12: frontend.v1.SidebarWorkspaceMemoryPage.not_loaded:type_name -> frontend.v1.SidebarWorkspaceMemoryPageNotLoaded
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_sidebar_memory_proto_init() }
@@ -1309,7 +1059,6 @@ func file_frontend_v1_sidebar_memory_proto_init() {
 		(*SidebarMemoryAgents_Running)(nil),
 	}
 	file_frontend_v1_sidebar_memory_proto_msgTypes[6].OneofWrappers = []any{}
-	file_frontend_v1_sidebar_memory_proto_msgTypes[8].OneofWrappers = []any{}
 	file_frontend_v1_sidebar_memory_proto_msgTypes[9].OneofWrappers = []any{
 		(*SidebarWorkspaceMemoryAgent_Running)(nil),
 		(*SidebarWorkspaceMemoryAgent_NotRunning)(nil),
@@ -1319,18 +1068,13 @@ func file_frontend_v1_sidebar_memory_proto_init() {
 		(*SidebarWorkspaceMemoryPage_Loaded)(nil),
 		(*SidebarWorkspaceMemoryPage_NotLoaded)(nil),
 	}
-	file_frontend_v1_sidebar_memory_proto_msgTypes[14].OneofWrappers = []any{
-		(*SidebarWorkspaceMemoryPageRelease_Held)(nil),
-		(*SidebarWorkspaceMemoryPageRelease_OnLeave)(nil),
-		(*SidebarWorkspaceMemoryPageRelease_At)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_sidebar_memory_proto_rawDesc), len(file_frontend_v1_sidebar_memory_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

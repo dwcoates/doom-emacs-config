@@ -5,7 +5,8 @@
 // naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
 // what that one workspace holds. Every figure is MEASURED: the daemon's
 // process collector (procmetrics) samples each process's physical footprint,
-// and Emacs reports each page's residency (agentrepl.v1 ReportPageResidency).
+// and a workspace's page is loaded exactly while it is visible
+// (frontend.v1.RosterRowVisibility).
 // Nothing here is estimated: the workspace pages share one WebKit web content
 // process, which reports one footprint for all of them, so no per-page byte
 // figure exists to draw and none is served.
@@ -28,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/sidebar_memory.proto.
  */
 export const file_frontend_v1_sidebar_memory: GenFile = /*@__PURE__*/
-  fileDesc("CiBmcm9udGVuZC92MS9zaWRlYmFyX21lbW9yeS5wcm90bxILZnJvbnRlbmQudjEikQIKFVNpZGViYXJNZW1vcnlPdmVydmlldxIuCgVwYWdlcxgBIAEoCzIfLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlQYWdlcxIwCgZzdHJhaW4YAiABKAsyIC5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5U3RyYWluEjAKBmFnZW50cxgDIAEoCzIgLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlBZ2VudHMSNAoJcHJvY2Vzc2VzGAQgAygLMiEuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeVByb2Nlc3MSLgoFdG90YWwYBSABKAsyHy5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5VG90YWwiagoSU2lkZWJhck1lbW9yeVBhZ2VzEhwKD2Zvb3RwcmludF9ieXRlcxgBIAEoBEgAiAEBEg4KBmxvYWRlZBgCIAEoDRISCgpub3RfbG9hZGVkGAMgASgNQhIKEF9mb290cHJpbnRfYnl0ZXMiUQoTU2lkZWJhck1lbW9yeVN0cmFpbhIOCgZzdGFsbHMYASABKA0SEgoKYmxvY2tlZF9tcxgCIAEoBBIWCg53aW5kb3dfc2Vjb25kcxgDIAEoDSKQAQoTU2lkZWJhck1lbW9yeUFnZW50cxI0CgRub25lGAEgASgLMiQuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeUFnZW50c05vbmVIABI6CgdydW5uaW5nGAIgASgLMicuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeUFnZW50c1J1bm5pbmdIAEIHCgVzdGF0ZSIZChdTaWRlYmFyTWVtb3J5QWdlbnRzTm9uZSJbChpTaWRlYmFyTWVtb3J5QWdlbnRzUnVubmluZxINCgVjb3VudBgBIAEoDRIXCg9mb290cHJpbnRfYnl0ZXMYAiABKAQSFQoNYXZlcmFnZV9ieXRlcxgDIAEoBCJXChRTaWRlYmFyTWVtb3J5UHJvY2VzcxINCgVsYWJlbBgBIAEoCRIcCg9mb290cHJpbnRfYnl0ZXMYAiABKARIAIgBAUISChBfZm9vdHByaW50X2J5dGVzIi0KElNpZGViYXJNZW1vcnlUb3RhbBIXCg9mb290cHJpbnRfYnl0ZXMYASABKAQilgEKFlNpZGViYXJXb3Jrc3BhY2VNZW1vcnkSNwoFYWdlbnQYASABKAsyKC5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnQSOgoEcGFnZRgCIAEoCzInLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlSACIAQFCBwoFX3BhZ2UitQEKG1NpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudBJCCgdydW5uaW5nGAEgASgLMi8uZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50UnVubmluZ0gAEkkKC25vdF9ydW5uaW5nGAIgASgLMjIuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50Tm90UnVubmluZ0gAQgcKBXN0YXRlIlYKIlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudFJ1bm5pbmcSHAoPZm9vdHByaW50X2J5dGVzGAEgASgESACIAQFCEgoQX2Zvb3RwcmludF9ieXRlcyInCiVTaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnROb3RSdW5uaW5nIq4BChpTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZRI/CgZsb2FkZWQYASABKAsyLS5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZUxvYWRlZEgAEkYKCm5vdF9sb2FkZWQYAiABKAsyMC5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZU5vdExvYWRlZEgAQgcKBXN0YXRlImMKIFNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlTG9hZGVkEj8KB3JlbGVhc2UYASABKAsyLi5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZVJlbGVhc2Ui+gEKIVNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlUmVsZWFzZRJCCgRoZWxkGAEgASgLMjIuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VSZWxlYXNlSGVsZEgAEkkKCG9uX2xlYXZlGAIgASgLMjUuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VSZWxlYXNlT25MZWF2ZUgAEj4KAmF0GAMgASgLMjAuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VSZWxlYXNlQXRIAEIGCgR3aGVuIicKJVNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlUmVsZWFzZUhlbGQiKgooU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VSZWxlYXNlT25MZWF2ZSI2CiNTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZVJlbGVhc2VBdBIPCgd1bml4X21zGAEgASgDIiUKI1NpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlTm90TG9hZGVkQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
+  fileDesc("CiBmcm9udGVuZC92MS9zaWRlYmFyX21lbW9yeS5wcm90bxILZnJvbnRlbmQudjEikQIKFVNpZGViYXJNZW1vcnlPdmVydmlldxIuCgVwYWdlcxgBIAEoCzIfLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlQYWdlcxIwCgZzdHJhaW4YAiABKAsyIC5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5U3RyYWluEjAKBmFnZW50cxgDIAEoCzIgLmZyb250ZW5kLnYxLlNpZGViYXJNZW1vcnlBZ2VudHMSNAoJcHJvY2Vzc2VzGAQgAygLMiEuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeVByb2Nlc3MSLgoFdG90YWwYBSABKAsyHy5mcm9udGVuZC52MS5TaWRlYmFyTWVtb3J5VG90YWwiagoSU2lkZWJhck1lbW9yeVBhZ2VzEhwKD2Zvb3RwcmludF9ieXRlcxgBIAEoBEgAiAEBEg4KBmxvYWRlZBgCIAEoDRISCgpub3RfbG9hZGVkGAMgASgNQhIKEF9mb290cHJpbnRfYnl0ZXMiUQoTU2lkZWJhck1lbW9yeVN0cmFpbhIOCgZzdGFsbHMYASABKA0SEgoKYmxvY2tlZF9tcxgCIAEoBBIWCg53aW5kb3dfc2Vjb25kcxgDIAEoDSKQAQoTU2lkZWJhck1lbW9yeUFnZW50cxI0CgRub25lGAEgASgLMiQuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeUFnZW50c05vbmVIABI6CgdydW5uaW5nGAIgASgLMicuZnJvbnRlbmQudjEuU2lkZWJhck1lbW9yeUFnZW50c1J1bm5pbmdIAEIHCgVzdGF0ZSIZChdTaWRlYmFyTWVtb3J5QWdlbnRzTm9uZSJbChpTaWRlYmFyTWVtb3J5QWdlbnRzUnVubmluZxINCgVjb3VudBgBIAEoDRIXCg9mb290cHJpbnRfYnl0ZXMYAiABKAQSFQoNYXZlcmFnZV9ieXRlcxgDIAEoBCJXChRTaWRlYmFyTWVtb3J5UHJvY2VzcxINCgVsYWJlbBgBIAEoCRIcCg9mb290cHJpbnRfYnl0ZXMYAiABKARIAIgBAUISChBfZm9vdHByaW50X2J5dGVzIi0KElNpZGViYXJNZW1vcnlUb3RhbBIXCg9mb290cHJpbnRfYnl0ZXMYASABKAQiiAEKFlNpZGViYXJXb3Jrc3BhY2VNZW1vcnkSNwoFYWdlbnQYASABKAsyKC5mcm9udGVuZC52MS5TaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnQSNQoEcGFnZRgCIAEoCzInLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlQYWdlIrUBChtTaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnQSQgoHcnVubmluZxgBIAEoCzIvLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudFJ1bm5pbmdIABJJCgtub3RfcnVubmluZxgCIAEoCzIyLmZyb250ZW5kLnYxLlNpZGViYXJXb3Jrc3BhY2VNZW1vcnlBZ2VudE5vdFJ1bm5pbmdIAEIHCgVzdGF0ZSJWCiJTaWRlYmFyV29ya3NwYWNlTWVtb3J5QWdlbnRSdW5uaW5nEhwKD2Zvb3RwcmludF9ieXRlcxgBIAEoBEgAiAEBQhIKEF9mb290cHJpbnRfYnl0ZXMiJwolU2lkZWJhcldvcmtzcGFjZU1lbW9yeUFnZW50Tm90UnVubmluZyKuAQoaU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2USPwoGbG9hZGVkGAEgASgLMi0uZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VMb2FkZWRIABJGCgpub3RfbG9hZGVkGAIgASgLMjAuZnJvbnRlbmQudjEuU2lkZWJhcldvcmtzcGFjZU1lbW9yeVBhZ2VOb3RMb2FkZWRIAEIHCgVzdGF0ZSIxCiBTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZUxvYWRlZEoECAEQAlIHcmVsZWFzZSIlCiNTaWRlYmFyV29ya3NwYWNlTWVtb3J5UGFnZU5vdExvYWRlZEIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z");
 
 /**
  * The version hover's popup: one line per element, top to bottom.
@@ -309,11 +310,10 @@ export type SidebarWorkspaceMemory = Message<"frontend.v1.SidebarWorkspaceMemory
   agent?: SidebarWorkspaceMemoryAgent | undefined;
 
   /**
-   * The workspace's page. UNSET until Emacs has reported it
-   * (ReportPageResidency), which it does for every open workspace it holds a
-   * slot for.
+   * The workspace's page, as its visibility decides it
+   * (frontend.v1.RosterRowVisibility). Always set.
    *
-   * @generated from field: optional frontend.v1.SidebarWorkspaceMemoryPage page = 2;
+   * @generated from field: frontend.v1.SidebarWorkspaceMemoryPage page = 2;
    */
   page?: SidebarWorkspaceMemoryPage | undefined;
 };
@@ -406,13 +406,14 @@ export const SidebarWorkspaceMemoryAgentNotRunningSchema: GenMessage<SidebarWork
  */
 export type SidebarWorkspaceMemoryPage = Message<"frontend.v1.SidebarWorkspaceMemoryPage"> & {
   /**
-   * Whether Emacs holds it.
+   * Whether the page is loaded: exactly while the workspace is visible
+   * (frontend.v1.RosterRowVisibility), and let go once it is not.
    *
    * @generated from oneof frontend.v1.SidebarWorkspaceMemoryPage.state
    */
   state: {
     /**
-     * It is loaded, and lets go as `release` says.
+     * It is loaded, held while the workspace is visible.
      *
      * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageLoaded loaded = 1;
      */
@@ -420,7 +421,7 @@ export type SidebarWorkspaceMemoryPage = Message<"frontend.v1.SidebarWorkspaceMe
     case: "loaded";
   } | {
     /**
-     * It is not loaded; the switch to the workspace loads it.
+     * It is not loaded: the workspace is not visible.
      *
      * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageNotLoaded not_loaded = 2;
      */
@@ -437,17 +438,13 @@ export const SidebarWorkspaceMemoryPageSchema: GenMessage<SidebarWorkspaceMemory
   messageDesc(file_frontend_v1_sidebar_memory, 12);
 
 /**
- * The page is loaded.
+ * The page is loaded, held while the workspace is visible. Empty: presence is
+ * the fact. Field 1 (`release`) is RETIRED: a page is let go when its
+ * workspace stops being visible, and by no other rule.
  *
  * @generated from message frontend.v1.SidebarWorkspaceMemoryPageLoaded
  */
 export type SidebarWorkspaceMemoryPageLoaded = Message<"frontend.v1.SidebarWorkspaceMemoryPageLoaded"> & {
-  /**
-   * When it is unloaded.
-   *
-   * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageRelease release = 1;
-   */
-  release?: SidebarWorkspaceMemoryPageRelease | undefined;
 };
 
 /**
@@ -456,103 +453,6 @@ export type SidebarWorkspaceMemoryPageLoaded = Message<"frontend.v1.SidebarWorks
  */
 export const SidebarWorkspaceMemoryPageLoadedSchema: GenMessage<SidebarWorkspaceMemoryPageLoaded> = /*@__PURE__*/
   messageDesc(file_frontend_v1_sidebar_memory, 13);
-
-/**
- * When a loaded page is unloaded (page-unload.el's rule for its status).
- *
- * @generated from message frontend.v1.SidebarWorkspaceMemoryPageRelease
- */
-export type SidebarWorkspaceMemoryPageRelease = Message<"frontend.v1.SidebarWorkspaceMemoryPageRelease"> & {
-  /**
-   * The one rule that applies now.
-   *
-   * @generated from oneof frontend.v1.SidebarWorkspaceMemoryPageRelease.when
-   */
-  when: {
-    /**
-     * Held while the workspace works; no unload is due.
-     *
-     * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageReleaseHeld held = 1;
-     */
-    value: SidebarWorkspaceMemoryPageReleaseHeld;
-    case: "held";
-  } | {
-    /**
-     * Unloaded the moment the user switches away from it.
-     *
-     * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageReleaseOnLeave on_leave = 2;
-     */
-    value: SidebarWorkspaceMemoryPageReleaseOnLeave;
-    case: "onLeave";
-  } | {
-    /**
-     * Unloaded at an instant: an idle page an hour past its last prompt.
-     *
-     * @generated from field: frontend.v1.SidebarWorkspaceMemoryPageReleaseAt at = 3;
-     */
-    value: SidebarWorkspaceMemoryPageReleaseAt;
-    case: "at";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message frontend.v1.SidebarWorkspaceMemoryPageRelease.
- * Use `create(SidebarWorkspaceMemoryPageReleaseSchema)` to create a new message.
- */
-export const SidebarWorkspaceMemoryPageReleaseSchema: GenMessage<SidebarWorkspaceMemoryPageRelease> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 14);
-
-/**
- * Held while the workspace works. Empty: presence is the fact.
- *
- * @generated from message frontend.v1.SidebarWorkspaceMemoryPageReleaseHeld
- */
-export type SidebarWorkspaceMemoryPageReleaseHeld = Message<"frontend.v1.SidebarWorkspaceMemoryPageReleaseHeld"> & {
-};
-
-/**
- * Describes the message frontend.v1.SidebarWorkspaceMemoryPageReleaseHeld.
- * Use `create(SidebarWorkspaceMemoryPageReleaseHeldSchema)` to create a new message.
- */
-export const SidebarWorkspaceMemoryPageReleaseHeldSchema: GenMessage<SidebarWorkspaceMemoryPageReleaseHeld> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 15);
-
-/**
- * Unloaded when the user switches away. Empty: presence is the fact.
- *
- * @generated from message frontend.v1.SidebarWorkspaceMemoryPageReleaseOnLeave
- */
-export type SidebarWorkspaceMemoryPageReleaseOnLeave = Message<"frontend.v1.SidebarWorkspaceMemoryPageReleaseOnLeave"> & {
-};
-
-/**
- * Describes the message frontend.v1.SidebarWorkspaceMemoryPageReleaseOnLeave.
- * Use `create(SidebarWorkspaceMemoryPageReleaseOnLeaveSchema)` to create a new message.
- */
-export const SidebarWorkspaceMemoryPageReleaseOnLeaveSchema: GenMessage<SidebarWorkspaceMemoryPageReleaseOnLeave> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 16);
-
-/**
- * Unloaded at an instant.
- *
- * @generated from message frontend.v1.SidebarWorkspaceMemoryPageReleaseAt
- */
-export type SidebarWorkspaceMemoryPageReleaseAt = Message<"frontend.v1.SidebarWorkspaceMemoryPageReleaseAt"> & {
-  /**
-   * The instant, in Unix milliseconds; the page draws it as the time left
-   * ("unloads in 42 min") against its own clock, and as "soon" once past.
-   *
-   * @generated from field: int64 unix_ms = 1;
-   */
-  unixMs: bigint;
-};
-
-/**
- * Describes the message frontend.v1.SidebarWorkspaceMemoryPageReleaseAt.
- * Use `create(SidebarWorkspaceMemoryPageReleaseAtSchema)` to create a new message.
- */
-export const SidebarWorkspaceMemoryPageReleaseAtSchema: GenMessage<SidebarWorkspaceMemoryPageReleaseAt> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 17);
 
 /**
  * The page is not loaded. Empty: presence is the fact.
@@ -567,5 +467,5 @@ export type SidebarWorkspaceMemoryPageNotLoaded = Message<"frontend.v1.SidebarWo
  * Use `create(SidebarWorkspaceMemoryPageNotLoadedSchema)` to create a new message.
  */
 export const SidebarWorkspaceMemoryPageNotLoadedSchema: GenMessage<SidebarWorkspaceMemoryPageNotLoaded> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_sidebar_memory, 18);
+  messageDesc(file_frontend_v1_sidebar_memory, 14);
 

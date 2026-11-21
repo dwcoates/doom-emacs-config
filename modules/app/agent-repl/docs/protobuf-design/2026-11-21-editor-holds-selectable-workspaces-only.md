@@ -81,7 +81,94 @@ daemon stream's editor events, then the composer draft the daemon keeps.
 - **Accepted cost.** A switch to a folded workspace waits for that round trip
   (about 50ms), on top of the page boot such a switch already paid.
 
+### One persisted visibility gates every per-workspace allocation (supersedes the held marker)
+
+- **The principle (owner-settled 2026-11-21, relayed by `feed-bubble-zettel-headers`).**
+  A workspace's VISIBILITY is one of `NOT_VISIBLE`, `UNSELECTED_VISIBLE` and
+  `SELECTED`. It is persisted in wsm, kept current on every input change, and
+  is the single source of truth: no other layer recomputes it.
+- **The rules, in the owner's terms.**
+  - Only an open workspace (the sidebar's Open section) can be visible. Hidden
+    workspaces, closed ones, hidden merge workspaces and threads never are,
+    except as `SELECTED`.
+  - In an unfolded section, every top-level workspace is visible, and a child
+    of a visible, unfolded parent is visible.
+  - Under any fold (a repository section, a subsection, or any ancestor's
+    children fold), at any depth, a workspace is visible when it is WORKING or
+    UNVIEWED.
+  - The parent of a visible workspace is always visible, recursively.
+  - The selected workspace is always `SELECTED`, even one the rules exclude.
+- **What it gates.** Emacs holding a workspace (perspective, composer, host
+  stream); which pages are loaded; each page's `WatchWebWorkspace` stream;
+  which pages a deploy reloads; and which sessions start at boot and deploy
+  (`wsm.Workspace.Runs()` stays a superset of it). Page residency remembered
+  across restarts is superseded by it.
+- **Explicitly unchanged.** Keep-alives (`KeptWarm`, `LetsCacheLapse`, and the
+  2026-11-17 ruling that collapsing never affects keep-alives).
+- **Reopens, by name.** The held marker (`frontend.v1.RosterRowHeld`,
+  `frontend.v1.RosterThreadHeld`) and `wsm.Workspace.Holds()`;
+  `wsm.Workspace.DrawnInsideFold()` and the persisted `surfaced` mark;
+  page-unload's status, hold, grace and working-cap rules; the page residency
+  table and `agentrepl.v1.ReportPageResidency`.
+- **Assumptions (autonomous design, each recorded so it can be reversed).**
+  - WORKING is the status arms Emacs's page-unload called working, moved to the
+    daemon: `submitting`, `thinking`, `vendor_silent`, `clearing`,
+    `compacting`, `permission`, `question`, `idle_async`, `api_retrying`.
+  - UNVIEWED is a turn-end arm (`done`, `interrupted`, `turn_failed`) whose
+    result is unread: the complement of the viewed (PARTIAL) marker on such an
+    arm, the same endpoint the name's fade uses.
+  - A workspace no fold covers is visible; one a fold covers is visible only
+    when it is working, unviewed, or the ancestor of a visible workspace.
+  - The state is a `oneof` of dedicated messages on the wire, never an enum
+    (the protobuf design rules forbid state enums); in Go it is a typed
+    constant.
+  - A cold-gated page is still held back until the user asks for it: that hold
+    concerns the cold read, not visibility.
+  - The sidebar resolver derives the visibility on every render, since it holds
+    every input (the registry, the selection, each row's status and read
+    result), and persists each change through wsm.
+
 ## Landed changes
+
+### `frontend.v1.RosterRowVisibility` replaces the held marker
+
+- **What changed.** `frontend.v1.RosterRow.visibility` (field 78) and
+  `frontend.v1.RosterThreadRow.visibility` (field 8), each a
+  `frontend.v1.RosterRowVisibility`: a oneof of `not_visible`,
+  `unselected_visible` and `selected`. Always set. The held markers (fields 77
+  and 7, `frontend.v1.RosterRowHeld`, `frontend.v1.RosterThreadHeld`) are
+  retired.
+- **Why.** The owner's visibility is one persisted state with three values,
+  the selection among them, so a presence bool could not carry it.
+- **Consequences.** The editor holds every row that is not `not_visible`. A
+  thread row is `selected` or `not_visible`, never `unselected_visible`.
+
+### Page residency is retired; the hover's page line follows visibility
+
+- **What changed.** `agentrepl.v1.ReportPageResidency` and its endpoint file
+  are deleted. `agentrepl.v1.RegisterWorkspaceSuccess.last_known_page` (field
+  2) and `agentrepl.v1.LastKnownPage` are retired. The rail hover's
+  `frontend.v1.SidebarWorkspaceMemory.page` is always set, and
+  `frontend.v1.SidebarWorkspaceMemoryPageLoaded` loses its `release` (field 1)
+  with every `SidebarWorkspaceMemoryPageRelease*` message.
+- **Why.** A page is loaded exactly while its workspace is visible, and the
+  visibility is persisted, so Emacs's reported residency and its restart memory
+  say nothing the visibility does not.
+- **Accepted cost (a visible wording change).** The hover's page line reads
+  "loaded, held while visible" or "not loaded". The countdown and the
+  "unloads when you leave" forms are gone, as are the rules behind them.
+
+### `WatchWebWorkspace` refuses a workspace that is not visible
+
+- **What changed.** The endpoint's comment states the refusal: Connect
+  FailedPrecondition `not_visible`, before anything is subscribed.
+- **Why.** A page nobody can see costs the daemon no stream and no feed
+  pushes (allocation 3 of the owner's list).
+- **How it is decided.** By the sidebar resolver's current visibility, the
+  same value the roster just published, never by the store's copy, which is
+  written a moment later: the editor loads a page the moment a roster says the
+  workspace is visible, and its stream must not race that write.
+
 
 ### `frontend.v1.RosterRow.held` and `frontend.v1.RosterThreadRow.held`
 
@@ -135,7 +222,7 @@ daemon stream's editor events, then the composer draft the daemon keeps.
   daemon's `composer_drafts` table below were landed and then removed. Emacs
   already keeps a composer's text across the composer's death: its shutdown
   save writes the text into the workspace's prompt history as the unsent head
-  (`agent-repl--input-save-on-shutdown`), and a new composer puts it back
+  (`agent-repl--input-save-unsent`, run at Emacs's shutdown), and a new composer puts it back
   (`agent-repl--input-restore-unsent`). Closing a workspace now runs that same
   save. One mechanism restores a composer, it survives an Emacs restart, and
   it keeps pasted images, which the daemon's plain text did not.

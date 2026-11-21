@@ -296,12 +296,14 @@ message RosterThreadRow {
   // The thread's branches, drawn under its row. Set on the CURRENT thread's
   // row once the daemon holds its graph; UNSET on every other row.
   optional RosterThreadOutline outline = 6;
-  // The editor holds the thread open, as frontend.v1.RosterRowHeld states it
-  // for a workspace's row. A thread is drawn by no tab bar, so it is held
-  // exactly while it is the selection (the thread the Chat app shows), and
-  // closed in the editor once the user leaves it. The rail draws nothing for
-  // it.
-  optional RosterThreadHeld held = 7;
+  // Field 7 (`held`) is RETIRED: `visibility` states what the editor holds.
+  reserved 7;
+  reserved "held";
+  // The thread's visibility, as frontend.v1.RosterRowVisibility states it for
+  // a workspace's row. A thread is never visible but as the selection, so it
+  // is `selected` while the Chat app shows it and `not_visible` otherwise.
+  // Always set. The rail draws nothing for it.
+  RosterRowVisibility visibility = 8;
 }
 
 // A THREAD'S BRANCHES AROUND ITS SHOWN PATH (owner ruling, 2026-10-25:
@@ -438,9 +440,6 @@ message RosterThreadSummary {
 // The thread is the selected one. Empty: presence is the fact.
 message RosterThreadCurrent {}
 
-// The editor holds the thread open (RosterThreadRow.held). Empty: presence is
-// the fact.
-message RosterThreadHeld {}
 
 // One workspace's standing cold gate, as the webhost's gate dock draws it.
 message RosterColdGate {
@@ -879,26 +878,48 @@ message RosterRowOneShot {
 // (Recently Merged, Hidden) draw nothing for it.
 message RosterRowOpenOwnedPullRequest {}
 
-// The HELD marker: the editor holds this workspace open, with a perspective,
-// a composer and a host stream (WatchHostWorkspace). Empty: presence is the
-// fact.
+// A WORKSPACE'S VISIBILITY: whether the user can see it, which decides every
+// per-workspace allocation. THE ARM IS THE VISIBILITY; exactly one is set.
 //
-// THE DAEMON DECIDES IT (wsm.Workspace.Holds), and the editor never works it
-// out for itself: the same definition decides which workspaces run, so what
-// the editor holds and what the daemon runs cannot disagree. PRESENT exactly
-// while the workspace is the selection, or the tab bar draws it (an open
-// workspace whose section is unfolded, or one drawn inside a fold, surfaced
-// or current); ABSENT for a folded or hidden workspace the user is not
-// looking at, and for every closed or merged row, the selection included.
+// THE DAEMON DECIDES IT (wsm.Workspace.Visibility), keeps it in its store,
+// and states it on every row; no other layer works it out. A workspace is
+// visible when it is OPEN (the Open section's rows: never a hidden, closed or
+// hidden merge workspace, nor a thread) and either no fold covers it (a
+// repository section's, a subsection's, or any ancestor's children fold), or
+// it is WORKING (a turn or detached work runs, or it asks the user something),
+// or UNVIEWED (a finished turn whose result the user has not read: its name is
+// still drawn full). The parent of a visible workspace is visible too, at
+// every level, so a visible workspace always has an unbroken chain of rows
+// above it. The workspace the user has selected is `selected`, whatever the
+// rules above say of it.
 //
-// THE EDITOR'S OBLIGATION: open the workspace when the marker appears, and
-// close it in the editor alone when the marker goes (the daemon keeps the
-// workspace and its session; the editor keeps the composer's text in the
-// workspace's prompt history, as it does at its own shutdown). An
-// event aimed at a workspace the editor does not hold rides the editor's
-// daemon stream (WatchDaemonResponse), never the host stream it lacks. The
-// sidebar draws nothing for the marker.
-message RosterRowHeld {}
+// WHAT IT GATES: the editor holds a perspective, a composer and a host stream
+// (WatchHostWorkspace) for exactly the workspaces that are not `not_visible`,
+// and loads exactly their pages; the daemon serves a web stream
+// (WatchWebWorkspace) for them alone, reloads only their pages in a deploy,
+// and starts their sessions at boot (beside the ones a merge queue, a deploy
+// check or a fold-spared one-shot runs). The sidebar draws nothing for it.
+message RosterRowVisibility {
+  // The visibility; exactly one arm is set.
+  oneof visibility {
+    // The user cannot see the workspace: nothing is allocated for it.
+    RosterVisibilityNotVisible not_visible = 1;
+    // The user can see the workspace and is not looking at it.
+    RosterVisibilityUnselectedVisible unselected_visible = 2;
+    // The user is looking at the workspace: the selection.
+    RosterVisibilitySelected selected = 3;
+  }
+}
+
+// The user cannot see the workspace. Empty: the arm is the state.
+message RosterVisibilityNotVisible {}
+
+// The user can see the workspace and is not looking at it. Empty: the arm is
+// the state.
+message RosterVisibilityUnselectedVisible {}
+
+// The user is looking at the workspace. Empty: the arm is the state.
+message RosterVisibilitySelected {}
 
 // The ASYNC-MERGING marker: the workspace's OWN BRANCH is merging async, in a
 // hidden merge workspace forked from it. Empty: presence is the fact.
@@ -2465,10 +2486,14 @@ message RosterRow {
   // RosterRowOpenOwnedPullRequest, which carries the marker's whole contract.
   optional RosterRowOpenOwnedPullRequest open_owned_pull_request = 76;
 
-  // The row's HELD marker: present exactly while the editor holds the
-  // workspace open, absent otherwise. See RosterRowHeld, which carries the
-  // marker's whole contract.
-  optional RosterRowHeld held = 77;
+  // Field 77 (`held`) is RETIRED: the editor holds exactly the visible
+  // workspaces, which `visibility` states.
+  reserved 77;
+  reserved "held";
+
+  // The row's VISIBILITY, which gates every per-workspace allocation. Always
+  // set. See RosterRowVisibility, which carries its whole contract.
+  RosterRowVisibility visibility = 78;
 
   // The row's display name.
   RosterRowName name = 2;

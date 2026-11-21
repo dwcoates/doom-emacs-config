@@ -672,7 +672,7 @@ type WatchDaemonResponse_NotificationClicked struct {
 	// and reads the click back from the banner itself, so the switch it asks
 	// for is the only part of a notification Emacs acts on. It rides this
 	// stream, never the workspace's host stream, because a banner can name a
-	// workspace the editor does not hold (frontend.v1.RosterRowHeld). Sent
+	// workspace the editor does not hold (frontend.v1.RosterRowVisibility). Sent
 	// ONLY on an Emacs stream. An event, not state: never replayed to a late
 	// subscriber, because a click belongs to the moment it was made.
 	NotificationClicked *DaemonWorkspaceNotificationClicked `protobuf:"bytes,14,opt,name=notification_clicked,json=notificationClicked,proto3,oneof"`
