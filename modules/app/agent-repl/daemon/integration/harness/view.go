@@ -179,15 +179,7 @@ func (d *Daemon) forgetRetired(ws *workspacev1.WorkspaceRef, dropHeld bool) {
 // canonical form.
 func (d *Daemon) repositoryMates(main *workspacev1.WorkspaceRef) []*workspacev1.WorkspaceRef {
 	d.t.Helper()
-	// EVERY WORKSPACE THE DAEMON HOLDS, in one answer: a partial one could
-	// omit a mate, which would leave the main worktree unforgettable.
-	limit := uint32(100000)
-	resp, err := d.Client().FindWorkspaces(d.ctx, connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Limit: &limit}))
-	if err != nil || resp.Msg.GetSuccess().GetComplete() == nil {
-		d.t.Errorf("harness: retire %s from the shared daemon: FindWorkspaces = (%v, %v), want every workspace in one answer", main.GetDir(), resp, err)
-		return nil
-	}
-	found := resp.Msg.GetSuccess().GetComplete().GetWorkspaces()
+	found := d.everyWorkspace("retire " + main.GetDir())
 	repo := canonicalDir(main.GetDir())
 	var mates []*workspacev1.WorkspaceRef
 	for _, w := range found {
@@ -196,6 +188,20 @@ func (d *Daemon) repositoryMates(main *workspacev1.WorkspaceRef) []*workspacev1.
 		}
 	}
 	return mates
+}
+
+// everyWorkspace answers every workspace the daemon holds, in one answer: a
+// partial one could omit a workspace the retirement must take. WHAT names the
+// retirement step a failure is reported against.
+func (d *Daemon) everyWorkspace(what string) []*agentreplv1.FoundWorkspace {
+	d.t.Helper()
+	limit := uint32(100000)
+	resp, err := d.Client().FindWorkspaces(d.ctx, connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Limit: &limit}))
+	if err != nil || resp.Msg.GetSuccess().GetComplete() == nil {
+		d.t.Errorf("harness: %s from the shared daemon: FindWorkspaces = (%v, %v), want every workspace in one answer", what, resp, err)
+		return nil
+	}
+	return resp.Msg.GetSuccess().GetComplete().GetWorkspaces()
 }
 
 // canonicalDir is DIR with its symlinks resolved, or DIR as given when it no
