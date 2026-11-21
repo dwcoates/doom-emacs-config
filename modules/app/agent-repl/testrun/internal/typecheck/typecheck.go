@@ -26,11 +26,12 @@ package typecheck
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"agentrepl/testrun/internal/atomicfile"
 )
 
 // CacheDir is where a package's incremental typecheck keeps its state, under
@@ -98,33 +99,18 @@ func Publish(pkgDir, seed string) error {
 	return copyAtomic(BuildInfoPath(pkgDir), seed)
 }
 
-// copyAtomic copies src over dst through a temporary file beside dst, so a
-// reader sees the old dst or the new one, never part of one.
+// copyAtomic copies src over dst through atomicfile.Replace, so a reader sees
+// the old dst or the new one, never part of one.
 func copyAtomic(src, dst string) error {
-	in, err := os.Open(src)
+	data, err := os.ReadFile(src)
 	if err != nil {
-		return fmt.Errorf("typecheck: open %s: %w", src, err)
+		return fmt.Errorf("typecheck: read %s: %w", src, err)
 	}
-	defer in.Close()
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("typecheck: create %s: %w", filepath.Dir(dst), err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*")
-	if err != nil {
-		return fmt.Errorf("typecheck: create a temporary file beside %s: %w", dst, err)
-	}
-	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return fmt.Errorf("typecheck: copy %s to %s: %w", src, dst, err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return fmt.Errorf("typecheck: write %s: %w", tmp.Name(), err)
-	}
-	if err := os.Rename(tmp.Name(), dst); err != nil {
-		os.Remove(tmp.Name())
-		return fmt.Errorf("typecheck: replace %s: %w", dst, err)
+	if err := atomicfile.Replace(dst, filepath.Base(dst)+".*", data); err != nil {
+		return fmt.Errorf("typecheck: %w", err)
 	}
 	return nil
 }
