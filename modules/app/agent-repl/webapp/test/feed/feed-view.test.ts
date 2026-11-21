@@ -215,6 +215,35 @@ describe("isBubbleRow", () => {
   });
 });
 
+describe("createFeedController: every bubble carries the question control", () => {
+  function peerMessageRow(id: string) {
+    return create(FeedRowSchema, {
+      id: feedId(id),
+      order: orderFor(id),
+      row: {
+        case: "peerMessage",
+        value: {
+          from: { name: { text: "sender" }, sender: { case: "workspace", value: {} } },
+          prose: plainProse("hello"),
+        },
+      },
+    });
+  }
+
+  it.each([
+    ["a user prompt", () => userPromptRow("q1", "1")],
+    ["an agent prompt", () => agentPromptRow("q1", "vetter", "go")],
+    ["a peer message", () => peerMessageRow("q1")],
+  ])("draws it on %s asking about its own row", (_name, row) => {
+    // Arrange
+    const { controller, host } = fixture();
+    // Act
+    controller.applyPage(page([row()]), "replace");
+    // Assert
+    expect(host.querySelector(".question-control")?.getAttribute("data-asks-about")).toBe("q1");
+  });
+});
+
 describe("createFeedController: painting a page", () => {
   it("names the feed it draws", () => {
     const { host } = fixture();

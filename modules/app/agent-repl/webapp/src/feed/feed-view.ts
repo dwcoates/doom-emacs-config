@@ -88,6 +88,7 @@ import {
   type FeedPage,
   type FeedPageError,
   type FeedPageSuccess,
+  type FeedPeerMessage,
   type FeedSelection,
   type FeedTurnActivity,
   type FeedRow,
@@ -114,6 +115,7 @@ import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { userPromptDrawn } from "../prompt-echo.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
+import { requireRowId, withCardQuestion } from "./response-question.js";
 import { drawFeedSubagentHandback } from "./rows/subagent-handback.js";
 import { drawFeedMergeHandback } from "./rows/merge-handback.js";
 import { drawFeedTurnEnded } from "./rows/turn-ended.js";
@@ -129,6 +131,11 @@ import { childrenMatching, queryAll } from "../dom.js";
 import { entryLines, flashEntryOncePainted } from "./entries.js";
 import { FEED_ROW_ATTRIBUTE, feedRowId } from "./row-id.js";
 import { applyRevealedNode } from "./revealed-node.js";
+
+/** A peer message wears the question control every bubble does, at its top right (it has no copy control). */
+const drawPeerMessageWithQuestion = withCardQuestion((msg: FeedPeerMessage, rc: RowContext) =>
+  drawFeedPeerMessage(msg, rc.previous),
+);
 
 /** The row a new row is inserted above, sampled before the insert. */
 interface InsertSample {
@@ -1661,15 +1668,15 @@ export function createFeedController(
     const arm = requireCase(row.row, "FeedRow.row");
     switch (arm.case) {
       case "userPrompt": {
-        const body = drawFeedUserPrompt(arm.value, rc.previous);
+        const body = drawFeedUserPrompt(arm.value, requireRowId(rc), rc.previous);
         // A SUBMITTED PROMPT'S ECHO ENDS AT ITS ROW'S FIRST DRAW (prompt-echo.ts).
         userPromptDrawn(row.turn?.value);
         return body;
       }
       case "agentPrompt":
-        return drawFeedAgentPrompt(arm.value, rc.previous);
+        return drawFeedAgentPrompt(arm.value, requireRowId(rc), rc.previous);
       case "peerMessage":
-        return drawFeedPeerMessage(arm.value, rc.previous);
+        return drawPeerMessageWithQuestion(arm.value, rc);
       case "subagentHandback":
         return drawFeedSubagentHandback(arm.value);
       case "mergeHandback":

@@ -1,8 +1,8 @@
 // Package promptorigin is what a prompt's origin decides: whether the USER
 // sent it, which takes a one-shot back (UserSent); whether its turn is one the
-// shim ADOPTED, which no queue delivered (Adopted); whether the prompt
-// is DRAWN, shared by the two resolvers that draw a prompt (the feed's prompt
-// rows in resolve/feed and the held section's cards in resolve/holds), and
+// shim ADOPTED, which no queue delivered (Adopted); whether it is one of the
+// daemon's NOTICES (DaemonNotice), shared by the feed, the held section and
+// the queue, and
 // whether it is DELIVERED ON ARRIVAL, never held (DeliveredOnArrival),
 // whether it NAMES ITS SENDER, shared by every layer that carries a prompt's
 // sender (the rpc, the prompt handler, the queue, the store and the feed). It
@@ -44,16 +44,21 @@ func CheckSenderNamed(origin string, named bool) error {
 	return CheckSender(Named(origin), named)
 }
 
-// Unseen reports whether a prompt of ORIGIN is drawn NOWHERE in the webapp:
-// no prompt row in the feed, and no held card while it waits behind a
-// running turn. Such a prompt is the daemon's word to the agent alone, which
-// the user neither said nor needs to read: a merge queue subscription's
-// notice, a workspace subscription's notice, the brief notice that a
-// workspace derived from this one was created, landed or closed, a GitHub
-// pull request's, GitHub merge queue's or GitHub workflow run's notice to
-// the workspace following it, and the brief asking a workspace that left its one-shot state to file
-// itself into a subsection. The agent's reply to it is drawn as any reply is.
-func Unseen(origin conversationv1.PromptOrigin) bool {
+// DaemonNotice reports whether a prompt of ORIGIN is one of the daemon's
+// NOTICES to a workspace's agent: a merge queue subscription's notice, a
+// workspace subscription's notice, the brief notice that a workspace derived
+// from this one was created, landed or closed, a GitHub pull request's,
+// GitHub merge queue's or GitHub workflow run's notice to the workspace
+// following it, and the brief asking a workspace that left its one-shot state
+// to file itself into a subsection.
+//
+// A NOTICE IS DRAWN IN THE FEED (owner ruling, 2026-11-21, reversing the
+// earlier rule that it was drawn nowhere): as a prompt the daemon sent, headed
+// "Zettel <subsystem>" (frontend.v1.FeedUserPromptDaemonSender). It is
+// delivered on arrival, so it never waits as a held card, and it stands
+// outside the line the user's held prompts are judged and folded in
+// (holdfold.Seen); a turn it causes ends with no desktop banner.
+func DaemonNotice(origin conversationv1.PromptOrigin) bool {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
@@ -67,11 +72,11 @@ func Unseen(origin conversationv1.PromptOrigin) bool {
 	return false
 }
 
-// UnseenNamed is Unseen for an origin spelled as conversation.v1.PromptOrigin
+// DaemonNoticeNamed is DaemonNotice for an origin spelled as conversation.v1.PromptOrigin
 // names it, as a durable hold stores it. A name the vocabulary does not hold
-// is not unseen.
-func UnseenNamed(origin string) bool {
-	return Unseen(Named(origin))
+// is not a notice.
+func DaemonNoticeNamed(origin string) bool {
+	return DaemonNotice(Named(origin))
 }
 
 // DeliveredOnArrival reports whether a prompt of ORIGIN is delivered the

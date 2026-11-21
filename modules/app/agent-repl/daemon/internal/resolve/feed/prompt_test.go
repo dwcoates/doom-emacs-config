@@ -95,6 +95,56 @@ func TestTheAuthorLabelComesFromTheOrigin(t *testing.T) {
 	}
 }
 
+func TestADaemonSentPromptNamesTheSubsystemThatSentIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		want   string
+	}{
+		{"a merge test repair is the merge queue monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, "Merge Queue Monitor"},
+		{"a merge conflict repair is the merge queue monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, "Merge Queue Monitor"},
+		{"a deploy mediation brief is the deployment monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION, "Deployment Monitor"},
+		{"a pull request notice is the GitHub PR monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, "GitHub PR Monitor"},
+		{"a workspace notice is the workspace monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, "Workspace Monitor"},
+		{"a failed workspace create is the workspace creator's", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED, "Workspace Creator"},
+		{"a main sync repair is the main sync monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR, "Main Sync Monitor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			row := PromptRow(tc.origin, nil, SaidText("x"), nil)
+
+			// Assert.
+			got := row.GetUserPrompt().GetDaemonSender().GetSubsystem()
+			if got != tc.want {
+				t.Fatalf("daemon sender = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPromptNoDaemonSubsystemSentHasNoDaemonSender(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+	}{
+		{"a person's prompt", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		{"a workspace's initial brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED},
+		{"a prompt typed on claude.ai", conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			row := PromptRow(tc.origin, nil, SaidText("x"), nil)
+
+			// Assert.
+			if got := row.GetUserPrompt().GetDaemonSender(); got != nil {
+				t.Fatalf("daemon sender = %v, want none", got)
+			}
+		})
+	}
+}
+
 // A RESUMPTION AFTER RESTART IS UNDER THE HOOD (owner ruling, 2026-10-12): it
 // replaces the earlier rule that it drew a row labelled "Resumed after
 // restart". Its turn runs and shows as status; no prompt row is drawn.
@@ -113,20 +163,35 @@ func TestAResumptionAfterRestartDrawsNoPromptRow(t *testing.T) {
 	}
 }
 
-// A MERGE QUEUE NOTICE IS DRAWN NOWHERE (promptorigin.Unseen): its turn runs
-// and its reply is drawn, but the daemon's words to the agent are not.
-func TestAMergeQueueNoticeDrawsNoPromptRow(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
+// A DAEMON NOTICE IS DRAWN (owner ruling, 2026-11-21): as a prompt the daemon
+// sent, headed by the subsystem that sent it.
+func TestADaemonNoticeDrawsAPromptRowHeadedByItsSubsystem(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		want   string
+	}{
+		{"a merge queue notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, "Merge Queue Monitor"},
+		{"a pull request notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, "GitHub PR Monitor"},
+		{"a GitHub merge queue notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE, "GitHub Merge Queue Monitor"},
+		{"a GitHub workflow run notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE, "GitHub Workflow Monitor"},
+		{"a workspace notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, "Workspace Monitor"},
+		{"a derived workspace notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE, "Workspace Monitor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
 
-	// Act.
-	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, textBlock("merge queue of doom: fix landed"))
+			// Act.
+			h.promptWith("turn-1", tc.origin, textBlock("the notice"))
 
-	// Assert.
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetUserPrompt() != nil || row.GetMergeHandback() != nil {
-			t.Fatalf("drew a row %v for the daemon's notice", row)
-		}
+			// Assert.
+			got := h.only(rootFeed()).GetUserPrompt().GetDaemonSender().GetSubsystem()
+			if got != tc.want {
+				t.Fatalf("daemon sender = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -193,8 +258,9 @@ func TestPromptRowHiddenNamesEveryOriginTheFeedDrawsNoRowFor(t *testing.T) {
 		want   bool
 	}{
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, true},
-		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
-		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},

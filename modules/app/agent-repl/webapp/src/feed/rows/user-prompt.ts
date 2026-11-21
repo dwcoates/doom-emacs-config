@@ -17,10 +17,13 @@ import { USER_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedUserPrompt,
+  FeedUserPromptDaemonSender,
   FeedUserPromptBlock,
   FeedUserPromptBody,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { SlotMark } from "../../bubble/body.js";
+import { questionControl } from "../response-question.js";
+import { drawPromptAddressHeader } from "./agent-prompt.js";
 import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
 import { reserveCopyRoom } from "../../bubble/copy-room.js";
 import { markKnownCommands } from "./known-commands.js";
@@ -32,7 +35,7 @@ const PATH = "FeedUserPrompt";
  * The prompt bubble. It is still: no animation runs on it, in flight or not
  * (owner ruling, 2026-10-26).
  */
-export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement): HTMLElement {
+export function drawFeedUserPrompt(msg: FeedUserPrompt, row: string, previous?: HTMLElement): HTMLElement {
   log.info("drawing a user prompt row", {
     operation: "feed.draw-user-prompt",
     context: { arm: msg.result.case ?? "unset", commands: msg.commands.length },
@@ -47,6 +50,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
   switch (result.case) {
     case "success": {
       const body = requireMessage(result.value.body, `${PATH}.success.body`);
+      const look = userPromptLook(body, `${PATH}.success.body`, knownCommandsMark(msg));
       // PREVIOUS, the row's last draw, is updated in place (drawBubble), so a
       // re-push never replaces the box a reader is scrolled inside.
       return drawBubble(
@@ -54,7 +58,11 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
           role: "prompt",
           variant: "user",
           hooks: ["user"],
-          ...userPromptLook(body, `${PATH}.success.body`, knownCommandsMark(msg)),
+          // A PROMPT THE DAEMON SENT is headed as an agent-to-agent prompt that
+          // came in is: a left arrow, then "Zettel <subsystem>".
+          strip: msg.daemonSender === undefined ? undefined : [drawDaemonSenderHeader(msg.daemonSender)],
+          ...look,
+          corner: [questionControl(row), ...look.corner],
         },
         previous,
       ).bubble;
@@ -62,6 +70,11 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
     default:
       return unreachableArm(`${PATH}.result`, result.case);
   }
+}
+
+/** The header of a prompt the daemon itself sent: a left arrow, then "Zettel <subsystem>". */
+export function drawDaemonSenderHeader(sender: FeedUserPromptDaemonSender): HTMLElement {
+  return drawPromptAddressHeader(`Zettel ${sender.subsystem}`, "in", false);
 }
 
 /** The parts of a bubble that draw what a person typed as a user prompt does. */

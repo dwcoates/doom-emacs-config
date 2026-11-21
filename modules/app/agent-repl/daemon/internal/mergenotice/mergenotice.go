@@ -22,7 +22,8 @@
 // THE NOTICE TAKES THE PATH EVERY UNDER-THE-HOOD REPORT TO AN AGENT TAKES: a
 // deferred prompt submitted through the prompt handler, exactly as an async
 // merge's handback is (mergeworkspace.Service.HandBack), under its own origin
-// (PROMPT_ORIGIN_MERGE_QUEUE_NOTICE), which the feed draws no row for. It is
+// (PROMPT_ORIGIN_MERGE_QUEUE_NOTICE), which the feed draws as the Merge Queue
+// Monitor's notice (feed.DaemonSubsystem). It is
 // delivered on arrival (promptqueue's arrival.go): it joins a running turn
 // after its current tool call and wakes an idle agent, and is never held.
 //

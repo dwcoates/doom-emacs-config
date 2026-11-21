@@ -1044,7 +1044,7 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 	}
 }
 
-func TestTrayDrawsNoCardForAPromptDrawnNowhere(t *testing.T) {
+func TestTrayDrawsNoCardForADaemonNotice(t *testing.T) {
 	// Arrange: a merge queue notice waiting behind a running turn, beside a
 	// prompt the user sent.
 	r, surfaces := newRenderer(t)
@@ -1062,17 +1062,17 @@ func TestTrayDrawsNoCardForAPromptDrawnNowhere(t *testing.T) {
 		t.Fatalf("cards = %+v, want only the sent prompt's", cards)
 	}
 	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.holds.convert",
-		Message: "a held prompt of an origin drawn nowhere was skipped: the tray draws no card for it"}); !ok {
+		Message: "a held daemon notice was skipped: the tray draws no card for it"}); !ok {
 		t.Fatalf("no record of the skipped notice: %+v", surfaces.Records())
 	}
 }
 
 // THE TRAY ASKS holdfold.Seen whether a hold has a card, the reading the
 // queue's fold and classifier share: no file of the tray reads a hold's
-// origin as unseen by hand.
+// origin as a daemon notice by hand.
 func TestTrayAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 	// Arrange
-	handRolled := regexp.MustCompile(`Unseen(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
+	handRolled := regexp.MustCompile(`\bDaemonNotice(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
 
 	// Act
 	var found []string
@@ -1084,7 +1084,7 @@ func TestTrayAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 
 	// Assert
 	if len(found) > 0 {
-		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
+		t.Fatalf("these files read a hold as a daemon notice by hand instead of holdfold.Seen: %v", found)
 	}
 }
 

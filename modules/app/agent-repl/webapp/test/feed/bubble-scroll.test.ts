@@ -72,12 +72,10 @@ const KINDS: readonly Kind[] = [
   {
     name: "an agent-addressed prompt",
     draw: () =>
-      drawFeedAgentPrompt(
-        create(FeedAgentPromptSchema, {
+      drawFeedAgentPrompt(create(FeedAgentPromptSchema, {
           address: sentTo("Explore"),
           body: { blocks: [{ block: { case: "text", value: { prose: servedProse("go") } } }] },
-        }),
-      ),
+        }), "row-1"),
     meta: ".prompt-address",
     scroll: `.${BUBBLE_SCROLL_CLASS}`,
     siblings: true,

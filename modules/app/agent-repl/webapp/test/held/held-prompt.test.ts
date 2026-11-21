@@ -1296,12 +1296,12 @@ describe("the held prompt's spec: a user prompt's look on the held fill", () => 
     const { tc } = trayContext();
     const u = saying("fix **the** test");
     const held = drawHeldPrompt(u, tc).querySelector(".bubble-scroll");
-    const user = drawFeedUserPrompt(
-      create(FeedUserPromptSchema, {
+    const user = drawFeedUserPrompt(create(FeedUserPromptSchema, {
         author: { label: "You" },
         result: { case: "success", value: { body: u.body } },
-      }),
-    ).querySelector(".bubble-scroll");
+      }), "row-1").querySelector(".bubble-scroll");
+    // A held card is no feed row, so it has no question control to compare.
+    user?.querySelector(".question-control")?.remove();
     expect(held?.innerHTML).toBe(user?.innerHTML);
   });
 
@@ -2566,12 +2566,10 @@ describe("a held prompt folded", () => {
 
   it.each(["--bubble-pad-y", "--bubble-pad-x"])("pads the bubble as a user prompt does (%s)", (property) => {
     // Arrange
-    const user = drawFeedUserPrompt(
-      create(FeedUserPromptSchema, {
+    const user = drawFeedUserPrompt(create(FeedUserPromptSchema, {
         author: { label: "You" },
         result: { case: "success", value: { body: drawnBodyOf(saying("hi").said) } },
-      }),
-    );
+      }), "row-1");
     document.body.append(user);
     // Act / Assert
     try {

@@ -54,8 +54,8 @@ func (q *queue) itemAhead(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 		// ONLY A HOLD IN LINE IS JUDGED AGAINST (holdfold.InLine), the same
 		// reading the fold and the tray's "fold above" take: a prompt kept at a
 		// cold gate's answer is the user's alone to send (gatefate.go), and a
-		// prompt drawn nowhere was never seen, so a user's words folded into
-		// it would run under its origin, drawn nowhere (2026-10-31: a user's
+		// daemon notice is never held in that line, so a user's words folded
+		// into it would run under the notice's origin (2026-10-31: a user's
 		// prompt coalesced into the subsection placement brief queued behind
 		// the prompt ahead of it).
 		if !holdfold.InLine(standing[i]) {

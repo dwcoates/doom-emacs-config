@@ -149,7 +149,7 @@ window.bubbleCopy = {
         },
       },
     });
-    const bubble = drawFeedUserPrompt(msg);
+    const bubble = drawFeedUserPrompt(msg, "row-1");
     if (c.selected) bubble.classList.add(SELECTED_ENTRY_CLASS);
     if (c.expanded) bubble.querySelector(`.${BUBBLE_SCROLL_CLASS}`)?.classList.add(EXPANDED_CLASS);
     return measure(bubble);
