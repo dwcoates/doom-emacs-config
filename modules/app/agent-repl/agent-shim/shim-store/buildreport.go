@@ -41,24 +41,24 @@ func reportBuild(log *logging.Logger, deps buildReportDeps) {
 	r, err := deps.self()
 	if err != nil {
 		log.Log(logging.Fields{Operation: "store.buildreport.self-failed", Level: "error"},
-			"shim-store could not determine its own build to report at boot service=%s: %v",
-			buildreport.ServiceStore, err)
+			"shim-store could not determine its own build to report at boot service={service}: {cause}",
+			logging.Values{"service": buildreport.ServiceStore, "cause": err.Error()})
 		return
 	}
 	dir, err := deps.resolveDir(deps.getenv)
 	if err != nil {
 		log.Log(logging.Fields{Operation: "store.buildreport.dir-failed", Level: "error"},
-			"shim-store could not resolve its build report directory service=%s: %v",
-			buildreport.ServiceStore, err)
+			"shim-store could not resolve its build report directory service={service}: {cause}",
+			logging.Values{"service": buildreport.ServiceStore, "cause": err.Error()})
 		return
 	}
 	path := buildreport.Path(dir, buildreport.ServiceStore)
 	if err := deps.write(dir, buildreport.ServiceStore, r); err != nil {
 		log.Log(logging.Fields{Operation: "store.buildreport.write-failed", Level: "error", Path: path},
-			"shim-store failed to write its build report service=%s dir=%s: %v",
-			buildreport.ServiceStore, dir, err)
+			"shim-store failed to write its build report service={service} dir={dir}: {cause}",
+			logging.Values{"service": buildreport.ServiceStore, "dir": dir, "cause": err.Error()})
 		return
 	}
 	log.Log(logging.Fields{Operation: "store.buildreport", Path: path},
-		"shim-store reported its build build=%s path=%s", r.Build, path)
+		"shim-store reported its build build={build} path={path}", logging.Values{"build": r.Build, "path": path})
 }

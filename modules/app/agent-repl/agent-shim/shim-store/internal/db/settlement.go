@@ -69,6 +69,6 @@ func (d *DB) RunSettlements(ctx context.Context, runIDs []string) ([]SettledRun,
 	}
 	d.observeQuery(StatementRunSettlements, "detached_work", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementRunSettlements, "detached_work", base, int64(len(out)))
-	d.log.LogVerbose(base, "answered %d settled run(s) of %d asked", len(out), len(args))
+	d.log.LogVerbose(base, "answered {answered} settled run(s) of {asked} asked", logging.Values{"answered": len(out), "asked": len(args)})
 	return out, nil
 }

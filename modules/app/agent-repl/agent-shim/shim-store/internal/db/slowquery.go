@@ -203,7 +203,7 @@ func (d *DB) traceStatement(ctx context.Context, statement, table string, fields
 	fields.Statement = statement
 	fields.Rows = rows
 	fields.RequestID = logging.RequestIDFrom(ctx)
-	d.log.LogVerbose(fields, "statement ran statement=%s rows=%d", statement, rows)
+	d.log.LogVerbose(fields, "statement ran statement={statement} rows={rows}", logging.Values{"statement": statement, "rows": rows})
 }
 
 // BudgetWindow is how many observations of one statement family the store keeps
@@ -329,13 +329,13 @@ func (d *DB) observeQuery(statement, table string, fields logging.Fields, starte
 	fields.BudgetWindow = window
 	if over >= BudgetWarnAt {
 		fields.Level = "warn"
-		d.log.Log(fields, "SQLite statement family is persistently over its budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d%s",
-			statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window, classSuffix)
+		d.log.Log(fields, "SQLite statement family is persistently over its budget statement={statement} duration_ms={duration_ms} lock_wait_ms={lock_wait_ms} rows={rows} threshold_ms={threshold_ms} over_budget_recent={over}/{window}{class_suffix}",
+			logging.Values{"statement": statement, "duration_ms": elapsed.Milliseconds(), "lock_wait_ms": fields.LockWait.Milliseconds(), "rows": rows, "threshold_ms": threshold.Milliseconds(), "over": over, "window": window, "class_suffix": classSuffix})
 		return
 	}
 	fields.Level = "info"
-	d.log.Log(fields, "SQLite statement exceeded its budget on an isolated sample — the family's recent statements are within budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d%s",
-		statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window, classSuffix)
+	d.log.Log(fields, "SQLite statement exceeded its budget on an isolated sample — the family's recent statements are within budget statement={statement} duration_ms={duration_ms} lock_wait_ms={lock_wait_ms} rows={rows} threshold_ms={threshold_ms} over_budget_recent={over}/{window}{class_suffix}",
+		logging.Values{"statement": statement, "duration_ms": elapsed.Milliseconds(), "lock_wait_ms": fields.LockWait.Milliseconds(), "rows": rows, "threshold_ms": threshold.Milliseconds(), "over": over, "window": window, "class_suffix": classSuffix})
 }
 
 // WriteTimingOperation is the operation every per-write timing record carries.
@@ -358,6 +358,6 @@ func (d *DB) traceWriteTiming(statement string, fields logging.Fields, started t
 	fields.Duration = elapsed
 	fields.Exec = elapsed - fields.LockWait
 	fields.Rows = rows
-	d.log.LogVerbose(fields, "write timed statement=%s write_class=%s transaction=%d queue_wait_ms=%d exec_ms=%d rows=%d",
-		statement, fields.WriteClass, transaction, fields.LockWait.Milliseconds(), fields.Exec.Milliseconds(), rows)
+	d.log.LogVerbose(fields, "write timed statement={statement} write_class={write_class} transaction={transaction} queue_wait_ms={queue_wait_ms} exec_ms={exec_ms} rows={rows}",
+		logging.Values{"statement": statement, "write_class": fields.WriteClass, "transaction": transaction, "queue_wait_ms": fields.LockWait.Milliseconds(), "exec_ms": fields.Exec.Milliseconds(), "rows": rows})
 }

@@ -156,7 +156,7 @@ func (d *DB) ResidueShapes(ctx context.Context, kind *string, limit uint32, incl
 	}
 	d.observeQuery(StatementResidueShapes, "residue_shapes", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementResidueShapes, "residue_shapes", base, int64(len(out)))
-	d.log.LogVerbose(base, "residue shapes read shapes=%d one_kind=%t example=%t", len(out), kind != nil, includeExample)
+	d.log.LogVerbose(base, "residue shapes read shapes={shapes} one_kind={one_kind} example={example}", logging.Values{"shapes": len(out), "one_kind": kind != nil, "example": includeExample})
 	return out, nil
 }
 

@@ -44,9 +44,10 @@ func storePprofLogger() (*logging.Logger, *bytes.Buffer) {
 }
 
 type storeLogRecord struct {
-	Operation string `json:"operation"`
-	Level     string `json:"level"`
-	Message   string `json:"message"`
+	Operation string         `json:"operation"`
+	Level     string         `json:"level"`
+	Message   string         `json:"message"`
+	Context   map[string]any `json:"context"`
 }
 
 func decodeStoreRecords(t *testing.T, durable *bytes.Buffer) []storeLogRecord {

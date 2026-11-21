@@ -24,5 +24,5 @@ func startRuntimeProfiling(log *logging.Logger, getenv func(string) string, home
 // it, under the store's namespace.
 func recordProfilingEvent(log *logging.Logger, e profiling.Event) {
 	d := profiling.Describe("store", e)
-	log.Log(logging.Fields{Operation: "store." + d.Operation, Level: d.Level}, "%s", d.Text())
+	log.LogMessage(logging.Fields{Operation: "store." + d.Operation, Level: d.Level}, d.Message, logging.Values(d.Context()))
 }

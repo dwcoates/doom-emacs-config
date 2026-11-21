@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"agentrepl/shim-store/internal/logging"
@@ -39,7 +40,7 @@ func (s *Server) withResponseFlusher(next http.Handler) http.Handler {
 			// this records the same condition in the store's own log so the
 			// resulting CodeInternal is not a mystery.
 			s.log.Log(logging.Fields{Operation: "store.stream.flusher", Level: "warn"},
-				"this response writer cannot flush, so no standing stream can be opened on it writer=%T", w)
+				"this response writer cannot flush, so no standing stream can be opened on it writer={writer}", logging.Values{"writer": fmt.Sprintf("%T", w)})
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -61,6 +62,6 @@ func (s *Server) openStream(ctx context.Context, log *logging.Logger, operation 
 		return connect.NewError(connect.CodeInternal, ref)
 	}
 	flusher.Flush()
-	log.LogVerbose(logging.Fields{Operation: operation}, "response headers flushed; the stream is open")
+	log.LogVerbose(logging.Fields{Operation: operation}, "response headers flushed; the stream is open", nil)
 	return nil
 }

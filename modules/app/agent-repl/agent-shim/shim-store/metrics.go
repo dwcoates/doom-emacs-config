@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"agentrepl/logging/causelog"
+	"agentrepl/logging/logsite"
 	"agentrepl/logging/metrics"
 	"agentrepl/shim-store/internal/logging"
 
@@ -29,13 +30,13 @@ func closeMetricsSurface(surface *metrics.Server, log *logging.Logger) {
 // metricsRecord is the store's canonical logger as the metrics surface
 // records through it; a debug record is verbose.
 func metricsRecord(log *logging.Logger) metrics.Record {
-	return func(level, message string) {
+	return func(level string, message logsite.Message, values map[string]any) {
 		fields := logging.Fields{Operation: "store.metrics", Level: level}
 		if level == "debug" {
-			log.LogVerbose(fields, "%s", message)
+			log.LogVerboseMessage(fields, message, logging.Values(values))
 			return
 		}
-		log.Log(fields, "%s", message)
+		log.LogMessage(fields, message, logging.Values(values))
 	}
 }
 
@@ -107,11 +108,11 @@ func (p *peerMessages) Collect(ch chan<- prometheus.Metric) {
 	ends, err := p.ends.PeerMessageEnds(ctx)
 	answered := p.causes.Note("count", err, func(cause string) {
 		p.log.Log(logging.Fields{Operation: "store.metrics.peer-messages", Level: "error", Table: "peer_delivery"},
-			"the cross-session message count failed; the scrape omits %s until it answers timeout_ms=%d expected_ms=%d cause=%s",
-			peerMessagesName, p.timeout.Milliseconds(), peerMessagesMeasured.Milliseconds(), cause)
+			"the cross-session message count failed; the scrape omits {metric} until it answers timeout_ms={timeout_ms} expected_ms={expected_ms} cause={cause}",
+			logging.Values{"metric": peerMessagesName, "timeout_ms": p.timeout.Milliseconds(), "expected_ms": peerMessagesMeasured.Milliseconds(), "cause": cause})
 	}, func() {
 		p.log.Log(logging.Fields{Operation: "store.metrics.peer-messages", Level: "info", Table: "peer_delivery"},
-			"the cross-session message count answers again; the scrape serves %s", peerMessagesName)
+			"the cross-session message count answers again; the scrape serves {metric}", logging.Values{"metric": peerMessagesName})
 	})
 	if !answered {
 		return
@@ -128,7 +129,7 @@ func registerPeerMessages(surface *metrics.Server, ends peerMessageEnds, log *lo
 		return nil
 	}
 	if err := surface.Registry().Register(newPeerMessages(ends, log, peerMessagesTimeout)); err != nil {
-		log.Log(logging.Fields{Operation: "store.metrics", Level: "error"}, "could not register %s: %v", peerMessagesName, err)
+		log.Log(logging.Fields{Operation: "store.metrics", Level: "error"}, "could not register {metric}: {cause}", logging.Values{"metric": peerMessagesName, "cause": err.Error()})
 		return fmt.Errorf("register %s: %w", peerMessagesName, err)
 	}
 	return nil

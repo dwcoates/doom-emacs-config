@@ -123,7 +123,7 @@ func (d *DB) ensureAgent(ctx context.Context, tx *sql.Tx, agentID string, now in
 	if _, err := tx.ExecContext(ctx, upsertSQL, agentID, now); err != nil {
 		return d.queryError("store.db.write-batch", "agent", logging.Fields{AgentID: agentID}, storagef(err, "recording first sight of agent %q", agentID))
 	}
-	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: agentID}, "agent row ensured")
+	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: agentID}, "agent row ensured", nil)
 	return nil
 }
 
@@ -197,7 +197,7 @@ func (d *DB) createSpawnedAgent(ctx context.Context, tx *sql.Tx, spawnedBy strin
 		return d.queryError("store.db.write-batch", "agent", logging.Fields{AgentID: created}, storagef(err, "recording spawned agent %q", created))
 	}
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: created},
-		"spawned agent recorded spawned_by=%q", spawnedBy)
+		"spawned agent recorded spawned_by=\"{spawned_by}\"", logging.Values{"spawned_by": spawnedBy})
 	return nil
 }
 
@@ -226,7 +226,7 @@ func (d *DB) recordSettledSpawnLineage(ctx context.Context, tx *sql.Tx, spawnedB
 	fields := logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: created}
 	if created == "" {
 		fields.AgentID = spawnedBy
-		d.log.LogVerbose(fields, "a settled spawn names no created agent; it states no lineage")
+		d.log.LogVerbose(fields, "a settled spawn names no created agent; it states no lineage", nil)
 		return nil
 	}
 	const upsertSQL = `INSERT INTO agent (agent_id, spawned_by_agent, started_at_ms) VALUES (?, ?, ?)
@@ -234,7 +234,7 @@ func (d *DB) recordSettledSpawnLineage(ctx context.Context, tx *sql.Tx, spawnedB
 	if _, err := tx.ExecContext(ctx, upsertSQL, created, spawnedBy, now); err != nil {
 		return d.queryError("store.db.write-batch", "agent", fields, storagef(err, "recording the spawner of settled spawn %q", created))
 	}
-	d.log.LogVerbose(fields, "spawn lineage recorded from the settled spawn spawned_by=%q", spawnedBy)
+	d.log.LogVerbose(fields, "spawn lineage recorded from the settled spawn spawned_by=\"{spawned_by}\"", logging.Values{"spawned_by": spawnedBy})
 	return nil
 }
 
@@ -247,7 +247,7 @@ func (d *DB) endAgent(ctx context.Context, tx *sql.Tx, agentID string, terminal 
 	if _, err := tx.ExecContext(ctx, endSQL, now, terminal, agentID); err != nil {
 		return d.queryError("store.db.write-batch", "agent", logging.Fields{AgentID: agentID}, storagef(err, "ending agent %q", agentID))
 	}
-	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: agentID}, "agent terminal recorded")
+	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "agent", AgentID: agentID}, "agent terminal recorded", nil)
 	return nil
 }
 
@@ -371,7 +371,7 @@ func (d *DB) claimDetachedWorkForUnitBook(ctx context.Context, tx *sql.Tx, book,
 	}
 	if n > 0 {
 		d.log.Log(logging.Fields{Operation: "store.db.write-batch", Table: "detached_work", ActivityID: activityID, AgentID: book, Level: "info"},
-			"detached work of unit %q is now owned by %q, the agent whose book holds the unit's row (%d run(s))", activityID, book, n)
+			"detached work of unit \"{unit}\" is now owned by \"{owner}\", the agent whose book holds the unit's row ({runs} run(s))", logging.Values{"unit": activityID, "owner": book, "runs": n})
 	}
 	return nil
 }
@@ -485,8 +485,8 @@ func (d *DB) upsertDetachedWork(ctx context.Context, tx *sql.Tx, row detachedRow
 	case err == nil:
 		if standing != row.kind && standing != detachedKindDetached && row.kind != detachedKindDetached {
 			d.log.Log(logging.Fields{Operation: "store.db.detached-kind-conflict", Table: "detached_work", TaskID: row.workID, Level: "error"},
-				"a write named detached work %q as %s, but the record holds it as %s; the recorded kind stands",
-				row.workID, row.kind, standing)
+				"a write named detached work \"{work_id}\" as {kind}, but the record holds it as {standing_kind}; the recorded kind stands",
+				logging.Values{"work_id": row.workID, "kind": row.kind, "standing_kind": standing})
 		}
 	case isNoRows(err):
 	default:
@@ -506,7 +506,7 @@ func (d *DB) upsertDetachedWork(ctx context.Context, tx *sql.Tx, row detachedRow
 		return d.queryError("store.db.write-batch", "detached_work", logging.Fields{TaskID: row.workID}, storagef(err, "recording detached work %q", row.workID))
 	}
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "detached_work", TaskID: row.workID},
-		"detached work join row recorded kind=%s", row.kind)
+		"detached work join row recorded kind={kind}", logging.Values{"kind": row.kind})
 	return nil
 }
 
@@ -516,7 +516,7 @@ func (d *DB) endDetachedWork(ctx context.Context, tx *sql.Tx, workID string, ter
 	if _, err := tx.ExecContext(ctx, endSQL, now, terminal, workID); err != nil {
 		return d.queryError("store.db.write-batch", "detached_work", logging.Fields{TaskID: workID}, storagef(err, "ending detached work %q", workID))
 	}
-	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "detached_work", TaskID: workID}, "detached work terminal recorded")
+	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "detached_work", TaskID: workID}, "detached work terminal recorded", nil)
 	return nil
 }
 
@@ -542,7 +542,7 @@ func (d *DB) closeDetachedByOrigin(ctx context.Context, tx *sql.Tx, activityID s
 	}
 	if closed > 0 {
 		d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "detached_work", ActivityID: activityID},
-			"detached work closed by its origin unit's terminal rows=%d", closed)
+			"detached work closed by its origin unit's terminal rows={rows}", logging.Values{"rows": closed})
 	}
 	return nil
 }

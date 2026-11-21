@@ -86,7 +86,7 @@ func New(store Store, log *logging.Logger, watchBuffer int) *Server {
 		commits: newCommitSignal(),
 	}
 	s.http = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
-	log.Log(logging.Fields{Operation: "store.server.new"}, "store.v1.ShimStore ready watch_buffer=%d", s.fan.buffer)
+	log.Log(logging.Fields{Operation: "store.server.new"}, "store.v1.ShimStore ready watch_buffer={watch_buffer}", logging.Values{"watch_buffer": s.fan.buffer})
 	return s
 }
 
@@ -106,13 +106,13 @@ func (s *Server) Handler() http.Handler { return s.http.Handler }
 // Serve runs until Shutdown. It returns http.ErrServerClosed after an orderly
 // stop, exactly as http.Server does.
 func (s *Server) Serve(ln net.Listener) error {
-	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving store.v1.ShimStore")
+	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving store.v1.ShimStore", nil)
 	err := s.http.Serve(ln)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		s.log.Log(logging.Fields{Operation: "store.serve", Level: "error"}, "serving ended: %v", err)
+		s.log.Log(logging.Fields{Operation: "store.serve", Level: "error"}, "serving ended: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
-	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving stopped")
+	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving stopped", nil)
 	return err
 }
 
@@ -120,13 +120,14 @@ func (s *Server) Serve(ln net.Listener) error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		close(s.done)
-		s.log.Log(logging.Fields{Operation: "store.shutdown"}, "ending standing watches watchers=%d bash_watchers=%d outstanding_tokens=%d", s.fan.subscribers(), s.bashFan.subscribers(), s.tokens.outstanding())
+		s.log.Log(logging.Fields{Operation: "store.shutdown"}, "ending standing watches watchers={watchers} bash_watchers={bash_watchers} outstanding_tokens={outstanding_tokens}",
+			logging.Values{"watchers": s.fan.subscribers(), "bash_watchers": s.bashFan.subscribers(), "outstanding_tokens": s.tokens.outstanding()})
 	})
 	if err := s.http.Shutdown(ctx); err != nil {
-		s.log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "draining the HTTP server failed: %v", err)
+		s.log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "draining the HTTP server failed: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
-	s.log.Log(logging.Fields{Operation: "store.shutdown"}, "store.v1.ShimStore stopped")
+	s.log.Log(logging.Fields{Operation: "store.shutdown"}, "store.v1.ShimStore stopped", nil)
 	return nil
 }
 
@@ -161,7 +162,7 @@ func logRefusal(log *logging.Logger, operation string, ref *refusal, fields logg
 	fields.Level = ref.logLevel()
 	fields.RefusalSite = ref.site
 	fields.RefusalKind = ref.class.armName()
-	log.Log(fields, "refused: %s", ref.detail)
+	log.Log(fields, "refused: {detail}", logging.Values{"detail": ref.detail})
 }
 
 // storeRefusal maps a storage-layer error onto this layer's refusal.
@@ -231,7 +232,7 @@ func logStoreFailure(log *logging.Logger, operation string, ref *refusal, fields
 	fields.Operation = operation
 	fields.RefusalSite = ref.site
 	fields.Level = "debug"
-	log.LogVerbose(fields, "answering the failure arm: %s", ref.detail)
+	log.LogVerbose(fields, "answering the failure arm: {detail}", logging.Values{"detail": ref.detail})
 }
 
 // logOwnFailure records a failure this layer OWNS — one no lower layer saw, so
@@ -240,7 +241,7 @@ func logOwnFailure(log *logging.Logger, operation string, ref *refusal, fields l
 	fields.Operation = operation
 	fields.RefusalSite = ref.site
 	fields.Level = "error"
-	log.Log(fields, "failed: %s", ref.detail)
+	log.Log(fields, "failed: {detail}", logging.Values{"detail": ref.detail})
 }
 
 // ---- WriteBatch ----
@@ -251,7 +252,8 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	attribution.WriteClass = writeClassOf(msg.GetWriteClass()).String()
 	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header()).With(attribution)
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
-		"write batch entries=%d shapes=%d cursor_advance=%t", len(msg.GetBatch().GetEntries()), len(msg.GetShapes()), msg.GetBatch().GetCursorAdvance() != nil)
+		"write batch entries={entries} shapes={shapes} cursor_advance={cursor_advance}",
+		logging.Values{"entries": len(msg.GetBatch().GetEntries()), "shapes": len(msg.GetShapes()), "cursor_advance": msg.GetBatch().GetCursorAdvance() != nil})
 
 	if ref := validateWriteBatchRequest(msg); ref != nil {
 		logRefusal(log, "store.rpc.write-batch", ref, logging.Fields{Producer: msg.GetProducer()})
@@ -275,8 +277,8 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	}
 
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
-		"batch durable written=%d absorbed=%d skipped=%d page_lines=%d bash_rows=%d shapes=%d",
-		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), len(result.BashRows), result.Shapes)
+		"batch durable written={written} absorbed={absorbed} skipped={skipped} page_lines={page_lines} bash_rows={bash_rows} shapes={shapes}",
+		logging.Values{"written": result.Written, "absorbed": result.Absorbed, "skipped": len(result.Skipped), "page_lines": len(result.Lines), "bash_rows": len(result.BashRows), "shapes": result.Shapes})
 	s.publish(log, msg.GetProducer(), result.Lines)
 	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
 	s.commits.fire()
@@ -400,15 +402,15 @@ func writeBatchFailure(ref *refusal) *connect.Response[storev1.WriteBatchRespons
 // is not already durable.
 func (s *Server) publish(log *logging.Logger, producer string, lines []LineWritten) {
 	if len(lines) == 0 {
-		log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer}, "batch produced no page lines")
+		log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer}, "batch produced no page lines", nil)
 		return
 	}
 	overflowed := s.fan.publish(lines)
 	log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer},
-		"published lines=%d watchers=%d", len(lines), s.fan.subscribers())
+		"published lines={lines} watchers={watchers}", logging.Values{"lines": len(lines), "watchers": s.fan.subscribers()})
 	for _, sub := range overflowed {
 		log.Log(logging.Fields{Operation: "store.fanout.overflow", Level: "warn", BookAgentID: sub.key, WatchTokenHash: sub.tokenHash},
-			"watch buffer overflowed; ending this subscriber's stream buffer=%d dropped=%d", s.fan.buffer, sub.dropped)
+			"watch buffer overflowed; ending this subscriber's stream buffer={buffer} dropped={dropped}", logging.Values{"buffer": s.fan.buffer, "dropped": sub.dropped})
 	}
 }
 
@@ -419,7 +421,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 	agentID := msg.GetAgent().GetValue()
 	log := s.rpcLogger(storev1connect.ShimStoreOpenAgentSessionProcedure, req.Header()).With(logging.Fields{AgentID: agentID, BookAgentID: agentID})
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID},
-		"open opening=%s page_only=%t", openingOf(msg), msg.GetPageOnly())
+		"open opening={opening} page_only={page_only}", logging.Values{"opening": openingOf(msg).String(), "page_only": msg.GetPageOnly()})
 
 	if ref := validateOpenAgentSessionRequest(msg); ref != nil {
 		logRefusal(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
@@ -445,7 +447,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 	// watch attempted from it meets the ordinary unknown-token refusal.
 	if msg.GetPageOnly() {
 		log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WriteSeq: opened.PinSeq},
-			"page-only read served; no watch token minted lines=%d", len(opened.Page.GetLines()))
+			"page-only read served; no watch token minted lines={lines}", logging.Values{"lines": len(opened.Page.GetLines())})
 		return connect.NewResponse(&storev1.OpenAgentSessionResponse{
 			Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
 				Page:   opened.Page,
@@ -461,7 +463,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 		return openFailure(ref), nil
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WatchTokenHash: tokenHash(token), WriteSeq: opened.PinSeq},
-		"reading session opened lines=%d", len(opened.Page.GetLines()))
+		"reading session opened lines={lines}", logging.Values{"lines": len(opened.Page.GetLines())})
 	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
 		Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
 			Page:   opened.Page,
@@ -569,7 +571,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 		return err
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: entry.pinSeq},
-		"watch live after replay replayed=%d", len(replay))
+		"watch live after replay replayed={replayed}", logging.Values{"replayed": len(replay)})
 
 	for {
 		// Overflow is checked FIRST and on its own, so a subscriber that has
@@ -584,18 +586,18 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 		case <-sub.overflow:
 			return s.endOverflowed(log, sub)
 		case <-s.done:
-			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the store is shutting down")
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the store is shutting down", nil)
 			return nil
 		case <-ctx.Done():
-			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the caller went away")
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the caller went away", nil)
 			return nil
 		case line := <-sub.items:
 			if line.WriteSeq <= entry.pinSeq {
-				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line at or below the pin")
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line at or below the pin", nil)
 				continue
 			}
 			if line.WriteSeq <= through {
-				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a write the replay already delivered or superseded")
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a write the replay already delivered or superseded", nil)
 				continue
 			}
 			if err := s.send(ctx, log, stream.Send, line); err != nil {
@@ -623,20 +625,20 @@ func (s *Server) send(ctx context.Context, log *logging.Logger, deliver func(*st
 	if err := deliver(response); err != nil {
 		if ctx.Err() != nil {
 			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq},
-				"watch ended: the caller went away while a %s was sent: %v", what, err)
+				"watch ended: the caller went away while a {what} was sent: {cause}", logging.Values{"what": what, "cause": err.Error()})
 			return nil
 		}
 		log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()},
-			"sending a %s to the watcher failed: %v", what, err)
+			"sending a {what} to the watcher failed: {cause}", logging.Values{"what": what, "cause": err.Error()})
 		return err
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()}, "%s delivered", what)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()}, "{what} delivered", logging.Values{"what": what})
 	return nil
 }
 
 func (s *Server) endOverflowed(log *logging.Logger, sub *sink[LineWritten]) error {
 	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn"},
-		"watch ended: this subscriber overflowed its buffer and must re-open with known_through dropped=%d", sub.dropped)
+		"watch ended: this subscriber overflowed its buffer and must re-open with known_through dropped={dropped}", logging.Values{"dropped": sub.dropped})
 	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow, "watch",
 		"watch: the subscriber fell too far behind its buffer; re-open with known_through"))
 }
@@ -648,7 +650,7 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 	agentID := msg.GetBook().GetValue()
 	log := s.rpcLogger(storev1connect.ShimStoreReadAgentPageProcedure, req.Header()).With(logging.Fields{AgentID: agentID, BookAgentID: agentID})
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID, BookAgentID: agentID, Position: msg.GetAfter().GetValue()},
-		"read page through_at_ms=%d", msg.GetThrough().GetAtMs())
+		"read page through_at_ms={through_at_ms}", logging.Values{"through_at_ms": msg.GetThrough().GetAtMs()})
 
 	if ref := validateReadAgentPageRequest(msg); ref != nil {
 		logRefusal(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
@@ -671,7 +673,7 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 		logOwnFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
 		return readPageFailure(ref), nil
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID}, "page served lines=%d", len(page.GetLines()))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID}, "page served lines={lines}", logging.Values{"lines": len(page.GetLines())})
 	return connect.NewResponse(&storev1.ReadAgentPageResponse{
 		Result: &storev1.ReadAgentPageResponse_Success{Success: page},
 	}), nil
@@ -722,7 +724,7 @@ func (s *Server) GetWorkflow(_ context.Context, req *connect.Request[storev1.Get
 func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.GetLiveWorkRequest]) (*connect.Response[storev1.GetLiveWorkResponse], error) {
 	session := req.Msg.GetSession().GetValue()
 	log := s.rpcLogger(storev1connect.ShimStoreGetLiveWorkProcedure, req.Header()).With(logging.Fields{AgentID: session})
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work", AgentID: session}, "reading one session's open obligations")
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work", AgentID: session}, "reading one session's open obligations", nil)
 
 	if ref := validateGetLiveWorkRequest(req.Msg); ref != nil {
 		logRefusal(log, "store.rpc.get-live-work", ref, logging.Fields{})
@@ -740,7 +742,8 @@ func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.G
 		return liveWorkFailure(ref), nil
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work", AgentID: session},
-		"open obligations served agents=%d workflows=%d detached=%d", len(live.GetLiveAgents()), len(live.GetLiveWorkflows()), len(live.GetLiveDetachedRuns()))
+		"open obligations served agents={agents} workflows={workflows} detached={detached}",
+		logging.Values{"agents": len(live.GetLiveAgents()), "workflows": len(live.GetLiveWorkflows()), "detached": len(live.GetLiveDetachedRuns())})
 	return connect.NewResponse(&storev1.GetLiveWorkResponse{
 		Result: &storev1.GetLiveWorkResponse_Success{Success: live},
 	}), nil
@@ -773,7 +776,7 @@ func (s *Server) GetAgentByVendorTask(ctx context.Context, req *connect.Request[
 	task := req.Msg.GetVendorTaskId()
 	fields := logging.Fields{AgentID: session, TaskID: task}
 	log := s.rpcLogger(storev1connect.ShimStoreGetAgentByVendorTaskProcedure, req.Header()).With(fields)
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "resolving a vendor task locator to its agent")
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "resolving a vendor task locator to its agent", nil)
 
 	if ref := validateGetAgentByVendorTaskRequest(req.Msg); ref != nil {
 		logRefusal(log, "store.rpc.get-agent-by-vendor-task", ref, logging.Fields{})
@@ -786,7 +789,7 @@ func (s *Server) GetAgentByVendorTask(ctx context.Context, req *connect.Request[
 		return agentByVendorTaskFailure(ref), nil
 	}
 	if !rec.found {
-		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering not_found")
+		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering not_found", nil)
 		return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
 			Result: &storev1.GetAgentByVendorTaskResponse_NotFound{NotFound: &storev1.GetAgentByVendorTaskNotFound{}},
 		}), nil
@@ -795,7 +798,7 @@ func (s *Server) GetAgentByVendorTask(ctx context.Context, req *connect.Request[
 	// commission): a record holding the agent's lineage but no start answers
 	// the agent with the commission UNSET, and the caller reports that.
 	success := &storev1.GetAgentByVendorTaskSuccess{Agent: &conversationv1.AgentId{Value: rec.agent}, Commission: rec.commission}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering agent %s commission_recorded=%t", rec.agent, rec.commission != nil)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering agent {agent} commission_recorded={commission_recorded}", logging.Values{"agent": rec.agent, "commission_recorded": rec.commission != nil})
 	return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
 		Result: &storev1.GetAgentByVendorTaskResponse_Success{Success: success},
 	}), nil
@@ -828,7 +831,7 @@ func (s *Server) GetPeerDelivery(ctx context.Context, req *connect.Request[store
 	delivery := req.Msg.GetDeliveryId().GetValue()
 	fields := logging.Fields{}
 	log := s.rpcLogger(storev1connect.ShimStoreGetPeerDeliveryProcedure, req.Header()).With(fields)
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-delivery"}, "resolving delivery %s to the sessions at its ends", delivery)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-delivery"}, "resolving delivery {delivery_id} to the sessions at its ends", logging.Values{"delivery_id": delivery})
 
 	if ref := validateGetPeerDeliveryRequest(req.Msg); ref != nil {
 		logRefusal(log, "store.rpc.get-peer-delivery", ref, logging.Fields{})
@@ -840,7 +843,7 @@ func (s *Server) GetPeerDelivery(ctx context.Context, req *connect.Request[store
 		ref := storeFailure(log, "store.rpc.get-peer-delivery", err, fields)
 		return peerDeliveryFailure(ref), nil
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-delivery"}, "answering delivery %s: sender %q, recipient %q", delivery, sender, recipient)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-delivery"}, "answering delivery {delivery_id}: sender \"{sender}\", recipient \"{recipient}\"", logging.Values{"delivery_id": delivery, "sender": sender, "recipient": recipient})
 	return connect.NewResponse(&storev1.GetPeerDeliveryResponse{
 		Result: &storev1.GetPeerDeliveryResponse_Success{Success: &storev1.GetPeerDeliverySuccess{
 			Sender:    peerDeliveryEnd(sender),
@@ -885,7 +888,7 @@ func (s *Server) GetDetachedWork(ctx context.Context, req *connect.Request[store
 	unit := req.Msg.GetUnit().GetValue()
 	fields := logging.Fields{ActivityID: unit}
 	log := s.rpcLogger(storev1connect.ShimStoreGetDetachedWorkProcedure, req.Header()).With(fields)
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "reading the detached work a unit left")
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "reading the detached work a unit left", nil)
 
 	if ref := validateGetDetachedWorkRequest(req.Msg); ref != nil {
 		logRefusal(log, "store.rpc.get-detached-work", ref, logging.Fields{})
@@ -898,12 +901,12 @@ func (s *Server) GetDetachedWork(ctx context.Context, req *connect.Request[store
 		return detachedWorkFailure(ref), nil
 	}
 	if !found {
-		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "answering not_found")
+		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "answering not_found", nil)
 		return connect.NewResponse(&storev1.GetDetachedWorkResponse{
 			Result: &storev1.GetDetachedWorkResponse_NotFound{NotFound: &storev1.GetDetachedWorkNotFound{}},
 		}), nil
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "answering the recorded work")
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-detached-work"}, "answering the recorded work", nil)
 	return connect.NewResponse(&storev1.GetDetachedWorkResponse{
 		Result: &storev1.GetDetachedWorkResponse_Success{Success: work},
 	}), nil
@@ -933,7 +936,7 @@ func detachedWorkFailure(ref *refusal) *connect.Response[storev1.GetDetachedWork
 // not a refusal.
 func (s *Server) GetRunSettlements(ctx context.Context, req *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
 	log := s.rpcLogger(storev1connect.ShimStoreGetRunSettlementsProcedure, req.Header())
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-run-settlements"}, "resolving %d run id(s) to their settlements", len(req.Msg.GetRunIds()))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-run-settlements"}, "resolving {run_ids} run id(s) to their settlements", logging.Values{"run_ids": len(req.Msg.GetRunIds())})
 
 	if ref := validateGetRunSettlementsRequest(req.Msg); ref != nil {
 		logRefusal(log, "store.rpc.get-run-settlements", ref, logging.Fields{})
@@ -949,7 +952,7 @@ func (s *Server) GetRunSettlements(ctx context.Context, req *connect.Request[sto
 	for _, run := range settled {
 		success.Settled = append(success.Settled, &storev1.RunSettlement{RunId: run.RunID, EndedAtMs: run.EndedAtMs})
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-run-settlements"}, "answering settled=%d", len(success.Settled))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-run-settlements"}, "answering settled={settled}", logging.Values{"settled": len(success.Settled)})
 	return connect.NewResponse(&storev1.GetRunSettlementsResponse{
 		Result: &storev1.GetRunSettlementsResponse_Success{Success: success},
 	}), nil
@@ -978,7 +981,7 @@ func runSettlementsFailure(ref *refusal) *connect.Response[storev1.GetRunSettlem
 // question, once per process, about the shells from before the machine's boot.
 func (s *Server) GetLiveShellRunsAnnouncedBefore(ctx context.Context, req *connect.Request[storev1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[storev1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
 	log := s.rpcLogger(storev1connect.ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure, req.Header())
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-shell-runs"}, "reading the live shell runs announced before %d", req.Msg.GetAnnouncedBeforeMs())
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-shell-runs"}, "reading the live shell runs announced before {announced_before_ms}", logging.Values{"announced_before_ms": req.Msg.GetAnnouncedBeforeMs()})
 
 	if ref := validateGetLiveShellRunsAnnouncedBeforeRequest(req.Msg); ref != nil {
 		logRefusal(log, "store.rpc.get-live-shell-runs", ref, logging.Fields{})
@@ -1001,7 +1004,7 @@ func (s *Server) GetLiveShellRunsAnnouncedBefore(ctx context.Context, req *conne
 			AnnouncedAtMs: run.AnnouncedAtMs,
 		})
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-shell-runs"}, "answering runs=%d", len(success.Runs))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-shell-runs"}, "answering runs={runs}", logging.Values{"runs": len(success.Runs)})
 	return connect.NewResponse(&storev1.GetLiveShellRunsAnnouncedBeforeResponse{
 		Result: &storev1.GetLiveShellRunsAnnouncedBeforeResponse_Success{Success: success},
 	}), nil
@@ -1030,7 +1033,7 @@ func liveShellRunsFailure(ref *refusal) *connect.Response[storev1.GetLiveShellRu
 // the answer, which is an ordinary answer, not a refusal.
 func (s *Server) GetShellRunClaims(ctx context.Context, req *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {
 	log := s.rpcLogger(storev1connect.ShimStoreGetShellRunClaimsProcedure, req.Header())
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-shell-run-claims"}, "resolving %d spool task id(s) to their runs", len(req.Msg.GetVendorTaskIds()))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-shell-run-claims"}, "resolving {vendor_task_ids} spool task id(s) to their runs", logging.Values{"vendor_task_ids": len(req.Msg.GetVendorTaskIds())})
 
 	if ref := validateGetShellRunClaimsRequest(req.Msg); ref != nil {
 		logRefusal(log, "store.rpc.get-shell-run-claims", ref, logging.Fields{})
@@ -1053,7 +1056,7 @@ func (s *Server) GetShellRunClaims(ctx context.Context, req *connect.Request[sto
 		}
 		success.Claims = append(success.Claims, claimed)
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-shell-run-claims"}, "answering claims=%d", len(success.Claims))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-shell-run-claims"}, "answering claims={claims}", logging.Values{"claims": len(success.Claims)})
 	return connect.NewResponse(&storev1.GetShellRunClaimsResponse{
 		Result: &storev1.GetShellRunClaimsResponse_Success{Success: success},
 	}), nil
@@ -1087,7 +1090,8 @@ func (s *Server) ListResidueShapes(ctx context.Context, req *connect.Request[sto
 	log := s.rpcLogger(storev1connect.ShimStoreListResidueShapesProcedure, req.Header())
 	msg := req.Msg
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.list-residue-shapes"},
-		"reading the residue shape catalog scoped=%t limit=%d example=%t", msg.Kind != nil, msg.GetLimit(), msg.GetIncludeExample())
+		"reading the residue shape catalog scoped={scoped} limit={limit} example={example}",
+		logging.Values{"scoped": msg.Kind != nil, "limit": msg.GetLimit(), "example": msg.GetIncludeExample()})
 
 	if ref := validateListResidueShapesRequest(msg); ref != nil {
 		logRefusal(log, "store.rpc.list-residue-shapes", ref, logging.Fields{})
@@ -1101,7 +1105,7 @@ func (s *Server) ListResidueShapes(ctx context.Context, req *connect.Request[sto
 	}
 	// An empty answer is the fresh-catalog answer, not a failure: a store that
 	// has observed no unstored residue has no shapes.
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.list-residue-shapes"}, "catalog served shapes=%d", len(shapes))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.list-residue-shapes"}, "catalog served shapes={shapes}", logging.Values{"shapes": len(shapes)})
 	return connect.NewResponse(&storev1.ListResidueShapesResponse{
 		Result: &storev1.ListResidueShapesResponse_Success{Success: &storev1.ListResidueShapesSuccess{Shapes: shapes}},
 	}), nil
@@ -1127,7 +1131,7 @@ func (s *Server) GetSidecarCursors(ctx context.Context, req *connect.Request[sto
 	log := s.rpcLogger(storev1connect.ShimStoreGetSidecarCursorsProcedure, req.Header())
 	msg := req.Msg
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-sidecar-cursors", FileID: msg.GetFileId()},
-		"reading cursors scoped=%t", msg.FileId != nil)
+		"reading cursors scoped={scoped}", logging.Values{"scoped": msg.FileId != nil})
 
 	if ref := validateGetSidecarCursorsRequest(msg); ref != nil {
 		logRefusal(log, "store.rpc.get-sidecar-cursors", ref, logging.Fields{})
@@ -1141,7 +1145,7 @@ func (s *Server) GetSidecarCursors(ctx context.Context, req *connect.Request[sto
 	}
 	// An empty answer is the fresh-store answer, not a failure: every tailed
 	// file starts from zero.
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-sidecar-cursors", FileID: msg.GetFileId()}, "cursors served cursors=%d", len(cursors))
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-sidecar-cursors", FileID: msg.GetFileId()}, "cursors served cursors={cursors}", logging.Values{"cursors": len(cursors)})
 	return connect.NewResponse(&storev1.GetSidecarCursorsResponse{
 		Result: &storev1.GetSidecarCursorsResponse_Success{Success: &storev1.GetSidecarCursorsSuccess{Cursors: cursors}},
 	}), nil

@@ -62,7 +62,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 		// subscription above already holds every row committed from before the
 		// replay query, so the first row cannot slip past.
 		log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run"},
-			"bash run watch waiting: the run was announced and has no stored row yet")
+			"bash run watch waiting: the run was announced and has no stored row yet", nil)
 	}
 
 	replayed := make(map[uint64]struct{}, len(replay.Rows))
@@ -90,7 +90,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 		// The run is already over: it can never speak again, so the stream ends
 		// rather than standing open on it.
 		log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: terminalSeq},
-			"bash run watch ended: the terminal row was already stored replayed=%d", len(replayed))
+			"bash run watch ended: the terminal row was already stored replayed={replayed}", logging.Values{"replayed": len(replayed)})
 		return nil
 	}
 	// The headers go out before the tail blocks, for the reason openStream
@@ -100,7 +100,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 		return err
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: replay.PinSeq},
-		"bash run watch live after replay replayed=%d", len(replay.Rows))
+		"bash run watch live after replay replayed={replayed}", logging.Values{"replayed": len(replay.Rows)})
 
 	for {
 		// Overflow is checked FIRST and on its own, so a subscriber already
@@ -115,19 +115,19 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 		case <-sub.overflow:
 			return s.endBashOverflowed(log, sub)
 		case <-s.done:
-			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the store is shutting down")
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the store is shutting down", nil)
 			return nil
 		case <-ctx.Done():
-			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the caller went away")
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the caller went away", nil)
 			return nil
 		case row := <-sub.items:
 			if row.WriteSeq <= replay.PinSeq {
-				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq}, "dropping a row at or below the pin")
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq}, "dropping a row at or below the pin", nil)
 				continue
 			}
 			if _, duplicate := replayed[row.WriteSeq]; duplicate {
 				delete(replayed, row.WriteSeq)
-				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq}, "dropping a row the replay already delivered")
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq}, "dropping a row the replay already delivered", nil)
 				continue
 			}
 			if err := s.sendBashRow(log, stream, row); err != nil {
@@ -135,7 +135,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 			}
 			if db.BashRowIsTerminal(row.Row) {
 				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq},
-					"bash run watch ended: the run reached its terminal")
+					"bash run watch ended: the run reached its terminal", nil)
 				return nil
 			}
 		}
@@ -145,16 +145,16 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 func (s *Server) sendBashRow(log *logging.Logger, stream *connect.ServerStream[storev1.WatchBashRunResponse], row BashRowWritten) error {
 	if err := stream.Send(&storev1.WatchBashRunResponse{Row: row.Row}); err != nil {
 		log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", Level: "warn", WriteSeq: row.WriteSeq},
-			"sending a row to the bash watcher failed: %v", err)
+			"sending a row to the bash watcher failed: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq}, "bash row delivered")
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq}, "bash row delivered", nil)
 	return nil
 }
 
 func (s *Server) endBashOverflowed(log *logging.Logger, sub *sink[BashRowWritten]) error {
 	log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", Level: "warn"},
-		"bash run watch ended: this subscriber overflowed its buffer and must re-open dropped=%d", sub.dropped)
+		"bash run watch ended: this subscriber overflowed its buffer and must re-open dropped={dropped}", logging.Values{"dropped": sub.dropped})
 	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow, "run",
 		"watch: the subscriber fell too far behind its buffer; re-open to replay the run"))
 }
@@ -168,9 +168,9 @@ func (s *Server) publishBashRows(log *logging.Logger, producer string, rows []Ba
 	}
 	overflowed := s.bashFan.publish(rows)
 	log.LogVerbose(logging.Fields{Operation: "store.fanout.publish-bash", Producer: producer},
-		"published rows=%d bash_watchers=%d", len(rows), s.bashFan.subscribers())
+		"published rows={rows} bash_watchers={bash_watchers}", logging.Values{"rows": len(rows), "bash_watchers": s.bashFan.subscribers()})
 	for _, sub := range overflowed {
 		log.Log(logging.Fields{Operation: "store.fanout.overflow", Level: "warn", TaskID: sub.key},
-			"bash watch buffer overflowed; ending this subscriber's stream buffer=%d dropped=%d", s.bashFan.buffer, sub.dropped)
+			"bash watch buffer overflowed; ending this subscriber's stream buffer={buffer} dropped={dropped}", logging.Values{"buffer": s.bashFan.buffer, "dropped": sub.dropped})
 	}
 }

@@ -190,7 +190,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (Ope
 		if !opening.vouched || !errors.Is(err, ErrUnknownAgent) {
 			return OpenedPage{}, d.refuse(base, err)
 		}
-		d.log.LogVerbose(base, "a vouched open found no book; serving it empty with its tail on the first row")
+		d.log.LogVerbose(base, "a vouched open found no book; serving it empty with its tail on the first row", nil)
 	}
 
 	// REPAINT IS THE NEWEST PLACES; CATCH-UP IS WHAT WAS WRITTEN SINCE. A
@@ -250,7 +250,7 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (Ope
 	d.traceStatement(ctx, StatementOpenPage, "entry", base, int64(len(lines)))
 	verbose := base
 	verbose.WriteSeq = pinSeq
-	d.log.LogVerbose(verbose, "page opened lines=%d heads=%d more=%t opening=%s", len(lines), len(heads), more, opening)
+	d.log.LogVerbose(verbose, "page opened lines={lines} heads={heads} more={more} opening={opening}", logging.Values{"lines": len(lines), "heads": len(heads), "more": more, "opening": opening.String()})
 	return OpenedPage{Page: page, PinSeq: pinSeq, Newest: newest}, nil
 }
 
@@ -313,7 +313,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, after *storev1.StoreI
 	success := continuationPage(lines, heads, more)
 	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
 	d.traceStatement(ctx, StatementReadPage, "entry", base, int64(len(lines)))
-	d.log.LogVerbose(base, "page read lines=%d heads=%d more=%t", len(lines), len(heads), more)
+	d.log.LogVerbose(base, "page read lines={lines} heads={heads} more={more}", logging.Values{"lines": len(lines), "heads": len(heads), "more": more})
 	return success, nil
 }
 
@@ -355,7 +355,7 @@ func (d *DB) ReadPageThrough(ctx context.Context, agentID string, throughAtMs in
 	success := continuationPage(lines, heads, more)
 	d.observeQuery(StatementReadPage, "entry", base, started, int64(len(lines)))
 	d.traceStatement(ctx, StatementReadPage, "entry", base, int64(len(lines)))
-	d.log.LogVerbose(base, "page read through at_ms=%d lines=%d heads=%d more=%t", throughAtMs, len(lines), len(heads), more)
+	d.log.LogVerbose(base, "page read through at_ms={at_ms} lines={lines} heads={heads} more={more}", logging.Values{"at_ms": throughAtMs, "lines": len(lines), "heads": len(heads), "more": more})
 	return success, nil
 }
 
@@ -440,7 +440,7 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 	}
 	d.observeQuery(StatementLinesSince, "entry", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementLinesSince, "entry", base, int64(len(out)))
-	d.log.LogVerbose(base, "replay read lines=%d", len(out))
+	d.log.LogVerbose(base, "replay read lines={lines}", logging.Values{"lines": len(out)})
 	return out, nil
 }
 

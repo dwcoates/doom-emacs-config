@@ -7,6 +7,11 @@
 // line belongs to, the write that produced it, the row it superseded, the
 // position it landed at, and the store-internal write ordinal a watcher is
 // pinned to.
+//
+// EVERY RECORD NAMES ITS SITE (logging-contract.md "Log sites"): the key of
+// the log call that wrote it (logsite.Key over the runtime "store", the
+// function the call is written in and its template) and the template itself,
+// right after the message.
 package logging
 
 import (
@@ -18,7 +23,31 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/logsite"
 )
+
+// Runtime is the runtime every store record names, and part of every site
+// key.
+const Runtime = "store"
+
+// template is a log message's template: a string constant, never a value
+// built at run time. It is unexported so no other package can convert a
+// run-time string to it; an untyped string constant converts implicitly.
+//
+// The template is the call's site summary and part of its key, so a dynamic
+// value goes in the call's Values under a name, and the template names it as
+// {name}: "the spool {spool} could not be read: {cause}" with
+// Values{"spool": p, "cause": err.Error()}. A literal brace is written {{ or
+// }}.
+type template string
+
+// Values are a record's named values: the values its template's
+// placeholders take, each landing in the record's context under its name. A
+// placeholder is filled from the record's whole context (the typed Fields'
+// keys and Values), but the call's own Values literal must hold every
+// placeholder the template names, which each module's static scan test
+// proves. A Values key replaces a typed field's key of the same name.
+type Values map[string]any
 
 // Fields is diagnostic context bound to a store logger or supplied per record.
 // Empty fields are omitted. The store's runtime owners bind the stable values
@@ -178,6 +207,8 @@ type record struct {
 	Verbosity          string         `json:"verbosity"`
 	Operation          string         `json:"operation"`
 	Message            string         `json:"message"`
+	Site               string         `json:"site"`
+	Template           string         `json:"template"`
 	AgentReplSessionID string         `json:"agent_repl_session_id,omitempty"`
 	RequestID          string         `json:"request_id,omitempty"`
 	Context            map[string]any `json:"context"`
@@ -282,7 +313,7 @@ const levelWindowOperation = "store.logging.level-window"
 // when anything other than info was asked for.
 func (l *Logger) NoteLevelSelection(sel sharedlogging.Selection) {
 	if message, ok := sel.Note(); ok {
-		l.Log(Fields{Operation: levelWindowOperation, Level: "info", LevelWindow: sel.Context()}, "%s", message)
+		l.LogMessage(Fields{Operation: levelWindowOperation, Level: "info", LevelWindow: sel.Context()}, message, nil)
 	}
 }
 
@@ -297,18 +328,43 @@ func (l *Logger) With(fields Fields) *Logger {
 	return &copy
 }
 
-// Log records normal-priority diagnostic output to shim-store.log and stderr.
-func (l *Logger) Log(fields Fields, format string, args ...any) {
-	l.write("normal", fields, format, args)
+// Log records normal-priority diagnostic output to shim-store.log and stderr:
+// MESSAGE, a constant template, rendered from the record's named values.
+func (l *Logger) Log(fields Fields, message template, values Values) {
+	l.write("normal", fields, string(message), logsite.Caller(), values)
 }
 
 // LogVerbose records a debug-level verbose diagnostic. AGENT_REPL_LOG_LEVEL
 // decides whether the record reaches either sink.
-func (l *Logger) LogVerbose(fields Fields, format string, args ...any) {
-	l.write("verbose", fields, format, args)
+func (l *Logger) LogVerbose(fields Fields, message template, values Values) {
+	l.write("verbose", fields, string(message), logsite.Caller(), values)
 }
 
-func (l *Logger) write(verbosity string, fields Fields, format string, args []any) {
+// LogMessage is Log of a message a helper forwards on its caller's behalf,
+// keyed by the function that made it with logsite.Msg.
+func (l *Logger) LogMessage(fields Fields, message logsite.Message, values Values) {
+	l.write("normal", fields, message.Template(), forwarded(message), values)
+}
+
+// LogVerboseMessage is LogVerbose of a forwarded message.
+func (l *Logger) LogVerboseMessage(fields Fields, message logsite.Message, values Values) {
+	l.write("verbose", fields, message.Template(), forwarded(message), values)
+}
+
+// forwarded answers the function MESSAGE was written in. A Message no Msg
+// made names no call: it panics.
+func forwarded(message logsite.Message) string {
+	if message.IsZero() {
+		panic("shim-store logging: a forwarded message must be made by logsite.Msg")
+	}
+	return message.Function()
+}
+
+// write records the call written as TEMPLATE in FUNCTION. A template naming
+// a value the record does not hold, or one whose braces do not parse, is a
+// defect of the call, which the static scan test (logsite_scan_test.go)
+// exists to catch: it panics.
+func (l *Logger) write(verbosity string, fields Fields, template, function string, values Values) {
 	if l == nil {
 		panic("shim-store logging: nil logger")
 	}
@@ -327,7 +383,7 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 	allowed, ended := l.threshold.Allows(level)
 	if ended != nil {
 		// The window is info now, so this record cannot end it again.
-		l.Log(Fields{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, "%s", ended.Message())
+		l.LogMessage(Fields{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, ended.Message(), nil)
 	}
 	if !allowed {
 		return
@@ -407,15 +463,24 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 	if merged.Delivered != 0 || terminal {
 		context["delivered"] = merged.Delivered
 	}
+	for key, value := range values {
+		context[key] = value
+	}
+	message, err := logsite.RenderFields(template, context)
+	if err != nil {
+		panic(fmt.Sprintf("shim-store logging: the record of operation %s cannot be rendered: %v", merged.Operation, err))
+	}
 	now := sharedlogging.Timestamp(l.clock())
 	entry := record{
 		Timestamp:          now,
-		Runtime:            "store",
+		Runtime:            Runtime,
 		PID:                l.pid(),
 		Level:              level,
 		Verbosity:          verbosity,
 		Operation:          merged.Operation,
-		Message:            fmt.Sprintf(format, args...),
+		Message:            message,
+		Site:               logsite.Key(Runtime, function, template),
+		Template:           template,
 		AgentReplSessionID: merged.AgentReplSessionID,
 		RequestID:          merged.RequestID,
 		Context:            context,
@@ -434,21 +499,23 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		l.state.poisoned = fmt.Errorf("persistent sink: %w", err)
 		// The durable sink is the canonical record. Its failure can only be
 		// reported through the terminal before the caller is stopped.
+		emergency := logsite.Msg("persistent log sink write failed")
 		emergencyPayload, encodeErr := json.Marshal(record{
 			Timestamp: now,
-			Runtime:   "store",
+			Runtime:   Runtime,
 			PID:       entry.PID,
 			Level:     "error",
 			Verbosity: "normal",
 			Operation: "store.logging.sink-failure",
-			Message:   "persistent log sink write failed",
+			Message:   emergency.Template(),
+			Site:      logsite.Key(Runtime, emergency.Function(), emergency.Template()),
+			Template:  emergency.Template(),
 			Context:   map[string]any{"error": err.Error(), "target_operation": entry.Operation},
 		})
 		if encodeErr != nil {
 			panic(fmt.Sprintf("shim-store logging: persistent sink failed: %v; encode emergency record: %v", err, encodeErr))
 		}
-		emergency := string(emergencyPayload) + "\n"
-		if terminalErr := writeFull(l.stderr, emergency); terminalErr != nil {
+		if terminalErr := writeFull(l.stderr, string(emergencyPayload)+"\n"); terminalErr != nil {
 			panic(fmt.Sprintf("shim-store logging: persistent sink failed: %v; emergency stderr also failed: %v", err, terminalErr))
 		}
 		panic(fmt.Sprintf("shim-store logging: persistent sink failed: %v", err))

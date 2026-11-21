@@ -103,13 +103,13 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 		// run holding a hundred of those rows is one fact, not a hundred.
 		info := base
 		info.Level = "info"
-		d.log.Log(info, "bash run replay skipped %d outmoded row(s) written under a retired arm; they are left in place and drawn by nothing", outmoded)
+		d.log.Log(info, "bash run replay skipped {outmoded} outmoded row(s) written under a retired arm; they are left in place and drawn by nothing", logging.Values{"outmoded": outmoded})
 	}
 	d.observeQuery(StatementBashRun, "entry", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementBashRun, "entry", base, int64(len(out)))
 	verbose := base
 	verbose.WriteSeq = pinSeq
-	d.log.LogVerbose(verbose, "bash run read rows=%d", len(out))
+	d.log.LogVerbose(verbose, "bash run read rows={rows}", logging.Values{"rows": len(out)})
 	return BashRunReplay{Rows: out, PinSeq: pinSeq}, nil
 }
 

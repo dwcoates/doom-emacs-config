@@ -32,7 +32,7 @@ func storeListeners(holder, socketPath, readSocketPath string, log, readLog *log
 		readLn, err := server.Listen(readSocketPath, readLog)
 		if err != nil {
 			if closeErr := ln.Close(); closeErr != nil {
-				log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: socketPath}, "closing the producers' socket after the read-only socket failed to bind failed: %v", closeErr)
+				log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: socketPath}, "closing the producers' socket after the read-only socket failed to bind failed: {cause}", logging.Values{"cause": closeErr.Error()})
 				return nil, nil, errors.Join(err, closeErr)
 			}
 			return nil, nil, err
@@ -46,7 +46,7 @@ func storeListeners(holder, socketPath, readSocketPath string, log, readLog *log
 	readLn, err := takeFromHolder(holder, holderReadSocket, readLog)
 	if err != nil {
 		if closeErr := ln.Close(); closeErr != nil {
-			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: holder}, "closing the producers' listener after the read-only one could not be taken failed: %v", closeErr)
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: holder}, "closing the producers' listener after the read-only one could not be taken failed: {cause}", logging.Values{"cause": closeErr.Error()})
 			return nil, nil, errors.Join(err, closeErr)
 		}
 		return nil, nil, err
@@ -60,10 +60,11 @@ func takeFromHolder(holder, name string, log *logging.Logger) (net.Listener, err
 	ln, took, err := sockethold.TakeTimed(sockethold.Take, holder, name)
 	if err != nil {
 		log.Log(logging.Fields{Operation: "store.listen.holder", Level: "error", Socket: holder},
-			"the store could not take its %q listener from the socket holder within %s (measured %s) after %s: %v", name, sockethold.TakeBound, sockethold.TakeMeasured, took, err)
+			"the store could not take its \"{name}\" listener from the socket holder within {bound} (measured {measured}) after {elapsed}: {cause}",
+			logging.Values{"name": name, "bound": sockethold.TakeBound.String(), "measured": sockethold.TakeMeasured.String(), "elapsed": took.String(), "cause": err.Error()})
 		return nil, fmt.Errorf("shim-store: take the %q listener from the holder %s: %w", name, holder, err)
 	}
-	log.Log(logging.Fields{Operation: "store.listen.holder", Socket: holder}, "took the %q listener from the socket holder in %s", name, took)
+	log.Log(logging.Fields{Operation: "store.listen.holder", Socket: holder}, "took the \"{name}\" listener from the socket holder in {elapsed}", logging.Values{"name": name, "elapsed": took.String()})
 	return ln, nil
 }
 
@@ -73,16 +74,16 @@ func lockDatabase(dbPath string, log *logging.Logger) (func(), error) {
 	path := dbPath + ".store.lock"
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		log.Log(logging.Fields{Operation: "store.lock", Level: "error"}, "opening the database's store lock %s failed: %v", path, err)
+		log.Log(logging.Fields{Operation: "store.lock", Level: "error"}, "opening the database's store lock {lock_path} failed: {cause}", logging.Values{"lock_path": path, "cause": err.Error()})
 		return nil, fmt.Errorf("shim-store: open the store lock %s: %w", path, err)
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			log.Log(logging.Fields{Operation: "store.lock", Level: "error"}, "another store already serves the database %s; refusing to start a second", dbPath)
+			log.Log(logging.Fields{Operation: "store.lock", Level: "error"}, "another store already serves the database {db_path}; refusing to start a second", logging.Values{"db_path": dbPath})
 			return nil, fmt.Errorf("shim-store: another store already serves %s", dbPath)
 		}
-		log.Log(logging.Fields{Operation: "store.lock", Level: "error"}, "taking the database's store lock %s failed: %v", path, err)
+		log.Log(logging.Fields{Operation: "store.lock", Level: "error"}, "taking the database's store lock {lock_path} failed: {cause}", logging.Values{"lock_path": path, "cause": err.Error()})
 		return nil, fmt.Errorf("shim-store: lock %s: %w", path, err)
 	}
 	return func() { f.Close() }, nil

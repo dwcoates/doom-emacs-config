@@ -103,7 +103,7 @@ func (d *DB) DetachedWorkByUnit(ctx context.Context, unit string) (*storev1.GetD
 	d.traceStatement(ctx, StatementDetachedWorkByUnit, "detached_work", base, int64(len(found)))
 	switch len(found) {
 	case 0:
-		d.log.Log(base, "no detached work on record left unit %s", unit)
+		d.log.Log(base, "no detached work on record left unit {unit}", logging.Values{"unit": unit})
 		return nil, false, nil
 	case 1:
 	default:
@@ -122,6 +122,6 @@ func (d *DB) DetachedWorkByUnit(ctx context.Context, unit string) (*storev1.GetD
 	} else {
 		success.State = &storev1.GetDetachedWorkSuccess_Live{Live: &storev1.GetDetachedWorkLive{}}
 	}
-	d.log.Log(base, "unit %s left detached work %s kind=%s ended=%t", unit, row.workID, row.kind, row.ended.Valid)
+	d.log.Log(base, "unit {unit} left detached work {work_id} kind={kind} ended={ended}", logging.Values{"unit": unit, "work_id": row.workID, "kind": row.kind, "ended": row.ended.Valid})
 	return success, true, nil
 }

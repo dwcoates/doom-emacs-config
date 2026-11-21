@@ -219,8 +219,8 @@ func (d *DB) PeerDelivery(ctx context.Context, deliveryID string) (sender, recip
 	}
 	d.observeQuery(StatementPeerDelivery, peerDeliveryTable, base, started, int64(found))
 	d.traceStatement(ctx, StatementPeerDelivery, peerDeliveryTable, base, int64(found))
-	d.log.Log(base, "delivery %s: sender %s, recipient %s", deliveryID,
-		recordedOr(ends[deliveryEndSender]), recordedOr(ends[deliveryEndRecipient]))
+	d.log.Log(base, "delivery {delivery_id}: sender {sender}, recipient {recipient}",
+		logging.Values{"delivery_id": deliveryID, "sender": recordedOr(ends[deliveryEndSender]), "recipient": recordedOr(ends[deliveryEndRecipient])})
 	return ends[deliveryEndSender], ends[deliveryEndRecipient], nil
 }
 

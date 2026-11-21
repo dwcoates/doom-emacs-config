@@ -95,10 +95,10 @@ func (d *DB) AgentByVendorTask(ctx context.Context, session, vendorTaskID string
 	d.traceStatement(ctx, StatementAgentByVendorTask, "vendor_task", base, int64(len(agents)))
 	switch len(agents) {
 	case 0:
-		d.log.Log(base, "no agent in this session's lineage is paired with vendor task %s", vendorTaskID)
+		d.log.Log(base, "no agent in this session's lineage is paired with vendor task {vendor_task_id}", logging.Values{"vendor_task_id": vendorTaskID})
 		return "", false, nil
 	case 1:
-		d.log.Log(base, "vendor task %s names agent %s", vendorTaskID, agents[0])
+		d.log.Log(base, "vendor task {vendor_task_id} names agent {agent}", logging.Values{"vendor_task_id": vendorTaskID, "agent": agents[0]})
 		return agents[0], true, nil
 	default:
 		return "", false, d.refuse(base, storagef(errAmbiguousLocator,
@@ -136,14 +136,14 @@ func (d *DB) AgentCommission(ctx context.Context, agentID string) (*conversation
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		d.observeQuery(StatementAgentCommission, "agent", base, started, 0)
-		d.log.Log(base, "the record holds no row for agent %s, so no commission", agentID)
+		d.log.Log(base, "the record holds no row for agent {agent}, so no commission", logging.Values{"agent": agentID})
 		return nil, false, nil
 	case err != nil:
 		return nil, false, d.refuse(base, storagef(err, "reading the commission of agent %s", agentID))
 	}
 	d.observeQuery(StatementAgentCommission, "agent", base, started, 1)
 	if !row.forkedFromCaller.Valid {
-		d.log.Log(base, "the record holds agent %s's lineage but no start, so no commission", agentID)
+		d.log.Log(base, "the record holds agent {agent}'s lineage but no start, so no commission", logging.Values{"agent": agentID})
 		return nil, false, nil
 	}
 	commission, err := row.commission()

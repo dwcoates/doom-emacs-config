@@ -43,7 +43,7 @@ func (s *Server) AwaitAgentByVendorTask(ctx context.Context, req *connect.Reques
 		}
 		agent, commission := rec.agent, rec.commission
 		if rec.found && commission != nil {
-			log.Log(logging.Fields{Operation: op}, "the record holds agent %s and its commission after %d read(s)", agent, reads)
+			log.Log(logging.Fields{Operation: op}, "the record holds agent {agent} and its commission after {reads} read(s)", logging.Values{"agent": agent, "reads": reads})
 			return connect.NewResponse(&storev1.AwaitAgentByVendorTaskResponse{
 				Result: &storev1.AwaitAgentByVendorTaskResponse_Success{Success: &storev1.AwaitAgentByVendorTaskSuccess{
 					Agent: &conversationv1.AgentId{Value: agent}, Commission: commission,
@@ -53,10 +53,10 @@ func (s *Server) AwaitAgentByVendorTask(ctx context.Context, req *connect.Reques
 		select {
 		case <-committed:
 		case <-s.done:
-			log.Log(logging.Fields{Operation: op}, "the wait ended: the store is shutting down after %d read(s)", reads)
+			log.Log(logging.Fields{Operation: op}, "the wait ended: the store is shutting down after {reads} read(s)", logging.Values{"reads": reads})
 			return nil, connect.NewError(connect.CodeUnavailable, errStoreStopping)
 		case <-ctx.Done():
-			log.Log(logging.Fields{Operation: op}, "the wait ended: the caller went away after %d read(s): %v", reads, ctx.Err())
+			log.Log(logging.Fields{Operation: op}, "the wait ended: the caller went away after {reads} read(s): {cause}", logging.Values{"reads": reads, "cause": ctx.Err().Error()})
 			code := connect.CodeCanceled
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				code = connect.CodeDeadlineExceeded
