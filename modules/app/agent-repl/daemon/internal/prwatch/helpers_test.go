@@ -359,7 +359,14 @@ func (r *rig) subscribe(t *testing.T, events ...wsm.PullRequestEvent) {
 // subscribeAs subscribes the rig's workspace to the pull request under ORIGIN.
 func (r *rig) subscribeAs(t *testing.T, origin wsm.PullRequestOrigin, events ...wsm.PullRequestEvent) {
 	t.Helper()
-	sub, _, err := r.w.Anchor(context.Background(), r.ws, prK, wsm.NewPullRequestEvents(events...), origin)
+	r.anchorAs(t, prK, wsm.NewPullRequestEvents(events...), origin)
+}
+
+// anchorAs anchors and records a subscription of the rig's workspace to PR
+// asking for EVENTS under ORIGIN: THE ONE WAY a test subscribes the rig.
+func (r *rig) anchorAs(t *testing.T, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) {
+	t.Helper()
+	sub, _, err := r.w.Anchor(context.Background(), r.ws, pr, events, origin)
 	if err != nil {
 		t.Fatalf("Anchor: %v", err)
 	}
@@ -377,13 +384,7 @@ func (r *rig) followAs(t *testing.T, g *gql, pr wsm.PullRequestKey, origin wsm.P
 	t.Helper()
 	r.gh.set(fmt.Sprintf("%s/pulls/%d", base, pr.Number), pullJSON("open", false, false, "head1"))
 	g.setFacts(pr.Number, factsJSON("main", nil))
-	sub, _, err := r.w.Anchor(context.Background(), r.ws, pr, wsm.AllPullRequestEvents(), origin)
-	if err != nil {
-		t.Fatalf("Anchor: %v", err)
-	}
-	if _, err := r.db.SubscribePullRequest(context.Background(), sub); err != nil {
-		t.Fatalf("SubscribePullRequest: %v", err)
-	}
+	r.anchorAs(t, pr, wsm.AllPullRequestEvents(), origin)
 }
 
 // readsOf answers how many times the pull request PR itself was read.
