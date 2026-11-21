@@ -343,8 +343,8 @@ func (o *orchestrator) creditOf(ctx context.Context, entry wsm.MergeQueueEntry) 
 // rosterLine answers the merges of LINE as the roster draws them, front
 // first: each one's credit and the bubble a click on it opens. HEADED says
 // LINE is the queue's line, whose front is the head: an admitted head's stages
-// are read from its ledger. Every merge carries the moment it took its slot, durable on its
-// queue entry (wsm.MergeQueueEntry.SlotSince). The merges remediating out of
+// are read from its ledger. Every merge carries its clock, durable on its
+// queue entry (wsm.MergeQueueEntry.Clock). The merges remediating out of
 // line are drawn unheaded.
 func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed, queueHeld bool) ([]sidebar.QueueEntry, error) {
 	out := make([]sidebar.QueueEntry, 0, len(line))
@@ -358,9 +358,8 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 			Credited:  c.workspace,
 			Async:     c.async,
 			AsyncName: c.asyncName,
-			QueuedAt:  entry.EnqueuedAt,
 			Admitted:  entry.State != wsm.MergeQueued,
-			SlotSince: entry.SlotSince,
+			Clock:     entry.Clock,
 			Repair:    rosterRepair(entry.Slot),
 		}
 		if lease, ok := o.leaseOf(entry.Workspace); ok {

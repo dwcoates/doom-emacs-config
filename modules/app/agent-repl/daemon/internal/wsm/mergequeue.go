@@ -906,7 +906,9 @@ func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id Worksp
 		return err
 	}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+		// THE ACTIVE STRETCH IS HELD ACROSS THE RESTART (MergeClock.Held): the
+		// merge goes back to its place only because the daemon restarted.
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ?, clock_held = 1 WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
 			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
 		if err != nil {
 			return err
@@ -1057,7 +1059,9 @@ func (s *store) RequeuePausedMerge(ctx context.Context, repo RepoKey, id Workspa
 		return err
 	}
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+		// THE ACTIVE STRETCH IS HELD ACROSS THE RESTART (MergeClock.Held): the
+		// merge goes back to its place only because the daemon restarted.
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ?, clock_held = 1 WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
 			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
 		if err != nil {
 			return err
@@ -1136,7 +1140,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, pick_started_at, pick_turn, slot, slot_since, aside, waits_on, waits_on_name, waits_on_left, cold_gated, resolved_tip, resolved_branch_head, resolved_turn, ` + requestColumns
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, pick_started_at, pick_turn, slot, slot_since, aside, clock_phase, clock_since, clock_waited, clock_held, waits_on, waits_on_name, waits_on_left, cold_gated, resolved_tip, resolved_branch_head, resolved_turn, ` + requestColumns
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -1162,6 +1166,10 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			slot      int64
 			slotSince int64
 			aside     int64
+			phase     int64
+			since     int64
+			waited    int64
+			held      bool
 			waitsOn   sql.NullString
 			waitsName sql.NullString
 			waitsLeft sql.NullString
@@ -1170,7 +1178,7 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			resTurn   sql.NullString
 			req       requestScan
 		)
-		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &picked, &pickTurn, &slot, &slotSince, &aside, &waitsOn, &waitsName, &waitsLeft, &entry.ColdGated, &resTip, &resHead, &resTurn}, req.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &picked, &pickTurn, &slot, &slotSince, &aside, &phase, &since, &waited, &held, &waitsOn, &waitsName, &waitsLeft, &entry.ColdGated, &resTip, &resHead, &resTurn}, req.targets()...)...); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -1196,6 +1204,13 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 		entry.Aside = MergeAside(aside)
 		if !entry.Aside.valid() {
 			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "aside", Err: fmt.Errorf("unknown merge aside %d", aside)}
+		}
+		entry.Clock = MergeClock{Phase: MergeClockPhase(phase), Waited: time.Duration(waited), Held: held}
+		if !entry.Clock.Phase.valid() {
+			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "clock_phase", Err: fmt.Errorf("unknown merge clock phase %d", phase)}
+		}
+		if since != 0 {
+			entry.Clock.Since = fromNanos(since)
 		}
 		entry.WaitsOn, entry.WaitsOnName, entry.WaitsOnLeft = WorkspaceID(waitsOn.String), waitsName.String, waitsLeft.String
 		if entry.WaitsOnLeft != "" && entry.WaitsOn == "" {

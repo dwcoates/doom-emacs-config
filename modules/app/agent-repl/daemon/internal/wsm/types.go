@@ -1532,6 +1532,10 @@ type MergeQueueEntry struct {
 	// (mergecoldgate.go): the entry keeps its place in line and is skipped,
 	// never admitted, until the gate is passed.
 	ColdGated bool
+	// Clock is how long the merge has been active, or has waited
+	// (MergeClock): stamped in the same store write that changed its slot or
+	// state, so a restart or a handover reads the same clock.
+	Clock MergeClock
 	// Aside is the repair a remediating entry is out of line for, and so
 	// the repair slot it holds or awaits; MergeAsideNone for every other
 	// entry.

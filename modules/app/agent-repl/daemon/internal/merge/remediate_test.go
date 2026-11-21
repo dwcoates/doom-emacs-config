@@ -219,8 +219,8 @@ func TestTheRosterIsToldTheMergeRemediatingOutOfLine(t *testing.T) {
 
 	// Assert
 	queue := c.h.sidebar.queueOf(c.h.repoKey())
-	if len(queue.Remediating) != 1 || queue.Remediating[0].Workspace != theWorkspace || queue.Remediating[0].SlotSince.IsZero() {
-		t.Fatalf("remediating = %+v, want the failed head with when it stepped aside", queue.Remediating)
+	if len(queue.Remediating) != 1 || queue.Remediating[0].Workspace != theWorkspace || queue.Remediating[0].Clock.Phase != wsm.MergeClockActive || queue.Remediating[0].Clock.Since.IsZero() {
+		t.Fatalf("remediating = %+v, want the failed head on an active clock", queue.Remediating)
 	}
 	if slices.ContainsFunc(queue.Line, func(e sidebar.QueueEntry) bool { return e.Workspace == theWorkspace }) {
 		t.Fatalf("line = %+v, want the remediating merge out of it", queue.Line)

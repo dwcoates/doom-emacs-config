@@ -32,16 +32,19 @@ import {
 import { RequeueMergeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_requeue_merge_pb";
 import { DiscardMergeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_discard_merge_pb";
 import type {
+  RosterMergeQueueActiveClock,
   RosterMergeQueueGithubEntry,
   RosterMergeQueueOffQueue,
   RosterMergeQueueGithubPlace,
   RosterMergeQueueHead,
+  RosterMergeQueueHeadClock,
   RosterMergeQueueMediation,
   RosterMergeQueueMediationTarget,
   RosterMergeQueuePaused,
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
   RosterMergeQueueWaiting,
+  RosterMergeQueueWaitingClock,
   RosterRepoMergeQueue,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { formatAge, formatElapsed } from "../duration.js";
@@ -390,7 +393,7 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
 
 /**
  * The head's card: a small merge bubble. Its head line is the merge GLYPH (the queue's toggle, `drawQueueGlyph`), the
- * credited workspace's name and how long it has run or waited -- stopped at
+ * credited workspace's name and how long it has been active or has waited (its clock, `headClockStartMs`) -- stopped at
  * the pause while its queue is PAUSED, and not drawn for a pause whose
  * instant was not recorded; then its stages so far. IT DRAWS NO STATUS LINE
  * (owner request, 2026-11-09): the stage strip already names the step it
@@ -424,10 +427,10 @@ export function drawRosterMergeQueueHead(
     const drawn = drawHeadClock(sc, startedMs, paused, `${path}.paused`);
     if (drawn !== null) line.appendChild(drawn);
   };
-  // THE HEAD'S CLOCK STARTS AS IT TAKES THE HEAD SLOT (owner ruling,
-  // 2026-10-30), never at its first stage or its enqueueing: a merge that
-  // rebased in the background and waited hours in line reads zero here.
-  clock(msOf(u.headSinceMs, `${path}.head_since_ms`));
+  // THE HEAD'S CLOCK COUNTS ITS ACTIVE STRETCH FROM 0 ONCE IT IS ACTIVE, and
+  // its whole waiting before (owner rule, 2026-11-16): the daemon states the
+  // stretch, and the page only counts on from it.
+  clock(headClockStartMs(u.clock, `${path}.clock`));
   switch (standing.case) {
     case "waiting":
       break;
@@ -490,7 +493,8 @@ export const MERGE_QUEUE_REASON_CLASS = "sb-mq-reason";
  */
 export interface QueueRepair {
   subject: RosterMergeQueueSubject | undefined;
-  sinceMs: bigint;
+  /** The instant its clock counts from, read only as the line is drawn. */
+  startedMs: () => number;
   words: string;
   title: string;
   path: string;
@@ -507,15 +511,16 @@ export interface QueueRepair {
 export function repairsOf(u: RosterRepoMergeQueue, path = "queue"): QueueRepair[] {
   const out: QueueRepair[] = [];
   if (u.fixingTests !== undefined) {
-    out.push({ subject: u.fixingTests.subject, sinceMs: u.fixingTests.sinceMs, words: "fixing tests",
+    const fixing = u.fixingTests;
+    out.push({ subject: fixing.subject, startedMs: () => activeClockStartMs(fixing.clock, `${path}.fixing_tests.clock`), words: "fixing tests",
       title: "fixing its tests out of line", path: `${path}.fixing_tests` });
   }
   u.resolvingConflicts.forEach((r, index) => {
-    out.push({ subject: r.subject, sinceMs: r.sinceMs, words: "resolving conflicts",
+    out.push({ subject: r.subject, startedMs: () => activeClockStartMs(r.clock, `${path}.resolving_conflicts[${index}].clock`), words: "resolving conflicts",
       title: "resolving its conflicts out of line", path: `${path}.resolving_conflicts[${index}]` });
   });
   u.awaitingFixingTests.forEach((a, index) => {
-    out.push({ subject: a.subject, sinceMs: a.sinceMs, words: "waiting to fix tests",
+    out.push({ subject: a.subject, startedMs: () => waitingClockStartMs(a.clock, `${path}.awaiting_fixing_tests[${index}].clock`), words: "waiting to fix tests",
       title: "waiting out of line for the fixing-tests slot", path: `${path}.awaiting_fixing_tests[${index}]` });
   });
   return out;
@@ -533,7 +538,7 @@ export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext, c
   const line = drawSubjectControl(subject, sc, `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`, `${u.path}.subject`);
   line.append(drawSubjectName(subject, `${u.path}.subject`, coldGated));
   line.appendChild(drawQueueLabel(u.words, MERGE_QUEUE_REASON_CLASS, u.title));
-  line.appendChild(drawClock(sc, msOf(u.sinceMs, `${u.path}.since_ms`)));
+  line.appendChild(drawClock(sc, u.startedMs()));
   return line;
 }
 
@@ -667,7 +672,7 @@ function drawQueueLabel(text: string, kind: string, title: string): HTMLElement 
 /**
  * One merge waiting behind the head, indented under the head's name, with no
  * bullet (owner request, 2026-11-06): the credited workspace's name and how
- * long it has waited. IT OPENS WITH ITS POSITION AMONG THE WAITING MERGES
+ * long it has waited, its active stretches left out (`waitingClockStartMs`). IT OPENS WITH ITS POSITION AMONG THE WAITING MERGES
  * (owner request, 2026-11-11): POSITION is 1-based, counts only the merges in
  * `RosterRepoMergeQueue.waiting` (never the head or a remediating merge), and
  * is the line's order, not the workspace's number, so a reorder renumbers. No
@@ -688,7 +693,7 @@ export function drawRosterMergeQueueWaiting(
   const name = drawSubjectName(subject, `${path}.subject`, coldGated);
   line.append(numeral, name);
   appendAsyncOf(line, name, subject, `${path}.subject`);
-  line.appendChild(drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
+  line.appendChild(drawClock(sc, waitingClockStartMs(u.clock, `${path}.clock`)));
   return line;
 }
 
@@ -890,6 +895,36 @@ function drawSubjectName(u: RosterMergeQueueSubject, path: string, coldGated: Co
     }
   }
   return name;
+}
+
+/** The instant an active clock counts from: when its active stretch began. */
+export function activeClockStartMs(u: RosterMergeQueueActiveClock | undefined, path: string): number {
+  return msOf(requireMessage(u, path).activeSinceMs, `${path}.active_since_ms`);
+}
+
+/**
+ * The instant a waiting clock counts from: its waiting stretch's start, moved
+ * back by the waiting the merge did before it, so the count is every waiting
+ * stretch and no active one.
+ */
+export function waitingClockStartMs(u: RosterMergeQueueWaitingClock | undefined, path: string): number {
+  const clock = requireMessage(u, path);
+  return msOf(clock.waitingSinceMs, `${path}.waiting_since_ms`) - msOf(clock.waitedBeforeMs, `${path}.waited_before_ms`);
+}
+
+/** The instant the head's clock counts from, in the stretch the head is in. */
+export function headClockStartMs(u: RosterMergeQueueHeadClock | undefined, path: string): number {
+  const stretch = requireCase(requireMessage(u, path).stretch, `${path}.stretch`);
+  switch (stretch.case) {
+    case "active":
+      return activeClockStartMs(stretch.value, `${path}.stretch.active`);
+    case "waiting":
+      return waitingClockStartMs(stretch.value, `${path}.stretch.waiting`);
+    default: {
+      const other: { case: string } = stretch;
+      return unreachableArm(`${path}.stretch`, other.case);
+    }
+  }
 }
 
 /** A clock counting up from STARTED_MS, as a row's when-column ticks (`tickElapsed`). */

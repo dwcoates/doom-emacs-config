@@ -374,8 +374,6 @@ type QueueEntry struct {
 	// Reveal is the merge bubble's head row on Credited's root feed, nil when
 	// the merge has no bubble identity in this daemon.
 	Reveal *frontendv1.FeedId
-	// QueuedAt is when the merge was put in line.
-	QueuedAt time.Time
 	// Admitted reports that the merge's run was admitted: it is being worked
 	// on rather than waiting.
 	Admitted bool
@@ -383,11 +381,11 @@ type QueueEntry struct {
 	// (frontend.v1.RosterMergeQueueHead.stages). Only the front of the line
 	// carries them.
 	Stages []*frontendv1.RosterMergeQueueStage
-	// SlotSince is when the merge took the slot it holds, durable on its
-	// queue entry (wsm.MergeQueueEntry.SlotSince): the clock of every active
-	// slot ticks from it (frontend.v1.RosterMergeQueueHead.head_since_ms,
-	// frontend.v1.RosterMergeQueueFixingTests.since_ms and its siblings).
-	SlotSince time.Time
+	// Clock is how long the merge has been active, or has waited, durable on
+	// its queue entry (wsm.MergeQueueEntry.Clock): every line's clock is
+	// drawn from it (frontend.v1.RosterMergeQueueHead.clock and its
+	// siblings).
+	Clock wsm.MergeClock
 	// Repair is the repair slot a merge out of line holds or awaits. Every
 	// merge out of line carries one; a merge in line carries RepairNone.
 	Repair QueueRepair

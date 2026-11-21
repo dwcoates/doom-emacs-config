@@ -2125,7 +2125,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                        #'agent-repl-wire-decode-roster-merge-queue-section
                        (concat
                         "{\"header\":{\"label\":{\"text\":\"Merge Queue\"}},\"expanded\":{}"
-                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\"}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
+                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{},\"clock\":{\"active\":{\"activeSinceMs\":\"5\"}}},\"waiting\":[{\"subject\":%s,\"clock\":{\"waitingSinceMs\":\"9\"}}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
                                 agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject)
                         "}"))
                       :groups)))
@@ -2139,10 +2139,10 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                          (plist-get (car (plist-get head :stages)) :label)
                          (plist-get (plist-get (car (plist-get head :stages)) :state) :value)
                          (plist-get head :standing)
-                         (plist-get (car (plist-get queue :waiting)) :queued-at-ms)
+                         (plist-get (car (plist-get queue :waiting)) :clock)
                          (plist-get queue :paused))
                    '((:id "r1" :dir "/src") (:text "doom") "one" :async "b1" "queue" (:started-at-ms 5)
-                     (:arm :merging :value nil) 9
+                     (:arm :merging :value nil) (:waiting-since-ms 9 :waited-before-ms 0)
                      (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
 
 (ert-deftest agent-repl-test-wire-roster-merge-queue-mode-async-decodes-its-requester ()
@@ -2178,7 +2178,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 carrying it is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merge-queue-waiting
-                  (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"racing\":{\"sinceMs\":\"12\"}}"
+                  (format "{\"subject\":%s,\"clock\":{\"waitingSinceMs\":\"9\"},\"racing\":{\"sinceMs\":\"12\"}}"
                           agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueWaiting" racing "unknown field"))))
 
@@ -2187,7 +2187,7 @@ carrying it is an unknown field."
 \"front\", so a waiting merge carrying it is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merge-queue-waiting
-                  (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}"
+                  (format "{\"subject\":%s,\"clock\":{\"waitingSinceMs\":\"9\"},\"placedAtFront\":true}"
                           agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueWaiting" placedAtFront "unknown field"))))
 
@@ -2361,41 +2361,94 @@ unknown field."
                           agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueHead" failed "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-roster-a-waiting-merge-queue-head-decodes-when-it-was-queued ()
-  "A waiting head carries when it was put in line."
+(ert-deftest agent-repl-test-wire-roster-a-waiting-merge-queue-head-decodes-its-standing ()
+  "A waiting head's standing decodes as the empty waiting arm."
   (should (equal (plist-get
                   (agent-repl-test-wire-roster--decode
                    #'agent-repl-wire-decode-roster-merge-queue-head
-                   (format "{\"subject\":%s,\"waiting\":{\"queuedAtMs\":\"3\"}}"
+                   (format "{\"subject\":%s,\"waiting\":{},\"clock\":{\"waiting\":{\"waitingSinceMs\":\"3\"}}}"
                            agent-repl-test-wire-roster--subject))
                   :standing)
-                 '(:arm :waiting :value (:queued-at-ms 3)))))
+                 '(:arm :waiting :value t))))
 
-(ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-decodes-when-it-reached-the-head ()
-  "A head carries when the merge reached the head."
-  (should (equal (plist-get
-                  (agent-repl-test-wire-roster--decode
-                   #'agent-repl-wire-decode-roster-merge-queue-head
-                   (format "{\"subject\":%s,\"headSinceMs\":\"7\",\"waiting\":{\"queuedAtMs\":\"3\"}}"
-                           agent-repl-test-wire-roster--subject))
-                  :head-since-ms)
-                 7)))
+(ert-deftest agent-repl-test-wire-roster-a-waiting-merge-queue-head-refuses-the-retired-queued-at ()
+  "Tag 1 of the head's waiting standing, when it was put in line, is
+retired: the head's clock says how long it has waited."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-head
+                  (format "{\"subject\":%s,\"waiting\":{\"queuedAtMs\":\"3\"},\"clock\":{\"waiting\":{\"waitingSinceMs\":\"3\"}}}"
+                          agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueHeadWaiting" queuedAtMs "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-decodes-its-clock-in-either-stretch ()
+  "A head carries its clock, active or waiting."
+  (should (equal (mapcar (lambda (clock)
+                           (plist-get
+                            (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-merge-queue-head
+                             (format "{\"subject\":%s,\"merging\":{},\"clock\":%s}"
+                                     agent-repl-test-wire-roster--subject clock))
+                            :clock))
+                         '("{\"active\":{\"activeSinceMs\":\"7\"}}"
+                           "{\"waiting\":{\"waitingSinceMs\":\"7\",\"waitedBeforeMs\":\"2400000\"}}"))
+                 '((:arm :active :value (:active-since-ms 7))
+                   (:arm :waiting :value (:waiting-since-ms 7 :waited-before-ms 2400000))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-without-a-clock-is-a-breach ()
+  "A head's clock is a required message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-head
+                  (format "{\"subject\":%s,\"merging\":{}}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueHead" clock "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-head-clock-in-no-stretch-is-a-breach ()
+  "A head's clock is always in one stretch."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-head-clock "{}")
+                 '("RosterMergeQueueHeadClock" stretch "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-refuses-the-retired-head-since ()
+  "Tag 6, when the merge reached the head, is retired: the head's clock
+counts its stretch."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-head
+                  (format "{\"subject\":%s,\"headSinceMs\":\"7\",\"merging\":{},\"clock\":{\"active\":{}}}"
+                          agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueHead" headSinceMs "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-waiting-merge-refuses-the-retired-queued-at ()
+  "Tag 2 of a waiting merge, when it was put in line, is retired: its
+clock says how long it has waited."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-waiting
+                  (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"clock\":{}}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueWaiting" queuedAtMs "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-each-repair-and-its-line ()
   "A queue carries the one merge fixing tests, every merge resolving
 conflicts, and the merges awaiting the fixing-tests slot, each with when it
-stepped aside."
+its clock: an active one at a repair, a waiting one while it awaits one."
   (let ((queue (agent-repl-test-wire-roster--decode
                 #'agent-repl-wire-decode-roster-repo-merge-queue
-                (format (concat "{\"fixingTests\":{\"subject\":%s,\"sinceMs\":\"1\"},"
-                                "\"resolvingConflicts\":[{\"subject\":%s,\"sinceMs\":\"2\"},{\"subject\":%s,\"sinceMs\":\"3\"}],"
-                                "\"awaitingFixingTests\":[{\"subject\":%s,\"sinceMs\":\"4\"}]}")
+                (format (concat "{\"fixingTests\":{\"subject\":%s,\"clock\":{\"activeSinceMs\":\"1\"}},"
+                                "\"resolvingConflicts\":[{\"subject\":%s,\"clock\":{\"activeSinceMs\":\"2\"}},{\"subject\":%s,\"clock\":{\"activeSinceMs\":\"3\"}}],"
+                                "\"awaitingFixingTests\":[{\"subject\":%s,\"clock\":{\"waitingSinceMs\":\"4\",\"waitedBeforeMs\":\"5\"}}]}")
                         agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject
                         agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject))))
-    (should (equal (list (plist-get (plist-get queue :fixing-tests) :since-ms)
-                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :resolving-conflicts))
-                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :awaiting-fixing-tests)))
-                   '(1 (2 3) (4))))))
+    (should (equal (list (plist-get (plist-get queue :fixing-tests) :clock)
+                         (mapcar (lambda (m) (plist-get m :clock)) (plist-get queue :resolving-conflicts))
+                         (mapcar (lambda (m) (plist-get m :clock)) (plist-get queue :awaiting-fixing-tests)))
+                   '((:active-since-ms 1) ((:active-since-ms 2) (:active-since-ms 3))
+                     ((:waiting-since-ms 4 :waited-before-ms 5)))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-repair-line-refuses-a-clock-of-the-other-kind ()
+  "A merge fixing its tests carries an active clock: a waiting clock's
+fields there are unknown."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-merge-queue
+                  (format "{\"fixingTests\":{\"subject\":%s,\"clock\":{\"waitingSinceMs\":\"1\"}}}"
+                          agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueActiveClock" waitingSinceMs "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-refuses-the-retired-awaiting-resolving-list ()
   "Tag 10, the merges awaiting the resolving-conflicts slot, is retired:
@@ -2415,8 +2468,9 @@ carrying it is an unknown field."
   "A repair-slot holder with an unknown field is refused under its own
 message name."
   (should (equal (agent-repl-test-wire-roster--breach
-                  (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueFixingTests" v))
-                  (format "{\"subject\":%s,\"sinceMs\":\"1\",\"reason\":{}}" agent-repl-test-wire-roster--subject))
+                  (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair
+                               "RosterMergeQueueFixingTests" v #'agent-repl-wire-decode-roster-merge-queue-active-clock))
+                  (format "{\"subject\":%s,\"clock\":{\"activeSinceMs\":\"1\"},\"reason\":{}}" agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueFixingTests" reason "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-its-github-standings ()
@@ -2465,7 +2519,8 @@ its place and since it joined."
   "Where the head stands is never unset on the wire."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merge-queue-head
-                  (format "{\"subject\":%s}" agent-repl-test-wire-roster--subject))
+                  (format "{\"subject\":%s,\"clock\":{\"active\":{\"activeSinceMs\":\"1\"}}}"
+                          agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueHead" standing "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-without-mode-is-a-breach ()

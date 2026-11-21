@@ -1287,8 +1287,9 @@ func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.Work
 
 // restampRepairsLocked stands every remediating entry of REPO on the repair
 // slot the store's one derivation gives it (wsm.SlotsOf), stamping the
-// moment of each change, as the durable queue does in the write that moved
-// it. Entries in line keep the slots their test seeded. Called with f.mu held.
+// moment of each change and moving its clock by the store's one transition
+// (wsm.StampClock), as the durable queue does in the write that moved it.
+// Entries in line keep the slots their test seeded. Called with f.mu held.
 func (f *fakeDB) restampRepairsLocked(repo wsm.RepoKey) error {
 	queue := f.queues[repo]
 	slots, err := wsm.SlotsOf(queue)
@@ -1297,7 +1298,9 @@ func (f *fakeDB) restampRepairsLocked(repo wsm.RepoKey) error {
 	}
 	for i := range queue {
 		if queue[i].State == wsm.MergeRemediating && queue[i].Slot != slots[i] {
-			queue[i].Slot, queue[i].SlotSince = slots[i], time.Now()
+			if err := stampLocked(&queue[i], slots[i], time.Now()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -1336,6 +1339,17 @@ func (f *fakeDB) ClearResolvedRebase(_ context.Context, repo wsm.RepoKey, id ids
 	return false, fmt.Errorf("clear the resolved rebase of %s: %w", id, wsm.ErrNotFound)
 }
 
+// stampLocked stands ENTRY on SLOT at AT, moving its clock by the store's one
+// transition (wsm.StampClock). Called with f.mu held.
+func stampLocked(entry *wsm.MergeQueueEntry, slot wsm.MergeSlot, at time.Time) error {
+	clock, _, err := wsm.StampClock(entry.Clock, entry.State, slot, at)
+	if err != nil {
+		return err
+	}
+	entry.Slot, entry.SlotSince, entry.Clock = slot, at, clock
+	return nil
+}
+
 // ReturnRemediatedMerge puts the remediating entry back, admitted, at the
 // first waiting place, carrying RESOLVED, as the durable queue does.
 func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID, resolved *wsm.ResolvedRebase) error {
@@ -1362,7 +1376,10 @@ func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id i
 	if entry.Aside == wsm.MergeAsideWaitingConflicts {
 		entry.State = wsm.MergeQueued
 	}
-	entry.Aside, entry.Slot, entry.SlotSince = wsm.MergeAsideNone, wsm.MergeSlotWaiting, time.Now()
+	entry.Aside = wsm.MergeAsideNone
+	if err := stampLocked(&entry, wsm.MergeSlotWaiting, time.Now()); err != nil {
+		return err
+	}
 	entry.Resolved = resolved
 	rest := append(queue[:at:at], queue[at+1:]...)
 	place := len(rest)

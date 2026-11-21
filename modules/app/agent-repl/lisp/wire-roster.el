@@ -1541,8 +1541,7 @@ as its queue holds it (an async merge's merge workspace)."
                    "RosterMergeQueueSubject" 'merge object #'agent-repl-wire-decode-workspace-ref)))))
 
 (defconst agent-repl-wire--roster-merge-queue-instants
-  '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (queuedAtMs . :queued-at-ms)
-    (sinceMs . :since-ms) (heldSinceMs . :held-since-ms))
+  '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (heldSinceMs . :held-since-ms))
   "Each epoch-ms field a merge queue's span messages carry, and its keyword.")
 
 (defun agent-repl-wire--decode-roster-merge-queue-span (message-name value fields)
@@ -1587,37 +1586,72 @@ retired; a held merge's stages say it is held themselves."
     (agent-repl-wire--check-keys "RosterMergeQueueHeadMerging" object '())
     (agent-repl-wire--decoded "RosterMergeQueueHeadMerging" nil)))
 
+(defun agent-repl-wire-decode-roster-merge-queue-active-clock (value)
+  "Decode VALUE as `RosterMergeQueueActiveClock'.
+A plist `(:active-since-ms MS)': when the merge's active stretch began."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueActiveClock" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueActiveClock" object '(activeSinceMs))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueActiveClock"
+     (list :active-since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueActiveClock" 'activeSinceMs object)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-waiting-clock (value)
+  "Decode VALUE as `RosterMergeQueueWaitingClock'.
+A plist `(:waiting-since-ms MS :waited-before-ms WAITED)': when the
+merge's waiting stretch began, and the waiting it did before, in ms."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueWaitingClock" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueWaitingClock" object '(waitingSinceMs waitedBeforeMs))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueWaitingClock"
+     (list :waiting-since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaitingClock" 'waitingSinceMs object)
+           :waited-before-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaitingClock" 'waitedBeforeMs object)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-head-clock (value)
+  "Decode VALUE as `RosterMergeQueueHeadClock', `(:arm ARM :value CLOCK)'.
+ARM is `:active' (`agent-repl-wire-decode-roster-merge-queue-active-clock')
+or `:waiting' (`agent-repl-wire-decode-roster-merge-queue-waiting-clock').
+The stretch is never unset."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueHeadClock" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueHeadClock" object '(active waiting))
+    (agent-repl-wire--decode-oneof
+     "RosterMergeQueueHeadClock" 'stretch object
+     '((active :active agent-repl-wire-decode-roster-merge-queue-active-clock)
+       (waiting :waiting agent-repl-wire-decode-roster-merge-queue-waiting-clock)))))
+
 (defun agent-repl-wire-decode-roster-merge-queue-head (value)
   "Decode VALUE as `RosterMergeQueueHead'.
-A plist `(:subject SUBJECT :head-since-ms MS :stages STAGES :standing
-\(:arm ARM :value V))', ARM `:waiting' or `:merging', MS when the merge
-reached the head.  The standing is never unset."
+A plist `(:subject SUBJECT :clock CLOCK :stages STAGES :standing
+\(:arm ARM :value V))', ARM `:waiting' or `:merging', CLOCK the head's
+\(`agent-repl-wire-decode-roster-merge-queue-head-clock').  The standing
+is never unset."
   (let ((object (agent-repl-wire--object "RosterMergeQueueHead" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueHead" object '(subject stages waiting merging headSinceMs))
+    (agent-repl-wire--check-keys "RosterMergeQueueHead" object '(subject stages waiting merging clock))
     (agent-repl-wire--decoded
      "RosterMergeQueueHead"
      (list :subject (agent-repl-wire--decode-message
                      "RosterMergeQueueHead" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
-           :head-since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueHead" 'headSinceMs object)
+           :clock (agent-repl-wire--decode-message
+                   "RosterMergeQueueHead" 'clock object #'agent-repl-wire-decode-roster-merge-queue-head-clock)
            :stages (agent-repl-wire--decode-repeated
                     "RosterMergeQueueHead" 'stages object #'agent-repl-wire-decode-roster-merge-queue-stage)
            :standing (agent-repl-wire--decode-oneof
                       "RosterMergeQueueHead" 'standing object
-                      `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
-                                                        "RosterMergeQueueHeadWaiting" v '(queuedAtMs))))
+                      `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueHeadWaiting" v) t))
                         (merging :merging agent-repl-wire-decode-roster-merge-queue-head-merging)))))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-waiting (value)
   "Decode VALUE as `RosterMergeQueueWaiting'.
-A plist `(:subject SUBJECT :queued-at-ms MS)': a merge waiting behind the
-head, and when it was put in line."
+A plist `(:subject SUBJECT :clock CLOCK)': a merge waiting behind the
+head, and its waiting clock
+\(`agent-repl-wire-decode-roster-merge-queue-waiting-clock')."
   (let ((object (agent-repl-wire--object "RosterMergeQueueWaiting" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs))
+    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject clock))
     (agent-repl-wire--decoded
      "RosterMergeQueueWaiting"
      (list :subject (agent-repl-wire--decode-message
                      "RosterMergeQueueWaiting" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
-           :queued-at-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaiting" 'queuedAtMs object)))))
+           :clock (agent-repl-wire--decode-message
+                   "RosterMergeQueueWaiting" 'clock object #'agent-repl-wire-decode-roster-merge-queue-waiting-clock)))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-pauser (value)
   "Decode VALUE as `RosterMergeQueuePauser', `(:arm ARM :value V)'.
@@ -1686,13 +1720,16 @@ mediation the queue waits on, nil while it waits on none
                     #'agent-repl-wire-decode-roster-merge-queue-paused)
            :fixing-tests (agent-repl-wire--decode-optional-message
                           "RosterRepoMergeQueue" 'fixingTests object
-                          (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueFixingTests" v)))
+                          (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair
+                                       "RosterMergeQueueFixingTests" v #'agent-repl-wire-decode-roster-merge-queue-active-clock)))
            :resolving-conflicts (agent-repl-wire--decode-repeated
                                  "RosterRepoMergeQueue" 'resolvingConflicts object
-                                 (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueResolvingConflicts" v)))
+                                 (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair
+                                              "RosterMergeQueueResolvingConflicts" v #'agent-repl-wire-decode-roster-merge-queue-active-clock)))
            :awaiting-fixing-tests (agent-repl-wire--decode-repeated
                                    "RosterRepoMergeQueue" 'awaitingFixingTests object
-                                   (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueAwaitingFixingTests" v)))
+                                   (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair
+                                                "RosterMergeQueueAwaitingFixingTests" v #'agent-repl-wire-decode-roster-merge-queue-waiting-clock)))
            :github (agent-repl-wire--decode-repeated
                     "RosterRepoMergeQueue" 'github object
                     #'agent-repl-wire-decode-roster-merge-queue-github-entry)
@@ -1824,19 +1861,20 @@ and how many entries the queue holds."
      (list :place (agent-repl-wire--decode-uint32 "RosterMergeQueueGithubPlace" 'place object)
            :total (agent-repl-wire--decode-uint32 "RosterMergeQueueGithubPlace" 'total object)))))
 
-(defun agent-repl-wire-decode-roster-merge-queue-repair (message value)
+(defun agent-repl-wire-decode-roster-merge-queue-repair (message value clock-decoder)
   "Decode VALUE as MESSAGE, one merge at or awaiting a repair slot.
 MESSAGE is one of the three shapes that share it:
 `RosterMergeQueueFixingTests', `RosterMergeQueueResolvingConflicts' and
 `RosterMergeQueueAwaitingFixingTests'.  A plist `(:subject SUBJECT
-:since-ms MS)': the merge, and when it took its slot or began awaiting it."
+:clock CLOCK)': the merge, and its clock, decoded by CLOCK-DECODER (the
+active clock's at a repair, the waiting clock's while it awaits one)."
   (let ((object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(subject sinceMs))
+    (agent-repl-wire--check-keys message object '(subject clock))
     (agent-repl-wire--decoded
      message
      (list :subject (agent-repl-wire--decode-message
                      message 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
-           :since-ms (agent-repl-wire--decode-int64 message 'sinceMs object)))))
+           :clock (agent-repl-wire--decode-message message 'clock object clock-decoder)))))
 
 (defun agent-repl-wire-decode-roster-repo-section (value)
   "Decode VALUE as `RosterRepoSection'.

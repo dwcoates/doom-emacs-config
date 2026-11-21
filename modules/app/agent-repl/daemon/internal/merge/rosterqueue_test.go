@@ -557,12 +557,12 @@ func TestTheRosterLineCarriesEachMergesPlaceInLine(t *testing.T) {
 	h := newHarness(t)
 	h.register("ws-a", "a")
 	h.register("ws-b", "b")
-	queuedA := time.UnixMilli(1_000)
-	queuedB := time.UnixMilli(2_000)
+	clockA := wsm.MergeClock{Phase: wsm.MergeClockActive, Since: time.UnixMilli(1_000)}
+	clockB := wsm.MergeClock{Phase: wsm.MergeClockWaiting, Since: time.UnixMilli(2_000), Waited: time.Minute}
 	h.db.mu.Lock()
 	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{
-		{Repo: h.repoKey(), Workspace: "ws-a", State: wsm.MergeAdmitted, EnqueuedAt: queuedA, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-		{Repo: h.repoKey(), Workspace: "ws-b", State: wsm.MergeQueued, EnqueuedAt: queuedB, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Front: true}},
+		{Repo: h.repoKey(), Workspace: "ws-a", State: wsm.MergeAdmitted, Clock: clockA, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+		{Repo: h.repoKey(), Workspace: "ws-b", State: wsm.MergeQueued, Clock: clockB, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Front: true}},
 	}
 	h.db.mu.Unlock()
 
@@ -574,11 +574,11 @@ func TestTheRosterLineCarriesEachMergesPlaceInLine(t *testing.T) {
 	if len(line) != 2 {
 		t.Fatalf("roster line = %v, want two merges", line)
 	}
-	if !line[0].Admitted || !line[0].QueuedAt.Equal(queuedA) || line[0].Repair != sidebar.RepairNone {
-		t.Fatalf("front = %+v, want admitted, queued at %v, in line", line[0], queuedA)
+	if !line[0].Admitted || line[0].Clock != clockA || line[0].Repair != sidebar.RepairNone {
+		t.Fatalf("front = %+v, want admitted, on clock %+v, in line", line[0], clockA)
 	}
-	if line[1].Admitted || !line[1].QueuedAt.Equal(queuedB) || line[1].Repair != sidebar.RepairNone {
-		t.Fatalf("waiting = %+v, want waiting, queued at %v, in line", line[1], queuedB)
+	if line[1].Admitted || line[1].Clock != clockB || line[1].Repair != sidebar.RepairNone {
+		t.Fatalf("waiting = %+v, want waiting, on clock %+v, in line", line[1], clockB)
 	}
 }
 
