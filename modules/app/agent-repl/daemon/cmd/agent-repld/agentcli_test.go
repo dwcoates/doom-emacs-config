@@ -19,8 +19,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"

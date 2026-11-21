@@ -695,18 +695,18 @@ func runningShells(f *fixture, shells int) {
 // non-empty — the one thing the caller asked it to empty.
 func TestInterruptAllAgentsStopsEveryLiveDetachedItem(t *testing.T) {
 	tests := []struct {
-		name        string
-		agents      int
-		shells      int
-		wantCount   int
-		wantAgents  int
-		wantShells  int
-		wantNothing bool
+		name          string
+		agents        int
+		shells        int
+		wantCount     int
+		wantAgents    int
+		wantShells    int
+		wantTurnStill bool
 	}{
 		{name: "agents and a shell", agents: 2, shells: 1, wantCount: 3, wantAgents: 2, wantShells: 1},
 		{name: "shells alone", agents: 0, shells: 2, wantCount: 2, wantAgents: 0, wantShells: 2},
 		{name: "agents alone", agents: 3, shells: 0, wantCount: 3, wantAgents: 3, wantShells: 0},
-		{name: "an empty live set", agents: 0, shells: 0, wantNothing: true},
+		{name: "an empty live set", agents: 0, shells: 0, wantTurnStill: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -723,8 +723,10 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedItem(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Interrupt: %v", err)
 			}
-			if outcome.NothingRunning != tc.wantNothing {
-				t.Fatalf("outcome = %+v, want nothing_running=%v", outcome, tc.wantNothing)
+			// The turn is open in every case, so a sweep that reaches no
+			// detached work answers the turn still running, never nothing_running.
+			if outcome.NothingRunning || (outcome.TurnStillRunning != nil) != tc.wantTurnStill {
+				t.Fatalf("outcome = %+v, want turn_still_running=%v and never nothing_running", outcome, tc.wantTurnStill)
 			}
 			if outcome.DetachedCount != tc.wantCount {
 				t.Fatalf("stopped count = %d, want %d", outcome.DetachedCount, tc.wantCount)
@@ -794,29 +796,29 @@ func TestInterruptAllAgentsPropagatesAShellRefusal(t *testing.T) {
 // items are gone, which is exactly what the caller asked for.
 func TestInterruptAllAgentsSkipsItemsTheShimHasForgotten(t *testing.T) {
 	tests := []struct {
-		name         string
-		agents       int
-		shells       int
-		stopAgentErr error
-		stopBashErr  error
-		wantNothing  bool
-		wantCount    int
+		name          string
+		agents        int
+		shells        int
+		stopAgentErr  error
+		stopBashErr   error
+		wantTurnStill bool
+		wantCount     int
 	}{
 		{
 			name: "every agent forgotten", agents: 2,
-			stopAgentErr: &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
-			wantNothing:  true,
+			stopAgentErr:  &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
+			wantTurnStill: true,
 		},
 		{
 			name: "every shell forgotten", shells: 2,
-			stopBashErr: &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
-			wantNothing: true,
+			stopBashErr:   &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
+			wantTurnStill: true,
 		},
 		{
 			name: "the whole live set forgotten", agents: 2, shells: 1,
-			stopAgentErr: &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
-			stopBashErr:  &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
-			wantNothing:  true,
+			stopAgentErr:  &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
+			stopBashErr:   &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
+			wantTurnStill: true,
 		},
 		{
 			name: "a forgotten agent beside a live shell", agents: 2, shells: 1,
@@ -841,8 +843,10 @@ func TestInterruptAllAgentsSkipsItemsTheShimHasForgotten(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Interrupt(all_agents) = error %v, want a success", err)
 			}
-			if outcome.NothingRunning != tc.wantNothing {
-				t.Fatalf("outcome = %+v, want nothing_running=%v", outcome, tc.wantNothing)
+			// The turn is open in every case, so a sweep that reaches no
+			// detached work answers the turn still running, never nothing_running.
+			if outcome.NothingRunning || (outcome.TurnStillRunning != nil) != tc.wantTurnStill {
+				t.Fatalf("outcome = %+v, want turn_still_running=%v and never nothing_running", outcome, tc.wantTurnStill)
 			}
 			if outcome.DetachedCount != tc.wantCount {
 				t.Fatalf("stopped count = %d, want %d", outcome.DetachedCount, tc.wantCount)
