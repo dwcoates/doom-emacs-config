@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// testProcessStarted is when the test binary's package variables were set,
+// before any test made a store.
+var testProcessStarted = time.Now()
+
 // theLandingRepo is the repository every landing test lands on.
 const theLandingRepo = RepoKey("/repos/a/.git")
 
@@ -85,16 +89,17 @@ func TestMergeLandingsInHoldsItsWindowEdgesAndItsRepositoryOnly(t *testing.T) {
 }
 
 func TestRecordingOfLandingsBeganWhenTheTableWasMade(t *testing.T) {
-	// Arrange
-	opened := time.Now().Add(-time.Second)
+	// Arrange: a test store is a copy of one template the test process
+	// created, so its tables were made after the process started and before
+	// this read.
 	s, _ := testStore(t)
 
 	// Act
 	_, began, err := s.MergeLandingsIn(context.Background(), theLandingRepo, time.Unix(0, 0), time.Now())
 
 	// Assert
-	if err != nil || began.Before(opened) || began.After(time.Now().Add(time.Second)) {
-		t.Fatalf("recording began %v (%v); want the store's creation, just after %v", began, err, opened)
+	if err != nil || began.Before(testProcessStarted.Add(-time.Second)) || began.After(time.Now().Add(time.Second)) {
+		t.Fatalf("recording began %v (%v); want when the test process made the store's tables, after %v", began, err, testProcessStarted)
 	}
 }
 
