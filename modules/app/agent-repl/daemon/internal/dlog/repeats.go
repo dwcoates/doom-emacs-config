@@ -70,7 +70,7 @@ func (f *RepeatFilter) Error(operation string, message template, ctx Context) {
 
 // Log implements Logger.
 func (f *RepeatFilter) Log(level, operation string, message logsite.Message, ctx Context) {
-	f.logAt(level, operation, message.Template(), forwarded(message), ctx)
+	f.logAt(level, operation, message.Template(), message.Forwarded(), ctx)
 }
 
 func (f *RepeatFilter) logAt(level, operation, template, function string, ctx Context) {

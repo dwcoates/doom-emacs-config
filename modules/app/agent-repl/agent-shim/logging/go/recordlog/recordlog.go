@@ -98,10 +98,7 @@ func (l *Logger) Error(operation string, message template, ctx Context) {
 // with logsite.Msg: the path of a helper that logs its caller's message (the
 // level window's notes). A Message no Msg made names no call: it panics.
 func (l *Logger) Log(level, operation string, message logsite.Message, ctx Context) {
-	if message.IsZero() {
-		panic("recordlog: a forwarded message must be made by logsite.Msg")
-	}
-	l.write(level, operation, message.Template(), message.Function(), ctx)
+	l.write(level, operation, message.Template(), message.Forwarded(), ctx)
 }
 
 type record struct {

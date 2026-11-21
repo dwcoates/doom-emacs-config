@@ -106,7 +106,7 @@ func (l *TestLogger) Error(operation string, message template, ctx Context) {
 
 // Log implements Logger.
 func (l *TestLogger) Log(level, operation string, message logsite.Message, ctx Context) {
-	l.append(level, operation, message.Template(), forwarded(message), ctx)
+	l.append(level, operation, message.Template(), message.Forwarded(), ctx)
 }
 
 // logAt implements Logger.
@@ -224,7 +224,7 @@ func (l *derivedTestLogger) Error(operation string, message template, ctx Contex
 }
 
 func (l *derivedTestLogger) Log(level, operation string, message logsite.Message, ctx Context) {
-	l.emit(level, operation, message.Template(), forwarded(message), ctx)
+	l.emit(level, operation, message.Template(), message.Forwarded(), ctx)
 }
 
 func (l *derivedTestLogger) logAt(level, operation, template, function string, ctx Context) {

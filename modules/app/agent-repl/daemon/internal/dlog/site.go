@@ -22,12 +22,3 @@ func mustRender(operation, template string, fields Context) string {
 	}
 	return text
 }
-
-// forwarded answers the function MESSAGE was written in. A Message no Msg
-// made names no call: it panics.
-func forwarded(message logsite.Message) string {
-	if message.IsZero() {
-		panic("dlog: a forwarded message must be made by logsite.Msg")
-	}
-	return message.Function()
-}

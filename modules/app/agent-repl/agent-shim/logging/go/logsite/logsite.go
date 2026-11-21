@@ -286,6 +286,16 @@ func (m Message) Function() string { return m.function }
 // IsZero reports whether the message was never made by Msg.
 func (m Message) IsZero() bool { return m.function == "" }
 
+// Forwarded answers the function the message was written in, for a logger
+// recording it on its caller's behalf. A Message no Msg made names no call,
+// which is a defect of the helper that forwarded it: it panics.
+func (m Message) Forwarded() string {
+	if m.IsZero() {
+		panic("logsite: a forwarded message must be made by logsite.Msg")
+	}
+	return m.function
+}
+
 // RenderFields renders TEMPLATE from FIELDS, a record's named values: each
 // placeholder takes the field of its name, as Text spells it.
 func RenderFields(template string, fields map[string]any) (string, error) {

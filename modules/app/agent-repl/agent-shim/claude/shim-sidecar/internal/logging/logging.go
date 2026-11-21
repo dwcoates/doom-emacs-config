@@ -610,15 +610,6 @@ func (b *Bound) LogVerboseMessage(message logsite.Message, values Values) {
 	b.logger.writeMessage(true, b.context, message, values)
 }
 
-// forwarded answers the function MESSAGE was written in. A Message no Msg
-// made names no call: it panics.
-func forwarded(message logsite.Message) string {
-	if message.IsZero() {
-		panic("sidecar logging: a forwarded message must be made by logsite.Msg")
-	}
-	return message.Function()
-}
-
 // BeginCatchup opens the startup catch-up window over the named operations.
 // Calling it again while the window is open is an invariant violation: the
 // boundary is the process's one boot walk, not a per-pass toggle.
@@ -764,7 +755,7 @@ func contextMap(ctx Context) map[string]any {
 // writeMessage writes MESSAGE, a template made by logsite.Msg, keyed by the
 // function that made it: this package's own records, and a forwarded one.
 func (l *Logger) writeMessage(verbose bool, ctx Context, message logsite.Message, values Values) {
-	l.write(verbose, ctx, message.Template(), forwarded(message), values)
+	l.write(verbose, ctx, message.Template(), message.Forwarded(), values)
 }
 
 // write records the call written as TEMPLATE in FUNCTION. A template naming
@@ -1153,7 +1144,7 @@ func (l *Logger) reportForwardTransient(now time.Time, address string, attempts 
 	l.writeGlobal(record{
 		Timestamp: sharedlogging.Timestamp(now), Runtime: Runtime, PID: l.pid(),
 		Level: "debug", Verbosity: "normal", Operation: "sidecar.logging.forward-deferred",
-		Message: message.Template(), Site: logsite.Key(Runtime, forwarded(message), message.Template()), Template: message.Template(),
+		Message: message.Template(), Site: logsite.Key(Runtime, message.Forwarded(), message.Template()), Template: message.Template(),
 		Context: map[string]any{
 			"daemon_address": address, "error": cause.Error(), "attempt": attempts,
 			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,

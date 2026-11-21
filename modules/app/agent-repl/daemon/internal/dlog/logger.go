@@ -55,7 +55,7 @@ func (l *logger) Error(operation string, message template, ctx Context) {
 
 // Log implements Logger.
 func (l *logger) Log(level, operation string, message logsite.Message, ctx Context) {
-	l.emit(level, operation, message.Template(), forwarded(message), ctx)
+	l.emit(level, operation, message.Template(), message.Forwarded(), ctx)
 }
 
 // With implements Logger.

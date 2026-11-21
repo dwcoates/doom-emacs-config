@@ -91,3 +91,41 @@ func TestEveryLogSiteScanTakesTheSharedShape(t *testing.T) {
 		t.Fatalf("found %d log site scan tests (%v), want one per Go runtime, at least 8", len(found), found)
 	}
 }
+
+// TestNoLoggerGuardsAForwardedMessageByHand fails a Go logger that checks a
+// forwarded message by hand instead of logsite.Message.Forwarded, the one
+// guard every logger shares.
+func TestNoLoggerGuardsAForwardedMessageByHand(t *testing.T) {
+	// Arrange
+	root := moduleRootDir(t)
+
+	// Act
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "node_modules" || d.Name() == "testdata" || d.Name() == "logsite" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(src), "message.IsZero()") {
+			rel, _ := filepath.Rel(root, path)
+			t.Errorf("%s guards a forwarded message by hand; call its Forwarded", rel)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk the module: %v", err)
+	}
+}

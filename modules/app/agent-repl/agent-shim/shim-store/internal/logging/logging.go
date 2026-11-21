@@ -343,21 +343,12 @@ func (l *Logger) LogVerbose(fields Fields, message template, values Values) {
 // LogMessage is Log of a message a helper forwards on its caller's behalf,
 // keyed by the function that made it with logsite.Msg.
 func (l *Logger) LogMessage(fields Fields, message logsite.Message, values Values) {
-	l.write("normal", fields, message.Template(), forwarded(message), values)
+	l.write("normal", fields, message.Template(), message.Forwarded(), values)
 }
 
 // LogVerboseMessage is LogVerbose of a forwarded message.
 func (l *Logger) LogVerboseMessage(fields Fields, message logsite.Message, values Values) {
-	l.write("verbose", fields, message.Template(), forwarded(message), values)
-}
-
-// forwarded answers the function MESSAGE was written in. A Message no Msg
-// made names no call: it panics.
-func forwarded(message logsite.Message) string {
-	if message.IsZero() {
-		panic("shim-store logging: a forwarded message must be made by logsite.Msg")
-	}
-	return message.Function()
+	l.write("verbose", fields, message.Template(), message.Forwarded(), values)
 }
 
 // write records the call written as TEMPLATE in FUNCTION. A template naming

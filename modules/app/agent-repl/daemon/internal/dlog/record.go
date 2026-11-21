@@ -177,7 +177,7 @@ func newKeyedRecord(at time.Time, runtime, level, operation, template, function 
 // for a record it builds by hand (its sinks' own failures), keyed by the
 // function that made it.
 func newSiteRecord(at time.Time, runtime, level, operation string, message logsite.Message, ctx Context, pid int) record {
-	return newKeyedRecord(at, runtime, level, operation, message.Template(), forwarded(message), ctx, pid)
+	return newKeyedRecord(at, runtime, level, operation, message.Template(), message.Forwarded(), ctx, pid)
 }
 
 // newRecord builds a record from an already-merged context.
