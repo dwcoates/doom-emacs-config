@@ -21,6 +21,16 @@ import (
 //     being worked on when the gate rises is taken off its run and put back
 //     at its own place, marked, under a new bubble (wsm.RequeueColdGatedMerge):
 //     it runs again from its start once it heads the queue again.
+//   - THE QUEUE ANSWERS THE GATE ITSELF (owner ruling, 2026-11-21). A gate
+//     stands on a queued merge's workspace whether it was raised live or
+//     raised again from its record after a restart or a handover, and nobody
+//     is waiting to answer it: a deploy once left every queued merge gated
+//     and the queue admitted nothing for hours. So the raise's handling
+//     passes the gate at once with the compaction pass-gate makes
+//     (Deps.CompactColdGate), recorded under opColdGate. The merge stays
+//     marked and skipped for as long as the compaction takes, and the
+//     session it brings up retires the gate. A compaction that fails is an
+//     ERROR and leaves the merge marked, skipped, with the gate standing.
 //   - PASSING THE GATE BY AN ANSWER RESUMES IT THERE. Pay, clear and compact
 //     bring a session up, which retires the gate's record and with it the
 //     mark (wsm.ClearMergeColdGated); a merge the merges worked on meanwhile
@@ -109,7 +119,9 @@ func (o *orchestrator) queueColdGateEdge(edge coldGateEdge) {
 func (o *orchestrator) applyColdGateEdge(ctx context.Context, edge coldGateEdge) {
 	switch edge.kind {
 	case edgeRaised:
-		o.coldGateRaised(ctx, edge.ws)
+		if o.coldGateRaised(ctx, edge.ws) {
+			o.compactQueuedColdGate(ctx, edge.ws)
+		}
 	case edgeRetired:
 		o.coldGateRetired(ctx, edge.ws)
 	case edgeHidden:
@@ -125,15 +137,16 @@ func (o *orchestrator) applyColdGateEdge(ctx context.Context, edge coldGateEdge)
 // admitted with no run here is driven by another daemon: each is left as it
 // stands. A merge whose run is taken (running, suspended for its take-back,
 // or taken back to resume) is put back in line at its own place
-// (CauseColdGate).
-func (o *orchestrator) coldGateRaised(ctx context.Context, ws ids.WorkspaceID) {
+// (CauseColdGate). It answers whether the merge stands in line at the gate,
+// which is the merge whose gate the queue answers (compactQueuedColdGate).
+func (o *orchestrator) coldGateRaised(ctx context.Context, ws ids.WorkspaceID) bool {
 	log := o.log(ctx, ws)
 	repo, ok := o.coldGateQueue(ctx, ws, "raised")
 	if !ok {
-		return
+		return false
 	}
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
-	marked, taken := false, false
+	marked, taken, waiting := false, false, false
 	var state wsm.MergeQueueState
 	err := o.lineWrite(repo, func() error {
 		entry, err := o.entryOf(ctx, repo, ws)
@@ -153,37 +166,72 @@ func (o *orchestrator) coldGateRaised(ctx context.Context, ws ids.WorkspaceID) {
 		// pending resume is no run, and it is marked where it stands.
 		if (running && !background) || away || (pending && entry.State != wsm.MergeQueued) {
 			taken = true
+			waiting = true
 			return nil
 		}
 		if entry.State != wsm.MergeQueued {
 			return nil
 		}
+		waiting = true
 		marked, err = o.deps.DB.SetMergeColdGated(ctx, repo, ws)
 		return err
 	})
 	if errors.Is(err, wsm.ErrNotFound) {
 		log.Debug(opColdGate, "the workspace's merge left its queue before its cold gate was applied", fields)
-		return
+		return false
 	}
 	if err != nil {
 		log.Error(opColdGate, "could not keep the merge of a workspace at its cold gate at its place in line; the queue may admit it", withField(fields, "error", err.Error()))
-		return
+		return false
 	}
 	if taken {
 		if err := o.dequeue(ctx, ws, CauseColdGate); err != nil {
 			log.Error(opColdGate, "could not put the merge of a workspace whose session parked at its cold gate back at its place in line", withField(fields, "error", err.Error()))
+			return false
 		}
-		return
+		return waiting
 	}
 	if !marked {
 		log.Debug(opColdGate, "the merge is left as it stands at its workspace's cold gate", withField(fields, "state", state.String()))
-		return
+		return waiting
 	}
 	log.Info(opColdGate, "the session parked at its cold gate; its merge keeps its place in line and is skipped until the gate is passed", fields)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		log.Error(opColdGate, "could not republish the queue of a merge kept at its cold gate", withField(fields, "error", err.Error()))
 	}
 	o.kick(repo)
+	return waiting
+}
+
+// compactQueuedColdGate answers the cold gate standing on WS, whose merge
+// waits in line skipped at it, with the compaction pass-gate makes
+// (Deps.CompactColdGate). The session the compaction brings up retires the
+// gate, which resumes the merge (ColdGateRetired). A compaction that fails is
+// recorded at ERROR and leaves the merge marked and skipped, the gate
+// standing for the user. The compaction runs off the edge worker, so the
+// edges behind it are not held for as long as it takes.
+func (o *orchestrator) compactQueuedColdGate(ctx context.Context, ws ids.WorkspaceID) {
+	compact := func() {
+		log := o.log(ctx, ws)
+		fields := dlog.Context{"workspace": string(ws)}
+		if repo, err := o.queueOf(ctx, ws); err == nil {
+			fields["repo"] = string(repo)
+		}
+		if err := o.deps.CompactColdGate(ctx, ws); err != nil {
+			log.Error(opColdGate, "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge stays skipped until the gate is answered", withField(fields, "error", err.Error()))
+			return
+		}
+		log.Info(opColdGate, "the cold gate of a queued merge's workspace was answered by a compaction; the merge resumes at its place once the session is up", fields)
+	}
+	if !o.async {
+		compact()
+		return
+	}
+	o.live.Add(1)
+	inflight.Standing(func() {
+		defer o.live.Done()
+		compact()
+	})
 }
 
 // coldGateRetired resumes WS's merge where it stands in line once its gate was

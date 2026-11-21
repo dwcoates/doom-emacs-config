@@ -591,3 +591,78 @@ func TestOnlyEndAbandonedBubbleDrawsAnAbandonedHeadForAMergeWithNoRun(t *testing
 		t.Fatalf("an abandoned head is drawn at %v, want only endAbandonedBubble in terminal.go", sites)
 	}
 }
+
+func TestAColdGateRaisedOnAQueuedMergesWorkspaceIsAnsweredByACompaction(t *testing.T) {
+	// Arrange
+	h := twoInLine(t)
+
+	// Act
+	h.o.ColdGateRaised(theWorkspace)
+
+	// Assert
+	if !slices.Equal(h.gatesCompacted, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want the queued merge's workspace once", h.gatesCompacted)
+	}
+	if !entryIn(t, h, theWorkspace).ColdGated {
+		t.Fatal("the merge was not marked skipped while the compaction runs")
+	}
+	rec, ok := coldGateRecord(h, "info", "the cold gate of a queued merge's workspace was answered by a compaction; the merge resumes at its place once the session is up")
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["repo"] == nil {
+		t.Fatalf("the compaction was recorded as %+v, want an INFO naming the workspace and the queue", rec)
+	}
+}
+
+func TestAColdGateRaisedOnAWorkspaceWithNoQueuedMergeIsNotCompacted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.o.ColdGateRaised(theWorkspace)
+
+	// Assert
+	if len(h.gatesCompacted) != 0 {
+		t.Fatalf("gates compacted = %v, want none", h.gatesCompacted)
+	}
+}
+
+func TestACompactionOfAQueuedMergesGateIsAskedAgainWhenItsRecordIsRaisedAgain(t *testing.T) {
+	// Arrange
+	h := twoInLine(t)
+	h.o.ColdGateRaised(theWorkspace)
+	h.db.mu.Lock()
+	h.db.coldGates = map[ids.WorkspaceID]wsm.ColdGateRecord{theWorkspace: {VendorSessionID: "v-1"}}
+	h.db.mu.Unlock()
+	fresh, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the successor: %v", err)
+	}
+
+	// Act
+	fresh.ColdGateRaised(theWorkspace)
+
+	// Assert
+	if !slices.Equal(h.gatesCompacted, []ids.WorkspaceID{theWorkspace, theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want one compaction per raise, the recorded one included", h.gatesCompacted)
+	}
+	if !entryIn(t, h, theWorkspace).ColdGated {
+		t.Fatal("the merge lost its mark")
+	}
+}
+
+func TestACompactionThatFailsIsAnErrorAndLeavesTheMergeMarkedAndSkipped(t *testing.T) {
+	// Arrange
+	h := twoInLine(t)
+	h.compactGateErr = errors.New("the summarizer is down")
+
+	// Act
+	h.o.ColdGateRaised(theWorkspace)
+
+	// Assert
+	if !entryIn(t, h, theWorkspace).ColdGated {
+		t.Fatal("the merge was unmarked though its gate stands")
+	}
+	rec, ok := coldGateRecord(h, "error", "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge stays skipped until the gate is answered")
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["repo"] == nil || rec.Context["error"] == nil {
+		t.Fatalf("the failure was recorded as %+v, want an ERROR naming the workspace, the queue and the cause", rec)
+	}
+}
