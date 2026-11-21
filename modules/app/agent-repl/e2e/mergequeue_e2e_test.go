@@ -275,9 +275,12 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
 	// (daemon.rollout.reconcile), and a turn left in flight by a killed daemon
-	// is closed by the next boot (daemon.promptqueue.restore_holds).
+	// is closed by the next boot (daemon.promptqueue.restore_holds), and a
+	// daemon killed after hibernating the workspace leaves the hibernate
+	// lease it holds for the next boot to release (daemon.boot.orphan_leases).
 	mqExpectedBounceWarnings := []string{
 		"daemon.rollout.reconcile", "daemon.promptqueue.restore_holds",
+		"daemon.boot.orphan_leases",
 	}
 
 	// Arrange. The displaced turn is PARKED ON THE FAKE'S TURN GATE

@@ -119,11 +119,11 @@ func TestRestartingASharedServiceIsRefused(t *testing.T) {
 func TestAWorldGroupIsOneWorldPerName(t *testing.T) {
 	// Arrange
 	g := &worldGroups{worlds: map[string]*sharedWorld{}, opts: map[string]WorldOpts{}}
-	opts := WorldOpts{DaemonOpts: harness.Opts{KeepaliveInterval: 2}}
+	opts := WorldOpts{DaemonOpts: harness.Opts{DurableState: true}}
 
 	// Act
-	first, err1 := g.group("keepalive", opts)
-	again, err2 := g.group("keepalive", opts)
+	first, err1 := g.group("durable", opts)
+	again, err2 := g.group("durable", opts)
 	other, err3 := g.group("zettel", WorldOpts{Zettel: true})
 
 	// Assert
@@ -141,18 +141,18 @@ func TestAWorldGroupIsOneWorldPerName(t *testing.T) {
 func TestAWorldGroupRefusesAskingUnderOtherOptions(t *testing.T) {
 	// Arrange
 	g := &worldGroups{worlds: map[string]*sharedWorld{}, opts: map[string]WorldOpts{}}
-	if _, err := g.group("keepalive", WorldOpts{DaemonOpts: harness.Opts{KeepaliveInterval: 2}}); err != nil {
+	if _, err := g.group("durable", WorldOpts{DaemonOpts: harness.Opts{DurableState: true}}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	_, err := g.group("keepalive", WorldOpts{DaemonOpts: harness.Opts{KeepaliveInterval: 3}})
+	_, err := g.group("durable", WorldOpts{DaemonOpts: harness.Opts{DurableState: false}})
 
 	// Assert: refused, and the group keeps the options it was built with.
-	if err == nil || !strings.Contains(err.Error(), `the group World "keepalive" was built with`) {
+	if err == nil || !strings.Contains(err.Error(), `the group World "durable" was built with`) {
 		t.Fatalf("group = %v; want the mismatched options refused", err)
 	}
-	if got := g.opts["keepalive"].DaemonOpts.KeepaliveInterval; got != 2 {
+	if got := g.opts["durable"].DaemonOpts.DurableState; !got {
 		t.Fatalf("the group's options became %v; want the first ask's kept", got)
 	}
 }
