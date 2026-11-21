@@ -2726,7 +2726,7 @@ func queueMove(up bool) func(c *cliCall, args []string) int {
 func queueMoveTo(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	place := fs.String("placement", "", "front, back, behind=MERGE or index=N")
-	ref, rest, ok := c.queuedArg(fs, stateDir, args)
+	named, ref, rest, ok := c.queuedArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -2737,7 +2737,7 @@ func queueMoveTo(c *cliCall, args []string) int {
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Move{Move: move}})
+	return c.updateMergeQueue(named, &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Move{Move: move}})
 }
 
 // movePlacement reads a move's -placement as the move of REF's merge. Nothing
