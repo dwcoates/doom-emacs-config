@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"agentrepl/testrun/internal/command"
@@ -48,10 +49,13 @@ func (Lister) VitestNames(module, dir, config string, files []string) (map[strin
 	if err := runEnsure(fmt.Sprintf("ensure the npm deps of %s", dir), filepath.Join(module, "bin", "ensure-deps.sh"), dir); err != nil {
 		return nil, err
 	}
-	// One worker: the default pool's bounds conflict with the host's core
-	// count under the test runs' environment, and listing runs no test. A
-	// config that collects none of FILES lists nothing, which is no failure.
-	args := []string{"vitest", "list", "--json", "--maxWorkers=1", "--minWorkers=1", "--passWithNoTests"}
+	workers, err := vitestListWorkers(dir)
+	if err != nil {
+		return nil, err
+	}
+	// A config that collects none of FILES lists nothing, which is no
+	// failure.
+	args := append([]string{"vitest", "list", "--json", "--passWithNoTests"}, workers...)
 	if config != "" {
 		args = append(args, "--config", config)
 	}
@@ -63,6 +67,34 @@ func (Lister) VitestNames(module, dir, config string, files []string) (map[strin
 		return nil, fmt.Errorf("suites: list the vitest tests of %s: %w", strings.Join(files, ", "), err)
 	}
 	return parseVitestNames(dir, out)
+}
+
+// vitestListWorkers answers the worker flags `vitest list` takes in DIR, by
+// the vitest the package installs: one worker, since listing runs no test.
+// Vitest before 5 needs its floor set too, or the pool's default floor
+// conflicts with the one-worker ceiling; vitest 5 has no floor, and its
+// `list` refuses the flag.
+func vitestListWorkers(dir string) ([]string, error) {
+	path := filepath.Join(dir, "node_modules", "vitest", "package.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("suites: read the vitest version of %s: %w", dir, err)
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return nil, fmt.Errorf("suites: read the vitest version in %s: %w", path, err)
+	}
+	major, _, _ := strings.Cut(pkg.Version, ".")
+	n, err := strconv.Atoi(major)
+	if err != nil {
+		return nil, fmt.Errorf("suites: %s names no vitest version (%q)", path, pkg.Version)
+	}
+	if n >= 5 {
+		return []string{"--maxWorkers=1"}, nil
+	}
+	return []string{"--maxWorkers=1", "--minWorkers=1"}, nil
 }
 
 // parseVitestNames reads `vitest list --json`: each collected test's file

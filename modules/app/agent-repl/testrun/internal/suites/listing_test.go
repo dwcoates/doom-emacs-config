@@ -2,6 +2,7 @@ package suites
 
 import (
 	"maps"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -125,6 +126,43 @@ func TestTheERTDriverListsTheTestsOfTheFilesItIsAsked(t *testing.T) {
 			}
 			if tt.wantNot != "" && strings.Contains(out, tt.wantNot) {
 				t.Fatalf("output names %q, a file it was not asked to list:\n%s", tt.wantNot, out)
+			}
+		})
+	}
+}
+
+func TestVitestListWorkersFollowsThePackagesVitest(t *testing.T) {
+	tests := []struct {
+		name    string
+		pkg     string
+		want    []string
+		wantErr string
+	}{
+		{name: "vitest 5 takes a ceiling alone", pkg: `{"version":"5.1.1"}`, want: []string{"--maxWorkers=1"}},
+		{name: "vitest 2 takes a floor beside the ceiling", pkg: `{"version":"2.1.9"}`, want: []string{"--maxWorkers=1", "--minWorkers=1"}},
+		{name: "a version that names no major is refused", pkg: `{"version":"next"}`, wantErr: "names no vitest version"},
+		{name: "no vitest installed is refused", wantErr: "read the vitest version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			if tt.pkg != "" {
+				write(t, filepath.Join(dir, "node_modules", "vitest", "package.json"), tt.pkg, 0o644)
+			}
+
+			// Act
+			got, err := vitestListWorkers(dir)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("vitestListWorkers = %v, %v; want an error saying %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, tt.want) {
+				t.Fatalf("vitestListWorkers = %v, %v; want %v", got, err, tt.want)
 			}
 		})
 	}
