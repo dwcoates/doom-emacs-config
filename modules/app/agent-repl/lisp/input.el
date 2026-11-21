@@ -1113,8 +1113,9 @@ to the oldest."
 ;;
 ;; ROLLING THE CONVERSATION BACK to just before a prompt: the selected one,
 ;; or the latest (which cancels it).  The DAEMON plans it (PlanRollback):
-;; Emacs shows the plan as a y/n question in the minibuffer, its side effects
-;; in red, and on a yes hands the plan's opaque token back (RollBack).  On
+;; Emacs shows the plan as a y/n question in the minibuffer (its files
+;; sentence, then its side effects in red), and on a yes hands the plan's
+;; opaque token back (RollBack).  On
 ;; success the composer's contents go to its history and the composer holds
 ;; the rolled-back prompt again.  `C-c C-RET' keeps the files, `C-c M-RET'
 ;; restores the ones the agent's edit tools changed.
@@ -1164,31 +1165,26 @@ They come in the order the confirmation lists them."
                            (plist-get cancel :items)
                            "background agent or shell" "background agents and shells")))))))
 
+(defun agent-repl--input-rollback-extras (plan resend)
+  "Return PLAN's side effects and RESEND's note, each led by a space.
+The side effects wear the `error' face.  RESEND, when the composer's
+words are sent in the prompt's place, is named after them.  The string
+is empty when the rollback destroys nothing more."
+  (mapconcat (lambda (sentence) (concat " " sentence))
+             (append (mapcar (lambda (sentence) (propertize sentence 'face 'error))
+                             (agent-repl--input-rollback-side-effects plan))
+                     (when resend (list "The composer's words are sent in its place.")))
+             ""))
+
 (defun agent-repl--input-rollback-confirmation (plan &optional resend)
-  "Return the y/n question that states PLAN, side effects in the `error' face.
-RESEND, when the composer's words are sent in the prompt's place, is
-named too."
-  (let* ((target (plist-get plan :target))
-         (dropped (plist-get target :prompts-dropped))
-         (head (format "%s \"%s\"%s."
-                       (pcase (plist-get target :chosen)
-                         (:selected "Roll back to before the selected prompt")
-                         (:named "Roll back to before the chosen prompt")
-                         (_ "Cancel the latest prompt"))
-                       (plist-get target :excerpt)
-                       (if (> dropped 1)
-                           (format " (%d prompts are dropped)" dropped)
-                         "")))
-         (files (if (eq (plist-get (plist-get plan :files) :arm) :restored)
-                    "Files the agent's edit tools changed are restored; shell changes and git commits are not (C-c C-RET leaves files alone)."
-                  "Files are not restored (C-c M-RET restores them)."))
-         (effects (mapcar (lambda (sentence) (propertize sentence 'face 'error))
-                          (agent-repl--input-rollback-side-effects plan))))
-    (concat (mapconcat #'identity
-                       (append (list head files) effects
-                               (when resend (list "The composer's words are sent in its place.")))
-                       " ")
-            " Roll back? ")))
+  "Return the y/n question for PLAN: its files sentence, then \"Roll back?\".
+`agent-repl--input-rollback-extras' (PLAN's side effects and RESEND's
+note) sits between the two."
+  (concat (if (eq (plist-get (plist-get plan :files) :arm) :restored)
+              "Files the agent's edit tools changed are restored; shell changes and git commits are not (C-c C-RET leaves files alone)."
+            "Files are not restored (C-c M-RET restores them).")
+          (agent-repl--input-rollback-extras plan resend)
+          " Roll back? "))
 
 (defun agent-repl--input-rollback-refused (ws verb cause)
   "Log and flash WS's VERB (`plan', `roll-back' or `list') refusal CAUSE.
