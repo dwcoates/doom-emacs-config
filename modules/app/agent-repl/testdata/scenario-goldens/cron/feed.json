@@ -1,6 +1,12 @@
 {
   "rows": [
     {
+      "hover": {
+        "atMs": "${NOW}",
+        "label": {
+          "text": "Prompt"
+        }
+      },
       "id": {
         "value": "${ROW_1}"
       },
@@ -67,6 +73,19 @@
             "startedAtMs": "${NOW}",
             "text": "12.9k"
           }
+        }
+      },
+      "hover": {
+        "atMs": "1800000000012",
+        "label": {
+          "text": "Response"
+        },
+        "startedAtMs": "${NOW}",
+        "tokens": {
+          "heat": {
+            "position": 0.14373333333333335
+          },
+          "text": "12.9k"
         }
       },
       "id": {

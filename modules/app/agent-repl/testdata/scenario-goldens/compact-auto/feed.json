@@ -63,6 +63,19 @@
           }
         }
       },
+      "hover": {
+        "atMs": "1800000000006",
+        "label": {
+          "text": "Response"
+        },
+        "startedAtMs": "${NOW}",
+        "tokens": {
+          "heat": {
+            "position": 0.03593333333333334
+          },
+          "text": "3.2k"
+        }
+      },
       "id": {
         "value": "${ROW_2}"
       },

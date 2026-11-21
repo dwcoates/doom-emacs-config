@@ -1,6 +1,12 @@
 {
   "rows": [
     {
+      "hover": {
+        "atMs": "${NOW}",
+        "label": {
+          "text": "Prompt"
+        }
+      },
       "id": {
         "value": "${ROW_1}"
       },
@@ -49,6 +55,11 @@
               }
             }
           }
+        }
+      },
+      "hover": {
+        "label": {
+          "text": "Response"
         }
       },
       "id": {

@@ -1,6 +1,12 @@
 {
   "rows": [
     {
+      "hover": {
+        "atMs": "${NOW}",
+        "label": {
+          "text": "Prompt"
+        }
+      },
       "id": {
         "value": "${ROW_1}"
       },
@@ -56,6 +62,13 @@
           }
         }
       },
+      "hover": {
+        "atMs": "1800000000008",
+        "label": {
+          "text": "Skill /absent-skill"
+        },
+        "startedAtMs": "1800000000008"
+      },
       "id": {
         "value": "${ROW_2}"
       },
@@ -94,6 +107,19 @@
             "startedAtMs": "${NOW}",
             "text": "6.5k"
           }
+        }
+      },
+      "hover": {
+        "atMs": "1800000000006",
+        "label": {
+          "text": "Response"
+        },
+        "startedAtMs": "${NOW}",
+        "tokens": {
+          "heat": {
+            "position": 0.07186666666666668
+          },
+          "text": "6.5k"
         }
       },
       "id": {

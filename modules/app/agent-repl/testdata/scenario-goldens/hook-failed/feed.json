@@ -1,6 +1,12 @@
 {
   "rows": [
     {
+      "hover": {
+        "atMs": "${NOW}",
+        "label": {
+          "text": "Prompt"
+        }
+      },
       "id": {
         "value": "${ROW_1}"
       },
@@ -59,6 +65,13 @@
           }
         }
       },
+      "hover": {
+        "atMs": "1800000000006",
+        "label": {
+          "text": "Hook"
+        },
+        "startedAtMs": "1800000000006"
+      },
       "id": {
         "value": "${ROW_2}"
       },
@@ -97,6 +110,19 @@
             "startedAtMs": "${NOW}",
             "text": "3.2k"
           }
+        }
+      },
+      "hover": {
+        "atMs": "1800000000004",
+        "label": {
+          "text": "Response"
+        },
+        "startedAtMs": "${NOW}",
+        "tokens": {
+          "heat": {
+            "position": 0.03593333333333334
+          },
+          "text": "3.2k"
         }
       },
       "id": {
