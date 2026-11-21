@@ -279,7 +279,11 @@ mechanics (`integration/shareddaemon_test.go`).
   other reason is a create that fails in a way the daemon reports to the
   repository's main worktree (`newReportedCreateDaemon`): the report reopens
   that workspace after the case is answered, which a slice's retirement
-  would race.
+  would race. Until the owner rules on e34f0cb693, a case that creates a child
+  or a fork keeps one too (`newDerivingDaemon`, `newDerivingOpened`): the
+  derived workspace's notice to its source is held where the held section
+  draws no card, so a retirement cannot drop it and the forget stays
+  blocked.
 - **A case reads the run log through its own records**
   (`Daemon.AwaitOwnRunLogRecord`, `Daemon.OwnRunLog`): a view owns a record
   naming a workspace it registered, by `workspace_dir` or, for a central

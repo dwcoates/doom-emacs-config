@@ -38,7 +38,8 @@ const (
 func TestAForksFeedReadsItsParentsTurnAboveItsOwn(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent asked something, then forked.
-	f := newCanonical(t)
+	// A daemon of its own until the e34f0cb693 ruling (newDerivingOpened).
+	f := newDerivingOpened(t)
 	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
 		t.Fatalf("the parent's StartSession = %v, want fresh", req)
 	}
