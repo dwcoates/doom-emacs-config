@@ -573,18 +573,50 @@ its label, and the composer says so."
                          (buffer-substring-no-properties
                           (+ (line-beginning-position) (length label)) (line-end-position))))))
 
+(defun agent-repl-prompt-entries--advance-or-open (next none)
+  "Relabel an empty entry to its neighbor node, else open that node.
+The neighbor is below (NEXT) or above point's entry.
+THE ONE SHAPE of `C-SPC' and `C-S-SPC': the daemon names the node NEXT
+`:next' or else `:previous' from the entry's own.  An entry with nothing
+after its label is relabeled to that node; a filled entry opens a line
+below (NEXT) or above answering it, or goes to the entry already answering
+it that way.  With no such node the composer flashes NONE, a format of the
+entry's label."
+  (let ((way (if next :next :previous)))
+    (if (agent-repl-prompt-entries--entry-empty-p)
+        (agent-repl-prompt-entries--step way none)
+      (agent-repl-prompt-entries--on-entry
+       "advance" way
+       (lambda (label) (agent-repl-prompt-entries--neighbor label way))
+       none
+       (lambda (label to)
+         (agent-repl--info agent-repl-prompt-entries--ws "elisp.prompt-entries.advance-open ws=%s label=%s way=%s to=%s"
+                           agent-repl-prompt-entries--ws label way to)
+         (agent-repl-prompt-entries--open-on label to next))))))
+
 (defun agent-repl-prompt-entries-advance-or-open-sibling ()
   "Advance an empty entry to its next sibling, else open the next sibling below.
 The composer's `C-SPC' in insert mode on an entry line.  An entry with
 nothing after its label (`1.2 - ') is relabeled to the next sibling in the
 tree the entry targets, else its nearest ancestor's next sibling
 \(`1.2 - ' becomes `1.3 - ', or `2 - ' when 1 has no later child), as
-`agent-repl-prompt-entries-step-on' relabels.  A filled entry opens its
-next sibling below, as `M-k' does."
+`agent-repl-prompt-entries-step-on' relabels.  A filled entry opens a line
+below answering that same node, so a last sibling opens its aunt
+\(`1.3 - yes' opens `2 - ' when 1 has no later child), never a sibling
+the tree lacks.  With no such node the composer says so."
   (interactive)
-  (if (agent-repl-prompt-entries--entry-empty-p)
-      (agent-repl-prompt-entries--step :next "%s is the last sibling to answer")
-    (agent-repl-prompt-entries-open-sibling-below)))
+  (agent-repl-prompt-entries--advance-or-open t "%s is the last sibling to answer"))
+
+(defun agent-repl-prompt-entries-retreat-or-open-previous ()
+  "Step an empty entry back to the node before it, else open that node above.
+The composer's `C-S-SPC' in insert mode on an entry line, `C-SPC' undone.
+The node before is the previous sibling in the tree the entry targets, else
+the parent (`1.2' gives `1.1', `1.1' gives `1'), as
+`agent-repl-prompt-entries-step-back' finds it.  An entry with nothing
+after its label is relabeled to it; a filled entry opens a line above
+answering it.  With no such node the composer says so."
+  (interactive)
+  (agent-repl-prompt-entries--advance-or-open nil "%s is the first node to answer"))
 
 (defun agent-repl-prompt-entries-newline ()
   "Insert a newline, first clearing point's line when it is an empty entry.
@@ -619,14 +651,14 @@ binding for it stands, so `TAB' keeps its own meaning.")
   `((,(kbd "M-j") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
     (,(kbd "M-k") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below))
     (,(kbd "C-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-advance-or-open-sibling))
-    (,(kbd "C-S-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
+    (,(kbd "C-S-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-retreat-or-open-previous))
     (,(kbd "S-RET") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-newline)))
   "The composer's entry-only keys in insert mode, as (KEY . BINDING).
-`M-j' opens the previous sibling above, `M-k' the next one below, and
-`C-SPC' advances an empty entry to its next sibling (else opens it below),
-`C-S-SPC' opens the previous sibling above, as `M-j' does,
-on an entry line, and `S-RET' clears an empty entry as it opens the next line,
-and all fall through elsewhere.")
+`M-j' opens the previous sibling above and `M-k' the next one below.
+`C-SPC' advances an empty entry to its next sibling or aunt, else opens
+that node below.  `C-S-SPC' steps an empty entry back to the node before
+it, else opens that node above.  `S-RET' clears an empty entry as it
+opens the next line.  All act on an entry line and fall through elsewhere.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.

@@ -607,7 +607,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                          (list 'insert t (list (kbd "C-SPC") (agent-repl-prompt-entries--on-entry-binding
                                                             #'agent-repl-prompt-entries-advance-or-open-sibling)))
                          (list 'insert t (list (kbd "C-S-SPC") (agent-repl-prompt-entries--on-entry-binding
-                                                              #'agent-repl-prompt-entries-open-sibling-above)))
+                                                              #'agent-repl-prompt-entries-retreat-or-open-previous)))
                          (list 'insert t (list (kbd "S-RET") (agent-repl-prompt-entries--on-entry-binding
                                                             #'agent-repl-prompt-entries-newline))))))))
 
@@ -1001,25 +1001,121 @@ is recorded on `flashed'."
     (should (equal (list (agent-repl-test-prompt-entries--line) flashed)
                    '("1.1 -    " (("ws-1" "1.1 is the last sibling to answer")))))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-opens-the-sibling-above ()
-  "`C-S-SPC' on `2.2 - no' opens `2.1 - ' above, as `M-j' does."
-  (agent-repl-test-prompt-entries--siblings "2.2"
-    ;; Arrange
-    (goto-char 25)
-    (let ((command (nth 2 (alist-get (kbd "C-S-SPC") agent-repl-prompt-entries--insert-entry-keys nil nil #'equal))))
-      ;; Act
-      (funcall command)
-      ;; Assert
-      (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
-                     '("2.1 - " 3 nil))))))
+(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-is-bound-to-the-inverse-of-C-SPC ()
+  "`C-S-SPC' runs `agent-repl-prompt-entries-retreat-or-open-previous'."
+  (should (eq (nth 2 (alist-get (kbd "C-S-SPC") agent-repl-prompt-entries--insert-entry-keys nil nil #'equal))
+              #'agent-repl-prompt-entries-retreat-or-open-previous)))
 
-(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-filled-entry-opens-the-sibling-below ()
-  "`C-SPC' on `1.1 - yes' opens `1.2 - ' below, as `M-k' does."
-  (agent-repl-test-prompt-entries--siblings "2.1"
+(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-on-a-filled-entry-opens-the-previous-node-above ()
+  "`C-S-SPC' on `2.2 - no' opens the daemon's `:previous' node, `2.1 - ', above."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "2.1")
+    ;; Arrange
+    (save-excursion (goto-char 21) (delete-char 3) (insert "2.2"))
+    (goto-char 25)
+    ;; Act
+    (agent-repl-prompt-entries-retreat-or-open-previous)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos)
+                         (plist-get (car asked) :direction) (plist-get (car asked) :label))
+                   '("2.1 - " 3 (:arm :previous) "2.2")))
+    (should (cl-some (lambda (m) (string-match-p "advance-open ws=ws-1 label=2.2 way=:previous to=2.1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-on-a-filled-first-sibling-opens-its-parent ()
+  "`C-S-SPC' on a filled first sibling opens its parent `2 - ' above, never a missing `2.0 - '."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "2")
+    ;; Arrange
+    (save-excursion (goto-char 21) (delete-char 3) (insert "2.1"))
+    (goto-char 25)
+    ;; Act
+    (agent-repl-prompt-entries-retreat-or-open-previous)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos))
+                   '("2 - " 3)))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-on-a-filled-entry-goes-to-the-previous-node-already-above ()
+  "`C-S-SPC' whose previous node already has an entry above goes to that line's end in insert mode."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.1")
+    ;; Arrange
+    (save-excursion (goto-char 21) (delete-char 3) (insert "2.2"))
+    (goto-char 25)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-retreat-or-open-previous)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) (agent-repl-test-prompt-entries--line) inserting)
+                     (list before 10 "1.1 - yes" t))))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-on-an-empty-entry-relabels-to-the-previous-node ()
+  "`C-S-SPC' on `1.2 - ' relabels it to the daemon's `:previous' node, `1.1 - '."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.1")
+    ;; Arrange
+    (save-excursion (goto-char 1) (delete-char 3) (insert "1.2") (goto-char 7) (delete-char 3) (insert "   "))
+    (goto-char 6)
+    ;; Act
+    (agent-repl-prompt-entries-retreat-or-open-previous)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
+                   '("1.1 -    " (:arm :previous) "1.2")))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-with-no-previous-node-says-so ()
+  "With no node before it a filled entry opens nothing; the composer flashes why, recorded at info."
+  (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
+    ;; Arrange
+    (goto-char 3)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-retreat-or-open-previous)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) flashed)
+                     (list before 3 '(("ws-1" "1.1 is the first node to answer")))))
+      (should (cl-some (lambda (m) (string-match-p "advance-none ws=ws-1 label=1.1 way=:previous" m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-filled-entry-opens-the-next-node-below ()
+  "`C-SPC' on `1.1 - yes' opens the daemon's `:next' node, `1.2 - ', below."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.2")
     ;; Arrange
     (goto-char 3)
     ;; Act
     (agent-repl-prompt-entries-advance-or-open-sibling)
     ;; Assert
-    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
-                   '("1.2 - " 2 nil)))))
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos)
+                         (plist-get (car asked) :direction) (plist-get (car asked) :label))
+                   '("1.2 - " 2 (:arm :next) "1.1")))
+    (should (cl-some (lambda (m) (string-match-p "advance-open ws=ws-1 label=1.1 way=:next to=1.2" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-filled-last-sibling-opens-its-aunt ()
+  "`C-SPC' on a filled last sibling opens its aunt `2 - ' below, never a missing `1.2 - '."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "2")
+    ;; Arrange
+    (goto-char 3)
+    ;; Act
+    (agent-repl-prompt-entries-advance-or-open-sibling)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos))
+                   '("2 - " 2)))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-filled-entry-goes-to-the-next-node-already-below ()
+  "`C-SPC' whose next node already has an entry below goes to that line's end in insert mode."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.2")
+    ;; Arrange
+    (save-excursion (goto-char 21) (delete-char 3) (insert "1.2"))
+    (goto-char 3)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-advance-or-open-sibling)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) (agent-repl-test-prompt-entries--line) inserting)
+                     (list before 29 "1.2 - no" t))))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-filled-last-node-opens-nothing-and-says-so ()
+  "With no later sibling or aunt a filled entry opens nothing; the composer flashes why, recorded at info."
+  (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
+    ;; Arrange
+    (goto-char 3)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-advance-or-open-sibling)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) flashed)
+                     (list before 3 '(("ws-1" "1.1 is the last sibling to answer")))))
+      (should (cl-some (lambda (m) (string-match-p "advance-none ws=ws-1 label=1.1 way=:next" m)) logs)))))
