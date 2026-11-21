@@ -185,6 +185,9 @@ a scenario names which pids are alive rather than depending on the host.")
          ;; "daemon: launch failed" outranks every other arm, so the next
          ;; scenario's segment assertion read the previous one's failure.
          (agent-repl-daemon-launch-failure nil)
+         ;; Each scenario's spawns are its own: a batch's spawns read as one
+         ;; launcher's would report a crash loop no scenario made.
+         (agent-repl-daemon--recent-spawns nil)
          (agent-repl-daemon-mode-line-segment nil)
          (agent-repl-daemon--build-state nil)
          (agent-repl-daemon--build-duration nil)

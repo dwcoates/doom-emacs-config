@@ -1305,7 +1305,8 @@ func runLogRecord(t *testing.T, root, operation, level string) map[string]any {
 
 // TestAStaleAdvertisementIsRecordedBeforeItIsReplaced pins the realtest-1
 // finding: a predecessor that went without withdrawing left Emacs an address
-// to dial and time out on, and the boot that overwrites it says so.
+// to dial and time out on, and the boot that overwrites it says so, at ERROR,
+// as the predecessor's disorderly death (readPredecessorDeath).
 func TestAStaleAdvertisementIsRecordedBeforeItIsReplaced(t *testing.T) {
 	// Arrange: an address nothing is listening on. Port 0 can never be
 	// connected to, so the probe is certain rather than merely likely.
@@ -1318,9 +1319,9 @@ func TestAStaleAdvertisementIsRecordedBeforeItIsReplaced(t *testing.T) {
 	_ = runIn(t, root)
 
 	// Assert.
-	record := runLogRecord(t, root, "daemon.cmd.claim", dlog.LevelWarn)
+	record := runLogRecord(t, root, opPredecessorDied, dlog.LevelError)
 	if record == nil {
-		t.Fatal("no WARN daemon.cmd.claim record, want the stale advertisement reported")
+		t.Fatalf("no ERROR %s record, want the stale advertisement reported as the predecessor's death", opPredecessorDied)
 	}
 	context, _ := record["context"].(map[string]any)
 	if got := context["stale_address"]; got != "127.0.0.1:0" {
