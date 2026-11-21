@@ -132,10 +132,7 @@ func (l *Logger) log(level, operation, template, function string, ctx Context) {
 		merged = maps.Clone(l.base)
 		maps.Copy(merged, ctx)
 	}
-	message, err := logsite.RenderFields(template, merged)
-	if err != nil {
-		panic(fmt.Sprintf("shim-lock logging: the record of operation %s cannot be rendered: %v", operation, err))
-	}
+	message := logsite.MustRender(operation, template, merged)
 	site := logsite.Key(Runtime, function, template)
 	rec := record{
 		Timestamp: sharedlogging.Timestamp(l.clock()),

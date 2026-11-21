@@ -942,11 +942,7 @@ func (r *Restarter) failed(message logsite.Message, fields dlog.Context, err err
 // template naming a value the fields do not hold is the same defect of its
 // call as it is there (dlog renders it the same way): it panics.
 func stepText(message logsite.Message, fields dlog.Context) string {
-	text, err := logsite.RenderFields(message.Template(), fields)
-	if err != nil {
-		panic(fmt.Sprintf("deploy: the cut step's message cannot be rendered: %v", err))
-	}
-	return text
+	return logsite.MustRender(opServices, message.Template(), fields)
 }
 
 // storeLogSize is how much the store has written: a boot still emitting

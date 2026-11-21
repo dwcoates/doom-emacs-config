@@ -131,10 +131,7 @@ func (l *Logger) write(level, operation, template, function string, ctx Context)
 	}
 	merged := maps.Clone(l.base)
 	maps.Copy(merged, ctx)
-	message, err := logsite.RenderFields(template, merged)
-	if err != nil {
-		panic(fmt.Sprintf("recordlog: the record of operation %s cannot be rendered: %v", operation, err))
-	}
+	message := logsite.MustRender(operation, template, merged)
 	line, err := json.Marshal(record{
 		Timestamp: sharedlogging.Timestamp(l.clock()), Runtime: l.runtime, PID: l.pid,
 		Level: level, Verbosity: "normal", Operation: operation, Message: message,

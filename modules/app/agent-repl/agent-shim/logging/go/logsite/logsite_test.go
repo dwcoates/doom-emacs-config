@@ -265,3 +265,39 @@ func TestValidKeyAcceptsOnlyTwelveLowercaseHex(t *testing.T) {
 		})
 	}
 }
+
+func TestMustRenderFillsTheTemplateFromItsFields(t *testing.T) {
+	// Act
+	got := MustRender("daemon.test", "shim {shim} after {elapsed}", map[string]any{"shim": "s1", "elapsed": 3})
+
+	// Assert
+	if got != "shim s1 after 3" {
+		t.Fatalf("MustRender = %q", got)
+	}
+}
+
+func TestMustRenderPanicsNamingTheOperationAndTheFault(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		want     string
+	}{
+		{name: "a placeholder no field holds", template: "lost {gone}", want: "{gone}"},
+		{name: "braces that do not parse", template: "unclosed {", want: "unclosed {"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			defer func() {
+				// Assert
+				text, _ := recover().(string)
+				if !strings.Contains(text, "daemon.test.render") || !strings.Contains(text, tt.want) {
+					t.Fatalf("panic = %q, want one naming the operation and %q", text, tt.want)
+				}
+			}()
+
+			// Act
+			MustRender("daemon.test.render", tt.template, map[string]any{"here": 1})
+		})
+	}
+}

@@ -457,10 +457,7 @@ func (l *Logger) write(verbosity string, fields Fields, template, function strin
 	for key, value := range values {
 		context[key] = value
 	}
-	message, err := logsite.RenderFields(template, context)
-	if err != nil {
-		panic(fmt.Sprintf("shim-store logging: the record of operation %s cannot be rendered: %v", merged.Operation, err))
-	}
+	message := logsite.MustRender(merged.Operation, template, context)
 	now := sharedlogging.Timestamp(l.clock())
 	entry := record{
 		Timestamp:          now,

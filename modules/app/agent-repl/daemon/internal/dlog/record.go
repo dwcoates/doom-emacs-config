@@ -168,7 +168,7 @@ func stringify(v any) string {
 // FUNCTION: its message rendered from the merged context CTX (mustRender),
 // and its site keyed and its template stamped.
 func newKeyedRecord(at time.Time, runtime, level, operation, template, function string, ctx Context, pid int) record {
-	rec := newRecord(at, runtime, level, operation, mustRender(operation, template, ctx), ctx, pid)
+	rec := newRecord(at, runtime, level, operation, logsite.MustRender(operation, template, ctx), ctx, pid)
 	rec.Site, rec.Template = logsite.Key(runtime, function, template), template
 	return rec
 }

@@ -296,6 +296,19 @@ func (m Message) Forwarded() string {
 	return m.function
 }
 
+// MustRender is a logger's record of OPERATION rendered: TEMPLATE filled
+// from FIELDS, the record's named values. A template naming a value the
+// record does not hold, or one whose braces do not parse, is a defect of the
+// call that wrote it, which every runtime's static scan test exists to
+// catch: it panics, naming the operation and the fault.
+func MustRender(operation, template string, fields map[string]any) string {
+	text, err := RenderFields(template, fields)
+	if err != nil {
+		panic(fmt.Sprintf("logsite: the record of operation %s cannot be rendered: %v", operation, err))
+	}
+	return text
+}
+
 // RenderFields renders TEMPLATE from FIELDS, a record's named values: each
 // placeholder takes the field of its name, as Text spells it.
 func RenderFields(template string, fields map[string]any) (string, error) {

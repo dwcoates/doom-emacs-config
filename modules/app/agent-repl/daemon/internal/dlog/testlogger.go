@@ -134,7 +134,7 @@ func (l *TestLogger) Records() []Record {
 // naming a value the record does not hold panics here as it does there.
 func (l *TestLogger) append(level, operation, template, function string, ctx Context) string {
 	merged := merge(l.base, ctx)
-	text := mustRender(operation, template, merged)
+	text := logsite.MustRender(operation, template, merged)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.records = append(l.records, Record{

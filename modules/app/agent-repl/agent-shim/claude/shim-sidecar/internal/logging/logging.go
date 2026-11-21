@@ -805,10 +805,7 @@ func (l *Logger) write(verbose bool, ctx Context, template, function string, val
 	for key, value := range values {
 		context[key] = value
 	}
-	message, err := logsite.RenderFields(template, context)
-	if err != nil {
-		panic(fmt.Sprintf("sidecar logging: the record of operation %s cannot be rendered: %v", ctx.Operation, err))
-	}
+	message := logsite.MustRender(ctx.Operation, template, context)
 	verbosity := "normal"
 	if verbose {
 		verbosity = "verbose"

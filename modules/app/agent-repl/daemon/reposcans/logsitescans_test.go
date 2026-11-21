@@ -93,8 +93,9 @@ func TestEveryLogSiteScanTakesTheSharedShape(t *testing.T) {
 }
 
 // TestNoLoggerGuardsAForwardedMessageByHand fails a Go logger that checks a
-// forwarded message by hand instead of logsite.Message.Forwarded, the one
-// guard every logger shares.
+// forwarded message by hand instead of logsite.Message.Forwarded, or renders
+// a record's template by hand instead of logsite.MustRender: the one guard
+// and the one render every logger shares.
 func TestNoLoggerGuardsAForwardedMessageByHand(t *testing.T) {
 	// Arrange
 	root := moduleRootDir(t)
@@ -117,9 +118,12 @@ func TestNoLoggerGuardsAForwardedMessageByHand(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		rel, _ := filepath.Rel(root, path)
 		if strings.Contains(string(src), "message.IsZero()") {
-			rel, _ := filepath.Rel(root, path)
 			t.Errorf("%s guards a forwarded message by hand; call its Forwarded", rel)
+		}
+		if strings.Contains(string(src), "logsite.RenderFields(") {
+			t.Errorf("%s renders a record's template by hand; call logsite.MustRender", rel)
 		}
 		return nil
 	})
