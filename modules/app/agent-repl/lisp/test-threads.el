@@ -172,7 +172,7 @@ and `said' to the last message."
       ;; Act
       (agent-repl-thread-recent-when-ready)
       ;; Assert
-      (should (equal agent-repl-test-threads--switched '(("chat/newer" . launch)))))))
+      (should (equal agent-repl-test-threads--switched '(("t-2" . launch)))))))
 
 (ert-deftest agent-repl-test-threads-a-launch-before-the-roster-waits-for-it ()
   "Before the first roster a launch opens nothing, and the roster's arrival opens it once."
@@ -187,7 +187,7 @@ and `said' to the last message."
         (should (agent-repl-test-threads--recorded 'info "elisp.threads.launch-deferred")))
       (agent-repl-threads--launch-on-roster roster)
       (agent-repl-threads--launch-on-roster roster)
-      (should (equal agent-repl-test-threads--switched '(("chat/why" . launch)))))))
+      (should (equal agent-repl-test-threads--switched '(("t-1" . launch)))))))
 
 (ert-deftest agent-repl-test-threads-a-launch-with-no-thread-says-so ()
   "A launch with no thread yet raises nothing, and records it."
@@ -220,7 +220,7 @@ and `said' to the last message."
             (timer-event-handler (car scheduled))
             ;; Assert
             (should-not (buffer-live-p buffer))
-            (should (equal agent-repl-test-threads--switched '(("chat/why" . launch)))))
+            (should (equal agent-repl-test-threads--switched '(("t-1" . launch)))))
         (delete-directory (file-name-directory file) t)))))
 
 (provide 'test-threads)

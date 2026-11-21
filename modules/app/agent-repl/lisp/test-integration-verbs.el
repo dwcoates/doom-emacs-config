@@ -1696,7 +1696,9 @@ overrides the display name, defaulting to ID."
     (detail . ())
     (closed . ((closed . ,(if closed t :false))))
     (availability . ((available . ())))
-    (lastUpdated . ((atMs . "1")))))
+    (lastUpdated . ((atMs . "1")))
+    ;; The daemon shows an open row and never a closed one (wsm.Visibility).
+    (visibility . ,(if closed '((notVisible . ())) '((unselectedVisible . ()))))))
 
 (defun agent-repl-itest-verbs--roster (rows)
   "Return a WorkspaceRoster protojson alist carrying ROWS in the fixture section.

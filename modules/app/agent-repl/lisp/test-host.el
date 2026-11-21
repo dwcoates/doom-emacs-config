@@ -900,7 +900,7 @@ A hand-rolled copy of either would not be recorded here."
     ;; Act
     (agent-repl-host-select "ws-1")
     ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.select-standing-down ws=ws-1"))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.select-standing-down id=\"ws-id-1\""))))
 
 (ert-deftest agent-repl-test-host-select-standing-down-reports-no-refusal ()
   "No ERROR is recorded for a select a leaving daemon answered."
@@ -987,7 +987,7 @@ order of the failure and the link-down edge decides nothing (2026-10-07)."
     ;; Act
     (agent-repl-host-select "ws-1")
     ;; Assert
-    (should (agent-repl-test-host--logged-p :error "elisp.host.select-failed ws=ws-1"))))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.select-failed id=\"ws-id-1\""))))
 
 (defun agent-repl-test-host--select-failing-as-the-daemon-goes ()
   "Arrange a select whose daemon goes away under it: the link is down as
@@ -1028,7 +1028,7 @@ answer's is: the link-up re-asserts it."
     ;; Act
     (agent-repl-host-select "ws-1")
     ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.select-daemon-gone ws=ws-1"))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.select-daemon-gone id=\"ws-id-1\""))
     (should-not (cl-find-if (lambda (entry) (eq (car entry) :error))
                             agent-repl-test-host--logs))))
 
@@ -1083,7 +1083,7 @@ re-assertion waiting on it lets go."
     (agent-repl-host-select "ws-1")
     ;; Assert
     (should (agent-repl-test-host--logged-p
-             :info "elisp.host.select-deferred ws=ws-1 id=\"ws-id-1\" reason=no-connection reassert=next-link-up"))
+             :info "elisp.host.select-deferred id=\"ws-id-1\" reason=no-connection reassert=next-link-up"))
     (should-not (cl-find-if (lambda (entry) (eq (car entry) :warn))
                             agent-repl-test-host--logs))))
 
@@ -1378,7 +1378,7 @@ says now rather than wait for a push that will never come."
     ;; Act
     (agent-repl-host-select "ws-2" nil t)
     ;; Assert
-    (should (cl-some (lambda (line) (string-match-p "elisp.host.select ws=ws-2 .*keep-history=t" line))
+    (should (cl-some (lambda (line) (string-match-p "elisp.host.select id=.*ws-id-2.* keep-history=t" line))
                      (mapcar (lambda (l) (if (stringp l) l (format "%S" l))) agent-repl-test-host--logs)))))
 
 
