@@ -61,6 +61,7 @@ import "agentrepl/v1/endpoint_get_workspace_status.proto";
 import "agentrepl/v1/endpoint_locate_workspace.proto";
 import "agentrepl/v1/endpoint_inspect_chess_board_square.proto";
 import "agentrepl/v1/endpoint_interrupt.proto";
+import "agentrepl/v1/endpoint_keep_live_workspace.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
 import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
 import "agentrepl/v1/endpoint_list_slack_channels.proto";
@@ -832,6 +833,10 @@ service AgentRepl {
   // context, the one way an agent passes a gate: paying and clearing stay the
   // user's (AnswerColdGate). See endpoint_pass_cold_gate.proto.
   rpc PassColdGate(PassColdGateRequest) returns (PassColdGateResponse);
+  // Warm one workspace's cache by the cache keeper's own keep-alive: restore
+  // a parked session, send the keep-alive, await the vendor's answer, and
+  // stand down a session it started. See endpoint_keep_live_workspace.proto.
+  rpc KeepLiveWorkspace(KeepLiveWorkspaceRequest) returns (KeepLiveWorkspaceResponse);
   // Run the named tests from one workspace's worktree, streaming what the run
   // reports; the daemon is the one runner of tests on the host. See
   // endpoint_run_tests.proto.

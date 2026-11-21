@@ -452,6 +452,9 @@ const (
 	AgentReplNotifyWorkspaceProcedure = "/agentrepl.v1.AgentRepl/NotifyWorkspace"
 	// AgentReplPassColdGateProcedure is the fully-qualified name of the AgentRepl's PassColdGate RPC.
 	AgentReplPassColdGateProcedure = "/agentrepl.v1.AgentRepl/PassColdGate"
+	// AgentReplKeepLiveWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// KeepLiveWorkspace RPC.
+	AgentReplKeepLiveWorkspaceProcedure = "/agentrepl.v1.AgentRepl/KeepLiveWorkspace"
 	// AgentReplRunTestsProcedure is the fully-qualified name of the AgentRepl's RunTests RPC.
 	AgentReplRunTestsProcedure = "/agentrepl.v1.AgentRepl/RunTests"
 	// AgentReplRunRedundancyProcedure is the fully-qualified name of the AgentRepl's RunRedundancy RPC.
@@ -618,6 +621,7 @@ var (
 	agentReplListGithubMergeQueueSubscriptionsMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("ListGithubMergeQueueSubscriptions")
 	agentReplNotifyWorkspaceMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("NotifyWorkspace")
 	agentReplPassColdGateMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("PassColdGate")
+	agentReplKeepLiveWorkspaceMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("KeepLiveWorkspace")
 	agentReplRunTestsMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("RunTests")
 	agentReplRunRedundancyMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("RunRedundancy")
 	agentReplEvaluateInEditorMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
@@ -1113,6 +1117,10 @@ type AgentReplClient interface {
 	// context, the one way an agent passes a gate: paying and clearing stay the
 	// user's (AnswerColdGate). See endpoint_pass_cold_gate.proto.
 	PassColdGate(context.Context, *connect.Request[v1.PassColdGateRequest]) (*connect.Response[v1.PassColdGateResponse], error)
+	// Warm one workspace's cache by the cache keeper's own keep-alive: restore
+	// a parked session, send the keep-alive, await the vendor's answer, and
+	// stand down a session it started. See endpoint_keep_live_workspace.proto.
+	KeepLiveWorkspace(context.Context, *connect.Request[v1.KeepLiveWorkspaceRequest]) (*connect.Response[v1.KeepLiveWorkspaceResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -2066,6 +2074,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplPassColdGateMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		keepLiveWorkspace: connect.NewClient[v1.KeepLiveWorkspaceRequest, v1.KeepLiveWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplKeepLiveWorkspaceProcedure,
+			connect.WithSchema(agentReplKeepLiveWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		runTests: connect.NewClient[v1.RunTestsRequest, v1.RunTestsResponse](
 			httpClient,
 			baseURL+AgentReplRunTestsProcedure,
@@ -2246,6 +2260,7 @@ type agentReplClient struct {
 	listGithubMergeQueueSubscriptions *connect.Client[v1.ListGithubMergeQueueSubscriptionsRequest, v1.ListGithubMergeQueueSubscriptionsResponse]
 	notifyWorkspace                   *connect.Client[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse]
 	passColdGate                      *connect.Client[v1.PassColdGateRequest, v1.PassColdGateResponse]
+	keepLiveWorkspace                 *connect.Client[v1.KeepLiveWorkspaceRequest, v1.KeepLiveWorkspaceResponse]
 	runTests                          *connect.Client[v1.RunTestsRequest, v1.RunTestsResponse]
 	runRedundancy                     *connect.Client[v1.RunRedundancyRequest, v1.RunRedundancyResponse]
 	evaluateInEditor                  *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
@@ -3007,6 +3022,11 @@ func (c *agentReplClient) PassColdGate(ctx context.Context, req *connect.Request
 	return c.passColdGate.CallUnary(ctx, req)
 }
 
+// KeepLiveWorkspace calls agentrepl.v1.AgentRepl.KeepLiveWorkspace.
+func (c *agentReplClient) KeepLiveWorkspace(ctx context.Context, req *connect.Request[v1.KeepLiveWorkspaceRequest]) (*connect.Response[v1.KeepLiveWorkspaceResponse], error) {
+	return c.keepLiveWorkspace.CallUnary(ctx, req)
+}
+
 // RunTests calls agentrepl.v1.AgentRepl.RunTests.
 func (c *agentReplClient) RunTests(ctx context.Context, req *connect.Request[v1.RunTestsRequest]) (*connect.ServerStreamForClient[v1.RunTestsResponse], error) {
 	return c.runTests.CallServerStream(ctx, req)
@@ -3516,6 +3536,10 @@ type AgentReplHandler interface {
 	// context, the one way an agent passes a gate: paying and clearing stay the
 	// user's (AnswerColdGate). See endpoint_pass_cold_gate.proto.
 	PassColdGate(context.Context, *connect.Request[v1.PassColdGateRequest]) (*connect.Response[v1.PassColdGateResponse], error)
+	// Warm one workspace's cache by the cache keeper's own keep-alive: restore
+	// a parked session, send the keep-alive, await the vendor's answer, and
+	// stand down a session it started. See endpoint_keep_live_workspace.proto.
+	KeepLiveWorkspace(context.Context, *connect.Request[v1.KeepLiveWorkspaceRequest]) (*connect.Response[v1.KeepLiveWorkspaceResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -4465,6 +4489,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplPassColdGateMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplKeepLiveWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplKeepLiveWorkspaceProcedure,
+		svc.KeepLiveWorkspace,
+		connect.WithSchema(agentReplKeepLiveWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplRunTestsHandler := connect.NewServerStreamHandler(
 		AgentReplRunTestsProcedure,
 		svc.RunTests,
@@ -4793,6 +4823,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplNotifyWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplPassColdGateProcedure:
 			agentReplPassColdGateHandler.ServeHTTP(w, r)
+		case AgentReplKeepLiveWorkspaceProcedure:
+			agentReplKeepLiveWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplRunTestsProcedure:
 			agentReplRunTestsHandler.ServeHTTP(w, r)
 		case AgentReplRunRedundancyProcedure:
@@ -5412,6 +5444,10 @@ func (UnimplementedAgentReplHandler) NotifyWorkspace(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) PassColdGate(context.Context, *connect.Request[v1.PassColdGateRequest]) (*connect.Response[v1.PassColdGateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.PassColdGate is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) KeepLiveWorkspace(context.Context, *connect.Request[v1.KeepLiveWorkspaceRequest]) (*connect.Response[v1.KeepLiveWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.KeepLiveWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error {

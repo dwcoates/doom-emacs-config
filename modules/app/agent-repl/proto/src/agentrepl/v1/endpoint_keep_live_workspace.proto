@@ -1,0 +1,281 @@
+// endpoint_keep_live_workspace.proto — KeepLiveWorkspace: an agent warms one
+// workspace's cache through the daemon's own keep-alive. AGENT API section.
+//
+// THE VERB IS THE CACHE KEEPER'S SCHEDULED BEAT, ASKED FOR NOW. The daemon
+// runs the one keep-alive subroutine its scheduled beats run
+// (cachelapse.Keeper.sendBeat): a parked session is restored through the
+// keeper's own restore slots, the keep-alive is sent, the vendor's answer is
+// awaited, and the session is stood down by the keep-alive cycle's own
+// stand-down (drain.Controller.CycleDown) under that stand-down's rules. A
+// session this verb started is always asked to stand down, so touching a
+// parked workspace never leaves its shim up; a session that was already up
+// is left to the ordinary rules, exactly as after a scheduled beat.
+//
+// THE VERB NEVER PAYS A COLD GATE AND NEVER INTERRUPTS WORK. A workspace at
+// its cold gate is refused (its gate is passed explicitly, PassColdGate), and
+// a session whose main agent is busy or whose detached work is live is
+// answered `busy` with nothing sent and nothing stopped: the work keeps the
+// cache warm itself.
+//
+// THE CALL IS BOUNDED. Each step (the start, the vendor's answer, the
+// stand-down) has its own bound, sized at two to three times its measured
+// healthy worst case, and a bound that fires answers `timed_out` naming the
+// step.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The workspace whose cache is warmed.
+message KeepLiveWorkspaceRequest {
+  // The workspace to keep live. Its dir must agree with the registry's.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message KeepLiveWorkspaceResponse {
+  // Whether the keep-alive subroutine ran to an answer, or the request could
+  // not be served.
+  oneof result {
+    KeepLiveWorkspaceSuccess success = 1;
+    KeepLiveWorkspaceError error = 2;
+  }
+}
+
+// ---- Success: the subroutine ran to an answer ----
+
+// The workspace's cache is warm: either this keep-alive re-anchored it, or
+// work running on the session keeps it warm without one.
+message KeepLiveWorkspaceSuccess {
+  // Whether a keep-alive went out, or the session's own work made one
+  // unnecessary.
+  oneof outcome {
+    KeepLiveWorkspaceBeaten beaten = 1;
+    KeepLiveWorkspaceBusy busy = 2;
+  }
+}
+
+// A keep-alive was sent and the vendor answered it.
+message KeepLiveWorkspaceBeaten {
+  // How the session came to be up for the keep-alive. A session this verb
+  // started is always asked to stand down afterwards; one that was already
+  // up is asked only when the keep-alive cycle's own grace has passed.
+  oneof start {
+    KeepLiveWorkspaceStarted started = 1;
+    KeepLiveWorkspaceAlreadyUp already_up = 2;
+  }
+  // The vendor's answer to the keep-alive.
+  KeepLiveWorkspaceAck ack = 3;
+  // Where the session stood once the subroutine ended.
+  oneof after {
+    KeepLiveWorkspaceStoodDown stood_down = 4;
+    KeepLiveWorkspaceLeftUp left_up = 5;
+  }
+}
+
+// The session was parked, and this verb restored it for the keep-alive
+// through the cache keeper's restore slots (at most three starts at once).
+message KeepLiveWorkspaceStarted {}
+
+// The session's shim was already up, so no start was taken.
+message KeepLiveWorkspaceAlreadyUp {}
+
+// The vendor's answer to the keep-alive: the shim restates the cache's lapse
+// when the request answers, or states the request's failure.
+message KeepLiveWorkspaceAck {
+  // Whether the keep-alive's request re-anchored the cache or failed.
+  oneof answer {
+    KeepLiveWorkspaceAnswered answered = 1;
+    KeepLiveWorkspaceRequestFailed request_failed = 2;
+  }
+}
+
+// The request answered and the cache is re-anchored.
+message KeepLiveWorkspaceAnswered {
+  // When the re-anchored cache lapses, in Unix milliseconds, as the shim
+  // restated it.
+  int64 lapses_at_ms = 1;
+}
+
+// The keep-alive's request failed after it was sent; the cache lapses at its
+// old anchor. The session is still stood down by the rules, as after an
+// answer.
+message KeepLiveWorkspaceRequestFailed {
+  // The failure, verbatim from the shim.
+  string detail = 1;
+}
+
+// The keep-alive cycle's stand-down took the session to its one park, or no
+// shim served it by then: no shim is left up.
+message KeepLiveWorkspaceStoodDown {}
+
+// A stand-down rule kept the session up: the workspace is in view, its remote
+// control is on, a real turn ran since the keep-alive, or (for a session that
+// was already up) it fell free less than the keep-alive cycle's grace ago. It
+// stays up until those rules let it go, as after any scheduled beat.
+message KeepLiveWorkspaceLeftUp {
+  // The rule that kept it up, as the daemon's records word it.
+  string rule = 1;
+}
+
+// The session's work keeps the cache warm, so nothing was sent and nothing
+// was stopped.
+message KeepLiveWorkspaceBusy {
+  // Which work holds the session. The shim judges it; a keep-alive's rewind
+  // would kill live detached work, so that work also refuses one.
+  oneof work {
+    KeepLiveWorkspaceBusyMainAgent main_agent = 1;
+    KeepLiveWorkspaceBusyDetachedWork detached_work = 2;
+  }
+}
+
+// The main agent is running a turn.
+message KeepLiveWorkspaceBusyMainAgent {
+  // The shim's account of what holds the main agent.
+  string detail = 1;
+}
+
+// Detached work is live on the session.
+message KeepLiveWorkspaceBusyDetachedWork {
+  // How many detached items are live.
+  uint32 live_items = 1;
+}
+
+// ---- Error: the request could not be served ----
+
+// Validation failures (unset field, blank string) are Connect
+// InvalidArgument, never an arm.
+message KeepLiveWorkspaceError {
+  // Why no keep-alive was delivered.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    KeepLiveWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    KeepLiveWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    KeepLiveWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    KeepLiveWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The workspace is closed.
+    KeepLiveWorkspaceClosed closed = 5;
+    // The workspace stands at its cold gate.
+    KeepLiveWorkspaceColdGated cold_gated = 6;
+    // The cache keeper owes the workspace no keep-alive.
+    KeepLiveWorkspaceOwesNoKeepalive owes_no_keepalive = 7;
+    // The shim judged the cache already lapsed.
+    KeepLiveWorkspaceCacheLapsed cache_lapsed = 8;
+    // The parked session could not be restored.
+    KeepLiveWorkspaceStartFailed start_failed = 9;
+    // The keep-alive could not be asked of the shim.
+    KeepLiveWorkspaceBeatFailed beat_failed = 10;
+    // The stand-down the rules asked for failed.
+    KeepLiveWorkspaceStandDownFailed stand_down_failed = 11;
+    // A step outran its bound.
+    KeepLiveWorkspaceTimedOut timed_out = 12;
+    // The registry could not be read.
+    KeepLiveWorkspaceRegistryUnreadable registry_unreadable = 13;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message KeepLiveWorkspaceUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's.
+message KeepLiveWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message KeepLiveWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+message KeepLiveWorkspaceNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it. UNSET when no live daemon serves it.
+  optional string address = 1;
+}
+
+// A closed workspace gets its one last keep-alive from the cache keeper and
+// then lapses; the verb sends it none.
+message KeepLiveWorkspaceClosed {}
+
+// The workspace stands at its cold gate, which the verb never pays: the
+// caller passes the gate explicitly (PassColdGate or the gate card) first.
+message KeepLiveWorkspaceColdGated {}
+
+// The cache keeper owes the workspace no keep-alive, so nothing was started
+// or sent: it is hidden and its cache lapses on its own clock, its cache is
+// known cold, it has no live or parked session, its run is at its break-even,
+// or it is idle past the idle sweep's cutoff.
+message KeepLiveWorkspaceOwesNoKeepalive {
+  // Why it owes none, as the keeper's records word it.
+  string reason = 1;
+}
+
+// The shim judged the cache already lapsed, so the keep-alive was not sent.
+// The workspace is marked cold and its session parked, as after a scheduled
+// beat judged so; its next prompt meets the cold gate.
+message KeepLiveWorkspaceCacheLapsed {
+  // When the cache lapsed, in Unix milliseconds.
+  int64 lapsed_at_ms = 1;
+}
+
+// The parked session's restore failed; nothing was sent.
+message KeepLiveWorkspaceStartFailed {
+  // The start's failure.
+  string detail = 1;
+}
+
+// The shim could not be asked for the keep-alive, or its submission failed.
+// A session this verb started is still asked to stand down.
+message KeepLiveWorkspaceBeatFailed {
+  // The call's failure.
+  string detail = 1;
+}
+
+// The keep-alive cycle's stand-down could not read what it needed or could
+// not stand the session down; the session may still be up.
+message KeepLiveWorkspaceStandDownFailed {
+  // The stand-down's account of its failure.
+  string detail = 1;
+}
+
+// A step outran its bound. The daemon recorded it at ERROR. A session this
+// verb started is still asked to stand down.
+message KeepLiveWorkspaceTimedOut {
+  // The step that outran its bound.
+  oneof step {
+    KeepLiveWorkspaceTimedOutStart start = 1;
+    KeepLiveWorkspaceTimedOutAck ack = 2;
+    KeepLiveWorkspaceTimedOutStandDown stand_down = 3;
+  }
+  // The bound that fired, in milliseconds.
+  int64 bound_ms = 4;
+  // The step's measured healthy worst case the bound was sized from, in
+  // milliseconds.
+  int64 expected_ms = 5;
+}
+
+// Bringing the parked session up and sending its keep-alive, including any
+// wait for a restore slot.
+message KeepLiveWorkspaceTimedOutStart {}
+
+// Waiting for the vendor's answer to the sent keep-alive.
+message KeepLiveWorkspaceTimedOutAck {}
+
+// Waiting for the keep-alive cycle's stand-down to settle.
+message KeepLiveWorkspaceTimedOutStandDown {}
+
+// The registry could not be read.
+message KeepLiveWorkspaceRegistryUnreadable {
+  // The read's failure.
+  string detail = 1;
+}
