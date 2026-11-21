@@ -1692,11 +1692,10 @@ func workspaceFind(c *cliCall, args []string) int {
 		if bound.value == "" {
 			continue
 		}
-		at, err := parseWhen(bound.value, c.deps.now())
-		if err != nil {
-			return c.usageFailed("-%s: %v", bound.flag, err)
+		ms, ok := c.whenFlag(bound.flag, bound.value)
+		if !ok {
+			return exitFailure
 		}
-		ms := at.UnixMilli()
 		*bound.into = &ms
 	}
 	if window.SinceMs != nil || window.UntilMs != nil {
@@ -1736,6 +1735,17 @@ func workspaceFind(c *cliCall, args []string) int {
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.FindWorkspacesResponse) (string, error) {
 		return describeFindRefusal(msg.GetError())
 	})
+}
+
+// whenFlag reads time flag -FLAG's VALUE (parseWhen) as epoch ms, a value
+// it cannot read failing the call as a usage error naming the flag.
+func (c *cliCall) whenFlag(flag, value string) (int64, bool) {
+	at, err := parseWhen(value, c.deps.now())
+	if err != nil {
+		c.usageFailed("-%s: %v", flag, err)
+		return 0, false
+	}
+	return at.UnixMilli(), true
 }
 
 // parseWhen reads a time flag: an age counted back from NOW (a Go duration
@@ -2312,18 +2322,17 @@ func queueLandings(c *cliCall, args []string) int {
 	if *since == "" {
 		return c.usageFailed("-since is required: an age (90m, 36h, 7d) or a date (2026-10-20, RFC 3339)")
 	}
-	from, err := parseWhen(*since, c.deps.now())
-	if err != nil {
-		return c.usageFailed("-since: %v", err)
+	from, ok := c.whenFlag("since", *since)
+	if !ok {
+		return exitFailure
 	}
-	req := &agentreplv1.ListMergeLandingsRequest{SinceMs: from.UnixMilli()}
+	req := &agentreplv1.ListMergeLandingsRequest{SinceMs: from}
 	if *until != "" {
-		to, err := parseWhen(*until, c.deps.now())
-		if err != nil {
-			return c.usageFailed("-until: %v", err)
+		to, ok := c.whenFlag("until", *until)
+		if !ok {
+			return exitFailure
 		}
-		ms := to.UnixMilli()
-		req.UntilMs = &ms
+		req.UntilMs = &to
 	}
 	if !c.dial(*stateDir) {
 		return exitFailure

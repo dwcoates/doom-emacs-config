@@ -4290,3 +4290,49 @@ func TestMergeQueueRecordLandingRefusesAMissingFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestWhenFlagReadsATimeFlagAsEpochMilliseconds(t *testing.T) {
+	tests := []struct {
+		name   string
+		value  string
+		wantMs int64
+		wantOK bool
+		stderr string
+	}{
+		{name: "an age", value: "90m", wantMs: cliNow.Add(-90 * time.Minute).UnixMilli(), wantOK: true},
+		{name: "an RFC 3339 instant", value: "2026-11-20T08:00:00Z", wantMs: time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC).UnixMilli(), wantOK: true},
+		{name: "an unreadable value fails naming its flag", value: "soon", stderr: `-until: "soon" is no age`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var errOut strings.Builder
+			c := &cliCall{ctx: context.Background(), deps: cliDeps{now: func() time.Time { return cliNow }}, errOut: &errOut, name: "merge-queue landings"}
+
+			// Act
+			ms, ok := c.whenFlag("until", tt.value)
+
+			// Assert
+			if ok != tt.wantOK || (ok && ms != tt.wantMs) || !strings.Contains(errOut.String(), tt.stderr) {
+				t.Fatalf("whenFlag = %d, %v (stderr %q); want %d, %v naming %q", ms, ok, errOut.String(), tt.wantMs, tt.wantOK, tt.stderr)
+			}
+		})
+	}
+}
+
+func TestEveryTimeFlagIsReadThroughWhenFlag(t *testing.T) {
+	// Arrange
+	body, err := os.ReadFile("agentcli.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	calls := strings.Count(string(body), "parseWhen(value, c.deps.now())")
+	all := strings.Count(string(body), "parseWhen(")
+
+	// Assert: the definition and whenFlag's one call.
+	if calls != 1 || all != 2 {
+		t.Fatalf("parseWhen is called %d times (%d through whenFlag); want only whenFlag to call it", all-1, calls)
+	}
+}
