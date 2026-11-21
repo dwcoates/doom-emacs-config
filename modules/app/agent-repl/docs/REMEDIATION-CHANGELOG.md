@@ -1585,3 +1585,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-20 merge-queue-stall-triage (landed in queue bypass mode): Merge gates record each test's CPU, and the shim and webapp integration tests now share their service processes, cutting their files' CPU 53-67%.
 - 2026-11-20 merge-queue-stall-triage (landed in queue bypass mode): The daemon no longer re-publishes every workspace's naming on each turn end, and 146 daemon integration tests share one daemon, cutting their CPU 31%.
 - 2026-11-20 merge-queue-stall-triage (landed in queue bypass mode): More integration tests share their service process: daemon idle barriers scope to one workspace, and more webapp and shim files share one app or shim.
+- 2026-11-20 merge-queue-stall-triage (landed in queue bypass mode): Test runs no longer leak a Go test binary that outlives its unit's time limit.
