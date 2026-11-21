@@ -23,6 +23,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+	testrunv1 "agentrepl/proto/testrun/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/briefprompt/briefprompttest"
@@ -58,6 +59,7 @@ import (
 	"agent-repld/internal/storagesweep"
 	"agent-repld/internal/streamslot"
 	"agent-repld/internal/subagentmaker"
+	"agent-repld/internal/testcases"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/worktreereap"
 	"agent-repld/internal/wsm"
@@ -183,6 +185,12 @@ type fakeDB struct {
 	repositories   []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
+	// testCases is each workspace's recorded test cases; recordCasesErr,
+	// testCasesErr and forgetCasesErr fail their write, read and forgetting.
+	testCases      map[ids.WorkspaceID][]*testrunv1.TestSelection
+	recordCasesErr error
+	testCasesErr   error
+	forgetCasesErr error
 	// listWorkspacesErr fails ListWorkspaces.
 	listWorkspacesErr error
 	// subsections are the subsections ReadArrangement answers.
@@ -274,6 +282,36 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 		return wsm.Workspace{}, wsm.ErrNotFound
 	}
 	return record, nil
+}
+
+func (f *fakeDB) RecordTestCases(_ context.Context, id ids.WorkspaceID, cases []*testrunv1.TestSelection, _ int64) error {
+	if f.recordCasesErr != nil {
+		return f.recordCasesErr
+	}
+	if f.testCases == nil {
+		f.testCases = map[ids.WorkspaceID][]*testrunv1.TestSelection{}
+	}
+	for _, c := range cases {
+		if !slices.ContainsFunc(f.testCases[id], func(had *testrunv1.TestSelection) bool { return testcases.Key(had) == testcases.Key(c) }) {
+			f.testCases[id] = append(f.testCases[id], c)
+		}
+	}
+	return nil
+}
+
+func (f *fakeDB) TestCasesOf(_ context.Context, id ids.WorkspaceID) ([]*testrunv1.TestSelection, error) {
+	return f.testCases[id], f.testCasesErr
+}
+
+func (f *fakeDB) ForgetTestCases(_ context.Context, id ids.WorkspaceID, cases []*testrunv1.TestSelection) (int, error) {
+	if f.forgetCasesErr != nil {
+		return 0, f.forgetCasesErr
+	}
+	before := len(f.testCases[id])
+	f.testCases[id] = slices.DeleteFunc(f.testCases[id], func(had *testrunv1.TestSelection) bool {
+		return slices.ContainsFunc(cases, func(c *testrunv1.TestSelection) bool { return testcases.Key(had) == testcases.Key(c) })
+	})
+	return before - len(f.testCases[id]), nil
 }
 
 func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
