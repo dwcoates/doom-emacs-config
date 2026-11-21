@@ -1297,7 +1297,7 @@ t_every_go_build_passes_one_ldflags() {
     : > "$root/stub.log"
     run_script "$root" daemon store sidecar lock >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
-           ! grep '^go build' "$root/stub.log" | awk '{ n = gsub(/ -ldflags /, "&"); if (n > 1) bad = 1 } END { exit !bad }'; then
+           ! awk '/^go build/ { n = gsub(/ -ldflags /, "&"); if (n > 1) bad = 1 } END { exit !bad }' "$root/stub.log"; then
         pass "go_build: every go build passes at most one -ldflags"
     else
         fail "go_build: every go build passes at most one -ldflags" "stub.log: $(cat "$root/stub.log")"
