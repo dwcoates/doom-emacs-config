@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -386,5 +387,34 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 				t.Fatalf("advance = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetMergeQueueStatusCountsTheQueueFromItsEntries(t *testing.T) {
+	// Arrange: one running, one waiting, two out of line, and one off the
+	// queue.
+	h := newHarness(t)
+	queue := aQueue()
+	queue.Queue.Remediating = []merge.QueueMember{
+		{Workspace: "ws-2", Name: "holder", Repair: sidebar.RepairFixingTests},
+		{Workspace: "ws-3", Name: "awaiting", Repair: sidebar.RepairAwaitingFixingTests},
+	}
+	queue.OffQueue = []merge.OffQueueMember{{Workspace: "ws-off", Name: "off", Branch: "agent/off", Cause: string(merge.CauseUserDrop), LeftAt: time.Unix(100, 0)}}
+	h.Merge.statuses = []merge.QueueStatus{queue}
+
+	// Act
+	resp, err := h.Client.GetMergeQueueStatus(context.Background(), connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("GetMergeQueueStatus: %v", err)
+	}
+	status := resp.Msg.GetSuccess().GetQueues()[0]
+	size := status.GetSize()
+	if size.GetRunning() != 1 || size.GetWaiting() != 1 || size.GetOutOfLine() != 2 || size.GetInQueue() != 4 || size.GetOffQueue() != 1 {
+		t.Fatalf("size = %v; want 1 running, 1 waiting, 2 out of line, 4 in the queue, 1 off it", size)
+	}
+	if int(size.GetInQueue()) != len(status.GetEntries()) || int(size.GetOffQueue()) != len(status.GetOffQueue()) {
+		t.Fatalf("size %v disagrees with %d entries and %d off the queue", size, len(status.GetEntries()), len(status.GetOffQueue()))
 	}
 }

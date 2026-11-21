@@ -1279,6 +1279,16 @@ type fakeMerge struct {
 	releasedEscalations  []merge.RepositoryScope
 	escalationReleaseErr error
 	merge.Orchestrator
+	// landings answers Landings, which landingsErr fails; landingsAsked is
+	// every window asked for.
+	landings      merge.LandingsWindow
+	landingsErr   error
+	landingsAsked []fakeLandingsAsk
+	// directReports is every RecordDirectLanding, answered directPath or
+	// directErr.
+	directReports []merge.DirectLanding
+	directPath    wsm.LandingPath
+	directErr     error
 	// ignoredKinds and unignoredKinds record every IgnoreRecords and
 	// UnignoreRecords, which ignoreErr answers.
 	ignoredKinds, unignoredKinds []fakeIgnoredKind
@@ -1367,6 +1377,22 @@ type fakeMerge struct {
 func (f *fakeMerge) Status(_ context.Context, scope *merge.RepositoryScope) ([]merge.QueueStatus, error) {
 	f.statusScopes = append(f.statusScopes, scope)
 	return f.statuses, f.statusErr
+}
+
+// fakeLandingsAsk is one Landings the fake was asked for.
+type fakeLandingsAsk struct {
+	scope        merge.RepositoryScope
+	since, until time.Time
+}
+
+func (f *fakeMerge) Landings(_ context.Context, scope merge.RepositoryScope, since, until time.Time) (merge.LandingsWindow, error) {
+	f.landingsAsked = append(f.landingsAsked, fakeLandingsAsk{scope: scope, since: since, until: until})
+	return f.landings, f.landingsErr
+}
+
+func (f *fakeMerge) RecordDirectLanding(_ context.Context, report merge.DirectLanding) (wsm.LandingPath, error) {
+	f.directReports = append(f.directReports, report)
+	return f.directPath, f.directErr
 }
 
 // fakeSubscription is one Subscribe or Unsubscribe the fake was asked for.

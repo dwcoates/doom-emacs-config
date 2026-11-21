@@ -993,6 +993,20 @@ func (s *requestLoggingServer) GetMergeQueueStatus(
 	return serveUnary(s, ctx, "GetMergeQueueStatus", req, s.server.GetMergeQueueStatus)
 }
 
+func (s *requestLoggingServer) ListMergeLandings(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListMergeLandingsRequest],
+) (*connect.Response[agentreplv1.ListMergeLandingsResponse], error) {
+	return serveUnary(s, ctx, "ListMergeLandings", req, s.server.ListMergeLandings)
+}
+
+func (s *requestLoggingServer) RecordDirectLanding(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RecordDirectLandingRequest],
+) (*connect.Response[agentreplv1.RecordDirectLandingResponse], error) {
+	return serveUnary(s, ctx, "RecordDirectLanding", req, s.server.RecordDirectLanding)
+}
+
 func (s *requestLoggingServer) FindWorkspaces(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.FindWorkspacesRequest],

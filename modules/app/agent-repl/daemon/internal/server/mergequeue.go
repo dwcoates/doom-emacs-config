@@ -198,7 +198,27 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 			PlacedAtFront: member.Front,
 		})
 	}
+	out.Size = queueSizeOf(out)
 	return out
+}
+
+// queueSizeOf counts a rendered queue's entries by stage and its merges off
+// the queue, from the very lists it renders, so the counts and the lists
+// never disagree (agentrepl.v1.MergeQueueStatusSize).
+func queueSizeOf(status *agentreplv1.MergeQueueStatus) *agentreplv1.MergeQueueStatusSize {
+	size := &agentreplv1.MergeQueueStatusSize{OffQueue: uint32(len(status.GetOffQueue()))}
+	for _, entry := range status.GetEntries() {
+		switch entry.GetStage().GetStage().(type) {
+		case *agentreplv1.MergeQueueStatusEntryStage_Running:
+			size.Running++
+		case *agentreplv1.MergeQueueStatusEntryStage_Waiting:
+			size.Waiting++
+		default:
+			size.OutOfLine++
+		}
+	}
+	size.InQueue = size.Running + size.Waiting + size.OutOfLine
+	return size
 }
 
 // awaitedSlotOf renders the slot a merge awaiting a repair slot waits for.
