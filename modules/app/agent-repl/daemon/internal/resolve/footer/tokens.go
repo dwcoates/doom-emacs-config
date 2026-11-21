@@ -420,6 +420,18 @@ func (t *tokenState) sum() totals {
 	return out
 }
 
+// turnSpent is what TURN, ending now, spent across every agent: the turn
+// accounting's sum, from the instant the turn in flight was accepted (zero
+// when none is known to be in flight).
+func (s *wsState) turnSpent(turn ids.TurnID) *TurnSpent {
+	sum := s.tok.sum()
+	spent := &TurnSpent{Turn: turn, FreshInput: sum.misses, CacheRead: sum.cacheRead, Output: sum.output}
+	if s.turn != nil {
+		spent.StartedAt = s.turn.At
+	}
+	return spent
+}
+
 // groupSums folds each unit's usage into its agent's figures.
 func (t *tokenState) groupSums() map[string]*totals {
 	out := map[string]*totals{}

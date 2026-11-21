@@ -112,6 +112,11 @@ type fakeDB struct {
 	mediatorRecordErr error
 	mediationErr      error
 	dispatchErr       error
+	// mediatorRepoErr fails MediatorRepoOf.
+	mediatorRepoErr error
+	// onRelease, when set, runs before each check's release, as a newer
+	// deploy racing it does.
+	onRelease func()
 	// windowErr fails RecordMediationWindow when set.
 	windowErr            error
 	remediationFinishErr error
@@ -393,6 +398,12 @@ func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed t
 }
 
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
+	f.mu.Lock()
+	hook := f.onRelease
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return f.checks.ReleaseMediation(ctx, repo, owed)
 }
 
@@ -411,6 +422,12 @@ func (f *fakeDB) DeployMediatorOf(ctx context.Context, repo wsm.RepoKey) (wsm.De
 }
 
 func (f *fakeDB) MediatorRepoOf(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
+	f.mu.Lock()
+	err := f.mediatorRepoErr
+	f.mu.Unlock()
+	if err != nil {
+		return "", false, err
+	}
 	return f.checks.MediatorRepoOf(ctx, ws)
 }
 
@@ -4591,6 +4608,9 @@ type fakeMeter struct {
 	// headTook their durations.
 	heads    []string
 	headTook []time.Duration
+	// compactionTook is each recorded mediator compaction's duration, in
+	// order.
+	compactionTook []time.Duration
 }
 
 func (f *fakeMeter) ObserveMergeStep(step string, took time.Duration) {
@@ -4666,6 +4686,25 @@ func (f *fakeMeter) CountQueueChange(change, cause string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, "change:"+change+":"+cause)
+}
+
+func (f *fakeMeter) ObserveMediatorTurnTokens(phase, kind string, tokens uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("mediator_tokens:%s:%s:%d", phase, kind, tokens))
+}
+
+func (f *fakeMeter) ObserveMediatorCompaction(outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "mediator_compaction:"+outcome)
+	f.compactionTook = append(f.compactionTook, took)
+}
+
+func (f *fakeMeter) CountMediatorRun(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "mediator_run:"+outcome)
 }
 
 // timed answers every duration the orchestrator recorded, in order: all of
@@ -4889,27 +4928,16 @@ type fakeDeployChecks struct {
 	// and closeErr fail them.
 	reopened, closed    []ids.WorkspaceID
 	reopenErr, closeErr error
-	// stopped records each deploy check stopped at once; stopErr fails it.
-	stopped []ids.WorkspaceID
-	stopErr error
-	// stoodBy and resumed record each finish's stand-by and each return to
-	// work; standByErr fails a stand-by.
-	stoodBy, resumed []ids.WorkspaceID
-	standByErr       error
+	// resumed records each return to work.
+	resumed []ids.WorkspaceID
 	// resumeErr fails every Resume.
 	resumeErr error
 	// refreshed and compacted record each fixer refresh and each compaction;
 	// refreshErr and compactErr fail them.
 	refreshed, compacted   []ids.WorkspaceID
 	refreshErr, compactErr error
-	// onStopNow runs inside each stop, as ending the stopped session does.
-	onStopNow func()
 	// createCtxErrs records each check workspace's creation context error.
 	createCtxErrs []error
-	// onStandBy runs inside each stand-by, as ending the finishing session
-	// does; standByCtxErrs records the stand-by context's error after it.
-	onStandBy      func()
-	standByCtxErrs []error
 	// efforts records each effort set, "ROLE:WS", and
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
@@ -4965,17 +4993,6 @@ func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
 	return f.reopenErr
 }
 
-func (f *fakeDeployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) error {
-	if f.onStandBy != nil {
-		f.onStandBy()
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.stoodBy = append(f.stoodBy, ws)
-	f.standByCtxErrs = append(f.standByCtxErrs, ctx.Err())
-	return f.standByErr
-}
-
 func (f *fakeDeployChecks) Refresh(_ context.Context, ws ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -4995,16 +5012,6 @@ func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
 	defer f.mu.Unlock()
 	f.resumed = append(f.resumed, ws)
 	return f.resumeErr
-}
-
-func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {
-	if f.onStopNow != nil {
-		f.onStopNow()
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.stopped = append(f.stopped, ws)
-	return f.stopErr
 }
 
 func (f *fakeDeployChecks) CloseSelf(_ context.Context, ws ids.WorkspaceID) (bool, error) {

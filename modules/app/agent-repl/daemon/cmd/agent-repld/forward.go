@@ -412,22 +412,6 @@ func (d deployChecks) CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, 
 	return verbs.CloseSelf(ctx, ws)
 }
 
-func (d deployChecks) StopNow(ctx context.Context, ws ids.WorkspaceID) error {
-	verbs, err := d.f.bound("the merge queue stopped a deploy check workspace")
-	if err != nil {
-		return err
-	}
-	return verbs.StopDeployCheck(ctx, ws)
-}
-
-func (d deployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) error {
-	verbs, err := d.f.bound("the merge queue stood a finished deploy check workspace by")
-	if err != nil {
-		return err
-	}
-	return verbs.StandByDeployCheck(ctx, ws)
-}
-
 func (d deployChecks) Refresh(ctx context.Context, ws ids.WorkspaceID) error {
 	verbs, err := d.f.bound("the merge queue refreshed the standing fixer's worktree")
 	if err != nil {

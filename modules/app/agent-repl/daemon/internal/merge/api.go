@@ -287,6 +287,10 @@ type Orchestrator interface {
 	// FixerTurnEnded settles the check a fixer is dispatched for when a
 	// turn of WS, that fixer, ended (fixerwatch.go).
 	FixerTurnEnded(ctx context.Context, ws wsm.WorkspaceID)
+	// MediatorTurnSpent meters the tokens a turn of WS spent when WS is a
+	// deploy mediator, by the phase of its run the turn ended in
+	// (mediatormetrics.go).
+	MediatorTurnSpent(ctx context.Context, ws wsm.WorkspaceID, spend footer.TurnSpent)
 	// Mediate runs an intake round for every check owed, and takes up every
 	// remediation finish a restart cut: a deploy
 	// finished, or a successor took over.
@@ -851,12 +855,6 @@ type DeployCheckWorkspaces interface {
 	// CloseSelf closes a deploy check workspace, at its running turn's end
 	// when one runs, answering whether it waits for that end.
 	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
-	// StopNow ends a deploy check workspace at once, its session killed
-	// mid-turn: a chain's end never lets its intake's turn run on.
-	StopNow(ctx context.Context, ws ids.WorkspaceID) error
-	// StandBy ends the session of a remediation or escalation whose finish
-	// was accepted, keeping it open and in sight until its fix deploys.
-	StandBy(ctx context.Context, ws ids.WorkspaceID) error
 	// Resume shows a hidden deploy check workspace again: the mediator
 	// stands in sight for good, so any hide of it is undone.
 	Resume(ctx context.Context, ws ids.WorkspaceID) error
@@ -911,6 +909,16 @@ type Meter interface {
 	// taking the head to leaving it, by how it left (the HeadExit values, or
 	// an AbandonCause's spelling for a merge abandoned at the head).
 	ObserveMergeHead(exit string, took time.Duration)
+	// ObserveMediatorTurnTokens records the tokens of one KIND
+	// (MediatorTokenKinds) a deploy mediator's turn spent, by the phase of
+	// its run the turn ended in (the MediatorPhase constants).
+	ObserveMediatorTurnTokens(phase, kind string, tokens uint64)
+	// ObserveMediatorCompaction records one compaction of a deploy
+	// mediator, by how it ended (the MediatorCompaction constants).
+	ObserveMediatorCompaction(outcome string, took time.Duration)
+	// CountMediatorRun records one deploy mediator run, by how it ended (the
+	// MediatorRun constants).
+	CountMediatorRun(outcome string)
 }
 
 // How a merge leaves its queue's head, the merge head metric's `exit`. A

@@ -480,9 +480,6 @@ type Verbs interface {
 	// SetCorrespondence marks a workspace awaiting another, or clears the mark
 	// with nil, as the asker (nil for the user) asks (standings.go).
 	SetCorrespondence(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, awaited *ids.WorkspaceID) error
-	// StopDeployCheck ends deploy check workspace WS at once, its session
-	// killed mid-turn (deploychecks.go).
-	StopDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// AnswerDeployCheckColdGate answers a cold gate standing on a standing
 	// deploy check with compact-and-resume at once.
 	AnswerDeployCheckColdGate(ctx context.Context, ws ids.WorkspaceID) error
@@ -496,10 +493,7 @@ type Verbs interface {
 	// RefreshDeployCheck brings a standing fixer's worktree to its parent's
 	// tip before a new brief.
 	RefreshDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
-	// StandByDeployCheck ends a finished deploy check workspace's session at
-	// once, keeping it open and in sight (deploychecks.go).
-	StandByDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
-	// ResumeDeployCheck shows a standing-by deploy check workspace again.
+	// ResumeDeployCheck shows a hidden deploy check workspace again.
 	ResumeDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// CloseSelf is the workspace's own agent closing it: the asking turn is
 	// never a blocker, and a workspace whose turn still runs is marked to

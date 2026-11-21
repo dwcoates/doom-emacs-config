@@ -329,7 +329,12 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 		}
 	}
 	armAfter := s.usage.arm()
+	spent := s.spent
+	s.spent = nil
 	r.mu.Unlock()
+	if spent != nil && r.opts.turnSpent != nil {
+		r.opts.turnSpent(ws, *spent)
+	}
 
 	if ctx == nil {
 		ctx = dlog.Context{}

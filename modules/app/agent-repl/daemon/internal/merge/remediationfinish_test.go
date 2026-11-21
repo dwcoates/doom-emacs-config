@@ -513,13 +513,16 @@ func TestAClosedMediatorsEscalationFinishIsEnded(t *testing.T) {
 	}
 }
 
-func TestAFinishedRemediationStandsByAndReturnsOnlyWithWork(t *testing.T) {
+// TestAFinishedRemediationKeepsItsSessionAndReturnsOnlyWithWork covers the
+// owner's 2026-11-20 ruling: the mediator stands in remote control for good,
+// so its finish never ends its session.
+func TestAFinishedRemediationKeepsItsSessionAndReturnsOnlyWithWork(t *testing.T) {
 	tests := []struct {
 		name        string
 		arrange     func(h *harness)
 		wantResumed []ids.WorkspaceID
 	}{
-		{name: "a finish that lands leaves it standing by until its deploy closes it"},
+		{name: "a finish that lands keeps its session"},
 		{name: "a gate that fails brings it back for its brief", wantResumed: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(h *harness) { h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}} }},
 	}
@@ -527,6 +530,7 @@ func TestAFinishedRemediationStandsByAndReturnsOnlyWithWork(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := finishing(t)
+			asDeployMediator(h, "ws-fixer")
 			if tt.arrange != nil {
 				h.git.mu.Lock()
 				tt.arrange(h)
@@ -537,27 +541,30 @@ func TestAFinishedRemediationStandsByAndReturnsOnlyWithWork(t *testing.T) {
 			err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
 
 			// Assert
-			if err != nil || !slices.Equal(h.checks.stoodBy, []ids.WorkspaceID{"ws-fixer"}) || !slices.Equal(h.checks.resumed, tt.wantResumed) {
-				t.Fatalf("FinishRemediation = %v, stood by %v, resumed %v; want it standing by and resumed %v", err, h.checks.stoodBy, h.checks.resumed, tt.wantResumed)
+			if err != nil || len(h.stoppedSessions) != 0 || !slices.Equal(h.checks.resumed, tt.wantResumed) {
+				t.Fatalf("FinishRemediation = %v, stopped %v, resumed %v; want its session left running and resumed %v", err, h.stoppedSessions, h.checks.resumed, tt.wantResumed)
 			}
 		})
 	}
 }
 
-// TestAFinishedWorkspaceStandsByOnlyOnceItsTurnEnds covers the owner's
-// 2026-11-17 ruling: the finish command is never cut mid-run, so the
-// stand-by awaits the turn that finished, and a wait that fails stands
-// nothing by and is recorded.
-func TestAFinishedWorkspaceStandsByOnlyOnceItsTurnEnds(t *testing.T) {
+// TestAFinishedWorkspacesGateWaitsForItsTurnToEnd covers the owner's
+// 2026-11-17 ruling: the finish command is never cut mid-run, so the gate
+// awaits the turn that finished; a wait that fails is recorded and the
+// finish still lands.
+func TestAFinishedWorkspacesGateWaitsForItsTurnToEnd(t *testing.T) {
 	tests := []struct {
-		name        string
-		awaitErr    error
-		wantStoodBy []ids.WorkspaceID
-		wantRecord  string
+		name         string
+		awaitErr     error
+		openTurnsErr error
+		wantAwaited  bool
+		wantRecord   string
 	}{
-		{name: "the turn that finished ends, then it stands by", wantStoodBy: []ids.WorkspaceID{"ws-fixer"}},
-		{name: "a turn that cannot be awaited stands nothing by", awaitErr: errors.New("watcher gone"),
-			wantRecord: "the finished workspace's turn could not be awaited; it does not stand by"},
+		{name: "the turn that finished ends, then the gate runs", wantAwaited: true},
+		{name: "a turn that cannot be awaited is recorded", awaitErr: errors.New("watcher gone"), wantAwaited: true,
+			wantRecord: "the finished workspace's turn could not be awaited; its gate runs without waiting for it"},
+		{name: "open turns that cannot be read are recorded", openTurnsErr: errors.New("database is locked"),
+			wantRecord: "the finished workspace's open turns could not be read; its gate runs without waiting for them"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -565,6 +572,7 @@ func TestAFinishedWorkspaceStandsByOnlyOnceItsTurnEnds(t *testing.T) {
 			h := finishing(t)
 			h.db.mu.Lock()
 			h.db.turns["ws-fixer"] = []wsm.Turn{{ID: "t-finish", Workspace: "ws-fixer"}}
+			h.db.openTurnsErr = tt.openTurnsErr
 			h.db.mu.Unlock()
 			awaited := make(chan ids.TurnID, 1)
 			h.mu.Lock()
@@ -572,19 +580,24 @@ func TestAFinishedWorkspaceStandsByOnlyOnceItsTurnEnds(t *testing.T) {
 			h.mu.Unlock()
 
 			// Act
-			_ = h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+			err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
 
 			// Assert
 			select {
 			case turn := <-awaited:
-				if turn != "t-finish" {
-					t.Fatalf("awaited %q, want the turn that finished", turn)
+				if !tt.wantAwaited || turn != "t-finish" {
+					t.Fatalf("awaited %q, want awaited %v the turn that finished", turn, tt.wantAwaited)
 				}
 			default:
-				t.Fatal("the turn that finished was never awaited")
+				if tt.wantAwaited {
+					t.Fatal("the turn that finished was never awaited")
+				}
 			}
-			if !slices.Equal(h.checks.stoodBy, tt.wantStoodBy) {
-				t.Fatalf("stood by %v, want %v", h.checks.stoodBy, tt.wantStoodBy)
+			h.db.mu.Lock()
+			h.db.openTurnsErr = nil
+			h.db.mu.Unlock()
+			if f := finishOf(t, h); err != nil || f == nil || f.Step != wsm.RemediationDeploying {
+				t.Fatalf("FinishRemediation = %v, finish %+v; want it landed", err, f)
 			}
 			if tt.wantRecord != "" {
 				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish, Message: tt.wantRecord}); !ok {
@@ -595,39 +608,43 @@ func TestAFinishedWorkspaceStandsByOnlyOnceItsTurnEnds(t *testing.T) {
 	}
 }
 
-func TestAFinishedWorkspaceThatCannotStandByIsRecordedAndStillLands(t *testing.T) {
-	// Arrange
-	h := finishing(t)
-	h.checks.standByErr = errors.New("the shim would not stop")
-
-	// Act
-	err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
-
-	// Assert
-	if f := finishOf(t, h); err != nil || f == nil || f.Step != wsm.RemediationDeploying {
-		t.Fatalf("FinishRemediation = %v, finish %+v; want it landed regardless", err, f)
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish, Message: "the finished workspace could not stand by; its session runs on and it stays among the working rows"}); !ok {
-		t.Fatalf("records = %v, want the failed stand-by at ERROR", h.logs.Records())
-	}
+// asDeployMediator records WS as its repository's deploy mediator, as
+// production always records the workspace a finish lands directly for.
+func asDeployMediator(h *harness, ws ids.WorkspaceID) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	record := h.db.workspaces[ws]
+	record.DeployMediator = true
+	h.db.workspaces[ws] = record
 }
 
-func TestAStandByThatEndsTheFinishingSessionRunsOnALiveContext(t *testing.T) {
-	// Arrange
+func TestTheFinishingTurnIsAwaitedOnTheMediationsLifetimeNotTheRequests(t *testing.T) {
+	// Arrange: the finish request's context is cut while its turn is awaited.
 	h := finishing(t)
+	h.db.mu.Lock()
+	h.db.turns["ws-fixer"] = []wsm.Turn{{ID: "t-finish", Workspace: "ws-fixer"}}
+	h.db.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h.checks.onStandBy = cancel
+	started, gate := make(chan ids.TurnID), make(chan struct{})
+	h.mu.Lock()
+	h.awaitStarted, h.awaitGate = started, gate
+	h.mu.Unlock()
+	go func() {
+		<-started
+		cancel()
+		close(gate)
+	}()
 
 	// Act
 	err := h.o.FinishRemediation(ctx, "ws-fixer", aRemediationPatch)
 
 	// Assert
-	if err != nil || !slices.Equal(h.checks.standByCtxErrs, []error{nil}) {
-		t.Fatalf("FinishRemediation = %v, stand-by context errors %v; want one stand-by on a live context", err, h.checks.standByCtxErrs)
+	if f := finishOf(t, h); err != nil || f == nil || f.Step != wsm.RemediationDeploying {
+		t.Fatalf("FinishRemediation = %v, finish %+v; want it landed", err, f)
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "could not republish the queue whose check changed"}); ok {
-		t.Fatalf("records = %v, want the queue republished", h.logs.Records())
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish}); ok {
+		t.Fatalf("records = %v, want the turn awaited on a live context", h.logs.Records())
 	}
 }
 

@@ -218,7 +218,9 @@ func (o *orchestrator) compactMediator(ctx context.Context, q wsm.RepoKey, field
 	}
 	fields = withField(fields, "workspace", string(recorded.Workspace))
 	compact := func(ctx context.Context) {
+		started := o.deps.Now()
 		compacted, err := o.deps.DeployChecks.Compact(ctx, recorded.Workspace)
+		o.deps.Meter.ObserveMediatorCompaction(mediatorCompactionOutcome(compacted, err), o.deps.Now().Sub(started))
 		if err != nil {
 			o.deps.Log.Global().Error(opMediation, "the quiet run after the checks' work could not compact the deploy mediator", withField(fields, "error", err.Error()))
 			return

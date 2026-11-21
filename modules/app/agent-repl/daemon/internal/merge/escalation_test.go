@@ -249,25 +249,10 @@ func TestAnEscalationTakesOnAgainAProblemWhoseFixDeployed(t *testing.T) {
 	}
 }
 
-// deployStarted is decided when the stop ends the intake's session.
-func decidedAtStop(t *testing.T, h *harness) *bool {
-	t.Helper()
-	decided := new(bool)
-	h.checks.onStopNow = func() {
-		m, err := h.db.MediationOf(context.Background(), mediationKey(h))
-		if err != nil {
-			t.Errorf("MediationOf at the stop = %v", err)
-			return
-		}
-		*decided = !owes(m, deployStarted) || m.Dispatched || m.Escalated()
-	}
-	return decided
-}
-
 // TestADecisionNeverStopsTheMediator covers the owner's 2026-11-17 ruling: a
 // decision command is never cut mid-run, since a cut was saved in the
-// mediator's transcript as "User rejected tool use"; the mediator's session
-// ends with the turn that decided (intakeTurnEnded).
+// mediator's transcript as "User rejected tool use"; and the 2026-11-20
+// ruling: its session is never ended at all.
 func TestADecisionNeverStopsTheMediator(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -288,8 +273,8 @@ func TestADecisionNeverStopsTheMediator(t *testing.T) {
 			err := decideTold(h, tt.decision)
 
 			// Assert
-			if err != nil || len(h.checks.stopped) != 0 {
-				t.Fatalf("DecideMediation = %v, stopped %v; want the decision recorded and the mediator left to end its turn", err, h.checks.stopped)
+			if err != nil || len(h.stoppedSessions) != 0 {
+				t.Fatalf("DecideMediation = %v, stopped %v; want the decision recorded and the mediator's session left running", err, h.stoppedSessions)
 			}
 		})
 	}

@@ -616,6 +616,10 @@ type wsState struct {
 
 	// tok is the turn's token accumulation.
 	tok tokenState
+	// spent is the spend of the main turn that just ended, set at its
+	// terminal under the lock and taken by the publication that follows it,
+	// which tells it once the lock is released (WithTurnSpent).
+	spent *TurnSpent
 
 	// agents are the live subagents with feed bubbles, by spawn unit.
 	agents map[string]*agentRow

@@ -48,7 +48,23 @@ const (
 	// MergeHeadName is each stay of a merge at its queue's head, from taking
 	// the head to leaving it, by how it left.
 	MergeHeadName = "agentrepl_merge_head_seconds"
+	// MediatorTurnTokensName is the tokens each turn of a deploy mediator
+	// spent, by the phase of its run the turn ended in and the kind of
+	// token. Its count per phase and kind is how many turns ended in it.
+	MediatorTurnTokensName = "agentrepl_deploy_mediator_turn_tokens"
+	// MediatorCompactionName is how long each compaction of a deploy
+	// mediator took, by how it ended. Its count per outcome is how many
+	// compactions ended so.
+	MediatorCompactionName = "agentrepl_deploy_mediator_compaction_seconds"
+	// MediatorRunsName counts the deploy mediator's runs, from a deploy's
+	// hot reload to the approval or the finish that ended the run, by how
+	// it ended.
+	MediatorRunsName = "agentrepl_deploy_mediator_runs_total"
 )
+
+// turnTokenBuckets double from a one-line turn to a turn that read a whole
+// context window many times over.
+var turnTokenBuckets = prometheus.ExponentialBuckets(1000, 2, 15)
 
 // roundCountBuckets span a clean merge's single round to a merge that
 // rebased or fixed past its bound.
@@ -67,6 +83,8 @@ type merges struct {
 	changes                                                                   *prometheus.CounterVec
 	noticeSizes                                                               *prometheus.HistogramVec
 	noticesSuppressed                                                         *prometheus.CounterVec
+	mediatorTurnTokens, mediatorCompactions                                   *prometheus.HistogramVec
+	mediatorRuns                                                              *prometheus.CounterVec
 }
 
 func newMerges() merges {
@@ -113,6 +131,15 @@ func newMerges() merges {
 		noticesSuppressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: NoticesSuppressedName, Help: "Notices of a type the daemon is set not to send, by type.",
 		}, []string{"notice"}),
+		mediatorTurnTokens: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: MediatorTurnTokensName, Help: "Tokens a deploy mediator's turn spent, by the phase of its run the turn ended in and the kind of token.", Buckets: turnTokenBuckets,
+		}, []string{"phase", "kind"}),
+		mediatorCompactions: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: MediatorCompactionName, Help: "How long a compaction of a deploy mediator took, by how it ended.", Buckets: mergeBuckets,
+		}, []string{"outcome"}),
+		mediatorRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: MediatorRunsName, Help: "Deploy mediator runs, from a deploy's hot reload to the approval or finish that ended it, by how it ended.",
+		}, []string{"outcome"}),
 	}
 }
 
@@ -209,6 +236,32 @@ func (s *Surface) CountQueueChange(change, cause string) {
 		return
 	}
 	s.merges.changes.WithLabelValues(change, cause).Inc()
+}
+
+// ObserveMediatorTurnTokens implements merge.Meter. The off surface records
+// nothing.
+func (s *Surface) ObserveMediatorTurnTokens(phase, kind string, tokens uint64) {
+	if s == nil {
+		return
+	}
+	s.merges.mediatorTurnTokens.WithLabelValues(phase, kind).Observe(float64(tokens))
+}
+
+// ObserveMediatorCompaction implements merge.Meter. The off surface records
+// nothing.
+func (s *Surface) ObserveMediatorCompaction(outcome string, took time.Duration) {
+	if s == nil {
+		return
+	}
+	s.merges.mediatorCompactions.WithLabelValues(outcome).Observe(took.Seconds())
+}
+
+// CountMediatorRun implements merge.Meter. The off surface records nothing.
+func (s *Surface) CountMediatorRun(outcome string) {
+	if s == nil {
+		return
+	}
+	s.merges.mediatorRuns.WithLabelValues(outcome).Inc()
 }
 
 // The notices the daemon sends workspaces (briefprompt.Meter).

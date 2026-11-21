@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -42,11 +43,18 @@ func (h *mediationHook) bind(o merge.Orchestrator) {
 }
 
 func (h *mediationHook) bound(edge string) merge.Orchestrator {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if h.o == nil {
+	o := h.orchestrator()
+	if o == nil {
 		h.log.Error(opMediationHook, "a deploy edge came before the merge queue was built; no mediation follows it", dlog.Context{"edge": edge})
 	}
+	return o
+}
+
+// orchestrator is the merge orchestrator bound, nil before the binding. It
+// is the one read of the binding.
+func (h *mediationHook) orchestrator() merge.Orchestrator {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return h.o
 }
 
@@ -76,13 +84,24 @@ func (h *mediationHook) rounds() {
 // queue is built is no loss and no error: the queue's first pass reads every
 // turn's recorded close.
 func (h *mediationHook) turnEnded(ws ids.WorkspaceID) {
-	h.mu.RLock()
-	o := h.o
-	h.mu.RUnlock()
+	o := h.orchestrator()
 	if o == nil {
 		return
 	}
 	inflight.Go(func() { o.FixerTurnEnded(h.ctx, ws) })
+}
+
+// turnSpent meters, off the caller's goroutine, what WS's turn that just
+// ended spent when WS is a deploy mediator
+// (merge.Orchestrator.MediatorTurnSpent). A turn that ends before the merge
+// queue is built goes unmetered, which is recorded.
+func (h *mediationHook) turnSpent(ws ids.WorkspaceID, spent footer.TurnSpent) {
+	o := h.orchestrator()
+	if o == nil {
+		h.log.Info(opMediationHook, "a turn ended before the merge queue was built; its spend is not metered", dlog.Context{"workspace": string(ws), "turn": string(spent.Turn)})
+		return
+	}
+	inflight.Go(func() { o.MediatorTurnSpent(h.ctx, ws, spent) })
 }
 
 // ended runs the rounds of every mediation owed, off the caller's goroutine.
