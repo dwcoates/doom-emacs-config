@@ -21,8 +21,8 @@
 // selection (a banner's own click is one), or a newer banner of its workspace
 // lets it go; a read-back banner (Linux notify-send) is let go too once its
 // program stops showing it. The platform is NOT asked at the claim which
-// banners it still lists: that query is a program run (terminal-notifier
-// -list, 40-160ms) on the path from focus to switch, and the switch is due in
+// banners it still lists: that query is a round trip to the platform
+// (40-160ms) on the path from focus to switch, and the switch is due in
 // tens of milliseconds. So a macOS banner the user cleared from Notification
 // Center still steers the next return.
 //

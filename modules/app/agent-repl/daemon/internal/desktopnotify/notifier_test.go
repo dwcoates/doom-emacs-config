@@ -293,9 +293,9 @@ func TestNotifierRecordsAHandedBannerAndRelaysNoClick(t *testing.T) {
 
 	// Assert
 	if got := f.clicks.clicked(); len(got) != 0 {
-		t.Fatalf("clicks = %v, want none: a handed banner's click selects the workspace itself", got)
+		t.Fatalf("clicks = %v, want none: a handed banner's click is reported on its own", got)
 	}
-	r, ok := hasRecord(f.log, "info", "the platform holds the banner; its click selects the workspace itself")
+	r, ok := hasRecord(f.log, "info", "the platform holds the banner; its click is reported on its own")
 	if !ok || r.Context["workspace"] != "ws1" || r.Context["kind"] != "turn_ended" {
 		t.Fatalf("record = %+v (found=%v), want the handed banner recorded with its workspace and kind", r, ok)
 	}
@@ -525,7 +525,7 @@ func TestNotifierRingsNothingForABannerNotMade(t *testing.T) {
 			chime := &fakeChime{}
 			deps := Deps{Focus: focus, Chime: chime, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: tc.workspaces, Log: log}
 			if tc.noProgram {
-				deps.BackendErr = errors.New("terminal-notifier is not installed")
+				deps.BackendErr = errors.New("notify-send is not installed")
 			} else {
 				deps.Backend = &fakeBackend{err: tc.programErr}
 			}
@@ -698,7 +698,7 @@ func TestNotifierPostAnswersItsDecision(t *testing.T) {
 			backend := &fakeBackend{}
 			deps := Deps{Focus: focus, Chime: &fakeChime{}, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: named, Log: log}
 			if tc.noProgram {
-				deps.BackendErr = errors.New("terminal-notifier is not installed")
+				deps.BackendErr = errors.New("notify-send is not installed")
 			} else {
 				deps.Backend = backend
 			}
@@ -774,7 +774,7 @@ func TestNotifierNoProgramCauseAnswersTheBootCause(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	n := New(Deps{
-		Focus: NewFocus(log), BackendErr: errors.New("terminal-notifier is not installed"), Chime: &fakeChime{}, Speech: quietSpeech(),
+		Focus: NewFocus(log), BackendErr: errors.New("notify-send is not installed"), Chime: &fakeChime{}, Speech: quietSpeech(),
 		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
@@ -782,7 +782,7 @@ func TestNotifierNoProgramCauseAnswersTheBootCause(t *testing.T) {
 	got := n.NoProgramCause()
 
 	// Assert
-	if got != "terminal-notifier is not installed" {
+	if got != "notify-send is not installed" {
 		t.Fatalf("NoProgramCause = %q, want the boot cause", got)
 	}
 }
@@ -799,4 +799,30 @@ func TestNotifierNoProgramCausePanicsWithAProgram(t *testing.T) {
 
 	// Act
 	f.notifier.NoProgramCause()
+}
+
+// TestNotifierClickedLetsGoOfHeldBannersAndAsksEmacsToSelect pins a click the
+// launcher reports: every held banner is let go, so no later focus gain
+// steers anywhere, and Emacs is asked to select the clicked workspace.
+func TestNotifierClickedLetsGoOfHeldBannersAndAsksEmacsToSelect(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.backend.outcome = Handed
+	f.notifier.Post("ws1", "turn_ended", titledBy)
+	f.notifier.wg.Wait()
+
+	// Act
+	f.notifier.Clicked("ws2")
+
+	// Assert
+	if got := f.clicks.clicked(); len(got) != 1 || got[0] != "ws2" {
+		t.Fatalf("clicks = %v, want the clicked workspace ws2", got)
+	}
+	if claim := f.notifier.Claim(); claim.Held {
+		t.Fatalf("claim = %+v, want nothing held after a click", claim)
+	}
+	r, ok := hasRecord(f.log, "info", "a held banner was clicked; asking Emacs to select the workspace")
+	if !ok || r.Context["workspace"] != "ws2" {
+		t.Fatalf("record = %+v (found=%v), want the click recorded with its workspace", r, ok)
+	}
 }

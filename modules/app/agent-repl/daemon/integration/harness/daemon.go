@@ -505,9 +505,16 @@ type Daemon struct {
 	// Services is this platform's fake service manager
 	// (NewFakeServiceManager); PlatformServiceVerbs names its verbs.
 	Services *Recorder
-	// Notifier records every desktop banner the daemon posted
-	// (AGENT_REPL_NOTIFIER_CMD), so no test ever raises a real one.
+	// LSRegister records every app bundle a deploy registered with
+	// LaunchServices (AGENT_REPL_LSREGISTER): the launcher, on macOS.
+	LSRegister *Recorder
+	// Notifier records every desktop banner the daemon posted through the
+	// platform's banner program (AGENT_REPL_NOTIFIER_CMD, Linux), so no test
+	// ever raises a real one.
 	Notifier *Recorder
+	// Launcher is the fake launcher every macOS banner is handed to,
+	// accepting before the daemon boots. Nil elsewhere.
+	Launcher *FakeLauncher
 	// Chime records every banner chime the daemon rang
 	// (AGENT_REPL_CHIME_CMD), so no test ever plays a real sound.
 	Chime *Recorder
@@ -738,6 +745,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		StoreSocket:        opts.StoreSocket,
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
 		Services:           NewFakeServiceManager(t, filepath.Join(root, "bin")),
+		LSRegister:         NewRecorderExecutable(t, filepath.Join(root, "bin"), "lsregister"),
 		Notifier:           NewFakeNotifier(t, filepath.Join(root, "bin")),
 		Chime:              NewFakeChime(t, filepath.Join(root, "bin")),
 		Say:                NewFakeSay(t, filepath.Join(root, "bin")),
@@ -825,6 +833,11 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		}
 	}
 	d.TestsSocket = ensureTestService(t, d.StateDir, d.LockDir)
+	// ON MACOS THE LAUNCHER POSTS EVERY BANNER, on its own socket: the fake
+	// one accepts before the daemon boots, so every banner reaches it.
+	if runtime.GOOS == "darwin" {
+		d.Launcher = StartFakeLauncher(t, sockRoot, d.LockDir)
+	}
 	mainJS := filepath.Join(root, "main.js")
 	writeFile(t, mainJS, "// placeholder shim module\n")
 	if opts.ShimMain != "" {
@@ -951,12 +964,19 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE="+d.PowerSource.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),
 		"AGENT_REPL_SYSTEMD_USER_DIR="+filepath.Join(root, "systemd-user"),
+		// The launcher a macOS deploy installs and registers: a directory
+		// of the test's and a recorder, never ~/Applications or LaunchServices.
+		"AGENT_REPL_APPLICATIONS_DIR="+filepath.Join(root, "Applications"),
+		"AGENT_REPL_LSREGISTER="+d.LSRegister.Path,
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
 		// HOME and PATH aside, the build identity is stated in one place only.
 		"HOME="+root,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
+	if d.Launcher != nil {
+		env = append(env, "AGENT_REPL_LAUNCHER_SOCKET="+d.Launcher.Socket)
+	}
 	if d.inMemoryState {
 		env = append(env, wsm.EnvTestStateInMemory+"=1")
 	}

@@ -616,7 +616,8 @@ func (*NotifyWorkspaceWorkspaceClosed) Descriptor() ([]byte, []int) {
 }
 
 // No desktop banner program could be resolved at the daemon's boot
-// (terminal-notifier on macOS, notify-send on Linux).
+// (notify-send on Linux; macOS's banners are the Zettel app's, which always
+// resolves, and an app that is not running is a per-banner error instead).
 type NotifyWorkspaceNoBannerProgram struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Why the program could not be resolved, as the daemon recorded it at boot.

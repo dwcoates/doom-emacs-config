@@ -307,6 +307,9 @@ const (
 	// AgentReplUpdatePersistentWifiModeProcedure is the fully-qualified name of the AgentRepl's
 	// UpdatePersistentWifiMode RPC.
 	AgentReplUpdatePersistentWifiModeProcedure = "/agentrepl.v1.AgentRepl/UpdatePersistentWifiMode"
+	// AgentReplReportDesktopBannerClickedProcedure is the fully-qualified name of the AgentRepl's
+	// ReportDesktopBannerClicked RPC.
+	AgentReplReportDesktopBannerClickedProcedure = "/agentrepl.v1.AgentRepl/ReportDesktopBannerClicked"
 	// AgentReplRegisterWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// RegisterWorkspace RPC.
 	AgentReplRegisterWorkspaceProcedure = "/agentrepl.v1.AgentRepl/RegisterWorkspace"
@@ -587,6 +590,7 @@ var (
 	agentReplClientLogMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("ClientLog")
 	agentReplReportLatenciesMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ReportLatencies")
 	agentReplUpdatePersistentWifiModeMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
+	agentReplReportDesktopBannerClickedMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("ReportDesktopBannerClicked")
 	agentReplRegisterWorkspaceMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplRegisterWorkspacesMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspaces")
 	agentReplSelectWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
@@ -967,6 +971,9 @@ type AgentReplClient interface {
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
+	// The user clicked a banner; Emacs selects its workspace. See
+	// endpoint_report_desktop_banner_clicked.proto.
+	ReportDesktopBannerClicked(context.Context, *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error)
 	// Emacs announces a workspace exists; idempotent by dir. See
 	// endpoint_register_workspace.proto.
 	RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error)
@@ -1801,6 +1808,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdatePersistentWifiModeMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		reportDesktopBannerClicked: connect.NewClient[v1.ReportDesktopBannerClickedRequest, v1.ReportDesktopBannerClickedResponse](
+			httpClient,
+			baseURL+AgentReplReportDesktopBannerClickedProcedure,
+			connect.WithSchema(agentReplReportDesktopBannerClickedMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		registerWorkspace: connect.NewClient[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplRegisterWorkspaceProcedure,
@@ -2294,6 +2307,7 @@ type agentReplClient struct {
 	clientLog                          *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
 	reportLatencies                    *connect.Client[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse]
 	updatePersistentWifiMode           *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
+	reportDesktopBannerClicked         *connect.Client[v1.ReportDesktopBannerClickedRequest, v1.ReportDesktopBannerClickedResponse]
 	registerWorkspace                  *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	registerWorkspaces                 *connect.Client[v1.RegisterWorkspacesRequest, v1.RegisterWorkspacesResponse]
 	selectWorkspace                    *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
@@ -2852,6 +2866,11 @@ func (c *agentReplClient) ReportLatencies(ctx context.Context, req *connect.Requ
 // UpdatePersistentWifiMode calls agentrepl.v1.AgentRepl.UpdatePersistentWifiMode.
 func (c *agentReplClient) UpdatePersistentWifiMode(ctx context.Context, req *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
 	return c.updatePersistentWifiMode.CallUnary(ctx, req)
+}
+
+// ReportDesktopBannerClicked calls agentrepl.v1.AgentRepl.ReportDesktopBannerClicked.
+func (c *agentReplClient) ReportDesktopBannerClicked(ctx context.Context, req *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error) {
+	return c.reportDesktopBannerClicked.CallUnary(ctx, req)
 }
 
 // RegisterWorkspace calls agentrepl.v1.AgentRepl.RegisterWorkspace.
@@ -3485,6 +3504,9 @@ type AgentReplHandler interface {
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
+	// The user clicked a banner; Emacs selects its workspace. See
+	// endpoint_report_desktop_banner_clicked.proto.
+	ReportDesktopBannerClicked(context.Context, *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error)
 	// Emacs announces a workspace exists; idempotent by dir. See
 	// endpoint_register_workspace.proto.
 	RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error)
@@ -4315,6 +4337,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdatePersistentWifiModeMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportDesktopBannerClickedHandler := connect.NewUnaryHandler(
+		AgentReplReportDesktopBannerClickedProcedure,
+		svc.ReportDesktopBannerClicked,
+		connect.WithSchema(agentReplReportDesktopBannerClickedMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplRegisterWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplRegisterWorkspaceProcedure,
 		svc.RegisterWorkspace,
@@ -4904,6 +4932,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplReportLatenciesHandler.ServeHTTP(w, r)
 		case AgentReplUpdatePersistentWifiModeProcedure:
 			agentReplUpdatePersistentWifiModeHandler.ServeHTTP(w, r)
+		case AgentReplReportDesktopBannerClickedProcedure:
+			agentReplReportDesktopBannerClickedHandler.ServeHTTP(w, r)
 		case AgentReplRegisterWorkspaceProcedure:
 			agentReplRegisterWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplRegisterWorkspacesProcedure:
@@ -5433,6 +5463,10 @@ func (UnimplementedAgentReplHandler) ReportLatencies(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdatePersistentWifiMode is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportDesktopBannerClicked(context.Context, *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportDesktopBannerClicked is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error) {

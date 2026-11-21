@@ -1,6 +1,6 @@
 ---
 name: agent-repl-install
-description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (zettel-emacs, Emacs built from a pinned fork commit, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the `agent-repld` command on PATH, the git hook), walk the user through what only they can provide (environment variables, notification permission, the passwordless `pmset` sudo grant on macOS), and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Any change to what agent-repl or zettel needs to build, install or run (a new or changed toolchain, dependency, version pin, build flag, or patched program such as Emacs) updates this skill and its requirement manifests in the same change.
+description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (zettel-emacs, Emacs built from a pinned fork commit, toolchains, the Zettel launcher app, the store, sidecar and metrics-store services, skills, the `agent-repld` command on PATH, the git hook), walk the user through what only they can provide (environment variables, notification permission, the passwordless `pmset` sudo grant on macOS), and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Any change to what agent-repl or zettel needs to build, install or run (a new or changed toolchain, dependency, version pin, build flag, or patched program such as Emacs) updates this skill and its requirement manifests in the same change.
 argument-hint: "[check]"
 allowed-tools: Bash(.claude/skills/agent-repl-install/run.sh:*), Bash(~/.claude/skills/agent-repl-install/run.sh:*)
 lineage_root: user.dodge.skills.agent-repl-install
@@ -65,7 +65,11 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
   - For each `needs-user` line, and each line whose install step needs the user:
     - a. Give the user the line's fix exactly as printed.
     - b. For an environment variable, have the user add it to their shell profile; it reaches Emacs at step 5.
-    - c. For a notification permission, have the user allow the named program in System Settings → Notifications.
+    - c. For a notification permission, have the user do all three of these for the named program:
+      - i. Turn on Allow notifications in System Settings → Notifications → the program.
+      - ii. Set its alert style to Banners in that same pane.
+      - iii. Add the program under Allowed Notifications → Apps in every Focus they use, in System Settings → Focus.
+      - *NOTE*: A Focus that does not allow the program sends its banners to Notification Center without showing them, even after i and ii are done.
     - d. For a bin dir that is not on PATH, have the user add the printed `export PATH=...` line to their shell profile; it reaches Emacs at step 5.
     - e. For Emacs, after install replaced the app, have the user restart Emacs so the new build runs.
     - f. For a Linux package install sudo could not run without a password, have the user run the printed sudo command in a terminal.

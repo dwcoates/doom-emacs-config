@@ -31,7 +31,22 @@ type Live struct {
 	// (persistentwifi.WifiAppIn); empty on a platform with no helper, where a
 	// deploy neither builds nor installs one.
 	WifiApp string
+	// Applications is the directory the launcher is installed in
+	// (~/Applications, where Spotlight and Finder find it). Empty on a
+	// platform with no launcher.
+	Applications string
 }
+
+// LauncherBundle is the launcher's bundle name, staged in the cache bin
+// and installed in Live.Applications.
+const LauncherBundle = "Zettel.app"
+
+// LauncherExecutable is the launcher's executable inside its bundle: the
+// file its build is named by.
+const LauncherExecutable = "Contents/MacOS/Zettel"
+
+// LauncherApp is the installed launcher.
+func (l Live) LauncherApp() string { return filepath.Join(l.Applications, LauncherBundle) }
 
 // ShimMain is the installed shim bundle.
 func (l Live) ShimMain() string {

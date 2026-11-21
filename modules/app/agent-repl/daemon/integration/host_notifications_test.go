@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"os/exec"
 	"runtime"
 	"slices"
 	"strings"
@@ -21,8 +20,9 @@ import (
 )
 
 // ==========================================================================
-// Desktop banners. The daemon posts every banner itself, through the platform's
-// banner program (the harness's recorder), decided on Emacs's focus: the focus
+// Desktop banners. The daemon posts every banner itself, through the Zettel
+// app on macOS (the harness's fake app) or the platform's banner program
+// elsewhere (the harness's recorder), decided on Emacs's focus: the focus
 // an Emacs WatchDaemon stream connects with, moved by ReportEditorFocus, and
 // forgotten when the stream ends. A banner click reaches Emacs as the host
 // stream's notification_clicked.
@@ -30,33 +30,23 @@ import (
 
 // bannerSettled is the daemon's record that a banner's program returned with
 // no click to relay: a read-back banner dismissed or timed out, or a banner
-// the platform now holds (macOS), whose click selects the workspace itself.
+// the platform now holds (macOS), whose click is reported on its own.
 func bannerSettled(r harness.LogRecord) bool {
 	return r.Operation == "daemon.desktopnotify.post" &&
 		(r.Message == "the banner was dismissed or timed out" ||
-			r.Message == "the platform holds the banner; its click selects the workspace itself")
+			r.Message == "the platform holds the banner; its click is reported on its own")
 }
 
-// awaitBannerSettled waits for a banner to settle, and answers every banner
-// argv posted so far.
+// awaitBannerSettled waits for a banner to settle, and answers the words of
+// every banner posted so far (harness.Daemon.PostedBanners).
 func awaitBannerSettled(t *testing.T, f *fixture, what string) [][]string {
 	t.Helper()
 	f.d.AwaitLogRecord(f.d.RunLogPath(), what, bannerSettled)
-	var argvs [][]string
-	for _, inv := range bannerRuns(f) {
-		argvs = append(argvs, inv.Argv)
-	}
-	return argvs
+	return f.d.PostedBanners()
 }
 
-// bannerRuns is every run of the banner program that posted a banner: the
-// boot's version query set aside.
-func bannerRuns(f *fixture) []harness.Invocation {
-	return f.d.Notifier.InvocationsExcept(harness.NotifierVersionQuery)
-}
-
-// bannerCarrying reports whether any posted argv carries every one of words
-// as an argument, whatever the platform's flag spelling.
+// bannerCarrying reports whether any posted banner carries every one of words
+// in one of its words, whatever the platform's spelling.
 func bannerCarrying(argvs [][]string, words ...string) bool {
 	for _, argv := range argvs {
 		matched := true
@@ -234,7 +224,7 @@ func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
 	f.d.AwaitLogRecord(f.d.RunLogPath(), "the suppressed banner", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.desktopnotify.post" && r.Message == "Emacs is focused; no desktop banner"
 	})
-	if got := bannerRuns(f); len(got) != 0 {
+	if got := f.d.PostedBanners(); len(got) != 0 {
 		t.Fatalf("a reported-focused Emacs got %d banners, want none", len(got))
 	}
 }
@@ -265,7 +255,7 @@ func TestAFocusGainClaimsTheHeldBannerInTheSameReport(t *testing.T) {
 	f.submit("go", "k-claimed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 	awaitBannerSettled(t, f, "the handed turn banner")
-	runs := len(bannerRuns(f))
+	runs := len(f.d.PostedBanners())
 
 	// Act
 	first := reportFocus(t, f.d, harness.FocusedEditor())
@@ -280,8 +270,8 @@ func TestAFocusGainClaimsTheHeldBannerInTheSameReport(t *testing.T) {
 	if second.GetNothingHeld() == nil {
 		t.Fatalf("second gain = %v, want nothing_held: the first consumed the banner", second)
 	}
-	if after := bannerRuns(f); len(after) != runs {
-		t.Fatalf("banner program runs %v after the gains, want none: the claim asks the platform nothing", after[runs:])
+	if after := f.d.PostedBanners(); len(after) != runs {
+		t.Fatalf("banners %v posted after the gains, want none: the claim asks the platform nothing", after[runs:])
 	}
 }
 
@@ -307,41 +297,32 @@ func TestAClickedBannerAsksEmacsToSelectTheWorkspace(t *testing.T) {
 }
 
 // TestAHandedBannersClickSelectsTheWorkspace pins a HANDED click (macOS): the
-// banner brings Emacs forward and stores the daemon's own SelectWorkspace
-// call, and running that stored command -- what the platform does on the
-// click -- makes the workspace the roster's current.
+// launcher reports the click with the banner's own token, and the host
+// stream carries notification_clicked for the banner's workspace.
 func TestAHandedBannersClickSelectsTheWorkspace(t *testing.T) {
 	if runtime.GOOS != "darwin" {
-		t.Skip("only a macOS banner is handed to the platform")
+		t.Skip("only a macOS banner is handed to the launcher")
 	}
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	roster := f.d.WatchRoster()
 	f.submit("go", "k-handed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
-	argvs := awaitBannerSettled(t, f, "the handed turn banner")
-	if len(argvs) != 1 {
-		t.Fatalf("banners %q, want exactly one", argvs)
+	awaitBannerSettled(t, f, "the handed turn banner")
+	banners := f.d.Launcher.Banners()
+	if len(banners) != 1 {
+		t.Fatalf("banners %v, want exactly one", banners)
 	}
-	argv := argvs[0]
-	activate := slices.Index(argv, "-activate")
-	execute := slices.Index(argv, "-execute")
-	if activate < 0 || activate+1 >= len(argv) || argv[activate+1] != "org.gnu.Emacs" {
-		t.Fatalf("banner %q, want -activate org.gnu.Emacs", argv)
-	}
-	if execute < 0 || execute+1 >= len(argv) || !strings.HasPrefix(argv[execute+1], `\`) {
-		t.Fatalf("banner %q, want a backslash-escaped -execute command", argv)
-	}
-	click := strings.TrimPrefix(argv[execute+1], `\`)
 
 	// Act
-	if out, err := exec.CommandContext(f.d.Ctx(), "/bin/sh", "-c", click).CombinedOutput(); err != nil {
-		t.Fatalf("the stored click %q failed: %v: %s", click, err, out)
-	}
+	resp, err := f.d.Client().ReportDesktopBannerClicked(f.d.Ctx(), connect.NewRequest(&agentreplv1.ReportDesktopBannerClickedRequest{
+		Click: banners[0].GetClick(),
+	}))
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the click's SelectWorkspace stamped current", func(r *frontendv1.RosterPush) bool {
-		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
-	})
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ReportDesktopBannerClicked = (%v, %v), want success", resp, err)
+	}
+	harness.AwaitView(t, f.d.Ctx(), f.host, "the banner click on the host stream",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool { return r.GetNotificationClicked() != nil })
 }

@@ -14,7 +14,9 @@ import (
 
 	v1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 )
 
 func (s *fakeServer) SubmitPrompt(ctx context.Context, req *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error) {
@@ -784,4 +786,22 @@ func (s *fakeServer) NotifyWorkspace(ctx context.Context, req *connect.Request[v
 
 func (s *fakeServer) AcceptHandedWorkspace(ctx context.Context, req *connect.Request[v1.AcceptHandedWorkspaceRequest]) (*connect.Response[v1.AcceptHandedWorkspaceResponse], error) {
 	return handleUnary[v1.AcceptHandedWorkspaceRequest, v1.AcceptHandedWorkspaceResponse](ctx, s, "AcceptHandedWorkspace", req.Msg)
+}
+
+// The launcher's surface. `ReportDesktopBannerClicked` is the launcher's
+// (Zettel.app, endpoint_report_desktop_banner_clicked.proto), never Emacs's,
+// so this fake refuses it loudly rather than mocking a surface no Emacs
+// scenario can reach.
+
+func (s *fakeServer) ReportDesktopBannerClicked(ctx context.Context, req *connect.Request[v1.ReportDesktopBannerClickedRequest]) (*connect.Response[v1.ReportDesktopBannerClickedResponse], error) {
+	return nil, s.launcherOnly(ctx, "ReportDesktopBannerClicked", req.Msg)
+}
+
+// launcherOnly records and refuses one of the launcher's rpcs.
+func (s *fakeServer) launcherOnly(ctx context.Context, method string, msg proto.Message) error {
+	s.record(ctx, method, msg)
+	logWarn("fakedaemon.stream.not-mocked", "an rpc of the launcher's, which this fake does not mock, was called",
+		map[string]any{"method": method})
+	return connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's surface; %s is the launcher's", method))
 }

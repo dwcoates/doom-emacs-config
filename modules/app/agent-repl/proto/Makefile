@@ -1,8 +1,9 @@
 # Codegen for the agent-shim protobuf protocol.
 #
 # Outputs:
-#   Go  → gen/go/...   (consumed by daemon/, agent-shim/shim-store/, agent-shim/claude/shim-sidecar/)
-#   TS  → gen/ts/...   (consumed by agent-shim/claude/shim/, webapp/)
+#   Go    → gen/go/...    (consumed by daemon/, agent-shim/shim-store/, agent-shim/claude/shim-sidecar/)
+#   TS    → gen/ts/...    (consumed by agent-shim/claude/shim/, webapp/)
+#   Swift → gen/swift/... (consumed by launcher/, Zettel.app; SWIFT_PROTOS only)
 #
 # Requires: protoc, protoc-gen-go, protoc-gen-connect-go (Connect service
 # handler interfaces — message types alone cannot serve an rpc), and
@@ -54,7 +55,7 @@ BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
 # the surface roots under it, and the unguarded `find` reported one "No such
 # file or directory" per root on every such run. The set comes out identical in
 # the real tree; the guard only stops the empty case from saying so.
-PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace shim store storeread repoconfig testrun testservice zettel; do \
+PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace launcher shim store storeread repoconfig testrun testservice zettel; do \
 	  [ -d "$$root" ] && find "$$root" -name '*.proto'; \
 	done | sort)
 
@@ -69,9 +70,9 @@ ISOLATION_ROOT ?= ..
 # regenerate into a scratch tree and never write the committed one.
 GEN ?= gen
 
-.PHONY: all go ts lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate clean
+.PHONY: all go ts swift lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate clean
 
-all: go ts
+all: go ts swift
 
 # EVERY path that emits bindings passes through this target. The structural
 # invariants below are not review notes, they are preconditions on codegen: a
@@ -84,6 +85,29 @@ go: codegen-gate
 	mkdir -p $(GEN)/go
 	protoc -I src --go_out=$(GEN)/go --go_opt=paths=source_relative \
 	  --connect-go_out=$(GEN)/go --connect-go_opt=paths=source_relative $(PROTOS)
+
+# THE SWIFT BINDINGS ARE THE LAUNCHER'S, AND ONLY WHAT IT SPEAKS: launcher.v1,
+# the click it reports on agentrepl.v1, and their imports, never the whole
+# tree. The launcher (../launcher, Zettel.app) serves one exchange and makes
+# one call; compiling every surface into it would be thousands of types it
+# never touches. A file those come to import is added here.
+# protoc-gen-swift is BUILT FROM THE LAUNCHER'S OWN PINNED swift-protobuf
+# (../launcher/Package.resolved), never taken from PATH, so the generator and
+# the runtime library the launcher links are one version by construction.
+# PROTOC_GEN_SWIFT is overridable so the check-generated self-test can stub it.
+PROTOC_GEN_SWIFT ?= ../launcher/.build/release/protoc-gen-swift
+SWIFT_PROTOS ?= launcher/v1/launcher.proto \
+	agentrepl/v1/desktop_banner.proto \
+	agentrepl/v1/endpoint_report_desktop_banner_clicked.proto \
+	workspace/v1/workspace.proto
+
+../launcher/.build/release/protoc-gen-swift: ../launcher/Package.swift ../launcher/Package.resolved
+	cd ../launcher && swift build -c release --product protoc-gen-swift
+
+swift: codegen-gate $(PROTOC_GEN_SWIFT)
+	mkdir -p $(GEN)/swift
+	protoc -I src --plugin=protoc-gen-swift=$(PROTOC_GEN_SWIFT) \
+	  --swift_out=$(GEN)/swift --swift_opt=Visibility=Public $(SWIFT_PROTOS)
 
 node_modules/.package-lock.json: package.json package-lock.json
 	npm ci

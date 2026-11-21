@@ -4,21 +4,16 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
-
-	"google.golang.org/protobuf/encoding/protojson"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/shellword"
 	"agent-repld/internal/wsm"
 )
 
@@ -61,69 +56,6 @@ func TestBannerWorkspacesSurfacesAFailedRead(t *testing.T) {
 	}
 }
 
-// argvRecorder writes an executable that writes each of its arguments on its
-// own NUL-terminated line into a file beside it, and answers that file.
-func argvRecorder(t *testing.T, dir string) (exe, record string) {
-	t.Helper()
-	exe = filepath.Join(dir, "agent-repld")
-	record = filepath.Join(dir, "argv")
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > " + shellword.Quote(record) + "\n"
-	if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
-		t.Fatalf("write %s: %v", exe, err)
-	}
-	return exe, record
-}
-
-func TestSelectWorkspaceClickRunsTheDaemonsSelectWorkspace(t *testing.T) {
-	cases := []struct {
-		name   string
-		target desktopnotify.Target
-		state  string
-	}{
-		{name: "a plain directory", target: desktopnotify.Target{ID: "ws1", Dir: "/work/ws1"}, state: "/state"},
-		{name: "quotes and spaces stay inside their words", target: desktopnotify.Target{ID: "ws2", Dir: `/work/it's "here"`}, state: "/state dir/x"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			exe, record := argvRecorder(t, t.TempDir())
-			command := selectWorkspaceClick(exe, tc.state)(tc.target)
-
-			// Act
-			if out, err := exec.Command("/bin/sh", "-c", command).CombinedOutput(); err != nil {
-				t.Fatalf("sh -c %q: %v: %s", command, err, out)
-			}
-
-			// Assert
-			raw, err := os.ReadFile(record)
-			if err != nil {
-				t.Fatalf("read %s: %v", record, err)
-			}
-			argv := strings.Split(strings.TrimSuffix(string(raw), "\x00"), "\x00")
-			if len(argv) != 5 || !reflect.DeepEqual(argv[:4], []string{"call", "-state-dir", tc.state, "SelectWorkspace"}) {
-				t.Fatalf("the click ran %q, want call -state-dir %q SelectWorkspace <request>", argv, tc.state)
-			}
-			var request agentreplv1.SelectWorkspaceRequest
-			if err := protojson.Unmarshal([]byte(argv[4]), &request); err != nil {
-				t.Fatalf("the call verb cannot read the click's request %q: %v", argv[4], err)
-			}
-			if request.GetWorkspace().GetId() != string(tc.target.ID) || request.GetWorkspace().GetDir() != tc.target.Dir {
-				t.Fatalf("request = %v, want the target's id and directory", &request)
-			}
-		})
-	}
-}
-
-func TestSelectWorkspaceClickNamesTheCallVerbsMethod(t *testing.T) {
-	// Act
-	method := agentReplService().Methods().ByName("SelectWorkspace")
-
-	// Assert
-	if method == nil || method.IsStreamingServer() || method.IsStreamingClient() {
-		t.Fatalf("SelectWorkspace = %v, want a unary AgentRepl method the call verb can send", method)
-	}
-}
-
 // recordingClicks records the clicks relayed to it.
 type recordingClicks struct{ got []ids.WorkspaceID }
 
@@ -159,24 +91,46 @@ func TestClickForwarderRefusesAClickBeforeTheServerIsBound(t *testing.T) {
 	f.NotificationClicked("ws1")
 }
 
-func TestResolveBannerBackendTakesTheOverride(t *testing.T) {
+// TestResolveBannerBackendIsTheAppOnMacOS pins that on macOS every banner is
+// the launcher's, whatever program the environment names, and that
+// elsewhere the platform's program honors the override.
+func TestResolveBannerBackendIsTheLauncherOnMacOS(t *testing.T) {
 	// Arrange
-	fake := filepath.Join(t.TempDir(), "fake-banner")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'terminal-notifier 3.1.0.'\n"), 0o755); err != nil {
-		t.Fatalf("write %s: %v", fake, err)
-	}
-	t.Setenv("AGENT_REPL_NOTIFIER_CMD", fake)
+	t.Setenv("AGENT_REPL_NOTIFIER_CMD", "/tmp/fake-banner")
 	log := dlog.NewTestLogger()
+	launcher := desktopnotify.NewLauncher("/sock/launcher.sock", desktopnotify.LauncherPostBound, log)
 
 	// Act
-	backend, err := resolveBannerBackend(context.Background(), log, selectWorkspaceClick("/bin/agent-repld", "/state"))
+	backend, err := resolveBannerBackend(log, launcher)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("resolveBannerBackend: %v", err)
 	}
-	if backend.Program() != fake {
-		t.Fatalf("program = %q, want the override", backend.Program())
+	want := "/tmp/fake-banner"
+	if runtime.GOOS == "darwin" {
+		want = desktopnotify.LauncherProgram
+	}
+	if backend.Program() != want {
+		t.Fatalf("program = %q, want %q on %s", backend.Program(), want, runtime.GOOS)
+	}
+}
+
+func TestLauncherDeployedOnlyOnMacOS(t *testing.T) {
+	cases := []struct {
+		goos string
+		want bool
+	}{{"darwin", true}, {"linux", false}}
+	for _, tc := range cases {
+		t.Run(tc.goos, func(t *testing.T) {
+			// Act
+			got := launcherDeployed(tc.goos)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("launcherDeployed(%s) = %v, want %v", tc.goos, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -33,7 +33,7 @@ func TestNotifyWorkspaceAnswersTheNotifiersDecision(t *testing.T) {
 			return r.GetSuccess().GetEditorFocused() != nil
 		}},
 		{name: "no banner program", decision: desktopnotify.NoProgram, check: func(r *agentreplv1.NotifyWorkspaceResponse) bool {
-			return r.GetError().GetNoBannerProgram().GetCause() == "terminal-notifier is not installed"
+			return r.GetError().GetNoBannerProgram().GetCause() == "notify-send is not installed"
 		}},
 		{name: "the daemon is standing down", decision: desktopnotify.StandingDown, check: func(r *agentreplv1.NotifyWorkspaceResponse) bool {
 			return r.GetError().GetStandingDown() != nil
@@ -44,7 +44,7 @@ func TestNotifyWorkspaceAnswersTheNotifiersDecision(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			h.Banners.decision = tt.decision
-			h.Banners.noProgramCause = "terminal-notifier is not installed"
+			h.Banners.noProgramCause = "notify-send is not installed"
 
 			// Act
 			resp, err := notifyWorkspace(h, ref(), "The build is green")

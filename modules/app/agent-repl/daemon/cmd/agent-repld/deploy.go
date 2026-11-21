@@ -52,11 +52,24 @@ const (
 	envSystemctl = "AGENT_REPL_SYSTEMCTL"
 	// envSystemdUserDir is where the services' units are installed on Linux.
 	envSystemdUserDir = "AGENT_REPL_SYSTEMD_USER_DIR"
+	// envApplicationsDir is where the launcher is installed, the same
+	// contract bin/build-launcher.sh honors.
+	envApplicationsDir = "AGENT_REPL_APPLICATIONS_DIR"
+	// envLSRegister is the lsregister a launcher restart registers the app
+	// with, the same contract bin/build-launcher.sh honors.
+	envLSRegister = "AGENT_REPL_LSREGISTER"
 )
 
 // deployerParams are what buildDeployer needs from the composition root.
 type deployerParams struct {
 	Surfaces dlog.Surfaces
+	// Launcher reports whether the platform has the launcher (macOS), which
+	// the deploy builds, installs and restarts; elsewhere a banner program
+	// posts and no launcher is deployed.
+	Launcher bool
+	// LauncherSocket is the socket the launcher accepts banners on, whose
+	// declared holder the launcher's restart ensures.
+	LauncherSocket string
 	// Checkout is the agent-repl module root the daemon was deployed from.
 	Checkout string
 	// ShimMain and WebappDist are where the daemon runs the shim bundle and
@@ -114,11 +127,13 @@ type hotReloadMediators interface {
 
 // newHotReloadTracker builds the deploy's hot reload tracker: its card is
 // drawn in FEED, for the deploy mediator of the repository CHECKOUT is in.
+// LAUNCHER reports whether the platform deploys the launcher.
 func newHotReloadTracker(git interface {
 	CommonDir(ctx context.Context, dir string) (string, error)
-}, db hotReloadMediators, feed hotreload.Publisher, checkout string, log dlog.Logger) (*hotreload.Tracker, error) {
+}, db hotReloadMediators, feed hotreload.Publisher, checkout string, launcher bool, log dlog.Logger) (*hotreload.Tracker, error) {
 	return hotreload.New(hotreload.Deps{
-		Feed: feed,
+		Feed:     feed,
+		Launcher: launcher,
 		Mediator: func(ctx context.Context) (ids.WorkspaceID, bool, error) {
 			common, err := git.CommonDir(ctx, checkout)
 			if err != nil {
@@ -142,6 +157,8 @@ type deployPaths struct {
 	// wifiApp is where the deploy installs the Wi-Fi helper app; empty on a
 	// platform with no helper (wifiAppOn).
 	wifiApp string
+	// applications is where the launcher is installed.
+	applications string
 }
 
 // wifiAppOn is where a deploy on GOOS installs the Wi-Fi helper app under
@@ -165,12 +182,13 @@ func resolveDeployPaths(getenv func(string) string) (deployPaths, error) {
 		return deployPaths{}, fmt.Errorf("agent-repld: resolve the services' build-report directory: %w", err)
 	}
 	return deployPaths{
-		cacheBin:  filepath.Join(home, ".cache", "agent-repl", "bin"),
-		plistDir:  firstNonEmpty(getenv(envLaunchAgentsDir), filepath.Join(home, "Library", "LaunchAgents")),
-		unitDir:   firstNonEmpty(getenv(envSystemdUserDir), filepath.Join(firstNonEmpty(getenv("XDG_CONFIG_HOME"), filepath.Join(home, ".config")), "systemd", "user")),
-		storeLog:  filepath.Join(home, ".cache", "agent-repl", "log", "shim-store.err.log"),
-		reportDir: reportDir,
-		wifiApp:   wifiAppOn(runtime.GOOS, home),
+		cacheBin:     filepath.Join(home, ".cache", "agent-repl", "bin"),
+		plistDir:     firstNonEmpty(getenv(envLaunchAgentsDir), filepath.Join(home, "Library", "LaunchAgents")),
+		unitDir:      firstNonEmpty(getenv(envSystemdUserDir), filepath.Join(firstNonEmpty(getenv("XDG_CONFIG_HOME"), filepath.Join(home, ".config")), "systemd", "user")),
+		storeLog:     filepath.Join(home, ".cache", "agent-repl", "log", "shim-store.err.log"),
+		reportDir:    reportDir,
+		wifiApp:      wifiAppOn(runtime.GOOS, home),
+		applications: firstNonEmpty(getenv(envApplicationsDir), filepath.Join(home, "Applications")),
 	}, nil
 }
 
@@ -229,6 +247,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Observer:      p.HotReload,
 		Log:           log,
 		Restarts:      p.Restarts,
+		Launcher:      p.Launcher,
 	}
 	services, err := serviceManagerFor(runtime.GOOS, where, p)
 	if err != nil {
@@ -263,13 +282,25 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		HolderServing:   ensurer.ServingID,
 		StoreHolder:     storeHolder,
 	}
+	// THE LAUNCHER IS DEPLOYED ON MACOS ALONE: elsewhere the platform's
+	// banner program posts, and there is no app to build or install.
+	live := deploy.Live{
+		ModuleRoot: p.Checkout, CacheBin: where.cacheBin,
+		Shim: p.ShimMain, Webapp: p.WebappDist, WifiApp: where.wifiApp,
+	}
+	if p.Launcher {
+		live.Applications = where.applications
+		restarter.LauncherApp = live.LauncherApp()
+		restarter.LauncherHolder, _ = holderensure.HolderOfSocket(holders, p.LauncherSocket)
+		restarter.RegisterApp = deploy.LSRegister{
+			Binary: firstNonEmpty(p.Getenv(envLSRegister), deploy.DefaultLSRegister),
+			Dir:    p.Checkout, Runner: p.Runner,
+		}.Register
+	}
 	deployer, err := deploy.New(deploy.Deps{
-		Restarts:   p.Restarts,
-		Reconnects: p.Reconnects,
-		Live: deploy.Live{
-			ModuleRoot: p.Checkout, CacheBin: where.cacheBin,
-			Shim: p.ShimMain, Webapp: p.WebappDist, WifiApp: where.wifiApp,
-		},
+		Restarts:    p.Restarts,
+		Reconnects:  p.Reconnects,
+		Live:        live,
 		StagingRoot: filepath.Join(deployDir, "staging"),
 		Builder:     builder,
 		Bundle:      p.Bundle,
@@ -286,6 +317,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 			tools.WifiApp = where.wifiApp
 			return persistentwifi.StopAsks(ctx, p.Runner, tools)
 		},
+		Launcher:  p.Launcher,
 		ReportDir: where.reportDir,
 		Lifetime:  ctx,
 		Progress:  p.Progress,

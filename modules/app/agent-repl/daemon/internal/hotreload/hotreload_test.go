@@ -72,6 +72,13 @@ type fixture struct {
 // workspaces are named "name-<id>".
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureOn(t, false)
+}
+
+// newFixtureOn is a tracker whose platform deploys the launcher when
+// LAUNCHER is set.
+func newFixtureOn(t *testing.T, launcher bool) *fixture {
+	t.Helper()
 	f := &fixture{feed: &fakeFeed{}, clock: &clock{now: start}, log: dlog.NewTestLogger()}
 	tracker, err := New(Deps{
 		Feed:     f.feed,
@@ -79,8 +86,9 @@ func newFixture(t *testing.T) *fixture {
 		WorkspaceName: func(_ context.Context, ws ids.WorkspaceID) (string, error) {
 			return "name-" + string(ws), nil
 		},
-		Now: f.clock.Now,
-		Log: f.log,
+		Launcher: launcher,
+		Now:      f.clock.Now,
+		Log:      f.log,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -233,6 +241,51 @@ func TestBeginDrawsEveryServiceScheduledInTheMediatorsRootFeed(t *testing.T) {
 	}
 	if badge(card) != "live" || card.GetHead().GetLabel().GetText() != "hot-reloading" || f.feed.ws[0] != "mediator" {
 		t.Fatalf("card badge %s label %q in %s, want a live hot-reloading card in the mediator's feed", badge(card), card.GetHead().GetLabel().GetText(), f.feed.ws[0])
+	}
+}
+
+func TestTheCardListsTheLauncherOnlyWhereThePlatformDeploysIt(t *testing.T) {
+	tests := []struct {
+		name     string
+		launcher bool
+		want     []string
+	}{
+		{"a platform with no launcher", false,
+			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
+		{"macOS, which deploys the launcher", true,
+			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceLauncher, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixtureOn(t, tt.launcher)
+
+			// Act
+			f.t.Begin(context.Background(), start)
+
+			// Assert
+			var names []string
+			for _, s := range f.feed.last(t).GetServices() {
+				names = append(names, s.GetName().GetText())
+			}
+			if strings.Join(names, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("services %v, want %v", names, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheLaunchersBuildTargetDrawsOnItsBuildStep(t *testing.T) {
+	// Arrange
+	f := newFixtureOn(t, true)
+	f.t.Begin(context.Background(), start)
+
+	// Act
+	f.t.BuildStepBegan("launcher")
+
+	// Assert
+	if got := arm(stepOf(t, service(t, f.feed.last(t), ServiceLauncher), "build").GetState()); got != "running:building" {
+		t.Fatalf("step = %s, want running:building", got)
 	}
 }
 

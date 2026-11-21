@@ -121,6 +121,19 @@ service_start() {
     fi
 }
 
+# service_restart LABEL: restart a held LABEL in place onto what its program
+# now is: launchd's `kickstart -k', systemd's restart. A service the manager
+# does not hold is refused by the tool, and the caller decides whether that
+# is its error.
+service_restart() {
+    service_platform_set || return
+    if [ "$SERVICE_PLATFORM" = darwin ]; then
+        "$SERVICE_LAUNCHCTL" kickstart -k "gui/$(id -u)/$1" >/dev/null
+    else
+        "$SERVICE_SYSTEMCTL" --user restart "$1.service" >/dev/null
+    fi
+}
+
 # service_step TOOL-NAME TOOL ARGS...: run one step, and on failure leave it,
 # spelled with TOOL-NAME, in SERVICE_FAILED_STEP.
 service_step() {

@@ -30,6 +30,8 @@ type Banners interface {
 	// NoProgramCause is why no banner program could be resolved, asked only
 	// after Notify answered desktopnotify.NoProgram.
 	NoProgramCause() string
+	// Clicked relays a click the launcher reported for ws.
+	Clicked(ws ids.WorkspaceID)
 }
 
 // ReportEditorFocus moves Emacs's desktop focus, which decides every later

@@ -161,6 +161,7 @@ import "agentrepl/v1/endpoint_validate_workspace_name.proto";
 import "agentrepl/v1/endpoint_list_creation_models.proto";
 import "agentrepl/v1/endpoint_watch_chat.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
+import "agentrepl/v1/endpoint_report_desktop_banner_clicked.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_host_workspace.proto";
@@ -605,6 +606,15 @@ service AgentRepl {
   // Turn persistent wifi mode (lid-closed operation) on, off, or over. See
   // endpoint_update_persistent_wifi_mode.proto.
   rpc UpdatePersistentWifiMode(UpdatePersistentWifiModeRequest) returns (UpdatePersistentWifiModeResponse);
+
+  // ---- DESKTOP BANNERS ----
+  // The launcher (Zettel.app) posts every macOS desktop banner. The daemon
+  // hands it each one over the launcher's own socket (launcher.v1.PostBanner),
+  // so the one call the launcher makes on the daemon is its click.
+
+  // The user clicked a banner; Emacs selects its workspace. See
+  // endpoint_report_desktop_banner_clicked.proto.
+  rpc ReportDesktopBannerClicked(ReportDesktopBannerClickedRequest) returns (ReportDesktopBannerClickedResponse);
 
   // ---- HOST ----
 

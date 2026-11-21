@@ -768,6 +768,13 @@ func (s *requestLoggingServer) ReportEditorFocus(
 	return serveUnary(s, ctx, "ReportEditorFocus", req, s.server.ReportEditorFocus)
 }
 
+func (s *requestLoggingServer) ReportDesktopBannerClicked(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportDesktopBannerClickedRequest],
+) (*connect.Response[agentreplv1.ReportDesktopBannerClickedResponse], error) {
+	return serveUnary(s, ctx, "ReportDesktopBannerClicked", req, s.server.ReportDesktopBannerClicked)
+}
+
 func (s *requestLoggingServer) WatchHostWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.WatchHostWorkspaceRequest],

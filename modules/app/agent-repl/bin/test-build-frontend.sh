@@ -1368,6 +1368,47 @@ t_out_stages_a_cache_bin_service() {
     rm -rf "$root"
 }
 
+# launcher_case ROOT — a stand-in bin/build-launcher.sh in ROOT that logs its
+# argv into the stub log and builds a bundle at its --out, and a swift on PATH.
+launcher_case() {
+    local root="$1"
+    cat > "$root/bin/build-launcher.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'build-launcher %s\n' "$*" >> "$STUB_LOG"
+mkdir -p "$2/Contents/MacOS" && printf 'zettel\n' > "$2/Contents/MacOS/Zettel"
+STUB
+    chmod +x "$root/bin/build-launcher.sh"
+    printf '#!/bin/sh\nexit 0\n' > "$root/stubs/swift" && chmod +x "$root/stubs/swift"
+}
+
+# The launcher (macOS only): staged, it is built into cache-bin and NOT
+# installed (the deploy installs it); in place, build-launcher.sh installs it.
+t_launcher_stages_without_installing_and_installs_in_place() {
+    if [ "$(uname)" != Darwin ]; then
+        pass "launcher: skipped off macOS, where the target refuses"
+        return
+    fi
+    local root out bin; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    launcher_case "$root"
+    out="$root/staging"; bin="$out/cache-bin"
+    run_script "$root" --out "$out" launcher >/dev/null
+    local staged; staged="$(cat "$root/stub.log")"
+    : > "$root/stub.log"
+    run_script "$root" --force launcher >/dev/null
+    local inplace; inplace="$(cat "$root/stub.log")"
+    if [ -f "$bin/Zettel.app/Contents/MacOS/Zettel" ] &&
+           [ "$(cat "$bin/.Zettel.app.built-sha" 2>/dev/null)" = "$(staging_head "$root")" ] &&
+           [ "$(cat "$bin/.Zettel.app.source-tree" 2>/dev/null)" = "$(fake_source_tree launcher)" ] &&
+           [ "$staged" = "build-launcher --out $bin/Zettel.app --no-install" ] &&
+           [ "$inplace" = "build-launcher --out $root/home/.cache/agent-repl/bin/Zettel.app" ]; then
+        pass "launcher: staged without installing, with its stamps; in place it installs"
+    else
+        fail "launcher: staged without installing, with its stamps; in place it installs" \
+             "staged: $staged | in place: $inplace | files: $(find "$out" -type f 2>/dev/null)"
+    fi
+    rm -rf "$root"
+}
+
 t_out_writes_nothing_live() {
     local root live; root="$(new_staging_root)"
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
@@ -2186,6 +2227,7 @@ build_group_staging() {
     t_out_stages_a_cache_bin_service lock shim-lock
     t_out_stages_a_cache_bin_service zettel zettel
     t_out_stages_a_cache_bin_service tests agent-repl-tests
+    t_launcher_stages_without_installing_and_installs_in_place
     t_out_writes_nothing_live
     t_in_place_fresh_fixture_builds_nothing
     t_out_builds_fresh_targets_unconditionally

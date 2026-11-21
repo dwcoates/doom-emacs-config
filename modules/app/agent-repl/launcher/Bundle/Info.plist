@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Zettel.app's bundle identity: the launcher. THE BUNDLE IDENTIFIER IS
+  PERMANENT: macOS keys the app's notification permission and every Focus's
+  allowed-apps entry to it, so changing it costs the user each of those
+  settings again. CFBundleName is the name macOS shows above every banner and
+  in System Settings. LSUIElement: no Dock icon and no menu bar; the launcher
+  runs in the background.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>app.zettel</string>
+    <key>CFBundleName</key>
+    <string>Zettel</string>
+    <key>CFBundleDisplayName</key>
+    <string>Zettel</string>
+    <key>CFBundleExecutable</key>
+    <string>Zettel</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>

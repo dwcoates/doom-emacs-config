@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,7 +10,6 @@ import (
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/shellword"
 	"agent-repld/internal/wsm"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
@@ -19,45 +17,23 @@ import (
 // opDesktopNotify is the operation the notifier's boot records carry.
 const opDesktopNotify = "daemon.cmd.desktop_notify"
 
-// resolveBannerBackend resolves the platform's banner program once, at boot.
-// click is the command a banner the platform holds runs when it is clicked.
-func resolveBannerBackend(ctx context.Context, log dlog.Logger, click desktopnotify.ClickAction) (desktopnotify.Backend, error) {
+// resolveBannerBackend resolves the platform's banner poster once, at boot.
+// On macOS it is the launcher (Zettel.app), which posts each banner through
+// the notification center under its own name and icon, handed to it on its
+// own socket (desktopnotify.Launcher); everywhere else it is the platform's
+// banner program.
+func resolveBannerBackend(log dlog.Logger, launcher *desktopnotify.Launcher) (desktopnotify.Backend, error) {
 	return resolveNotifyProgram(log, "banner", desktopnotify.EnvNotifierCmd,
 		func(goos, override string) (desktopnotify.Backend, error) {
-			platform, err := desktopnotify.PlatformFor(goos, click)
+			if goos == "darwin" {
+				return launcher, nil
+			}
+			platform, err := desktopnotify.PlatformFor(goos)
 			if err != nil {
 				return nil, err
 			}
-			return desktopnotify.NewBackend(ctx, platform, override, exec.LookPath, desktopnotify.ExecRunner{})
+			return desktopnotify.NewBackend(platform, override, exec.LookPath, desktopnotify.ExecRunner{})
 		})
-}
-
-// selectWorkspaceClick is the click a banner the platform holds runs: this
-// daemon binary's own `call SelectWorkspace` for the banner's workspace,
-// against this daemon's state root.
-//
-// THE CLICK REACHES WHICHEVER DAEMON SERVES WHEN IT LANDS. The command names
-// the state root, not an address, so a banner clicked after a restart or a
-// deploy selects the workspace on the daemon serving then; the binary path is
-// the deployed one, which a deploy replaces in place. The state root is
-// spelled out because the platform runs the command in a bare environment,
-// without the $AGENT_REPL_STATE_DIR this daemon may have been started with.
-func selectWorkspaceClick(selfExe, stateDir string) desktopnotify.ClickAction {
-	return func(target desktopnotify.Target) string {
-		type ref struct {
-			ID  string `json:"id"`
-			Dir string `json:"dir"`
-		}
-		request, err := json.Marshal(struct {
-			Workspace ref `json:"workspace"`
-		}{Workspace: ref{ID: string(target.ID), Dir: target.Dir}})
-		if err != nil {
-			panic(fmt.Sprintf("agent-repld: encode a SelectWorkspace request of two strings: %v", err))
-		}
-		return "exec " + shellword.Quote(selfExe) + " " + callVerb +
-			" -state-dir " + shellword.Quote(stateDir) +
-			" SelectWorkspace " + shellword.Quote(string(request))
-	}
 }
 
 // resolveChime resolves the platform's chime player once, at boot: the one
@@ -144,8 +120,7 @@ func (w bannerWorkspaces) Workspace(ctx context.Context, ws ids.WorkspaceID) (de
 	return desktopnotify.Workspace{Name: record.Name, Dir: record.Dir}, nil
 }
 
-// clickForwarder carries a READ-BACK banner's click to the server's host
-// stream. The
+// clickForwarder carries a banner's click to the server's host stream. The
 // notifier is built before the server exists, so the server is bound late,
 // exactly as the host relay is.
 type clickForwarder struct {
@@ -161,3 +136,7 @@ func (f *clickForwarder) NotificationClicked(ws ids.WorkspaceID) {
 	}
 	target.NotificationClicked(ws)
 }
+
+// launcherDeployed reports whether a deploy on GOOS builds, installs and
+// restarts the launcher: macOS, where it posts the banners, alone.
+func launcherDeployed(goos string) bool { return goos == "darwin" }

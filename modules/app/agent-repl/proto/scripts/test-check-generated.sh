@@ -11,7 +11,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 FIXTURE="$TMP/fixture"
 STUBS="$TMP/stubs"
-mkdir -p "$FIXTURE/gen/go" "$FIXTURE/gen/ts" "$FIXTURE/component" "$FIXTURE/src" "$FIXTURE/scripts" "$STUBS"
+mkdir -p "$FIXTURE/gen/go" "$FIXTURE/gen/ts" "$FIXTURE/gen/swift" "$FIXTURE/component" "$FIXTURE/src" "$FIXTURE/scripts" "$STUBS"
 cp "$THIS_DIR/../Makefile" "$FIXTURE/Makefile"
 cp "$THIS_DIR/../package.json" "$THIS_DIR/../package-lock.json" "$FIXTURE/"
 printf 'syntax = "proto3";\n' >"$FIXTURE/src/fixture.proto"
@@ -42,6 +42,7 @@ message CleanView {
 EOF
 printf 'stable\n' >"$FIXTURE/gen/go/artifact"
 printf 'stable\n' >"$FIXTURE/gen/ts/artifact"
+printf 'stable\n' >"$FIXTURE/gen/swift/artifact"
 
 cat >"$STUBS/protoc" <<'EOF'
 #!/usr/bin/env bash
@@ -50,6 +51,7 @@ for arg in "$@"; do
     case "$arg" in
         --go_out=*) out="${arg#--go_out=}" ;;
         --es_out=*) out="${arg#--es_out=}" ;;
+        --swift_out=*) out="${arg#--swift_out=}" ;;
         *) continue ;;
     esac
     printf '%s\n' "$out" >>"$PROTO_TEST_WRITES"
@@ -71,11 +73,15 @@ cat >"$STUBS/protoc-gen-es" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat >"$STUBS/protoc-gen-swift" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
 cat >"$STUBS/node" <<'EOF'
 #!/usr/bin/env bash
 printf '2.14.1\n'
 EOF
-chmod +x "$STUBS/protoc" "$STUBS/npm" "$STUBS/protoc-gen-es" "$STUBS/node"
+chmod +x "$STUBS/protoc" "$STUBS/npm" "$STUBS/protoc-gen-es" "$STUBS/protoc-gen-swift" "$STUBS/node"
 
 # The stub protoc records every output directory it writes, so the matching run
 # can be held to never writing the checked tree: check-generated compares
@@ -84,12 +90,12 @@ chmod +x "$STUBS/protoc" "$STUBS/npm" "$STUBS/protoc-gen-es" "$STUBS/node"
 export PROTO_TEST_WRITES="$TMP/writes"
 PATH="$STUBS:/usr/bin:/bin" \
     PROTO_TEST_PLUGIN="$STUBS/protoc-gen-es" \
-    make -C "$FIXTURE" check-generated PROTOS=fixture.proto COMPONENT_DIR=component ISOLATION_ROOT=. >/dev/null
-if [ "$(wc -l <"$PROTO_TEST_WRITES")" -ne 2 ]; then
-    printf 'check-generated did not regenerate both bindings:\n%s\n' "$(cat "$PROTO_TEST_WRITES")" >&2
+    make -C "$FIXTURE" check-generated PROTOS=fixture.proto SWIFT_PROTOS=fixture.proto PROTOC_GEN_SWIFT="$STUBS/protoc-gen-swift" COMPONENT_DIR=component ISOLATION_ROOT=. >/dev/null
+if [ "$(wc -l <"$PROTO_TEST_WRITES")" -ne 3 ]; then
+    printf 'check-generated did not regenerate all three bindings:\n%s\n' "$(cat "$PROTO_TEST_WRITES")" >&2
     exit 1
 fi
-if grep -qxE 'gen/(go|ts)' "$PROTO_TEST_WRITES"; then
+if grep -qxE 'gen/(go|ts|swift)' "$PROTO_TEST_WRITES"; then
     printf 'check-generated wrote the checked gen/ tree:\n%s\n' "$(cat "$PROTO_TEST_WRITES")" >&2
     exit 1
 fi
@@ -98,7 +104,7 @@ set +e
 PATH="$STUBS:/usr/bin:/bin" \
     PROTO_TEST_PLUGIN="$STUBS/protoc-gen-es" \
     PROTO_TEST_OUTPUT=changed \
-    make -C "$FIXTURE" check-generated PROTOS=fixture.proto COMPONENT_DIR=component ISOLATION_ROOT=. >/dev/null 2>&1
+    make -C "$FIXTURE" check-generated PROTOS=fixture.proto SWIFT_PROTOS=fixture.proto PROTOC_GEN_SWIFT="$STUBS/protoc-gen-swift" COMPONENT_DIR=component ISOLATION_ROOT=. >/dev/null 2>&1
 rc=$?
 set -e
 

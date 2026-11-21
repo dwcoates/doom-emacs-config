@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/account"
 	"agent-repld/internal/audiooutput"
 	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/rollout"
@@ -99,6 +100,10 @@ type options struct {
 	// zettelSocket is the zettel service's unix socket. This flag BEATS
 	// $AGENT_REPL_ZETTEL_SOCKET, which in turn beats the default.
 	zettelSocket string
+	// launcherSocket is the launcher's unix socket, which every macOS banner
+	// is handed to. This flag BEATS $AGENT_REPL_LAUNCHER_SOCKET, which in
+	// turn beats the default.
+	launcherSocket string
 	// testsSocket is the test service's unix socket, which every merge
 	// queue gate runs on. This flag BEATS $AGENT_REPL_TESTS_SOCKET, which in
 	// turn beats the default.
@@ -340,6 +345,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.holder, "holder", "", "the daemon's socket holder's control socket (required): the daemon serves the shared address it keeps")
 	config.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
 	config.StringVar(&opts.zettelSocket, "zettel-socket", "", "zettel unix socket, overriding $"+zettelclient.EnvSocket)
+	config.StringVar(&opts.launcherSocket, "launcher-socket", "", "launcher unix socket, overriding $"+desktopnotify.EnvLauncherSocket)
 	config.StringVar(&opts.testsSocket, "tests-socket", "", "test service unix socket, overriding $"+testsclient.EnvSocket)
 	config.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
 	config.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
@@ -400,6 +406,11 @@ func parseFlags(program string, args []string) (options, error) {
 		return options{}, err
 	}
 	opts.zettelSocket = zettelSocket
+	launcherSocket, err := resolveSocket("launcher", opts.launcherSocket, os.Getenv(desktopnotify.EnvLauncherSocket), desktopnotify.DefaultLauncherSocket, os.UserHomeDir)
+	if err != nil {
+		return options{}, err
+	}
+	opts.launcherSocket = launcherSocket
 	testsSocket, err := resolveSocket("tests", opts.testsSocket, os.Getenv(testsclient.EnvSocket), defaultTestsSocket, os.UserHomeDir)
 	if err != nil {
 		return options{}, err

@@ -234,7 +234,8 @@ records are forbidden.
 Required fields:
 
 - `timestamp`: RFC 3339 timestamp in the shared representation below
-- `runtime`: `emacs`, `daemon`, `shim`, `webapp`, `sidecar`, or `store`
+- `runtime`: `emacs`, `daemon`, `shim`, `webapp`, `sidecar`, `store`, or
+  `launcher`
 - `level`: `debug`, `info`, `warn`, or `error`
 - `verbosity`: `normal` or `verbose`
 - `operation`: stable machine-readable operation name
@@ -364,6 +365,15 @@ it to the local zone before persisting.
 - The sidecar writes only genuinely global service records directly. A
   file-specific diagnostic is forwarded with the Claude session identifier,
   source path, sidecar PID, operation, and structured error context.
+- The launcher (Zettel.app, `launcher/`) writes its own global sink,
+  `~/.cache/agent-repl/log/launcher.log` (runtime `launcher`), through its one
+  logger (`ZettelLauncher.FileLogger`): its own lifecycle (`launcher.app`), each
+  banner exchange it accepted, posted or the platform refused
+  (`launcher.server.accept`, `launcher.server.post`), and every click it
+  reported (`launcher.clicks.click`, `launcher.clicks.advertisement`). A
+  banner's refusal is ALSO recorded by the daemon against the banner's
+  workspace, which owns that failure (`daemon.desktopnotify.launcher` for the
+  daemon's side of the dial); the launcher's line is its own side of it.
 - The store writes only genuinely global lifecycle, database, protocol, and
   sink failures. Successful replay, heartbeat, subscription, and ingestion are
   not store-owned narrative records. Session-specific failures are returned to

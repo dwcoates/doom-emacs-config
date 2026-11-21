@@ -2523,6 +2523,8 @@ type fakeBanners struct {
 	// noProgramCause is what NoProgramCause answers.
 	noProgramCause string
 	notified       []fakeNotify
+	// clickedWS is every workspace a reported click named.
+	clickedWS []ids.WorkspaceID
 }
 
 // fakeNotify is one Notify a fakeBanners was handed.
@@ -2542,6 +2544,18 @@ func (b *fakeBanners) notifies() []fakeNotify {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]fakeNotify(nil), b.notified...)
+}
+
+func (b *fakeBanners) Clicked(ws ids.WorkspaceID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.clickedWS = append(b.clickedWS, ws)
+}
+
+func (b *fakeBanners) clicks() []ids.WorkspaceID {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), b.clickedWS...)
 }
 
 func (b *fakeBanners) NoProgramCause() string {

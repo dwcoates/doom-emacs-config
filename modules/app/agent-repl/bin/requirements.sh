@@ -30,7 +30,10 @@
 #   env                      an environment variable the user sets
 #   group                    the user belongs to a group (`name`), which only an
 #                            administrator grants
-#   notification_permission  macOS lets a banner program notify
+#   notification_permission  macOS lets an app notify: `command` (a `~/` path
+#                            is the user's home) answers
+#                            `--check-notifications` (exit 0 when it may) and
+#                            asks with `--request-notifications`
 #   app_build                a macOS app built from the module (`build.module`, a
 #                            script taking the app's path, which answers its
 #                            sources' hash under `--source-hash`) into the cache
@@ -57,7 +60,9 @@
 #                            here (`build_target` + `binary`) or an installed
 #                            command (`command`), its `args`, `env` and `log`
 #                            files, with any `files` copied from the module into
-#                            the cache
+#                            the cache; a built program its build installs
+#                            outside the cache runs from `program` (a `~/` path
+#                            is the user's home)
 #   socket_holder            listening sockets (`sockets`, each a `unix` path or a
 #                            `tcp` host) the platform's service manager creates
 #                            and keeps for a sockethold program (`label`), which
@@ -421,6 +426,8 @@ validate_entries() {
          (select((($e.command != null) and (($e.build_target != null) or ($e.binary != null)))
                  or (($e.command == null) and (($e.build_target == null) or ($e.binary == null))))
            | "\($e._file): \($e.id): service needs either \"command\" or both \"build_target\" and \"binary\""),
+         (select($e.program != null and $e.build_target == null)
+           | "\($e._file): \($e.id): a service \"program\" is where its build installs it, so it needs \"build_target\""),
          ($e.files // [] | .[] | select(.from == null or .to == null)
            | "\($e._file): \($e.id): every service file needs \"from\" and \"to\"")
        elif $e.kind == "socket_holder" then need($e; ["label", "control", "sockets", "log", "platforms"]),
@@ -685,18 +692,20 @@ check_group() {
   fi
 }
 
+# permission_command ENTRY: the notification_permission entry's command, a
+# leading `~/` taken as the user's home.
+permission_command() { field "$1" .command | sed "s|^~/|$HOME/|"; }
+
 check_notification_permission() {
   local e="$1" cmd out
-  cmd="$(field "$e" .command)"
-  FIX="install posts one banner so macOS asks; then allow $cmd in System Settings → Notifications"
+  cmd="$(permission_command "$e")"
+  FIX="install asks macOS (its prompt, the first time); then allow it in System Settings → Notifications"
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    STATUS=missing; DETAIL="$cmd is not on PATH"; return
+    STATUS=missing; DETAIL="$cmd is not installed"; return
   fi
-  if out="$("$cmd" -diagnose 2>&1)"; then
-    STATUS=ok; DETAIL="$cmd may notify"
-  else
-    STATUS=missing; DETAIL="$cmd may not notify: $(printf '%s\n' "$out" | grep -iE 'authoriz|problem' | tr '\n' ' ')"
-  fi
+  if out="$("$cmd" --check-notifications 2>&1)"; then STATUS=ok; else STATUS=missing; fi
+  # The answer's first line is the detail.
+  DETAIL="${out%%$'\n'*}"
 }
 
 # app_path ENTRY: where an app_build or location_permission entry's app is
@@ -1081,7 +1090,7 @@ rendered_service() {
     def xml: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
     def unit: gsub("%"; "%%");
     def word: "\"" + (gsub("\\\\"; "\\\\") | gsub("\""; "\\\"") | gsub("\\$"; "$$") | unit) + "\"";
-    (if .command then .command else $cache + "/bin/" + .binary end) as $program
+    (if .command then .command elif .program then .program else $cache + "/bin/" + .binary end) as $program
     | (["/usr/bin/env", $program] + .args | map(home)) as $argv
     | ((if .command then {PATH: $path} else {} end) + ((.env // {}) | map_values(home))) as $env
     | ($cache + "/log/" + .log.stdout) as $out | ($cache + "/log/" + .log.stderr) as $err
@@ -1275,9 +1284,11 @@ install_socket_holder() {
 service_files() { printf '%s\n' "$1" | jq -r '(.files // [])[] | "\(.from)\t\(.to)"'; }
 
 check_service() {
-  local e="$1" label command binary dest from to stale=""
+  local e="$1" label command binary program dest from to stale=""
   label="$(field "$e" .label)"
   command="$(field "$e" .command)"
+  program="$(field "$e" .program)"
+  program="${program/#\~\//$HOME/}"
   dest="$(service_definition "$e")"
   if [ -n "$command" ]; then
     FIX="install $command, install $dest, and start $label"
@@ -1293,6 +1304,8 @@ check_service() {
     STATUS=missing; DETAIL="$command is not on PATH"
   elif [ -z "$command" ] && [ ! -x "$binary" ]; then
     STATUS=missing; DETAIL="$binary is not built"
+  elif [ -n "$program" ] && [ ! -x "$program" ]; then
+    STATUS=missing; DETAIL="$program is not installed"
   elif [ ! -f "$dest" ]; then
     STATUS=missing; DETAIL="$dest is not installed"
   elif ! rendered_service "$e" | cmp -s - "$dest"; then
@@ -1576,12 +1589,12 @@ install_group() { return 1; }
 
 install_notification_permission() {
   local cmd
-  cmd="$(field "$1" .command)"
+  cmd="$(permission_command "$1")"
   command -v "$cmd" >/dev/null 2>&1 || return 1
-  # The first banner is what makes macOS ask; its failure is the not-yet-allowed
+  # Asking is what makes macOS prompt, once; a refusal is the not-yet-allowed
   # state the re-check reports.
-  "$cmd" -title "agent-repl" -message "agent-repl can now post desktop banners" -group agent-repl:requirements >/dev/null 2>&1 \
-    || say "install: $cmd's first banner was refused; macOS asks once, and System Settings → Notifications allows it"
+  "$cmd" --request-notifications >/dev/null 2>&1 \
+    || say "install: macOS has not allowed $cmd to notify; System Settings → Notifications allows it"
   return 0
 }
 

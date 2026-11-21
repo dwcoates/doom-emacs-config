@@ -17,8 +17,8 @@ const opPost = "daemon.desktopnotify.post"
 // opChime is the operation a chime's records carry.
 const opChime = "daemon.desktopnotify.chime"
 
-// ClickSink is told a READ-BACK banner was clicked (a handed banner's click
-// selects the workspace itself): the server pushes the host stream's
+// ClickSink is told a banner was clicked, read back (Linux) or reported by the
+// launcher (macOS): the server pushes the host stream's
 // notification_clicked, and Emacs raises its frame and selects the tab.
 type ClickSink interface {
 	NotificationClicked(ws ids.WorkspaceID)
@@ -309,12 +309,24 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		n.Forget("a banner was clicked")
 		n.deps.Clicks.NotificationClicked(ws)
 	case outcome == Handed:
-		log.Info(opPost, "the platform holds the banner; its click selects the workspace itself", nil)
+		log.Info(opPost, "the platform holds the banner; its click is reported on its own", nil)
 	case outcome == Unclicked:
 		log.Debug(opPost, "the banner was dismissed or timed out", nil)
 	default:
 		panic(fmt.Sprintf("desktopnotify: the banner backend answered an unknown outcome %d", outcome))
 	}
+}
+
+// Clicked relays the click on a banner the platform held (macOS, through the
+// launcher) for ws: exactly what a read-back banner's click does, so every
+// click lets go of the held banners and asks Emacs to select its workspace,
+// whichever daemon posted the banner.
+func (n *Notifier) Clicked(ws ids.WorkspaceID) {
+	n.deps.Log.Info(opPost, "a held banner was clicked; asking Emacs to select the workspace", dlog.Context{
+		"workspace": string(ws),
+	})
+	n.Forget("a banner was clicked")
+	n.deps.Clicks.NotificationClicked(ws)
 }
 
 // Close cancels every banner still awaiting its click and every chime still

@@ -170,6 +170,9 @@ func serveTopicWith[T comparable, R any](
 	}
 }
 
+// opStreamEnding is the operation of a standing stream's planned ending.
+const opStreamEnding = "daemon.server.stream_ending"
+
 // endStandingStream sends a standing stream's `DaemonStreamEnding` frame as
 // its LAST frame when the daemon's own lifetime is what ended it -- and only
 // then. The lifetime ends in `Close`, and `Close` runs on the planned exit
@@ -188,11 +191,11 @@ func endStandingStream[R any](s *server, rpc string, log dlog.Logger, out stream
 		return
 	}
 	if err := out.Send(ending); err != nil {
-		log.Debug(rpc, "the standing stream's client went away before its planned ending",
-			dlog.Context{"cause": err.Error()})
+		log.Debug(opStreamEnding, "the standing stream's client went away before its planned ending",
+			dlog.Context{"rpc": rpc, "cause": err.Error()})
 		return
 	}
-	log.Debug(rpc, "sent the standing stream's planned ending", nil)
+	log.Debug(opStreamEnding, "sent the standing stream's planned ending", dlog.Context{"rpc": rpc})
 }
 
 // serveThenEnd serves one standing stream with an ending frame: BODY writes
