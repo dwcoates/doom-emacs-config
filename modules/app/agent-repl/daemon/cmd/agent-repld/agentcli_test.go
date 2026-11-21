@@ -297,6 +297,20 @@ func (c *cliClient) LocateWorkspace(_ context.Context, req *connect.Request[agen
 	return connect.NewResponse(c.located), nil
 }
 
+func (c *cliClient) ListMergeLandings(_ context.Context, req *connect.Request[agentreplv1.ListMergeLandingsRequest]) (*connect.Response[agentreplv1.ListMergeLandingsResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&agentreplv1.ListMergeLandingsResponse{Result: &agentreplv1.ListMergeLandingsResponse_Success{Success: &agentreplv1.ListMergeLandingsSuccess{}}}), nil
+}
+
+func (c *cliClient) RecordDirectLanding(_ context.Context, req *connect.Request[agentreplv1.RecordDirectLandingRequest]) (*connect.Response[agentreplv1.RecordDirectLandingResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&agentreplv1.RecordDirectLandingResponse{Result: &agentreplv1.RecordDirectLandingResponse_Success{Success: &agentreplv1.RecordDirectLandingSuccess{}}}), nil
+}
+
 func (c *cliClient) GetMergeQueueStatus(_ context.Context, req *connect.Request[agentreplv1.GetMergeQueueStatusRequest]) (*connect.Response[agentreplv1.GetMergeQueueStatusResponse], error) {
 	if err := c.record(req.Msg); err != nil {
 		return nil, err
@@ -4177,5 +4191,102 @@ func TestEveryAnsweredRefusalNamesItsDescriber(t *testing.T) {
 	}
 	for _, p := range problems {
 		t.Error(p)
+	}
+}
+
+func TestMergeQueueLandingsSendsItsWindow(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		check func(*agentreplv1.ListMergeLandingsRequest) bool
+	}{
+		{name: "an age and no end", args: []string{"-repository", "here", "-since", "36h"}, check: func(r *agentreplv1.ListMergeLandingsRequest) bool {
+			return r.GetSinceMs() == cliNow.Add(-36*time.Hour).UnixMilli() && r.UntilMs == nil && r.GetRepository() != nil
+		}},
+		{name: "a date and an end", args: []string{"-repository", "here", "-since", "2026-11-20T00:00:00Z", "-until", "1h"}, check: func(r *agentreplv1.ListMergeLandingsRequest) bool {
+			return r.GetSinceMs() == time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC).UnixMilli() && r.UntilMs != nil && r.GetUntilMs() == cliNow.Add(-time.Hour).UnixMilli()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, append([]string{"landings"}, tt.args...)...)
+
+			// Assert
+			req := only[*agentreplv1.ListMergeLandingsRequest](t, f)
+			if code != exitSuccess || !tt.check(req) {
+				t.Fatalf("exit %d (stderr %q), request %v", code, f.errOut.String(), req)
+			}
+		})
+	}
+}
+
+func TestMergeQueueLandingsRefusesAnIncompleteAsk(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no repository", args: []string{"-since", "1d"}, want: "-repository is required"},
+		{name: "no start", args: []string{"-repository", "here"}, want: "-since is required"},
+		{name: "an unreadable start", args: []string{"-repository", "here", "-since", "yesterday"}, want: `-since: "yesterday" is no age`},
+		{name: "an unreadable end", args: []string{"-repository", "here", "-since", "1d", "-until", "soon"}, want: `-until: "soon" is no age`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, append([]string{"landings"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.want) || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, stderr %q, requests %v; want a usage failure naming %q", code, f.errOut.String(), f.client.requests, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeQueueRecordLandingNamesItsCaller(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(mergeQueueNoun, "record-landing", "-repository", "here", "-branch", "feature", "-head", "abc123")
+
+	// Assert
+	req := only[*agentreplv1.RecordDirectLandingRequest](t, f)
+	if code != exitSuccess || req.GetBranch() != "feature" || req.GetLandedHead() != "abc123" || req.GetCaller().GetId() != "ws-caller" || req.GetRepository() == nil {
+		t.Fatalf("exit %d (stderr %q), request %v; want ws-caller's landing of feature at abc123", code, f.errOut.String(), req)
+	}
+}
+
+func TestMergeQueueRecordLandingRefusesAMissingFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no repository", args: []string{"-branch", "feature", "-head", "abc"}, want: "-repository is required"},
+		{name: "no branch", args: []string{"-repository", "here", "-head", "abc"}, want: "-branch is required"},
+		{name: "no head", args: []string{"-repository", "here", "-branch", "feature"}, want: "-head is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, append([]string{"record-landing"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.want) || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, stderr %q, requests %v; want a usage failure naming %q", code, f.errOut.String(), f.client.requests, tt.want)
+			}
+		})
 	}
 }

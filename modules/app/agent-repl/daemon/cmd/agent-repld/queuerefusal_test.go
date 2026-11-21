@@ -16,7 +16,22 @@ var queueRefusals = func() []describedRefusal {
 	update := &agentreplv1.UpdateMergeQueueError{}
 	subscribe := &agentreplv1.SubscribeMergeQueueError{}
 	unsubscribe := &agentreplv1.UnsubscribeMergeQueueError{}
+	landings := &agentreplv1.ListMergeLandingsError{}
+	record := &agentreplv1.RecordDirectLandingError{}
 	return []describedRefusal{
+		{name: "landings", empty: landings, oneof: "cause",
+			cases: []refusalCase{{name: "unknown_repository", err: armed(landings, "unknown_repository", nil), want: "the daemon has no repository by the one -repository named"}},
+			describe: func(e proto.Message) (string, error) {
+				return describeLandingsRefusal(e.(*agentreplv1.ListMergeLandingsError))
+			}},
+		{name: "record-landing", empty: record, oneof: "cause",
+			cases: []refusalCase{
+				{name: "unknown_repository", err: armed(record, "unknown_repository", nil), want: "the daemon has no repository by the one -repository named"},
+				{name: "unknown_caller", err: armed(record, "unknown_caller", nil),
+					want: "the workspace this command runs in was closed since it was located, so the landing cannot name it"}},
+			describe: func(e proto.Message) (string, error) {
+				return describeRecordLandingRefusal(e.(*agentreplv1.RecordDirectLandingError))
+			}},
 		{name: "status", empty: status, oneof: "cause",
 			cases: []refusalCase{{name: "unknown_repository", err: armed(status, "unknown_repository", nil), want: "the daemon has no repository by the one -repository named"}},
 			describe: func(e proto.Message) (string, error) {
