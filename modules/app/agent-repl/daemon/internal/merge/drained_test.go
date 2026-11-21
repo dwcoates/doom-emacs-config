@@ -252,11 +252,6 @@ func TestTheDrainRecordsEveryFailureToStartAndLeavesTheDebtOwed(t *testing.T) {
 			message: "could not read whether the repository's queue is paused"},
 		{name: "the queue cannot be read", arrange: func(h *harness) { h.db.queueReadErr = errors.New("disk I/O error") },
 			message: "could not read the repository's merge queue"},
-		{name: "no registered repository has the queue", arrange: func(h *harness) {
-			h.db.mu.Lock()
-			h.db.repos = h.db.repos[:1]
-			h.db.mu.Unlock()
-		}, message: "could not resolve the repository whose queue owes its drain; the drain stays owed"},
 		{name: "the deploy config cannot be read", arrange: func(h *harness) { h.configErr = errors.New("lifecycle.yaml: unknown field") },
 			message: "could not read the deploy config of the repository whose queue owes its drain; the drain stays owed"},
 	}
@@ -282,6 +277,52 @@ func TestTheDrainRecordsEveryFailureToStartAndLeavesTheDebtOwed(t *testing.T) {
 				t.Fatal("the drain was cleared, want it still owed")
 			}
 		})
+	}
+}
+
+func TestAForgottenRepositorysOwedDrainIsDropped(t *testing.T) {
+	// Arrange: the repository was forgotten while its queue owed the drain.
+	h := drainOwedHarness(t, releaseScript)
+	h.db.mu.Lock()
+	h.db.repos = h.db.repos[:1]
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.settleDrained(context.Background(), h.repoKey())
+
+	// Assert
+	if ran := h.scriptsRan(); len(ran) != 0 {
+		t.Fatalf("scripts ran = %v, want none", ran)
+	}
+	record, ok := h.drainRecord(dlog.LevelInfo, "the repository whose queue owed its drain is no longer registered; the drain is dropped")
+	if !ok || record.Context["repo"] != string(h.repoKey()) {
+		t.Fatalf("records = %+v, want the dropped drain recorded at INFO naming the queue", h.logs.Records())
+	}
+	if h.drainStillOwed() {
+		t.Fatal("the drain is still owed, want it dropped with its repository")
+	}
+	for _, r := range h.logs.Records() {
+		if r.Operation == opQueueDrained && r.Level == dlog.LevelError {
+			t.Fatalf("records = %+v, want no ERROR for a forgotten repository", h.logs.Records())
+		}
+	}
+}
+
+func TestAForgottenRepositorysDrainThatCannotBeClearedIsAnError(t *testing.T) {
+	// Arrange
+	h := drainOwedHarness(t, releaseScript)
+	h.db.mu.Lock()
+	h.db.repos = h.db.repos[:1]
+	h.db.mu.Unlock()
+	h.db.drainClearErr = errors.New("disk I/O error")
+
+	// Act
+	h.o.settleDrained(context.Background(), h.repoKey())
+
+	// Assert
+	record, ok := h.drainRecord(dlog.LevelError, "could not clear the drain of a repository that is no longer registered")
+	if !ok || record.Context["error"] != "disk I/O error" || !h.drainStillOwed() {
+		t.Fatalf("records = %+v, owed %v; want the failed clear recorded and the debt standing", h.logs.Records(), h.drainStillOwed())
 	}
 }
 
