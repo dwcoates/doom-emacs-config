@@ -170,7 +170,37 @@ daemon stream's editor events, then the composer draft the daemon keeps.
   workspace is visible, and its stream must not race that write.
 
 
-### `frontend.v1.RosterRow.held` and `frontend.v1.RosterThreadRow.held`
+### A page is loaded exactly while its workspace is visible
+
+- **What changed.** Emacs's page-unload.el keeps only the cold-gate hold-back,
+  the announced drop and the gate check on each roster push. Its status
+  buckets, the hold after a turn's end, the leave grace, the working cap, the
+  pass timer and the residency reports are gone, and so is
+  `proto/vocab/page-hold.json`, which only it read.
+- **Why.** Emacs holds a page only for a workspace it holds, and it holds
+  exactly the visible ones, so a rule of its own would be a second predicate.
+- **Accepted cost.** A visible workspace that is idle keeps its page loaded
+  until it stops being visible. A fold or a hide is now what frees a page.
+- **Unchanged.** A cold-gated page is still held back until the user asks for
+  it, and a page dropped while its workspace stays open (a hide, a closed
+  panel) is still announced first.
+
+### Boot, redeploy and stream closes read the persisted visibility
+
+- **Boot and redeploy.** `wsm.Workspace.Runs()` starts a session for a
+  workspace whose persisted visibility is visible, and beyond that only for a
+  queued merge, the deploy mediator, and a one-shot or merging workspace a fold
+  spares. A handover moves the workspaces that are not visible last and loads
+  no page for them (`rollout.foldedRows`), reading the visibility the
+  workspaces were listed with, so that read can no longer fail.
+- **Stream closes.** A workspace's host or web stream that closes while the
+  workspace is not visible is no severed hop: the editor closed it because the
+  roster stopped showing the workspace, so the hop is awaited afresh.
+
+### SUPERSEDED: `frontend.v1.RosterRow.held` and `frontend.v1.RosterThreadRow.held`
+
+- **Superseded (owner ruling, 2026-11-21).** The visibility entry above
+  replaces the marker; it is kept here as it was landed.
 
 - **What changed.** A new presence marker on each row,
   `frontend.v1.RosterRowHeld` (field 77) and `frontend.v1.RosterThreadHeld`
