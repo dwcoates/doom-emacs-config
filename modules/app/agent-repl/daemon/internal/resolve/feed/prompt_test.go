@@ -2,15 +2,14 @@ package feed
 
 import (
 	"agent-repld/internal/prose"
+	"agent-repld/internal/sourcescan"
 	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
+	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -1559,29 +1558,13 @@ func TestIsPromptRowNamesBothKindsOfPromptAndNothingElse(t *testing.T) {
 // hand-rolled pair of arm checks cannot drift from it.
 func TestNoSourceHandRollsThePromptRowTest(t *testing.T) {
 	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("listing the package's sources: %v", err)
-	}
 	pair := regexp.MustCompile(`GetUserPrompt\(\) != nil \|\| [a-z]+\.GetAgentPrompt\(\) != nil`)
 
 	// Act.
-	var rolled []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
-		}
-		if n := len(pair.FindAllIndex(source, -1)); n > 0 {
-			rolled = append(rolled, fmt.Sprintf("%s:%d", file, n))
-		}
-	}
+	rolled := sourcescan.SitesMatching(t, pair)
 
 	// Assert: isPromptRow's own body is the one pair.
-	if len(rolled) != 1 || rolled[0] != "prompt.go:1" {
+	if !slices.Equal(rolled, []string{"prompt.go"}) {
 		t.Fatalf("hand-rolled prompt row tests = %v, want only isPromptRow's own in prompt.go", rolled)
 	}
 }

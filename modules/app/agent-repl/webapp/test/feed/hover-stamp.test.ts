@@ -4,7 +4,6 @@
  * every push, and handed to the footer while the pointer is on its card.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -18,6 +17,7 @@ import {
   setRowHover,
   type HoverStamp,
 } from "../../src/feed/hover-stamp.js";
+import { codeUnder } from "../files-under.js";
 import { heatColor } from "../../src/heat.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { FEED_ROW_ATTRIBUTE } from "../../src/feed/row-id.js";
@@ -514,11 +514,9 @@ describe("the one recorder", () => {
   it("is the only place a card's hover stamp is recorded: no card records one of its own", () => {
     // Arrange: every source under src/ but the recorder's own module.
     const root = join(dirname(fileURLToPath(import.meta.url)), "../../src");
-    const sources = readdirSync(root, { recursive: true })
-      .map(String)
-      .filter((file) => /\.tsx?$/.test(file) && file !== join("feed", "hover-stamp.ts"));
+    const sources = [...codeUnder(root)].filter(([file]) => file !== join("feed", "hover-stamp.ts"));
     // Act
-    const recorders = sources.filter((file) => /\bsetRowHover\(|\brecordRowHover\(/.test(readFileSync(join(root, file), "utf8")));
+    const recorders = sources.filter(([, code]) => /\bsetRowHover\(|\brecordRowHover\(/.test(code)).map(([file]) => file);
     // Assert: the feed view's row chrome alone, for every row kind.
     expect(recorders).toEqual([join("feed", "feed-view.ts")]);
   });
