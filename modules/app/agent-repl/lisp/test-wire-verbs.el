@@ -5510,6 +5510,40 @@ encoder reads: the common codec owns the real encoding.")
                    '(:arm :error :value (:arm :workspace-ref-mismatch
                                          :value (:workspace-id "w" :reported-dir "/a" :registry-dir "/b")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-report-vendor-spend-request-shape ()
+  "A spend report spells its workspace, root, cause and every call."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-report-vendor-spend-request
+                    (list :workspace '(:id "w1" :dir "/w")
+                          :config-dir "/home/u/.claude"
+                          :cause "VENDOR_CALL_CAUSE_PROMPT_SUMMARY"
+                          :calls (list (list :model "claude-haiku-5-5"
+                                             :tokens '(:uncached-input 3 :cache-read 0 :cache-write-5m 1500
+                                                       :cache-write-1h 500 :output 9)))))
+                   '((workspace . ((id . "w1") (dir . "/w")))
+                     (configDir . "/home/u/.claude")
+                     (cause . "VENDOR_CALL_CAUSE_PROMPT_SUMMARY")
+                     (calls . [((model . "claude-haiku-5-5")
+                                (tokens . ((uncachedInput . 3) (cacheRead . 0) (cacheWrite5m . 1500)
+                                           (cacheWrite1h . 500) (output . 9))))]))))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-vendor-spend-response-arms ()
+  "Both success arms decode, and the refusal carries its detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-report-vendor-spend-response '((success . ((recorded . nil)))))
+                   '(:arm :success :value (:arm :recorded :value nil))))
+    (should (equal (agent-repl-wire-decode-report-vendor-spend-response '((success . ((metricsOff . nil)))))
+                   '(:arm :success :value (:arm :metrics-off :value nil))))
+    (should (equal (agent-repl-wire-decode-report-vendor-spend-response
+                    '((error . ((invalid . ((detail . "names no model")))))))
+                   '(:arm :error :value (:arm :invalid :value (:detail "names no model")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-vendor-spend-response-refuses-unknown-fields ()
+  "A field the codec does not know is loud rather than dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-report-vendor-spend-response
+                   '((success . ((recorded . nil) (surprise . 1))))))))
+
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-response-refuses-unknown-fields ()
   "A field the codec does not know is loud rather than dropped."
   (agent-repl-test-wire-verbs--with-common

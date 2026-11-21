@@ -135,6 +135,9 @@ would abort the very branch a test is asserting."
     ("ReportLatencies" agent-repl-rpc-report-latencies
      agent-repl-wire-encode-report-latencies-request
      agent-repl-wire-decode-report-latencies-response)
+    ("ReportVendorSpend" agent-repl-rpc-report-vendor-spend
+     agent-repl-wire-encode-report-vendor-spend-request
+     agent-repl-wire-decode-report-vendor-spend-response)
     ("SubmitPrompt" agent-repl-rpc-submit-prompt
      agent-repl-wire-encode-submit-prompt-request
      agent-repl-wire-decode-submit-prompt-response)
