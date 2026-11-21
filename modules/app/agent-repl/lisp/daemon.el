@@ -1651,6 +1651,58 @@ every later daemon inherits its predecessor's environment unchanged."
         (cons (format "AGENT_REPL_USER_ENV_FILE=%s" (expand-file-name file)) env)
       env)))
 
+;;;; ---- A crash loop is said, since no daemon lives to say it ----
+
+;; A DAEMON THAT DIES AT EVERY BOOT CANNOT TELL ANYONE.  Its deploy mediator
+;; is one of its own workspaces, so a daemon that panics seconds into each
+;; boot never runs it, and its panic stands only in the stdio log (2026-11-21:
+;; the daemon crash-looped from 15:22 to 15:35, and nothing said so).  This
+;; launcher is the one observer that outlives every attempt: a deploy's
+;; handover spawns its successor itself, so every spawn here follows a death
+;; or a cold start, and several in a short window are a loop.  It is reported
+;; as a launch failure, loudly, with the panic the stdio log ends on; the
+;; spawns go on, since each is the recovery.
+
+(defconst agent-repl-daemon-crash-loop-spawns 3
+  "Spawns inside `agent-repl-daemon-crash-loop-window' that are a crash loop.")
+
+(defconst agent-repl-daemon-crash-loop-window 120.0
+  "Seconds within which `agent-repl-daemon-crash-loop-spawns' spawns are a loop.
+A crash-looping daemon died 14 to 18 seconds into each boot (measured
+2026-11-21, 15:22 to 15:35): three spawns span about 54 seconds, and this is
+about twice that.  A healthy daemon lives for hours between spawns.")
+
+(defvar agent-repl-daemon--recent-spawns nil
+  "The `float-time' of each spawn inside the crash-loop window, newest first.")
+
+(defun agent-repl-daemon--note-spawn (now)
+  "Record a spawn at NOW, answering how many fall inside the crash-loop window."
+  (setq agent-repl-daemon--recent-spawns
+        (cons now (seq-filter (lambda (at) (< (- now at) agent-repl-daemon-crash-loop-window))
+                              agent-repl-daemon--recent-spawns)))
+  (length agent-repl-daemon--recent-spawns))
+
+(defun agent-repl--frontend-stdio-log-last-panic ()
+  "External-boundary wrapper: the last panic line of the daemon stdio log.
+The runtime writes a panic, or a fatal error, to stderr, which is that log,
+as a line opening \"panic: \" or \"fatal error: \".  Answers nil when the
+log holds none or cannot be read."
+  (let ((path (agent-repl-daemon--stdio-log-path)))
+    (when (file-readable-p path) ;; ALLOW-EXTERNAL-BOUNDARY
+      (with-temp-buffer
+        (insert-file-contents path) ;; ALLOW-EXTERNAL-BOUNDARY
+        (goto-char (point-max))
+        (when (re-search-backward "^\\(panic: \\|fatal error: \\).*$" nil t)
+          (match-string-no-properties 0))))))
+
+(defun agent-repl-daemon--report-crash-loop (spawns)
+  "Report the crash loop SPAWNS recent spawns make, naming the last panic."
+  (let ((panic (agent-repl--frontend-stdio-log-last-panic)))
+    (agent-repl-daemon--report-launch-failure
+     (format "the daemon is crash-looping: %d starts in %d seconds; it last died of: %s"
+             spawns (round agent-repl-daemon-crash-loop-window)
+             (or panic "no panic in its stdio log")))))
+
 (defun agent-repl-daemon--start ()
   "Spawn the daemon and return its process, or nil when the binary is absent."
   (let ((binary (car agent-repl-daemon-command))
@@ -1670,6 +1722,9 @@ every later daemon inherits its predecessor's environment unchanged."
       nil)
      (t
       (agent-repl-daemon--clear-launch-failure)
+      (let ((spawns (agent-repl-daemon--note-spawn (float-time))))
+        (when (>= spawns agent-repl-daemon-crash-loop-spawns)
+          (agent-repl-daemon--report-crash-loop spawns)))
       ;; RECORDED HERE, ECHOED BY THE TRANSITION.  The spawn's own line is
       ;; kept for the log, but the minibuffer line for this phase is issued
       ;; once by `agent-repl-daemon--set-lifecycle' a few forms below, so

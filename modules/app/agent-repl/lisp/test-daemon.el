@@ -2836,3 +2836,63 @@ On 2026-11-18 a match on the address alone deleted the successor's file."
     ;; Assert
     (should-not agent-repl-daemon--own-address)
     (should (agent-repl-test-daemon--logged-p :log "elisp.daemon.own-addr-already-gone"))))
+
+;;;; ---- A crash loop is said ----
+
+(ert-deftest agent-repl-test-daemon-spawns-inside-the-window-are-counted ()
+  "Each spawn counts the spawns inside the window; an older one falls out."
+  (agent-repl-test-daemon--with-harness
+    (let ((agent-repl-daemon--recent-spawns nil))
+      ;; Act
+      (let ((first (agent-repl-daemon--note-spawn 1000.0))
+            (second (agent-repl-daemon--note-spawn 1018.0))
+            (third (agent-repl-daemon--note-spawn (+ 1018.0 agent-repl-daemon-crash-loop-window))))
+        ;; Assert
+        (should (equal (list first second third) '(1 2 1)))))))
+
+(ert-deftest agent-repl-test-daemon-a-crash-loop-is-reported-with-the-last-panic ()
+  "The third spawn inside the window reports the loop and the panic it ended on."
+  (agent-repl-test-daemon--with-harness
+    (let ((agent-repl-daemon--recent-spawns nil)
+          (agent-repl-daemon-launch-failure nil)
+          (stdio (make-temp-file "stdio-log")))
+      (unwind-protect
+          (progn
+            (with-temp-file stdio
+              (insert "{\"pid\":1}\npanic: an older death\n{\"pid\":2}\npanic: topbar: never bound\n\ngoroutine 9 [running]:\n"))
+            (cl-letf (((symbol-function 'agent-repl-daemon--stdio-log-path) (lambda () stdio)))
+              ;; Arrange
+              (agent-repl-daemon--note-spawn 1000.0)
+              (agent-repl-daemon--note-spawn 1014.0)
+              ;; Act
+              (agent-repl-daemon--report-crash-loop (agent-repl-daemon--note-spawn 1032.0))
+              ;; Assert
+              (should (equal agent-repl-daemon-launch-failure
+                             "the daemon is crash-looping: 3 starts in 120 seconds; it last died of: panic: topbar: never bound"))))
+        (delete-file stdio)))))
+
+(ert-deftest agent-repl-test-daemon-a-crash-loop-with-no-panic-says-so ()
+  "A log that holds no panic is said, never left blank."
+  (agent-repl-test-daemon--with-harness
+    (let ((agent-repl-daemon-launch-failure nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-stdio-log-last-panic) (lambda () nil)))
+        ;; Act
+        (agent-repl-daemon--report-crash-loop 3)
+        ;; Assert
+        (should (string-suffix-p "it last died of: no panic in its stdio log" agent-repl-daemon-launch-failure))))))
+
+(ert-deftest agent-repl-test-daemon-the-third-quick-spawn-reports-the-crash-loop ()
+  "The launcher's own spawns say the loop: the third inside the window reports it."
+  (agent-repl-test-daemon--with-harness
+    (let ((agent-repl-daemon--recent-spawns nil)
+          (agent-repl-daemon-launch-failure nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-stdio-log-last-panic) (lambda () "panic: boom")))
+        ;; Arrange
+        (agent-repl-daemon--start)
+        (agent-repl-daemon--start)
+        (should-not agent-repl-daemon-launch-failure)
+        ;; Act
+        (agent-repl-daemon--start)
+        ;; Assert
+        (should (string-match-p "crash-looping: 3 starts.*panic: boom" (or agent-repl-daemon-launch-failure "")))
+        (should (agent-repl-test-daemon--logged-p :error "elisp.daemon.launch-failed detail=the daemon is crash-looping"))))))
