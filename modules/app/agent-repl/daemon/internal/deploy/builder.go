@@ -41,6 +41,13 @@ func (e *BuildFailed) Error() string {
 // its own to compare.
 var Targets = []string{"shim", "webapp", "daemon", "store", "sidecar", "zettel", "tests", "lock"}
 
+// BuildObserver is told each build step as it begins and ends: the hot
+// reload's card draws every service's build from it (hotreload.Tracker).
+type BuildObserver interface {
+	BuildStepBegan(step string)
+	BuildStepEnded(step string, err error)
+}
+
 // ScriptBuilder is the production Builder.
 //
 // THE ONE BUILD STEP IS bin/build-frontend.sh. It is kept — and not folded
@@ -69,6 +76,8 @@ type ScriptBuilder struct {
 	Log           dlog.Logger
 	// Restarts records how long each build step took, by its name.
 	Restarts restarttiming.Recorder
+	// Observer is told every step as it begins and ends. REQUIRED.
+	Observer BuildObserver
 }
 
 // buildStep is one command of a build.
@@ -90,11 +99,13 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 		fields := dlog.Context{"step": step.name, "argv": step.argv, "log": logPath}
 		b.Log.Info(opBuild, "building", fields)
 		began := b.Clock.Now()
+		b.Observer.BuildStepBegan(step.name)
 		out, code, err := b.Runner.Run(ctx, b.ModuleRoot, step.argv)
 		b.Restarts.ObserveRestart(restarttiming.OfBuildStep(step.name, restarttiming.OutcomeOf(stepErr(code, err)), b.Clock.Now().Sub(began)))
 		archive.WriteString("==== " + step.name + ": " + strings.Join(step.argv, " ") + "\n" + out + "\n")
 		if stepErr(code, err) == nil {
 			b.Log.Debug(opBuild, "the step built", fields)
+			b.Observer.BuildStepEnded(step.name, nil)
 			continue
 		}
 		detail := outputtext.TailLines(out, 20)
@@ -105,7 +116,9 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 		}
 		b.archive(logPath, archive.String())
 		b.Log.Error(opBuild, "a build step failed; nothing is deployed", dlog.Merge(fields, dlog.Context{"detail": detail}))
-		return &BuildFailed{Step: step.name, Detail: detail, Log: logPath}
+		failed := &BuildFailed{Step: step.name, Detail: detail, Log: logPath}
+		b.Observer.BuildStepEnded(step.name, failed)
+		return failed
 	}
 	b.archive(logPath, archive.String())
 	b.Log.Info(opBuild, "every component built into staging", dlog.Context{"staging": staging, "log": logPath})

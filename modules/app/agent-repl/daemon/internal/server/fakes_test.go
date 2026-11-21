@@ -2381,6 +2381,9 @@ type harness struct {
 	Pages       *fakeSupersededPages
 	OpenWorld   *fakeOpenWorld
 	ChessBoards *fakeChessSquares
+	// HotReload records the web streams' builds the server tells the
+	// deploy's hot reload card.
+	HotReload *fakeHotReload
 	// Latencies records what ReportLatencies accepts.
 	Latencies *fakeLatencies
 	RPCs      *fakeRPCs
@@ -2528,6 +2531,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		EditorInstances:  &fakeEditorInstances{},
 		OpenWorld:        newFakeOpenWorld(),
 		ChessBoards:      &fakeChessSquares{},
+		HotReload:        &fakeHotReload{},
 		SlashCommands:    commandcatalog.New(),
 		SlackChannels:    &fakeSlackChannels{},
 		Mentions:         &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
@@ -2616,6 +2620,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Latencies:         h.Latencies,
 		RPCs:              h.RPCs,
 		Reconnects:        h.reconnects(),
+		HotReload:         h.HotReload,
 		ChessWidgetBundle: http.NotFoundHandler(),
 		Log:               h.Surfaces,
 	}
@@ -3539,3 +3544,29 @@ func (d *fakeDB) WorkspaceLinks(_ context.Context, id ids.WorkspaceID) ([]wsm.Wo
 	}
 	return d.workspaceLinks[id], nil
 }
+
+// fakeHotReload records what the server tells the deploy's hot reload card,
+// as "webview:<ws>:<build>", "webview_gone:<ws>" or "webhost:<build>".
+type fakeHotReload struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (f *fakeHotReload) record(event string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+}
+
+// told answers every recorded event, in order.
+func (f *fakeHotReload) told() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.events...)
+}
+
+func (f *fakeHotReload) WebviewReported(ws ids.WorkspaceID, build string) {
+	f.record("webview:" + string(ws) + ":" + build)
+}
+func (f *fakeHotReload) WebviewGone(ws ids.WorkspaceID) { f.record("webview_gone:" + string(ws)) }
+func (f *fakeHotReload) WebhostReported(build string)   { f.record("webhost:" + build) }

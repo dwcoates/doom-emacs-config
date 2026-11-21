@@ -699,3 +699,37 @@ func TestAPushAFullQueueRefusedIsUncounted(t *testing.T) {
 		t.Fatalf("(reached %d, counted %d), want (0, 0)", reached, s.addressedPushes.InFlight())
 	}
 }
+
+func TestWebStreamsTellTheHotReloadTheirBuilds(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(s *server)
+		want []string
+	}{
+		{"a webview attaching", func(s *server) { s.holdWebBuild(testWorkspaceID, "Web1") },
+			[]string{"webview:" + string(testWorkspaceID) + ":Web1"}},
+		{"a workspace's last webview closing", func(s *server) { s.holdWebBuild(testWorkspaceID, "Web1")() },
+			[]string{"webview:" + string(testWorkspaceID) + ":Web1", "webview_gone:" + string(testWorkspaceID)}},
+		{"one of two webviews closing", func(s *server) {
+			s.holdWebBuild(testWorkspaceID, "Web1")
+			s.holdWebBuild(testWorkspaceID, "Web2")()
+		}, []string{"webview:" + string(testWorkspaceID) + ":Web1", "webview:" + string(testWorkspaceID) + ":Web2"}},
+		{"a web view host page attaching", func(s *server) { s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web3"}) },
+			[]string{"webhost:Web3"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			s := h.Server.(*server)
+
+			// Act
+			tt.act(s)
+
+			// Assert
+			if got := h.HotReload.told(); strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("told %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

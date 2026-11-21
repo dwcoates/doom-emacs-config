@@ -746,6 +746,10 @@ message FeedTurnActivity {
     // before the fix lands, drawn in the mediator's own feed as a merge
     // bubble with the tests tab's content alone. See FeedFixGate.
     FeedFixGate fix_gate = 13;
+    // A DEPLOY'S HOT RELOAD: every service the deploy builds and puts back
+    // into service, drawn in the deploy mediator's own feed as a merge bubble
+    // whose body lists the services. See FeedHotReload.
+    FeedHotReload hot_reload = 14;
   }
 }
 
@@ -4226,6 +4230,238 @@ message FeedFixGateHead {
   // the chain is escalated to the user. Drawn as "attempt 2 of 3".
   uint32 attempt = 2;
   uint32 max_attempts = 3;
+}
+
+// ---- A deploy's hot reload ----
+
+// A DEPLOY'S HOT RELOAD (owner request, 2026-11-20): what one deploy of the
+// runtime does to every service it can reload, as it does it. Drawn in the
+// DEPLOY MEDIATOR'S OWN FEED, in the merge bubble's frame (head, badge, clock)
+// like FeedFixGate, its body a list of the services. ONE ROW PER DEPLOY, keyed
+// by the deploy's start, replaced whole on every push.
+//
+//   │ ⇡ hot-reloading                                  [reloading]  1m 12s │
+//   │ ✓ protobufs                                                    3s    │
+//   │ ✓ store            restarted                                   14s   │
+//   │ ● daemon           handing over · 6 workspaces                  41s   │
+//   │ ◌ shim             2 of 5 replaced                              52s   │
+//   │ ✓ webapp           up to date                                         │
+//
+// A SERVICE ROW IS SELECTABLE. Selecting one swaps the body for that
+// service's detail, with a back control to the list; the selection is the
+// reader's, kept by the client, and every push redraws the selected detail:
+//
+//   │ ‹ back   ◌ shim   2 of 5 replaced                              52s   │
+//   │ Hosts each workspace's Claude session. A stale one is replaced …      │
+//   │ build 4f2a1c → 9be515                                                 │
+//   │ ✓ build 9s   ✓ install   ◌ replace                                   │
+//   │ ✓ fix-footer       replaced                                   2s     │
+//   │ ◌ deploy-mediator  waits for its turn to end                  48s    │
+//
+// THE DAEMON RESOLVES EVERY WORD. The client draws each state's words, its
+// glyph and its clock, and derives nothing: no count, no order, no summary.
+//
+// THE CARD OUTLIVES THE DAEMON THAT BEGAN IT. A deploy that moves the daemon
+// hands the card to its successor, which goes on drawing it under the same
+// row once it has taken over, so one card tells the whole deploy.
+message FeedHotReload {
+  FeedHotReloadHead head = 1;
+  // Where the deploy's hot reload stands; the head's badge. Exactly one is
+  // set: live while any service is still scheduled, running or waiting;
+  // settled once every service is done, unchanged, failed or skipped,
+  // succeeded when none failed.
+  oneof state {
+    // Some service is still being reloaded. The clock counts up from the
+    // deploy's start.
+    FeedMergeTabLive live = 2;
+    // Every service reached its end. A failure carries the deploy's one-line
+    // account.
+    FeedMergeTabSettled settled = 3;
+  }
+  // The steps every service shares, before any service's own (the protobufs
+  // the build regenerates first), drawn above the services in the list view.
+  repeated FeedHotReloadStep steps = 4;
+  // Every service the deploy reloads, in the order the daemon decides them.
+  repeated FeedHotReloadService services = 5;
+}
+
+// The card's head.
+message FeedHotReloadHead {
+  // What is drawn ("hot-reloading"), resolved by the daemon, drawn verbatim.
+  FeedHotReloadLabel label = 1;
+}
+
+// The hot reload head's label: what the card is ("hot-reloading"), resolved
+// by the daemon, drawn verbatim.
+message FeedHotReloadLabel {
+  string text = 1;
+}
+
+// One service a deploy reloads: its row in the list view and, when the reader
+// selects it, its detail view.
+message FeedHotReloadService {
+  // The service's name ("shim", "daemon"), drawn verbatim. It is also the key
+  // the reader's selection is kept under, unique within the card.
+  FeedHotReloadServiceName name = 1;
+  // Where this service stands; the row's glyph, words and clock.
+  FeedHotReloadState state = 2;
+  // A short account of the service's instances, drawn after its state's words
+  // ("2 of 5 replaced"). UNSET when the service has no instances to count.
+  optional FeedHotReloadServiceSummary summary = 3;
+  // One or two sentences saying what reloading this service means, drawn
+  // at the top of the detail view, so a reader learns what a hot reload does.
+  FeedHotReloadServiceAbout about = 4;
+  // The build the service ran before and the build the deploy brings. UNSET
+  // until the build has been hashed.
+  optional FeedHotReloadBuilds builds = 5;
+  // The service's own steps in order (build, install, then how it is put into
+  // service), drawn in the detail view.
+  repeated FeedHotReloadStep steps = 6;
+  // The service's running copies the deploy acts on one by one (each
+  // workspace's shim, each workspace's web view, each Emacs), drawn in the
+  // detail view. Empty for a service that runs as one process.
+  repeated FeedHotReloadInstance instances = 7;
+}
+
+// A service's name.
+message FeedHotReloadServiceName {
+  string text = 1;
+}
+
+// A service's instance account, resolved by the daemon.
+message FeedHotReloadServiceSummary {
+  string text = 1;
+}
+
+// What reloading a service means, resolved by the daemon.
+message FeedHotReloadServiceAbout {
+  string text = 1;
+}
+
+// A service's two builds, each by its short content hash.
+message FeedHotReloadBuilds {
+  // The build installed before this deploy. UNSET when nothing stood
+  // installed or it could not be read.
+  optional FeedHotReloadBuildPrevious previous = 1;
+  // The build this deploy brings.
+  FeedHotReloadBuildFresh fresh = 2;
+}
+
+// The build installed before the deploy.
+message FeedHotReloadBuildPrevious {
+  // Its short content hash.
+  string short_hash = 1;
+}
+
+// The build the deploy brings.
+message FeedHotReloadBuildFresh {
+  // Its short content hash.
+  string short_hash = 1;
+}
+
+// One step of a deploy (generating the protobufs) or of one service (its
+// build, its install, its restart).
+message FeedHotReloadStep {
+  // The step's name ("build", "restart"), drawn verbatim.
+  FeedHotReloadStepName name = 1;
+  // Where the step stands.
+  FeedHotReloadState state = 2;
+}
+
+// A step's name.
+message FeedHotReloadStepName {
+  string text = 1;
+}
+
+// One running copy of a service the deploy acts on.
+message FeedHotReloadInstance {
+  // What the copy is ("fix-footer", "the web view host", "Emacs"), drawn
+  // verbatim: a workspace is named by its name.
+  FeedHotReloadInstanceName name = 1;
+  // Where this copy stands.
+  FeedHotReloadState state = 2;
+}
+
+// An instance's name.
+message FeedHotReloadInstanceName {
+  string text = 1;
+}
+
+// Where a service, a step or an instance stands: ONE VOCABULARY, so the three
+// draw alike. Exactly one arm is set; the arm picks the glyph and whether a
+// clock ticks.
+message FeedHotReloadState {
+  oneof state {
+    // Not begun: an earlier step goes first. A grey dot, no clock.
+    FeedHotReloadScheduled scheduled = 1;
+    // Working now. A breathing yellow dot, a clock ticking from its start.
+    FeedHotReloadRunning running = 2;
+    // Would work but stands still on something outside the deploy (a turn in
+    // flight, the successor daemon). A still grey dot, a clock ticking from
+    // its start.
+    FeedHotReloadWaiting waiting = 3;
+    // Finished and now serves the fresh build. A green ✓ and how long it ran.
+    FeedHotReloadDone done = 4;
+    // Already ran the fresh build, so nothing was done. A dim green ✓.
+    FeedHotReloadUnchanged unchanged = 5;
+    // Could not be done. A red ✗, its account, and how long it ran.
+    FeedHotReloadFailed failed = 6;
+    // Will not be done because the deploy stopped before it. A grey dash.
+    FeedHotReloadSkipped skipped = 7;
+  }
+}
+
+// What a state says, resolved by the daemon ("building", "restarted",
+// "waits for its turn to end"), drawn verbatim.
+message FeedHotReloadWords {
+  string text = 1;
+}
+
+// Not begun.
+message FeedHotReloadScheduled {
+  FeedHotReloadWords words = 1;
+}
+
+// Working now.
+message FeedHotReloadRunning {
+  FeedHotReloadWords words = 1;
+  // When the work began, epoch ms; the client ticks the clock from it.
+  int64 started_at_ms = 2;
+}
+
+// Standing still on something outside the deploy.
+message FeedHotReloadWaiting {
+  FeedHotReloadWords words = 1;
+  // When the work began, epoch ms; the client ticks the clock from it.
+  int64 started_at_ms = 2;
+}
+
+// Finished on the fresh build.
+message FeedHotReloadDone {
+  FeedHotReloadWords words = 1;
+  // When the work began and ended, epoch ms; the client draws the span.
+  int64 started_at_ms = 2;
+  int64 ended_at_ms = 3;
+}
+
+// Nothing to do: already the fresh build.
+message FeedHotReloadUnchanged {
+  FeedHotReloadWords words = 1;
+}
+
+// Could not be done.
+message FeedHotReloadFailed {
+  // The daemon's one-line account of the failure.
+  FeedHotReloadWords words = 1;
+  // When the work began and failed, epoch ms; the client draws the span.
+  int64 started_at_ms = 2;
+  int64 ended_at_ms = 3;
+}
+
+// Not done because the deploy stopped first.
+message FeedHotReloadSkipped {
+  // Why ("the build failed"), resolved by the daemon.
+  FeedHotReloadWords words = 1;
 }
 
 // ---- A run's wait for a RAM disk seat, before it plans ----

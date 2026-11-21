@@ -284,7 +284,11 @@ func runPinned(m *testing.M, module, parent string) int {
 // manifest, which every daemon reads at boot and every spawned daemon's
 // environment is refreshed under (cmd/agent-repld requireManifest).
 func newPinnedCheckout(dir, repo string) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// THE CHECKOUT STANDS AS A REPOSITORY'S MAIN WORKTREE ON DISK, as every
+	// fake repository does (NewRepoAt): the fake git answers its common dir as
+	// its `.git` (tagPinnedCheckout), and the daemon canonicalizes that answer
+	// on disk when it resolves the repository the runtime is deployed from.
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
 		return "", fmt.Errorf("mkdir the pinned checkout %s: %w", dir, err)
 	}
 	if err := writePinnedConfig(dir); err != nil {

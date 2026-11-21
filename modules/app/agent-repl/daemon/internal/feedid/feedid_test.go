@@ -354,3 +354,32 @@ func TestPlanBubbleRowKeyRoundTrips(t *testing.T) {
 func b64(payload string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(payload))
 }
+
+func TestRootCardRowAddressesTheRootFeedAndCarriesTheCard(t *testing.T) {
+	// Arrange
+	activity := &frontendv1.FeedTurnActivity{Unit: &frontendv1.FeedTurnActivity_HotReload{HotReload: &frontendv1.FeedHotReload{}}}
+
+	// Act
+	row := RootCardRow("ws", RowKey{Kind: KindHotReload, ID: "1"}, activity)
+
+	// Assert
+	ref, err := Decode(row.GetId())
+	if err != nil || ref.WS != "ws" || !ref.Feed.Root || ref.Row.Kind != KindHotReload || ref.Row.ID != "1" {
+		t.Fatalf("ref = %+v (%v), want the root feed's hot_reload row 1", ref, err)
+	}
+	if row.GetActivity() != activity {
+		t.Fatalf("row = %v, want the card carried as given", row)
+	}
+}
+
+func TestRootCardRowRefusesAnUnaddressableKey(t *testing.T) {
+	// Arrange
+	defer func() {
+		if recover() == nil {
+			t.Fatal("an unaddressable key did not panic")
+		}
+	}()
+
+	// Act
+	RootCardRow("ws", RowKey{Kind: "nonsense", ID: "1"}, &frontendv1.FeedTurnActivity{})
+}

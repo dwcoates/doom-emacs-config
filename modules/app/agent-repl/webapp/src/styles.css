@@ -9264,23 +9264,48 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .merge-badge.is-succeeded { color: var(--ok); }
 .merge-badge.is-failed { color: var(--err); }
 .merge-badge.is-abandoned { color: var(--muted); }
-/* A DEPLOY MEDIATOR'S FIX AT ITS GATE (cards/fix-gate.ts; owner ruling,
-   2026-11-19): the merge bubble's head over the tests tab's run, no tab
-   strip. It stops where an expanded merge bubble stops, and only its run
-   scrolls. */
-.tool-card.fix-gate {
+/* THE MERGE BUBBLE'S FRAME WITHOUT A TAB STRIP (cards/merge-frame.ts): a
+   deploy mediator's fix at its gate (cards/fix-gate.ts; owner ruling,
+   2026-11-19) and a deploy's hot reload (cards/hot-reload.ts; owner request,
+   2026-11-20). Each stops where an expanded merge bubble stops, and only its
+   body scrolls. */
+.tool-card.fix-gate,
+.tool-card.hot-reload {
   display: flex;
   flex-direction: column;
   max-height: calc(var(--feed-item-max-h) * 0.45);
 }
-.fix-gate > .fix-gate-head { flex: 0 0 auto; }
-.fix-gate > .fix-gate-run {
+.fix-gate > .fix-gate-head,
+.hot-reload > .hot-reload-head { flex: 0 0 auto; }
+.fix-gate > .fix-gate-run,
+.hot-reload > .hot-reload-body {
   min-height: 0;
   overflow-y: auto;
   padding-top: 0.3rem;
 }
 .fix-gate-attempt,
 .fix-gate-summary { color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+/* A hot reload's rows: a service, a step or a running copy, each a glyph,
+   its name, its words and its clock, drawn as a test suite's head line is. */
+.hot-reload-row { display: flex; align-items: baseline; gap: 0.4rem; padding: 0.1rem 0; }
+.hot-reload-name { flex: 0 0 auto; min-width: 7em; }
+.hot-reload-words { flex: 1 1 auto; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hot-reload-clock { flex: 0 0 auto; color: var(--muted); font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.hot-reload-glyph.is-scheduled,
+.hot-reload-glyph.is-waiting,
+.hot-reload-glyph.is-skipped { color: var(--muted); }
+.hot-reload-glyph.is-unchanged { color: var(--ok); opacity: 0.45; }
+.hot-reload-service { cursor: pointer; border-radius: 3px; }
+.hot-reload-service:hover,
+.hot-reload-service:focus-visible { background: var(--menu-hover-bg); outline: none; }
+.hot-reload-shared-step { opacity: 0.8; }
+.hot-reload-back { cursor: pointer; color: var(--muted); margin-right: 0.3rem; }
+.hot-reload-back:hover { color: inherit; }
+.hot-reload-about { color: var(--muted); font-size: 0.9em; padding: 0.2rem 0 0.3rem; }
+.hot-reload-builds { font-family: ui-monospace, monospace; font-size: 0.85em; color: var(--muted); padding-bottom: 0.2rem; }
+.hot-reload-steps,
+.hot-reload-instances { padding-left: 0.8rem; }
+.hot-reload-instances { border-top: 1px solid var(--border); margin-top: 0.2rem; padding-top: 0.2rem; }
 /* A PAUSED QUEUE (owner request, 2026-10-23; feed/merge/paused.ts): a pause
    glyph and a word in --merge-paused, on a soft wash of it. The head draws it
    as a pill after its badge, folded and expanded alike, and the queue tab as a

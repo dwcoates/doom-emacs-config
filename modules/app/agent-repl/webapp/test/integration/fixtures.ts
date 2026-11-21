@@ -589,6 +589,36 @@ export const fixGateUnit = (): ActivityUnit => ({
   },
 });
 
+/**
+ * A deploy's hot reload — `FeedTurnActivity.hot_reload`: the protobufs
+ * generated, the store already current and the shim replacing one workspace's.
+ */
+export const hotReloadUnit = (): ActivityUnit => ({
+  case: "hotReload",
+  value: {
+    head: { label: { text: "hot-reloading" } },
+    state: { case: "live", value: { startedAtMs: 1n } },
+    steps: [{ name: { text: "protobufs" }, state: { state: { case: "done", value: { words: { text: "generated" }, startedAtMs: 1n, endedAtMs: 2n } } } }],
+    services: [
+      {
+        name: { text: "store" },
+        state: { state: { case: "unchanged", value: { words: { text: "already running the fresh build" } } } },
+        about: { text: "Keeps every conversation's records." },
+        steps: [],
+        instances: [],
+      },
+      {
+        name: { text: "shim" },
+        state: { state: { case: "running", value: { words: { text: "replacing" }, startedAtMs: 1n } } },
+        summary: { text: "0 of 1 replaced" },
+        about: { text: "Hosts each workspace's Claude session." },
+        steps: [],
+        instances: [{ name: { text: "fix-footer" }, state: { state: { case: "running", value: { words: { text: "replacing" }, startedAtMs: 1n } } } }],
+      },
+    ],
+  },
+});
+
 /** A chess board whose daemon-side state is STATE. */
 export const chessBoardUnit = (
   state:

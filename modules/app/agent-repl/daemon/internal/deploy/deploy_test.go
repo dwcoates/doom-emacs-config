@@ -2077,3 +2077,216 @@ func TestEveryLiveAbsenceIsReadThroughPathStands(t *testing.T) {
 		t.Fatalf("os.Lstat sites = %v, want only pathStands' in deploy.go", sites)
 	}
 }
+
+// ---- the hot reload ---------------------------------------------------------
+
+// toldAll reports whether every one of WANT was told, in order, among TOLD.
+func toldAll(told, want []string) bool {
+	i := 0
+	for _, event := range told {
+		if i < len(want) && event == want[i] {
+			i++
+		}
+	}
+	return i == len(want)
+}
+
+func TestADeployTellsItsHotReloadEveryStep(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		want    []string
+	}{
+		{"a deploy whose daemon stays", func(*testing.T, *harness) {}, []string{
+			"begin", "built:8", "install_began", "install_ended",
+			"current:store", "current:sidecar", "current:zettel", "current:test service",
+			"daemon_current", "shims_judging", "shims_judged", "webapp_judged",
+		}},
+		{"a stale store restarts the sidecar with it", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
+		}, []string{"restarting:store", "restarting:sidecar", "restarted:store", "restarted:sidecar"}},
+		{"a stale sidecar alone", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theOld.sidecar))
+		}, []string{"current:store", "restarting:sidecar", "restarted:sidecar"}},
+		{"a stale standalone service", func(t *testing.T, h *harness) {
+			h.report(t, buildreport.ServiceZettel, 103, hashOf(t, theOld.zettel))
+		}, []string{"restarting:zettel", "restarted:zettel"}},
+		{"a stale webview", func(_ *testing.T, h *harness) {
+			h.clients.webviews["ws-a"] = []string{"web-old"}
+		}, []string{"webview_reloading:ws-a", "webapp_judged"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), false); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			if told := h.hotReload.told(); !toldAll(told, tc.want) {
+				t.Fatalf("told %v, want %v in order", told, tc.want)
+			}
+		})
+	}
+}
+
+func TestADeployTellsItsHotReloadEachInstalledArtifact(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	want := []string{"installed:shim:primary=true:replaced=true", "installed:shim:primary=false:replaced=true"}
+	if told := h.hotReload.told(); !toldAll(told, want) {
+		t.Fatalf("told %v, want the shim bundle as its build and shim-lock as a rider", told)
+	}
+}
+
+func TestAMovingDaemonHandsItsHotReloadToTheSuccessor(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		words   string
+	}{
+		{"a handover", func(*testing.T, *harness) {}, "handing over every workspace"},
+		{"a restart across a layout change", func(_ *testing.T, h *harness) { h.freshLayout = runningLayout + 1 }, "restarting across a state layout change"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+			h.clients.webviews["ws-b"] = []string{"web-old"}
+			tc.arrange(t, h)
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), false); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			if told := h.hotReload.told(); !toldAll(told, []string{"daemon_moving:" + tc.words + ":[ws-b]", "handoff"}) {
+				t.Fatalf("told %v, want the move with the stale webview, then the handoff", told)
+			}
+			if asks := h.rollout.asks; len(asks) != 1 || string(asks[0].HotReload) != "card" {
+				t.Fatalf("asks %+v, want the card in the rollout's ask", asks)
+			}
+		})
+	}
+}
+
+func TestARefusedMoveFailsItsHotReload(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{"a refused handover", func(h *harness) { h.rollout.handErr = errors.New("busy") }},
+		{"a refused restart", func(h *harness) { h.freshLayout = runningLayout + 1; h.rollout.restartErr = errors.New("busy") }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+			tc.arrange(h)
+
+			// Act
+			_, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if err == nil || !toldAll(h.hotReload.told(), []string{"handoff", "handover_failed", "failed"}) {
+				t.Fatalf("Deploy = %v, told %v; want the move's failure told", err, h.hotReload.told())
+			}
+		})
+	}
+}
+
+func TestAFailedBuildFailsItsHotReload(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.builder.fail = &BuildFailed{Step: "shim", Detail: "boom"}
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil || strings.Join(h.hotReload.told(), ",") != "begin,failed" {
+		t.Fatalf("Deploy = %v, told %v; want begin then failed", err, h.hotReload.told())
+	}
+}
+
+func TestElispTellsItsHotReload(t *testing.T) {
+	tests := []struct {
+		name  string
+		emacs []EmacsClient
+		want  string
+	}{
+		{"an Emacs on older elisp", []EmacsClient{{ID: "e1", Build: "old"}}, "elisp_pushed:1"},
+		{"every Emacs current", nil, "elisp_current"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.clients.emacs = tc.emacs
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), false); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			if told := h.hotReload.told(); !toldAll(told, []string{tc.want}) {
+				t.Fatalf("told %v, want %s", told, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewRefusesAMissingHotReload(t *testing.T) {
+	// Arrange
+	deps := newHarness(t).d.deps
+	deps.HotReload = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "hot reload tracker is required") {
+		t.Fatalf("New = %v, want the missing hot reload refused", err)
+	}
+}
+
+func TestHotReloadServiceNamesEveryComponent(t *testing.T) {
+	for _, c := range []Component{ComponentStore, ComponentSidecar, ComponentZettel, ComponentTests, ComponentDaemon, ComponentShim, ComponentWebapp, ComponentElisp} {
+		t.Run(string(c), func(t *testing.T) {
+			// Act
+			got := hotReloadService(c)
+
+			// Assert
+			if got == "" {
+				t.Fatalf("component %s has no hot reload service", c)
+			}
+		})
+	}
+}
+
+func TestHotReloadServiceRefusesAnUnknownComponent(t *testing.T) {
+	// Arrange
+	defer func() {
+		if recover() == nil {
+			t.Fatal("an unknown component did not panic")
+		}
+	}()
+
+	// Act
+	hotReloadService("nonsense")
+}

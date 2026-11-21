@@ -48,6 +48,7 @@ func (c *controller) recordDeployTakeover(m Manifest) {
 	c.unlock()
 	if !before {
 		c.log.Info(opProgress, "the handover being joined is a deploy's; this daemon says updated once it has taken over", nil)
+		c.deps.HotReload.Resume(m.HotReload)
 	}
 }
 
@@ -72,6 +73,8 @@ func (c *controller) finishDeployStory(deferred map[ids.WorkspaceID][]deployprog
 		return
 	}
 	c.timeDeployTakeover(deployStarted, handoverStarted, fields)
+	c.deps.HotReload.TookOver()
+	c.deps.HotReload.ShimsJudged()
 	c.log.Info(opProgress, "took over from a deploy's handover; saying updated on every strip",
 		dlog.Merge(fields, dlog.Context{"shims_when_idle": len(deferred)}))
 	c.deps.Progress.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated, Notes: deferred})
@@ -82,6 +85,7 @@ func (c *controller) finishDeployStory(deferred map[ids.WorkspaceID][]deployprog
 func (c *controller) clearDeployLine(why string, fields dlog.Context) {
 	c.log.Info(opProgress, "the rollout cannot finish; taking the deploy's line down", dlog.Merge(fields, dlog.Context{"why": why}))
 	c.deps.Progress.SetDeployProgress(nil)
+	c.deps.HotReload.HandoverFailed("the daemon's handover could not finish: " + why)
 }
 
 // openSuccessorFault records a successor that would not start (or never

@@ -23,9 +23,61 @@ func newScriptBuilder(t *testing.T, answers map[string]runAnswer) (*ScriptBuilde
 		LogDir:     t.TempDir(),
 		Runner:     runner,
 		Clock:      newStepClock(),
+		Observer:   &stepObserver{},
 		Log:        log,
 		Restarts:   &restarttimingtest.Recorder{},
 	}, runner, log
+}
+
+// stepObserver records each build step as "began:<step>" or
+// "ended:<step>" ("ended:<step>:failed" for a failed one), in order.
+type stepObserver struct{ told []string }
+
+func (o *stepObserver) BuildStepBegan(step string) { o.told = append(o.told, "began:"+step) }
+func (o *stepObserver) BuildStepEnded(step string, err error) {
+	if err != nil {
+		o.told = append(o.told, "ended:"+step+":failed")
+		return
+	}
+	o.told = append(o.told, "ended:"+step)
+}
+
+func TestTheBuildTellsItsObserverEveryStepAsItBeginsAndEnds(t *testing.T) {
+	// Arrange
+	b, _, _ := newScriptBuilder(t, map[string]runAnswer{})
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	want := []string{"began:proto", "ended:proto"}
+	for _, target := range Targets {
+		want = append(want, "began:"+target, "ended:"+target)
+	}
+	if got := b.Observer.(*stepObserver).told; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("observer told %v, want %v", got, want)
+	}
+}
+
+func TestTheBuildTellsItsObserverTheStepThatFailedAndNoLaterOne(t *testing.T) {
+	// Arrange
+	step := "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 shim"
+	b, _, _ := newScriptBuilder(t, map[string]runAnswer{step: {code: 1}})
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert
+	if err == nil {
+		t.Fatal("Build succeeded over a failed step")
+	}
+	want := []string{"began:proto", "ended:proto", "began:shim", "ended:shim:failed"}
+	if got := b.Observer.(*stepObserver).told; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("observer told %v, want %v", got, want)
+	}
 }
 
 func TestTheBuildRegeneratesTheProtosThenStagesEveryTargetInOrder(t *testing.T) {

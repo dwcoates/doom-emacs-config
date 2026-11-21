@@ -93,6 +93,9 @@ const (
 	// (frontend.v1.FeedFixGate), on the mediator's root feed. Keyed by the
 	// finish's start and the attempt.
 	KindFixGate RowKind = "fix_gate"
+	// KindHotReload is one deploy's hot reload (frontend.v1.FeedHotReload),
+	// on the deploy mediator's root feed. Keyed by the deploy's start.
+	KindHotReload RowKind = "hot_reload"
 )
 
 // AllRowKinds is every row kind, in declaration order. Decode accepts exactly
@@ -114,6 +117,7 @@ var AllRowKinds = []RowKind{
 	KindPeer,
 	KindIngress,
 	KindFixGate,
+	KindHotReload,
 }
 
 func knownKind(k RowKind) bool {
@@ -269,6 +273,18 @@ func Encode(ref Ref) *frontendv1.FeedId {
 		return nil
 	}
 	return id
+}
+
+// RootCardRow is a daemon-synthesized card on WS's root feed as its row:
+// addressed by KEY, carrying ACTIVITY. The one shape of every card the daemon
+// draws in a workspace's root feed outside any turn (a deploy mediator's fix
+// at its gate, a deploy's hot reload). An unaddressable KEY is a caller's bug.
+func RootCardRow(ws WorkspaceID, key RowKey, activity *frontendv1.FeedTurnActivity) *frontendv1.FeedRow {
+	id := Encode(Ref{WS: ws, Feed: Feed{Root: true}, Row: key})
+	if id == nil {
+		panic(fmt.Sprintf("feedid: a root card row of %q cannot be addressed by %+v", ws, key))
+	}
+	return &frontendv1.FeedRow{Id: id, Row: &frontendv1.FeedRow_Activity{Activity: activity}}
 }
 
 // Decode parses a FeedId back into its Ref. An id from a different scheme
