@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -104,6 +105,13 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	u.Splits = append(u.Splits, iu.Splits...)
 	u.GoBuilds = append(u.GoBuilds, iu.GoBuilds...)
 	u.GoVets = append(u.GoVets, iu.GoVets...)
+	// The programs the integration pass's tests run are the module's too: the
+	// run builds each once, and every chunk that runs one waits for its unit.
+	for _, name := range iu.Programs {
+		if !slices.Contains(u.Programs, name) {
+			u.Programs = append(u.Programs, name)
+		}
+	}
 	return u.Finish(), nil
 }
 
@@ -194,12 +202,16 @@ func moduleBuild(l Layout, suite, dir, tags string, cover bool) GoBuild {
 // pkgOf is the package rel of suite s as this build makes it: its binary
 // under the build's directory, its units after the build, the build's tags.
 func (b GoBuild) pkgOf(l Layout, s roster.Suite, rel string) goPkg {
-	return goPkg{
+	p := goPkg{
 		Suite: s.Name, Module: b.Options.Module, Rel: rel, Tags: b.Options.Tags, Parallel: s.TestParallel[rel],
 		Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
 		Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
 		Counts: filepath.Join(l.Work, "log-records", s.Name),
 	}
+	if l.Impact && s.IntegrationTags != "" && b.Options.Tags == s.IntegrationTags && slices.Contains(s.ImpactPackages, rel) {
+		p.recordImpact(filepath.Join(l.Work, "impact", s.Name))
+	}
+	return p
 }
 
 // addPackage adds p's units to u, each atomic one recorded as needing p's
