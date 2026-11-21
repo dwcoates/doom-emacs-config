@@ -56,10 +56,12 @@ func decideKeyed(d Deps, name string, set *InputSet, facts Facts, mode Mode) (ke
 	}
 	if hasLast && last.Failed {
 		var changed []string
+		var env []EnvChange
 		if last.Key != key.Digest {
 			changed = key.Manifest.Changed(last.Manifest)
+			env = EnvChanges(last, facts.Env, changed)
 		}
-		out.Why = Why{Kind: WhyFailedBefore, Changed: changed}
+		out.Why = Why{Kind: WhyFailedBefore, Changed: changed, Env: env}
 		return out, nil
 	}
 	newest, ok, err := d.Store.Newest(name)
@@ -70,7 +72,8 @@ func decideKeyed(d Deps, name string, set *InputSet, facts Facts, mode Mode) (ke
 		out.Why = Why{Kind: WhyNeverRecorded}
 		return out, nil
 	}
-	out.Why = Why{Kind: WhyInputsChanged, Changed: key.Manifest.Changed(newest.Manifest)}
+	changed := key.Manifest.Changed(newest.Manifest)
+	out.Why = Why{Kind: WhyInputsChanged, Changed: changed, Env: EnvChanges(newest, facts.Env, changed)}
 	return out, nil
 }
 
@@ -140,7 +143,7 @@ func (r *recorder) record(name, label string, set *InputSet, facts Facts, key Ke
 		r.read = true
 	}
 	rec := Record{Suite: name, Key: key.Digest, PassedAt: r.d.Now(), Failed: failed, Checkout: r.d.Repo,
-		Branch: r.branch, Commit: r.commit, Dirty: r.dirty, Units: units, Manifest: key.Manifest}
+		Branch: r.branch, Commit: r.commit, Dirty: r.dirty, Units: units, Manifest: key.Manifest, Env: RedactedEnv(facts.Env)}
 	if !failed {
 		if err := r.d.Store.Put(rec); err != nil {
 			return false, err

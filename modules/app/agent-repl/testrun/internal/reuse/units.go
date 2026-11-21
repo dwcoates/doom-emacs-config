@@ -109,6 +109,9 @@ type Why struct {
 	// Changed are the inputs that differ from the record compared against,
 	// sorted (WhyInputsChanged, and WhyFailedBefore after an edit).
 	Changed []string
+	// Env are the environment variables among Changed, each with the
+	// record's value and this run's (EnvChanges).
+	Env []EnvChange
 	// Detail is the never-reused reason (WhyNever).
 	Detail string
 }
@@ -334,6 +337,30 @@ func Report(log Logger, v SuiteVerdict) {
 			continue
 		}
 		log.Infof("%s: %s runs: %s", name, u.Label(), u.Why)
+	}
+	reportEnvChanges(log, v)
+}
+
+// reportEnvChanges logs each environment value that differs from the records
+// of the suite's running units, once per distinct change with how many units
+// it reruns, so a drift between the processes that start runs shows at once.
+func reportEnvChanges(log Logger, v SuiteVerdict) {
+	counts := map[EnvChange]int{}
+	var order []EnvChange
+	for _, u := range v.Units {
+		if u.Reused != nil {
+			continue
+		}
+		for _, c := range u.Why.Env {
+			if counts[c] == 0 {
+				order = append(order, c)
+			}
+			counts[c]++
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool { return order[i].Name < order[j].Name })
+	for _, c := range order {
+		log.Infof("%s: the environment differs from %d units' records: %s", v.Suite.Name, counts[c], c)
 	}
 }
 

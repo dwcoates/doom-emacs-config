@@ -72,7 +72,7 @@ func ComputeKeyCached(repo string, set *InputSet, facts Facts, env KeyEnv) (Key,
 		m["@tool "+name] = v
 	}
 	for name, v := range facts.Env {
-		m["@env "+name] = v
+		m[envEntryPrefix+name] = v
 	}
 	h := hasher{repo: repo, generated: set.Generated(), ignored: env.Ignored, bindings: env.Bindings, m: m, cache: env.Cache, use: &bindingUse{named: map[int]bool{}}}
 	for _, p := range set.Files() {

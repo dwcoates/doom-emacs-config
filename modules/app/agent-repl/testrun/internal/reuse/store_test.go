@@ -201,8 +201,8 @@ func TestOnlyTheNewestPassKeepsItsManifest(t *testing.T) {
 	// Arrange
 	s := Store{Dir: t.TempDir()}
 	t0 := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
-	newer := Record{Suite: "lock", Key: keyB, PassedAt: t0.Add(time.Hour), Manifest: Manifest{"b": "2"}}
-	older := Record{Suite: "lock", Key: keyA, PassedAt: t0, Manifest: Manifest{"a": "1"}}
+	newer := Record{Suite: "lock", Key: keyB, PassedAt: t0.Add(time.Hour), Manifest: Manifest{"b": "2"}, Env: map[string]string{"PATH": "/b"}}
+	older := Record{Suite: "lock", Key: keyA, PassedAt: t0, Manifest: Manifest{"a": "1"}, Env: map[string]string{"PATH": "/a"}}
 
 	// Act
 	errNewer, errOlder := s.Put(newer), s.Put(older)
@@ -213,13 +213,13 @@ func TestOnlyTheNewestPassKeepsItsManifest(t *testing.T) {
 	}
 	for _, k := range []string{keyA, keyB} {
 		r, ok, err := s.Lookup("lock", k)
-		if err != nil || !ok || r.Manifest != nil {
-			t.Fatalf("Lookup(%s) = %+v %v %v, want a pass without its manifest", k, r, ok, err)
+		if err != nil || !ok || r.Manifest != nil || r.Env != nil {
+			t.Fatalf("Lookup(%s) = %+v %v %v, want a pass without its manifest or environment", k, r, ok, err)
 		}
 	}
 	got, ok, err := s.Newest("lock")
-	if err != nil || !ok || got.Key != keyB || got.Manifest["b"] != "2" {
-		t.Fatalf("Newest = %+v %v %v, want the later pass with its manifest", got, ok, err)
+	if err != nil || !ok || got.Key != keyB || got.Manifest["b"] != "2" || got.Env["PATH"] != "/b" {
+		t.Fatalf("Newest = %+v %v %v, want the later pass with its manifest and environment", got, ok, err)
 	}
 }
 

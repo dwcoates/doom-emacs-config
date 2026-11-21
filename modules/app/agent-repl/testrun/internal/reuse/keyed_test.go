@@ -2,6 +2,7 @@ package reuse
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -86,6 +87,104 @@ func recordSubject(t *testing.T, f fixture, set *InputSet, facts Facts) {
 	}
 	if ok, err := newRecorder(f.d).record("subject", "the subject", set, facts, dec.Key, 1, false); err != nil || !ok {
 		t.Fatalf("record = %v, %v", ok, err)
+	}
+}
+
+// TestTheKeyedEnvironmentDecidesReuse pins the canonical environment end to
+// end: a record made by a run the daemon started is reused by a run the
+// tests service started, whose inherited module-fetch and locale settings
+// differ, while a Go setting that changes a build reruns and says so.
+func TestTheKeyedEnvironmentDecidesReuse(t *testing.T) {
+	recorded := []string{"HOME=/h", "PATH=/bin", "GOFLAGS=-p=1", "GOPRIVATE=example.com/*", "LANG=en_US.UTF-8"}
+	tests := []struct {
+		name    string
+		now     []string
+		reused  bool
+		wantWhy string
+		wantEnv []EnvChange
+	}{
+		{"a different inherited GOPRIVATE", []string{"HOME=/h", "PATH=/bin", "GOFLAGS=-p=1", "GOPRIVATE=other.example/*"}, true, "", nil},
+		{"no inherited GOPRIVATE or LANG", []string{"HOME=/h", "PATH=/bin", "GOFLAGS=-p=1"}, true, "", nil},
+		{"a changed GOFLAGS", []string{"HOME=/h", "PATH=/bin", "GOFLAGS=-race", "GOPRIVATE=example.com/*"}, false,
+			"inputs changed since its newest green record: @env GOFLAGS",
+			[]EnvChange{{Name: "GOFLAGS", Old: "-p=1", OldSet: true, OldKnown: true, New: "-race", NewSet: true}}},
+		{"an unset GOFLAGS", []string{"HOME=/h", "PATH=/bin"}, false,
+			"inputs changed since its newest green record: @env GOFLAGS",
+			[]EnvChange{{Name: "GOFLAGS", Old: "-p=1", OldSet: true, OldKnown: true}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			set, facts := keyedSubject(t, f)
+			facts.Env = KeyedEnv(recorded)
+			recordSubject(t, f, set, facts)
+			facts.Env = KeyedEnv(tt.now)
+
+			// Act
+			dec, err := decideKeyed(f.d, "subject", set, facts, Reusing)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (dec.Reused != nil) != tt.reused || (!tt.reused && dec.Why.String() != tt.wantWhy) {
+				t.Fatalf("decision = reused %v why %q, want reused %v why %q", dec.Reused != nil, dec.Why, tt.reused, tt.wantWhy)
+			}
+			if !slices.Equal(dec.Why.Env, tt.wantEnv) {
+				t.Fatalf("Why.Env = %+v, want %+v", dec.Why.Env, tt.wantEnv)
+			}
+		})
+	}
+}
+
+// TestAFailedUnitSaysWhichEnvironmentValuesChanged pins that a rerun of a
+// failed unit names its environment's changes against its last outcome.
+func TestAFailedUnitSaysWhichEnvironmentValuesChanged(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	set, facts := keyedSubject(t, f)
+	facts.Env = KeyedEnv([]string{"GOFLAGS=-p=1"})
+	dec, err := decideKeyed(f.d, "subject", set, facts, NoReuse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := newRecorder(f.d).record("subject", "the subject", set, facts, dec.Key, 1, true); err != nil || !ok {
+		t.Fatalf("record = %v, %v", ok, err)
+	}
+	facts.Env = KeyedEnv([]string{"GOFLAGS=-race"})
+
+	// Act
+	dec, err = decideKeyed(f.d, "subject", set, facts, Reusing)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []EnvChange{{Name: "GOFLAGS", Old: "-p=1", OldSet: true, OldKnown: true, New: "-race", NewSet: true}}
+	if dec.Why.Kind != WhyFailedBefore || !slices.Equal(dec.Why.Env, want) {
+		t.Fatalf("Why = %+v, want failed before with %+v", dec.Why, want)
+	}
+}
+
+// TestARecordStoresItsEnvironmentRedacted pins that the recorder stores the
+// key's environment through RedactedEnv, so a secret never reaches the store.
+func TestARecordStoresItsEnvironmentRedacted(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	set, facts := keyedSubject(t, f)
+	facts.Env = map[string]string{"GOFLAGS": "-p=1", "GO_TOKEN": "hunter2"}
+
+	// Act
+	recordSubject(t, f, set, facts)
+
+	// Assert
+	got, ok, err := f.d.Store.Newest("subject")
+	if err != nil || !ok {
+		t.Fatalf("Newest = %v, %v", ok, err)
+	}
+	if want := RedactedEnv(facts.Env); !maps.Equal(got.Env, want) {
+		t.Fatalf("record's Env = %v, want %v", got.Env, want)
 	}
 }
 

@@ -43,6 +43,10 @@ type Record struct {
 	// input differs from this record. Only a unit's newest pass and its last
 	// outcome carry one (Store); a pass record under its key does not.
 	Manifest Manifest `json:"manifest,omitempty"`
+	// Env is the key's environment (Facts.Env) as a log may print it
+	// (RedactedEnv), carried beside Manifest, so a later run whose
+	// environment differs says which values it had and has (EnvChanges).
+	Env map[string]string `json:"env,omitempty"`
 }
 
 // recordVersion is the record file's format.
@@ -175,7 +179,7 @@ func (s Store) Put(r Record) error {
 		return err
 	}
 	withManifest := r
-	r.Manifest = nil
+	r.Manifest, r.Env = nil, nil
 	if err := s.write(p, r); err != nil {
 		return err
 	}
