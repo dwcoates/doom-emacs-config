@@ -1,12 +1,15 @@
 package gobuild
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -397,7 +400,7 @@ exit 3
 	var out, errOut bytes.Buffer
 
 	// Act
-	code, err := ExecTest(bin, []string{"-test.v", "-test.run=^TestA$"}, &out, &errOut, now)
+	code, err := ExecTest(bin, []string{"-test.v", "-test.run=^TestA$"}, &out, &errOut, now, nil)
 
 	// Assert
 	if err != nil || code != 3 {
@@ -414,13 +417,57 @@ exit 3
 	}
 }
 
+func TestExecTestForwardsATerminationSignalAndOutlivesTheBinary(t *testing.T) {
+	// Arrange: a binary that traps SIGTERM, says it is ready, and exits 7
+	// only once the trapped signal arrives.
+	bin := script(t, `trap 'echo got-term; kill $!; exit 7' TERM
+echo ready
+sleep 60 &
+wait
+`)
+	now, _ := stampedAt()
+	r, w := io.Pipe()
+	signals := make(chan os.Signal, 1)
+	type result struct {
+		code int
+		err  error
+	}
+	done := make(chan result, 1)
+
+	// Act: the wrapper receives SIGTERM once the binary is ready.
+	go func() {
+		code, err := ExecTest(bin, nil, w, &bytes.Buffer{}, now, signals)
+		w.Close()
+		done <- result{code, err}
+	}()
+	lines := bufio.NewScanner(r)
+	if !lines.Scan() || lines.Text() != "ready" {
+		t.Fatalf("first line %q, want ready", lines.Text())
+	}
+	signals <- syscall.SIGTERM
+	var rest []string
+	for lines.Scan() {
+		rest = append(rest, lines.Text())
+	}
+	got := <-done
+
+	// Assert: the binary got the signal, and the wrapper answered only with
+	// its exit.
+	if got.err != nil || got.code != 7 {
+		t.Fatalf("ExecTest = %d, %v; want the binary's own exit 7", got.code, got.err)
+	}
+	if !slices.Contains(rest, "got-term") {
+		t.Fatalf("the binary printed %q after ready; want got-term", rest)
+	}
+}
+
 func TestExecTestAnswersASignalledBinaryAs128PlusItsSignal(t *testing.T) {
 	// Arrange
 	bin := script(t, "kill -TERM $$\n")
 	now, _ := stampedAt()
 
 	// Act
-	code, err := ExecTest(bin, nil, &bytes.Buffer{}, &bytes.Buffer{}, now)
+	code, err := ExecTest(bin, nil, &bytes.Buffer{}, &bytes.Buffer{}, now, nil)
 
 	// Assert
 	if err != nil || code != 128+int(syscall.SIGTERM) {
@@ -435,7 +482,7 @@ func TestExecTestSurfacesABinaryThatCannotStart(t *testing.T) {
 	now, _ := stampedAt()
 
 	// Act
-	_, err := ExecTest(bin, nil, &bytes.Buffer{}, &bytes.Buffer{}, now)
+	_, err := ExecTest(bin, nil, &bytes.Buffer{}, &bytes.Buffer{}, now, nil)
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "gobuild: start "+bin) {
@@ -453,7 +500,7 @@ func TestExecTestOfAPackageThatDidNotCompileNeverRuns(t *testing.T) {
 	var out bytes.Buffer
 
 	// Act
-	_, err := ExecTest(bin, nil, &out, &bytes.Buffer{}, now)
+	_, err := ExecTest(bin, nil, &out, &bytes.Buffer{}, now, nil)
 
 	// Assert
 	if !errors.Is(err, ErrDidNotCompile) || out.String() != "a.go:1: bad\n" {

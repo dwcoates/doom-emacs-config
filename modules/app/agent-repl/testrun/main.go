@@ -742,7 +742,11 @@ func execTestCmd(log *run.Log, argv []string) int {
 		log.Errorf("exec-test: usage: exec-test BINARY [ARGS...]")
 		return 2
 	}
-	code, err := gobuild.ExecTest(argv[0], argv[1:], os.Stdout, os.Stderr, time.Now)
+	// The termination signals are the binary's to act on: this process
+	// forwards them and outlives it (gobuild.ExecTest).
+	signals := make(chan os.Signal, 4)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	code, err := gobuild.ExecTest(argv[0], argv[1:], os.Stdout, os.Stderr, time.Now, signals)
 	if err != nil {
 		log.Errorf("exec-test %s: %v", argv[0], err)
 		return 1
