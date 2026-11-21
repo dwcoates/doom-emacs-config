@@ -1215,6 +1215,15 @@ type DB interface {
 	// when none is set.
 	FeedTextScale(ctx context.Context) (float64, error)
 
+	// PutComposerDraft keeps a workspace's composer draft, replacing any kept
+	// one (composerdrafts.go). The text is never empty.
+	PutComposerDraft(ctx context.Context, ws WorkspaceID, text string) error
+	// ClearComposerDraft forgets a workspace's composer draft.
+	ClearComposerDraft(ctx context.Context, ws WorkspaceID) error
+	// ComposerDraft answers a workspace's kept composer draft, false when none
+	// is kept.
+	ComposerDraft(ctx context.Context, ws WorkspaceID) (string, bool, error)
+
 	// LidDimLevel answers the pre-close brightness an earlier build kept when
 	// it dimmed the display for a closed lid, false when no such dim is in
 	// force. Nothing writes it now; the persistent-wifi controller undoes a
