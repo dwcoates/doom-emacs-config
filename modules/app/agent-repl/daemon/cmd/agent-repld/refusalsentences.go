@@ -48,7 +48,7 @@ func undescribed(verb string, e any) error {
 // AGAIN being what to do once they are gone ("close it again").
 func sayOpenChildren(ws string, e *agentreplv1.WorkspaceHasOpenChildren, again string) string {
 	return fmt.Sprintf("%s has %d open children and %d open workspaces landing into it, hidden ones included; close or merge each, then %s",
-		ws, len(e.GetChildren()), len(e.GetLandingInto()), again)
+		ws, len(e.Children), len(e.LandingInto), again)
 }
 
 // sayParentNotOpen is the parent_not_open sentence, AGAIN being what to do

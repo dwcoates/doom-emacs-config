@@ -45,6 +45,7 @@
 (declare-function agent-repl-wire-call "wire-common" (direction codec value))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
+(declare-function agent-repl--log-excerpt "core" (text &optional chars))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--capture-log-scope "core" (scope))
 

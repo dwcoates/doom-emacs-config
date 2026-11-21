@@ -5848,15 +5848,12 @@ the walk began, which BODY makes the stubbed links answer."
   "A walk recorded with no promotion epoch is an invariant breach."
   (agent-repl-test-host--with-harness
     ;; Arrange
-    (let ((fatal nil))
-      (cl-letf (((symbol-function 'agent-repl--fatal)
-                 (lambda (_ws fmt &rest args)
-                   (setq fatal (apply #'format fmt args))
-                   (error "fatal"))))
+    (let ((fatals nil))
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
         ;; Act
         (should-error (agent-repl-host--promoted-since-p "ws-1" (list :token 1)))
         ;; Assert
-        (should (string-search "elisp.host.walk-without-promotion-epoch ws=ws-1" fatal))))))
+        (should (string-search "elisp.host.walk-without-promotion-epoch ws=ws-1" (car fatals)))))))
 
 ;;;; ---- The batched link-edge walk, and a detached workspace's armed walk ----
 

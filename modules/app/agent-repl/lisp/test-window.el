@@ -748,16 +748,13 @@ naturally."
 (ert-deftest agent-repl-window-test-delete-where-unnamed-sweep-fails-hard ()
   "A sweep that does not name its caller and predicate is refused."
   (agent-repl-window-test--with-temp-frame
-    (let ((fatal nil))
-      (cl-letf (((symbol-function 'agent-repl--fatal)
-                 (lambda (_ws fmt &rest args)
-                   (setq fatal (apply #'format fmt args))
-                   (error "fatal"))))
+    (let ((fatals nil))
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
         ;; Act
         (should-error (agent-repl-window--delete-where (lambda (_w) nil)))
         ;; Assert
         (should (string-search "window--delete-where: unnamed sweep caller=nil predicate=nil"
-                               fatal))))))
+                               (car fatals)))))))
 
 (ert-deftest agent-repl-window-test-delete-where-failure-names-caller-predicate-and-buffer ()
   "A failed delete is warned naming the sweep, its predicate and the window\='s buffer.
