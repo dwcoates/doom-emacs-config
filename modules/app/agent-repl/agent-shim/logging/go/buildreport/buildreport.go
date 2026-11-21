@@ -48,6 +48,12 @@ const (
 	ServiceLauncher = "launcher"
 )
 
+// HolderService is the report name of the socket holder whose first held
+// socket is FIRST: every holder runs the one sockethold binary, so each
+// reports under a name of its own, which the deploy derives from the same
+// requirement (holderensure.Holder.Service).
+func HolderService(first string) string { return "sockethold-" + first }
+
 // Report is one service's statement of what it runs.
 type Report struct {
 	// PID is the reporting process.

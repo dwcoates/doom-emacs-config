@@ -13,6 +13,7 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/buildreport"
 	"agentrepl/logging/recordlog"
 	"agentrepl/logging/sockethold"
 	"agentrepl/logging/sockethold/activate"
@@ -65,6 +66,17 @@ func socketFile(t *testing.T, path string) *os.File {
 	return f
 }
 
+// reportsIn is a getenv that puts the holder's build report under DIR, never
+// the owner's own run directory.
+func reportsIn(dir string) func(string) string {
+	return func(key string) string {
+		if key == buildreport.DirEnv {
+			return dir
+		}
+		return ""
+	}
+}
+
 func newLog(sink *bytes.Buffer) *recordlog.Logger {
 	return recordlog.New(runtimeName, sink, sink, sharedlogging.FixedWindow(sharedlogging.LevelDebug), time.Now)
 }
@@ -82,7 +94,7 @@ func TestRunHandsAServerItsHeldSocket(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, "control", []string{"store"}, func([]string) ([]activate.Socket, error) { return sockets, nil }, newLog(&sink))
+		done <- run(ctx, "control", []string{"store"}, func([]string) ([]activate.Socket, error) { return sockets, nil }, newLog(&sink), reportsIn(dir))
 	}()
 
 	// Act
@@ -161,7 +173,7 @@ func TestRunRecordsEveryFailureToStart(t *testing.T) {
 			var sink bytes.Buffer
 
 			// Act
-			err := run(context.Background(), tc.control, tc.hold, tc.activate, newLog(&sink))
+			err := run(context.Background(), tc.control, tc.hold, tc.activate, newLog(&sink), reportsIn(t.TempDir()))
 
 			// Assert
 			if err == nil {
@@ -187,7 +199,7 @@ func TestRunRecordsAReturnAndAnAcceptStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, "control", []string{"store"}, func([]string) ([]activate.Socket, error) { return sockets, nil }, newLog(&sink))
+		done <- run(ctx, "control", []string{"store"}, func([]string) ([]activate.Socket, error) { return sockets, nil }, newLog(&sink), reportsIn(dir))
 	}()
 	bound := func() (context.Context, context.CancelFunc) {
 		return context.WithTimeout(context.Background(), exchangeBound)
@@ -255,5 +267,42 @@ func TestRunRecordsAReturnAndAnAcceptStream(t *testing.T) {
 		if !hasRecord(recs, want[0], want[1], want[2]) {
 			t.Fatalf("records = %v, want %v", recs, want)
 		}
+	}
+}
+
+func TestRunReportsTheHoldersBuild(t *testing.T) {
+	// Arrange
+	dir, err := os.MkdirTemp("/tmp", "shr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	control := filepath.Join(dir, "c.sock")
+	sockets := []activate.Socket{{Name: "control", File: socketFile(t, control)}, {Name: "store", File: socketFile(t, filepath.Join(dir, "d.sock"))}}
+	var sink bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, "control", []string{"store"}, func([]string) ([]activate.Socket, error) { return sockets, nil }, newLog(&sink), reportsIn(dir))
+	}()
+	c, cc := context.WithTimeout(context.Background(), exchangeBound)
+	probeErr := sockethold.Probe(c, control)
+	cc()
+
+	// Act
+	cancel()
+	runErr := <-done
+
+	// Assert: the report names this process and its binary's build, under
+	// the holder's own name.
+	if probeErr != nil || runErr != nil {
+		t.Fatalf("Probe = %v, run = %v", probeErr, runErr)
+	}
+	report, ok, err := buildreport.Read(dir, buildreport.HolderService("store"))
+	if err != nil || !ok || report.PID != os.Getpid() || report.Build == "" {
+		t.Fatalf("report = %+v (found %v, %v), want this process's build", report, ok, err)
+	}
+	if !hasRecord(records(t, &sink), "info", "sockethold.buildreport", buildreport.HolderService("store")+" reported its build") {
+		t.Fatalf("records = %v, want the report recorded", records(t, &sink))
 	}
 }

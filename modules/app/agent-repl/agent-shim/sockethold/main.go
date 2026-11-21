@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"agentrepl/logging/buildreport"
 	"agentrepl/logging/recordlog"
 	"agentrepl/logging/sockethold"
 	"agentrepl/logging/sockethold/activate"
@@ -54,14 +55,14 @@ func main() {
 	defer func() { _ = closeLog() }()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	if err := run(ctx, *control, hold, activate.Sockets, log); err != nil {
+	if err := run(ctx, *control, hold, activate.Sockets, log, os.Getenv); err != nil {
 		os.Exit(1)
 	}
 }
 
 // run takes the control socket CONTROL and every socket of HOLD from ACTIVATE
 // and serves them until CTX ends. Every failure is recorded before it returns.
-func run(ctx context.Context, control string, hold []string, activateSockets func([]string) ([]activate.Socket, error), log *recordlog.Logger) error {
+func run(ctx context.Context, control string, hold []string, activateSockets func([]string) ([]activate.Socket, error), log *recordlog.Logger, getenv func(string) string) error {
 	fail := func(message string, err error) error {
 		log.Error("sockethold.run", message, recordlog.Context{"control": control, "hold": strings.Join(hold, ","), "cause": err.Error()})
 		return err
@@ -96,6 +97,10 @@ func run(ctx context.Context, control string, hold []string, activateSockets fun
 		return fail("the control socket is not a unix socket", fmt.Errorf("listener %T", ln))
 	}
 	log.Info("sockethold.run", "holding the sockets and serving their control socket", recordlog.Context{"control": control, "hold": strings.Join(hold, ",")})
+	// THE HOLDER STATES ITS BUILD, as every service a deploy restarts does: a
+	// deploy restarts a holder whose report is not the fresh build before it
+	// rolls out a daemon that speaks the holder's newer requests.
+	buildreport.Announce(buildreport.HolderService(hold[0]), "sockethold.buildreport", log, getenv)
 	err = sockethold.Serve(ctx, unix, byName, func(g sockethold.Grant) {
 		switch {
 		case g.Probe && g.Err != nil:
