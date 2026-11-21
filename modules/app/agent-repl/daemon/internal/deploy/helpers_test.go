@@ -852,7 +852,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		RunningLayout: runningLayout,
 		Deployed:      func() { h.deployed++ },
 		Restarts:      h.restarts,
-		Reconnects:    restarttiming.NewReconnects(h.restarts, restarttiming.NoWindows{}, time.Now),
+		Reconnects:    restarttiming.NewReconnects(h.restarts, restarttiming.NoWindows{}, h.wifiAsks.clock.Now),
 		HotReload:     h.hotReload,
 		FoldSweep:     h.foldSweep,
 	})

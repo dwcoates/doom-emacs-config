@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -166,5 +167,57 @@ func TestAHandoversParticipantsAreTimedBackFromItsManifest(t *testing.T) {
 	got := h.restarts.Of(restarttiming.WorkspaceReconnect)
 	if len(got) != 1 || got[0].Phase() != "host" || got[0].Cause() != "successor" || got[0].Seconds() != 4 {
 		t.Fatalf("reconnects = %+v, want the host stream only, successor, 4s", got)
+	}
+}
+
+func TestAHandoverExpectsItsParticipantsBackAsOneWavePerPhase(t *testing.T) {
+	// Arrange: the manifest was written 4s before the harness's instant and
+	// names three workspaces, two expected on each phase.
+	h := newHarness(t)
+	a, _ := h.workspace(t)
+	b, _ := h.workspace(t)
+	c, _ := h.workspace(t)
+	h.c.armSessions(ids.InstanceID("daemon-outgoing"), instant.Add(-4*time.Second), []ManifestSession{
+		{Workspace: a, ExpectedHost: true, ExpectedWeb: true},
+		{Workspace: b, ExpectedHost: true},
+		{Workspace: c, ExpectedWeb: true},
+	})
+
+	// Act: the host streams come back 0s and 3s after the instant, the web
+	// streams 1s and 6s after it.
+	h.c.deps.Reconnects.Connected(b, restarttiming.ReconnectHost)
+	h.clock.advance(time.Second)
+	h.c.deps.Reconnects.Connected(c, restarttiming.ReconnectWeb)
+	h.clock.advance(2 * time.Second)
+	h.c.deps.Reconnects.Connected(a, restarttiming.ReconnectHost)
+	h.clock.advance(3 * time.Second)
+	h.c.deps.Reconnects.Connected(a, restarttiming.ReconnectWeb)
+
+	// Assert: one wave per phase, each holding both of its members, so each
+	// spread is the gap between its first and last arrival.
+	want := []string{
+		"host_first successor 4",
+		"web_first successor 5",
+		"host_last successor 7", "host_spread successor 3",
+		"web_last successor 10", "web_spread successor 5",
+	}
+	if got := h.restarts.WaveMarks(); !slices.Equal(got, want) {
+		t.Fatalf("waves = %v, want %v", got, want)
+	}
+}
+
+func TestAHandoverExpectingNoPhaseOpensNoWave(t *testing.T) {
+	// Arrange: the manifest names a workspace with neither stream expected.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	h.c.armSessions(ids.InstanceID("daemon-outgoing"), instant.Add(-4*time.Second), []ManifestSession{{Workspace: ws}})
+	h.c.deps.Reconnects.Connected(ws, restarttiming.ReconnectHost)
+	h.c.deps.Reconnects.Connected(ws, restarttiming.ReconnectWeb)
+
+	// Assert
+	if got := h.restarts.WaveMarks(); len(got) != 0 {
+		t.Fatalf("waves = %v, want none", got)
 	}
 }
