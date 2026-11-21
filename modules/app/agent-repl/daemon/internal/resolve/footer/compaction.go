@@ -51,8 +51,14 @@ func plainCompaction(text string) compactionText {
 // A SPEND WITH NO GATE STANDING IS AN INVARIANT VIOLATION. Only the cold
 // gate's remediation runs a summarizer, and the gate is lifted only after its
 // re-open lands, so every spend arrives while the gate's window is known. A
-// spend measured against no window would be a color invented here; it is
-// recorded at ERROR and the resolver fails hard instead.
+// spend measured against no window would be a color invented here, so the
+// violation is recorded at ERROR and the line names the spend uncolored.
+//
+// IT DOES NOT CRASH THE DAEMON. A footer line is one workspace's drawing; a
+// panic here ran on a session watcher goroutine and took every workspace
+// down with it (owner's report, 2026-11-21: the daemon died at 15:15:05 on
+// this check, as it had at 23:48:48 the night before). The ERROR record is
+// the violation's loud surface.
 func (r *resolver) compactionLine(ws ids.WorkspaceID, s *wsState, p *conversationv1.SessionCompactionProgress) compactionText {
 	sentence := compactionSentence(p)
 	spend := p.GetSpend()
@@ -71,8 +77,8 @@ func (r *resolver) compactionLine(ws ids.WorkspaceID, s *wsState, p *conversatio
 				"invariant_violation": "a summarizer's spend arrives only while its cold gate stands",
 				"remediation":         "find what lifted the gate, or zeroed its window, before the compaction concluded",
 			})
-		panic(fmt.Sprintf("footer: compaction spend on %q with no cold gate window (standing=%t, window=%d)",
-			ws, s.coldGate.Standing, s.coldGate.Window))
+		return plainCompaction(fmt.Sprintf("%s · %s spent %s tokens",
+			sentence, spend.GetModel().GetName(), tokenFigure(spend.GetTokens())))
 	}
 	parts := compactionSpendLine(sentence, spend, s.coldGate.Window)
 	return compactionText{text: parts.Text(), parts: &parts}
