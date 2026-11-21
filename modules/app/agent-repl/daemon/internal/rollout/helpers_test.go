@@ -1554,6 +1554,14 @@ func (h *harness) publishedWorkspaces() []ids.WorkspaceID {
 }
 
 // workspace registers one workspace served by this daemon, with a live shim.
+// persistVisibility persists V as WS's visibility, as the roster does.
+func persistVisibility(t *testing.T, h *harness, ws ids.WorkspaceID, v wsm.Visibility) {
+	t.Helper()
+	if err := h.db.SetVisibilities(context.Background(), map[wsm.WorkspaceID]wsm.Visibility{ws: v}); err != nil {
+		t.Fatalf("SetVisibilities: %v", err)
+	}
+}
+
 func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -1576,9 +1584,7 @@ func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 		t.Fatalf("ClaimServing: %v", err)
 	}
 	// An ordinary open workspace is one the roster shows.
-	if err := h.db.SetVisibilities(context.Background(), map[wsm.WorkspaceID]wsm.Visibility{ws.ID: wsm.UnselectedVisible}); err != nil {
-		t.Fatalf("SetVisibilities: %v", err)
-	}
+	persistVisibility(t, h, ws.ID, wsm.UnselectedVisible)
 	h.freeness.SetFree(ws.ID, true)
 	h.fleet.live[ws.ID] = newFakeShim(pid, h.order)
 	// The registry NORMALIZES the dir (macOS resolves /var to /private/var), and

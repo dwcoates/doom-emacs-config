@@ -41,20 +41,27 @@
         (progn (funcall decoder (agent-repl-test-wire-roster--parse json)) nil)
       (agent-repl-wire-error (cdr err)))))
 
-(defun agent-repl-test-wire-roster--row (&rest fragments)
-  "Return a minimal valid RosterRow JSON carrying FRAGMENTS.
-A row's non-optional message fields are all present, its visibility
+(defun agent-repl-test-wire-roster--row-json (last-updated fragments)
+  "Return a minimal valid RosterRow JSON whose `lastUpdated' is LAST-UPDATED.
+LAST-UPDATED is the field's raw JSON, or nil to leave the field absent.  A
+row's other non-optional message fields are all present, its visibility
 `unselectedVisible' unless a fragment states one; FRAGMENTS supply the
 status arm and whatever else the case is about."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"name\":{\"text\":\"fix-flaky\"},"
           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
-          "\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"}"
+          "\"availability\":{\"available\":{}}"
+          (if last-updated (concat ",\"lastUpdated\":" last-updated) "")
           (if (seq-some (lambda (f) (string-prefix-p "\"visibility\":" f)) fragments)
               ""
             ",\"visibility\":{\"unselectedVisible\":{}}")
           (mapconcat (lambda (f) (concat "," f)) fragments "")
           "}"))
+
+(defun agent-repl-test-wire-roster--row (&rest fragments)
+  "Return a minimal valid RosterRow JSON carrying FRAGMENTS.
+See `agent-repl-test-wire-roster--row-json'."
+  (agent-repl-test-wire-roster--row-json "{\"atMs\":\"1\"}" fragments))
 
 ;;;; ---- RosterRow, whole ----
 
@@ -463,12 +470,7 @@ status arm and whatever else the case is about."
 (defun agent-repl-test-wire-roster--row-updated-at (last-updated)
   "Return a minimal valid RosterRow JSON whose `lastUpdated' is LAST-UPDATED.
 LAST-UPDATED is the field's raw JSON, or nil to leave the field absent."
-  (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
-          "\"name\":{\"text\":\"fix-flaky\"},\"ready\":{},"
-          "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
-          "\"availability\":{\"available\":{}},\"visibility\":{\"notVisible\":{}}"
-          (if last-updated (concat ",\"lastUpdated\":" last-updated) "")
-          "}"))
+  (agent-repl-test-wire-roster--row-json last-updated '("\"ready\":{}")))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-updated-instant ()
   "A row's `lastUpdated' decodes to its update recency in epoch ms."

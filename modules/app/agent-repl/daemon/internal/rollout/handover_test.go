@@ -2296,14 +2296,6 @@ func TestATakenBackWorkspaceIsOfferedAgainAtDispatchQuiet(t *testing.T) {
 
 // ---- the rollout order and the page loads (owner ruling, 2026-11-13) -------
 
-// persistVisibility persists V as WS's visibility, as the roster does.
-func persistVisibility(t *testing.T, h *harness, ws ids.WorkspaceID, v wsm.Visibility) {
-	t.Helper()
-	if err := h.db.SetVisibilities(context.Background(), map[wsm.WorkspaceID]wsm.Visibility{ws: v}); err != nil {
-		t.Fatalf("SetVisibilities: %v", err)
-	}
-}
-
 // notVisible persists WS as not visible, as the roster does for a row a fold
 // keeps out of sight.
 func notVisible(t *testing.T, h *harness, ws ids.WorkspaceID) {
