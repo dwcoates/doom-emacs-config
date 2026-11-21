@@ -337,10 +337,20 @@ type Deps struct {
 	// Reconnects is told each webview a reload is pushed to, so its return
 	// is timed. REQUIRED.
 	Reconnects *restarttiming.Reconnects
+	// FoldSweep folds the sidebar's idle sections as every deploy begins
+	// building (internal/foldsweep). A sweep that fails records itself and
+	// never fails the deploy. Nil sweeps nothing.
+	FoldSweep FoldSweeper
 	// HotReload is told every step of every deploy, which the deploy
 	// mediator's feed draws as the deploy's hot reload. REQUIRED.
 	HotReload HotReload
 	Log       dlog.Surfaces
+}
+
+// FoldSweeper folds the sidebar's idle sections, answering the failures of
+// the folds it could not make (foldsweep.Sweeper).
+type FoldSweeper interface {
+	Sweep(ctx context.Context) error
 }
 
 // Deployer runs deploys, one at a time.
@@ -483,6 +493,12 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// whose successor would not start is the rollout's own fault.
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Building, Components: builtComponents})
 	d.deps.HotReload.Begin(ctx, began)
+	// THE SIDEBAR IS SWEPT AS THE BUILD STARTS: what the user has not worked
+	// in is folded before the new instances come up. A sweep's failures are
+	// recorded by the sweeper, its owner, and never fail the deploy.
+	if d.deps.FoldSweep != nil {
+		_ = d.deps.FoldSweep.Sweep(ctx)
+	}
 	var rollback rolledBack
 	defer func() {
 		if err != nil {

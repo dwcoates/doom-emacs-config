@@ -345,6 +345,8 @@ var migrations = []migration{
 	{To: 183, Name: "merge_landings", Kind: MigrationAdditive, DDL: mergeLandingsDDL},
 	{To: 184, Name: "github_workflow_runs", Kind: MigrationAdditive, DDL: githubWorkflowRunsDDL},
 	{To: 185, Name: "workspace_vendor_titles", Kind: MigrationAdditive, DDL: workspaceVendorTitlesDDL},
+	// IT IS ADDITIVE: a new table the previous build never names.
+	{To: 186, Name: "user_attention", Kind: MigrationAdditive, DDL: userAttentionDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

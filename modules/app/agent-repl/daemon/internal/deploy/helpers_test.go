@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -456,6 +457,7 @@ func (s *fakeServices) Calls() []string {
 
 // harness is one Deployer over a temp checkout, a temp cache-bin, and fakes.
 type harness struct {
+	foldSweep *fakeFoldSweep
 	hotReload *fakeHotReload
 	restarts  *restarttimingtest.Recorder
 	d         *Deployer
@@ -655,6 +657,28 @@ func (f *fakeProgress) last() *deployprogress.Progress {
 
 // fakeHotReload records every report the deploy tells the hot reload, as
 // "event" or "event:argument", in order.
+// fakeFoldSweep records when the sweep ran, into the hot reload's event
+// order, and how many builds had started by then.
+type fakeFoldSweep struct {
+	hotReload *fakeHotReload
+	// sawBegin is whether the hot reload had been told it began.
+	sawBegin bool
+	builder  *fakeBuilder
+	err      error
+	// buildsAtSweep is the builder's count when the sweep ran.
+	buildsAtSweep int
+	sweeps        int
+}
+
+func (f *fakeFoldSweep) Sweep(context.Context) error {
+	f.sweeps++
+	f.sawBegin = slices.Contains(f.hotReload.told(), "begin")
+	f.builder.mu.Lock()
+	f.buildsAtSweep = f.builder.builds
+	f.builder.mu.Unlock()
+	return f.err
+}
+
 type fakeHotReload struct {
 	mu     sync.Mutex
 	events []string
@@ -752,6 +776,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		wifiAsks:      &fakeWifiAsks{clock: newStepClock()},
 		hotReload:     &fakeHotReload{},
 	}
+	h.foldSweep = &fakeFoldSweep{hotReload: h.hotReload, builder: h.builder}
 	h.reports = &fakeReports{builder: h.builder}
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
@@ -793,6 +818,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		Restarts:      h.restarts,
 		Reconnects:    restarttiming.NewReconnects(h.restarts, restarttiming.NoWindows{}, time.Now),
 		HotReload:     h.hotReload,
+		FoldSweep:     h.foldSweep,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

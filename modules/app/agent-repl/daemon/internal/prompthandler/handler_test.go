@@ -1811,3 +1811,76 @@ func TestAFailedPlacementNoteTakeIsLeftToItsOwnersRecord(t *testing.T) {
 		t.Fatalf("records = %+v, want the failure recorded only by its owner", h.log.Records())
 	}
 }
+
+func TestSubmitStampsAPromptTheUserGave(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		said   string
+		want   bool
+	}{
+		{name: "a user's typed prompt", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, said: "hello", want: true},
+		{name: "a webapp user's prompt", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, said: "hello", want: true},
+		{name: "a prompt held for later", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_AND_HIDE, said: "hello", want: true},
+		{name: "a daemon notice", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, said: "hello"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.h.Submit(context.Background(), theWorkspace, userSaid(tt.said), "key-1", tt.origin, nil, wsm.DeliveryOrdinary, nil)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			want := []wsm.UserAttention{}
+			if tt.want {
+				want = append(want, wsm.UserAttention{Kind: wsm.AttentionPrompt, Target: string(theWorkspace), At: stampedAt})
+			}
+			if len(h.db.stamps) != len(want) || (tt.want && h.db.stamps[0] != want[0]) {
+				t.Fatalf("stamps = %v, want %v", h.db.stamps, want)
+			}
+		})
+	}
+}
+
+func TestSubmitStampsNoPromptAnotherWorkspaceSent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sender := ids.WorkspaceID("ws-sender")
+
+	// Act
+	_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, &sender, wsm.DeliveryOrdinary, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(h.db.stamps) != 0 {
+		t.Fatalf("stamps = %v, want none for an agent's prompt", h.db.stamps)
+	}
+}
+
+func TestSubmitSurfacesAFailedUserPromptStamp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.stampErr = errors.New("the database is read-only")
+
+	// Act
+	_, err := h.submit("hello")
+
+	// Assert
+	if !errors.Is(err, h.db.stampErr) {
+		t.Fatalf("err = %v, want the failed stamp surfaced", err)
+	}
+	if len(h.queue.forwarded()) != 0 {
+		t.Fatal("nothing may be forwarded when the user's prompt could not be stamped")
+	}
+	if !loggedAt(h, opSubmit, "error") {
+		t.Fatal("the failed stamp was not recorded at error")
+	}
+}

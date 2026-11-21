@@ -1129,6 +1129,13 @@ type DB interface {
 	// RecordGithubWorkflowRunNoticeSubmitted records a submitted notice.
 	RecordGithubWorkflowRunNoticeSubmitted(ctx context.Context, subscriber WorkspaceID, run GithubWorkflowRunKey, turn TurnID, sentences []string, took int) error
 
+	// StampUserAttention records that the user's attention of kind fell on
+	// target at the instant, only ever moving a stamp forward
+	// (userattention.go).
+	StampUserAttention(ctx context.Context, kind AttentionKind, target string, at time.Time) error
+	// ListUserAttention loads every stamp, all-or-nothing.
+	ListUserAttention(ctx context.Context) ([]UserAttention, error)
+
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)
 	// CloseFault stamps a fault's persisted resolved-at.

@@ -9,6 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/health"
@@ -820,4 +821,26 @@ func (f *queuedCreatesForwarder) RecoverQueuedCreates(ctx context.Context) error
 		return fmt.Errorf("agent-repld: the held creates were taken up before the workspace verbs existed")
 	}
 	return target.RecoverQueuedCreates(ctx)
+}
+
+// foldSweepForwarder carries the deploy's pre-build sweep of the sidebar to
+// the fold sweeper, which is built after the workspace verbs it folds with,
+// and the deploy is built before them.
+type foldSweepForwarder struct {
+	lateBound[deploy.FoldSweeper]
+	log dlog.Logger
+}
+
+var _ deploy.FoldSweeper = (*foldSweepForwarder)(nil)
+
+// Sweep runs the sweeper. A sweep asked for before the verbs are bound is a
+// wiring defect, recorded and answered as an error.
+func (f *foldSweepForwarder) Sweep(ctx context.Context) error {
+	target, ok := f.load()
+	if !ok {
+		err := errors.New("agent-repld: the sidebar was swept for a deploy before the workspace verbs existed")
+		f.log.Error("daemon.foldsweep.sweep", "the deploy's sweep ran before the fold sweeper was bound; nothing was folded", dlog.WithCause(nil, err))
+		return err
+	}
+	return target.Sweep(ctx)
 }
