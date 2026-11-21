@@ -414,10 +414,12 @@ func memberBase(d Deps, s roster.Suite, member string, common *InputSet) (*Input
 	return own, nil
 }
 
-// memberDesc is unitDesc for one member of a batch: never its batch's name
-// or its batch-mates, so moving a file between batches leaves its key as it
-// was.
+// memberDesc is unitDesc for one member of a batch: never its batch's name,
+// its batch-mates or the suite's batch size (roster.Suite.Batch), so moving
+// a file between batches, or resizing the suite's batches, leaves its key as
+// it was.
 func memberDesc(s roster.Suite, member string, extra ...string) string {
+	s.Batch = nil
 	return unitDesc(s, "file:"+member, extra...)
 }
 

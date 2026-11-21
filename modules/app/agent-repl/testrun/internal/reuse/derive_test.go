@@ -558,6 +558,24 @@ func TestDeriveERTKeysEachBatchMemberOnWhatItAloneLoads(t *testing.T) {
 	}
 }
 
+func TestAMembersFactsLeaveOutItsSuitesBatchSize(t *testing.T) {
+	// Arrange: one suite at the default batch size, and the same suite resized.
+	s := roster.Suite{Name: "web", Kind: roster.Vitest, Path: "web", Reuse: &roster.Reuse{}}
+	resized := s
+	resized.Batch = &roster.Batching{Max: 96, Min: 24}
+
+	// Act
+	before, after := memberDesc(s, "test/a.test.ts"), memberDesc(resized, "test/a.test.ts")
+
+	// Assert: the member's facts are the same, while the suite's own are not.
+	if before != after {
+		t.Fatalf("a member's facts moved with its suite's batch size:\n%s\n%s", before, after)
+	}
+	if unitDesc(s, "both") == unitDesc(resized, "both") {
+		t.Fatal("the suite's facts did not hold its batch size, so this test proves nothing")
+	}
+}
+
 func TestDeriveERTKeysEachFileOnWhatItLoads(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
