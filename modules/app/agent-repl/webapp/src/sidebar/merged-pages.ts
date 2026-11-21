@@ -50,6 +50,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary, type UnaryContext } from "../rpc/unary.js";
 import { RECENTLY_MERGED_GROUP_SELECTOR, deploysGroupRepository } from "./deploys-fold.js";
 import { FOLDED_CLASS } from "./folded-class.js";
+import type { MergedGroupPages, MergedPages, MergedVerdict } from "./context.js";
 import { drawRosterRowWhenMerged } from "./row.js";
 
 /** How many merged rows one page holds: the daemon's fixed page size. */
@@ -79,40 +80,6 @@ export const MERGED_MORE_ATTRIBUTE = "data-deploys-more";
 
 /** The Recently Merged section's rows region, the viewport a page is in view of or not. */
 const MERGED_REGION_SELECTOR = ".merged-section > .rows";
-
-/** What one group's loaded pages draw. */
-export interface MergedGroupPages {
-  /** Each loaded page's rows, page 0 first. */
-  readonly pages: ReadonlyArray<readonly RosterMergedRow[]>;
-  /** More pages exist: the last answer was `more`, or page 0 is still being fetched. */
-  readonly more: boolean;
-  /** How many rows are loaded, every page together. */
-  readonly rows: number;
-}
-
-/** Whether a push may be drawn now (`agree`). */
-export type MergedVerdict = "draw" | "hold";
-
-/** The page's one holder of the Recently Merged band's loaded pages. */
-export interface MergedPages {
-  /**
-   * The rail is about to draw SECTION (null: the band is not drawn, Chat is
-   * shown): load or let go of pages to match, and answer whether the push may
-   * be drawn now (every loaded page carries SECTION's token) or is held until
-   * its pages agree. PATH names SECTION for a refusal.
-   */
-  agree(section: RosterMergedSection | null, path: string): MergedVerdict;
-  /** The pages loaded for GROUP. */
-  loaded(group: RosterMergedRepoGroup, path: string): MergedGroupPages;
-  /** A number that moves whenever any loaded page changes, so a drawing knows to redraw its pages. */
-  version(): number;
-  /** Look at where each group's end and pages stand in the band's viewport, loading or letting go to match. */
-  check(): void;
-  /** A group was folded or opened by hand: load or let go to match, and fetch again after a failure. */
-  foldsChanged(): void;
-  /** The rail is going away: drop every page, and every answer still on its way. */
-  dispose(): void;
-}
 
 /** What the pages need. */
 export interface MergedPagesDeps {

@@ -7,10 +7,11 @@
  * tall at the page's top, scrolling lines of ROW px each, clamped at its end.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { overrideComputedStyle } from "../computed-style.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { createQueueSelectionScroll, markQueueSelection, QUEUE_CURRENT_CLASS } from "../../src/sidebar/queue-selection.js";
 import { MERGE_QUEUE_SUBJECT_CLASS, MERGE_QUEUE_WAITING_CLASS } from "../../src/sidebar/merge-queue-view.js";
-import { MERGE_QUEUE_SECTION_CLASS } from "../../src/sidebar/band-fit.js";
+import { MERGE_QUEUE_SECTION_CLASS } from "../../src/sidebar/section-classes.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { boxRect } from "../dom-rect.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
@@ -43,10 +44,7 @@ function queue(lines: number, view: number) {
   Object.defineProperty(region, "scrollHeight", { configurable: true, get: () => Math.max(count, view) * ROW });
   Object.defineProperty(region, "clientTop", { configurable: true, value: 0 });
   region.getBoundingClientRect = () => boxRect({ top: 0, height: view * ROW });
-  const computed = window.getComputedStyle.bind(window);
-  vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) =>
-    el === region ? ({ scrollPaddingTop: "auto", scrollPaddingBottom: "auto" } as CSSStyleDeclaration) : computed(el, pseudo),
-  );
+  overrideComputedStyle(region, { scrollPaddingTop: "auto", scrollPaddingBottom: "auto" } as CSSStyleDeclaration);
   for (let i = 0; i < lines; i += 1) {
     const line = document.createElement("div");
     line.className = `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`;

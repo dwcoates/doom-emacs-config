@@ -26,10 +26,10 @@ import {
   type ArrangeSidebarRequest,
   type ArrangeSidebarResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
-import { createDrawingHold, type DrawingHold } from "../hold.js";
+import { createDrawingHold } from "../hold.js";
 import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
-import type { SidebarContext } from "./context.js";
+import type { ArrangeHold, SidebarContext } from "./context.js";
 import type { RosterStreams } from "./roster-streams.js";
 import { fireVerb, type VerbCall, type VerbResponse } from "./verbs.js";
 
@@ -144,8 +144,6 @@ export async function sendHeld<Res extends VerbResponse>(
   return took;
 }
 
-/** The page's hold on its own roster drawing while an arrangement is dragged or asked for (`hold.ts`). */
-export type ArrangeHold = DrawingHold<RosterStreams>;
 
 /**
  * The hold, drawing through DRAW, letting go at the roster revision an

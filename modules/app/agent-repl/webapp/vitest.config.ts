@@ -3,7 +3,8 @@
 import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
-import { viteCacheDir } from "./vite-cache";
+import { viteCacheDir, vitestModuleCacheDir } from "./vite-cache";
+import { agentReplViteServer } from "../bin/vite-server.mjs";
 
 /**
  * Vitest stubs CSS imports out to an empty module by default, which would
@@ -19,8 +20,10 @@ export default defineConfig({
   // account, and test/vite-cache.test.ts for the check that keeps every
   // config in this package on it.
   cacheDir: viteCacheDir,
+  server: agentReplViteServer,
   resolve: { alias: protobufRuntimeAliases },
   test: {
+    fsModuleCachePath: vitestModuleCacheDir,
     css: true,
     setupFiles: ["./test/setup.ts", "./test/setup-shared-worker.ts"],
     // The unit suite spent far more wall time standing a fresh jsdom up for
@@ -43,8 +46,6 @@ export default defineConfig({
     // This cap keeps one run's vitest from claiming the machine.
     // Half the CPUs measured at 5.3s against 5.2s for all sixteen: the suite
     // is not CPU-bound at this size, so the cap costs nothing to buy back.
-    // minWorkers travels with it: vitest refuses a max below the default min.
-    minWorkers: 1,
     maxWorkers: "50%",
 
     // The integration suite has its own config (vitest.integration.config.ts):
@@ -94,8 +95,17 @@ export default defineConfig({
       // as it does in the full suite. `bin/coverage-honesty.mjs`
       // (`npm run coverage:verify`) is the check that keeps it that way.
       provider: "istanbul",
-      all: true,
-      include: ["src/**/*.ts", "src/**/*.tsx"],
+      // A CONFINED CHUNK REPORTS ONLY WHAT IT LOADED. A coverage run cuts the
+      // suite into chunks, each confined to its own files' inputs
+      // (testrun's AGENT_REPL_COVERAGE_LOADED_ONLY), and with an `include`
+      // set vitest also reads every included file the chunk never loaded, to
+      // report it at zero: reads outside the chunk's inputs. So a chunk runs
+      // without `include`, and the run's one merge (`--merge-reports`, which
+      // no confinement holds) applies it, adding the files no chunk loaded
+      // and, through `excludeAfterRemap`, keeping only what `include` and
+      // `exclude` name.
+      include: process.env.AGENT_REPL_COVERAGE_LOADED_ONLY === "1" ? undefined : ["src/**/*.ts", "src/**/*.tsx"],
+      excludeAfterRemap: true,
       exclude: ["src/**/*.d.ts", "src/**/generated/**"],
       reporter: ["text", "json", "json-summary", "html"],
       reportsDirectory: "coverage",

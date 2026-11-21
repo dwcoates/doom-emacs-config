@@ -45,7 +45,6 @@ import {
   toggleRowMenu,
   type RowPlace,
   drawRosterFamily,
-  pathedFamilies,
   noteSelectRoute,
   DIVIDER_MAIN_WORKSPACE_ATTRIBUTE,
   REPOSITORY_BLOCK_ATTRIBUTE,
@@ -56,7 +55,7 @@ import {
   drawRosterOpenRowRepositoryDivider,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
-import { codeOf } from "../source-text.js";
+import { codeOf, functionBody } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { GetWorkspaceMemoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_workspace_memory_pb";
@@ -1202,32 +1201,6 @@ describe("a repository block", () => {
   });
 });
 
-describe("pathedFamilies", () => {
-  it("gives each family its index under the region's path", () => {
-    const got = pathedFamilies([openRow(row({ id: "a" })), openRow(row({ id: "b" }))], "R.rows");
-    expect(got.map((e) => [e.family.row?.workspace?.workspace?.id, e.path])).toEqual([
-      ["a", "R.rows[0]"],
-      ["b", "R.rows[1]"],
-    ]);
-  });
-
-  it.each([
-    ["roster.ts", "drawRosterRows"],
-    ["entries.ts", "pathedOpenRows"],
-    ["row.ts", "appendRowKids"],
-  ])("is how %s walks a list's rows", (file, fn) => {
-    // Arrange
-    const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
-    const start = source.indexOf(`function ${fn}(`);
-
-    // Act
-    const body = source.slice(start, source.indexOf("\n}\n", start));
-
-    // Assert
-    expect(body.includes("pathedFamilies(")).toBe(true);
-  });
-});
-
 describe("kidsBoxOf", () => {
   it("answers the box of nested rows a row holds", () => {
     // Arrange
@@ -1271,13 +1244,12 @@ describe("kidsBoxOf", () => {
   ])("is how %s finds or makes a row's box", (file, fn) => {
     // Arrange
     const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
-    const start = source.indexOf(`function ${fn}(`);
 
     // Act
-    const body = source.slice(start, source.indexOf("\n}\n", start));
+    const body = functionBody(source, fn);
 
     // Assert
-    expect([start >= 0, body.includes("kidsBoxOf"), body.includes("createElement")]).toEqual([true, true, false]);
+    expect([body.includes("kidsBoxOf"), body.includes("createElement")]).toEqual([true, false]);
   });
 });
 

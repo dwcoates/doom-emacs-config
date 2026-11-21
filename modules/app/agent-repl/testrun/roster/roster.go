@@ -332,6 +332,8 @@ var Suites = []Suite{
 			"gofunc":                            {"e2e/"},
 			"internal/redundancy/gomeasure":     {"daemon/", "e2e/", "agent-shim/logging/go/", "proto/gen/go/", "proto/helpers/go/", "tree-sitter-tldr/"},
 			"internal/redundancy/vitestmeasure": {"webapp"},
+			// Its test reads every typechecked package's script and ignores.
+			"internal/typecheck": {"webapp/package.json", "webapp/.gitignore", "agent-shim/claude/shim/package.json", "agent-shim/claude/shim/.gitignore"},
 		},
 		Never: map[string]string{
 			"internal/reuse":   "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
@@ -420,7 +422,7 @@ var Suites = []Suite{
 			// that rebuilt a stale dist after keying the suite refused to
 			// record its green pass ("its inputs changed while it ran",
 			// 2026-10-16).
-			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/"},
+			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/", "webapp/.typecheck-cache/"},
 			Units:     webappUnitInputs}},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
@@ -436,7 +438,7 @@ var Suites = []Suite{
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
-		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"},
+		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/", "agent-shim/claude/shim/.typecheck-cache/"},
 			Units: shimUnitInputs}},
 	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh",
 		NeverReused: "its isolation check walks the webapp's whole tree, its installed node_modules and build output included"},
@@ -549,7 +551,7 @@ var webappUnitInputs = func() map[string][]string {
 		"test/feed/renderers.test.ts", "test/feed/rows/blocks.test.ts", "test/feed/rows/handback-badge.test.ts",
 		"test/feed/subtree-box.test.ts", "test/feed/title-fold.test.ts", "test/footer/activity.test.ts",
 		"test/footer/clock-span.test.ts", "test/frame.test.ts", "test/heat.test.ts",
-		"test/held/held-prompt.test.ts", "test/host/answers.test.ts", "test/link.test.ts",
+		"test/held/held-prompt.test.ts", "test/host/answers.test.ts", "test/import-cycles.test.ts", "test/link.test.ts",
 		"test/listeners.test.ts", "test/markdown.test.ts", "test/merge-glyph.test.ts",
 		"test/merge-queue-move.test.ts", "test/page-size.test.ts", "test/page-teardown.test.ts",
 		"test/per-document.test.ts", "test/percent-gradient.test.ts", "test/placement.test.ts",
@@ -558,7 +560,7 @@ var webappUnitInputs = func() map[string][]string {
 		"test/rpc/merge-queue-refusal.test.ts", "test/rpc/oneof.test.ts", "test/rpc/page-streams.test.ts",
 		"test/rpc/refusal.test.ts", "test/rpc/refuse.test.ts", "test/rpc/requester.test.ts",
 		"test/rpc/transport.test.ts", "test/selection.test.ts", "test/sidebar/arrange.test.ts",
-		"test/sidebar/children.test.ts", "test/sidebar/name-popup.test.ts", "test/sidebar/row-menu.test.ts",
+		"test/sidebar/children.test.ts", "test/sidebar/family.test.ts", "test/sidebar/name-popup.test.ts", "test/sidebar/row-menu.test.ts",
 		"test/sidebar/row.test.ts", "test/sidebar/section-fold.test.ts", "test/sidebar/verbs.test.ts",
 		"test/timers.test.ts", "test/topbar/chip-toggle.test.ts", "test/topbar/pick.test.ts",
 		"test/type-out.test.ts", "test/wall-latency.test.ts", "test/webkit-stylesheets.test.ts",
@@ -567,7 +569,7 @@ var webappUnitInputs = func() map[string][]string {
 	}
 	// The scans over the webapp's own tests and their helpers.
 	for _, f := range []string{
-		"test/agent-only-arms.test.ts", "test/bubble/still.test.ts", "test/deferred-animation.test.ts",
+		"test/agent-only-arms.test.ts", "test/bubble/still.test.ts", "test/computed-style.test.ts", "test/deferred-animation.test.ts",
 		"test/dom-rect.test.ts", "test/drag-pointer.test.ts", "test/failure-sink.test.ts",
 		"test/feed/harness.test.ts", "test/files-under.test.ts", "test/frame-queue.test.ts",
 		"test/host/popup-channel.test.ts", "test/integration/harness.self.test.ts",

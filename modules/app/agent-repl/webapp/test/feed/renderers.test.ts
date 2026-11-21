@@ -7,7 +7,6 @@ import { create } from "@bufbuild/protobuf";
 import { FeedBreadcrumbSchema, FeedRowSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   NEST_ATTRIBUTE,
-  createRowRenderers,
   arrangeSubfeedRows,
   armName,
   defaultBubbleBody,
@@ -38,11 +37,9 @@ import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { createTicker } from "../../src/clock.js";
 import { stoppedClock } from "./cards/tool-card-head-shape.js";
 import { tick } from "../../src/feed/ticking.js";
-import type { RowRenderers } from "../../src/feed/renderers.js";
 import { orderFor } from "../feed-order.js";
 import { filesUnder } from "../files-under.js";
 import renderersSource from "../../src/feed/renderers.ts?raw";
-import { carriesCardQuestion } from "../../src/feed/response-question.js";
 import { plainProse } from "../prose.js";
 
 beforeEach(() => {
@@ -777,84 +774,6 @@ describe("defaultBubbleBody", () => {
     const shown = mount.querySelector('.feed-group-panel [data-feed-row="a"]') as HTMLElement;
     const newest = mount.querySelector('.feed-group-panel [data-feed-row="c"]') as HTMLElement;
     expect([shown.hidden, newest.hidden]).toEqual([false, true]);
-  });
-});
-
-/**
- * THE REGISTRY IS COMPLETE.
- *
- * The type-level half is the annotation on this list: a key added to
- * `RowRenderers` and missing from it does not compile, and a key here that the
- * interface does not declare does not compile either. The runtime half is the
- * sweep below, which catches the one thing the type cannot — a key declared,
- * typed, and left `undefined` by the assembler.
- */
-const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
-  "response",
-  "simpleToolCall",
-  "hook",
-  "skill",
-  "artifact",
-  "plan",
-  "findings",
-  "chessBoard",
-  "subagentResult",
-  "fixGate",
-  "hotReload",
-  "shell",
-  "shellHead",
-  "permission",
-  "question",
-  "coldGate",
-  "mergeHead",
-  "subagentHead",
-  "detachedSubagentHead",
-  "commandPanel",
-  "commandRefused",
-  "mergeBody",
-];
-
-/** The one seam that draws no card: a merge bubble's body lays out its sub-feed's rows. */
-const NOT_A_CARD: readonly (keyof RowRenderers)[] = ["mergeBody"];
-
-describe("createRowRenderers", () => {
-  for (const key of REGISTRY_KEYS) {
-    it(`fills the ${key} seam`, () => {
-      const h = harness();
-      expect(typeof createRowRenderers(h.ctx)[key]).toBe("function");
-    });
-  }
-
-  it("fills no seam the interface does not declare", () => {
-    const h = harness();
-    expect(Object.keys(createRowRenderers(h.ctx)).sort()).toEqual([...REGISTRY_KEYS].sort());
-  });
-
-  // Owner request, 2026-11-09: every card carries the question control, through
-  // one helper, so a card kind added without it fails here.
-  it("draws every card through the question control's one helper", () => {
-    // Arrange
-    const h = harness();
-    const renderers = createRowRenderers(h.ctx);
-
-    // Act
-    const unwrapped = (Object.keys(renderers) as (keyof RowRenderers)[]).filter(
-      (key) => !NOT_A_CARD.includes(key) && !carriesCardQuestion(renderers[key]),
-    );
-
-    // Assert
-    expect(unwrapped).toEqual([]);
-  });
-
-  it("leaves the merge body, which draws no card, unwrapped", () => {
-    // Arrange
-    const h = harness();
-
-    // Act
-    const got = carriesCardQuestion(createRowRenderers(h.ctx).mergeBody);
-
-    // Assert
-    expect(got).toBe(false);
   });
 });
 

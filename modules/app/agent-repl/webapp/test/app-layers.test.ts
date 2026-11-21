@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { appLayers, layerChunks, type LayerModule, type ModuleGraph } from "../app-layers";
+import { appLayers, importCycles, layerChunks, type LayerModule, type ModuleGraph } from "../app-layers";
+import appLayersSource from "../app-layers.ts?raw";
+import { codeOf, functionBody } from "./source-text.js";
 
 /** A module of SIZE bytes importing IMPORTS. */
 function mod(id: string, size: number, ...imports: string[]): LayerModule {
@@ -209,5 +211,67 @@ describe("layerChunks", () => {
     });
     // Act / Assert
     expect(() => layerChunks(graph, isApp, 100, "app")).toThrow(/no code for \/src\/empty\.ts/);
+  });
+});
+
+describe("importCycles", () => {
+  /** A module importing IMPORTS, as the cycle check reads it. */
+  const imp = (id: string, ...imports: string[]) => ({ id, imports });
+
+  it("finds no cycle among modules that import only downward", () => {
+    // Arrange
+    const modules = [imp("a", "b", "c"), imp("b", "c"), imp("c")];
+    // Act
+    const got = importCycles(modules);
+    // Assert
+    expect(got).toEqual([]);
+  });
+
+  it("names every module of a cycle, sorted, and none outside it", () => {
+    // Arrange -- c, b and d import each other in a ring; a only imports into it.
+    const modules = [imp("a", "c"), imp("c", "b"), imp("b", "d"), imp("d", "c")];
+    // Act
+    const got = importCycles(modules);
+    // Assert
+    expect(got).toEqual([["b", "c", "d"]]);
+  });
+
+  it("names a module that imports itself as a cycle", () => {
+    // Arrange
+    const modules = [imp("a", "a")];
+    // Act
+    const got = importCycles(modules);
+    // Assert
+    expect(got).toEqual([["a"]]);
+  });
+
+  it("names two separate cycles apart, dependencies first", () => {
+    // Arrange -- the cycle of a and b imports the cycle of c and d.
+    const modules = [imp("a", "b"), imp("b", "a", "c"), imp("c", "d"), imp("d", "c")];
+    // Act
+    const got = importCycles(modules);
+    // Assert
+    expect(got).toEqual([
+      ["c", "d"],
+      ["a", "b"],
+    ]);
+  });
+
+  it("ignores an import of a module it was not given", () => {
+    // Arrange
+    const modules = [imp("a", "/node_modules/x.js")];
+    // Act
+    const got = importCycles(modules);
+    // Assert
+    expect(got).toEqual([]);
+  });
+
+  it("walks the one component walk the layering walks", () => {
+    // Arrange
+    const code = codeOf(appLayersSource);
+    // Act
+    const walkers = ["appLayers", "importCycles"].filter((fn) => functionBody(code, fn).includes("componentsDependenciesFirst("));
+    // Assert
+    expect(walkers).toEqual(["appLayers", "importCycles"]);
   });
 });

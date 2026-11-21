@@ -302,8 +302,9 @@ unit".
 
 - **The unit** is what the runner records one pass for: a Go package (unit
   or integration; a tagged pass's is `<package>[<tags>]`), a vitest test file,
-  an ERT test file, a suite-wide check (`vet`, `vet[<tag>]`, `typecheck`), or
-  a whole script or e2e suite. Vitest and ERT files run in BATCHES, one
+  an ERT test file, a suite-wide check (the e2e suite's `vet` and
+  `vet[<tag>]`, a GoModule suite's `VetTags` vets, `typecheck`), or a whole
+  script or e2e suite. Vitest and ERT files run in BATCHES, one
   process per batch (`suites.BatchFiles`), but a batch is only how its files
   share a process: each file is keyed, reused and recorded on its OWN inputs
   under its own record (`reuse.decideBatch`), so a batch runs only the files
@@ -314,10 +315,19 @@ unit".
   leak that hides is a defect, fixed at its source, as for every shared
   process ("Integration tests share one canonical process, each case on its
   own slice"). So a batch's size trades only process starts, never reruns.
-  Module builds,
-  the ERT fake daemon's build and an integration bundle are infra: each runs
-  only while a unit that needs it runs, under the suite's envelope (every
-  unit's inputs together), and is never recorded.
+  Module builds, module vets, the ERT fake daemon's build and an integration
+  bundle are infra: each runs only while a unit that needs it runs, under the
+  suite's envelope (every unit's inputs together), and is never recorded.
+- **A GoModule suite's packages are vetted by their own units.** A pass's one
+  vet (`<suite>:vet`, `testrun vet-module`, `testrun/internal/govet`) writes
+  each package's verdict, and the package's check unit (`<group>:vet`,
+  `testrun vet-check`) fails with that package's findings alone. The check
+  belongs to the package's reuse unit, whose test binary graph is everything
+  vet reads to analyze it, so a reused package is not vetted again; a package
+  without test files is a unit of its vet check alone, over its own graph.
+  Measured 2026-11-20 on the daemon (warm, `-p=1`, `GOMAXPROCS=2`): vetting
+  all 188 packages costs about 16.3 CPU-seconds, 94 of them 9.5, 47 of them
+  4.9.
 - **The key is content, not history.** A unit's key hashes every file it
   reads: a Go package's test binary's build graph from `go list -deps -test`
   (each package's directory, testdata and embedded files, the go.mod and

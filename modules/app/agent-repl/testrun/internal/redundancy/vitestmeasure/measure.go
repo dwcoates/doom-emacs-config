@@ -181,7 +181,6 @@ func (m *measurer) traceConfig(dir string) (string, error) {
     setupFiles: [%q],
     isolate: true,
     maxWorkers: 1,
-    minWorkers: 1,
     coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: %q },
   }`, m.cfg.Trace, filepath.Join(dir, "coverage")))
 }

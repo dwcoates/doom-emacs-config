@@ -62,7 +62,7 @@ import { createLocalFailures } from "../../src/failure/local";
 import { bootFailed } from "../../src/failure/sink";
 import { mountFeed, type FeedHandle } from "../../src/feed/feed";
 import { installProseLinkRouting } from "../../src/link";
-import { createRowRenderers } from "../../src/feed/renderers";
+import { createRowRenderers } from "../../src/feed/row-renderers";
 import { mountFooter, type FooterHandle } from "../../src/footer/footer";
 import { createEditorNotices } from "../../src/footer/editor-notice";
 import { installHoverStamp } from "../../src/feed/hover-stamp";

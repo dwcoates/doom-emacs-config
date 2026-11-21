@@ -55,6 +55,9 @@ type Options struct {
 	Tags string
 	// Cover instruments every binary (-cover -coverpkg=./...).
 	Cover bool
+	// DebugInfo links every binary with its DWARF debug information, which a
+	// build otherwise drops (LinkFlags).
+	DebugInfo bool
 	// Packages are the packages to build, relative to Module ("." the root).
 	Packages []string
 	// Self is the testrun binary the build's -exec runs (`testrun stash-test`).
@@ -80,6 +83,32 @@ func FailurePath(bin string) string { return bin + ".build-failed" }
 // inside it so the stash's hard link stays on one filesystem.
 func GoTmpDir(binDir string) string { return filepath.Join(binDir, ".gotmp") }
 
+// LINK WITHOUT DEBUG INFORMATION. A test run's links are its Go builds' CPU
+// floor: about 0.41 CPU-seconds per daemon test binary in the merge gates of
+// 2026-11-20. Dropping DWARF (-ldflags=-w) cut a warm link of every daemon
+// test binary from 88 to 71 CPU-seconds, and the daemon program's from 9.6
+// to 4.8 (one run each at -p 2, GOMAXPROCS=2, 2026-11-20). Stack traces and a
+// failure's file:line come from the line table, which -w keeps; only a
+// debugger reads DWARF, so a run keeps it only when asked
+// (testrun.v1.TestRunRequest.debug_info).
+
+// LinkFlags is the -ldflags argument of every go command that links a test
+// binary or program in a run: -w unless debugInfo, then extra (each one
+// linker flag, such as "-X pkg.var=value"). It answers nothing when there is
+// no flag to pass, so a debug-info build with no extra flags links exactly
+// as the go command does by default.
+func LinkFlags(debugInfo bool, extra ...string) []string {
+	var flags []string
+	if !debugInfo {
+		flags = append(flags, "-w")
+	}
+	flags = append(flags, extra...)
+	if len(flags) == 0 {
+		return nil
+	}
+	return []string{"-ldflags=" + strings.Join(flags, " ")}
+}
+
 // GoTestArgs is the `go test` argument list the build runs in Module.
 func GoTestArgs(o Options) ([]string, error) {
 	if len(o.Packages) == 0 {
@@ -96,6 +125,7 @@ func GoTestArgs(o Options) ([]string, error) {
 	if o.Cover {
 		args = append(args, "-cover", "-coverpkg=./...")
 	}
+	args = append(args, LinkFlags(o.DebugInfo)...)
 	args = append(args, "-run", "^$")
 	for _, rel := range o.Packages {
 		args = append(args, packageArg(rel))
@@ -426,7 +456,7 @@ func StampStarts(in io.Reader, out io.Writer, now func() time.Time) error {
 }
 
 // ParseBuildArgs reads `testrun build-tests`' arguments:
-// -module DIR -bindir DIR [-tags T] [-cover] -- PACKAGE...
+// -module DIR -bindir DIR [-tags T] [-cover] [-debug-info] -- PACKAGE...
 func ParseBuildArgs(argv []string) (Options, error) {
 	var o Options
 	for i := 0; i < len(argv); i++ {
@@ -448,6 +478,8 @@ func ParseBuildArgs(argv []string) (Options, error) {
 			o.Tags, err = value()
 		case "-cover":
 			o.Cover = true
+		case "-debug-info":
+			o.DebugInfo = true
 		case "--":
 			o.Packages = append([]string(nil), argv[i+1:]...)
 			i = len(argv)
@@ -477,6 +509,9 @@ func (o Options) Args() []string {
 	}
 	if o.Cover {
 		args = append(args, "-cover")
+	}
+	if o.DebugInfo {
+		args = append(args, "-debug-info")
 	}
 	return append(append(args, "--"), o.Packages...)
 }

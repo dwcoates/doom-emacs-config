@@ -359,3 +359,19 @@ func TestEveryRosterGoSuitePlansOneBuildPerPass(t *testing.T) {
 		})
 	}
 }
+
+func TestPinnedBuildHoldsBuildSlotsPinnedByWidePinnedEnv(t *testing.T) {
+	// Arrange
+	sp := spec("x:build", "x", "/m", []string{"go", "build", "-buildvcs=false"})
+
+	// Act
+	got := pinnedBuild(sp)
+
+	// Assert
+	if got.Slots != BuildSlots || !reflect.DeepEqual(got.Env, WidePinnedEnv(BuildSlots)) {
+		t.Fatalf("pinnedBuild = %d slots pinned by %v, want %d pinned by %v", got.Slots, got.Env, BuildSlots, WidePinnedEnv(BuildSlots))
+	}
+	if got.ID != sp.ID || !reflect.DeepEqual(got.Argv, sp.Argv) || got.Dir != sp.Dir {
+		t.Fatalf("pinnedBuild changed the unit's command: %+v from %+v", got, sp)
+	}
+}

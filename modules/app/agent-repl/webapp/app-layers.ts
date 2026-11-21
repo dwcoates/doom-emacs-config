@@ -24,11 +24,15 @@
  * imports every layer above them, so the entry still reaches every chunk.
  */
 
-/** One app module, as the layering reads it. */
-export interface LayerModule {
+/** One module and the modules it imports, as the component walk reads it. */
+export interface ImportingModule {
   id: string;
-  /** The app modules it statically imports. Any other id is ignored. */
+  /** The modules it statically imports. Any id that is not one of the walk's modules is ignored. */
   imports: readonly string[];
+}
+
+/** One app module, as the layering reads it. */
+export interface LayerModule extends ImportingModule {
   /** Its code's size, in bytes, before minification. */
   size: number;
 }
@@ -56,23 +60,37 @@ export function appLayers(modules: readonly LayerModule[], budget: number): Map<
 }
 
 /**
+ * The import cycles among MODULES: every strongly connected component of more
+ * than one module, or of one module importing itself, as its module ids in
+ * sorted order, the cycles in the walk's dependencies-first order. Inside a
+ * cycle a module that reads an import while it is evaluated can read it before
+ * it is defined, depending on which module of the cycle loads first, so the
+ * webapp's sources hold none (test/import-cycles.test.ts).
+ */
+export function importCycles(modules: readonly ImportingModule[]): string[][] {
+  return componentsDependenciesFirst(modules)
+    .filter((c) => c.length > 1 || c[0].imports.includes(c[0].id))
+    .map((c) => c.map((m) => m.id).sort());
+}
+
+/**
  * The strongly connected components of MODULES (Tarjan's algorithm), each
  * emitted only after every component it imports: dependencies first.
  */
-function componentsDependenciesFirst(modules: readonly LayerModule[]): LayerModule[][] {
+function componentsDependenciesFirst<M extends ImportingModule>(modules: readonly M[]): M[][] {
   const byId = new Map(modules.map((m) => [m.id, m]));
   const index = new Map<string, number>();
   const low = new Map<string, number>();
   const onStack = new Set<string>();
-  const stack: LayerModule[] = [];
-  const components: LayerModule[][] = [];
+  const stack: M[] = [];
+  const components: M[][] = [];
   let next = 0;
 
   // Iterative, so a long import chain cannot overflow the call stack.
   for (const root of modules) {
     if (index.has(root.id)) continue;
-    const frames: Array<{ m: LayerModule; edge: number }> = [];
-    const enter = (m: LayerModule): void => {
+    const frames: Array<{ m: M; edge: number }> = [];
+    const enter = (m: M): void => {
       index.set(m.id, next);
       low.set(m.id, next);
       next += 1;
@@ -101,7 +119,7 @@ function componentsDependenciesFirst(modules: readonly LayerModule[]): LayerModu
         low.set(parent.m.id, Math.min(low.get(parent.m.id)!, low.get(frame.m.id)!));
       }
       if (low.get(frame.m.id) !== index.get(frame.m.id)) continue;
-      const component: LayerModule[] = [];
+      const component: M[] = [];
       for (;;) {
         const member = stack.pop()!;
         onStack.delete(member.id);

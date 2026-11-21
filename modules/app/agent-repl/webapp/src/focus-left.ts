@@ -102,7 +102,10 @@ export function createFocusLeft(win: Window, presence: Presence): FocusLeftSourc
 }
 
 /** The focus-left signal of each page, keyed by its document: one per page. */
-const focusLeftOf = perDocument(() => createFocusLeft(window, pagePresence()));
+const focusLeftOf = perDocument(
+  () => createFocusLeft(window, pagePresence()),
+  (source) => source.dispose(),
+);
 
 /** The focus-left signal of this page: one per page (per document), made on first use. */
 export function pageFocusLeft(): FocusLeftSource {

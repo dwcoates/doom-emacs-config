@@ -29,14 +29,8 @@
  */
 import { drawRosterSectionHeight, drawSectionHeight, type RosterSectionHeight } from "./section-resize.js";
 import { FOLDED_CLASS } from "./folded-class.js";
-import {
-  HIDDEN_SECTION_CLASS,
-  MERGED_AT_ATTRIBUTE,
-  MERGED_SECTION_CLASS,
-  MERGE_QUEUE_SECTION_CLASS,
-  OPEN_REGION_CLASS,
-  OPEN_SECTION_CLASS,
-} from "./band-fit.js";
+import { MERGED_AT_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
 import {
   RosterHiddenSectionSchema,
   RosterMergedSectionSchema,
@@ -79,6 +73,8 @@ import {
   MERGE_QUEUE_FOLD_KEY,
   OPEN_FOLD_KEY,
   repoFoldKey,
+  type MergedGroupPages,
+  type MergedPages,
   type RailContext,
   type SidebarContext,
 } from "./context.js";
@@ -116,13 +112,12 @@ import {
   DEPLOYS_SECTION_ATTRIBUTE,
   type DeploysGroupSection,
 } from "./deploys-fold.js";
-import { MERGED_PAGE_CLASS, drawMergedMoreSpinner, mergedRowAtMs, type MergedGroupPages, type MergedPages } from "./merged-pages.js";
+import { MERGED_PAGE_CLASS, drawMergedMoreSpinner, mergedRowAtMs } from "./merged-pages.js";
 import { drawEscalationRelease, drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { coldGatedOf, sameColdGated, type ColdGated } from "./cold-gate-name.js";
+import { pathedFamilies, type RowFamily } from "./family.js";
 import {
   drawRosterFamily,
-  type RowFamily,
-  pathedFamilies,
   mergedToday,
   tickPaint,
   type RowPlace,

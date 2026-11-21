@@ -26,7 +26,8 @@ src/log.ts                the canonical logging API
 src/link.ts               renderExternalLink / renderEditorLink / renderMergeTestLogLink
 src/bubble/               THE ONE BUBBLE: draw (drawBubble, the spec) and body (the pipeline)
 src/feed/                 the feed mechanism (feed, feed-view, bubble, rows)
-  renderers.ts              THE SEAM, plus createRowRenderers: the registry
+  renderers.ts              THE SEAM
+  row-renderers.ts          createRowRenderers: the registry
   cards/ asks/ merge/       the fifteen row renderers
 src/footer/ src/topbar/ src/sidebar/ src/held/ src/composer/ src/panels/
 src/login/ src/lifecycle/ src/failure/      the remaining components
@@ -104,10 +105,12 @@ scale (src/feed/feed-text-scale.ts) is the first user.
 ## The seams
 
 - **`RowRenderers` (src/feed/renderers.ts).** The feed mechanism and the cards
-  meet here and nowhere else. `createRowRenderers(ctx)` is the ONE place the
-  fifteen keys are filled in; `main.ts` and the integration harness both call
-  exactly it. A key added to the interface and not to the assembler does not
-  compile.
+  meet here and nowhere else. `createRowRenderers(ctx)`
+  (src/feed/row-renderers.ts) is the ONE place the fifteen keys are filled in;
+  `main.ts` and the integration harness both call exactly it. A key added to
+  the interface and not to the assembler does not compile. The assembler is
+  its own module because it alone imports the cards: every card imports the
+  seam, so a seam that imported the cards would be an import cycle.
 - **The composer gate.** `footer.onStatus` drives `ComposerGate`: closed on
   `merging`, `closing` and `disconnected` (R7), and the reason shown is the
   FOOTER's own status word, never a second vocabulary for the same three states.
@@ -1056,3 +1059,4 @@ and its commit (or the open item). Test-performance lessons also go into the
 - First show of a hidden page: switch -> painted p50 679ms, p90 1,477ms, max 2,619ms, mostly the push backlog replayed before the page shows (first-switch investigation).
 - Most of the webhost's CPU is the rendering update, not the streams' JavaScript: a 10s native sample with the sidebar drawn once read 61% of the main thread's busy time in `updateRendering`, 33% in style recalculation, 7% in JavaScript (2026-10-13, docs/investigations/2026-10-13-page-cost-by-component.md). A page hidden with `visibility: hidden` keeps its CSS animations running, so every working workspace's loops forced a style pass a frame; a page now pauses every animation while the webhost does not show it, and moves each on by its frozen time when shown (src/host/unshown-animations.ts). Each show logs `page.animations-resumed` with the count, `hidden_ms` and `took_ms`, and `page.shown-frame` with the `ms` from the show to the frame after the first painted one (src/host/shown-edge.ts); re-sample the webhost's WebKit process to measure the saving.
 - The system WebKit never frees a CSS animation that script has asked for: a `getAnimations()` call gives each animation a JS wrapper, and on the installed WebKit (21623.1.14.11.9, macOS 26.2) a cancelled CSS animation's wrapper is never collected, so the `CSSAnimation`, its keyframes and the detached element it animated stay alive for the document's life. Measured 2026-11-18: the sidebar's web process held 14,237 retained `CSSAnimation`s and gained about 45 a minute; the pages' process about 2,850, while the pages' censuses counted 0 to 20 running. WebKit fixed it upstream on 2026-07-15 (commit 02706b24eb, 317227@main, https://bugs.webkit.org/show_bug.cgi?id=318856), but Emacs's web view runs the system WebKit, which only a macOS update replaces. So production code calls `getAnimations()` nowhere: it reads and moves a CSS animation through `src/animation-delays.ts`, by its computed style and its `animation-delay` (a pseudo-element's through a custom property on its element), and `test/animation-delays.test.ts` fails any source that calls it. When a macOS release ships 317227@main, check `heap <WebContent pid> | grep CSSAnimation` stays flat, and only then may a `getAnimations()` call come back.
+- The test suite paid every module's transform once per vitest process: vitest 2 kept no transform across processes, so each of a run's batches re-transformed the graph every other batch had. On vitest 5 with its module cache in `.vite-cache/vitest-modules` (`vite-cache.ts`), the suite's units summed 176.3 CPU-s against 269.3 on vitest 2 (2026-11-20, `/agent-repl-tests` pitfall 21).

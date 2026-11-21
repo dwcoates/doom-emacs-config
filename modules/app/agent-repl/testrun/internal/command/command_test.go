@@ -90,3 +90,49 @@ func TestOutputRefusesACommandWhoseStderrIsTaken(t *testing.T) {
 	}()
 	Output(cmd)
 }
+
+func TestVerdict(t *testing.T) {
+	tests := []struct {
+		name           string
+		cmd            func(t *testing.T) *exec.Cmd
+		wantStdout     string
+		wantStderr     string
+		wantExitedZero bool
+		wantErr        string
+	}{
+		{name: "a passing command exited zero", cmd: func(*testing.T) *exec.Cmd { return helper("pass") }, wantStdout: "listed\n", wantExitedZero: true},
+		{name: "a failing command is an answer, with both outputs", cmd: func(*testing.T) *exec.Cmd { return helper("fail") }, wantStdout: "partial\n", wantStderr: "the reason it failed\n"},
+		{name: "a missing program is an error naming it", cmd: func(t *testing.T) *exec.Cmd { return exec.Command(filepath.Join(t.TempDir(), "absent")) }, wantErr: "absent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			stdout, stderr, exitedZero, err := Verdict(tt.cmd(t))
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || stdout != nil || stderr != nil {
+					t.Fatalf("Verdict = %q, %q, %v; want an error naming %q", stdout, stderr, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || string(stdout) != tt.wantStdout || string(stderr) != tt.wantStderr || exitedZero != tt.wantExitedZero {
+				t.Fatalf("Verdict = %q, %q, %v, %v; want %q, %q, %v", stdout, stderr, exitedZero, err, tt.wantStdout, tt.wantStderr, tt.wantExitedZero)
+			}
+		})
+	}
+}
+
+func TestVerdictRefusesACommandWhoseOutputIsTaken(t *testing.T) {
+	// Arrange
+	cmd := helper("pass")
+	cmd.Stdout = os.Stdout
+
+	// Act / Assert
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Verdict ran a command whose stdout it could not capture")
+		}
+	}()
+	Verdict(cmd)
+}

@@ -64,6 +64,7 @@ Options:
 -runs N                  repeat the run N times, each its own run with its own log (every frame names its run); for a flaky test, repeat just that test
 -stop-at-first-failure   stop repeating at the first failing run
 -remeasure               bound every selected unit as one never measured, so a unit that legitimately got slower passes and records its new peak; the runner otherwise kills each unit at five times its expected time (`run.BoundFactor`)
+-debug-info              link every Go test binary and program with its DWARF debug information, for a debugger; a TEMPORARY debugging measure only, never a standing setting: runs otherwise link without it (-ldflags=-w), which costs about a fifth less link CPU and keeps every stack trace and file:line
 -no-reuse -as-user       run every selected unit, reusing no earlier pass; ONLY when the user explicitly asks to measure or debug the tests themselves (owner ruling 2026-11-13); never part of ordinary work, and the daemon refuses it from a workspace
 -ungoverned -as-user     run with no CPU governor, on every core; ONLY when the user asks for it (owner ruling 2026-11-13: every run is governed by default, a queue bypass holder's included); the daemon refuses it from a workspace
 -cpu-load N -as-user     hold N busy loops for the run's length; ONLY when the user asks for load (owner ruling 2026-10-06); the daemon refuses load from a workspace
@@ -179,7 +180,8 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 - Every roster suite (`testrun/roster/roster.go`) declares `Reuse`, what its units read beyond what the runner derives, or `NeverReused`, a written reason it can never be reused.
   - `roster.Check` refuses a suite with neither or with both, at the start of every run and in `TestEverySuiteDeclaresItsInputs`, so a new suite lands with its declaration.
   - `NeverReused` is only for a suite no profile can confine (a container's daemon reads the checkout outside it, a scan walks the whole module) or whose verdict is not a function of its inputs (a latency measurement).
-- Reuse is per UNIT: a Go package (unit or integration, a tagged pass named `<package>[<tags>]`), a vitest test file, an ERT test file, a suite-wide check (`vet`, `typecheck`), or a whole script or e2e suite.
+- Reuse is per UNIT: a Go package (unit or integration, a tagged pass named `<package>[<tags>]`), a vitest test file, an ERT test file, a suite-wide check (`typecheck`, the e2e suite's `vet`), or a whole script or e2e suite.
+  - A GoModule suite's package owns its own vet verdict: its check unit (`<suite>:<package>:vet`) belongs to the package's unit, and the pass's one vet (`<suite>:vet`) vets only the packages whose units run. A package without test files is a unit of its vet check alone.
   - A unit's inputs are derived by the tools, never kept by hand: a Go package's from `go list -deps -test` (every package its test binary links, their testdata and embedded files, go.mod, go.sum), a vitest file's from its import graph, an ERT file's from what it and the helpers load.
   - A run skips every unit whose inputs an earlier green run on the host passed it on, from any workspace: a unit's key is its inputs' bytes, never a checkout path, branch or workspace.
   - Two inputs are not read by their bytes:
@@ -451,6 +453,18 @@ coverage impact (always none).
     - Evidence (2026-11-20): the merge-queue gate metrics over the 29 merges put the daemon suite at about 920 CPU-s per gate, 637 of it (69%) in daemon:integration units whose ~546 top-level tests nearly each start their own daemon; daemon:integration[integration]#01 used 5.5 CPU-s per wall second.
     - Fix: one canonical process per test process, per AGENTS.md "Integration tests share one canonical process, each case on its own slice"; conversion under way per suite (daemon, webapp, shim).
     - Coverage impact: none; every case keeps its name and assertions, scoped to its own slice.
+
+20. **Build CPU spent on debug information, a re-vetted module, an unpinned program build and a full typecheck.**
+    - Evidence (2026-11-20, one run each, warm, at the build unit's width): linking every daemon test binary cost 88 CPU-s with DWARF and 71 without (`-ldflags=-w`), the daemon program 9.6 and 4.8; `go vet` of all 188 daemon packages cost about 16.3 CPU-s, 94 of them 9.5, 47 of them 4.9; a program build held to one slot used 1.17-1.45 cores in the gates; the webapp's full `tsc --noEmit` cost 19-20 CPU-s, the shim's 16.3-16.9.
+    - Fix: every run links without DWARF unless `-debug-info`; each package's vet belongs to its own reuse unit, so a gate vets only the packages it runs; a program build holds `BuildSlots`, pinned as the module build is; webapp and shim typecheck incrementally with declaration emit, each worktree seeded from the host's newest passing typecheck (`testrun typecheck`). Seeded from another worktree, the webapp's typecheck cost 5.8 CPU-s with nothing changed and 4.9 after a body edit to a file sixteen files import.
+    - Pitfall inside the fix: incremental `tsc` under `--noEmit` keys a file's signature on its text, so a body edit to that file cost 26.1 CPU-s, more than the full check. Declaration emit makes the signature its declarations.
+    - Coverage impact: none; every binary, package and file is still built, vetted and typechecked, and tsc compares every source by the hash of its text.
+
+21. **Every vitest process re-transforming the same modules.**
+    - Evidence (2026-11-20): on vitest 2.1.9 a 48-file webapp batch cost 25-34 CPU-s, about a third of it transforming modules every earlier process of the run had already transformed; the gate's webapp suite cost 269.3 CPU-s and the shim's 197.8 (gate 06af8b3d47e14195, nothing reused).
+    - Fix: vitest 5.1.1 (vite 7.3.8; vite 8 would have replaced the production bundle's Rollup) and its persistent module cache, kept per worktree (`webapp/vite-cache.ts`'s `vitestModuleCacheDir`, the shim's in its own `node_modules`). Each entry is keyed by the module's path and its text's hash, so a confined unit never reads one for a changed source. Measured unit by unit in full `-suite` runs: webapp 176.3 CPU-s, shim 140.3 (cache cold).
+    - Pitfalls the upgrade surfaced, each a fix at its source: a second `vi.spyOn` of the same method returns the spy already installed, so a spy per fixture recursed; a getter spy and a setter spy on one accessor restored the mocked getter for every later file; files that left the root element's attributes or the document's own properties behind failed others once vitest 5 reordered the files (`webapp/test/setup-shared-worker.ts` now starts every test on a bare root element and the document as the environment made it); a module reading an import at its top level inside an import cycle read `undefined` (`src/sidebar/section-classes.ts`).
+    - Coverage impact: none; every test runs with its assertions unchanged.
 
 ## Changes that LOOK faster and are refused
 

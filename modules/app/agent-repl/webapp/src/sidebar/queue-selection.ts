@@ -27,7 +27,8 @@
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
-import { MERGE_QUEUE_SECTION_CLASS, regionLines } from "./band-fit.js";
+import { regionLines } from "./band-fit.js";
+import { MERGE_QUEUE_SECTION_CLASS } from "./section-classes.js";
 import { MERGE_QUEUE_SUBJECT_CLASS } from "./merge-queue-view.js";
 import { scrollerOf, scrollLineAmong } from "./selection-scroll.js";
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/roster"
 )
 
@@ -41,7 +42,7 @@ func TestTheDaemonProgramIsLinkedToTheRunsMockedGit(t *testing.T) {
 	if err != nil || len(specs) != 1 {
 		t.Fatalf("specs = %v, %v", specs, err)
 	}
-	want := []string{"go", "build", "-buildvcs=false", "-ldflags=-X agent-repld/internal/gitclient.gitBinary=/w/programs/git",
+	want := []string{"go", "build", "-buildvcs=false", "-ldflags=-w -X agent-repld/internal/gitclient.gitBinary=/w/programs/git",
 		"-o", "/w/programs/agent-repld", "./cmd/agent-repld"}
 	if !reflect.DeepEqual(specs[0].Argv, want) || specs[0].Dir != "/m/daemon" {
 		t.Fatalf("spec = %v in %s, want %v in /m/daemon", specs[0].Argv, specs[0].Dir, want)
@@ -121,7 +122,7 @@ func TestProgramBuildPutsExtraFlagsBeforeTheOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"go", "build", "-buildvcs=false", "-overlay", "/o.json", "-o", "/w/programs/shim-store", "."}
+	want := []string{"go", "build", "-buildvcs=false", "-ldflags=-w", "-overlay", "/o.json", "-o", "/w/programs/shim-store", "."}
 	if !reflect.DeepEqual(argv, want) || dir != "/m/agent-shim/shim-store" {
 		t.Fatalf("ProgramBuild = %v in %s, want %v", argv, dir, want)
 	}
@@ -142,6 +143,108 @@ func TestProgramUnitsBuildWhatProgramBuildSays(t *testing.T) {
 		}
 		if !reflect.DeepEqual(specs[0].Argv, argv) || specs[0].Dir != dir {
 			t.Errorf("%s: unit %v in %s, ProgramBuild %v in %s", p.Name, specs[0].Argv, specs[0].Dir, argv, dir)
+		}
+	}
+}
+
+func TestProgramBuildLinksDebugInfoOnlyWhenAsked(t *testing.T) {
+	tests := []struct {
+		name      string
+		program   string
+		debugInfo bool
+		want      []string
+	}{
+		{"a program without links drops DWARF", "shim-store", false,
+			[]string{"go", "build", "-buildvcs=false", "-ldflags=-w", "-o", "/w/programs/shim-store", "."}},
+		{"a program without links keeps DWARF on request, with no -ldflags", "shim-store", true,
+			[]string{"go", "build", "-buildvcs=false", "-o", "/w/programs/shim-store", "."}},
+		{"a linked program keeps its links and DWARF on request", "agent-repld", true,
+			[]string{"go", "build", "-buildvcs=false", "-ldflags=-X agent-repld/internal/gitclient.gitBinary=/w/programs/git", "-o", "/w/programs/agent-repld", "./cmd/agent-repld"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			p, _ := roster.LookupProgram(tt.program)
+
+			// Act
+			argv, _, err := ProgramBuild(Layout{Module: "/m", Work: "/w", DebugInfo: tt.debugInfo}, p)
+
+			// Assert
+			if err != nil || !reflect.DeepEqual(argv, tt.want) {
+				t.Fatalf("ProgramBuild = %v, %v; want %v", argv, err, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryLinkInARunTakesItsFlagsFromLinkFlags pins that the run's two kinds
+// of link, a module's test binaries and a roster program, both spell their
+// -ldflags through gobuild.LinkFlags, so neither can drift to a different
+// debug-information default.
+func TestEveryLinkInARunTakesItsFlagsFromLinkFlags(t *testing.T) {
+	for _, debugInfo := range []bool{false, true} {
+		l := Layout{Module: "/m", Work: "/w", Self: "/testrun", DebugInfo: debugInfo}
+		for _, p := range roster.Programs {
+			// Arrange
+			var links []string
+			for _, link := range p.Links {
+				links = append(links, "-X "+link.Var+"=/w/programs/"+link.Program)
+			}
+
+			// Act
+			argv, _, err := ProgramBuild(l, p)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := ldflagsOf(argv), gobuild.LinkFlags(debugInfo, links...); !reflect.DeepEqual(got, want) {
+				t.Errorf("program %s (debug info %v): -ldflags %q, want LinkFlags' %q", p.Name, debugInfo, got, want)
+			}
+		}
+		o := moduleBuild(l, "daemon", "/m/daemon", "", false).Options
+		o.Packages = []string{"a"}
+		args, err := gobuild.GoTestArgs(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := ldflagsOf(args), gobuild.LinkFlags(debugInfo); !reflect.DeepEqual(got, want) {
+			t.Errorf("module build (debug info %v): -ldflags %q, want LinkFlags' %q", debugInfo, got, want)
+		}
+	}
+}
+
+// ldflagsOf is every -ldflags argument of argv.
+func ldflagsOf(argv []string) []string {
+	var flags []string
+	for _, a := range argv {
+		if strings.HasPrefix(a, "-ldflags") {
+			flags = append(flags, a)
+		}
+	}
+	return flags
+}
+
+// TestEveryProgramUnitIsAPinnedBuild pins that a roster program's build unit
+// takes its width and pins from pinnedBuild, as a module build's does, so no
+// build unit holds fewer slots than the cores its go command uses.
+func TestEveryProgramUnitIsAPinnedBuild(t *testing.T) {
+	// Arrange
+	var names []string
+	for _, p := range roster.Programs {
+		names = append(names, p.Name)
+	}
+
+	// Act
+	specs, err := ProgramUnits(Layout{Module: "/m", Work: "/w"}, names, func(p roster.Program) string { return p.Owner })
+
+	// Assert
+	if err != nil || len(specs) != len(names) {
+		t.Fatalf("specs = %v, %v", specs, err)
+	}
+	for _, sp := range specs {
+		if want := pinnedBuild(sp); sp.Slots != want.Slots || !reflect.DeepEqual(sp.Env, want.Env) {
+			t.Errorf("%s holds %d slots pinned by %v, want pinnedBuild's %d pinned by %v", sp.ID, sp.Slots, sp.Env, want.Slots, want.Env)
 		}
 	}
 }

@@ -74,7 +74,15 @@ type TestRunRequest struct {
 	// first unit. `agent-repld test run -dry-run` sends it, so a selection the
 	// planner refuses fails its dry run (2026-11-02: an atomic unit's refusal
 	// passed every dry run and failed only the real one).
-	PlanOnly      bool `protobuf:"varint,6,opt,name=plan_only,json=planOnly,proto3" json:"plan_only,omitempty"`
+	PlanOnly bool `protobuf:"varint,6,opt,name=plan_only,json=planOnly,proto3" json:"plan_only,omitempty"`
+	// Link every Go test binary and every program the run builds with its
+	// DWARF debug information. A run otherwise links them without it
+	// (-ldflags=-w), which costs about a fifth less link CPU; stack traces and
+	// a failure's file:line come from the binary's line table, which both keep,
+	// so only a debugger attached to a run's binary needs this. It is a
+	// temporary debugging measure, never a standing setting: it changes no
+	// verdict, so the run reuses and records passes as any other run does.
+	DebugInfo     bool `protobuf:"varint,7,opt,name=debug_info,json=debugInfo,proto3" json:"debug_info,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -147,6 +155,13 @@ func (x *TestRunRequest) GetNoReuse() bool {
 func (x *TestRunRequest) GetPlanOnly() bool {
 	if x != nil {
 		return x.PlanOnly
+	}
+	return false
+}
+
+func (x *TestRunRequest) GetDebugInfo() bool {
+	if x != nil {
+		return x.DebugInfo
 	}
 	return false
 }
@@ -1348,7 +1363,7 @@ var File_testrun_v1_selection_proto protoreflect.FileDescriptor
 const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\n" +
 	"\x1atestrun/v1/selection.proto\x12\n" +
-	"testrun.v1\"\xd5\x01\n" +
+	"testrun.v1\"\xf4\x01\n" +
 	"\x0eTestRunRequest\x129\n" +
 	"\n" +
 	"selections\x18\x01 \x03(\v2\x19.testrun.v1.TestSelectionR\n" +
@@ -1357,7 +1372,9 @@ const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\x06record\x18\x03 \x01(\bR\x06record\x12\x1c\n" +
 	"\tremeasure\x18\x04 \x01(\bR\tremeasure\x12\x19\n" +
 	"\bno_reuse\x18\x05 \x01(\bR\anoReuse\x12\x1b\n" +
-	"\tplan_only\x18\x06 \x01(\bR\bplanOnly\"\xa3\x03\n" +
+	"\tplan_only\x18\x06 \x01(\bR\bplanOnly\x12\x1d\n" +
+	"\n" +
+	"debug_info\x18\a \x01(\bR\tdebugInfo\"\xa3\x03\n" +
 	"\rTestSelection\x12C\n" +
 	"\n" +
 	"go_package\x18\x01 \x01(\v2\".testrun.v1.TestSelectionGoPackageH\x00R\tgoPackage\x12F\n" +

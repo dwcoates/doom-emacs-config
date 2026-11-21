@@ -14,7 +14,7 @@
 //     and e2e waits missed their bounds in every full run (3 of 3) and in an
 //     e2e-only run; at two, 0 of 4. Two also keeps real parallelism in the
 //     systems under test, which a single P would hide from them;
-//   - vitest runs with --maxWorkers=1 --minWorkers=1;
+//   - vitest runs with --maxWorkers=1;
 //   - Emacs is single-threaded.
 //
 // The one exception is a Script suite the roster gives a width (Slots): its
@@ -55,6 +55,9 @@ type Layout struct {
 	Self string
 	// Coverage adds expensive coverage instrumentation and report units.
 	Coverage bool
+	// DebugInfo links every test binary and program with its DWARF debug
+	// information, which the run otherwise drops (gobuild.LinkFlags).
+	DebugInfo bool
 }
 
 // Split is a splittable suite piece before the planner chunks it.
@@ -104,6 +107,9 @@ type Units struct {
 	// GoBuilds are a Go suite's module builds, already placed in Atomic over
 	// the packages Atomic and Splits run (Finish).
 	GoBuilds []GoBuild
+	// GoVets are a Go suite's module vets, already placed in Atomic over the
+	// packages whose check units Atomic holds (Finish).
+	GoVets []GoVet
 }
 
 // Build turns one suite into units.

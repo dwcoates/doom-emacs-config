@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -38,6 +37,7 @@ import (
 	"agentrepl/logging/hostpower"
 
 	"agentrepl/testrun/internal/cli"
+	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/cputime"
@@ -45,6 +45,7 @@ import (
 	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/gocache"
+	"agentrepl/testrun/internal/govet"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/proctable"
@@ -60,6 +61,7 @@ import (
 	"agentrepl/testrun/internal/seats"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
+	"agentrepl/testrun/internal/typecheck"
 	"agentrepl/testrun/reap"
 	"agentrepl/testrun/roster"
 	"agentrepl/testrun/seatwait"
@@ -99,6 +101,12 @@ func main() {
 		os.Exit(execTestCmd(log, os.Args[2:]))
 	case "check-test":
 		os.Exit(checkTestCmd(log, os.Args[2:]))
+	case "vet-module":
+		os.Exit(vetModuleCmd(log, os.Args[2:]))
+	case "vet-check":
+		os.Exit(vetCheckCmd(log, os.Args[2:]))
+	case "typecheck":
+		os.Exit(typecheckCmd(log, os.Args[2:]))
 	case "redundancy":
 		os.Exit(redundancyCmd(log, os.Args[2:]))
 	case "coverage-baseline":
@@ -721,21 +729,15 @@ func buildTestsCmd(log *run.Log, argv []string) int {
 	return 0
 }
 
-// execGoTest is gobuild.GoTest over the real go command.
+// execGoTest is gobuild.GoTest over the real go command. A package that did
+// not compile exits go test 1; the -json stream says which, and
+// gobuild.Build judges the rest.
 func execGoTest(dir string, args, env []string) ([]byte, []byte, error) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		// A package that did not compile exits go test 1; the -json stream
-		// says which, and gobuild.Build judges the rest.
-		err = nil
-	}
-	return stdout.Bytes(), stderr.Bytes(), err
+	stdout, stderr, _, err := command.Verdict(cmd)
+	return stdout, stderr, err
 }
 
 // stashTestCmd is the module build's -exec (gobuild.Stash): `testrun
@@ -786,6 +788,71 @@ func checkTestCmd(log *run.Log, argv []string) int {
 	}
 	if err := gobuild.Check(argv[0], os.Stdout); err != nil {
 		log.Errorf("check-test %s: %v", argv[0], err)
+		return 1
+	}
+	return 0
+}
+
+// vetModuleCmd is `testrun vet-module`: one module pass's vet, each
+// package's verdict written for its check unit (internal/govet).
+func vetModuleCmd(log *run.Log, argv []string) int {
+	o, err := govet.ParseArgs(argv)
+	if err != nil {
+		log.Errorf("vet-module: %v", err)
+		return 2
+	}
+	res, err := govet.Vet(o, govet.Exec)
+	if err != nil {
+		log.Errorf("vet-module of %d packages in %s: %v", len(o.Packages), o.Module, err)
+		return 1
+	}
+	log.Infof("vet-module: %d of %d packages passed vet in %s", len(res.Passed), len(o.Packages), o.Module)
+	for _, rel := range slices.Sorted(maps.Keys(res.Failed)) {
+		log.Errorf("vet-module: %s did not pass vet; its vet unit fails with:\n%s", rel, res.Failed[rel])
+	}
+	return 0
+}
+
+// vetCheckCmd is `testrun vet-check RESULT`: a package's vet unit, failing
+// with the package's findings when it did not pass the module's vet.
+func vetCheckCmd(log *run.Log, argv []string) int {
+	if len(argv) != 1 {
+		log.Errorf("vet-check: usage: vet-check RESULT, got %q", argv)
+		return 2
+	}
+	if err := govet.Check(argv[0], os.Stdout); err != nil {
+		log.Errorf("vet-check %s: %v", argv[0], err)
+		return 1
+	}
+	return 0
+}
+
+// typecheckCmd is `testrun typecheck -name SUITE -- COMMAND...`: the
+// TypeScript package in the working directory's typecheck, COMMAND, run
+// incrementally from the host's seed (internal/typecheck).
+func typecheckCmd(log *run.Log, argv []string) int {
+	if len(argv) < 4 || argv[0] != "-name" || argv[2] != "--" {
+		log.Errorf("typecheck: usage: typecheck -name SUITE -- COMMAND..., got %q", argv)
+		return 2
+	}
+	name, command := argv[1], argv[3:]
+	pkgDir, err := os.Getwd()
+	if err != nil {
+		log.Errorf("typecheck %s: read the working directory: %v", name, err)
+		return 1
+	}
+	seeds, err := typecheck.DefaultSeedDir()
+	if err != nil {
+		log.Errorf("typecheck %s: %v", name, err)
+		return 1
+	}
+	runCommand := func() error {
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		return cmd.Run()
+	}
+	if err := typecheck.Run(pkgDir, name, seeds, runCommand, log); err != nil {
+		log.Errorf("%v", err)
 		return 1
 	}
 	return 0

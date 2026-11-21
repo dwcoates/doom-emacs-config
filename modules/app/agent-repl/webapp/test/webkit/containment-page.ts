@@ -13,7 +13,7 @@
 import { create, type DescMessage, type Message } from "@bufbuild/protobuf";
 import { FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { mountFeed } from "../../src/feed/feed.js";
-import { createRowRenderers } from "../../src/feed/renderers.js";
+import { createRowRenderers } from "../../src/feed/row-renderers.js";
 import { installPageLogger } from "./page-log";
 import { orderFor } from "../feed-order.js";
 import { harness, openSuccess, page } from "../feed/harness.js";

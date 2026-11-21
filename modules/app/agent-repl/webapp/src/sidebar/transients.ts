@@ -39,7 +39,7 @@ import { createPointerRest } from "../pointer-rest.js";
 import { FOCUS_LEFT_BLUR, type FocusLeft } from "../focus-left.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
 import type { Dropdowns } from "./dropdowns.js";
-import type { RowHover } from "./row-hover.js";
+import type { RowHover } from "./context.js";
 
 /** The class the rail wears while it draws no hover highlight. */
 export const HOVER_SUSPENDED_CLASS = "sb-hover-suspended";

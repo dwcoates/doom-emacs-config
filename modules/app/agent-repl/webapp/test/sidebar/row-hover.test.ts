@@ -1,13 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from "vitest";
 import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js";
-import {
-  HOVER_CLOSE_GRACE_MS,
-  HOVER_OPEN_DELAY_MS,
-  createRowHover,
-  type DrawnRow,
-  type RowHover,
-} from "../../src/sidebar/row-hover.js";
+import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS, createRowHover } from "../../src/sidebar/row-hover.js";
+import type { DrawnRow, RowHover } from "../../src/sidebar/context.js";
 import { drawRosterFamily, drawRosterRow } from "../../src/sidebar/row.js";
 import type { PopupMirror } from "../../src/host/sidebar-popups.js";
 import { log } from "../../src/log.js";

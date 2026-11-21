@@ -45,13 +45,8 @@ import { guardMalformed } from "../rpc/guard.js";
 import { selectedText } from "../selection.js";
 import { unreachableArm } from "../rpc/strict.js";
 import { selectFeedRow } from "./select-feed-row.js";
-import {
-  ANSWER_PROMPT_ATTRIBUTE,
-  ENTRY_ATTRIBUTE,
-  ENTRY_CLASS,
-  ENTRY_LABEL_CLASS,
-  LABEL_LINK_CLASS,
-} from "./entries.js";
+import { ANSWER_PROMPT_ATTRIBUTE, LABEL_LINK_CLASS } from "./entries.js";
+import { ENTRY_ATTRIBUTE, ENTRY_CLASS, ENTRY_LABEL_CLASS } from "./entry-tree.js";
 import { TREE_CLASS, TREE_LABEL_ATTRIBUTE, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE } from "../metaprompt-tree.js";
 import { boxesOverLine, lengthInLine, nodeBoxedAt, xInLine, type LengthResolver } from "./subtree-box.js";
 import { feedRowId, feedRowOf } from "./row-id.js";

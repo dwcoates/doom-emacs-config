@@ -17,6 +17,7 @@ import (
 
 	"agentrepl/testrun/gofunc"
 	"agentrepl/testrun/internal/gotest"
+	"agentrepl/testrun/internal/govet"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
@@ -35,33 +36,34 @@ import (
 // package did not compile.
 //
 // `go test` would also vet the package. A compiled binary is not vetted, so
-// each module gets one vet unit running exactly the analyzers `go test` runs
-// (goTestVetFlags), and nothing `go test` checked is lost.
-
-// goTestVetFlags is the analyzer subset `go test` vets with (`go help test`).
-var goTestVetFlags = []string{
-	"-atomic", "-bool", "-buildtags", "-directive", "-errorsas",
-	"-ifaceassert", "-nilfunc", "-printf", "-stringintconv", "-tests",
-}
+// every package is vetted with exactly the analyzers `go test` runs
+// (govet.Flags), and nothing `go test` checked is lost: a GoModule suite's
+// packages each by their own check unit over the pass's one vet (GoVet),
+// every other Go suite's module whole by its vet unit (goVets).
 
 // goVet is a Go module's vet unit: exactly the analyzers `go test` would have
 // run over every package of the module in dir, which the compiled test
 // binaries never run.
 func goVet(suite, dir string) run.Spec {
-	return spec(suite+":vet", suite, dir, append(append([]string{"go", "vet"}, goTestVetFlags...), "./..."))
+	return spec(suite+":vet", suite, dir, append(append([]string{"go", "vet"}, govet.Flags...), "./..."))
 }
 
 // goVetTagged is a vet unit over pattern under one build tag, exactly the
 // analyzers goVet runs.
 func goVetTagged(suite, dir, tag, pattern string) run.Spec {
 	return spec(suite+":vet["+tag+"]", suite, dir,
-		append(append([]string{"go", "vet", "-tags", tag}, goTestVetFlags...), pattern))
+		append(append([]string{"go", "vet", "-tags", tag}, govet.Flags...), pattern))
 }
 
-// goVets is a Go suite's vet units: the module's own, and one per VetTags tag
-// over the whole module.
+// goVets is a Go suite's vet units: the module's own, and goTaggedVets'.
 func goVets(s roster.Suite, dir string) []run.Spec {
-	vets := []run.Spec{goVet(s.Name, dir)}
+	return append([]run.Spec{goVet(s.Name, dir)}, goTaggedVets(s, dir)...)
+}
+
+// goTaggedVets is one vet unit per VetTags tag over the whole module: the
+// files of a tag no unit compiles have no package unit to own their vet.
+func goTaggedVets(s roster.Suite, dir string) []run.Spec {
+	var vets []run.Spec
 	for _, tag := range s.VetTags {
 		vets = append(vets, goVetTagged(s.Name, dir, tag, "./..."))
 	}
@@ -143,11 +145,15 @@ func (p *goPkg) prebuild(dir string, before ...string) run.Spec {
 // group is the package's chunk group, which is also its unit ID prefix.
 // A tagged package's group names its tags, so it never collides with the
 // same directory's untagged pass.
-func (p goPkg) group() string {
-	if p.Tags != "" {
-		return p.Suite + ":" + p.Rel + "[" + p.Tags + "]"
+func (p goPkg) group() string { return packageGroup(p.Suite, p.Rel, p.Tags) }
+
+// packageGroup is the unit ID prefix of package rel of suite under a pass
+// (tags): "<suite>:<rel>", with "[<tags>]" under a tagged pass.
+func packageGroup(suite, rel, tags string) string {
+	if tags != "" {
+		return suite + ":" + rel + "[" + tags + "]"
 	}
-	return p.Suite + ":" + p.Rel
+	return suite + ":" + rel
 }
 
 // CompiledUnitID is the unit of a package whose test files hold no test:

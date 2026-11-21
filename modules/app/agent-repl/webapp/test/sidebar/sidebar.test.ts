@@ -2,7 +2,7 @@
 import { createSidebarNotices } from "../../src/sidebar/notices.js";
 import { createLocalFailures } from "../../src/failure/local.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { SELECTION_ANIMATIONS, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
@@ -1688,11 +1688,22 @@ function layOpenSection(host: HTMLElement): { scrollTop(): number } {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
     return this.classList.contains("sb-sections") ? 2 * LINE : 0;
   });
-  vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockImplementation(function (this: HTMLElement) {
-    return offsets.get(this) ?? 0;
+  // ONE ACCESSOR, removed when the test ends. `scrollTop` is jsdom's on
+  // Element.prototype, so a getter spy here defines an own property on
+  // HTMLElement.prototype, and a setter spy after it saves THAT property as
+  // the original: restoring the two put the mocked getter back for every later
+  // file in the worker (band-fit.test.ts read every scrollTop as 0, 2026-11-20).
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return offsets.get(this) ?? 0;
+    },
+    set(this: HTMLElement, v: number) {
+      offsets.set(this, Math.max(0, Math.min(v, 4 * LINE)));
+    },
   });
-  vi.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation(function (this: HTMLElement, v: number) {
-    offsets.set(this, Math.max(0, Math.min(v, 4 * LINE)));
+  onTestFinished(() => {
+    delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop;
   });
   return {
     scrollTop: () => {

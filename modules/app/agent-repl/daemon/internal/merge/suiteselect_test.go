@@ -63,6 +63,16 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  append(append([]string(nil), scriptHarnessSuites...), "byte-compile", "repo-scans"),
 		},
 		{
+			name:  "the vite server every vite config imports selects the webapp's and the shim's suites besides bin/'s",
+			paths: []string{"modules/app/agent-repl/bin/vite-server.mjs"},
+			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans", "webapp", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e"),
+		},
+		{
+			name:  "the vite server's declarations select what the server does",
+			paths: []string{"modules/app/agent-repl/bin/vite-server.d.mts"},
+			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans", "webapp", "build-frontend-harness", "shim", "sidecar", "e2e-kit", "e2e"),
+		},
+		{
 			name:  "several regions union their selections",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/daemon/main.go"},
 			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e-kit", "e2e", "repo-scans"},

@@ -112,7 +112,7 @@ export function readMentionTargets(targets: WorkspaceMentionTargets): Targets {
     const path = `WorkspaceMentionTargets.targets[${i}]`;
     const name = requireMessage(target.name, `${path}.name`).text;
     const workspace = requireMessage(target.workspace, `${path}.workspace`);
-    const standing = requireCase(target.standing, `${path}.standing`).case as Standing;
+    const standing = requireCase(target.standing, `${path}.standing`).case;
     if (name === "") throw new MalformedView(`${path}.name.text`, "a mention target names nothing");
     if (workspace.id === "") throw new MalformedView(`${path}.workspace.id`, "a mention target names no workspace");
     if (byName.has(name)) throw new MalformedView(`${path}.name.text`, `the name ${JSON.stringify(name)} is served twice`);

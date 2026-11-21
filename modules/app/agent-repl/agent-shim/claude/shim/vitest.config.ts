@@ -2,25 +2,24 @@
 // run at background priority (see that script and require-background.mjs).
 import "../../../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
-import { fileURLToPath } from "node:url";
+import { agentReplViteServer } from "../../../bin/vite-server.mjs";
+import { protobufRuntimeAliases } from "./protobuf-runtime-aliases.js";
 
 // The generated protobuf TS stubs live at proto/gen/ts, outside this
 // package. Vite's dev-server fs guard blocks files outside the project
-// root by default; allow the agent-repl subtree so the relatively-imported
-// stubs load. Runtime bare-import resolution (@bufbuild/protobuf) still
-// comes from this package's node_modules, which vite anchors at the root.
-const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
+// root by default, so the server serves the agent-repl module
+// (bin/vite-server.mjs) and the relatively-imported stubs load. Their bare `@bufbuild/protobuf` imports resolve to this
+// package's own copy through the runtime aliases (protobuf-runtime-aliases.ts).
 
 export default defineConfig({
-  server: { fs: { allow: [agentReplRoot] } },
+  resolve: { alias: protobufRuntimeAliases },
+  server: agentReplViteServer,
   test: {
     // WORKER COUNT IS CAPPED. Vitest defaults to one worker per CPU, which is
     // a claim on the whole machine; measured on a 16-CPU host that is 2-5 GiB
     // for one run, and several concurrent runs took the box to a load average
     // of 253 and cost a whole Emacs layer run its evidence. This cap keeps one
-    // run's vitest from claiming the machine. minWorkers travels with it
-    // because vitest refuses a max below the default min.
-    minWorkers: 1,
+    // run's vitest from claiming the machine.
     maxWorkers: "50%",
     // The vendor guard keeps every test offline. The log setup installs a
     // deterministic inherited sink for canonical JSON logging assertions.
@@ -72,8 +71,17 @@ export default defineConfig({
       // whole type-only modules (src/proto.ts and its siblings) with 100% of
       // nothing, which istanbul drops for carrying no executable statement.
       provider: "istanbul",
-      all: true,
-      include: ["src/**/*.ts"],
+      // A CONFINED CHUNK REPORTS ONLY WHAT IT LOADED. A coverage run cuts the
+      // suite into chunks, each confined to its own files' inputs
+      // (testrun's AGENT_REPL_COVERAGE_LOADED_ONLY), and with an `include`
+      // set vitest also reads every included file the chunk never loaded, to
+      // report it at zero: reads outside the chunk's inputs. So a chunk runs
+      // without `include`, and the run's one merge (`--merge-reports`, which
+      // no confinement holds) applies it, adding the files no chunk loaded
+      // and, through `excludeAfterRemap`, keeping only what `include` and
+      // `exclude` name.
+      include: process.env.AGENT_REPL_COVERAGE_LOADED_ONLY === "1" ? undefined : ["src/**/*.ts"],
+      excludeAfterRemap: true,
       exclude: [
         "src/**/*.d.ts",
         "src/**/__generated__/**",

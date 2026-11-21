@@ -312,7 +312,7 @@ async function runBoot(rec: BootRecord): Promise<void> {
       return { dispose: vi.fn() };
     }),
   }));
-  vi.doMock("../src/feed/renderers.js", () => ({
+  vi.doMock("../src/feed/row-renderers.js", () => ({
     createRowRenderers: vi.fn(() => ({})),
   }));
   vi.doMock("../src/footer/footer.js", () => ({
@@ -418,14 +418,14 @@ async function teardownPage(): Promise<void> {
  * THE FILE'S COLD BOOT IS PAID ONCE, IN A `beforeAll`, UNDER ITS OWN BOUND.
  *
  * The first `import("../src/main.js")` in a worker is the first time the
- * composition root's graph is fetched and compiled: vite-node pulls each module
+ * composition root's graph is fetched and compiled: vitest's module runner pulls each module
  * over an rpc to the main vitest process, one `await` per import, and V8
  * compiles each on first evaluation. PROFILED (a `--cpu-prof` of both
  * processes): the boot itself settles in ~2ms and neither awaits anything
  * serially nor arms a real timer; the cold cost is the worker IDLE on those
  * module-fetch round trips, plus protobuf-es decoding the generated
  * descriptors and jsdom parsing the imported stylesheet. Every later import in
- * the file re-evaluates the same graph from vite-node's transform cache. So
+ * the file re-evaluates the same graph from the runner's transform cache. So
  * the cold import is ~10x a warm one, and at load it is the round trips that
  * stretch: MEASURED, cold 0.65-1.3s idle, up to 3.15s over 20 runs at a load
  * average of ~112 (`yes` x16 plus two looping unit suites), and 5.59s once on

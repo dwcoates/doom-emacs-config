@@ -15,7 +15,7 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { pathedFamilies } from "./row.js";
+import { pathedFamilies } from "./family.js";
 
 /** One open row and its message path. */
 export interface PathedOpenRow {

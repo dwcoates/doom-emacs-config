@@ -10,7 +10,7 @@
  * how many it has. The children counted are the row's direct ones: its own
  * repository's and every repository block's rows (`RowKin`).
  */
-import type { RowFamily, RowKin } from "./row.js";
+import type { RowFamily, RowKin } from "./family.js";
 import { openKin } from "./entries.js";
 import { type StatusCount, showWorkspaceCountParenthetical, statusCountOf } from "./open-count.js";
 

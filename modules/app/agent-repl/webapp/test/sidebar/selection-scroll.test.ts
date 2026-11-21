@@ -8,6 +8,7 @@
  * computes it.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { overrideComputedStyle } from "../computed-style.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import {
   contextSpan,
@@ -81,10 +82,7 @@ function band({
   Object.defineProperty(region, "clientHeight", { configurable: true, get: () => shown * ROW });
   Object.defineProperty(region, "clientTop", { configurable: true, value: 0 });
   region.getBoundingClientRect = () => rect(0, shown * ROW);
-  const computed = window.getComputedStyle.bind(window);
-  vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) =>
-    el === region ? ({ scrollPaddingTop: padTop, scrollPaddingBottom: padBottom } as CSSStyleDeclaration) : computed(el, pseudo),
-  );
+  overrideComputedStyle(region, { scrollPaddingTop: padTop, scrollPaddingBottom: padBottom } as CSSStyleDeclaration);
   for (let i = 0; i < lines; i += 1) {
     const ws = document.createElement("div");
     ws.className = "ws";

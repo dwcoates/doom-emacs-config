@@ -14,13 +14,13 @@ import { COMPOSER_EDITED_EVENT } from "../../src/feed/composer-entry.js";
 import { SELECTABLE_ATTRIBUTE, SELECTION_GOVERNED_ATTRIBUTE } from "../../src/feed/bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_CLASS } from "../../src/metaprompt-tree.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { linkAnswers, entryTreeHtml } from "../../src/feed/entries.js";
+import { linkAnswers } from "../../src/feed/entries.js";
+import { entryTreeHtml } from "../../src/feed/entry-tree.js";
 import { create } from "@bufbuild/protobuf";
 import { FeedResponseAnswerSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { columnMeasure } from "../../src/metaprompt-tree.js";
 import { inline } from "../../src/markdown.js";
-import { promptProse } from "../prose.js";
-import { COLUMN_PX, TEN_PX_COLUMNS, boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelOf, labelledTree, lineOf } from "./tree-fixture.js";
+import { COLUMN_PX, TEN_PX_COLUMNS, boxedBy, drawnRow, exampleSubtreeWidth, entryTreeOf, exampleTree, labelOf, labelledTree, lineOf } from "./tree-fixture.js";
 
 const HOVER_BOX = { className: BRANCH_HOVER_CLASS, leftProperty: HOVER_LEFT_PROPERTY, rightProperty: HOVER_RIGHT_PROPERTY };
 const REFERENCE_BOX = {
@@ -421,12 +421,10 @@ const answeredTree = labelledTree([
 function answeredFeed(entries = "3.1 - yes"): { response: HTMLElement; prompt: HTMLElement } {
   const row = response({}, answeredTree);
   linkAnswers(row, [create(FeedResponseAnswerSchema, { label: "3.1", prompt: { value: "p1" } })]);
-  const block = promptProse(entries).blocks[0]?.block;
-  if (block?.case !== "entries") throw new Error("the prompt draws no entries");
   const prompt = document.createElement("article");
   prompt.setAttribute("data-feed-row", "p1");
   prompt.toggleAttribute(SELECTION_GOVERNED_ATTRIBUTE, true);
-  prompt.innerHTML = `<div class="${TREE_CLASS}">${entryTreeHtml(block.value, inline, columnMeasure(80))}</div>`;
+  prompt.innerHTML = `<div class="${TREE_CLASS}">${entryTreeHtml(entryTreeOf(entries), inline, columnMeasure(80))}</div>`;
   document.body.append(prompt);
   return { response: row, prompt };
 }

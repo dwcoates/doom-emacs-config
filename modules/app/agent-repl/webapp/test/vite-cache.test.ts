@@ -1,7 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { viteCacheDir } from "../vite-cache";
+import { viteCacheDir, vitestModuleCacheDir } from "../vite-cache";
+import { agentReplViteServer } from "../../bin/vite-server.mjs";
 import buildConfig from "../vite.config";
 import unitConfig from "../vitest.config";
 import integrationConfig from "../vitest.integration.config";
@@ -43,7 +44,9 @@ describe("the shared vite cache directory", () => {
 // tree bit first, but the sandbox runs the unit and integration projects and
 // `vite build` against the same linked `node_modules`, so one config left on
 // the default is one more way to break the container.
-const configs: { name: string; config: { cacheDir?: string } }[] = [
+type Config = { cacheDir?: string; server?: unknown; test?: { fsModuleCachePath?: string } };
+
+const configs: { name: string; config: Config }[] = [
   { name: "vite.config.ts", config: buildConfig },
   { name: "vitest.config.ts", config: unitConfig },
   { name: "vitest.integration.config.ts", config: integrationConfig },
@@ -54,5 +57,24 @@ const configs: { name: string; config: { cacheDir?: string } }[] = [
 describe.each(configs)("$name", ({ config }) => {
   it("sets its cacheDir to the shared one rather than taking vite's node_modules default", () => {
     expect(config.cacheDir).toBe(viteCacheDir);
+  });
+});
+
+describe("the shared vitest module cache directory", () => {
+  it("is inside the webapp's vite cache, outside node_modules", () => {
+    expect(path.relative(webappDir, vitestModuleCacheDir)).toBe(path.join(".vite-cache", "vitest-modules"));
+  });
+});
+
+describe.each(configs)("$name", ({ config }) => {
+  it("lets the server serve the agent-repl module, where the stubs and images live", () => {
+    expect(config.server).toBe(agentReplViteServer);
+  });
+});
+
+// The build config runs no tests, so it has no module cache.
+describe.each(configs.filter((c) => c.name !== "vite.config.ts"))("$name", ({ config }) => {
+  it("keeps vitest's transformed modules in the shared module cache rather than node_modules", () => {
+    expect(config.test?.fsModuleCachePath).toBe(vitestModuleCacheDir);
   });
 });

@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { codeOf, withoutBlockComments } from "./source-text.js";
+import { codeOf, functionBody, withoutBlockComments } from "./source-text.js";
 import { filesUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,9 +42,37 @@ describe("codeOf", () => {
   });
 });
 
+describe("functionBody", () => {
+  it.each([
+    { name: "cuts a function from its keyword to its closing brace", name_: "f", want: "function f() {\n  g();" },
+    { name: "cuts an exported function the same way", name_: "h", want: "function h(x: number) {\n  return x;" },
+  ])("$name", ({ name_, want }) => {
+    // Arrange
+    const code = "function f() {\n  g();\n}\nexport function h(x: number) {\n  return x;\n}\n";
+    // Act
+    const body = functionBody(code, name_);
+    // Assert
+    expect(body).toBe(want);
+  });
+
+  it("finds no function whose name merely opens another's", () => {
+    // Arrange
+    const code = "function fg() {\n}\n";
+    // Act + Assert
+    expect(() => functionBody(code, "f")).toThrow("the code declares no function f");
+  });
+
+  it("refuses a function with no closing brace at the start of a line", () => {
+    // Arrange
+    const code = "function f() { g(); }";
+    // Act + Assert
+    expect(() => functionBody(code, "f")).toThrow("the function f has no closing brace at the start of a line");
+  });
+});
+
 describe("the call sites", () => {
 
-  it("strip comments, scan stylesheet rules and find media blocks only through the shared readers", () => {
+  it("strip comments, scan stylesheet rules, find media blocks and cut function bodies only through the shared readers", () => {
     // Arrange: the hand-rolled shapes the shared readers replaced.
     const shapes = [
       String.raw`/\/\*[\s\S]*?\*\//g`,
@@ -52,6 +80,7 @@ describe("the call sites", () => {
       String.raw`/([^{}]+)\{([^{}]*)\}/g`,
       'indexOf("@media',
       'split("@media',
+      String.raw`indexOf("\n}\n"`,
     ];
     const owners = new Set([
       path.join(here, "source-text.ts"),

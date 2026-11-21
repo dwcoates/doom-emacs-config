@@ -18,9 +18,10 @@
  * an ordinary word ("runner", "test") that a source tree rightly contains.
  *
  * WHAT IS SKIPPED. docs/ except docs/USER-GUIDE.md (dated reports are a
- * historical record and are not rewritten), node_modules, dist, coverage and
- * .git directories, binary files, and a skill's `lineage_root:` line (the GNS
- * address a skill was first published under, kept as published).
+ * historical record and are not rewritten), node_modules, dist, coverage,
+ * .vite-cache, .typecheck-cache and .git directories, binary files, and a
+ * skill's `lineage_root:` line (the GNS address a skill was first published
+ * under, kept as published).
  *
  * Usage:
  *   bin/check-personal-values.mjs [ROOT]
@@ -37,7 +38,10 @@ import { fileURLToPath } from "node:url";
 import { scrubPersonal } from "../agent-shim/claude/shim/scripts/capture/anonymize.mjs";
 import { envList, personalValuesFromHost } from "../agent-shim/claude/shim/scripts/capture/capture.mjs";
 
-const SKIPPED_DIRS = new Set([".git", "node_modules", "dist", "coverage"]);
+// Build output, never written by hand: vite's and vitest's caches
+// (webapp/vite-cache.ts) and the incremental typecheck's state
+// (testrun/internal/typecheck), which record the paths they were built at.
+const SKIPPED_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".vite-cache", ".typecheck-cache"]);
 
 /** Every file under root the check reads, as paths relative to root. */
 function filesUnder(root, rel = "") {

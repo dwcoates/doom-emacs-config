@@ -18,27 +18,25 @@
 
 import { writeFileSync } from "node:fs";
 
-/** Every test under TASKS, its suites' names before its own, into OUT. */
-function collectTests(file, tasks, path, out) {
-  for (const task of tasks ?? []) {
-    const name = [...path, task.name];
-    if (task.type === "suite") {
-      collectTests(file, task.tasks, name, out);
-      continue;
-    }
-    const state = task.result?.state ?? task.mode;
-    out.push({
-      file,
-      name: name.join(" > "),
-      state,
-      seconds: (task.result?.duration ?? 0) / 1000,
-      start: (task.result?.startTime ?? 0) / 1000,
-    });
+/** A test case's state as the runner names it (testtimes.ParseVitest). */
+function stateOf(testCase) {
+  const state = testCase.result().state;
+  switch (state) {
+    case "passed":
+      return "pass";
+    case "failed":
+      return "fail";
+    case "skipped":
+      return testCase.options.mode === "todo" ? "todo" : "skip";
+    case "pending":
+      // A test still pending when the run ended never ran.
+      return "skip";
   }
+  throw new Error(`items-reporter: ${testCase.fullName} ended in the unknown state ${state}`);
 }
 
 export default class ItemsReporter {
-  onFinished(files) {
+  onTestRunEnd(testModules) {
     const target = process.env.AGENT_REPL_TESTRUN_ITEMS;
     if (!target) {
       throw new Error("items-reporter: AGENT_REPL_TESTRUN_ITEMS names no output file");
@@ -48,18 +46,23 @@ export default class ItemsReporter {
       throw new Error("items-reporter: AGENT_REPL_TESTRUN_TESTS names no output file");
     }
     const out = {};
-    for (const f of files ?? []) {
-      const ms =
-        (f.prepareDuration ?? 0) +
-        (f.environmentLoad ?? 0) +
-        (f.setupDuration ?? 0) +
-        (f.collectDuration ?? 0) +
-        (f.result?.duration ?? 0);
-      out[f.filepath] = ms / 1000;
+    const tests = [];
+    for (const m of testModules ?? []) {
+      const d = m.diagnostic();
+      out[m.moduleId] =
+        (d.prepareDuration + d.environmentSetupDuration + d.setupDuration + d.collectDuration + d.duration) / 1000;
+      for (const testCase of m.children.allTests()) {
+        const t = testCase.diagnostic();
+        tests.push({
+          file: m.moduleId,
+          name: testCase.fullName,
+          state: stateOf(testCase),
+          seconds: (t?.duration ?? 0) / 1000,
+          start: (t?.startTime ?? 0) / 1000,
+        });
+      }
     }
     writeFileSync(target, JSON.stringify(out));
-    const tests = [];
-    for (const f of files ?? []) collectTests(f.filepath, f.tasks, [], tests);
     writeFileSync(testsTarget, JSON.stringify(tests));
   }
 }

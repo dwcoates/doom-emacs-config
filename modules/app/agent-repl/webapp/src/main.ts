@@ -44,7 +44,7 @@ import "@fontsource-variable/source-serif-4/opsz-italic.css";
 import "katex/dist/katex.min.css";
 import { createTicker, DEFAULT_TICK_MS } from "./clock.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
-import { createRowRenderers } from "./feed/renderers.js";
+import { createRowRenderers } from "./feed/row-renderers.js";
 import { mountFeed } from "./feed/feed.js";
 import { mountChat } from "./chat/chat.js";
 import { landChatAtEnd } from "./scroll.js";
@@ -192,7 +192,8 @@ export async function boot(): Promise<void> {
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
-    installPagePresenceLog();
+    const presenceLog = installPagePresenceLog();
+    stopAtPageTeardown(() => presenceLog.stop());
     // THE PAGE STATES ITS OWN SIZE (page-census.ts): the webhost holding it
     // cannot read a cross-origin page's document.
     stopAtPageTeardown(installPageCensus(document, pageAfter));
@@ -241,7 +242,8 @@ export async function boot(): Promise<void> {
     opened = ctx;
     // The daemon declares this workspace open (and the editor shows its tab)
     // only once this page has drawn, which only the page can say.
-    installPageDrawnReport(ctx, document);
+    const drawnReport = installPageDrawnReport(ctx, document);
+    stopAtPageTeardown(() => drawnReport.dispose());
     // THE PAGE'S OWN LATENCIES (switch-latency.ts) go to the daemon's always-on
     // metrics: its boot from here to its conversation drawn, and every switch
     // to it Emacs stamped.

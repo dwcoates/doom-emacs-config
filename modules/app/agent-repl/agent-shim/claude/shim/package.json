@@ -20,7 +20,7 @@
     "prelint": "npm run ensure-deps",
     "lint": "eslint .",
     "pretypecheck": "npm run ensure-deps",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit false --declaration --emitDeclarationOnly --outDir .typecheck-cache/declarations --incremental --tsBuildInfoFile .typecheck-cache/tsbuildinfo",
     "knip": "knip --no-progress",
     "presmoke": "../../../bin/background.sh npm run ensure-deps",
     "smoke": "../../../bin/background.sh node scripts/run-smoke.mjs",
@@ -35,10 +35,10 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@stryker-mutator/core": "10.0.0",
-    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@stryker-mutator/core": "10.1.1",
+    "@stryker-mutator/vitest-runner": "10.1.1",
     "@types/node": "^22.0.0",
-    "@vitest/coverage-istanbul": "2.1.9",
+    "@vitest/coverage-istanbul": "5.1.1",
     "c8": "10.1.3",
     "esbuild": "^0.21.5",
     "eslint": "10.10.0",
@@ -46,6 +46,7 @@
     "knip": "5.88.1",
     "typescript": "^5.6.0",
     "typescript-eslint": "8.69.0",
-    "vitest": "^2.1.0"
+    "vite": "^7.3.8",
+    "vitest": "^5.1.1"
   }
 }

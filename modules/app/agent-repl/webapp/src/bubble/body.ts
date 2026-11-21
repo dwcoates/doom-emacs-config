@@ -32,7 +32,7 @@ import {
 } from "../metaprompt-tree.js";
 import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
-import { entryTreeHtml } from "../feed/entries.js";
+import { entryTreeHtml } from "../feed/entry-tree.js";
 import { RESPONSE_RUN_CLASS } from "../feed/response-run.js";
 import { applyTextReveal, clearTextReveal, fullTextOf, type RevealWindow } from "./text-reveal.js";
 import { FEED_TEXT_SCALE_PROPERTY, feedTextScaleToMeasure, onFeedTextScaleApplied } from "../feed/feed-text-scale.js";

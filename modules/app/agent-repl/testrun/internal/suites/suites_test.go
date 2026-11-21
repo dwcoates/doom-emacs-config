@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -712,6 +713,13 @@ func TestVitestCoverageModes(t *testing.T) {
 			if chunkCoverage != coverage || report != coverage {
 				t.Fatalf("coverage=%v: chunk coverage=%v report=%v argv=%v", coverage, chunkCoverage, report, chunk.Argv)
 			}
+			loadedOnly := false
+			for _, e := range chunk.Env {
+				loadedOnly = loadedOnly || e == CoverageLoadedOnlyEnv+"=1"
+			}
+			if loadedOnly != coverage {
+				t.Fatalf("coverage=%v: chunk env %v, want %s=1 exactly in a coverage run", coverage, chunk.Env, CoverageLoadedOnlyEnv)
+			}
 		})
 	}
 }
@@ -722,14 +730,14 @@ func TestVitestChecksRunInThePackageOnTheCoresTheyUse(t *testing.T) {
 		argv  string
 		width int
 	}{
-		{id: "webapp:typecheck", argv: "npm run typecheck", width: TypecheckSlots},
+		{id: "webapp:typecheck", argv: "/testrun typecheck -name webapp -- npm run typecheck", width: TypecheckSlots},
 		{id: "webapp:knip", argv: "npm run knip", width: KnipSlots},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
 			// Arrange
 			dir := t.TempDir()
-			l := Layout{Module: dir, Work: t.TempDir()}
+			l := Layout{Module: dir, Work: t.TempDir(), Self: "/testrun"}
 
 			// Act
 			u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))
@@ -924,14 +932,13 @@ func TestParseGoTestItemsReadsPastALineLongerThanAnyScanBuffer(t *testing.T) {
 	}
 }
 
-func TestEveryGoModuleKindIsVetted(t *testing.T) {
-	// Arrange: the same module built as an ordinary Go module and as the e2e
-	// suite; each must carry exactly goVet's unit, since a compiled test
-	// binary vets nothing.
+func TestTheE2EModuleIsVettedWhole(t *testing.T) {
+	// Arrange: the e2e suite must carry exactly goVet's unit, since a
+	// compiled test binary vets nothing. A GoModule suite vets each package
+	// by its own check instead (TestAModulePassVetsEachPackageByItsOwnCheck).
 	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
 	build := map[string]func(Layout, roster.Suite, string, []string) (Units, error){
-		"go module": goModuleUnitsForPackages,
-		"e2e":       e2eUnitsForPackages,
+		"e2e": e2eUnitsForPackages,
 	}
 	for kind, units := range build {
 		t.Run(kind, func(t *testing.T) {
@@ -972,8 +979,10 @@ func TestGoVetTaggedRunsTheSameAnalyzersUnderItsTag(t *testing.T) {
 
 func TestEveryVetTagGetsItsOwnVetUnit(t *testing.T) {
 	build := map[string]func(Layout, roster.Suite, string, []string) (Units, error){
-		"go module": goModuleUnitsForPackages,
-		"e2e":       e2eUnitsForPackages,
+		"go module": func(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
+			return goModuleUnitsForPackages(l, s, dir, pkgs)
+		},
+		"e2e": e2eUnitsForPackages,
 	}
 	for kind, units := range build {
 		t.Run(kind, func(t *testing.T) {
@@ -994,6 +1003,7 @@ func TestEveryVetTagGetsItsOwnVetUnit(t *testing.T) {
 					got = append(got, a.ID)
 				}
 			}
+			sort.Strings(got)
 			if want := []string{"m:vet", "m:vet[perf]", "m:vet[realtest]"}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("vet units = %v, want %v", got, want)
 			}
@@ -1001,10 +1011,10 @@ func TestEveryVetTagGetsItsOwnVetUnit(t *testing.T) {
 	}
 }
 
-func TestTheIntegrationVetSharesGoVetTagged(t *testing.T) {
+func TestTheIntegrationPassVetsEachPackageUnderItsTag(t *testing.T) {
 	// Arrange
 	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
-	l := Layout{Module: module, Work: t.TempDir()}
+	l := Layout{Module: module, Work: t.TempDir(), Self: "/testrun"}
 	s := roster.Suite{Name: "m", IntegrationTags: "integration", IntegrationPackages: "./p"}
 
 	// Act
@@ -1014,9 +1024,16 @@ func TestTheIntegrationVetSharesGoVetTagged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := goVetTagged("m", module, "integration", "./p")
-	if len(u.Atomic) == 0 || !reflect.DeepEqual(u.Atomic[0].Argv, want.Argv) || u.Atomic[0].ID != want.ID {
-		t.Fatalf("integration vet = %+v, want %+v", u.Atomic, want)
+	v := moduleVet(l, "m", module, "integration")
+	byID := map[string]run.Spec{}
+	for _, a := range u.Atomic {
+		byID[a.ID] = a
+	}
+	if vet, ok := byID["m:vet[integration]"]; !ok || !reflect.DeepEqual(vet.Argv, v.Spec([]string{"p"}).Argv) {
+		t.Fatalf("integration vet = %+v, want %v", vet, v.Spec([]string{"p"}).Argv)
+	}
+	if check, ok := byID["m:p[integration]:vet"]; !ok || !reflect.DeepEqual(check.Deps, []string{"m:vet[integration]"}) {
+		t.Fatalf("p's integration vet check = %+v, want one waiting for the pass's vet", check)
 	}
 }
 
@@ -1065,12 +1082,13 @@ func TestParseGoList(t *testing.T) {
 	tests := []struct {
 		name    string
 		out     string
-		want    []string
+		want    goPackages
 		wantErr string
 	}{
-		{name: "packages relative and sorted", out: "/m/z\n/m\n\n/m/a/b\n", want: []string{".", "a/b", "z"}},
-		{name: "nothing tested", out: "\n", want: nil},
-		{name: "a package outside the module fails", out: "/m/a\n/elsewhere\n", wantErr: "/elsewhere is not under /m"},
+		{name: "packages relative and sorted", out: "/m/z\ttested\n/m\ttested\n\n/m/a/b\ttested\n", want: goPackages{Tested: []string{".", "a/b", "z"}}},
+		{name: "untested packages apart", out: "/m/q\n/m/a\ttested\n/m/b\n", want: goPackages{Tested: []string{"a"}, Untested: []string{"b", "q"}}},
+		{name: "nothing listed", out: "\n", want: goPackages{}},
+		{name: "a package outside the module fails", out: "/m/a\ttested\n/elsewhere\n", wantErr: "/elsewhere is not under /m"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1155,9 +1173,12 @@ func TestGoIntegrationUnitsBuildAndVetUnderTheTags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vet := strings.Join(u.Atomic[0].Argv, " ")
-	build := strings.Join(u.Atomic[1].Argv, " ")
-	if !strings.Contains(vet, "go vet -tags integration") || !strings.HasSuffix(vet, "./p") {
+	byID := map[string]string{}
+	for _, a := range u.Atomic {
+		byID[a.ID] = strings.Join(a.Argv, " ")
+	}
+	vet, build := byID[ModuleVetID("daemon", "integration")], byID[ModuleBuildID("daemon", "integration")]
+	if !strings.Contains(vet, "-tags integration") || !strings.HasSuffix(vet, "-- p") {
 		t.Fatalf("vet = %q, want it under the tags over the integration packages", vet)
 	}
 	if !strings.Contains(build, "-tags integration") {
@@ -1197,7 +1218,7 @@ func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
 		want     []string
 	}{
 		{name: "a coverage run", coverage: true, want: []string{
-			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json --coverage.all=false",
+			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json",
 			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]%test%integration%a.integration.test.ts#00",
 		}},
 		{name: "an ordinary run", coverage: false},
@@ -1640,5 +1661,29 @@ func TestAGoChunksTestsAreGivenTheLogRecordsTheirHarnessCounted(t *testing.T) {
 	}
 	if !tests[0].HasLogRecords || tests[0].LogRecords != 5 || tests[1].HasLogRecords {
 		t.Fatalf("tests = %+v, want TestA with its 5 records and TestB uncounted", tests)
+	}
+}
+
+// TestEveryVitestConfigReportsOnlyLoadedFilesInACoverageChunk pins the
+// contract CoverageLoadedOnlyEnv names: each vitest suite's unit config reads
+// it and leaves coverage.include unset when it is set.
+func TestEveryVitestConfigReportsOnlyLoadedFilesInACoverageChunk(t *testing.T) {
+	for _, config := range []string{"webapp/vitest.config.ts", "agent-shim/claude/shim/vitest.config.ts"} {
+		// Arrange
+		path := filepath.Join("..", "..", "..", config)
+
+		// Act
+		b, err := os.ReadFile(path)
+
+		// Assert
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "process.env." + CoverageLoadedOnlyEnv + ` === "1" ? undefined : `; !strings.Contains(string(b), want) {
+			t.Errorf("%s does not leave coverage.include unset under %s", config, CoverageLoadedOnlyEnv)
+		}
+		if !strings.Contains(string(b), "excludeAfterRemap: true") {
+			t.Errorf("%s does not filter the merged coverage by include (excludeAfterRemap)", config)
+		}
 	}
 }

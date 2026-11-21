@@ -146,7 +146,7 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []Fil
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
 			"npx", "vitest", "run", "--config", s.IntegrationConfig,
-			"--maxWorkers=1", "--minWorkers=1",
+			"--maxWorkers=1",
 			"--reporter=default", "--reporter=" + reporter,
 		}
 		if l.Coverage {
@@ -156,7 +156,7 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []Fil
 				// shared across files reports nothing for the later ones
 				// (webapp/vitest.config.ts's coverage note).
 				"--isolate",
-				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json", "--coverage.all=false",
+				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json",
 				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), tag),
 			)
 		}
@@ -164,7 +164,14 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []Fil
 			argv = append(argv, "-t", VitestNamePattern(names))
 		}
 		testsOut := filepath.Join(work, "items", tag+".tests.json")
-		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut, testtimes.VitestTestsEnv+"="+testsOut)
+		env := []string{VitestItemsEnv + "=" + itemsOut, testtimes.VitestTestsEnv + "=" + testsOut}
+		if l.Coverage {
+			// A chunk is confined to its own files' inputs, so it reports
+			// only what it loaded; the merge adds the rest (the package's
+			// vitest.config.ts coverage note).
+			env = append(env, CoverageLoadedOnlyEnv+"=1")
+		}
+		sp := spec(id, s.Name, dir, append(argv, items...), env...)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
 		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
 		return sp
@@ -185,7 +192,9 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 			return Units{}, fmt.Errorf("suites: create %s: %w", d, err)
 		}
 	}
-	typecheck := spec(s.Name+":typecheck", s.Name, dir, []string{"npm", "run", "typecheck"})
+	// The typecheck is incremental, seeded from the host's newest passing
+	// typecheck of the package (internal/typecheck).
+	typecheck := spec(s.Name+":typecheck", s.Name, dir, []string{l.Self, "typecheck", "-name", s.Name, "--", "npm", "run", "typecheck"})
 	// tsc cannot be pinned to one core: its compiler thread and node's GC and
 	// worker threads measured 1.5-1.75 cores on average across four full
 	// runs (webapp and shim alike), so the unit holds the two slots it uses.
@@ -205,7 +214,7 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
 			"npx", "vitest", "run",
-			"--maxWorkers=1", "--minWorkers=1",
+			"--maxWorkers=1",
 			"--reporter=default", "--reporter=" + reporter,
 		}
 		if l.Coverage {
@@ -215,17 +224,25 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 				"--reporter=blob",
 				"--outputFile.blob="+filepath.Join(blobs, tag+".json"),
 			)
-			// ONE chunk carries the config's `all: true` pass. The merge sums
-			// the counts, so every other chunk writes only its loaded files.
+			// ONE chunk writes the config's reports; every other chunk writes
+			// only the JSON the merge reads. Each reports only the files it
+			// loaded (CoverageLoadedOnlyEnv), and the merge adds the rest.
 			if id != allChunk {
-				argv = append(argv, "--coverage.all=false", "--coverage.reporter=json")
+				argv = append(argv, "--coverage.reporter=json")
 			}
 		}
 		if len(names) > 0 {
 			argv = append(argv, "-t", VitestNamePattern(names))
 		}
 		testsOut := filepath.Join(work, "items", tag+".tests.json")
-		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut, testtimes.VitestTestsEnv+"="+testsOut)
+		env := []string{VitestItemsEnv + "=" + itemsOut, testtimes.VitestTestsEnv + "=" + testsOut}
+		if l.Coverage {
+			// A chunk is confined to its own files' inputs, so it reports
+			// only what it loaded; the merge adds the rest (the package's
+			// vitest.config.ts coverage note).
+			env = append(env, CoverageLoadedOnlyEnv+"=1")
+		}
+		sp := spec(id, s.Name, dir, append(argv, items...), env...)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
 		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
 		return sp
@@ -312,6 +329,12 @@ func VitestNamePattern(names []string) string {
 
 // VitestItemsEnv names the file testrun/vitest/items-reporter.mjs writes.
 const VitestItemsEnv = "AGENT_REPL_TESTRUN_ITEMS"
+
+// CoverageLoadedOnlyEnv tells a vitest suite's config that its chunk reports
+// coverage of only the files it loaded: a coverage chunk is confined to its
+// own files' inputs, so its config leaves `coverage.include` unset, and the
+// suite's one coverage merge applies it.
+const CoverageLoadedOnlyEnv = "AGENT_REPL_COVERAGE_LOADED_ONLY"
 
 // ParseVitestItems reads one chunk's items-reporter output: each test file's
 // whole cost to its chunk, keyed by its path relative to the package.

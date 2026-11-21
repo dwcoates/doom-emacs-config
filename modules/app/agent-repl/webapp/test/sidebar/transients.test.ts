@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js";
-import { createRowHover, type RowHover } from "../../src/sidebar/row-hover.js";
+import { createRowHover } from "../../src/sidebar/row-hover.js";
+import type { RowHover } from "../../src/sidebar/context.js";
 import { HOVER_SUSPENDED_CLASS, installTransients, type Transients } from "../../src/sidebar/transients.js";
 import { log } from "../../src/log.js";
 import { createListeners } from "../../src/listeners.js";

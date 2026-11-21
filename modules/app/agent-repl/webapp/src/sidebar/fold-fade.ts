@@ -22,6 +22,7 @@ import { drawnRowsOf } from "./drawn-rows.js";
 import { log } from "../log.js";
 import { placeOneShot } from "../animation-delays.js";
 import { SURFACED_ROW_CLASS } from "./row.js";
+import type { FoldFade } from "./context.js";
 
 /** How long a row a fold stops drawing takes to fade away, in milliseconds. */
 export const FOLD_FADE_MS = 5000;
@@ -35,11 +36,6 @@ export const FOLD_FADE_DURATION_PROPERTY = "--fold-fade-duration";
 /** The custom property a fading row is handed minus the time already faded. */
 export const FOLD_FADE_DELAY_PROPERTY = "--fold-fade-delay";
 
-/** The rail's fold fades. */
-export interface FoldFade {
-  /** ROW was just drawn for workspace ID, SURFACED or not: start, join or end its fade. */
-  apply(id: string, row: HTMLElement, surfaced: boolean): void;
-}
 
 /**
  * The fold fades of the rail drawn under ROOT, on the wall clock NOW, each

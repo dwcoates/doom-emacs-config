@@ -42,4 +42,57 @@ describe("the shared worker's page", () => {
     // Assert
     expect(document.body.children).toHaveLength(0);
   });
+
+  it("leaves a test free to leave a range selected", () => {
+    // Arrange / Act
+    const p = document.createElement("p");
+    p.textContent = "selected";
+    document.body.append(p);
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    document.getSelection()?.addRange(range);
+
+    // Assert
+    expect(document.getSelection()?.rangeCount).toBe(1);
+  });
+
+  it("hands the next test no selection", () => {
+    // Assert
+    expect(document.getSelection()?.rangeCount).toBe(0);
+  });
+
+  it("leaves a test free to mark the root element", () => {
+    // Arrange / Act
+    document.documentElement.setAttribute("data-conversation-drawn", "page");
+    document.documentElement.classList.add("dragging");
+
+    // Assert
+    expect(document.documentElement.getAttributeNames()).toHaveLength(2);
+  });
+
+  it("hands the next test a bare root element", () => {
+    // Assert
+    expect(document.documentElement.getAttributeNames()).toEqual([]);
+  });
+
+  let environmentView: (Window & typeof globalThis) | null = null;
+
+  it("leaves a test free to define and redefine properties on the document", () => {
+    // Arrange
+    environmentView = document.defaultView;
+
+    // Act
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    Object.defineProperty(document, "defaultView", { configurable: true, value: null });
+
+    // Assert
+    expect([document.visibilityState, document.defaultView]).toEqual(["hidden", null]);
+  });
+
+  it("hands the next test the document as the environment made it", () => {
+    // Assert
+    expect(Object.getOwnPropertyDescriptor(document, "visibilityState")).toBeUndefined();
+    expect(document.visibilityState).toBe("visible");
+    expect(document.defaultView).toBe(environmentView);
+  });
 });
