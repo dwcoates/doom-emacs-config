@@ -222,14 +222,6 @@ func (s *server) composeHostWorkspace(
 	}
 	view.InitialPrompt = initial
 
-	// THE COMPOSER DRAFT THE DAEMON KEEPS is state too (composer_draft.go):
-	// absent while none is kept.
-	draft, ok := s.hostComposerDraft(ctx, log, ws)
-	if !ok {
-		return nil, false
-	}
-	view.ComposerDraft = draft
-
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)
 	switch {
 	case live:

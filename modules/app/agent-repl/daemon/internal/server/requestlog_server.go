@@ -165,13 +165,6 @@ func (s *requestLoggingServer) FoldMergeBubble(
 	return serveUnary(s, ctx, "FoldMergeBubble", req, s.server.FoldMergeBubble)
 }
 
-func (s *requestLoggingServer) ReportComposerDraft(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.ReportComposerDraftRequest],
-) (*connect.Response[agentreplv1.ReportComposerDraftResponse], error) {
-	return serveUnary(s, ctx, "ReportComposerDraft", req, s.server.ReportComposerDraft)
-}
-
 func (s *requestLoggingServer) ReportComposerEntries(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportComposerEntriesRequest],
