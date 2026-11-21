@@ -1145,3 +1145,53 @@ func TestEveryTakeBackOfARecordGoesThroughTakeBackResume(t *testing.T) {
 		t.Fatalf("a taken-back merge is drawn waiting at %v, want only in takeBackResume", draws)
 	}
 }
+
+func TestTakingBackAWaitingSyncMergeAsksForTheParkOfItsSession(t *testing.T) {
+	tests := []struct {
+		name string
+		take func(h *harness) error
+	}{
+		{name: "the boot", take: func(h *harness) error { return h.o.Recover(context.Background()) }},
+		{name: "a takeover", take: func(h *harness) error { return h.o.AdoptWorkspace(context.Background(), theWorkspace) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a sync merge waiting in line across a restart.
+			h := newHarness(t)
+			enqueue(t, h)
+			entry, _ := h.entryOf(theWorkspace)
+			h.restart(t)
+			h.parksAsked()
+
+			// Act.
+			if err := tt.take(h); err != nil {
+				t.Fatalf("taking the merges back: %v", err)
+			}
+
+			// Assert.
+			parks := h.parksAsked()
+			if len(parks) != 1 || parks[0] != (parkAsk{ws: theWorkspace, repo: h.repoKey(), ledger: entry.Ledger}) {
+				t.Fatalf("parks = %+v, want one scoped to the entry %+v", parks, entry)
+			}
+		})
+	}
+}
+
+func TestRecoverAsksNoParkForAnAdmittedMerge(t *testing.T) {
+	// Arrange: a merge admitted when the daemon died runs on its session.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.git.clean = true
+	h.parksAsked()
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	if parks := h.parksAsked(); len(parks) != 0 {
+		t.Fatalf("parks = %+v, want none for an admitted merge", parks)
+	}
+}

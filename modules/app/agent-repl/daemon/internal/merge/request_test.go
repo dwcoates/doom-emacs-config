@@ -860,3 +860,77 @@ func TestBehindNotInLineNamesTheMergeAskedForAndWhatIsInLine(t *testing.T) {
 		t.Fatalf("behindNotInLine = %+v, want placement_behind_not_in_line naming nowhere and what is in line", refusal)
 	}
 }
+
+func TestASyncMergePutInLineAsksForTheParkOfItsSessionOnce(t *testing.T) {
+	// Arrange: the agent's finish waits for its turn to end.
+	h := newHarness(t)
+	h.inFlight = "turn-asking"
+	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if parks := h.parksAsked(); len(parks) != 0 {
+		t.Fatalf("parks = %+v before the requesting turn ended, want none", parks)
+	}
+
+	// Act.
+	h.runWait(t)
+
+	// Assert.
+	entry, _ := h.entryOf(theWorkspace)
+	parks := h.parksAsked()
+	if len(parks) != 1 || parks[0] != (parkAsk{ws: theWorkspace, repo: h.repoKey(), ledger: entry.Ledger}) || entry.Ledger == "" {
+		t.Fatalf("parks = %+v, want one scoped to the entry %+v", parks, entry)
+	}
+	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.request",
+		Message: "asked for the park of the workspace's session while its merge waits in line"})
+	if !found {
+		t.Fatalf("no INFO record of the park's ask: %+v", h.logs.Records())
+	}
+	if rec.Context["workspace"] != string(theWorkspace) || rec.Context["repo"] != string(h.repoKey()) || rec.Context["merge_entry"] != string(entry.Ledger) {
+		t.Fatalf("record context = %v, want the workspace and the queue entry", rec.Context)
+	}
+}
+
+func TestAUsersSyncMergeAsksForTheParkAtOnceUnderTheTurnInFlight(t *testing.T) {
+	// Arrange: the user's own finish is put in line at once; the drain parks
+	// the session when the turn ends (drain.Controller.MergeQueuedDown).
+	h := newHarness(t)
+	h.inFlight = "turn-running"
+
+	// Act.
+	if err := h.request(t, ownBranch, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert.
+	if parks := h.parksAsked(); len(parks) != 1 || parks[0].ws != theWorkspace {
+		t.Fatalf("parks = %+v, want one for the workspace", parks)
+	}
+}
+
+func TestParkQueuedAsksOnlyForAnOwnBranchMergeWithNoPick(t *testing.T) {
+	tests := []struct {
+		name   string
+		source wsm.MergeSource
+		want   int
+	}{
+		{name: "an own-branch merge", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, want: 1},
+		{name: "a merge workspace's merge with a pick", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Pick: "fix it"}},
+		{name: "another workspace's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace}},
+		{name: "a named branch's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "feature"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.o.parkQueued(context.Background(), "daemon.merge.request", h.repoKey(), tt.source, theWorkspace, "ledger-1")
+
+			// Assert.
+			if parks := h.parksAsked(); len(parks) != tt.want {
+				t.Fatalf("parks = %+v, want %d", parks, tt.want)
+			}
+		})
+	}
+}

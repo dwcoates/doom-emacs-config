@@ -832,6 +832,10 @@ type Deps struct {
 	// brings up retires the gate, which resumes the workspace's merge
 	// (ColdGateRetired). A workspace with no gate standing is left as it is.
 	CompactColdGate func(ctx context.Context, ws ids.WorkspaceID) error
+	// ParkQueued asks for the park of a workspace's session the moment its
+	// own branch's merge is put in line in REPO under LEDGER
+	// (drain.Controller.MergeQueuedDown; parkQueued). It returns at once.
+	ParkQueued func(ws ids.WorkspaceID, repo wsm.RepoKey, ledger wsm.LeaseID)
 	// PauseAfterCapture is a TEST-ONLY seam: when set, a run blocks in it
 	// immediately after the displaced turn was captured, which is the one
 	// window a test cannot otherwise reach (the merge's own next submission,
