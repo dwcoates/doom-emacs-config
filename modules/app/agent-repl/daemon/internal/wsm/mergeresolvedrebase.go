@@ -87,12 +87,12 @@ func decodeResolvedRebase(row string, tip, head, turn sql.NullString) (*Resolved
 // that is resolving no conflicts of its own rebase.
 var errResolvedRebaseRefused = errors.New("wsm: only a merge resolving its own rebase's conflicts records a resolved rebase")
 
-// resolvesConflicts reports whether an entry in STATE, stepped aside for
+// ResolvesConflicts reports whether an entry in STATE, stepped aside for
 // ASIDE, may be resolving its own rebase's conflicts: the merge at work
 // (resolving in place, before any step aside), or one stepped aside for its
 // conflicts, from the head or from its waiting place. A merge waiting in
 // line runs a git-only rebase, which prompts nothing.
-func resolvesConflicts(state MergeQueueState, aside MergeAside) bool {
+func ResolvesConflicts(state MergeQueueState, aside MergeAside) bool {
 	switch {
 	case state == MergeAdmitted && aside == MergeAsideNone:
 		return true
@@ -129,7 +129,7 @@ func (s *store) RecordResolvedRebase(ctx context.Context, repo RepoKey, id Works
 		if err := tx.QueryRowContext(ctx, `SELECT aside FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).Scan(&aside); err != nil {
 			return err
 		}
-		if !resolvesConflicts(state, MergeAside(aside)) {
+		if !ResolvesConflicts(state, MergeAside(aside)) {
 			return fmt.Errorf("%w: workspace %s in repo %q is %s, stepped aside for %s", errResolvedRebaseRefused, id, key, state, MergeAside(aside))
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET resolved_tip = ?, resolved_branch_head = ?, resolved_turn = ?

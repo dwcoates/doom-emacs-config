@@ -106,11 +106,11 @@ func TestResolvesConflicts(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := resolvesConflicts(tc.state, tc.aside)
+			got := ResolvesConflicts(tc.state, tc.aside)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("resolvesConflicts(%s, %s) = %v, want %v", tc.state, tc.aside, got, tc.want)
+				t.Fatalf("ResolvesConflicts(%s, %s) = %v, want %v", tc.state, tc.aside, got, tc.want)
 			}
 		})
 	}

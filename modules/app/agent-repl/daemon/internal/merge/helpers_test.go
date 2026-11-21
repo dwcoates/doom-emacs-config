@@ -1391,9 +1391,7 @@ func (f *fakeDB) RecordResolvedRebase(_ context.Context, repo wsm.RepoKey, id id
 		if entry.Workspace != id {
 			continue
 		}
-		resolving := (entry.State == wsm.MergeAdmitted && entry.Aside == wsm.MergeAsideNone) ||
-			(entry.State == wsm.MergeRemediating && (entry.Aside == wsm.MergeAsideConflicts || entry.Aside == wsm.MergeAsideWaitingConflicts))
-		if !resolving {
+		if !wsm.ResolvesConflicts(entry.State, entry.Aside) {
 			return fmt.Errorf("record a resolved rebase on %s while %s, aside for %s", id, entry.State, entry.Aside)
 		}
 		f.queues[repo][i].Resolved = &resolved
