@@ -124,7 +124,9 @@ func TestLauncherPostSurfacesEveryRefusal(t *testing.T) {
 
 func TestLauncherPostFailsWhenTheLauncherCannotBeReached(t *testing.T) {
 	// Arrange
-	dial := func(context.Context, string) (net.Conn, error) { return nil, errors.New("connect: no such file or directory") }
+	dial := func(context.Context, string) (net.Conn, error) {
+		return nil, errors.New("connect: no such file or directory")
+	}
 	l := newLauncher("/sock/launcher.sock", time.Minute, dlog.NewTestLogger(), dial)
 	made := false
 

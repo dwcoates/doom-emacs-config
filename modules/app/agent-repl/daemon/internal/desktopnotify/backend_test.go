@@ -498,7 +498,9 @@ func TestEveryProgramRunGoesThroughRunWithin(t *testing.T) {
 		substr string
 		want   []string
 	}{
-		{substr: "context.WithTimeout(", want: []string{"backend.go"}},
+		// launcher.go bounds one socket exchange with the launcher, which is no
+		// program run: the launcher is the one resident program, already running.
+		{substr: "context.WithTimeout(", want: []string{"backend.go", "launcher.go"}},
 		{substr: "runner.Run(", want: []string{"backend.go"}},
 	}
 	for _, tc := range cases {

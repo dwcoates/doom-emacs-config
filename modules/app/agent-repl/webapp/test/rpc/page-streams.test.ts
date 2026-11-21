@@ -1574,9 +1574,6 @@ describe("the page's connection budget", () => {
       // than exempted.
       "runTests",
       "runRedundancy",
-      // The Zettel notifier app's banner stream (macOS): the app holds it,
-      // and no page has any business opening it.
-      "watchDesktopBanners",
     ];
 
     // Act.
