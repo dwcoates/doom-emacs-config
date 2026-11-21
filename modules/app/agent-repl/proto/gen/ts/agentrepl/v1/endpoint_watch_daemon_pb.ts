@@ -33,7 +33,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_daemon.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_daemon: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGFlbW9uLnByb3RvEgxhZ2VudHJlcGwudjEihAEKEldhdGNoRGFlbW9uUmVxdWVzdBIvCgVlbWFjcxgBIAEoCzIeLmFnZW50cmVwbC52MS5XYXRjaERhZW1vbkVtYWNzSAASMwoHd2VidmlldxgCIAEoCzIgLmFnZW50cmVwbC52MS5XYXRjaERhZW1vbldlYnZpZXdIAEIICgZjbGllbnQiwAEKEFdhdGNoRGFlbW9uRW1hY3MSEwoLZWxpc3BfYnVpbGQYASABKAkSKAoFZm9jdXMYAiABKAsyGS5hZ2VudHJlcGwudjEuRWRpdG9yRm9jdXMSLgoIaW5zdGFuY2UYAyABKAsyHC5hZ2VudHJlcGwudjEuRWRpdG9ySW5zdGFuY2USMQoHcHJvY2VzcxgEIAEoCzIbLmFnZW50cmVwbC52MS5FZGl0b3JQcm9jZXNzSACIAQFCCgoIX3Byb2Nlc3MiHwoORWRpdG9ySW5zdGFuY2USDQoFdmFsdWUYASABKAkiHAoNRWRpdG9yUHJvY2VzcxILCgNwaWQYASABKAUiFAoSV2F0Y2hEYWVtb25XZWJ2aWV3It0FChNXYXRjaERhZW1vblJlc3BvbnNlEkMKEnNodXRkb3duX2Fubm91bmNlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkFubm91bmNlZEgAEj0KD2RyYWluX3NjaGVkdWxlZBgCIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpblNjaGVkdWxlZEgAEj0KD2RyYWluX2NhbmNlbGxlZBgDIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpbkNhbmNlbGxlZEgAEkQKEW11dGF0aW9uX3Byb2dyZXNzGAQgASgLMicuYWdlbnRyZXBsLnYxLldvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3NIABI3CgxyZWxvYWRfZWxpc3AYBSABKAsyHy5hZ2VudHJlcGwudjEuRGFlbW9uUmVsb2FkRWxpc3BIABIyCgZlbmRpbmcYBiABKAsyIC5hZ2VudHJlcGwudjEuRGFlbW9uU3RyZWFtRW5kaW5nSAASPQoPZmF1bHRzX3N0YW5kaW5nGAcgASgLMiIuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0c1N0YW5kaW5nSAASPAoPcGVyc2lzdGVudF93aWZpGAggASgLMiEuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpU3RhdGVIABI3CgtuZXdzX2RpZ2VzdBgJIAEoCzIgLmFnZW50cmVwbC52MS5OZXdzRGlnZXN0U3RhbmRpbmdIABI7Cg5yZWxvYWRfd2ViaG9zdBgLIAEoCzIhLmFnZW50cmVwbC52MS5EYWVtb25SZWxvYWRXZWJob3N0SAASRgoUbmV3X3RocmVhZF9yZXF1ZXN0ZWQYDCABKAsyJi5hZ2VudHJlcGwudjEuRGFlbW9uTmV3VGhyZWFkUmVxdWVzdGVkSABCBgoEcHVzaEoECAoQC1IHc3RhcnR1cCJ/ChJOZXdzRGlnZXN0U3RhbmRpbmcSLwoFc2hvd24YASABKAsyHi5mcm9udGVuZC52MS5OZXdzRGlnZXN0T3ZlcmxheUgAEiwKBG5vbmUYAiABKAsyHC5hZ2VudHJlcGwudjEuTmV3c0RpZ2VzdE5vbmVIAEIKCghzdGFuZGluZyIQCg5OZXdzRGlnZXN0Tm9uZSJJChREYWVtb25GYXVsdHNTdGFuZGluZxIxCgZmYXVsdHMYASADKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uU3RhbmRpbmdGYXVsdCJ1ChNEYWVtb25TdGFuZGluZ0ZhdWx0EhAKCGZhdWx0X2lkGAEgASgJEgwKBGxpbmUYAiABKAkSKAoFZmF1bHQYAyABKAsyGS5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHQSFAoMb3BlbmVkX2F0X21zGAQgASgDIjcKEURhZW1vblJlbG9hZEVsaXNwEhMKC21vZHVsZV9yb290GAEgASgJEg0KBWJ1aWxkGAIgASgJIiQKE0RhZW1vblJlbG9hZFdlYmhvc3QSDQoFYnVpbGQYASABKAkinwEKF0RhZW1vblNodXRkb3duQW5ub3VuY2VkEhQKB2FkZHJlc3MYASABKAlIAIgBARIwCgVjYXVzZRgCIAEoCzIhLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkNhdXNlEhoKEmV4cGVjdGVkX291dGFnZV9tcxgDIAEoAxIUCgxtaW50ZWRfYXRfbXMYBCABKANCCgoIX2FkZHJlc3Mi7AEKE0RhZW1vblNodXRkb3duQ2F1c2USSgoSc2VsZl9tZXJnZV9yb2xsb3V0GAEgASgLMiwuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duU2VsZk1lcmdlUm9sbG91dEgAEkUKD3NjaGVkdWxlZF9kcmFpbhgCIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93blNjaGVkdWxlZERyYWluSAASOgoJaW1tZWRpYXRlGAMgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duSW1tZWRpYXRlSABCBgoEa2luZCIgCh5EYWVtb25TaHV0ZG93blNlbGZNZXJnZVJvbGxvdXQiSQocRGFlbW9uU2h1dGRvd25TY2hlZHVsZWREcmFpbhIpCgZyZWFzb24YASABKAsyGS5hZ2VudHJlcGwudjEuRHJhaW5SZWFzb24iRAoXRGFlbW9uU2h1dGRvd25JbW1lZGlhdGUSKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIlAKFERhZW1vbkRyYWluU2NoZWR1bGVkEg0KBWF0X21zGAEgASgDEikKBnJlYXNvbhgCIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiIWChREYWVtb25EcmFpbkNhbmNlbGxlZCIaChhEYWVtb25OZXdUaHJlYWRSZXF1ZXN0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_news_digest, file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_endpoint_daemon_health, file_agentrepl_v1_drain_reason, file_agentrepl_v1_editor_focus, file_agentrepl_v1_persistent_wifi, file_agentrepl_v1_workspace_mutation_progress]);
+  fileDesc("CihhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGFlbW9uLnByb3RvEgxhZ2VudHJlcGwudjEihAEKEldhdGNoRGFlbW9uUmVxdWVzdBIvCgVlbWFjcxgBIAEoCzIeLmFnZW50cmVwbC52MS5XYXRjaERhZW1vbkVtYWNzSAASMwoHd2VidmlldxgCIAEoCzIgLmFnZW50cmVwbC52MS5XYXRjaERhZW1vbldlYnZpZXdIAEIICgZjbGllbnQiwAEKEFdhdGNoRGFlbW9uRW1hY3MSEwoLZWxpc3BfYnVpbGQYASABKAkSKAoFZm9jdXMYAiABKAsyGS5hZ2VudHJlcGwudjEuRWRpdG9yRm9jdXMSLgoIaW5zdGFuY2UYAyABKAsyHC5hZ2VudHJlcGwudjEuRWRpdG9ySW5zdGFuY2USMQoHcHJvY2VzcxgEIAEoCzIbLmFnZW50cmVwbC52MS5FZGl0b3JQcm9jZXNzSACIAQFCCgoIX3Byb2Nlc3MiHwoORWRpdG9ySW5zdGFuY2USDQoFdmFsdWUYASABKAkiHAoNRWRpdG9yUHJvY2VzcxILCgNwaWQYASABKAUiFAoSV2F0Y2hEYWVtb25XZWJ2aWV3IpgGChNXYXRjaERhZW1vblJlc3BvbnNlEkMKEnNodXRkb3duX2Fubm91bmNlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkFubm91bmNlZEgAEj0KD2RyYWluX3NjaGVkdWxlZBgCIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpblNjaGVkdWxlZEgAEj0KD2RyYWluX2NhbmNlbGxlZBgDIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpbkNhbmNlbGxlZEgAEkQKEW11dGF0aW9uX3Byb2dyZXNzGAQgASgLMicuYWdlbnRyZXBsLnYxLldvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3NIABI3CgxyZWxvYWRfZWxpc3AYBSABKAsyHy5hZ2VudHJlcGwudjEuRGFlbW9uUmVsb2FkRWxpc3BIABI5Cg1lbGlzcF9jdXJyZW50GA0gASgLMiAuYWdlbnRyZXBsLnYxLkRhZW1vbkVsaXNwQ3VycmVudEgAEjIKBmVuZGluZxgGIAEoCzIgLmFnZW50cmVwbC52MS5EYWVtb25TdHJlYW1FbmRpbmdIABI9Cg9mYXVsdHNfc3RhbmRpbmcYByABKAsyIi5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHRzU3RhbmRpbmdIABI8Cg9wZXJzaXN0ZW50X3dpZmkYCCABKAsyIS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlTdGF0ZUgAEjcKC25ld3NfZGlnZXN0GAkgASgLMiAuYWdlbnRyZXBsLnYxLk5ld3NEaWdlc3RTdGFuZGluZ0gAEjsKDnJlbG9hZF93ZWJob3N0GAsgASgLMiEuYWdlbnRyZXBsLnYxLkRhZW1vblJlbG9hZFdlYmhvc3RIABJGChRuZXdfdGhyZWFkX3JlcXVlc3RlZBgMIAEoCzImLmFnZW50cmVwbC52MS5EYWVtb25OZXdUaHJlYWRSZXF1ZXN0ZWRIAEIGCgRwdXNoSgQIChALUgdzdGFydHVwIn8KEk5ld3NEaWdlc3RTdGFuZGluZxIvCgVzaG93bhgBIAEoCzIeLmZyb250ZW5kLnYxLk5ld3NEaWdlc3RPdmVybGF5SAASLAoEbm9uZRgCIAEoCzIcLmFnZW50cmVwbC52MS5OZXdzRGlnZXN0Tm9uZUgAQgoKCHN0YW5kaW5nIhAKDk5ld3NEaWdlc3ROb25lIkkKFERhZW1vbkZhdWx0c1N0YW5kaW5nEjEKBmZhdWx0cxgBIAMoCzIhLmFnZW50cmVwbC52MS5EYWVtb25TdGFuZGluZ0ZhdWx0InUKE0RhZW1vblN0YW5kaW5nRmF1bHQSEAoIZmF1bHRfaWQYASABKAkSDAoEbGluZRgCIAEoCRIoCgVmYXVsdBgDIAEoCzIZLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdBIUCgxvcGVuZWRfYXRfbXMYBCABKAMiNwoRRGFlbW9uUmVsb2FkRWxpc3ASEwoLbW9kdWxlX3Jvb3QYASABKAkSDQoFYnVpbGQYAiABKAkiIwoSRGFlbW9uRWxpc3BDdXJyZW50Eg0KBWJ1aWxkGAEgASgJIiQKE0RhZW1vblJlbG9hZFdlYmhvc3QSDQoFYnVpbGQYASABKAkinwEKF0RhZW1vblNodXRkb3duQW5ub3VuY2VkEhQKB2FkZHJlc3MYASABKAlIAIgBARIwCgVjYXVzZRgCIAEoCzIhLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkNhdXNlEhoKEmV4cGVjdGVkX291dGFnZV9tcxgDIAEoAxIUCgxtaW50ZWRfYXRfbXMYBCABKANCCgoIX2FkZHJlc3Mi7AEKE0RhZW1vblNodXRkb3duQ2F1c2USSgoSc2VsZl9tZXJnZV9yb2xsb3V0GAEgASgLMiwuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duU2VsZk1lcmdlUm9sbG91dEgAEkUKD3NjaGVkdWxlZF9kcmFpbhgCIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93blNjaGVkdWxlZERyYWluSAASOgoJaW1tZWRpYXRlGAMgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duSW1tZWRpYXRlSABCBgoEa2luZCIgCh5EYWVtb25TaHV0ZG93blNlbGZNZXJnZVJvbGxvdXQiSQocRGFlbW9uU2h1dGRvd25TY2hlZHVsZWREcmFpbhIpCgZyZWFzb24YASABKAsyGS5hZ2VudHJlcGwudjEuRHJhaW5SZWFzb24iRAoXRGFlbW9uU2h1dGRvd25JbW1lZGlhdGUSKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIlAKFERhZW1vbkRyYWluU2NoZWR1bGVkEg0KBWF0X21zGAEgASgDEikKBnJlYXNvbhgCIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiIWChREYWVtb25EcmFpbkNhbmNlbGxlZCIaChhEYWVtb25OZXdUaHJlYWRSZXF1ZXN0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_news_digest, file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_endpoint_daemon_health, file_agentrepl_v1_drain_reason, file_agentrepl_v1_editor_focus, file_agentrepl_v1_persistent_wifi, file_agentrepl_v1_workspace_mutation_progress]);
 
 /**
  * The stream is daemon-scoped, so there is nothing to address. It is held by
@@ -250,16 +250,40 @@ export type WatchDaemonResponse = Message<"agentrepl.v1.WatchDaemonResponse"> & 
     case: "mutationProgress";
   } | {
     /**
-     * A DEPLOY FOUND THIS EMACS ON OLDER ELISP: hot-load the module set, in
-     * config.el's load order, from the named root. Sent ONLY on an Emacs
-     * stream whose elisp_build is not the checkout's — never on a webview's —
-     * and never replayed to a late subscriber: a stream opened later states
-     * its own elisp_build, and a deploy that runs after it compares that.
+     * THIS EMACS RUNS OLDER ELISP THAN THE CHECKOUT'S: hot-load the module
+     * set, in config.el's load order, from the named root. Sent ONLY on an
+     * Emacs stream — never on a webview's — and never replayed to a late
+     * subscriber. It is sent at two moments, decided by one comparison of
+     * the stream's elisp_build with the checkout's:
+     *
+     *   * AS THE STREAM'S VERDICT, its first frame, when the stream connects
+     *     on an older build. It is then the stream's ONLY frame: the daemon
+     *     ends the stream after it, so no frame of a contract the loaded
+     *     elisp may not decode ever reaches it. Emacs reloads and dials
+     *     again, stating the build it loaded (see elisp_current).
+     *   * On a stream already standing, when a deploy that does not move the
+     *     daemon changes the checkout's elisp. The daemon's contract did not
+     *     change, so the stream keeps serving.
      *
      * @generated from field: agentrepl.v1.DaemonReloadElisp reload_elisp = 5;
      */
     value: DaemonReloadElisp;
     case: "reloadElisp";
+  } | {
+    /**
+     * THIS EMACS RUNS THE CHECKOUT'S ELISP: the stream's VERDICT, its first
+     * frame, sent ONLY on an Emacs stream whose elisp_build is the
+     * checkout's as it connects. Every Emacs stream's first frame is its
+     * verdict — this arm or reload_elisp — and EMACS ACCEPTS THE LINK ON
+     * THIS ARM ALONE, never on the response headers: until it does, it
+     * opens no other stream and makes no call to this daemon, so a daemon
+     * whose contract is newer than the editor's elisp is never spoken to
+     * before the editor has loaded the elisp that decodes it.
+     *
+     * @generated from field: agentrepl.v1.DaemonElispCurrent elisp_current = 13;
+     */
+    value: DaemonElispCurrent;
+    case: "elispCurrent";
   } | {
     /**
      * The daemon is standing down in a planned exit and this is the stream's
@@ -499,6 +523,29 @@ export const DaemonReloadElispSchema: GenMessage<DaemonReloadElisp> = /*@__PURE_
   messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 10);
 
 /**
+ * The stream's verdict that the Emacs connecting runs the checkout's elisp
+ * (WatchDaemonResponse.elisp_current).
+ *
+ * @generated from message agentrepl.v1.DaemonElispCurrent
+ */
+export type DaemonElispCurrent = Message<"agentrepl.v1.DaemonElispCurrent"> & {
+  /**
+   * The checkout's elisp build the stream's elisp_build was compared with,
+   * and matched. REQUIRED.
+   *
+   * @generated from field: string build = 1;
+   */
+  build: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonElispCurrent.
+ * Use `create(DaemonElispCurrentSchema)` to create a new message.
+ */
+export const DaemonElispCurrentSchema: GenMessage<DaemonElispCurrent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 11);
+
+/**
  * The web view host's reload onto a webapp build (WatchDaemonResponse
  * .reload_webhost).
  *
@@ -519,7 +566,7 @@ export type DaemonReloadWebhost = Message<"agentrepl.v1.DaemonReloadWebhost"> & 
  * Use `create(DaemonReloadWebhostSchema)` to create a new message.
  */
 export const DaemonReloadWebhostSchema: GenMessage<DaemonReloadWebhost> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 11);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 12);
 
 /**
  * @generated from message agentrepl.v1.DaemonShutdownAnnounced
@@ -563,7 +610,7 @@ export type DaemonShutdownAnnounced = Message<"agentrepl.v1.DaemonShutdownAnnoun
  * Use `create(DaemonShutdownAnnouncedSchema)` to create a new message.
  */
 export const DaemonShutdownAnnouncedSchema: GenMessage<DaemonShutdownAnnounced> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 12);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 13);
 
 /**
  * THE ARM IS THE CAUSE.
@@ -600,7 +647,7 @@ export type DaemonShutdownCause = Message<"agentrepl.v1.DaemonShutdownCause"> & 
  * Use `create(DaemonShutdownCauseSchema)` to create a new message.
  */
 export const DaemonShutdownCauseSchema: GenMessage<DaemonShutdownCause> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 13);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 14);
 
 /**
  * A new build is being rolled out blue-green. A deploy starts one
@@ -618,7 +665,7 @@ export type DaemonShutdownSelfMergeRollout = Message<"agentrepl.v1.DaemonShutdow
  * Use `create(DaemonShutdownSelfMergeRolloutSchema)` to create a new message.
  */
 export const DaemonShutdownSelfMergeRolloutSchema: GenMessage<DaemonShutdownSelfMergeRollout> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 14);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 15);
 
 /**
  * A scheduled drain reached its instant.
@@ -637,7 +684,7 @@ export type DaemonShutdownScheduledDrain = Message<"agentrepl.v1.DaemonShutdownS
  * Use `create(DaemonShutdownScheduledDrainSchema)` to create a new message.
  */
 export const DaemonShutdownScheduledDrainSchema: GenMessage<DaemonShutdownScheduledDrain> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 15);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 16);
 
 /**
  * UpdateShutdownSchedule{now}: an immediate operator shutdown.
@@ -656,7 +703,7 @@ export type DaemonShutdownImmediate = Message<"agentrepl.v1.DaemonShutdownImmedi
  * Use `create(DaemonShutdownImmediateSchema)` to create a new message.
  */
 export const DaemonShutdownImmediateSchema: GenMessage<DaemonShutdownImmediate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 16);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 17);
 
 /**
  * The standing drain schedule, pushed when armed (and re-pushed to late
@@ -685,7 +732,7 @@ export type DaemonDrainScheduled = Message<"agentrepl.v1.DaemonDrainScheduled"> 
  * Use `create(DaemonDrainScheduledSchema)` to create a new message.
  */
 export const DaemonDrainScheduledSchema: GenMessage<DaemonDrainScheduled> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 17);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 18);
 
 /**
  * Presence is the fact: the schedule was cancelled.
@@ -700,7 +747,7 @@ export type DaemonDrainCancelled = Message<"agentrepl.v1.DaemonDrainCancelled"> 
  * Use `create(DaemonDrainCancelledSchema)` to create a new message.
  */
 export const DaemonDrainCancelledSchema: GenMessage<DaemonDrainCancelled> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 18);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 19);
 
 /**
  * Open the new-thread prompt. DELIBERATELY EMPTY: the click is the whole fact.
@@ -715,5 +762,5 @@ export type DaemonNewThreadRequested = Message<"agentrepl.v1.DaemonNewThreadRequ
  * Use `create(DaemonNewThreadRequestedSchema)` to create a new message.
  */
 export const DaemonNewThreadRequestedSchema: GenMessage<DaemonNewThreadRequested> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 19);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 20);
 

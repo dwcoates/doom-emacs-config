@@ -27,6 +27,9 @@ type Deployer interface {
 	// than the installed one, on EDGE: a host's page stream or an Emacs's
 	// daemon stream attaching (deploy/webhost.go).
 	ReconcileWebhost(edge string) int
+	// ElispVerdict decides an Emacs WatchDaemon stream as it connects:
+	// whether the elisp it runs is the checkout's (deploy.Deployer).
+	ElispVerdict(stream, running string) (deploy.ElispVerdict, error)
 	// InstalledWebapp answers the installed webapp's build, which a page's
 	// attach states (agentrepl.v1.PageAttached.webapp_build).
 	InstalledWebapp() (string, error)
@@ -202,18 +205,25 @@ func (s *server) PushReloadElisp(streams []string, moduleRoot, build string) int
 	for _, id := range streams {
 		want[id] = true
 	}
-	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{
-		ReloadElisp: &agentreplv1.DaemonReloadElisp{ModuleRoot: moduleRoot, Build: build},
-	}}
+	push := reloadElispPush(moduleRoot, build)
 	return s.pushToEditors("daemon.server.reload_elisp", push,
 		func(w *daemonWatcher) bool { return want[w.id] },
 		func(w *daemonWatcher) {
 			s.log.Info("daemon.server.reload_elisp", "pushed the elisp reload to an Emacs", dlog.Context{
 				"stream": w.id, "build": build, "module_root": moduleRoot,
-				"state": "elisp_build", "before": w.elispBuild, "after": build,
+				"state": "elisp_build", "before": w.elispBuild, "after": build, "trigger": deploy.ElispOnDeploy,
 			})
 			w.elispBuild = build
 		})
+}
+
+// reloadElispPush is the reload_elisp frame naming the checkout MODULEROOT
+// and its elisp BUILD: the one shape both a deploy's push and a stale
+// stream's verdict send.
+func reloadElispPush(moduleRoot, build string) *agentreplv1.WatchDaemonResponse {
+	return &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{
+		ReloadElisp: &agentreplv1.DaemonReloadElisp{ModuleRoot: moduleRoot, Build: build},
+	}}
 }
 
 // pushToEditors hands PUSH to every Emacs WatchDaemon stream WANT names, on

@@ -424,10 +424,7 @@ func proveDaemonSubscription(t *testing.T, h *harness) *connect.ServerStreamForC
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "elisp-test", Instance: testEditorInstance()}}}))
-	if err != nil {
-		t.Fatalf("open the daemon stream: %v", err)
-	}
+	stream := dialEmacsDaemon(t, h, ctx, emacsDaemonRequest)
 	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 1})
 	if !stream.Receive() {
 		t.Fatalf("prove the subscription: %v", stream.Err())

@@ -122,18 +122,29 @@ func TestAcceptedStreamStillDeliversItsFirstPush(t *testing.T) {
 		t.Fatalf("/_fake/push = %d %s", status, body)
 	}
 
-	// Assert: an ordinary envelope follows the already-sent headers.
+	// Assert: past the verdict every Emacs WatchDaemon stream opens with, an
+	// ordinary envelope follows the already-sent headers.
+	if flags, payload := readRawFrame(t, resp.Body); flags != 0x00 || !bytes.Contains(payload, []byte("elispCurrent")) {
+		t.Fatalf("first frame = flags %#x payload %s, want the elisp_current verdict", flags, payload)
+	}
+	if flags, payload := readRawFrame(t, resp.Body); flags != 0x00 || !bytes.Contains(payload, []byte("drainCancelled")) {
+		t.Fatalf("frame after the verdict = flags %#x payload %s", flags, payload)
+	}
+}
+
+// readRawFrame reads one Connect envelope off BODY: its flags byte and its
+// payload.
+func readRawFrame(t *testing.T, body io.Reader) (byte, []byte) {
+	t.Helper()
 	header := make([]byte, 5)
-	if _, err := io.ReadFull(resp.Body, header); err != nil {
+	if _, err := io.ReadFull(body, header); err != nil {
 		t.Fatalf("read frame header: %v", err)
 	}
 	payload := make([]byte, binary.BigEndian.Uint32(header[1:5]))
-	if _, err := io.ReadFull(resp.Body, payload); err != nil {
+	if _, err := io.ReadFull(body, payload); err != nil {
 		t.Fatalf("read frame payload: %v", err)
 	}
-	if header[0] != 0x00 || !bytes.Contains(payload, []byte("drainCancelled")) {
-		t.Fatalf("first frame = flags %#x payload %s", header[0], payload)
-	}
+	return header[0], payload
 }
 
 func TestUnaryStillWritesItsOwnHeaders(t *testing.T) {

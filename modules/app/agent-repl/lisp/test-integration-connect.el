@@ -678,8 +678,9 @@ past it would be a subscriber production believes it does not have."
 fanout §3 STANDING-STREAM ACCEPTANCE: the acceptance instant is the one
 the consumer re-subscribes on, so it must precede the first push.  R-ACCEPT
 pinned this in unit tests only; against a real accepted stream this fails
-if ON-OPEN runs late (after the snapshot frame the daemon replays), runs
-more than once, or never runs at all."
+if ON-OPEN runs late (after the elisp verdict every Emacs WatchDaemon
+stream opens with, or the snapshot frame the daemon replays after it),
+runs more than once, or never runs at all."
   ;; Arrange: a standing snapshot, so a frame is waiting the moment the
   ;; subscription is accepted.
   (agent-repl-itest--with-fake-daemon daemon
@@ -694,14 +695,15 @@ more than once, or never runs at all."
             ;; Act.
             (agent-repl-connect-stream
              conn "WatchDaemon" agent-repl-itest-connect--watch-daemon-body
-             (lambda (_push) (push :push events))
+             (lambda (push) (push (caar push) events))
              (lambda (_outcome) nil)
              (lambda () (push :open events)))
             (agent-repl-itest--wait-until
-             (lambda () (memq :push events)) nil
+             (lambda () (memq 'drainScheduled events)) nil
              "the replayed drainScheduled snapshot to reach ON-PUSH")
-            ;; Assert: newest-first, so the tail is the acceptance instant.
-            (should (equal (reverse events) '(:open :push)))
+            ;; Assert: newest-first, so the tail is the acceptance instant,
+            ;; and the verdict is the first frame after it.
+            (should (equal (reverse events) '(:open elispCurrent drainScheduled)))
             (should (equal 1 (seq-count (lambda (e) (eq e :open)) events))))
         (agent-repl-connect-close conn)))))
 

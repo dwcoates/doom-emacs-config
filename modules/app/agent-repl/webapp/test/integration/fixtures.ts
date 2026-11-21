@@ -2946,6 +2946,9 @@ export const WATCH_DAEMON_PUSHES = [
   // Addressed to stale EMACS streams alone, never to a webview; a page that
   // meets one skips it as the same forward-compat skew.
   "reloadElisp",
+  // An Emacs stream's verdict that its elisp is current: addressed to EMACS
+  // streams alone, as their first frame, skipped by a page as the same skew.
+  "elispCurrent",
   // The daemon's standing loud faults: an EMACS stream's alone (a webview
   // draws the same faults on its topbar and footer), skipped as the same skew.
   "faultsStanding",

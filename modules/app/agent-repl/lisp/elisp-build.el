@@ -219,13 +219,15 @@ so the verb fails loudly.  Returns t."
 The exact FILE, never a `.elc' beside it (NOSUFFIX), quietly."
   (load file nil t t))
 
-(defun agent-repl-elisp-reload-handle (reload)
+(defun agent-repl-elisp-reload-handle (reload &optional on-done)
   "Handle a pushed `DaemonReloadElisp' RELOAD, a plist (:module-root :build).
 The daemon may only reload THIS Emacs's checkout: a root naming any other
 is REFUSED loudly and nothing is loaded, because it would leave the editor
 on one checkout's elisp and the daemon on another's.  Otherwise the reload
-is SCHEDULED out of the process filter that delivered the push.  Returns
-non-nil when the reload was scheduled."
+is SCHEDULED out of the process filter that delivered the push, and
+ON-DONE, when given, is called once it has run with whether it succeeded
+\=(`agent-repl--elisp-reload-then').  Returns non-nil when the reload was
+scheduled."
   (let* ((pushed (plist-get reload :module-root))
          (build (plist-get reload :build))
          (theirs (agent-repl--elisp-normalize-root pushed))
@@ -241,8 +243,18 @@ non-nil when the reload was scheduled."
       (agent-repl--info agent-repl--elisp-build-log-scope
                         "elisp.elisp-build.reload-scheduled root=%S build=%S"
                         ours build)
-      (run-at-time 0 nil #'agent-repl--elisp-reload-run ours build)
+      (run-at-time 0 nil #'agent-repl--elisp-reload-then ours build on-done)
       t)))
+
+(defun agent-repl--elisp-reload-then (root build on-done)
+  "Run the reload of BUILD from ROOT, then call ON-DONE with its success.
+ON-DONE, when non-nil, runs even when the reload signals, so a caller
+waiting on it (a link awaiting its redial) is never left waiting; the
+signal still propagates."
+  (let (loaded)
+    (unwind-protect
+        (setq loaded (agent-repl--elisp-reload-run root build))
+      (when on-done (funcall on-done loaded)))))
 
 (defun agent-repl--elisp-reload-load-modules (root modules)
   "Load MODULES' sources under ROOT in order, and record what was loaded.

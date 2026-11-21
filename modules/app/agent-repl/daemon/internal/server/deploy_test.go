@@ -733,3 +733,23 @@ func TestWebStreamsTellTheHotReloadTheirBuilds(t *testing.T) {
 		})
 	}
 }
+
+func TestReloadElispPushNamesTheRootAndTheBuild(t *testing.T) {
+	// Arrange / Act
+	push := reloadElispPush("/root", "fresh")
+
+	// Assert
+	if got := push.GetReloadElisp(); got.GetModuleRoot() != "/root" || got.GetBuild() != "fresh" {
+		t.Fatalf("push = %v, want reload_elisp{/root, fresh}", push)
+	}
+}
+
+func TestEveryReloadElispFrameIsBuiltByReloadElispPush(t *testing.T) {
+	// Arrange / Act: every production site that builds a reload_elisp frame.
+	sites := sourcescan.Sites(t, "WatchDaemonResponse_ReloadElisp{")
+
+	// Assert: reloadElispPush's own, in deploy.go, and no other.
+	if strings.Join(sites, ",") != "deploy.go" {
+		t.Fatalf("reload_elisp frames built at %v, want only reloadElispPush's in deploy.go; use reloadElispPush", sites)
+	}
+}

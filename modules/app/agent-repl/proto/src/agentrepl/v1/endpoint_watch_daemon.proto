@@ -114,12 +114,30 @@ message WatchDaemonResponse {
     // event beside its session-identity state, so a late subscriber replaying
     // the state arms is never handed a stale progress event in their place.
     WorkspaceMutationProgress mutation_progress = 4;
-    // A DEPLOY FOUND THIS EMACS ON OLDER ELISP: hot-load the module set, in
-    // config.el's load order, from the named root. Sent ONLY on an Emacs
-    // stream whose elisp_build is not the checkout's — never on a webview's —
-    // and never replayed to a late subscriber: a stream opened later states
-    // its own elisp_build, and a deploy that runs after it compares that.
+    // THIS EMACS RUNS OLDER ELISP THAN THE CHECKOUT'S: hot-load the module
+    // set, in config.el's load order, from the named root. Sent ONLY on an
+    // Emacs stream — never on a webview's — and never replayed to a late
+    // subscriber. It is sent at two moments, decided by one comparison of
+    // the stream's elisp_build with the checkout's:
+    //
+    //   * AS THE STREAM'S VERDICT, its first frame, when the stream connects
+    //     on an older build. It is then the stream's ONLY frame: the daemon
+    //     ends the stream after it, so no frame of a contract the loaded
+    //     elisp may not decode ever reaches it. Emacs reloads and dials
+    //     again, stating the build it loaded (see elisp_current).
+    //   * On a stream already standing, when a deploy that does not move the
+    //     daemon changes the checkout's elisp. The daemon's contract did not
+    //     change, so the stream keeps serving.
     DaemonReloadElisp reload_elisp = 5;
+    // THIS EMACS RUNS THE CHECKOUT'S ELISP: the stream's VERDICT, its first
+    // frame, sent ONLY on an Emacs stream whose elisp_build is the
+    // checkout's as it connects. Every Emacs stream's first frame is its
+    // verdict — this arm or reload_elisp — and EMACS ACCEPTS THE LINK ON
+    // THIS ARM ALONE, never on the response headers: until it does, it
+    // opens no other stream and makes no call to this daemon, so a daemon
+    // whose contract is newer than the editor's elisp is never spoken to
+    // before the editor has loaded the elisp that decodes it.
+    DaemonElispCurrent elisp_current = 13;
     // The daemon is standing down in a planned exit and this is the stream's
     // last frame; the client reattaches to the live daemon without treating
     // the end as a fault. See the message.
@@ -211,6 +229,14 @@ message DaemonReloadElisp {
   // algorithm). What this Emacs reports as its elisp_build from then on.
   // REQUIRED.
   string build = 2;
+}
+
+// The stream's verdict that the Emacs connecting runs the checkout's elisp
+// (WatchDaemonResponse.elisp_current).
+message DaemonElispCurrent {
+  // The checkout's elisp build the stream's elisp_build was compared with,
+  // and matched. REQUIRED.
+  string build = 1;
 }
 
 // The web view host's reload onto a webapp build (WatchDaemonResponse

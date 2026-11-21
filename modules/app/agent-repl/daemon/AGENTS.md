@@ -1189,7 +1189,9 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
 4. decide, component by component, against each RUNNING process's reported
    build: store/sidecar by their build report (`agentrepl/logging/buildreport`)
    and restart them in the recorded safe order (`Restarter`); Emacs streams by
-   `WatchDaemon.elisp_build` and push `reload_elisp` to the stale ones; a stale
+   `WatchDaemon.elisp_build` and push `reload_elisp` to the stale ones (a
+   deploy that moves the daemon leaves each Emacs to its successor, which
+   decides every Emacs stream as it connects, `Deployer.ElispVerdict`); a stale
    daemon (its own boot-time binary hash) hands over and DEFERS shim and webapp
    to its successor; otherwise each live shim is judged by its last
    `SessionDiagnostics.shim_build` and a stale one goes to the prompt queue's

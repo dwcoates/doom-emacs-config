@@ -28,6 +28,13 @@ func connFrom(ctx context.Context) net.Conn {
 // replays any stored snapshot, then stands until the client cancels or the
 // control plane ends it — standing streams never conclude on their own.
 func serveStream[Res any](ctx context.Context, s *fakeServer, name, workspaceID string, stream *connect.ServerStream[Res]) error {
+	return serveStreamFrom[Res](ctx, s, name, workspaceID, nil, stream)
+}
+
+// serveStreamFrom is serveStream whose FIRST frame, when non-nil, is sent
+// right after acceptance and before any push: an Emacs WatchDaemon's elisp
+// verdict, which the real daemon sends first on every Emacs stream.
+func serveStreamFrom[Res any](ctx context.Context, s *fakeServer, name, workspaceID string, first *Res, stream *connect.ServerStream[Res]) error {
 	sub := s.addSubscriber(name, workspaceID, connFrom(ctx))
 	defer s.removeSubscriber(sub)
 
@@ -44,6 +51,15 @@ func serveStream[Res any](ctx context.Context, s *fakeServer, name, workspaceID 
 		// headers; that is a wiring defect, not a quiet stream.
 		logError("fakedaemon.stream.accept-unavailable",
 			"no accept writer on the request context; headers cannot be flushed on acceptance",
+			map[string]any{"id": sub.id, "stream": name})
+	}
+	if first != nil {
+		if err := stream.Send(first); err != nil {
+			logWarn("fakedaemon.stream.send-failed", "send of a stream's first frame failed",
+				map[string]any{"id": sub.id, "stream": name, "error": err.Error()})
+			return err
+		}
+		logInfo("fakedaemon.stream.first-frame", "sent the stream's first frame",
 			map[string]any{"id": sub.id, "stream": name})
 	}
 

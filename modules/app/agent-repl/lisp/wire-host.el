@@ -2028,6 +2028,17 @@ The standing schedule, re-pushed to late subscribers."
                     "DaemonDrainScheduled" 'reason object
                     #'agent-repl-wire-decode-daemon-drain-scheduled-reason)))))
 
+(defun agent-repl-wire-decode-daemon-elisp-current (value)
+  "Decode VALUE as `DaemonElispCurrent', a plist `(:build)'.
+The build is REQUIRED: it is the checkout\='s elisp build this Emacs\='s
+was found to match, and an empty one is a contract breach, never a
+verdict to accept the link on."
+  (let ((object (agent-repl-wire--object "DaemonElispCurrent" value)))
+    (agent-repl-wire--check-keys "DaemonElispCurrent" object '(build))
+    (let ((build (agent-repl-wire--decode-string "DaemonElispCurrent" 'build object)))
+      (agent-repl-wire--require-string "DaemonElispCurrent" 'build build)
+      (agent-repl-wire--decoded "DaemonElispCurrent" (list :build build)))))
+
 (defun agent-repl-wire-decode-daemon-reload-elisp (value)
   "Decode VALUE as `DaemonReloadElisp', a plist `(:module-root :build)'.
 BOTH ARE REQUIRED: the root is what Emacs checks against its own before it
@@ -2665,6 +2676,7 @@ THE ARM IS THE FRAME; an unset one is a contract breach."
      (mutationProgress :mutation-progress
                        agent-repl-wire-decode-workspace-mutation-progress)
      (reloadElisp :reload-elisp agent-repl-wire-decode-watch-daemon-response-reload-elisp)
+     (elispCurrent :elisp-current agent-repl-wire-decode-daemon-elisp-current)
      (ending :ending agent-repl-wire-decode-watch-daemon-response-ending)
      (faultsStanding :faults-standing
                      agent-repl-wire-decode-watch-daemon-response-faults-standing)
@@ -2694,7 +2706,7 @@ UpdatePersistentWifiMode's success)."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       ending faultsStanding persistentWifi reloadWebhost newThreadRequested))
+       elispCurrent ending faultsStanding persistentWifi reloadWebhost newThreadRequested))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))

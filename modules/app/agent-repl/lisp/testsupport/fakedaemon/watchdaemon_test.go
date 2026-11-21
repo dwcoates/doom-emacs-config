@@ -81,6 +81,29 @@ func TestWatchDaemonAcceptsAWebviewClient(t *testing.T) {
 	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
 }
 
+func TestAnEmacsDaemonStreamIsFirstToldItsElispIsCurrent(t *testing.T) {
+	// Arrange.
+	server, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	stream, err := client.WatchDaemon(ctx, connect.NewRequest(emacsWatchDaemon()))
+	if err != nil {
+		t.Fatalf("open WatchDaemon: %v", err)
+	}
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("no first frame: %v", stream.Err())
+	}
+	if got := stream.Msg().GetElispCurrent().GetBuild(); got != emacsWatchDaemon().GetEmacs().GetElispBuild() {
+		t.Fatalf("first frame = %v, want elisp_current naming the stated build", stream.Msg())
+	}
+	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
+}
+
 func TestPushDeliversAReloadElispToTheDaemonStream(t *testing.T) {
 	// Arrange.
 	server, baseURL := newTestServer(t)
