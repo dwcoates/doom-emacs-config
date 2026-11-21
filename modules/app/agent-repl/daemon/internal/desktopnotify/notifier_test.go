@@ -826,3 +826,31 @@ func TestNotifierClickedLetsGoOfHeldBannersAndAsksEmacsToSelect(t *testing.T) {
 		t.Fatalf("record = %+v (found=%v), want the click recorded with its workspace", r, ok)
 	}
 }
+
+func TestABannersRecordsNameTheirWorkspaceAsTheRecordsOwn(t *testing.T) {
+	cases := []struct {
+		name    string
+		focused bool
+		message string
+	}{
+		{name: "a suppressed banner", focused: true, message: "Emacs is focused; no desktop banner"},
+		{name: "a posted banner", focused: false, message: "posting a desktop banner"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newNotifierFixture(t, named)
+			f.focus.Attach(tc.focused)
+
+			// Act
+			f.notifier.Post("ws1", "turn_ended", titledBy)
+			f.notifier.wg.Wait()
+
+			// Assert
+			r, ok := hasRecord(f.log, "", tc.message)
+			if !ok || r.Context[dlog.KeyWorkspaceID] != "ws1" || r.Context["workspace"] != "ws1" {
+				t.Fatalf("record = %+v (found=%v), want workspace_id and workspace both ws1", r, ok)
+			}
+		})
+	}
+}
