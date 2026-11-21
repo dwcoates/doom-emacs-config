@@ -826,6 +826,29 @@ type DB interface {
 	IgnoreRecordKind(ctx context.Context, k IgnoredRecordKind) error
 	// UnignoreRecordKind withdraws one, answering whether it was recorded.
 	UnignoreRecordKind(ctx context.Context, operation, messageContains string) (bool, error)
+	// LogSiteDeploys answers every kept deploy's start, oldest first
+	// (logsites.go).
+	LogSiteDeploys(ctx context.Context) ([]time.Time, error)
+	// LogSiteSnapshot answers every kept deploy's start and the instant read
+	// at, in one write transaction a deploy's recording serializes with.
+	LogSiteSnapshot(ctx context.Context, now func() time.Time) ([]time.Time, time.Time, error)
+	// RecordLogSiteDeploy records a deploy beginning at the instant NOW
+	// answers inside its transaction, and answers it.
+	RecordLogSiteDeploy(ctx context.Context, now func() time.Time) (time.Time, error)
+	// PruneLogSiteDeploys drops every deploy older than the KEEP most recent,
+	// and its tally rows.
+	PruneLogSiteDeploys(ctx context.Context, keep int) (int64, error)
+	// LogSiteCursor answers where a log file's tally cursor stands.
+	LogSiteCursor(ctx context.Context, file string) (int64, bool, error)
+	// TallyLogSites adds one chunk of a log file and moves its cursor,
+	// answering false when another pass moved the cursor first.
+	TallyLogSites(ctx context.Context, c LogSiteChunk) (bool, error)
+	// ForgetLogSiteCursors drops the cursor of every file not live.
+	ForgetLogSiteCursors(ctx context.Context, live []string) (int64, error)
+	// LogSiteRows answers the kept rows of the hours [FROM, TO) at LEVELS.
+	LogSiteRows(ctx context.Context, from, to time.Time, levels []string) ([]LogSiteRow, error)
+	// OldestLogSiteHour answers the oldest kept row's hour.
+	OldestLogSiteHour(ctx context.Context) (time.Time, bool, error)
 	// CheckedThrough answers where a repository's deploy checks have read
 	// its logs up to.
 	CheckedThrough(ctx context.Context, repo RepoKey) (time.Time, bool, error)
