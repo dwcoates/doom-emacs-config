@@ -258,7 +258,7 @@ func TestAQuietCheckThatCannotReadTheContextCompactsNothing(t *testing.T) {
 	}
 }
 
-func TestADispatchArmsTheCompaction(t *testing.T) {
+func TestQuietApprovalsAfterADispatchCompactNothingWithinTheBound(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
@@ -282,9 +282,10 @@ func TestADispatchArmsTheCompaction(t *testing.T) {
 		}
 	}
 
-	// Assert: the standing remediation the dispatch made is owed its compaction.
-	if !slices.Contains(h.checks.compacted, "ws-fixer") {
-		t.Fatalf("compacted %v, want the standing fixer's", h.checks.compacted)
+	// Assert: a dispatch arms nothing and the context is within its bound, so
+	// only the fix's own deploy compacts the mediator (remediationDeploy).
+	if len(h.checks.compacted) != 0 {
+		t.Fatalf("compacted %v, want none from quiet approvals within the bound", h.checks.compacted)
 	}
 }
 
