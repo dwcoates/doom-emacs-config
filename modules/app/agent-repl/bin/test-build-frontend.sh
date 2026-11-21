@@ -88,6 +88,7 @@ make_tree() {
              "$root/agent-shim/shim-lock" \
              "$root/zettel" \
              "$root/testservice" \
+             "$root/testrun" \
              "$root/agent-shim/logging/go" \
              "$root/proto/gen/go" \
              "$root/proto/helpers/go" \
@@ -108,8 +109,11 @@ make_tree() {
     echo "package main" > "$root/agent-shim/shim-lock/main.go"
     echo "package main" > "$root/zettel/main.go"
     echo "package main" > "$root/testservice/main.go"
+    echo "package main" > "$root/testrun/main.go"
     echo "package logging" > "$root/agent-shim/logging/go/timestamp.go"
     echo "package proto" > "$root/proto/gen/go/proto.go"
+    mkdir -p "$root/proto/src/conversation/v1"
+    echo 'syntax = "proto3";' > "$root/proto/src/conversation/v1/entry.proto"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
     echo '{"scripts":{"build":"true"}}' > "$root/webapp/package.json"
     echo '{"name":"tree-sitter-tldr"}' > "$root/tree-sitter-tldr/package.json"
@@ -149,7 +153,7 @@ commit_tree() {
     # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
     # artifact a build just produced would itself make the tree "dirty" and
     # every build would read as stale forever.
-    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n' > "$root/.gitignore"
+    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n.source-tree\n' > "$root/.gitignore"
     git -C "$root" init -q
     git -C "$root" add -A
     git -C "$root" commit -qm seed
@@ -276,10 +280,38 @@ while [ $# -gt 0 ]; do
     [ "$1" = "-o" ] && { out="$2"; shift 2; continue; }
     shift
 done
+# The testrun binary build-frontend.sh builds for the seeded typecheck is
+# itself a stub: it logs its argv and runs the command after `--`, so the
+# build under it runs. FAKE_GO_FAIL=testrun fails that build.
+case "$out" in
+    */testrun)
+        [ "${FAKE_GO_FAIL:-}" = testrun ] && exit 1
+        mkdir -p "$(dirname "$out")"
+        cat > "$out" <<'EOT'
+#!/usr/bin/env bash
+echo "testrun $* (in $PWD)" >> "$STUB_LOG"
+while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
+shift
+[ -n "${FAKE_TYPECHECK_FAIL:-}" ] && exit 1
+exec "$@"
+EOT
+        chmod +x "$out"
+        exit 0
+        ;;
+esac
 [ -n "$out" ] && { mkdir -p "$(dirname "$out")"; echo built > "$out"; }
 exit 0
 EOF
-    chmod +x "$bindir/npm" "$bindir/go"
+    # make: logs, and exits 1 when its target is FAKE_MAKE_FAIL.
+    cat > "$bindir/make" <<'EOF2'
+#!/usr/bin/env bash
+echo "make $*" >> "$STUB_LOG"
+for arg in "$@"; do
+    [ -n "${FAKE_MAKE_FAIL:-}" ] && [ "$arg" = "$FAKE_MAKE_FAIL" ] && exit 1
+done
+exit 0
+EOF2
+    chmod +x "$bindir/npm" "$bindir/go" "$bindir/make"
 }
 
 run_script() {
@@ -1242,6 +1274,37 @@ t_in_place_go_builds_pass_trimpath() {
     rm -rf "$root"
 }
 
+# Every go build goes through build-frontend.sh go_build: a `go build` written
+# anywhere else in the script would skip the flags every binary must carry.
+t_every_go_build_goes_through_go_build() {
+    local sites
+    sites="$(grep -n 'go build' "$SCRIPT_UNDER_TEST" | grep -v '^[0-9]*: *#' | grep -c 'go build "${args\[@\]}"')"
+    local all
+    all="$(grep -n 'go build' "$SCRIPT_UNDER_TEST" | grep -vc '^[0-9]*: *#')"
+    if [ "$sites" -eq 1 ] && [ "$all" -eq 1 ]; then
+        pass "go_build: the script's one go build command is go_build's"
+    else
+        fail "go_build: the script's one go build command is go_build's" \
+             "$(grep -n 'go build' "$SCRIPT_UNDER_TEST" | grep -v '^[0-9]*: *#')"
+    fi
+}
+
+# Each go build passes at most one -ldflags: a second one replaces the first,
+# so the daemon's checkout stamp would silently vanish beside another.
+t_every_go_build_passes_one_ldflags() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"
+    : > "$root/stub.log"
+    run_script "$root" daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
+           ! grep '^go build' "$root/stub.log" | awk '{ n = gsub(/ -ldflags /, "&"); if (n > 1) bad = 1 } END { exit !bad }'; then
+        pass "go_build: every go build passes at most one -ldflags"
+    else
+        fail "go_build: every go build passes at most one -ldflags" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
 # checkout_stamp_symbol — the linker symbol the daemon's checkout package
 # declares for its stamp, read from the real source.
 checkout_stamp_symbol() {
@@ -1411,9 +1474,11 @@ t_launcher_stages_without_installing_and_installs_in_place() {
 
 t_out_writes_nothing_live() {
     local root live; root="$(new_staging_root)"
+    # 8 build lines: shim's npm build, the webapp's testrun build and seeded
+    # typecheck line and npm build, and the four Go builds.
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
     live="$(live_files "$root")"
-    if [ -z "$live" ] && [ "$(grep -c 'build' "$root/stub.log")" -eq 6 ]; then
+    if [ -z "$live" ] && [ "$(grep -c 'build' "$root/stub.log")" -eq 8 ]; then
         pass "staging: a staging run writes nothing into the live artifact locations"
     else
         fail "staging: a staging run writes nothing into the live artifact locations" \
@@ -1447,8 +1512,9 @@ t_out_builds_fresh_targets_unconditionally() {
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
     : > "$root/stub.log"
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
+    # 5 go builds: the four services plus the webapp's testrun.
     if [ "$(grep -c '^npm run build' "$root/stub.log")" -eq 2 ] &&
-           [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ]; then
+           [ "$(grep -c '^go build' "$root/stub.log")" -eq 5 ]; then
         pass "staging: every selected target builds even when the live and staged ones are fresh"
     else
         fail "staging: every selected target builds even when the live and staged ones are fresh" \
@@ -2180,6 +2246,8 @@ build_group_revision_staleness() {
     t_in_place_go_builds_pass_buildvcs_false
     t_in_place_go_builds_pass_trimpath
     t_daemon_build_stamps_its_checkout
+    t_every_go_build_goes_through_go_build
+    t_every_go_build_passes_one_ldflags
 }
 
 build_group_healing() {
@@ -2237,6 +2305,215 @@ build_group_staging() {
     t_out_creates_an_absent_dir
 }
 
+# --- the proto target: generation only when proto's sources changed ---------
+
+# stamp_fresh_proto ROOT — record that the fixture's bindings were generated
+# from the proto tree standing there now.
+stamp_fresh_proto() {
+    local paths
+    paths="$(deploy_stamp_system_paths proto "")"
+    # shellcheck disable=SC2086
+    write_source_tree "$1/proto/.source-tree" "$(source_tree_id "$1" $paths)"
+}
+
+# proto_case ROOT — a fixture whose stub log is empty.
+proto_case() {
+    make_tree "$1"; make_stubs "$1/stubs"; : > "$1/stub.log"
+}
+
+# proto_generated ROOT / proto_gated_only ROOT — what the proto target ran.
+proto_generated() { grep -q "^make -C .*/proto all$" "$1/stub.log"; }
+proto_gated_only() {
+    grep -q "^make -C .*/proto codegen-gate$" "$1/stub.log" && ! proto_generated "$1"
+}
+
+t_proto_without_a_stamp_generates_and_stamps() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"
+    local paths; paths="$(deploy_stamp_system_paths proto "")"
+    # shellcheck disable=SC2086
+    local want; want="$(source_tree_id "$root" $paths)"
+    if run_script "$root" proto >/dev/null && proto_generated "$root" &&
+           [ "$(read_source_tree "$root/proto/.source-tree")" = "$want" ]; then
+        pass "proto: with no stamp it generates, then stamps the proto tree"
+    else
+        fail "proto: with no stamp it generates, then stamps the proto tree" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.source-tree" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_unchanged_tree_runs_only_the_gate() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if run_script "$root" proto >/dev/null && proto_gated_only "$root"; then
+        pass "proto: an unchanged proto tree skips generation and still runs the codegen gate"
+    else
+        fail "proto: an unchanged proto tree skips generation and still runs the codegen gate" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_committed_schema_change_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    commit_change "$root" proto/src/conversation/v1/entry.proto "message M {}" "proto: add M"
+    if run_script "$root" proto >/dev/null && proto_generated "$root"; then
+        pass "proto: a committed schema change regenerates"
+    else
+        fail "proto: a committed schema change regenerates" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_dirty_tree_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    printf '// uncommitted\n' >> "$root/proto/gen/go/proto.go"
+    if run_script "$root" proto >/dev/null && proto_generated "$root"; then
+        pass "proto: an uncommitted edit under proto, bindings included, regenerates"
+    else
+        fail "proto: an uncommitted edit under proto, bindings included, regenerates" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_change_outside_the_pathspec_runs_only_the_gate() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    commit_change "$root" daemon/cmd/agent-repld/main.go "// edit" "daemon: edit"
+    if run_script "$root" proto >/dev/null && proto_gated_only "$root"; then
+        pass "proto: a commit outside proto skips generation and still runs the codegen gate"
+    else
+        fail "proto: a commit outside proto skips generation and still runs the codegen gate" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_force_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if run_script "$root" --force proto >/dev/null && proto_generated "$root"; then
+        pass "proto: --force regenerates an unchanged tree"
+    else
+        fail "proto: --force regenerates an unchanged tree" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# The bindings are never staged, so a staging run consults the stamp too: the
+# staging rule (every target built unconditionally) would regenerate on every
+# deploy.
+t_proto_staging_run_consults_the_stamp() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if run_script "$root" --out "$root/staging" proto >/dev/null && proto_gated_only "$root"; then
+        pass "proto: a staging run skips generation of an unchanged tree"
+    else
+        fail "proto: a staging run skips generation of an unchanged tree" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_failed_generation_fails_and_stamps_nothing() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"
+    if ! FAKE_MAKE_FAIL=all run_script "$root" proto >/dev/null 2>&1 &&
+           [ ! -e "$root/proto/.source-tree" ]; then
+        pass "proto: a failed generation fails the build and writes no stamp"
+    else
+        fail "proto: a failed generation fails the build and writes no stamp" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.source-tree" 2>&1)"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_failed_gate_fails_an_unchanged_tree() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if ! FAKE_MAKE_FAIL=codegen-gate run_script "$root" proto >/dev/null 2>&1; then
+        pass "proto: a failed codegen gate fails the build of an unchanged tree"
+    else
+        fail "proto: a failed codegen gate fails the build of an unchanged tree" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+build_group_proto() {
+    t_proto_without_a_stamp_generates_and_stamps
+    t_proto_unchanged_tree_runs_only_the_gate
+    t_proto_committed_schema_change_regenerates
+    t_proto_dirty_tree_regenerates
+    t_proto_change_outside_the_pathspec_runs_only_the_gate
+    t_proto_force_regenerates
+    t_proto_staging_run_consults_the_stamp
+    t_proto_failed_generation_fails_and_stamps_nothing
+    t_proto_failed_gate_fails_an_unchanged_tree
+}
+
+# --- the webapp's production typecheck: incremental and seeded -------------
+
+t_webapp_build_runs_under_the_seeded_typecheck() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    if run_script "$root" --out "$root/staging" webapp >/dev/null &&
+           grep -q "^testrun typecheck -name webapp -- npm run build -- --outDir $root/staging/webapp/dist --emptyOutDir (in .*/webapp)$" "$root/stub.log" &&
+           grep -q "^npm run build -- --outDir" "$root/stub.log"; then
+        pass "webapp: the build runs in the webapp under testrun's seeded typecheck"
+    else
+        fail "webapp: the build runs in the webapp under testrun's seeded typecheck" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_webapp_build_leaves_no_testrun_binary_behind() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    mkdir -p "$root/tmp"
+    if TMPDIR="$root/tmp" run_script "$root" webapp >/dev/null &&
+           [ -z "$(ls -A "$root/tmp")" ]; then
+        pass "webapp: the seeded typecheck removes the testrun binary it built"
+    else
+        fail "webapp: the seeded typecheck removes the testrun binary it built" "left: $(ls -A "$root/tmp")"
+    fi
+    rm -rf "$root"
+}
+
+t_webapp_failed_typecheck_fails_the_build() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    if ! FAKE_TYPECHECK_FAIL=1 run_script "$root" webapp >/dev/null 2>&1 &&
+           [ ! -e "$root/webapp/dist/.source-tree" ]; then
+        pass "webapp: a failed seeded typecheck fails the build and stamps nothing"
+    else
+        fail "webapp: a failed seeded typecheck fails the build and stamps nothing" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_webapp_failed_testrun_build_fails_the_build() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; : > "$root/stub.log"
+    if ! FAKE_GO_FAIL=testrun run_script "$root" webapp >/dev/null 2>&1 &&
+           ! grep -q "^npm run build" "$root/stub.log"; then
+        pass "webapp: a testrun binary that fails to build fails the build before it runs"
+    else
+        fail "webapp: a testrun binary that fails to build fails the build before it runs" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+build_group_webapp_typecheck() {
+    t_webapp_build_runs_under_the_seeded_typecheck
+    t_webapp_build_leaves_no_testrun_binary_behind
+    t_webapp_failed_typecheck_fails_the_build
+    t_webapp_failed_testrun_build_fails_the_build
+}
+
 test_split_run core build_group_core
 test_split_run store-gc build_group_store_gc
 test_split_run stamps build_group_stamps
@@ -2245,5 +2522,7 @@ test_split_run revision-staleness build_group_revision_staleness
 test_split_run healing build_group_healing
 test_split_run dependencies build_group_dependencies
 test_split_run staging build_group_staging
+test_split_run proto build_group_proto
+test_split_run webapp-typecheck build_group_webapp_typecheck
 
 harness_finish

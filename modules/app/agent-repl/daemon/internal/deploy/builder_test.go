@@ -5,7 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,16 +33,60 @@ func newScriptBuilder(t *testing.T, answers map[string]runAnswer) (*ScriptBuilde
 }
 
 // stepObserver records each build step as "began:<step>" or
-// "ended:<step>" ("ended:<step>:failed" for a failed one), in order.
-type stepObserver struct{ told []string }
+// "ended:<step>" ("ended:<step>:failed" for a failed one), in the order it is
+// told; ended, when set, is sent each step that ended.
+type stepObserver struct {
+	mu    sync.Mutex
+	told  []string
+	ended chan string
+}
 
-func (o *stepObserver) BuildStepBegan(step string) { o.told = append(o.told, "began:"+step) }
+func (o *stepObserver) BuildStepBegan(step string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.told = append(o.told, "began:"+step)
+}
+
 func (o *stepObserver) BuildStepEnded(step string, err error) {
+	o.mu.Lock()
 	if err != nil {
 		o.told = append(o.told, "ended:"+step+":failed")
-		return
+	} else {
+		o.told = append(o.told, "ended:"+step)
 	}
-	o.told = append(o.told, "ended:"+step)
+	o.mu.Unlock()
+	if o.ended != nil {
+		o.ended <- step
+	}
+}
+
+// Told is every step the observer was told, in order.
+func (o *stepObserver) Told() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.told...)
+}
+
+const (
+	protoStep  = "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh proto"
+	targetStep = "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 "
+	wifiStep   = "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app --reuse /home/.cache/agent-repl/AgentReplWifi.app"
+)
+
+// sortedCopy is xs sorted, for comparing what concurrent steps did.
+func sortedCopy(xs []string) []string {
+	out := append([]string(nil), xs...)
+	sort.Strings(out)
+	return out
+}
+
+// joinedCalls is each call's argv, joined.
+func joinedCalls(calls [][]string) []string {
+	out := make([]string, len(calls))
+	for i, c := range calls {
+		out[i] = strings.Join(c, " ")
+	}
+	return out
 }
 
 func TestTheBuildTellsItsObserverEveryStepAsItBeginsAndEnds(t *testing.T) {
@@ -49,38 +96,105 @@ func TestTheBuildTellsItsObserverEveryStepAsItBeginsAndEnds(t *testing.T) {
 	// Act
 	err := b.Build(context.Background(), "/staging/1")
 
-	// Assert
+	// Assert: the protos first, then every target begun before it ended.
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	want := []string{"began:proto", "ended:proto"}
+	got := b.Observer.(*stepObserver).Told()
+	if len(got) < 2 || got[0] != "began:proto" || got[1] != "ended:proto" {
+		t.Fatalf("observer told %v, want the protos built first", got)
+	}
+	var want []string
 	for _, target := range Targets {
 		want = append(want, "began:"+target, "ended:"+target)
 	}
-	if got := b.Observer.(*stepObserver).told; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("observer told %v, want %v", got, want)
+	if strings.Join(sortedCopy(got[2:]), ",") != strings.Join(sortedCopy(want), ",") {
+		t.Fatalf("observer told %v, want every target begun and ended once", got[2:])
+	}
+	for _, target := range Targets {
+		if slices.Index(got, "began:"+target) > slices.Index(got, "ended:"+target) {
+			t.Fatalf("observer told %s ended before it began: %v", target, got)
+		}
 	}
 }
 
-func TestTheBuildTellsItsObserverTheStepThatFailedAndNoLaterOne(t *testing.T) {
+func TestAFailedProtoStepIsTheLastStepTheObserverIsTold(t *testing.T) {
 	// Arrange
-	step := "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 shim"
-	b, _, _ := newScriptBuilder(t, map[string]runAnswer{step: {code: 1}})
+	b, runner, _ := newScriptBuilder(t, map[string]runAnswer{protoStep: {code: 1}})
 
 	// Act
 	err := b.Build(context.Background(), "/staging/1")
 
 	// Assert
-	if err == nil {
-		t.Fatal("Build succeeded over a failed step")
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "proto" {
+		t.Fatalf("Build = %v, want the proto step's failure", err)
 	}
-	want := []string{"began:proto", "ended:proto", "began:shim", "ended:shim:failed"}
-	if got := b.Observer.(*stepObserver).told; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("observer told %v, want %v", got, want)
+	if got := b.Observer.(*stepObserver).Told(); strings.Join(got, ",") != "began:proto,ended:proto:failed" {
+		t.Fatalf("observer told %v, want the proto step alone", got)
+	}
+	if calls := joinedCalls(runner.Calls()); len(calls) != 1 || calls[0] != protoStep {
+		t.Fatalf("steps = %v, want no target built over failed protos", calls)
 	}
 }
 
-func TestTheBuildRegeneratesTheProtosThenStagesEveryTargetInOrder(t *testing.T) {
+func TestAFailedTargetDoesNotStopItsSiblings(t *testing.T) {
+	// Arrange
+	b, runner, log := newScriptBuilder(t, map[string]runAnswer{targetStep + "shim": {out: "esbuild: 1 error", code: 1}})
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert: the build fails on the shim, and every other target still built.
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "shim" {
+		t.Fatalf("Build = %v, want the shim step's failure", err)
+	}
+	if len(runner.Calls()) != 1+len(Targets) {
+		t.Fatalf("steps = %v, want every target run beside the failed one", joinedCalls(runner.Calls()))
+	}
+	told := b.Observer.(*stepObserver).Told()
+	for _, target := range Targets {
+		want := "ended:" + target
+		if target == "shim" {
+			want += ":failed"
+		}
+		if !slices.Contains(told, want) {
+			t.Fatalf("observer told %v, want %s", told, want)
+		}
+	}
+	if !loggedTo(log, "error", "a build step failed") {
+		t.Fatalf("records = %+v, want the failure at ERROR", log.Records())
+	}
+}
+
+func TestTheBuildNamesTheFirstFailedStepInBuildOrder(t *testing.T) {
+	// Arrange: two targets fail; the shim comes before the daemon.
+	b, _, log := newScriptBuilder(t, map[string]runAnswer{
+		targetStep + "daemon": {out: "go: compile error", code: 1},
+		targetStep + "shim":   {out: "esbuild: 1 error", code: 1},
+	})
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert: the shim is named, and both failures are logged.
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "shim" {
+		t.Fatalf("Build = %v, want the shim, the first failed step in build order", err)
+	}
+	n := 0
+	for _, r := range log.Records() {
+		if r.Level == "error" && strings.Contains(r.Message, "a build step failed") {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("logged %d failed steps, want both: %+v", n, log.Records())
+	}
+}
+
+func TestTheBuildRegeneratesTheProtosThenStagesEveryTarget(t *testing.T) {
 	// Arrange
 	b, runner, _ := newScriptBuilder(t, map[string]runAnswer{})
 
@@ -91,18 +205,13 @@ func TestTheBuildRegeneratesTheProtosThenStagesEveryTargetInOrder(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	calls := runner.Calls()
-	want := []string{"make -C /checkout/modules/app/agent-repl/proto all"}
+	calls := joinedCalls(runner.Calls())
+	var want []string
 	for _, target := range Targets {
-		want = append(want, "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 "+target)
+		want = append(want, targetStep+target)
 	}
-	if len(calls) != len(want) {
-		t.Fatalf("steps = %v, want %v", calls, want)
-	}
-	for i := range want {
-		if got := strings.Join(calls[i], " "); got != want[i] {
-			t.Fatalf("step %d = %q, want %q", i, got, want[i])
-		}
+	if len(calls) == 0 || calls[0] != protoStep || strings.Join(sortedCopy(calls[1:]), ",") != strings.Join(sortedCopy(want), ",") {
+		t.Fatalf("steps = %v, want the protos, then every target once", calls)
 	}
 	for _, dir := range runner.dirs {
 		if dir != b.ModuleRoot {
@@ -111,7 +220,7 @@ func TestTheBuildRegeneratesTheProtosThenStagesEveryTargetInOrder(t *testing.T) 
 	}
 }
 
-func TestAFailedStepNamesItselfAndStopsTheBuild(t *testing.T) {
+func TestAFailedStepNamesItselfAndKeepsItsOutput(t *testing.T) {
 	tests := []struct {
 		name       string
 		answer     runAnswer
@@ -123,8 +232,7 @@ func TestAFailedStepNamesItselfAndStopsTheBuild(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			step := "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 webapp"
-			b, runner, log := newScriptBuilder(t, map[string]runAnswer{step: tc.answer})
+			b, _, log := newScriptBuilder(t, map[string]runAnswer{targetStep + "webapp": tc.answer})
 
 			// Act
 			err := b.Build(context.Background(), "/staging/1")
@@ -134,9 +242,6 @@ func TestAFailedStepNamesItselfAndStopsTheBuild(t *testing.T) {
 			if !errors.As(err, &failed) || failed.Step != "webapp" || !strings.Contains(failed.Detail, tc.wantDetail) {
 				t.Fatalf("Build = %v, want the webapp step named with %q", err, tc.wantDetail)
 			}
-			if last := runner.Calls()[len(runner.Calls())-1]; strings.Join(last, " ") != step {
-				t.Fatalf("the build ran past the failed step: last %v", last)
-			}
 			archived, readErr := os.ReadFile(failed.Log)
 			if readErr != nil || !strings.Contains(string(archived), "==== webapp") {
 				t.Fatalf("archive = %q (%v), want the failed step's output kept", archived, readErr)
@@ -145,6 +250,38 @@ func TestAFailedStepNamesItselfAndStopsTheBuild(t *testing.T) {
 				t.Fatalf("records = %+v, want the failure at ERROR", log.Records())
 			}
 		})
+	}
+}
+
+func TestTheArchiveKeepsEveryStepInBuildOrder(t *testing.T) {
+	// Arrange
+	answers := map[string]runAnswer{protoStep: {out: "proto out"}}
+	for _, target := range Targets {
+		answers[targetStep+target] = runAnswer{out: target + " out"}
+	}
+	b, _, _ := newScriptBuilder(t, answers)
+
+	// Act
+	if err := b.Build(context.Background(), "/staging/1"); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// Assert
+	logs, err := filepath.Glob(filepath.Join(b.LogDir, "build-*.log"))
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("build logs = %v (%v), want one", logs, err)
+	}
+	archived, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := -1
+	for _, step := range append([]string{"proto"}, Targets...) {
+		i := strings.Index(string(archived), "==== "+step+": ")
+		if i <= at || !strings.Contains(string(archived), step+" out") {
+			t.Fatalf("archive = %q, want %s's section with its output after the step before it", archived, step)
+		}
+		at = i
 	}
 }
 
@@ -222,16 +359,14 @@ func TestAFailedOverrideIsTheBuildStep(t *testing.T) {
 	}
 }
 
-func TestTheWifiHelperIsBuiltLastByItsOwnBuildWhereThePlatformHasOne(t *testing.T) {
+func TestTheWifiHelperIsBuiltByItsOwnBuildWhereThePlatformHasOne(t *testing.T) {
 	tests := []struct {
 		name      string
 		installed string
-		want      string
+		want      bool
 	}{
-		{name: "the platform with a helper builds it, reusing the installed app", installed: "/home/.cache/agent-repl/AgentReplWifi.app",
-			want: "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app --reuse /home/.cache/agent-repl/AgentReplWifi.app"},
-		{name: "a platform with none does not", installed: "",
-			want: "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 " + Targets[len(Targets)-1]},
+		{name: "the platform with a helper builds it, reusing the installed app", installed: "/home/.cache/agent-repl/AgentReplWifi.app", want: true},
+		{name: "a platform with none does not", installed: "", want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -245,9 +380,8 @@ func TestTheWifiHelperIsBuiltLastByItsOwnBuildWhereThePlatformHasOne(t *testing.
 			}
 
 			// Assert
-			calls := runner.Calls()
-			if got := strings.Join(calls[len(calls)-1], " "); got != tc.want {
-				t.Fatalf("last step = %q, want %q", got, tc.want)
+			if got := slices.Contains(joinedCalls(runner.Calls()), wifiStep); got != tc.want {
+				t.Fatalf("steps = %v, want the wifi helper built %v", joinedCalls(runner.Calls()), tc.want)
 			}
 		})
 	}
@@ -255,8 +389,7 @@ func TestTheWifiHelperIsBuiltLastByItsOwnBuildWhereThePlatformHasOne(t *testing.
 
 func TestAFailedWifiHelperBuildNamesItsStep(t *testing.T) {
 	// Arrange
-	step := "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app --reuse /home/.cache/agent-repl/AgentReplWifi.app"
-	b, _, _ := newScriptBuilder(t, map[string]runAnswer{step: {out: "swiftc: error: no such module", code: 1}})
+	b, _, _ := newScriptBuilder(t, map[string]runAnswer{wifiStep: {out: "swiftc: error: no such module", code: 1}})
 	b.WifiInstalled = "/home/.cache/agent-repl/AgentReplWifi.app"
 
 	// Act
@@ -307,50 +440,94 @@ func TestWifiSourceHash(t *testing.T) {
 
 func ptr(s string) *string { return &s }
 
-// timedRunner is a Runner whose every step takes the time its answer names,
-// on the builder's step clock, so a test reads each step's duration.
-type timedRunner struct {
-	inner *scriptedRunner
-	clock *stepClock
-	takes map[string]time.Duration
+// gatedRunner is a Runner whose every step tells started when it runs, then
+// waits for the test to release it, so a test orders the steps' ends on its
+// clock.
+type gatedRunner struct {
+	inner   *scriptedRunner
+	started chan string
+	mu      sync.Mutex
+	release map[string]chan struct{}
 }
 
-func (r *timedRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
-	<-r.clock.After(r.takes[strings.Join(argv, " ")])
+func (r *gatedRunner) gate(argv string) chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.release[argv] == nil {
+		r.release[argv] = make(chan struct{})
+	}
+	return r.release[argv]
+}
+
+func (r *gatedRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
+	key := strings.Join(argv, " ")
+	r.started <- key
+	<-r.gate(key)
 	return r.inner.Run(ctx, dir, argv)
 }
 
 func TestEveryBuildStepIsTimedUnderItsOwnName(t *testing.T) {
-	// Arrange
+	// Arrange: the protos take 2s; then every target starts at once, the
+	// webapp ends 7s later and the rest 3s after it.
 	b, runner, _ := newScriptBuilder(t, map[string]runAnswer{})
 	clock := newStepClock()
 	b.Clock = clock
-	b.Runner = &timedRunner{inner: runner, clock: clock, takes: map[string]time.Duration{
-		"make -C /checkout/modules/app/agent-repl/proto all":                                  2 * time.Second,
-		"bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 webapp": 7 * time.Second,
-	}}
+	observer := &stepObserver{ended: make(chan string, 1+len(Targets))}
+	b.Observer = observer
+	gated := &gatedRunner{inner: runner, started: make(chan string, 1+len(Targets)), release: map[string]chan struct{}{}}
+	b.Runner = gated
+	done := make(chan error, 1)
 
 	// Act
-	err := b.Build(context.Background(), "/staging/1")
+	go func() { done <- b.Build(context.Background(), "/staging/1") }()
+	<-gated.started
+	<-clock.After(2 * time.Second)
+	close(gated.gate(protoStep))
+	<-observer.ended
+	for range Targets {
+		<-gated.started
+	}
+	<-clock.After(7 * time.Second)
+	close(gated.gate(targetStep + "webapp"))
+	<-observer.ended
+	<-clock.After(3 * time.Second)
+	for _, target := range Targets {
+		if target != "webapp" {
+			close(gated.gate(targetStep + target))
+		}
+	}
+	err := <-done
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	got := b.Restarts.(*restarttimingtest.Recorder).Of(restarttiming.DeployBuildStep)
-	want := append([]string{"proto"}, Targets...)
-	if len(got) != len(want) {
-		t.Fatalf("build steps timed = %+v, want one per step %v", got, want)
+	if len(got) != 1+len(Targets) {
+		t.Fatalf("build steps timed = %+v, want one per step", got)
 	}
-	seconds := map[string]float64{"proto": 2, "webapp": 7}
-	for i, o := range got {
-		if o.Phase() != want[i] || o.Outcome() != restarttiming.OK || o.Seconds() != seconds[want[i]] {
-			t.Fatalf("step %d timed %s %s %vs, want %s ok %vs", i, o.Phase(), o.Outcome(), o.Seconds(), want[i], seconds[want[i]])
+	timed := map[string]float64{}
+	for _, o := range got {
+		if o.Outcome() != restarttiming.OK {
+			t.Fatalf("step %s timed %s, want ok", o.Phase(), o.Outcome())
+		}
+		timed[o.Phase()] = o.Seconds()
+	}
+	for _, step := range append([]string{"proto"}, Targets...) {
+		want := 10.0
+		switch step {
+		case "proto":
+			want = 2
+		case "webapp":
+			want = 7
+		}
+		if timed[step] != want {
+			t.Fatalf("step %s timed %vs, want %vs: %v", step, timed[step], want, timed)
 		}
 	}
 }
 
-func TestAFailedBuildStepIsTimedAsFailedAndNoLaterStepIsTimed(t *testing.T) {
+func TestAFailedBuildStepIsTimedAsFailedAndItsSiblingsAsTheirOwn(t *testing.T) {
 	tests := []struct {
 		name   string
 		answer runAnswer
@@ -361,8 +538,7 @@ func TestAFailedBuildStepIsTimedAsFailedAndNoLaterStepIsTimed(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			step := "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 webapp"
-			b, _, log := newScriptBuilder(t, map[string]runAnswer{step: tc.answer})
+			b, _, log := newScriptBuilder(t, map[string]runAnswer{targetStep + "webapp": tc.answer})
 
 			// Act
 			err := b.Build(context.Background(), "/staging/1")
@@ -372,13 +548,16 @@ func TestAFailedBuildStepIsTimedAsFailedAndNoLaterStepIsTimed(t *testing.T) {
 				t.Fatal("Build succeeded, want the webapp step's failure")
 			}
 			got := b.Restarts.(*restarttimingtest.Recorder).Of(restarttiming.DeployBuildStep)
-			last := got[len(got)-1]
-			if last.Phase() != "webapp" || last.Outcome() != restarttiming.Failed {
-				t.Fatalf("last step timed %s %s, want webapp failed", last.Phase(), last.Outcome())
+			if len(got) != 1+len(Targets) {
+				t.Fatalf("build steps timed = %+v, want every step", got)
 			}
-			for _, o := range got[:len(got)-1] {
-				if o.Outcome() != restarttiming.OK {
-					t.Fatalf("step %s timed %s before the failure, want ok", o.Phase(), o.Outcome())
+			for _, o := range got {
+				want := restarttiming.OK
+				if o.Phase() == "webapp" {
+					want = restarttiming.Failed
+				}
+				if o.Outcome() != want {
+					t.Fatalf("step %s timed %s, want %s", o.Phase(), o.Outcome(), want)
 				}
 			}
 			if !loggedTo(log, "error", "a build step failed") {

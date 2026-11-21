@@ -266,6 +266,9 @@ deploy_stamp_system_paths() {
         # No proto: the holder's whole contract is its one-line control request.
         sockethold)          printf '%s %s' "$(deploy_stamp_prefix agent-shim/sockethold "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
         zettel)              printf '%s %s %s' "$(deploy_stamp_prefix zettel "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
+        # The bindings' own source set (build-frontend.sh build_proto). No
+        # deployed artifact answers to it, so readiness-report.sh never asks.
+        proto)               printf '%s' "$(deploy_stamp_proto_paths "$rel")" ;;
         agent-repl-tests)    printf '%s %s %s' "$(deploy_stamp_prefix testservice "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
         # The launcher compiles its own package and the Swift bindings, and
         # its build script and icon belong to it.

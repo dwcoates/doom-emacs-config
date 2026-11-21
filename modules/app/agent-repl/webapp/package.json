@@ -8,7 +8,7 @@
     "ensure-deps": "../bin/ensure-deps.sh",
     "dev": "vite",
     "prebuild": "npm run ensure-deps",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
     "pretest": "../bin/background.sh npm run ensure-deps",
     "test": "../bin/background.sh vitest run",
     "precoverage": "../bin/background.sh npm run ensure-deps",

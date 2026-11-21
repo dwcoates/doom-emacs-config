@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/outputtext"
@@ -58,8 +59,9 @@ const LauncherTarget = "launcher"
 // into Go — because Emacs's cold start has to build the daemon before any
 // daemon exists, so a daemon-only builder could not be the only one; two
 // builders would drift. The daemon therefore drives that same script, in its
-// staging mode (`--out DIR`), one target at a time so a failure names its
-// step, after regenerating the protobufs the way every build must.
+// staging mode (`--out DIR`), one invocation per target so a failure names
+// its step, after its `proto` target regenerates the protobufs whenever their
+// sources changed since the last generation in this checkout.
 type ScriptBuilder struct {
 	// ModuleRoot is the agent-repl module root the daemon was deployed from.
 	ModuleRoot string
@@ -93,7 +95,27 @@ type buildStep struct {
 	argv []string
 }
 
+// stepResult is what one build step did: its output and its failure, if any.
+type stepResult struct {
+	out    string
+	failed *BuildFailed
+}
+
 // Build implements Builder.
+//
+// THE PROTOBUFS FIRST, THEN EVERY OTHER STEP AT ONCE. Every target compiles
+// against the generated code, so the proto step runs alone; the targets do
+// not read one another's output (each writes its own slot of the staging
+// directory, and build-frontend.sh already runs concurrently across
+// worktrees), so they run side by side. Measured over the 7 days before
+// 2026-11-21, one at a time they took a deploy's build to p50 30.7s, the sum
+// of its steps (webapp 10.5s, proto 6.5s, daemon 6.0s, sidecar 2.5s,
+// store 1.5s and the rest under 1s each).
+//
+// A FAILED STEP FAILS THE BUILD, BUT DOES NOT STOP ITS SIBLINGS: each runs to
+// its own end, so each one's outcome, timing and output are its own rather
+// than a cancellation's. The build answers the first failed step in build
+// order, and every failed step is logged.
 func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 	if err := os.MkdirAll(b.LogDir, 0o755); err != nil {
 		b.Log.Error(opBuild, "could not create the build-log directory; nothing was built", dlog.Context{"dir": b.LogDir, "cause": err.Error()})
@@ -101,44 +123,76 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 	}
 	logPath := filepath.Join(b.LogDir, fmt.Sprintf("build-%d.log", b.Clock.Now().UnixNano()))
 	steps := b.steps(staging)
+	results := make([]stepResult, len(steps))
+	results[0] = b.runStep(ctx, steps[0], logPath)
+	if results[0].failed == nil {
+		var wg sync.WaitGroup
+		for i := 1; i < len(steps); i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				results[i] = b.runStep(ctx, steps[i], logPath)
+			}(i)
+		}
+		wg.Wait()
+	}
 	var archive strings.Builder
-	for _, step := range steps {
-		fields := dlog.Context{"step": step.name, "argv": step.argv, "log": logPath}
-		b.Log.Info(opBuild, "building", fields)
-		began := b.Clock.Now()
-		b.Observer.BuildStepBegan(step.name)
-		out, code, err := b.Runner.Run(ctx, b.ModuleRoot, step.argv)
-		b.Restarts.ObserveRestart(restarttiming.OfBuildStep(step.name, restarttiming.OutcomeOf(stepErr(code, err)), b.Clock.Now().Sub(began)))
-		archive.WriteString("==== " + step.name + ": " + strings.Join(step.argv, " ") + "\n" + out + "\n")
-		if stepErr(code, err) == nil {
-			b.Log.Debug(opBuild, "the step built", fields)
-			b.Observer.BuildStepEnded(step.name, nil)
-			continue
+	var failed *BuildFailed
+	for i, step := range steps {
+		if i > 0 && results[0].failed != nil {
+			break
 		}
-		detail := outputtext.TailLines(out, 20)
-		if err != nil {
-			detail = err.Error()
-		} else {
-			fields["exit_code"] = code
+		archive.WriteString("==== " + step.name + ": " + strings.Join(step.argv, " ") + "\n" + results[i].out + "\n")
+		if failed == nil {
+			failed = results[i].failed
 		}
-		b.archive(logPath, archive.String())
-		b.Log.Error(opBuild, "a build step failed; nothing is deployed", dlog.Merge(fields, dlog.Context{"detail": detail}))
-		failed := &BuildFailed{Step: step.name, Detail: detail, Log: logPath}
-		b.Observer.BuildStepEnded(step.name, failed)
-		return failed
 	}
 	b.archive(logPath, archive.String())
+	if failed != nil {
+		return failed
+	}
 	b.Log.Info(opBuild, "every component built into staging", dlog.Context{"staging": staging, "log": logPath})
 	return nil
 }
 
-// steps are the build's commands, in order: the protobufs, then every
-// build-frontend target into staging — or the Override alone.
+// runStep runs one build step: timed under its own name, told to the
+// observer as it begins and ends, and logged at ERROR when it fails.
+func (b *ScriptBuilder) runStep(ctx context.Context, step buildStep, logPath string) stepResult {
+	fields := dlog.Context{"step": step.name, "argv": step.argv, "log": logPath}
+	b.Log.Info(opBuild, "building", fields)
+	began := b.Clock.Now()
+	b.Observer.BuildStepBegan(step.name)
+	out, code, err := b.Runner.Run(ctx, b.ModuleRoot, step.argv)
+	b.Restarts.ObserveRestart(restarttiming.OfBuildStep(step.name, restarttiming.OutcomeOf(stepErr(code, err)), b.Clock.Now().Sub(began)))
+	if stepErr(code, err) == nil {
+		b.Log.Debug(opBuild, "the step built", fields)
+		b.Observer.BuildStepEnded(step.name, nil)
+		return stepResult{out: out}
+	}
+	detail := outputtext.TailLines(out, 20)
+	if err != nil {
+		detail = err.Error()
+	} else {
+		fields["exit_code"] = code
+	}
+	b.Log.Error(opBuild, "a build step failed; nothing is deployed", dlog.Merge(fields, dlog.Context{"detail": detail}))
+	failed := &BuildFailed{Step: step.name, Detail: detail, Log: logPath}
+	b.Observer.BuildStepEnded(step.name, failed)
+	return stepResult{out: out, failed: failed}
+}
+
+// steps are the build's commands, in build order: the protobufs, then every
+// build-frontend target into staging and the Wi-Fi helper, which Build runs
+// side by side once the protobufs are built — or the Override alone.
 func (b *ScriptBuilder) steps(staging string) []buildStep {
 	if b.Override != "" {
 		return []buildStep{{name: "build", argv: []string{b.Override, "--out", staging}}}
 	}
-	steps := []buildStep{{name: "proto", argv: []string{"make", "-C", filepath.Join(b.ModuleRoot, "proto"), "all"}}}
+	// The proto target takes no --out: the bindings are sources the other
+	// targets compile from, generated into the checkout (build-frontend.sh
+	// build_proto).
+	script := filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh")
+	steps := []buildStep{{name: "proto", argv: []string{"bash", script, "proto"}}}
 	targets := Targets
 	if b.Launcher {
 		targets = append(append([]string(nil), Targets...), LauncherTarget)
@@ -146,7 +200,7 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 	for _, target := range targets {
 		steps = append(steps, buildStep{
 			name: target,
-			argv: []string{"bash", filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh"), "--out", staging, target},
+			argv: []string{"bash", script, "--out", staging, target},
 		})
 	}
 	if b.WifiInstalled != "" {

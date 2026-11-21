@@ -1,0 +1,3 @@
+# What the bindings in gen/ were last generated from (bin/build-frontend.sh
+# build_proto): build state, never a source.
+/.source-tree
