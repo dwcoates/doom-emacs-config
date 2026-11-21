@@ -1440,6 +1440,30 @@ describe("fitBands with a sized band", () => {
     expect(record.context).toMatchObject({ queue_sized: null, merged_sized: null, hidden_sized: 8 });
   });
 
+  it("keeps a fit that drew other lines than the last one in the log", async () => {
+    // Arrange
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    laidOut(rail, 500, 100);
+    const capture = captureLogRecords("info");
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.band-fit");
+    expect(record.context).toMatchObject({ drawn: "14/0/1/5", open_shown: 14 });
+  });
+
+  it("keeps a fit that drew the same lines as the last one out of the info log", async () => {
+    // Arrange
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    laidOut(rail, 500, 100);
+    fitBands(rail.scroller, rail.pane, NOW);
+    const capture = captureLogRecords("info");
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(await forwardedRecords(capture)).toEqual([]);
+  });
+
   it("records what it measured of each section for a drag of its rule", () => {
     // Arrange
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });

@@ -221,10 +221,14 @@ describe("draggedLines", () => {
     { name: "a band under the Open section grown by a rule dragged up", upper: { stops: stops(10), lines: 6 }, lower: { stops: stops(6), lines: 2 }, dy: -41, want: { upper: 4, lower: 4 } },
     { name: "a band under the Open section shrunk by what the Open section can still show", upper: { stops: stops(10), lines: 6 }, lower: { stops: stops(6), lines: 4 }, dy: 300, want: { upper: 10, lower: 0 } },
     { name: "a band kept as it stood under an Open section that shows every line", upper: { stops: stops(4), lines: 4 }, lower: { stops: stops(6), lines: 2 }, dy: 60, want: { upper: 4, lower: 2 } },
-    { name: "a band grown no further than its lines", upper: { stops: stops(10), lines: 6 }, lower: { stops: stops(3), lines: 1 }, dy: -300, want: { upper: 0, lower: 3 } },
+    { name: "a band grown no further than its lines", upper: { stops: stops(10), lines: 6 }, lower: { stops: stops(3), lines: 1 }, dy: -300, want: { upper: 4, lower: 3 } },
     { name: "the room between two bands moved down", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(4), lines: 2 }, dy: 20, want: { upper: 4, lower: 1 } },
     { name: "the room between two bands moved up", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(8), lines: 2 }, dy: -40, want: { upper: 1, lower: 4 } },
-    { name: "a lower band kept to the lines it holds", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(2), lines: 2 }, dy: -60, want: { upper: 0, lower: 2 } },
+    { name: "a lower band kept to the lines it holds, the upper giving up no more than it takes", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(2), lines: 2 }, dy: -60, want: { upper: 3, lower: 2 } },
+    { name: "a band already showing every line, the rule dragged up the room it cannot take (owner report, 2026-11-21)", upper: { stops: stops(9), lines: 9 }, lower: { stops: stops(1), lines: 1 }, dy: -300, want: { upper: 9, lower: 1 } },
+    { name: "a lower band grown by only the room it can take", upper: { stops: stops(9), lines: 9 }, lower: { stops: stops(3), lines: 1 }, dy: -300, want: { upper: 7, lower: 3 } },
+    { name: "an upper band grown no further than the room the two share", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(2), lines: 1 }, dy: 300, want: { upper: 4, lower: 0 } },
+    { name: "an upper band that cannot grow because it shows every line", upper: { stops: stops(4), lines: 4 }, lower: { stops: stops(6), lines: 3 }, dy: 300, want: { upper: 4, lower: 3 } },
   ])("gives $name", ({ upper, lower, dy, want }) => {
     // Arrange / Act / Assert
     expect(draggedLines(upper, lower, dy)).toEqual(want);
@@ -307,7 +311,16 @@ describe("installSectionResize", () => {
     drag(r.queue, 60);
     // Assert
     const record = await forwardedRecord(capture, "sidebar.section-resize");
-    expect(record.context).toMatchObject({ lower: "repo merge-queue-section", from: "null/2", to: "null/4" });
+    expect(record.context).toMatchObject({
+      lower: "repo merge-queue-section",
+      from: "6/2",
+      to: "4/4",
+      upper_total: 10,
+      lower_total: 6,
+      pointer_px: -40,
+      moved_px: -40 + 0,
+      sized: MERGE_QUEUE_FOLD_KEY,
+    });
   });
 
   it("asks nothing for a rule dragged down against an Open section that shows every line", () => {
@@ -324,6 +337,40 @@ describe("installSectionResize", () => {
     drag(r.queue, 160);
     // Assert
     expect([r.asked.length, r.queue.getAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([0, null]);
+  });
+
+  it("asks nothing, and pins nothing, for a rule between two bands that moves neither", () => {
+    // Arrange: the lower band shows its only line, so the room it cannot take stays with the upper
+    const r = rail();
+    install(
+      r,
+      new Map([
+        [r.merged, { stops: stops(5), lines: 3 }],
+        [r.hidden, { stops: stops(1), lines: 1 }],
+      ]),
+    );
+    // Act
+    drag(r.hidden, 40);
+    // Assert
+    expect([r.asked.length, r.merged.hasAttribute(BAND_SIZED_ATTRIBUTE), r.hidden.hasAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([0, false, false]);
+  });
+
+  it("sizes only the band a rule between two bands changed, the other left as it stood", async () => {
+    // Arrange: the lower band's next line is taller than the room one line of the upper frees
+    const r = rail({ sized: { hidden: 9 } });
+    install(
+      r,
+      new Map([
+        [r.merged, { stops: stops(5), lines: 3 }],
+        [r.hidden, { stops: [0, 50, 100], lines: 0 }],
+      ]),
+    );
+    // Act
+    drag(r.hidden, 80);
+    // Assert
+    await r.requests.reached(1);
+    const change = r.asked[0].change;
+    expect([change.case === "sizeSections" && change.value.sizes.map((s) => s.section.case), r.hidden.getAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([["recentlyMerged"], "9"]);
   });
 
   it("asks nothing for a rule let go where it was pressed", () => {
