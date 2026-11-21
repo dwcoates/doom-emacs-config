@@ -20,11 +20,11 @@
 ;;     anything; when it is shown again it is asked for again, and when an
 ;;     open one is hidden by the user its page is dropped (the daemon leaves
 ;;     its cache to lapse, then stands its session down);
-;;   - A FOLD UNLOADS ITS PAGES AT ONCE (owner request, 2026-10-30, which
-;;     supersedes the ruling of 2026-10-26 that a fold dropped no page).
-;;     Folding a repository section or a subsection takes its tabs off the
-;;     bar and unloads their pages, keeping their slots (page-unload.el);
-;;     the daemon stands their sessions down five minutes later;
+;;   - A FOLD CLOSES WHAT IT MAKES NOT VISIBLE (owner ruling, 2026-11-21,
+;;     which supersedes the request of 2026-10-30 that a fold unloaded its
+;;     pages and kept their slots).  A workspace the daemon stops calling
+;;     visible is torn down whole, perspective, stream and page
+;;     (frontend.v1.RosterRowVisibility);
 ;;   - A DAEMON-ONLY RESTART NEVER CLOSES A TAB.  What is open is this
 ;;     process's own record, so a daemon that restarts finds every open tab
 ;;     still standing; only an open still in flight when its stream ends is
@@ -150,7 +150,7 @@ Until it has, the frame has no workspace of the user's to move to."
 (defun agent-repl-open-tabs-hidden-p (ws)
   "Return non-nil when the user hid workspace WS.
 This editor holds a hidden workspace only while it is the selection
-\(frontend.v1.RosterRowHeld).  Read from the last roster walk; a workspace
+\(frontend.v1.RosterRowVisibility).  Read from the last roster walk; a workspace
 it did not meet is not hidden."
   (let ((row (agent-repl-open-tabs--ws-row ws)))
     (and row (plist-get row :hidden) t)))
@@ -226,10 +226,8 @@ connection."
   "Make workspace NAME's slot unless it is HIDDEN; return the page arm.
 `:loading' when the host holds NAME's page now (made here, or already
 standing), `:none' when it is HIDDEN or holds no page: a slot is made with
-a page only where one is wanted (`agent-repl-page-unload-wanted-p': on
-screen, or working and neither hidden nor folded), so most tabs open with
-none and load it at their show.  A FOLDED one\='s slot is made as a drawn
-one\='s is, with no page.  A
+a page wherever one is wanted (`agent-repl-page-unload-wanted-p': every
+workspace held here but a cold-gated one, whose show holds it back).  A
 page that FAILS to load is recorded at ERROR and asked `:none', so the
 workspace still opens (its tab shows no page) and no other row's open is
 lost."
@@ -340,7 +338,7 @@ It drops its page and slot (`agent-repl-open-tabs--hide').  A COLLAPSED ROW
 THIS EDITOR HOLDS IS ALWAYS HIDDEN: the daemon holds a folded workspace only
 while it draws it inside its fold (surfaced, or the selection), whose tab is
 numbered, and one it stops drawing is no longer held and is torn down
-\(frontend.v1.RosterRowHeld).  A collapsed, held row that is not hidden is
+\(frontend.v1.RosterRowVisibility).  A collapsed, held row that is not hidden is
 a broken contract, and is fatal."
   (unless (plist-get row :hidden)
     (agent-repl--fatal (plist-get row :name)

@@ -144,9 +144,10 @@ With no open thread the press is refused before the question is read."
 
 (defun agent-repl-threads--open (row trigger)
   "Switch to the workspace of the thread ROW, recording TRIGGER.
-A thread is held only while it is the selection (frontend.v1.RosterThreadHeld),
-so the one asked for usually has no workspace here yet: the switch is
-requested by its ref, and the roster push that marks it held opens it
+A thread is visible only while it is the selection
+\(frontend.v1.RosterRowVisibility), so the one asked for usually has no
+workspace here yet: the switch is requested by its ref, and the roster
+push that marks it selected opens it
 \(`agent-repl-host-request-switch-ref')."
   (agent-repl--info agent-repl-threads--log-scope "elisp.threads.open id=%s name=%s trigger=%s"
                     (plist-get (plist-get row :thread) :id) (plist-get row :name) trigger)

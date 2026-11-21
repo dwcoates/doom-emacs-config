@@ -1007,7 +1007,7 @@ of its own beyond the echo: the push is the new state."
 (defun agent-repl-verb-show-ref (ref)
   "Show the hidden workspace REF names again, and land on it.
 `agent-repl-verb-set-hidden' showing, for a hidden workspace this editor does
-not hold (frontend.v1.RosterRowHeld): it has no name here, so it is
+not hold (frontend.v1.RosterRowVisibility): it has no name here, so it is
 addressed by its ref on the primary link.  Once shown it is drawn, so the
 roster push marks it held and opens it, and the switch requested on success
 lands the frame on it (`agent-repl-host-request-switch-ref')."
@@ -2269,7 +2269,7 @@ to switch back to."
   "Show a hidden workspace again and switch to it (`SPC TAB H').
 Completes over the workspaces the sidebar's HIDDEN WORKSPACES section
 holds, by their roster names: a hidden workspace the user is not looking
-at has no tab here (frontend.v1.RosterRowHeld), so it is shown by its ref
+at has no tab here (frontend.v1.RosterRowVisibility), so it is shown by its ref
 \(`agent-repl-verb-show-ref').  The chosen one comes back onto the tab bar,
 and the frame lands on it once the daemon accepts."
   (interactive)

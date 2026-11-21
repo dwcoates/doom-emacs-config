@@ -58,11 +58,11 @@ default `:available'), `:repository' (the repository's name, default none)."
           :closed (list :closed (if (plist-member overrides :closed)
                                     (plist-get overrides :closed)
                                   :false)))
-      ;; THE HELD MARKER is the daemon's; the fixtures stamp it as the
-      ;; daemon would (`agent-repl-test--stamp-held') unless `:held' is
-      ;; given, when it is taken as given.
-      (when (plist-member overrides :held)
-        (list :held (and (plist-get overrides :held) t))))
+      ;; THE VISIBILITY is the daemon's; the fixtures stamp it as the
+      ;; daemon would (`agent-repl-test--stamp-visibility') unless
+      ;; `:visibility' is given, when it is taken as given.
+      (when (plist-member overrides :visibility)
+        (list :visibility (plist-get overrides :visibility))))
      (plist-get overrides :children))))
 
 (defun agent-repl-test-roster--section (label rows &optional collapsed)
@@ -112,9 +112,11 @@ closed stream's rows.  THREADS are the thread section's rows, each
                                                            :dir (concat "/zettel/threads/" (cdr thread)))
                                              :name (cdr thread)
                                              :standing (list :arm :open :value nil)
-                                             ;; A THREAD IS HELD only while it is the
-                                             ;; selection, as the daemon stamps it.
-                                             :held (and (equal (car thread) current) t)))
+                                             ;; A THREAD IS VISIBLE only while it is
+                                             ;; the selection, as the daemon stamps it.
+                                             :visibility (if (equal (car thread) current)
+                                                             :selected
+                                                           :not-visible)))
                                      threads))))
 
 ;;;; ---- Harness ----
@@ -3275,7 +3277,7 @@ saying the roster had been asked for one and declined."
         (should (equal tabs '(("a") ("b"))))))))
 
 (ert-deftest agent-repl-test-roster-a-folded-row-not-looked-at-has-no-tab ()
-  "An open row the daemon folds, and does not mark held, gets no tab here."
+  "An open row the daemon folds, and does not mark visible, gets no tab here."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
@@ -3289,24 +3291,24 @@ saying the roster had been asked for one and declined."
         ;; Assert
         (should (equal tabs '("a")))))))
 
-(ert-deftest agent-repl-test-roster-a-row-marked-held-gets-a-tab-whatever-its-fold ()
-  "The held marker alone decides: a folded row the daemon marks held gets a tab."
+(ert-deftest agent-repl-test-roster-a-visible-row-gets-a-tab-whatever-its-fold ()
+  "The visibility alone decides: a folded row the daemon marks visible gets a tab."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
                    :sections (list (agent-repl-test-roster--section
-                                    "folded" (list (agent-repl-test-roster--row "f" "f" :ready :held t)) t)))))
+                                    "folded" (list (agent-repl-test-roster--row "f" "f" :ready :visibility :unselected-visible)) t)))))
       ;; Act / Assert
       (should (equal (mapcar (lambda (tab) (plist-get tab :id)) (agent-repl-roster-desired-tabs roster))
                      '("f"))))))
 
-(ert-deftest agent-repl-test-roster-a-row-not-marked-held-gets-no-tab-whatever-its-fold ()
-  "The held marker alone decides: a drawn row the daemon does not mark held gets none."
+(ert-deftest agent-repl-test-roster-a-row-not-visible-gets-no-tab-whatever-its-fold ()
+  "The visibility alone decides: a drawn row the daemon marks not visible gets none."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
                    :sections (list (agent-repl-test-roster--section
-                                    "shown" (list (agent-repl-test-roster--row "a" "a" :ready :held nil)))))))
+                                    "shown" (list (agent-repl-test-roster--row "a" "a" :ready :visibility :not-visible)))))))
       ;; Act / Assert
       (should-not (agent-repl-roster-desired-tabs roster)))))
 
@@ -3553,7 +3555,7 @@ saying the roster had been asked for one and declined."
       (funcall push nil)
       (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))
 
-;;;; ---- A workspace the roster stops marking held is closed here ----
+;;;; ---- A workspace the roster stops marking visible is closed here ----
 
 (defun agent-repl-test-roster--fold-roster (folded)
   "A roster with w1 drawn and w2 in a repository FOLDED or not."
@@ -4833,15 +4835,17 @@ handed to `:on-failure'."
     (should-not (agent-repl-roster-thread-row-ws '(:thread (:id "t1"))))))
 
 (ert-deftest agent-repl-test-roster-thread-row-ws-is-every-row-lookup ()
-  "Every thread-row-to-workspace lookup goes through `agent-repl-roster-thread-row-ws'."
+  "Every thread-row-to-workspace lookup goes through `agent-repl-roster-thread-row-ws'.
+Opening a thread looks nothing up: it switches by the thread's ref, since
+a thread not selected has no workspace here (`agent-repl-threads--open')."
   (let ((rows nil))
     (cl-letf (((symbol-function 'agent-repl-roster-thread-row-ws)
                (lambda (row) (push row rows) "chat/t"))
               ((symbol-function 'agent-repl-roster-threads) (lambda (&optional _) '((:name "t"))))
-              ((symbol-function 'agent-repl-host-request-switch) #'ignore))
+              ((symbol-function 'agent-repl-host-request-switch-ref) #'ignore))
       (agent-repl--open-thread-names)
-      (agent-repl-threads--open '(:name "t") 'thread-picker)
-      (should (equal rows '((:name "t") (:name "t")))))))
+      (agent-repl-threads--open '(:name "t" :thread (:id "t1")) 'thread-picker)
+      (should (equal rows '((:name "t")))))))
 
 (ert-deftest agent-repl-test-roster-shown-app-reads-the-switcher ()
   "The shown app is the accepted roster's switcher's `:shown'."

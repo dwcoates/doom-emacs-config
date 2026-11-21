@@ -311,13 +311,14 @@ it from the workspace's shim link; a tab is opened for the row only once
 it leaves `:pending'."
   (plist-get (plist-get row :availability) :arm))
 
-(defun agent-repl-roster-row-held-p (row)
+(defun agent-repl-roster-row-visible-p (row)
   "Return non-nil when this editor holds ROW\='s workspace open.
-THE DAEMON DECIDES IT (frontend.v1.RosterRowHeld, `wsm.Workspace.Holds'):
-the workspace is the selection, or the tab bar draws it.  Emacs holds a
-perspective, a composer and a host stream for exactly these rows, and
-works out nothing of its own (owner ruling, 2026-11-21)."
-  (eq (plist-get row :held) t))
+THE DAEMON DECIDES IT (frontend.v1.RosterRowVisibility,
+`wsm.Workspace.Visibility'): ROW is visible or the selection.  Emacs holds a
+perspective, a composer, a host stream and a page for exactly these rows,
+and works out nothing of its own (owner ruling, 2026-11-21).  ROW is a
+workspace row or a thread row: both carry the one visibility."
+  (not (eq (plist-get row :visibility) :not-visible)))
 
 (defun agent-repl-roster-row-closed-p (row)
   "Return non-nil when ROW is CLOSED: no tab, whatever its lifecycle."
@@ -816,15 +817,16 @@ unusable and is dropped rather than drawn."
 
 (defun agent-repl-roster-desired-tabs (roster)
   "Return the tabs ROSTER asks for, in order: plists `(:id :name :ref)'.
-The Open section's walk is the order, and THE HELD MARKER IS THE
-MEMBERSHIP (`agent-repl-roster-row-held-p'): Emacs opens a workspace only
-while the daemon says it holds it -- drawn, or the selection -- so a folded
-or hidden workspace the user is not looking at, and every merged or closed
-row, gets none, and costs this editor nothing (owner ruling, 2026-11-21).
+The Open section's walk is the order, and THE VISIBILITY IS THE
+MEMBERSHIP (`agent-repl-roster-row-visible-p'): Emacs opens a workspace only
+while the daemon says it is visible or the selection, so a folded or hidden
+workspace the user cannot see, and every merged or closed row, gets none,
+and costs this editor nothing (owner ruling, 2026-11-21).
 
 `:collapsed' is a tab off the bar, and `:hidden' the user\='s hide.  A
-held row is collapsed only when it is hidden and the selection: a folded
-one is held only while the daemon draws it inside its fold, numbered.
+visible row is collapsed only when it is hidden and the selection: a
+folded one is visible only while the daemon draws it inside its fold,
+numbered.
 
 THE ROWS IT REFUSES A TAB ARE RECORDED.  This predicate is the whole
 answer to \"why is there no tab for that workspace\", and it used to give
@@ -853,7 +855,7 @@ Once per push over every closed row, which is why it is DEBUG."
                       :availability (agent-repl-roster-row-availability row)
                       :collapsed (plist-get entry :collapsed)
                       :hidden (eq (plist-get entry :section) :hidden))))
-            (seq-filter (lambda (entry) (agent-repl-roster-row-held-p (plist-get entry :row)))
+            (seq-filter (lambda (entry) (agent-repl-roster-row-visible-p (plist-get entry :row)))
                         entries))))
 
 ;;;; ---- Threads -----------------------------------------------------------
@@ -911,10 +913,10 @@ user picks a thread (`agent-repl-thread-pick')."
   (concat agent-repl-roster-thread-prefix (plist-get (plist-get row :thread) :id)))
 
 (defun agent-repl-roster-desired-threads (roster)
-  "Return the workspaces ROSTER's threads ask for: the ones it marks held.
+  "Return the workspaces ROSTER's threads ask for: the visible ones.
 Shaped as `agent-repl-roster-desired-tabs' returns them.  A thread is
-held only while it is the selection (frontend.v1.RosterThreadHeld), so at
-most one is open here.  Each carries `:thread' t and is never `:collapsed'
+visible only while it is the selection (frontend.v1.RosterRowVisibility),
+so at most one is open here.  Each carries `:thread' t and is never `:collapsed'
 nor `:hidden': its page loads, it is only never drawn."
   (mapcar (lambda (row)
             (let ((ref (plist-get row :thread)))
@@ -925,7 +927,7 @@ nor `:hidden': its page loads, it is only never drawn."
                     :collapsed nil
                     :hidden nil
                     :thread t)))
-          (seq-filter (lambda (row) (eq (plist-get row :held) t))
+          (seq-filter #'agent-repl-roster-row-visible-p
                       (agent-repl-roster-threads roster))))
 
 ;;;; ---- Reconciliation ---------------------------------------------------
@@ -1056,8 +1058,8 @@ as nil, so the caller applies the rename or leaves it alone entire."
 (defun agent-repl-roster--tear-down-tab (name &optional released)
   "Tear NAME's tab down: kill the persp, tombstone it.
 RELEASED non-nil marks a workspace the roster still lists open but no
-longer marks held (frontend.v1.RosterRowHeld): it is only closed in this
-editor, and its tombstone says so (`:released'), so its next open is a
+longer marks visible (frontend.v1.RosterRowVisibility): it is only closed
+in this editor, and its tombstone says so (`:released'), so its next open is a
 re-hold rather than a workspace becoming open (`agent-repl-roster--open-tab').
 IDEMPOTENT, because CloseWorkspace's own success tears the tab down too
 and the roster push that follows must not care which of the two got
@@ -1093,7 +1095,7 @@ contained here for the same reason a failing kill is: an escape would
 abort the reconcile walk mid-list.
 
 THE COMPOSER'S TEXT OUTLIVES THE TAB.  A workspace the roster stops
-marking held (folded, hidden, or left) is torn down here while the daemon
+marking visible (folded, hidden, or left) is torn down here while the daemon
 keeps it, so its composer is saved first as the history's unsent head
 \(`agent-repl--input-save-unsent'), as Emacs's own shutdown saves it, and
 the composer born on its next open puts it back.  A failed save is

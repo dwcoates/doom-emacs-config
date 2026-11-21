@@ -1876,7 +1876,7 @@ NOT SELECTABLE, as its sidebar row is not: the press is a reported no-op.
 Called interactively with no prefix argument, completes over the
 DRAWN TABS (`agent-repl--drawn-tab-names') and switches to the chosen one,
 the same set the walking chords reach.  A folded or hidden workspace has no
-tab here (frontend.v1.RosterRowHeld); `SPC p p' reaches it.
+tab here (frontend.v1.RosterRowVisibility); `SPC p p' reaches it.
 
 An empty bar and a slot the bar does not draw are REPORTED no-ops rather
 than errors: the numerals are a glance-and-press gesture, and a press
