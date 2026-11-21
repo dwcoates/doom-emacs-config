@@ -170,9 +170,6 @@ export function requireDrawnBucket(drawn: HTMLElement, wire: Bucket, path: strin
 /** The attribute a repository section states its repository's id on. */
 export const REPOSITORY_ATTRIBUTE = "data-repository";
 
-/** The attribute a subsection's count wears when it counts no workspaces. */
-export const ZERO_COUNT_ATTRIBUTE = "data-zero";
-
 /** One subsection as drawn: its element and its rows list. */
 export interface DrawnSubsection {
   element: HTMLElement;
@@ -203,15 +200,18 @@ export function drawRosterSubsection(
   label.className = SUBSECTION_LABEL_CLASS;
   label.textContent = name;
   paintSubsectionWork(label, u, path);
-  const shown = showWorkspaceCountParenthetical(
-    count.workspaces,
-    statusCountOf(
-      pathedOpenRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`)
-        .flatMap(({ row, path: rowPath }) => familyRows(row, rowPath))
-        .map(({ row, path: rowPath }) => ({ row: row.row, path: `${rowPath}.row` })),
-    ),
-  );
-  if (count.workspaces === 0) shown.setAttribute(ZERO_COUNT_ATTRIBUTE, "");
+  // A count of no workspaces draws nothing; any other count is drawn.
+  const shown =
+    count.workspaces === 0
+      ? null
+      : showWorkspaceCountParenthetical(
+          count.workspaces,
+          statusCountOf(
+            pathedOpenRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`)
+              .flatMap(({ row, path: rowPath }) => familyRows(row, rowPath))
+              .map(({ row, path: rowPath }) => ({ row: row.row, path: `${rowPath}.row` })),
+          ),
+        );
   if (bucket.case !== "named") throw new Error("invariant: a drawn subsection is a named one");
   const id = bucket.id;
   const foldKey = subsectionFoldKey(id);
@@ -239,7 +239,7 @@ export function drawRosterSubsection(
     event.stopPropagation();
     void sendArrangement(sc, sc.arrange.status, { case: "deleteSubsection", value: { subsection: { id } } });
   });
-  head.append(label, shown, remove);
+  head.append(label, ...(shown === null ? [] : [shown]), remove);
   element.appendChild(head);
 
   const rows = drawRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`);

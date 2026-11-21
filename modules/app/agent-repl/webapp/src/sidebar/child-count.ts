@@ -1,6 +1,6 @@
 /**
  * child-count — the "(working/merging/total)" a workspace row wears after its
- * name when it has more than `CHILD_COUNT_THRESHOLD` children (owner request,
+ * name when it has any children (owner request,
  * 2026-11-15; spelled as every Open-section count is, `open-count.ts`, owner
  * request 2026-11-19).
  *
@@ -13,9 +13,6 @@
 import type { RowFamily, RowKin } from "./family.js";
 import { openKin } from "./entries.js";
 import { type StatusCount, showWorkspaceCountParenthetical, statusCountOf } from "./open-count.js";
-
-/** A row shows its child count only when it has MORE children than this. */
-export const CHILD_COUNT_THRESHOLD = 5;
 
 /** The class of a row's child count. */
 export const CHILD_COUNT_CLASS = "sb-child-count";
@@ -38,10 +35,10 @@ export function childCountOf(kin: RowKin, path: string): ChildCount {
   };
 }
 
-/** The "(working/merging/total)" element for KIN at PATH, or undefined when it has no more than the threshold's children. */
+/** The count element for KIN at PATH, or undefined when it has no children. */
 export function drawChildCount(kin: RowKin, path: string): HTMLElement | undefined {
   const count = childCountOf(kin, path);
-  if (count.workspaces <= CHILD_COUNT_THRESHOLD) return undefined;
+  if (count.workspaces === 0) return undefined;
   const element = showWorkspaceCountParenthetical(count.workspaces, count);
   element.classList.add(CHILD_COUNT_CLASS);
   return element;
