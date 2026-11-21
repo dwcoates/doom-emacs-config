@@ -596,8 +596,9 @@ entry's label."
        (lambda (label) (agent-repl-prompt-entries--neighbor label way))
        none
        (lambda (label to)
-         (agent-repl--info agent-repl-prompt-entries--ws "elisp.prompt-entries.advance-open ws=%s label=%s way=%s to=%s"
-                           agent-repl-prompt-entries--ws label way to)
+         (let ((ws (agent-repl-prompt-entries--ws)))
+           (agent-repl--info ws "elisp.prompt-entries.advance-open ws=%s label=%s way=%s to=%s"
+                             ws label way to))
          (agent-repl-prompt-entries--open-on label to next))))))
 
 (defun agent-repl-prompt-entries-advance-or-open-sibling ()
