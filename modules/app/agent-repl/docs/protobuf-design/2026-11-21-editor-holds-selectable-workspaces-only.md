@@ -118,6 +118,16 @@ daemon stream's editor events, then the composer draft the daemon keeps.
     An evaluation for a workspace Emacs does not hold runs in a neutral buffer
     whose `default-directory` is the workspace's directory.
   - Emacs answers an evaluation on the connection that delivered it.
+  - An evaluation the daemon pushed to several Emacs streams waits until the
+    last of them closes before it answers `no_editor`.
+  - A feed link's `link_followed` still rides the source page's host stream,
+    while the switch it causes rides the daemon stream, so Emacs may see the
+    two in either order. Accepted: counting the source viewed does not depend
+    on the switch having happened, and `link_followed` must keep its order
+    with the host-stream events an `OpenInEditor` click raises after it.
+  - Emacs selects a workspace it does not hold through the same one select
+    queue as a held one: the queue's slots carry `workspace.v1.WorkspaceRef`s,
+    not names, so two selections are still sent in the order they were made.
 
 ### RETRACTED: `agentrepl.v1.ReportComposerDraft` and `agentrepl.v1.HostWorkspace.composer_draft`
 
