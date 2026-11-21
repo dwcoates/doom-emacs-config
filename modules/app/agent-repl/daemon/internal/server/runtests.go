@@ -70,10 +70,15 @@ func (s *server) RunTests(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RunTestsRequest],
 	stream *connect.ServerStream[agentreplv1.RunTestsResponse],
-) error {
+) (err error) {
 	const rpc = "RunTests"
 	msg := req.Msg
-	if len(msg.GetRun().GetSelections()) == 0 {
+	if msg.GetRerun() != nil && len(msg.GetRun().GetSelections()) > 0 {
+		s.log.Info(opRunTests, "refused a rerun that names its own selections", dlog.Context{"workspace_id": msg.GetWorkspace().GetId()})
+		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_Invalid{Invalid: &agentreplv1.RunTestsInvalid{
+			Detail: "a rerun runs the workspace's recorded cases, so it names no selection of its own"}}})
+	}
+	if msg.GetRerun() == nil && len(msg.GetRun().GetSelections()) == 0 {
 		s.log.Info(opRunTests, "refused a test run that names no test", nil)
 		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NoSelection{NoSelection: &agentreplv1.RunTestsNoSelection{}}})
 	}
@@ -124,7 +129,28 @@ func (s *server) RunTests(
 		w = cut.worktree
 	}
 	log, dir, script := w.log, w.dir, w.script
-	selection, err := writeRequest(msg.GetRun(), "agent-repl-run-tests-*.pb")
+	request := msg.GetRun()
+	if msg.GetRerun() != nil {
+		var rerun *testrunv1.TestRunRequest
+		if rerun, err = s.rerunOf(ctx, w, request); err != nil {
+			return err
+		}
+		if rerun == nil {
+			return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NothingToRerun{NothingToRerun: &agentreplv1.RunTestsNothingToRerun{}}})
+		}
+		request = rerun
+	} else if err := s.recordTestCases(ctx, w, request); err != nil {
+		return err
+	}
+	// THE CASES A RERUN DROPPED ARE FORGOTTEN once the call ends, however it
+	// ends, so a rename is said once and never again.
+	var dropped []*testrunv1.TestSelection
+	defer func() {
+		if forgetErr := s.forgetTestCases(w, dropped); err == nil {
+			err = forgetErr
+		}
+	}()
+	selection, err := writeRequest(request, "agent-repl-run-tests-*.pb")
 	if err != nil {
 		log.Error(opRunTests, "a test run's selection could not be handed to its runner", dlog.Context{"dir": dir, "cause": err.Error()})
 		return sendRunnerFailed(stream, 1, -1, err.Error())
@@ -152,7 +178,11 @@ func (s *server) RunTests(
 	defer context.AfterFunc(s.life, stopRun)()
 	runs := max(msg.GetRuns(), 1)
 	for run := uint32(1); run <= runs; run++ {
-		outcome, err := s.relayTestRun(runCtx, log, stream, dir, argv, run)
+		outcome, err := s.relayTestRun(runCtx, log, stream, dir, argv, run, func(ev *testrunv1.TestRunEvent) {
+			for _, c := range ev.GetDropped().GetCases() {
+				dropped = append(dropped, c.GetSelection())
+			}
+		})
 		if outcome == runCutByExit {
 			return s.answerRunCutByExit(log, stream, dir, run)
 		}
@@ -233,7 +263,7 @@ func (s *server) answerRunCutByExit(log dlog.Logger, stream *connect.ServerStrea
 // relayTestRun runs argv in dir with an events pipe as its fd 3, sending every
 // event on as it arrives, each framed as run RUN, and answers runner_failed
 // when the run ends without saying how.
-func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *connect.ServerStream[agentreplv1.RunTestsResponse], dir string, argv []string, run uint32) (runOutcome, error) {
+func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *connect.ServerStream[agentreplv1.RunTestsResponse], dir string, argv []string, run uint32, seen func(*testrunv1.TestRunEvent)) (runOutcome, error) {
 	events, pipe, err := os.Pipe()
 	if err != nil {
 		log.Error(opRunTests, "a test run's events pipe could not be made", dlog.Context{"dir": dir, "run": run, "cause": err.Error()})
@@ -304,6 +334,7 @@ relay:
 			outcome = runAborted
 			log.Error(opRunTests, "a test run stopped before it planned", dlog.Context{"dir": dir, "run": run, "selection": ev.GetAborted().GetSelection(), "cause": ev.GetAborted().GetDetail()})
 		}
+		seen(ev)
 		if ev.GetEnded() != nil {
 			ended = ev
 			continue

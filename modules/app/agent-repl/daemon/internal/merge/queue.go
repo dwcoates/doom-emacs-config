@@ -102,6 +102,23 @@ func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope
 	return true, nil
 }
 
+// pauseFields adds PAUSE's record to FIELDS: who paused (the user, the host
+// with what it could not do, or a workspace by name and id), and whether it
+// is a hard stop or a pause to land. A resume (nil) adds nothing.
+func pauseFields(pause *wsm.MergeQueuePause, fields dlog.Context) dlog.Context {
+	if pause == nil {
+		return fields
+	}
+	fields = dlog.Merge(fields, dlog.Context{"pauser": pause.By.Kind.String(), "hard": pause.Hard, "to_land": pause.ToLand})
+	if pause.By.Cause != "" {
+		fields["cause"] = pause.By.Cause
+	}
+	if pause.By.Workspace != "" {
+		fields["pausing_workspace"], fields["pausing_workspace_name"] = string(pause.By.Workspace), pause.By.Name
+	}
+	return fields
+}
+
 // pauseRecord is the record a pause BY writes now: who asked, by the asking
 // workspace's name as it stands, whether it is a hard stop, and whether it was
 // made to land a change. A workspace
@@ -161,7 +178,10 @@ func (o *orchestrator) pauseRepos(ctx context.Context, op string, repos []wsm.Re
 	if len(changed) == 0 {
 		return o.refuseNoopPause(op, paused, "refused a pause change that would not change anything", "the merge queue is not paused", "the merge queue is already paused")
 	}
-	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scoped})
+	// EVERY PAUSE CHANGE IS RECORDED WITH WHO MADE IT AND WHY, at INFO: a
+	// queue found paused must say by whom from the log alone (2026-11-21: a
+	// host pause on a gate's cut test run was visible only in the store).
+	o.deps.Log.Global().Info(op, "changed the merge queue's pause state", pauseFields(pause, dlog.Context{"paused": paused, "repos": len(changed), "scoped": scoped}))
 	if paused {
 		suspended := o.suspendHeld(ctx, repos, suspendPause)
 		return errors.Join(suspended, o.redrawPaused(ctx, op, changed))

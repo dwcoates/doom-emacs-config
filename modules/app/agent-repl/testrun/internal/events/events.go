@@ -149,6 +149,19 @@ func (e *Emitter) Refused(detail string) {
 	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{Detail: detail}}})
 }
 
+// Dropped states the cases a rerun dropped because the tree no longer holds
+// them, each with why.
+func (e *Emitter) Dropped(dropped []*testrunv1.TestRunDroppedCase) {
+	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Dropped{Dropped: &testrunv1.TestRunDropped{Cases: dropped}}})
+}
+
+// RefusedNothingLeft states that a rerun was refused because the tree holds
+// none of its cases any more.
+func (e *Emitter) RefusedNothingLeft(detail string) {
+	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{
+		Detail: detail, NothingLeft: &testrunv1.TestRunRefusedNothingLeft{}}}})
+}
+
 // WaitingForCPU states that unit id waits to start because the host is too
 // busy for tests to add to.
 func (e *Emitter) WaitingForCPU(id string, busyPercent float64, capPercent int) {

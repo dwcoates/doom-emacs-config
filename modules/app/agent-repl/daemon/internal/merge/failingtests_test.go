@@ -2,17 +2,23 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	testrunv1 "agentrepl/proto/testrun/v1"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/testcases"
 )
 
-// testModule is the module path every invocation in these tests is spelled
-// against.
-const testModule = "/wt/modules/app/agent-repl"
+// testWorktree is the worktree a test gate run tested, which every
+// invocation in these tests is spelled against.
+const testWorktree = "/wt"
 
 // failedUnit is the runner's account of one failed unit: its output block and
 // its FAILED verdict.
@@ -42,7 +48,7 @@ func TestReadFailingTestsNamesAGoUnitsFailingTests(t *testing.T) {
 	out := failedUnit("daemon:internal/merge#00", "daemon", "=== RUN   TestA", "--- FAIL: TestA (0.01s)", "--- PASS: TestB (0.00s)", "FAIL")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "daemon")
 
 	// Assert.
 	if len(s.groups) != 1 || !slices.Equal(s.groups[0].shown, []string{"TestA"}) {
@@ -55,11 +61,11 @@ func TestReadFailingTestsRunsAGoPackageFromItsModule(t *testing.T) {
 	out := failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "daemon")
 
 	// Assert.
 	want := TestRunCommand + " -go '/wt/modules/app/agent-repl/daemon/internal/merge=TestA'"
-	if got := s.groups[0].command(); got != want {
+	if got := s.groups[0].command(testWorktree); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
@@ -69,10 +75,10 @@ func TestReadFailingTestsRunsAnIntegrationPackageUnderItsTags(t *testing.T) {
 	out := failedUnit("daemon:integration[integration]#03", "daemon", "--- FAIL: TestMergeLands (3.10s)")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "daemon")
 
 	// Assert.
-	if got := s.groups[0].command(); got != TestRunCommand+" -go '/wt/modules/app/agent-repl/daemon/integration=TestMergeLands'" {
+	if got := s.groups[0].command(testWorktree); got != TestRunCommand+" -go '/wt/modules/app/agent-repl/daemon/integration=TestMergeLands'" {
 		t.Fatalf("command = %q, want the integration package by its directory (the runner knows its tags)", got)
 	}
 }
@@ -82,11 +88,11 @@ func TestReadFailingTestsRunsJustTheFailingSubtest(t *testing.T) {
 	out := failedUnit("daemon:internal/merge#00", "daemon", "    --- FAIL: TestA/one_case (0.00s)", "--- FAIL: TestA (0.00s)")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "daemon")
 
 	// Assert.
-	if !slices.Equal(s.groups[0].shown, []string{"TestA/one_case", "TestA"}) || !strings.HasSuffix(s.groups[0].command(), "=TestA/one_case'") {
-		t.Fatalf("group = %+v (%s), want the subtest listed and run alone by its path", s.groups[0], s.groups[0].command())
+	if !slices.Equal(s.groups[0].shown, []string{"TestA/one_case", "TestA"}) || !strings.HasSuffix(s.groups[0].command(testWorktree), "=TestA/one_case'") {
+		t.Fatalf("group = %+v (%s), want the subtest listed and run alone by its path", s.groups[0], s.groups[0].command(testWorktree))
 	}
 }
 
@@ -95,10 +101,10 @@ func TestReadFailingTestsRunsTheCrossSystemSuiteFromItsDirectory(t *testing.T) {
 	out := failedUnit("e2e:.#02", "e2e", "--- FAIL: TestWebappLayerSurfaces (31.32s)")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "e2e")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "e2e")
 
 	// Assert.
-	if got := s.groups[0].command(); got != TestRunCommand+" -go '/wt/modules/app/agent-repl/e2e=TestWebappLayerSurfaces'" {
+	if got := s.groups[0].command(testWorktree); got != TestRunCommand+" -go '/wt/modules/app/agent-repl/e2e=TestWebappLayerSurfaces'" {
 		t.Fatalf("command = %q, want the e2e package by its directory", got)
 	}
 }
@@ -108,7 +114,7 @@ func TestReadFailingTestsLeavesABuildUnitUnnamed(t *testing.T) {
 	out := failedUnit("daemon:internal/merge:build", "daemon", "internal/merge/x.go:3:1: syntax error")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "daemon")
 
 	// Assert.
 	if len(s.groups) != 0 || !slices.Equal(s.unnamed, []string{"daemon:internal/merge:build"}) {
@@ -121,7 +127,7 @@ func TestReadFailingTestsLeavesAGoChunkWithNoFailLineUnnamed(t *testing.T) {
 	out := failedUnit("daemon:integration[integration]#01", "daemon", "panic: test timed out after 10m0s")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "daemon")
 
 	// Assert.
 	if !slices.Equal(s.unnamed, []string{"daemon:integration[integration]#01"}) {
@@ -138,7 +144,7 @@ func TestReadFailingTestsNamesAnERTTestWithItsFile(t *testing.T) {
 		"   FAILED  agent-repl-test-wire-verbs-merge-queue-action-arms-pinned")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "ert")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "ert")
 
 	// Assert.
 	if !slices.Equal(s.groups[0].shown, []string{"test-wire-verbs.el: agent-repl-test-wire-verbs-merge-queue-action-arms-pinned"}) {
@@ -151,11 +157,11 @@ func TestReadFailingTestsRunsERTTestsByNameInTheirFile(t *testing.T) {
 	out := failedUnit("ert#00", "ert", "   FAILED  1/2  agent-repl-a (0.1 sec) at test-core.el:12")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "ert")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "ert")
 
 	// Assert.
 	want := TestRunCommand + " -ert '/wt/modules/app/agent-repl/lisp/test-core.el=agent-repl-a'"
-	if got := s.groups[0].command(); got != want {
+	if got := s.groups[0].command(testWorktree); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
@@ -165,7 +171,7 @@ func TestReadFailingTestsLeavesAnERTUnitWithNoLocatedFailureUnnamed(t *testing.T
 	out := failedUnit("ert#01", "ert", "Error running tests")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "ert")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "ert")
 
 	// Assert.
 	if !slices.Equal(s.unnamed, []string{"ert#01"}) {
@@ -178,7 +184,7 @@ func TestReadFailingTestsNamesAVitestTestByItsFullName(t *testing.T) {
 	out := failedUnit("webapp#00", "webapp", " FAIL  test/link.test.ts > links > opens a file")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "webapp")
 
 	// Assert.
 	if !slices.Equal(s.groups[0].shown, []string{"test/link.test.ts: links opens a file"}) {
@@ -191,11 +197,11 @@ func TestReadFailingTestsRunsAVitestTestByItsFullName(t *testing.T) {
 	out := failedUnit("webapp#00", "webapp", " FAIL  test/link.test.ts > links > opens a (file)")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "webapp")
 
 	// Assert.
 	want := TestRunCommand + ` -vitest '/wt/modules/app/agent-repl/webapp/test/link.test.ts=links opens a (file)'`
-	if got := s.groups[0].command(); got != want {
+	if got := s.groups[0].command(testWorktree); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
@@ -205,10 +211,10 @@ func TestReadFailingTestsRunsAnIntegrationVitestFileByItsPath(t *testing.T) {
 	out := failedUnit("webapp[integration]#00", "webapp", " FAIL  test/integration/sidebar.integration.test.ts > arm coverage > covers every roster status arm")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "webapp")
 
 	// Assert.
-	if got := s.groups[0].command(); got != TestRunCommand+` -vitest '/wt/modules/app/agent-repl/webapp/test/integration/sidebar.integration.test.ts=arm coverage covers every roster status arm'` {
+	if got := s.groups[0].command(testWorktree); got != TestRunCommand+` -vitest '/wt/modules/app/agent-repl/webapp/test/integration/sidebar.integration.test.ts=arm coverage covers every roster status arm'` {
 		t.Fatalf("command = %q, want the integration file by its path (the runner knows its config)", got)
 	}
 }
@@ -218,10 +224,10 @@ func TestReadFailingTestsRunsAVitestFileThatFailedWholeWithNoPattern(t *testing.
 	out := failedUnit("shim#00", "shim", " FAIL  test/engine/session.test.ts [ test/engine/session.test.ts ]")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "shim")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "shim")
 
 	// Assert.
-	if got := s.groups[0].command(); got != TestRunCommand+" -vitest '/wt/modules/app/agent-repl/agent-shim/claude/shim/test/engine/session.test.ts'" {
+	if got := s.groups[0].command(testWorktree); got != TestRunCommand+" -vitest '/wt/modules/app/agent-repl/agent-shim/claude/shim/test/engine/session.test.ts'" {
 		t.Fatalf("command = %q, want the whole file run", got)
 	}
 }
@@ -231,7 +237,7 @@ func TestReadFailingTestsReadsAColoredVitestLine(t *testing.T) {
 	out := failedUnit("webapp#00", "webapp", "\x1b[31m FAIL \x1b[39m test/a.test.ts > b")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "webapp")
 
 	// Assert.
 	if !slices.Equal(s.groups[0].shown, []string{"test/a.test.ts: b"}) {
@@ -244,7 +250,7 @@ func TestReadFailingTestsLeavesTheTypecheckUnitUnnamed(t *testing.T) {
 	out := failedUnit("webapp:typecheck", "webapp", "src/a.ts(3,1): error TS2304: Cannot find name 'x'.")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "webapp")
 
 	// Assert.
 	if !slices.Equal(s.unnamed, []string{"webapp:typecheck"}) {
@@ -267,10 +273,10 @@ func TestReadFailingTestsNamesAHarnessesFailedCases(t *testing.T) {
 			out := failedUnit("background-harness", "background-harness", "ok   - a pass", tt.line)
 
 			// Act.
-			s := suiteOf(t, readFailingTests(out, testModule), "background-harness")
+			s := suiteOf(t, readFailingTests(out, testWorktree), "background-harness")
 
 			// Assert.
-			if !slices.Equal(s.groups[0].shown, []string{tt.want}) || s.groups[0].command() != TestRunCommand+" -harness '/wt/modules/app/agent-repl/bin/test-background.sh'" {
+			if !slices.Equal(s.groups[0].shown, []string{tt.want}) || s.groups[0].command(testWorktree) != TestRunCommand+" -harness '/wt/modules/app/agent-repl/bin/test-background.sh'" {
 				t.Fatalf("group = %+v, want %q run through its harness", s.groups[0], tt.want)
 			}
 		})
@@ -282,10 +288,10 @@ func TestReadFailingTestsRunsARepositoryHarnessFromTheRepositoryRoot(t *testing.
 	out := failedUnit("precommit-harness", "precommit-harness", "  FAIL: the hook refuses")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "precommit-harness")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "precommit-harness")
 
 	// Assert.
-	if got := s.groups[0].command(); got != TestRunCommand+" -harness '/wt/.githooks/test-pre-commit.sh'" {
+	if got := s.groups[0].command(testWorktree); got != TestRunCommand+" -harness '/wt/.githooks/test-pre-commit.sh'" {
 		t.Fatalf("command = %q, want the hook's harness at the repository root", got)
 	}
 }
@@ -295,7 +301,7 @@ func TestReadFailingTestsLeavesAUnitThatNeverStartedUnnamed(t *testing.T) {
 	out := "[agent-repl-tests] ERROR: unit store:vet (store) could not start: exec: go: not found\n"
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "store")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "store")
 
 	// Assert.
 	if !slices.Equal(s.unnamed, []string{"store:vet"}) {
@@ -308,7 +314,7 @@ func TestReadFailingTestsLeavesASuiteThatFailedWithNoUnitUnnamed(t *testing.T) {
 	out := "[agent-repl-tests] ERROR: sidecar failed after 1s with exit code 2\n"
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "sidecar")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "sidecar")
 
 	// Assert.
 	if !slices.Equal(s.unnamed, []string{"sidecar"}) {
@@ -321,7 +327,7 @@ func TestReadFailingTestsIgnoresAUnitNotRunForItsDependency(t *testing.T) {
 	out := "[agent-repl-tests] ERROR: unit daemon:internal/merge#00 [daemon] NOT RUN: its dependency daemon:internal/merge:build did not pass\n"
 
 	// Act.
-	found := readFailingTests(out, testModule)
+	found := readFailingTests(out, testWorktree)
 
 	// Assert.
 	if len(found.suites) != 0 {
@@ -334,7 +340,7 @@ func TestReadFailingTestsIgnoresAPassingUnit(t *testing.T) {
 	out := "[agent-repl-tests] unit daemon:x#00 [daemon] output:\n--- FAIL: TestFlakyButRetried (0.0s)\n[agent-repl-tests] unit daemon:x#00 [daemon] ok, 1.000s wall, 1.000s cpu\n"
 
 	// Act.
-	found := readFailingTests(out, testModule)
+	found := readFailingTests(out, testWorktree)
 
 	// Assert.
 	if len(found.suites) != 0 {
@@ -347,7 +353,7 @@ func TestReadFailingTestsOrdersSuitesAsTheRoster(t *testing.T) {
 	out := failedUnit("e2e:.#00", "e2e", "--- FAIL: TestE (1s)") + failedUnit("ert#00", "ert", "   FAILED  1/1  a (0.1 sec) at test-a.el:1")
 
 	// Act.
-	found := readFailingTests(out, testModule)
+	found := readFailingTests(out, testWorktree)
 
 	// Assert.
 	if len(found.suites) != 2 || found.suites[0].name != "ert" || found.suites[1].name != "e2e" {
@@ -380,8 +386,10 @@ func TestRenderPointsAnUnnamedUnitToItsBlockInTheArchive(t *testing.T) {
 
 func TestRenderListsEachGroupsCommandAndTests(t *testing.T) {
 	// Arrange.
-	flags := func(names []string) []string { return []string{selectionFlag("go", "/p", names)} }
-	found := failingTests{suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{flags: flags, names: []string{"TestA", "TestB"}, shown: []string{"TestA", "TestB"}}}}}}
+	selections := func(names []string) []*testrunv1.TestSelection {
+		return []*testrunv1.TestSelection{testcases.GoPackage("p", names)}
+	}
+	found := failingTests{worktree: "/", suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{selections: selections, names: []string{"TestA", "TestB"}, shown: []string{"TestA", "TestB"}}}}}}
 
 	// Act.
 	text := found.render("/logs/x.log")
@@ -393,12 +401,14 @@ func TestRenderListsEachGroupsCommandAndTests(t *testing.T) {
 }
 
 func TestRenderWritesNoMarkdownHeading(t *testing.T) {
-	flags := func(names []string) []string { return []string{selectionFlag("go", "/p", names)} }
+	selections := func(names []string) []*testrunv1.TestSelection {
+		return []*testrunv1.TestSelection{testcases.GoPackage("p", names)}
+	}
 	tests := []struct {
 		name  string
 		found failingTests
 	}{
-		{name: "a run with a failing group", found: failingTests{suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{flags: flags, names: []string{"TestA"}, shown: []string{"TestA"}}}}}}},
+		{name: "a run with a failing group", found: failingTests{suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{selections: selections, names: []string{"TestA"}, shown: []string{"TestA"}}}}}}},
 		{name: "a run with a unit whose tests could not be named", found: failingTests{suites: []*failingSuite{{name: "daemon", unnamed: []string{"daemon:vet"}}}}},
 		{name: "a run with no failure attributed to a suite", found: failingTests{}},
 	}
@@ -664,7 +674,7 @@ func TestRenderRunsEveryFailingTestInOneCommand(t *testing.T) {
 		failedUnit("ert#00", "ert", "   FAILED  1/2  agent-repl-a (0.1 sec) at test-core.el:12")
 
 	// Act.
-	text := readFailingTests(out, testModule).render("/logs/x.log")
+	text := readFailingTests(out, testWorktree).render("/logs/x.log")
 
 	// Assert.
 	// In roster order: the ERT suite before the daemon's.
@@ -680,10 +690,10 @@ func TestReadFailingTestsGathersAPackagesFailuresAcrossItsChunks(t *testing.T) {
 		failedUnit("daemon:internal/merge#01", "daemon", "--- FAIL: TestZ (0.01s)")
 
 	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+	s := suiteOf(t, readFailingTests(out, testWorktree), "daemon")
 
 	// Assert.
-	if len(s.groups) != 1 || !strings.HasSuffix(s.groups[0].command(), "=TestA,TestZ'") {
+	if len(s.groups) != 1 || !strings.HasSuffix(s.groups[0].command(testWorktree), "=TestA,TestZ'") {
 		t.Fatalf("groups = %+v, want one command naming both chunks' failures", s.groups)
 	}
 }
@@ -723,12 +733,122 @@ func TestNoFailingTestCommandRunsATestByHand(t *testing.T) {
 		failedUnit("background-harness", "background-harness", "  FAIL: x")
 
 	// Act.
-	text := readFailingTests(out, testModule).render("/logs/x.log")
+	text := readFailingTests(out, testWorktree).render("/logs/x.log")
 
 	// Assert.
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, "run") && !strings.Contains(line, ": "+TestRunCommand+" ") {
 			t.Fatalf("line %q runs tests by hand, want %s", line, TestRunCommand)
 		}
+	}
+}
+
+// caseWorktree is a worktree holding the daemon package internal/merge.
+func caseWorktree(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, moduleRoot, "daemon", "internal", "merge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestAFailingRunsCasesAreEachTestItNamesAndEachUnitItCouldNot(t *testing.T) {
+	const merge = moduleRoot + "daemon/internal/merge"
+	tests := []struct {
+		name string
+		out  string
+		want []*testrunv1.TestSelection
+	}{
+		{name: "each failing Go test, a subtest's as its top-level test",
+			out:  failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)", "    --- FAIL: TestB/one_case (0.00s)", "--- FAIL: TestB (0.01s)"),
+			want: []*testrunv1.TestSelection{testcases.GoPackage(merge, []string{"TestA"}), testcases.GoPackage(merge, []string{"TestB"})}},
+		{name: "each failing vitest test", out: failedUnit("webapp#00", "webapp", " FAIL  test/feed.test.ts > feed > draws a row"),
+			want: []*testrunv1.TestSelection{testcases.VitestFile(moduleRoot+"webapp/test/feed.test.ts", "feed draws a row")}},
+		{name: "each failing ERT test", out: failedUnit("ert#00", "ert", "   FAILED  1/2  agent-repl-a (0.1 sec) at test-core.el:12"),
+			want: []*testrunv1.TestSelection{testcases.ErtFile(moduleRoot+"lisp/test-core.el", []string{"agent-repl-a"})}},
+		{name: "a failing harness, whole", out: failedUnit("background-harness", "background-harness", "FAIL - the pipe"),
+			want: []*testrunv1.TestSelection{testcases.Harness(moduleRoot+"bin/test-background.sh", nil)}},
+		{name: "an unnamed unit of a Go package in the tree, as its package", out: failedUnit("daemon:internal/merge:vet", "daemon", "vet: broken"),
+			want: []*testrunv1.TestSelection{testcases.GoPackage(merge, nil)}},
+		{name: "an unnamed unit naming no package in the tree, as its suite", out: failedUnit("daemon:build", "daemon", "build: broken"),
+			want: []*testrunv1.TestSelection{testcases.Suite("daemon")}},
+		{name: "an unnamed unit of a suite that is not Go, as its suite", out: failedUnit("webapp:typecheck", "webapp", "error TS2322"),
+			want: []*testrunv1.TestSelection{testcases.Suite("webapp")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			found := readFailingTests(tt.out, caseWorktree(t))
+
+			// Act
+			got := found.cases()
+
+			// Assert
+			if !slices.EqualFunc(got, tt.want, func(a, b *testrunv1.TestSelection) bool { return testcases.Key(a) == testcases.Key(b) }) {
+				t.Fatalf("cases = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// THE BRIEF AND THE RECORD READ ONE SHAPE: every command the brief gives is
+// the flags testcases spells for the group's own selections, the selections
+// the record takes, so the two never name different tests.
+func TestTheBriefsCommandsSpellTheSelectionsTheRecordTakes(t *testing.T) {
+	// Arrange
+	found := readFailingTests(failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)"), testWorktree)
+	g := suiteOf(t, found, "daemon").groups[0]
+
+	// Act
+	command := g.command(testWorktree)
+
+	// Assert
+	var want []string
+	for _, sel := range g.selections(g.names) {
+		want = append(want, testcases.Flags(testWorktree, sel)...)
+	}
+	if command != TestRunCommand+" "+strings.Join(want, " ") || len(found.cases()) != 1 {
+		t.Fatalf("command %q, cases %v; want the flags of the group's own selections", command, found.cases())
+	}
+}
+
+func TestWriteFailingTestsRecordsTheRunsCasesForTheWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	r := failingTestsRun(t, h)
+	archive := writeArchive(t, failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)"))
+
+	// Act
+	_, err := r.writeFailingTests(context.Background(), archive)
+
+	// Assert
+	want := []*testrunv1.TestSelection{testcases.GoPackage(moduleRoot+"daemon/internal/merge", []string{"TestA"})}
+	got := h.db.testCases[r.ws]
+	if err != nil || !slices.EqualFunc(got, want, func(a, b *testrunv1.TestSelection) bool { return testcases.Key(a) == testcases.Key(b) }) {
+		t.Fatalf("err %v, recorded %v; want %v", err, got, want)
+	}
+}
+
+func TestWriteFailingTestsThatCannotRecordItsCasesWritesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.recordCasesErr = errors.New("disk I/O error")
+	r := failingTestsRun(t, h)
+	archive := writeArchive(t, failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)"))
+
+	// Act
+	_, err := r.writeFailingTests(context.Background(), archive)
+
+	// Assert
+	if !errors.Is(err, h.db.recordCasesErr) {
+		t.Fatalf("err = %v, want the record's failure", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(h.sourceD, FailingTestsFile)); !os.IsNotExist(statErr) {
+		t.Fatalf("the failing tests file stands (%v), want nothing written", statErr)
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.fixes"})
+	if !ok || rec.Context["workspace"] != string(r.ws) || rec.Context["archive"] != archive || rec.Context["cause"] == nil {
+		t.Fatalf("records = %v; want the failed record logged with the workspace, the archive and the cause", h.logs.Records())
 	}
 }

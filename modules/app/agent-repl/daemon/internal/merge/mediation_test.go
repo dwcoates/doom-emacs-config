@@ -35,7 +35,7 @@ func checked(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
-	h.briefs[BriefDeployIntake] = []string{"deploy_started", "ending", "window_started", "repo_dir", "version", "gate_log", "digest"}
+	h.briefs[BriefDeployIntake] = []string{"occasion", "ending", "window_started", "gate_log", "digest"}
 	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
 	h.briefs[BriefDeployCheckNotRun] = []string{"repo_dir", "deploy_started", "told_standing", "what", "cause"}
 	h.briefs[BriefDeployIntakeResumed] = []string{"deploy_started", "version"}

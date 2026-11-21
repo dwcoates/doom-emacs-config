@@ -7,7 +7,9 @@
 // `unit_ended` per planned unit, then `ended` last. A selection the runner
 // cannot resolve states `refused` alone, and a run the runner resolved but
 // could not plan (an input it could not read, a plan it could not build)
-// states `aborted` alone. Between `planned` and `ended`, a unit
+// states `aborted` alone. A rerun (TestRunRequest.drop_missing) that dropped
+// a case states `dropped` once, before its `planned` (or before the
+// `refused` of a rerun that dropped every case). Between `planned` and `ended`, a unit
 // the host's CPU holds back states `waiting_for_cpu` when its wait begins and
 // `cpu_wait_ended` once it has its cores, in that order, before its own
 // `unit_ended`.
@@ -18,13 +20,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { TestSelection } from "./selection_pb";
+import { file_testrun_v1_selection } from "./selection_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file testrun/v1/run_event.proto.
  */
 export const file_testrun_v1_run_event: GenFile = /*@__PURE__*/
-  fileDesc("Chp0ZXN0cnVuL3YxL3J1bl9ldmVudC5wcm90bxIKdGVzdHJ1bi52MSL7AgoMVGVzdFJ1bkV2ZW50Ei0KB3BsYW5uZWQYASABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkSAASMgoKdW5pdF9lbmRlZBgCIAEoCzIcLnRlc3RydW4udjEuVGVzdFJ1blVuaXRFbmRlZEgAEikKBWVuZGVkGAMgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRIABItCgdyZWZ1c2VkGAQgASgLMhoudGVzdHJ1bi52MS5UZXN0UnVuUmVmdXNlZEgAEjsKD3dhaXRpbmdfZm9yX2NwdRgFIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1bldhaXRpbmdGb3JDcHVIABI5Cg5jcHVfd2FpdF9lbmRlZBgGIAEoCzIfLnRlc3RydW4udjEuVGVzdFJ1bkNwdVdhaXRFbmRlZEgAEi0KB2Fib3J0ZWQYByABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5BYm9ydGVkSABCBwoFZXZlbnQiZAoOVGVzdFJ1blBsYW5uZWQSLQoFdW5pdHMYASADKAsyHi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkVW5pdBIjCgNsb2cYAiABKAsyFi50ZXN0cnVuLnYxLlRlc3RSdW5Mb2ciNAoSVGVzdFJ1blBsYW5uZWRVbml0Eg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkiGgoKVGVzdFJ1bkxvZxIMCgRwYXRoGAEgASgJIqUCChBUZXN0UnVuVW5pdEVuZGVkEg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkSDwoHd2FsbF9tcxgDIAEoAxIvCgZwYXNzZWQYBCABKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5Vbml0UGFzc2VkSAASLwoGZmFpbGVkGAUgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVW5pdEZhaWxlZEgAEjUKCWNhbmNlbGxlZBgHIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1blVuaXRDYW5jZWxsZWRIABIsCgV0ZXN0cxgIIAMoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RSZXN1bHRCCQoHdmVyZGljdEoECAYQB1IIZGVjbGluZWQiEwoRVGVzdFJ1blVuaXRQYXNzZWQiOwoRVGVzdFJ1blVuaXRGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEhMKC291dHB1dF90YWlsGAIgASgJIjQKFFRlc3RSdW5Vbml0Q2FuY2VsbGVkEhwKFGNhbmNlbGxlZF9ieV91bml0X2lkGAEgASgJItIBChFUZXN0UnVuVGVzdFJlc3VsdBIMCgRuYW1lGAEgASgJEg8KB3dhbGxfbXMYAiABKAMSLwoGcGFzc2VkGAMgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFBhc3NlZEgAEi8KBmZhaWxlZBgEIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RGYWlsZWRIABIxCgdza2lwcGVkGAUgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVRlc3RSdW5UZXN0UGFzc2VkIhMKEVRlc3RSdW5UZXN0RmFpbGVkIhQKElRlc3RSdW5UZXN0U2tpcHBlZCLGAQoMVGVzdFJ1bkVuZGVkEjAKBnBhc3NlZBgBIAEoCzIeLnRlc3RydW4udjEuVGVzdFJ1bkVuZGVkUGFzc2VkSAASMAoGZmFpbGVkGAIgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRGYWlsZWRIABIyCgdwbGFubmVkGAMgASgLMh8udGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRQbGFubmVkSAASEwoLcHJvZmlsZV9kaXIYBCABKAlCCQoHb3V0Y29tZSIsChNUZXN0UnVuRW5kZWRQbGFubmVkEhUKDXBsYW5uZWRfdW5pdHMYASABKAUiQAoSVGVzdFJ1bkVuZGVkUGFzc2VkEhQKDHBhc3NlZF91bml0cxgBIAEoBUoECAIQA1IOZGVjbGluZWRfdW5pdHMibwoSVGVzdFJ1bkVuZGVkRmFpbGVkEhQKDGZhaWxlZF91bml0cxgBIAEoBRIXCg9jYW5jZWxsZWRfdW5pdHMYAiABKAUSFAoMcGFzc2VkX3VuaXRzGAMgASgFEhQKDHJ1bl9mYWlsdXJlcxgEIAMoCSIzCg5UZXN0UnVuQWJvcnRlZBIRCglzZWxlY3Rpb24YASABKAkSDgoGZGV0YWlsGAIgASgJIiAKDlRlc3RSdW5SZWZ1c2VkEg4KBmRldGFpbBgBIAEoCSJSChRUZXN0UnVuV2FpdGluZ0ZvckNwdRIPCgd1bml0X2lkGAEgASgJEhQKDGJ1c3lfcGVyY2VudBgCIAEoARITCgtjYXBfcGVyY2VudBgDIAEoDSI5ChNUZXN0UnVuQ3B1V2FpdEVuZGVkEg8KB3VuaXRfaWQYASABKAkSEQoJd2FpdGVkX21zGAIgASgDQiZaJGFnZW50cmVwbC9wcm90by90ZXN0cnVuL3YxO3Rlc3RydW52MWIGcHJvdG8z");
+  fileDesc("Chp0ZXN0cnVuL3YxL3J1bl9ldmVudC5wcm90bxIKdGVzdHJ1bi52MSKqAwoMVGVzdFJ1bkV2ZW50Ei0KB3BsYW5uZWQYASABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkSAASMgoKdW5pdF9lbmRlZBgCIAEoCzIcLnRlc3RydW4udjEuVGVzdFJ1blVuaXRFbmRlZEgAEikKBWVuZGVkGAMgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRIABItCgdyZWZ1c2VkGAQgASgLMhoudGVzdHJ1bi52MS5UZXN0UnVuUmVmdXNlZEgAEjsKD3dhaXRpbmdfZm9yX2NwdRgFIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1bldhaXRpbmdGb3JDcHVIABI5Cg5jcHVfd2FpdF9lbmRlZBgGIAEoCzIfLnRlc3RydW4udjEuVGVzdFJ1bkNwdVdhaXRFbmRlZEgAEi0KB2Fib3J0ZWQYByABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5BYm9ydGVkSAASLQoHZHJvcHBlZBgIIAEoCzIaLnRlc3RydW4udjEuVGVzdFJ1bkRyb3BwZWRIAEIHCgVldmVudCI/Cg5UZXN0UnVuRHJvcHBlZBItCgVjYXNlcxgBIAMoCzIeLnRlc3RydW4udjEuVGVzdFJ1bkRyb3BwZWRDYXNlIlIKElRlc3RSdW5Ecm9wcGVkQ2FzZRIsCglzZWxlY3Rpb24YASABKAsyGS50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb24SDgoGZGV0YWlsGAIgASgJImQKDlRlc3RSdW5QbGFubmVkEi0KBXVuaXRzGAEgAygLMh4udGVzdHJ1bi52MS5UZXN0UnVuUGxhbm5lZFVuaXQSIwoDbG9nGAIgASgLMhYudGVzdHJ1bi52MS5UZXN0UnVuTG9nIjQKElRlc3RSdW5QbGFubmVkVW5pdBIPCgd1bml0X2lkGAEgASgJEg0KBXN1aXRlGAIgASgJIhoKClRlc3RSdW5Mb2cSDAoEcGF0aBgBIAEoCSKlAgoQVGVzdFJ1blVuaXRFbmRlZBIPCgd1bml0X2lkGAEgASgJEg0KBXN1aXRlGAIgASgJEg8KB3dhbGxfbXMYAyABKAMSLwoGcGFzc2VkGAQgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVW5pdFBhc3NlZEgAEi8KBmZhaWxlZBgFIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blVuaXRGYWlsZWRIABI1CgljYW5jZWxsZWQYByABKAsyIC50ZXN0cnVuLnYxLlRlc3RSdW5Vbml0Q2FuY2VsbGVkSAASLAoFdGVzdHMYCCADKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5UZXN0UmVzdWx0QgkKB3ZlcmRpY3RKBAgGEAdSCGRlY2xpbmVkIhMKEVRlc3RSdW5Vbml0UGFzc2VkIjsKEVRlc3RSdW5Vbml0RmFpbGVkEhEKCWV4aXRfY29kZRgBIAEoBRITCgtvdXRwdXRfdGFpbBgCIAEoCSI0ChRUZXN0UnVuVW5pdENhbmNlbGxlZBIcChRjYW5jZWxsZWRfYnlfdW5pdF9pZBgBIAEoCSLSAQoRVGVzdFJ1blRlc3RSZXN1bHQSDAoEbmFtZRgBIAEoCRIPCgd3YWxsX21zGAIgASgDEi8KBnBhc3NlZBgDIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RQYXNzZWRIABIvCgZmYWlsZWQYBCABKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5UZXN0RmFpbGVkSAASMQoHc2tpcHBlZBgFIAEoCzIeLnRlc3RydW4udjEuVGVzdFJ1blRlc3RTa2lwcGVkSABCCQoHb3V0Y29tZSITChFUZXN0UnVuVGVzdFBhc3NlZCITChFUZXN0UnVuVGVzdEZhaWxlZCIUChJUZXN0UnVuVGVzdFNraXBwZWQixgEKDFRlc3RSdW5FbmRlZBIwCgZwYXNzZWQYASABKAsyHi50ZXN0cnVuLnYxLlRlc3RSdW5FbmRlZFBhc3NlZEgAEjAKBmZhaWxlZBgCIAEoCzIeLnRlc3RydW4udjEuVGVzdFJ1bkVuZGVkRmFpbGVkSAASMgoHcGxhbm5lZBgDIAEoCzIfLnRlc3RydW4udjEuVGVzdFJ1bkVuZGVkUGxhbm5lZEgAEhMKC3Byb2ZpbGVfZGlyGAQgASgJQgkKB291dGNvbWUiLAoTVGVzdFJ1bkVuZGVkUGxhbm5lZBIVCg1wbGFubmVkX3VuaXRzGAEgASgFIkAKElRlc3RSdW5FbmRlZFBhc3NlZBIUCgxwYXNzZWRfdW5pdHMYASABKAVKBAgCEANSDmRlY2xpbmVkX3VuaXRzIm8KElRlc3RSdW5FbmRlZEZhaWxlZBIUCgxmYWlsZWRfdW5pdHMYASABKAUSFwoPY2FuY2VsbGVkX3VuaXRzGAIgASgFEhQKDHBhc3NlZF91bml0cxgDIAEoBRIUCgxydW5fZmFpbHVyZXMYBCADKAkiMwoOVGVzdFJ1bkFib3J0ZWQSEQoJc2VsZWN0aW9uGAEgASgJEg4KBmRldGFpbBgCIAEoCSJdCg5UZXN0UnVuUmVmdXNlZBIOCgZkZXRhaWwYASABKAkSOwoMbm90aGluZ19sZWZ0GAIgASgLMiUudGVzdHJ1bi52MS5UZXN0UnVuUmVmdXNlZE5vdGhpbmdMZWZ0IhsKGVRlc3RSdW5SZWZ1c2VkTm90aGluZ0xlZnQiUgoUVGVzdFJ1bldhaXRpbmdGb3JDcHUSDwoHdW5pdF9pZBgBIAEoCRIUCgxidXN5X3BlcmNlbnQYAiABKAESEwoLY2FwX3BlcmNlbnQYAyABKA0iOQoTVGVzdFJ1bkNwdVdhaXRFbmRlZBIPCgd1bml0X2lkGAEgASgJEhEKCXdhaXRlZF9tcxgCIAEoA0ImWiRhZ2VudHJlcGwvcHJvdG8vdGVzdHJ1bi92MTt0ZXN0cnVudjFiBnByb3RvMw", [file_testrun_v1_selection]);
 
 /**
  * One thing a run reports.
@@ -95,6 +99,14 @@ export type TestRunEvent = Message<"testrun.v1.TestRunEvent"> & {
      */
     value: TestRunAborted;
     case: "aborted";
+  } | {
+    /**
+     * The cases a rerun dropped because the tree no longer holds them.
+     *
+     * @generated from field: testrun.v1.TestRunDropped dropped = 8;
+     */
+    value: TestRunDropped;
+    case: "dropped";
   } | { case: undefined; value?: undefined };
 };
 
@@ -104,6 +116,58 @@ export type TestRunEvent = Message<"testrun.v1.TestRunEvent"> & {
  */
 export const TestRunEventSchema: GenMessage<TestRunEvent> = /*@__PURE__*/
   messageDesc(file_testrun_v1_run_event, 0);
+
+/**
+ * The cases a rerun (TestRunRequest.drop_missing) dropped because the tree no
+ * longer holds them: each is a selection of the request, exactly as it was
+ * sent, so its caller can forget it.
+ *
+ * @generated from message testrun.v1.TestRunDropped
+ */
+export type TestRunDropped = Message<"testrun.v1.TestRunDropped"> & {
+  /**
+   * REQUIRED, at least one. Every dropped case, in the request's order.
+   *
+   * @generated from field: repeated testrun.v1.TestRunDroppedCase cases = 1;
+   */
+  cases: TestRunDroppedCase[];
+};
+
+/**
+ * Describes the message testrun.v1.TestRunDropped.
+ * Use `create(TestRunDroppedSchema)` to create a new message.
+ */
+export const TestRunDroppedSchema: GenMessage<TestRunDropped> = /*@__PURE__*/
+  messageDesc(file_testrun_v1_run_event, 1);
+
+/**
+ * One case a rerun dropped.
+ *
+ * @generated from message testrun.v1.TestRunDroppedCase
+ */
+export type TestRunDroppedCase = Message<"testrun.v1.TestRunDroppedCase"> & {
+  /**
+   * REQUIRED. The request's selection, as it was sent.
+   *
+   * @generated from field: testrun.v1.TestSelection selection = 1;
+   */
+  selection?: TestSelection | undefined;
+
+  /**
+   * REQUIRED. Why, for a person: the package, file or script gone, or the
+   * test or group its target no longer defines.
+   *
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message testrun.v1.TestRunDroppedCase.
+ * Use `create(TestRunDroppedCaseSchema)` to create a new message.
+ */
+export const TestRunDroppedCaseSchema: GenMessage<TestRunDroppedCase> = /*@__PURE__*/
+  messageDesc(file_testrun_v1_run_event, 2);
 
 /**
  * The run's plan, before any unit starts.
@@ -132,7 +196,7 @@ export type TestRunPlanned = Message<"testrun.v1.TestRunPlanned"> & {
  * Use `create(TestRunPlannedSchema)` to create a new message.
  */
 export const TestRunPlannedSchema: GenMessage<TestRunPlanned> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 1);
+  messageDesc(file_testrun_v1_run_event, 3);
 
 /**
  * One planned unit: one process the runner starts.
@@ -161,7 +225,7 @@ export type TestRunPlannedUnit = Message<"testrun.v1.TestRunPlannedUnit"> & {
  * Use `create(TestRunPlannedUnitSchema)` to create a new message.
  */
 export const TestRunPlannedUnitSchema: GenMessage<TestRunPlannedUnit> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 2);
+  messageDesc(file_testrun_v1_run_event, 4);
 
 /**
  * Where a run's complete log is.
@@ -182,7 +246,7 @@ export type TestRunLog = Message<"testrun.v1.TestRunLog"> & {
  * Use `create(TestRunLogSchema)` to create a new message.
  */
 export const TestRunLogSchema: GenMessage<TestRunLog> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 3);
+  messageDesc(file_testrun_v1_run_event, 5);
 
 /**
  * One unit's verdict, with the tests it ran.
@@ -258,7 +322,7 @@ export type TestRunUnitEnded = Message<"testrun.v1.TestRunUnitEnded"> & {
  * Use `create(TestRunUnitEndedSchema)` to create a new message.
  */
 export const TestRunUnitEndedSchema: GenMessage<TestRunUnitEnded> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 4);
+  messageDesc(file_testrun_v1_run_event, 6);
 
 /**
  * The unit passed.
@@ -273,7 +337,7 @@ export type TestRunUnitPassed = Message<"testrun.v1.TestRunUnitPassed"> & {
  * Use `create(TestRunUnitPassedSchema)` to create a new message.
  */
 export const TestRunUnitPassedSchema: GenMessage<TestRunUnitPassed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 5);
+  messageDesc(file_testrun_v1_run_event, 7);
 
 /**
  * The unit failed.
@@ -302,7 +366,7 @@ export type TestRunUnitFailed = Message<"testrun.v1.TestRunUnitFailed"> & {
  * Use `create(TestRunUnitFailedSchema)` to create a new message.
  */
 export const TestRunUnitFailedSchema: GenMessage<TestRunUnitFailed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 6);
+  messageDesc(file_testrun_v1_run_event, 8);
 
 /**
  * The unit was cancelled before it started.
@@ -323,7 +387,7 @@ export type TestRunUnitCancelled = Message<"testrun.v1.TestRunUnitCancelled"> & 
  * Use `create(TestRunUnitCancelledSchema)` to create a new message.
  */
 export const TestRunUnitCancelledSchema: GenMessage<TestRunUnitCancelled> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 7);
+  messageDesc(file_testrun_v1_run_event, 9);
 
 /**
  * One test a unit ran.
@@ -384,7 +448,7 @@ export type TestRunTestResult = Message<"testrun.v1.TestRunTestResult"> & {
  * Use `create(TestRunTestResultSchema)` to create a new message.
  */
 export const TestRunTestResultSchema: GenMessage<TestRunTestResult> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 8);
+  messageDesc(file_testrun_v1_run_event, 10);
 
 /**
  * The test passed.
@@ -399,7 +463,7 @@ export type TestRunTestPassed = Message<"testrun.v1.TestRunTestPassed"> & {
  * Use `create(TestRunTestPassedSchema)` to create a new message.
  */
 export const TestRunTestPassedSchema: GenMessage<TestRunTestPassed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 9);
+  messageDesc(file_testrun_v1_run_event, 11);
 
 /**
  * The test failed.
@@ -414,7 +478,7 @@ export type TestRunTestFailed = Message<"testrun.v1.TestRunTestFailed"> & {
  * Use `create(TestRunTestFailedSchema)` to create a new message.
  */
 export const TestRunTestFailedSchema: GenMessage<TestRunTestFailed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 10);
+  messageDesc(file_testrun_v1_run_event, 12);
 
 /**
  * The test was skipped.
@@ -429,7 +493,7 @@ export type TestRunTestSkipped = Message<"testrun.v1.TestRunTestSkipped"> & {
  * Use `create(TestRunTestSkippedSchema)` to create a new message.
  */
 export const TestRunTestSkippedSchema: GenMessage<TestRunTestSkipped> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 11);
+  messageDesc(file_testrun_v1_run_event, 13);
 
 /**
  * How the run ended.
@@ -485,7 +549,7 @@ export type TestRunEnded = Message<"testrun.v1.TestRunEnded"> & {
  * Use `create(TestRunEndedSchema)` to create a new message.
  */
 export const TestRunEndedSchema: GenMessage<TestRunEnded> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 12);
+  messageDesc(file_testrun_v1_run_event, 14);
 
 /**
  * A plan-only run planned every unit and ran none.
@@ -506,7 +570,7 @@ export type TestRunEndedPlanned = Message<"testrun.v1.TestRunEndedPlanned"> & {
  * Use `create(TestRunEndedPlannedSchema)` to create a new message.
  */
 export const TestRunEndedPlannedSchema: GenMessage<TestRunEndedPlanned> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 13);
+  messageDesc(file_testrun_v1_run_event, 15);
 
 /**
  * No unit failed.
@@ -527,7 +591,7 @@ export type TestRunEndedPassed = Message<"testrun.v1.TestRunEndedPassed"> & {
  * Use `create(TestRunEndedPassedSchema)` to create a new message.
  */
 export const TestRunEndedPassedSchema: GenMessage<TestRunEndedPassed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 14);
+  messageDesc(file_testrun_v1_run_event, 16);
 
 /**
  * At least one unit failed or was cancelled, or the run itself failed a check
@@ -575,7 +639,7 @@ export type TestRunEndedFailed = Message<"testrun.v1.TestRunEndedFailed"> & {
  * Use `create(TestRunEndedFailedSchema)` to create a new message.
  */
 export const TestRunEndedFailedSchema: GenMessage<TestRunEndedFailed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 15);
+  messageDesc(file_testrun_v1_run_event, 17);
 
 /**
  * The run stopped before it planned, on a failure of the runner's own rather
@@ -608,7 +672,7 @@ export type TestRunAborted = Message<"testrun.v1.TestRunAborted"> & {
  * Use `create(TestRunAbortedSchema)` to create a new message.
  */
 export const TestRunAbortedSchema: GenMessage<TestRunAborted> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 16);
+  messageDesc(file_testrun_v1_run_event, 18);
 
 /**
  * The selection could not be run.
@@ -623,6 +687,15 @@ export type TestRunRefused = Message<"testrun.v1.TestRunRefused"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * Set when the request was a rerun (TestRunRequest.drop_missing) and the
+   * tree holds none of its cases any more: every one was dropped, in the
+   * `dropped` event before this one.
+   *
+   * @generated from field: testrun.v1.TestRunRefusedNothingLeft nothing_left = 2;
+   */
+  nothingLeft?: TestRunRefusedNothingLeft | undefined;
 };
 
 /**
@@ -630,7 +703,22 @@ export type TestRunRefused = Message<"testrun.v1.TestRunRefused"> & {
  * Use `create(TestRunRefusedSchema)` to create a new message.
  */
 export const TestRunRefusedSchema: GenMessage<TestRunRefused> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 17);
+  messageDesc(file_testrun_v1_run_event, 19);
+
+/**
+ * A rerun whose every case the tree no longer holds.
+ *
+ * @generated from message testrun.v1.TestRunRefusedNothingLeft
+ */
+export type TestRunRefusedNothingLeft = Message<"testrun.v1.TestRunRefusedNothingLeft"> & {
+};
+
+/**
+ * Describes the message testrun.v1.TestRunRefusedNothingLeft.
+ * Use `create(TestRunRefusedNothingLeftSchema)` to create a new message.
+ */
+export const TestRunRefusedNothingLeftSchema: GenMessage<TestRunRefusedNothingLeft> = /*@__PURE__*/
+  messageDesc(file_testrun_v1_run_event, 20);
 
 /**
  * A unit waits to start for the host's CPU. Every test and build on the host
@@ -667,7 +755,7 @@ export type TestRunWaitingForCpu = Message<"testrun.v1.TestRunWaitingForCpu"> & 
  * Use `create(TestRunWaitingForCpuSchema)` to create a new message.
  */
 export const TestRunWaitingForCpuSchema: GenMessage<TestRunWaitingForCpu> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 18);
+  messageDesc(file_testrun_v1_run_event, 21);
 
 /**
  * A unit that waited for the host's CPU has its cores and starts.
@@ -695,5 +783,5 @@ export type TestRunCpuWaitEnded = Message<"testrun.v1.TestRunCpuWaitEnded"> & {
  * Use `create(TestRunCpuWaitEndedSchema)` to create a new message.
  */
 export const TestRunCpuWaitEndedSchema: GenMessage<TestRunCpuWaitEnded> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 19);
+  messageDesc(file_testrun_v1_run_event, 22);
 

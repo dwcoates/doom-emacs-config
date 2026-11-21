@@ -151,7 +151,8 @@ describe("this repository's committed metaprompt", () => {
     // full suite; a workspace runs only what it added, changed, or was handed.
     expect(text).toContain("A workspace NEVER runs the full suite, for any reason");
     expect(text).toContain("The merge queue alone runs it, programmatically, as the gate of every landing.");
-    expect(text).toContain("That remediation runs only the failing tests it was handed, once fixed, and the tests the work added or changed.");
+    expect(text).toContain("That remediation reruns the workspace's recorded cases (`agent-repld test run -rerun`), which hold the failing tests it was handed and every case the work ran.");
+    expect(text).toContain("A workspace may rerun its own recorded cases at any time (`agent-repld test run -rerun`).");
     expect(text).not.toContain("The rare exception is a change with systemic knock-on effects");
   });
 

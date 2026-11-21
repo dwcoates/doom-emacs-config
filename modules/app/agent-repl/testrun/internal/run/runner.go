@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -456,9 +457,9 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			res.Tests = tests
 		}
 		if r.CPU != nil {
-			slices := r.CPU.Take(c.id)
-			if err := testtimes.AttributeCPU(res.Tests, slices, res.Usage.CPU, res.Start, res.End); err != nil {
-				r.Log.Errorf("unit %s (%s) reported tests whose CPU cannot be told apart (%d tests, %d CPU intervals, %.3fs CPU): %v", c.id, spec.Suite, len(res.Tests), len(slices), res.Usage.CPU, err)
+			intervals := r.CPU.Take(c.id)
+			if err := testtimes.AttributeCPU(res.Tests, intervals, res.Usage.CPU, res.Start, res.End); err != nil {
+				r.Log.Errorf("unit %s (%s) reported tests whose CPU cannot be told apart (%d tests, %d CPU intervals, %.3fs CPU): %v", c.id, spec.Suite, len(res.Tests), len(intervals), res.Usage.CPU, err)
 				if res.Outcome == Passed {
 					// As for the test timings: a passing unit that broke its
 					// timing contract fails.
@@ -466,7 +467,10 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 				}
 			}
 		}
-		if res.Outcome == Passed && spec.NamesTests && len(res.Tests) == 0 {
+		// A TEST THE RUNNER SKIPPED NEVER RAN: a vitest name that matched
+		// nothing reports every test of its file skipped (2026-11-21: a
+		// named run of test/metaprompt.test.ts skipped all 49 and passed).
+		if res.Outcome == Passed && spec.NamesTests && !slices.ContainsFunc(res.Tests, func(t testtimes.Test) bool { return t.Outcome != testtimes.Skip }) {
 			r.Log.Errorf("unit %s (%s) was narrowed to named tests and ran none of them; a selection that runs nothing fails", c.id, spec.Suite)
 			fmt.Fprintf(c.output, "\n%s unit %s ran NONE of the tests it was narrowed to: a selection that runs nothing fails.\n", Prefix, c.id)
 			res.Outcome, res.Exit = Failed, 1

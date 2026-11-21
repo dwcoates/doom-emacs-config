@@ -56,6 +56,18 @@ or absolute, inside the workspace's worktree):
 names it (owner ruling, 2026-11-15); the one exception is a queue bypass
 holder's own landing gate, which stands in for the queue's.
 
+`-rerun`, in place of every selection, runs the workspace's recorded cases:
+the daemon records every case each run of the workspace names (a Go subtest
+path as its top-level test), and every failing case a merge queue gate reads
+off its branch, each once, for the workspace's life. A rerun runs each of
+them the tree still holds; a case renamed, moved or deleted since is dropped,
+named on stderr, and forgotten, and a record with nothing left to run is
+refused. It is the branch's regression set, so a workspace may run it at any
+time: it runs only recorded cases, never a whole suite unless one is a
+recorded case itself (a failing unit whose tests could not be named), and
+never the whole roster. The merge queue's fixing brief has every attempt run
+it.
+
 Options:
 
 ```text

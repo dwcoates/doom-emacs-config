@@ -536,12 +536,22 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// host identity is -- it is false here, and the adopting callers set it.
 	f.sessions[ws] = &live{client: c, hostSessionID: carried}
 	f.movedLocked()
-	_, gateStood := f.coldGates[ws]
-	delete(f.coldGates, ws)
+	gate, gateStood := f.coldGates[ws]
+	// A GATE WHOSE ANSWER IS IN FLIGHT IS THE ANSWER'S TO SETTLE: its
+	// re-open runs on the shim installed here, its compaction measuring the
+	// summarizer's spend against the gate's window, and its views retire in
+	// coldGateSettled once it lands (2026-11-21 15:15:05: a turn-end bounce
+	// installed the deploy mediator's replacement shim mid-answer, retired the
+	// gate's views, and the compaction's spend found no gate and panicked the
+	// daemon). Only a gate nobody answers is dropped with the retired shim.
+	answering := gateStood && gate.answering
+	if !answering {
+		delete(f.coldGates, ws)
+	}
 	f.mu.Unlock()
 	f.logTransition(ws, "session_live", previous != nil, true,
-		dlog.Context{"shim_pid": c.PID(), "retired": previous != nil})
-	if gateStood {
+		dlog.Context{"shim_pid": c.PID(), "retired": previous != nil, "gate_answer_in_flight": answering})
+	if gateStood && !answering {
 		f.retireGateViews(ws, "replacement_shim_installed")
 	}
 

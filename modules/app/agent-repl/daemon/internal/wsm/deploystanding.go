@@ -275,6 +275,10 @@ const (
 	// DeployStoppedShort: it stopped before finishing: a build, a restart or
 	// a rollout failed or could not finish.
 	DeployStoppedShort DeployEnding = "stopped_short"
+	// DaemonCrashed: no deploy at all. The daemon before the one that owed
+	// the check died without its orderly exit, and the check is of that
+	// death (the boot's daemon.boot.predecessor_died record).
+	DaemonCrashed DeployEnding = "crashed"
 )
 
 // RecordMediationEnding records ENDING on the check REPO owes for the deploy
@@ -288,7 +292,7 @@ func (s *store) RecordMediationEnding(ctx context.Context, repo RepoKey, owed ti
 		return false, err
 	}
 	switch ending {
-	case DeployFinished, DeployUnchanged, DeployStoppedShort:
+	case DeployFinished, DeployUnchanged, DeployStoppedShort, DaemonCrashed:
 	default:
 		err := fmt.Errorf("wsm: %q is no deploy ending", ending)
 		s.log.Error(op, "refused an ending that is none of the three", withError(fields, err))

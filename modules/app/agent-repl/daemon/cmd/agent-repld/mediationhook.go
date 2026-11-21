@@ -70,6 +70,25 @@ func (h *mediationHook) began() {
 	}
 }
 
+// crashed owes the check of the predecessor's disorderly death, as a deploy
+// that began now and ended crashed: the deploy mediator is prompted with the
+// window that holds the death (readPredecessorDeath recorded it at ERROR),
+// and the queue lands nothing past it until the mediator decides (2026-11-21:
+// the daemon crash-looped for twenty minutes and nothing told the mediator).
+// A check that cannot be owed, or whose ending cannot be recorded, is
+// recorded by the orchestrator.
+func (h *mediationHook) crashed() {
+	o := h.bound("crashed")
+	if o == nil {
+		return
+	}
+	at := h.now()
+	if err := o.OweMediations(h.ctx, at); err != nil {
+		return
+	}
+	_ = o.NoteDeployEnding(h.ctx, at, wsm.DaemonCrashed)
+}
+
 // rounds runs the rounds of every mediation owed, off the caller's
 // goroutine: a fresh boot takes up a round a crash cut short.
 func (h *mediationHook) rounds() {

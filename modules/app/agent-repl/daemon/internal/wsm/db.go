@@ -5,6 +5,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	testrunv1 "agentrepl/proto/testrun/v1"
 
 	"agent-repld/internal/pullrefs"
 
@@ -600,6 +601,14 @@ type DB interface {
 	// ListVendorTitles loads every stored vendor title by workspace; a
 	// workspace with none is absent.
 	ListVendorTitles(ctx context.Context) (map[WorkspaceID]string, error)
+	// RecordTestCases adds cases, each naming one, to a workspace's record of
+	// the test cases it ran and its merge gates failed (testcases.go).
+	RecordTestCases(ctx context.Context, id WorkspaceID, cases []*testrunv1.TestSelection, at int64) error
+	// TestCasesOf loads a workspace's recorded test cases.
+	TestCasesOf(ctx context.Context, id WorkspaceID) ([]*testrunv1.TestSelection, error)
+	// ForgetTestCases removes cases from a workspace's record, answering how
+	// many stood.
+	ForgetTestCases(ctx context.Context, id WorkspaceID, cases []*testrunv1.TestSelection) (int, error)
 	// PutColdReadPayment records the cold read a workspace's user paid for,
 	// replacing any it had (coldreadpayments.go).
 	PutColdReadPayment(ctx context.Context, id WorkspaceID, p ColdReadPayment) error

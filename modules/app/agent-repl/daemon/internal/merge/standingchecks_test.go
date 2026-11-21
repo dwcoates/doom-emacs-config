@@ -382,6 +382,7 @@ func TestRenderEndingSaysHowTheDeployEnded(t *testing.T) {
 		{wsm.DeployUnchanged, "It finished, changing nothing."},
 		{wsm.DeployStoppedShort, "It STOPPED SHORT of finishing"},
 		{"", "How it ended was not recorded"},
+		{wsm.DaemonCrashed, "Find what killed it and fix it: `daemon.boot.predecessor_died`"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.ending), func(t *testing.T) {
@@ -537,5 +538,30 @@ func TestAReleasedEscalationsMediatorStaysInSight(t *testing.T) {
 	h.db.mu.Unlock()
 	if err != nil || record.Hidden {
 		t.Fatalf("ReleaseEscalation = %v, record %+v; want the released mediator still in sight", err, record)
+	}
+}
+
+func TestRenderOccasionNamesTheDeployOrTheCrashTheCheckIsOf(t *testing.T) {
+	owed := time.Date(2026, 11, 21, 20, 22, 30, 0, time.UTC)
+	tests := []struct {
+		name   string
+		ending wsm.DeployEnding
+		want   string
+	}{
+		{name: "a deploy's check names the deploy", ending: wsm.DeployFinished, want: "A deploy of `/r` began at 2026-11-21T20:22:30Z (v1)."},
+		{name: "a check of no recorded ending names the deploy", want: "A deploy of `/r` began at 2026-11-21T20:22:30Z (v1)."},
+		{name: "a crash's check names no deploy", ending: wsm.DaemonCrashed,
+			want: "No deploy ran: the daemon serving `/r` restarted at 2026-11-21T20:22:30Z (v1) because the one before it died without its orderly exit."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := RenderOccasion(tt.ending, "/r", owed, "v1")
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("RenderOccasion = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

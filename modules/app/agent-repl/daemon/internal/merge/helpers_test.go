@@ -18,6 +18,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+	testrunv1 "agentrepl/proto/testrun/v1"
 
 	"google.golang.org/protobuf/proto"
 
@@ -34,6 +35,7 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/testcases"
 	"agent-repld/internal/wsm"
 )
 
@@ -58,6 +60,11 @@ type fakeDB struct {
 
 	// holdErr fails every round hold (HoldMergeRound).
 	holdErr error
+
+	// testCases is each workspace's recorded test cases, and
+	// recordCasesErr fails their record.
+	testCases      map[ids.WorkspaceID][]*testrunv1.TestSelection
+	recordCasesErr error
 
 	// clearResolvedErr fails ClearResolvedRebase, and recordResolvedErr
 	// RecordResolvedRebase.
@@ -993,6 +1000,19 @@ func (f *fakeDB) HeldMergeRounds(context.Context) (map[wsm.LeaseID]time.Time, er
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeDB) RecordTestCases(_ context.Context, id ids.WorkspaceID, cases []*testrunv1.TestSelection, _ int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.recordCasesErr != nil {
+		return f.recordCasesErr
+	}
+	if f.testCases == nil {
+		f.testCases = map[ids.WorkspaceID][]*testrunv1.TestSelection{}
+	}
+	f.testCases[id] = testcases.Add(f.testCases[id], cases)
+	return nil
 }
 
 func (f *fakeDB) HoldMergeRound(_ context.Context, lease wsm.LeaseID, at *time.Time) (bool, error) {

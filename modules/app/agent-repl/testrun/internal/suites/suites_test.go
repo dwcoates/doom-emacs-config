@@ -1413,8 +1413,43 @@ func TestVitestNamePattern(t *testing.T) {
 	got := VitestNamePattern([]string{"a suite", "b (x)"})
 
 	// Assert
-	if got != `^(a suite|b \(x\))( |$)` {
+	if got != `^(a( | > )suite|b( | > )\(x\))( > |$)` {
 		t.Fatalf("VitestNamePattern = %q", got)
+	}
+}
+
+// THE PATTERN MATCHES VITEST'S OWN FULL NAMES, its levels joined by " > ",
+// for a name written with spaces or with " > " between its levels.
+func TestVitestNamePatternMatchesVitestsFullNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		want     string
+		fullName string
+		match    bool
+	}{
+		{name: "a test by its levels joined with spaces", want: "feed draws a row", fullName: "feed > draws a row", match: true},
+		{name: "a test by its levels joined as vitest joins them", want: "feed > draws a row", fullName: "feed > draws a row", match: true},
+		{name: "a describe block runs its tests", want: "feed", fullName: "feed > draws a row", match: true},
+		{name: "a nested describe block runs its tests", want: "feed rows", fullName: "feed > rows > draws", match: true},
+		{name: "a test of one level", want: "boots", fullName: "boots", match: true},
+		{name: "a name ending inside a word", want: "feed draw", fullName: "feed > draws a row"},
+		{name: "a name ending inside a level", want: "feed draws", fullName: "feed > draws a row"},
+		{name: "a name of another test", want: "feed scrolls", fullName: "feed > draws a row"},
+		{name: "punctuation is matched literally", want: "suite, and (x)", fullName: "suite, and (x)", match: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			re := regexp.MustCompile(VitestNamePattern([]string{tt.want}))
+
+			// Act
+			got := re.MatchString(tt.fullName)
+
+			// Assert
+			if got != tt.match {
+				t.Fatalf("%s matches %q: %v, want %v", re, tt.fullName, got, tt.match)
+			}
+		})
 	}
 }
 

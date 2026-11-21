@@ -322,11 +322,15 @@ func VitestBatchOfGroup(s roster.Suite, group string) (batch, config string, err
 const VitestConfig = "vitest.config.ts"
 
 // VitestNamePattern is the `-t` value that runs exactly the tests whose full
-// names (describe titles and the test's own, joined by single spaces) start
-// with one of names: each name is matched literally, anchored at the start, and
-// ends at a word boundary so "a test" does not also run "a tests".
+// names start with one of names. Vitest matches `-t` against a test's
+// describe titles and its own name JOINED BY " > " (2026-11-21: every name
+// spelled with spaces between its levels matched nothing, skipped its whole
+// file, and passed), while a name is often written with spaces there, so
+// each space of a name matches either a space or " > ". Each word is matched
+// literally, anchored at the start, and the name ends at a level's end (" > "
+// or the name's own end), so "a test" does not also run "a tests".
 func VitestNamePattern(names []string) string {
-	return "^" + gotest.LiteralAlternation(names) + "( |$)"
+	return "^" + gotest.SpacedAlternation(names, " > ") + "( > |$)"
 }
 
 // VitestItemsEnv names the file testrun/vitest/items-reporter.mjs writes.

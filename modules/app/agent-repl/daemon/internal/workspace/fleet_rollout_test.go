@@ -2100,3 +2100,44 @@ func TestARelaunchedShimIsPutBackAtThePickedEffort(t *testing.T) {
 		})
 	}
 }
+
+// A GATE WHOSE ANSWER IS IN FLIGHT OUTLIVES AN INSTALL: the answer's re-open
+// runs on the installed shim, and its views retire when it settles
+// (2026-11-21: a turn-end bounce retired the deploy mediator's gate mid-answer,
+// and its compaction's spend panicked the footer).
+func TestAnInstallKeepsAGateWhoseAnswerIsInFlightAndDropsOneNobodyAnswers(t *testing.T) {
+	tests := []struct {
+		name        string
+		answering   bool
+		wantKept    bool
+		wantRetired bool
+	}{
+		{name: "a gate mid-answer is kept with its views", answering: true, wantKept: true},
+		{name: "a gate nobody answers is dropped with its views", wantRetired: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			f.fleet.coldGates[ws.ID] = coldGate{served: ServedColdGate{VendorSessionID: "vendor-1"}}
+			if tt.answering && !f.fleet.TakeColdGate(ws.ID, "vendor-1") {
+				t.Fatal("TakeColdGate refused the standing gate")
+			}
+
+			// Act
+			if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+
+			// Assert
+			_, kept := f.fleet.coldGates[ws.ID]
+			gate, drawn := f.footer.coldGates[ws.ID]
+			retired := drawn && !gate.Standing
+			if kept != tt.wantKept || retired != tt.wantRetired {
+				t.Fatalf("gate kept %v, views retired %v; want kept %v, retired %v", kept, retired, tt.wantKept, tt.wantRetired)
+			}
+		})
+	}
+}

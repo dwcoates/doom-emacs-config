@@ -131,8 +131,11 @@ func TestTheIntakesBriefStatesTheDeployAndNothingTheWindowHolds(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got := strings.Join(names, ","); got != "deploy_started,digest,ending,gate_log,repo_dir,version,window_started" {
+	if got := strings.Join(names, ","); got != "digest,ending,gate_log,occasion,window_started" {
 		t.Fatalf("the brief was given %s", got)
+	}
+	if !strings.HasPrefix(values["occasion"], "A deploy of ") || !strings.Contains(values["occasion"], deployStarted.UTC().Format(time.RFC3339)) {
+		t.Fatalf("occasion %q; want it to name the deploy and its start", values["occasion"])
 	}
 	if values["window_started"] != deployStarted.UTC().Format(time.RFC3339) || len(window.Groups) != 2 {
 		t.Fatalf("window_started %q and %d stored groups; want the deploy's start and both groups kept", values["window_started"], len(window.Groups))

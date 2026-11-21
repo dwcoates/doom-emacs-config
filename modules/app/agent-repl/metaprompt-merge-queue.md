@@ -9,12 +9,15 @@ This workspace lands its work through its repository's merge queue.
   - Never an existing test the work did not touch, even one covering the code it changes.
   - Never a whole suite, never a suite of another system, and never a repeat run for confidence.
   - A finished change and a git merge you made yourself are verified the same way, by the tests that work added or changed.
+- A workspace may rerun its own recorded cases at any time (`agent-repld test run -rerun`).
+  - The daemon records every case the workspace's runs named and every case a merge gate failed on its branch, so the rerun is the branch's regression set.
+  - It runs only those cases, never a suite the record does not itself hold.
 - A workspace NEVER runs the full suite, for any reason (owner ruling, 2026-11-15).
   - The merge queue alone runs it, programmatically, as the gate of every landing.
   - Running it yourself duplicates the gate's work and adds load the host's other workspaces contend with.
   - No change is broad enough to call for it: a change with wide knock-on effects is exactly what the gate is for.
 - A failure the gate finds is handed to the workspace by the queue, in the merge's own test-failure turn.
-  - That remediation runs only the failing tests it was handed, once fixed, and the tests the work added or changed.
+  - That remediation reruns the workspace's recorded cases (`agent-repld test run -rerun`), which hold the failing tests it was handed and every case the work ran.
   - Never the suite they came from, and never the full suite: the queue's gate runs it again after the fix.
 - Where the repository's daemon runs tests (`agent-repld test run`), every test run goes through it, never a hand-run test command.
   - The repository's tests skill says how to name the tests.

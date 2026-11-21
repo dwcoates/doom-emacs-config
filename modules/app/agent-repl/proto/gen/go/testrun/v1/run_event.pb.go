@@ -7,7 +7,9 @@
 // `unit_ended` per planned unit, then `ended` last. A selection the runner
 // cannot resolve states `refused` alone, and a run the runner resolved but
 // could not plan (an input it could not read, a plan it could not build)
-// states `aborted` alone. Between `planned` and `ended`, a unit
+// states `aborted` alone. A rerun (TestRunRequest.drop_missing) that dropped
+// a case states `dropped` once, before its `planned` (or before the
+// `refused` of a rerun that dropped every case). Between `planned` and `ended`, a unit
 // the host's CPU holds back states `waiting_for_cpu` when its wait begins and
 // `cpu_wait_ended` once it has its cores, in that order, before its own
 // `unit_ended`.
@@ -50,6 +52,7 @@ type TestRunEvent struct {
 	//	*TestRunEvent_WaitingForCpu
 	//	*TestRunEvent_CpuWaitEnded
 	//	*TestRunEvent_Aborted
+	//	*TestRunEvent_Dropped
 	Event         isTestRunEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -155,6 +158,15 @@ func (x *TestRunEvent) GetAborted() *TestRunAborted {
 	return nil
 }
 
+func (x *TestRunEvent) GetDropped() *TestRunDropped {
+	if x != nil {
+		if x, ok := x.Event.(*TestRunEvent_Dropped); ok {
+			return x.Dropped
+		}
+	}
+	return nil
+}
+
 type isTestRunEvent_Event interface {
 	isTestRunEvent_Event()
 }
@@ -195,6 +207,11 @@ type TestRunEvent_Aborted struct {
 	Aborted *TestRunAborted `protobuf:"bytes,7,opt,name=aborted,proto3,oneof"`
 }
 
+type TestRunEvent_Dropped struct {
+	// The cases a rerun dropped because the tree no longer holds them.
+	Dropped *TestRunDropped `protobuf:"bytes,8,opt,name=dropped,proto3,oneof"`
+}
+
 func (*TestRunEvent_Planned) isTestRunEvent_Event() {}
 
 func (*TestRunEvent_UnitEnded) isTestRunEvent_Event() {}
@@ -208,6 +225,112 @@ func (*TestRunEvent_WaitingForCpu) isTestRunEvent_Event() {}
 func (*TestRunEvent_CpuWaitEnded) isTestRunEvent_Event() {}
 
 func (*TestRunEvent_Aborted) isTestRunEvent_Event() {}
+
+func (*TestRunEvent_Dropped) isTestRunEvent_Event() {}
+
+// The cases a rerun (TestRunRequest.drop_missing) dropped because the tree no
+// longer holds them: each is a selection of the request, exactly as it was
+// sent, so its caller can forget it.
+type TestRunDropped struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// REQUIRED, at least one. Every dropped case, in the request's order.
+	Cases         []*TestRunDroppedCase `protobuf:"bytes,1,rep,name=cases,proto3" json:"cases,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestRunDropped) Reset() {
+	*x = TestRunDropped{}
+	mi := &file_testrun_v1_run_event_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestRunDropped) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestRunDropped) ProtoMessage() {}
+
+func (x *TestRunDropped) ProtoReflect() protoreflect.Message {
+	mi := &file_testrun_v1_run_event_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestRunDropped.ProtoReflect.Descriptor instead.
+func (*TestRunDropped) Descriptor() ([]byte, []int) {
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *TestRunDropped) GetCases() []*TestRunDroppedCase {
+	if x != nil {
+		return x.Cases
+	}
+	return nil
+}
+
+// One case a rerun dropped.
+type TestRunDroppedCase struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// REQUIRED. The request's selection, as it was sent.
+	Selection *TestSelection `protobuf:"bytes,1,opt,name=selection,proto3" json:"selection,omitempty"`
+	// REQUIRED. Why, for a person: the package, file or script gone, or the
+	// test or group its target no longer defines.
+	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestRunDroppedCase) Reset() {
+	*x = TestRunDroppedCase{}
+	mi := &file_testrun_v1_run_event_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestRunDroppedCase) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestRunDroppedCase) ProtoMessage() {}
+
+func (x *TestRunDroppedCase) ProtoReflect() protoreflect.Message {
+	mi := &file_testrun_v1_run_event_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestRunDroppedCase.ProtoReflect.Descriptor instead.
+func (*TestRunDroppedCase) Descriptor() ([]byte, []int) {
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *TestRunDroppedCase) GetSelection() *TestSelection {
+	if x != nil {
+		return x.Selection
+	}
+	return nil
+}
+
+func (x *TestRunDroppedCase) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
 
 // The run's plan, before any unit starts.
 type TestRunPlanned struct {
@@ -223,7 +346,7 @@ type TestRunPlanned struct {
 
 func (x *TestRunPlanned) Reset() {
 	*x = TestRunPlanned{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[1]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -235,7 +358,7 @@ func (x *TestRunPlanned) String() string {
 func (*TestRunPlanned) ProtoMessage() {}
 
 func (x *TestRunPlanned) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[1]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -248,7 +371,7 @@ func (x *TestRunPlanned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunPlanned.ProtoReflect.Descriptor instead.
 func (*TestRunPlanned) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{1}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TestRunPlanned) GetUnits() []*TestRunPlannedUnit {
@@ -279,7 +402,7 @@ type TestRunPlannedUnit struct {
 
 func (x *TestRunPlannedUnit) Reset() {
 	*x = TestRunPlannedUnit{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[2]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -291,7 +414,7 @@ func (x *TestRunPlannedUnit) String() string {
 func (*TestRunPlannedUnit) ProtoMessage() {}
 
 func (x *TestRunPlannedUnit) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[2]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -304,7 +427,7 @@ func (x *TestRunPlannedUnit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunPlannedUnit.ProtoReflect.Descriptor instead.
 func (*TestRunPlannedUnit) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{2}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TestRunPlannedUnit) GetUnitId() string {
@@ -332,7 +455,7 @@ type TestRunLog struct {
 
 func (x *TestRunLog) Reset() {
 	*x = TestRunLog{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[3]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +467,7 @@ func (x *TestRunLog) String() string {
 func (*TestRunLog) ProtoMessage() {}
 
 func (x *TestRunLog) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[3]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +480,7 @@ func (x *TestRunLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunLog.ProtoReflect.Descriptor instead.
 func (*TestRunLog) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{3}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TestRunLog) GetPath() string {
@@ -395,7 +518,7 @@ type TestRunUnitEnded struct {
 
 func (x *TestRunUnitEnded) Reset() {
 	*x = TestRunUnitEnded{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[4]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +530,7 @@ func (x *TestRunUnitEnded) String() string {
 func (*TestRunUnitEnded) ProtoMessage() {}
 
 func (x *TestRunUnitEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[4]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +543,7 @@ func (x *TestRunUnitEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunUnitEnded.ProtoReflect.Descriptor instead.
 func (*TestRunUnitEnded) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{4}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TestRunUnitEnded) GetUnitId() string {
@@ -519,7 +642,7 @@ type TestRunUnitPassed struct {
 
 func (x *TestRunUnitPassed) Reset() {
 	*x = TestRunUnitPassed{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[5]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -531,7 +654,7 @@ func (x *TestRunUnitPassed) String() string {
 func (*TestRunUnitPassed) ProtoMessage() {}
 
 func (x *TestRunUnitPassed) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[5]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -544,7 +667,7 @@ func (x *TestRunUnitPassed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunUnitPassed.ProtoReflect.Descriptor instead.
 func (*TestRunUnitPassed) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{5}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{7}
 }
 
 // The unit failed.
@@ -561,7 +684,7 @@ type TestRunUnitFailed struct {
 
 func (x *TestRunUnitFailed) Reset() {
 	*x = TestRunUnitFailed{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[6]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -573,7 +696,7 @@ func (x *TestRunUnitFailed) String() string {
 func (*TestRunUnitFailed) ProtoMessage() {}
 
 func (x *TestRunUnitFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[6]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +709,7 @@ func (x *TestRunUnitFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunUnitFailed.ProtoReflect.Descriptor instead.
 func (*TestRunUnitFailed) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{6}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TestRunUnitFailed) GetExitCode() int32 {
@@ -614,7 +737,7 @@ type TestRunUnitCancelled struct {
 
 func (x *TestRunUnitCancelled) Reset() {
 	*x = TestRunUnitCancelled{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[7]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -626,7 +749,7 @@ func (x *TestRunUnitCancelled) String() string {
 func (*TestRunUnitCancelled) ProtoMessage() {}
 
 func (x *TestRunUnitCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[7]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -639,7 +762,7 @@ func (x *TestRunUnitCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunUnitCancelled.ProtoReflect.Descriptor instead.
 func (*TestRunUnitCancelled) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{7}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TestRunUnitCancelled) GetCancelledByUnitId() string {
@@ -672,7 +795,7 @@ type TestRunTestResult struct {
 
 func (x *TestRunTestResult) Reset() {
 	*x = TestRunTestResult{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[8]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -684,7 +807,7 @@ func (x *TestRunTestResult) String() string {
 func (*TestRunTestResult) ProtoMessage() {}
 
 func (x *TestRunTestResult) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[8]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -697,7 +820,7 @@ func (x *TestRunTestResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunTestResult.ProtoReflect.Descriptor instead.
 func (*TestRunTestResult) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{8}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TestRunTestResult) GetName() string {
@@ -782,7 +905,7 @@ type TestRunTestPassed struct {
 
 func (x *TestRunTestPassed) Reset() {
 	*x = TestRunTestPassed{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[9]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -794,7 +917,7 @@ func (x *TestRunTestPassed) String() string {
 func (*TestRunTestPassed) ProtoMessage() {}
 
 func (x *TestRunTestPassed) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[9]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -807,7 +930,7 @@ func (x *TestRunTestPassed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunTestPassed.ProtoReflect.Descriptor instead.
 func (*TestRunTestPassed) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{9}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{11}
 }
 
 // The test failed.
@@ -819,7 +942,7 @@ type TestRunTestFailed struct {
 
 func (x *TestRunTestFailed) Reset() {
 	*x = TestRunTestFailed{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[10]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -831,7 +954,7 @@ func (x *TestRunTestFailed) String() string {
 func (*TestRunTestFailed) ProtoMessage() {}
 
 func (x *TestRunTestFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[10]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -844,7 +967,7 @@ func (x *TestRunTestFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunTestFailed.ProtoReflect.Descriptor instead.
 func (*TestRunTestFailed) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{10}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{12}
 }
 
 // The test was skipped.
@@ -856,7 +979,7 @@ type TestRunTestSkipped struct {
 
 func (x *TestRunTestSkipped) Reset() {
 	*x = TestRunTestSkipped{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[11]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -868,7 +991,7 @@ func (x *TestRunTestSkipped) String() string {
 func (*TestRunTestSkipped) ProtoMessage() {}
 
 func (x *TestRunTestSkipped) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[11]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -881,7 +1004,7 @@ func (x *TestRunTestSkipped) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunTestSkipped.ProtoReflect.Descriptor instead.
 func (*TestRunTestSkipped) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{11}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{13}
 }
 
 // How the run ended.
@@ -906,7 +1029,7 @@ type TestRunEnded struct {
 
 func (x *TestRunEnded) Reset() {
 	*x = TestRunEnded{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[12]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +1041,7 @@ func (x *TestRunEnded) String() string {
 func (*TestRunEnded) ProtoMessage() {}
 
 func (x *TestRunEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[12]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +1054,7 @@ func (x *TestRunEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunEnded.ProtoReflect.Descriptor instead.
 func (*TestRunEnded) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{12}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TestRunEnded) GetOutcome() isTestRunEnded_Outcome {
@@ -1012,7 +1135,7 @@ type TestRunEndedPlanned struct {
 
 func (x *TestRunEndedPlanned) Reset() {
 	*x = TestRunEndedPlanned{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[13]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1024,7 +1147,7 @@ func (x *TestRunEndedPlanned) String() string {
 func (*TestRunEndedPlanned) ProtoMessage() {}
 
 func (x *TestRunEndedPlanned) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[13]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1037,7 +1160,7 @@ func (x *TestRunEndedPlanned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunEndedPlanned.ProtoReflect.Descriptor instead.
 func (*TestRunEndedPlanned) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{13}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TestRunEndedPlanned) GetPlannedUnits() int32 {
@@ -1058,7 +1181,7 @@ type TestRunEndedPassed struct {
 
 func (x *TestRunEndedPassed) Reset() {
 	*x = TestRunEndedPassed{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[14]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1070,7 +1193,7 @@ func (x *TestRunEndedPassed) String() string {
 func (*TestRunEndedPassed) ProtoMessage() {}
 
 func (x *TestRunEndedPassed) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[14]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1083,7 +1206,7 @@ func (x *TestRunEndedPassed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunEndedPassed.ProtoReflect.Descriptor instead.
 func (*TestRunEndedPassed) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{14}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TestRunEndedPassed) GetPassedUnits() int32 {
@@ -1116,7 +1239,7 @@ type TestRunEndedFailed struct {
 
 func (x *TestRunEndedFailed) Reset() {
 	*x = TestRunEndedFailed{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[15]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1128,7 +1251,7 @@ func (x *TestRunEndedFailed) String() string {
 func (*TestRunEndedFailed) ProtoMessage() {}
 
 func (x *TestRunEndedFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[15]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1141,7 +1264,7 @@ func (x *TestRunEndedFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunEndedFailed.ProtoReflect.Descriptor instead.
 func (*TestRunEndedFailed) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{15}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TestRunEndedFailed) GetFailedUnits() int32 {
@@ -1190,7 +1313,7 @@ type TestRunAborted struct {
 
 func (x *TestRunAborted) Reset() {
 	*x = TestRunAborted{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[16]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1202,7 +1325,7 @@ func (x *TestRunAborted) String() string {
 func (*TestRunAborted) ProtoMessage() {}
 
 func (x *TestRunAborted) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[16]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1215,7 +1338,7 @@ func (x *TestRunAborted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunAborted.ProtoReflect.Descriptor instead.
 func (*TestRunAborted) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{16}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TestRunAborted) GetSelection() string {
@@ -1237,14 +1360,18 @@ type TestRunRefused struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What could not be resolved, for a person: the target no suite owns, the
 	// test the target does not define, and so on.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Set when the request was a rerun (TestRunRequest.drop_missing) and the
+	// tree holds none of its cases any more: every one was dropped, in the
+	// `dropped` event before this one.
+	NothingLeft   *TestRunRefusedNothingLeft `protobuf:"bytes,2,opt,name=nothing_left,json=nothingLeft,proto3" json:"nothing_left,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TestRunRefused) Reset() {
 	*x = TestRunRefused{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[17]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1256,7 +1383,7 @@ func (x *TestRunRefused) String() string {
 func (*TestRunRefused) ProtoMessage() {}
 
 func (x *TestRunRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[17]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1269,7 +1396,7 @@ func (x *TestRunRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunRefused.ProtoReflect.Descriptor instead.
 func (*TestRunRefused) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{17}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TestRunRefused) GetDetail() string {
@@ -1277,6 +1404,50 @@ func (x *TestRunRefused) GetDetail() string {
 		return x.Detail
 	}
 	return ""
+}
+
+func (x *TestRunRefused) GetNothingLeft() *TestRunRefusedNothingLeft {
+	if x != nil {
+		return x.NothingLeft
+	}
+	return nil
+}
+
+// A rerun whose every case the tree no longer holds.
+type TestRunRefusedNothingLeft struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestRunRefusedNothingLeft) Reset() {
+	*x = TestRunRefusedNothingLeft{}
+	mi := &file_testrun_v1_run_event_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestRunRefusedNothingLeft) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestRunRefusedNothingLeft) ProtoMessage() {}
+
+func (x *TestRunRefusedNothingLeft) ProtoReflect() protoreflect.Message {
+	mi := &file_testrun_v1_run_event_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestRunRefusedNothingLeft.ProtoReflect.Descriptor instead.
+func (*TestRunRefusedNothingLeft) Descriptor() ([]byte, []int) {
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{20}
 }
 
 // A unit waits to start for the host's CPU. Every test and build on the host
@@ -1296,7 +1467,7 @@ type TestRunWaitingForCpu struct {
 
 func (x *TestRunWaitingForCpu) Reset() {
 	*x = TestRunWaitingForCpu{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[18]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1308,7 +1479,7 @@ func (x *TestRunWaitingForCpu) String() string {
 func (*TestRunWaitingForCpu) ProtoMessage() {}
 
 func (x *TestRunWaitingForCpu) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[18]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1321,7 +1492,7 @@ func (x *TestRunWaitingForCpu) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunWaitingForCpu.ProtoReflect.Descriptor instead.
 func (*TestRunWaitingForCpu) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{18}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TestRunWaitingForCpu) GetUnitId() string {
@@ -1358,7 +1529,7 @@ type TestRunCpuWaitEnded struct {
 
 func (x *TestRunCpuWaitEnded) Reset() {
 	*x = TestRunCpuWaitEnded{}
-	mi := &file_testrun_v1_run_event_proto_msgTypes[19]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1370,7 +1541,7 @@ func (x *TestRunCpuWaitEnded) String() string {
 func (*TestRunCpuWaitEnded) ProtoMessage() {}
 
 func (x *TestRunCpuWaitEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_run_event_proto_msgTypes[19]
+	mi := &file_testrun_v1_run_event_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1383,7 +1554,7 @@ func (x *TestRunCpuWaitEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunCpuWaitEnded.ProtoReflect.Descriptor instead.
 func (*TestRunCpuWaitEnded) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{19}
+	return file_testrun_v1_run_event_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *TestRunCpuWaitEnded) GetUnitId() string {
@@ -1405,7 +1576,7 @@ var File_testrun_v1_run_event_proto protoreflect.FileDescriptor
 const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\n" +
 	"\x1atestrun/v1/run_event.proto\x12\n" +
-	"testrun.v1\"\xc5\x03\n" +
+	"testrun.v1\x1a\x1atestrun/v1/selection.proto\"\xfd\x03\n" +
 	"\fTestRunEvent\x126\n" +
 	"\aplanned\x18\x01 \x01(\v2\x1a.testrun.v1.TestRunPlannedH\x00R\aplanned\x12=\n" +
 	"\n" +
@@ -1414,8 +1585,14 @@ const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\arefused\x18\x04 \x01(\v2\x1a.testrun.v1.TestRunRefusedH\x00R\arefused\x12J\n" +
 	"\x0fwaiting_for_cpu\x18\x05 \x01(\v2 .testrun.v1.TestRunWaitingForCpuH\x00R\rwaitingForCpu\x12G\n" +
 	"\x0ecpu_wait_ended\x18\x06 \x01(\v2\x1f.testrun.v1.TestRunCpuWaitEndedH\x00R\fcpuWaitEnded\x126\n" +
-	"\aaborted\x18\a \x01(\v2\x1a.testrun.v1.TestRunAbortedH\x00R\aabortedB\a\n" +
-	"\x05event\"p\n" +
+	"\aaborted\x18\a \x01(\v2\x1a.testrun.v1.TestRunAbortedH\x00R\aaborted\x126\n" +
+	"\adropped\x18\b \x01(\v2\x1a.testrun.v1.TestRunDroppedH\x00R\adroppedB\a\n" +
+	"\x05event\"F\n" +
+	"\x0eTestRunDropped\x124\n" +
+	"\x05cases\x18\x01 \x03(\v2\x1e.testrun.v1.TestRunDroppedCaseR\x05cases\"e\n" +
+	"\x12TestRunDroppedCase\x127\n" +
+	"\tselection\x18\x01 \x01(\v2\x19.testrun.v1.TestSelectionR\tselection\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\"p\n" +
 	"\x0eTestRunPlanned\x124\n" +
 	"\x05units\x18\x01 \x03(\v2\x1e.testrun.v1.TestRunPlannedUnitR\x05units\x12(\n" +
 	"\x03log\x18\x02 \x01(\v2\x16.testrun.v1.TestRunLogR\x03log\"C\n" +
@@ -1469,9 +1646,11 @@ const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\frun_failures\x18\x04 \x03(\tR\vrunFailures\"F\n" +
 	"\x0eTestRunAborted\x12\x1c\n" +
 	"\tselection\x18\x01 \x01(\tR\tselection\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail\"(\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\"r\n" +
 	"\x0eTestRunRefused\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"s\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12H\n" +
+	"\fnothing_left\x18\x02 \x01(\v2%.testrun.v1.TestRunRefusedNothingLeftR\vnothingLeft\"\x1b\n" +
+	"\x19TestRunRefusedNothingLeft\"s\n" +
 	"\x14TestRunWaitingForCpu\x12\x17\n" +
 	"\aunit_id\x18\x01 \x01(\tR\x06unitId\x12!\n" +
 	"\fbusy_percent\x18\x02 \x01(\x01R\vbusyPercent\x12\x1f\n" +
@@ -1493,54 +1672,62 @@ func file_testrun_v1_run_event_proto_rawDescGZIP() []byte {
 	return file_testrun_v1_run_event_proto_rawDescData
 }
 
-var file_testrun_v1_run_event_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_testrun_v1_run_event_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_testrun_v1_run_event_proto_goTypes = []any{
-	(*TestRunEvent)(nil),         // 0: testrun.v1.TestRunEvent
-	(*TestRunPlanned)(nil),       // 1: testrun.v1.TestRunPlanned
-	(*TestRunPlannedUnit)(nil),   // 2: testrun.v1.TestRunPlannedUnit
-	(*TestRunLog)(nil),           // 3: testrun.v1.TestRunLog
-	(*TestRunUnitEnded)(nil),     // 4: testrun.v1.TestRunUnitEnded
-	(*TestRunUnitPassed)(nil),    // 5: testrun.v1.TestRunUnitPassed
-	(*TestRunUnitFailed)(nil),    // 6: testrun.v1.TestRunUnitFailed
-	(*TestRunUnitCancelled)(nil), // 7: testrun.v1.TestRunUnitCancelled
-	(*TestRunTestResult)(nil),    // 8: testrun.v1.TestRunTestResult
-	(*TestRunTestPassed)(nil),    // 9: testrun.v1.TestRunTestPassed
-	(*TestRunTestFailed)(nil),    // 10: testrun.v1.TestRunTestFailed
-	(*TestRunTestSkipped)(nil),   // 11: testrun.v1.TestRunTestSkipped
-	(*TestRunEnded)(nil),         // 12: testrun.v1.TestRunEnded
-	(*TestRunEndedPlanned)(nil),  // 13: testrun.v1.TestRunEndedPlanned
-	(*TestRunEndedPassed)(nil),   // 14: testrun.v1.TestRunEndedPassed
-	(*TestRunEndedFailed)(nil),   // 15: testrun.v1.TestRunEndedFailed
-	(*TestRunAborted)(nil),       // 16: testrun.v1.TestRunAborted
-	(*TestRunRefused)(nil),       // 17: testrun.v1.TestRunRefused
-	(*TestRunWaitingForCpu)(nil), // 18: testrun.v1.TestRunWaitingForCpu
-	(*TestRunCpuWaitEnded)(nil),  // 19: testrun.v1.TestRunCpuWaitEnded
+	(*TestRunEvent)(nil),              // 0: testrun.v1.TestRunEvent
+	(*TestRunDropped)(nil),            // 1: testrun.v1.TestRunDropped
+	(*TestRunDroppedCase)(nil),        // 2: testrun.v1.TestRunDroppedCase
+	(*TestRunPlanned)(nil),            // 3: testrun.v1.TestRunPlanned
+	(*TestRunPlannedUnit)(nil),        // 4: testrun.v1.TestRunPlannedUnit
+	(*TestRunLog)(nil),                // 5: testrun.v1.TestRunLog
+	(*TestRunUnitEnded)(nil),          // 6: testrun.v1.TestRunUnitEnded
+	(*TestRunUnitPassed)(nil),         // 7: testrun.v1.TestRunUnitPassed
+	(*TestRunUnitFailed)(nil),         // 8: testrun.v1.TestRunUnitFailed
+	(*TestRunUnitCancelled)(nil),      // 9: testrun.v1.TestRunUnitCancelled
+	(*TestRunTestResult)(nil),         // 10: testrun.v1.TestRunTestResult
+	(*TestRunTestPassed)(nil),         // 11: testrun.v1.TestRunTestPassed
+	(*TestRunTestFailed)(nil),         // 12: testrun.v1.TestRunTestFailed
+	(*TestRunTestSkipped)(nil),        // 13: testrun.v1.TestRunTestSkipped
+	(*TestRunEnded)(nil),              // 14: testrun.v1.TestRunEnded
+	(*TestRunEndedPlanned)(nil),       // 15: testrun.v1.TestRunEndedPlanned
+	(*TestRunEndedPassed)(nil),        // 16: testrun.v1.TestRunEndedPassed
+	(*TestRunEndedFailed)(nil),        // 17: testrun.v1.TestRunEndedFailed
+	(*TestRunAborted)(nil),            // 18: testrun.v1.TestRunAborted
+	(*TestRunRefused)(nil),            // 19: testrun.v1.TestRunRefused
+	(*TestRunRefusedNothingLeft)(nil), // 20: testrun.v1.TestRunRefusedNothingLeft
+	(*TestRunWaitingForCpu)(nil),      // 21: testrun.v1.TestRunWaitingForCpu
+	(*TestRunCpuWaitEnded)(nil),       // 22: testrun.v1.TestRunCpuWaitEnded
+	(*TestSelection)(nil),             // 23: testrun.v1.TestSelection
 }
 var file_testrun_v1_run_event_proto_depIdxs = []int32{
-	1,  // 0: testrun.v1.TestRunEvent.planned:type_name -> testrun.v1.TestRunPlanned
-	4,  // 1: testrun.v1.TestRunEvent.unit_ended:type_name -> testrun.v1.TestRunUnitEnded
-	12, // 2: testrun.v1.TestRunEvent.ended:type_name -> testrun.v1.TestRunEnded
-	17, // 3: testrun.v1.TestRunEvent.refused:type_name -> testrun.v1.TestRunRefused
-	18, // 4: testrun.v1.TestRunEvent.waiting_for_cpu:type_name -> testrun.v1.TestRunWaitingForCpu
-	19, // 5: testrun.v1.TestRunEvent.cpu_wait_ended:type_name -> testrun.v1.TestRunCpuWaitEnded
-	16, // 6: testrun.v1.TestRunEvent.aborted:type_name -> testrun.v1.TestRunAborted
-	2,  // 7: testrun.v1.TestRunPlanned.units:type_name -> testrun.v1.TestRunPlannedUnit
-	3,  // 8: testrun.v1.TestRunPlanned.log:type_name -> testrun.v1.TestRunLog
-	5,  // 9: testrun.v1.TestRunUnitEnded.passed:type_name -> testrun.v1.TestRunUnitPassed
-	6,  // 10: testrun.v1.TestRunUnitEnded.failed:type_name -> testrun.v1.TestRunUnitFailed
-	7,  // 11: testrun.v1.TestRunUnitEnded.cancelled:type_name -> testrun.v1.TestRunUnitCancelled
-	8,  // 12: testrun.v1.TestRunUnitEnded.tests:type_name -> testrun.v1.TestRunTestResult
-	9,  // 13: testrun.v1.TestRunTestResult.passed:type_name -> testrun.v1.TestRunTestPassed
-	10, // 14: testrun.v1.TestRunTestResult.failed:type_name -> testrun.v1.TestRunTestFailed
-	11, // 15: testrun.v1.TestRunTestResult.skipped:type_name -> testrun.v1.TestRunTestSkipped
-	14, // 16: testrun.v1.TestRunEnded.passed:type_name -> testrun.v1.TestRunEndedPassed
-	15, // 17: testrun.v1.TestRunEnded.failed:type_name -> testrun.v1.TestRunEndedFailed
-	13, // 18: testrun.v1.TestRunEnded.planned:type_name -> testrun.v1.TestRunEndedPlanned
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	3,  // 0: testrun.v1.TestRunEvent.planned:type_name -> testrun.v1.TestRunPlanned
+	6,  // 1: testrun.v1.TestRunEvent.unit_ended:type_name -> testrun.v1.TestRunUnitEnded
+	14, // 2: testrun.v1.TestRunEvent.ended:type_name -> testrun.v1.TestRunEnded
+	19, // 3: testrun.v1.TestRunEvent.refused:type_name -> testrun.v1.TestRunRefused
+	21, // 4: testrun.v1.TestRunEvent.waiting_for_cpu:type_name -> testrun.v1.TestRunWaitingForCpu
+	22, // 5: testrun.v1.TestRunEvent.cpu_wait_ended:type_name -> testrun.v1.TestRunCpuWaitEnded
+	18, // 6: testrun.v1.TestRunEvent.aborted:type_name -> testrun.v1.TestRunAborted
+	1,  // 7: testrun.v1.TestRunEvent.dropped:type_name -> testrun.v1.TestRunDropped
+	2,  // 8: testrun.v1.TestRunDropped.cases:type_name -> testrun.v1.TestRunDroppedCase
+	23, // 9: testrun.v1.TestRunDroppedCase.selection:type_name -> testrun.v1.TestSelection
+	4,  // 10: testrun.v1.TestRunPlanned.units:type_name -> testrun.v1.TestRunPlannedUnit
+	5,  // 11: testrun.v1.TestRunPlanned.log:type_name -> testrun.v1.TestRunLog
+	7,  // 12: testrun.v1.TestRunUnitEnded.passed:type_name -> testrun.v1.TestRunUnitPassed
+	8,  // 13: testrun.v1.TestRunUnitEnded.failed:type_name -> testrun.v1.TestRunUnitFailed
+	9,  // 14: testrun.v1.TestRunUnitEnded.cancelled:type_name -> testrun.v1.TestRunUnitCancelled
+	10, // 15: testrun.v1.TestRunUnitEnded.tests:type_name -> testrun.v1.TestRunTestResult
+	11, // 16: testrun.v1.TestRunTestResult.passed:type_name -> testrun.v1.TestRunTestPassed
+	12, // 17: testrun.v1.TestRunTestResult.failed:type_name -> testrun.v1.TestRunTestFailed
+	13, // 18: testrun.v1.TestRunTestResult.skipped:type_name -> testrun.v1.TestRunTestSkipped
+	16, // 19: testrun.v1.TestRunEnded.passed:type_name -> testrun.v1.TestRunEndedPassed
+	17, // 20: testrun.v1.TestRunEnded.failed:type_name -> testrun.v1.TestRunEndedFailed
+	15, // 21: testrun.v1.TestRunEnded.planned:type_name -> testrun.v1.TestRunEndedPlanned
+	20, // 22: testrun.v1.TestRunRefused.nothing_left:type_name -> testrun.v1.TestRunRefusedNothingLeft
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_testrun_v1_run_event_proto_init() }
@@ -1548,6 +1735,7 @@ func file_testrun_v1_run_event_proto_init() {
 	if File_testrun_v1_run_event_proto != nil {
 		return
 	}
+	file_testrun_v1_selection_proto_init()
 	file_testrun_v1_run_event_proto_msgTypes[0].OneofWrappers = []any{
 		(*TestRunEvent_Planned)(nil),
 		(*TestRunEvent_UnitEnded)(nil),
@@ -1556,18 +1744,19 @@ func file_testrun_v1_run_event_proto_init() {
 		(*TestRunEvent_WaitingForCpu)(nil),
 		(*TestRunEvent_CpuWaitEnded)(nil),
 		(*TestRunEvent_Aborted)(nil),
+		(*TestRunEvent_Dropped)(nil),
 	}
-	file_testrun_v1_run_event_proto_msgTypes[4].OneofWrappers = []any{
+	file_testrun_v1_run_event_proto_msgTypes[6].OneofWrappers = []any{
 		(*TestRunUnitEnded_Passed)(nil),
 		(*TestRunUnitEnded_Failed)(nil),
 		(*TestRunUnitEnded_Cancelled)(nil),
 	}
-	file_testrun_v1_run_event_proto_msgTypes[8].OneofWrappers = []any{
+	file_testrun_v1_run_event_proto_msgTypes[10].OneofWrappers = []any{
 		(*TestRunTestResult_Passed)(nil),
 		(*TestRunTestResult_Failed)(nil),
 		(*TestRunTestResult_Skipped)(nil),
 	}
-	file_testrun_v1_run_event_proto_msgTypes[12].OneofWrappers = []any{
+	file_testrun_v1_run_event_proto_msgTypes[14].OneofWrappers = []any{
 		(*TestRunEnded_Passed)(nil),
 		(*TestRunEnded_Failed)(nil),
 		(*TestRunEnded_Planned)(nil),
@@ -1578,7 +1767,7 @@ func file_testrun_v1_run_event_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_testrun_v1_run_event_proto_rawDesc), len(file_testrun_v1_run_event_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   20,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

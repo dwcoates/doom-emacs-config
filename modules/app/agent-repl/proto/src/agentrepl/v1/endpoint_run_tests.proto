@@ -30,8 +30,8 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message RunTestsRequest {
   // REQUIRED. The workspace whose worktree the tests run in.
   workspace.v1.WorkspaceRef workspace = 1;
-  // REQUIRED, naming at least one test. The tests to run, exactly as the
-  // runner takes them.
+  // REQUIRED, naming at least one test unless `rerun` is set, when it names
+  // none. The tests to run, exactly as the runner takes them.
   testrun.v1.TestRunRequest run = 2;
   // How many times the run repeats, one run after another, each a whole run
   // with its own log: every frame names the run it belongs to, so a flaky
@@ -62,7 +62,23 @@ message RunTestsRequest {
   // machine). THE USER'S ALONE: refused (`user_only_refused`) unless
   // `requester` is the user.
   bool ungoverned = 9;
+  // Rerun the workspace's recorded cases (`agent-repld test run -rerun`): every
+  // case any earlier run of the workspace named, and every failing case a
+  // merge queue gate read off the workspace's branch, that the tree still
+  // holds. With it, `run` carries the run's options and NO selection: the
+  // daemon fills them from the record, as TestRunRequest.drop_missing
+  // selections, so a case renamed, moved or deleted since it was recorded is
+  // dropped (and forgotten) rather than run. A record naming nothing is
+  // refused (`nothing_to_rerun`).
+  RunTestsRerun rerun = 10;
 }
+
+// A rerun of the workspace's recorded cases.
+message RunTestsRerun {}
+
+// The workspace's record names no case to rerun: no run of it named a test,
+// and no merge gate failed one.
+message RunTestsNothingToRerun {}
 
 // A worktree a main workspace runs tests in, in place of its own.
 message RunTestsWorktree {
@@ -114,6 +130,8 @@ message RunTestsError {
     // The daemon handed the workspace to a successor mid-handover; the run is
     // the successor's to serve.
     RunTestsTransferringAway transferring_away = 8;
+    // A rerun found no recorded case to run.
+    RunTestsNothingToRerun nothing_to_rerun = 9;
   }
 }
 

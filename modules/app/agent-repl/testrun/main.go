@@ -531,6 +531,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Cores:       host,
 		HistoryPath: histPath,
 		Build:       suites.Build,
+		Lister:      suites.Lister{},
 		Git:         gitinfo.Head,
 		Self:        self,
 		Work:        work,

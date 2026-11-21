@@ -209,7 +209,8 @@ does.
 Tests are not free: every suite here is sized to fill the machine, and runs
 from several agents multiply. How broad a run is, at every stage, is the
 metaprompt's rule (`metaprompt-merge-queue.md`, "When to run which tests"): only the tests the change
-added or changed; every other test runs only in the merge queue's gate. How an agent
+added or changed, and the workspace's own recorded cases (`agent-repld test run -rerun`);
+every other test runs only in the merge queue's gate. How an agent
 names those tests and runs them through the daemon is the `agent-repl-tests`
 skill's.
 

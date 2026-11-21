@@ -74,6 +74,10 @@ type process struct {
 	// — and it is handed to the graph rather than taken by it, because only
 	// the boot spine owns the lifetime.
 	Exit func(standDownReason)
+	// Died is how the daemon before this one died, when it died without its
+	// orderly exit (readPredecessorDeath); nil otherwise. The boot owes the
+	// deploy mediator a check of it.
+	Died *predecessorDeath
 }
 
 // hooks are the seams the process-level tests drive. Production supplies the
@@ -423,6 +427,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"waited_ms": claimWaited.Milliseconds(),
 	})
 
+	// died is how the daemon before this one died, when it died without its
+	// orderly exit; nil for a predecessor that withdrew, or none.
+	var died *predecessorDeath
 	if joining {
 		// A JOINING DAEMON DOES NOT ADVERTISE. It reports its address where the
 		// incumbent that spawned it is waiting, and daemon.addr is written only
@@ -444,11 +451,14 @@ func run(ctx context.Context, opts options, h hooks) error {
 		// predecessor's; one that does not answer is what the next client
 		// would have dialled and timed out on, and the record is the only
 		// thing that says the predecessor went without withdrawing.
+		//
+		// A STALE ADVERTISEMENT IS A PREDECESSOR'S DISORDERLY DEATH, since
+		// every orderly exit withdraws it: the death is recorded at ERROR with
+		// its panic, and this boot owes the deploy mediator a check of it
+		// (mediationHook.crashed), as a deploy does.
 		if stale, isStale := daemonaddr.StaleAdvertisement(layout.DaemonAddr()); isStale {
-			log.Warn("daemon.cmd.claim", "a stale daemon.addr names an address nobody answers; overwriting it", dlog.Context{
-				"stale_address": stale,
-				"addr_path":     layout.DaemonAddr(),
-			})
+			death := readPredecessorDeath(layout.DaemonAddr(), layout.LogsDir(), stale, log)
+			died = &death
 		}
 		if err := publishOwnership(claim, metricsSurface, shared); err != nil {
 			log.Error("daemon.cmd.claim", "the daemon's advertisement could not be published", dlog.Context{
@@ -591,6 +601,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	var ended standDownRecord
 
 	built, err := h.Graph(serving, process{
+		Died:       died,
 		Opts:       opts,
 		Contracts:  contracts,
 		Layout:     layout,

@@ -461,7 +461,7 @@ func TestAReusedSuiteIsNoFailure(t *testing.T) {
 	output := reusedLine + "\n"
 
 	// Act
-	found := readFailingTests(output, "/module")
+	found := readFailingTests(output, "/wt")
 
 	// Assert
 	if len(found.suites) != 0 {

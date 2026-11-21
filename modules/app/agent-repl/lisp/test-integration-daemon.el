@@ -76,7 +76,10 @@ timeouts the scenarios below set can then be sized by what they are
 actually asserting rather than by the tick that has to catch them."
   (declare (indent 1) (debug (symbolp body)))
   `(agent-repl-test--with-temp-dir ,dir "agent-repl-itest-boot-"
-     (let ((agent-repl-daemon-boot-poll-interval-seconds 0.02))
+     (let ((agent-repl-daemon-boot-poll-interval-seconds 0.02)
+           ;; Each scenario's spawns are its own, so no batch of them reads
+           ;; as one launcher's crash loop.
+           (agent-repl-daemon--recent-spawns nil))
        ,@body)))
 
 (defun agent-repl-itest-daemon--record-shell (command path)

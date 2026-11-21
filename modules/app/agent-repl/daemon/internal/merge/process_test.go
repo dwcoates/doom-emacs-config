@@ -3130,3 +3130,29 @@ func TestARebaseWhoseResolvedRebaseCannotBeClearedOnceItFinishedFailsTheMerge(t 
 		t.Fatalf("a failed merge moved the target: %v", h.git.fastForwards)
 	}
 }
+
+// EVERY FIXING ATTEMPT IS TOLD TO RERUN THE WORKSPACE'S RECORD: the brief
+// goes out before each attempt, the first and the last alike, and each
+// carries `agent-repld test run -rerun`.
+func TestEveryFixingAttemptsBriefRunsTheWorkspacesRecordedCases(t *testing.T) {
+	for attempt := 1; attempt <= MaxFixAttempts; attempt++ {
+		t.Run(fmt.Sprintf("attempt %d", attempt), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			brief, err := LoadBrief(filepath.Join("..", "..", "..", "prompts"), BriefTestFailureResolve)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.o.deps.Briefs = func(_ string, values map[string]string) (string, error) { return brief.Splice(values) }
+			r := failingTestsRun(t, h)
+
+			// Act
+			text, err := r.fixBrief(attempt, []string{"daemon"}, "/logs/x.log", "tail", "the failing tests", "master")
+
+			// Assert
+			if err != nil || !strings.Contains(text, "Run `agent-repld test run -rerun`.") || !strings.Contains(text, fmt.Sprintf("This is fixing attempt %d of %d.", attempt, MaxFixAttempts)) {
+				t.Fatalf("brief for attempt %d (%v):\n%s\nwant it to run the workspace's recorded cases", attempt, err, text)
+			}
+		})
+	}
+}

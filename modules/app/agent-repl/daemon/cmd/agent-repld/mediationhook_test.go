@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +27,8 @@ type mediationOrchestrator struct {
 	mediated chan struct{}
 	// calls is every release and round, in order.
 	calls []string
+	// oweErr fails every OweMediations.
+	oweErr error
 }
 
 func (o *mediationOrchestrator) ReleaseUnchangedDeploy(_ context.Context, at time.Time) error {
@@ -44,6 +48,9 @@ func (o *mediationOrchestrator) NoteDeployEnding(_ context.Context, at time.Time
 func (o *mediationOrchestrator) OweMediations(_ context.Context, at time.Time) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.oweErr != nil {
+		return o.oweErr
+	}
 	o.owed = append(o.owed, at)
 	return nil
 }
@@ -97,14 +104,17 @@ func TestSettleThenMediate(t *testing.T) {
 	settled := false
 
 	// Act
-	settleThenMediate(func(context.Context) { settled = true }, h)(context.Background())
+	settleThenMediate(func(context.Context) { settled = true }, h, nil)(context.Background())
 
 	// Assert
 	<-o.mediated
 	if !settled {
 		t.Fatal("the boot's settle did not run before the mediation")
 	}
-	if settleThenMediate(nil, h) != nil {
+	if len(o.owed) != 0 {
+		t.Fatalf("owed %v; a boot whose predecessor withdrew owes no check", o.owed)
+	}
+	if settleThenMediate(nil, h, &predecessorDeath{}) != nil {
 		t.Fatal("a successor, which settles nothing here, was given a settle")
 	}
 }
@@ -315,5 +325,58 @@ func TestEveryReadOfTheHooksBindingGoesThroughOrchestrator(t *testing.T) {
 	}
 	if n := strings.Count(string(source), "return h.o\n"); n != 1 || strings.Count(string(source), ":= h.o\n") != 0 {
 		t.Fatalf("the binding is read %d times by return and some by assignment, want orchestrator alone", n)
+	}
+}
+
+// A BOOT AFTER A CRASH OWES THE CHECK OF IT: the death is owed as a check
+// whose ending is the crash, before the boot's rounds run it.
+func TestABootAfterACrashOwesTheCheckOfItBeforeItsRounds(t *testing.T) {
+	// Arrange
+	at := time.Date(2026, 11, 21, 20, 22, 30, 0, time.UTC)
+	o := &mediationOrchestrator{mediated: make(chan struct{})}
+	h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: dlog.NewTestLogger()}
+	h.bind(o)
+
+	// Act
+	settleThenMediate(func(context.Context) {}, h, &predecessorDeath{Address: "127.0.0.1:1", PID: 7})(context.Background())
+
+	// Assert
+	<-o.mediated
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	want := []string{"ending crashed 2026-11-21T20:22:30Z", "mediate"}
+	if len(o.owed) != 1 || !o.owed[0].Equal(at) || !reflect.DeepEqual(o.calls, want) {
+		t.Fatalf("owed %v, calls %v; want the crash owed at the boot and its ending recorded before the round", o.owed, o.calls)
+	}
+}
+
+func TestACrashsCheckThatCannotBeOwedRecordsNoEnding(t *testing.T) {
+	// Arrange
+	o := &mediationOrchestrator{mediated: make(chan struct{}), oweErr: errors.New("database is locked")}
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+	h.bind(o)
+
+	// Act
+	h.crashed()
+
+	// Assert
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.calls) != 0 {
+		t.Fatalf("calls %v; want no ending for a check never owed", o.calls)
+	}
+}
+
+func TestACrashBeforeTheBindingIsRecordedAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: log}
+
+	// Act
+	h.crashed()
+
+	// Assert
+	if rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opMediationHook}); !ok || rec.Context["edge"] != "crashed" {
+		t.Fatalf("no ERROR record of the unbound crash: %+v", log.Records())
 	}
 }

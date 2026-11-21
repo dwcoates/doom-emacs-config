@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 )
 
@@ -569,5 +570,53 @@ func TestNoopPauseRefusalsAllGoThroughRefuseNoopPause(t *testing.T) {
 	}
 	if n := strings.Count(text, "ArmAlreadyPaused, "); n != 1 {
 		t.Fatalf("hand-built already_paused arms in queue.go = %d, want only the helper's", n)
+	}
+}
+
+// EVERY PAUSE CHANGE SAYS WHO MADE IT AND WHY: a queue found paused names
+// its pauser from the log alone.
+func TestAPauseChangeIsRecordedWithItsPauser(t *testing.T) {
+	tests := []struct {
+		name   string
+		act    func(h *harness) error
+		want   dlog.Context
+		absent []string
+	}{
+		{name: "the user's pause", act: func(h *harness) error { return h.o.Pause(context.Background(), &theScope, userPauser) },
+			want: dlog.Context{"paused": true, "pauser": "user", "hard": false, "to_land": false}, absent: []string{"cause", "pausing_workspace"}},
+		{name: "a workspace's pause to land", act: func(h *harness) error {
+			return h.o.Pause(context.Background(), &theScope, Pauser{By: RequestedByAgent, Asker: theWorkspace, ToLand: true})
+		}, want: dlog.Context{"paused": true, "pauser": "workspace", "to_land": true, "pausing_workspace": string(theWorkspace)}},
+		{name: "the host's pause on a fault", act: func(h *harness) error {
+			return h.o.holdForHostFault(context.Background(), h.repoKey(), "the test runner could not be started")
+		}, want: dlog.Context{"paused": true, "pauser": "host", "cause": "the test runner could not be started"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			seedQueue(h, h.repoKey(), false)
+
+			// Act
+			if err := tt.act(h); err != nil {
+				t.Fatal(err)
+			}
+
+			// Assert
+			rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.pause", Message: "changed the merge queue's pause state"})
+			if !ok {
+				t.Fatalf("records = %v; want the pause change at INFO", h.logs.Records())
+			}
+			for k, v := range tt.want {
+				if rec.Context[k] != v {
+					t.Fatalf("record %v: %s = %v, want %v", rec.Context, k, rec.Context[k], v)
+				}
+			}
+			for _, k := range tt.absent {
+				if _, has := rec.Context[k]; has {
+					t.Fatalf("record %v carries %s, want none", rec.Context, k)
+				}
+			}
+		})
 	}
 }

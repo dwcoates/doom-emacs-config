@@ -2144,7 +2144,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}),
 		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		AwaitCreates: awaitCreatesAtExit(creates, holdoutWarnEvery, time.After, log),
-		SettleBoot:   settleThenMediate(freshBootSettle(p.Opts.joining != "", rolloutController), mediation),
+		SettleBoot:   settleThenMediate(freshBootSettle(p.Opts.joining != "", rolloutController), mediation, p.Died),
 	}, nil
 }
 
@@ -2764,14 +2764,19 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 }
 
 // settleThenMediate is a fresh boot's settle, followed by the rounds of every
-// mediation owed: a round a crash cut short is taken up again. A successor
-// settles nothing here (SETTLE nil); its takeover's deploy end runs them.
-func settleThenMediate(settle func(ctx context.Context), mediation *mediationHook) func(ctx context.Context) {
+// mediation owed: a round a crash cut short is taken up again. A boot whose
+// predecessor died without its orderly exit (DIED) first owes the check of
+// that death. A successor settles nothing here (SETTLE nil); its takeover's
+// deploy end runs them.
+func settleThenMediate(settle func(ctx context.Context), mediation *mediationHook, died *predecessorDeath) func(ctx context.Context) {
 	if settle == nil {
 		return nil
 	}
 	return func(ctx context.Context) {
 		settle(ctx)
+		if died != nil {
+			mediation.crashed()
+		}
 		mediation.rounds()
 	}
 }

@@ -7,13 +7,17 @@
 // `unit_ended` per planned unit, then `ended` last. A selection the runner
 // cannot resolve states `refused` alone, and a run the runner resolved but
 // could not plan (an input it could not read, a plan it could not build)
-// states `aborted` alone. Between `planned` and `ended`, a unit
+// states `aborted` alone. A rerun (TestRunRequest.drop_missing) that dropped
+// a case states `dropped` once, before its `planned` (or before the
+// `refused` of a rerun that dropped every case). Between `planned` and `ended`, a unit
 // the host's CPU holds back states `waiting_for_cpu` when its wait begins and
 // `cpu_wait_ended` once it has its cores, in that order, before its own
 // `unit_ended`.
 syntax = "proto3";
 
 package testrun.v1;
+
+import "testrun/v1/selection.proto";
 
 option go_package = "agentrepl/proto/testrun/v1;testrunv1";
 
@@ -37,7 +41,26 @@ message TestRunEvent {
     // The run stopped before it planned, on the runner's own failure: the
     // run's only event. A runner never exits before planning without it.
     TestRunAborted aborted = 7;
+    // The cases a rerun dropped because the tree no longer holds them.
+    TestRunDropped dropped = 8;
   }
+}
+
+// The cases a rerun (TestRunRequest.drop_missing) dropped because the tree no
+// longer holds them: each is a selection of the request, exactly as it was
+// sent, so its caller can forget it.
+message TestRunDropped {
+  // REQUIRED, at least one. Every dropped case, in the request's order.
+  repeated TestRunDroppedCase cases = 1;
+}
+
+// One case a rerun dropped.
+message TestRunDroppedCase {
+  // REQUIRED. The request's selection, as it was sent.
+  TestSelection selection = 1;
+  // REQUIRED. Why, for a person: the package, file or script gone, or the
+  // test or group its target no longer defines.
+  string detail = 2;
 }
 
 // The run's plan, before any unit starts.
@@ -208,7 +231,14 @@ message TestRunRefused {
   // What could not be resolved, for a person: the target no suite owns, the
   // test the target does not define, and so on.
   string detail = 1;
+  // Set when the request was a rerun (TestRunRequest.drop_missing) and the
+  // tree holds none of its cases any more: every one was dropped, in the
+  // `dropped` event before this one.
+  TestRunRefusedNothingLeft nothing_left = 2;
 }
+
+// A rerun whose every case the tree no longer holds.
+message TestRunRefusedNothingLeft {}
 
 // A unit waits to start for the host's CPU. Every test and build on the host
 // together may only bring the host's total CPU use up to a cap; while the host

@@ -16,22 +16,33 @@ import (
 )
 
 func splitScriptUnits(l Layout, s roster.Suite) (Units, error) {
-	path, err := executableScriptPath(l, s)
+	path, items, err := listHarness(l, s)
 	if err != nil {
 		return Units{}, err
+	}
+	return splitScriptUnitsForItems(path, s, items), nil
+}
+
+// listHarness answers split harness suite S's script and the groups its
+// --list prints: the one listing of a harness's groups, for its units and a
+// rerun's existence check (Lister.HarnessGroups) alike.
+func listHarness(l Layout, s roster.Suite) (string, []string, error) {
+	path, err := executableScriptPath(l, s)
+	if err != nil {
+		return "", nil, err
 	}
 	cmd := exec.Command(path, "--list")
 	cmd.Dir = filepath.Dir(path)
 	cmd.Env = append(os.Environ(), PinnedEnv()...)
 	out, err := command.Output(cmd)
 	if err != nil {
-		return Units{}, fmt.Errorf("suites: list %s's harness items: %w", s.Name, err)
+		return "", nil, fmt.Errorf("suites: list %s's harness items: %w", s.Name, err)
 	}
 	items, err := parseScriptList(out)
 	if err != nil {
-		return Units{}, fmt.Errorf("suites: list %s's harness items: %w", s.Name, err)
+		return "", nil, fmt.Errorf("suites: list %s's harness items: %w", s.Name, err)
 	}
-	return splitScriptUnitsForItems(path, s, items), nil
+	return path, items, nil
 }
 
 func splitScriptUnitsForItems(path string, s roster.Suite, items []string) Units {

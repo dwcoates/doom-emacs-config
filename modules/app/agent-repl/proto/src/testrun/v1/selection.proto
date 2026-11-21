@@ -76,6 +76,20 @@ message TestRunRequest {
   // `coverage`, whose instrumentation is what a profile would then measure,
   // and with `record`, whose timings the profiler's overhead would skew.
   bool profile = 8;
+  // A RERUN of cases recorded earlier (agentrepl.v1.RunTestsRerun): a
+  // selection naming a package, file, script, suite, test or group the tree no
+  // longer holds is DROPPED and reported (TestRunDropped) rather than refused,
+  // so a case renamed, moved or deleted since it was recorded never fails the
+  // run. Existence is the runner's own listing of the tree as it plans this
+  // run: a Go package's top-level tests, a vitest file's collected full names,
+  // an ERT file's loaded tests, a harness's --list groups, the roster's
+  // suites. Each selection names ONE case (one test, one group, or one whole
+  // target), so what is dropped is exactly one recorded case; a selection
+  // naming several is refused. A Go subtest path is never named, since no
+  // listing holds subtests: its top-level test is. When every selection is
+  // dropped the run is refused (TestRunRefused.nothing_left), never run as
+  // nothing.
+  bool drop_missing = 9;
 }
 
 // One target and the tests within it to run.
