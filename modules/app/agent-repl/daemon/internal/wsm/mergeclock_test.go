@@ -88,6 +88,11 @@ func admitStep(ws func(*slotQueue) WorkspaceID) func(*testing.T, *slotQueue, con
 
 func asideStep(ws func(*slotQueue) WorkspaceID, aside MergeAside) func(*testing.T, *slotQueue, context.Context) error {
 	return func(_ *testing.T, q *slotQueue, ctx context.Context) error {
+		if aside != MergeAsideWaitingConflicts {
+			if _, err := holdAsideLeaseErr(ctx, q.s, ws(q), aside); err != nil {
+				return err
+			}
+		}
 		_, err := q.s.StepAsideMerge(ctx, q.repo, ws(q), aside)
 		return err
 	}
@@ -95,7 +100,8 @@ func asideStep(ws func(*slotQueue) WorkspaceID, aside MergeAside) func(*testing.
 
 func returnStep(ws func(*slotQueue) WorkspaceID) func(*testing.T, *slotQueue, context.Context) error {
 	return func(_ *testing.T, q *slotQueue, ctx context.Context) error {
-		return q.s.ReturnRemediatedMerge(ctx, q.repo, ws(q), nil, nil)
+		_, err := returnRemediated(ctx, q.s, q.repo, ws(q), nil)
+		return err
 	}
 }
 
@@ -156,20 +162,21 @@ func TestTheStoreStampsEachMergesClockWithEveryChange(t *testing.T) {
 			want: func(m map[string]time.Time) MergeClock {
 				return MergeClock{Phase: MergeClockWaiting, Since: m["b aside"], Waited: m["admit b"].Sub(put(2))}
 			}},
-		// A merge back from its repair stands admitted, so it is active again
-		// the moment it takes the head.
+		// A merge back from its repair waits in line like any merge (owner
+		// ruling, 2026-11-20), so it is active again only once it is admitted
+		// at the head.
 		{name: "several cycles sum every waiting stretch and no active one", ws: a,
 			steps: []clockStep{{"admit a", admitStep(a)}, {"a aside", asideStep(a, MergeAsideTests)}, {"admit b", admitStep(b)}, {"a returns", returnStep(a)},
-				{"b lands", landStep(b)}},
+				{"b lands", landStep(b)}, {"readmit a", admitStep(a)}},
 			want: func(m map[string]time.Time) MergeClock {
-				waited := m["admit a"].Sub(put(1)) + m["b lands"].Sub(m["a returns"])
-				return MergeClock{Phase: MergeClockActive, Since: m["b lands"], Waited: waited}
+				waited := m["admit a"].Sub(put(1)) + m["readmit a"].Sub(m["a returns"])
+				return MergeClock{Phase: MergeClockActive, Since: m["readmit a"], Waited: waited}
 			}},
 		{name: "a third waiting stretch after two active ones is summed too", ws: a,
 			steps: []clockStep{{"admit a", admitStep(a)}, {"a aside", asideStep(a, MergeAsideTests)}, {"admit b", admitStep(b)}, {"a returns", returnStep(a)},
-				{"b lands", landStep(b)}, {"a aside again", asideStep(a, MergeAsideTests)}, {"admit c", admitStep(func(q *slotQueue) WorkspaceID { return q.c })}, {"a returns again", returnStep(a)}},
+				{"b lands", landStep(b)}, {"readmit a", admitStep(a)}, {"a aside again", asideStep(a, MergeAsideTests)}, {"admit c", admitStep(func(q *slotQueue) WorkspaceID { return q.c })}, {"a returns again", returnStep(a)}},
 			want: func(m map[string]time.Time) MergeClock {
-				waited := m["admit a"].Sub(put(1)) + m["b lands"].Sub(m["a returns"])
+				waited := m["admit a"].Sub(put(1)) + m["readmit a"].Sub(m["a returns"])
 				return MergeClock{Phase: MergeClockWaiting, Since: m["a returns again"], Waited: waited}
 			}},
 		{name: "a restart returning the admitted head holds its active stretch", ws: a,
@@ -241,9 +248,9 @@ func TestADaemonRestartInTheMiddleOfAStretchNeitherResetsNorInflatesTheClock(t *
 			}},
 		{name: "a restart while the merge waits again after an active stretch",
 			before: []clockStep{{"admit a", admitStep(a)}, {"a aside", asideStep(a, MergeAsideTests)}, {"admit b", admitStep(b)}, {"a returns", returnStep(a)}},
-			after:  []clockStep{{"b lands", landStep(b)}},
+			after:  []clockStep{{"b lands", landStep(b)}, {"readmit a", admitStep(a)}},
 			want: func(m map[string]time.Time) MergeClock {
-				return MergeClock{Phase: MergeClockActive, Since: m["b lands"], Waited: m["admit a"].Sub(put) + m["b lands"].Sub(m["a returns"])}
+				return MergeClock{Phase: MergeClockActive, Since: m["readmit a"], Waited: m["admit a"].Sub(put) + m["readmit a"].Sub(m["a returns"])}
 			}},
 		{name: "a restart while the merge fixes its tests out of line",
 			before: []clockStep{{"admit a", admitStep(a)}, {"a aside", asideStep(a, MergeAsideTests)}, {"admit b", admitStep(b)}},

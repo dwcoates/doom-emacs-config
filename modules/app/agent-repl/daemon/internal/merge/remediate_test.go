@@ -1308,11 +1308,15 @@ func TestAMergeBackFromItsConflictsCarriesTheRebaseItsRepairWorkedOn(t *testing.
 // continue the rebase its repair resolved, never abort it and meet the same
 // conflict again.
 func TestARequeuedMergeBackFromItsConflictsContinuesItsResolvedRebase(t *testing.T) {
-	// Arrange: the head stepped aside for its conflict, returned, and was
-	// put back in line to start over, the target unmoved.
+	// Arrange: the head stepped aside for its conflict, returned, headed the
+	// queue and was admitted under its ledger, then was put back in line to
+	// start over, the target unmoved.
 	c := conflictAsideScenario(t)
 	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
 		t.Fatalf("returnRemediated: %v", err)
+	}
+	if front, _, admitted, err := c.h.o.admitFront(context.Background(), c.h.repoKey()); err != nil || !admitted || front != theWorkspace {
+		t.Fatalf("admitFront = %s, %v, %v; want the returner admitted at the head", front, admitted, err)
 	}
 	if err := c.h.o.requeueAdmitted(context.Background(), "daemon.merge.resume", c.h.repoKey(), theWorkspace, requeueWhy{
 		unleased: "unleased", failed: "failed", done: "requeued to start over",
@@ -1339,5 +1343,182 @@ func TestARequeuedMergeBackFromItsConflictsContinuesItsResolvedRebase(t *testing
 	got := c.git.landedOwn()
 	if len(got) != 2 || !slices.Equal(got[0], []string{"a1"}) || !slices.Equal(got[1], []string{"b1"}) {
 		t.Fatalf("landings brought %v, want a1 then b1", got)
+	}
+}
+
+// returnedScenario is stepAsideScenario with ws-c queued behind ws-b, then the
+// failed head's return: it stands first in line, ahead of ws-b and ws-c,
+// which wait with nothing admitted.
+func returnedScenario(t *testing.T) *chain {
+	t.Helper()
+	c := stepAsideScenario(t)
+	c.queue(t, "ws-c", "c1")
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	return c
+}
+
+func TestAReturnerWaitsAtTheFirstWaitingPlaceWithNoLease(t *testing.T) {
+	// Arrange + Act
+	c := returnedScenario(t)
+	ctx := context.Background()
+
+	// Assert
+	t.Run("it waits first in line", func(t *testing.T) {
+		if got := c.lineOrder(t); !slices.Equal(got, []ids.WorkspaceID{theWorkspace, "ws-b", "ws-c"}) {
+			t.Fatalf("line = %v, want the returner first, then ws-b and ws-c", got)
+		}
+		if entry, _ := c.entryOf(t, theWorkspace); entry.State != wsm.MergeQueued {
+			t.Fatalf("returner = %+v, want it waiting", entry)
+		}
+	})
+	t.Run("its merge lease is given up", func(t *testing.T) {
+		c.h.db.mu.Lock()
+		_, held := c.h.db.leases[theWorkspace]
+		c.h.db.mu.Unlock()
+		if held {
+			t.Fatal("the returner still holds its merge lease while it waits")
+		}
+	})
+	t.Run("its record stays for its resume", func(t *testing.T) {
+		if _, found, err := c.h.db.MergeProgressOf(ctx, theWorkspace); err != nil || !found {
+			t.Fatalf("MergeProgressOf found %v, %v; want the returner's record kept", found, err)
+		}
+		if !c.h.o.pendingResume(theWorkspace) {
+			t.Fatal("the returner's resume is not pending")
+		}
+	})
+	t.Run("its place is recorded at INFO", func(t *testing.T) {
+		rec, ok := dlog.FindRecord(c.h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediate,
+			Message: "the merge's repair ended; it is back in line at the first waiting place, next after the merges being worked on, with no hold on that place, and its repair slot passes on"})
+		if !ok || rec.Context["position"] != 1 || rec.Context["behind"] != "" || rec.Context["lease_released"] == "" {
+			t.Fatalf("INFO record = %+v (found %v), want place 1, behind nothing, and the lease it gave up", rec, ok)
+		}
+	})
+	t.Run("a restart's resume does not take it up out of its place", func(t *testing.T) {
+		if ws, resuming, err := c.h.o.resumeIn(ctx, c.h.repoKey()); err != nil || (resuming && ws == theWorkspace) {
+			t.Fatalf("resumeIn = %s, %v, %v; want the waiting returner left at its place", ws, resuming, err)
+		}
+	})
+}
+
+func TestAReturnerRecordsTheMergeItStandsBehind(t *testing.T) {
+	// Arrange: ws-b is admitted at the head after the failed head stepped
+	// aside.
+	c := stepAsideScenario(t)
+	if front, _, admitted, err := c.h.o.admitFront(context.Background(), c.h.repoKey()); err != nil || !admitted || front != "ws-b" {
+		t.Fatalf("admitFront = %s, %v, %v; want ws-b admitted", front, admitted, err)
+	}
+
+	// Act
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+
+	// Assert
+	rec, ok := dlog.FindRecord(c.h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediate,
+		Message: "the merge's repair ended; it is back in line at the first waiting place, next after the merges being worked on, with no hold on that place, and its repair slot passes on"})
+	if !ok || rec.Context["position"] != 2 || rec.Context["behind"] != "ws-b" {
+		t.Fatalf("INFO record = %+v (found %v), want place 2 behind ws-b", rec, ok)
+	}
+}
+
+func TestTheStatusOrderAfterAReturnIsTheOrderTheQueueRuns(t *testing.T) {
+	// Arrange
+	c := returnedScenario(t)
+	snapshot, err := c.h.o.readQueue(context.Background(), c.h.db, c.h.repoKey())
+	if err != nil {
+		t.Fatalf("readQueue: %v", err)
+	}
+	var reported []ids.WorkspaceID
+	for _, m := range snapshot.Members {
+		reported = append(reported, m.Workspace)
+	}
+
+	// Act
+	c.drain(t)
+
+	// Assert
+	byPatch := map[string]ids.WorkspaceID{"a1": theWorkspace, "b1": "ws-b", "c1": "ws-c"}
+	var ran []ids.WorkspaceID
+	for _, landed := range c.git.landedOwn() {
+		ran = append(ran, byPatch[landed[0]])
+	}
+	if !slices.Equal(reported, ran) || !slices.Equal(ran, []ids.WorkspaceID{theWorkspace, "ws-b", "ws-c"}) {
+		t.Fatalf("status order = %v, landing order = %v; want both the returner, ws-b, then ws-c", reported, ran)
+	}
+	if !c.recorded("info", "daemon.merge.admit", "a merge back in line from its repair heads the queue; it is admitted under its ledger and resumes from its record") {
+		t.Fatal("the returner's admission back at the head was not recorded")
+	}
+	if got := c.git.landedOwn()[0]; !slices.Equal(got, []string{"a1", "fix"}) {
+		t.Fatalf("the returner landed %v, want a1 with its fix, resumed from its record", got)
+	}
+}
+
+func TestDequeuingAWaitingReturnerDropsItsEntryAndItsRecord(t *testing.T) {
+	// Arrange
+	c := returnedScenario(t)
+
+	// Act
+	if err := c.h.o.dequeue(context.Background(), theWorkspace, CauseUserDequeue); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+
+	// Assert
+	if _, found := c.entryOf(t, theWorkspace); found {
+		t.Fatal("the dequeued returner is still on its queue")
+	}
+	if _, found, err := c.h.db.MergeProgressOf(context.Background(), theWorkspace); err != nil || found {
+		t.Fatalf("MergeProgressOf found %v, %v; want the record gone with its entry", found, err)
+	}
+	if c.h.o.pendingResume(theWorkspace) {
+		t.Fatal("the dequeued returner is still pending its resume")
+	}
+}
+
+func TestAWaitingReturnerAtItsColdGateKeepsItsPlaceAndItsRecord(t *testing.T) {
+	// Arrange
+	c := returnedScenario(t)
+
+	// Act
+	c.h.o.ColdGateRaised(theWorkspace)
+
+	// Assert
+	entry, found := c.entryOf(t, theWorkspace)
+	if !found || !entry.ColdGated || entry.State != wsm.MergeQueued {
+		t.Fatalf("returner = %+v (found %v), want it waiting at its place, marked at its cold gate", entry, found)
+	}
+	if got := c.lineOrder(t); got[0] != theWorkspace {
+		t.Fatalf("line = %v, want the returner kept first", got)
+	}
+	if !c.h.o.pendingResume(theWorkspace) {
+		t.Fatal("the returner at its cold gate lost its resume")
+	}
+}
+
+func TestTheBackgroundRebasePassesOverAWaitingReturner(t *testing.T) {
+	// Arrange: ws-b heads; the returner waits behind it, then ws-c.
+	c := stepAsideScenario(t)
+	c.queue(t, "ws-c", "c1")
+	if _, _, admitted, err := c.h.o.admitFront(context.Background(), c.h.repoKey()); err != nil || !admitted {
+		t.Fatalf("admitFront = %v, %v; want ws-b admitted", admitted, err)
+	}
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+
+	// Act
+	c.h.o.rebaseWaitingPass(context.Background(), c.h.repoKey())
+
+	// Assert
+	rebased := map[string]bool{}
+	for _, rec := range c.h.logs.Records() {
+		if rec.Operation == "daemon.merge.rebase_waiting" {
+			rebased[fmtAny(rec.Context["workspace"])] = true
+		}
+	}
+	if rebased[string(theWorkspace)] || !rebased["ws-c"] {
+		t.Fatalf("background rebases = %v, want ws-c rebased and the returner passed over", rebased)
 	}
 }

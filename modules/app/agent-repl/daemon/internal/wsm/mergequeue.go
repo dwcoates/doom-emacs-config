@@ -786,15 +786,39 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 	return slot, err
 }
 
-// ReturnRemediatedMerge puts the remediating merge ID back in REPO's line at
-// the FIRST WAITING PLACE: ahead of every merge waiting in line, behind every
-// merge being worked on, which it never evicts (owner ruling, 2026-10-31).
-// With no merge waiting it stays at the back, which is then the first place
-// after whatever runs. A merge that stepped aside from the head returns
-// admitted, to resume from its record once it heads the queue; one that
-// stepped aside from its waiting place returns waiting, as it was. Its
-// repair slot is released in the same write, and granted to the next merge
-// awaiting it (mergeSlotsOf). Anything but a remediating entry is a refusal.
+// ReturnRemediatedMerge puts the remediating merge ID back in REPO's line as
+// an ORDINARY WAITING MERGE at the FIRST WAITING PLACE: ahead of every merge
+// waiting in line, behind every merge being worked on, which it never evicts
+// (owner rulings, 2026-10-31 and 2026-11-20). With no merge waiting it stays
+// at the back, which is then the first place after whatever runs. Its repair
+// slot is released in the same write, and granted to the next merge awaiting
+// it (mergeSlotsOf). Anything but a remediating entry is a refusal. It
+// answers where the merge now stands.
+//
+// THE PLACE IS AN ORDINARY POSITION, HELD ON NO LEASE (owner ruling,
+// 2026-11-20): the return writes the merge's sequence once, and nothing
+// remembers it was a returner. A front placement, a hotfix, a later returner
+// and every move the user makes pass it as they pass any waiting merge, and
+// the order the queue runs is the order it reports, both read off the one
+// sequence. The merge takes the front mark of the merge it passed
+// (takeFirstWaitingPlace), so every front merge still stands ahead of every
+// ordinary one.
+//
+// A MERGE THAT STEPPED ASIDE FROM THE HEAD (MergeAsideTests,
+// MergeAsideConflicts) RETURNS WAITING, keeping its progress record and
+// dropping LEASE, its merge lease, in the same write: a waiting merge owns no
+// lease, and the record is what the merge resumes from once it heads the
+// queue and is admitted under its ledger again (the record's lease is that
+// ledger). One that stepped aside from its waiting place
+// (MergeAsideWaitingConflicts) holds no lease and no record, and LEASE is
+// empty. A lease given where none is held, or none given where one is, is
+// refused and changes nothing.
+//
+// A MERGE BACK FROM RESOLVING CONFLICTS STANDS BEHIND every merge back from
+// fixing its tests that is first in the waiting line AT THAT MOMENT, as the
+// ranks it replaces put it (2026-11-13: a later conflict return was put ahead
+// of a merge that had fixed its tests). That is decided from those merges'
+// own records, once, here; it holds them no place afterwards.
 //
 // RESOLVED is the rebase the merge's own conflict repair worked on, written
 // on the entry in the same write (mergeresolvedrebase.go), or nil for a
@@ -806,21 +830,22 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 // orchestrator has taken up (its chain's member joining behind the head) is
 // still waiting in the store until its admission is written, and the return
 // that read it as waiting stood ahead of a merge already being worked on.
-func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID, resolved *ResolvedRebase) error {
+func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, workedOn []WorkspaceID, resolved *ResolvedRebase) (MergeReturn, error) {
 	const op = "daemon.wsm.return_remediated_merge"
 	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		return err
+		return MergeReturn{}, err
 	}
-	fields := dlog.Context{"repo": string(key), "workspace": string(id), "resolved_rebase": resolved != nil}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "resolved_rebase": resolved != nil}
 	if resolved != nil {
 		if err := resolved.validate(); err != nil {
 			s.log.Error(op, "refused a merge's return carrying a malformed resolved rebase", withError(fields, err))
-			return err
+			return MergeReturn{}, err
 		}
 	}
 	resolvedTip, resolvedHead, resolvedTurn := resolvedRebaseColumns(resolved)
-	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+	var placed MergeReturn
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		_, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil {
 			return err
@@ -832,53 +857,143 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 		if err := tx.QueryRowContext(ctx, `SELECT aside FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).Scan(&aside); err != nil {
 			return err
 		}
-		returns := MergeAdmitted
-		switch MergeAside(aside) {
+		reason := MergeAside(aside)
+		switch reason {
 		case MergeAsideTests, MergeAsideConflicts:
+			if lease == "" {
+				return fmt.Errorf("wsm: workspace %s in repo %q returns from %s with no merge lease to drop", id, key, reason)
+			}
+			if err := releaseMergeLease(ctx, tx, id, lease); err != nil {
+				return err
+			}
 		case MergeAsideWaitingConflicts:
-			returns = MergeQueued
+			if lease != "" {
+				return fmt.Errorf("wsm: workspace %s in repo %q returns from %s, which holds no lease, with lease %s", id, key, reason, lease)
+			}
 		default:
-			return fmt.Errorf("wsm: workspace %s in repo %q returns from remediating for %s, which names no repair", id, key, MergeAside(aside))
+			return fmt.Errorf("wsm: workspace %s in repo %q returns from remediating for %s, which names no repair", id, key, reason)
 		}
-		if resolved != nil && MergeAside(aside) != MergeAsideConflicts {
-			return fmt.Errorf("%w: workspace %s in repo %q returns from %s", errResolvedRebaseAside, id, key, MergeAside(aside))
+		if resolved != nil && reason != MergeAsideConflicts {
+			return fmt.Errorf("%w: workspace %s in repo %q returns from %s", errResolvedRebaseAside, id, key, reason)
 		}
-		rank := returnRankOf(MergeAside(aside))
 		back, err := nextSeq(ctx, tx, key)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 1, return_rank = ?,
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 0,
 resolved_tip = ?, resolved_branch_head = ?, resolved_turn = ? WHERE repo_key = ? AND workspace_id = ?`,
-			int(returns), int(MergeAsideNone), back, rank, resolvedTip, resolvedHead, resolvedTurn, key, id); err != nil {
+			int(MergeQueued), int(MergeAsideNone), back, resolvedTip, resolvedHead, resolvedTurn, key, id); err != nil {
 			return err
 		}
-		// A RETURNER GOES AHEAD OF EVERY ENTRY OF A LOWER RANK, never ahead of
-		// one of its own or a higher rank (returnRankOf): a merge back from
-		// fixing its tests takes the place after the merge being worked on,
-		// ahead of the conflict returners and the waiting line, and returners
-		// of one rank keep the order they came back in (2026-11-13: a later
-		// conflict return was put ahead of a merge that had fixed its tests).
-		// The candidates are the waiting line and the earlier returners
-		// standing in it; an admitted entry that never stepped aside is a
-		// merge at work, never passed.
-		query := `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND workspace_id <> ? AND return_rank < ? AND (state = ? OR (state = ? AND return_rank > 0))`
-		args := []any{key, id, rank, int(MergeQueued), int(MergeAdmitted)}
-		if len(workedOn) > 0 {
-			query += ` AND workspace_id NOT IN (?` + strings.Repeat(`, ?`, len(workedOn)-1) + `)`
-			for _, ws := range workedOn {
-				args = append(args, ws)
-			}
-		}
-		var waiting sql.NullInt64
-		if err := tx.QueryRowContext(ctx, query, args...).Scan(&waiting); err != nil {
+		if err := takeFirstWaitingPlace(ctx, tx, key, id, reason != MergeAsideTests, workedOn); err != nil {
 			return err
 		}
-		if !waiting.Valid {
-			return nil
-		}
-		return moveAhead(ctx, tx, key, id, waiting.Int64)
+		placed, err = returnPlaceOf(ctx, tx, key, id)
+		placed.Lease = lease
+		return err
 	})
+	if err != nil {
+		return MergeReturn{}, err
+	}
+	if lease != "" {
+		s.disown(lease)
+	}
+	return placed, nil
+}
+
+// MergeReturn is where ReturnRemediatedMerge put a merge back in line.
+type MergeReturn struct {
+	// Position is the merge's one-based place among the entries in line.
+	Position int
+	// Behind is the merge directly ahead of it in line, empty when it heads.
+	Behind WorkspaceID
+	// Lease is the merge lease the return dropped, empty when it held none.
+	Lease LeaseID
+}
+
+// takeFirstWaitingPlace moves ID, standing at the back of KEY's queue, to the
+// first waiting place: the place of the first merge waiting in line that the
+// caller does not name WORKED ON, taking that merge's front mark. BEHINDFIXERS
+// passes over the merges at the front of the waiting line whose own record
+// says they are back from fixing their tests (a waiting merge carries a
+// record only while it is back in line from its repair, at the step it
+// repaired), so a merge back from resolving conflicts stands behind them. No
+// such merge leaves ID at the back, ordinary.
+func takeFirstWaitingPlace(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, behindFixers bool, workedOn []WorkspaceID) error {
+	query := `SELECT q.seq, q.source_front, COALESCE(json_extract(p.document, '$.step'), '') FROM merge_queue AS q
+		LEFT JOIN merge_progress AS p ON p.workspace_id = q.workspace_id
+		WHERE q.repo_key = ? AND q.workspace_id <> ? AND q.state = ?`
+	args := []any{key, id, int(MergeQueued)}
+	if len(workedOn) > 0 {
+		query += ` AND q.workspace_id NOT IN (?` + strings.Repeat(`, ?`, len(workedOn)-1) + `)`
+		for _, ws := range workedOn {
+			args = append(args, ws)
+		}
+	}
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY q.seq`, args...)
+	if err != nil {
+		return err
+	}
+	var (
+		target int64
+		front  bool
+		found  bool
+	)
+	for rows.Next() {
+		var (
+			seq  int64
+			mark bool
+			step string
+		)
+		if err := rows.Scan(&seq, &mark, &step); err != nil {
+			rows.Close()
+			return err
+		}
+		if behindFixers && step == MergeStepFixes {
+			continue
+		}
+		target, front, found = seq, mark, true
+		break
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if err := moveAhead(ctx, tx, key, id, target); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ? WHERE repo_key = ? AND workspace_id = ?`, front, key, id)
+	return err
+}
+
+// MergeStepFixes is the step a merge's progress record names while it fixes
+// its tests and once it is back in line from doing so. It is THE ONE
+// SPELLING: the merge package's TabFixes is this constant, so the record the
+// merge package writes and the store's read of it (takeFirstWaitingPlace)
+// cannot drift apart. The layout-126 step reads the same spelling, as
+// shipped.
+const MergeStepFixes = "fixes"
+
+// returnPlaceOf answers where ID stands in KEY's line: its one-based place
+// among the entries in line, and the entry in line directly ahead of it.
+func returnPlaceOf(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) (MergeReturn, error) {
+	seq, _, err := entryPlace(ctx, tx, key, id)
+	if err != nil {
+		return MergeReturn{}, err
+	}
+	position, err := inLinePositionOf(ctx, tx, key, seq)
+	if err != nil {
+		return MergeReturn{}, err
+	}
+	var behind sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT workspace_id FROM merge_queue WHERE repo_key = ? AND seq < ? AND state NOT IN (?, ?) ORDER BY seq DESC LIMIT 1`,
+		key, seq, int(MergeRequested), int(MergeRemediating)).Scan(&behind)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return MergeReturn{}, err
+	}
+	return MergeReturn{Position: position, Behind: WorkspaceID(behind.String)}, nil
 }
 
 // AdmitMerge marks the entry the orchestrator is running now, moves it ahead
@@ -942,6 +1057,15 @@ func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id Work
 	)
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		settled, kept, err = leaveQueueInTx(ctx, tx, key, id, cause, s.now(), "")
+		if err != nil {
+			return err
+		}
+		// A RECORD NO LEASE HOLDS LEAVES WITH ITS ENTRY: it is the record of
+		// a merge back in line from its repair (ReturnRemediatedMerge), which
+		// holds no lease while it waits, and nothing resumes it once its
+		// entry is gone. A record a lease still holds is an admitted merge's,
+		// which its lease's own end drops.
+		_, err = tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE workspace_id = ? AND lease_id NOT IN (SELECT id FROM leases)`, id)
 		return err
 	})
 	if err != nil {
@@ -1085,15 +1209,24 @@ func (s *store) RequeuePausedMerge(ctx context.Context, repo RepoKey, id Workspa
 // merge lease is refused and deletes nothing. The caller
 // disowns the lease once TX commits.
 func dropMergeLease(ctx context.Context, tx *sql.Tx, id WorkspaceID, lease LeaseID) error {
+	if err := releaseMergeLease(ctx, tx, id, lease); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE lease_id = ?`, lease)
+	return err
+}
+
+// releaseMergeLease deletes LEASE, workspace ID's merge lease, in TX, keeping
+// its progress record: the half of dropMergeLease a merge back in line from
+// its repair takes (ReturnRemediatedMerge), since the record is what it
+// resumes from. A lease that is not ID's merge lease is refused and deletes
+// nothing. The caller disowns the lease once TX commits.
+func releaseMergeLease(ctx context.Context, tx *sql.Tx, id WorkspaceID, lease LeaseID) error {
 	res, err := tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?`, lease, id, int(HolderMerge))
 	if err != nil {
 		return err
 	}
-	if err := requireOneRow(res, fmt.Sprintf("wsm: merge lease %s of workspace %s", lease, id)); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE lease_id = ?`, lease)
-	return err
+	return requireOneRow(res, fmt.Sprintf("wsm: merge lease %s of workspace %s", lease, id))
 }
 
 // MergeQueue loads one repository's queue in order, all-or-nothing.
@@ -1324,25 +1457,11 @@ func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueueP
 }
 
 // returnRankDDL is the layout-130 addition: merge_queue.return_rank, the rank
-// a merge came back to the line with from repairing out of line
-// (ReturnRemediatedMerge). 0 is an entry that never stepped aside. It is
-// additive: the previous build names no such column and writes 0.
+// a merge came back to the line with from repairing out of line. IT IS READ
+// BY NOTHING since the owner's ruling of 2026-11-20: a returner is placed by
+// its sequence once, at its return, and holds no standing after it
+// (ReturnRemediatedMerge). The column stays, written and read by nothing
+// here, so the step stays additive; the build before it still writes it.
 const returnRankDDL = `
 ALTER TABLE merge_queue ADD COLUMN return_rank INTEGER NOT NULL DEFAULT 0;
 `
-
-// The ranks a returner comes back with: a merge back from fixing its tests
-// had already earned the head, so it outranks one back from resolving
-// conflicts, which outranks the waiting line (0).
-const (
-	returnRankConflicts = 1
-	returnRankTests     = 2
-)
-
-// returnRankOf is the rank a merge that stepped aside for REASON returns with.
-func returnRankOf(reason MergeAside) int {
-	if reason == MergeAsideTests {
-		return returnRankTests
-	}
-	return returnRankConflicts
-}

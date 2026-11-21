@@ -160,6 +160,9 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 		return func(q *slotQueue, ctx context.Context) error { return q.s.AdmitMerge(ctx, q.repo, ws(q)) }
 	}
 	stepAside := func(q *slotQueue, ctx context.Context) error {
+		if _, err := holdAsideLeaseErr(ctx, q.s, q.a, MergeAsideTests); err != nil {
+			return err
+		}
 		_, err := q.s.StepAsideMerge(ctx, q.repo, q.a, MergeAsideTests)
 		return err
 	}
@@ -197,7 +200,8 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			name: "a remediated merge returning behind the worked-on head waits from its return",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
 				{"return", func(q *slotQueue, ctx context.Context) error {
-					return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil, nil)
+					_, err := returnRemediated(ctx, q.s, q.repo, q.a, nil)
+					return err
 				}}},
 			want: check{ws: a, slot: MergeSlotWaiting, at: func(m map[string]time.Time) time.Time { return m["return"] }},
 		},
@@ -205,7 +209,8 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			name: "a returned merge takes the head again as the head ahead of it lands",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
 				{"return", func(q *slotQueue, ctx context.Context) error {
-					return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil, nil)
+					_, err := returnRemediated(ctx, q.s, q.repo, q.a, nil)
+					return err
 				}},
 				{"b lands", func(q *slotQueue, ctx context.Context) error {
 					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "landed")
@@ -222,7 +227,8 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.c, "taken off")
 				}},
 				{"return", func(q *slotQueue, ctx context.Context) error {
-					return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil, nil)
+					_, err := returnRemediated(ctx, q.s, q.repo, q.a, nil)
+					return err
 				}}},
 			want: check{ws: a, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["return"] }},
 		},

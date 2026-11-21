@@ -2339,3 +2339,46 @@ func TestEveryBandSectionStatesItsHeight(t *testing.T) {
 		}
 	}
 }
+
+func TestTheWaitingMergesAreNumberedInTheOrderTheQueueReports(t *testing.T) {
+	tests := []struct {
+		name string
+		line []sidebar.QueueEntry
+	}{
+		{
+			name: "a returner waiting first behind the head is numbered first",
+			line: inLine("w1", "w2", "w3", "w4"),
+		},
+		{
+			name: "a merge admitted behind the head is numbered at its place in line",
+			line: []sidebar.QueueEntry{
+				{Workspace: "w1", Credited: "w1", Admitted: true, Clock: activeClock(1)},
+				{Workspace: "w3", Credited: "w3", Clock: waitingClock(1, 0)},
+				{Workspace: "w2", Credited: "w2", Admitted: true, Clock: waitingClock(1, 0)},
+				{Workspace: "w4", Credited: "w4", Clock: waitingClock(1, 0)},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			var status []string
+			var members []ids.WorkspaceID
+			for _, entry := range tt.line {
+				status = append(status, string(entry.Workspace))
+				members = append(members, entry.Workspace)
+			}
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: members, Line: tt.line})
+
+			// Act
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three"), workspace("w4", "four")))
+
+			// Assert: the head, then the waiting merges, whose numbers are
+			// their places in the drawn list, read in the status's order.
+			if got := queueSubjectIDs(queueGroup(latest(t, r), repo)); !slices.Equal(got, status) {
+				t.Fatalf("drawn order = %v, want the status order %v", got, status)
+			}
+		})
+	}
+}

@@ -1376,48 +1376,86 @@ func stampLocked(entry *wsm.MergeQueueEntry, slot wsm.MergeSlot, at time.Time) e
 	return nil
 }
 
-// ReturnRemediatedMerge puts the remediating entry back, admitted, at the
-// first waiting place, carrying RESOLVED, as the durable queue does.
-func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID, resolved *wsm.ResolvedRebase) error {
+// ReturnRemediatedMerge puts the remediating entry back, waiting, at the
+// first waiting place, taking the passed merge's front mark, dropping LEASE,
+// keeping its progress record and carrying RESOLVED, as the durable queue
+// does. A merge back from resolving conflicts passes over the merges at the
+// front of the waiting line whose record says they are back from fixing
+// their tests.
+func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, workedOn []ids.WorkspaceID, resolved *wsm.ResolvedRebase) (wsm.MergeReturn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	queue := f.queues[repo]
-	at := -1
-	for i, entry := range queue {
-		if entry.Workspace == id {
-			at = i
-		}
-	}
+	at := slices.IndexFunc(queue, func(e wsm.MergeQueueEntry) bool { return e.Workspace == id })
 	if at < 0 {
-		return fmt.Errorf("return %s: %w", id, wsm.ErrNotFound)
+		return wsm.MergeReturn{}, fmt.Errorf("return %s: %w", id, wsm.ErrNotFound)
 	}
 	if queue[at].State != wsm.MergeRemediating {
-		return fmt.Errorf("return %s while %s, not remediating", id, queue[at].State)
+		return wsm.MergeReturn{}, fmt.Errorf("return %s while %s, not remediating", id, queue[at].State)
 	}
 	entry := queue[at]
 	if resolved != nil && entry.Aside != wsm.MergeAsideConflicts {
-		return fmt.Errorf("return %s from %s carrying a resolved rebase", id, entry.Aside)
+		return wsm.MergeReturn{}, fmt.Errorf("return %s from %s carrying a resolved rebase", id, entry.Aside)
 	}
-	entry.State, entry.Source.Front = wsm.MergeAdmitted, true
-	if entry.Aside == wsm.MergeAsideWaitingConflicts {
-		entry.State = wsm.MergeQueued
+	switch entry.Aside {
+	case wsm.MergeAsideTests, wsm.MergeAsideConflicts:
+		if held, ok := f.leases[id]; !ok || lease == "" || held.ID != lease || held.Holder != wsm.HolderMerge {
+			return wsm.MergeReturn{}, fmt.Errorf("return %s from %s under lease %q: %w", id, entry.Aside, lease, wsm.ErrNotFound)
+		}
+		delete(f.leases, id)
+		f.releasedLeases = append(f.releasedLeases, lease)
+	default:
+		if lease != "" {
+			return wsm.MergeReturn{}, fmt.Errorf("return %s from %s with lease %s", id, entry.Aside, lease)
+		}
 	}
+	behindFixers := entry.Aside != wsm.MergeAsideTests
+	entry.State, entry.Source.Front = wsm.MergeQueued, false
 	entry.Aside = wsm.MergeAsideNone
 	if err := stampLocked(&entry, wsm.MergeSlotWaiting, time.Now()); err != nil {
-		return err
+		return wsm.MergeReturn{}, err
 	}
 	entry.Resolved = resolved
 	rest := append(queue[:at:at], queue[at+1:]...)
 	place := len(rest)
 	for i, e := range rest {
-		if e.State == wsm.MergeQueued && !slices.Contains(workedOn, e.Workspace) {
-			place = i
-			break
+		if e.State != wsm.MergeQueued || slices.Contains(workedOn, e.Workspace) {
+			continue
 		}
+		if behindFixers && f.backFromFixingLocked(e.Workspace) {
+			continue
+		}
+		place, entry.Source.Front = i, e.Source.Front
+		break
 	}
 	f.queues[repo] = append(rest[:place:place], append([]wsm.MergeQueueEntry{entry}, rest[place:]...)...)
 	f.renumber(repo)
-	return f.restampRepairsLocked(repo)
+	placed := wsm.MergeReturn{Lease: lease}
+	for _, e := range f.queues[repo][:place] {
+		if e.State != wsm.MergeRequested && e.State != wsm.MergeRemediating {
+			placed.Position++
+			placed.Behind = e.Workspace
+		}
+	}
+	placed.Position++
+	return placed, f.restampRepairsLocked(repo)
+}
+
+// backFromFixingLocked reports whether WS's progress record stands at the
+// fixes step, as a merge back in line from fixing its tests does. Called with
+// f.mu held.
+func (f *fakeDB) backFromFixingLocked(ws ids.WorkspaceID) bool {
+	record, ok := f.progress[ws]
+	if !ok {
+		return false
+	}
+	var doc struct {
+		Step string `json:"step"`
+	}
+	if err := json.Unmarshal(record.Document, &doc); err != nil {
+		panic(fmt.Sprintf("fakeDB: the progress record of %s will not decode: %v", ws, err))
+	}
+	return doc.Step == TabFixes
 }
 
 func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (wsm.OrphanedMergeState, error) {
@@ -1523,6 +1561,13 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 			f.settleWaitsOnLocked(repo, id, cause)
 			f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
 			f.keepOffQueueLocked(entry, cause)
+			// A RECORD NO LEASE HOLDS LEAVES WITH ITS ENTRY, as the durable
+			// queue drops a merge's back in line from its repair.
+			if record, ok := f.progress[id]; ok {
+				if held, leased := f.leases[id]; !leased || held.ID != record.Lease {
+					delete(f.progress, id)
+				}
+			}
 			return f.restampRepairsLocked(repo)
 		}
 	}

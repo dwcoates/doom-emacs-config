@@ -26,6 +26,7 @@ func conflictAsideFixture(t *testing.T, aside MergeAside) (*store, *dlog.TestLog
 	if err := s.AdmitMerge(ctx, repo, head.ID); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
+	holdAsideLease(t, s, head.ID, aside)
 	if _, err := s.StepAsideMerge(ctx, repo, head.ID, aside); err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
@@ -54,15 +55,15 @@ func TestReturnRemediatedMergeRecordsTheResolvedRebaseOnTheEntry(t *testing.T) {
 	resolved := theResolvedRebase
 
 	// Act
-	err := s.ReturnRemediatedMerge(context.Background(), repo, ws, nil, &resolved)
+	_, err := returnRemediatedWith(context.Background(), s, repo, ws, nil, &resolved)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 	entry := entryOf(t, s, repo, ws)
-	if entry.State != MergeAdmitted || entry.Resolved == nil || *entry.Resolved != theResolvedRebase {
-		t.Fatalf("entry = %+v (resolved %+v), want it admitted carrying %+v", entry, entry.Resolved, theResolvedRebase)
+	if entry.State != MergeQueued || entry.Resolved == nil || *entry.Resolved != theResolvedRebase {
+		t.Fatalf("entry = %+v (resolved %+v), want it waiting carrying %+v", entry, entry.Resolved, theResolvedRebase)
 	}
 }
 
@@ -71,7 +72,7 @@ func TestReturnRemediatedMergeWithNoResolvedRebaseLeavesTheEntryWithout(t *testi
 	s, _, repo, ws := conflictAsideFixture(t, MergeAsideConflicts)
 
 	// Act
-	err := s.ReturnRemediatedMerge(context.Background(), repo, ws, nil, nil)
+	_, err := returnRemediatedWith(context.Background(), s, repo, ws, nil, nil)
 
 	// Assert
 	if err != nil {
@@ -88,7 +89,7 @@ func TestReturnRemediatedMergeRefusesAResolvedRebaseFromAnyRepairButConflicts(t 
 	resolved := theResolvedRebase
 
 	// Act
-	err := s.ReturnRemediatedMerge(context.Background(), repo, ws, nil, &resolved)
+	_, err := returnRemediatedWith(context.Background(), s, repo, ws, nil, &resolved)
 
 	// Assert
 	if !errors.Is(err, errResolvedRebaseAside) {
@@ -106,7 +107,7 @@ func TestReturnRemediatedMergeRefusesAMalformedResolvedRebase(t *testing.T) {
 	resolved := ResolvedRebase{Tip: "tip-sha", Turn: "turn-1"}
 
 	// Act
-	err := s.ReturnRemediatedMerge(context.Background(), repo, ws, nil, &resolved)
+	_, err := returnRemediatedWith(context.Background(), s, repo, ws, nil, &resolved)
 
 	// Assert
 	if err == nil {
@@ -122,12 +123,15 @@ func TestReturnRemediatedMergeRefusesAMalformedResolvedRebase(t *testing.T) {
 }
 
 func TestARequeueKeepsTheResolvedRebase(t *testing.T) {
-	// Arrange: the merge returned carrying its resolved rebase, then took a
-	// lease as a head does.
+	// Arrange: the merge returned waiting, carrying its resolved rebase, then
+	// headed the queue: it took a lease and was admitted as a head is.
 	s, _, repo, ws := conflictAsideFixture(t, MergeAsideConflicts)
 	resolved := theResolvedRebase
-	if err := s.ReturnRemediatedMerge(context.Background(), repo, ws, nil, &resolved); err != nil {
+	if _, err := returnRemediatedWith(context.Background(), s, repo, ws, nil, &resolved); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+	if err := s.AdmitMerge(context.Background(), repo, ws); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
 	}
 	lease, err := s.AcquireLease(context.Background(), ws, HolderMerge, PolicyHold)
 	if err != nil {
@@ -165,7 +169,7 @@ func TestClearResolvedRebase(t *testing.T) {
 				r := theResolvedRebase
 				resolved = &r
 			}
-			if err := s.ReturnRemediatedMerge(context.Background(), repo, ws, nil, resolved); err != nil {
+			if _, err := returnRemediatedWith(context.Background(), s, repo, ws, nil, resolved); err != nil {
 				t.Fatalf("ReturnRemediatedMerge: %v", err)
 			}
 
@@ -200,7 +204,7 @@ func TestClearResolvedRebaseOfAWorkspaceWithNoEntryIsNotFound(t *testing.T) {
 func TestAResolvedRebaseMissingAColumnIsADecodeError(t *testing.T) {
 	// Arrange: a row naming a resolved tip with no branch head or turn.
 	s, _, repo, ws := conflictAsideFixture(t, MergeAsideConflicts)
-	if err := s.ReturnRemediatedMerge(context.Background(), repo, ws, nil, nil); err != nil {
+	if _, err := returnRemediatedWith(context.Background(), s, repo, ws, nil, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 	corrupt(t, s, `UPDATE merge_queue SET resolved_tip = 'tip-sha' WHERE workspace_id = ?`, string(ws))

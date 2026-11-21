@@ -141,6 +141,9 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 	if err != nil || !requeued {
 		return err
 	}
+	if err := o.recoverBackInLine(ctx, repo, entry); err != nil {
+		return err
+	}
 	if entry.ColdGated {
 		o.recoverColdGated(ctx, repo, entry)
 	}
@@ -438,27 +441,7 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// already fast-forwarded to, which the commit object outlives), while the
 	// branch's worktree is where its rebase stands.
 	o.sweepTrees(ctx, ws, doc.Subject.TargetDir, lease.ID, true)
-	o.mu.Lock()
-	o.repoOf[ws] = repo
-	o.ledgerOf[ws] = lease.ID
-	o.resumes[ws] = doc
-	o.mu.Unlock()
-	// THE MERGE IS HELD from here until its resume runs (holdRound).
-	o.holdRound(ctx, repo, ws, lease.ID, true)
-	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
-	// always had, and the footer shows the step the merge stands on before the
-	// resumed run's first word.
-	label := branchLineOf(doc.Subject.Branch, doc.Subject.subject().targetLabel())
-	if doc.BackInLine {
-		// A MERGE BACK IN LINE FROM ITS REPAIR is drawn waiting, never at the
-		// repair its record last stood on (drawBackInLine); the queue's redraw
-		// gives it its place.
-		o.publishHead(ws, lease.ID, label, doc.QueuedMS, headWaiting, headRecover)
-		o.publish(repo, ws, MergeFacts{State: StateQueued, QueuedAt: time.UnixMilli(doc.QueuedMS), Step: footer.StepEnqueued})
-	} else {
-		o.publishHead(ws, lease.ID, label, doc.StartedMS, headMerging, headRecover)
-		o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
-	}
+	o.takeBackResume(ctx, repo, ws, lease.ID, doc)
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
@@ -475,6 +458,78 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	}
 	o.log(ctx, ws).Info(op, message, fields)
 	o.deps.Log.Global().Info(op, message, fields)
+	return nil
+}
+
+// takeBackResume stands DOC, the progress record of WS's merge under LEASE,
+// as this daemon's resume of it, and draws the merge as it stood: the one
+// take-back a record has, whether its merge waits admitted (recoverResumable)
+// or waits in line back from its repair (recoverBackInLine).
+func (o *orchestrator) takeBackResume(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lease ids.LeaseID, doc progressDoc) {
+	o.mu.Lock()
+	o.repoOf[ws] = repo
+	o.ledgerOf[ws] = lease
+	o.resumes[ws] = doc
+	o.mu.Unlock()
+	// THE MERGE IS HELD from here until its resume runs (holdRound).
+	o.holdRound(ctx, repo, ws, lease, true)
+	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
+	// always had, and the footer shows the step the merge stands on before the
+	// resumed run's first word.
+	label := branchLineOf(doc.Subject.Branch, doc.Subject.subject().targetLabel())
+	if doc.BackInLine {
+		// A MERGE BACK IN LINE FROM ITS REPAIR is drawn waiting, never at the
+		// repair its record last stood on (drawBackInLine); the queue's redraw
+		// gives it its place.
+		o.publishHead(ws, lease, label, doc.QueuedMS, headWaiting, headRecover)
+		o.publish(repo, ws, MergeFacts{State: StateQueued, QueuedAt: time.UnixMilli(doc.QueuedMS), Step: footer.StepEnqueued})
+		return
+	}
+	o.publishHead(ws, lease, label, doc.StartedMS, headMerging, headRecover)
+	o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
+}
+
+// recoverBackInLine takes back the progress record of ENTRY, a WAITING merge:
+// a merge back in line from its repair waits with no lease and keeps the
+// record it resumes from once it heads the queue (wsm.ReturnRemediatedMerge,
+// admitFront). A waiting merge with no record is an ordinary one, and nothing
+// is taken. A waiting merge's record is only ever its return's, so one that
+// does not say it is back in line, or that names another lease than the
+// entry's ledger, is a defect that refuses the take-back, loudly, as a record
+// that will not decode does.
+func (o *orchestrator) recoverBackInLine(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) error {
+	const op = "daemon.merge.recover"
+	ws := entry.Workspace
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "ledger": string(entry.Ledger)}
+	stored, found, err := o.deps.DB.MergeProgressOf(ctx, ws)
+	// A REFUSAL IS A FACT ABOUT THE BOOT OR THE ADOPTION too, so it goes to
+	// the run log beside the workspace's, as recoverAdmitted's refusals do.
+	refuse := func(message string, err error) error {
+		withErr := withField(fields, "error", err.Error())
+		o.log(ctx, ws).Error(op, message, withErr)
+		o.deps.Log.Global().Error(op, message, withErr)
+		return err
+	}
+	if err != nil {
+		return refuse("could not read whether a waiting merge is back in line from its repair", fmt.Errorf("merge: read the progress of waiting %q: %w", ws, err))
+	}
+	if !found {
+		return nil
+	}
+	fields["lease"] = string(stored.Lease)
+	doc, err := decodeProgress(stored)
+	if err != nil {
+		return refuse("refusing the take-back: a waiting merge's progress record will not decode", fmt.Errorf("merge: recover waiting %q: %w", ws, err))
+	}
+	if !doc.BackInLine || stored.Lease != entry.Ledger {
+		fields["invariant_violation"] = "a waiting merge's record is its return's, back in line under its ledger"
+		return refuse("refusing the take-back: a waiting merge carries a record its return did not write",
+			fmt.Errorf("merge: the waiting merge of %q carries a record (back in line %v, lease %s) that is no return's under its ledger %s",
+				ws, doc.BackInLine, stored.Lease, entry.Ledger))
+	}
+	o.takeBackResume(ctx, repo, ws, stored.Lease, doc)
+	fields["step"] = doc.Step
+	o.log(ctx, ws).Info(op, "a merge back in line from its repair is taken back waiting; it resumes at the step it recorded once it heads the queue", fields)
 	return nil
 }
 

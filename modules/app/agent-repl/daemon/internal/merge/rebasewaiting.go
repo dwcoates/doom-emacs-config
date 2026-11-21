@@ -109,7 +109,11 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		if o.isDraining() {
 			return
 		}
-		if entry.State != wsm.MergeQueued || !o.deps.Standing.ServesWorkspace(entry.Workspace) {
+		// A MERGE BACK IN LINE FROM ITS REPAIR keeps its record for its
+		// resume, which rebases at the head (admitFront): it takes no
+		// background rebase, whose conflict would step it aside as a merge
+		// with no record.
+		if entry.State != wsm.MergeQueued || !o.deps.Standing.ServesWorkspace(entry.Workspace) || o.pendingResume(entry.Workspace) {
 			continue
 		}
 		o.rebaseWaitingMember(ctx, repo, entry)

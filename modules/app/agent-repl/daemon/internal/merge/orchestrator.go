@@ -52,7 +52,7 @@ const (
 	TabRebasing   = "rebasing"
 	TabConflicts  = "conflicts"
 	TabTests      = "tests"
-	TabFixes      = "fixes"
+	TabFixes      = wsm.MergeStepFixes
 	TabCommitting = "committing"
 )
 

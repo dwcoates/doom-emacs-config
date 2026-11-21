@@ -56,10 +56,14 @@ import (
 //   - RETURNING: once the repair ends, the merge goes back in line at the
 //     FIRST WAITING PLACE -- ahead of every merge waiting, behind every merge
 //     being worked on, which it never evicts (wsm.ReturnRemediatedMerge) --
+//     as an ORDINARY WAITING MERGE that holds no lease on that place (owner
+//     ruling, 2026-11-20): anything that passes a waiting merge passes it --
 //     and its bubble's repairing tab is settled at once (drawBackInLine), so
 //     no strip reads "fixing tests" or "resolving conflicts" for a merge
 //     back in line. A merge that stepped aside from the head returns
-//     admitted and resumes from its record once it heads the queue: it reads
+//     waiting, gives up its merge lease and keeps its progress record; once
+//     it heads the queue it is admitted under its ledger again and resumes
+//     from that record (admitFront): it reads
 //     the turn's end, rebases onto the target's tip and runs its whole suite
 //     again. After a test step aside that suite run is the one fixing
 //     attempt; a conflict step aside spends no fixing attempt.
@@ -177,12 +181,12 @@ var (
 	suspendAsideForTests = suspension{headExit: HeadExitNeededFixes, op: opRemediate, cause: errAsideForTests,
 		moved:     "the merge's tests failed; it stepped aside to fix them out of line, and the next merge takes its place",
 		by:        "its step aside to fix its failing tests",
-		resumes:   "it returns to the line once its fixing turn ends, next after the merge being worked on and any merge back from fixing its tests before it",
+		resumes:   "it returns to the line once its fixing turn ends, at the first waiting place, next after the merges being worked on",
 		gateRerun: "it runs its whole suite again once it heads the queue again"}
 	suspendAsideForConflicts = suspension{headExit: HeadExitNeededConflictResolution, op: opRemediate, cause: errAsideForConflicts,
 		moved:     "the merge's rebase conflicted; it stepped aside to resolve the conflicts out of line, and the next merge takes its place",
 		by:        "its step aside to resolve its rebase's conflicts",
-		resumes:   "it returns to the line once its resolving turn ends, behind the merge being worked on, every merge back from fixing its tests, and any merge back from resolving its conflicts before it",
+		resumes:   "it returns to the line once its resolving turn ends, at the first waiting place, behind the merges being worked on and any merge back from fixing its tests that stands first in line then",
 		gateRerun: "it rebases onto the target's tip and runs its whole suite once it heads the queue again"}
 )
 
@@ -476,11 +480,15 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 	}
 }
 
-// returnRemediated puts the remediating merge WS back in REPO's line, ahead
-// of every entry of a lower return rank (wsm.ReturnRemediatedMerge), releasing its repair slot to the next
-// merge awaiting it, whose repair starts at once (armRepairs). A merge that
-// stepped aside from the head has its bubble drawn back in line
-// (drawBackInLine).
+// returnRemediated puts the remediating merge WS back in REPO's line as an
+// ordinary waiting merge at the first waiting place, next after the merges
+// being worked on, holding no lease on that place (wsm.ReturnRemediatedMerge,
+// owner ruling 2026-11-20), releasing its repair slot to the next merge
+// awaiting it, whose repair starts at once (armRepairs). A merge that stepped
+// aside from the head gives its merge lease up in the same write and keeps its
+// progress record: it is admitted again under its ledger once it heads the
+// queue, and resumes from the record there (admitFront). Its bubble is drawn
+// back in line (drawBackInLine).
 //
 // THE RETURN IS ORDERED WITH EVERY TAKING-UP OF A MERGE (lineLock). Read
 // between the pump's look at its front and that front's admission, the return
@@ -493,23 +501,41 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 // whichever run takes it up next continues the rebase rather than aborting
 // it as a cut run's leftover (settleStandingRebase).
 func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
+	lease, held, err := o.deps.DB.Lease(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("merge: read the lease of the remediated merge of %s: %w", ws, err)
+	}
+	// THE MERGE LEASE IS THE STORE'S TO JUDGE: one that stepped aside from
+	// the head holds it, one that stepped aside from its waiting place holds
+	// none, and the store refuses the return when the two disagree.
+	var merged wsm.LeaseID
+	if held && lease.Holder == wsm.HolderMerge {
+		merged = lease.ID
+	}
 	o.mu.Lock()
 	rem := o.remediating[ws]
 	o.mu.Unlock()
 	resolved := resolvedRebaseOf(rem)
+	var placed wsm.MergeReturn
 	if err := o.lineWrite(repo, func() error {
-		return o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo), resolved)
+		var err error
+		placed, err = o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, merged, o.workedOn(repo), resolved)
+		return err
 	}); err != nil {
 		return err
+	}
+	if placed.Lease != "" {
+		o.deps.Queue.OnLeaseChanged(ws)
 	}
 	o.mu.Lock()
 	delete(o.remediating, ws)
 	o.mu.Unlock()
-	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "resolved_rebase": resolved != nil}
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "position": placed.Position, "behind": string(placed.Behind),
+		"lease_released": string(placed.Lease), "resolved_rebase": resolved != nil}
 	if resolved != nil {
 		fields["resolved_tip"], fields["resolved_turn"] = resolved.Tip, string(resolved.Turn)
 	}
-	o.log(ctx, ws).Info(opRemediate, "the merge's repair ended; it is back in line, ahead of every merge of a lower return rank, and its repair slot passes on", fields)
+	o.log(ctx, ws).Info(opRemediate, "the merge's repair ended; it is back in line at the first waiting place, next after the merges being worked on, with no hold on that place, and its repair slot passes on", fields)
 	if rem != nil && !rem.waiting {
 		o.drawBackInLine(ctx, ws, repo, rem.doc)
 	}
