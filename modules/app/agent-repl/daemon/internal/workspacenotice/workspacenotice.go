@@ -11,8 +11,8 @@
 // and a closed source is not told: it runs no session to tell.
 //
 // THE NOTICE TAKES THE PATH EVERY UNDER-THE-HOOD REPORT TO AN AGENT TAKES: a
-// deferred prompt submitted through the prompt handler, which waits behind a
-// running turn and wakes an idle agent. The brief notices ride
+// prompt submitted through the prompt handler, delivered on arrival: it joins a
+// running turn after its current tool call and wakes an idle agent. The brief notices ride
 // PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE, which the feed draws no row for.
 //
 // NOTHING THAT REPORTS EVER WAITS ON A DELIVERY. Report only appends; one loop
