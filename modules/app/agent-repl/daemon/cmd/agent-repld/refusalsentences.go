@@ -119,3 +119,9 @@ func sayGithubFailure(f *agentreplv1.PullRequestGitHubFailure) (string, error) {
 func saySubscriberClosed(subscriber string) string {
 	return fmt.Sprintf("%s is closed: it runs no agent to tell, and a subscription taken while closed would never end", subscriber)
 }
+
+// sayNotOnGithub is the not_on_github sentence every GitHub subscription verb
+// shares: SUBSCRIBER's repository has ORIGIN, which is not on github.com.
+func sayNotOnGithub(subscriber, origin string) string {
+	return fmt.Sprintf("%s's repository is not on github.com (its origin is %s)", subscriber, origin)
+}

@@ -92,7 +92,7 @@ func describeGithubQueueSubscribeRefusal(subscriber string, e *agentreplv1.Subsc
 	case *agentreplv1.SubscribeGithubMergeQueueError_SubscriberClosed:
 		return saySubscriberClosed(subscriber), nil
 	case *agentreplv1.SubscribeGithubMergeQueueError_NotOnGithub:
-		return fmt.Sprintf("%s's repository is not on github.com (its origin is %s)", subscriber, r.NotOnGithub.GetOrigin()), nil
+		return sayNotOnGithub(subscriber, r.NotOnGithub.GetOrigin()), nil
 	case *agentreplv1.SubscribeGithubMergeQueueError_NoMergeQueue:
 		q := r.NoMergeQueue.GetMergeQueue()
 		return fmt.Sprintf("GitHub runs no merge queue for %s/%s@%s, so there is nothing to follow", q.GetRepository().GetOwner(), q.GetRepository().GetRepo(), q.GetBranch()), nil
@@ -140,7 +140,7 @@ func describeGithubRunSubscribeRefusal(subscriber string, e *agentreplv1.Subscri
 	case *agentreplv1.SubscribeGithubWorkflowRunError_Unparsable:
 		return fmt.Sprintf("%q names no workflow run (%s)", r.Unparsable.GetText(), r.Unparsable.GetReason()), nil
 	case *agentreplv1.SubscribeGithubWorkflowRunError_NotOnGithub:
-		return fmt.Sprintf("%s's repository is not on github.com (its origin is %s)", subscriber, r.NotOnGithub.GetOrigin()), nil
+		return sayNotOnGithub(subscriber, r.NotOnGithub.GetOrigin()), nil
 	case *agentreplv1.SubscribeGithubWorkflowRunError_Unreadable:
 		why, err := sayGithubFailure(r.Unreadable.GetCause())
 		if err != nil {
