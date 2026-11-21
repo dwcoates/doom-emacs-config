@@ -334,9 +334,8 @@ var ErrOffQueueVersionRecorded = errors.New("wsm: the request recorded its own v
 // It answers the request as it was put back.
 func (s *store) RequeueOffQueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place RequeuePlacement, version *VersionIncrement, model string, at time.Time) (MergeSource, error) {
 	const op = "daemon.wsm.requeue_off_queue_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return MergeSource{}, err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "front": place.Front, "behind": string(place.Behind), "version_supplied": version != nil, "model": model}

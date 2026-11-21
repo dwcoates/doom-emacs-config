@@ -104,9 +104,8 @@ type AsyncMergeRequest struct {
 // children is refused (HasOpenChildrenError, family.go).
 func (s *store) RequestAsyncMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, turn TurnID, source MergeSource, at time.Time) error {
 	const op = "daemon.wsm.request_async_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(requester)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(requester)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(requester), "request": string(source.Detach), "turn": string(turn), "requested_at": at}
@@ -263,9 +262,8 @@ func (s *store) scanAsyncMergeRequests(ctx context.Context, tail string, args ..
 // standing is ErrNotFound.
 func (s *store) DropAsyncMergeRequest(ctx context.Context, repo RepoKey, request DetachedMergeID, cause string) error {
 	const op = "daemon.wsm.drop_async_merge_request"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "request": string(request)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "request": string(request)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "request": string(request), "cause": cause}

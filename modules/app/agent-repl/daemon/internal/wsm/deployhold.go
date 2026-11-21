@@ -46,9 +46,8 @@ INSERT INTO merge_queue_repos (repo_key, paused, deploy_held_at)
 // before it gets here.
 func (s *store) SetDeployHold(ctx context.Context, repo RepoKey, held bool, at time.Time) error {
 	const op = "daemon.wsm.set_deploy_hold"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a repository key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return err
 	}
 	return s.write(ctx, op, dlog.Context{"repo": string(key), "held": held}, func(ctx context.Context, tx *sql.Tx) error {
@@ -70,9 +69,8 @@ func (s *store) SetDeployHold(ctx context.Context, repo RepoKey, held bool, at t
 // only ever recorded by a deploy that read the hold.
 func (s *store) RecordDeploySkip(ctx context.Context, repo RepoKey) error {
 	const op = "daemon.wsm.record_deploy_skip"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a repository key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return err
 	}
 	return s.write(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context, tx *sql.Tx) error {
@@ -96,9 +94,8 @@ func (s *store) RecordDeploySkip(ctx context.Context, repo RepoKey) error {
 // or with no hold on its row, is NOT HELD, answered without an error.
 func (s *store) DeployHoldOf(ctx context.Context, repo RepoKey) (DeployHold, error) {
 	const op = "daemon.wsm.deploy_hold"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a repository key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return DeployHold{}, err
 	}
 	var hold DeployHold

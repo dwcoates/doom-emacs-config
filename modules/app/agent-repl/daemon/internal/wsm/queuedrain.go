@@ -33,9 +33,8 @@ func oweQueueDrain(ctx context.Context, tx *sql.Tx, key RepoKey) error {
 // no row has never admitted a merge, and owes nothing.
 func (s *store) QueueDrainOwed(ctx context.Context, repo RepoKey) (bool, error) {
 	const op = "daemon.wsm.queue_drain_owed"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return false, err
 	}
 	var owed bool
@@ -55,9 +54,8 @@ func (s *store) QueueDrainOwed(ctx context.Context, repo RepoKey) (bool, error) 
 // admitted. A repository with no row owes nothing, so clearing it is a no-op.
 func (s *store) ClearQueueDrainOwed(ctx context.Context, repo RepoKey) error {
 	const op = "daemon.wsm.clear_queue_drain_owed"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return err
 	}
 	return s.write(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context, tx *sql.Tx) error {

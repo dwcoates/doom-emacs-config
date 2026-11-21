@@ -41,9 +41,8 @@ ALTER TABLE merge_queue ADD COLUMN cold_gated INTEGER NOT NULL DEFAULT 0;
 // lost track of the queue. A workspace with no entry is ErrNotFound.
 func (s *store) SetMergeColdGated(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error) {
 	const op = "daemon.wsm.set_merge_cold_gated"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return false, err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
@@ -73,9 +72,8 @@ func (s *store) SetMergeColdGated(ctx context.Context, repo RepoKey, id Workspac
 // ErrNotFound.
 func (s *store) ClearMergeColdGated(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) (bool, error) {
 	const op = "daemon.wsm.clear_merge_cold_gated"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return false, err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "worked_on": len(workedOn)}
@@ -119,9 +117,8 @@ func (s *store) ClearMergeColdGated(ctx context.Context, repo RepoKey, id Worksp
 // one admitted entry). An entry that is not admitted is a refusal.
 func (s *store) RequeueColdGatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease, ledger LeaseID) error {
 	const op = "daemon.wsm.requeue_cold_gated_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "ledger": string(ledger)}

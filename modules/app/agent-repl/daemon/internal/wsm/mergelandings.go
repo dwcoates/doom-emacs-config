@@ -117,9 +117,8 @@ func (s *store) RecordMergeLanding(ctx context.Context, landing MergeLanding) (b
 		s.log.Error(op, "refused an incomplete landing record", withError(fields, ErrIncompleteLanding))
 		return false, ErrIncompleteLanding
 	}
-	repo, err := normalizeRepoKey(landing.Repo)
+	repo, err := s.normalizedRepoKey(op, landing.Repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return false, err
 	}
 	added := false
@@ -147,9 +146,8 @@ func (s *store) MergeLandingsIn(ctx context.Context, repo RepoKey, since, until 
 		s.log.Error(op, "refused a reversed landing window", withError(fields, err))
 		return nil, time.Time{}, err
 	}
-	repo, err := normalizeRepoKey(repo)
+	repo, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return nil, time.Time{}, err
 	}
 	var (
