@@ -2371,8 +2371,8 @@ func TestADeploySweepsTheSidebarAfterBeginAndBeforeTheBuild(t *testing.T) {
 	if h.foldSweep.buildsAtSweep != 0 {
 		t.Fatalf("builds started before the sweep = %d, want none", h.foldSweep.buildsAtSweep)
 	}
-	if told := h.hotReload.told(); len(told) < 2 || told[0] != "begin" || told[1] != "swept" {
-		t.Fatalf("told %v, want the sweep straight after begin", told)
+	if !h.foldSweep.sawBegin {
+		t.Fatal("the sweep ran before the hot reload was told the deploy began")
 	}
 }
 

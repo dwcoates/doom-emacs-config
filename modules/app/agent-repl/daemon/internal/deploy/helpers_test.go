@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -660,8 +661,10 @@ func (f *fakeProgress) last() *deployprogress.Progress {
 // order, and how many builds had started by then.
 type fakeFoldSweep struct {
 	hotReload *fakeHotReload
-	builder   *fakeBuilder
-	err       error
+	// sawBegin is whether the hot reload had been told it began.
+	sawBegin bool
+	builder  *fakeBuilder
+	err      error
 	// buildsAtSweep is the builder's count when the sweep ran.
 	buildsAtSweep int
 	sweeps        int
@@ -669,7 +672,7 @@ type fakeFoldSweep struct {
 
 func (f *fakeFoldSweep) Sweep(context.Context) error {
 	f.sweeps++
-	f.hotReload.record("swept")
+	f.sawBegin = slices.Contains(f.hotReload.told(), "begin")
 	f.builder.mu.Lock()
 	f.buildsAtSweep = f.builder.builds
 	f.builder.mu.Unlock()

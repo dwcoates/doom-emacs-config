@@ -147,13 +147,14 @@ func (s *Sweeper) Sweep(ctx context.Context) error {
 func (s *Sweeper) candidates(ctx context.Context, arr wsm.Arrangement) []candidate {
 	requester := workspace.FoldRequester{RPC: RequesterRPC}
 	var out []candidate
+	section := wsm.SectionRepos(arr.Workspaces)
 	for _, repo := range arr.Repositories {
 		if repo.Folded {
 			continue
 		}
 		repo := repo
 		out = append(out, candidate{
-			what: "repository section", target: string(repo.ID), members: wsm.RepositoryMembers(repo.ID),
+			what: "repository section", target: string(repo.ID), members: wsm.RepositoryMembers(section, repo.ID),
 			opened: wsm.UserAttention{Kind: wsm.AttentionOpenedRepository},
 			fold:   func(ctx context.Context) error { return s.deps.Folder.FoldRepository(ctx, repo.ID, true, requester) },
 		})
