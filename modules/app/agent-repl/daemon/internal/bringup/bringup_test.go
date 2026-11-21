@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -564,5 +565,38 @@ func TestDepsWidth(t *testing.T) {
 				t.Fatalf("width(%d) = %d, want %d", tc.pending, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestIsStandDownNamesEveryStopThisDaemonOrdered(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a stand-down the supervisor ordered", err: fmt.Errorf("start: %w", shimclient.ErrStandDownOrdered), want: true},
+		{name: "a spawn refused while standing down", err: fmt.Errorf("start: %w", shimclient.ErrStandingDown), want: true},
+		{name: "a workspace no longer served here", err: fmt.Errorf("start: %w", ErrNotServed), want: true},
+		{name: "a shim that would not spawn", err: errors.New("the shim would not spawn"), want: false},
+		{name: "no error", err: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act, Assert
+			if got := IsStandDown(tt.err); got != tt.want {
+				t.Fatalf("IsStandDown(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheStandDownClassificationHasOneHome(t *testing.T) {
+	// Assert: the three stand-down errors are tested together only inside
+	// IsStandDown, so no start site in this package classifies its own way.
+	if got := sourcescan.Sites(t, "errors.Is(err, ErrNotServed)"); !slices.Equal(got, []string{"bringup.go"}) {
+		t.Fatalf("ErrNotServed classified at %v, want only IsStandDown in bringup.go", got)
+	}
+	if got := sourcescan.Count(t, "IsStandDown(err)"); got < 1 {
+		t.Fatalf("IsStandDown(err) called %d times in bringup, want the bring-up's own start to use it", got)
 	}
 }

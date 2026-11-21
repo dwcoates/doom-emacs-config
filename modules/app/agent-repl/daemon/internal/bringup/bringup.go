@@ -218,6 +218,18 @@ func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 // not a failed bring-up, so it is recorded as stood down.
 var ErrNotServed = errors.New("bringup: the workspace is no longer served by this daemon")
 
+// IsStandDown reports whether a start's ERR is a stand-down this daemon ordered
+// rather than a failed start: the supervisor stood the shim down while the
+// start ran (an exit's drain, a stop of the workspace's session), refused a
+// spawn once it began standing down, or the workspace stopped being this
+// daemon's (ErrNotServed). THE ONE CLASSIFICATION every start site records
+// by, so a stop a start ran into is never an ERROR at one site and a stand-down
+// at another.
+func IsStandDown(err error) bool {
+	return errors.Is(err, shimclient.ErrStandDownOrdered) || errors.Is(err, shimclient.ErrStandingDown) ||
+		errors.Is(err, ErrNotServed)
+}
+
 // width answers how many starts run at once for PENDING workspaces: Width, or
 // the processor count, and never more than there are workspaces.
 func (d Deps) width(pending int) int {
@@ -277,8 +289,7 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 		// supervisor began standing down is refused one for the same reason. MEASURED: realtest run
 		// 2026-09-13T16:20:34 recorded it as an ERROR on three consecutive
 		// daemon generations.
-		if errors.Is(err, shimclient.ErrStandDownOrdered) || errors.Is(err, shimclient.ErrStandingDown) ||
-			errors.Is(err, ErrNotServed) {
+		if IsStandDown(err) {
 			// NOT TIMED: a start this daemon cut short says nothing about how
 			// long a start takes.
 			log.Debug(deps.Operation, "an open workspace's start ended in a stand-down this daemon ordered", fields)
