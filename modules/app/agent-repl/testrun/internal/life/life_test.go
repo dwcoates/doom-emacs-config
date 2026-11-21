@@ -424,6 +424,7 @@ func TestFinish(t *testing.T) {
 		code       int
 		reapErr    error
 		releaseErr error
+		cut        string
 		gone       chan struct{}
 		want       int
 		wantLog    string
@@ -433,11 +434,13 @@ func TestFinish(t *testing.T) {
 		{name: "a failed reap", code: 0, reapErr: boom, gone: make(chan struct{}), want: 1},
 		{name: "a failed release", code: 0, releaseErr: boom, gone: make(chan struct{}), want: 1, wantLog: "boom"},
 		{name: "a cut run", code: 0, gone: closed, want: 1, wantLog: "the run was cut (its sentinel is gone); it reaped its session 77"},
+		{name: "a run cut for its disk", code: 0, cut: "its RAM disk /dev/disk8 is gone", gone: make(chan struct{}), want: 1, wantLog: "the run was cut (its RAM disk /dev/disk8 is gone); it reaped its session 77"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			r, lifeline, log := pipeRunner(t, tt.reapErr)
+			r.cut = tt.cut
 
 			// Act.
 			got := r.Finish(tt.code, tt.gone, func() error { return tt.releaseErr })
@@ -514,6 +517,46 @@ func TestCancelOnLifelineCancelsAndReapsWhenTheSentinelGoes(t *testing.T) {
 	}
 	if !has(log.info, "the sentinel is gone (the run was cut)") {
 		t.Fatalf("info = %q", log.info)
+	}
+	// The lifeline cuts through Cut, the one cut every cause takes.
+	if why := r.cutWhy(); why != "the sentinel is gone" {
+		t.Fatalf("cut why = %q, want the lifeline's", why)
+	}
+}
+
+func TestCutCancelsAndReapsTheSession(t *testing.T) {
+	// Arrange.
+	r, _, log := pipeRunner(t, nil)
+	var reaped []reap.Members
+	r.reap = func(m reap.Members) (reap.Result, error) { reaped = append(reaped, m); return reap.Result{}, nil }
+	cancelled := 0
+
+	// Act.
+	r.Cut("its RAM disk /dev/disk8 is gone", func() { cancelled++ })
+
+	// Assert.
+	if cancelled != 1 || len(reaped) != 1 || reaped[0].Session != 77 || !slices.Contains(reaped[0].Except, 76) {
+		t.Fatalf("cancelled %d, reaped %+v; want one cancel and one reap of the session", cancelled, reaped)
+	}
+	if !has(log.info, "its RAM disk /dev/disk8 is gone (the run was cut): the run is cancelled and its session 77 reaped") {
+		t.Fatalf("info = %q", log.info)
+	}
+	if why := r.cutWhy(); why != "its RAM disk /dev/disk8 is gone" {
+		t.Fatalf("cut why = %q", why)
+	}
+}
+
+func TestCutKeepsTheFirstCause(t *testing.T) {
+	// Arrange.
+	r, _, _ := pipeRunner(t, nil)
+	r.Cut("its RAM disk /dev/disk8 is gone", func() {})
+
+	// Act.
+	r.Cut("the sentinel is gone", func() {})
+
+	// Assert.
+	if why := r.cutWhy(); why != "its RAM disk /dev/disk8 is gone" {
+		t.Fatalf("cut why = %q, want the first cause", why)
 	}
 }
 
