@@ -19,6 +19,7 @@ import (
 // the daemon, the one runner of tests (bin/background.sh refuses any other).
 //
 //	agent-repld test run [-workspace WS] [-worktree DIR] SELECTION... [OPTIONS]
+//	agent-repld test run [-workspace WS] -rerun [OPTIONS]
 //	agent-repld test redundancy go|vitest|report [-workspace WS] FLAGS...
 //
 // `run`'s selections are flags, each repeated as needed:
@@ -35,6 +36,15 @@ import (
 //	-suite NAME                    one roster suite, whole
 //	-every-suite                   the whole roster: the merge queue's gate, run
 //	                               by an agent only with a stated reason
+//
+// or, in place of every selection,
+//
+//	-rerun                         the workspace's recorded cases: every case
+//	                               any earlier run of it named, and every case
+//	                               a merge gate failed on its branch, that the
+//	                               tree still holds; a recorded case renamed,
+//	                               moved or deleted since is dropped, said on
+//	                               stderr, and forgotten
 //
 // and its options:
 //
@@ -92,6 +102,7 @@ func testRun(c *cliCall, args []string) int {
 	fs.Var(repeatedFlag{values: &sel.harness, noun: "selection"}, "harness", "a shell harness: SCRIPT, or SCRIPT=group1,group2")
 	fs.Var(repeatedFlag{values: &sel.suites, noun: "selection"}, "suite", "one roster suite, whole")
 	fs.BoolVar(&sel.every, "every-suite", false, "the whole roster (the merge queue's gate; only with a stated reason)")
+	rerun := fs.Bool("rerun", false, "rerun the workspace's recorded cases: every case it ran and every case its merge gates failed, that the tree still holds")
 	coverage := fs.Bool("coverage", false, "instrument the run and report coverage (whole suites only)")
 	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
 	profile := fs.Bool("profile", false, "profile every unit that runs and the production processes its tests start; the ended event names the profiles directory")
@@ -110,8 +121,11 @@ func testRun(c *cliCall, args []string) int {
 	if len(positionals) > 0 {
 		return c.usageFailed("unexpected arguments %v; every selection is a flag", positionals)
 	}
-	if sel.empty() {
-		return c.usageFailed("name the tests to run: the full suite is the merge queue's to run")
+	switch {
+	case *rerun && !sel.empty():
+		return c.usageFailed("-rerun runs the workspace's recorded cases: name no selection beside it")
+	case !*rerun && sel.empty():
+		return c.usageFailed("name the tests to run, or -rerun the workspace's recorded cases: the full suite is the merge queue's to run")
 	}
 	if (*noReuse || *ungoverned) && !*asUser {
 		return c.usageFailed("-no-reuse and -ungoverned are the user's alone: pass -as-user only when the user asks for one")
@@ -145,13 +159,18 @@ func testRun(c *cliCall, args []string) int {
 			return c.usageFailed("-worktree %s: %v", *worktree, err)
 		}
 	}
-	run, err := buildSelections(canonicalDir(root), canonicalDir(cwd), sel)
-	if err != nil {
-		return c.usageFailed("%v", err)
+	run := &testrunv1.TestRunRequest{}
+	if !*rerun {
+		if run, err = buildSelections(canonicalDir(root), canonicalDir(cwd), sel); err != nil {
+			return c.usageFailed("%v", err)
+		}
 	}
 	run.Coverage, run.Record, run.Remeasure, run.NoReuse, run.PlanOnly, run.Profile = *coverage, *record, *remeasure, *noReuse, c.planOnly, *profile
 	run.DebugInfo = *debugInfo
 	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester, Ungoverned: *ungoverned}
+	if *rerun {
+		req.Rerun = &agentreplv1.RunTestsRerun{}
+	}
 	if *worktree != "" {
 		req.Worktree = &agentreplv1.RunTestsWorktree{Dir: canonicalDir(root)}
 	}
@@ -193,6 +212,12 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 		}
 		if said := sayRunRefused(req.GetWorkspace().GetId(), frame.GetError()); said != "" {
 			c.failed("%s", said)
+		}
+		for _, dropped := range frame.GetEvent().GetDropped().GetCases() {
+			c.failed("the rerun dropped %s, and forgets it: %s", strings.Join(testcases.Flags(".", dropped.GetSelection()), " "), dropped.GetDetail())
+		}
+		if frame.GetEvent().GetRefused().GetNothingLeft() != nil {
+			c.failed("the rerun ran nothing: the tree holds none of the workspace's recorded cases any more")
 		}
 		switch {
 		case frame.GetError().GetRunnerFailed() != nil:
@@ -358,6 +383,8 @@ func sayRunRefused(ws string, refusal *agentreplv1.RunTestsError) string {
 	switch r := refusal.GetCause().(type) {
 	case *agentreplv1.RunTestsError_UnknownWorkspace:
 		return sayNoWorkspace(ws)
+	case *agentreplv1.RunTestsError_NothingToRerun:
+		return "the rerun ran nothing: the workspace's record names no case, since no run of it named a test and no merge gate failed one"
 	case *agentreplv1.RunTestsError_TransferringAway:
 		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "run the tests again once the restart finishes")
 	default:

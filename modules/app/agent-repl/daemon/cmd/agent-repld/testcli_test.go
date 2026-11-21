@@ -570,3 +570,75 @@ func TestTheCommandLineReadsBackTheFlagsTestcasesSpells(t *testing.T) {
 		})
 	}
 }
+
+func TestTestRunRerunAsksForTheRecordAndNamesNoSelection(t *testing.T) {
+	// Arrange
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-rerun", "-remeasure")
+
+	// Assert
+	if code != exitSuccess || daemon.got.GetRerun() == nil || len(daemon.got.GetRun().GetSelections()) != 0 || !daemon.got.GetRun().GetRemeasure() {
+		t.Fatalf("exit %d, request %v, stderr %q; want a rerun with its options and no selection", code, daemon.got, errOut)
+	}
+}
+
+func TestTestRunRefusesARerunBesideASelection(t *testing.T) {
+	// Arrange
+	daemon := &testRunsDaemon{}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-rerun", "-go", "pkg")
+
+	// Assert
+	if code != exitFailure || daemon.got != nil || !strings.Contains(errOut, "-rerun runs the workspace's recorded cases") {
+		t.Fatalf("exit %d, request %v, stderr %q; want the usage refusal and no call", code, daemon.got, errOut)
+	}
+}
+
+func TestTestRunSaysWhatARerunDropped(t *testing.T) {
+	// Arrange
+	gone := testcases.GoPackage("src/pkg", []string{"TestRenamed"})
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{
+		eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Dropped{Dropped: &testrunv1.TestRunDropped{Cases: []*testrunv1.TestRunDroppedCase{
+			{Selection: gone, Detail: "Go package src/pkg: it no longer defines TestRenamed"}}}}}),
+		endedFrame(true),
+	}}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-rerun")
+
+	// Assert
+	want := "the rerun dropped -go 'src/pkg=TestRenamed', and forgets it: Go package src/pkg: it no longer defines TestRenamed"
+	if code != exitSuccess || !strings.Contains(errOut, want) {
+		t.Fatalf("exit %d, stderr %q; want the passing run saying %q", code, errOut, want)
+	}
+}
+
+func TestTestRunSaysARerunThatRanNothing(t *testing.T) {
+	tests := []struct {
+		name  string
+		frame *agentreplv1.RunTestsResponse
+		want  string
+	}{
+		{name: "the record names no case", frame: &agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{
+			Cause: &agentreplv1.RunTestsError_NothingToRerun{NothingToRerun: &agentreplv1.RunTestsNothingToRerun{}}}}}, want: "the workspace's record names no case"},
+		{name: "the tree holds none of the record", frame: eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{
+			Detail: "the tree holds none of the rerun's 2 cases any more", NothingLeft: &testrunv1.TestRunRefusedNothingLeft{}}}}), want: "the tree holds none of the workspace's recorded cases any more"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{tt.frame}}
+
+			// Act
+			code, _, errOut := runTestCLI(t, daemon, "run", "-rerun")
+
+			// Assert
+			if code != exitRefused || !strings.Contains(errOut, tt.want) {
+				t.Fatalf("exit %d, stderr %q; want exit %d saying %q", code, errOut, exitRefused, tt.want)
+			}
+		})
+	}
+}
