@@ -2235,6 +2235,86 @@ Company itself is never loaded: PARENT stands in for its global
         (should (string-match-p "no command" (cadr (should-error (agent-repl-input-company-return)))))
         (should-not sent)))))
 
+;; THE ONE SHAPE of a composer key in company's popup is
+;; `agent-repl--input-company-run-composer-key'.
+
+(ert-deftest agent-repl-input-company-run-composer-key-aborts-then-runs-key ()
+  "The helper closes the popup, then runs KEY's composer binding."
+  ;; Arrange.
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'company-abort) (lambda () (push 'abort calls)))
+              ((symbol-function 'agent-repl-send)
+               (lambda () (interactive) (push 'send calls))))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        ;; Act.
+        (agent-repl--input-company-run-composer-key (kbd "RET"))
+        ;; Assert.
+        (should (equal (nreverse calls) '(abort send)))
+        (should (eq this-command #'agent-repl-send))))))
+
+(ert-deftest agent-repl-input-company-run-composer-key-names-the-unbound-key ()
+  "A KEY bound to no command fails hard, naming the key, and runs nothing."
+  ;; Arrange.
+  (cl-letf (((symbol-function 'company-abort) #'ignore)
+            ((symbol-function 'key-binding) (lambda (&rest _) nil)))
+    (with-temp-buffer
+      (agent-repl-input-mode)
+      ;; Act.
+      (let ((err (should-error (agent-repl--input-company-run-composer-key (kbd "C-SPC")))))
+        ;; Assert.
+        (should (string-match-p "composer C-SPC resolves to no command" (cadr err)))))))
+
+(ert-deftest agent-repl-input-company-keys-share-the-one-helper ()
+  "Every composer key in company's map runs through the one helper."
+  ;; Arrange.
+  (let ((map (agent-repl--input-company-map (make-sparse-keymap)))
+        (keys nil))
+    (cl-letf (((symbol-function 'agent-repl--input-company-run-composer-key)
+               (lambda (key) (push key keys))))
+      ;; Act.
+      (map-keymap (lambda (_event cmd)
+                    (unless (eq cmd #'company-complete-selection)
+                      (funcall cmd)))
+                  map)
+      ;; Assert.
+      (should (equal (sort (mapcar #'key-description keys) #'string<)
+                     '("C-SPC" "RET" "RET"))))))
+
+(ert-deftest agent-repl-input-company-map-control-space-does-not-complete ()
+  "`C-SPC' with company's popup up runs the composer's `C-SPC', not a completion."
+  ;; Arrange.
+  (let ((parent (make-sparse-keymap)))
+    (define-key parent (kbd "C-SPC") #'ignore)
+    ;; Act.
+    (agent-repl-test-input--with-company parent
+      ;; Assert.
+      (should (eq (lookup-key company-active-map (kbd "C-SPC"))
+                  #'agent-repl-input-company-control-space)))))
+
+(ert-deftest agent-repl-input-company-control-space-opens-the-next-entry ()
+  "`C-SPC' in the popup on a filled entry closes it and opens the next sibling."
+  ;; Arrange.
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'company-abort) (lambda () (push 'abort calls)))
+              ((symbol-function 'agent-repl-prompt-entries--label-at-point)
+               (lambda () "1.2 "))
+              ((symbol-function 'agent-repl-prompt-entries-advance-or-open-sibling)
+               (lambda () (interactive) (push 'advance calls))))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        (let* ((ours (make-sparse-keymap))
+               (minor-mode-map-alist (cons (cons t ours) minor-mode-map-alist)))
+          (define-key ours (kbd "C-SPC")
+                      (alist-get (kbd "C-SPC") agent-repl-prompt-entries--insert-entry-keys
+                                 nil nil #'equal))
+          ;; Act.
+          (agent-repl-input-company-control-space))
+        ;; Assert.
+        (should (equal (nreverse calls) '(abort advance)))
+        (should (eq this-command
+                    #'agent-repl-prompt-entries-advance-or-open-sibling))))))
+
 ;;;; ---- The send edge is durable ----
 
 ;; A user's send is a once-per-action edge, so its record has to survive the

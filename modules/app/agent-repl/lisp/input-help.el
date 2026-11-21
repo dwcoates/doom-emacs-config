@@ -49,7 +49,7 @@
                 (agent-repl-discard-input "Save the composer to history, then clear it."))
      :features ("A word starting with / completes against the workspace's commands, and a known one turns purple."
                 "A word that begins an open workspace's name completes to that name."
-                "Only TAB takes a completion: RET closes the completion popup and sends."))
+                "Only TAB takes a completion: RET closes the completion popup and sends, and C-SPC closes it and does what C-SPC does in the composer."))
     (:id sending
      :group "Composer"
      :title "Sending prompts"
@@ -319,6 +319,7 @@ binding form of the module and every one of its keymaps.")
 
 (defconst agent-repl-input-help-unlisted-commands
   '((agent-repl-input-company-return . "RET in the completion popup, described under Writing prompts")
+    (agent-repl-input-company-control-space . "C-SPC in the completion popup, described under Writing prompts")
     (company-complete-selection . "TAB in the completion popup, described under Writing prompts")
     (isearch-backward . "C-r in a creation prompt's minibuffer, not the composer, described in USER-GUIDE.md")
     (agent-repl-prompt-attach-clipboard-image . "C-c C-i in a creation prompt's minibuffer, not the composer, described in USER-GUIDE.md")

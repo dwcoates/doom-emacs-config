@@ -2922,13 +2922,15 @@ is sent now (`agent-repl-send-held-now')."
 (define-key agent-repl-input-mode-map (kbd "C-<return>") #'agent-repl-input-control-return)
 
 ;; ONLY `TAB' TAKES A COMPLETION.  Company's active map binds `RET' to
-;; `company-complete-selection', and company's keymap outranks every evil
-;; and mode map while its popup is up, so `RET' completed the selected
-;; candidate instead of sending.  The composer gives itself a buffer-local
+;; `company-complete-selection' and Doom binds `C-SPC' there to
+;; `company-complete-common', and company's keymap outranks every evil and
+;; mode map while its popup is up, so `RET' completed the selected candidate
+;; instead of sending and `C-SPC' completed instead of opening the next
+;; response tree entry.  The composer gives itself a buffer-local
 ;; `company-active-map' whose parent is the global one (so every other
 ;; company key, and any later rebinding of one, still applies): there `RET'
-;; closes the popup and does what `RET' does in the composer, and `TAB'
-;; inserts the selected candidate.  The map is installed from the
+;; and `C-SPC' close the popup and do what they do in the composer, and
+;; `TAB' inserts the selected candidate.  The map is installed from the
 ;; composer's own `company-mode-hook', since company loads lazily and is
 ;; switched on in a buffer only after its major mode is set up.
 (defvar company-active-map)
@@ -2936,20 +2938,33 @@ is sent now (`agent-repl-send-held-now')."
 (declare-function company-complete-selection "company" ())
 (declare-function agent-repl--completing-read-under-ivy "core" (alist entry prompt table))
 
-(defun agent-repl-input-company-return ()
-  "Close company's popup, then run the composer's own `RET' binding.
-The binding is looked up under `RET' itself, never under the keys that
-invoked this command: in a graphical frame the Return key is the
-`<return>' event, which company's map binds directly, and only key
-reading translates it to `RET' -- so the composer, which binds `RET',
-has nothing under `<return>'."
-  (interactive)
+(defun agent-repl--input-company-run-composer-key (key)
+  "Close company's popup, then run the composer's own binding of KEY.
+THE ONE SHAPE of every composer key that company's popup would otherwise
+take.  The binding is looked up under KEY itself, never under the keys
+that invoked the command: in a graphical frame the Return key is the
+`<return>' event, which company's map binds directly, and only key reading
+translates it to `RET' -- so the composer, which binds `RET', has nothing
+under `<return>'."
   (company-abort)
-  (let ((cmd (key-binding (kbd "RET"))))
+  (let ((cmd (key-binding key)))
     (cl-assert (commandp cmd) nil
-               "composer RET resolves to no command after company-abort: %S" cmd)
+               "composer %s resolves to no command after company-abort: %S"
+               (key-description key) cmd)
     (setq this-command cmd)
     (call-interactively cmd)))
+
+(defun agent-repl-input-company-return ()
+  "Close company's popup, then run the composer's own `RET' binding."
+  (interactive)
+  (agent-repl--input-company-run-composer-key (kbd "RET")))
+
+(defun agent-repl-input-company-control-space ()
+  "Close company's popup, then run the composer's own `C-SPC' binding.
+On a response tree entry line that opens or advances the entry
+\(`agent-repl-prompt-entries-advance-or-open-sibling')."
+  (interactive)
+  (agent-repl--input-company-run-composer-key (kbd "C-SPC")))
 
 (defun agent-repl--input-company-map (parent)
   "Return the composer's company active map, inheriting from PARENT."
@@ -2957,6 +2972,7 @@ has nothing under `<return>'."
     (set-keymap-parent map parent)
     (dolist (key (list (kbd "RET") [return]))
       (define-key map key #'agent-repl-input-company-return))
+    (define-key map (kbd "C-SPC") #'agent-repl-input-company-control-space)
     (dolist (key (list (kbd "TAB") [tab]))
       (define-key map key #'company-complete-selection))
     map))
