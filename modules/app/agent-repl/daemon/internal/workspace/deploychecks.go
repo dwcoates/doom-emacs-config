@@ -18,9 +18,9 @@ import (
 // standing workspace that checks every deploy, fixes what it dispatches,
 // and settles an escalation with the user. It is made with no initial
 // prompt, so no session comes up at the create, and recorded as its queue's
-// standing mediator before its effort is set (SetDeployMediatorEffort, which
-// starts a sessionless workspace's shim), so its session always comes up
-// under the mediator's landing (sessionProfile).
+// standing mediator before it is briefed: its session first comes up for the
+// brief's delivery, at the effort picked for it (SetDeployMediatorEffort),
+// so it always comes up under the mediator's landing (sessionProfile).
 
 // opDeployChecks is the operation the deploy mediator's verbs are recorded
 // under.

@@ -860,9 +860,9 @@ type DeployCheckWorkspaces interface {
 	// CreateDeployMediator makes a repository's deploy mediator, in sight,
 	// unprompted and in remote control.
 	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployMediatorEffort sets the deploy mediator to its effort; it
-	// starts a sessionless workspace's shim, so its standing is recorded
-	// before it.
+	// SetDeployMediatorEffort picks the deploy mediator's effort, which its
+	// session comes up at, and switches a live session to it without waiting
+	// on its turn; a shim absent, stood down or unreachable is no failure.
 	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
 	// Reopen opens a closed remediation workspace again, its worktree cut
 	// again on its branch at the main branch's tip.

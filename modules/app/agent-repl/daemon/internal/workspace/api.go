@@ -437,7 +437,8 @@ type Verbs interface {
 	// repository at REPODIR, unprompted and in remote control
 	// (deploychecks.go).
 	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployMediatorEffort sets the deploy mediator to its effort
+	// SetDeployMediatorEffort picks the deploy mediator's effort and
+	// switches a live session to it without waiting on its turn
 	// (deploychecks.go).
 	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
