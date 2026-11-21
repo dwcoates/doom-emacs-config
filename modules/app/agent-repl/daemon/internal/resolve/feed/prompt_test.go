@@ -163,20 +163,35 @@ func TestAResumptionAfterRestartDrawsNoPromptRow(t *testing.T) {
 	}
 }
 
-// A MERGE QUEUE NOTICE IS DRAWN NOWHERE (promptorigin.Unseen): its turn runs
-// and its reply is drawn, but the daemon's words to the agent are not.
-func TestAMergeQueueNoticeDrawsNoPromptRow(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
+// A DAEMON NOTICE IS DRAWN (owner ruling, 2026-11-21): as a prompt the daemon
+// sent, headed by the subsystem that sent it.
+func TestADaemonNoticeDrawsAPromptRowHeadedByItsSubsystem(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		want   string
+	}{
+		{"a merge queue notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, "Merge Queue Monitor"},
+		{"a pull request notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, "GitHub PR Monitor"},
+		{"a GitHub merge queue notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE, "GitHub Merge Queue Monitor"},
+		{"a GitHub workflow run notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE, "GitHub Workflow Monitor"},
+		{"a workspace notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, "Workspace Monitor"},
+		{"a derived workspace notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE, "Workspace Monitor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
 
-	// Act.
-	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, textBlock("merge queue of doom: fix landed"))
+			// Act.
+			h.promptWith("turn-1", tc.origin, textBlock("the notice"))
 
-	// Assert.
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetUserPrompt() != nil || row.GetMergeHandback() != nil {
-			t.Fatalf("drew a row %v for the daemon's notice", row)
-		}
+			// Assert.
+			got := h.only(rootFeed()).GetUserPrompt().GetDaemonSender().GetSubsystem()
+			if got != tc.want {
+				t.Fatalf("daemon sender = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -243,8 +258,9 @@ func TestPromptRowHiddenNamesEveryOriginTheFeedDrawsNoRowFor(t *testing.T) {
 		want   bool
 	}{
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, true},
-		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
-		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},

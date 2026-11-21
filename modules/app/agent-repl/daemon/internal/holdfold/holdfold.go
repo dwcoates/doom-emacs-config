@@ -91,15 +91,15 @@ func SameAuthor(a, b *wsm.WorkspaceID) bool {
 	return *a == *b
 }
 
-// Seen reports whether a hold stands in the line the user sees. A prompt of an
-// origin drawn nowhere (promptorigin.Unseen: a subscription's notice, the brief
-// asking a workspace to file itself into a subsection) has no card while it
-// waits, so it stands outside that line: no prompt is judged against it,
-// folded into it, or offered a fold into it. Folded in, the user's words would
-// run under the unseen prompt's origin, drawn nowhere, and the tray would draw
-// a fold into a card it never showed.
+// Seen reports whether a hold stands in the line the user sees. A daemon
+// notice (promptorigin.DaemonNotice: a subscription's notice, the brief asking
+// a workspace to file itself into a subsection) has no card while it waits,
+// so it stands outside that line: no prompt is judged against it, folded into
+// it, or offered a fold into it. Folded in, the user's words would run under
+// the notice's origin, and the tray would draw a fold into a card it never
+// showed.
 func Seen(h wsm.HeldPrompt) bool {
-	return !promptorigin.UnseenNamed(h.Origin)
+	return !promptorigin.DaemonNoticeNamed(h.Origin)
 }
 
 // InLine reports whether a hold stands in the line the queue judges, folds

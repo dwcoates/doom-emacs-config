@@ -236,11 +236,11 @@ func (q *queue) earnsBanner(ctx context.Context, ws ids.WorkspaceID, turn ids.Tu
 }
 
 // causedByDaemonNotice reports whether a recorded origin is one of a turn the
-// user had no part in beyond what the merge queue causes: an unseen daemon
-// notice (promptorigin.Unseen) answered, or a compaction an agent asked for.
+// user had no part in beyond what the merge queue causes: a daemon notice
+// (promptorigin.DaemonNotice) answered, or a compaction an agent asked for.
 // Such a turn ends with no banner, as a merge queue notice's does.
 func causedByDaemonNotice(origin string) bool {
-	return promptorigin.UnseenNamed(origin) || origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT.String()
+	return promptorigin.DaemonNoticeNamed(origin) || origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT.String()
 }
 
 // OnTurnAdopted is the LifecycleSink's adopted turn: a turn the vendor ran

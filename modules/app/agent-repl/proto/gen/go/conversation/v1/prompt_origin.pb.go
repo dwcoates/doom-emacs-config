@@ -184,9 +184,9 @@ const (
 	// each change and carries the queue as it stands after it. Delivered on
 	// arrival (see the enum's header), the way a merge handback is: it joins
 	// a running turn and wakes an idle agent. The feed
-	// draws NO row for it: the notice is the daemon's word to the agent, not
-	// anything the user said or needs to read, and the agent's reply is drawn
-	// as any reply is.
+	// draws it as a prompt the daemon sent, headed "Zettel Merge Queue Monitor"
+	// (frontend.v1.FeedUserPromptDaemonSender), like every daemon notice (owner
+	// ruling, 2026-11-21: notices were drawn as no row before).
 	PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE PromptOrigin = 36
 	// The daemon's brief asking a reopened merged workspace's agent to revert
 	// the merge that workspace landed (agentrepl.v1.OpenWorkspaceRequest
@@ -206,8 +206,7 @@ const (
 	// forked -- sent when the derived workspace is created, when it lands, and
 	// when it closes without landing (one combined notice when it is both). It
 	// names the derived workspace and what happened. Delivered on arrival, like
-	// a merge-queue notice, and drawn as NO row: it is the daemon's
-	// word to the agent. Never sent to the workspace that asked for the create.
+	// a merge-queue notice, and drawn as one is. Never sent to the workspace that asked for the create.
 	PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE PromptOrigin = 38
 	// A notice to a child's OWNER that landing the child's work was the owner's
 	// responsibility. NO LONGER SENT: every workspace lands itself, so no owner
@@ -242,12 +241,11 @@ const (
 	// user said.
 	PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK PromptOrigin = 43
 	// The daemon's brief asking a workspace that just LEFT its one-shot state
-	// to file itself into its repository's sidebar subsections. Drawn as NO
-	// row: it is the daemon's word to the agent, as a workspace notice is.
+	// to file itself into its repository's sidebar subsections. Drawn as a workspace notice is.
 	// THE DAEMON NO LONGER SENDS IT (owner request, 2026-11-03): a one-shot
 	// files itself like any other workspace and an unmark moves nothing, so
 	// there is nothing left to file. The value stays so the prompt rows already
-	// stored with it still decode and still draw as no row.
+	// stored with it still decode and draw.
 	PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT PromptOrigin = 44
 	// A prompt typed on claude.ai (or its mobile app) into a workspace whose
 	// remote control is on (agentrepl.v1.UpdateRemoteControlMode). The vendor
@@ -286,7 +284,7 @@ const (
 	// A notice of a followed GitHub merge queue's movement
 	// (agentrepl.v1.GithubMergeQueueNotice): entries that joined, merged or
 	// were removed, and the new head, since the subscriber was last told.
-	// Delivered on arrival and drawn as a workspace notice is: no row.
+	// Delivered on arrival and drawn as a workspace notice is.
 	PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE PromptOrigin = 50
 	// The outcome of a shell command a person ran from a bubble's code block
 	// run control, sent to that workspace's agent once the command exited
@@ -302,7 +300,7 @@ const (
 	// The one notice of a followed GitHub Actions workflow run
 	// (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
 	// workflow's name, its conclusion, its head commit and its web address.
-	// Delivered on arrival and drawn as a workspace notice is: no row.
+	// Delivered on arrival and drawn as a workspace notice is.
 	PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE PromptOrigin = 53
 )
 

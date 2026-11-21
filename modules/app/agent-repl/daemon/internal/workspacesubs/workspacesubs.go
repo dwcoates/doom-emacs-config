@@ -10,7 +10,8 @@
 //
 // THE NOTICE TAKES THE PATH EVERY UNDER-THE-HOOD REPORT TO AN AGENT TAKES: a
 // deferred prompt submitted through the prompt handler, under its own origin
-// (PROMPT_ORIGIN_WORKSPACE_NOTICE), which the feed draws no row for. It is
+// (PROMPT_ORIGIN_WORKSPACE_NOTICE), which the feed draws as the Workspace
+// Monitor's notice (feed.DaemonSubsystem). It is
 // delivered on arrival: it joins a running turn after its current tool call
 // and wakes an idle agent.
 //

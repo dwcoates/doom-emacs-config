@@ -132,11 +132,10 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 				dlog.Context{"turn": turn.GetValue()})
 			return
 		}
-		// A RESUMPTION AFTER RESTART, OR A MERGE QUEUE NOTICE, IS THE DAEMON'S
-		// WORD, NOT WORDS ANYONE SAID (promptqueue/restartredrive.go,
-		// internal/mergenotice). Its turn opened above and runs as any turn;
-		// it is shown only as the status a running turn shows, so no bubble
-		// is drawn, live or on replay.
+		// A RESUMPTION AFTER RESTART IS THE DAEMON'S WORD, NOT WORDS ANYONE
+		// SAID (promptqueue/restartredrive.go). Its turn opened above and runs
+		// as any turn; it is shown only as the status a running turn shows,
+		// so no bubble is drawn, live or on replay.
 		if PromptRowHidden(prompt.GetOrigin()) {
 			log.Debug("daemon.feed.resume_prompt_suppressed",
 				"a prompt of an origin the feed draws no row for opened its turn and drew no user-prompt bubble",
@@ -489,26 +488,19 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART:
 		return "Resumed after restart"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:
-		// promptorigin.Unseen: no row is drawn for it; the label only keeps
-		// any other reader from naming the user as its author.
 		return "Merge queue"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:
-		// promptorigin.Unseen, as the merge queue's notice is.
 		return "Workspace notice"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE:
-		// promptorigin.Unseen, as a workspace notice is.
 		return "Pull request"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE:
-		// promptorigin.Unseen, as a workspace notice is.
 		return "GitHub merge queue"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE:
-		// promptorigin.Unseen, as a workspace notice is.
 		return "GitHub workflow run"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
 		return "Owner notice"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:
-		// promptorigin.Unseen, as a workspace notice is.
 		return "Sidebar placement"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT:
 		return "Agent"
@@ -530,12 +522,12 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 
 // PromptRowHidden reports whether a prompt of origin draws no user-prompt row
 // in the feed: the daemon's resumption after restart, which is an instruction
-// the daemon gives, not words anyone said, and every prompt drawn nowhere at
-// all (promptorigin.Unseen: a merge queue notice). The queue's mirror of an
-// accepted prompt reads the SAME answer, so the mirror and the replayed draw
-// agree.
+// the daemon gives, not words anyone said. A daemon NOTICE is drawn
+// (promptorigin.DaemonNotice), headed by the subsystem that sent it
+// (DaemonSubsystem). The queue's mirror of an accepted prompt reads the SAME
+// answer, so the mirror and the replayed draw agree.
 func PromptRowHidden(origin conversationv1.PromptOrigin) bool {
-	return origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART || promptorigin.Unseen(origin)
+	return origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART
 }
 
 // drawUserBlocks resolves what a person composed into drawable blocks, with

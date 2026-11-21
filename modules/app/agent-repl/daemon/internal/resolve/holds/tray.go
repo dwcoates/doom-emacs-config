@@ -50,10 +50,10 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, start ShimStart, draw DrawBody, 
 			dlog.Context{"turn_id": string(h.Turn), "tombstone": h.Tombstone.Kind})
 		return nil
 	}
-	// A PROMPT DRAWN NOWHERE (promptorigin.Unseen: a merge queue notice) has
-	// no card either while it waits: the daemon's word to the agent alone.
+	// A DAEMON NOTICE (promptorigin.DaemonNotice) has no card while it
+	// waits: it is delivered on arrival, and drawn in the feed once it is.
 	if !holdfold.Seen(h) {
-		log.Debug("daemon.holds.convert", "a held prompt of an origin drawn nowhere was skipped: the tray draws no card for it",
+		log.Debug("daemon.holds.convert", "a held daemon notice was skipped: the tray draws no card for it",
 			dlog.Context{"turn_id": string(h.Turn), "origin": h.Origin})
 		return nil
 	}

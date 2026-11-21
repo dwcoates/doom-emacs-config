@@ -329,9 +329,9 @@ export enum PromptOrigin {
    * each change and carries the queue as it stands after it. Delivered on
    * arrival (see the enum's header), the way a merge handback is: it joins
    * a running turn and wakes an idle agent. The feed
-   * draws NO row for it: the notice is the daemon's word to the agent, not
-   * anything the user said or needs to read, and the agent's reply is drawn
-   * as any reply is.
+   * draws it as a prompt the daemon sent, headed "Zettel Merge Queue Monitor"
+   * (frontend.v1.FeedUserPromptDaemonSender), like every daemon notice (owner
+   * ruling, 2026-11-21: notices were drawn as no row before).
    *
    * @generated from enum value: PROMPT_ORIGIN_MERGE_QUEUE_NOTICE = 36;
    */
@@ -361,8 +361,7 @@ export enum PromptOrigin {
    * forked -- sent when the derived workspace is created, when it lands, and
    * when it closes without landing (one combined notice when it is both). It
    * names the derived workspace and what happened. Delivered on arrival, like
-   * a merge-queue notice, and drawn as NO row: it is the daemon's
-   * word to the agent. Never sent to the workspace that asked for the create.
+   * a merge-queue notice, and drawn as one is. Never sent to the workspace that asked for the create.
    *
    * @generated from enum value: PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE = 38;
    */
@@ -427,12 +426,11 @@ export enum PromptOrigin {
 
   /**
    * The daemon's brief asking a workspace that just LEFT its one-shot state
-   * to file itself into its repository's sidebar subsections. Drawn as NO
-   * row: it is the daemon's word to the agent, as a workspace notice is.
+   * to file itself into its repository's sidebar subsections. Drawn as a workspace notice is.
    * THE DAEMON NO LONGER SENDS IT (owner request, 2026-11-03): a one-shot
    * files itself like any other workspace and an unmark moves nothing, so
    * there is nothing left to file. The value stays so the prompt rows already
-   * stored with it still decode and still draw as no row.
+   * stored with it still decode and draw.
    *
    * @generated from enum value: PROMPT_ORIGIN_SUBSECTION_PLACEMENT = 44;
    */
@@ -501,7 +499,7 @@ export enum PromptOrigin {
    * A notice of a followed GitHub merge queue's movement
    * (agentrepl.v1.GithubMergeQueueNotice): entries that joined, merged or
    * were removed, and the new head, since the subscriber was last told.
-   * Delivered on arrival and drawn as a workspace notice is: no row.
+   * Delivered on arrival and drawn as a workspace notice is.
    *
    * @generated from enum value: PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE = 50;
    */
@@ -532,7 +530,7 @@ export enum PromptOrigin {
    * The one notice of a followed GitHub Actions workflow run
    * (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
    * workflow's name, its conclusion, its head commit and its web address.
-   * Delivered on arrival and drawn as a workspace notice is: no row.
+   * Delivered on arrival and drawn as a workspace notice is.
    *
    * @generated from enum value: PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE = 53;
    */

@@ -26,7 +26,8 @@
 //
 // THE NOTICE TAKES THE WORKSPACE NOTICE PATH (PROMPT_ORIGIN_WORKSPACE_NOTICE)
 // subscriptions and parent updates take: a deferred prompt that waits behind a
-// running turn, wakes an idle agent, and draws no feed row. Its words carry
+// running turn, wakes an idle agent, and is drawn in the feed as the Workspace
+// Monitor's notice. Its words carry
 // the agentrepl.v1.GatherNotice as protojson.
 package gather
 

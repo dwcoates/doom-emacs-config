@@ -12,9 +12,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
-// unseenOrigins are the notices the contract says no row is drawn for: the
-// daemon's word to an agent, which the user neither said nor needs to read.
-var unseenOrigins = map[conversationv1.PromptOrigin]bool{
+// daemonNoticeOrigins are the daemon's notices to an agent.
+var daemonNoticeOrigins = map[conversationv1.PromptOrigin]bool{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:         true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE:           true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:   true,
@@ -24,22 +23,22 @@ var unseenOrigins = map[conversationv1.PromptOrigin]bool{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:       true,
 }
 
-func TestOnlyTheAgentNoticesAreUnseen(t *testing.T) {
+func TestOnlyTheDaemonsNoticesAreNotices(t *testing.T) {
 	for value := range conversationv1.PromptOrigin_name {
 		origin := conversationv1.PromptOrigin(value)
 		t.Run(origin.String(), func(t *testing.T) {
 			// Act.
-			got := Unseen(origin)
+			got := DaemonNotice(origin)
 
 			// Assert.
-			if want := unseenOrigins[origin]; got != want {
-				t.Fatalf("Unseen(%s) = %v, want %v", origin, got, want)
+			if want := daemonNoticeOrigins[origin]; got != want {
+				t.Fatalf("DaemonNotice(%s) = %v, want %v", origin, got, want)
 			}
 		})
 	}
 }
 
-func TestUnseenNamedReadsTheStoredSpelling(t *testing.T) {
+func TestDaemonNoticeNamedReadsTheStoredSpelling(t *testing.T) {
 	tests := []struct {
 		name string
 		want bool
@@ -51,11 +50,11 @@ func TestUnseenNamedReadsTheStoredSpelling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act.
-			got := UnseenNamed(tt.name)
+			got := DaemonNoticeNamed(tt.name)
 
 			// Assert.
 			if got != tt.want {
-				t.Fatalf("UnseenNamed(%q) = %v, want %v", tt.name, got, tt.want)
+				t.Fatalf("DaemonNoticeNamed(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}
@@ -272,12 +271,12 @@ func TestOnlyTheNoticesAndAgentPromptsAreDeliveredOnArrival(t *testing.T) {
 	}
 }
 
-// EVERY UNSEEN NOTICE IS DELIVERED ON ARRIVAL: a notice drawn nowhere that
-// could be held would wait where nothing draws it.
-func TestEveryUnseenOriginIsDeliveredOnArrival(t *testing.T) {
+// EVERY NOTICE IS DELIVERED ON ARRIVAL: the held section draws no card for a
+// notice, so one that could be held would wait where nothing draws it.
+func TestEveryNoticeIsDeliveredOnArrival(t *testing.T) {
 	for value := range conversationv1.PromptOrigin_name {
 		origin := conversationv1.PromptOrigin(value)
-		if !Unseen(origin) {
+		if !DaemonNotice(origin) {
 			continue
 		}
 		t.Run(origin.String(), func(t *testing.T) {
@@ -286,7 +285,7 @@ func TestEveryUnseenOriginIsDeliveredOnArrival(t *testing.T) {
 
 			// Assert
 			if !got {
-				t.Fatalf("Unseen(%s) but not DeliveredOnArrival", origin)
+				t.Fatalf("DaemonNotice(%s) but not DeliveredOnArrival", origin)
 			}
 		})
 	}

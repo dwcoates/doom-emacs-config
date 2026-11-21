@@ -313,7 +313,7 @@ func placementSubmission(turn ids.TurnID) Submission {
 // folded into it (2026-10-31: a prompt coalesced into the placement brief, so
 // its words ran under the brief's origin, drawn nowhere, and the tray drew a
 // fold into no card).
-func TestAPromptIsNeverJudgedAgainstOrFoldedIntoAnUnseenPrompt(t *testing.T) {
+func TestAPromptIsNeverJudgedAgainstOrFoldedIntoADaemonNotice(t *testing.T) {
 	tests := []struct {
 		name string
 		// seenAhead submits a user's prompt before the brief when set.
@@ -380,10 +380,10 @@ func TestAPromptIsNeverJudgedAgainstOrFoldedIntoAnUnseenPrompt(t *testing.T) {
 }
 
 // THE QUEUE ASKS holdfold.Seen whether a hold stands in the line the user
-// sees: no file of the queue reads a hold's origin as unseen by hand.
+// sees: no file of the queue reads a hold's origin as a daemon notice by hand.
 func TestTheQueueAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 	// Arrange
-	handRolled := regexp.MustCompile(`Unseen(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
+	handRolled := regexp.MustCompile(`\bDaemonNotice(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
 
 	// Act
 	var found []string
@@ -395,13 +395,13 @@ func TestTheQueueAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 
 	// Assert
 	if len(found) > 0 {
-		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
+		t.Fatalf("these files read a hold as a daemon notice by hand instead of holdfold.Seen: %v", found)
 	}
 }
 
 // TestTheQueueReadsTheLineThroughHoldfold pins itemAhead to holdfold.InLine,
 // the reading the fold and the tray's "fold above" share: an ahead.go that
-// tests a cold gate's kept prompt or an unseen origin by hand fails here
+// tests a cold gate's kept prompt or a daemon notice by hand fails here
 // rather than drifting from the tray.
 func TestTheQueueReadsTheLineThroughHoldfold(t *testing.T) {
 	// Arrange

@@ -1069,10 +1069,10 @@ func TestTrayDrawsNoCardForAPromptDrawnNowhere(t *testing.T) {
 
 // THE TRAY ASKS holdfold.Seen whether a hold has a card, the reading the
 // queue's fold and classifier share: no file of the tray reads a hold's
-// origin as unseen by hand.
+// origin as a daemon notice by hand.
 func TestTrayAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 	// Arrange
-	handRolled := regexp.MustCompile(`Unseen(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
+	handRolled := regexp.MustCompile(`\bDaemonNotice(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
 
 	// Act
 	var found []string
@@ -1084,7 +1084,7 @@ func TestTrayAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 
 	// Assert
 	if len(found) > 0 {
-		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
+		t.Fatalf("these files read a hold as a daemon notice by hand instead of holdfold.Seen: %v", found)
 	}
 }
 
