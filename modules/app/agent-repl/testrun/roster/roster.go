@@ -551,7 +551,7 @@ var webappUnitInputs = func() map[string][]string {
 		"test/feed/renderers.test.ts", "test/feed/rows/blocks.test.ts", "test/feed/rows/handback-badge.test.ts",
 		"test/feed/subtree-box.test.ts", "test/feed/title-fold.test.ts", "test/footer/activity.test.ts",
 		"test/footer/clock-span.test.ts", "test/frame.test.ts", "test/heat.test.ts",
-		"test/held/held-prompt.test.ts", "test/host/answers.test.ts", "test/link.test.ts",
+		"test/held/held-prompt.test.ts", "test/host/answers.test.ts", "test/import-cycles.test.ts", "test/link.test.ts",
 		"test/listeners.test.ts", "test/markdown.test.ts", "test/merge-glyph.test.ts",
 		"test/merge-queue-move.test.ts", "test/page-size.test.ts", "test/page-teardown.test.ts",
 		"test/per-document.test.ts", "test/percent-gradient.test.ts", "test/placement.test.ts",
