@@ -357,6 +357,9 @@ func (s *TestSurfaces) BindRecordTee(tee RecordTee) {
 // BindRecordCounter implements Surfaces: the double counts nothing.
 func (s *TestSurfaces) BindRecordCounter(RecordCounter) {}
 
+// BindBeforePrune implements Surfaces: the double removes no log file.
+func (s *TestSurfaces) BindBeforePrune(func(string)) {}
+
 // RetainDirectory implements Surfaces: the double runs no retention pass.
 func (s *TestSurfaces) RetainDirectory(string, func(string) bool) {}
 func (s *TestSurfaces) DiscardWorkspace(string, string, bool) (DiscardReport, error) {

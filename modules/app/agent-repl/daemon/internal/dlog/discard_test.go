@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -227,6 +228,41 @@ func TestDiscardWorkspaceRefusals(t *testing.T) {
 			// Assert.
 			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
 				t.Fatalf("DiscardWorkspace = %v, want a refusal (%v)", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiscardWorkspaceRunsTheBeforePruneFunctionBeforeItRemoves(t *testing.T) {
+	tests := []struct {
+		name        string
+		judgeOnly   bool
+		wantReasons []string
+	}{
+		{name: "a discard tallies its files first", wantReasons: []string{"discard"}},
+		{name: "judging only removes nothing, so tallies nothing", judgeOnly: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newDiscardFixture(t)
+			var reasons []string
+			existed := false
+			f.s.BindBeforePrune(func(reason string) {
+				reasons = append(reasons, reason)
+				existed = present(t, f.target)
+				// The function runs with no lock of the surfaces held: it logs.
+				f.s.Global().Info("daemon.dlog.test", "tallied", nil)
+			})
+
+			// Act.
+			if _, err := f.s.DiscardWorkspace(f.dir, f.id, tt.judgeOnly); err != nil {
+				t.Fatalf("DiscardWorkspace: %v", err)
+			}
+
+			// Assert.
+			if !slices.Equal(reasons, tt.wantReasons) || (len(reasons) > 0 && !existed) {
+				t.Fatalf("before-prune ran with %v, the target existing %v; want %v, before the target went", reasons, existed, tt.wantReasons)
 			}
 		})
 	}

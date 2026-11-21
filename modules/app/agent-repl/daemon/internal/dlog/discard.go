@@ -55,23 +55,20 @@ func (s *surfaces) DiscardWorkspace(dir, id string, judgeOnly bool) (DiscardRepo
 	if id == "" {
 		return DiscardReport{}, errors.New("discard a workspace's logs: no workspace id was given")
 	}
+	errs, err := s.releaseWorkspace(id)
+	if err != nil {
+		return DiscardReport{}, err
+	}
+	// EVERY FILE THE DISCARD REMOVES IS TALLIED FIRST (BindBeforePrune),
+	// after this daemon's own sinks of it closed, so nothing it writes is
+	// left untallied, and with no lock held, since the tally logs.
+	if !judgeOnly {
+		s.runBeforePrune("discard")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return DiscardReport{}, errSurfacesClosed
-	}
-	var errs []error
-	for key, ws := range s.workspaces {
-		if ws.id != id {
-			continue
-		}
-		delete(s.workspaces, key)
-		if err := closeWorkspace(ws); err != nil {
-			errs = append(errs, fmt.Errorf("discard workspace %s's logs: release its open sinks: %w", id, err))
-		}
-	}
-	for _, name := range SinkNames {
-		delete(s.targets, id+"/"+name)
 	}
 
 	pruned, err := logging.RemoveFamilies(s.logsDir, workspaceLogFamily(id).MatchString, judgeOnly)
@@ -110,4 +107,29 @@ func (s *surfaces) DiscardWorkspace(dir, id string, judgeOnly bool) (DiscardRepo
 		report.Links = append(report.Links, link)
 	}
 	return report, errors.Join(errs...)
+}
+
+// releaseWorkspace closes every sink this daemon holds open for the workspace
+// with the minted id ID and forgets its targets, answering the sinks that
+// could not be released.
+func (s *surfaces) releaseWorkspace(id string) ([]error, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errSurfacesClosed
+	}
+	var errs []error
+	for key, ws := range s.workspaces {
+		if ws.id != id {
+			continue
+		}
+		delete(s.workspaces, key)
+		if err := closeWorkspace(ws); err != nil {
+			errs = append(errs, fmt.Errorf("discard workspace %s's logs: release its open sinks: %w", id, err))
+		}
+	}
+	for _, name := range SinkNames {
+		delete(s.targets, id+"/"+name)
+	}
+	return errs, nil
 }

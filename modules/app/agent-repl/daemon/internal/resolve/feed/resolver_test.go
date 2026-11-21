@@ -78,6 +78,7 @@ func (f *fakeSurfaces) BindRecordTee(dlog.RecordTee) {}
 
 func (f *fakeSurfaces) BindRecordCounter(dlog.RecordCounter)      {}
 func (f *fakeSurfaces) RetainDirectory(string, func(string) bool) {}
+func (f *fakeSurfaces) BindBeforePrune(func(string))              {}
 func (f *fakeSurfaces) DiscardWorkspace(string, string, bool) (dlog.DiscardReport, error) {
 	return dlog.DiscardReport{}, nil
 }

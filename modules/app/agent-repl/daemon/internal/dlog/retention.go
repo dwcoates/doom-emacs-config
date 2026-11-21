@@ -91,6 +91,8 @@ func (p *retentionPass) noteRemoved(paths []string) {
 
 // retainOnce runs one retention pass at now and records it.
 func (s *surfaces) retainOnce(now time.Time) {
+	// EVERY FILE THE PASS MAY REMOVE IS TALLIED FIRST (BindBeforePrune).
+	s.runBeforePrune("retention")
 	var pass retentionPass
 	s.retainSinks(now, &pass)
 

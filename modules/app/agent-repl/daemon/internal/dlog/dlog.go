@@ -146,6 +146,12 @@ type Surfaces interface {
 	// directory that does not exist yet is an ordinary state: it has nothing
 	// to prune.
 	RetainDirectory(dir string, owned func(base string) bool)
+	// BindBeforePrune binds the one function every removal of log files runs
+	// first, synchronously, with why it removes: the hourly retention pass
+	// ("retention") and a discarded workspace's logs ("discard"). The daemon
+	// binds the log site tally to it (internal/logsites), so every file the
+	// daemon removes was tallied to its end first. A nil function unbinds it.
+	BindBeforePrune(fn func(reason string))
 	// DiscardWorkspace removes every daemon-written log file of the workspace
 	// with the minted id ID that no writer outside this daemon holds, whatever
 	// its age, and the canonical links in DIR that named a removed file. It is

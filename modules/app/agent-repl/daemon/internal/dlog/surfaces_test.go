@@ -2556,3 +2556,40 @@ func TestClientLogPersistsTheClientsSiteAndTemplate(t *testing.T) {
 	}
 	t.Fatal("the forwarded record was not persisted")
 }
+
+func TestBindBeforePruneBindsAndUnbindsTheOneFunction(t *testing.T) {
+	tests := []struct {
+		name string
+		bind func(s *surfaces, ran *[]string)
+		want []string
+	}{
+		{name: "nothing bound runs nothing", bind: func(*surfaces, *[]string) {}},
+		{name: "a bound function runs with the reason", bind: func(s *surfaces, ran *[]string) {
+			s.BindBeforePrune(func(reason string) { *ran = append(*ran, reason) })
+		}, want: []string{"retention"}},
+		{name: "a later binding replaces the first", bind: func(s *surfaces, ran *[]string) {
+			s.BindBeforePrune(func(string) { *ran = append(*ran, "first") })
+			s.BindBeforePrune(func(reason string) { *ran = append(*ran, "second:"+reason) })
+		}, want: []string{"second:retention"}},
+		{name: "a nil function unbinds it", bind: func(s *surfaces, ran *[]string) {
+			s.BindBeforePrune(func(reason string) { *ran = append(*ran, reason) })
+			s.BindBeforePrune(nil)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			var ran []string
+			tt.bind(s, &ran)
+
+			// Act.
+			s.runBeforePrune("retention")
+
+			// Assert.
+			if !reflect.DeepEqual(ran, tt.want) {
+				t.Fatalf("ran %v, want %v", ran, tt.want)
+			}
+		})
+	}
+}

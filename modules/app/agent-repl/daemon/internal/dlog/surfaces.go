@@ -104,6 +104,9 @@ type surfaces struct {
 	// counter is the bound record counter, read on every Warn and Error
 	// record without taking mu, as tee is.
 	counter atomic.Pointer[counterBox]
+	// beforePrune is what every removal of log files runs first
+	// (BindBeforePrune); nil when unbound.
+	beforePrune atomic.Pointer[func(reason string)]
 
 	scanEvery time.Duration
 	// retainFirst and retainEvery schedule the retention pass (retention.go).
@@ -388,6 +391,23 @@ func (s *surfaces) BindRecordTee(tee RecordTee) {
 
 // counterBox holds the bound record counter so it can be swapped atomically.
 type counterBox struct{ counter RecordCounter }
+
+// BindBeforePrune implements Surfaces.
+func (s *surfaces) BindBeforePrune(fn func(reason string)) {
+	if fn == nil {
+		s.beforePrune.Store(nil)
+		return
+	}
+	s.beforePrune.Store(&fn)
+}
+
+// runBeforePrune runs the bound before-prune function, if any. It is called
+// with no lock of the surfaces held: the function logs.
+func (s *surfaces) runBeforePrune(reason string) {
+	if fn := s.beforePrune.Load(); fn != nil {
+		(*fn)(reason)
+	}
+}
 
 // BindRecordCounter implements Surfaces.
 func (s *surfaces) BindRecordCounter(counter RecordCounter) {
