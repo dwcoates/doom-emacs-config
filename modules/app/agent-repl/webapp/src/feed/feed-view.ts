@@ -77,7 +77,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { guardMalformed } from "../rpc/guard.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
-import { centerTarget, elementsSpan, type ScrollPosition, type TailFollow, type VerticalSpan } from "../scroll.js";
+import { centerTarget, elementsSpan, type ScrollPosition, type TailFollow, type VerticalSpan, type WalkHold } from "../scroll.js";
 import type { AppContext } from "../rpc/context.js";
 import { clone, equals } from "@bufbuild/protobuf";
 import {
@@ -200,6 +200,8 @@ export interface FeedControllerOptions {
   scroll?: {
     box: ScrollPosition & Pick<Element, "getBoundingClientRect">;
     tail: TailFollow;
+    /** Holds the box still while an older page loads (`createWalkHold`). */
+    hold: WalkHold;
   };
   /**
    * Runs after the selection expands or collapses a governed bubble's box
@@ -1871,7 +1873,13 @@ export function createFeedController(
   function walkOlder(at: Control, operation: string): void {
     olderPending += 1;
     walkFaces.setLoading(true);
-    void guardMalformed(opts.ctx, operation, serializeWalk(() => loadOlder(at)));
+    // THE FEED HOLDS STILL FROM THE ASK UNTIL THE PAGE SETTLES (scroll.ts
+    // createWalkHold), and the hold outlasts it until the reader's gesture is
+    // over, so the flick that asked never carries on into the landed rows.
+    const hold = opts.scroll?.hold;
+    hold?.begin();
+    const walked = serializeWalk(() => loadOlder(at)).finally(() => hold?.end());
+    void guardMalformed(opts.ctx, operation, walked);
   }
 
   /**

@@ -23,6 +23,10 @@ import {
   selectionRowScroll,
   scrollKept,
   installIntentScroll,
+  createWalkHold,
+  walkHeld,
+  WALK_HOLD_ATTRIBUTE,
+  WALK_HOLD_QUIET_FRAMES,
   innerScrollerAt,
   TailFollow,
   isScrollBox,
@@ -3232,6 +3236,18 @@ describe("installIntentScroll", () => {
     expect(feed.scrollTop).toBe(40);
   });
 
+  it("consumes a wheel redirected onto a feed the walk holds still, moving nothing", () => {
+    // Arrange — an older page is loading (createWalkHold).
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed, noneOpen);
+    feed.setAttribute(WALK_HOLD_ATTRIBUTE, "");
+    // Act
+    const e = wheelAt(box, -40);
+    // Assert
+    expect({ top: feed.scrollTop, prevented: e.defaultPrevented }).toEqual({ top: 0, prevented: true });
+  });
+
   it("prevents the browser default when it redirects", () => {
     // Arrange — the redirect must stop the browser scrolling the section too.
     const feed = makeFeed();
@@ -5442,5 +5458,168 @@ describe("revealChatExchange", () => {
     const { box, exchange } = arrange(2300, 500);
     revealChatExchange(box, exchange);
     expect(box.scrollTop).toBe(2400);
+  });
+});
+
+// THE FEED HOLDS STILL WHILE IT WALKS INTO THE PAST (owner request, 2026-11-21):
+// the hold takes the box's scrollability from the ask until the page settles,
+// and lets go only once the reader's wheel stream has gone quiet.
+describe("createWalkHold", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  /** A box, its hold, and the frame queue the test runs by hand. */
+  function arrange() {
+    const box = document.createElement("div");
+    document.body.append(box);
+    const frames: Array<() => void> = [];
+    const hold = createWalkHold(box, (fn) => frames.push(fn));
+    /** Run the frames queued so far, one rendering update's worth. */
+    const frame = (): void => {
+      for (const fn of frames.splice(0)) fn();
+    };
+    /** Dispatch one wheel event at the box. */
+    const wheel = (): void => {
+      box.dispatchEvent(new Event("wheel", { bubbles: true }));
+    };
+    return { box, hold, frame, frames, wheel };
+  }
+
+  it("holds the box still from the first begin", () => {
+    // Arrange
+    const { box, hold } = arrange();
+    // Act
+    hold.begin();
+    // Assert
+    expect(walkHeld(box)).toBe(true);
+  });
+
+  it("keeps holding while a page is still out", () => {
+    // Arrange
+    const { box, hold, frame } = arrange();
+    hold.begin();
+    hold.begin();
+    // Act
+    hold.end();
+    for (let i = 0; i < WALK_HOLD_QUIET_FRAMES + 1; i += 1) frame();
+    // Assert
+    expect(walkHeld(box)).toBe(true);
+  });
+
+  it("keeps holding for the frames short of the quiet bound after the last page settles", () => {
+    // Arrange
+    const { box, hold, frame } = arrange();
+    hold.begin();
+    // Act
+    hold.end();
+    for (let i = 0; i < WALK_HOLD_QUIET_FRAMES - 1; i += 1) frame();
+    // Assert
+    expect(walkHeld(box)).toBe(true);
+  });
+
+  it("lets go once the wheel has been quiet for the bound's frames", () => {
+    // Arrange
+    const { box, hold, frame } = arrange();
+    hold.begin();
+    // Act
+    hold.end();
+    for (let i = 0; i < WALK_HOLD_QUIET_FRAMES; i += 1) frame();
+    // Assert
+    expect(walkHeld(box)).toBe(false);
+  });
+
+  it("keeps holding while the gesture's momentum still arrives after the page landed", () => {
+    // Arrange
+    const { box, hold, frame, wheel } = arrange();
+    hold.begin();
+    hold.end();
+    // Act: a wheel every frame, as a momentum tail is delivered.
+    for (let i = 0; i < WALK_HOLD_QUIET_FRAMES * 3; i += 1) {
+      wheel();
+      frame();
+    }
+    // Assert
+    expect(walkHeld(box)).toBe(true);
+  });
+
+  it("counts a wheel that arrived while the page loaded against the first frame after it lands", () => {
+    // Arrange
+    const { box, hold, frame, wheel } = arrange();
+    hold.begin();
+    wheel();
+    hold.end();
+    // Act
+    for (let i = 0; i < WALK_HOLD_QUIET_FRAMES; i += 1) frame();
+    // Assert
+    expect(walkHeld(box)).toBe(true);
+  });
+
+  it("stops counting the quiet when another page is asked for", () => {
+    // Arrange
+    const { box, hold, frame } = arrange();
+    hold.begin();
+    hold.end();
+    frame();
+    // Act
+    hold.begin();
+    for (let i = 0; i < WALK_HOLD_QUIET_FRAMES + 1; i += 1) frame();
+    // Assert
+    expect(walkHeld(box)).toBe(true);
+  });
+
+  it("records the hold and its release with what it absorbed", async () => {
+    // Arrange
+    const capture = captureLogRecords("info");
+    const { box, hold, frame, wheel } = arrange();
+    box.scrollTop = 0;
+    hold.begin();
+    wheel();
+    hold.end();
+    frame();
+    frame();
+    wheel();
+    // Act
+    for (let i = 0; i < WALK_HOLD_QUIET_FRAMES + 1; i += 1) frame();
+    // Assert
+    const held = await forwardedRecord(capture, "scroll.walk-held");
+    const released = await forwardedRecord(capture, "scroll.walk-released");
+    expect({ held: held.context, released: released.context }).toMatchObject({
+      held: { at: 0 },
+      released: { by: "quiet", wheels_absorbed: 2, frames_waited: 6, longest_gap_frames: 1 },
+    });
+  });
+
+  it("refuses an end with no page out, recording it and leaving the box as it was", async () => {
+    // Arrange
+    const capture = captureLogRecords("error");
+    const { box, hold, frames } = arrange();
+    // Act
+    const act = (): void => hold.end();
+    // Assert
+    expect(act).toThrow("walk hold: end without a matching begin");
+    const record = await forwardedRecord(capture, "scroll.walk-hold-unbalanced");
+    expect({ context: record.context, held: walkHeld(box), frames: frames.length }).toMatchObject({
+      context: { held: false },
+      held: false,
+      frames: 0,
+    });
+  });
+
+  it("lets go at once on dispose, and stops listening for the wheel", async () => {
+    // Arrange
+    const capture = captureLogRecords("info");
+    const { box, hold, frame, wheel } = arrange();
+    hold.begin();
+    // Act
+    hold.dispose();
+    wheel();
+    frame();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.walk-released");
+    expect({ held: walkHeld(box), context: record.context }).toMatchObject({
+      held: false,
+      context: { by: "dispose", wheels_absorbed: 0, frames_waited: 0, longest_gap_frames: 0 },
+    });
   });
 });

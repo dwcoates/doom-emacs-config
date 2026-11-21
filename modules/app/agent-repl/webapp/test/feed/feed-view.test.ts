@@ -77,8 +77,10 @@ import {
 } from "../feed-order.js";
 import {
   TailFollow,
+  createWalkHold,
   revealCenterDelta,
   type CenterTarget,
+  type WalkHold,
 } from "../../src/scroll.js";
 import { responseCapLines } from "../../src/feed/cards/response.js";
 import { codeOf } from "../source-text.js";
@@ -136,6 +138,8 @@ function fixture(
     renderers?: Partial<Parameters<typeof stubRenderers>[0]>;
     /** Told the context each bubble row is built with. */
     onBubble?: (row: FeedRow, rc: RowContext) => void;
+    /** The page's scroll box, tail owner and walk hold; none by default. */
+    scroll?: Parameters<typeof createFeedController>[0]["scroll"];
   } = {},
 ): Fixture {
   const host = document.createElement("div");
@@ -162,8 +166,14 @@ function fixture(
       revealRow: async () => false,
       ...overrides,
     },
+    scroll: opts.scroll,
   });
   return { h, host, controller, bubbles };
+}
+
+/** A walk hold for a fixture that does not test it: its frames never run. */
+function inertHold(): WalkHold {
+  return createWalkHold(document.createElement("div"), () => undefined);
 }
 
 /** The row ids the host currently draws, in order. */
@@ -477,6 +487,7 @@ describe("createFeedController: upserts", () => {
           getBoundingClientRect: boxRect,
         },
         tail: tail as never,
+        hold: inertHold(),
       },
     });
     controller.applyPage(page([responseRow("a", "one")]), "replace");
@@ -1559,7 +1570,7 @@ describe("createFeedController: following the tail", () => {
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
       },
-      scroll: { box: scroll.box, tail: scroll.tail as never },
+      scroll: { box: scroll.box, tail: scroll.tail as never, hold: inertHold() },
     });
     return { controller, host, ...scroll };
   }
@@ -2038,7 +2049,7 @@ describe("createFeedController: a landed thinking row", () => {
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
       },
-      scroll: { box, tail },
+      scroll: { box, tail, hold: inertHold() },
     });
     controller.applyPage(page([thinkingRow("t1", false)]), "replace");
     tail.onInput("wheel");
@@ -2147,7 +2158,7 @@ describe("createFeedController: the feed selection", () => {
         revealRow: async () => false,
       },
       scroll: withScroll
-        ? { box: scroll.box, tail: scroll.tail as never }
+        ? { box: scroll.box, tail: scroll.tail as never, hold: inertHold() }
         : undefined,
       selectionVisibility,
     });
@@ -3612,6 +3623,119 @@ describe("createFeedController: the walk control on sight", () => {
 // A TURN'S EARLIER STEPS ON AN OLDER PAGE ARE A LOADING STATE (rows/earlier-
 // steps.ts): the row's spinner is a face of the feed's walk, asking for the
 // older page on sight, turning while it loads, and resting beside its refusal.
+// THE FEED HOLDS STILL WHILE IT WALKS (scroll.ts createWalkHold, owner request
+// 2026-11-21): the hold begins when a page is asked for and ends only once
+// that page has settled, after the prepend's compensation has kept the
+// reader's place, so a flick's momentum never carries on into the new rows.
+describe("createFeedController: the walk holds the feed still", () => {
+  /** A hold and a tail owner recording, in one list, what the walk asked of each. */
+  function recorded() {
+    const acts: string[] = [];
+    const hold: WalkHold = {
+      begin: () => acts.push("begin"),
+      end: () => acts.push("end"),
+      dispose: () => acts.push("dispose"),
+    };
+    const tail = {
+      isFollowing: () => false,
+      follow: () => undefined,
+      initialPlacement: () => undefined,
+      replaceRestore: () => undefined,
+      prependCompensation: () => acts.push("compensate"),
+    };
+    const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 100, getBoundingClientRect: boxRect };
+    return { acts, scroll: { box, tail: tail as never, hold } };
+  }
+
+  it("begins the hold when the control asks for the older page", async () => {
+    // Arrange
+    const { h } = heldPage();
+    const { acts, scroll } = recorded();
+    const { controller, host } = fixture(h, {}, { scroll });
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    acts.length = 0;
+
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+
+    // Assert
+    expect(acts).toEqual(["begin"]);
+  });
+
+  it("ends the hold only after the landed page kept the reader's place", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { acts, scroll } = recorded();
+    const { controller, host } = fixture(h, {}, { scroll });
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    acts.length = 0;
+
+    // Act
+    answer([withOrder(responseRow("older"), "a")]);
+    await settle();
+
+    // Assert
+    expect(acts).toEqual(["compensate", "end"]);
+  });
+
+  it("ends the hold when the daemon refuses the page", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }) });
+    const { acts, scroll } = recorded();
+    const { controller, host } = fixture(h, {}, { scroll });
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    acts.length = 0;
+
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+
+    // Assert
+    expect(acts).toEqual(["begin", "end"]);
+  });
+
+  it("ends the hold when the walk never reached the daemon", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () => {
+        throw new Error("gone");
+      },
+    });
+    const { acts, scroll } = recorded();
+    const { controller, host } = fixture(h, {}, { scroll });
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    acts.length = 0;
+
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+
+    // Assert
+    expect(acts).toEqual(["begin", "end"]);
+  });
+
+  it("ends the hold when the landed page cannot be read", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "success", value: page([withoutOrder(responseRow("older"))]) } }),
+    });
+    const { acts, scroll } = recorded();
+    const { controller, host } = fixture(h, {}, { scroll });
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    acts.length = 0;
+
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+
+    // Assert
+    expect(acts).toEqual(["begin", "end"]);
+  });
+});
+
 describe("createFeedController: a turn's earlier-steps indicator", () => {
   /** A page holding an earlier-steps row under a turn's prompt, older pages remaining. */
   const gapPage = (hasMore = true) =>
