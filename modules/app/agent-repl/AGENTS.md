@@ -2972,13 +2972,17 @@ exactly ONE of three domains, named for whose services are failing.
   held prompts are popped in order and classified THEN, each against what is
   ahead of it, and delivered per the verdict
   (`daemon/internal/promptqueue/vendorblock.go`).
-- **An agent's prompt to a workspace is never classified and never held for
-  the running turn's end** (owner ruling, 2026-11-14). A prompt another
-  workspace's agent sent while a turn runs is sent to join that turn at once,
-  beside any already joining, and interrupts nothing
-  (`daemon/internal/promptqueue/agentjoin.go`). It waits only where any joining
-  prompt does (a turn the vendor started, an open ask, a bounce drain, an edit,
-  a running context cut) or when sent deferred.
+- **A daemon notice or an agent's prompt to a workspace is delivered on
+  arrival and never held** (owner rulings, 2026-11-14 and 2026-11-21). Every
+  origin `promptorigin.DeliveredOnArrival` names goes the moment it arrives,
+  never classified: into an idle session as its turn, into a running turn as a
+  join after its current tool call, beside any already joining, interrupting
+  nothing. One that genuinely cannot go yet (the session not up, its cold
+  gate, a bounce, a merge, the daemon exiting, the vendor refusing, a turn
+  that takes no join, an agent's prompt sent deferred) waits under a named
+  arrival wait (`wsm.ArrivalWait`) that the one event it waits on drives, never
+  as a held prompt: the store refuses such a hold
+  (`daemon/internal/promptqueue/arrival.go`).
 - **A turn the vendor failed is retried by agent-repl, and a prompt sent
   meanwhile is the retry** (owner ruling, 2026-10-20). The vendor runs with
   its own API retries off (`CLAUDE_CODE_MAX_RETRIES=0`); the shim retries a
