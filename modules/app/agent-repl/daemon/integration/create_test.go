@@ -199,7 +199,6 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 func TestCreateWorkspaceForkMakesTheVendorsForkAndResumesIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent with a minted vendor session.
-	// A daemon of its own until the e34f0cb693 ruling (newDerivingOpened).
 	f := newDerivingOpened(t)
 	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
 		t.Fatalf("the parent's StartSession = %v, want fresh", req)
@@ -787,7 +786,6 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 func TestCreateWorkspaceChildStandsInBothStatuses(t *testing.T) {
 	t.Parallel()
 	// Arrange: a peer to be the parent.
-	// A daemon of its own until the e34f0cb693 ruling (newDerivingDaemon).
 	d := newDerivingDaemon(t)
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)

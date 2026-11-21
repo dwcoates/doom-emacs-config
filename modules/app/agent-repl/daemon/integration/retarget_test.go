@@ -35,9 +35,9 @@ type retargetFamily struct {
 // newRetargetFamily creates a parent workspace and a child of it.
 func newRetargetFamily(t *testing.T, opts harness.Opts, repo *harness.Repo) *retargetFamily {
 	t.Helper()
-	// The default options start a daemon of its own while the e34f0cb693
-	// ruling is pending (newDerivingDaemon): the family's child is a derived
-	// workspace. Any other option is a boot-time one, which starts its own.
+	// The default options share groupDerived (newDerivingDaemon): the
+	// family's child is a derived workspace. Any other option is a boot-time
+	// one, which starts its own.
 	var d *harness.Daemon
 	if reflect.ValueOf(opts).IsZero() {
 		d = newDerivingDaemon(t)

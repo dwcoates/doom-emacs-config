@@ -126,6 +126,10 @@ const (
 	// groupEditorSession is the daemon an Emacs stream connects to as a new
 	// editor: agent-repl's session is begun by the editor, one per daemon.
 	groupEditorSession daemonGroup = "the editor's session"
+	// groupDerived is the daemon a case creates a child or a fork on: the
+	// derived workspace's notice reaches its source after the case is
+	// answered (newDerivingDaemon).
+	groupDerived daemonGroup = "workspaces derived from another"
 )
 
 var (
@@ -177,23 +181,21 @@ func groupOwner(t *testing.T, group daemonGroup) *harness.Daemon {
 	return owner
 }
 
-// A CASE THAT CREATES A CHILD OR A FORK KEEPS A DAEMON OF ITS OWN until the
-// owner rules on e34f0cb693 ("a close or forget is blocked only by holds the
-// held section draws"). The derived workspace's notice to its source is held
-// while the source revives, and the held section draws no card for it, so a
-// slice's retirement can neither see nor drop it, and its forget stays
-// blocked. Once the ruling lands, these share the canonical daemon again.
+// A CASE THAT CREATES A CHILD OR A FORK SHARES groupDerived: the derived
+// workspace's notice to its source is held while the source revives and is
+// delivered after the case is answered, so these cases run one at a time,
+// and no case's notice meets another's retirement.
 
-// newDerivingDaemon is a daemon of its own for a case that registers its
-// slice itself and creates a child or a fork from it.
+// newDerivingDaemon is t's view of groupDerived, for a case that registers
+// its slice itself and creates a child or a fork from it.
 func newDerivingDaemon(t *testing.T) *harness.Daemon {
 	t.Helper()
-	return newDaemon(t, harness.Opts{})
+	return viewInGroup(t, groupDerived)
 }
 
-// newDerivingOpened is newOpened on a daemon of its own, for a case whose
-// opened workspace creates a child or a fork.
+// newDerivingOpened is newInGroup on groupDerived, for a case whose opened
+// workspace creates a child or a fork.
 func newDerivingOpened(t *testing.T) *fixture {
 	t.Helper()
-	return newOpened(t, harness.Opts{})
+	return newInGroup(t, groupDerived)
 }
