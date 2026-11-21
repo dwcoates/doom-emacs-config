@@ -6377,6 +6377,98 @@ describe("WatchSession", () => {
     expect(seen).not.toContain("update.queryDied");
   });
 
+  it("states a counted vendor call before any frame pushed after it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await nextPush(iterator);
+    await nextPush(iterator);
+    // Act: a vendor call, then a frame after it.
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-0000000000a1",
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { id: "msg_spend", role: "assistant", model: "claude-opus-5-5", content: [], usage: { input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 } },
+    } as never);
+    h.engine.pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
+      }),
+    );
+    // Every frame up to the one pushed after the call: the watch reads one
+    // frame ahead, so a frame pushed before the call may still come first.
+    const seen: shimv1.WatchSessionResponse["frame"][] = [];
+    for (let index = 0; index < 16; index++) {
+      const frame = (await nextPush(iterator)).frame;
+      seen.push(frame);
+      if (frame.case === "update" && frame.value.update.case === "compacting") break;
+    }
+    await iterator.return?.();
+    // Assert: the spend is stated before the frame pushed after the call.
+    const stated = seen.findIndex((f) => f.case === "measurements" && f.value.vendorSpend.length > 0);
+    const after = seen.findIndex((f) => f.case === "update" && f.value.update.case === "compacting");
+    expect(stated).toBeGreaterThanOrEqual(0);
+    expect(stated).toBeLessThan(after);
+    const spend = seen[stated]?.case === "measurements" ? seen[stated].value.vendorSpend : [];
+    expect(spend.map((e) => [e.model, e.calls])).toEqual([["claude-opus-5-5", 1n]]);
+  });
+
+  it("counts a turn's calls and its subagent's under the cause its origin declares, the subagent by its type", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-merge" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.MERGE_PICK,
+      }),
+    );
+    const usage = { input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 };
+    // Act: the main loop spawns an Explore subagent, which makes a call of its own.
+    await h.engine.onSdkMessage(
+      answering(h, {
+        type: "assistant",
+        uuid: "00000000-0000-4000-8000-0000000000b1",
+        session_id: "s",
+        parent_tool_use_id: null,
+        message: {
+          id: "msg_main",
+          role: "assistant",
+          model: "claude-opus-5-5",
+          content: [{ type: "tool_use", id: "toolu_spawn", name: "Agent", input: { subagent_type: "Explore", prompt: "look" } }],
+          usage,
+        },
+      } as never),
+    );
+    await h.engine.onSdkMessage(
+      answering(h, {
+        type: "assistant",
+        uuid: "00000000-0000-4000-8000-0000000000b2",
+        session_id: "s",
+        parent_tool_use_id: "toolu_spawn",
+        message: { id: "msg_sub", role: "assistant", model: "claude-haiku-5-5", content: [], usage },
+      } as never),
+    );
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    let spend: conversationv1.VendorSpend[] = [];
+    for (let index = 0; index < 16 && spend.length === 0; index++) {
+      const frame = (await nextPush(iterator)).frame;
+      if (frame.case === "measurements") spend = frame.value.vendorSpend;
+      if (index === 1) {
+        h.engine.pushes.push(create(conversationv1.SessionUpdateSchema, { update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) } }));
+      }
+    }
+    await iterator.return?.();
+    // Assert
+    expect(spend.map((e) => [e.agent, e.subagentType, e.cause, e.model])).toEqual([
+      [conversationv1.VendorCallAgent.MAIN, "", conversationv1.VendorCallCause.MERGE, "claude-opus-5-5"],
+      [conversationv1.VendorCallAgent.SUBAGENT, "Explore", conversationv1.VendorCallCause.MERGE, "claude-haiku-5-5"],
+    ]);
+  });
+
   it("re-announces on EVERY new watch, not only the first", async () => {
     const h = harness();
     await started(h);

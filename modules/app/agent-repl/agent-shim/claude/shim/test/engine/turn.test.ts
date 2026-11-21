@@ -231,7 +231,7 @@ function openKeepalive(h: Harness): () => void {
   h.keepaliveEnd = new Promise<void>((resolve) => {
     release = resolve;
   });
-  h.open = { id: KEEPALIVE_TURN, keepalive: true, startedAtMs: 1 };
+  h.open = { id: KEEPALIVE_TURN, keepalive: true, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.KEEPALIVE };
   return () => {
     h.open = undefined;
     h.keepaliveEnd = undefined;
@@ -358,7 +358,7 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     // Arrange
     const h = await harness();
     h.keepaliveEnd = new Promise<void>(() => undefined);
-    h.open = { id: KEEPALIVE_TURN, keepalive: false, adopted: true, startedAtMs: 1 };
+    h.open = { id: KEEPALIVE_TURN, keepalive: false, adopted: true, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.VENDOR_STARTED };
 
     // Act
     await settled(h.turns.startTurn(startTurn()));
@@ -958,7 +958,7 @@ function joinTurn(turn: conversationv1.TurnId = OTHER_TURN): shimv1.StartTurnReq
 
 /** A daemon turn standing in the send slot. */
 function openDaemonTurn(h: Harness): OpenTurn {
-  h.open = { id: TURN, keepalive: false, startedAtMs: 1 };
+  h.open = { id: TURN, keepalive: false, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.USER_PROMPT };
   return h.open;
 }
 
@@ -1375,7 +1375,7 @@ describe("StartTurn racing a turn the vendor started on its own", () => {
     const durable = h.persistence.writeDurable.bind(h.persistence);
     h.persistence.writeDurable = async (entries) => {
       await durable(entries);
-      h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
+      h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.VENDOR_STARTED };
     };
   }
 
@@ -1384,7 +1384,7 @@ describe("StartTurn racing a turn the vendor started on its own", () => {
     [
       "already running when the start arrives",
       (h) => {
-        h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
+        h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.VENDOR_STARTED };
       },
     ],
   ])("accepts the start when the vendor's turn was %s", async (_name, adopt) => {
@@ -1434,7 +1434,7 @@ describe("StartTurn finding the send slot taken during its awaits", () => {
     const durable = h.persistence.writeDurable.bind(h.persistence);
     h.persistence.writeDurable = async (entries) => {
       await durable(entries);
-      h.open = { id: TAKEN, keepalive: false, startedAtMs: 1 };
+      h.open = { id: TAKEN, keepalive: false, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.USER_PROMPT };
     };
   }
 
@@ -1487,7 +1487,7 @@ describe("StartTurn behind the network-resume turn", () => {
     h.keepaliveEnd = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const resume = { id: create(conversationv1.TurnIdSchema, { value: "adopted-resume" }), keepalive: false, adopted: true, startedAtMs: 1 };
+    const resume = { id: create(conversationv1.TurnIdSchema, { value: "adopted-resume" }), keepalive: false, adopted: true, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.VENDOR_STARTED };
     h.open = resume;
 
     // Act
@@ -1515,8 +1515,8 @@ describe("KillTurn with a vendor-started turn beside the send slot", () => {
   ])("kills by name: %s", async (_name, named, openAfter, adoptedAfter) => {
     // Arrange
     const h = await harness();
-    h.open = { id: TURN, keepalive: false, startedAtMs: 1 };
-    h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1 };
+    h.open = { id: TURN, keepalive: false, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.USER_PROMPT };
+    h.adopted = { id: ADOPTED, keepalive: false, adopted: true, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.VENDOR_STARTED };
 
     // Act
     const response = await h.turns.killTurn(killRequest(named));
@@ -3973,7 +3973,7 @@ describe("RollBackSession's turn steps", () => {
   it("interrupts the open turn as an unforced kill does, sparing its detached work", async () => {
     // Arrange
     const h = await harness();
-    h.open = { id: TURN, keepalive: false, startedAtMs: 1 };
+    h.open = { id: TURN, keepalive: false, startedAtMs: 1, spendCause: conversationv1.VendorCallCause.USER_PROMPT };
     spawn(h, "b01", TURN.value);
 
     // Act

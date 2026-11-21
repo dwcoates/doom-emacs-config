@@ -134,7 +134,7 @@ export interface TranscriptLine {
  * refused, which wrote another such record, forever — and the zeroed usage read
  * a 500k-token conversation as empty, so the cold gate never fired.
  */
-function isCliSynthesized(record: TranscriptLine): boolean {
+export function isCliSynthesized(record: TranscriptLine): boolean {
   return record.isApiErrorMessage === true || record.message?.model?.trim() === SYNTHETIC_MODEL;
 }
 

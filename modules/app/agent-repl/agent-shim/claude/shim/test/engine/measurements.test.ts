@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   MEASUREMENTS_INTERVAL_MS,
   Measurements,
+  MeasurementsCursor,
   EVENT_LOOP_DELAY_BUCKETS,
   EVENT_LOOP_SAMPLE_INTERVAL_MS,
   VENDOR_FIRST_OUTPUT_BUCKETS,
@@ -16,6 +17,7 @@ import {
   type Wait,
 } from "../../src/engine/measurements.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
+import { MAIN_AGENT } from "../../src/engine/vendor-spend.js";
 
 /** A heap reader answering one fixed reading. */
 const fixedHeap = (): { heapUsed: number; heapTotal: number; external: number } => ({ heapUsed: 10, heapTotal: 20, external: 3 });
@@ -353,5 +355,74 @@ describe("the event loop and the heap", () => {
     expect(h?.count).toBe(2n);
     expect(h?.sumSeconds).toBeCloseTo(0.02, 6);
     expect(ticks.intervals.every((ms) => ms === EVENT_LOOP_SAMPLE_INTERVAL_MS)).toBe(true);
+  });
+});
+
+describe("the vendor spend", () => {
+  /** Count one call into M's spend. */
+  function countCall(m: Measurements, id: string): void {
+    m.vendorSpend.countMessage(
+      { message: { id, model: "claude-opus-5-5", usage: { input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 } } },
+      MAIN_AGENT,
+      conversationv1.VendorCallCause.USER_PROMPT,
+      1_700_000_000_000,
+    );
+  }
+
+  it("states the counted calls in every frame's vendor_spend", () => {
+    // Arrange
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+    countCall(m, "m1");
+    // Act
+    const snap = m.snapshot();
+    // Assert
+    expect(snap.vendorSpend.map((e) => [e.model, e.calls])).toEqual([["claude-opus-5-5", 1n]]);
+  });
+
+  it("owes a frame once a call is counted, and none after the frame was taken", () => {
+    // Arrange
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+    const cursor = new MeasurementsCursor(m);
+    countCall(m, "m1");
+    // Act
+    const owed = cursor.owedSpend();
+    const again = cursor.owedSpend();
+    // Assert
+    expect(owed?.frame.case).toBe("measurements");
+    expect(again).toBeUndefined();
+  });
+
+  it("owes no frame for a latency, which waits for the tick", () => {
+    // Arrange
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+    const cursor = new MeasurementsCursor(m);
+    m.observeFirstOutput(1);
+    // Act
+    const owed = cursor.owedSpend();
+    // Assert
+    expect(owed).toBeUndefined();
+    expect(cursor.changed()?.frame.case).toBe("measurements");
+  });
+
+  it("sends no tick frame for spend a frame the stream owed already stated", async () => {
+    // Arrange
+    const feed = new Feed();
+    const ticks = new Ticks();
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+    const cursor = new MeasurementsCursor(m);
+    const stream = withMeasurements(feed, m, ticks.wait, cursor);
+    feed.push(frame("opening"));
+    await stream.next();
+    countCall(m, "m1");
+    expect(cursor.owedSpend()).toBeDefined();
+    const next = stream.next();
+    // Act: the tick comes after the owed frame took the figures.
+    ticks.tick();
+    await settled();
+    feed.push(frame("after"));
+    const following = await next;
+    // Assert
+    expect(nameOf(following.value as shimv1.WatchSessionResponse)).toBe("after");
+    await stream.return(undefined);
   });
 });

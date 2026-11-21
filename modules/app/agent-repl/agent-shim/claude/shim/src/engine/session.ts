@@ -221,7 +221,9 @@ import {
   PermissionGate,
   toVendorPermissionMode,
 } from "./permission-gate.js";
-import { Measurements, processHeap, sampleEventLoop, withMeasurements, type Wait } from "./measurements.js";
+import { Measurements, MeasurementsCursor, processHeap, sampleEventLoop, withMeasurements, type Wait } from "./measurements.js";
+import { causeOfOrigin, MAIN_AGENT, UNSTATED_SUBAGENT_TYPE } from "./vendor-spend.js";
+import { spawnsSubagent } from "../convert/tools/registry.js";
 import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
@@ -1998,6 +2000,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   ): Promise<shimv1.ReviseResponseResponse> {
     return reviseResponse(
       {
+        spend: measurements.vendorSpend,
         vendorSessionId: () => (started && identity !== undefined ? identity.vendorSessionId : undefined),
         cut: revisionCut,
         build: ({ parentSessionId, upTo }, prompt, abortController) =>
@@ -2231,6 +2234,59 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         "the mid-turn context refresh failed before it could push a reading",
       );
     });
+  }
+
+  /**
+   * COUNT THE VENDOR CALL A MESSAGE CARRIES (engine/vendor-spend.ts), BEFORE
+   * any frame it causes is pushed: the watch states the counted spend ahead of
+   * the next frame it carries (shim.v1.ShimMeasurements vendor_spend). A
+   * subagent's call is spent under the cause of the turn that spawned it, and
+   * a spawn this message makes is noted under its own call's cause.
+   */
+  function noteVendorCall(message: SdkMessage, attribution: KeepaliveAttribution, running: VendorTurn): void {
+    const ledger = measurements.vendorSpend;
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      ledger.noteCompaction();
+      return;
+    }
+    if (message.type !== "assistant") return;
+    const spawning = spawningCallOfMessage(message);
+    const turnCause = attribution.keepalive ? conversationv1.VendorCallCause.KEEPALIVE : spendCauseOf(running);
+    let agent = MAIN_AGENT;
+    let cause = turnCause;
+    if (spawning !== undefined) {
+      const spawn = ledger.spawnOf(spawning);
+      agent = { chain: spawning, agent: conversationv1.VendorCallAgent.SUBAGENT, subagentType: spawn?.subagentType ?? UNSTATED_SUBAGENT_TYPE };
+      cause = spawn?.cause ?? turnCause;
+    }
+    const retry = running.kind === "send" && ledger.retries(running.send.turnId);
+    ledger.countMessage(message as { message?: unknown; isApiErrorMessage?: unknown }, agent, cause, coldNowMs(), retry);
+    const content = (message.message as { content?: unknown } | undefined)?.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content as readonly { type?: unknown; id?: unknown; name?: unknown; input?: unknown }[]) {
+      if (block.type !== "tool_use" || typeof block.id !== "string" || !spawnsSubagent(String(block.name))) continue;
+      const type = (block.input as { subagent_type?: unknown } | undefined)?.subagent_type;
+      ledger.noteSpawn(block.id, typeof type === "string" && type !== "" ? type : undefined, cause);
+    }
+  }
+
+  /** The spend cause of the vendor turn RUNNING, as the turn was stated when it opened. */
+  function spendCauseOf(running: VendorTurn): conversationv1.VendorCallCause {
+    const ledger = measurements.vendorSpend;
+    switch (running.kind) {
+      case "send":
+        return ledger.causeOfTurn(running.send.turnId) ?? (running.send.keepalive ? conversationv1.VendorCallCause.KEEPALIVE : conversationv1.VendorCallCause.UNSTATED);
+      case "vendor":
+        return adopted?.spendCause ?? conversationv1.VendorCallCause.VENDOR_STARTED;
+      case "unknown":
+        for (const uuid of running.uuids) {
+          const cause = ledger.causeOfTurn(uuid);
+          if (cause !== undefined) return cause;
+        }
+        return conversationv1.VendorCallCause.UNSTATED;
+      case "unstated":
+        return open?.spendCause ?? adopted?.spendCause ?? conversationv1.VendorCallCause.UNSTATED;
+    }
   }
 
   async function probeContextUsage(): Promise<void> {
@@ -2513,6 +2569,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       noteIdentityFacts(message, attribution);
       noteVendorState(message);
       noteMainApiResponse(message, attribution, verdict.turn);
+      noteVendorCall(message, attribution, verdict.turn);
       noteRateLimitEvent(message);
       noteCacheRequest(message);
       settleStartOnBlockingHook(message);
@@ -2745,8 +2802,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // first waiting is the turn's own prompt, and any other waiting beside it
     // was merged into the same turn by the vendor.
     const remote = remotePromptsWaiting.shift();
-    const turn = mintAdoptedTurn(remote);
+    const turn = mintAdoptedTurn(remote === undefined ? conversationv1.VendorCallCause.VENDOR_STARTED : causeOfOrigin(conversationv1.PromptOrigin.REMOTE_CONTROL), remote);
     adopted = turn;
+    noteTurnSpend(turn);
     cadence?.pause();
     writeAdoptedPrompt(
       turn,
@@ -2796,11 +2854,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * `promptVendorUuid` answers verbatim, so a rollback finds the prompt by
    * its turn as it finds one the shim sent; any other is shim-minted.
    */
-  function mintAdoptedTurn(remote?: RemotePrompt): OpenTurn {
+  function mintAdoptedTurn(spendCause: conversationv1.VendorCallCause, remote?: RemotePrompt): OpenTurn {
     // NOT `newUuid`: that minter names SENDS, whose uuids the vendor echoes
     // back, and a turn id must never shift which uuid a send carries.
     const turn = create(conversationv1.TurnIdSchema, { value: remote?.uuid ?? `adopted-${randomUUID()}` });
-    return { id: turn, keepalive: false, adopted: true, startedAtMs: deps.nowMs() };
+    return { id: turn, keepalive: false, adopted: true, startedAtMs: deps.nowMs(), spendCause };
   }
 
   /**
@@ -2927,7 +2985,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function writeRemoteFolded(prompt: RemotePrompt, into: conversationv1.TurnId, running: VendorTurn): void {
     const agentId = requireIdentity().agentId;
     const row = create(conversationv1.AgentPromptSchema, {
-      id: mintAdoptedTurn().id,
+      id: mintAdoptedTurn(causeOfOrigin(conversationv1.PromptOrigin.REMOTE_CONTROL)).id,
       agent: agentId,
       said: prompt.said,
       origin: conversationv1.PromptOrigin.REMOTE_CONTROL,
@@ -3480,9 +3538,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * may go (engine/turn.ts), so every way out goes through here and the release
    * cannot be forgotten on any of them.
    */
+  /**
+   * THE TURN'S SPEND CAUSE, noted where it takes the send slot, is adopted, or
+   * joins the running turn: every vendor call answering it is counted under
+   * that cause (engine/vendor-spend.ts).
+   */
+  function noteTurnSpend(turn: OpenTurn): void {
+    measurements.vendorSpend.noteTurn(turn.id.value, turn.spendCause);
+  }
+
   function setOpen(turn: OpenTurn | undefined): void {
     const left = open;
     open = turn;
+    if (turn !== undefined) noteTurnSpend(turn);
     if (left === undefined || left === turn || !isShimTurn(left)) return;
     // THE KEEP-ALIVE'S REWIND WATCH ENDS WITH IT. The watch holds the send to
     // re-deliver if the vendor refuses the anchor; once the keep-alive has left
@@ -3642,6 +3710,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
     const said = prompt.said;
     if (said === undefined) throw new Error(`shim session: the join ${turn.id.value} carries no prompt`);
+    noteTurnSpend(turn);
     const join: Join = { turn, prompt, into };
     // Every waiting join waits on the send slot's turn, which is `into`: a
     // join behind another turn would be a slot this session never held.
@@ -5683,6 +5752,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           `resuming this conversation is a cold read of ${facts.contextTokens} tokens (${cold})`,
         );
       }
+      // A PAID GATE'S READ IS PAID BY THE SESSION'S FIRST REAL TURN, which
+      // its spend counts as the gate's answer (engine/vendor-spend.ts).
+      if (cold !== undefined && remediation?.remediation.case === "pay") measurements.vendorSpend.noteColdGatePaid();
       const remedy = applyColdRemediation(remediation, vendorSessionId);
       // THE HANDOVER FROM THE COMPACTION TO THE SESSION ITSELF. The
       // compaction's own work is over (SummarizeConversation): what remains
@@ -5968,6 +6040,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       deps.scheduler ?? REAL_SCHEDULER,
     );
     const cacheAnchor = startingCacheAnchor(facts, clearedTo, coldCompacted);
+    // THE MAIN LOOP'S LAST CALL IS THE TRANSCRIPT'S, so the session's first
+    // call is judged against the request it resumes after, not as a first call.
+    measurements.vendorSpend.seedMain(facts);
+    if (coldCompacted) measurements.vendorSpend.noteCompaction();
     // EVERY SESSION IS BORN HELD AND STAYS HELD (owner ruling, 2026-10-26):
     // the daemon drives every keep-alive (shim.v1.SendKeepalive), so the
     // cadence never schedules a beat of its own. Held, it projects the lapse
@@ -6397,6 +6473,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           ...(model === "" ? {} : { model }),
         }),
       compactionPrompt(scope),
+      { ledger: measurements.vendorSpend, cause: conversationv1.VendorCallCause.COMPACTION, nowMs: coldNowMs },
     );
     const failed = (error: string, retry: VendorStartRetry, stream: boolean, apiFailure?: conversationv1.ApiRequestFailed) =>
       ({ ok: false, error, retry, apiFailure, stream }) as const;
@@ -7166,7 +7243,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     });
     keepaliveCount += 1;
     const said = textSaid(keepalivePromptText(keepaliveCount));
-    const beat: OpenTurn = { id: turn, keepalive: true, startedAtMs: deps.nowMs() };
+    const beat: OpenTurn = { id: turn, keepalive: true, startedAtMs: deps.nowMs(), spendCause: conversationv1.VendorCallCause.KEEPALIVE };
     setOpen(beat);
     // THE SCOPE OPENS BEFORE THE SEND, so the vendor cannot answer a send the
     // shim does not yet recognize as its own.
@@ -7228,7 +7305,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const busy = mainAgentBusy();
     if (busy !== undefined) return { kind: "busy", detail: busy };
-    const turn = mintAdoptedTurn();
+    const turn = mintAdoptedTurn(source.spendCause);
     const uuid = promptUuid(turn.id.value);
     await yieldObligation(textSaid(text), false, uuid);
     // THE ROLLBACK AWAITED. A `StartTurn` that arrived meanwhile owns the next
@@ -7850,6 +7927,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         configDir: deps.env.configDir,
         cwd: deps.env.cwd,
         nowMs: deps.nowMs,
+        spend: measurements.vendorSpend,
         createQuery: (spec) =>
           deps.createQuery({
             profile: spec.profile,
@@ -8735,12 +8813,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave
     // the daemon unable to tell "not ready" from "refused".
-    watchSession: () =>
-      withMeasurements(
-        watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath, () => lastRollbackSettled),
+    watchSession: () => {
+      const cursor = new MeasurementsCursor(measurements);
+      return withMeasurements(
+        watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath, () => lastRollbackSettled, cursor),
         measurements,
         deps.measurementsWait,
-      ),
+        cursor,
+      );
+    },
     // EVERY CALL THAT NEEDS THE VENDOR WAITS FOR A ROLLBACK'S RESTART TO SETTLE
     // (`restartSettling`); reads and watches do not.
     setSessionModel: afterRestart(setSessionModel),
@@ -8807,9 +8888,16 @@ async function* watchSessionFrames(
   reannounce: () => Promise<conversationv1.SessionStarted | undefined>,
   standingDeath: () => conversationv1.SessionQueryDied | undefined,
   lastRollback: () => conversationv1.SessionRollbackSettled | undefined,
+  cursor: MeasurementsCursor,
 ): AsyncIterable<shimv1.WatchSessionResponse> {
   let opened = false;
   for await (const update of updates) {
+    // A COUNTED CALL IS STATED BEFORE THE NEXT FRAME (shim.v1.ShimMeasurements
+    // vendor_spend), once the opening frames, whose order is the readiness
+    // protocol, are out: whatever this update tells the daemon, a keep-alive's
+    // answer included, it learns with the spend that preceded it folded.
+    const owed = opened ? cursor.owedSpend() : undefined;
+    if (owed !== undefined) yield owed;
     yield create(shimv1.WatchSessionResponseSchema, {
       frame: { case: "update", value: update },
     });

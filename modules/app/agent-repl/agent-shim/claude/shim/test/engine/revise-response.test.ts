@@ -13,6 +13,7 @@ import { conversationv1, shimv1 } from "../../src/proto.js";
 import { reviseResponse, type ReviseResponseDeps, type RevisionCut } from "../../src/engine/revise-response.js";
 import type { PromptQueue } from "../../src/engine/prompt-queue.js";
 import { textSaid } from "../../src/engine/turn.js";
+import { VendorSpendLedger } from "../../src/engine/vendor-spend.js";
 import { errorResultMessage, initMessage, resultMessage, ScriptedQuery } from "./fakes.js";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 
@@ -34,6 +35,7 @@ function harness(
     built,
     written,
     deps: {
+      spend: new VendorSpendLedger(),
       vendorSessionId: () => vendorSessionId,
       cut: () => options.cut ?? { kind: "cut", upTo: "record-9" },
       build: (spec, prompt, controller) => {

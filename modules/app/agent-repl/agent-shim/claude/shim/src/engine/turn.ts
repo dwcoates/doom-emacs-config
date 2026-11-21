@@ -79,6 +79,7 @@ import type { ForegroundUnitTable } from "./foreground.js";
 import type { SessionIdentity } from "./identity.js";
 import type { QueryLike } from "../sdk/types.js";
 import type { TranscriptHolds } from "./rollback.js";
+import { causeOfOrigin } from "./vendor-spend.js";
 
 const LOGGER = bindLog({ component: "shim-engine-turn", operation: "shim.engine.turn" });
 
@@ -97,6 +98,12 @@ export interface OpenTurn {
   /** True when no user attends this turn: its prompt's origin is a merge remediation's. */
   readonly unattended?: boolean;
   readonly startedAtMs: number;
+  /**
+   * What the vendor calls answering this turn are spent under
+   * (conversation.v1.VendorCallCause): its prompt origin's declared cause, or
+   * the shim's own reason for a turn it opened itself.
+   */
+  readonly spendCause: conversationv1.VendorCallCause;
 }
 
 /**
@@ -724,6 +731,7 @@ export class TurnEngine {
       keepalive: false,
       unattended: UNATTENDED_ORIGINS.has(request.origin),
       startedAtMs: this.session.nowMs(),
+      spendCause: causeOfOrigin(request.origin),
     };
     this.session.setOpenTurn(opened);
     try {
@@ -783,7 +791,7 @@ export class TurnEngine {
       );
     }
     const prompt = buildPrompt(turn, agentId, said, request.origin);
-    const joining: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };
+    const joining: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs(), spendCause: causeOfOrigin(request.origin) };
     let admitted: Promise<void>;
     try {
       admitted = this.session.joinRunningTurn(prompt, joining, running, request.sentBy);
