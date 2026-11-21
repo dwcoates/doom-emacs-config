@@ -64,7 +64,9 @@ func (k *Keeper) answered(ws ids.WorkspaceID, stated *conversationv1.SessionCach
 		log.Debug(opDrive, "a lapse restated from the anchor before the keep-alive; its answer is still awaited", fields)
 		return
 	}
-	log.Info(opDrive, "the vendor answered the keep-alive and the cache is re-anchored", fields)
+	log.Info(opDrive, k.answerWords(ws,
+		"the vendor answered the keep-alive and the cache is re-anchored; its session is stood down until the next one",
+		"the vendor answered the keep-alive and the cache is re-anchored; its session stays up"), fields)
 	k.settleAnswer(ws, sent, answeredAck(lapsesAt))
 }
 
@@ -87,7 +89,9 @@ func (k *Keeper) answeredFailed(ws ids.WorkspaceID, failed *conversationv1.Sessi
 		})
 		return
 	}
-	k.deps.Log.Global().Info(opDrive, "the keep-alive's request failed, and the cache lapses at its old anchor", dlog.Context{
+	k.deps.Log.Global().Info(opDrive, k.answerWords(ws,
+		"the keep-alive's request failed; its session is stood down, and the cache lapses at its old anchor",
+		"the keep-alive's request failed; its session stays up, and the cache lapses at its old anchor"), dlog.Context{
 		"workspace": string(ws), "trigger": k.triggerOf(ws), "sent": sent, "detail": failed.GetDetail(),
 	})
 	k.settleAnswer(ws, sent, failedAck(failed.GetDetail()))
@@ -104,7 +108,9 @@ func (k *Keeper) answersDue() {
 		sent := k.answering[ws]
 		// warn: a keep-alive the vendor never answered leaves the cache to
 		// lapse at its old anchor, and the next restore may meet a cold gate.
-		k.deps.Log.Global().Warn(opDrive, "the keep-alive went unanswered past its bound, and the cache lapses at its old anchor",
+		k.deps.Log.Global().Warn(opDrive, k.answerWords(ws,
+			"the keep-alive went unanswered past its bound; its session is stood down, and the cache lapses at its old anchor",
+			"the keep-alive went unanswered past its bound; its session stays up, and the cache lapses at its old anchor"),
 			dlog.Context{"workspace": string(ws), "trigger": k.triggerOf(ws), "sent": sent, "bound": AnswerBound.String()})
 		k.settleAnswer(ws, sent, nil)
 	}
@@ -123,8 +129,15 @@ func (k *Keeper) settleAnswer(ws ids.WorkspaceID, sent time.Time, ack *agentrepl
 	if !standDown {
 		return
 	}
-	k.deps.Log.Global().Info(opDrive, "the keep-alive is settled; its session is stood down until the next one", dlog.Context{
-		"workspace": string(ws), "trigger": k.triggerOf(ws), "sent": sent,
-	})
 	k.deps.CycleDown(ws, sent, k.stoodDownThen(ws))
+}
+
+// answerWords is the record of WS's settled answer: DOWN when its session is
+// stood down after it, UP when the wait keeps it up (a keep-live on a session
+// within its grace).
+func (k *Keeper) answerWords(ws ids.WorkspaceID, down, up string) string {
+	if k.answerKeepsUp[ws] {
+		return up
+	}
+	return down
 }
