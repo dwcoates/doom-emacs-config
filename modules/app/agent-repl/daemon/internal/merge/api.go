@@ -828,10 +828,14 @@ type Deps struct {
 	AtColdGate func(ws ids.WorkspaceID) bool
 	// CompactColdGate answers the cold gate standing on the workspace by a
 	// compaction of its whole conversation with the gate's default
-	// summarizer, keeping the prompts held at the gate. The session it
-	// brings up retires the gate, which resumes the workspace's merge
-	// (ColdGateRetired). A workspace with no gate standing is left as it is.
-	CompactColdGate func(ctx context.Context, ws ids.WorkspaceID) error
+	// summarizer, keeping the prompts held at the gate, and answers only
+	// once the answer's re-open has settled: true when the session came up
+	// (which retires the gate and resumes the workspace's merge,
+	// ColdGateRetired), false with no error when no gate stood or the
+	// re-open was abandoned, and the failure otherwise. The re-open's every
+	// step runs under its own measured bound, so a slow compaction is never
+	// a failure.
+	CompactColdGate func(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// ParkQueued asks for the park of a workspace's session the moment its
 	// own branch's merge is put in line in REPO under LEDGER
 	// (drain.Controller.MergeQueuedDown; parkQueued). It returns at once.

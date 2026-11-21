@@ -251,13 +251,13 @@ func (f *verbsForwarder) answerDeployCheckColdGate(ctx context.Context, ws ids.W
 }
 
 // compactRequeuedMergeColdGate answers the gate standing on a workspace whose
-// merge was requeued by a compaction, for the merge queue. A failure is the
-// verb's to record; one asked before the verbs are bound is answered as an
+// merge was requeued by a compaction, for the merge queue, once the answer's
+// re-open has settled. A failure is the queue's to record; one asked before the verbs are bound is answered as an
 // error.
-func (f *verbsForwarder) compactRequeuedMergeColdGate(ctx context.Context, ws ids.WorkspaceID) error {
+func (f *verbsForwarder) compactRequeuedMergeColdGate(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
 	verbs, err := f.bound("a requeued merge's cold gate was answered by a compaction")
 	if err != nil {
-		return err
+		return false, err
 	}
 	return verbs.CompactRequeuedMergeColdGate(ctx, ws)
 }

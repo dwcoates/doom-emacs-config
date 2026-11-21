@@ -227,6 +227,14 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 // keeps warm, never one the cache keeper stands down on arrival. A show that
 // cannot be recorded refuses the answer, and the gate stands again.
 func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
+	return v.answerColdGate(ctx, ws, answer, nil)
+}
+
+// answerColdGate is AnswerColdGate, SETTLED (when given) told how the
+// answer's detached re-open ended once it settles (coldGateSettled). An
+// answer refused before its re-open starts answers its error and never
+// calls SETTLED.
+func (v *verbs) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest, settled func(ColdGateAnswerSettled)) error {
 	record, log, err := v.owned(ctx, "AnswerColdGate", ws)
 	if err != nil {
 		return err
@@ -295,7 +303,10 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 			v.deps.Footer.SetColdGateAnswer(ws, &footer.ColdGateAnswer{Choice: choice, Progress: progress})
 		},
 	}, func(runCtx context.Context, err error) {
-		v.coldGateSettled(runCtx, log, ws, served.VendorSessionID, choice, err)
+		outcome := v.coldGateSettled(runCtx, log, ws, served.VendorSessionID, choice, err)
+		if settled != nil {
+			settled(outcome)
+		}
 	})
 	return nil
 }
@@ -340,7 +351,7 @@ func (v *verbs) reraiseRefusedColdGate(log dlog.Logger, ws ids.WorkspaceID, vend
 // that outran its bound fails with context.DeadlineExceeded too, and on
 // 2026-10-20 that deadline was read as the daemon standing down: no fault, no
 // gate, and a workspace left neither parked nor up, with nothing to retry it.
-func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice string, err error) {
+func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice string, err error) ColdGateAnswerSettled {
 	switch {
 	case err == nil:
 		// THE GATE RETIRES BEFORE THE ANSWER'S LINE DOES. With the answer's
@@ -355,11 +366,13 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 		v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
 		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerResumed)
 		log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
+		return ColdGateAnswerSettled{Outcome: GateAnswerResumed}
 	case ctx.Err() != nil:
 		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerAbandoned)
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		log.Info(opColdGate, "the answered cold gate's re-open was abandoned as the daemon stood down",
 			dlog.Context{"choice": choice, "cause": err.Error()})
+		return ColdGateAnswerSettled{Outcome: GateAnswerAbandoned, Err: err}
 	case errors.Is(err, ErrShimTaken):
 		// A RE-OPEN WHOSE SHIM WAS TAKEN FROM IT (a handover's transfer, or a
 		// kill) ended because the workspace left this daemon's hands, as a
@@ -369,6 +382,7 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		log.Info(opColdGate, "the answered cold gate's re-open ended when its shim was taken from it (handed to a successor, or stopped)",
 			dlog.Context{"choice": choice, "cause": err.Error()})
+		return ColdGateAnswerSettled{Outcome: GateAnswerAbandoned, Err: err}
 	default:
 		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerFailed)
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
@@ -381,7 +395,16 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 			log.Error(opColdGate, "the failed re-open's gate could not stand again: its cold facts are gone",
 				dlog.Context{"choice": choice})
 		}
+		return ColdGateAnswerSettled{Outcome: GateAnswerFailed, Err: err}
 	}
+}
+
+// ColdGateAnswerSettled is how an answered cold gate's re-open ended: its
+// Outcome (GateAnswerResumed, GateAnswerAbandoned or GateAnswerFailed), and
+// Err the cause of any but a resume.
+type ColdGateAnswerSettled struct {
+	Outcome string
+	Err     error
 }
 
 // spendingColdGate publishes one line of the act a gate's answer is spending.

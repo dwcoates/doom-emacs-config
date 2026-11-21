@@ -3718,6 +3718,12 @@ type harness struct {
 	// asked to answer, in order, and compactGateErr what it answers.
 	gatesCompacted []ids.WorkspaceID
 	compactGateErr error
+	// compactGateAbandoned makes CompactColdGate answer that the answer's
+	// re-open was abandoned (a stand-down), with no session up.
+	compactGateAbandoned bool
+	// duringCompactGate, when set, runs inside CompactColdGate, outside the
+	// harness's lock: what happens while an answer is under way.
+	duringCompactGate func(ws ids.WorkspaceID)
 	// detached is the detached-merge service: the fork and the handbacks.
 	detached *fakeDetached
 	// names is the async merge name check.
@@ -4257,11 +4263,15 @@ func (h *harness) deps() Deps {
 			defer h.mu.Unlock()
 			h.parks = append(h.parks, parkAsk{ws: ws, repo: repo, ledger: ledger})
 		},
-		CompactColdGate: func(_ context.Context, ws ids.WorkspaceID) error {
+		CompactColdGate: func(_ context.Context, ws ids.WorkspaceID) (bool, error) {
 			h.mu.Lock()
-			defer h.mu.Unlock()
 			h.gatesCompacted = append(h.gatesCompacted, ws)
-			return h.compactGateErr
+			during, err, abandoned := h.duringCompactGate, h.compactGateErr, h.compactGateAbandoned
+			h.mu.Unlock()
+			if during != nil {
+				during(ws)
+			}
+			return err == nil && !abandoned, err
 		},
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,

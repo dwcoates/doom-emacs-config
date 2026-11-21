@@ -248,24 +248,28 @@ func TestRequeueRefusals(t *testing.T) {
 
 // TestRequeueOfAWorkspaceParkedAtItsColdGate pins the owner request of
 // 2026-11-20: a requeue at a cold gate goes in line skipped and answers the
-// gate by a compaction, where it was refused cold_gated.
+// gate by a compaction, where it was refused cold_gated; and the ruling of
+// 2026-11-21: that answer is made once, and its failure takes the merge off
+// its queue as failed.
 func TestRequeueOfAWorkspaceParkedAtItsColdGate(t *testing.T) {
 	tests := []struct {
 		name       string
 		gated      bool
 		compactErr error
+		wantInLine bool
 		wantMarked bool
 		wantAsked  int
 		wantRecord string
+		wantOp     string
 		wantLevel  string
 	}{
-		{name: "a parked workspace's merge goes in line skipped and its gate is compacted", gated: true, wantMarked: true, wantAsked: 1,
-			wantLevel:  dlog.LevelInfo,
-			wantRecord: "the requeued merge's workspace was parked at its cold gate; the gate is answered by a compaction, and the merge resumes at its place once the session is up"},
-		{name: "a gate that cannot be compacted leaves the merge in line, skipped", gated: true, compactErr: errors.New("no session"), wantMarked: true, wantAsked: 1,
-			wantLevel:  dlog.LevelError,
-			wantRecord: "the requeued merge's cold gate could not be answered by a compaction; the merge waits in line, skipped, until the gate is answered"},
-		{name: "a workspace at no gate is requeued unmarked and nothing is compacted", gated: false},
+		{name: "a parked workspace's merge goes in line skipped and its gate is compacted", gated: true, wantInLine: true, wantMarked: true, wantAsked: 1,
+			wantLevel: dlog.LevelInfo, wantOp: "daemon.merge.requeue",
+			wantRecord: "the requeued merge's workspace was parked at its cold gate; the gate is answered once by a compaction, and the merge resumes at its place once the session is up"},
+		{name: "a gate that cannot be compacted takes the merge off its queue as failed", gated: true, compactErr: errors.New("no session"), wantAsked: 1,
+			wantLevel: dlog.LevelError, wantOp: opColdGate,
+			wantRecord: "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge leaves its queue as failed, and the gate stands for the user"},
+		{name: "a workspace at no gate is requeued unmarked and nothing is compacted", gated: false, wantInLine: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -285,8 +289,8 @@ func TestRequeueOfAWorkspaceParkedAtItsColdGate(t *testing.T) {
 				t.Fatalf("Requeue = %v, want it accepted", err)
 			}
 			entry, ok := h.entryOf(theWorkspace)
-			if !ok || entry.ColdGated != tt.wantMarked || (tt.wantMarked && entry.State != wsm.MergeQueued) {
-				t.Fatalf("entry %+v (in line %v), want it in line with cold gate mark %v, waiting when marked", entry, ok, tt.wantMarked)
+			if ok != tt.wantInLine || (ok && (entry.ColdGated != tt.wantMarked || (tt.wantMarked && entry.State != wsm.MergeQueued))) {
+				t.Fatalf("entry %+v (in line %v), want in line %v with cold gate mark %v, waiting when marked", entry, ok, tt.wantInLine, tt.wantMarked)
 			}
 			h.mu.Lock()
 			asked := len(h.gatesCompacted)
@@ -297,9 +301,12 @@ func TestRequeueOfAWorkspaceParkedAtItsColdGate(t *testing.T) {
 			if tt.wantRecord == "" {
 				return
 			}
-			record, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.merge.requeue", Message: tt.wantRecord})
-			if !found || record.Context["workspace"] != string(theWorkspace) || record.Context["cold_gated"] != true {
-				t.Fatalf("records = %v, want %q with the workspace and its gate", h.logs.Records(), tt.wantRecord)
+			record, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: tt.wantOp, Message: tt.wantRecord})
+			if !found || record.Context["workspace"] != string(theWorkspace) {
+				t.Fatalf("records = %v, want %q with the workspace", h.logs.Records(), tt.wantRecord)
+			}
+			if tt.compactErr == nil && record.Context["cold_gated"] != true {
+				t.Fatalf("record context %v, want the gate", record.Context)
 			}
 			if tt.compactErr != nil && record.Context["error"] != tt.compactErr.Error() {
 				t.Fatalf("record context %v, want the cause %q", record.Context, tt.compactErr)

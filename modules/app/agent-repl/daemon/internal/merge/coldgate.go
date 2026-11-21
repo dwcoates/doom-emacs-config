@@ -29,15 +29,16 @@ import (
 //     passes the gate at once with the compaction pass-gate makes
 //     (Deps.CompactColdGate), recorded under opColdGate. The merge stays
 //     marked and skipped for as long as the compaction takes, and the
-//     session it brings up retires the gate. A compaction that fails is an
-//     ERROR and leaves the merge marked, skipped, with the gate standing.
-//     THE QUEUE ANSWERS A GATE AT MOST ONCE: a compaction whose re-open
-//     fails stands the gate again (edgeStoodAfterFailedAnswer), and that
-//     stand is never answered by the queue, which once answered, failed and
-//     stood the same gate every 10s for 40 minutes (2026-11-21). The merge
-//     stays marked and skipped, and the gate stands for the user, said at
-//     ERROR. A daemon that raises the gate again from its record later
-//     answers it once more: a new build is a new attempt.
+//     session it brings up retires the gate. The answer is made once per
+//     place in line: a compaction that fails is an ERROR, and the merge
+//     leaves its queue as failed with the gate standing for the user
+//     (answerQueuedColdGate). THE QUEUE ANSWERS A GATE AT MOST ONCE: a
+//     failed answer's re-open stands the gate again
+//     (edgeStoodAfterFailedAnswer), and that stand is never answered by the
+//     queue, which once answered, failed and stood the same gate every 10s
+//     for 40 minutes (2026-11-21). A stand that arrives while the answer
+//     runs is left to the answer's own record, and a stand on a merge that
+//     waits in line says at ERROR that the gate stands for the user.
 //   - PASSING THE GATE BY AN ANSWER RESUMES IT THERE. Pay, clear and compact
 //     bring a session up, which retires the gate's record and with it the
 //     mark (wsm.ClearMergeColdGated); a merge the merges worked on meanwhile
@@ -224,33 +225,18 @@ func (o *orchestrator) coldGateRaised(ctx context.Context, ws ids.WorkspaceID) b
 }
 
 // compactQueuedColdGate answers the cold gate standing on WS, whose merge
-// waits in line skipped at it, with the compaction pass-gate makes
-// (Deps.CompactColdGate). The session the compaction brings up retires the
-// gate, which resumes the merge (ColdGateRetired). A compaction that fails is
-// recorded at ERROR and leaves the merge marked and skipped, the gate
-// standing for the user. The compaction runs off the edge worker, so the
-// edges behind it are not held for as long as it takes.
+// waits in line skipped at it (answerQueuedColdGate). The answer runs off
+// the edge worker, so the edges behind it are not held for as long as it
+// takes.
 func (o *orchestrator) compactQueuedColdGate(ctx context.Context, ws ids.WorkspaceID) {
-	compact := func() {
-		log := o.log(ctx, ws)
-		fields := dlog.Context{"workspace": string(ws)}
-		if repo, err := o.queueOf(ctx, ws); err == nil {
-			fields["repo"] = string(repo)
-		}
-		if err := o.deps.CompactColdGate(ctx, ws); err != nil {
-			log.Error(opColdGate, "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge stays skipped until the gate is answered", withField(fields, "error", err.Error()))
-			return
-		}
-		log.Info(opColdGate, "the cold gate of a queued merge's workspace was answered by a compaction; the merge resumes at its place once the session is up", fields)
-	}
 	if !o.async {
-		compact()
+		o.answerQueuedColdGate(ctx, ws)
 		return
 	}
 	o.live.Add(1)
 	inflight.Standing(func() {
 		defer o.live.Done()
-		compact()
+		o.answerQueuedColdGate(ctx, ws)
 	})
 }
 
@@ -264,7 +250,76 @@ func (o *orchestrator) leaveFailedColdGateStanding(ctx context.Context, ws ids.W
 	if repo, err := o.queueOf(ctx, ws); err == nil {
 		fields["repo"] = string(repo)
 	}
+	// A stand that arrives while the queue's answer to this gate still runs
+	// is that answer's own failed re-open: the answer records it once.
+	o.coldMu.Lock()
+	answering := o.coldAnswering[ws]
+	o.coldMu.Unlock()
+	if answering {
+		o.log(ctx, ws).Debug(opColdGate, "the cold gate stood again while its answer runs; the answer records its failure", fields)
+		return
+	}
 	o.log(ctx, ws).Error(opColdGate, "an answer to the cold gate of a queued merge's workspace failed and the gate stands again; the queue does not answer it again, and the merge stays skipped until the user answers it", fields)
+}
+
+// answerQueuedColdGate is the queue's ONE answer to the cold gate standing
+// on WS, whose merge waits in line skipped at it: the compaction pass-gate
+// makes (Deps.CompactColdGate), waited on until its re-open settles. The
+// session it brings up retires the gate, which resumes the merge
+// (ColdGateRetired).
+//
+// THE ANSWER IS SPENT WITH THE MERGE'S PLACE IN LINE (owner ruling,
+// 2026-11-21: a requeued merge's gate answer once retried a failed bring-up
+// every ten seconds for most of an hour). A failed answer raises the gate
+// again, and a gate raised on a merge in line is answered, so a failure that
+// left the merge in line would be answered again forever. So:
+//
+//   - WS IS CLAIMED for as long as its answer runs, compaction and re-open
+//     included (coldAnswering): a gate raised meanwhile, the failed
+//     re-open's own included, is not answered.
+//   - A FAILURE IS FINAL. It is recorded once at ERROR, and the merge leaves
+//     its queue as a failed merge (CauseColdGateAnswerFailed), its bubble and
+//     its requester told, BEFORE the claim is let go: every raise after it
+//     finds no merge in line to answer. The gate stands for the user, and
+//     only a requeue puts the merge back in line, with one answer of its own.
+func (o *orchestrator) answerQueuedColdGate(ctx context.Context, ws ids.WorkspaceID) {
+	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws)}
+	if repo, err := o.queueOf(ctx, ws); err == nil {
+		fields["repo"] = string(repo)
+	}
+	o.mu.Lock()
+	fields["ledger"] = string(o.ledgerOf[ws])
+	o.mu.Unlock()
+	o.coldMu.Lock()
+	if o.coldAnswering[ws] {
+		o.coldMu.Unlock()
+		log.Debug(opColdGate, "the cold gate of a queued merge's workspace is being answered already; the gate raised again is not answered twice", fields)
+		return
+	}
+	o.coldAnswering[ws] = true
+	o.coldMu.Unlock()
+	defer func() {
+		o.coldMu.Lock()
+		delete(o.coldAnswering, ws)
+		o.coldMu.Unlock()
+	}()
+	// THE ATTEMPT ENDS WHEN ITS RE-OPEN SETTLES (Deps.CompactColdGate), never
+	// at a deadline of the queue's own: a compaction still running is no
+	// failure, and the claim stands for as long as it runs.
+	up, err := o.deps.CompactColdGate(ctx, ws)
+	if err == nil && up {
+		log.Info(opColdGate, "the cold gate of a queued merge's workspace was answered by a compaction; the session is up, and the merge resumes at its place", fields)
+		return
+	}
+	if err == nil {
+		log.Info(opColdGate, "the cold gate of a queued merge's workspace was not answered: no gate stood, or the answer's re-open was abandoned; the merge stays at its place", fields)
+		return
+	}
+	log.Error(opColdGate, "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge leaves its queue as failed, and the gate stands for the user", withField(fields, "error", err.Error()))
+	if err := o.dequeue(ctx, ws, CauseColdGateAnswerFailed); err != nil {
+		log.Error(opColdGate, "could not take the merge whose cold gate could not be answered off its queue; it stays skipped at its place", withField(fields, "error", err.Error()))
+	}
 }
 
 // coldGateRetired resumes WS's merge where it stands in line once its gate was

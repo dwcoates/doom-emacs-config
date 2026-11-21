@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -429,15 +430,24 @@ func TestAFamilyShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
 
 // TestCompactRequeuedMergeColdGate pins the owner request of 2026-11-20: a
 // requeued merge's cold gate is answered by a compaction of the whole
-// conversation with the gate's default summarizer, keeping the held prompts.
+// conversation with the gate's default summarizer, keeping the held prompts;
+// and the ruling of 2026-11-21: the verb answers how the answer's re-open
+// settled, so the queue spends its one answer only on an attempt that ended
+// in failure.
 func TestCompactRequeuedMergeColdGate(t *testing.T) {
 	tests := []struct {
 		name        string
 		gate        bool
+		resumeErr   error
+		standDown   bool
+		wantUp      bool
+		wantErr     bool
 		wantResumes int
 	}{
-		{name: "a standing gate is answered by a compaction that keeps the held prompts", gate: true, wantResumes: 1},
+		{name: "a standing gate is answered by a compaction that keeps the held prompts", gate: true, wantUp: true, wantResumes: 1},
 		{name: "a workspace with no gate standing is left as it is"},
+		{name: "a re-open that fails answers its failure", gate: true, resumeErr: errors.New("the shim never bound its socket"), wantErr: true},
+		{name: "a re-open the daemon's stand-down cut is no failure", gate: true, resumeErr: context.Canceled, standDown: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -448,15 +458,24 @@ func TestCompactRequeuedMergeColdGate(t *testing.T) {
 				served, _ := coldCompactMenu()
 				f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1", Compact: served}
 			}
+			f.fleet.resumeErr = tt.resumeErr
+			if tt.standDown {
+				ended, cancel := context.WithCancel(context.Background())
+				cancel()
+				f.fleet.resumeRunCtx = ended
+			}
 
 			// Act
-			err := f.verbs.CompactRequeuedMergeColdGate(context.Background(), "w1")
+			up, err := f.verbs.CompactRequeuedMergeColdGate(context.Background(), "w1")
 
 			// Assert
-			if err != nil || len(f.fleet.resumes) != tt.wantResumes {
-				t.Fatalf("CompactRequeuedMergeColdGate = %v, %d resumes; want %d", err, len(f.fleet.resumes), tt.wantResumes)
+			if up != tt.wantUp || (err != nil) != tt.wantErr || len(f.fleet.resumes) != tt.wantResumes {
+				t.Fatalf("CompactRequeuedMergeColdGate = %v, %v, %d resumes; want up %v, error %v, %d resumes", up, err, len(f.fleet.resumes), tt.wantUp, tt.wantErr, tt.wantResumes)
 			}
-			if !tt.gate {
+			if tt.wantErr && (!errors.Is(err, tt.resumeErr) || !slices.Equal(f.cards.reraised, []string{"vendor-1"})) {
+				t.Fatalf("CompactRequeuedMergeColdGate = %v, gates stood again %v; want the re-open's cause %v and the gate standing for the user", err, f.cards.reraised, tt.resumeErr)
+			}
+			if tt.wantResumes == 0 {
 				return
 			}
 			compact := f.fleet.resumes[0].Remediation.GetCompact()
@@ -467,6 +486,42 @@ func TestCompactRequeuedMergeColdGate(t *testing.T) {
 				t.Fatalf("gate fates = %v, want the held prompts kept", f.queue.gateFates)
 			}
 		})
+	}
+}
+
+// TestCompactRequeuedMergeColdGateWaitsOutASlowCompaction pins the ruling of
+// 2026-11-21: a compaction still running is never judged failed, so the verb
+// answers only once the re-open settles, and a slow healthy one answers up.
+func TestCompactRequeuedMergeColdGateWaitsOutASlowCompaction(t *testing.T) {
+	// Arrange: the re-open, compaction included, is held until released.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	served, _ := coldCompactMenu()
+	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1", Compact: served}
+	f.fleet.resumeHold = make(chan struct{})
+	f.fleet.resumeEntered = make(chan struct{})
+	type answer struct {
+		up  bool
+		err error
+	}
+	answered := make(chan answer, 1)
+
+	// Act
+	go func() {
+		up, err := f.verbs.CompactRequeuedMergeColdGate(context.Background(), "w1")
+		answered <- answer{up, err}
+	}()
+
+	// Assert
+	<-f.fleet.resumeEntered
+	select {
+	case got := <-answered:
+		t.Fatalf("CompactRequeuedMergeColdGate = %v, %v while the compaction still runs; want it to wait", got.up, got.err)
+	default:
+	}
+	close(f.fleet.resumeHold)
+	if got := <-answered; !got.up || got.err != nil {
+		t.Fatalf("CompactRequeuedMergeColdGate = %v, %v; want the slow compaction answered up", got.up, got.err)
 	}
 }
 

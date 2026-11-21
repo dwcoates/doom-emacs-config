@@ -3153,6 +3153,9 @@ type fakeSessions struct {
 	// reported. A nil resumeHold runs the re-open inline.
 	resumeHold    chan struct{}
 	resumeSettled chan struct{}
+	// resumeEntered, when set, is closed once a held re-open was asked for,
+	// before it waits on resumeHold.
+	resumeEntered chan struct{}
 	// resumeRunCtx is the context a detached re-open reports it ran under;
 	// nil reports a live one.
 	resumeRunCtx context.Context
@@ -3334,6 +3337,9 @@ func (s *fakeSessions) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume,
 		return
 	}
 	hold, settled := s.resumeHold, s.resumeSettled
+	if s.resumeEntered != nil {
+		close(s.resumeEntered)
+	}
 	go func() {
 		<-hold
 		run()
