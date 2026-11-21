@@ -95,3 +95,14 @@ func (n *Notifier) Forget(reason string) {
 	n.heldMu.Unlock()
 	n.deps.Log.Debug(opClaim, "let go of every held banner", dlog.Context{"reason": reason, "held": count})
 }
+
+// Drop lets go of WS's held banner, when one is held: the workspace was
+// closed or forgotten, and a banner steering a later focus gain to it would
+// send the user to a workspace that is gone. reason is why, for the record.
+func (n *Notifier) Drop(ws ids.WorkspaceID, reason string) {
+	n.heldMu.Lock()
+	_, held := n.held.banners[ws]
+	delete(n.held.banners, ws)
+	n.heldMu.Unlock()
+	n.deps.Log.Debug(opClaim, "let go of a workspace's held banner", dlog.Context{"workspace": string(ws), "reason": reason, "held": held})
+}

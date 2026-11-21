@@ -218,3 +218,34 @@ func TestAClickedBannerLetsGoOfEveryHeldBannerBeforeAskingEmacs(t *testing.T) {
 		t.Fatal("the click let go of nothing on the record")
 	}
 }
+
+func TestDropLetsGoOfOnlyThatWorkspacesBanner(t *testing.T) {
+	cases := []struct {
+		name string
+		drop ids.WorkspaceID
+		want Claim
+	}{
+		{name: "the dropped workspace's banner is never claimed", drop: "ws2", want: Claim{Held: true, Target: claimTarget("ws1")}},
+		{name: "a workspace with no banner held changes nothing", drop: "ws3", want: Claim{Held: true, Target: claimTarget("ws2")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := heldFixture(t)
+			postSettled(f, "ws1")
+			postSettled(f, "ws2")
+
+			// Act
+			f.notifier.Drop(tc.drop, "the workspace was forgotten")
+
+			// Assert
+			if got := f.notifier.Claim(); got != tc.want {
+				t.Fatalf("Claim = %+v, want %+v", got, tc.want)
+			}
+			r, ok := hasRecord(f.log, "debug", "let go of a workspace's held banner")
+			if !ok || r.Context["workspace"] != string(tc.drop) || r.Context["reason"] != "the workspace was forgotten" {
+				t.Fatalf("record = %+v (found=%v), want the drop recorded with its workspace and reason", r, ok)
+			}
+		})
+	}
+}
