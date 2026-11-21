@@ -146,7 +146,21 @@ type SubmitPromptRequest struct {
 	// Only meaningful with `sent_by`; it lifts the fan-out cap
 	// (SubmitPromptError.fan_out_refused). An agent sets it only when the user
 	// typed the send themselves or explicitly asked for it.
-	AsUser        bool `protobuf:"varint,10,opt,name=as_user,json=asUser,proto3" json:"as_user,omitempty"`
+	AsUser bool `protobuf:"varint,10,opt,name=as_user,json=asUser,proto3" json:"as_user,omitempty"`
+	// A SLACK THREAD HANDED TO THE RECIPIENT with this prompt: the Slack
+	// emoji-ack intake forwarding a reaction to an open workspace on the same
+	// task instead of creating one. UNSET for every other prompt. Only
+	// meaningful with `sent_by` (an agent-sent prompt); set without it, or
+	// beside `feed`, it is refused as InvalidArgument. On acceptance the daemon
+	// records the thread on the recipient (once per thread), stores it among
+	// the recipient's links as a reference labelled "Forwarded Slack thread",
+	// and appends to the prompt its built-in directive asking the recipient to
+	// post one brief reply in the thread naming itself, so the thread learns
+	// which workspace took the reaction. That reply is the ONLY post a
+	// forwarded thread gets: the pull request's announcement and the
+	// `:merged:` reaction stay with the thread the workspace was created for
+	// (CreateWorkspaceRequest.slack_origin).
+	SlackForward  *SubmitPromptSlackForward `protobuf:"bytes,11,opt,name=slack_forward,json=slackForward,proto3,oneof" json:"slack_forward,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -244,6 +258,64 @@ func (x *SubmitPromptRequest) GetAsUser() bool {
 	return false
 }
 
+func (x *SubmitPromptRequest) GetSlackForward() *SubmitPromptSlackForward {
+	if x != nil {
+		return x.SlackForward
+	}
+	return nil
+}
+
+// The Slack thread a prompt hands its recipient (SubmitPromptRequest
+// .slack_forward).
+type SubmitPromptSlackForward struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The reacted message's Slack link, as Slack's "Copy link" gives it: an
+	// https `<workspace>.slack.com/archives/<channel>/p<timestamp>` link, with
+	// `thread_ts` when the message is a reply. A link that is not one is
+	// refused as InvalidArgument, the same reading
+	// CreateWorkspaceSlackOrigin.thread_url gets.
+	ThreadUrl     string `protobuf:"bytes,1,opt,name=thread_url,json=threadUrl,proto3" json:"thread_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitPromptSlackForward) Reset() {
+	*x = SubmitPromptSlackForward{}
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitPromptSlackForward) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitPromptSlackForward) ProtoMessage() {}
+
+func (x *SubmitPromptSlackForward) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitPromptSlackForward.ProtoReflect.Descriptor instead.
+func (*SubmitPromptSlackForward) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SubmitPromptSlackForward) GetThreadUrl() string {
+	if x != nil {
+		return x.ThreadUrl
+	}
+	return ""
+}
+
 // THE ARM IS THE OUTCOME.
 type SubmitPromptResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -258,7 +330,7 @@ type SubmitPromptResponse struct {
 
 func (x *SubmitPromptResponse) Reset() {
 	*x = SubmitPromptResponse{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -270,7 +342,7 @@ func (x *SubmitPromptResponse) String() string {
 func (*SubmitPromptResponse) ProtoMessage() {}
 
 func (x *SubmitPromptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -283,7 +355,7 @@ func (x *SubmitPromptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptResponse.ProtoReflect.Descriptor instead.
 func (*SubmitPromptResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SubmitPromptResponse) GetResult() isSubmitPromptResponse_Result {
@@ -347,7 +419,7 @@ type SubmitPromptSuccess struct {
 
 func (x *SubmitPromptSuccess) Reset() {
 	*x = SubmitPromptSuccess{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -359,7 +431,7 @@ func (x *SubmitPromptSuccess) String() string {
 func (*SubmitPromptSuccess) ProtoMessage() {}
 
 func (x *SubmitPromptSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -372,7 +444,7 @@ func (x *SubmitPromptSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptSuccess.ProtoReflect.Descriptor instead.
 func (*SubmitPromptSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SubmitPromptSuccess) GetOutcome() isSubmitPromptSuccess_Outcome {
@@ -542,7 +614,7 @@ type SubmitPromptQuestionSent struct {
 
 func (x *SubmitPromptQuestionSent) Reset() {
 	*x = SubmitPromptQuestionSent{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -554,7 +626,7 @@ func (x *SubmitPromptQuestionSent) String() string {
 func (*SubmitPromptQuestionSent) ProtoMessage() {}
 
 func (x *SubmitPromptQuestionSent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -567,7 +639,7 @@ func (x *SubmitPromptQuestionSent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptQuestionSent.ProtoReflect.Descriptor instead.
 func (*SubmitPromptQuestionSent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SubmitPromptQuestionSent) GetRow() *v12.FeedId {
@@ -595,7 +667,7 @@ type SubmitPromptResponseRevising struct {
 
 func (x *SubmitPromptResponseRevising) Reset() {
 	*x = SubmitPromptResponseRevising{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -607,7 +679,7 @@ func (x *SubmitPromptResponseRevising) String() string {
 func (*SubmitPromptResponseRevising) ProtoMessage() {}
 
 func (x *SubmitPromptResponseRevising) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -620,7 +692,7 @@ func (x *SubmitPromptResponseRevising) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptResponseRevising.ProtoReflect.Descriptor instead.
 func (*SubmitPromptResponseRevising) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SubmitPromptResponseRevising) GetRow() *v12.FeedId {
@@ -639,7 +711,7 @@ type SubmitPromptAskAnswered struct {
 
 func (x *SubmitPromptAskAnswered) Reset() {
 	*x = SubmitPromptAskAnswered{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -651,7 +723,7 @@ func (x *SubmitPromptAskAnswered) String() string {
 func (*SubmitPromptAskAnswered) ProtoMessage() {}
 
 func (x *SubmitPromptAskAnswered) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -664,7 +736,7 @@ func (x *SubmitPromptAskAnswered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptAskAnswered.ProtoReflect.Descriptor instead.
 func (*SubmitPromptAskAnswered) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{6}
 }
 
 // The acted-without-a-turn answer. Empty on purpose (see the arm).
@@ -676,7 +748,7 @@ type SubmitPromptCommandActed struct {
 
 func (x *SubmitPromptCommandActed) Reset() {
 	*x = SubmitPromptCommandActed{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +760,7 @@ func (x *SubmitPromptCommandActed) String() string {
 func (*SubmitPromptCommandActed) ProtoMessage() {}
 
 func (x *SubmitPromptCommandActed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +773,7 @@ func (x *SubmitPromptCommandActed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptCommandActed.ProtoReflect.Descriptor instead.
 func (*SubmitPromptCommandActed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{7}
 }
 
 // The recognized-but-unsupported answer.
@@ -715,7 +787,7 @@ type SubmitPromptCommandRefused struct {
 
 func (x *SubmitPromptCommandRefused) Reset() {
 	*x = SubmitPromptCommandRefused{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -727,7 +799,7 @@ func (x *SubmitPromptCommandRefused) String() string {
 func (*SubmitPromptCommandRefused) ProtoMessage() {}
 
 func (x *SubmitPromptCommandRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -740,7 +812,7 @@ func (x *SubmitPromptCommandRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptCommandRefused.ProtoReflect.Descriptor instead.
 func (*SubmitPromptCommandRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SubmitPromptCommandRefused) GetCommand() string {
@@ -762,7 +834,7 @@ type SubmitPromptTurn struct {
 
 func (x *SubmitPromptTurn) Reset() {
 	*x = SubmitPromptTurn{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -774,7 +846,7 @@ func (x *SubmitPromptTurn) String() string {
 func (*SubmitPromptTurn) ProtoMessage() {}
 
 func (x *SubmitPromptTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -787,7 +859,7 @@ func (x *SubmitPromptTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptTurn.ProtoReflect.Descriptor instead.
 func (*SubmitPromptTurn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SubmitPromptTurn) GetTurn() *v11.TurnId {
@@ -817,7 +889,7 @@ type SubmitPromptCommandPanel struct {
 
 func (x *SubmitPromptCommandPanel) Reset() {
 	*x = SubmitPromptCommandPanel{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -829,7 +901,7 @@ func (x *SubmitPromptCommandPanel) String() string {
 func (*SubmitPromptCommandPanel) ProtoMessage() {}
 
 func (x *SubmitPromptCommandPanel) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -842,7 +914,7 @@ func (x *SubmitPromptCommandPanel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptCommandPanel.ProtoReflect.Descriptor instead.
 func (*SubmitPromptCommandPanel) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SubmitPromptCommandPanel) GetPanel() isSubmitPromptCommandPanel_Panel {
@@ -992,7 +1064,7 @@ type SubmitPromptError struct {
 
 func (x *SubmitPromptError) Reset() {
 	*x = SubmitPromptError{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1004,7 +1076,7 @@ func (x *SubmitPromptError) String() string {
 func (*SubmitPromptError) ProtoMessage() {}
 
 func (x *SubmitPromptError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1017,7 +1089,7 @@ func (x *SubmitPromptError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptError.ProtoReflect.Descriptor instead.
 func (*SubmitPromptError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SubmitPromptError) GetReason() isSubmitPromptError_Reason {
@@ -1399,7 +1471,7 @@ type SubmitPromptFanOutRefused struct {
 
 func (x *SubmitPromptFanOutRefused) Reset() {
 	*x = SubmitPromptFanOutRefused{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1411,7 +1483,7 @@ func (x *SubmitPromptFanOutRefused) String() string {
 func (*SubmitPromptFanOutRefused) ProtoMessage() {}
 
 func (x *SubmitPromptFanOutRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1424,7 +1496,7 @@ func (x *SubmitPromptFanOutRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptFanOutRefused.ProtoReflect.Descriptor instead.
 func (*SubmitPromptFanOutRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SubmitPromptFanOutRefused) GetCap() uint32 {
@@ -1459,7 +1531,7 @@ type SubmitPromptUnknownSender struct {
 
 func (x *SubmitPromptUnknownSender) Reset() {
 	*x = SubmitPromptUnknownSender{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1471,7 +1543,7 @@ func (x *SubmitPromptUnknownSender) String() string {
 func (*SubmitPromptUnknownSender) ProtoMessage() {}
 
 func (x *SubmitPromptUnknownSender) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1484,7 +1556,7 @@ func (x *SubmitPromptUnknownSender) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptUnknownSender.ProtoReflect.Descriptor instead.
 func (*SubmitPromptUnknownSender) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SubmitPromptUnknownSender) GetSentBy() *v1.WorkspaceRef {
@@ -1505,7 +1577,7 @@ type SubmitPromptSlashCommandFromAgent struct {
 
 func (x *SubmitPromptSlashCommandFromAgent) Reset() {
 	*x = SubmitPromptSlashCommandFromAgent{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1517,7 +1589,7 @@ func (x *SubmitPromptSlashCommandFromAgent) String() string {
 func (*SubmitPromptSlashCommandFromAgent) ProtoMessage() {}
 
 func (x *SubmitPromptSlashCommandFromAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1530,7 +1602,7 @@ func (x *SubmitPromptSlashCommandFromAgent) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SubmitPromptSlashCommandFromAgent.ProtoReflect.Descriptor instead.
 func (*SubmitPromptSlashCommandFromAgent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SubmitPromptSlashCommandFromAgent) GetCommand() string {
@@ -1549,7 +1621,7 @@ type SubmitPromptThreadAwaitingFirstAnswer struct {
 
 func (x *SubmitPromptThreadAwaitingFirstAnswer) Reset() {
 	*x = SubmitPromptThreadAwaitingFirstAnswer{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1561,7 +1633,7 @@ func (x *SubmitPromptThreadAwaitingFirstAnswer) String() string {
 func (*SubmitPromptThreadAwaitingFirstAnswer) ProtoMessage() {}
 
 func (x *SubmitPromptThreadAwaitingFirstAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1574,7 +1646,7 @@ func (x *SubmitPromptThreadAwaitingFirstAnswer) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use SubmitPromptThreadAwaitingFirstAnswer.ProtoReflect.Descriptor instead.
 func (*SubmitPromptThreadAwaitingFirstAnswer) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{15}
 }
 
 // The settled-ask refusal. Empty: the arm is the whole fact.
@@ -1586,7 +1658,7 @@ type SubmitPromptAskNotStanding struct {
 
 func (x *SubmitPromptAskNotStanding) Reset() {
 	*x = SubmitPromptAskNotStanding{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1598,7 +1670,7 @@ func (x *SubmitPromptAskNotStanding) String() string {
 func (*SubmitPromptAskNotStanding) ProtoMessage() {}
 
 func (x *SubmitPromptAskNotStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1611,7 +1683,7 @@ func (x *SubmitPromptAskNotStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptAskNotStanding.ProtoReflect.Descriptor instead.
 func (*SubmitPromptAskNotStanding) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{16}
 }
 
 // The abandoned-ask refusal. Empty: the arm is the whole fact.
@@ -1623,7 +1695,7 @@ type SubmitPromptAskSessionEnded struct {
 
 func (x *SubmitPromptAskSessionEnded) Reset() {
 	*x = SubmitPromptAskSessionEnded{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1635,7 +1707,7 @@ func (x *SubmitPromptAskSessionEnded) String() string {
 func (*SubmitPromptAskSessionEnded) ProtoMessage() {}
 
 func (x *SubmitPromptAskSessionEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1648,7 +1720,7 @@ func (x *SubmitPromptAskSessionEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptAskSessionEnded.ProtoReflect.Descriptor instead.
 func (*SubmitPromptAskSessionEnded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{17}
 }
 
 // The model a `/model` act named is not in this session's catalog.
@@ -1663,7 +1735,7 @@ type SubmitPromptModelNotInCatalog struct {
 
 func (x *SubmitPromptModelNotInCatalog) Reset() {
 	*x = SubmitPromptModelNotInCatalog{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1675,7 +1747,7 @@ func (x *SubmitPromptModelNotInCatalog) String() string {
 func (*SubmitPromptModelNotInCatalog) ProtoMessage() {}
 
 func (x *SubmitPromptModelNotInCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1688,7 +1760,7 @@ func (x *SubmitPromptModelNotInCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptModelNotInCatalog.ProtoReflect.Descriptor instead.
 func (*SubmitPromptModelNotInCatalog) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SubmitPromptModelNotInCatalog) GetDetail() string {
@@ -1709,7 +1781,7 @@ type SubmitPromptModelRefused struct {
 
 func (x *SubmitPromptModelRefused) Reset() {
 	*x = SubmitPromptModelRefused{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1721,7 +1793,7 @@ func (x *SubmitPromptModelRefused) String() string {
 func (*SubmitPromptModelRefused) ProtoMessage() {}
 
 func (x *SubmitPromptModelRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1734,7 +1806,7 @@ func (x *SubmitPromptModelRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptModelRefused.ProtoReflect.Descriptor instead.
 func (*SubmitPromptModelRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SubmitPromptModelRefused) GetDetail() string {
@@ -1759,7 +1831,7 @@ type SubmitPromptColdGate struct {
 
 func (x *SubmitPromptColdGate) Reset() {
 	*x = SubmitPromptColdGate{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1771,7 +1843,7 @@ func (x *SubmitPromptColdGate) String() string {
 func (*SubmitPromptColdGate) ProtoMessage() {}
 
 func (x *SubmitPromptColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1784,7 +1856,7 @@ func (x *SubmitPromptColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptColdGate.ProtoReflect.Descriptor instead.
 func (*SubmitPromptColdGate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SubmitPromptColdGate) GetDetail() string {
@@ -1812,7 +1884,7 @@ type SubmitPromptBubbleRefused struct {
 
 func (x *SubmitPromptBubbleRefused) Reset() {
 	*x = SubmitPromptBubbleRefused{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1824,7 +1896,7 @@ func (x *SubmitPromptBubbleRefused) String() string {
 func (*SubmitPromptBubbleRefused) ProtoMessage() {}
 
 func (x *SubmitPromptBubbleRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1837,7 +1909,7 @@ func (x *SubmitPromptBubbleRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptBubbleRefused.ProtoReflect.Descriptor instead.
 func (*SubmitPromptBubbleRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SubmitPromptBubbleRefused) GetDetail() string {
@@ -1900,7 +1972,7 @@ type SubmitPromptBubbleNotDeliverable struct {
 
 func (x *SubmitPromptBubbleNotDeliverable) Reset() {
 	*x = SubmitPromptBubbleNotDeliverable{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1912,7 +1984,7 @@ func (x *SubmitPromptBubbleNotDeliverable) String() string {
 func (*SubmitPromptBubbleNotDeliverable) ProtoMessage() {}
 
 func (x *SubmitPromptBubbleNotDeliverable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1925,7 +1997,7 @@ func (x *SubmitPromptBubbleNotDeliverable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptBubbleNotDeliverable.ProtoReflect.Descriptor instead.
 func (*SubmitPromptBubbleNotDeliverable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{22}
 }
 
 type SubmitPromptBubbleAgentBusy struct {
@@ -1936,7 +2008,7 @@ type SubmitPromptBubbleAgentBusy struct {
 
 func (x *SubmitPromptBubbleAgentBusy) Reset() {
 	*x = SubmitPromptBubbleAgentBusy{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1948,7 +2020,7 @@ func (x *SubmitPromptBubbleAgentBusy) String() string {
 func (*SubmitPromptBubbleAgentBusy) ProtoMessage() {}
 
 func (x *SubmitPromptBubbleAgentBusy) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1961,7 +2033,7 @@ func (x *SubmitPromptBubbleAgentBusy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptBubbleAgentBusy.ProtoReflect.Descriptor instead.
 func (*SubmitPromptBubbleAgentBusy) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{23}
 }
 
 // The duplicate-key refusal. Empty on purpose (see the arm).
@@ -1973,7 +2045,7 @@ type SubmitPromptDuplicateSubmission struct {
 
 func (x *SubmitPromptDuplicateSubmission) Reset() {
 	*x = SubmitPromptDuplicateSubmission{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1985,7 +2057,7 @@ func (x *SubmitPromptDuplicateSubmission) String() string {
 func (*SubmitPromptDuplicateSubmission) ProtoMessage() {}
 
 func (x *SubmitPromptDuplicateSubmission) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1998,7 +2070,7 @@ func (x *SubmitPromptDuplicateSubmission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptDuplicateSubmission.ProtoReflect.Descriptor instead.
 func (*SubmitPromptDuplicateSubmission) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{24}
 }
 
 // The merge-in-flight refusal. Empty: the set arm is the whole assertion —
@@ -2012,7 +2084,7 @@ type SubmitPromptRefusedMerging struct {
 
 func (x *SubmitPromptRefusedMerging) Reset() {
 	*x = SubmitPromptRefusedMerging{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2024,7 +2096,7 @@ func (x *SubmitPromptRefusedMerging) String() string {
 func (*SubmitPromptRefusedMerging) ProtoMessage() {}
 
 func (x *SubmitPromptRefusedMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2037,7 +2109,7 @@ func (x *SubmitPromptRefusedMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptRefusedMerging.ProtoReflect.Descriptor instead.
 func (*SubmitPromptRefusedMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{25}
 }
 
 type SubmitPromptUnknownWorkspace struct {
@@ -2048,7 +2120,7 @@ type SubmitPromptUnknownWorkspace struct {
 
 func (x *SubmitPromptUnknownWorkspace) Reset() {
 	*x = SubmitPromptUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2060,7 +2132,7 @@ func (x *SubmitPromptUnknownWorkspace) String() string {
 func (*SubmitPromptUnknownWorkspace) ProtoMessage() {}
 
 func (x *SubmitPromptUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2073,7 +2145,7 @@ func (x *SubmitPromptUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*SubmitPromptUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{26}
 }
 
 type SubmitPromptWorkspaceRefMismatch struct {
@@ -2086,7 +2158,7 @@ type SubmitPromptWorkspaceRefMismatch struct {
 
 func (x *SubmitPromptWorkspaceRefMismatch) Reset() {
 	*x = SubmitPromptWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2098,7 +2170,7 @@ func (x *SubmitPromptWorkspaceRefMismatch) String() string {
 func (*SubmitPromptWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *SubmitPromptWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2111,7 +2183,7 @@ func (x *SubmitPromptWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*SubmitPromptWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{26}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *SubmitPromptWorkspaceRefMismatch) GetRegistryDir() string {
@@ -2131,7 +2203,7 @@ type SubmitPromptTransferringAway struct {
 
 func (x *SubmitPromptTransferringAway) Reset() {
 	*x = SubmitPromptTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2143,7 +2215,7 @@ func (x *SubmitPromptTransferringAway) String() string {
 func (*SubmitPromptTransferringAway) ProtoMessage() {}
 
 func (x *SubmitPromptTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2156,7 +2228,7 @@ func (x *SubmitPromptTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptTransferringAway.ProtoReflect.Descriptor instead.
 func (*SubmitPromptTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{27}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SubmitPromptTransferringAway) GetAddress() string {
@@ -2181,7 +2253,7 @@ type SubmitPromptNotYetAdopted struct {
 
 func (x *SubmitPromptNotYetAdopted) Reset() {
 	*x = SubmitPromptNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2193,7 +2265,7 @@ func (x *SubmitPromptNotYetAdopted) String() string {
 func (*SubmitPromptNotYetAdopted) ProtoMessage() {}
 
 func (x *SubmitPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2206,7 +2278,7 @@ func (x *SubmitPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SubmitPromptNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{28}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SubmitPromptNotYetAdopted) GetAddress() string {
@@ -2224,7 +2296,7 @@ type SubmitPromptFeedNotInWorkspace struct {
 
 func (x *SubmitPromptFeedNotInWorkspace) Reset() {
 	*x = SubmitPromptFeedNotInWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2236,7 +2308,7 @@ func (x *SubmitPromptFeedNotInWorkspace) String() string {
 func (*SubmitPromptFeedNotInWorkspace) ProtoMessage() {}
 
 func (x *SubmitPromptFeedNotInWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2249,7 +2321,7 @@ func (x *SubmitPromptFeedNotInWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptFeedNotInWorkspace.ProtoReflect.Descriptor instead.
 func (*SubmitPromptFeedNotInWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{29}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{30}
 }
 
 type SubmitPromptFeedUndecodable struct {
@@ -2260,7 +2332,7 @@ type SubmitPromptFeedUndecodable struct {
 
 func (x *SubmitPromptFeedUndecodable) Reset() {
 	*x = SubmitPromptFeedUndecodable{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2272,7 +2344,7 @@ func (x *SubmitPromptFeedUndecodable) String() string {
 func (*SubmitPromptFeedUndecodable) ProtoMessage() {}
 
 func (x *SubmitPromptFeedUndecodable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2285,7 +2357,7 @@ func (x *SubmitPromptFeedUndecodable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptFeedUndecodable.ProtoReflect.Descriptor instead.
 func (*SubmitPromptFeedUndecodable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{30}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{31}
 }
 
 type SubmitPromptNoSession struct {
@@ -2301,7 +2373,7 @@ type SubmitPromptNoSession struct {
 
 func (x *SubmitPromptNoSession) Reset() {
 	*x = SubmitPromptNoSession{}
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2313,7 +2385,7 @@ func (x *SubmitPromptNoSession) String() string {
 func (*SubmitPromptNoSession) ProtoMessage() {}
 
 func (x *SubmitPromptNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2326,7 +2398,7 @@ func (x *SubmitPromptNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptNoSession.ProtoReflect.Descriptor instead.
 func (*SubmitPromptNoSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{31}
+	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SubmitPromptNoSession) GetDetail() string {
@@ -2340,7 +2412,7 @@ var File_agentrepl_v1_endpoint_submit_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\n" +
-	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1cworkspace/v1/workspace.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\xb6\x04\n" +
+	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1cworkspace/v1/workspace.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\x9a\x05\n" +
 	"\x13SubmitPromptRequest\x128\n" +
 	"\tworkspace\x18\x05 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12-\n" +
 	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12'\n" +
@@ -2351,12 +2423,17 @@ const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\x14submitted_at_unix_ms\x18\b \x01(\x03H\x02R\x11submittedAtUnixMs\x88\x01\x01\x128\n" +
 	"\asent_by\x18\t \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x03R\x06sentBy\x88\x01\x01\x12\x17\n" +
 	"\aas_user\x18\n" +
-	" \x01(\bR\x06asUserB\a\n" +
+	" \x01(\bR\x06asUser\x12P\n" +
+	"\rslack_forward\x18\v \x01(\v2&.agentrepl.v1.SubmitPromptSlackForwardH\x04R\fslackForward\x88\x01\x01B\a\n" +
 	"\x05_feedB\v\n" +
 	"\t_deliveryB\x17\n" +
 	"\x15_submitted_at_unix_msB\n" +
 	"\n" +
-	"\b_sent_byJ\x04\b\x06\x10\aR\x19reference_response_feedid\"\x98\x01\n" +
+	"\b_sent_byB\x10\n" +
+	"\x0e_slack_forwardJ\x04\b\x06\x10\aR\x19reference_response_feedid\"9\n" +
+	"\x18SubmitPromptSlackForward\x12\x1d\n" +
+	"\n" +
+	"thread_url\x18\x01 \x01(\tR\tthreadUrl\"\x98\x01\n" +
 	"\x14SubmitPromptResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.SubmitPromptSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.SubmitPromptErrorH\x00R\x05errorB\b\n" +
@@ -2469,105 +2546,107 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP() []byte {
 }
 
 var file_agentrepl_v1_endpoint_submit_prompt_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_agentrepl_v1_endpoint_submit_prompt_proto_goTypes = []any{
 	(SubmitPromptDelivery)(0),                     // 0: agentrepl.v1.SubmitPromptDelivery
 	(*SubmitPromptRequest)(nil),                   // 1: agentrepl.v1.SubmitPromptRequest
-	(*SubmitPromptResponse)(nil),                  // 2: agentrepl.v1.SubmitPromptResponse
-	(*SubmitPromptSuccess)(nil),                   // 3: agentrepl.v1.SubmitPromptSuccess
-	(*SubmitPromptQuestionSent)(nil),              // 4: agentrepl.v1.SubmitPromptQuestionSent
-	(*SubmitPromptResponseRevising)(nil),          // 5: agentrepl.v1.SubmitPromptResponseRevising
-	(*SubmitPromptAskAnswered)(nil),               // 6: agentrepl.v1.SubmitPromptAskAnswered
-	(*SubmitPromptCommandActed)(nil),              // 7: agentrepl.v1.SubmitPromptCommandActed
-	(*SubmitPromptCommandRefused)(nil),            // 8: agentrepl.v1.SubmitPromptCommandRefused
-	(*SubmitPromptTurn)(nil),                      // 9: agentrepl.v1.SubmitPromptTurn
-	(*SubmitPromptCommandPanel)(nil),              // 10: agentrepl.v1.SubmitPromptCommandPanel
-	(*SubmitPromptError)(nil),                     // 11: agentrepl.v1.SubmitPromptError
-	(*SubmitPromptFanOutRefused)(nil),             // 12: agentrepl.v1.SubmitPromptFanOutRefused
-	(*SubmitPromptUnknownSender)(nil),             // 13: agentrepl.v1.SubmitPromptUnknownSender
-	(*SubmitPromptSlashCommandFromAgent)(nil),     // 14: agentrepl.v1.SubmitPromptSlashCommandFromAgent
-	(*SubmitPromptThreadAwaitingFirstAnswer)(nil), // 15: agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer
-	(*SubmitPromptAskNotStanding)(nil),            // 16: agentrepl.v1.SubmitPromptAskNotStanding
-	(*SubmitPromptAskSessionEnded)(nil),           // 17: agentrepl.v1.SubmitPromptAskSessionEnded
-	(*SubmitPromptModelNotInCatalog)(nil),         // 18: agentrepl.v1.SubmitPromptModelNotInCatalog
-	(*SubmitPromptModelRefused)(nil),              // 19: agentrepl.v1.SubmitPromptModelRefused
-	(*SubmitPromptColdGate)(nil),                  // 20: agentrepl.v1.SubmitPromptColdGate
-	(*SubmitPromptBubbleRefused)(nil),             // 21: agentrepl.v1.SubmitPromptBubbleRefused
-	(*SubmitPromptBubbleNotDeliverable)(nil),      // 22: agentrepl.v1.SubmitPromptBubbleNotDeliverable
-	(*SubmitPromptBubbleAgentBusy)(nil),           // 23: agentrepl.v1.SubmitPromptBubbleAgentBusy
-	(*SubmitPromptDuplicateSubmission)(nil),       // 24: agentrepl.v1.SubmitPromptDuplicateSubmission
-	(*SubmitPromptRefusedMerging)(nil),            // 25: agentrepl.v1.SubmitPromptRefusedMerging
-	(*SubmitPromptUnknownWorkspace)(nil),          // 26: agentrepl.v1.SubmitPromptUnknownWorkspace
-	(*SubmitPromptWorkspaceRefMismatch)(nil),      // 27: agentrepl.v1.SubmitPromptWorkspaceRefMismatch
-	(*SubmitPromptTransferringAway)(nil),          // 28: agentrepl.v1.SubmitPromptTransferringAway
-	(*SubmitPromptNotYetAdopted)(nil),             // 29: agentrepl.v1.SubmitPromptNotYetAdopted
-	(*SubmitPromptFeedNotInWorkspace)(nil),        // 30: agentrepl.v1.SubmitPromptFeedNotInWorkspace
-	(*SubmitPromptFeedUndecodable)(nil),           // 31: agentrepl.v1.SubmitPromptFeedUndecodable
-	(*SubmitPromptNoSession)(nil),                 // 32: agentrepl.v1.SubmitPromptNoSession
-	(*v1.WorkspaceRef)(nil),                       // 33: workspace.v1.WorkspaceRef
-	(*v11.UserSaid)(nil),                          // 34: conversation.v1.UserSaid
-	(*v12.FeedId)(nil),                            // 35: frontend.v1.FeedId
-	(v11.PromptOrigin)(0),                         // 36: conversation.v1.PromptOrigin
-	(*v11.TurnId)(nil),                            // 37: conversation.v1.TurnId
-	(*v12.StatusPanelView)(nil),                   // 38: frontend.v1.StatusPanelView
-	(*v12.TodosPanelView)(nil),                    // 39: frontend.v1.TodosPanelView
-	(*v12.AgentsPanelView)(nil),                   // 40: frontend.v1.AgentsPanelView
-	(*v12.McpPanelView)(nil),                      // 41: frontend.v1.McpPanelView
-	(*v12.ContextPanelView)(nil),                  // 42: frontend.v1.ContextPanelView
-	(*v12.HelpPanelView)(nil),                     // 43: frontend.v1.HelpPanelView
+	(*SubmitPromptSlackForward)(nil),              // 2: agentrepl.v1.SubmitPromptSlackForward
+	(*SubmitPromptResponse)(nil),                  // 3: agentrepl.v1.SubmitPromptResponse
+	(*SubmitPromptSuccess)(nil),                   // 4: agentrepl.v1.SubmitPromptSuccess
+	(*SubmitPromptQuestionSent)(nil),              // 5: agentrepl.v1.SubmitPromptQuestionSent
+	(*SubmitPromptResponseRevising)(nil),          // 6: agentrepl.v1.SubmitPromptResponseRevising
+	(*SubmitPromptAskAnswered)(nil),               // 7: agentrepl.v1.SubmitPromptAskAnswered
+	(*SubmitPromptCommandActed)(nil),              // 8: agentrepl.v1.SubmitPromptCommandActed
+	(*SubmitPromptCommandRefused)(nil),            // 9: agentrepl.v1.SubmitPromptCommandRefused
+	(*SubmitPromptTurn)(nil),                      // 10: agentrepl.v1.SubmitPromptTurn
+	(*SubmitPromptCommandPanel)(nil),              // 11: agentrepl.v1.SubmitPromptCommandPanel
+	(*SubmitPromptError)(nil),                     // 12: agentrepl.v1.SubmitPromptError
+	(*SubmitPromptFanOutRefused)(nil),             // 13: agentrepl.v1.SubmitPromptFanOutRefused
+	(*SubmitPromptUnknownSender)(nil),             // 14: agentrepl.v1.SubmitPromptUnknownSender
+	(*SubmitPromptSlashCommandFromAgent)(nil),     // 15: agentrepl.v1.SubmitPromptSlashCommandFromAgent
+	(*SubmitPromptThreadAwaitingFirstAnswer)(nil), // 16: agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer
+	(*SubmitPromptAskNotStanding)(nil),            // 17: agentrepl.v1.SubmitPromptAskNotStanding
+	(*SubmitPromptAskSessionEnded)(nil),           // 18: agentrepl.v1.SubmitPromptAskSessionEnded
+	(*SubmitPromptModelNotInCatalog)(nil),         // 19: agentrepl.v1.SubmitPromptModelNotInCatalog
+	(*SubmitPromptModelRefused)(nil),              // 20: agentrepl.v1.SubmitPromptModelRefused
+	(*SubmitPromptColdGate)(nil),                  // 21: agentrepl.v1.SubmitPromptColdGate
+	(*SubmitPromptBubbleRefused)(nil),             // 22: agentrepl.v1.SubmitPromptBubbleRefused
+	(*SubmitPromptBubbleNotDeliverable)(nil),      // 23: agentrepl.v1.SubmitPromptBubbleNotDeliverable
+	(*SubmitPromptBubbleAgentBusy)(nil),           // 24: agentrepl.v1.SubmitPromptBubbleAgentBusy
+	(*SubmitPromptDuplicateSubmission)(nil),       // 25: agentrepl.v1.SubmitPromptDuplicateSubmission
+	(*SubmitPromptRefusedMerging)(nil),            // 26: agentrepl.v1.SubmitPromptRefusedMerging
+	(*SubmitPromptUnknownWorkspace)(nil),          // 27: agentrepl.v1.SubmitPromptUnknownWorkspace
+	(*SubmitPromptWorkspaceRefMismatch)(nil),      // 28: agentrepl.v1.SubmitPromptWorkspaceRefMismatch
+	(*SubmitPromptTransferringAway)(nil),          // 29: agentrepl.v1.SubmitPromptTransferringAway
+	(*SubmitPromptNotYetAdopted)(nil),             // 30: agentrepl.v1.SubmitPromptNotYetAdopted
+	(*SubmitPromptFeedNotInWorkspace)(nil),        // 31: agentrepl.v1.SubmitPromptFeedNotInWorkspace
+	(*SubmitPromptFeedUndecodable)(nil),           // 32: agentrepl.v1.SubmitPromptFeedUndecodable
+	(*SubmitPromptNoSession)(nil),                 // 33: agentrepl.v1.SubmitPromptNoSession
+	(*v1.WorkspaceRef)(nil),                       // 34: workspace.v1.WorkspaceRef
+	(*v11.UserSaid)(nil),                          // 35: conversation.v1.UserSaid
+	(*v12.FeedId)(nil),                            // 36: frontend.v1.FeedId
+	(v11.PromptOrigin)(0),                         // 37: conversation.v1.PromptOrigin
+	(*v11.TurnId)(nil),                            // 38: conversation.v1.TurnId
+	(*v12.StatusPanelView)(nil),                   // 39: frontend.v1.StatusPanelView
+	(*v12.TodosPanelView)(nil),                    // 40: frontend.v1.TodosPanelView
+	(*v12.AgentsPanelView)(nil),                   // 41: frontend.v1.AgentsPanelView
+	(*v12.McpPanelView)(nil),                      // 42: frontend.v1.McpPanelView
+	(*v12.ContextPanelView)(nil),                  // 43: frontend.v1.ContextPanelView
+	(*v12.HelpPanelView)(nil),                     // 44: frontend.v1.HelpPanelView
 }
 var file_agentrepl_v1_endpoint_submit_prompt_proto_depIdxs = []int32{
-	33, // 0: agentrepl.v1.SubmitPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	34, // 1: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
-	35, // 2: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
-	36, // 3: agentrepl.v1.SubmitPromptRequest.origin:type_name -> conversation.v1.PromptOrigin
+	34, // 0: agentrepl.v1.SubmitPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	35, // 1: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
+	36, // 2: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
+	37, // 3: agentrepl.v1.SubmitPromptRequest.origin:type_name -> conversation.v1.PromptOrigin
 	0,  // 4: agentrepl.v1.SubmitPromptRequest.delivery:type_name -> agentrepl.v1.SubmitPromptDelivery
-	33, // 5: agentrepl.v1.SubmitPromptRequest.sent_by:type_name -> workspace.v1.WorkspaceRef
-	3,  // 6: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
-	11, // 7: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
-	9,  // 8: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
-	10, // 9: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
-	8,  // 10: agentrepl.v1.SubmitPromptSuccess.command_refused:type_name -> agentrepl.v1.SubmitPromptCommandRefused
-	7,  // 11: agentrepl.v1.SubmitPromptSuccess.command_acted:type_name -> agentrepl.v1.SubmitPromptCommandActed
-	6,  // 12: agentrepl.v1.SubmitPromptSuccess.ask_answered:type_name -> agentrepl.v1.SubmitPromptAskAnswered
-	5,  // 13: agentrepl.v1.SubmitPromptSuccess.response_revising:type_name -> agentrepl.v1.SubmitPromptResponseRevising
-	4,  // 14: agentrepl.v1.SubmitPromptSuccess.question_sent:type_name -> agentrepl.v1.SubmitPromptQuestionSent
-	35, // 15: agentrepl.v1.SubmitPromptQuestionSent.row:type_name -> frontend.v1.FeedId
-	35, // 16: agentrepl.v1.SubmitPromptResponseRevising.row:type_name -> frontend.v1.FeedId
-	37, // 17: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
-	38, // 18: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
-	39, // 19: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
-	40, // 20: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
-	41, // 21: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
-	42, // 22: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
-	43, // 23: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
-	25, // 24: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
-	26, // 25: agentrepl.v1.SubmitPromptError.unknown_workspace:type_name -> agentrepl.v1.SubmitPromptUnknownWorkspace
-	27, // 26: agentrepl.v1.SubmitPromptError.workspace_ref_mismatch:type_name -> agentrepl.v1.SubmitPromptWorkspaceRefMismatch
-	28, // 27: agentrepl.v1.SubmitPromptError.transferring_away:type_name -> agentrepl.v1.SubmitPromptTransferringAway
-	29, // 28: agentrepl.v1.SubmitPromptError.not_yet_adopted:type_name -> agentrepl.v1.SubmitPromptNotYetAdopted
-	30, // 29: agentrepl.v1.SubmitPromptError.feed_not_in_workspace:type_name -> agentrepl.v1.SubmitPromptFeedNotInWorkspace
-	31, // 30: agentrepl.v1.SubmitPromptError.feed_undecodable:type_name -> agentrepl.v1.SubmitPromptFeedUndecodable
-	32, // 31: agentrepl.v1.SubmitPromptError.no_session:type_name -> agentrepl.v1.SubmitPromptNoSession
-	24, // 32: agentrepl.v1.SubmitPromptError.duplicate_submission:type_name -> agentrepl.v1.SubmitPromptDuplicateSubmission
-	21, // 33: agentrepl.v1.SubmitPromptError.bubble_refused:type_name -> agentrepl.v1.SubmitPromptBubbleRefused
-	20, // 34: agentrepl.v1.SubmitPromptError.cold_gate:type_name -> agentrepl.v1.SubmitPromptColdGate
-	18, // 35: agentrepl.v1.SubmitPromptError.model_not_in_catalog:type_name -> agentrepl.v1.SubmitPromptModelNotInCatalog
-	19, // 36: agentrepl.v1.SubmitPromptError.model_refused:type_name -> agentrepl.v1.SubmitPromptModelRefused
-	16, // 37: agentrepl.v1.SubmitPromptError.ask_not_standing:type_name -> agentrepl.v1.SubmitPromptAskNotStanding
-	17, // 38: agentrepl.v1.SubmitPromptError.ask_session_ended:type_name -> agentrepl.v1.SubmitPromptAskSessionEnded
-	14, // 39: agentrepl.v1.SubmitPromptError.slash_command_from_agent:type_name -> agentrepl.v1.SubmitPromptSlashCommandFromAgent
-	13, // 40: agentrepl.v1.SubmitPromptError.unknown_sender:type_name -> agentrepl.v1.SubmitPromptUnknownSender
-	15, // 41: agentrepl.v1.SubmitPromptError.thread_awaiting_first_answer:type_name -> agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer
-	12, // 42: agentrepl.v1.SubmitPromptError.fan_out_refused:type_name -> agentrepl.v1.SubmitPromptFanOutRefused
-	33, // 43: agentrepl.v1.SubmitPromptUnknownSender.sent_by:type_name -> workspace.v1.WorkspaceRef
-	22, // 44: agentrepl.v1.SubmitPromptBubbleRefused.not_deliverable:type_name -> agentrepl.v1.SubmitPromptBubbleNotDeliverable
-	23, // 45: agentrepl.v1.SubmitPromptBubbleRefused.agent_busy:type_name -> agentrepl.v1.SubmitPromptBubbleAgentBusy
-	46, // [46:46] is the sub-list for method output_type
-	46, // [46:46] is the sub-list for method input_type
-	46, // [46:46] is the sub-list for extension type_name
-	46, // [46:46] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	34, // 5: agentrepl.v1.SubmitPromptRequest.sent_by:type_name -> workspace.v1.WorkspaceRef
+	2,  // 6: agentrepl.v1.SubmitPromptRequest.slack_forward:type_name -> agentrepl.v1.SubmitPromptSlackForward
+	4,  // 7: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
+	12, // 8: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
+	10, // 9: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
+	11, // 10: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
+	9,  // 11: agentrepl.v1.SubmitPromptSuccess.command_refused:type_name -> agentrepl.v1.SubmitPromptCommandRefused
+	8,  // 12: agentrepl.v1.SubmitPromptSuccess.command_acted:type_name -> agentrepl.v1.SubmitPromptCommandActed
+	7,  // 13: agentrepl.v1.SubmitPromptSuccess.ask_answered:type_name -> agentrepl.v1.SubmitPromptAskAnswered
+	6,  // 14: agentrepl.v1.SubmitPromptSuccess.response_revising:type_name -> agentrepl.v1.SubmitPromptResponseRevising
+	5,  // 15: agentrepl.v1.SubmitPromptSuccess.question_sent:type_name -> agentrepl.v1.SubmitPromptQuestionSent
+	36, // 16: agentrepl.v1.SubmitPromptQuestionSent.row:type_name -> frontend.v1.FeedId
+	36, // 17: agentrepl.v1.SubmitPromptResponseRevising.row:type_name -> frontend.v1.FeedId
+	38, // 18: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
+	39, // 19: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
+	40, // 20: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
+	41, // 21: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
+	42, // 22: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
+	43, // 23: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
+	44, // 24: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
+	26, // 25: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
+	27, // 26: agentrepl.v1.SubmitPromptError.unknown_workspace:type_name -> agentrepl.v1.SubmitPromptUnknownWorkspace
+	28, // 27: agentrepl.v1.SubmitPromptError.workspace_ref_mismatch:type_name -> agentrepl.v1.SubmitPromptWorkspaceRefMismatch
+	29, // 28: agentrepl.v1.SubmitPromptError.transferring_away:type_name -> agentrepl.v1.SubmitPromptTransferringAway
+	30, // 29: agentrepl.v1.SubmitPromptError.not_yet_adopted:type_name -> agentrepl.v1.SubmitPromptNotYetAdopted
+	31, // 30: agentrepl.v1.SubmitPromptError.feed_not_in_workspace:type_name -> agentrepl.v1.SubmitPromptFeedNotInWorkspace
+	32, // 31: agentrepl.v1.SubmitPromptError.feed_undecodable:type_name -> agentrepl.v1.SubmitPromptFeedUndecodable
+	33, // 32: agentrepl.v1.SubmitPromptError.no_session:type_name -> agentrepl.v1.SubmitPromptNoSession
+	25, // 33: agentrepl.v1.SubmitPromptError.duplicate_submission:type_name -> agentrepl.v1.SubmitPromptDuplicateSubmission
+	22, // 34: agentrepl.v1.SubmitPromptError.bubble_refused:type_name -> agentrepl.v1.SubmitPromptBubbleRefused
+	21, // 35: agentrepl.v1.SubmitPromptError.cold_gate:type_name -> agentrepl.v1.SubmitPromptColdGate
+	19, // 36: agentrepl.v1.SubmitPromptError.model_not_in_catalog:type_name -> agentrepl.v1.SubmitPromptModelNotInCatalog
+	20, // 37: agentrepl.v1.SubmitPromptError.model_refused:type_name -> agentrepl.v1.SubmitPromptModelRefused
+	17, // 38: agentrepl.v1.SubmitPromptError.ask_not_standing:type_name -> agentrepl.v1.SubmitPromptAskNotStanding
+	18, // 39: agentrepl.v1.SubmitPromptError.ask_session_ended:type_name -> agentrepl.v1.SubmitPromptAskSessionEnded
+	15, // 40: agentrepl.v1.SubmitPromptError.slash_command_from_agent:type_name -> agentrepl.v1.SubmitPromptSlashCommandFromAgent
+	14, // 41: agentrepl.v1.SubmitPromptError.unknown_sender:type_name -> agentrepl.v1.SubmitPromptUnknownSender
+	16, // 42: agentrepl.v1.SubmitPromptError.thread_awaiting_first_answer:type_name -> agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer
+	13, // 43: agentrepl.v1.SubmitPromptError.fan_out_refused:type_name -> agentrepl.v1.SubmitPromptFanOutRefused
+	34, // 44: agentrepl.v1.SubmitPromptUnknownSender.sent_by:type_name -> workspace.v1.WorkspaceRef
+	23, // 45: agentrepl.v1.SubmitPromptBubbleRefused.not_deliverable:type_name -> agentrepl.v1.SubmitPromptBubbleNotDeliverable
+	24, // 46: agentrepl.v1.SubmitPromptBubbleRefused.agent_busy:type_name -> agentrepl.v1.SubmitPromptBubbleAgentBusy
+	47, // [47:47] is the sub-list for method output_type
+	47, // [47:47] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_submit_prompt_proto_init() }
@@ -2576,11 +2655,11 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		return
 	}
 	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[0].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[1].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[2].OneofWrappers = []any{
 		(*SubmitPromptResponse_Success)(nil),
 		(*SubmitPromptResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[2].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3].OneofWrappers = []any{
 		(*SubmitPromptSuccess_Turn)(nil),
 		(*SubmitPromptSuccess_CommandPanel)(nil),
 		(*SubmitPromptSuccess_CommandRefused)(nil),
@@ -2589,7 +2668,7 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		(*SubmitPromptSuccess_ResponseRevising)(nil),
 		(*SubmitPromptSuccess_QuestionSent)(nil),
 	}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[9].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[10].OneofWrappers = []any{
 		(*SubmitPromptCommandPanel_Status)(nil),
 		(*SubmitPromptCommandPanel_Todos)(nil),
 		(*SubmitPromptCommandPanel_Agents)(nil),
@@ -2597,7 +2676,7 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		(*SubmitPromptCommandPanel_Context)(nil),
 		(*SubmitPromptCommandPanel_Help)(nil),
 	}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[11].OneofWrappers = []any{
 		(*SubmitPromptError_Merging)(nil),
 		(*SubmitPromptError_UnknownWorkspace)(nil),
 		(*SubmitPromptError_WorkspaceRefMismatch)(nil),
@@ -2618,18 +2697,18 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		(*SubmitPromptError_ThreadAwaitingFirstAnswer)(nil),
 		(*SubmitPromptError_FanOutRefused)(nil),
 	}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[20].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[21].OneofWrappers = []any{
 		(*SubmitPromptBubbleRefused_NotDeliverable)(nil),
 		(*SubmitPromptBubbleRefused_AgentBusy)(nil),
 	}
-	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[28].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[29].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   32,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -181,7 +181,7 @@ var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
 		"create":                 {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
 		"async-merge":            {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
-		"prompt":                 {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
+		"prompt":                 {usage: "prompt [-as-user] [-slack-forward URL] WS TEXT", run: workspacePrompt},
 		"gather":                 {usage: "gather -workspaces A,B,C -prompt TEXT [-as-user]", run: workspaceGather},
 		"gather-status":          {usage: "gather-status GATHER", run: workspaceGatherStatus},
 		"set":                    {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
@@ -197,7 +197,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"interrupt":              {usage: "interrupt WS [-all-agents] [-confirm-agents]", run: workspaceInterrupt},
 		"compact":                {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
 		"status":                 {usage: "status WS", run: workspaceStatus},
-		"list":                   {usage: "list", run: workspaceList},
+		"list":                   {usage: "list [-login here|WS]", run: workspaceList},
 		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
 		"subscribe":              {usage: "subscribe WS -events " + allNoticeEvents, run: workspaceSubscribe},
 		"unsubscribe":            {usage: "unsubscribe WS", run: workspaceUnsubscribe},
@@ -1015,6 +1015,7 @@ func (c *cliCall) targetArgs(fs *flag.FlagSet, stateDir *string, args []string, 
 func workspacePrompt(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	asUser := fs.Bool("as-user", false, "the user explicitly asked for this send: lifts the fan-out cap")
+	slackForward := fs.String("slack-forward", "", "a Slack message link handed to the target with the prompt (the emoji-ack intake's forward)")
 	name, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
@@ -1033,8 +1034,12 @@ func workspacePrompt(c *cliCall, args []string) int {
 		c.failed("%v", err)
 		return exitFailure
 	}
-	resp, err := c.client.SubmitPrompt(c.ctx, connect.NewRequest(&agentreplv1.SubmitPromptRequest{Workspace: ref, Said: feed.SaidText(rest[0]),
-		IdempotencyKey: key, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender, AsUser: *asUser}))
+	req := &agentreplv1.SubmitPromptRequest{Workspace: ref, Said: feed.SaidText(rest[0]),
+		IdempotencyKey: key, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender, AsUser: *asUser}
+	if *slackForward != "" {
+		req.SlackForward = &agentreplv1.SubmitPromptSlackForward{ThreadUrl: *slackForward}
+	}
+	resp, err := c.client.SubmitPrompt(c.ctx, connect.NewRequest(req))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubmitPromptResponse) (string, error) {
 		return describePromptRefusal(name, msg.GetError())
 	})
@@ -1819,6 +1824,7 @@ func (c *cliCall) subsectionNamed(arranged *agentreplv1.ArrangedRepository, name
 // caller's own record. `status WS` reads one in full.
 func workspaceList(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
+	login := fs.String("login", "", "only the workspaces of this workspace's login (here, or a name or directory), plus their children")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
@@ -1833,8 +1839,15 @@ func workspaceList(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(&agentreplv1.FindWorkspacesRequest{
-		OnRoster: &agentreplv1.FindWorkspacesOnRoster{}, Caller: caller}))
+	req := &agentreplv1.FindWorkspacesRequest{OnRoster: &agentreplv1.FindWorkspacesOnRoster{}, Caller: caller}
+	if *login != "" {
+		ref, ok := c.named(*login)
+		if !ok {
+			return exitFailure
+		}
+		req.Login = &agentreplv1.FindWorkspacesLogin{Login: &agentreplv1.FindWorkspacesLogin_OfWorkspace{OfWorkspace: ref}}
+	}
+	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
 	if err != nil || resp.Msg.GetError() != nil {
 		return answer(c, resp, err)
 	}

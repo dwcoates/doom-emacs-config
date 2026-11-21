@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -464,8 +467,8 @@ func TestRegisteredRefAnswersTheRecordARefNames(t *testing.T) {
 	}
 }
 
-// BOTH REF CRITERIA RESOLVE THROUGH registeredRef: a handler that resolves
-// created_by or caller by hand fails here.
+// EVERY REF CRITERION RESOLVES THROUGH registeredRef: a handler that resolves
+// created_by, caller or login.of_workspace by hand fails here.
 func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.T) {
 	// Arrange
 	src, err := os.ReadFile("findworkspaces.go")
@@ -478,7 +481,106 @@ func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.
 	byHand := strings.Count(string(src), "byID[wsm.WorkspaceID(ref.GetId())]")
 
 	// Assert
-	if calls != 2 || byHand != 1 {
-		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want both refs through the helper and its own one lookup", calls, byHand)
+	if calls != 3 || byHand != 1 {
+		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want all three refs through the helper and its own one lookup", calls, byHand)
+	}
+}
+
+// loginHarness is findHarness with a second repository routed to another
+// login, holding a child of ws-open and a workspace of its own, while
+// repo-1 is routed to the work login.
+func loginHarness(t *testing.T, opts ...option) *harness {
+	t.Helper()
+	h := findHarness(t, opts...)
+	h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-2", Dir: "/src/personal"})
+	parent := ids.WorkspaceID("ws-open")
+	h.DB.workspaces["ws-child"] = wsm.Workspace{ID: "ws-child", Repo: "repo-2", Dir: "/src/child", Name: "child-one", Branch: "child-one",
+		CreatedAt: time.UnixMilli(2_000), Parent: &parent}
+	h.DB.workspaces["ws-personal"] = wsm.Workspace{ID: "ws-personal", Repo: "repo-2", Dir: "/src/mine", Name: "personal-one", Branch: "personal-one",
+		CreatedAt: time.UnixMilli(3_000)}
+	h.AccountRoots = map[string]string{"/src/repo": "/home/.claude-work"}
+	return h
+}
+
+// loginOf is a login narrowing naming REF.
+func loginOf(ref *workspacev1.WorkspaceRef) *agentreplv1.FindWorkspacesLogin {
+	return &agentreplv1.FindWorkspacesLogin{Login: &agentreplv1.FindWorkspacesLogin_OfWorkspace{OfWorkspace: ref}}
+}
+
+func TestFindWorkspacesByLoginKeepsItsRepositoriesAndTheirChildren(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  *workspacev1.WorkspaceRef
+		want []string
+	}{
+		{name: "a work workspace's login keeps work workspaces and their children", ref: &workspacev1.WorkspaceRef{Id: "ws-open"},
+			want: []string{"child-one", "landed-one", "open-one"}},
+		{name: "a child names the login of its own repository, not its parent's", ref: &workspacev1.WorkspaceRef{Id: "ws-child"},
+			want: []string{"child-one", "personal-one"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := loginHarness(t)
+
+			// Act
+			resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Login: loginOf(tt.ref)}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FindWorkspaces: %v", err)
+			}
+			var got []string
+			for name := range foundByName(resp) {
+				got = append(got, name)
+			}
+			sort.Strings(got)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("found %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindWorkspacesByTheLoginOfAnUnknownWorkspaceIsAnAnswer(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := loginHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{
+		Login: loginOf(&workspacev1.WorkspaceRef{Id: "ws-gone"})}))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetUnknownLoginWorkspace() == nil {
+		t.Fatalf("FindWorkspaces = %v, %v; want unknown_login_workspace", resp, err)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "FindWorkspaces"})
+	if !ok || !strings.Contains(fmt.Sprint(rec.Context), "ws-gone") {
+		t.Fatalf("INFO record = %v (%v), want the refusal naming the unknown workspace", rec.Context, ok)
+	}
+}
+
+func TestFindWorkspacesRefusesAMalformedLogin(t *testing.T) {
+	tests := []struct {
+		name  string
+		login *agentreplv1.FindWorkspacesLogin
+	}{
+		{name: "a login with no arm", login: &agentreplv1.FindWorkspacesLogin{}},
+		{name: "a login naming an empty workspace ref", login: loginOf(&workspacev1.WorkspaceRef{})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := loginHarness(t)
+
+			// Act
+			_, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Login: tt.login}))
+
+			// Assert
+			if connectCode(t, err) != connect.CodeInvalidArgument {
+				t.Fatalf("err = %v, want InvalidArgument", err)
+			}
+		})
 	}
 }

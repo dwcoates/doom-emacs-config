@@ -70,7 +70,15 @@ type FindWorkspacesRequest struct {
 	// apart from every other workspace. UNSET = the caller is no workspace (the
 	// user, or a shell outside every worktree), and no record answers calling.
 	// A ref naming no registered workspace is the unknown_caller answer.
-	Caller        *v1.WorkspaceRef `protobuf:"bytes,8,opt,name=caller,proto3,oneof" json:"caller,omitempty"`
+	Caller *v1.WorkspaceRef `protobuf:"bytes,8,opt,name=caller,proto3,oneof" json:"caller,omitempty"`
+	// Only the workspaces of one login, and their children: every workspace
+	// whose repository's main checkout is routed to that login's Claude config
+	// dir (the account routing `$MULTI_REPO_ROOT` decides), plus every child
+	// (WorkspaceRelationship.child) of such a workspace, in ANY repository,
+	// since a child of a work task need not live in a work repository. What
+	// the Slack emoji-ack intake reads to see only the workspaces a reaction
+	// may be routed to. UNSET = every login.
+	Login         *FindWorkspacesLogin `protobuf:"bytes,9,opt,name=login,proto3,oneof" json:"login,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -161,6 +169,86 @@ func (x *FindWorkspacesRequest) GetCaller() *v1.WorkspaceRef {
 	return nil
 }
 
+func (x *FindWorkspacesRequest) GetLogin() *FindWorkspacesLogin {
+	if x != nil {
+		return x.Login
+	}
+	return nil
+}
+
+// The login a find narrows to (FindWorkspacesRequest.login). THE ARM IS HOW
+// THE LOGIN IS NAMED.
+type FindWorkspacesLogin struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// REQUIRED: a login with no arm is malformed (Connect InvalidArgument).
+	//
+	// Types that are valid to be assigned to Login:
+	//
+	//	*FindWorkspacesLogin_OfWorkspace
+	Login         isFindWorkspacesLogin_Login `protobuf_oneof:"login"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindWorkspacesLogin) Reset() {
+	*x = FindWorkspacesLogin{}
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindWorkspacesLogin) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindWorkspacesLogin) ProtoMessage() {}
+
+func (x *FindWorkspacesLogin) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindWorkspacesLogin.ProtoReflect.Descriptor instead.
+func (*FindWorkspacesLogin) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *FindWorkspacesLogin) GetLogin() isFindWorkspacesLogin_Login {
+	if x != nil {
+		return x.Login
+	}
+	return nil
+}
+
+func (x *FindWorkspacesLogin) GetOfWorkspace() *v1.WorkspaceRef {
+	if x != nil {
+		if x, ok := x.Login.(*FindWorkspacesLogin_OfWorkspace); ok {
+			return x.OfWorkspace
+		}
+	}
+	return nil
+}
+
+type isFindWorkspacesLogin_Login interface {
+	isFindWorkspacesLogin_Login()
+}
+
+type FindWorkspacesLogin_OfWorkspace struct {
+	// The login this workspace's repository is routed to (`workspace list
+	// -login here` names the calling workspace). A ref naming no registered
+	// workspace is the unknown_login_workspace answer.
+	OfWorkspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=of_workspace,json=ofWorkspace,proto3,oneof"`
+}
+
+func (*FindWorkspacesLogin_OfWorkspace) isFindWorkspacesLogin_Login() {}
+
 // Narrows a find to the workspaces the sidebar roster draws. No fields: its
 // presence is the criterion.
 type FindWorkspacesOnRoster struct {
@@ -171,7 +259,7 @@ type FindWorkspacesOnRoster struct {
 
 func (x *FindWorkspacesOnRoster) Reset() {
 	*x = FindWorkspacesOnRoster{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -183,7 +271,7 @@ func (x *FindWorkspacesOnRoster) String() string {
 func (*FindWorkspacesOnRoster) ProtoMessage() {}
 
 func (x *FindWorkspacesOnRoster) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -196,7 +284,7 @@ func (x *FindWorkspacesOnRoster) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesOnRoster.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesOnRoster) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{2}
 }
 
 // A window of time a workspace's life must overlap: the workspace was created
@@ -219,7 +307,7 @@ type FindWorkspacesWindow struct {
 
 func (x *FindWorkspacesWindow) Reset() {
 	*x = FindWorkspacesWindow{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -231,7 +319,7 @@ func (x *FindWorkspacesWindow) String() string {
 func (*FindWorkspacesWindow) ProtoMessage() {}
 
 func (x *FindWorkspacesWindow) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -244,7 +332,7 @@ func (x *FindWorkspacesWindow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesWindow.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesWindow) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *FindWorkspacesWindow) GetSinceMs() int64 {
@@ -278,7 +366,7 @@ type FindWorkspacesStanding struct {
 
 func (x *FindWorkspacesStanding) Reset() {
 	*x = FindWorkspacesStanding{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -290,7 +378,7 @@ func (x *FindWorkspacesStanding) String() string {
 func (*FindWorkspacesStanding) ProtoMessage() {}
 
 func (x *FindWorkspacesStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -303,7 +391,7 @@ func (x *FindWorkspacesStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesStanding.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesStanding) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *FindWorkspacesStanding) GetStanding() isFindWorkspacesStanding_Standing {
@@ -374,7 +462,7 @@ type FindWorkspacesStandingOpen struct {
 
 func (x *FindWorkspacesStandingOpen) Reset() {
 	*x = FindWorkspacesStandingOpen{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -386,7 +474,7 @@ func (x *FindWorkspacesStandingOpen) String() string {
 func (*FindWorkspacesStandingOpen) ProtoMessage() {}
 
 func (x *FindWorkspacesStandingOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -399,7 +487,7 @@ func (x *FindWorkspacesStandingOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesStandingOpen.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesStandingOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{5}
 }
 
 // Closed workspaces, landed or not. No fields.
@@ -411,7 +499,7 @@ type FindWorkspacesStandingClosed struct {
 
 func (x *FindWorkspacesStandingClosed) Reset() {
 	*x = FindWorkspacesStandingClosed{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -423,7 +511,7 @@ func (x *FindWorkspacesStandingClosed) String() string {
 func (*FindWorkspacesStandingClosed) ProtoMessage() {}
 
 func (x *FindWorkspacesStandingClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -436,7 +524,7 @@ func (x *FindWorkspacesStandingClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesStandingClosed.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesStandingClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{6}
 }
 
 // Landed workspaces. No fields.
@@ -448,7 +536,7 @@ type FindWorkspacesStandingLanded struct {
 
 func (x *FindWorkspacesStandingLanded) Reset() {
 	*x = FindWorkspacesStandingLanded{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +548,7 @@ func (x *FindWorkspacesStandingLanded) String() string {
 func (*FindWorkspacesStandingLanded) ProtoMessage() {}
 
 func (x *FindWorkspacesStandingLanded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +561,7 @@ func (x *FindWorkspacesStandingLanded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesStandingLanded.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesStandingLanded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{7}
 }
 
 // THE ARM IS THE OUTCOME.
@@ -490,7 +578,7 @@ type FindWorkspacesResponse struct {
 
 func (x *FindWorkspacesResponse) Reset() {
 	*x = FindWorkspacesResponse{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -502,7 +590,7 @@ func (x *FindWorkspacesResponse) String() string {
 func (*FindWorkspacesResponse) ProtoMessage() {}
 
 func (x *FindWorkspacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -515,7 +603,7 @@ func (x *FindWorkspacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesResponse.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *FindWorkspacesResponse) GetResult() isFindWorkspacesResponse_Result {
@@ -577,7 +665,7 @@ type FindWorkspacesSuccess struct {
 
 func (x *FindWorkspacesSuccess) Reset() {
 	*x = FindWorkspacesSuccess{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -589,7 +677,7 @@ func (x *FindWorkspacesSuccess) String() string {
 func (*FindWorkspacesSuccess) ProtoMessage() {}
 
 func (x *FindWorkspacesSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -602,7 +690,7 @@ func (x *FindWorkspacesSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesSuccess.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FindWorkspacesSuccess) GetExtent() isFindWorkspacesSuccess_Extent {
@@ -656,7 +744,7 @@ type FindWorkspacesSuccessComplete struct {
 
 func (x *FindWorkspacesSuccessComplete) Reset() {
 	*x = FindWorkspacesSuccessComplete{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +756,7 @@ func (x *FindWorkspacesSuccessComplete) String() string {
 func (*FindWorkspacesSuccessComplete) ProtoMessage() {}
 
 func (x *FindWorkspacesSuccessComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +769,7 @@ func (x *FindWorkspacesSuccessComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesSuccessComplete.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesSuccessComplete) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *FindWorkspacesSuccessComplete) GetWorkspaces() []*FoundWorkspace {
@@ -704,7 +792,7 @@ type FindWorkspacesSuccessPartial struct {
 
 func (x *FindWorkspacesSuccessPartial) Reset() {
 	*x = FindWorkspacesSuccessPartial{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -716,7 +804,7 @@ func (x *FindWorkspacesSuccessPartial) String() string {
 func (*FindWorkspacesSuccessPartial) ProtoMessage() {}
 
 func (x *FindWorkspacesSuccessPartial) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -729,7 +817,7 @@ func (x *FindWorkspacesSuccessPartial) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesSuccessPartial.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesSuccessPartial) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *FindWorkspacesSuccessPartial) GetWorkspaces() []*FoundWorkspace {
@@ -793,7 +881,7 @@ type FoundWorkspace struct {
 
 func (x *FoundWorkspace) Reset() {
 	*x = FoundWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -805,7 +893,7 @@ func (x *FoundWorkspace) String() string {
 func (*FoundWorkspace) ProtoMessage() {}
 
 func (x *FoundWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -818,7 +906,7 @@ func (x *FoundWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspace.ProtoReflect.Descriptor instead.
 func (*FoundWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *FoundWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -921,7 +1009,7 @@ type FoundWorkspaceRoster struct {
 
 func (x *FoundWorkspaceRoster) Reset() {
 	*x = FoundWorkspaceRoster{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -933,7 +1021,7 @@ func (x *FoundWorkspaceRoster) String() string {
 func (*FoundWorkspaceRoster) ProtoMessage() {}
 
 func (x *FoundWorkspaceRoster) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -946,7 +1034,7 @@ func (x *FoundWorkspaceRoster) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceRoster.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceRoster) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FoundWorkspaceRoster) GetSection() *FoundWorkspaceRosterSection {
@@ -979,7 +1067,7 @@ type FoundWorkspaceRosterSection struct {
 
 func (x *FoundWorkspaceRosterSection) Reset() {
 	*x = FoundWorkspaceRosterSection{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -991,7 +1079,7 @@ func (x *FoundWorkspaceRosterSection) String() string {
 func (*FoundWorkspaceRosterSection) ProtoMessage() {}
 
 func (x *FoundWorkspaceRosterSection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1004,7 +1092,7 @@ func (x *FoundWorkspaceRosterSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceRosterSection.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceRosterSection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FoundWorkspaceRosterSection) GetSection() isFoundWorkspaceRosterSection_Section {
@@ -1078,7 +1166,7 @@ type FoundWorkspaceRosterSectionOpen struct {
 
 func (x *FoundWorkspaceRosterSectionOpen) Reset() {
 	*x = FoundWorkspaceRosterSectionOpen{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1090,7 +1178,7 @@ func (x *FoundWorkspaceRosterSectionOpen) String() string {
 func (*FoundWorkspaceRosterSectionOpen) ProtoMessage() {}
 
 func (x *FoundWorkspaceRosterSectionOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1103,7 +1191,7 @@ func (x *FoundWorkspaceRosterSectionOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceRosterSectionOpen.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceRosterSectionOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{15}
 }
 
 // Drawn in the hidden section. No fields.
@@ -1115,7 +1203,7 @@ type FoundWorkspaceRosterSectionHidden struct {
 
 func (x *FoundWorkspaceRosterSectionHidden) Reset() {
 	*x = FoundWorkspaceRosterSectionHidden{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1127,7 +1215,7 @@ func (x *FoundWorkspaceRosterSectionHidden) String() string {
 func (*FoundWorkspaceRosterSectionHidden) ProtoMessage() {}
 
 func (x *FoundWorkspaceRosterSectionHidden) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1140,7 +1228,7 @@ func (x *FoundWorkspaceRosterSectionHidden) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FoundWorkspaceRosterSectionHidden.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceRosterSectionHidden) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{16}
 }
 
 // Drawn in the recently merged band. No fields.
@@ -1152,7 +1240,7 @@ type FoundWorkspaceRosterSectionMerged struct {
 
 func (x *FoundWorkspaceRosterSectionMerged) Reset() {
 	*x = FoundWorkspaceRosterSectionMerged{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1252,7 @@ func (x *FoundWorkspaceRosterSectionMerged) String() string {
 func (*FoundWorkspaceRosterSectionMerged) ProtoMessage() {}
 
 func (x *FoundWorkspaceRosterSectionMerged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1265,7 @@ func (x *FoundWorkspaceRosterSectionMerged) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FoundWorkspaceRosterSectionMerged.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceRosterSectionMerged) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{17}
 }
 
 // The live status a found workspace's roster row draws: its lifecycle dot
@@ -1198,7 +1286,7 @@ type FoundWorkspaceRosterStatus struct {
 
 func (x *FoundWorkspaceRosterStatus) Reset() {
 	*x = FoundWorkspaceRosterStatus{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1210,7 +1298,7 @@ func (x *FoundWorkspaceRosterStatus) String() string {
 func (*FoundWorkspaceRosterStatus) ProtoMessage() {}
 
 func (x *FoundWorkspaceRosterStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1223,7 +1311,7 @@ func (x *FoundWorkspaceRosterStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceRosterStatus.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceRosterStatus) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *FoundWorkspaceRosterStatus) GetArm() string {
@@ -1250,7 +1338,7 @@ type FoundWorkspaceStanding struct {
 
 func (x *FoundWorkspaceStanding) Reset() {
 	*x = FoundWorkspaceStanding{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1262,7 +1350,7 @@ func (x *FoundWorkspaceStanding) String() string {
 func (*FoundWorkspaceStanding) ProtoMessage() {}
 
 func (x *FoundWorkspaceStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1275,7 +1363,7 @@ func (x *FoundWorkspaceStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceStanding.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceStanding) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *FoundWorkspaceStanding) GetStanding() isFoundWorkspaceStanding_Standing {
@@ -1343,7 +1431,7 @@ type FoundWorkspaceStandingOpen struct {
 
 func (x *FoundWorkspaceStandingOpen) Reset() {
 	*x = FoundWorkspaceStandingOpen{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1355,7 +1443,7 @@ func (x *FoundWorkspaceStandingOpen) String() string {
 func (*FoundWorkspaceStandingOpen) ProtoMessage() {}
 
 func (x *FoundWorkspaceStandingOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1368,7 +1456,7 @@ func (x *FoundWorkspaceStandingOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceStandingOpen.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceStandingOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{20}
 }
 
 // Closed without its branch landing.
@@ -1383,7 +1471,7 @@ type FoundWorkspaceStandingClosed struct {
 
 func (x *FoundWorkspaceStandingClosed) Reset() {
 	*x = FoundWorkspaceStandingClosed{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1395,7 +1483,7 @@ func (x *FoundWorkspaceStandingClosed) String() string {
 func (*FoundWorkspaceStandingClosed) ProtoMessage() {}
 
 func (x *FoundWorkspaceStandingClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1408,7 +1496,7 @@ func (x *FoundWorkspaceStandingClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceStandingClosed.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceStandingClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *FoundWorkspaceStandingClosed) GetClosedAtMs() int64 {
@@ -1429,7 +1517,7 @@ type FoundWorkspaceStandingLanded struct {
 
 func (x *FoundWorkspaceStandingLanded) Reset() {
 	*x = FoundWorkspaceStandingLanded{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1441,7 +1529,7 @@ func (x *FoundWorkspaceStandingLanded) String() string {
 func (*FoundWorkspaceStandingLanded) ProtoMessage() {}
 
 func (x *FoundWorkspaceStandingLanded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1454,7 +1542,7 @@ func (x *FoundWorkspaceStandingLanded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FoundWorkspaceStandingLanded.ProtoReflect.Descriptor instead.
 func (*FoundWorkspaceStandingLanded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *FoundWorkspaceStandingLanded) GetLandedAtMs() int64 {
@@ -1473,6 +1561,7 @@ type FindWorkspacesError struct {
 	//	*FindWorkspacesError_UnknownRepository
 	//	*FindWorkspacesError_UnknownCreator
 	//	*FindWorkspacesError_UnknownCaller
+	//	*FindWorkspacesError_UnknownLoginWorkspace
 	Cause         isFindWorkspacesError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1480,7 +1569,7 @@ type FindWorkspacesError struct {
 
 func (x *FindWorkspacesError) Reset() {
 	*x = FindWorkspacesError{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1492,7 +1581,7 @@ func (x *FindWorkspacesError) String() string {
 func (*FindWorkspacesError) ProtoMessage() {}
 
 func (x *FindWorkspacesError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1505,7 +1594,7 @@ func (x *FindWorkspacesError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesError.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *FindWorkspacesError) GetCause() isFindWorkspacesError_Cause {
@@ -1542,6 +1631,15 @@ func (x *FindWorkspacesError) GetUnknownCaller() *FindWorkspacesUnknownCaller {
 	return nil
 }
 
+func (x *FindWorkspacesError) GetUnknownLoginWorkspace() *FindWorkspacesUnknownLoginWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*FindWorkspacesError_UnknownLoginWorkspace); ok {
+			return x.UnknownLoginWorkspace
+		}
+	}
+	return nil
+}
+
 type isFindWorkspacesError_Cause interface {
 	isFindWorkspacesError_Cause()
 }
@@ -1561,11 +1659,19 @@ type FindWorkspacesError_UnknownCaller struct {
 	UnknownCaller *FindWorkspacesUnknownCaller `protobuf:"bytes,3,opt,name=unknown_caller,json=unknownCaller,proto3,oneof"`
 }
 
+type FindWorkspacesError_UnknownLoginWorkspace struct {
+	// `login.of_workspace` names a workspace the daemon's registry does not
+	// hold.
+	UnknownLoginWorkspace *FindWorkspacesUnknownLoginWorkspace `protobuf:"bytes,4,opt,name=unknown_login_workspace,json=unknownLoginWorkspace,proto3,oneof"`
+}
+
 func (*FindWorkspacesError_UnknownRepository) isFindWorkspacesError_Cause() {}
 
 func (*FindWorkspacesError_UnknownCreator) isFindWorkspacesError_Cause() {}
 
 func (*FindWorkspacesError_UnknownCaller) isFindWorkspacesError_Cause() {}
+
+func (*FindWorkspacesError_UnknownLoginWorkspace) isFindWorkspacesError_Cause() {}
 
 // Empty: the echoed ref is the only identity involved.
 type FindWorkspacesUnknownRepository struct {
@@ -1576,7 +1682,7 @@ type FindWorkspacesUnknownRepository struct {
 
 func (x *FindWorkspacesUnknownRepository) Reset() {
 	*x = FindWorkspacesUnknownRepository{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1588,7 +1694,7 @@ func (x *FindWorkspacesUnknownRepository) String() string {
 func (*FindWorkspacesUnknownRepository) ProtoMessage() {}
 
 func (x *FindWorkspacesUnknownRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1601,7 +1707,7 @@ func (x *FindWorkspacesUnknownRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesUnknownRepository.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesUnknownRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{24}
 }
 
 // Empty: the echoed ref is the only identity involved.
@@ -1613,7 +1719,7 @@ type FindWorkspacesUnknownCreator struct {
 
 func (x *FindWorkspacesUnknownCreator) Reset() {
 	*x = FindWorkspacesUnknownCreator{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1625,7 +1731,7 @@ func (x *FindWorkspacesUnknownCreator) String() string {
 func (*FindWorkspacesUnknownCreator) ProtoMessage() {}
 
 func (x *FindWorkspacesUnknownCreator) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1638,7 +1744,7 @@ func (x *FindWorkspacesUnknownCreator) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesUnknownCreator.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesUnknownCreator) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{25}
 }
 
 // Empty: the echoed ref is the only identity involved.
@@ -1650,7 +1756,7 @@ type FindWorkspacesUnknownCaller struct {
 
 func (x *FindWorkspacesUnknownCaller) Reset() {
 	*x = FindWorkspacesUnknownCaller{}
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1662,7 +1768,7 @@ func (x *FindWorkspacesUnknownCaller) String() string {
 func (*FindWorkspacesUnknownCaller) ProtoMessage() {}
 
 func (x *FindWorkspacesUnknownCaller) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1675,14 +1781,51 @@ func (x *FindWorkspacesUnknownCaller) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindWorkspacesUnknownCaller.ProtoReflect.Descriptor instead.
 func (*FindWorkspacesUnknownCaller) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{26}
+}
+
+// Empty: the echoed ref is the only identity involved.
+type FindWorkspacesUnknownLoginWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindWorkspacesUnknownLoginWorkspace) Reset() {
+	*x = FindWorkspacesUnknownLoginWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindWorkspacesUnknownLoginWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindWorkspacesUnknownLoginWorkspace) ProtoMessage() {}
+
+func (x *FindWorkspacesUnknownLoginWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindWorkspacesUnknownLoginWorkspace.ProtoReflect.Descriptor instead.
+func (*FindWorkspacesUnknownLoginWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{27}
 }
 
 var File_agentrepl_v1_endpoint_find_workspaces_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_find_workspaces.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xb8\x04\n" +
+	"+agentrepl/v1/endpoint_find_workspaces.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\x80\x05\n" +
 	"\x15FindWorkspacesRequest\x12@\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
@@ -1694,7 +1837,8 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\n" +
 	"created_by\x18\x06 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x05R\tcreatedBy\x88\x01\x01\x12F\n" +
 	"\ton_roster\x18\a \x01(\v2$.agentrepl.v1.FindWorkspacesOnRosterH\x06R\bonRoster\x88\x01\x01\x127\n" +
-	"\x06caller\x18\b \x01(\v2\x1a.workspace.v1.WorkspaceRefH\aR\x06caller\x88\x01\x01B\r\n" +
+	"\x06caller\x18\b \x01(\v2\x1a.workspace.v1.WorkspaceRefH\aR\x06caller\x88\x01\x01\x12<\n" +
+	"\x05login\x18\t \x01(\v2!.agentrepl.v1.FindWorkspacesLoginH\bR\x05login\x88\x01\x01B\r\n" +
 	"\v_repositoryB\t\n" +
 	"\a_windowB\v\n" +
 	"\t_standingB\a\n" +
@@ -1703,7 +1847,11 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\v_created_byB\f\n" +
 	"\n" +
 	"_on_rosterB\t\n" +
-	"\a_caller\"\x18\n" +
+	"\a_callerB\b\n" +
+	"\x06_login\"_\n" +
+	"\x13FindWorkspacesLogin\x12?\n" +
+	"\fof_workspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\vofWorkspaceB\a\n" +
+	"\x05login\"\x18\n" +
 	"\x16FindWorkspacesOnRoster\"p\n" +
 	"\x14FindWorkspacesWindow\x12\x1e\n" +
 	"\bsince_ms\x18\x01 \x01(\x03H\x00R\asinceMs\x88\x01\x01\x12\x1e\n" +
@@ -1784,15 +1932,17 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\r_closed_at_ms\"@\n" +
 	"\x1cFoundWorkspaceStandingLanded\x12 \n" +
 	"\flanded_at_ms\x18\x01 \x01(\x03R\n" +
-	"landedAtMs\"\xa9\x02\n" +
+	"landedAtMs\"\x96\x03\n" +
 	"\x13FindWorkspacesError\x12^\n" +
 	"\x12unknown_repository\x18\x01 \x01(\v2-.agentrepl.v1.FindWorkspacesUnknownRepositoryH\x00R\x11unknownRepository\x12U\n" +
 	"\x0funknown_creator\x18\x02 \x01(\v2*.agentrepl.v1.FindWorkspacesUnknownCreatorH\x00R\x0eunknownCreator\x12R\n" +
-	"\x0eunknown_caller\x18\x03 \x01(\v2).agentrepl.v1.FindWorkspacesUnknownCallerH\x00R\runknownCallerB\a\n" +
+	"\x0eunknown_caller\x18\x03 \x01(\v2).agentrepl.v1.FindWorkspacesUnknownCallerH\x00R\runknownCaller\x12k\n" +
+	"\x17unknown_login_workspace\x18\x04 \x01(\v21.agentrepl.v1.FindWorkspacesUnknownLoginWorkspaceH\x00R\x15unknownLoginWorkspaceB\a\n" +
 	"\x05cause\"!\n" +
 	"\x1fFindWorkspacesUnknownRepository\"\x1e\n" +
 	"\x1cFindWorkspacesUnknownCreator\"\x1d\n" +
-	"\x1bFindWorkspacesUnknownCallerB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1bFindWorkspacesUnknownCaller\"%\n" +
+	"#FindWorkspacesUnknownLoginWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescOnce sync.Once
@@ -1806,75 +1956,80 @@ func file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_agentrepl_v1_endpoint_find_workspaces_proto_goTypes = []any{
-	(*FindWorkspacesRequest)(nil),             // 0: agentrepl.v1.FindWorkspacesRequest
-	(*FindWorkspacesOnRoster)(nil),            // 1: agentrepl.v1.FindWorkspacesOnRoster
-	(*FindWorkspacesWindow)(nil),              // 2: agentrepl.v1.FindWorkspacesWindow
-	(*FindWorkspacesStanding)(nil),            // 3: agentrepl.v1.FindWorkspacesStanding
-	(*FindWorkspacesStandingOpen)(nil),        // 4: agentrepl.v1.FindWorkspacesStandingOpen
-	(*FindWorkspacesStandingClosed)(nil),      // 5: agentrepl.v1.FindWorkspacesStandingClosed
-	(*FindWorkspacesStandingLanded)(nil),      // 6: agentrepl.v1.FindWorkspacesStandingLanded
-	(*FindWorkspacesResponse)(nil),            // 7: agentrepl.v1.FindWorkspacesResponse
-	(*FindWorkspacesSuccess)(nil),             // 8: agentrepl.v1.FindWorkspacesSuccess
-	(*FindWorkspacesSuccessComplete)(nil),     // 9: agentrepl.v1.FindWorkspacesSuccessComplete
-	(*FindWorkspacesSuccessPartial)(nil),      // 10: agentrepl.v1.FindWorkspacesSuccessPartial
-	(*FoundWorkspace)(nil),                    // 11: agentrepl.v1.FoundWorkspace
-	(*FoundWorkspaceRoster)(nil),              // 12: agentrepl.v1.FoundWorkspaceRoster
-	(*FoundWorkspaceRosterSection)(nil),       // 13: agentrepl.v1.FoundWorkspaceRosterSection
-	(*FoundWorkspaceRosterSectionOpen)(nil),   // 14: agentrepl.v1.FoundWorkspaceRosterSectionOpen
-	(*FoundWorkspaceRosterSectionHidden)(nil), // 15: agentrepl.v1.FoundWorkspaceRosterSectionHidden
-	(*FoundWorkspaceRosterSectionMerged)(nil), // 16: agentrepl.v1.FoundWorkspaceRosterSectionMerged
-	(*FoundWorkspaceRosterStatus)(nil),        // 17: agentrepl.v1.FoundWorkspaceRosterStatus
-	(*FoundWorkspaceStanding)(nil),            // 18: agentrepl.v1.FoundWorkspaceStanding
-	(*FoundWorkspaceStandingOpen)(nil),        // 19: agentrepl.v1.FoundWorkspaceStandingOpen
-	(*FoundWorkspaceStandingClosed)(nil),      // 20: agentrepl.v1.FoundWorkspaceStandingClosed
-	(*FoundWorkspaceStandingLanded)(nil),      // 21: agentrepl.v1.FoundWorkspaceStandingLanded
-	(*FindWorkspacesError)(nil),               // 22: agentrepl.v1.FindWorkspacesError
-	(*FindWorkspacesUnknownRepository)(nil),   // 23: agentrepl.v1.FindWorkspacesUnknownRepository
-	(*FindWorkspacesUnknownCreator)(nil),      // 24: agentrepl.v1.FindWorkspacesUnknownCreator
-	(*FindWorkspacesUnknownCaller)(nil),       // 25: agentrepl.v1.FindWorkspacesUnknownCaller
-	(*v1.RepositoryRef)(nil),                  // 26: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                   // 27: workspace.v1.WorkspaceRef
+	(*FindWorkspacesRequest)(nil),               // 0: agentrepl.v1.FindWorkspacesRequest
+	(*FindWorkspacesLogin)(nil),                 // 1: agentrepl.v1.FindWorkspacesLogin
+	(*FindWorkspacesOnRoster)(nil),              // 2: agentrepl.v1.FindWorkspacesOnRoster
+	(*FindWorkspacesWindow)(nil),                // 3: agentrepl.v1.FindWorkspacesWindow
+	(*FindWorkspacesStanding)(nil),              // 4: agentrepl.v1.FindWorkspacesStanding
+	(*FindWorkspacesStandingOpen)(nil),          // 5: agentrepl.v1.FindWorkspacesStandingOpen
+	(*FindWorkspacesStandingClosed)(nil),        // 6: agentrepl.v1.FindWorkspacesStandingClosed
+	(*FindWorkspacesStandingLanded)(nil),        // 7: agentrepl.v1.FindWorkspacesStandingLanded
+	(*FindWorkspacesResponse)(nil),              // 8: agentrepl.v1.FindWorkspacesResponse
+	(*FindWorkspacesSuccess)(nil),               // 9: agentrepl.v1.FindWorkspacesSuccess
+	(*FindWorkspacesSuccessComplete)(nil),       // 10: agentrepl.v1.FindWorkspacesSuccessComplete
+	(*FindWorkspacesSuccessPartial)(nil),        // 11: agentrepl.v1.FindWorkspacesSuccessPartial
+	(*FoundWorkspace)(nil),                      // 12: agentrepl.v1.FoundWorkspace
+	(*FoundWorkspaceRoster)(nil),                // 13: agentrepl.v1.FoundWorkspaceRoster
+	(*FoundWorkspaceRosterSection)(nil),         // 14: agentrepl.v1.FoundWorkspaceRosterSection
+	(*FoundWorkspaceRosterSectionOpen)(nil),     // 15: agentrepl.v1.FoundWorkspaceRosterSectionOpen
+	(*FoundWorkspaceRosterSectionHidden)(nil),   // 16: agentrepl.v1.FoundWorkspaceRosterSectionHidden
+	(*FoundWorkspaceRosterSectionMerged)(nil),   // 17: agentrepl.v1.FoundWorkspaceRosterSectionMerged
+	(*FoundWorkspaceRosterStatus)(nil),          // 18: agentrepl.v1.FoundWorkspaceRosterStatus
+	(*FoundWorkspaceStanding)(nil),              // 19: agentrepl.v1.FoundWorkspaceStanding
+	(*FoundWorkspaceStandingOpen)(nil),          // 20: agentrepl.v1.FoundWorkspaceStandingOpen
+	(*FoundWorkspaceStandingClosed)(nil),        // 21: agentrepl.v1.FoundWorkspaceStandingClosed
+	(*FoundWorkspaceStandingLanded)(nil),        // 22: agentrepl.v1.FoundWorkspaceStandingLanded
+	(*FindWorkspacesError)(nil),                 // 23: agentrepl.v1.FindWorkspacesError
+	(*FindWorkspacesUnknownRepository)(nil),     // 24: agentrepl.v1.FindWorkspacesUnknownRepository
+	(*FindWorkspacesUnknownCreator)(nil),        // 25: agentrepl.v1.FindWorkspacesUnknownCreator
+	(*FindWorkspacesUnknownCaller)(nil),         // 26: agentrepl.v1.FindWorkspacesUnknownCaller
+	(*FindWorkspacesUnknownLoginWorkspace)(nil), // 27: agentrepl.v1.FindWorkspacesUnknownLoginWorkspace
+	(*v1.RepositoryRef)(nil),                    // 28: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                     // 29: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_find_workspaces_proto_depIdxs = []int32{
-	26, // 0: agentrepl.v1.FindWorkspacesRequest.repository:type_name -> workspace.v1.RepositoryRef
-	2,  // 1: agentrepl.v1.FindWorkspacesRequest.window:type_name -> agentrepl.v1.FindWorkspacesWindow
-	3,  // 2: agentrepl.v1.FindWorkspacesRequest.standing:type_name -> agentrepl.v1.FindWorkspacesStanding
-	27, // 3: agentrepl.v1.FindWorkspacesRequest.created_by:type_name -> workspace.v1.WorkspaceRef
-	1,  // 4: agentrepl.v1.FindWorkspacesRequest.on_roster:type_name -> agentrepl.v1.FindWorkspacesOnRoster
-	27, // 5: agentrepl.v1.FindWorkspacesRequest.caller:type_name -> workspace.v1.WorkspaceRef
-	4,  // 6: agentrepl.v1.FindWorkspacesStanding.open:type_name -> agentrepl.v1.FindWorkspacesStandingOpen
-	5,  // 7: agentrepl.v1.FindWorkspacesStanding.closed:type_name -> agentrepl.v1.FindWorkspacesStandingClosed
-	6,  // 8: agentrepl.v1.FindWorkspacesStanding.landed:type_name -> agentrepl.v1.FindWorkspacesStandingLanded
-	8,  // 9: agentrepl.v1.FindWorkspacesResponse.success:type_name -> agentrepl.v1.FindWorkspacesSuccess
-	22, // 10: agentrepl.v1.FindWorkspacesResponse.error:type_name -> agentrepl.v1.FindWorkspacesError
-	9,  // 11: agentrepl.v1.FindWorkspacesSuccess.complete:type_name -> agentrepl.v1.FindWorkspacesSuccessComplete
-	10, // 12: agentrepl.v1.FindWorkspacesSuccess.partial:type_name -> agentrepl.v1.FindWorkspacesSuccessPartial
-	11, // 13: agentrepl.v1.FindWorkspacesSuccessComplete.workspaces:type_name -> agentrepl.v1.FoundWorkspace
-	11, // 14: agentrepl.v1.FindWorkspacesSuccessPartial.workspaces:type_name -> agentrepl.v1.FoundWorkspace
-	27, // 15: agentrepl.v1.FoundWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	26, // 16: agentrepl.v1.FoundWorkspace.repository:type_name -> workspace.v1.RepositoryRef
-	18, // 17: agentrepl.v1.FoundWorkspace.standing:type_name -> agentrepl.v1.FoundWorkspaceStanding
-	27, // 18: agentrepl.v1.FoundWorkspace.created_by:type_name -> workspace.v1.WorkspaceRef
-	27, // 19: agentrepl.v1.FoundWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
-	12, // 20: agentrepl.v1.FoundWorkspace.roster:type_name -> agentrepl.v1.FoundWorkspaceRoster
-	13, // 21: agentrepl.v1.FoundWorkspaceRoster.section:type_name -> agentrepl.v1.FoundWorkspaceRosterSection
-	17, // 22: agentrepl.v1.FoundWorkspaceRoster.status:type_name -> agentrepl.v1.FoundWorkspaceRosterStatus
-	14, // 23: agentrepl.v1.FoundWorkspaceRosterSection.open:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionOpen
-	15, // 24: agentrepl.v1.FoundWorkspaceRosterSection.hidden:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionHidden
-	16, // 25: agentrepl.v1.FoundWorkspaceRosterSection.merged:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionMerged
-	19, // 26: agentrepl.v1.FoundWorkspaceStanding.open:type_name -> agentrepl.v1.FoundWorkspaceStandingOpen
-	20, // 27: agentrepl.v1.FoundWorkspaceStanding.closed:type_name -> agentrepl.v1.FoundWorkspaceStandingClosed
-	21, // 28: agentrepl.v1.FoundWorkspaceStanding.landed:type_name -> agentrepl.v1.FoundWorkspaceStandingLanded
-	23, // 29: agentrepl.v1.FindWorkspacesError.unknown_repository:type_name -> agentrepl.v1.FindWorkspacesUnknownRepository
-	24, // 30: agentrepl.v1.FindWorkspacesError.unknown_creator:type_name -> agentrepl.v1.FindWorkspacesUnknownCreator
-	25, // 31: agentrepl.v1.FindWorkspacesError.unknown_caller:type_name -> agentrepl.v1.FindWorkspacesUnknownCaller
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	28, // 0: agentrepl.v1.FindWorkspacesRequest.repository:type_name -> workspace.v1.RepositoryRef
+	3,  // 1: agentrepl.v1.FindWorkspacesRequest.window:type_name -> agentrepl.v1.FindWorkspacesWindow
+	4,  // 2: agentrepl.v1.FindWorkspacesRequest.standing:type_name -> agentrepl.v1.FindWorkspacesStanding
+	29, // 3: agentrepl.v1.FindWorkspacesRequest.created_by:type_name -> workspace.v1.WorkspaceRef
+	2,  // 4: agentrepl.v1.FindWorkspacesRequest.on_roster:type_name -> agentrepl.v1.FindWorkspacesOnRoster
+	29, // 5: agentrepl.v1.FindWorkspacesRequest.caller:type_name -> workspace.v1.WorkspaceRef
+	1,  // 6: agentrepl.v1.FindWorkspacesRequest.login:type_name -> agentrepl.v1.FindWorkspacesLogin
+	29, // 7: agentrepl.v1.FindWorkspacesLogin.of_workspace:type_name -> workspace.v1.WorkspaceRef
+	5,  // 8: agentrepl.v1.FindWorkspacesStanding.open:type_name -> agentrepl.v1.FindWorkspacesStandingOpen
+	6,  // 9: agentrepl.v1.FindWorkspacesStanding.closed:type_name -> agentrepl.v1.FindWorkspacesStandingClosed
+	7,  // 10: agentrepl.v1.FindWorkspacesStanding.landed:type_name -> agentrepl.v1.FindWorkspacesStandingLanded
+	9,  // 11: agentrepl.v1.FindWorkspacesResponse.success:type_name -> agentrepl.v1.FindWorkspacesSuccess
+	23, // 12: agentrepl.v1.FindWorkspacesResponse.error:type_name -> agentrepl.v1.FindWorkspacesError
+	10, // 13: agentrepl.v1.FindWorkspacesSuccess.complete:type_name -> agentrepl.v1.FindWorkspacesSuccessComplete
+	11, // 14: agentrepl.v1.FindWorkspacesSuccess.partial:type_name -> agentrepl.v1.FindWorkspacesSuccessPartial
+	12, // 15: agentrepl.v1.FindWorkspacesSuccessComplete.workspaces:type_name -> agentrepl.v1.FoundWorkspace
+	12, // 16: agentrepl.v1.FindWorkspacesSuccessPartial.workspaces:type_name -> agentrepl.v1.FoundWorkspace
+	29, // 17: agentrepl.v1.FoundWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	28, // 18: agentrepl.v1.FoundWorkspace.repository:type_name -> workspace.v1.RepositoryRef
+	19, // 19: agentrepl.v1.FoundWorkspace.standing:type_name -> agentrepl.v1.FoundWorkspaceStanding
+	29, // 20: agentrepl.v1.FoundWorkspace.created_by:type_name -> workspace.v1.WorkspaceRef
+	29, // 21: agentrepl.v1.FoundWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
+	13, // 22: agentrepl.v1.FoundWorkspace.roster:type_name -> agentrepl.v1.FoundWorkspaceRoster
+	14, // 23: agentrepl.v1.FoundWorkspaceRoster.section:type_name -> agentrepl.v1.FoundWorkspaceRosterSection
+	18, // 24: agentrepl.v1.FoundWorkspaceRoster.status:type_name -> agentrepl.v1.FoundWorkspaceRosterStatus
+	15, // 25: agentrepl.v1.FoundWorkspaceRosterSection.open:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionOpen
+	16, // 26: agentrepl.v1.FoundWorkspaceRosterSection.hidden:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionHidden
+	17, // 27: agentrepl.v1.FoundWorkspaceRosterSection.merged:type_name -> agentrepl.v1.FoundWorkspaceRosterSectionMerged
+	20, // 28: agentrepl.v1.FoundWorkspaceStanding.open:type_name -> agentrepl.v1.FoundWorkspaceStandingOpen
+	21, // 29: agentrepl.v1.FoundWorkspaceStanding.closed:type_name -> agentrepl.v1.FoundWorkspaceStandingClosed
+	22, // 30: agentrepl.v1.FoundWorkspaceStanding.landed:type_name -> agentrepl.v1.FoundWorkspaceStandingLanded
+	24, // 31: agentrepl.v1.FindWorkspacesError.unknown_repository:type_name -> agentrepl.v1.FindWorkspacesUnknownRepository
+	25, // 32: agentrepl.v1.FindWorkspacesError.unknown_creator:type_name -> agentrepl.v1.FindWorkspacesUnknownCreator
+	26, // 33: agentrepl.v1.FindWorkspacesError.unknown_caller:type_name -> agentrepl.v1.FindWorkspacesUnknownCaller
+	27, // 34: agentrepl.v1.FindWorkspacesError.unknown_login_workspace:type_name -> agentrepl.v1.FindWorkspacesUnknownLoginWorkspace
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_find_workspaces_proto_init() }
@@ -1883,36 +2038,40 @@ func file_agentrepl_v1_endpoint_find_workspaces_proto_init() {
 		return
 	}
 	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[0].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[2].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[1].OneofWrappers = []any{
+		(*FindWorkspacesLogin_OfWorkspace)(nil),
+	}
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[3].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[4].OneofWrappers = []any{
 		(*FindWorkspacesStanding_Open)(nil),
 		(*FindWorkspacesStanding_Closed)(nil),
 		(*FindWorkspacesStanding_Landed)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[8].OneofWrappers = []any{
 		(*FindWorkspacesResponse_Success)(nil),
 		(*FindWorkspacesResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[8].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[9].OneofWrappers = []any{
 		(*FindWorkspacesSuccess_Complete)(nil),
 		(*FindWorkspacesSuccess_Partial)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[11].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[13].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[12].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[14].OneofWrappers = []any{
 		(*FoundWorkspaceRosterSection_Open)(nil),
 		(*FoundWorkspaceRosterSection_Hidden)(nil),
 		(*FoundWorkspaceRosterSection_Merged)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[18].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[19].OneofWrappers = []any{
 		(*FoundWorkspaceStanding_Open)(nil),
 		(*FoundWorkspaceStanding_Closed)(nil),
 		(*FoundWorkspaceStanding_Landed)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[20].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[22].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[21].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[23].OneofWrappers = []any{
 		(*FindWorkspacesError_UnknownRepository)(nil),
 		(*FindWorkspacesError_UnknownCreator)(nil),
 		(*FindWorkspacesError_UnknownCaller)(nil),
+		(*FindWorkspacesError_UnknownLoginWorkspace)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1920,7 +2079,7 @@ func file_agentrepl_v1_endpoint_find_workspaces_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc), len(file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   26,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

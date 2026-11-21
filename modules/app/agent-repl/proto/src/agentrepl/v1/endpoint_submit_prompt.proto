@@ -105,6 +105,31 @@ message SubmitPromptRequest {
   // (SubmitPromptError.fan_out_refused). An agent sets it only when the user
   // typed the send themselves or explicitly asked for it.
   bool as_user = 10;
+  // A SLACK THREAD HANDED TO THE RECIPIENT with this prompt: the Slack
+  // emoji-ack intake forwarding a reaction to an open workspace on the same
+  // task instead of creating one. UNSET for every other prompt. Only
+  // meaningful with `sent_by` (an agent-sent prompt); set without it, or
+  // beside `feed`, it is refused as InvalidArgument. On acceptance the daemon
+  // records the thread on the recipient (once per thread), stores it among
+  // the recipient's links as a reference labelled "Forwarded Slack thread",
+  // and appends to the prompt its built-in directive asking the recipient to
+  // post one brief reply in the thread naming itself, so the thread learns
+  // which workspace took the reaction. That reply is the ONLY post a
+  // forwarded thread gets: the pull request's announcement and the
+  // `:merged:` reaction stay with the thread the workspace was created for
+  // (CreateWorkspaceRequest.slack_origin).
+  optional SubmitPromptSlackForward slack_forward = 11;
+}
+
+// The Slack thread a prompt hands its recipient (SubmitPromptRequest
+// .slack_forward).
+message SubmitPromptSlackForward {
+  // The reacted message's Slack link, as Slack's "Copy link" gives it: an
+  // https `<workspace>.slack.com/archives/<channel>/p<timestamp>` link, with
+  // `thread_ts` when the message is a reply. A link that is not one is
+  // refused as InvalidArgument, the same reading
+  // CreateWorkspaceSlackOrigin.thread_url gets.
+  string thread_url = 1;
 }
 
 // THE ARM IS THE OUTCOME.

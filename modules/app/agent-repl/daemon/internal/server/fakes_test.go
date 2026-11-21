@@ -134,6 +134,10 @@ func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
 
 // fakeDB answers the registry lookups the handlers make.
 type fakeDB struct {
+	// workspaceLinks is each workspace's stored links (WorkspaceLinks);
+	// workspaceLinksErr fails the read.
+	workspaceLinks    map[ids.WorkspaceID][]wsm.WorkspaceLink
+	workspaceLinksErr error
 	// pages is each workspace's last-known page residency; pageReadErr fails
 	// its read and pageWriteErr its write.
 	pages        map[ids.WorkspaceID]bool
@@ -2289,6 +2293,10 @@ type harness struct {
 	// Notices records the prompts and notices measured (Deps.Notices).
 	Notices *briefprompttest.Meter
 	t       *testing.T
+	// AccountRoots is the config dir each directory is routed to
+	// (Deps.AccountRootFor); a directory it does not name is routed to
+	// defaultAccountRoot.
+	AccountRoots map[string]string
 	// IncumbentAddress is what the surface's IncumbentAddress dependency
 	// answers: the daemon serving what a joining daemon has not adopted, or
 	// empty when none does.
@@ -2538,6 +2546,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		h.Notices = &briefprompttest.Meter{}
 	}
 	deps := Deps{
+		AccountRootFor:   h.accountRootFor,
 		Notices:          h.Notices,
 		DeployConfig:     lifecycleconfig.OnDisk{},
 		Tests:            h.Tests,
@@ -3509,4 +3518,24 @@ func (f *fakeSlackChannels) Response() *agentreplv1.ListSlackChannelsResponse {
 		}}
 	}
 	return f.response
+}
+
+// defaultAccountRoot is the config dir a directory the harness's AccountRoots
+// does not name is routed to.
+const defaultAccountRoot = "/home/.claude"
+
+// accountRootFor is the harness's Deps.AccountRootFor: AccountRoots, else the
+// default root.
+func (h *harness) accountRootFor(dir string) string {
+	if root, ok := h.AccountRoots[dir]; ok {
+		return root
+	}
+	return defaultAccountRoot
+}
+
+func (d *fakeDB) WorkspaceLinks(_ context.Context, id ids.WorkspaceID) ([]wsm.WorkspaceLink, error) {
+	if d.workspaceLinksErr != nil {
+		return nil, d.workspaceLinksErr
+	}
+	return d.workspaceLinks[id], nil
 }

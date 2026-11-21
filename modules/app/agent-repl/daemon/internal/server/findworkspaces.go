@@ -69,6 +69,16 @@ func (s *server) FindWorkspaces(
 		}
 		caller = &record.ID
 	}
+	if login := req.Msg.Login; login != nil {
+		ref := login.GetOfWorkspace()
+		record, ok := registeredRef(byID, ref)
+		if !ok {
+			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+				Arm: "unknown_login_workspace", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
+			})))
+		}
+		query.LoginRepos = s.loginRepos(repositories, record)
+	}
 	roster, ok := s.deps.Sidebar.Topic().Latest()
 	if !ok {
 		return nil, fail(s.log, rpc, fmt.Errorf("read the roster: the daemon has published no roster yet"))
@@ -99,9 +109,30 @@ func (s *server) FindWorkspaces(
 	s.log.Debug("daemon.server.find_workspaces", "answered a workspace find", dlog.Context{
 		"found": len(found), "omitted": result.Omitted, "repository": req.Msg.GetRepository().GetId() + req.Msg.GetRepository().GetDir(),
 		"text": req.Msg.GetText(), "standing": fmt.Sprint(query.Standing), "created_by": req.Msg.GetCreatedBy().GetId(),
-		"on_roster": query.OnRoster, "caller": req.Msg.GetCaller().GetId(), "roster_revision": roster.GetRevision()})
+		"on_roster": query.OnRoster, "caller": req.Msg.GetCaller().GetId(), "login_workspace": req.Msg.GetLogin().GetOfWorkspace().GetId(),
+		"login_repositories": len(query.LoginRepos), "roster_revision": roster.GetRevision()})
 	resp.Result = &agentreplv1.FindWorkspacesResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
+}
+
+// loginRepos answers the repositories routed to the same login as WS's own
+// repository: the repositories whose main checkout AccountRootFor routes to
+// the config dir WS's repository is routed to. A workspace naming a
+// repository the listing does not hold is an invariant violation (the
+// registry's foreign key forbids it) and panics.
+func (s *server) loginRepos(repositories []wsm.Repository, ws wsm.Workspace) map[wsm.RepoID]bool {
+	own, ok := wsm.RepositoryWithID(repositories, ws.Repo)
+	if !ok {
+		panic(fmt.Sprintf("server: workspace %s names repository %s, which the registry listing does not hold", ws.ID, ws.Repo))
+	}
+	root := s.deps.AccountRootFor(own.Dir)
+	repos := map[wsm.RepoID]bool{}
+	for _, repo := range repositories {
+		if s.deps.AccountRootFor(repo.Dir) == root {
+			repos[repo.ID] = true
+		}
+	}
+	return repos
 }
 
 // registeredRef answers the record in BYID that REF names: its id held, and
@@ -141,6 +172,14 @@ func validateFindWorkspacesRequest(req *agentreplv1.FindWorkspacesRequest) *conn
 	}
 	if req.Caller != nil {
 		if err := validateWorkspaceRef("caller", req.GetCaller()); err != nil {
+			return err
+		}
+	}
+	if req.Login != nil {
+		if req.GetLogin().GetLogin() == nil {
+			return invalid("login", "a login names its arm")
+		}
+		if err := validateWorkspaceRef("login.of_workspace", req.GetLogin().GetOfWorkspace()); err != nil {
 			return err
 		}
 	}

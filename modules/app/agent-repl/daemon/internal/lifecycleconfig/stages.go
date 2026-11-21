@@ -138,6 +138,17 @@ const (
 	DefaultPostDeployTimeoutSeconds = 120
 )
 
+// SlackForwardPrompt is the built-in directive appended to a prompt that
+// forwards a Slack reaction to an open workspace
+// (agentrepl.v1.SubmitPromptRequest.slack_forward): the recipient, workspace
+// NAME, tells THREAD in one brief reply that it took the reaction. It is the
+// only post a forwarded thread gets.
+func SlackForwardPrompt(thread, name string) string {
+	return "This prompt forwards a Slack message to this workspace: " + thread + ". " +
+		"Post one brief reply in that message's thread, in your own words, saying that the agent-repl workspace `" + name + "` has picked it up. " +
+		"Post it with the send-to-slack skill, and post nothing else there unless the work calls for it."
+}
+
 // hasDefault reports whether STAGE has a built-in default for KIND, which is
 // also where a `builtin` hook may stand.
 func (s Stage) hasDefault(kind Originator) bool {

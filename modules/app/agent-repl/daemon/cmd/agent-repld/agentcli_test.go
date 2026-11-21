@@ -3957,3 +3957,72 @@ func TestLocateOne(t *testing.T) {
 		})
 	}
 }
+
+func TestPromptSlackForwardHandsTheThreadOn(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	thread := "https://acme.slack.com/archives/C0123/p1763300000000100"
+
+	// Act
+	code := f.run(workspaceNoun, "prompt", "-slack-forward", thread, "peer", "another reaction came in")
+
+	// Assert
+	req := only[*agentreplv1.SubmitPromptRequest](t, f)
+	if code != exitSuccess || req.GetSlackForward().GetThreadUrl() != thread {
+		t.Fatalf("exit %d, slack_forward %v; want the thread handed on", code, req.GetSlackForward())
+	}
+}
+
+func TestPromptWithoutSlackForwardForwardsNoThread(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "prompt", "peer", "please rebase")
+
+	// Assert
+	req := only[*agentreplv1.SubmitPromptRequest](t, f)
+	if code != exitSuccess || req.SlackForward != nil {
+		t.Fatalf("exit %d, slack_forward %v; want none", code, req.SlackForward)
+	}
+}
+
+func TestListLoginNamesTheWorkspaceWhoseLoginItNarrowsTo(t *testing.T) {
+	tests := []struct {
+		name string
+		arg  string
+		want string
+	}{
+		{name: "here is the calling workspace", arg: "here", want: "ws-caller"},
+		{name: "a name is the workspace it names", arg: "peer", want: "ws-peer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, "list", "-login", tt.arg)
+
+			// Assert
+			req := only[*agentreplv1.FindWorkspacesRequest](t, f)
+			if code != exitSuccess || req.OnRoster == nil || req.GetLogin().GetOfWorkspace().GetId() != tt.want {
+				t.Fatalf("exit %d, sent %v; want the roster narrowed to the login of %s", code, req, tt.want)
+			}
+		})
+	}
+}
+
+func TestListWithoutLoginNarrowsToNoLogin(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "list")
+
+	// Assert
+	req := only[*agentreplv1.FindWorkspacesRequest](t, f)
+	if code != exitSuccess || req.Login != nil {
+		t.Fatalf("exit %d, login %v; want none", code, req.Login)
+	}
+}
