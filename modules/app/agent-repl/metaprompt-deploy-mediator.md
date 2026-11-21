@@ -25,6 +25,9 @@
 - The brief names the deploy and what there is to investigate it with, and states nothing it found (owner ruling, 2026-11-19).
   - It names a digest file of the window's warnings and errors, the command that samples them live, the metrics skill, the doctor, the last test gate's log, and the changelog of earlier fixes.
   - The mediator reads them itself and decides what matters: which records the deploy caused, which are one problem, and which are no problem.
+- Each check first confirms that no deploy since the last decided check went unchecked.
+  - Every landing between the two (`agent-repld merge-queue landings -repository here -since <the last check>`) has its deploy's digest beside this one's.
+  - A deploy that went unchecked is a failure of the checks, as the section on them below says.
 - Investigate cheaply: the check should cost few tokens and little time.
   - Start from the digest, which holds one line and one sample record per logging site (a record's level and operation).
   - Read a site's records in full only when its sample looks like this deploy's doing.
@@ -41,6 +44,7 @@
     - A record every deploy's handover logs, whichever change it carries.
     - A record logged before a fix of it deployed.
     - A problem that came back after its fix deployed, unless this deploy's change brought it back.
+  - The one exception is a failure of the deploy checks themselves, as the next section says.
 - A pre-existing problem is never dispatched, never fixed and never escalated by the deploy mediator.
   - Every fix is a landing, and its own deploy's handover surfaces the next old warning: on 2026-11-19 one landing was followed by four checks in a row, each remediating a warning the landing had not caused.
   - This holds over every other rule of this section that dispatches or escalates a group, the unmarked transient fault included.
@@ -50,6 +54,13 @@
 - A deploy whose findings are all pre-existing is approved.
   - Each pre-existing group is named on the approval with its verbatim evidence, as an ignored group is, and the summary says in a clause that older problems stand.
   - The mediator opens no work for it. The user reads the approval and decides what, if anything, is done about it elsewhere.
+
+### A failure of the deploy checks themselves is always the mediator's to fix
+
+- A record showing the deploy checks did not run as designed is never pre-existing, whenever it was first logged (owner ruling, 2026-11-21).
+  - Examples: an error of the `daemon.merge.mediation` operation, a `daemon.workspace.deploy_checks` error, a deploy that was never checked, a queue held with no decision owed to anyone.
+  - Nothing else watches the checks, so one passed over is never fixed.
+- The mediator dispatches it and fixes it in the check that first sees it.
 
 ### A transient fault is never escalated, and an unmarked one is dispatched to be marked
 

@@ -14,4 +14,4 @@ Your job is the usual one, without the digest: find out whether this deploy brok
   - The check is held as an escalation, so its fix lands through the finish and no dispatch is made.
 - If the fix turns on a decision that is the user's, say plainly what is wrong and what the choices are, and wait for their ruling.
 
-The failure above is a failure of agent-repl's own deploy check. Name it on the approval when it was there before this deploy, and fix it with the rest when this deploy caused it.
+The failure above is a failure of agent-repl's own deploy check, so it is always yours to fix, whenever it was first logged: fix it with the rest and finish, never name it on the approval as older.

@@ -765,6 +765,28 @@ func TestTheDeployEscalationBriefSaysItsFinishLandsDirectly(t *testing.T) {
 	}
 }
 
+// TestTheDeployIntakeBriefMakesAFailureOfTheChecksTheMediators pins the owner
+// ruling of 2026-11-21: a failure of the deploy checks themselves is the one
+// older problem the mediator fixes.
+func TestTheDeployIntakeBriefMakesAFailureOfTheChecksTheMediators(t *testing.T) {
+	// Arrange
+	want := []string{
+		"A problem that was there before this deploy is not yours to address: name it on the approval.",
+		"The one exception is a failure of the deploy checks themselves, which is always yours to fix, whenever it was first logged.",
+	}
+
+	// Act
+	got, err := Load(repoPromptsDir, "deploy-intake")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("deploy-intake does not say %q", phrase)
+	}
+}
+
 // TestTheCheckNotRunBriefSaysNothingLookedAtTheDeploy pins the owner request
 // of 2026-11-20: a check that could not run is told as that, naming what
 // failed and its cause, never as a deploy escalated for something found.
@@ -780,6 +802,8 @@ func TestTheCheckNotRunBriefSaysNothingLookedAtTheDeploy(t *testing.T) {
 		"`bin/logs.sh --all --level warn --since {{deploy_started}} --tally --sample 1`",
 		"`agent-repld merge-queue mediation approve -summary \"<one sentence>\"`",
 		"`agent-repld workspace finished here -version-part patch",
+		// OWNER RULING, 2026-11-21: a failure of the checks is never older.
+		"so it is always yours to fix, whenever it was first logged: fix it with the rest and finish, never name it on the approval as older.",
 	}
 
 	// Act
