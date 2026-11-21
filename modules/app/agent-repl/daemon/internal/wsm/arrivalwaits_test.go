@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
@@ -321,4 +320,3 @@ func TestEveryArrivalWaitReasonIsNamed(t *testing.T) {
 		})
 	}
 }
-
