@@ -68,7 +68,7 @@ func (o *stepObserver) Told() []string {
 }
 
 const (
-	protoStep  = "make -C /checkout/modules/app/agent-repl/proto all"
+	protoStep  = "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh proto"
 	targetStep = "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 "
 	wifiStep   = "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app --reuse /home/.cache/agent-repl/AgentReplWifi.app"
 )

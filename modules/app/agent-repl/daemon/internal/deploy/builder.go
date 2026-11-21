@@ -60,7 +60,8 @@ const LauncherTarget = "launcher"
 // daemon exists, so a daemon-only builder could not be the only one; two
 // builders would drift. The daemon therefore drives that same script, in its
 // staging mode (`--out DIR`), one invocation per target so a failure names
-// its step, after regenerating the protobufs the way every build must.
+// its step, after its `proto` target regenerates the protobufs whenever their
+// sources changed since the last generation in this checkout.
 type ScriptBuilder struct {
 	// ModuleRoot is the agent-repl module root the daemon was deployed from.
 	ModuleRoot string
@@ -187,7 +188,11 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 	if b.Override != "" {
 		return []buildStep{{name: "build", argv: []string{b.Override, "--out", staging}}}
 	}
-	steps := []buildStep{{name: "proto", argv: []string{"make", "-C", filepath.Join(b.ModuleRoot, "proto"), "all"}}}
+	// The proto target takes no --out: the bindings are sources the other
+	// targets compile from, generated into the checkout (build-frontend.sh
+	// build_proto).
+	script := filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh")
+	steps := []buildStep{{name: "proto", argv: []string{"bash", script, "proto"}}}
 	targets := Targets
 	if b.Launcher {
 		targets = append(append([]string(nil), Targets...), LauncherTarget)
@@ -195,7 +200,7 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 	for _, target := range targets {
 		steps = append(steps, buildStep{
 			name: target,
-			argv: []string{"bash", filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh"), "--out", staging, target},
+			argv: []string{"bash", script, "--out", staging, target},
 		})
 	}
 	if b.WifiInstalled != "" {

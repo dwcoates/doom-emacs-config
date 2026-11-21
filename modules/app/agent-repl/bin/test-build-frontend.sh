@@ -110,6 +110,8 @@ make_tree() {
     echo "package main" > "$root/testservice/main.go"
     echo "package logging" > "$root/agent-shim/logging/go/timestamp.go"
     echo "package proto" > "$root/proto/gen/go/proto.go"
+    mkdir -p "$root/proto/src/conversation/v1"
+    echo 'syntax = "proto3";' > "$root/proto/src/conversation/v1/entry.proto"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
     echo '{"scripts":{"build":"true"}}' > "$root/webapp/package.json"
     echo '{"name":"tree-sitter-tldr"}' > "$root/tree-sitter-tldr/package.json"
@@ -149,7 +151,7 @@ commit_tree() {
     # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
     # artifact a build just produced would itself make the tree "dirty" and
     # every build would read as stale forever.
-    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n' > "$root/.gitignore"
+    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n.source-tree\n' > "$root/.gitignore"
     git -C "$root" init -q
     git -C "$root" add -A
     git -C "$root" commit -qm seed
@@ -279,7 +281,16 @@ done
 [ -n "$out" ] && { mkdir -p "$(dirname "$out")"; echo built > "$out"; }
 exit 0
 EOF
-    chmod +x "$bindir/npm" "$bindir/go"
+    # make: logs, and exits 1 when its target is FAKE_MAKE_FAIL.
+    cat > "$bindir/make" <<'EOF2'
+#!/usr/bin/env bash
+echo "make $*" >> "$STUB_LOG"
+for arg in "$@"; do
+    [ -n "${FAKE_MAKE_FAIL:-}" ] && [ "$arg" = "$FAKE_MAKE_FAIL" ] && exit 1
+done
+exit 0
+EOF2
+    chmod +x "$bindir/npm" "$bindir/go" "$bindir/make"
 }
 
 run_script() {
@@ -2237,6 +2248,156 @@ build_group_staging() {
     t_out_creates_an_absent_dir
 }
 
+# --- the proto target: generation only when proto's sources changed ---------
+
+# stamp_fresh_proto ROOT — record that the fixture's bindings were generated
+# from the proto tree standing there now.
+stamp_fresh_proto() {
+    local paths
+    paths="$(deploy_stamp_system_paths proto "")"
+    # shellcheck disable=SC2086
+    write_source_tree "$1/proto/.source-tree" "$(source_tree_id "$1" $paths)"
+}
+
+# proto_case ROOT — a fixture whose stub log is empty.
+proto_case() {
+    make_tree "$1"; make_stubs "$1/stubs"; : > "$1/stub.log"
+}
+
+# proto_generated ROOT / proto_gated_only ROOT — what the proto target ran.
+proto_generated() { grep -q "^make -C .*/proto all$" "$1/stub.log"; }
+proto_gated_only() {
+    grep -q "^make -C .*/proto codegen-gate$" "$1/stub.log" && ! proto_generated "$1"
+}
+
+t_proto_without_a_stamp_generates_and_stamps() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"
+    local paths; paths="$(deploy_stamp_system_paths proto "")"
+    # shellcheck disable=SC2086
+    local want; want="$(source_tree_id "$root" $paths)"
+    if run_script "$root" proto >/dev/null && proto_generated "$root" &&
+           [ "$(read_source_tree "$root/proto/.source-tree")" = "$want" ]; then
+        pass "proto: with no stamp it generates, then stamps the proto tree"
+    else
+        fail "proto: with no stamp it generates, then stamps the proto tree" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.source-tree" 2>&1); want $want"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_unchanged_tree_runs_only_the_gate() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if run_script "$root" proto >/dev/null && proto_gated_only "$root"; then
+        pass "proto: an unchanged proto tree skips generation and still runs the codegen gate"
+    else
+        fail "proto: an unchanged proto tree skips generation and still runs the codegen gate" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_committed_schema_change_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    commit_change "$root" proto/src/conversation/v1/entry.proto "message M {}" "proto: add M"
+    if run_script "$root" proto >/dev/null && proto_generated "$root"; then
+        pass "proto: a committed schema change regenerates"
+    else
+        fail "proto: a committed schema change regenerates" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_dirty_tree_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    printf '// uncommitted\n' >> "$root/proto/gen/go/proto.go"
+    if run_script "$root" proto >/dev/null && proto_generated "$root"; then
+        pass "proto: an uncommitted edit under proto, bindings included, regenerates"
+    else
+        fail "proto: an uncommitted edit under proto, bindings included, regenerates" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_change_outside_the_pathspec_runs_only_the_gate() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    commit_change "$root" daemon/cmd/agent-repld/main.go "// edit" "daemon: edit"
+    if run_script "$root" proto >/dev/null && proto_gated_only "$root"; then
+        pass "proto: a commit outside proto skips generation and still runs the codegen gate"
+    else
+        fail "proto: a commit outside proto skips generation and still runs the codegen gate" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_force_regenerates() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if run_script "$root" --force proto >/dev/null && proto_generated "$root"; then
+        pass "proto: --force regenerates an unchanged tree"
+    else
+        fail "proto: --force regenerates an unchanged tree" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# The bindings are never staged, so a staging run consults the stamp too: the
+# staging rule (every target built unconditionally) would regenerate on every
+# deploy.
+t_proto_staging_run_consults_the_stamp() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if run_script "$root" --out "$root/staging" proto >/dev/null && proto_gated_only "$root"; then
+        pass "proto: a staging run skips generation of an unchanged tree"
+    else
+        fail "proto: a staging run skips generation of an unchanged tree" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_failed_generation_fails_and_stamps_nothing() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"
+    if ! FAKE_MAKE_FAIL=all run_script "$root" proto >/dev/null 2>&1 &&
+           [ ! -e "$root/proto/.source-tree" ]; then
+        pass "proto: a failed generation fails the build and writes no stamp"
+    else
+        fail "proto: a failed generation fails the build and writes no stamp" \
+             "stub.log: $(cat "$root/stub.log"); stamp: $(cat "$root/proto/.source-tree" 2>&1)"
+    fi
+    rm -rf "$root"
+}
+
+t_proto_failed_gate_fails_an_unchanged_tree() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    proto_case "$root"; stamp_fresh_proto "$root"
+    if ! FAKE_MAKE_FAIL=codegen-gate run_script "$root" proto >/dev/null 2>&1; then
+        pass "proto: a failed codegen gate fails the build of an unchanged tree"
+    else
+        fail "proto: a failed codegen gate fails the build of an unchanged tree" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+build_group_proto() {
+    t_proto_without_a_stamp_generates_and_stamps
+    t_proto_unchanged_tree_runs_only_the_gate
+    t_proto_committed_schema_change_regenerates
+    t_proto_dirty_tree_regenerates
+    t_proto_change_outside_the_pathspec_runs_only_the_gate
+    t_proto_force_regenerates
+    t_proto_staging_run_consults_the_stamp
+    t_proto_failed_generation_fails_and_stamps_nothing
+    t_proto_failed_gate_fails_an_unchanged_tree
+}
+
 test_split_run core build_group_core
 test_split_run store-gc build_group_store_gc
 test_split_run stamps build_group_stamps
@@ -2245,5 +2406,6 @@ test_split_run revision-staleness build_group_revision_staleness
 test_split_run healing build_group_healing
 test_split_run dependencies build_group_dependencies
 test_split_run staging build_group_staging
+test_split_run proto build_group_proto
 
 harness_finish
