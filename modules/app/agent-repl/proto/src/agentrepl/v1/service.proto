@@ -39,6 +39,7 @@ import "agentrepl/v1/endpoint_close_feed_image.proto";
 import "agentrepl/v1/endpoint_close_login.proto";
 import "agentrepl/v1/endpoint_close_workspace.proto";
 import "agentrepl/v1/endpoint_compact_workspace.proto";
+import "agentrepl/v1/endpoint_set_workspace_model.proto";
 import "agentrepl/v1/endpoint_create_task.proto";
 import "agentrepl/v1/endpoint_create_thread.proto";
 import "agentrepl/v1/endpoint_create_workspace.proto";
@@ -376,6 +377,9 @@ service AgentRepl {
   // Compact a workspace's conversation through its prompt queue. See
   // endpoint_compact_workspace.proto.
   rpc CompactWorkspace(CompactWorkspaceRequest) returns (CompactWorkspaceResponse);
+  // Set another workspace's model, compacting its conversation first. See
+  // endpoint_set_workspace_model.proto.
+  rpc SetWorkspaceModel(SetWorkspaceModelRequest) returns (SetWorkspaceModelResponse);
   // Mark a workspace a one-shot after its creation, or unmark it. See
   // endpoint_set_workspace_one_shot.proto.
   rpc SetWorkspaceOneShot(SetWorkspaceOneShotRequest) returns (SetWorkspaceOneShotResponse);

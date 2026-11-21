@@ -25,6 +25,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
+	"agent-repld/internal/agentverbs"
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/sourcescan"
@@ -271,6 +272,10 @@ func (c *cliClient) NotifyWorkspace(_ context.Context, req *connect.Request[agen
 
 func (c *cliClient) KeepLiveWorkspace(_ context.Context, req *connect.Request[agentreplv1.KeepLiveWorkspaceRequest]) (*connect.Response[agentreplv1.KeepLiveWorkspaceResponse], error) {
 	return connect.NewResponse(&agentreplv1.KeepLiveWorkspaceResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) SetWorkspaceModel(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceModelRequest]) (*connect.Response[agentreplv1.SetWorkspaceModelResponse], error) {
+	return connect.NewResponse(&agentreplv1.SetWorkspaceModelResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) PassColdGate(_ context.Context, req *connect.Request[agentreplv1.PassColdGateRequest]) (*connect.Response[agentreplv1.PassColdGateResponse], error) {
@@ -1598,6 +1603,83 @@ func TestEveryWorkspaceRequesterIsBuiltByCallingRequester(t *testing.T) {
 	// Assert: the one place a calling workspace becomes a requester.
 	if got := strings.Count(string(src), "&agentreplv1.WorkspaceRequesterWorkspace{"); got != 1 {
 		t.Fatalf("agentcli.go builds %d WorkspaceRequesterWorkspace values; want only callingRequester's", got)
+	}
+}
+
+func TestWorkspaceModelSendsTheModelAndTheRequester(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		wantRequester bool
+	}{
+		{name: "from the calling workspace", args: []string{"peer", "-model", "sonnet"}, wantRequester: true},
+		{name: "as the user", args: []string{"peer", "-model", "sonnet", "-as-user"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"model"}, tt.args...)...)
+
+			// Assert
+			req := only[*agentreplv1.SetWorkspaceModelRequest](t, f)
+			if code != exitSuccess || req.GetModel().GetName() != "sonnet" || req.GetWorkspace().GetId() != "ws-peer" {
+				t.Fatalf("exit %d, request %v; want sonnet for the peer", code, req)
+			}
+			if (req.GetRequester().GetWorkspace() != nil) != tt.wantRequester {
+				t.Fatalf("requester %v; want a workspace requester %v", req.GetRequester(), tt.wantRequester)
+			}
+		})
+	}
+}
+
+func TestWorkspaceModelUsageIsRefusedBeforeAnythingIsSent(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no model", args: []string{"peer"}},
+		{name: "a blank model", args: []string{"peer", "-model", " "}},
+		{name: "no workspace", args: []string{"-model", "sonnet"}},
+		{name: "a stray argument", args: []string{"peer", "-model", "sonnet", "extra"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"model"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), agentverbs.ModelUsage) {
+				t.Fatalf("exit %d, requests %v, stderr %q; want the usage refused and nothing sent", code, f.client.requests, f.errOut.String())
+			}
+		})
+	}
+}
+
+func TestTheVerbsThatReplaceSlashCommandsShareTheirUsageWithTheRefusal(t *testing.T) {
+	tests := []struct {
+		name  string
+		verb  string
+		usage string
+	}{
+		{name: "compact", verb: "compact", usage: agentverbs.CompactUsage},
+		{name: "model", verb: "model", usage: agentverbs.ModelUsage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := cliNouns[workspaceNoun][tt.verb].usage
+
+			// Assert
+			if got != tt.usage {
+				t.Fatalf("workspace %s usage = %q; want the shared %q", tt.verb, got, tt.usage)
+			}
+		})
 	}
 }
 

@@ -395,8 +395,9 @@ export enum PromptOrigin {
    * draws it as an agent prompt headed by a left arrow, then the sending
    * workspace's name (frontend.v1.FeedAgentPromptAddressReceived.workspace). A
    * prompt of this origin that begins with a slash command is refused
-   * (agentrepl.v1.SubmitPromptError.slash_command_from_agent): an agent's acts
-   * on a conversation are the ones the API names, such as compaction.
+   * (agentrepl.v1.SubmitPromptError.slash_command_from_agent): slash commands
+   * are not supported from agents, whose acts on a conversation are the ones
+   * the API names, such as compaction and setting the model.
    * Delivered on arrival (see the enum's header): it joins a running turn
    * after its current tool call and is never held, and at a standing cold
    * gate it is refused (agentrepl.v1.SubmitPromptColdGate) so the sending

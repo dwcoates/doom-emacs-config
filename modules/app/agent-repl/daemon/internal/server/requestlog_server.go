@@ -975,6 +975,13 @@ func (s *requestLoggingServer) CompactWorkspace(
 	return serveUnary(s, ctx, "CompactWorkspace", req, s.server.CompactWorkspace)
 }
 
+func (s *requestLoggingServer) SetWorkspaceModel(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceModelRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceModelResponse], error) {
+	return serveUnary(s, ctx, "SetWorkspaceModel", req, s.server.SetWorkspaceModel)
+}
+
 func (s *requestLoggingServer) RunTests(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RunTestsRequest],

@@ -159,6 +159,9 @@ const (
 	// AgentReplCompactWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// CompactWorkspace RPC.
 	AgentReplCompactWorkspaceProcedure = "/agentrepl.v1.AgentRepl/CompactWorkspace"
+	// AgentReplSetWorkspaceModelProcedure is the fully-qualified name of the AgentRepl's
+	// SetWorkspaceModel RPC.
+	AgentReplSetWorkspaceModelProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceModel"
 	// AgentReplSetWorkspaceOneShotProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceOneShot RPC.
 	AgentReplSetWorkspaceOneShotProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceOneShot"
@@ -534,6 +537,7 @@ var (
 	agentReplForgetWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ForgetWorkspace")
 	agentReplFinishWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("FinishWorkspace")
 	agentReplCompactWorkspaceMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("CompactWorkspace")
+	agentReplSetWorkspaceModelMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceModel")
 	agentReplSetWorkspaceOneShotMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceOneShot")
 	agentReplSetWorkspaceCorrespondenceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceCorrespondence")
 	agentReplChangeWorkspaceLinksMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ChangeWorkspaceLinks")
@@ -800,6 +804,9 @@ type AgentReplClient interface {
 	// Compact a workspace's conversation through its prompt queue. See
 	// endpoint_compact_workspace.proto.
 	CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error)
+	// Set another workspace's model, compacting its conversation first. See
+	// endpoint_set_workspace_model.proto.
+	SetWorkspaceModel(context.Context, *connect.Request[v1.SetWorkspaceModelRequest]) (*connect.Response[v1.SetWorkspaceModelResponse], error)
 	// Mark a workspace a one-shot after its creation, or unmark it. See
 	// endpoint_set_workspace_one_shot.proto.
 	SetWorkspaceOneShot(context.Context, *connect.Request[v1.SetWorkspaceOneShotRequest]) (*connect.Response[v1.SetWorkspaceOneShotResponse], error)
@@ -1466,6 +1473,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplCompactWorkspaceProcedure,
 			connect.WithSchema(agentReplCompactWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		setWorkspaceModel: connect.NewClient[v1.SetWorkspaceModelRequest, v1.SetWorkspaceModelResponse](
+			httpClient,
+			baseURL+AgentReplSetWorkspaceModelProcedure,
+			connect.WithSchema(agentReplSetWorkspaceModelMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		setWorkspaceOneShot: connect.NewClient[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse](
@@ -2251,6 +2264,7 @@ type agentReplClient struct {
 	forgetWorkspace                    *connect.Client[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse]
 	finishWorkspace                    *connect.Client[v1.FinishWorkspaceRequest, v1.FinishWorkspaceResponse]
 	compactWorkspace                   *connect.Client[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse]
+	setWorkspaceModel                  *connect.Client[v1.SetWorkspaceModelRequest, v1.SetWorkspaceModelResponse]
 	setWorkspaceOneShot                *connect.Client[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse]
 	setWorkspaceCorrespondence         *connect.Client[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse]
 	changeWorkspaceLinks               *connect.Client[v1.ChangeWorkspaceLinksRequest, v1.ChangeWorkspaceLinksResponse]
@@ -2586,6 +2600,11 @@ func (c *agentReplClient) FinishWorkspace(ctx context.Context, req *connect.Requ
 // CompactWorkspace calls agentrepl.v1.AgentRepl.CompactWorkspace.
 func (c *agentReplClient) CompactWorkspace(ctx context.Context, req *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error) {
 	return c.compactWorkspace.CallUnary(ctx, req)
+}
+
+// SetWorkspaceModel calls agentrepl.v1.AgentRepl.SetWorkspaceModel.
+func (c *agentReplClient) SetWorkspaceModel(ctx context.Context, req *connect.Request[v1.SetWorkspaceModelRequest]) (*connect.Response[v1.SetWorkspaceModelResponse], error) {
+	return c.setWorkspaceModel.CallUnary(ctx, req)
 }
 
 // SetWorkspaceOneShot calls agentrepl.v1.AgentRepl.SetWorkspaceOneShot.
@@ -3333,6 +3352,9 @@ type AgentReplHandler interface {
 	// Compact a workspace's conversation through its prompt queue. See
 	// endpoint_compact_workspace.proto.
 	CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error)
+	// Set another workspace's model, compacting its conversation first. See
+	// endpoint_set_workspace_model.proto.
+	SetWorkspaceModel(context.Context, *connect.Request[v1.SetWorkspaceModelRequest]) (*connect.Response[v1.SetWorkspaceModelResponse], error)
 	// Mark a workspace a one-shot after its creation, or unmark it. See
 	// endpoint_set_workspace_one_shot.proto.
 	SetWorkspaceOneShot(context.Context, *connect.Request[v1.SetWorkspaceOneShotRequest]) (*connect.Response[v1.SetWorkspaceOneShotResponse], error)
@@ -3995,6 +4017,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplCompactWorkspaceProcedure,
 		svc.CompactWorkspace,
 		connect.WithSchema(agentReplCompactWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSetWorkspaceModelHandler := connect.NewUnaryHandler(
+		AgentReplSetWorkspaceModelProcedure,
+		svc.SetWorkspaceModel,
+		connect.WithSchema(agentReplSetWorkspaceModelMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplSetWorkspaceOneShotHandler := connect.NewUnaryHandler(
@@ -4820,6 +4848,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplFinishWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplCompactWorkspaceProcedure:
 			agentReplCompactWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplSetWorkspaceModelProcedure:
+			agentReplSetWorkspaceModelHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceOneShotProcedure:
 			agentReplSetWorkspaceOneShotHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceCorrespondenceProcedure:
@@ -5239,6 +5269,10 @@ func (UnimplementedAgentReplHandler) FinishWorkspace(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CompactWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetWorkspaceModel(context.Context, *connect.Request[v1.SetWorkspaceModelRequest]) (*connect.Response[v1.SetWorkspaceModelResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceModel is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetWorkspaceOneShot(context.Context, *connect.Request[v1.SetWorkspaceOneShotRequest]) (*connect.Response[v1.SetWorkspaceOneShotResponse], error) {
