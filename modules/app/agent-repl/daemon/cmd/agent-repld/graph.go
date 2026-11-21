@@ -914,6 +914,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE OBSERVED STATE CLIENT, so every undelivered keep-alive's fault
 		// reaches the footer (health.ObserveFaults above).
 		Faults: p.DB,
+		// THE SPEND SERIES' OWN FIGURES, which a keep-alive run's spend is read
+		// from (cachelapse runspend.go); the off surface answers none.
+		KeepaliveSpent: p.Metrics.KeepaliveSpent,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)

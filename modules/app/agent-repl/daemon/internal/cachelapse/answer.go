@@ -1,6 +1,7 @@
 package cachelapse
 
 import (
+	"context"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -52,7 +53,7 @@ func (k *Keeper) awaitAnswer(log dlog.Logger, ws ids.WorkspaceID, sent time.Time
 
 // answered stands WS's session down when STATED is the restated lapse of the
 // keep-alive its stand-down awaits. Any other restatement leaves it waiting.
-func (k *Keeper) answered(ws ids.WorkspaceID, stated *conversationv1.SessionCacheLapse) {
+func (k *Keeper) answered(ctx context.Context, ws ids.WorkspaceID, stated *conversationv1.SessionCacheLapse) {
 	sent, waiting := k.answering[ws]
 	if !waiting {
 		return
@@ -67,7 +68,7 @@ func (k *Keeper) answered(ws ids.WorkspaceID, stated *conversationv1.SessionCach
 	log.Info(opDrive, k.answerWords(ws,
 		"the vendor answered the keep-alive and the cache is re-anchored; its session is stood down until the next one",
 		"the vendor answered the keep-alive and the cache is re-anchored; its session stays up"), fields)
-	k.settleAnswer(ws, sent, answeredAck(lapsesAt))
+	k.settleAnswer(ctx, ws, sent, answeredAck(lapsesAt))
 }
 
 // answeredFailed stands WS's session down when FAILED, a keep-alive whose
@@ -81,7 +82,7 @@ func (k *Keeper) answered(ws ids.WorkspaceID, stated *conversationv1.SessionCach
 // failure record, its network fault). Before this answer existed the session
 // waited out AnswerBound and was recorded unanswered at WARN (2026-11-17
 // 13:19:20: answered in 0.3s on ENOTFOUND, warned at 13:21:19).
-func (k *Keeper) answeredFailed(ws ids.WorkspaceID, failed *conversationv1.SessionKeepaliveFailed) {
+func (k *Keeper) answeredFailed(ctx context.Context, ws ids.WorkspaceID, failed *conversationv1.SessionKeepaliveFailed) {
 	sent, waiting := k.answering[ws]
 	if !waiting {
 		k.deps.Log.Global().Debug(opDrive, "a failed keep-alive with no stand-down awaiting it; its lapse already answered", dlog.Context{
@@ -94,12 +95,12 @@ func (k *Keeper) answeredFailed(ws ids.WorkspaceID, failed *conversationv1.Sessi
 		"the keep-alive's request failed; its session stays up, and the cache lapses at its old anchor"), dlog.Context{
 		"workspace": string(ws), "trigger": k.triggerOf(ws), "sent": sent, "detail": failed.GetDetail(),
 	})
-	k.settleAnswer(ws, sent, failedAck(failed.GetDetail()))
+	k.settleAnswer(ctx, ws, sent, failedAck(failed.GetDetail()))
 }
 
 // answersDue stands down every session whose keep-alive went unanswered past
 // AnswerBound: the shim is not held up for an answer that is not coming.
-func (k *Keeper) answersDue() {
+func (k *Keeper) answersDue(ctx context.Context) {
 	now := k.deps.Clock.Now()
 	for ws, by := range k.answerBy {
 		if now.Before(by) {
@@ -112,7 +113,7 @@ func (k *Keeper) answersDue() {
 			"the keep-alive went unanswered past its bound; its session is stood down, and the cache lapses at its old anchor",
 			"the keep-alive went unanswered past its bound; its session stays up, and the cache lapses at its old anchor"),
 			dlog.Context{"workspace": string(ws), "trigger": k.triggerOf(ws), "sent": sent, "bound": AnswerBound.String()})
-		k.settleAnswer(ws, sent, nil)
+		k.settleAnswer(ctx, ws, sent, nil)
 	}
 }
 
@@ -120,7 +121,10 @@ func (k *Keeper) answersDue() {
 // ended (ACK answered or failed, or nil when unanswered past its bound), and
 // stands its session down until the next one unless the wait kept it up: the
 // one settlement every outcome shares, a keep-live run's included.
-func (k *Keeper) settleAnswer(ws ids.WorkspaceID, sent time.Time, ack *agentreplv1.KeepLiveWorkspaceAck) {
+func (k *Keeper) settleAnswer(ctx context.Context, ws ids.WorkspaceID, sent time.Time, ack *agentreplv1.KeepLiveWorkspaceAck) {
+	// THE ANSWER FOLLOWS THE KEEP-ALIVE'S SPEND on the session stream, so the
+	// spend is read here (runspend.go).
+	k.addRunSpend(ctx, k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}), ws)
 	standDown := !k.answerKeepsUp[ws]
 	delete(k.answering, ws)
 	delete(k.answerBy, ws)

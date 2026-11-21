@@ -59,5 +59,6 @@ func (k *Keeper) runCapped(ctx context.Context, log dlog.Logger, ws ids.Workspac
 		// run still owes no keep-alive, and the next reconcile marks again.
 		_ = k.markCold(ctx, ws, why)
 	}
+	k.endRun(ctx, log, ws, wsm.RunEndingCap)
 	return why, true
 }

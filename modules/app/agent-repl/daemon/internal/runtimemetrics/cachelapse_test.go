@@ -3,6 +3,8 @@ package runtimemetrics
 import (
 	"testing"
 	"time"
+
+	"agent-repld/internal/wsm"
 )
 
 func TestCacheSeriesAreServed(t *testing.T) {
@@ -37,4 +39,25 @@ func TestTheOffSurfaceRecordsNoCacheSeries(t *testing.T) {
 	s.ObserveBeat("ws-1", "sent", time.Second)
 	s.CountLapse("ws-1", "stood_down")
 	s.ObserveColdGate("ws-1", "model_switch", time.Second)
+}
+
+func TestAnEndedKeepaliveRunIsServedByItsEnd(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	run := wsm.KeepaliveRun{Beats: 7, Spent: wsm.KeepaliveRunTokens{CacheRead: 6300, Output: 14}, End: wsm.KeepaliveRunCapped}
+	// Act
+	s.ObserveKeepaliveRun("ws1", run)
+	// Assert
+	mustContain(t, scrape(t, s),
+		KeepaliveRunBeatsName+`_bucket{end="run_cap",workspace="ws1",le="8"} 1`,
+		KeepaliveRunBeatsName+`_sum{end="run_cap",workspace="ws1"} 7`,
+		KeepaliveRunTokensName+`{end="run_cap",kind="cache_read",workspace="ws1"} 6300`,
+		KeepaliveRunTokensName+`{end="run_cap",kind="output",workspace="ws1"} 14`)
+}
+
+func TestTheOffSurfaceRecordsNoKeepaliveRun(t *testing.T) {
+	// Arrange
+	var s *Surface
+	// Act and Assert: the off surface records nothing and does not panic.
+	s.ObserveKeepaliveRun("ws1", wsm.KeepaliveRun{Beats: 1, End: wsm.KeepaliveRunResumed})
 }

@@ -112,7 +112,7 @@ func TestAnUnansweredKeepaliveStandsTheSessionDownAtItsBound(t *testing.T) {
 			h.clock.Set(now.Add(tt.after))
 
 			// Act
-			h.keeper.answersDue()
+			h.keeper.answersDue(context.Background())
 
 			// Assert
 			if len(h.cycled) != tt.want {
@@ -128,7 +128,7 @@ func TestAnUnansweredKeepaliveIsRecordedAtWarn(t *testing.T) {
 	h.clock.Set(now.Add(AnswerBound))
 
 	// Act
-	h.keeper.answersDue()
+	h.keeper.answersDue(context.Background())
 
 	// Assert
 	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "warn", Operation: opDrive}); !ok {
@@ -182,7 +182,7 @@ func TestAFailedKeepaliveAnswersTheStandDownItAwaits(t *testing.T) {
 	})
 	t.Run("nothing is recorded at WARN when the bound later passes", func(t *testing.T) {
 		h.clock.Set(now.Add(AnswerBound))
-		h.keeper.answersDue()
+		h.keeper.answersDue(context.Background())
 		if record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "warn", Operation: opDrive}); ok {
 			t.Fatalf("WARN record %+v, want none for an answered keep-alive", record)
 		}
@@ -222,7 +222,7 @@ func TestSettleAnswerEndsTheWaitAndStandsTheSessionDownAtTheBeat(t *testing.T) {
 	h := awaiting(t)
 
 	// Act.
-	h.keeper.settleAnswer(theWorkspace, now, nil)
+	h.keeper.settleAnswer(context.Background(), theWorkspace, now, nil)
 
 	// Assert.
 	if len(h.keeper.answering) != 0 || len(h.keeper.answerBy) != 0 {
@@ -246,7 +246,7 @@ func TestEveryKeepaliveOutcomeSettlesItsWaitTheSameWay(t *testing.T) {
 		}},
 		{name: "unanswered past its bound", settle: func(h *harness) {
 			h.clock.Set(now.Add(AnswerBound))
-			h.keeper.answersDue()
+			h.keeper.answersDue(context.Background())
 		}},
 	}
 	for _, tt := range tests {

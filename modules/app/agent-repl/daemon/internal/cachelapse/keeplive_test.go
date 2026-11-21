@@ -295,7 +295,7 @@ func TestAKeepLiveStepThatOutrunsItsBound(t *testing.T) {
 		{name: "ack", reach: func(t *testing.T, h *harness) {
 			h.restoreUp(t)
 			h.clock.Set(now.Add(AnswerBound))
-			h.keeper.answersDue()
+			h.keeper.answersDue(context.Background())
 		}, wantStep: func(s *agentreplv1.KeepLiveWorkspaceTimedOut) bool { return s.GetAck() != nil }, wantBound: AnswerBound, wantDowns: 1},
 		{name: "stand-down", reach: func(t *testing.T, h *harness) {
 			h.restoreUp(t)

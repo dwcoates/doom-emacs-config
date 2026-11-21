@@ -105,6 +105,10 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was sent: the
 	// beat's half of the cache clock (wsm.Workspace.CacheClock).
 	SetLastKeepalive(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
+	// EndKeepaliveRun and AddKeepaliveRunSpend record a keep-alive run's end
+	// and its spend (wsm keepaliverun.go, runspend.go).
+	EndKeepaliveRun(ctx context.Context, id wsm.WorkspaceID, ending wsm.KeepaliveRunEnding) (wsm.KeepaliveRun, bool, error)
+	AddKeepaliveRunSpend(ctx context.Context, id wsm.WorkspaceID, spent wsm.KeepaliveRunTokens) (bool, error)
 	// QueueBypass reads a workspace's queue-bypass standing: its parked
 	// conversation, that conversation's own cache clock and whether its
 	// cache is known cold.
@@ -216,6 +220,10 @@ type Deps struct {
 	// Faults records the keep-alives the keeper owed and did not deliver, and
 	// its own loop stopping (delivery.go).
 	Faults Faults
+	// KeepaliveSpent answers the tokens WS's keep-alives spent in this
+	// daemon's life (runtimemetrics.Surface.KeepaliveSpent), which a run's
+	// spend is read from (runspend.go).
+	KeepaliveSpent func(ws ids.WorkspaceID) *conversationv1.VendorTokens
 }
 
 // edgeKind is what one queued event is.
@@ -247,6 +255,12 @@ const (
 	edgeKeepLive
 	// edgeKeepLiveStoodDown is a keep-live run's stand-down settling.
 	edgeKeepLiveStoodDown
+	// edgeTurnClosed is a turn's close recorded: the cache clock moved, and
+	// the keep-alive run it ended is recorded (runspend.go).
+	edgeTurnClosed
+	// edgeClosure is a close or a reopen of the workspace recorded: a run
+	// its close ended is recorded (runspend.go).
+	edgeClosure
 )
 
 // edge is one queued event.
@@ -310,7 +324,11 @@ type Keeper struct {
 	// answer, with when that keep-alive was sent, and answerBy when the
 	// stand-down is taken without one (answer.go); both owned by Run alone.
 	answering map[ids.WorkspaceID]time.Time
-	answerBy  map[ids.WorkspaceID]time.Time
+	// runSpendMark is each workspace's keep-alive spend at the last answer
+	// this Keeper settled, which the next answer's growth is read from
+	// (runspend.go).
+	runSpendMark map[ids.WorkspaceID]*conversationv1.VendorTokens
+	answerBy     map[ids.WorkspaceID]time.Time
 	// answerKeepsUp is each awaited answer after which the session is left
 	// up (a keep-live on a session within its grace); owned by Run alone.
 	answerKeepsUp map[ids.WorkspaceID]bool
@@ -381,6 +399,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs to stat the workspaces' directories")
 	case deps.Faults == nil:
 		return nil, errors.New("cachelapse: the keeper needs the fault records")
+	case deps.KeepaliveSpent == nil:
+		return nil, errors.New("cachelapse: the keeper needs the workspaces' keep-alive spend")
 	}
 	return &Keeper{
 		deps: deps, wake: make(chan struct{}, 1),
@@ -403,6 +423,7 @@ func New(deps Deps) (*Keeper, error) {
 		owners:       map[ids.WorkspaceID]standing{},
 		coldDue:      map[ids.WorkspaceID]time.Time{},
 		early:        map[ids.WorkspaceID]time.Time{},
+		runSpendMark: map[ids.WorkspaceID]*conversationv1.VendorTokens{},
 	}, nil
 }
 
@@ -432,7 +453,7 @@ func (k *Keeper) SessionFree(ws ids.WorkspaceID, workEnded bool) {
 // the session watcher raises it before the close is written. It never
 // blocks.
 func (k *Keeper) TurnClosed(ws ids.WorkspaceID) {
-	k.enqueue(edge{ws: ws, why: "a turn's close was recorded"})
+	k.enqueue(edge{ws: ws, kind: edgeTurnClosed, why: "a turn's close was recorded"})
 }
 
 // VisibilityChanged is a hide or a show of WS, or the selection moving onto
@@ -444,7 +465,7 @@ func (k *Keeper) VisibilityChanged(ws ids.WorkspaceID) {
 // ClosureChanged is a close or a reopen of WS, already recorded: its cadence
 // is reconciled. It never blocks.
 func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
-	k.enqueue(edge{ws: ws, why: "the workspace was closed or reopened"})
+	k.enqueue(edge{ws: ws, kind: edgeClosure, why: "the workspace was closed or reopened"})
 }
 
 // ColdGateRaised is WS's session parking at its cold gate: its cache is
@@ -522,7 +543,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.lapseDue(ctx)
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
-			k.answersDue()
+			k.answersDue(ctx)
 			k.coldParksDue(ctx)
 			k.keepLivesDue()
 			k.stateNextKeepalives()
@@ -544,7 +565,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.lapseDue(ctx)
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
-			k.answersDue()
+			k.answersDue(ctx)
 			k.coldParksDue(ctx)
 			k.keepLivesDue()
 			k.stateNextKeepalives()
@@ -609,7 +630,7 @@ func (k *Keeper) earliest() (time.Time, bool) {
 func (k *Keeper) apply(ctx context.Context, e edge) {
 	switch e.kind {
 	case edgeLapse:
-		k.answered(e.ws, e.lapse)
+		k.answered(ctx, e.ws, e.lapse)
 		k.record(ctx, e.ws, e.lapse)
 	case edgeFree:
 		if e.workEnded {
@@ -623,13 +644,19 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	case edgeParkedAnswered:
 		k.parkedAnswered(ctx, e.ws, e.parked, e.err)
 	case edgeKeepaliveFailed:
-		k.answeredFailed(e.ws, e.failed)
+		k.answeredFailed(ctx, e.ws, e.failed)
 	case edgeNetworkRestored:
 		k.networkRestored(e.down)
 	case edgeKeepLive:
 		k.beginKeepLive(ctx, e.ws, e.keepLive)
 	case edgeKeepLiveStoodDown:
 		k.keepLiveStoodDown(e.run, e.stoodDown)
+	case edgeTurnClosed:
+		k.endRun(ctx, k.deps.Log.Global().With(dlog.Context{"workspace": string(e.ws)}), e.ws, wsm.RunEndingTurnClosed)
+		k.reconcile(ctx, e.ws, e.why)
+	case edgeClosure:
+		k.endRun(ctx, k.deps.Log.Global().With(dlog.Context{"workspace": string(e.ws)}), e.ws, wsm.RunEndingClosure)
+		k.reconcile(ctx, e.ws, e.why)
 	default:
 		k.reconcile(ctx, e.ws, e.why)
 	}

@@ -32,6 +32,13 @@ type fakeTelemetry struct {
 	beats  []beatObservation
 	lapses []string
 	gates  []gateObservation
+	runs   []wsm.KeepaliveRun
+}
+
+func (f *fakeTelemetry) ObserveKeepaliveRun(_ ids.WorkspaceID, run wsm.KeepaliveRun) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runs = append(f.runs, run)
 }
 
 func (f *fakeTelemetry) ObserveBeat(_ ids.WorkspaceID, outcome string, late time.Duration) {
