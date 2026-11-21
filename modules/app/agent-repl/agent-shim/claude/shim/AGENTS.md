@@ -1938,16 +1938,37 @@ suite (`test/integration-support/canonical.ts`).
 - **A group shim** serves every case of a file that needs the same
   precondition: `groupShim(KEY, OPTIONS)`, or `groupSession(KEY, OPTIONS)` with
   its one session. A key always names the same options. A new case needing a
-  precondition joins the group that names it. The groups so far:
-  - `no-session` (session.test.ts): a shim no case starts a session on, for
-    every refusal of a shim with no session.
-  - `store-outage` (record.test.ts): the outage cases, one after another, each
-    recovering the store and waiting for its held rows to land before it
-    returns.
-  - `rotation` (record.test.ts): ONE `!rotate`, after one ordinary turn, which
-    every rotation case observes (`rotation()`).
-  - `permission-mode` (gate.test.ts): the cases that move the session's
-    permission mode, each restoring the default when it finishes.
+  precondition joins the group that names it. Every group a case can join, by
+  file:
+  - `transport`: none.
+  - `record`: `store-outage` (each case recovers the store and waits for its
+    held rows), `rotation` (one `!rotate` every rotation case observes).
+  - `gate`: `permission-mode` (each case restores the default mode).
+  - `detached`: `fan-wide-cancel`, `task-notification` (a re-reported live
+    shell stays in the vendor's live set), `network-outage <ms>` per resume
+    window (each case takes the API down, and brings it back and awaits its
+    waits' end when it finishes).
+  - `turn`: `remote-control` (its bridge on once), `rollback`,
+    `vendor-turn-race` (one race several cases observe), `keep-alive` and
+    `stop-on-rewind` (each case settles the ledger with one ordinary turn when
+    it finishes).
+  - `session`: `no-session`, `refused-control`, `refuse-start-eof`,
+    `init-after-first-turn`, `query-death <prompt>` (one death per cause),
+    `converter-fault`, `session-settings` (each case restores the default
+    model, effort and mode), `skills`, `bridge` (each case turns it off),
+    `hibernate`.
+  - `process`: `missing-lock-holder`, `real-lock`.
+- **One act, several observers.** Cases that each performed the same act and
+  read a different view of it read ONE act a memo runs on first use (the
+  rotation, a query death, the vendor-turn race, a re-report): the act runs
+  once, and each case asserts its own view.
+- **A case body written for a shim of its own** takes `sliceOf(shim)`: the same
+  shim, its `log` and `store` answering only what came after the mark, so its
+  whole-log counts and first-match waits read its own slice unchanged.
+- **One canonical shim per FILE, never per vitest process.** Each file's fake
+  store runs inside that file's test process, and nearly every case reads it,
+  so a shim shared across files would need module isolation turned off for
+  about six fewer spawns per run.
 - **A fresh shim** (`spawnShim`) is only for a case whose subject is the
   shim's or its session's own lifecycle (startup and its refusals, SIGTERM or
   SIGKILL stand-down, a forced KillSession, a query that dies, a resume of a

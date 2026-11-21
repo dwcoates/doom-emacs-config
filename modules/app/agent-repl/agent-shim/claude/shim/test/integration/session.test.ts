@@ -12,7 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, onTestFinished, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { workspaceLockKey } from "../../src/locks.js";
 import { agentIdPath } from "../../src/engine/identity.js";
@@ -114,6 +114,23 @@ function startEofShim(): Promise<ShimHandle> {
  */
 function initAfterFirstTurnSession(): Promise<CanonicalSession> {
   return groupSession("init-after-first-turn", { env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
+}
+
+/**
+ * The "session-settings" group's session, at its defaults (the default model,
+ * high effort, the default permission mode) when a case takes it: every case
+ * that moves a setting puts all three back when it finishes, the model first,
+ * since a model that takes no effort level refuses the effort's reset.
+ */
+async function settingsSession(): Promise<CanonicalSession> {
+  const session = await groupSession("session-settings");
+  onTestFinished(async () => {
+    const { clients } = session.shim;
+    setModelAccepted(await clients.h1.setSessionModel(create(shimv1.SetSessionModelRequestSchema, { model: modelNamed(DEFAULT_MODEL), coldThresholdTokens: 1_000_000n })));
+    expect(setEffortAccepted(await clients.h1.setSessionEffort(create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH })))).toBe(conversationv1.AgentEffortLevel.HIGH);
+    setPermissionModeAccepted(await clients.h1.setSessionPermissionMode(create(shimv1.SetSessionPermissionModeRequestSchema, { permissionMode: permissionMode("default") })));
+  });
+  return session;
 }
 
 let initFirstTurn: Promise<shimv1.StartTurnResponse> | null = null;
@@ -356,8 +373,7 @@ describe("SetSessionPermissionMode", () => {
   test("the new mode is pushed authoritatively on WatchSession", async () => {
     // AUTHORITATIVE EVEN WHEN THE CONSUMER ASKED: the daemon's own request is
     // not evidence the mode changed; the shim's push is.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "permissionModeChanged");
 
@@ -382,8 +398,7 @@ describe("SetSessionPermissionMode", () => {
 
 describe("SetSessionEffort", () => {
   test("with no turn open it succeeds carrying the level now in effect", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
 
     const response = await shim.clients.h1.setSessionEffort(
       create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH }),
@@ -393,8 +408,7 @@ describe("SetSessionEffort", () => {
   });
 
   test("the vendor's applied level is pushed on WatchSession, and moves with a change", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     const watch = watchSession(shim);
     const effortOf = (frame: Parameters<typeof sessionUpdate>[0]): conversationv1.AgentEffortLevel | undefined => {
       const update = sessionUpdate(frame).update;
@@ -414,8 +428,7 @@ describe("SetSessionEffort", () => {
   });
 
   test("a model that takes no effort level answers not_supported", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     setModelAccepted(
       await shim.clients.h1.setSessionModel(
         create(shimv1.SetSessionModelRequestSchema, {
@@ -435,8 +448,7 @@ describe("SetSessionEffort", () => {
 
 describe("SetSessionModel", () => {
   test("with no turn open it succeeds and pushes model_changed", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "modelChanged");
 
@@ -470,9 +482,10 @@ describe("SetSessionModel", () => {
     // ONE MODEL PER TURN, a deliberate departure from the SDK's mid-turn
     // setModel: a turn that changed model halfway would have two models'
     // reasoning in one answer.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     let settled = false;
     const pending = shim.clients.h1
@@ -876,12 +889,13 @@ describe("session facts with no message behind them", () => {
   test("!model-fallback pushes model_changed for a model the shim did not ask for", async () => {
     // The vendor can serve a different model than the one requested; the change
     // is stated from the next assistant message's own `message.model`.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "modelChanged");
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!model-fallback" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!model-fallback" }));
     const changed = await watch.until((frame) => {
       const update = sessionUpdate(frame);
       return (
@@ -897,15 +911,16 @@ describe("session facts with no message behind them", () => {
 
 describe("compaction, as the vendor does it", () => {
   test("!compact-auto produces compacting and then a compacted context_cut", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = watchSession(shim);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await agent.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!compact-auto" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!compact-auto" }));
     const compacting = await watch.until(
       (frame) => sessionUpdate(frame).update.case === "compacting",
     );
@@ -930,14 +945,16 @@ describe("compaction, as the vendor does it", () => {
   });
 
   test("!compact-failed produces a compaction_failed context_cut and no boundary", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await agent.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!compact-failed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!compact-failed" }));
     const cut = await agent.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const inner = watchAgentEntry(frame).entry?.entry;
@@ -954,7 +971,7 @@ describe("compaction, as the vendor does it", () => {
     if (failed?.case !== "compactionFailed") throw new Error("expected compaction_failed");
     expect(failed.value.error).not.toBe("");
     expect(
-      readTranscript(shim.dirs, started.vendorSessionId).some(
+      mine.transcript(started.vendorSessionId).some(
         (record) => record.type === "system" && record.subtype === "compact_boundary",
       ),
     ).toBe(false);
@@ -963,60 +980,64 @@ describe("compaction, as the vendor does it", () => {
 });
 
 describe("query death", () => {
+  /** What one query death left: the session's own push, and the open turn's terminal. */
+  interface Death {
+    readonly died: shimv1.WatchSessionResponse;
+    readonly terminal: shimv1.WatchAgentResponse;
+  }
+
+  const deaths = new Map<string, Promise<Death>>();
+
+  /**
+   * ONE DEATH, SEVERAL OBSERVERS. A query death ends its session, so each cause
+   * dies ONCE, on its own group shim ("query-death <prompt>"), watched on both
+   * streams opened before the turn; every case of that cause reads the act.
+   */
+  function queryDeath(prompt: "!query-eof" | "!query-fail"): Promise<Death> {
+    let death = deaths.get(prompt);
+    if (death === undefined) {
+      death = (async () => {
+        const { shim } = await groupSession(`query-death ${prompt}`);
+        const watch = watchSession(shim);
+        const agent = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
+        await agent.next();
+        await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: prompt }));
+        const died = await watch.until((frame) => sessionUpdate(frame).update.case === "queryDied");
+        const terminal = await agent.until((frame) => {
+          if (frame.frame.case !== "entry") return false;
+          const inner = watchAgentEntry(frame).entry?.entry;
+          return inner?.case === "agentFrame" && inner.value.result.case === "failure";
+        });
+        watch.close();
+        agent.close();
+        return { died, terminal };
+      })();
+      deaths.set(prompt, death);
+    }
+    return death;
+  }
+
   test("!query-eof reports query_died.unexpected_eof", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = watchSession(shim);
+    const { died } = await queryDeath("!query-eof");
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-eof" }));
-    const died = await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "queryDied" && update.update.value.cause.case === "unexpectedEof"
-      );
-    });
-
-    expect(sessionUpdate(died).update.case).toBe("queryDied");
-    watch.close();
+    const update = sessionUpdate(died);
+    expect(update.update.case === "queryDied" ? update.update.value.cause.case : update.update.case).toBe("unexpectedEof");
   });
 
   test("!query-fail reports query_died.iterator_failure", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = watchSession(shim);
+    const { died } = await queryDeath("!query-fail");
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-fail" }));
-    const died = await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "queryDied" && update.update.value.cause.case === "iteratorFailure"
-      );
-    });
-
-    expect(sessionUpdate(died).update.case).toBe("queryDied");
-    watch.close();
+    const update = sessionUpdate(died);
+    expect(update.update.case === "queryDied" ? update.update.value.cause.case : update.update.case).toBe("iteratorFailure");
   });
 
   test("a query death concludes the open WatchAgent turn with a failure terminal", async () => {
     // DUPLICATED ON PURPOSE: stream owners get their own failure, and a
     // consumer with no stream open still needs the session-level fact.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const agent = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await agent.next();
-
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-eof" }));
-    const terminal = await agent.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      const inner = watchAgentEntry(frame).entry?.entry;
-      return inner?.case === "agentFrame" && inner.value.result.case === "failure";
-    });
+    const { terminal } = await queryDeath("!query-eof");
 
     const inner = watchAgentEntry(terminal).entry?.entry;
     expect(inner?.case).toBe("agentFrame");
-    agent.close();
   });
 
   // THE TERMINAL SAYS THE DEATH ITSELF. It reaches the daemon through the
@@ -1024,24 +1045,11 @@ describe("query death", () => {
   // them, and a replayed turn has only the terminal — so the terminal's own arm
   // must carry the death and its cause, not an execution_error stand-in.
   test.each([
-    { prompt: "!query-eof", cause: "unexpectedEof", thrown: undefined },
-    { prompt: "!query-fail", cause: "iteratorFailure", thrown: "fake vendor query died mid-turn" },
+    { prompt: "!query-eof" as const, cause: "unexpectedEof", thrown: undefined },
+    { prompt: "!query-fail" as const, cause: "iteratorFailure", thrown: "fake vendor query died mid-turn" },
   ])("$prompt concludes the turn with the query_died arm carrying $cause", async ({ prompt, cause, thrown }) => {
-    // Arrange
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const agent = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await agent.next();
-
-    // Act
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: prompt }));
-    const terminal = await agent.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      const inner = watchAgentEntry(frame).entry?.entry;
-      return inner?.case === "agentFrame" && inner.value.result.case === "failure";
-    });
+    // Arrange, Act: the cause's one death.
+    const { terminal } = await queryDeath(prompt);
 
     // Assert
     const inner = watchAgentEntry(terminal).entry?.entry;
@@ -1054,20 +1062,57 @@ describe("query death", () => {
     expect(died?.cause.case).toBe(cause);
     const said = died?.cause.case === "iteratorFailure" ? died.cause.value.cause : undefined;
     expect(said).toBe(thrown);
-    agent.close();
   });
 });
 
 describe("the shim's own faults", () => {
+  // THE RECOVERY CASE RUNS FIRST on the group's session: it leaves the session
+  // healthy, where a fault is a change the next case can see pushed.
+  test("a recovered fault closes its degraded window", async () => {
+    // Diagnostics keep degraded WINDOWS since shim start, so a transient defect
+    // stays visible after recovery instead of vanishing.
+    // THE "converter-fault" GROUP: a fault taints the session's health, which
+    // the canonical session's health cases read.
+    const { shim } = await groupSession("converter-fault");
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
+    const watch = watchSession(shim);
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!fault-converter" }));
+    await watch.until((frame) => {
+      const update = sessionUpdate(frame);
+      return (
+        update.update.case === "diagnostics" && update.update.value.health.case === "unhealthy"
+      );
+    });
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!md" }));
+    const recovered = await watch.until((frame) => {
+      const update = sessionUpdate(frame);
+      return (
+        update.update.case === "diagnostics" &&
+        update.update.value.health.case === "healthy" &&
+        update.update.value.degradedWindows.some((window) => window.extent.case === "closed")
+      );
+    });
+
+    expect(sessionUpdate(recovered).update.case).toBe("diagnostics");
+    watch.close();
+  });
+
   test("!fault-converter surfaces a converter_defect fault on diagnostics", async () => {
     // A converter that could not convert is a PRODUCER DEFECT, reported rather
     // than swallowed: the alternative is silently wrong attribution.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    // THE "converter-fault" GROUP: a fault taints the session's health, which
+    // the canonical session's health cases read.
+    const { shim } = await groupSession("converter-fault");
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = watchSession(shim);
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!fault-converter" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!fault-converter" }));
     const faulted = await watch.until((frame) => {
       const update = sessionUpdate(frame);
       if (update.update.case !== "diagnostics") return false;
@@ -1081,42 +1126,14 @@ describe("the shim's own faults", () => {
     expect(sessionUpdate(faulted).update.case).toBe("diagnostics");
     watch.close();
   });
-
-  test("a recovered fault closes its degraded window", async () => {
-    // Diagnostics keep degraded WINDOWS since shim start, so a transient defect
-    // stays visible after recovery instead of vanishing.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = watchSession(shim);
-    await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!fault-converter" }));
-    await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "diagnostics" && update.update.value.health.case === "unhealthy"
-      );
-    });
-
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
-    const recovered = await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "diagnostics" &&
-        update.update.value.health.case === "healthy" &&
-        update.update.value.degradedWindows.some((window) => window.extent.case === "closed")
-      );
-    });
-
-    expect(sessionUpdate(recovered).update.case).toBe("diagnostics");
-    watch.close();
-  });
 });
 
 describe("Hibernate", () => {
   test("a turn in flight refuses turn_in_flight", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     const response = await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {}));
 
@@ -1127,15 +1144,19 @@ describe("Hibernate", () => {
     // THE OWNER'S RULING (2026-09-20). Hibernation stops the shim to free its
     // memory and does nothing else, so the directive is single-phase again:
     // one ask, one ack, and a transcript exactly as the conversation left it.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // THE "hibernate" GROUP: a hibernation stands the vendor down, which no
+    // case on the canonical session expects.
+    const { shim, started } = await groupSession("hibernate");
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
 
     hibernateAcked(
       await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
-    const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
+    const boundaries = mine.transcript(started.vendorSessionId).filter(
       (record) => record.type === "system" && record.subtype === "compact_boundary",
     );
     expect(boundaries).toHaveLength(0);
@@ -1147,9 +1168,13 @@ describe("Hibernate", () => {
     // not end in a stand-down could buy a whole vendor summary turn: thirteen
     // boundaries and thirteen blocks of continuation notes in one morning. A
     // directive that asks the vendor for nothing cannot repeat anything.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // THE "hibernate" GROUP: a hibernation stands the vendor down, which no
+    // case on the canonical session expects.
+    const { shim, started } = await groupSession("hibernate");
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     hibernateAcked(
       await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
@@ -1158,7 +1183,7 @@ describe("Hibernate", () => {
       await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
-    const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
+    const boundaries = mine.transcript(started.vendorSessionId).filter(
       (record) => record.type === "system" && record.subtype === "compact_boundary",
     );
     expect(boundaries).toHaveLength(0);
@@ -1169,6 +1194,7 @@ describe("Hibernate", () => {
     // KillSession. While Hibernate ran a throwaway compaction query, the
     // teardown awaited THAT query's loop and never returned. It runs no query
     // at all now, and this is the assertion that keeps the pair settling.
+    // ITS OWN SHIM: the subject is the KillSession that ends the process.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
@@ -1193,6 +1219,7 @@ describe("Hibernate", () => {
 
 describe("KillSession", () => {
   test("an idle session ends idle and the process exits 0", async () => {
+    // ITS OWN SHIM: the subject is the KillSession that ends the process.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
@@ -1208,13 +1235,14 @@ describe("KillSession", () => {
   test("live detached work refuses, NAMING the work", async () => {
     // Both outcomes name the work so the daemon can tell the user what forcing
     // would destroy.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await agent.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await agent.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const inner = watchAgentEntry(frame).entry?.entry;
@@ -1238,26 +1266,34 @@ describe("KillSession", () => {
   test("a live refusal is recorded at INFO, naming each live item and its kind", async () => {
     // Arrange: a detached shell is live (2026-10-14: a refusal over "1 live
     // item(s)" the daemon read as free, with no record of which item it was).
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const mine = since(shim);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    await awaitAgentEntry(agent, (entry) => entryFrame(entry)?.result.case === "detachedWork");
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
+    const announced = await awaitAgentEntry(
+      agent,
+      (entry) => entry.turn?.value === t1 && entryFrame(entry)?.result.case === "detachedWork",
+    );
     agent.close();
+    const announcedFrame = entryFrame(announced);
+    const run = announcedFrame?.result.case === "detachedWork" ? (announcedFrame.result.value.work?.value ?? "") : "";
 
     // Act
     await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: false }));
 
-    // Assert
-    const refusal = await shim.log.record(
+    // Assert: THIS CASE'S OWN LIVE ITEM, among the live runs its siblings on
+    // the shared session left.
+    const refusal = await mine.record(
       (record) => record.message === "refused KillSession because the session is live and force was not set",
     );
     expect(refusal.level).toBe("info");
     const items = refusal.context.live_items as { task_type: string; tool_use_id: string }[];
-    expect(items.map((item) => item.task_type)).toEqual(["local_bash"]);
-    expect(items[0]?.tool_use_id).not.toBe("");
+    expect(run).not.toBe("");
+    expect(items.filter((item) => item.tool_use_id === run).map((item) => item.task_type)).toEqual(["local_bash"]);
   });
 
   test("force ends it, naming the stopped work", async () => {
@@ -2028,17 +2064,20 @@ describe("the vendor refusing a CONTROL call", () => {
 
 
 describe("SetSessionModel's cold gate", () => {
+  // On the "session-settings" group: every case here switches the model, which
+  // the group puts back when the case finishes.
   // A MODEL SWITCH IS A COLD CACHE, because the cache is per model. The refusal
   // is immediate and states its cost, rather than a warning after the user has
   // already paid for it.
   test("a switch above the caller's threshold is REFUSED with its cost", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     // A turn so the transcript has context to lose -- AND ABOVE THE COLD-GATE
     // FLOOR. The gate does not ask at or under 150,000 tokens (owner ruling), and an
     // ordinary turn reports far less than that, so `!cold-seed` is the seed
     // that puts a real cost on the switch.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!cold-seed" }));
 
     const response = await shim.clients.h1.setSessionModel(
       create(shimv1.SetSessionModelRequestSchema, {
@@ -2057,10 +2096,11 @@ describe("SetSessionModel's cold gate", () => {
 
   test("the same switch with a remediation SUCCEEDS", async () => {
     // The refusal is not a veto: it exists so the caller decides knowingly.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     // Above the cold-gate floor, so the first call is genuinely refused.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!cold-seed" }));
     setModelCause(
       await shim.clients.h1.setSessionModel(
         create(shimv1.SetSessionModelRequestSchema, {
@@ -2085,11 +2125,13 @@ describe("SetSessionModel's cold gate", () => {
     // The ack alone proves nothing about which model the session is on. The
     // turn-end push is the session's own authoritative statement, and it is
     // what a topbar renders.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "contextUsage");
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     setModelAccepted(
       await shim.clients.h1.setSessionModel(
         create(shimv1.SetSessionModelRequestSchema, {
@@ -2100,7 +2142,7 @@ describe("SetSessionModel's cold gate", () => {
       ),
     );
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!md" }));
     const pushed = await watch.until((frame) => {
       const update = sessionUpdate(frame);
       return update.update.case === "contextUsage" && update.update.value.model === "fake-sonnet-5";
@@ -2246,11 +2288,26 @@ describe("a skill installed mid-session", () => {
     writeFileSync(join(dir, name, "SKILL.md"), `---\nname: ${name}\ndescription: the ${name} skill\n---\n`);
   }
 
+  let skillsShim: Promise<ShimHandle> | null = null;
+
+  /**
+   * The "skills" group's session, its account skills directory made before
+   * the session started: a skill installed here is stated on every watch, so
+   * these cases keep it off the canonical session.
+   */
+  function skillsSession(): Promise<ShimHandle> {
+    skillsShim ??= (async () => {
+      const shim = await groupShim("skills");
+      mkdirSync(join(shim.dirs.configDir, "skills"), { recursive: true });
+      sessionStarted(await shim.clients.h1.startSession(freshSession()));
+      return shim;
+    })();
+    return skillsShim;
+  }
+
   test("into the account's skills directory is stated as a stale skill set", async () => {
-    const shim = await spawnShim();
+    const shim = await skillsSession();
     shimOfTest = shim;
-    mkdirSync(join(shim.dirs.configDir, "skills"), { recursive: true });
-    await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
 
     installSkill(join(shim.dirs.configDir, "skills"), "agent-repl-workspaces");
@@ -2261,9 +2318,8 @@ describe("a skill installed mid-session", () => {
   });
 
   test("into a worktree skills directory that did not exist at the start is stated too", async () => {
-    const shim = await spawnShim();
+    const shim = await skillsSession();
     shimOfTest = shim;
-    await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
 
     installSkill(join(shim.dirs.workspace, ".claude", "skills"), "repo-skill");
@@ -2309,9 +2365,23 @@ describe("SetSessionRemoteControl", () => {
     expect(refusal).toBe(Code.InvalidArgument);
   });
 
+  /**
+   * The "bridge" group's session, its bridge OFF when a case takes it: every
+   * case that turns it on turns it off again when it finishes.
+   */
+  async function bridgeSession(): Promise<CanonicalSession> {
+    const session = await groupSession("bridge");
+    onTestFinished(async () => {
+      const off = await session.shim.clients.h1.setSessionRemoteControl(
+        create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: false }),
+      );
+      expect(answered(off)).toEqual({ enabled: false, bridgeSessionId: "" });
+    });
+    return session;
+  }
+
   test("turns the bridge on with no prompt sent, answering the bridge's claude.ai session id", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await bridgeSession();
 
     const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn());
 
@@ -2319,8 +2389,7 @@ describe("SetSessionRemoteControl", () => {
   });
 
   test("re-binds the bridge session a previous shim answered", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await bridgeSession();
 
     const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn({ reattachBridgeSessionId: "session_prev" }));
 
@@ -2328,9 +2397,8 @@ describe("SetSessionRemoteControl", () => {
   });
 
   test("asks the vendor to keep the claude.ai session listed past its process", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const on = shim.log.record((record) => record.message === "fake vendor Remote Control ON");
+    const { shim } = await bridgeSession();
+    const on = since(shim).record((record) => record.message === "fake vendor Remote Control ON");
 
     await shim.clients.h1.setSessionRemoteControl(bridgeOn());
 
@@ -2338,8 +2406,7 @@ describe("SetSessionRemoteControl", () => {
   });
 
   test("turns the bridge off, answering it off", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await bridgeSession();
     await shim.clients.h1.setSessionRemoteControl(bridgeOn());
 
     const response = await shim.clients.h1.setSessionRemoteControl(

@@ -18,11 +18,12 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { workspaceLockKey } from "../../src/locks.js";
-import { shimv1 } from "../../src/proto.js";
+import { conversationv1, shimv1 } from "../../src/proto.js";
 import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
+import { canonicalSession, groupShim, releaseShared } from "../integration-support/canonical.js";
 import {
   cleanupShims,
   ITEST_BUILD_SHA,
@@ -45,7 +46,21 @@ import {
 } from "../integration-support/expect.js";
 import { workspaceRealPath } from "../integration-support/vendor.js";
 
+// THE CASES HERE SHARE SHIMS where they can (agent-shim/claude/shim/AGENTS.md
+// "Integration cases share the canonical shim"): most of this file's subject
+// is the process's own startup, refusal, signals and boot-time environment,
+// which each need a process of their own. The boot-record and start observers
+// read the canonical shim, and the lock-holder cases share their groups.
 afterEach(cleanupShims);
+afterAll(releaseShared);
+
+/** A lock holder that does not exist, which the missing-lock-holder group spawns with. */
+const MISSING_LOCK_HOLDER = path.join(os.tmpdir(), "no-such-shim-lock-for-itest");
+
+/** The "missing-lock-holder" group shim. */
+function missingLockHolderShim(): ReturnType<typeof spawnShim> {
+  return groupShim("missing-lock-holder", { env: { AGENT_REPL_SHIM_LOCK_BIN: MISSING_LOCK_HOLDER } });
+}
 
 /** The env a serving shim needs, for the spawns that build it by hand. */
 function servingEnv(dirs: ReturnType<typeof makeDirectories>): Record<string, string> {
@@ -190,10 +205,11 @@ describe("the spawn contract's argv", () => {
 });
 
 describe("an unspawnable lock holder", () => {
+  // THE "missing-lock-holder" GROUP: every start on it is refused the same
+  // way and leaves the shim inert, so its cases share it.
   test("StartSession is refused lock_holder_unavailable, never conversation_owned", async () => {
     // Arrange: nobody owns the conversation; the shim's own helper is missing.
-    const missing = path.join(os.tmpdir(), "no-such-shim-lock-for-itest");
-    const shim = await spawnShim({ env: { AGENT_REPL_SHIM_LOCK_BIN: missing } });
+    const shim = await missingLockHolderShim();
 
     // Act.
     const refused = await shim.clients.h1.startSession(freshSession());
@@ -204,8 +220,8 @@ describe("an unspawnable lock holder", () => {
 
   test("the refusal names the binary the shim could not spawn", async () => {
     // Arrange.
-    const missing = path.join(os.tmpdir(), "no-such-shim-lock-for-itest");
-    const shim = await spawnShim({ env: { AGENT_REPL_SHIM_LOCK_BIN: missing } });
+    const missing = MISSING_LOCK_HOLDER;
+    const shim = await missingLockHolderShim();
 
     // Act.
     const refused = await shim.clients.h1.startSession(freshSession());
@@ -317,10 +333,40 @@ describe("the workspace lock", () => {
     expect(lockRecords).toEqual([]);
   });
 
+  /**
+   * The "real-lock" group: one shim taking its locks through the real holder.
+   * Its inert cases come first in the file; the cases that need its session
+   * observe ONE start (`realLockStart`).
+   */
+  function realLockShim(): Promise<Awaited<ReturnType<typeof spawnShim>>> {
+    return groupShim("real-lock", { env: { AGENT_REPL_SHIM_LOCK_BIN: SHIM_LOCK_BINARY } });
+  }
+
+  /** What the real-lock group's one start left: the lock directory before and after it. */
+  interface RealLockStart {
+    readonly shim: Awaited<ReturnType<typeof spawnShim>>;
+    readonly before: string[];
+    readonly started: conversationv1.SessionStarted;
+    readonly after: string[];
+  }
+
+  let realLockStarted: Promise<RealLockStart> | null = null;
+
+  /** The real-lock group's one StartSession, for its observers. */
+  function realLockStart(): Promise<RealLockStart> {
+    realLockStarted ??= (async () => {
+      const shim = await realLockShim();
+      const before = readdirSync(shim.dirs.lockDir);
+      const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+      return { shim, before, started, after: readdirSync(shim.dirs.lockDir) };
+    })();
+    return realLockStarted;
+  }
+
   test("KillSession on an INERT shim is refused no_session and holds no lock", async () => {
     // There is no session to kill, so the verb refuses; the point here is that
     // the refusal path never touched a lock either.
-    const shim = await spawnRealLockShim();
+    const shim = await realLockShim();
 
     const response = await shim.clients.h1.killSession(
       create(shimv1.KillSessionRequestSchema, { force: false }),
@@ -332,7 +378,7 @@ describe("the workspace lock", () => {
 
   test("no lock file of either kind exists before StartSession", async () => {
     // The whole inert contract in one assertion: the directory is empty.
-    const shim = await spawnRealLockShim();
+    const shim = await realLockShim();
 
     expect(readdirSync(shim.dirs.lockDir)).toEqual([]);
   });
@@ -341,9 +387,7 @@ describe("the workspace lock", () => {
     // The lock directory is a CROSS-SYSTEM rendezvous (the daemon probes the
     // workspace lock by path), so the override is what lets a test run private
     // locks instead of contending with the developer's own running shim.
-    const shim = await spawnRealLockShim();
-
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await realLockStart();
 
     const key = workspaceLockKey(workspaceRealPath(shim.dirs));
     expect(existsSync(path.join(shim.dirs.lockDir, `workspace-${key}.lock`))).toBe(true);
@@ -352,11 +396,7 @@ describe("the workspace lock", () => {
   test("the session lock appears once StartSession has minted a vendor id", async () => {
     // The session lock is keyed by the vendor session id, which does not exist
     // until StartSession pre-mints it.
-    const shim = await spawnRealLockShim();
-
-    const before = readdirSync(shim.dirs.lockDir);
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    const after = readdirSync(shim.dirs.lockDir);
+    const { before, started, after } = await realLockStart();
 
     expect(before.some((name) => name.startsWith("session-"))).toBe(false);
     expect(after).toContain(`session-${started.vendorSessionId}.lock`);
@@ -505,7 +545,8 @@ describe("the durable log sink", () => {
 
   test("every record carries the daemon's workspace id, read off the listen socket", async () => {
     // Arrange.
-    const shim = await spawnShim();
+    // AN OBSERVER OF THE CANONICAL SHIM'S BOOT RECORD.
+    const { shim } = await canonicalSession();
 
     // Act.
     const serving = await shim.log.record((record) => record.context.outcome === "serving");
@@ -516,7 +557,8 @@ describe("the durable log sink", () => {
 
   test("every record keeps the shim's own md5 workspace key beside it", async () => {
     // Arrange.
-    const shim = await spawnShim();
+    // AN OBSERVER OF THE CANONICAL SHIM'S BOOT RECORD.
+    const { shim } = await canonicalSession();
 
     // Act.
     const serving = await shim.log.record((record) => record.context.outcome === "serving");
@@ -623,9 +665,8 @@ describe("SessionStarted's build identity", () => {
   test("SessionRuntime reports the SHIM_BUILD_SHA the process was spawned with", async () => {
     // The daemon compares this against its deploy stamp and bounces a stale
     // survivor, which only works if the value comes from the spawn env.
-    const shim = await spawnShim();
-
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    // AN OBSERVER OF THE CANONICAL SESSION'S ONE START.
+    const { started } = await canonicalSession();
 
     expect(started.runtime?.shimBuildSha).toBe(ITEST_BUILD_SHA);
     expect(started.runtime?.sdkVersion).not.toBe("");

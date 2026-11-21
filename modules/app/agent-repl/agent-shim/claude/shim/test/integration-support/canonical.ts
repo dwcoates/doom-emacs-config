@@ -28,7 +28,7 @@ import { onTestFinished } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import type { storev1 } from "../../src/proto.js";
 import type { TranscriptRecord } from "../../src/fake/vendor-files.js";
-import type { FakeStoreWrite } from "../fakes/store-server.js";
+import type { FakeStoreRead, FakeStoreWrite } from "../fakes/store-server.js";
 import { cleanupSharedShims, spawnShim, type ShimHandle, type SpawnShimOptions } from "./harness.js";
 import type { LogPredicate, LogRecord } from "./log.js";
 import { pageLineOf } from "./store.js";
@@ -209,6 +209,8 @@ export interface Since {
   transcript(vendorSessionId: string): TranscriptRecord[];
   /** The store's unserved items written since the mark. */
   unserved(): storev1.StoreUnservedItem[];
+  /** The READ verbs the store served since the mark. */
+  reads(): FakeStoreRead[];
   /**
    * The first entry MATCHES accepts that the store LANDED from a write sent
    * since the mark, awaiting one (the store's `entryLanded`, past the
@@ -227,6 +229,7 @@ export function since(shim: ShimHandle, transcripts: readonly string[] = []): Si
   const batches = shim.store?.writeBatches().length ?? 0;
   const before = new Set(shim.log.records());
   const unserved = shim.store?.unserved().length ?? 0;
+  const reads = shim.store?.reads().length ?? 0;
   const writeIds = new Set(
     (shim.store?.writes() ?? []).flatMap((request) => request.batch?.entries ?? []).map((entry) => entry.writeId),
   );
@@ -242,9 +245,53 @@ export function since(shim: ShimHandle, transcripts: readonly string[] = []): Si
       return readTranscript(shim.dirs, id).slice(mark);
     },
     unserved: () => (shim.store?.unserved() ?? []).slice(unserved),
+    reads: () => (shim.store?.reads() ?? []).slice(reads),
     landed: async (matches) => {
       if (shim.store === null) throw new Error("since: this shim has no store");
       return shim.store.entryLanded((entry) => !writeIds.has(entry.writeId) && matches(entry));
     },
   };
+}
+
+/**
+ * SHIM as a case on a shared shim sees it: the same process and clients, but
+ * its `log` and `store` answer only what arrived after the mark (`since`), so
+ * a case body written against a shim of its own (counting every record,
+ * scanning every write, awaiting the first matching landed row) reads its own
+ * slice unchanged. Every other store lever (faults, holds, seeding) acts on
+ * the shared store as before.
+ */
+export function sliceOf(shim: ShimHandle): ShimHandle {
+  const mine = since(shim);
+  const log = {
+    ...shim.log,
+    records: () => mine.records(),
+    record: (predicate: LogPredicate) => mine.record(predicate),
+    close: () => shim.log.close(),
+    endOfRecords: (reason: string) => shim.log.endOfRecords(reason),
+  };
+  const store =
+    shim.store === null
+      ? null
+      : new Proxy(shim.store, {
+          get(target, property, receiver) {
+            switch (property) {
+              case "writes":
+                return () => mine.writes();
+              case "writeBatches":
+                return () => mine.writeBatches();
+              case "unserved":
+                return () => mine.unserved();
+              case "reads":
+                return () => mine.reads();
+              case "entryLanded":
+                return (matches: (entry: storev1.StoreEntry) => boolean) => mine.landed(matches);
+              default: {
+                const value: unknown = Reflect.get(target, property, receiver);
+                return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+              }
+            }
+          },
+        });
+  return { ...shim, log, store };
 }
