@@ -109,7 +109,7 @@ func rlStopAndRelaunch(t *testing.T, w *stack.World) *harness.Daemon {
 func testARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 	// Arrange: a real turn run to its terminal, so the store durably holds
 	// the conversation's own rows.
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	w := stack.ScenarioLifecycleWorld(t, harness.Opts{DurableState: true})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo, ws := w.NewRepoWorkspace(t)
 	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")

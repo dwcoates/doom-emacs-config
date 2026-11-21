@@ -275,9 +275,13 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
 	// (daemon.rollout.reconcile), and a turn left in flight by a killed daemon
-	// is closed by the next boot (daemon.promptqueue.restore_holds).
+	// is closed by the next boot (daemon.promptqueue.restore_holds). The
+	// resubmitted turn's end can hibernate the workspace just before the
+	// next kill, which leaves the hibernate lease for the next boot to
+	// release (daemon.boot.orphan_leases).
 	mqExpectedBounceWarnings := []string{
 		"daemon.rollout.reconcile", "daemon.promptqueue.restore_holds",
+		"daemon.boot.orphan_leases",
 	}
 
 	// Arrange. The displaced turn is PARKED ON THE FAKE'S TURN GATE
@@ -307,6 +311,11 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
 	repo.DeploysAsAgentRepl()
+	// This step keeps its own store: its subject is what a crash leaves in
+	// the durable state (leases, displaced marks, the transcript a revival
+	// reads), and a store shared with the scenario's other steps made the
+	// replay it asserts depend on their rows and on a hibernation racing
+	// the kill.
 	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		DurableState: true,
 		ExtraEnv: []string{
@@ -647,9 +656,9 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *stack.World {
 	// harness.MergeChainTimeout. Under a full gate the landing's deploy was
 	// still installing at +4.4s when the 5s DefaultTimeout cut it (2026-10-14).
 	repo.DeploysAsAgentRepl()
-	return stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
+	return stack.ScenarioLifecycleWorld(t, harness.Opts{
 		Timeout: harness.MergeChainTimeout,
-	}})
+	})
 }
 
 // testFailMarkerFailsAPreDeployHooksDeploy proves a pre-deploy hook whose turn

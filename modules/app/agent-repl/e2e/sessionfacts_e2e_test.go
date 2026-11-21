@@ -61,7 +61,10 @@ import (
 // repository as its workspace.
 func sfNewWorkspace(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef, string) {
 	t.Helper()
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	// The weekly allowance this file asserts on is the ACCOUNT's, which every
+	// rate-limit event any case provokes moves, so these steps take a group
+	// World of their own rather than the shared one.
+	w := stack.GroupWorld(t, "weekly-allowance", stack.WorldOpts{})
 	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, repo.Dir
 }

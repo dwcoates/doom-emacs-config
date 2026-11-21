@@ -363,7 +363,7 @@ func testSubagentDetached(t *testing.T) {
 // Seam: vendor transcript -> sidecar -> daemon, a nested subagent's file-plane-only historical usage
 func testNestedSubagentHistoricalUsage(t *testing.T) {
 	// Arrange.
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act.
@@ -388,7 +388,7 @@ func testNestedSubagentHistoricalUsage(t *testing.T) {
 
 	// Assert: the record's usage figure is retained, whole, in the nested
 	// agent's own book: 100 input, 75 cache-written, 800 cache-read, 200 out.
-	usage := uhNestedBookUsage(t, w)
+	usage := uhNestedBookUsage(t, w, ws)
 	if got := usage.GetInputMisses().GetUnwritten(); got != 100 {
 		t.Errorf("usage.input_misses.unwritten = %d, want the record's input_tokens 100", got)
 	}
@@ -413,9 +413,11 @@ func testNestedSubagentHistoricalUsage(t *testing.T) {
 // agent's book carries, failing unless there is exactly one: the scenario
 // writes one `.meta.json` and one assistant record, and its book is keyed by
 // the spawning call's tool_use_id that file names.
-func uhNestedBookUsage(t *testing.T, w *stack.World) *conversationv1.TokenUsage {
+func uhNestedBookUsage(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) *conversationv1.TokenUsage {
 	t.Helper()
-	metas, err := filepath.Glob(filepath.Join(w.DefaultConfigDir, "projects", "*", "*", "subagents", "agent-*.meta.json"))
+	// Only this workspace's conversations: the shared World's account root
+	// holds every other test's too.
+	metas, err := filepath.Glob(filepath.Join(harness.ProjectDir(w.DefaultConfigDir, ws.GetDir()), "*", "subagents", "agent-*.meta.json"))
 	if err != nil || len(metas) != 1 {
 		t.Fatalf("the nested agent's .meta.json files = %v (%v), want exactly one", metas, err)
 	}
@@ -463,7 +465,7 @@ func uhNestedBookUsage(t *testing.T, w *stack.World) *conversationv1.TokenUsage 
 // Seam: store -> cold-booted daemon, a replayed subagent's settled spawn naming its created agent
 func testSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	// Arrange: a real spawn, driven to completion so the store holds it.
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	w := stack.ScenarioLifecycleWorld(t, harness.Opts{DurableState: true})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	ws := w.NewWorkspace(t)
 	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
@@ -573,7 +575,7 @@ func testSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 // Seam: shim -> daemon, a detached agent's responses interleaved with the main agent's blocks, each on its own feed
 func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	// Arrange.
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	const (
 		thinking   = "Answering while the sweep runs."
@@ -655,7 +657,7 @@ func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 // Seam: store -> cold-booted daemon -> new shim, a detached subagent whose process died, not revived as live work
 func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
 	// Arrange.
-	first := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	first := stack.ScenarioLifecycleWorld(t, harness.Opts{DurableState: true})
 	first.ExpectWarnings("daemon.rollout.reconcile")
 	ws := first.NewWorkspace(t)
 	turn := stack.DriveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")

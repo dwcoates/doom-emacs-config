@@ -22,3 +22,20 @@ func (d *Daemon) SuccessorOpts() Opts {
 		ExtraArgs:   []string{"--default-config-dir", d.DefaultConfigDir},
 	}
 }
+
+// adoptConfigDirArgs makes the daemon's account roots the ones its argv
+// names. A caller's ExtraArgs may override a root the harness minted (a
+// successor carries its predecessor's), and the last flag wins at the
+// daemon, so the struct must say the same: SuccessorOpts reads these fields,
+// and a successor of a successor would otherwise start on the minted root
+// the daemon never used, where no transcript exists.
+func (d *Daemon) adoptConfigDirArgs(extra []string) {
+	for i := 0; i+1 < len(extra); i++ {
+		switch extra[i] {
+		case "--default-config-dir":
+			d.DefaultConfigDir = extra[i+1]
+		case "--multi-repo-config-dir":
+			d.MultiRepoConfigDir = extra[i+1]
+		}
+	}
+}

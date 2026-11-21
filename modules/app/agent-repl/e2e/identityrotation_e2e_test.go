@@ -207,7 +207,7 @@ func testClearRotatesIdentity(t *testing.T) {
 // Seam: shim -> store -> daemon, a second identity rotation composed onto the first
 func testSecondRotateUnderRotatedIdentity(t *testing.T) {
 	// Arrange
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	topbar := w.WatchTopbar(ws)
 

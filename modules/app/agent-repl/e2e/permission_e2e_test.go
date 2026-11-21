@@ -60,15 +60,16 @@ import (
 // helpers do for the rpcs it already wraps.
 // ---------------------------------------------------------------------------
 
-// pmNewPermissionWorld builds one World, registers a fresh (scripted fake-git)
-// repository as a workspace, and opens it — the precondition every
-// permission test shares. Real git is out of scope for this suite (project
+// pmNewPermissionWorld starts a fresh daemon on its scenario's lifecycle family
+// (stack.ScenarioLifecycleWorld: the daemon stop steps' subject is the daemon,
+// never the store or sidecar), registers a fresh (scripted fake-git)
+// repository as a workspace, and opens it. Real git is out of scope for this suite (project
 // lead ruling, 2026-09-02): every external dependency here is mocked — the
 // scripted fake `git` the harness installs by default, and the fake SDK
 // behind the real shim's `--fake` flag.
 func pmNewPermissionWorld(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef) {
 	t.Helper()
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.ScenarioLifecycleWorld(t, harness.Opts{})
 	return w, pmNewPermissionWorkspace(t, w)
 }
 

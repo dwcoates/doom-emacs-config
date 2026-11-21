@@ -14,8 +14,21 @@ func TestTheTestsSocketIsASiblingOfTheStateRoot(t *testing.T) {
 	got := TestsSocketFor("/tmp/w/state")
 
 	// Assert
-	if want := "/tmp/w/tests/tests.sock"; got != want {
+	if want := "/tmp/w/tests-state/tests.sock"; got != want {
 		t.Fatalf("TestsSocketFor = %q, want %q", got, want)
+	}
+}
+
+func TestTwoStateRootsUnderOneParentGetTwoTestsSockets(t *testing.T) {
+	// Act: two lifecycle steps' roots share a parent, and so a lock dir.
+	first, second := TestsSocketFor("/tmp/f/s1"), TestsSocketFor("/tmp/f/s2")
+
+	// Assert
+	if first == second {
+		t.Fatalf("both roots got the test service socket %s; want one each", first)
+	}
+	if LockDirFor("/tmp/f/s1") != LockDirFor("/tmp/f/s2") {
+		t.Fatal("the two roots' lock dirs differ; want the parent's one")
 	}
 }
 

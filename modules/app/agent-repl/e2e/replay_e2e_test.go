@@ -28,7 +28,7 @@ import (
 // Seam: store -> daemon, a workspace open's one replay, and no watcher for the turns after it
 func testAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
 	// Arrange.
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	repo, ws := w.NewRepoWorkspace(t)
 
 	// Act.

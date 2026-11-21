@@ -397,7 +397,7 @@ func testPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 // Seam: daemon -> shim -> vendor, a hibernation's compaction and the revival that excludes the keep-alives
 func testRevivalAfterHibernate(t *testing.T) {
 	// Arrange
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.GroupWorld(t, "hibernation", stack.WorldOpts{DaemonOpts: harness.Opts{
 		// HibernationChainTimeout IS THIS WORLD'S BUDGET — the same reason
 		// TestHibernateOnIdleCutoff states, with this test's own figures: it
 		// spends 0.50s of the world budget quiet and 3.34s at a 1-minute load
@@ -407,6 +407,7 @@ func testRevivalAfterHibernate(t *testing.T) {
 		Timeout:      HibernationChainTimeout,
 		IdleCutoffMS: hibernationIdleCutoffMS,
 	}})
+	ws := w.NewWorkspace(t)
 	// Standing a shim down and reviving it opens a health fault while the
 	// session has no producer; that is what this test provokes. The link
 	// records are the same stand-down seen from the connectivity layer — the
@@ -414,11 +415,14 @@ func testRevivalAfterHibernate(t *testing.T) {
 	// The kill round trip is declared for the same reason
 	// TestHibernateOnIdleCutoff declares it: the sweep bounds it, and a
 	// saturated run can spend that bound.
-	w.ExpectWarnings("daemon.health.open_fault",
+	w.ExpectWarningsFor(ws, "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
 		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
-		"daemon.shimclient.exit")
-	ws := w.NewWorkspace(t)
+		"daemon.shimclient.exit",
+		// At a 50ms cutoff a second sweep can send its hibernate directive
+		// to a shim this daemon has just stood down, which answers EOF and
+		// defers the park (daemon.drain.sweep); the park then lands.
+		"daemon.drain.sweep")
 	host := w.WatchHost(ws)
 	defer host.Close()
 
@@ -524,15 +528,19 @@ func testRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	// Arrange: the same world TestKeepAlive/RevivalAfterHibernate declares, for the same
 	// reasons -- a compressed cutoff so the sweep really parks the session, and
 	// the chain budget because this drives two real process lifecycles.
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.GroupWorld(t, "hibernation", stack.WorldOpts{DaemonOpts: harness.Opts{
 		Timeout:      HibernationChainTimeout,
 		IdleCutoffMS: hibernationIdleCutoffMS,
 	}})
-	w.ExpectWarnings("daemon.health.open_fault",
+	ws := w.NewWorkspace(t)
+	w.ExpectWarningsFor(ws, "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
 		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
-		"daemon.shimclient.exit")
-	ws := w.NewWorkspace(t)
+		"daemon.shimclient.exit",
+		// At a 50ms cutoff a second sweep can send its hibernate directive
+		// to a shim this daemon has just stood down, which answers EOF and
+		// defers the park (daemon.drain.sweep); the park then lands.
+		"daemon.drain.sweep")
 	host := w.WatchHost(ws)
 	defer host.Close()
 

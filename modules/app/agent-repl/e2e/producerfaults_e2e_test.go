@@ -321,7 +321,7 @@ func testResidueAttachmentsDrawNoRow(t *testing.T) {
 // Seam: shim -> daemon, a context-tip attachment reaching no feed row and no footer line
 func testContextTipDrawsNoRow(t *testing.T) {
 	// Arrange
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws, configDir := pfNewWorkspace(t, w)
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
@@ -354,7 +354,7 @@ func testContextTipDrawsNoRow(t *testing.T) {
 // Seam: shim -> daemon, a tokens-reminder attachment reaching no feed row and no footer line
 func testTokensReminderDrawsNoRow(t *testing.T) {
 	// Arrange
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws, configDir := pfNewWorkspace(t, w)
 	footer := w.WatchFooter(ws)
 	defer footer.Close()

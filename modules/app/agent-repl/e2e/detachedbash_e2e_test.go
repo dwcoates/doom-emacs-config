@@ -371,11 +371,11 @@ const dbDetachGatePathEnv = "AGENT_REPL_FAKE_DETACH_GATE"
 //
 // Seam: shim -> sidecar -> daemon, an explicitly polled detached shell settling with no unmodeled tool
 func testBashDetachExplicitPoll(t *testing.T) {
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
-	w.ExpectWarnings("daemon.health.open_fault")
 	ws := w.NewWorkspace(t)
+	w.ExpectWarningsFor(ws, "daemon.health.open_fault")
 
 	initial, feedStream := dbOpenRootFeed(t, w, ws)
 	defer feedStream.Close()
