@@ -342,7 +342,7 @@ func TestALinkSeveredUnderALiveShimIsReportedUntilItServesAgain(t *testing.T) {
 func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	// unknown_workspace is a LANDED SessionHealthError arm
 	// (endpoint_session_health.proto): server.resolveRef fills its Arm
 	// and answers it in band, so it is logged at DEBUG, never WARN

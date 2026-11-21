@@ -51,7 +51,7 @@ func deployOutcomes(t *testing.T, d *harness.Daemon, force bool) map[agentreplv1
 func TestADeployOfWhatAlreadyRunsDecidesEveryComponentUpToDate(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 
 	// Act
 	outcomes := deployOutcomes(t, d, false)

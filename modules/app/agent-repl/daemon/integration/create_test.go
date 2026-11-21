@@ -24,7 +24,7 @@ import (
 func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheInitialPromptWithWorkspaceCreatedOrigin(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 
@@ -82,7 +82,7 @@ func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheIniti
 func TestCreateWorkspaceWithASuppliedNameWinsOverTheDerivedSlug(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	name := "my-explicit-name"
@@ -307,7 +307,7 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 func TestCreateWorkspaceOneShotNeedsNoDirectiveOfTheRepositorys(t *testing.T) {
 	t.Parallel()
 	// Arrange: a policy that states the preamble and no completion directive.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	if err := os.Remove(filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")); err != nil {
 		t.Fatalf("remove the completion directive: %v", err)
@@ -385,7 +385,7 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
@@ -491,7 +491,7 @@ func TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed(t *test
 	t.Parallel()
 	// Arrange: a registered (no live session) workspace whose worktree
 	// removal is scripted to fail.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	// The git leaf records its own command failure at ERROR — that record IS
 	// the evidence the refusal's detail is drawn from — and the verb answers
 	// the refusal above it.

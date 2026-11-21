@@ -727,7 +727,7 @@ func TestATopbarOutsideTheMultiRepoRootShowsTheDefaultAccountEmail(t *testing.T)
 func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange: a repository directly under $MULTI_REPO_ROOT.
-	d := harness.StartDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "inside-the-root-vendor-claude"))
 	ws := harness.Register(t, d, repo.Dir)
 	host := d.WatchHost(ws)
@@ -914,7 +914,7 @@ func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
 func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "nuke-me")
 	ws := harness.Register(t, d, dir)
@@ -1510,7 +1510,7 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 func TestKillWorkspaceLeavesTheWorktreeAndBranchIntact(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
 	d.ExpectWarnings("daemon.health.open_fault")
 	// KillWorkspace ends a live session on purpose; that trail is the ACT here.

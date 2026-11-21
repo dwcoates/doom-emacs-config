@@ -32,7 +32,7 @@ func closedRowAt(r *frontendv1.RosterPush, dir string) *frontendv1.RosterRow {
 func TestRegisteringALinkedWorktreeRegistersItsMainWorktreeClosed(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	linked := repo.AddWorktree("feature")
 	roster := d.WatchRoster()
@@ -51,7 +51,7 @@ func TestRegisteringALinkedWorktreeRegistersItsMainWorktreeClosed(t *testing.T) 
 func TestForgetRefusesTheMainWorktreeWhileALinkedWorktreeIsRegistered(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	linked := repo.AddWorktree("feature")
 	roster := d.WatchRoster()

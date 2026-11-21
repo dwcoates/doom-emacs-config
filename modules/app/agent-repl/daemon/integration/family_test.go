@@ -103,7 +103,7 @@ func TestAParentWithAnOpenChildIsNotHidden(t *testing.T) {
 func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent with no children, hidden.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repository := createRepositoryRef(t, d, harness.NewRepo(t))
 	created, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository)))
 	if err != nil || created.Msg.GetSuccess() == nil {

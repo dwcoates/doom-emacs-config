@@ -203,7 +203,7 @@ func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
 func TestSwapWorkspacesIsRefusedAcrossRepositories(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
 	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
 
@@ -220,7 +220,7 @@ func TestSwapWorkspacesIsRefusedAcrossRepositories(t *testing.T) {
 func TestMoveWorkspaceIsRefusedAcrossRepositories(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
 	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
 
@@ -556,7 +556,7 @@ func TestAttentionMarkerIsClearedWhenTheLastAskSettles(t *testing.T) {
 func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	closedDir := worktreeOf(t, repo, "closed")
 	nukedDir := worktreeOf(t, repo, "nuked")
@@ -758,7 +758,7 @@ func bogusTask() *agentreplv1.TaskRef { return &agentreplv1.TaskRef{Id: "no-such
 func TestUpdateTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 
 	// Act
 	resp, err := d.Client().UpdateTask(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
@@ -908,7 +908,7 @@ func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
 func TestTheFirstRosterStatesTheDeployedVersion(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 
 	// Act
 	roster := d.WatchRoster()

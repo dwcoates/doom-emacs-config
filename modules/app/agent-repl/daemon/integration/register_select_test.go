@@ -21,7 +21,7 @@ import (
 func TestRegisterWorkspaceIsIdempotentAcrossSpellings(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	first := harness.Register(t, d, repo.Dir)
 	link := filepath.Join(t.TempDir(), "link")
@@ -90,7 +90,7 @@ func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
 func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	plain := t.TempDir()
 
 	// Act
@@ -178,7 +178,7 @@ func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	// unknown_workspace is a LANDED CloseWorkspaceError arm (see the comment
 	// above), answered in band at DEBUG through server.refuse — never the
 	// daemon.refusal.unlanded_arm WARN this path was originally written
@@ -256,7 +256,7 @@ func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T) {
 	t.Parallel()
 	// Arrange: two workspaces in separate repos, A carrying a notification.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repoA := harness.NewRepo(t)
 	repoB := harness.NewRepo(t)
 	a := harness.Register(t, d, repoA.Dir)

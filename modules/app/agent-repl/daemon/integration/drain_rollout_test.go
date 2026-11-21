@@ -1432,7 +1432,7 @@ func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T
 func TestAssetsAreServedWithoutNoStore(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 
 	// Act
 	resp, err := d.HTTP().Get("http://" + d.Addr + "/assets/app.js")

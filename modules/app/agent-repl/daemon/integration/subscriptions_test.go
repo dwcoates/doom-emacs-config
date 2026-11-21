@@ -309,7 +309,7 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				// A fresh daemon: the subject is what a daemon-wide stream
 				// carries straight after the boot, before anything is
 				// published (the daemon's own lifecycle).
-				d = newDaemon(t, harness.Opts{})
+				d = canonicalView(t)
 			}
 
 			s := k.Open(d, ws)
