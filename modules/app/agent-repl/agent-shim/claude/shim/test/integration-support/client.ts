@@ -198,6 +198,11 @@ export class Stream<T> {
  * a helper that let it through would make every such suite restate the frame
  * order. `test/integration/session.test.ts` asserts the re-announcement itself
  * through the unfiltered stream.
+ *
+ * The `measurements` frame is dropped the same way: the shim pushes one ahead
+ * of the next frame after a vendor call is counted (vendor spend), and a suite
+ * reading session facts is not reading it. `test/engine/measurements.test.ts`
+ * and `test/engine/vendor-spend.test.ts` assert it itself.
  */
 export function openSessionUpdates(
   open: (options: { signal: AbortSignal }) => AsyncIterable<shimv1.WatchSessionResponse>,
@@ -211,7 +216,7 @@ export function openSessionUpdates(
   return new Stream(
     (async function* filtered(): AsyncIterable<shimv1.WatchSessionResponse> {
       for await (const frame of source) {
-        if (frame.frame.case === "sessionStarted") continue;
+        if (frame.frame.case === "sessionStarted" || frame.frame.case === "measurements") continue;
         yield frame;
       }
     })(),

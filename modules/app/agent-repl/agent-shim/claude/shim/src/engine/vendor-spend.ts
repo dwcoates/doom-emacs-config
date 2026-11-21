@@ -23,6 +23,7 @@ import type { NormalizedApiUsage } from "../api-usage.js";
 import { normalizeApiUsage } from "../api-usage.js";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
+import { transcriptCacheAnchor } from "./keepalive.js";
 import { CACHE_READ_PRICE, CACHE_TTL_1H_MS, CACHE_TTL_5M_MS, CACHE_WRITE_PRICE, isCliSynthesized, type TranscriptFacts } from "./cold.js";
 
 const LOGGER = bindLog({
@@ -228,11 +229,12 @@ export class VendorSpendLedger {
   /** Seed CHAIN's previous call from the transcript it resumes, as {@link seedMain} does the main loop's. */
   seedChain(chain: string, facts: TranscriptFacts | undefined): void {
     if (facts === undefined || !facts.sawUsage || facts.lastRequestAtMs <= 0) return;
+    const anchor = transcriptCacheAnchor(facts);
     this.chains.set(chain, {
-      atMs: facts.lastRequestAtMs,
+      atMs: anchor.atMs,
       model: facts.lastModel ?? "",
-      ttlMs: facts.cacheTtlMs > 0 ? facts.cacheTtlMs : CACHE_TTL_5M_MS,
-      cachedTokens: facts.cachedTokens,
+      ttlMs: anchor.ttlMs !== undefined && anchor.ttlMs > 0 ? anchor.ttlMs : CACHE_TTL_5M_MS,
+      cachedTokens: anchor.cachedTokens,
     });
   }
 
@@ -335,7 +337,7 @@ export class VendorSpendLedger {
     retriesVendorError = false,
   ): void {
     if (model === "") {
-      LOGGER.error({ message_id: messageId, chain: agent.chain }, "a vendor call names no model; it is counted under an empty model");
+      LOGGER.error({ message_id: messageId, chain: agent.chain, cause: "the vendor stated no model" }, "a vendor call names no model; it is counted under an empty model");
     }
     const seen = this.counted.get(messageId);
     if (seen !== undefined) {
@@ -347,7 +349,7 @@ export class VendorSpendLedger {
     }
     if (cause === conversationv1.VendorCallCause.UNSTATED) {
       LOGGER.error(
-        { message_id: messageId, model, chain: agent.chain, agent: conversationv1.VendorCallAgent[agent.agent] },
+        { message_id: messageId, model, chain: agent.chain, agent: conversationv1.VendorCallAgent[agent.agent], cause: "no turn or spawn stated a spend cause" },
         "a vendor call belongs to no turn whose cause was stated; it is counted under the unstated cause",
       );
     }

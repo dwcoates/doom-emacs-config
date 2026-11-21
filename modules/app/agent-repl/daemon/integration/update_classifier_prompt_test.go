@@ -22,9 +22,12 @@ const rewriteLine = "Interrupt whenever a message says something must happen aft
 // the brief it was shown, plus rewriteLine: a usable rewrite, slots intact.
 func rewritingClaudeEnv(t *testing.T) []string {
 	t.Helper()
+	// The answer is the CLI's event stream (headless/stream.go): the result
+	// envelope, its text JSON-escaped onto one line.
 	script := "#!/bin/sh\n" +
-		"sed -n '/^<current-prompt>$/,/^<\\/current-prompt>$/p' | sed '1d;$d'\n" +
-		"printf '%s\\n' '" + rewriteLine + "'\n"
+		"answer=$( { sed -n '/^<current-prompt>$/,/^<\\/current-prompt>$/p' | sed '1d;$d'; printf '%s\\n' '" + rewriteLine + "'; } |\n" +
+		"  sed -e 's/\\\\/\\\\\\\\/g' -e 's/\"/\\\\\"/g' | awk '{ printf \"%s\\\\n\", $0 }')\n" +
+		"printf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"%s\"}\\n' \"$answer\"\n"
 	return []string{scriptedClaudeEnv(t, script)}
 }
 

@@ -6580,8 +6580,8 @@ CAUSE a conversation.v1.VendorCallCause spelling such as
     (agent-repl-wire-verbs--check-keys message json '(recorded metricsOff))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
-     (list (list 'recorded :recorded (lambda (v) (agent-repl-wire-verbs--decode-empty "ReportVendorSpendRecorded" v)))
-           (list 'metricsOff :metrics-off (lambda (v) (agent-repl-wire-verbs--decode-empty "ReportVendorSpendMetricsOff" v)))))))
+     (list (list 'recorded :recorded (agent-repl-wire-verbs--empty-arm "ReportVendorSpendRecorded"))
+           (list 'metricsOff :metrics-off (agent-repl-wire-verbs--empty-arm "ReportVendorSpendMetricsOff"))))))
 
 (defun agent-repl-wire-decode-report-vendor-spend-error (json)
   "Decode ReportVendorSpendError from JSON into (:arm :invalid :value (:detail D))."
@@ -6590,9 +6590,7 @@ CAUSE a conversation.v1.VendorCallCause spelling such as
     (agent-repl-wire-verbs--decode-oneof
      message "kind" json
      (list (list 'invalid :invalid
-                 (lambda (v)
-                   (agent-repl-wire-verbs--check-keys "ReportVendorSpendInvalid" v '(detail))
-                   (list :detail (agent-repl-wire-verbs--decode-string "ReportVendorSpendInvalid" 'detail v))))))))
+                 (lambda (v) (agent-repl-wire-verbs--decode-detail "ReportVendorSpendInvalid" v)))))))
 
 (defun agent-repl-wire-decode-report-vendor-spend-response (json)
   "Decode ReportVendorSpendResponse from JSON into (:arm ARM :value V)."
