@@ -231,3 +231,47 @@ func describeNotifyRefusal(ws string, e *agentreplv1.NotifyWorkspaceError) (stri
 	}
 	return "", undescribed("notifying for "+ws, e)
 }
+
+// describeKeepLiveRefusal says why WS was not kept live
+// (endpoint_keep_live_workspace.proto).
+func describeKeepLiveRefusal(ws string, e *agentreplv1.KeepLiveWorkspaceError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.KeepLiveWorkspaceError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.KeepLiveWorkspaceError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.KeepLiveWorkspaceError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "keep it live again"), nil
+	case *agentreplv1.KeepLiveWorkspaceError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "keep it live again"), nil
+	case *agentreplv1.KeepLiveWorkspaceError_Closed:
+		return fmt.Sprintf("%s is closed; the cache keeper gives a closed workspace one last keep-alive and then lets its cache lapse", ws), nil
+	case *agentreplv1.KeepLiveWorkspaceError_ColdGated:
+		return fmt.Sprintf("%s stands at its cold gate, which a keep-live never pays; pass the gate first (workspace pass-gate)", ws), nil
+	case *agentreplv1.KeepLiveWorkspaceError_OwesNoKeepalive:
+		return fmt.Sprintf("the cache keeper owes %s no keep-alive (%s), so nothing was started or sent", ws, r.OwesNoKeepalive.GetReason()), nil
+	case *agentreplv1.KeepLiveWorkspaceError_CacheLapsed:
+		return fmt.Sprintf("%s's cache had already lapsed, so no keep-alive was sent; its session is parked and its next prompt meets the cold gate", ws), nil
+	case *agentreplv1.KeepLiveWorkspaceError_StartFailed:
+		return fmt.Sprintf("%s's parked session could not be restored (%s)", ws, r.StartFailed.GetDetail()), nil
+	case *agentreplv1.KeepLiveWorkspaceError_BeatFailed:
+		return fmt.Sprintf("%s's shim could not be asked for the keep-alive (%s)", ws, r.BeatFailed.GetDetail()), nil
+	case *agentreplv1.KeepLiveWorkspaceError_StandDownFailed:
+		return fmt.Sprintf("%s's stand-down failed (%s); its shim may still be up", ws, r.StandDownFailed.GetDetail()), nil
+	case *agentreplv1.KeepLiveWorkspaceError_TimedOut:
+		step := "a"
+		switch r.TimedOut.GetStep().(type) {
+		case *agentreplv1.KeepLiveWorkspaceTimedOut_Start:
+			step = "its start"
+		case *agentreplv1.KeepLiveWorkspaceTimedOut_Ack:
+			step = "its ack"
+		case *agentreplv1.KeepLiveWorkspaceTimedOut_StandDown:
+			step = "its stand-down"
+		}
+		return fmt.Sprintf("%s's keep-live outran %s step's bound of %dms (measured healthy worst case %dms); the daemon recorded it at ERROR",
+			ws, step, r.TimedOut.GetBoundMs(), r.TimedOut.GetExpectedMs()), nil
+	case *agentreplv1.KeepLiveWorkspaceError_RegistryUnreadable:
+		return fmt.Sprintf("the daemon could not read the registry to keep %s live (%s)", ws, r.RegistryUnreadable.GetDetail()), nil
+	}
+	return "", undescribed("keeping "+ws+" live", e)
+}

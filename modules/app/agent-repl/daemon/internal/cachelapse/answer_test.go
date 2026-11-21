@@ -222,7 +222,7 @@ func TestSettleAnswerEndsTheWaitAndStandsTheSessionDownAtTheBeat(t *testing.T) {
 	h := awaiting(t)
 
 	// Act.
-	h.keeper.settleAnswer(theWorkspace, now)
+	h.keeper.settleAnswer(theWorkspace, now, nil)
 
 	// Assert.
 	if len(h.keeper.answering) != 0 || len(h.keeper.answerBy) != 0 {

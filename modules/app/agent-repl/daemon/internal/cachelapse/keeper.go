@@ -64,12 +64,14 @@ import (
 	"sync"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -173,8 +175,9 @@ type Deps struct {
 	// KeepaliveInterval, or a test run's compressed cadence (IntervalFromEnv).
 	Interval time.Duration
 	// CycleDown asks for WS's session to be stood down after the keep-alive
-	// asked at BEAT (drain.Controller.CycleDown).
-	CycleDown func(ws ids.WorkspaceID, beat time.Time)
+	// asked at BEAT (drain.Controller.CycleDownThen), calling DONE, when
+	// given, once the stand-down settles: a keep-live run waits on it.
+	CycleDown func(ws ids.WorkspaceID, beat time.Time, done func(drain.CycleOutcome))
 	// ColdDown asks for WS's session to be parked the moment its cache is
 	// known cold at SINCE (drain.Controller.ColdDown): a cold cache owes no
 	// keep-alive, so the keep-alive cycle never parks it.
@@ -233,6 +236,10 @@ const (
 	// edgeNetworkRestored is the network coming back after an outage, for no
 	// one workspace (outage.go).
 	edgeNetworkRestored
+	// edgeKeepLive is an agent's keep-live call (keeplive.go).
+	edgeKeepLive
+	// edgeKeepLiveStoodDown is a keep-live run's stand-down settling.
+	edgeKeepLiveStoodDown
 )
 
 // edge is one queued event.
@@ -254,6 +261,12 @@ type edge struct {
 	// down is how long the outage a network-restored edge ended stood
 	// (edgeNetworkRestored).
 	down time.Duration
+	// keepLive answers a keep-live call (edgeKeepLive).
+	keepLive chan<- *agentreplv1.KeepLiveWorkspaceResponse
+	// run and stoodDown are a keep-live run and how its stand-down settled
+	// (edgeKeepLiveStoodDown).
+	run       *keepLiveRun
+	stoodDown drain.CycleOutcome
 	// why names the edge for the records.
 	why string
 }
@@ -291,6 +304,12 @@ type Keeper struct {
 	// stand-down is taken without one (answer.go); both owned by Run alone.
 	answering map[ids.WorkspaceID]time.Time
 	answerBy  map[ids.WorkspaceID]time.Time
+	// answerKeepsUp is each awaited answer after which the session is left
+	// up (a keep-live on a session within its grace); owned by Run alone.
+	answerKeepsUp map[ids.WorkspaceID]bool
+	// keepLives is each workspace's keep-live run (keeplive.go), owned by
+	// Run alone.
+	keepLives map[ids.WorkspaceID]*keepLiveRun
 	// stated is each workspace's next keep-alive as last stated to the views
 	// (nextkeepalive.go), owned by Run alone.
 	stated map[ids.WorkspaceID]time.Time
@@ -366,7 +385,10 @@ func New(deps Deps) (*Keeper, error) {
 		freeSince: map[ids.WorkspaceID]time.Time{},
 		answering: map[ids.WorkspaceID]time.Time{},
 		answerBy:  map[ids.WorkspaceID]time.Time{},
-		stated:    map[ids.WorkspaceID]time.Time{},
+
+		answerKeepsUp: map[ids.WorkspaceID]bool{},
+		keepLives:     map[ids.WorkspaceID]*keepLiveRun{},
+		stated:        map[ids.WorkspaceID]time.Time{},
 
 		parkedFlying: map[ids.WorkspaceID]bool{},
 		parkedRetry:  map[ids.WorkspaceID]time.Time{},
@@ -495,6 +517,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.restoresDue(ctx)
 			k.answersDue()
 			k.coldParksDue(ctx)
+			k.keepLivesDue()
 			k.stateNextKeepalives()
 			continue
 		}
@@ -516,6 +539,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.restoresDue(ctx)
 			k.answersDue()
 			k.coldParksDue(ctx)
+			k.keepLivesDue()
 			k.stateNextKeepalives()
 		}
 	}
@@ -555,11 +579,16 @@ func (k *Keeper) take() []edge {
 	return queued
 }
 
-// earliest answers the first armed deadline: a lapse, a beat, a restore or an
-// awaited keep-alive answer's bound.
+// earliest answers the first armed deadline: a lapse, a beat, a restore, an
+// awaited keep-alive answer's bound, a cold park's or a keep-live step's bound.
 func (k *Keeper) earliest() (time.Time, bool) {
 	var next time.Time
 	armed := false
+	for _, run := range k.keepLives {
+		if run.step != stepAck && (!armed || run.by.Before(next)) {
+			next, armed = run.by, true
+		}
+	}
 	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores, k.answerBy, k.coldDue} {
 		for _, at := range set {
 			if !armed || at.Before(next) {
@@ -590,6 +619,10 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 		k.answeredFailed(e.ws, e.failed)
 	case edgeNetworkRestored:
 		k.networkRestored(e.down)
+	case edgeKeepLive:
+		k.beginKeepLive(ctx, e.ws, e.keepLive)
+	case edgeKeepLiveStoodDown:
+		k.keepLiveStoodDown(e.run, e.stoodDown)
 	default:
 		k.reconcile(ctx, e.ws, e.why)
 	}

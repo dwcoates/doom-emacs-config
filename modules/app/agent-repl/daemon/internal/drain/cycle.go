@@ -85,6 +85,22 @@ type cycleState struct {
 	running bool
 	// again is an edge that arrived while an attempt ran.
 	again bool
+	// dones are the asks waiting to hear how the stand-down settled
+	// (CycleDownThen); each is called once, when an attempt settles.
+	dones []func(CycleOutcome)
+}
+
+// CycleOutcome is how one asked-for stand-down settled. A stand-down still
+// pending (the session busy, the park deferred) has not settled.
+type CycleOutcome struct {
+	// Down reports that no shim serves the session once the attempt settled:
+	// it was parked, or nothing served it.
+	Down bool
+	// Failed reports a read or a park that failed, rather than a rule that
+	// kept the session up.
+	Failed bool
+	// Why is the attempt's account, as its record words it.
+	Why string
 }
 
 // cycleReason is a keep-alive cycle's stand-down reason.
@@ -99,24 +115,32 @@ var cycleReason = standDownReason{
 // at BEAT. It returns at once; the attempt runs on the detached lifetime. A
 // later beat's ask replaces the earlier one's instant.
 func (c *controller) CycleDown(ws ids.WorkspaceID, beat time.Time) {
-	c.askDown(ws, beat, cycleReason)
+	c.askDown(ws, beat, cycleReason, nil)
+}
+
+// CycleDownThen is CycleDown, calling DONE once with how the stand-down
+// settled. A stand-down that never settles (the daemon leaving under it)
+// never calls DONE, so its caller bounds its own wait.
+func (c *controller) CycleDownThen(ws ids.WorkspaceID, beat time.Time, done func(CycleOutcome)) {
+	c.askDown(ws, beat, cycleReason, done)
 }
 
 // VisitDown asks for the stand-down of WS's session, a settings pick having
 // started it at SINCE, the user having switched away. It returns at once.
 func (c *controller) VisitDown(ws ids.WorkspaceID, since time.Time) {
-	c.askDown(ws, since, visitReason)
+	c.askDown(ws, since, visitReason, nil)
 }
 
 // ColdDown asks for the stand-down of WS's session, its cache having been
 // known cold at SINCE. It returns at once.
 func (c *controller) ColdDown(ws ids.WorkspaceID, since time.Time) {
-	c.askDown(ws, since, coldReason)
+	c.askDown(ws, since, coldReason, nil)
 }
 
 // askDown asks for WS's stand-down for REASON unless a real turn has run
-// since BEAT. A later ask replaces the earlier one's instant and reason.
-func (c *controller) askDown(ws ids.WorkspaceID, beat time.Time, reason standDownReason) {
+// since BEAT. A later ask replaces the earlier one's instant and reason; DONE,
+// when given, joins the asks told how it settles.
+func (c *controller) askDown(ws ids.WorkspaceID, beat time.Time, reason standDownReason, done func(CycleOutcome)) {
 	c.mu.Lock()
 	if c.cycles == nil {
 		c.cycles = map[ids.WorkspaceID]*cycleState{}
@@ -127,6 +151,9 @@ func (c *controller) askDown(ws ids.WorkspaceID, beat time.Time, reason standDow
 		c.cycles[ws] = st
 	}
 	st.beat, st.reason = beat, reason
+	if done != nil {
+		st.dones = append(st.dones, done)
+	}
 	c.mu.Unlock()
 	c.log.Debug(reason.op, "a stand-down was asked for", dlog.Context{"workspace": string(ws), "since": beat})
 	c.kickCycle(ws, st)
@@ -161,11 +188,16 @@ func (c *controller) kickCycle(ws ids.WorkspaceID, st *cycleState) {
 			c.mu.Lock()
 			beat, reason := st.beat, st.reason
 			c.mu.Unlock()
-			outcome := c.cycleDown(ctx, ws, beat, reason)
+			outcome, settled := c.cycleDown(ctx, ws, beat, reason)
 			c.mu.Lock()
+			var dones []func(CycleOutcome)
+			if outcome == withheldSettled {
+				dones, st.dones = st.dones, nil
+			}
 			if st.again && ctx.Err() == nil {
 				st.again = false
 				c.mu.Unlock()
+				tell(dones, settled)
 				continue
 			}
 			st.running, st.again = false, false
@@ -173,32 +205,40 @@ func (c *controller) kickCycle(ws ids.WorkspaceID, st *cycleState) {
 				delete(c.cycles, ws)
 			}
 			c.mu.Unlock()
+			tell(dones, settled)
 			return
 		}
 	})
 }
 
-// cycleDown is one attempt.
-func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat time.Time, reason standDownReason) withheldOutcome {
+// tell calls every waiting ask with how the stand-down settled.
+func tell(dones []func(CycleOutcome), settled CycleOutcome) {
+	for _, done := range dones {
+		done(settled)
+	}
+}
+
+// cycleDown is one attempt, and how it settled when it did.
+func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat time.Time, reason standDownReason) (withheldOutcome, CycleOutcome) {
 	op := reason.op
 	fields := dlog.Context{"workspace": string(ws), "since": beat}
 	if err := ctx.Err(); err != nil {
 		c.log.Info(op, "the daemon is leaving; the stand-down is not taken", dlog.WithCause(fields, err))
-		return withheldPending
+		return withheldPending, CycleOutcome{}
 	}
 	record, err := c.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		if errors.Is(err, wsm.ErrNotFound) {
 			c.log.Info(op, "the workspace is no longer registered; nothing is stood down", fields)
-			return withheldSettled
+			return withheldSettled, CycleOutcome{Down: true, Why: "the workspace is no longer registered; nothing is stood down"}
 		}
 		c.log.Error(op, "could not read the workspace's record; its stand-down is dropped", dlog.WithCause(fields, err))
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Failed: true, Why: "could not read the workspace's record; its stand-down is dropped"}
 	}
 	log := c.workspaceLog(record)
 	if record.Current {
 		log.Info(op, "the user is looking at the workspace; its session is kept up", fields)
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Why: "the user is looking at the workspace; its session is kept up"}
 	}
 	// A COLD PARK AND A SETTINGS VISIT ARE TAKEN WHATEVER THE VISIBILITY: the
 	// cache keeper asks for either only when the lapse owns no stand-down of
@@ -216,11 +256,11 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		queued, err := bringup.MergeQueued(ctx, c.deps.DB, record)
 		if err != nil {
 			log.Error(op, "could not read whether the closed workspace has a merge queued; its stand-down is dropped", dlog.WithCause(fields, err))
-			return withheldSettled
+			return withheldSettled, CycleOutcome{Failed: true, Why: "could not read whether the closed workspace has a merge queued; its stand-down is dropped"}
 		}
 		if !queued {
 			log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
-			return withheldSettled
+			return withheldSettled, CycleOutcome{Why: "the workspace is closed; its cache's lapse stands it down"}
 		}
 	}
 	// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP (owner ruling,
@@ -233,11 +273,11 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	remote, err := c.deps.DB.RemoteControl(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the workspace's remote-control mode; its stand-down is dropped", dlog.WithCause(fields, err))
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Failed: true, Why: "could not read the workspace's remote-control mode; its stand-down is dropped"}
 	}
 	if remote.On {
 		log.Info(op, "remote control is on; the shim stays up for claude.ai", dlog.Merge(fields, dlog.Context{"remote_control_recorded": remote.Recorded}))
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Why: "remote control is on; the shim stays up for claude.ai"}
 	}
 	visible := true
 	if lapseOwnsWithheld {
@@ -245,49 +285,49 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	}
 	if err != nil {
 		log.Error(op, "could not read whether the workspace is visible; its stand-down is dropped", dlog.WithCause(fields, err))
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Failed: true, Why: "could not read whether the workspace is visible; its stand-down is dropped"}
 	}
 	if !visible {
 		log.Debug(op, "the workspace is withheld; its cache's lapse stands it down", fields)
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Why: "the workspace is withheld; its cache's lapse stands it down"}
 	}
 	session, found, err := c.deps.DB.Session(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the workspace's session; its stand-down is dropped", dlog.WithCause(fields, err))
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Failed: true, Why: "could not read the workspace's session; its stand-down is dropped"}
 	}
 	if !found || session.Terminal != nil {
 		log.Debug(op, "the workspace has no live session; nothing to stand down", fields)
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Down: true, Why: "the workspace has no live session; nothing to stand down"}
 	}
 	if ended, turned := record.TurnedSince(beat); turned {
 		log.Info(op, "a real turn ran since; the session is kept up",
 			dlog.Merge(fields, dlog.Context{"turn_ended_at": ended}))
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Why: "a real turn ran since; the session is kept up"}
 	}
 	switch gate := c.gate(ws); gate {
 	case gateOpen:
 	case gateNotServing:
 		log.Debug(op, "the workspace has no shim to address; nothing to stand down", fields)
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Down: true, Why: "the workspace has no shim to address; nothing to stand down"}
 	case gateBusy, gateStarting, gateReviving:
 		log.Info(op, "the session is busy; its stand-down waits for it to fall free",
 			dlog.Merge(fields, dlog.Context{"gate": gate.String()}))
-		return withheldPending
+		return withheldPending, CycleOutcome{}
 	default:
 		log.Error(op, "the stand-down gate answered a value this stand-down cannot read; it is dropped",
 			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Failed: true, Why: "the stand-down gate answered a value this stand-down cannot read; it is dropped"}
 	}
 	switch c.park(ctx, log, ws, fields, reason) {
 	case parkDone:
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Down: true, Why: reason.done}
 	case parkDeferred:
 		log.Info(op, "the stand-down was deferred; it is taken when the session falls free", fields)
-		return withheldPending
+		return withheldPending, CycleOutcome{}
 	default:
 		// park recorded the failure at its own level; the next beat asks
 		// afresh.
-		return withheldSettled
+		return withheldSettled, CycleOutcome{Failed: true, Why: "the park failed; its record above says why"}
 	}
 }

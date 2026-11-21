@@ -295,6 +295,13 @@ func (s *requestLoggingServer) AnswerColdGate(
 	return serveUnary(s, ctx, "AnswerColdGate", req, s.server.AnswerColdGate)
 }
 
+func (s *requestLoggingServer) KeepLiveWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.KeepLiveWorkspaceRequest],
+) (*connect.Response[agentreplv1.KeepLiveWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "KeepLiveWorkspace", req, s.server.KeepLiveWorkspace)
+}
+
 func (s *requestLoggingServer) PassColdGate(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.PassColdGateRequest],

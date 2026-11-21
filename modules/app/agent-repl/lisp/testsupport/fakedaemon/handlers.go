@@ -101,6 +101,10 @@ func (s *fakeServer) PassColdGate(ctx context.Context, req *connect.Request[v1.P
 	return handleUnary[v1.PassColdGateRequest, v1.PassColdGateResponse](ctx, s, "PassColdGate", req.Msg)
 }
 
+func (s *fakeServer) KeepLiveWorkspace(ctx context.Context, req *connect.Request[v1.KeepLiveWorkspaceRequest]) (*connect.Response[v1.KeepLiveWorkspaceResponse], error) {
+	return handleUnary[v1.KeepLiveWorkspaceRequest, v1.KeepLiveWorkspaceResponse](ctx, s, "KeepLiveWorkspace", req.Msg)
+}
+
 func (s *fakeServer) AnswerColdGate(ctx context.Context, req *connect.Request[v1.AnswerColdGateRequest]) (*connect.Response[v1.AnswerColdGateResponse], error) {
 	return handleUnary[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse](ctx, s, "AnswerColdGate", req.Msg)
 }

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -220,6 +222,11 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		return none(noBeatCold, "neither of its conversations has a warm cache to keep, or each one's last keep-alive is spent")
 	}
 	plan.due = k.pulledForward(ws, plan.due)
+	// A KEEP-LIVE RUN MAKES THE BEAT DUE NOW (keeplive.go): the same plan,
+	// asked for at once, so every reason it owes none still holds.
+	if k.forcing(ws) {
+		plan.due = k.deps.Clock.Now()
+	}
 	engaged := session.LastEngagementAt
 	if engaged.IsZero() {
 		engaged = session.StartedAt
@@ -305,11 +312,20 @@ func (k *Keeper) beatsDue(ctx context.Context) {
 
 // sendBeat sends WS's keep-alive, re-read first so a turn that moved the clock in
 // the meantime re-arms it instead.
+//
+// IT IS THE ONE KEEP-ALIVE SUBROUTINE: the scheduled beat (beatsDue) and the
+// keep-live verb (beginKeepLive) both call it, and every record it makes
+// names which one did (`trigger`).
 func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time) {
-	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws), "trigger": k.triggerOf(ws)})
 	plan, ok := k.beatPlanFor(ctx, log, ws)
 	if !ok {
 		delete(k.restores, ws)
+		if why, known := k.noBeat[ws]; known {
+			k.keepLiveFailed(ws, "owes_no_keepalive", owesNoKeepalive(why), false)
+		} else {
+			k.keepLiveFailed(ws, "registry_unreadable", registryUnreadable("the keeper could not read what the workspace owes; the cause is recorded above"), false)
+		}
 		return
 	}
 	due, parked := plan.due, plan.sessionParked
@@ -330,6 +346,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			// THE RESTORE IS LATE OR STILL RUNNING: the beat goes out when its
 			// session comes up (SessionUp schedules it, already due).
 			log.Info(opDrive, "the keep-alive is due and its session is still parked; it goes out once the session is restored", fields)
+			k.keepLiveRestoring(ws, now)
 			k.requestRestore(ctx, ws, due)
 			return
 		}
@@ -345,6 +362,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 	if !plan.bound {
 		k.beatAnswered(ws)
 		log.Info(opDrive, "the parked conversation's keep-alive is due and the running conversation owes none", fields)
+		k.keepLiveFailed(ws, "owes_no_keepalive", owesNoKeepalive("the conversation the session runs has no warm cache to keep; only its parked conversation's keep-alive was sent"), true)
 		return
 	}
 	answer, err := shim.Beat(ctx)
@@ -359,6 +377,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			observe(BeatOutcomeSubmitFailed)
 			k.undelivered(ctx, log, opDrive, ws, due, "submitting the keep-alive", "the keep-alive's submission failed; it is asked again shortly",
 				dlog.Merge(fields, dlog.Context{"retry_in": BeatRetry.String()}), err)
+			k.keepLiveFailed(ws, "beat_failed", beatFailed(failed.Detail), true)
 		default:
 			observe(BeatOutcomeShimUnreachable)
 			const failed = "could not ask the shim for its keep-alive; it is asked again shortly"
@@ -370,6 +389,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			}, fields, err) {
 				k.raiseUndelivered(ctx, log, ws, due, failed+": "+err.Error())
 			}
+			k.keepLiveFailed(ws, "beat_failed", beatFailed(err.Error()), true)
 		}
 		k.beats[ws] = now.Add(BeatRetry)
 		return
@@ -397,13 +417,21 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		// an interval after the session last fell free. A beat that comes
 		// sooner, because detached work ended after the turn, goes out and
 		// leaves the shim up; the next one stands it down.
-		if free, ok := k.freeSince[ws]; ok && now.Sub(free) < StandDownGrace {
+		free, freed := k.freeSince[ws]
+		withinGrace := freed && now.Sub(free) < StandDownGrace
+		// A KEEP-LIVE RUN AWAITS THE ANSWER EITHER WAY, and a session it
+		// started is stood down after it whatever its grace.
+		running, standDown := k.keepLiveSent(ws, withinGrace)
+		switch {
+		case running:
+			k.awaitAnswer(log, ws, now, fields, !standDown)
+		case withinGrace:
 			log.Info(opDrive, "the session fell free less than an interval ago; the shim stays up until the next keep-alive",
 				dlog.Merge(fields, dlog.Context{"free_since": free}))
-		} else {
+		default:
 			// NEVER UNDER ITS OWN KEEP-ALIVE (answer.go): the stand-down waits
 			// for the vendor's answer.
-			k.awaitAnswer(log, ws, now, fields)
+			k.awaitAnswer(log, ws, now, fields, false)
 		}
 		k.beats[ws] = now.Add(k.deps.Interval)
 	case answer.GetSkipped().GetMainAgentBusy() != nil:
@@ -417,16 +445,21 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		k.beats[ws] = now.Add(k.deps.Interval)
 		log.Info(opDrive, "the main agent is busy, which keeps the cache warm itself; the next beat falls one interval on, or is timed when it falls free",
 			dlog.Merge(fields, dlog.Context{"detail": answer.GetSkipped().GetMainAgentBusy().GetDetail(), "next": k.beats[ws]}))
+		k.keepLiveBusy(ws, busyOf(answer.GetSkipped()))
 	case answer.GetSkipped().GetDetachedWorkLive() != nil:
 		observe(BeatOutcomeDetachedWorkLive)
 		log.Info(opDrive, "detached work is live, and the rewind a keep-alive owes would kill it; the keep-alive goes out when it ends",
 			dlog.Merge(fields, dlog.Context{"live_items": answer.GetSkipped().GetDetachedWorkLive().GetLiveItems()}))
+		k.keepLiveBusy(ws, busyOf(answer.GetSkipped()))
 	case answer.GetSkipped().GetCacheLapsed() != nil:
 		observe(BeatOutcomeCacheLapsed)
 		lapsed := time.UnixMilli(answer.GetSkipped().GetCacheLapsed().GetLapsedAtMs())
 		log.Info(opDrive, "the cache had already lapsed; no keep-alive is sent until a turn moves its clock",
 			dlog.Merge(fields, dlog.Context{"lapsed_at_ms": lapsed.UnixMilli()}))
 		k.missed(ctx, log, ws, due, lapsed)
+		k.keepLiveFailed(ws, "cache_lapsed", &agentreplv1.KeepLiveWorkspaceError{Cause: &agentreplv1.KeepLiveWorkspaceError_CacheLapsed{
+			CacheLapsed: &agentreplv1.KeepLiveWorkspaceCacheLapsed{LapsedAtMs: lapsed.UnixMilli()},
+		}}, false)
 		if k.markCold(ctx, ws, "the shim judged the cache lapsed") != nil {
 			// UNMARKED, the beat would be asked again at once and judged lapsed
 			// again: it is asked again shortly instead, and markCold recorded
@@ -440,6 +473,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		log.Error(opDrive, "the shim answered the keep-alive with a judgment this daemon does not name", dlog.Merge(fields, dlog.Context{
 			"invariant_violation": "every SendKeepaliveSuccess arm is handled",
 		}))
+		k.keepLiveFailed(ws, "beat_failed", beatFailed("the shim answered the keep-alive with a judgment this daemon does not name"), true)
 	}
 }
 
@@ -496,6 +530,7 @@ func (k *Keeper) pump(ctx context.Context) {
 		log := k.deps.Log.Global().With(dlog.Context{"workspace": string(next.ws)})
 		if _, served := k.deps.Shim(next.ws); served {
 			log.Debug(opRestore, "the parked session is already served again; it is not restored", nil)
+			k.keepLiveRetimed(next.ws)
 			continue
 		}
 		session, found, err := k.deps.DB.Session(ctx, next.ws)
@@ -507,6 +542,7 @@ func (k *Keeper) pump(ctx context.Context) {
 		}
 		if !found || !session.Parked() {
 			log.Debug(opRestore, "the session is no longer parked; it is not restored", nil)
+			k.keepLiveRetimed(next.ws)
 			continue
 		}
 		k.restoring[next.ws] = true
@@ -514,6 +550,7 @@ func (k *Keeper) pump(ctx context.Context) {
 		log.Info(opRestore, "restoring the parked session ahead of its keep-alive", dlog.Context{
 			"due": next.due, "in_flight": len(k.restoring), "waiting": len(k.queued),
 		})
+		k.keepLiveRestoreBegan(ws)
 		k.deps.Restore(ws, func(err error) {
 			k.enqueue(edge{ws: ws, kind: edgeRestored, err: err, why: "the parked session's restore ended"})
 		})
@@ -525,7 +562,10 @@ func (k *Keeper) pump(ctx context.Context) {
 // one that came up is scheduled by its own SessionUp.
 func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 	delete(k.restoring, ws)
-	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws), "trigger": k.triggerOf(ws)})
+	if err != nil {
+		k.keepLiveFailed(ws, "start_failed", startFailed(err.Error()), false)
+	}
 	switch {
 	case err == nil:
 		log.Info(opRestore, "the parked session is back up for its keep-alive", nil)

@@ -18,6 +18,7 @@ import (
 
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -337,6 +338,9 @@ type harness struct {
 	cycled []cycleCall
 	// coldDowns are the cold cache's parks asked for.
 	coldDowns []cycleCall
+	// cycleDones are the reports each keep-alive cycle stand-down in cycled
+	// was asked with, nil for none: a keep-live run waits on its own.
+	cycleDones []func(drain.CycleOutcome)
 	// visitDowns are the settings visits' stand-downs asked for.
 	visitDowns []cycleCall
 	// restoring are the restores asked for, each with the done that ends it.
@@ -433,8 +437,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		PublishRegistry: func(context.Context) error { h.publishes++; return nil },
 		IdleCutoff:      6 * time.Hour,
 		Interval:        KeepaliveInterval,
-		CycleDown: func(ws ids.WorkspaceID, beat time.Time) {
+		CycleDown: func(ws ids.WorkspaceID, beat time.Time, done func(drain.CycleOutcome)) {
 			h.cycled = append(h.cycled, cycleCall{ws: ws, beat: beat})
+			h.cycleDones = append(h.cycleDones, done)
 		},
 		ColdDown: func(ws ids.WorkspaceID, since time.Time) {
 			h.coldDowns = append(h.coldDowns, cycleCall{ws: ws, beat: since})
@@ -506,7 +511,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			StandDowns:      &fakeStandDowns{},
 			PublishRegistry: func(context.Context) error { return nil },
 			Interval:        KeepaliveInterval,
-			CycleDown:       func(ids.WorkspaceID, time.Time) {},
+			CycleDown:       func(ids.WorkspaceID, time.Time, func(drain.CycleOutcome)) {},
 			ColdDown:        func(ids.WorkspaceID, time.Time) {},
 			VisitDown:       func(ids.WorkspaceID, time.Time) {},
 			Restore:         func(ids.WorkspaceID, func(error)) {},

@@ -210,6 +210,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"gh-queue-subscriptions": {usage: "gh-queue-subscriptions WS", run: workspaceGithubQueueSubscriptions},
 		"notify":                 {usage: "notify WS TEXT", run: workspaceNotify},
 		"pass-gate":              {usage: "pass-gate WS", run: workspacePassGate},
+		"keep-live":              {usage: "keep-live WS", run: workspaceKeepLive},
 		"subsections":            {usage: "subsections WS", run: workspaceSubsections},
 		"place":                  {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
 	},
@@ -2220,6 +2221,24 @@ func workspacePassGate(c *cliCall, args []string) int {
 	resp, err := c.client.PassColdGate(c.ctx, connect.NewRequest(req))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.PassColdGateResponse) (string, error) {
 		return describePassColdGateRefusal(named, msg.GetError())
+	})
+}
+
+// workspaceKeepLive warms WS's cache by the cache keeper's own keep-alive
+// (endpoint_keep_live_workspace.proto): a parked session is restored, beaten
+// and stood down again, so touching a parked workspace leaves no shim up.
+func workspaceKeepLive(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("the command names one workspace and nothing else")
+	}
+	resp, err := c.client.KeepLiveWorkspace(c.ctx, connect.NewRequest(&agentreplv1.KeepLiveWorkspaceRequest{Workspace: ref}))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.KeepLiveWorkspaceResponse) (string, error) {
+		return describeKeepLiveRefusal(named, msg.GetError())
 	})
 }
 

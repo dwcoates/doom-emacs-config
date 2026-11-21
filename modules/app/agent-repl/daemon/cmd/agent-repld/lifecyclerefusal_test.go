@@ -22,6 +22,7 @@ var lifecycleRefusals = func() []describedRefusal {
 	status := &agentreplv1.GetWorkspaceStatusError{}
 	gate := &agentreplv1.PassColdGateError{}
 	notify := &agentreplv1.NotifyWorkspaceError{}
+	keep := &agentreplv1.KeepLiveWorkspaceError{}
 	return []describedRefusal{
 		{name: "open", empty: open, oneof: "cause",
 			cases: append(append(sharedWorkspaceCases(open, "open it again", theFourWorkspaceArms...),
@@ -116,6 +117,31 @@ var lifecycleRefusals = func() []describedRefusal {
 				refusalCase{name: "standing_down", err: armed(notify, "standing_down", nil), want: "the daemon is standing down and starts no banner"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeNotifyRefusal("ws", e.(*agentreplv1.NotifyWorkspaceError))
+			}},
+		{name: "keep-live", empty: keep, oneof: "cause",
+			cases: append(sharedWorkspaceCases(keep, "keep it live again", theFourWorkspaceArms...),
+				refusalCase{name: "closed", err: armed(keep, "closed", nil),
+					want: "ws is closed; the cache keeper gives a closed workspace one last keep-alive and then lets its cache lapse"},
+				refusalCase{name: "cold_gated", err: armed(keep, "cold_gated", nil),
+					want: "ws stands at its cold gate, which a keep-live never pays; pass the gate first (workspace pass-gate)"},
+				refusalCase{name: "owes_no_keepalive", err: armedWith(keep, "owes_no_keepalive", map[string]any{"reason": "it is hidden"}),
+					want: "the cache keeper owes ws no keep-alive (it is hidden), so nothing was started or sent"},
+				refusalCase{name: "cache_lapsed", err: armed(keep, "cache_lapsed", nil),
+					want: "ws's cache had already lapsed, so no keep-alive was sent; its session is parked and its next prompt meets the cold gate"},
+				refusalCase{name: "start_failed", err: armedWith(keep, "start_failed", map[string]any{"detail": "exec"}),
+					want: "ws's parked session could not be restored (exec)"},
+				refusalCase{name: "beat_failed", err: armedWith(keep, "beat_failed", map[string]any{"detail": "refused"}),
+					want: "ws's shim could not be asked for the keep-alive (refused)"},
+				refusalCase{name: "stand_down_failed", err: armedWith(keep, "stand_down_failed", map[string]any{"detail": "hung"}),
+					want: "ws's stand-down failed (hung); its shim may still be up"},
+				refusalCase{name: "timed_out", err: armed(keep, "timed_out", &agentreplv1.KeepLiveWorkspaceTimedOut{
+					Step:    &agentreplv1.KeepLiveWorkspaceTimedOut_Ack{Ack: &agentreplv1.KeepLiveWorkspaceTimedOutAck{}},
+					BoundMs: 120000, ExpectedMs: 57000,
+				}), want: "ws's keep-live outran its ack step's bound of 120000ms (measured healthy worst case 57000ms); the daemon recorded it at ERROR"},
+				refusalCase{name: "registry_unreadable", err: armedWith(keep, "registry_unreadable", map[string]any{"detail": "locked"}),
+					want: "the daemon could not read the registry to keep ws live (locked)"}),
+			describe: func(e proto.Message) (string, error) {
+				return describeKeepLiveRefusal("ws", e.(*agentreplv1.KeepLiveWorkspaceError))
 			}},
 	}
 }()

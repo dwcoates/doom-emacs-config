@@ -88,6 +88,10 @@ type Controller interface {
 	// once a real turn has run since the beat. A busy one is stood down once
 	// it falls free. It returns at once.
 	CycleDown(ws ids.WorkspaceID, beat time.Time)
+	// CycleDownThen is CycleDown, calling DONE once with how the stand-down
+	// settled (the cache keeper's keep-alive subroutine, which reports it).
+	// A stand-down still pending has not settled, so DONE waits with it.
+	CycleDownThen(ws ids.WorkspaceID, beat time.Time, done func(CycleOutcome))
 	// VisitDown stands down the shim a settings pick started at SINCE, on the
 	// user's switch away (owner request, 2026-10-29; cycle.go), under
 	// CycleDown's rules: never under a turn, never for the workspace in view,
