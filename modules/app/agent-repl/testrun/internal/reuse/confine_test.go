@@ -2,6 +2,7 @@ package reuse
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,8 @@ func TestConfinedEnvKeepsOnlyWhatTheKeyCoversOrTheRunOwns(t *testing.T) {
 		"AGENT_REPL_TEST_CORE_SEATS_HELD=42",                                      // run-scoped
 		"AGENT_REPL_TEST_PROGRAMS=/p",                                             // the unit's own
 		"CLAUDE_CONFIG_DIR=/c", "AGENT_REPL_LOG_LEVEL=debug", "TERM_SESSION_ID=x", // dropped
+		"GOPRIVATE=example.com/*", "GOPROXY=off", "LANG=en_US.UTF-8", "LC_ALL=C", "TZ=UTC", // dropped
+		"GOENV=/somewhere/go.env", // canonical, overridden
 	}
 
 	// Act
@@ -22,7 +25,8 @@ func TestConfinedEnvKeepsOnlyWhatTheKeyCoversOrTheRunOwns(t *testing.T) {
 
 	// Assert
 	want := []string{"HOME=/h", "PATH=/bin", "GOFLAGS=-p=1", "CGO_ENABLED=0", "TMPDIR=/t",
-		"AGENT_REPL_TEST_SHORT_BASE=/s", "AGENT_REPL_BACKGROUND_PRIORITY=nice-19", "AGENT_REPL_TEST_CORE_SEATS_HELD=42", "AGENT_REPL_TEST_PROGRAMS=/p"}
+		"AGENT_REPL_TEST_SHORT_BASE=/s", "AGENT_REPL_BACKGROUND_PRIORITY=nice-19", "AGENT_REPL_TEST_CORE_SEATS_HELD=42", "AGENT_REPL_TEST_PROGRAMS=/p",
+		"GOENV=off"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("ConfinedEnv = %v, want %v", got, want)
 	}
@@ -30,11 +34,91 @@ func TestConfinedEnvKeepsOnlyWhatTheKeyCoversOrTheRunOwns(t *testing.T) {
 
 func TestKeyedEnvHoldsOnlyKeyedValues(t *testing.T) {
 	// Act
-	got := KeyedEnv([]string{"PATH=/bin", "GOFLAGS=-p=1", "TMPDIR=/t", "AGENT_REPL_LOG_LEVEL=debug"})
+	got := KeyedEnv([]string{"PATH=/bin", "GOFLAGS=-p=1", "TMPDIR=/t", "AGENT_REPL_LOG_LEVEL=debug", "GOPRIVATE=x", "LANG=C", "GOENV=/e"})
 
 	// Assert
-	if len(got) != 2 || got["PATH"] != "/bin" || got["GOFLAGS"] != "-p=1" {
-		t.Fatalf("KeyedEnv = %v, want PATH and GOFLAGS only", got)
+	want := map[string]string{"PATH": "/bin", "GOFLAGS": "-p=1", "GOENV": "off"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("KeyedEnv = %v, want %v", got, want)
+	}
+}
+
+// TestTheConfinedEnvironmentIsTheSameUnderEveryStartingProcess pins the
+// canonical environment: a run started by the daemon (Doom's env file) and
+// one started by the tests service (launchd) give a unit the same variables
+// and the same key, however their module-fetch, locale and go env file
+// settings differ.
+func TestTheConfinedEnvironmentIsTheSameUnderEveryStartingProcess(t *testing.T) {
+	// Arrange
+	shared := []string{"HOME=/h", "PATH=/bin", "USER=u", "LOGNAME=u", "SHELL=/bin/zsh"}
+	daemon := append(slices.Clone(shared), "GOPRIVATE=example.com/*", "LANG=en_US.UTF-8", "LC_TERMINAL=iTerm2")
+	service := append(slices.Clone(shared), "XPC_SERVICE_NAME=agent-repl-tests", "GOENV=/elsewhere")
+
+	// Act
+	keyDaemon, keyService := KeyedEnv(daemon), KeyedEnv(service)
+	envDaemon, envService := ConfinedEnv(daemon, nil), ConfinedEnv(service, nil)
+
+	// Assert
+	if !maps.Equal(keyDaemon, keyService) {
+		t.Errorf("KeyedEnv differs: daemon %v, service %v", keyDaemon, keyService)
+	}
+	if !slices.Equal(envDaemon, envService) {
+		t.Errorf("ConfinedEnv differs: daemon %v, service %v", envDaemon, envService)
+	}
+}
+
+func TestKeyedEnvKeysEveryGoSettingThatChangesABuild(t *testing.T) {
+	tests := []string{"GOFLAGS", "GOEXPERIMENT", "GODEBUG", "GOARCH", "GOTOOLCHAIN", "CGO_ENABLED", "CGO_CFLAGS"}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			// Act
+			a := KeyedEnv([]string{name + "=a"})
+			b := KeyedEnv([]string{name + "=b"})
+
+			// Assert
+			if maps.Equal(a, b) {
+				t.Fatalf("KeyedEnv keys %s alike for two values: %v", name, a)
+			}
+		})
+	}
+}
+
+func TestCanonicalOver(t *testing.T) {
+	tests := []struct {
+		name    string
+		environ []string
+		want    []string
+	}{
+		{"no canonical name inherited", []string{"A=1"}, []string{"A=1", "GOENV=off"}},
+		{"a canonical name inherited", []string{"GOENV=/e", "A=1"}, []string{"A=1", "GOENV=off"}},
+		{"nothing inherited", nil, []string{"GOENV=off"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := CanonicalOver(tt.environ)
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("CanonicalOver = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfinedEnvSetsTheCanonicalEnvironmentThroughCanonicalOver pins that
+// ConfinedEnv's canonical part is CanonicalOver's, so a hand-rolled override
+// that drifts from the one the go list uses fails here.
+func TestConfinedEnvSetsTheCanonicalEnvironmentThroughCanonicalOver(t *testing.T) {
+	// Arrange
+	environ := []string{"HOME=/h", "GOENV=/e", "GOFLAGS=-p=1"}
+
+	// Act
+	got := ConfinedEnv(environ, nil)
+
+	// Assert
+	if want := CanonicalOver([]string{"HOME=/h", "GOENV=/e", "GOFLAGS=-p=1"}); !slices.Equal(got, want) {
+		t.Fatalf("ConfinedEnv = %v, want CanonicalOver's %v", got, want)
 	}
 }
 

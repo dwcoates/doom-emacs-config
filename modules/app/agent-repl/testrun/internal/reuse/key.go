@@ -16,7 +16,7 @@ import (
 
 // KeyVersion is part of every key. Changing what a key covers, or how it is
 // spelled, bumps it, so no record made under the old meaning is ever reused.
-const KeyVersion = "reuse-key-v2"
+const KeyVersion = "reuse-key-v3"
 
 // Facts are the non-file inputs of a suite: everything besides the checkout
 // that decides what its tests observe.
