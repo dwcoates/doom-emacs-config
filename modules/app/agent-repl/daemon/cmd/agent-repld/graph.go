@@ -38,6 +38,7 @@ import (
 	"agent-repld/internal/editorinstance"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/externalbrowser"
+	"agent-repld/internal/foldsweep"
 	"agent-repld/internal/gather"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/gitclient"
@@ -1386,6 +1387,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the deploy ----
 
 	clients := &deployClientsForwarder{}
+	foldSweepRef := &foldSweepForwarder{log: log}
 	// THE DEPLOYED VERSION is resolved once by Prime, before anything is
 	// served, so the first roster any client receives already states it; then
 	// by its own background loop after each deploy, off the deploy's path.
@@ -1415,6 +1417,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Windows:    p.Metrics,
 		Reconnects: p.Reconnects,
 		HotReload:  hotReload,
+		FoldSweep:  foldSweepRef,
 	})
 	if err != nil {
 		return nil, err
@@ -1669,6 +1672,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the workspace verbs: %w", err)
 	}
 	verbsRef.bind(verbs)
+	foldSweeper, err := foldsweep.New(foldsweep.Deps{DB: p.DB, Folder: verbs, Log: p.Surfaces})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the fold sweeper: %w", err)
+	}
+	foldSweepRef.bind(foldSweeper)
 
 	// ---- the three ingresses ----
 

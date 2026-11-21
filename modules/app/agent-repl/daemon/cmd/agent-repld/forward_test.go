@@ -1058,3 +1058,47 @@ func TestEveryForwarderCarriesItsCollaboratorThroughLateBound(t *testing.T) {
 		t.Fatalf("found %d forwarders embedding lateBound, want the 16 the extraction moved", carried)
 	}
 }
+
+// recordingSweeper is a deploy.FoldSweeper that counts its sweeps and answers err.
+type recordingSweeper struct {
+	sweeps int
+	err    error
+}
+
+func (r *recordingSweeper) Sweep(context.Context) error {
+	r.sweeps++
+	return r.err
+}
+
+func TestFoldSweepForwarderCarriesTheSweepToTheBoundSweeper(t *testing.T) {
+	// Arrange
+	failed := errors.New("fold subsection: holds_current")
+	target := &recordingSweeper{err: failed}
+	f := &foldSweepForwarder{log: dlog.NewTestLogger()}
+	f.bind(target)
+
+	// Act
+	err := f.Sweep(context.Background())
+
+	// Assert
+	if target.sweeps != 1 || !errors.Is(err, failed) {
+		t.Fatalf("sweeps = %d, err = %v, want the one sweep and its failure carried back", target.sweeps, err)
+	}
+}
+
+func TestFoldSweepForwarderSweepingBeforeItIsBoundIsAnError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	f := &foldSweepForwarder{log: log}
+
+	// Act
+	err := f.Sweep(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("a sweep before the sweeper was bound was answered as success")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.foldsweep.sweep"}); !ok {
+		t.Fatal("the unbound sweep was not recorded at error")
+	}
+}

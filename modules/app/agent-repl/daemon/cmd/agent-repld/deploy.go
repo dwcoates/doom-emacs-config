@@ -100,6 +100,9 @@ type deployerParams struct {
 	Reconnects *restarttiming.Reconnects
 	// HotReload draws each deploy's hot reload in the deploy mediator's feed.
 	HotReload *hotreload.Tracker
+	// FoldSweep folds the sidebar's idle sections as each deploy starts
+	// building.
+	FoldSweep deploy.FoldSweeper
 }
 
 // hotReloadMediators is the slice of the state store the hot reload reads
@@ -289,6 +292,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Faults:    p.Faults,
 		Deployed:  p.Deployed,
 		HotReload: p.HotReload,
+		FoldSweep: p.FoldSweep,
 		Log:       p.Surfaces,
 	})
 	if err != nil {

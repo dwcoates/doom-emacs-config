@@ -2354,3 +2354,55 @@ func TestHotReloadServiceRefusesAnUnknownComponent(t *testing.T) {
 	// Act
 	hotReloadService("nonsense")
 }
+
+func TestADeploySweepsTheSidebarAfterBeginAndBeforeTheBuild(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if h.foldSweep.sweeps != 1 {
+		t.Fatalf("sweeps = %d, want one per deploy", h.foldSweep.sweeps)
+	}
+	if h.foldSweep.buildsAtSweep != 0 {
+		t.Fatalf("builds started before the sweep = %d, want none", h.foldSweep.buildsAtSweep)
+	}
+	if told := h.hotReload.told(); len(told) < 2 || told[0] != "begin" || told[1] != "swept" {
+		t.Fatalf("told %v, want the sweep straight after begin", told)
+	}
+}
+
+func TestAFailedSweepNeverFailsTheDeploy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.foldSweep.err = errors.New("fold subsection \"sub\": holds_current")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Deploy = %v, want a failed sweep to leave the deploy standing", err)
+	}
+	if h.builder.builds != 1 {
+		t.Fatalf("builds = %d, want the deploy to go on to build", h.builder.builds)
+	}
+}
+
+func TestADeployWithNoSweepStillDeploys(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.FoldSweep = nil
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err != nil || h.foldSweep.sweeps != 0 {
+		t.Fatalf("Deploy = %v with %d sweeps, want a deploy that sweeps nothing", err, h.foldSweep.sweeps)
+	}
+}
