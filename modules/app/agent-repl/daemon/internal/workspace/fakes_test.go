@@ -26,7 +26,6 @@ import (
 	"agent-repld/internal/claudesettings"
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/drain"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/headless"
@@ -3802,12 +3801,10 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 // fixture is one arranged verb surface plus every fake behind it, so a test
 // arranges by mutating fields and asserts by reading them.
 type fixture struct {
+	// remoteEdges are the remote-control edges handed to the cache keeper.
+	remoteEdges []ids.WorkspaceID
 	// gateAnswers records every cold gate answer the verbs counted.
 	gateAnswers fakeGateAnswers
-	// visits is the settings visits a switch stands down, and visitDrain
-	// the drain they are handed to.
-	visits     *SettingsVisits
-	visitDrain fakeVisitDrain
 	// topbarPicked is the effort the topbar seam was handed as picked.
 	topbarPicked conversationv1.AgentEffortLevel
 	// creates is the create gate the verbs hold a ticket from.
@@ -3994,7 +3991,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings, namePrefixes: &f.topbarNamePrefixes}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
-		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SettingsVisits: f.ensureVisits(), Drain: &f.visitDrain,
+		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
@@ -4018,6 +4015,7 @@ func newFixture(t *testing.T) *fixture {
 		CacheLapses: &fakeCacheLapses{
 			visibility: func(ws ids.WorkspaceID) { f.visibilityEdges = append(f.visibilityEdges, ws) },
 			switched:   func(ws ids.WorkspaceID) { f.switchedEdges = append(f.switchedEdges, ws) },
+			remote:     func(ws ids.WorkspaceID) { f.remoteEdges = append(f.remoteEdges, ws) },
 			answered: func(ws ids.WorkspaceID) error {
 				f.coldMarks = append(f.coldMarks, ws)
 				return f.coldMarkErr
@@ -4611,7 +4609,10 @@ type fakeCacheLapses struct {
 	visibility func(ws ids.WorkspaceID)
 	answered   func(ws ids.WorkspaceID) error
 	switched   func(ws ids.WorkspaceID)
+	remote     func(ws ids.WorkspaceID)
 }
+
+func (f *fakeCacheLapses) RemoteControlChanged(ws ids.WorkspaceID) { f.remote(ws) }
 
 func (f *fakeCacheLapses) VisibilityChanged(ws ids.WorkspaceID) { f.visibility(ws) }
 
@@ -4971,35 +4972,10 @@ func (f *fakeGateAnswers) CountColdGateAnswer(ws ids.WorkspaceID, choice, outcom
 	f.answers = append(f.answers, string(ws)+" "+choice+" "+outcome)
 }
 
-// ensureVisits answers the fixture's settings visits, made on first use.
-func (f *fixture) ensureVisits() *SettingsVisits {
-	if f.visits == nil {
-		f.visits = NewSettingsVisits()
-	}
-	return f.visits
-}
-
 // ReviveForSettings records the ask and answers reviveErr.
 func (q *fakeQueue) ReviveForSettings(_ context.Context, ws ids.WorkspaceID) error {
 	q.settingsRevivals = append(q.settingsRevivals, ws)
 	return q.reviveErr
-}
-
-// visitDown is one VisitDown asked of the drain.
-type visitDown struct {
-	WS    ids.WorkspaceID
-	Since time.Time
-}
-
-// fakeVisitDrain records every settings visit's stand-down asked.
-type fakeVisitDrain struct {
-	drain.Controller
-	visits []visitDown
-}
-
-// VisitDown records the ask.
-func (d *fakeVisitDrain) VisitDown(ws ids.WorkspaceID, since time.Time) {
-	d.visits = append(d.visits, visitDown{WS: ws, Since: since})
 }
 
 // RemoteControl answers the workspace's scripted standing, off when none was.

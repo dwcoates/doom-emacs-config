@@ -519,3 +519,45 @@ func TestAColdStandDownParksAWorkspaceWithAMergeQueued(t *testing.T) {
 		t.Fatalf("terminal = %+v, want the queued workspace parked", term)
 	}
 }
+
+// A COLD PARK AND A SETTINGS VISIT ARE TAKEN WHATEVER THE VISIBILITY: the
+// cache keeper asks either only when no lapse owns the session.
+func TestAColdParkOrAVisitStandsDownAClosedOrWithheldWorkspace(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) ids.WorkspaceID
+		ask     func(c *controller, ws ids.WorkspaceID)
+		life    shimlife.StandDownReason
+	}{
+		{name: "a cold park of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+			ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter) }, life: shimlife.StandDownCacheCold},
+		{name: "a cold park of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.closedAt(t, ws)
+			return ws
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter) }, life: shimlife.StandDownCacheCold},
+		{name: "a visit of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
+			ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }, life: shimlife.StandDownSettingsVisit},
+		{name: "a visit of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.closedAt(t, ws)
+			return ws
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }, life: shimlife.StandDownSettingsVisit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.arrange(t, h)
+
+			// Act
+			tt.ask(h.c, ws)
+
+			// Assert
+			killed := h.stand.Killed()
+			if len(killed) != 1 || killed[0].WS != ws || killed[0].Life != tt.life {
+				t.Fatalf("kills = %+v, want one %s stand-down", killed, tt.life)
+			}
+		})
+	}
+}

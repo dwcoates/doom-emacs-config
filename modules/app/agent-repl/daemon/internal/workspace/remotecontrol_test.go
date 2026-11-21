@@ -660,6 +660,32 @@ func TestUpdateRemoteControlModeAsksTheFleetForTheChange(t *testing.T) {
 	}
 }
 
+func TestUpdateRemoteControlModeTellsTheCacheKeeper(t *testing.T) {
+	tests := []struct {
+		name      string
+		remoteErr error
+	}{
+		{name: "a mode the live shim took"},
+		{name: "a mode recorded with no shim", remoteErr: &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.fleet.remoteErr = tt.remoteErr
+
+			// Act.
+			_, err := f.verbs.UpdateRemoteControlMode(context.Background(), "w1", wsm.RemoteControlOff)
+
+			// Assert.
+			if err != nil || len(f.remoteEdges) != 1 || f.remoteEdges[0] != "w1" {
+				t.Fatalf("err %v, remote-control edges %v; want one for w1", err, f.remoteEdges)
+			}
+		})
+	}
+}
+
 func TestUpdateRemoteControlModeStartsAShimForAnOnWithNone(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

@@ -68,11 +68,36 @@ A pick with no shim starts one, start cause `settings`:
 - An effort pick holds no row: the topbar keeps the pick, and every start puts
   it back in force (`reapplyEffort`).
 
-The switch away from that workspace stands the shim down again, reason
-`settings_visit` (`workspace.SettingsVisits`, `drain.VisitDown`), under the
+The pick is recorded on the workspace's row (`wsm.Workspace.SettingsVisitAt`,
+layout 176), so the visit outlives a daemon handover. Once nobody is looking
+at the workspace, the cache keeper stands the shim down again, reason
+`settings_visit` (`cachelapse.Keeper.own`, `drain.VisitDown`), under the
 keep-alive cycle's rules: never under a turn, never for the workspace in view,
-and never once a real turn has run since the pick. It leaves the keep-alive
+and never once a real turn has run since the pick. A pick through the agent
+API, which no switch away follows, ends the same way. It leaves the keep-alive
 cycle's park, so the workspace is drawn as the idle session it was.
+
+A real turn is a turn's close after the pick (`wsm.Workspace.TurnedSince`).
+The session's engagement stamp is not one: every bring-up stamps it, so the
+pick's own revival read as engagement (2026-11-20, 25 visits kept up with no
+turn run). Held prompts the revival delivers are real turns once they run,
+and the session then belongs to the keep-alive cycle.
+
+### Every live session has one stand-down owner
+
+On every reconcile the cache keeper gives each session a shim serves exactly
+one owner (`cachelapse/standdown.go`), logged under
+`daemon.cachelapse.stand_down_owner` whenever it changes:
+
+- `settings_visit` while a pick's visit stands with no turn since;
+- `keepalive_cycle` while a keep-alive is owed;
+- `cache_lapse` while a hidden or closed workspace's lapse is armed;
+- `idle_sweep` when the session goes idle past the cutoff first;
+- `cold_park` otherwise, stood down at once.
+
+A session is left up, owned by none, while it is in view (`in_view`) or its
+remote control is on (`remote_control`). The owner is read from the row, so a
+successor's adoption decides the same one.
 
 ## The shim alone decides whether it may stand down
 

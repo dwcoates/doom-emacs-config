@@ -471,8 +471,9 @@ const (
 	revivalLoad revivalCause = iota
 	revivalRelaunch
 	// revivalSettings is a model, permission-mode or effort pick on a
-	// workspace with no shim: the shim it starts is stood down on the switch
-	// away unless a turn runs meanwhile (Deps.SettingsStarted).
+	// workspace with no shim: the shim it starts is stood down once nobody
+	// is looking at the workspace, unless a turn runs meanwhile
+	// (Deps.SettingsStarted).
 	revivalSettings
 )
 

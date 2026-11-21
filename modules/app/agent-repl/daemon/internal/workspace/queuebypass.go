@@ -281,6 +281,7 @@ func (v *verbs) restateRemoteControl(ctx context.Context, log dlog.Logger, ws id
 	if err := v.deps.Sessions.RestateRemoteControl(ctx, log, ws, transition); err != nil {
 		log.Info(opQueueBypass, "the queue bypass transition stands; the fleet surfaced its remote-control failure", dlog.Context{"transition": transition, "cause": err.Error()})
 	}
+	v.deps.CacheLapses.RemoteControlChanged(ws)
 }
 
 // switchConversation parks the conversation workspace WS runs and binds

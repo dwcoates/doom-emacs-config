@@ -710,6 +710,31 @@ func TestAFailedRemoteControlRestateLeavesTheTransitionStanding(t *testing.T) {
 	}
 }
 
+func TestAQueueBypassTransitionTellsTheCacheKeeperTheModeMoved(t *testing.T) {
+	cases := []struct {
+		name   string
+		holds  bool
+		change QueueBypassChange
+	}{
+		{name: "entering", change: QueueBypassOn},
+		{name: "leaving", holds: true, change: QueueBypassOff},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f, _ := bypassFixture(t, tc.holds)
+
+			// Act
+			_, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", tc.change, contextFor(tc.change))
+
+			// Assert
+			if err != nil || len(f.remoteEdges) != 1 || f.remoteEdges[0] != "w1" {
+				t.Fatalf("err %v, remote-control edges %v; want one for w1", err, f.remoteEdges)
+			}
+		})
+	}
+}
+
 // contextFor is the context a change names: one only when the mode is taken.
 func contextFor(change QueueBypassChange) QueueBypassContext {
 	if change == QueueBypassOn {

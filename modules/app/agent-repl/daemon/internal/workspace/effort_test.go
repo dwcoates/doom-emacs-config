@@ -435,3 +435,36 @@ func TestSelectAccountRereadsTheEffortSettingsOfTheChosenRoot(t *testing.T) {
 		t.Fatalf("effort reads = %v, want the chosen root read last", f.effortReads)
 	}
 }
+
+func TestAnEffortPickWithNoShimKeepsThePickAndStartsTheShim(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{effortHigh}, true
+	f.fleet.effortErr = &ShimRefusal{Verb: "SetSessionEffort", Arm: ArmShimNoSession}
+
+	// Act
+	err := f.verbs.SetEffort(context.Background(), "w1", effortHigh)
+
+	// Assert
+	if err != nil || f.topbarPicked != effortHigh || len(f.queue.settingsRevivals) != 1 || f.queue.settingsRevivals[0] != "w1" {
+		t.Fatalf("err %v, picked %v, revivals %v: want the pick kept and one settings start", err, f.topbarPicked, f.queue.settingsRevivals)
+	}
+}
+
+func TestAnEffortPickThatCannotStartTheShimFails(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{effortHigh}, true
+	f.fleet.effortErr = &ShimRefusal{Verb: "SetSessionEffort", Arm: ArmShimNoSession}
+	f.queue.reviveErr = errors.New("no revival wired")
+
+	// Act
+	err := f.verbs.SetEffort(context.Background(), "w1", effortHigh)
+
+	// Assert
+	if err == nil {
+		t.Fatal("SetEffort answered success though the shim could not be started")
+	}
+}
