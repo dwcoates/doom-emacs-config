@@ -372,11 +372,11 @@ func TestLinuxHostConstants(t *testing.T) {
 	h, _, _ := newLinuxHostFor(t)
 
 	// Act
-	low, can, bright := h.LowPowerEnergy(), h.CanDisconnect(), h.SetBrightness(context.Background(), 0.5)
+	low, high, can, bright := h.LowPowerEnergy(), h.HighPowerEnergy(), h.CanDisconnect(), h.SetBrightness(context.Background(), 0.5)
 	_, askErr := h.AskScanPermission(context.Background())
 
 	// Assert
-	if low != "power-saver" || can != nil || !errors.Is(bright, errNoBrightness) || askErr != nil {
+	if low != "power-saver" || high != "performance" || can != nil || !errors.Is(bright, errNoBrightness) || askErr != nil {
 		t.Fatalf("low %q, can disconnect %v, brightness %v, ask %v", low, can, bright, askErr)
 	}
 }

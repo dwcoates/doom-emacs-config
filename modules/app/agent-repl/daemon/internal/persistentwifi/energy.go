@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -25,8 +26,10 @@ const opEnergy = "daemon.persistentwifi.energy"
 //     user's) is recorded, durably (EnergyStore), so a daemon that adopts the
 //     standing state across a restart, a handover or a crash restores what
 //     the first one recorded.
-//   - While it stands on AC power, or does not stand, a recorded mode is
-//     restored, then forgotten. With nothing recorded nothing is written, so
+//   - While the quiet state stands on AC power, the machine runs High Power
+//     Mode (owner ruling, 2026-11-21: the closed lid on AC power is the
+//     machine at work), recorded and restored exactly as Low Power Mode is.
+//   - While it does not stand, a recorded mode is restored, then forgotten. With nothing recorded nothing is written, so
 //     the user's own choice is never overridden: with the lid open or on AC
 //     power no beat and no mode change ever writes the energy mode.
 //   - While a fact the decision turns on is not yet heard (the lid, or the
@@ -48,6 +51,8 @@ const (
 	energyKeep energyHold = iota
 	// energyLower records the mode in use, then sets Low Power Mode.
 	energyLower
+	// energyRaise records the mode in use, then sets High Power Mode.
+	energyRaise
 	// energyRestore restores a recorded mode, then forgets it.
 	energyRestore
 )
@@ -65,7 +70,7 @@ func energyWanted(quiet bool, lid lidKind, source powerSourceKind) (energyHold, 
 	case source == powerSourceBattery:
 		return energyLower, "the lid is closed on battery power"
 	case source == powerSourceAC:
-		return energyRestore, "the lid is closed on AC power"
+		return energyRaise, "the lid is closed on AC power"
 	case source == powerSourceUnheard:
 		return energyKeep, "the power source is not yet heard"
 	case source == powerSourceUnwatched:
@@ -93,13 +98,15 @@ const (
 	restoreWrite
 )
 
-func decideRestore(energy, kept, low string) restoreAction {
+// decideRestore's ours are the modes the quiet state itself sets (Low and
+// High Power Mode): the machine in any other mode has been moved by the user.
+func decideRestore(energy, kept string, ours ...string) restoreAction {
 	switch {
 	case energy == "":
 		return restoreWait
 	case energy == kept:
 		return restoreAlready
-	case energy != low:
+	case !slices.Contains(ours, energy):
 		return restoreUserMoved
 	}
 	return restoreWrite
@@ -113,7 +120,9 @@ func (c *Controller) holdEnergyLocked(ctx context.Context, energy, trigger strin
 	hold, because := energyWanted(c.quiet, c.lid.kind, c.powerSource.kind)
 	switch hold {
 	case energyLower:
-		return c.lowerEnergyLocked(ctx, energy, trigger, because)
+		return c.setQuietEnergyLocked(ctx, energy, trigger, because, c.host.LowPowerEnergy(), energyLowPowerOutcome, "Low Power Mode")
+	case energyRaise:
+		return c.setQuietEnergyLocked(ctx, energy, trigger, because, c.host.HighPowerEnergy(), energyHighPowerOutcome, "High Power Mode")
 	case energyRestore:
 		return c.restoreEnergyLocked(ctx, energy, trigger, because, false)
 	}
@@ -121,34 +130,46 @@ func (c *Controller) holdEnergyLocked(ctx context.Context, energy, trigger strin
 	return energyUnchanged()
 }
 
-// lowerEnergyLocked is the engaging half: the mode in use is recorded (or
-// the kept record adopted), then Low Power Mode set. A record that cannot be
-// read or kept writes nothing. because is energyWanted's reason. Caller
-// holds mu.
-func (c *Controller) lowerEnergyLocked(ctx context.Context, energy, trigger, because string) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
+// setQuietEnergyLocked is the engaging half: the mode in use is recorded (or
+// the kept record adopted), then target (Low or High Power Mode, named
+// targetName) set. A record that cannot be read or kept writes nothing.
+// because is energyWanted's reason. Caller holds mu.
+func (c *Controller) setQuietEnergyLocked(ctx context.Context, energy, trigger, because, target string, outcome func() *agentreplv1.UpdatePersistentWifiModeEnergyMode, targetName string) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 	if energy == "" {
-		c.log.Debug(opEnergy, "the energy mode in use is unread or the machine names none; Low Power Mode is not set",
+		c.log.Debug(opEnergy, "the energy mode in use is unread or the machine names none; "+targetName+" is not set",
 			dlog.Context{"trigger": trigger})
 		return energyUnchanged()
 	}
 	kept, err := c.keepEnergyLocked(energy, trigger)
 	if err != nil {
 		return c.energyFailedLocked(ctx, trigger,
-			"the energy mode in use could not be recorded, so Low Power Mode was not set; it is tried again on the next beat", err)
+			"the energy mode in use could not be recorded, so "+targetName+" was not set; it is tried again on the next beat", err)
 	}
-	if energy == c.host.LowPowerEnergy() {
+	if energy == target {
 		c.energyCause = ""
 		return energyUnchanged()
 	}
-	if err := c.host.SetEnergy(ctx, c.host.LowPowerEnergy()); err != nil {
+	if err := c.host.SetEnergy(ctx, target); err != nil {
 		return c.energyFailedLocked(ctx, trigger,
-			"Low Power Mode could not be set for the lid-closed quiet state; it is tried again on the next beat", err)
+			targetName+" could not be set for the lid-closed quiet state; it is tried again on the next beat", err)
 	}
 	c.energyCause = ""
-	c.log.Info(opEnergy, "the lid-closed quiet state put the machine in Low Power Mode",
+	c.log.Info(opEnergy, "the lid-closed quiet state put the machine in "+targetName,
 		dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "was": energy, "recorded": kept})
+	return outcome()
+}
+
+// energyLowPowerOutcome is the step that set Low Power Mode.
+func energyLowPowerOutcome() *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 	return &agentreplv1.UpdatePersistentWifiModeEnergyMode{
 		Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_LowPower{LowPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeLowPower{}},
+	}
+}
+
+// energyHighPowerOutcome is the step that set High Power Mode.
+func energyHighPowerOutcome() *agentreplv1.UpdatePersistentWifiModeEnergyMode {
+	return &agentreplv1.UpdatePersistentWifiModeEnergyMode{
+		Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_HighPowerHeld{HighPowerHeld: &agentreplv1.UpdatePersistentWifiModeEnergyModeHighPowerHeld{}},
 	}
 }
 
@@ -198,12 +219,12 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger, b
 	if kept == "" {
 		c.energyCause = ""
 		if leaving {
-			c.log.Info(opEnergy, "the lid-closed quiet state was left with no energy mode recorded (Low Power Mode was never set: on AC power, or entered by an earlier build); nothing is restored",
+			c.log.Info(opEnergy, "the lid-closed quiet state was left with no energy mode recorded (no mode was ever set: the quiet state was entered by an earlier build); nothing is restored",
 				dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "energy": energy})
 		}
 		return energyUnchanged()
 	}
-	switch decideRestore(energy, kept, c.host.LowPowerEnergy()) {
+	switch decideRestore(energy, kept, c.host.LowPowerEnergy(), c.host.HighPowerEnergy()) {
 	case restoreWait:
 		c.log.Debug(opEnergy, "the energy mode in use is unread; the recorded mode is restored once it is read",
 			dlog.Context{"trigger": trigger, "recorded": kept})
@@ -286,7 +307,7 @@ func GuardRestoreEnergy(ctx context.Context, host Host, store EnergyStore, log d
 			dlog.Context{"trigger": trigger, "recorded": rec.Mode, "cause": err.Error()})
 		return err
 	}
-	action := decideRestore(energy, rec.Mode, host.LowPowerEnergy())
+	action := decideRestore(energy, rec.Mode, host.LowPowerEnergy(), host.HighPowerEnergy())
 	switch action {
 	case restoreWait:
 		err := errors.New("the host named no energy mode in use")

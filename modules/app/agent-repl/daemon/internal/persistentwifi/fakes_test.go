@@ -1,7 +1,6 @@
 package persistentwifi
 
 import (
-	"agentrepl/logging/hostpower"
 	"context"
 	"errors"
 	"strings"
@@ -189,9 +188,6 @@ const (
 	ports    = "Hardware Port: Ethernet\nDevice: en5\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa\n"
 	noWifi   = "Hardware Port: Ethernet\nDevice: en5\n"
 	hotspot  = "Test Hotspot"
-	// energyModeHighPower is `pmset`'s High Power Mode, a mode the user may
-	// choose.
-	energyModeHighPower = hostpower.EnergyModeHighPower
 )
 
 // pmsetIn is `pmset -g` for a mode on or off and an energy mode in use (empty

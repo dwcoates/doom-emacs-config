@@ -23,6 +23,7 @@ func energyInfos(h *harness, msg string) []dlog.Record {
 const (
 	msgLowered = "the lid-closed quiet state put the machine in Low Power Mode"
 	msgRestore = "the recorded energy mode was restored"
+	msgRaised  = "the lid-closed quiet state put the machine in High Power Mode"
 )
 
 func TestEnergyWanted(t *testing.T) {
@@ -42,7 +43,7 @@ func TestEnergyWanted(t *testing.T) {
 			wantBecause: "the lid-closed quiet state does not stand"},
 		{name: "the quiet state on battery lowers", quiet: true, lid: lidClosed, source: powerSourceBattery, want: energyLower,
 			wantBecause: "the lid is closed on battery power"},
-		{name: "the quiet state on AC restores", quiet: true, lid: lidClosed, source: powerSourceAC, want: energyRestore,
+		{name: "the quiet state on AC raises", quiet: true, lid: lidClosed, source: powerSourceAC, want: energyRaise,
 			wantBecause: "the lid is closed on AC power"},
 		{name: "the quiet state with the power source unheard writes nothing", quiet: true, lid: lidClosed, source: powerSourceUnheard,
 			want: energyKeep, wantBecause: "the power source is not yet heard"},
@@ -74,24 +75,40 @@ func TestEnergyWantedPanicsOnAnUnnamedPowerSource(t *testing.T) {
 	energyWanted(true, lidClosed, powerSourceKind(99))
 }
 
-func TestALidClosedOnACPowerNeverSetsLowPowerMode(t *testing.T) {
-	// Arrange
-	h := closedHarness(t, energyModeHighPower).withPowerSource(powerSourceAC)
-
-	// Act
-	h.hear(LidClosed)
-	h.c.tick(context.Background())
-
-	// Assert
-	if !h.c.quiet {
-		t.Fatal("the quiet state does not stand, want it entered on AC power")
+func TestALidClosedOnACPowerSetsHighPowerMode(t *testing.T) {
+	cases := []struct {
+		name       string
+		energy     string // the mode in use when the lid closes
+		wantWrites int
+		wantArm    string
+	}{
+		{name: "the user's automatic mode is recorded and High Power Mode written", energy: "0", wantWrites: 1, wantArm: "high_power_held"},
+		{name: "High Power Mode already in use is recorded and nothing written", energy: energyModeHighPower, wantWrites: 0, wantArm: "unchanged"},
 	}
-	if n := powerModeWrites(h); n != 0 || h.energy.saves != 0 {
-		t.Fatalf("calls = %v, saves = %d, want no energy mode written or recorded on AC power", h.r.ran(), h.energy.saves)
-	}
-	entered := h.records(dlog.LevelInfo, opQuiet)
-	if len(entered) != 1 || entered[0].Context["energy"] != "unchanged" || entered[0].Context["power_source"] != "ac" {
-		t.Fatalf("quiet INFO records = %+v, want the entry naming AC power and the energy mode unchanged", entered)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := closedHarness(t, tc.energy).withPowerSource(powerSourceAC)
+			h.r.on(argPowerMode(energyModeHighPower), answer{})
+
+			// Act
+			h.hear(LidClosed)
+
+			// Assert
+			if !h.c.quiet {
+				t.Fatal("the quiet state does not stand, want it entered on AC power")
+			}
+			if n := powerModeWrites(h); n != tc.wantWrites || h.r.count(argLowPower) != 0 || h.energy.kept() != tc.energy {
+				t.Fatalf("calls = %v, record %q, want %d High Power writes, no Low Power write and the user's mode recorded", h.r.ran(), h.energy.kept(), tc.wantWrites)
+			}
+			entered := h.records(dlog.LevelInfo, opQuiet)
+			if len(entered) != 1 || entered[0].Context["energy"] != tc.wantArm || entered[0].Context["power_source"] != "ac" {
+				t.Fatalf("quiet INFO records = %+v, want the entry naming AC power and energy %s", entered, tc.wantArm)
+			}
+			if raised := energyInfos(h, msgRaised); (len(raised) == 1) != (tc.wantWrites == 1) {
+				t.Fatalf("raised INFO records = %+v, want one only when High Power Mode was written", raised)
+			}
+		})
 	}
 }
 
@@ -114,8 +131,8 @@ func TestALidClosedOnBatteryRecordsTheCauseOfTheLowPowerWrite(t *testing.T) {
 func TestLosingACPowerUnderAClosedLidSetsLowPowerMode(t *testing.T) {
 	// Arrange: the quiet state stands on AC power with High Power Mode.
 	h := closedHarness(t, energyModeHighPower).withPowerSource(powerSourceAC)
-	h.hear(LidClosed)
 	h.r.on(argLowPower, answer{})
+	h.hear(LidClosed)
 
 	// Act
 	h.hearSource(PowerBattery)
@@ -138,9 +155,9 @@ func TestLosingACPowerUnderAClosedLidSetsLowPowerMode(t *testing.T) {
 	}
 }
 
-func TestRegainingACPowerUnderAClosedLidRestoresTheRecordedMode(t *testing.T) {
-	// Arrange: the quiet state stands on battery, High Power Mode recorded.
-	h := closedHarness(t, energyModeHighPower)
+func TestRegainingACPowerUnderAClosedLidSetsHighPowerKeepingTheRecord(t *testing.T) {
+	// Arrange: the quiet state stands on battery, automatic mode recorded.
+	h := closedHarness(t, "0")
 	h.r.on(argLowPower, answer{})
 	h.hear(LidClosed)
 	h.r.on(argPmsetRead, answer{out: pmsetIn(true, energyModeLowPower)})
@@ -153,19 +170,19 @@ func TestRegainingACPowerUnderAClosedLidRestoresTheRecordedMode(t *testing.T) {
 	if !h.c.quiet {
 		t.Fatal("the quiet state was left, want it standing under the closed lid")
 	}
-	if h.r.count(argPowerMode(energyModeHighPower)) != 1 || h.energy.kept() != "" || h.c.energyKept != "" {
-		t.Fatalf("calls = %v, record %q, held %q: want High Power Mode restored and forgotten", h.r.ran(), h.energy.kept(), h.c.energyKept)
+	if h.r.count(argPowerMode(energyModeHighPower)) != 1 || h.energy.kept() != "0" || h.energy.clears != 0 {
+		t.Fatalf("calls = %v, record %q, clears %d: want High Power Mode written and the user's mode still recorded", h.r.ran(), h.energy.kept(), h.energy.clears)
 	}
-	restored := energyInfos(h, msgRestore)
-	if len(restored) != 1 || restored[0].Context["trigger"] != "power_source_ac" ||
-		restored[0].Context["because"] != "the lid is closed on AC power" || restored[0].Context["power_source"] != "ac" {
-		t.Fatalf("energy INFO records = %+v, want the restore on the regained AC power with its cause", h.records(dlog.LevelInfo, opEnergy))
+	raised := energyInfos(h, msgRaised)
+	if len(raised) != 1 || raised[0].Context["trigger"] != "power_source_ac" ||
+		raised[0].Context["because"] != "the lid is closed on AC power" || raised[0].Context["power_source"] != "ac" {
+		t.Fatalf("energy INFO records = %+v, want the High Power write on the regained AC power with its cause", h.records(dlog.LevelInfo, opEnergy))
 	}
 }
 
-func TestPowerCyclingUnderAClosedLidRecordsAfreshEachTime(t *testing.T) {
-	// Arrange: lowered on battery, then restored on AC.
-	h := closedHarness(t, energyModeHighPower)
+func TestPowerCyclingUnderAClosedLidKeepsTheOriginalRecord(t *testing.T) {
+	// Arrange: lowered on battery, then raised on AC.
+	h := closedHarness(t, "0")
 	h.r.on(argLowPower, answer{})
 	h.hear(LidClosed)
 	h.r.on(argPmsetRead, answer{out: pmsetIn(true, energyModeLowPower)}, answer{out: pmsetIn(true, energyModeHighPower)})
@@ -175,15 +192,15 @@ func TestPowerCyclingUnderAClosedLidRecordsAfreshEachTime(t *testing.T) {
 	// Act
 	h.hearSource(PowerBattery)
 
-	// Assert
-	if h.r.count(argLowPower) != 2 || h.energy.kept() != energyModeHighPower || h.energy.saves != 2 {
-		t.Fatalf("calls = %v, record %q after %d saves: want High Power Mode recorded again and Low Power written again",
+	// Assert: the user's mode, not an in-between one, is what stays recorded.
+	if h.r.count(argLowPower) != 2 || h.energy.kept() != "0" || h.energy.saves != 1 {
+		t.Fatalf("calls = %v, record %q after %d saves: want the automatic mode recorded once and Low Power written again",
 			h.r.ran(), h.energy.kept(), h.energy.saves)
 	}
 }
 
-func TestOpeningTheLidOnACPowerWithNothingRecordedWritesNothing(t *testing.T) {
-	// Arrange
+func TestOpeningTheLidOnACPowerWithHighPowerAlreadyInUseWritesNothing(t *testing.T) {
+	// Arrange: High Power Mode was the user's own, so entering recorded it.
 	h := closedHarness(t, energyModeHighPower).withPowerSource(powerSourceAC)
 	h.hear(LidClosed)
 
@@ -191,9 +208,26 @@ func TestOpeningTheLidOnACPowerWithNothingRecordedWritesNothing(t *testing.T) {
 	h.hear(LidOpen)
 
 	// Assert
-	if h.c.quiet || powerModeWrites(h) != 0 || h.energy.saves != 0 || h.energy.clears != 0 {
-		t.Fatalf("quiet %v, calls %v, saves %d, clears %d: want the quiet state left with nothing written",
+	if h.c.quiet || powerModeWrites(h) != 0 || h.energy.saves != 1 || h.energy.clears != 1 || h.energy.kept() != "" {
+		t.Fatalf("quiet %v, calls %v, saves %d, clears %d: want the quiet state left, the record forgotten and nothing written",
 			h.c.quiet, h.r.ran(), h.energy.saves, h.energy.clears)
+	}
+}
+
+func TestOpeningTheLidOnACPowerRestoresTheModeBeforeHighPower(t *testing.T) {
+	// Arrange: High Power Mode was set over the user's automatic mode.
+	h := closedHarness(t, "0").withPowerSource(powerSourceAC)
+	h.r.on(argPowerMode(energyModeHighPower), answer{})
+	h.hear(LidClosed)
+	h.r.on(argPmsetRead, answer{out: pmsetIn(true, energyModeHighPower)})
+	h.r.on(argPowerMode("0"), answer{})
+
+	// Act
+	h.hear(LidOpen)
+
+	// Assert
+	if h.c.quiet || h.r.count(argPowerMode("0")) != 1 || h.energy.kept() != "" {
+		t.Fatalf("quiet %v, calls %v, record %q: want the automatic mode restored and forgotten", h.c.quiet, h.r.ran(), h.energy.kept())
 	}
 }
 
@@ -249,8 +283,8 @@ func TestARestartUnderAClosedLidKeepsTheRecordedState(t *testing.T) {
 	}{
 		{name: "on battery the earlier Low Power Mode is adopted with nothing written", energy: energyModeLowPower,
 			source: PowerBattery, wantKept: energyModeHighPower},
-		{name: "on AC power the recorded mode is restored", energy: energyModeLowPower,
-			source: PowerAC, wantRestore: true},
+		{name: "on AC power High Power Mode is written over the earlier Low Power Mode", energy: energyModeLowPower,
+			source: PowerAC, wantRestore: true, wantKept: energyModeHighPower},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -267,7 +301,7 @@ func TestARestartUnderAClosedLidKeepsTheRecordedState(t *testing.T) {
 
 			// Assert
 			if got := h.r.count(argPowerMode(energyModeHighPower)) == 1; got != tc.wantRestore || h.r.count(argLowPower) != 0 {
-				t.Fatalf("calls = %v, want restore %v and no Low Power write", h.r.ran(), tc.wantRestore)
+				t.Fatalf("calls = %v, want High Power write %v and no Low Power write", h.r.ran(), tc.wantRestore)
 			}
 			if h.energy.saves != 0 || h.energy.kept() != tc.wantKept {
 				t.Fatalf("record %q after %d saves, want %q never overwritten", h.energy.kept(), h.energy.saves, tc.wantKept)

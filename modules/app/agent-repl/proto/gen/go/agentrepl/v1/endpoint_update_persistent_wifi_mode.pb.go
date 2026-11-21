@@ -906,8 +906,9 @@ func (x *UpdatePersistentWifiModeHotspotFailed) GetDetail() string {
 // THE ENERGY MODE FOLLOWS THE LID-CLOSED QUIET STATE AND THE POWER SOURCE,
 // NOT THE SWITCH (owner rulings, 2026-11-13 and 2026-11-14). While the quiet
 // state stands on battery power, the energy mode in use is recorded and the
-// machine put in Low Power Mode; on AC power, or once the quiet state is
-// left, the recorded mode is restored. So the step acts only where the
+// machine put in Low Power Mode; on AC power it is put in High Power Mode
+// (owner ruling, 2026-11-21); once the quiet state is left, the recorded mode
+// is restored. So the step acts only where the
 // change itself moves the quiet state: turning on with the lid closed on
 // battery lowers, turning off while the quiet state stands restores, and
 // every other change leaves the energy mode as it is. A change of power
@@ -921,6 +922,7 @@ type UpdatePersistentWifiModeEnergyMode struct {
 	//	*UpdatePersistentWifiModeEnergyMode_Failed
 	//	*UpdatePersistentWifiModeEnergyMode_Restored
 	//	*UpdatePersistentWifiModeEnergyMode_Unchanged
+	//	*UpdatePersistentWifiModeEnergyMode_HighPowerHeld
 	Outcome       isUpdatePersistentWifiModeEnergyMode_Outcome `protobuf_oneof:"outcome"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -999,6 +1001,15 @@ func (x *UpdatePersistentWifiModeEnergyMode) GetUnchanged() *UpdatePersistentWif
 	return nil
 }
 
+func (x *UpdatePersistentWifiModeEnergyMode) GetHighPowerHeld() *UpdatePersistentWifiModeEnergyModeHighPowerHeld {
+	if x != nil {
+		if x, ok := x.Outcome.(*UpdatePersistentWifiModeEnergyMode_HighPowerHeld); ok {
+			return x.HighPowerHeld
+		}
+	}
+	return nil
+}
+
 type isUpdatePersistentWifiModeEnergyMode_Outcome interface {
 	isUpdatePersistentWifiModeEnergyMode_Outcome()
 }
@@ -1030,6 +1041,12 @@ type UpdatePersistentWifiModeEnergyMode_Unchanged struct {
 	Unchanged *UpdatePersistentWifiModeEnergyModeUnchanged `protobuf:"bytes,5,opt,name=unchanged,proto3,oneof"`
 }
 
+type UpdatePersistentWifiModeEnergyMode_HighPowerHeld struct {
+	// Turning on with the lid closed on AC power: the energy mode in use was
+	// recorded and the machine was put in High Power Mode.
+	HighPowerHeld *UpdatePersistentWifiModeEnergyModeHighPowerHeld `protobuf:"bytes,6,opt,name=high_power_held,json=highPowerHeld,proto3,oneof"`
+}
+
 func (*UpdatePersistentWifiModeEnergyMode_LowPower) isUpdatePersistentWifiModeEnergyMode_Outcome() {}
 
 func (*UpdatePersistentWifiModeEnergyMode_Failed) isUpdatePersistentWifiModeEnergyMode_Outcome() {}
@@ -1037,6 +1054,9 @@ func (*UpdatePersistentWifiModeEnergyMode_Failed) isUpdatePersistentWifiModeEner
 func (*UpdatePersistentWifiModeEnergyMode_Restored) isUpdatePersistentWifiModeEnergyMode_Outcome() {}
 
 func (*UpdatePersistentWifiModeEnergyMode_Unchanged) isUpdatePersistentWifiModeEnergyMode_Outcome() {}
+
+func (*UpdatePersistentWifiModeEnergyMode_HighPowerHeld) isUpdatePersistentWifiModeEnergyMode_Outcome() {
+}
 
 // Low Power Mode.
 type UpdatePersistentWifiModeEnergyModeLowPower struct {
@@ -1075,6 +1095,43 @@ func (*UpdatePersistentWifiModeEnergyModeLowPower) Descriptor() ([]byte, []int) 
 	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{15}
 }
 
+// High Power Mode, held for the lid closed on AC power.
+type UpdatePersistentWifiModeEnergyModeHighPowerHeld struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdatePersistentWifiModeEnergyModeHighPowerHeld) Reset() {
+	*x = UpdatePersistentWifiModeEnergyModeHighPowerHeld{}
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdatePersistentWifiModeEnergyModeHighPowerHeld) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdatePersistentWifiModeEnergyModeHighPowerHeld) ProtoMessage() {}
+
+func (x *UpdatePersistentWifiModeEnergyModeHighPowerHeld) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdatePersistentWifiModeEnergyModeHighPowerHeld.ProtoReflect.Descriptor instead.
+func (*UpdatePersistentWifiModeEnergyModeHighPowerHeld) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{16}
+}
+
 // The recorded energy mode was restored.
 type UpdatePersistentWifiModeEnergyModeRestored struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1087,7 +1144,7 @@ type UpdatePersistentWifiModeEnergyModeRestored struct {
 
 func (x *UpdatePersistentWifiModeEnergyModeRestored) Reset() {
 	*x = UpdatePersistentWifiModeEnergyModeRestored{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1099,7 +1156,7 @@ func (x *UpdatePersistentWifiModeEnergyModeRestored) String() string {
 func (*UpdatePersistentWifiModeEnergyModeRestored) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeEnergyModeRestored) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1112,7 +1169,7 @@ func (x *UpdatePersistentWifiModeEnergyModeRestored) ProtoReflect() protoreflect
 
 // Deprecated: Use UpdatePersistentWifiModeEnergyModeRestored.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeEnergyModeRestored) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UpdatePersistentWifiModeEnergyModeRestored) GetPowerMode() string {
@@ -1131,7 +1188,7 @@ type UpdatePersistentWifiModeEnergyModeUnchanged struct {
 
 func (x *UpdatePersistentWifiModeEnergyModeUnchanged) Reset() {
 	*x = UpdatePersistentWifiModeEnergyModeUnchanged{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1143,7 +1200,7 @@ func (x *UpdatePersistentWifiModeEnergyModeUnchanged) String() string {
 func (*UpdatePersistentWifiModeEnergyModeUnchanged) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeEnergyModeUnchanged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1156,7 +1213,7 @@ func (x *UpdatePersistentWifiModeEnergyModeUnchanged) ProtoReflect() protoreflec
 
 // Deprecated: Use UpdatePersistentWifiModeEnergyModeUnchanged.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeEnergyModeUnchanged) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{18}
 }
 
 // The energy mode change failed.
@@ -1170,7 +1227,7 @@ type UpdatePersistentWifiModeEnergyModeFailed struct {
 
 func (x *UpdatePersistentWifiModeEnergyModeFailed) Reset() {
 	*x = UpdatePersistentWifiModeEnergyModeFailed{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1182,7 +1239,7 @@ func (x *UpdatePersistentWifiModeEnergyModeFailed) String() string {
 func (*UpdatePersistentWifiModeEnergyModeFailed) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeEnergyModeFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1195,7 +1252,7 @@ func (x *UpdatePersistentWifiModeEnergyModeFailed) ProtoReflect() protoreflect.M
 
 // Deprecated: Use UpdatePersistentWifiModeEnergyModeFailed.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeEnergyModeFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *UpdatePersistentWifiModeEnergyModeFailed) GetDetail() string {
@@ -1230,7 +1287,7 @@ type UpdatePersistentWifiModeDisplay struct {
 
 func (x *UpdatePersistentWifiModeDisplay) Reset() {
 	*x = UpdatePersistentWifiModeDisplay{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1242,7 +1299,7 @@ func (x *UpdatePersistentWifiModeDisplay) String() string {
 func (*UpdatePersistentWifiModeDisplay) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeDisplay) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1255,7 +1312,7 @@ func (x *UpdatePersistentWifiModeDisplay) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdatePersistentWifiModeDisplay.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeDisplay) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *UpdatePersistentWifiModeDisplay) GetOutcome() isUpdatePersistentWifiModeDisplay_Outcome {
@@ -1343,7 +1400,7 @@ type UpdatePersistentWifiModeDisplaySlept struct {
 
 func (x *UpdatePersistentWifiModeDisplaySlept) Reset() {
 	*x = UpdatePersistentWifiModeDisplaySlept{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1355,7 +1412,7 @@ func (x *UpdatePersistentWifiModeDisplaySlept) String() string {
 func (*UpdatePersistentWifiModeDisplaySlept) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeDisplaySlept) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1368,7 +1425,7 @@ func (x *UpdatePersistentWifiModeDisplaySlept) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use UpdatePersistentWifiModeDisplaySlept.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeDisplaySlept) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{21}
 }
 
 // The display was woken from the quiet state's sleep, at the brightness it had.
@@ -1380,7 +1437,7 @@ type UpdatePersistentWifiModeDisplayWoke struct {
 
 func (x *UpdatePersistentWifiModeDisplayWoke) Reset() {
 	*x = UpdatePersistentWifiModeDisplayWoke{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1392,7 +1449,7 @@ func (x *UpdatePersistentWifiModeDisplayWoke) String() string {
 func (*UpdatePersistentWifiModeDisplayWoke) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeDisplayWoke) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1405,7 +1462,7 @@ func (x *UpdatePersistentWifiModeDisplayWoke) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use UpdatePersistentWifiModeDisplayWoke.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeDisplayWoke) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{22}
 }
 
 // The change left the display as it was.
@@ -1417,7 +1474,7 @@ type UpdatePersistentWifiModeDisplayUnchanged struct {
 
 func (x *UpdatePersistentWifiModeDisplayUnchanged) Reset() {
 	*x = UpdatePersistentWifiModeDisplayUnchanged{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1429,7 +1486,7 @@ func (x *UpdatePersistentWifiModeDisplayUnchanged) String() string {
 func (*UpdatePersistentWifiModeDisplayUnchanged) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeDisplayUnchanged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1442,7 +1499,7 @@ func (x *UpdatePersistentWifiModeDisplayUnchanged) ProtoReflect() protoreflect.M
 
 // Deprecated: Use UpdatePersistentWifiModeDisplayUnchanged.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeDisplayUnchanged) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{23}
 }
 
 // The display tool failed.
@@ -1456,7 +1513,7 @@ type UpdatePersistentWifiModeDisplayFailed struct {
 
 func (x *UpdatePersistentWifiModeDisplayFailed) Reset() {
 	*x = UpdatePersistentWifiModeDisplayFailed{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1468,7 +1525,7 @@ func (x *UpdatePersistentWifiModeDisplayFailed) String() string {
 func (*UpdatePersistentWifiModeDisplayFailed) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeDisplayFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1481,7 +1538,7 @@ func (x *UpdatePersistentWifiModeDisplayFailed) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use UpdatePersistentWifiModeDisplayFailed.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeDisplayFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UpdatePersistentWifiModeDisplayFailed) GetDetail() string {
@@ -1507,7 +1564,7 @@ type UpdatePersistentWifiModeError struct {
 
 func (x *UpdatePersistentWifiModeError) Reset() {
 	*x = UpdatePersistentWifiModeError{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1519,7 +1576,7 @@ func (x *UpdatePersistentWifiModeError) String() string {
 func (*UpdatePersistentWifiModeError) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1532,7 +1589,7 @@ func (x *UpdatePersistentWifiModeError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdatePersistentWifiModeError.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *UpdatePersistentWifiModeError) GetCause() isUpdatePersistentWifiModeError_Cause {
@@ -1591,7 +1648,7 @@ type UpdatePersistentWifiModePowerSettingsRefused struct {
 
 func (x *UpdatePersistentWifiModePowerSettingsRefused) Reset() {
 	*x = UpdatePersistentWifiModePowerSettingsRefused{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1603,7 +1660,7 @@ func (x *UpdatePersistentWifiModePowerSettingsRefused) String() string {
 func (*UpdatePersistentWifiModePowerSettingsRefused) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModePowerSettingsRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1616,7 +1673,7 @@ func (x *UpdatePersistentWifiModePowerSettingsRefused) ProtoReflect() protorefle
 
 // Deprecated: Use UpdatePersistentWifiModePowerSettingsRefused.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModePowerSettingsRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *UpdatePersistentWifiModePowerSettingsRefused) GetDetail() string {
@@ -1637,7 +1694,7 @@ type UpdatePersistentWifiModeModeUnreadable struct {
 
 func (x *UpdatePersistentWifiModeModeUnreadable) Reset() {
 	*x = UpdatePersistentWifiModeModeUnreadable{}
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1649,7 +1706,7 @@ func (x *UpdatePersistentWifiModeModeUnreadable) String() string {
 func (*UpdatePersistentWifiModeModeUnreadable) ProtoMessage() {}
 
 func (x *UpdatePersistentWifiModeModeUnreadable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1662,7 +1719,7 @@ func (x *UpdatePersistentWifiModeModeUnreadable) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use UpdatePersistentWifiModeModeUnreadable.ProtoReflect.Descriptor instead.
 func (*UpdatePersistentWifiModeModeUnreadable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{26}
+	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *UpdatePersistentWifiModeModeUnreadable) GetDetail() string {
@@ -1715,15 +1772,17 @@ const file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDesc = "" 
 	".UpdatePersistentWifiModeHotspotNoWifiInterface\"b\n" +
 	"%UpdatePersistentWifiModeHotspotFailed\x12!\n" +
 	"\fnetwork_name\x18\x01 \x01(\tR\vnetworkName\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail\"\x9f\x03\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\"\x88\x04\n" +
 	"\"UpdatePersistentWifiModeEnergyMode\x12W\n" +
 	"\tlow_power\x18\x01 \x01(\v28.agentrepl.v1.UpdatePersistentWifiModeEnergyModeLowPowerH\x00R\blowPower\x12P\n" +
 	"\x06failed\x18\x03 \x01(\v26.agentrepl.v1.UpdatePersistentWifiModeEnergyModeFailedH\x00R\x06failed\x12V\n" +
 	"\brestored\x18\x04 \x01(\v28.agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestoredH\x00R\brestored\x12Y\n" +
-	"\tunchanged\x18\x05 \x01(\v29.agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchangedH\x00R\tunchangedB\t\n" +
+	"\tunchanged\x18\x05 \x01(\v29.agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchangedH\x00R\tunchanged\x12g\n" +
+	"\x0fhigh_power_held\x18\x06 \x01(\v2=.agentrepl.v1.UpdatePersistentWifiModeEnergyModeHighPowerHeldH\x00R\rhighPowerHeldB\t\n" +
 	"\aoutcomeJ\x04\b\x02\x10\x03R\n" +
 	"high_power\",\n" +
-	"*UpdatePersistentWifiModeEnergyModeLowPower\"K\n" +
+	"*UpdatePersistentWifiModeEnergyModeLowPower\"1\n" +
+	"/UpdatePersistentWifiModeEnergyModeHighPowerHeld\"K\n" +
 	"*UpdatePersistentWifiModeEnergyModeRestored\x12\x1d\n" +
 	"\n" +
 	"power_mode\x18\x01 \x01(\tR\tpowerMode\"-\n" +
@@ -1762,7 +1821,7 @@ func file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescGZIP() 
 	return file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_goTypes = []any{
 	(*UpdatePersistentWifiModeRequest)(nil),                  // 0: agentrepl.v1.UpdatePersistentWifiModeRequest
 	(*UpdatePersistentWifiModeOn)(nil),                       // 1: agentrepl.v1.UpdatePersistentWifiModeOn
@@ -1780,28 +1839,29 @@ var file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_goTypes = []any
 	(*UpdatePersistentWifiModeHotspotFailed)(nil),            // 13: agentrepl.v1.UpdatePersistentWifiModeHotspotFailed
 	(*UpdatePersistentWifiModeEnergyMode)(nil),               // 14: agentrepl.v1.UpdatePersistentWifiModeEnergyMode
 	(*UpdatePersistentWifiModeEnergyModeLowPower)(nil),       // 15: agentrepl.v1.UpdatePersistentWifiModeEnergyModeLowPower
-	(*UpdatePersistentWifiModeEnergyModeRestored)(nil),       // 16: agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored
-	(*UpdatePersistentWifiModeEnergyModeUnchanged)(nil),      // 17: agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged
-	(*UpdatePersistentWifiModeEnergyModeFailed)(nil),         // 18: agentrepl.v1.UpdatePersistentWifiModeEnergyModeFailed
-	(*UpdatePersistentWifiModeDisplay)(nil),                  // 19: agentrepl.v1.UpdatePersistentWifiModeDisplay
-	(*UpdatePersistentWifiModeDisplaySlept)(nil),             // 20: agentrepl.v1.UpdatePersistentWifiModeDisplaySlept
-	(*UpdatePersistentWifiModeDisplayWoke)(nil),              // 21: agentrepl.v1.UpdatePersistentWifiModeDisplayWoke
-	(*UpdatePersistentWifiModeDisplayUnchanged)(nil),         // 22: agentrepl.v1.UpdatePersistentWifiModeDisplayUnchanged
-	(*UpdatePersistentWifiModeDisplayFailed)(nil),            // 23: agentrepl.v1.UpdatePersistentWifiModeDisplayFailed
-	(*UpdatePersistentWifiModeError)(nil),                    // 24: agentrepl.v1.UpdatePersistentWifiModeError
-	(*UpdatePersistentWifiModePowerSettingsRefused)(nil),     // 25: agentrepl.v1.UpdatePersistentWifiModePowerSettingsRefused
-	(*UpdatePersistentWifiModeModeUnreadable)(nil),           // 26: agentrepl.v1.UpdatePersistentWifiModeModeUnreadable
-	(*PersistentWifiState)(nil),                              // 27: agentrepl.v1.PersistentWifiState
+	(*UpdatePersistentWifiModeEnergyModeHighPowerHeld)(nil),  // 16: agentrepl.v1.UpdatePersistentWifiModeEnergyModeHighPowerHeld
+	(*UpdatePersistentWifiModeEnergyModeRestored)(nil),       // 17: agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored
+	(*UpdatePersistentWifiModeEnergyModeUnchanged)(nil),      // 18: agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged
+	(*UpdatePersistentWifiModeEnergyModeFailed)(nil),         // 19: agentrepl.v1.UpdatePersistentWifiModeEnergyModeFailed
+	(*UpdatePersistentWifiModeDisplay)(nil),                  // 20: agentrepl.v1.UpdatePersistentWifiModeDisplay
+	(*UpdatePersistentWifiModeDisplaySlept)(nil),             // 21: agentrepl.v1.UpdatePersistentWifiModeDisplaySlept
+	(*UpdatePersistentWifiModeDisplayWoke)(nil),              // 22: agentrepl.v1.UpdatePersistentWifiModeDisplayWoke
+	(*UpdatePersistentWifiModeDisplayUnchanged)(nil),         // 23: agentrepl.v1.UpdatePersistentWifiModeDisplayUnchanged
+	(*UpdatePersistentWifiModeDisplayFailed)(nil),            // 24: agentrepl.v1.UpdatePersistentWifiModeDisplayFailed
+	(*UpdatePersistentWifiModeError)(nil),                    // 25: agentrepl.v1.UpdatePersistentWifiModeError
+	(*UpdatePersistentWifiModePowerSettingsRefused)(nil),     // 26: agentrepl.v1.UpdatePersistentWifiModePowerSettingsRefused
+	(*UpdatePersistentWifiModeModeUnreadable)(nil),           // 27: agentrepl.v1.UpdatePersistentWifiModeModeUnreadable
+	(*PersistentWifiState)(nil),                              // 28: agentrepl.v1.PersistentWifiState
 }
 var file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdatePersistentWifiModeRequest.on:type_name -> agentrepl.v1.UpdatePersistentWifiModeOn
 	2,  // 1: agentrepl.v1.UpdatePersistentWifiModeRequest.off:type_name -> agentrepl.v1.UpdatePersistentWifiModeOff
 	3,  // 2: agentrepl.v1.UpdatePersistentWifiModeRequest.toggle:type_name -> agentrepl.v1.UpdatePersistentWifiModeToggle
 	5,  // 3: agentrepl.v1.UpdatePersistentWifiModeResponse.success:type_name -> agentrepl.v1.UpdatePersistentWifiModeSuccess
-	24, // 4: agentrepl.v1.UpdatePersistentWifiModeResponse.error:type_name -> agentrepl.v1.UpdatePersistentWifiModeError
-	27, // 5: agentrepl.v1.UpdatePersistentWifiModeSuccess.state:type_name -> agentrepl.v1.PersistentWifiState
+	25, // 4: agentrepl.v1.UpdatePersistentWifiModeResponse.error:type_name -> agentrepl.v1.UpdatePersistentWifiModeError
+	28, // 5: agentrepl.v1.UpdatePersistentWifiModeSuccess.state:type_name -> agentrepl.v1.PersistentWifiState
 	6,  // 6: agentrepl.v1.UpdatePersistentWifiModeSuccess.hotspot:type_name -> agentrepl.v1.UpdatePersistentWifiModeHotspot
-	19, // 7: agentrepl.v1.UpdatePersistentWifiModeSuccess.display:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplay
+	20, // 7: agentrepl.v1.UpdatePersistentWifiModeSuccess.display:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplay
 	14, // 8: agentrepl.v1.UpdatePersistentWifiModeSuccess.energy_mode:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyMode
 	7,  // 9: agentrepl.v1.UpdatePersistentWifiModeHotspot.joined:type_name -> agentrepl.v1.UpdatePersistentWifiModeHotspotJoined
 	8,  // 10: agentrepl.v1.UpdatePersistentWifiModeHotspot.already_joined:type_name -> agentrepl.v1.UpdatePersistentWifiModeHotspotAlreadyJoined
@@ -1811,20 +1871,21 @@ var file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_depIdxs = []int
 	12, // 14: agentrepl.v1.UpdatePersistentWifiModeHotspot.no_wifi_interface:type_name -> agentrepl.v1.UpdatePersistentWifiModeHotspotNoWifiInterface
 	13, // 15: agentrepl.v1.UpdatePersistentWifiModeHotspot.failed:type_name -> agentrepl.v1.UpdatePersistentWifiModeHotspotFailed
 	15, // 16: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.low_power:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeLowPower
-	18, // 17: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.failed:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeFailed
-	16, // 18: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.restored:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored
-	17, // 19: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.unchanged:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged
-	23, // 20: agentrepl.v1.UpdatePersistentWifiModeDisplay.failed:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplayFailed
-	22, // 21: agentrepl.v1.UpdatePersistentWifiModeDisplay.unchanged:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplayUnchanged
-	20, // 22: agentrepl.v1.UpdatePersistentWifiModeDisplay.slept:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplaySlept
-	21, // 23: agentrepl.v1.UpdatePersistentWifiModeDisplay.woke:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplayWoke
-	25, // 24: agentrepl.v1.UpdatePersistentWifiModeError.power_settings_refused:type_name -> agentrepl.v1.UpdatePersistentWifiModePowerSettingsRefused
-	26, // 25: agentrepl.v1.UpdatePersistentWifiModeError.mode_unreadable:type_name -> agentrepl.v1.UpdatePersistentWifiModeModeUnreadable
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	19, // 17: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.failed:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeFailed
+	17, // 18: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.restored:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored
+	18, // 19: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.unchanged:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged
+	16, // 20: agentrepl.v1.UpdatePersistentWifiModeEnergyMode.high_power_held:type_name -> agentrepl.v1.UpdatePersistentWifiModeEnergyModeHighPowerHeld
+	24, // 21: agentrepl.v1.UpdatePersistentWifiModeDisplay.failed:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplayFailed
+	23, // 22: agentrepl.v1.UpdatePersistentWifiModeDisplay.unchanged:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplayUnchanged
+	21, // 23: agentrepl.v1.UpdatePersistentWifiModeDisplay.slept:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplaySlept
+	22, // 24: agentrepl.v1.UpdatePersistentWifiModeDisplay.woke:type_name -> agentrepl.v1.UpdatePersistentWifiModeDisplayWoke
+	26, // 25: agentrepl.v1.UpdatePersistentWifiModeError.power_settings_refused:type_name -> agentrepl.v1.UpdatePersistentWifiModePowerSettingsRefused
+	27, // 26: agentrepl.v1.UpdatePersistentWifiModeError.mode_unreadable:type_name -> agentrepl.v1.UpdatePersistentWifiModeModeUnreadable
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_init() }
@@ -1856,14 +1917,15 @@ func file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_init() {
 		(*UpdatePersistentWifiModeEnergyMode_Failed)(nil),
 		(*UpdatePersistentWifiModeEnergyMode_Restored)(nil),
 		(*UpdatePersistentWifiModeEnergyMode_Unchanged)(nil),
+		(*UpdatePersistentWifiModeEnergyMode_HighPowerHeld)(nil),
 	}
-	file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[19].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[20].OneofWrappers = []any{
 		(*UpdatePersistentWifiModeDisplay_Failed)(nil),
 		(*UpdatePersistentWifiModeDisplay_Unchanged)(nil),
 		(*UpdatePersistentWifiModeDisplay_Slept)(nil),
 		(*UpdatePersistentWifiModeDisplay_Woke)(nil),
 	}
-	file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[24].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_msgTypes[25].OneofWrappers = []any{
 		(*UpdatePersistentWifiModeError_PowerSettingsRefused)(nil),
 		(*UpdatePersistentWifiModeError_ModeUnreadable)(nil),
 	}
@@ -1873,7 +1935,7 @@ func file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_persistent_wifi_mode_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

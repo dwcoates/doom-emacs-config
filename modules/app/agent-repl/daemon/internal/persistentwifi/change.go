@@ -17,6 +17,10 @@ import (
 // before (energy.go). The sudoers grant names `powermode 0`, `1` and `2`.
 const energyModeLowPower = hostpower.EnergyModeLowPower
 
+// energyModeHighPower is High Power Mode, which the quiet state runs on AC
+// power.
+const energyModeHighPower = hostpower.EnergyModeHighPower
+
 // powerSettings are the three `pmset -a` settings the mode writes, in order:
 // sleep disabled outright, the network kept up over sleep, and wake on network
 // access. The sudoers grant names each of these exact invocations.
