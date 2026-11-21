@@ -38,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitDom } from "./events.js";
 
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 import { resetLoggingForTests } from "../src/log.js";
@@ -153,7 +154,13 @@ function captureTheReRaise(): void {
 // hand: a hand list drifted behind the entry point's imports, and every module
 // it missed was compiled inside the first test's bound, which a contended full
 // run then exhausted.
-await Promise.all(bootImports().map((specifier) => import(/* @vite-ignore */ specifier)));
+// Each is imported by its absolute path: vitest resolves an unanalyzable
+// (`@vite-ignore`) relative specifier against the importer's root-relative id,
+// which clamps one climbing past the webapp root (`../src/../../agent-shim/...`)
+// to the root.
+await Promise.all(
+  bootImports().map((specifier) => import(/* @vite-ignore */ fileURLToPath(new URL(specifier, import.meta.url)))),
+);
 
 describe("the boot's warm set", () => {
   it("is every value import of the entry point", () => {
