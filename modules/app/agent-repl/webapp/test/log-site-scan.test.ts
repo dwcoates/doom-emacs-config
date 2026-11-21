@@ -123,4 +123,21 @@ describe("scanLogSites", () => {
     // Assert
     expect(sites).toEqual([]);
   });
+
+  it("names a fault when a placed logger's template is not a literal", () => {
+    // Act
+    const { faults } = scanFixture({ "a.ts": 'const log = createLogger("webapp.a");\nlog.info(made, {}, {});\n' });
+
+    // Assert
+    expect(faults).toEqual(["a.ts:2: the template is not a string literal"]);
+  });
+
+  it("is the shared scan over the webapp's call shape", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(new URL("./log-site-scan.ts", import.meta.url)), "utf8");
+
+    // Act / Assert: a scan of its own beside the shared one would drift from the shim's.
+    expect(source).toContain("logSiteScan(ts, {");
+    expect(source).not.toContain("createSourceFile");
+  });
 });

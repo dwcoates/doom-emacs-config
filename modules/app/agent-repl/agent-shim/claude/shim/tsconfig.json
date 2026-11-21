@@ -19,6 +19,7 @@
     // up from the stub's own directory (proto/gen/ts) where no node_modules
     // exists, so map the subpaths explicitly to the installed ESM typings.
     "paths": {
+      "typescript": ["./node_modules/typescript/lib/typescript.d.ts"],
       "@bufbuild/protobuf": ["./node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"],
       "@bufbuild/protobuf/codegenv2": ["./node_modules/@bufbuild/protobuf/dist/esm/codegenv2/index.d.ts"],
       "@bufbuild/protobuf/wkt": ["./node_modules/@bufbuild/protobuf/dist/esm/wkt/index.d.ts"]

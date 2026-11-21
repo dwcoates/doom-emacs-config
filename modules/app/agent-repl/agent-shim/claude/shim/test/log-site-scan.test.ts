@@ -148,4 +148,29 @@ describe("scanLogSites", () => {
     // Assert
     expect(sites).toEqual([]);
   });
+
+  it("takes a non-literal template through a placed logger as a LogMessage, no fault", () => {
+    // Act
+    const { faults } = scanFixture({ "a.ts": 'const LOGGER = bindLog("shim.a", {});\nLOGGER.info({}, made, {});\n' });
+
+    // Assert
+    expect(faults).toEqual([]);
+  });
+
+  it("reads src/log.ts's emergencyStderr as a site of the logging scope", () => {
+    // Act
+    const { sites } = scanFixture({ "src/log.ts": 'emergencyStderr("could not write {path}", { path });\n' });
+
+    // Assert
+    expect(sites).toEqual([{ at: "src/log.ts:1", scope: "shim.logging", template: "could not write {path}", key: siteKey("shim", "shim.logging", "could not write {path}") }]);
+  });
+
+  it("is the shared scan over the shim's call shape", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(new URL("./log-site-scan.ts", import.meta.url)), "utf8");
+
+    // Act / Assert: a scan of its own beside the shared one would drift from the webapp's.
+    expect(source).toContain("logSiteScan(ts, {");
+    expect(source).not.toContain("createSourceFile");
+  });
 });
