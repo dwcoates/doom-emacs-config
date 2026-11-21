@@ -916,10 +916,7 @@ type Deps struct {
 	Merge     merge.Orchestrator
 	Rollout   rollout.Controller
 	Drain     drain.Controller
-	// SettingsVisits holds the workspaces whose shim a settings pick
-	// started, which a switch away stands down (settingsvisits.go).
-	SettingsVisits *SettingsVisits
-	Health         health.Reporter
+	Health    health.Reporter
 	// Derived tells a created, landed or closed workspace's sources about it.
 	Derived DerivedReporter
 	Feed    feed.Resolver
@@ -1065,6 +1062,10 @@ type CacheLapses interface {
 	// its clocks already swapped on the record (wsm.SwapParkedConversation):
 	// both conversations' beats are timed afresh from their own clocks.
 	ConversationSwitched(ws ids.WorkspaceID)
+	// RemoteControlChanged is WS's remote-control mode changed, already
+	// recorded: a session the mode kept up is given its stand-down owner
+	// again, and one it now keeps up is left up.
+	RemoteControlChanged(ws ids.WorkspaceID)
 }
 
 // Summaries keeps every workspace's summary (wssummary.Keeper).
@@ -1362,8 +1363,6 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a state client")
 	case deps.ColdGateAnswers == nil:
 		return nil, missing("the cold gate answers' telemetry")
-	case deps.SettingsVisits == nil:
-		return nil, missing("the settings visits")
 	case deps.Derived == nil:
 		return nil, missing("a derived-workspace reporter")
 	case deps.Git == nil:

@@ -36,9 +36,11 @@ const opCycle = "daemon.drain.keepalive_cycle"
 
 // THE SAME STAND-DOWN ENDS A SETTINGS VISIT (owner request, 2026-10-29). A
 // model, permission-mode or effort pick on a workspace with no shim starts
-// one (promptqueue's revivalSettings); the switch away stands it down again
-// through this path (VisitDown), under the same rules, unless a real turn has
-// run since the pick started it. It leaves the one park, so the
+// one (promptqueue's revivalSettings); once nobody is looking at the
+// workspace, the cache keeper asks for its stand-down through this path
+// (VisitDown, cachelapse.Keeper.own), under the same rules, unless a real
+// turn has run since the pick started it. A pick through the agent API is
+// ended the same way, with no switch away. It leaves the one park, so the
 // workspace is drawn as the idle session it was.
 
 // opVisit is the operation a settings visit's stand-down records under.
@@ -198,13 +200,19 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Info(op, "the user is looking at the workspace; its session is kept up", fields)
 		return withheldSettled
 	}
+	// A COLD PARK AND A SETTINGS VISIT ARE TAKEN WHATEVER THE VISIBILITY: the
+	// cache keeper asks for either only when the lapse owns no stand-down of
+	// the session (cachelapse.Keeper.own), so a closed or withheld workspace
+	// those two refused was left with no owner at all (2026-11-20). Only the
+	// keep-alive cycle leaves a closed or withheld workspace to its lapse.
+	lapseOwnsWithheld := reason.op == opCycle
 	// A CLOSED WORKSPACE WITH A MERGE QUEUED IS STOOD DOWN AS AN OPEN ONE IS:
 	// the cache keeper's lapse keeps every queued workspace's session for as
 	// long as its entry stands (cachelapse.Keeper.lapse), so the lapse would
 	// never stand it down, and it stayed up between beats (2026-11-14, 27 of
 	// 87 live sessions had a merge waiting). The next prompt the merge sends
 	// revives it, as it revives any park.
-	if record.Closed {
+	if record.Closed && lapseOwnsWithheld {
 		queued, err := bringup.MergeQueued(ctx, c.deps.DB, record)
 		if err != nil {
 			log.Error(op, "could not read whether the closed workspace has a merge queued; its stand-down is dropped", dlog.WithCause(fields, err))
@@ -231,7 +239,10 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Info(op, "remote control is on; the shim stays up for claude.ai", dlog.Merge(fields, dlog.Context{"remote_control_recorded": remote.Recorded}))
 		return withheldSettled
 	}
-	visible, err := bringup.Visible(ctx, c.deps.DB, log, ws)
+	visible := true
+	if lapseOwnsWithheld {
+		visible, err = bringup.Visible(ctx, c.deps.DB, log, ws)
+	}
 	if err != nil {
 		log.Error(op, "could not read whether the workspace is visible; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
@@ -249,9 +260,9 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Debug(op, "the workspace has no live session; nothing to stand down", fields)
 		return withheldSettled
 	}
-	if session.LastEngagementAt.After(beat) {
+	if ended, turned := record.TurnedSince(beat); turned {
 		log.Info(op, "a real turn ran since; the session is kept up",
-			dlog.Merge(fields, dlog.Context{"engaged_at": session.LastEngagementAt}))
+			dlog.Merge(fields, dlog.Context{"turn_ended_at": ended}))
 		return withheldSettled
 	}
 	switch gate := c.gate(ws); gate {

@@ -841,6 +841,11 @@ type DB interface {
 	// SetKeepaliveOwing records the keeper's decision that a workspace owes
 	// keep-alives, or owes none (keepaliveowing.go).
 	SetKeepaliveOwing(ctx context.Context, id WorkspaceID, owing bool, at time.Time) error
+	// SetSettingsVisit records that a settings pick started a workspace's
+	// shim (settingsvisit.go); EndSettingsVisit ends the visit begun at an
+	// instant, answering whether it stood.
+	SetSettingsVisit(ctx context.Context, id WorkspaceID, at time.Time) error
+	EndSettingsVisit(ctx context.Context, id WorkspaceID, at time.Time) (bool, error)
 	// MarkParentUpdated records that a child's open parent was given the
 	// child's one update (ParentFollowedEvents).
 	MarkParentUpdated(ctx context.Context, child WorkspaceID, at time.Time) error

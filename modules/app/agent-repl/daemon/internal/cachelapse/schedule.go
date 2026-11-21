@@ -128,8 +128,11 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace to time its keep-alive", "could not read the workspace; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
 	}
-	none := func(why string) (beatPlan, bool) {
+	// queued is read below; a reason found before it reads none.
+	queued := false
+	none := func(nb noBeat, why string) (beatPlan, bool) {
 		k.owesNone(ctx, log, record, why)
+		k.own(ctx, log, record, queued, false, nb, why)
 		return beatPlan{}, false
 	}
 	// A WORKSPACE WHOSE DIRECTORY IS GONE OWES NO KEEP-ALIVE: no session can
@@ -142,7 +145,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if _, err := k.deps.Stat(record.Dir); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			k.forget(ws)
-			return none("its directory is gone, so no session can ever run for it")
+			return none(noBeatCold, "its directory is gone, so no session can ever run for it")
 		}
 		log.Error(opDrive, "could not tell whether the workspace's directory exists; its keep-alive is not armed",
 			dlog.Context{"dir": record.Dir, "cause": err.Error()})
@@ -153,23 +156,24 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	// run on its session, so neither a hide nor a close lets its cache lapse
 	// while the entry stands, for QueuedIdleFactor idle cutoffs
 	// (bringup.IdleCutoff, read below).
-	queuedAt, queued, err := bringup.MergeQueuedAt(ctx, k.deps.DB, record)
+	queuedAt, inQueue, err := bringup.MergeQueuedAt(ctx, k.deps.DB, record)
+	queued = inQueue
 	if err != nil {
 		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace has a merge queued", "could not read whether the workspace has a merge queued; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
 	}
 	if record.KeepaliveHeld() && !queued {
-		return none("it is hidden and nobody is looking at it; its cache lapses on its own clock")
+		return none(noBeatCold, "it is hidden and nobody is looking at it; its cache lapses on its own clock")
 	}
 	if _, gated := k.deps.ColdGate(ws); gated {
-		return none("its session stands at the cold gate")
+		return none(noBeatCold, "its session stands at the cold gate")
 	}
 	if why, capped := k.runCapped(ctx, log, ws, record, queued); capped {
-		return none(why)
+		return none(noBeatCold, why)
 	}
 	// A COLLAPSED SECTION WITHHOLDS NO KEEP-ALIVE (wsm.Workspace.KeptWarm).
 	if !record.KeptWarm(queued) {
-		return none("it is hidden, so it runs no session")
+		return none(noBeatCold, "it is hidden, so it runs no session")
 	}
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
@@ -177,10 +181,10 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		return beatPlan{}, false
 	}
 	if !found {
-		return none("it has no session")
+		return none(noBeatNoSession, "it has no session")
 	}
 	if session.Terminal != nil && !session.Parked() {
-		return none("its session is not live: " + session.Terminal.Kind)
+		return none(noBeatNoSession, "its session is not live: "+session.Terminal.Kind)
 	}
 	// A CLOSED WORKSPACE OWES EACH CONVERSATION ONE LAST BEAT: none once that
 	// conversation's clock has passed the close.
@@ -211,16 +215,17 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		}
 	}
 	if !plan.bound && !plan.parked {
-		return none("neither of its conversations has a warm cache to keep, or each one's last keep-alive is spent")
+		return none(noBeatCold, "neither of its conversations has a warm cache to keep, or each one's last keep-alive is spent")
 	}
 	engaged := session.LastEngagementAt
 	if engaged.IsZero() {
 		engaged = session.StartedAt
 	}
 	if k.deps.IdleCutoff > 0 && bringup.IdleHorizon(k.deps.IdleCutoff, engaged, queuedAt, queued).Before(plan.due) {
-		return none("it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
+		return none(noBeatSweep, "it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
 	k.owesAgain(ctx, log, record)
+	k.own(ctx, log, record, queued, true, noBeatCold, "")
 	return plan, true
 }
 

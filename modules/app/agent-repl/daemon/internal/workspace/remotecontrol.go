@@ -69,6 +69,10 @@ func (v *verbs) UpdateRemoteControlMode(ctx context.Context, ws ids.WorkspaceID,
 		return false, err
 	}
 	on, err := v.deps.Sessions.SetRemoteControl(ctx, log, ws, change)
+	// THE MODE IS ON THE RECORD WHETHER OR NOT THE SHIM TOOK IT, so the cache
+	// keeper reads it afresh: a session the mode kept up is given its
+	// stand-down owner again (cachelapse.Keeper.own).
+	v.deps.CacheLapses.RemoteControlChanged(ws)
 	if !refusedNoSession(err) {
 		return on, err
 	}

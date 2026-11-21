@@ -875,6 +875,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Interval:        keepaliveInterval,
 		CycleDown:       func(ws ids.WorkspaceID, beat time.Time) { drainController.CycleDown(ws, beat) },
 		ColdDown:        func(ws ids.WorkspaceID, since time.Time) { drainController.ColdDown(ws, since) },
+		VisitDown:       func(ws ids.WorkspaceID, since time.Time) { drainController.VisitDown(ws, since) },
 		// A RESTORE IS THE FLEET'S OWN DETACHED START, which the session's
 		// bring-up retires the park's terminal under; the views' park is
 		// lifted once it is back, as a revival lifts it.
@@ -1105,11 +1106,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE ORCHESTRATOR, through the forwarder: it is built below, and is
 	// told each lease change through the queue's lease sink.
 	mergeMover := &mergeForwarder{}
-	// A SETTINGS PICK'S SHIM IS A VISIT: the queue notes its start, and a
-	// switch away stands it down (workspace/settingsvisits.go).
-	settingsVisits := workspace.NewSettingsVisits()
+	// A SETTINGS PICK'S SHIM IS A VISIT: the queue notes its start on the
+	// workspace's row, and the cache keeper owns its stand-down until it ends
+	// (cachelapse/standdown.go).
 	queue, err = promptqueue.New(promptqueue.Deps{
-		SettingsStarted: settingsVisits.Note,
+		SettingsStarted: cacheKeeper.SettingsVisitStarted,
 		Leases:          mergeMover,
 		Merges:          mergeMover,
 		// Every submission the queue takes lands in the metrics surface.
@@ -1602,7 +1603,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Threads: chatService,
 		// Every cold gate answered lands in the metrics surface.
 		ColdGateAnswers: p.Metrics,
-		SettingsVisits:  settingsVisits,
 		Creates:         creates,
 		// A CREATE THE NETWORK BLOCKS IS HELD and resumes on the network's
 		// restoration; its ops are answered through the server, bound below.

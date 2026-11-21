@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -60,6 +62,54 @@ type fakeDB struct {
 	owingWrites int
 	// readOnly stands for a joining successor's unpromoted handle.
 	readOnly bool
+	// remote is each workspace's remote-control mode, off when absent;
+	// remoteErr fails its read.
+	remote    map[ids.WorkspaceID]bool
+	remoteErr error
+	// visitErr fails SetSettingsVisit and EndSettingsVisit.
+	visitErr error
+}
+
+func (f *fakeDB) RemoteControl(_ context.Context, id wsm.WorkspaceID) (wsm.RemoteControl, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.remoteErr != nil {
+		return wsm.RemoteControl{}, f.remoteErr
+	}
+	return wsm.RemoteControl{On: f.remote[id], Recorded: true}, nil
+}
+
+// SetSettingsVisit records the visit on the record, as the store does.
+func (f *fakeDB) SetSettingsVisit(_ context.Context, id wsm.WorkspaceID, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.visitErr != nil {
+		return f.visitErr
+	}
+	rec, ok := f.records[id]
+	if !ok {
+		return wsm.ErrNotFound
+	}
+	rec.SettingsVisitAt = &at
+	f.records[id] = rec
+	return nil
+}
+
+// EndSettingsVisit ends the visit begun at AT, as the store's one statement
+// does.
+func (f *fakeDB) EndSettingsVisit(_ context.Context, id wsm.WorkspaceID, at time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.visitErr != nil {
+		return false, f.visitErr
+	}
+	rec, ok := f.records[id]
+	if !ok || rec.SettingsVisitAt == nil || !rec.SettingsVisitAt.Equal(at) {
+		return false, nil
+	}
+	rec.SettingsVisitAt = nil
+	f.records[id] = rec
+	return true, nil
 }
 
 func (f *fakeDB) ReadOnly() bool { return f.readOnly }
@@ -287,6 +337,8 @@ type harness struct {
 	cycled []cycleCall
 	// coldDowns are the cold cache's parks asked for.
 	coldDowns []cycleCall
+	// visitDowns are the settings visits' stand-downs asked for.
+	visitDowns []cycleCall
 	// restoring are the restores asked for, each with the done that ends it.
 	restoring []restoreCall
 	// nextKeepalives are the next keep-alives stated to the views, in order.
@@ -387,6 +439,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		ColdDown: func(ws ids.WorkspaceID, since time.Time) {
 			h.coldDowns = append(h.coldDowns, cycleCall{ws: ws, beat: since})
 		},
+		VisitDown: func(ws ids.WorkspaceID, since time.Time) {
+			h.visitDowns = append(h.visitDowns, cycleCall{ws: ws, beat: since})
+		},
 		Restore: func(ws ids.WorkspaceID, done func(error)) {
 			h.restoring = append(h.restoring, restoreCall{ws: ws, done: done})
 		},
@@ -408,6 +463,14 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 	}
 	h.keeper = keeper
 	return h
+}
+
+// applyQueued applies every edge queued so far, in order, as Run's loop does
+// on a wake.
+func (h *harness) applyQueued() {
+	for _, e := range h.keeper.take() {
+		h.keeper.apply(context.Background(), e)
+	}
 }
 
 func (h *harness) found(q dlog.RecordQuery) bool {
@@ -445,6 +508,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			Interval:        KeepaliveInterval,
 			CycleDown:       func(ids.WorkspaceID, time.Time) {},
 			ColdDown:        func(ids.WorkspaceID, time.Time) {},
+			VisitDown:       func(ids.WorkspaceID, time.Time) {},
 			Restore:         func(ids.WorkspaceID, func(error)) {},
 			HandedOver:      func(error) bool { return false },
 			Clock:           clocktest.New(now),
@@ -468,6 +532,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "keep-alive interval", strip: func(d *Deps) { d.Interval = 0 }},
 		{name: "keep-alive cycle's stand-down", strip: func(d *Deps) { d.CycleDown = nil }},
 		{name: "cold cache's stand-down", strip: func(d *Deps) { d.ColdDown = nil }},
+		{name: "settings visit's stand-down", strip: func(d *Deps) { d.VisitDown = nil }},
 		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
 		{name: "handover classifier", strip: func(d *Deps) { d.HandedOver = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},
@@ -1340,12 +1405,63 @@ func TestMergeEnteredQueueArmsAHiddenWorkspacesBeat(t *testing.T) {
 
 	// Act
 	h.keeper.MergeEnteredQueue(theWorkspace)
-	for _, e := range h.keeper.take() {
-		h.keeper.apply(context.Background(), e)
-	}
+	h.applyQueued()
 
 	// Assert
 	if _, armed := h.keeper.beats[theWorkspace]; !armed {
 		t.Fatal("entering a queue armed no beat")
+	}
+}
+
+func TestApplyQueuedAppliesEveryQueuedEdgeInOrder(t *testing.T) {
+	// Arrange: a close then a reopen, each queued as Run would take them.
+	h := newHarness(t, visible())
+	h.keeper.ClosureChanged(theWorkspace)
+	h.keeper.SessionUp(theWorkspace)
+
+	// Act
+	h.applyQueued()
+
+	// Assert
+	if left := h.keeper.take(); len(left) != 0 {
+		t.Fatalf("edges left queued = %+v, want none", left)
+	}
+	var edges []string
+	for _, r := range h.log.Records() {
+		if r.Operation == opDrive || r.Operation == opCadence {
+			if why, ok := r.Context["edge"].(string); ok && (len(edges) == 0 || edges[len(edges)-1] != why) {
+				edges = append(edges, why)
+			}
+		}
+	}
+	if !slices.Equal(edges, []string{"the workspace was closed or reopened", "a session came up"}) {
+		t.Fatalf("edges applied = %v, want the close then the session, in order", edges)
+	}
+}
+
+// TestQueuedEdgesAreAppliedOnlyThroughApplyQueued fails when a test of this
+// package hand-rolls the take-and-apply loop applyQueued owns.
+func TestQueuedEdgesAreAppliedOnlyThroughApplyQueued(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+
+	// Act
+	var sites []string
+	for _, name := range files {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", name, err)
+		}
+		for range regexp.MustCompile(`range \w+\.keeper\.take\(\)`).FindAllIndex(source, -1) {
+			sites = append(sites, name)
+		}
+	}
+
+	// Assert
+	if !slices.Equal(sites, []string{"keeper_test.go"}) {
+		t.Fatalf("the take-and-apply loop is at %v, want only harness.applyQueued in keeper_test.go", sites)
 	}
 }

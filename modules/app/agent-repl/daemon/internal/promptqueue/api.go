@@ -561,9 +561,10 @@ type Deps struct {
 	Revive ReviveFunc
 	// SettingsStarted is told when a settings pick starts a workspace's shim
 	// (a model, permission-mode or effort pick with no shim), with the
-	// instant: the workspace verbs stand that shim down again on the switch
-	// away unless a turn has run since (owner request, 2026-10-29). Nil
-	// follows no such start.
+	// instant, before the bring-up starts: the cache keeper records the visit
+	// and stands that shim down again once nobody is looking at the
+	// workspace, unless a turn has run since (owner request, 2026-10-29;
+	// cachelapse.Keeper.SettingsVisitStarted). Nil follows no such start.
 	SettingsStarted func(ws ids.WorkspaceID, at time.Time)
 	// Watcher resolves a workspace's session watcher, which is what answers
 	// the in-flight turn and what an accepted turn is handed over to.

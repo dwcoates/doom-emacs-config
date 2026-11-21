@@ -161,3 +161,34 @@ func TestTheMigratedRowsAreNotKnownCold(t *testing.T) {
 		t.Fatalf("%d migrated workspace rows carry a cold mark, want none", got)
 	}
 }
+
+func TestTurnedSinceReadsTheTurnClockAlone(t *testing.T) {
+	since := instant.Add(time.Hour)
+	ended := since.Add(time.Minute)
+	before := instant
+	tests := []struct {
+		name  string
+		ended *time.Time
+		since time.Time
+		want  bool
+	}{
+		{name: "no turn ever closed", since: since},
+		{name: "the last turn closed before", ended: &before, since: since},
+		{name: "the last turn closed at the instant", ended: &ended, since: ended},
+		{name: "the last turn closed after", ended: &ended, since: since, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			record := Workspace{LastTurnEndedAt: tt.ended}
+
+			// Act
+			_, got := record.TurnedSince(tt.since)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("TurnedSince = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

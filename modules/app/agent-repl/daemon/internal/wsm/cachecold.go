@@ -64,3 +64,22 @@ func (s *store) MarkCacheCold(ctx context.Context, id WorkspaceID) (*time.Time, 
 func (w Workspace) CacheKnownCold() bool {
 	return w.CacheColdTurnAt != nil && w.LastTurnEndedAt != nil && !w.LastTurnEndedAt.After(*w.CacheColdTurnAt)
 }
+
+// TurnedSince answers the workspace's last turn end, and whether a turn closed
+// after SINCE: THE ONE READING of "a real turn ran since" for every
+// stand-down (drain's cycle, visit and cold stand-downs, and the cache
+// keeper's stand-down owners).
+//
+// IT IS THE TURN CLOCK, NEVER THE ENGAGEMENT STAMP. Every bring-up stamps
+// the session's engagement as it records the session's facts
+// (workspace.Fleet.recordFacts), so a settings pick's own revival moved it
+// past the pick, and every visit read as engaged: on 2026-11-20 at 14:55, 25
+// shims a SetModel sweep revived were kept up for "a real turn" though none
+// of them ran one, each stamp 0.8s to 2.2s after its pick. A turn still
+// running holds the session busy, and its close moves this clock.
+func (w Workspace) TurnedSince(since time.Time) (time.Time, bool) {
+	if w.LastTurnEndedAt == nil {
+		return time.Time{}, false
+	}
+	return *w.LastTurnEndedAt, w.LastTurnEndedAt.After(since)
+}

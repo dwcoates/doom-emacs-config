@@ -118,6 +118,13 @@ type DB interface {
 	// Session reads a workspace's session record: its engagement clock and
 	// its park.
 	Session(ctx context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error)
+	// RemoteControl reads a workspace's remote-control mode: a session it
+	// keeps up is owned by no stand-down (standdown.go).
+	RemoteControl(ctx context.Context, id wsm.WorkspaceID) (wsm.RemoteControl, error)
+	// SetSettingsVisit and EndSettingsVisit record a settings pick's visit
+	// and end it (wsm.Workspace.SettingsVisitAt).
+	SetSettingsVisit(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
+	EndSettingsVisit(ctx context.Context, id wsm.WorkspaceID, at time.Time) (bool, error)
 }
 
 // Keepalives is one serving shim's keep-alive.
@@ -172,6 +179,9 @@ type Deps struct {
 	// known cold at SINCE (drain.Controller.ColdDown): a cold cache owes no
 	// keep-alive, so the keep-alive cycle never parks it.
 	ColdDown func(ws ids.WorkspaceID, since time.Time)
+	// VisitDown asks for WS's session to be stood down, the settings pick
+	// that started it at SINCE having ended (drain.Controller.VisitDown).
+	VisitDown func(ws ids.WorkspaceID, since time.Time)
 	// Restore brings a session the keep-alive cycle parked back up, calling
 	// DONE once with how its start ended. It returns at once.
 	Restore func(ws ids.WorkspaceID, done func(error))
@@ -287,6 +297,13 @@ type Keeper struct {
 	// is recorded at INFO only when it changes (owesNone); owned by Run
 	// alone.
 	noBeat map[ids.WorkspaceID]string
+	// owners is each live session's stand-down owner, or why it is left up,
+	// as last recorded (standdown.go), so a change is recorded at INFO;
+	// owned by Run alone.
+	owners map[ids.WorkspaceID]standing
+	// coldDue is when each session the cold park owns has been idle
+	// StandDownGrace, armed until then (standdown.go); owned by Run alone.
+	coldDue map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -308,6 +325,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the keep-alive cycle's stand-down")
 	case deps.ColdDown == nil:
 		return nil, errors.New("cachelapse: the keeper needs the cold cache's stand-down")
+	case deps.VisitDown == nil:
+		return nil, errors.New("cachelapse: the keeper needs the settings visit's stand-down")
 	case deps.Restore == nil:
 		return nil, errors.New("cachelapse: the keeper needs the parked sessions' restore")
 	case deps.HandedOver == nil:
@@ -342,6 +361,8 @@ func New(deps Deps) (*Keeper, error) {
 		parkedFlying: map[ids.WorkspaceID]bool{},
 		parkedRetry:  map[ids.WorkspaceID]time.Time{},
 		noBeat:       map[ids.WorkspaceID]string{},
+		owners:       map[ids.WorkspaceID]standing{},
+		coldDue:      map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -462,6 +483,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue()
+			k.coldParksDue(ctx)
 			k.stateNextKeepalives()
 			continue
 		}
@@ -482,6 +504,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue()
+			k.coldParksDue(ctx)
 			k.stateNextKeepalives()
 		}
 	}
@@ -526,7 +549,7 @@ func (k *Keeper) take() []edge {
 func (k *Keeper) earliest() (time.Time, bool) {
 	var next time.Time
 	armed := false
-	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores, k.answerBy} {
+	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores, k.answerBy, k.coldDue} {
 		for _, at := range set {
 			if !armed || at.Before(next) {
 				next, armed = at, true
@@ -653,6 +676,8 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.sent, ws)
 	delete(k.freeSince, ws)
 	delete(k.parkedRetry, ws)
+	delete(k.owners, ws)
+	delete(k.coldDue, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace
