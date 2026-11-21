@@ -413,6 +413,18 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 		t.Fatalf("turns still marked displaced after the resubmission = %d, want none", n)
 	}
 
+	// Arrange: THE PARK SETTLES BEFORE THE SECOND BOUNCE. The workspace's
+	// merge waits in line, so the moment the resubmitted turn ends it falls
+	// free and its session is parked (drain.Controller.MergeQueuedDown), which
+	// is why the third daemon below finds no shim. A kill landing inside that
+	// park would leave its stand-down lease behind for the next boot to release
+	// at ERROR; the bounce under test is of a settled state root, so it waits
+	// for the park's own record, in the workspace's log.
+	d2.AwaitLogRecord(harness.WorkspaceLogPath(child.GetDir(), "daemon"), "the merge-queued park of the finished workspace", func(r harness.LogRecord) bool {
+		return r.PID == d2.PID() && r.Operation == "daemon.drain.merge_queued_park" &&
+			r.Message == "parked a finished workspace whose merge waits in line"
+	})
+
 	// Assert: a SECOND bounce does not resubmit again — the claim that put
 	// the turn back is durable, so the boot after it finds nothing owed.
 	w.Kill()
