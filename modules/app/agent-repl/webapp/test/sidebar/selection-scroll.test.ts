@@ -41,6 +41,23 @@ interface BandSpec {
 }
 
 /** A laid-out band as SPEC says: its root, its rows region, and each row's line. */
+/** The computed style each band's region answers, for the test that built it. */
+const paddedRegions = new Map<Element, CSSStyleDeclaration>();
+
+/**
+ * Answers STYLE as REGION's computed style, every other element's as the
+ * engine computes it. One spy serves every band a test builds: a second
+ * `vi.spyOn` of the same method returns the spy already installed, so a spy
+ * per band would call itself as the "real" method.
+ */
+function paddedStyle(region: Element, style: CSSStyleDeclaration): void {
+  if (paddedRegions.size === 0) {
+    const computed = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => paddedRegions.get(el) ?? computed(el, pseudo));
+  }
+  paddedRegions.set(region, style);
+}
+
 function band({
   lines,
   view,
@@ -81,10 +98,7 @@ function band({
   Object.defineProperty(region, "clientHeight", { configurable: true, get: () => shown * ROW });
   Object.defineProperty(region, "clientTop", { configurable: true, value: 0 });
   region.getBoundingClientRect = () => rect(0, shown * ROW);
-  const computed = window.getComputedStyle.bind(window);
-  vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) =>
-    el === region ? ({ scrollPaddingTop: padTop, scrollPaddingBottom: padBottom } as CSSStyleDeclaration) : computed(el, pseudo),
-  );
+  paddedStyle(region, { scrollPaddingTop: padTop, scrollPaddingBottom: padBottom } as CSSStyleDeclaration);
   for (let i = 0; i < lines; i += 1) {
     const ws = document.createElement("div");
     ws.className = "ws";
@@ -115,6 +129,7 @@ function highlight(root: HTMLElement, id: string): void {
 }
 
 afterEach(() => {
+  paddedRegions.clear();
   vi.restoreAllMocks();
   resetLoggingForTests();
 });
