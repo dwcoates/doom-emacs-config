@@ -209,7 +209,9 @@ func TestAKeepLiveOnABusySessionSendsNothingAndStopsNothing(t *testing.T) {
 	}{
 		{name: "the main agent is busy",
 			reason: &shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_MainAgentBusy{MainAgentBusy: &shimv1.SendKeepaliveSkippedMainAgentBusy{Detail: "a turn is in flight"}}},
-			want:   func(b *agentreplv1.KeepLiveWorkspaceBusy) bool { return b.GetMainAgent().GetDetail() == "a turn is in flight" }},
+			want: func(b *agentreplv1.KeepLiveWorkspaceBusy) bool {
+				return b.GetMainAgent().GetDetail() == "a turn is in flight"
+			}},
 		{name: "detached work is live",
 			reason: &shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_DetachedWorkLive{DetachedWorkLive: &shimv1.SendKeepaliveSkippedDetachedWorkLive{LiveItems: 2}}},
 			want:   func(b *agentreplv1.KeepLiveWorkspaceBusy) bool { return b.GetDetachedWork().GetLiveItems() == 2 }},
@@ -350,7 +352,9 @@ func TestAKeepLiveThatFails(t *testing.T) {
 		{name: "on a lapsed cache answers cache_lapsed", reach: func(t *testing.T, h *harness) {
 			h.shim.answer = skipped(&shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_CacheLapsed{CacheLapsed: &shimv1.SendKeepaliveSkippedCacheLapsed{LapsedAtMs: now.UnixMilli()}}})
 			h.restoreUp(t)
-		}, want: func(e *agentreplv1.KeepLiveWorkspaceError) bool { return e.GetCacheLapsed().GetLapsedAtMs() == now.UnixMilli() }},
+		}, want: func(e *agentreplv1.KeepLiveWorkspaceError) bool {
+			return e.GetCacheLapsed().GetLapsedAtMs() == now.UnixMilli()
+		}},
 		{name: "to stand the session down answers stand_down_failed", reach: func(t *testing.T, h *harness) {
 			h.restoreUp(t)
 			h.vendorAnswers()
@@ -469,7 +473,6 @@ func sameSet(got, want []string) bool {
 	slices.Sort(want)
 	return slices.Equal(got, want)
 }
-
 
 func TestAKeepLiveCallThatEndsFirstAbandonsTheWaitNotTheRun(t *testing.T) {
 	// Arrange
