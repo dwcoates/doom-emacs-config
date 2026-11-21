@@ -883,3 +883,165 @@ func TestEveryNoticeKindIsDeliveredThroughDeliverKind(t *testing.T) {
 		t.Fatalf("deliverOwed delivers %d kinds through deliverKind, want all 3", n)
 	}
 }
+
+func TestEachTierReadsOnlyItsOwnPullRequests(t *testing.T) {
+	owned := wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 21}
+	other := wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 22}
+	tests := []struct {
+		name       string
+		act        func(r *rig)
+		wantOwned  int
+		wantOthers int
+	}{
+		{name: "the owned tick reads the owned pull request alone", act: func(r *rig) { r.w.TickOwned(context.Background(), r.prompts) }, wantOwned: 1},
+		{name: "the other tick reads the pull request no workspace owns alone", act: func(r *rig) { r.w.TickOthers(context.Background()) }, wantOthers: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			g := r.withGQL()
+			r.followAs(t, g, owned, wsm.PullRequestOriginOwnedLink)
+			r.followAs(t, g, other, wsm.PullRequestOriginRequested)
+			ownedBefore, othersBefore := r.readsOf(owned), r.readsOf(other)
+
+			// Act
+			tt.act(r)
+
+			// Assert
+			if got := r.readsOf(owned) - ownedBefore; got != tt.wantOwned {
+				t.Fatalf("owned reads = %d, want %d", got, tt.wantOwned)
+			}
+			if got := r.readsOf(other) - othersBefore; got != tt.wantOthers {
+				t.Fatalf("other reads = %d, want %d", got, tt.wantOthers)
+			}
+		})
+	}
+}
+
+func TestAnOwnedPollReadsItsPullRequestsAtOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	prs := []wsm.PullRequestKey{{Owner: "o", Repo: "r", Number: 21}, {Owner: "o", Repo: "r", Number: 22}}
+	for _, pr := range prs {
+		r.followAs(t, g, pr, wsm.PullRequestOriginOwnedLink)
+	}
+	arrived, release := make(chan string, len(prs)), make(chan struct{})
+	r.gh.mu.Lock()
+	r.gh.onGet = func(path string) {
+		for _, pr := range prs {
+			if path == fmt.Sprintf("%s/pulls/%d", base, pr.Number) {
+				arrived <- path
+				<-release
+			}
+		}
+	}
+	r.gh.mu.Unlock()
+	done := make(chan struct{})
+
+	// Act
+	go func() {
+		defer close(done)
+		r.w.TickOwned(context.Background(), r.prompts)
+	}()
+	// Each read holds until both are in flight, so reads made one after the
+	// other never get here.
+	first, second := <-arrived, <-arrived
+	close(release)
+	<-done
+
+	// Assert
+	if first == second {
+		t.Fatalf("reads in flight = %q and %q, want both pull requests", first, second)
+	}
+}
+
+func TestAnOtherPollReadingMoreThanItsLimitIsRecordedAtWarn(t *testing.T) {
+	tests := []struct {
+		name     string
+		linked   int
+		follow   wsm.PullRequestOrigin
+		wantWarn bool
+	}{
+		{name: "the limit's worth of linked pull requests is no warning", linked: othersWarnAbove},
+		{name: "one linked pull request past the limit is a warning", linked: othersWarnAbove + 1, wantWarn: true},
+		{name: "a followed pull request counts toward the limit", linked: othersWarnAbove, follow: wsm.PullRequestOriginRequested, wantWarn: true},
+		{name: "an owned pull request is the owned tier's and does not count", linked: othersWarnAbove, follow: wsm.PullRequestOriginOwnedLink},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			g := r.withGQL()
+			if tt.follow != "" {
+				r.followAs(t, g, prK, tt.follow)
+			}
+			for i := range tt.linked {
+				pr := wsm.PullRequestKey{Owner: "o", Repo: "r", Number: uint32(100 + i)}
+				r.gh.set(fmt.Sprintf("%s/pulls/%d", base, pr.Number), pullJSON("open", false, false, "head1"))
+				if _, err := r.db.SetWorkspaceLink(context.Background(), r.ws, wsm.LinkSet{URL: URLOf(pr), Label: "A pull request", PullRequest: &pr}); err != nil {
+					t.Fatalf("SetWorkspaceLink: %v", err)
+				}
+			}
+
+			// Act
+			r.w.TickOthers(context.Background())
+
+			// Assert
+			rec, warned := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "warn", Operation: opPoll})
+			if warned != tt.wantWarn {
+				t.Fatalf("warned = %v, want %v; records = %+v", warned, tt.wantWarn, r.log.Records())
+			}
+			if warned && (rec.Context["read"] != othersWarnAbove+1 || rec.Context["limit"] != othersWarnAbove) {
+				t.Fatalf("warning context = %+v, want %d read against the limit %d", rec.Context, othersWarnAbove+1, othersWarnAbove)
+			}
+		})
+	}
+}
+
+func TestAnOtherTickLeavesItsNoticesToTheOwnedLoop(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventComment)
+	r.gh.set(pathComments(), mustJSON([]any{commentJSONOf(11, "alice", "please rename it", t0, t0, nil)}))
+
+	// Act
+	r.w.TickOthers(context.Background())
+	before := r.told()
+	woken := len(r.w.wake)
+	r.w.DeliverNow(context.Background(), r.prompts)
+
+	// Assert
+	if len(before) != 0 || woken != 1 {
+		t.Fatalf("told by the other tick = %q, wakes pending = %d; want nothing told and one wake", before, woken)
+	}
+	if told := r.told(); len(told) != 1 || !contains(told[0], "please rename it") {
+		t.Fatalf("told after the wake's delivery = %q, want the comment", told)
+	}
+}
+
+func TestNewRefusesACadenceThatIsNotPositive(t *testing.T) {
+	tests := []struct {
+		name  string
+		every func(d *Deps)
+	}{
+		{name: "the other tier's", every: func(d *Deps) { d.Every = 0 }},
+		{name: "the owned tier's", every: func(d *Deps) { d.OwnedEvery = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			deps := newRig(t).deps
+			tt.every(&deps)
+
+			// Act
+			_, err := New(deps)
+
+			// Assert
+			if err == nil {
+				t.Fatal("New = nil, want the cadence refused")
+			}
+		})
+	}
+}

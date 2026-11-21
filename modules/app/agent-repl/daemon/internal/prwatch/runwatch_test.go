@@ -307,7 +307,8 @@ func TestAWakeDeliversAnOwedRunNoticeWithoutPolling(t *testing.T) {
 		defer close(done)
 		r.w.Run(ctx, r.prompts)
 	}()
-	<-r.clock.Asked // the first tick ran; the loop waits on its cadence
+	<-r.clock.Asked // each tier ran its first tick and waits on its cadence
+	<-r.clock.Asked
 	r.gh.mu.Lock()
 	callsBefore := len(r.gh.calls)
 	r.gh.mu.Unlock()

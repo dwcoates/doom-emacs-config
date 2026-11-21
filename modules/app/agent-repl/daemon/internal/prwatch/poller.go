@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -31,8 +32,42 @@ const (
 	opLinked  = "daemon.prwatch.linked"
 )
 
-// DefaultEvery is the cadence between polls (owner ruling, 2026-10-30).
+// THE WATCHER POLLS IN TWO TIERS (owner ruling, 2026-11-21), each on its
+// own loop, so the slow tier never holds the fast one back:
+//
+//   - the OWNED tier is every pull request an open workspace owns (its
+//     owned-link subscription, wsm/pullrequestowner.go), read every
+//     DefaultOwnedEvery, each read beside the others' (ownedReadsAtOnce),
+//     so its owner stands in the merge queue (deployments.go) within a few
+//     seconds of GitHub queueing it: at one tier for every pull request, a
+//     poll of seventeen took about 35s, and a pull request GitHub merged
+//     82s after queueing it was never drawn (2026-11-19);
+//   - the OTHER tier is every other followed pull request, every linked
+//     one's state, every followed merge queue and every waited-on workflow
+//     run, read every DefaultEvery, one after the other.
+//
+// THE OWNED LOOP ALONE DELIVERS what is owed, so no two deliveries ever run
+// at once and no notice is submitted twice: the other loop wakes it (Wake)
+// after each of its polls.
+
+// DefaultEvery is the other tier's cadence between polls (owner ruling,
+// 2026-10-30).
 const DefaultEvery = 30 * time.Second
+
+// DefaultOwnedEvery is the owned tier's cadence between polls (owner ruling,
+// 2026-11-21).
+const DefaultOwnedEvery = 5 * time.Second
+
+// ownedReadsAtOnce is how many owned pull requests one owned poll reads at
+// once: each read is a few `gh` calls of about 0.4s each (measured
+// 2026-11-21), so a poll lasts about one read however many are owned, while
+// the `gh` processes it starts at once stay few.
+const ownedReadsAtOnce = 8
+
+// othersWarnAbove is how many pull requests one poll of the other tier may
+// read before it is recorded at WARN (owner ruling, 2026-11-21): each is
+// read every DefaultEvery, so more means a following nobody ends.
+const othersWarnAbove = 50
 
 // BriefNotice is the brief a notice is composed from.
 const BriefNotice = "pull-request-notice"
@@ -85,8 +120,9 @@ type Deps struct {
 	// ServesIntake): only the serving daemon polls and tells.
 	Serves func() bool
 	Clock  clock.Clock
-	Every  time.Duration
-	// Deployments is told, after every poll, each owned pull request standing
+	// Every is the other tier's cadence, OwnedEvery the owned tier's.
+	Every, OwnedEvery time.Duration
+	// Deployments is told, after every owned poll, each owned pull request standing
 	// in a GitHub merge queue (deployments.go).
 	Deployments DeploymentSink
 	// Ended is told each workspace one of whose followed pull requests
@@ -109,15 +145,15 @@ type Watcher struct {
 	reader *reader
 	gate   *intakegate.Gate
 	// places is each owned pull request's GitHub merge queue place as its
-	// latest successful read found it (deployments.go). Only the one Tick
-	// running at a time touches it.
+	// latest successful read found it (deployments.go). Only the owned loop
+	// touches it.
 	places map[wsm.PullRequestKey]*placed
 	// linkedResetsAt is when a rate limit a linked pull request's state read
 	// ran into resets; no state read is made before it (pollLinked). Only
-	// the one Tick running at a time touches it.
+	// the other loop touches it.
 	linkedResetsAt time.Time
-	// wake asks the Run loop to deliver what is owed now (Wake); one pending
-	// wake stands for any number asked.
+	// wake asks the owned loop to deliver what is owed now (Wake); one
+	// pending wake stands for any number asked.
 	wake chan struct{}
 }
 
@@ -128,26 +164,37 @@ func New(deps Deps) (*Watcher, error) {
 		return nil, errors.New("prwatch: every collaborator is required")
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
+	case deps.OwnedEvery <= 0:
+		return nil, fmt.Errorf("prwatch: the owned cadence must be positive, not %v", deps.OwnedEvery)
 	}
 	return &Watcher{deps: deps, reader: newReader(deps.GH), places: map[wsm.PullRequestKey]*placed{}, wake: make(chan struct{}, 1),
 		gate: intakegate.NewFor(deps.Serves, deps.Log, opGate, "the pull-request polls")}, nil
 }
 
-// Run polls and tells on the cadence until ctx ends: once at once, then
-// every Every, one tick after the other. A Wake between ticks delivers what
-// is owed at once, on this same loop, so a delivery never runs beside a
-// tick's and no notice is submitted twice.
+// Run polls and tells until ctx ends, each tier on its own loop: the other
+// tier's on a goroutine of its own, once at once and then every Every; the
+// owned tier's on the caller's, once at once and then every OwnedEvery. A
+// Wake between owned ticks delivers what is owed at once, on the owned loop,
+// so a delivery never runs beside another and no notice is submitted twice.
+// Run returns once both loops have stopped.
 func (w *Watcher) Run(ctx context.Context, prompts prompthandler.Submitter) {
-	w.Tick(ctx, prompts)
-	next := w.deps.Clock.After(w.deps.Every)
+	others := make(chan struct{})
+	go func() {
+		defer close(others)
+		w.TickOthers(ctx)
+		_ = clock.Repeat(ctx, w.deps.Clock, w.deps.Every, w.deps.Every, w.TickOthers)
+	}()
+	w.TickOwned(ctx, prompts)
+	next := w.deps.Clock.After(w.deps.OwnedEvery)
 	for {
 		select {
 		case <-ctx.Done():
+			<-others
 			w.deps.Log.Debug(opPoll, "the pull-request watcher stopped with its context", nil)
 			return
 		case <-next:
-			w.Tick(ctx, prompts)
-			next = w.deps.Clock.After(w.deps.Every)
+			w.TickOwned(ctx, prompts)
+			next = w.deps.Clock.After(w.deps.OwnedEvery)
 		case <-w.wake:
 			w.DeliverNow(ctx, prompts)
 		}
@@ -163,98 +210,185 @@ func (w *Watcher) DeliverNow(ctx context.Context, prompts prompthandler.Submitte
 	w.deliverOwed(ctx, prompts)
 }
 
-// Tick polls every followed pull request, the state of every other linked
-// one, and every followed merge queue and workflow run once, then submits
-// every notice owed, when this daemon serves. A queue both kinds need is read
-// once (queueReads).
-func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
+// TickOwned polls every owned pull request once, tells the merge queue where
+// each stands in its GitHub merge queue, then submits every notice owed,
+// when this daemon serves: the owned loop's tick.
+func (w *Watcher) TickOwned(ctx context.Context, prompts prompthandler.Submitter) {
+	if !w.gate.Admits() {
+		return
+	}
+	w.pollOwned(ctx, newQueueReads(w.deps.GH))
+	w.deliverOwed(ctx, prompts)
+}
+
+// TickOthers polls every followed pull request no open workspace owns, the
+// state of every other linked one, and every followed merge queue and
+// workflow run once, when this daemon serves, then wakes the owned loop to
+// deliver what it owed: the other loop's tick. A queue both kinds need is
+// read once (queueReads). A poll that read more than othersWarnAbove pull
+// requests is recorded at WARN.
+func (w *Watcher) TickOthers(ctx context.Context) {
 	if !w.gate.Admits() {
 		return
 	}
 	queues := newQueueReads(w.deps.GH)
-	polled := w.poll(ctx, queues)
-	w.pollLinked(ctx, polled)
+	followed, read := w.pollOthers(ctx, queues)
+	linked := w.pollLinked(ctx, followed)
+	if n := read + linked; n > othersWarnAbove {
+		w.deps.Log.Warn(opPoll, "one poll of the pull requests no open workspace owns read more of them than its limit; their followings may outlive their use",
+			dlog.Context{"read": n, "followed": read, "linked": linked, "limit": othersWarnAbove, "every": w.deps.Every.String()})
+	}
 	w.pollQueues(ctx, queues)
 	w.pollRuns(ctx)
-	w.deliverOwed(ctx, prompts)
+	w.Wake()
 }
 
-// poll reads each followed pull request once and advances every subscription
-// to it, answering every followed pull request, read or waiting out a rate
-// limit: their states are this poll's to record, never pollLinked's.
-func (w *Watcher) poll(ctx context.Context, queues *queueReads) map[wsm.PullRequestKey]bool {
-	followed := map[wsm.PullRequestKey]bool{}
+// followedTier is the followed pull requests one tier reads: each one's
+// subscriptions, in the order the store answered them.
+type followedTier struct {
+	byPR  map[wsm.PullRequestKey][]wsm.PullRequestSubscription
+	order []wsm.PullRequestKey
+}
+
+// readTiers reads every live subscription and splits the pull requests they
+// follow into the OWNED tier (an owned-link subscription names it) and the
+// OTHER, answering false when the store could not be read.
+func (w *Watcher) readTiers(ctx context.Context) (owned, others followedTier, ok bool) {
 	subs, err := w.deps.Store.LivePullRequestSubscriptions(ctx)
 	if err != nil && ctx.Err() != nil {
 		// The daemon is stopping: no fact about the store.
 		w.deps.Log.Debug(opPoll, "the poll stopped with its context", nil)
-		return followed
+		return owned, others, false
 	}
 	if err != nil {
 		w.deps.Log.Error(opPoll, "could not read the pull-request subscriptions; nothing is polled this tick", dlog.WithCause(nil, err))
-		return followed
+		return owned, others, false
 	}
 	byPR, order := grouped(subs, func(s wsm.PullRequestSubscription) wsm.PullRequestKey { return s.PullRequest }, itself[wsm.PullRequestSubscription])
+	owned.byPR, others.byPR = byPR, byPR
 	for _, pr := range order {
-		followed[pr] = true
+		if _, isOwned := ownerOf(byPR[pr]); isOwned {
+			owned.order = append(owned.order, pr)
+		} else {
+			others.order = append(others.order, pr)
+		}
 	}
+	return owned, others, true
+}
+
+// readable answers the pull requests of TIER to read now, leaving out each
+// one waiting out a spent rate limit, and their merge queue facts.
+func (w *Watcher) readable(ctx context.Context, tier followedTier) ([]wsm.PullRequestKey, queueFacts) {
 	var read, queued []wsm.PullRequestKey
-	for _, pr := range order {
-		if resets, waiting := w.rateLimitWait(byPR[pr]); waiting {
+	for _, pr := range tier.order {
+		if resets, waiting := w.rateLimitWait(tier.byPR[pr]); waiting {
 			w.deps.Log.Debug(opPoll, "the rate limit is spent; the pull request is read once it resets", dlog.Context{"pull_request": pr.String(), "resets_at": resets})
 			continue
 		}
 		read = append(read, pr)
-		if wantsQueue(byPR[pr]) {
+		if wantsQueue(tier.byPR[pr]) {
 			queued = append(queued, pr)
 		}
 	}
-	facts := w.readQueueFacts(ctx, queued)
-	for _, pr := range read {
+	return read, w.readQueueFacts(ctx, queued)
+}
+
+// pollOwned reads each owned pull request once, up to ownedReadsAtOnce of
+// them at once, then advances every subscription to each, one pull request
+// after the other on this loop, and tells the merge queue every owned pull
+// request standing in a GitHub merge queue.
+func (w *Watcher) pollOwned(ctx context.Context, queues *queueReads) {
+	owned, _, ok := w.readTiers(ctx)
+	if !ok {
+		return
+	}
+	read, facts := w.readable(ctx, owned)
+	type result struct {
+		snap snapshot
+		err  error
+	}
+	results := make([]result, len(read))
+	slots := make(chan struct{}, ownedReadsAtOnce)
+	var wg sync.WaitGroup
+	for i, pr := range read {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			results[i].snap, results[i].err = w.readOne(ctx, pr, owned.byPR[pr], facts.ask(pr), queues)
+		}()
+	}
+	wg.Wait()
+	for i, pr := range read {
 		if ctx.Err() != nil {
-			return followed
+			return
 		}
-		snap, ok := w.pollOne(ctx, pr, byPR[pr], facts.ask(pr), queues)
-		if _, owned := ownerOf(byPR[pr]); owned && ok {
+		if snap, ok := w.applyRead(ctx, pr, owned.byPR[pr], results[i].snap, results[i].err); ok {
 			w.places[pr] = w.placeOf(pr, snap)
 		}
 	}
-	w.tellDeployments(ctx, order, byPR)
-	return followed
+	w.tellDeployments(ctx, owned.order, owned.byPR)
+}
+
+// pollOthers reads each followed pull request no open workspace owns once,
+// one after the other, and advances every subscription to it, answering
+// every followed pull request of either tier, read or waiting out a rate
+// limit (their states are the polls' to record, never pollLinked's), and how
+// many it read.
+func (w *Watcher) pollOthers(ctx context.Context, queues *queueReads) (map[wsm.PullRequestKey]bool, int) {
+	followed := map[wsm.PullRequestKey]bool{}
+	owned, others, ok := w.readTiers(ctx)
+	if !ok {
+		return followed, 0
+	}
+	for _, pr := range append(append([]wsm.PullRequestKey{}, owned.order...), others.order...) {
+		followed[pr] = true
+	}
+	read, facts := w.readable(ctx, others)
+	for _, pr := range read {
+		if ctx.Err() != nil {
+			return followed, len(read)
+		}
+		w.pollOne(ctx, pr, others.byPR[pr], facts.ask(pr), queues)
+	}
+	return followed, len(read)
 }
 
 // pollLinked reads the state of every linked pull request no subscription
 // follows (wsm.LinkedPullRequests): a reference link, or an owned one whose
 // subscription ended or was ended, so its menu row's badge says how it
-// stands. FOLLOWED holds the pull requests poll already read. A read that
+// stands. FOLLOWED holds the pull requests the polls read. A read that
 // fails leaves the recorded state as it stands; the next tick reads again,
-// and a spent rate limit is waited out.
-func (w *Watcher) pollLinked(ctx context.Context, followed map[wsm.PullRequestKey]bool) {
+// and a spent rate limit is waited out. It answers how many it read.
+func (w *Watcher) pollLinked(ctx context.Context, followed map[wsm.PullRequestKey]bool) int {
 	prs, err := w.deps.Store.LinkedPullRequests(ctx)
 	if err != nil && ctx.Err() != nil {
 		w.deps.Log.Debug(opLinked, "the linked pull requests' reads stopped with their context", nil)
-		return
+		return 0
 	}
 	if err != nil {
 		w.deps.Log.Error(opLinked, "could not read the linked pull requests; no state is read this tick", dlog.WithCause(nil, err))
-		return
+		return 0
 	}
+	read := 0
 	for _, pr := range prs {
 		if followed[pr] {
 			continue
 		}
 		if ctx.Err() != nil {
-			return
+			return read
 		}
 		fields := dlog.Context{"pull_request": pr.String()}
 		if now := w.deps.Clock.Now(); now.Before(w.linkedResetsAt) {
 			w.deps.Log.Debug(opLinked, "the rate limit is spent; the linked pull requests' states are read once it resets", dlog.Merge(fields, dlog.Context{"resets_at": w.linkedResetsAt}))
-			return
+			return read
 		}
+		read++
 		state, err := w.reader.readState(ctx, pr)
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return read
 			}
 			f := failureOf(err, w.deps.Clock.Now())
 			if f.Kind == wsm.PullRequestFailureRateLimited {
@@ -267,6 +401,7 @@ func (w *Watcher) pollLinked(ctx context.Context, followed map[wsm.PullRequestKe
 		}
 		w.recordState(ctx, pr, state)
 	}
+	return read
 }
 
 // recordState records PR's STATE as a read just found it, and redraws the
@@ -325,12 +460,25 @@ func wantsQueue(subs []wsm.PullRequestSubscription) bool {
 // pollOne reads PR, its merge queue facts when QUEUE is set, and advances
 // SUBS, answering the read and whether it succeeded.
 func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm.PullRequestSubscription, queue *queueAsk, queues *queueReads) (snapshot, bool) {
-	fields := dlog.Context{"pull_request": pr.String(), "subscribers": len(subs)}
+	snap, err := w.readOne(ctx, pr, subs, queue, queues)
+	return w.applyRead(ctx, pr, subs, snap, err)
+}
+
+// readOne reads PR as SUBS ask for it, and its merge queue facts when QUEUE
+// is set. It only reads GitHub, so reads of several pull requests may run at
+// once (pollOwned).
+func (w *Watcher) readOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm.PullRequestSubscription, queue *queueAsk, queues *queueReads) (snapshot, error) {
 	checks := false
 	for _, sub := range subs {
 		checks = checks || sub.Events.Has(wsm.PullRequestEventChecks)
 	}
-	snap, err := w.readSnapshot(ctx, pr, checks, queue, queues)
+	return w.readSnapshot(ctx, pr, checks, queue, queues)
+}
+
+// applyRead advances SUBS to a read of PR that answered SNAP, or records
+// its failure ERR, answering SNAP and whether the read succeeded.
+func (w *Watcher) applyRead(ctx context.Context, pr wsm.PullRequestKey, subs []wsm.PullRequestSubscription, snap snapshot, err error) (snapshot, bool) {
+	fields := dlog.Context{"pull_request": pr.String(), "subscribers": len(subs)}
 	if err != nil {
 		if ctx.Err() != nil {
 			return snap, false

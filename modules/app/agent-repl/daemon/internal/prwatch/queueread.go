@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"agent-repld/internal/ghclient"
@@ -403,7 +404,10 @@ func readDepartures(ctx context.Context, gh ghclient.Client, repo repository, nu
 // queueReads is one tick's reads of merge queues, so a queue every
 // pull-request subscription and queue subscription needs is read once.
 type queueReads struct {
-	gh   ghclient.Client
+	gh ghclient.Client
+	// mu is held across a read, so owned reads made at once (pollOwned)
+	// read each queue once between them.
+	mu   sync.Mutex
 	read map[wsm.GithubMergeQueueKey]queueRead
 }
 
@@ -418,6 +422,8 @@ func newQueueReads(gh ghclient.Client) *queueReads {
 
 // get answers KEY's queue, reading it on the tick's first ask.
 func (r *queueReads) get(ctx context.Context, key wsm.GithubMergeQueueKey) (remoteQueue, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if got, ok := r.read[key]; ok {
 		return got.q, got.err
 	}

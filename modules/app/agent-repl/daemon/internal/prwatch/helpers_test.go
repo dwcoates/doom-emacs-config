@@ -45,6 +45,9 @@ type fakeGH struct {
 	sent  []map[string]string
 	// graphql answers every GraphQL call; nil fails it.
 	graphql func(query string, variables map[string]any) (ghclient.GraphQLResponse, error)
+	// onGet, when set, is called with each GET's path before it is answered,
+	// outside the fake's lock, so a test holds a read in flight.
+	onGet func(path string)
 }
 
 func newGH() *fakeGH { return &fakeGH{gets: map[string]any{}, posts: map[string]any{}} }
@@ -52,6 +55,12 @@ func newGH() *fakeGH { return &fakeGH{gets: map[string]any{}, posts: map[string]
 func etagOf(body string) string { return fmt.Sprintf(`W/"%d"`, len(body)) + digest(body) }
 
 func (g *fakeGH) Get(_ context.Context, path, etag string) (ghclient.Response, error) {
+	g.mu.Lock()
+	hook := g.onGet
+	g.mu.Unlock()
+	if hook != nil {
+		hook(path)
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls = append(g.calls, "GET "+path)
@@ -282,7 +291,7 @@ func newRig(t *testing.T) *rig {
 	}
 	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}, banners: &fakeComments{}}
 	r.deps = Deps{Store: db, GH: r.gh, Holds: r.holds, Notices: &briefprompttest.Meter{}, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
-		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Comments: r.banners, Log: r.log,
+		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, OwnedEvery: DefaultOwnedEvery, Deployments: r.deploys, Comments: r.banners, Log: r.log,
 		Ended: func(_ context.Context, ws ids.WorkspaceID, merged bool) error {
 			r.ended = append(r.ended, endTold{ws: ws, merged: merged})
 			return r.endedErr
@@ -359,7 +368,41 @@ func (r *rig) subscribeAs(t *testing.T, origin wsm.PullRequestOrigin, events ...
 	}
 }
 
-func (r *rig) tick() { r.w.Tick(context.Background(), r.prompts) }
+// tick runs one tick of each tier, the other tier first, so the owned one
+// delivers what both owed.
+// followAs anchors and records a subscription of the rig's workspace to PR
+// under ORIGIN asking for every event, scripting PR open and in no merge
+// queue on G.
+func (r *rig) followAs(t *testing.T, g *gql, pr wsm.PullRequestKey, origin wsm.PullRequestOrigin) {
+	t.Helper()
+	r.gh.set(fmt.Sprintf("%s/pulls/%d", base, pr.Number), pullJSON("open", false, false, "head1"))
+	g.setFacts(pr.Number, factsJSON("main", nil))
+	sub, _, err := r.w.Anchor(context.Background(), r.ws, pr, wsm.AllPullRequestEvents(), origin)
+	if err != nil {
+		t.Fatalf("Anchor: %v", err)
+	}
+	if _, err := r.db.SubscribePullRequest(context.Background(), sub); err != nil {
+		t.Fatalf("SubscribePullRequest: %v", err)
+	}
+}
+
+// readsOf answers how many times the pull request PR itself was read.
+func (r *rig) readsOf(pr wsm.PullRequestKey) int {
+	r.gh.mu.Lock()
+	defer r.gh.mu.Unlock()
+	n := 0
+	for _, c := range r.gh.calls {
+		if c == fmt.Sprintf("GET %s/pulls/%d", base, pr.Number) {
+			n++
+		}
+	}
+	return n
+}
+
+func (r *rig) tick() {
+	r.w.TickOthers(context.Background())
+	r.w.TickOwned(context.Background(), r.prompts)
+}
 
 // told answers every notice text submitted so far.
 func (r *rig) told() []string {

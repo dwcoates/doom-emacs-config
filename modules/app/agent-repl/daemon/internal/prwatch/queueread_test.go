@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -214,5 +215,38 @@ func TestPositionOf(t *testing.T) {
 				t.Fatalf("positionOf(%d) = %+v, %v; want %+v, %v", tt.number, got, ok, tt.want, tt.ok)
 			}
 		})
+	}
+}
+
+func TestReadsOfOneQueueMadeAtOnceReadItOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	g.setQueue("main", queueJSON(entry(1, "QUEUED")))
+	reads := newQueueReads(r.gh)
+	key := wsm.GithubMergeQueueKey{Owner: "o", Repo: "r", Branch: "main"}
+	var wg sync.WaitGroup
+
+	// Act
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := reads.get(context.Background(), key); err != nil {
+				t.Errorf("get: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Assert
+	n := 0
+	for _, c := range r.gh.calls {
+		if c == "GRAPHQL MergeQueue" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("MergeQueue reads = %d, want 1", n)
 	}
 }
