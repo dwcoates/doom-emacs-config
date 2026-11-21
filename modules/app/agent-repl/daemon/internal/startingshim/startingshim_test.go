@@ -356,3 +356,37 @@ func TestIdentify(t *testing.T) {
 		})
 	}
 }
+
+// TestWaiterRunning pins the one liveness question both bring-up paths ask:
+// the injected Alive answers when set, and the kernel's own when not.
+func TestWaiterRunning(t *testing.T) {
+	self, err := Identify(os.Getpid())
+	if err != nil {
+		t.Fatalf("Identify(self): %v", err)
+	}
+	refused := errors.New("sysctl refused")
+	tests := []struct {
+		name    string
+		alive   func(ids.ProcessIdentity) (bool, error)
+		spawn   ids.ProcessIdentity
+		want    bool
+		wantErr error
+	}{
+		{name: "the injected answer is the answer", alive: func(ids.ProcessIdentity) (bool, error) { return false, nil },
+			spawn: self, want: false},
+		{name: "the injected refusal is the answer", alive: func(ids.ProcessIdentity) (bool, error) { return false, refused },
+			spawn: self, wantErr: refused},
+		{name: "no injected answer asks the kernel", spawn: self, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, err := Waiter{Alive: tt.alive}.Running(tt.spawn)
+
+			// Assert.
+			if !errors.Is(err, tt.wantErr) || got != tt.want {
+				t.Fatalf("Running = (%v, %v), want (%v, %v)", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
