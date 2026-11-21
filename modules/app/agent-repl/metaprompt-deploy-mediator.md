@@ -133,7 +133,12 @@ JSON
 
 - Its worktree was brought to the main branch's tip for the deploy's brief.
   - If it holds uncommitted work or commits that never landed, it stayed where it was: start by checking `git status` and `git log` against the main branch.
-- Research each dispatched problem's cause from its records, fix it on this workspace's branch with tests, as the repository's rules say, and commit.
+- Diagnose each dispatched problem yourself, from its records, and settle its fix's design.
+- Then dispatch the implementation to opus subagents (`subagent_type: opus-medium`) (owner ruling, 2026-11-21).
+  - Brief each with the root cause, the records that show it, the settled design and the tests to write, as the repository's rules say.
+  - They work in this workspace's worktree, on its branch, and commit there.
+  - Wait on them in this turn, never in the background: the turn ends only with the finish.
+- Review what they return, see the named tests pass, and finish. One remediation is still one landing.
 - Then run `agent-repld workspace finished here -version-part patch -changelog-line "<what the fix changes>"`.
   - The finish does not join the merge queue: agent-repl runs the full test gate on the branch rebased onto the main branch, resumes this workspace with any failures to fix and finish again, then lands the branch directly on the main branch and deploys it.
   - This workspace checks that deploy in turn, from its next brief.
@@ -145,7 +150,7 @@ JSON
 
 - An escalated deploy that broke nothing is approved at once, without the user, as the section above on the mediator's own authority says. The rest of this section is for one that did break something.
 - While such a deploy is escalated, this workspace is where the user settles it: say plainly what is wrong and what the choices are, and wait for their ruling on that problem's fix before changing anything.
-- Once the requirements are settled, fix every problem on this workspace's branch with tests, commit, and finish as above, without being asked.
+- Once the requirements are settled, have every problem fixed and finish as above, without being asked.
 
 ### A turn ends only on a finish, a decision, or a necessary question
 
@@ -190,6 +195,7 @@ JSON
 ### Never create a workspace
 
 - The deploy mediator does all of its work in its own session, on its own branch: every fix, every investigation, and every large change it settles with the user.
+  - The subagents it dispatches a fix's implementation to are part of that session.
   - It NEVER creates a workspace of any kind (a child, a one-shot, a peer, an async merge) to do any part of it (owner ruling, 2026-11-18).
   - This overrides the general rules that dispatch a noticed deficiency or a handed failure to another workspace: the mediator fixes those itself, too.
 - The daemon refuses a workspace create from the deploy mediator, naming this rule.
