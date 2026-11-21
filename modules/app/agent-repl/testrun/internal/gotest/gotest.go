@@ -17,11 +17,32 @@ func TopPattern(tests []string) string {
 
 // LiteralAlternation is a regexp group matching any one of items literally:
 // the one spelling of "these exact names" every runner's name filter builds
-// on (TopPattern here, the vitest -t pattern in suites).
+// on (TopPattern here, and SpacedAlternation's vitest -t pattern in suites).
 func LiteralAlternation(items []string) string {
+	return SpacedAlternation(items)
+}
+
+// SpacedAlternation is LiteralAlternation where each space of an item also
+// matches any of SEPARATORS, each literally: vitest joins a test's levels by
+// " > ", while a name is often written with spaces between them
+// (suites.VitestNamePattern). With no separators a space matches only a
+// space, which is LiteralAlternation.
+func SpacedAlternation(items []string, separators ...string) string {
+	space := regexp.QuoteMeta(" ")
+	if len(separators) > 0 {
+		alts := []string{space}
+		for _, sep := range separators {
+			alts = append(alts, regexp.QuoteMeta(sep))
+		}
+		space = "(" + strings.Join(alts, "|") + ")"
+	}
 	q := make([]string, len(items))
 	for i, it := range items {
-		q[i] = regexp.QuoteMeta(it)
+		words := strings.Split(it, " ")
+		for j, w := range words {
+			words[j] = regexp.QuoteMeta(w)
+		}
+		q[i] = strings.Join(words, space)
 	}
 	return "(" + strings.Join(q, "|") + ")"
 }

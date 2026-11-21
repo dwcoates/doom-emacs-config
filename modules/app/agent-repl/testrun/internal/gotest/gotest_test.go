@@ -156,3 +156,42 @@ func TestLiteralAlternation(t *testing.T) {
 		t.Fatalf("LiteralAlternation = %q", got)
 	}
 }
+
+func TestSpacedAlternation(t *testing.T) {
+	tests := []struct {
+		name       string
+		items      []string
+		separators []string
+		want       string
+	}{
+		{name: "each space also matches each separator", items: []string{"a b", "c.d"}, separators: []string{" > "}, want: `(a( | > )b|c\.d)`},
+		{name: "a separator is matched literally", items: []string{"a b"}, separators: []string{" | "}, want: `(a( | \| )b)`},
+		{name: "with no separator a space is only a space, as LiteralAlternation spells it", items: []string{"a b", "c|d"}, want: `(a b|c\|d)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := SpacedAlternation(tt.items, tt.separators...)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("SpacedAlternation = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// LITERALALTERNATION IS SPACEDALTERNATION WITH NO SEPARATOR: the one
+// construction of a literal name filter, so the two never spell a name apart.
+func TestLiteralAlternationIsSpacedAlternationWithNoSeparator(t *testing.T) {
+	// Arrange
+	items := []string{"a b", "x.y(1)", "p|q"}
+
+	// Act
+	literal, spaced := LiteralAlternation(items), SpacedAlternation(items)
+
+	// Assert
+	if literal != spaced {
+		t.Fatalf("LiteralAlternation = %q, SpacedAlternation = %q; want one spelling", literal, spaced)
+	}
+}

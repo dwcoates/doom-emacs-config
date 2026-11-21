@@ -6,12 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/cover"
+	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/internal/testtimes"
@@ -330,15 +330,7 @@ const VitestConfig = "vitest.config.ts"
 // literally, anchored at the start, and the name ends at a level's end (" > "
 // or the name's own end), so "a test" does not also run "a tests".
 func VitestNamePattern(names []string) string {
-	alts := make([]string, len(names))
-	for i, name := range names {
-		words := strings.Split(name, " ")
-		for j, w := range words {
-			words[j] = regexp.QuoteMeta(w)
-		}
-		alts[i] = strings.Join(words, "( | > )")
-	}
-	return "^(" + strings.Join(alts, "|") + ")( > |$)"
+	return "^" + gotest.SpacedAlternation(names, " > ") + "( > |$)"
 }
 
 // VitestItemsEnv names the file testrun/vitest/items-reporter.mjs writes.
