@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,9 +100,16 @@ func TestTheDeployMediatorIsSetToLowEffort(t *testing.T) {
 	// Act
 	err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
 
-	// Assert
-	if err != nil || len(f.fleet.efforts) != 1 || f.fleet.efforts[0].Level != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW {
-		t.Fatalf("SetDeployMediatorEffort = %v, efforts %+v; want one at low", err, f.fleet.efforts)
+	// Assert: picked, and the live session switched off the round's
+	// goroutine, never waited on.
+	if err != nil || f.topbarPicked != mediatorEffort {
+		t.Fatalf("SetDeployMediatorEffort = %v, picked %v; want low picked", err, f.topbarPicked)
+	}
+	if len(f.fleet.switches) != 1 || f.fleet.switches[0].Level != mediatorEffort || len(f.fleet.efforts) != 0 {
+		t.Fatalf("switches %+v, sets %+v; want one switch at low and no set waited on", f.fleet.switches, f.fleet.efforts)
+	}
+	if records := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks}); len(records) != 0 {
+		t.Fatalf("error records = %+v, want none", records)
 	}
 }
 
@@ -123,20 +131,43 @@ func TestASessionlessDeployMediatorHasItsEffortPickedForItsStart(t *testing.T) {
 }
 
 func TestADeployMediatorWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
-	// Arrange: the live session serves no low effort.
-	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir()).ID
-	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM}, true
-
-	// Act
-	err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
-
-	// Assert
-	if err == nil {
-		t.Fatal("SetDeployMediatorEffort set an effort the model does not serve")
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture) wsm.WorkspaceID
+		cause   string
+	}{
+		{name: "a live session whose selector never offered low", cause: "never offered",
+			arrange: func(t *testing.T, f *fixture) wsm.WorkspaceID {
+				f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM}, true
+				return f.workspace("w1", t.TempDir()).ID
+			}},
+		{name: "a workspace this daemon does not own", cause: "w-unknown",
+			arrange: func(t *testing.T, f *fixture) wsm.WorkspaceID {
+				f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{mediatorEffort}, true
+				return "w-unknown"
+			}},
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy mediator's effort could not be set"}); !ok {
-		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ws := tt.arrange(t, f)
+
+			// Act
+			err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
+
+			// Assert
+			if err == nil {
+				t.Fatal("SetDeployMediatorEffort answered success for an effort it could not set")
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy mediator's effort could not be set"})
+			if !ok || !strings.Contains(fmt.Sprint(record.Context["cause"]), tt.cause) {
+				t.Fatalf("records = %+v, want the failure at ERROR carrying %q", f.log.logger.Records(), tt.cause)
+			}
+			if f.topbarPicked != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED || len(f.fleet.switches) != 0 {
+				t.Fatalf("picked %v, switches %+v; want nothing picked or switched", f.topbarPicked, f.fleet.switches)
+			}
+		})
 	}
 }
 

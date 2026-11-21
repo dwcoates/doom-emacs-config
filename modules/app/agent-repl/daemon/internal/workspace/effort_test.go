@@ -3,14 +3,17 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/claudesettings"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -466,5 +469,162 @@ func TestAnEffortPickThatCannotStartTheShimFails(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("SetEffort answered success though the shim could not be started")
+	}
+}
+
+// goneShimCause is the transport failure a call to a shim that is no more
+// carries.
+var goneShimCause = errors.New("unavailable: dial unix /sock/9e9ccb0bae024ebd.n21.sock: connect: no such file or directory")
+
+func TestFleetSetEffortOnAShimGoneOrUnreachableIsNoSessionAtInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "a shim this daemon stood down", err: fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, goneShimCause)},
+		{name: "a shim that died", err: fmt.Errorf("%w: %w", shimclient.ErrShimDied, goneShimCause)},
+		{name: "a shim whose socket could not be dialed", err: fmt.Errorf("%w: %w", shimclient.ErrShimUnreachable, goneShimCause)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			f.client.effortErr = tt.err
+
+			// Act.
+			err := f.fleet.SetEffort(context.Background(), f.log.logger, ws.ID, effortLow)
+
+			// Assert.
+			if !switchFoundNoSession(err) || !errors.Is(err, tt.err) {
+				t.Fatalf("err = %v, want the switch read as finding no session, the cause kept", err)
+			}
+			if records := recordsAt(f.log, opSetEffort, "error"); len(records) != 0 {
+				t.Fatalf("error records = %v, want none", records)
+			}
+			if records := recordsAt(f.log, opSetEffort, "info"); len(records) != 1 || records[0]["cause"] != tt.err.Error() {
+				t.Fatalf("info records = %v, want one carrying the cause", records)
+			}
+		})
+	}
+}
+
+func TestFleetSetEffortAbandonedByItsCallerIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f.client.effortErr = context.Canceled
+
+	// Act.
+	err := f.fleet.SetEffort(ctx, f.log.logger, ws.ID, effortLow)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation answered", err)
+	}
+	if records := recordsAt(f.log, opSetEffort, "error"); len(records) != 0 {
+		t.Fatalf("error records = %v, want none for a switch its caller abandoned", records)
+	}
+}
+
+// awaitSwitch waits for the effort switch's outcome record MESSAGE at LEVEL,
+// then joins the fleet's detached work, so every effect of the switch is in.
+func awaitSwitch(t *testing.T, f *fleetFixture, level, message string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := f.log.logger.Await(ctx, dlog.RecordQuery{Level: level, Operation: opSetEffort, Message: message}); err != nil {
+		t.Fatalf("records = %+v, want %q at %s: %v", f.log.logger.Records(), message, level, err)
+	}
+	if !f.fleet.DrainStarts(time.Minute) {
+		t.Fatal("the effort switch did not leave")
+	}
+}
+
+func TestSwitchEffortSettlesEachOutcomeOffTheCallersGoroutine(t *testing.T) {
+	tests := []struct {
+		name         string
+		arrange      func(f *fleetFixture)
+		level        string
+		message      string
+		wantPicked   conversationv1.AgentEffortLevel
+		wantErrors   int
+		wantWarnings int
+	}{
+		{name: "a switch the shim confirmed states the level", level: "info", message: "the effort switch landed", wantPicked: effortLow},
+		{name: "a shim the rollout stood down leaves the pick standing", level: "info",
+			message: "the effort switch found no session to take it; the pick stands for the session's next start",
+			arrange: func(f *fleetFixture) {
+				f.client.effortErr = fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, goneShimCause)
+			}},
+		{name: "a level the vendor refused is an error stated on the strip", level: "error", message: "the shim did not switch the effort",
+			wantErrors: 1, wantWarnings: 1,
+			arrange: func(f *fleetFixture) {
+				f.client.effortResponse = effortFailure(&shimv1.SetSessionEffortFailure{
+					Detail: "the vendor said no",
+					Cause:  &shimv1.SetSessionEffortFailure_VendorRefused{VendorRefused: &shimv1.SetSessionEffortVendorRefused{}},
+				})
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			if tt.arrange != nil {
+				tt.arrange(f)
+			}
+
+			// Act.
+			f.fleet.SwitchEffort(f.log.logger, ws.ID, effortLow)
+			awaitSwitch(t, f, tt.level, tt.message)
+
+			// Assert.
+			if f.picked != tt.wantPicked {
+				t.Errorf("picked = %v, want %v", f.picked, tt.wantPicked)
+			}
+			if records := recordsAt(f.log, opSetEffort, "error"); len(records) != tt.wantErrors {
+				t.Errorf("error records = %v, want %d", records, tt.wantErrors)
+			}
+			if len(f.topbarWarnings) != tt.wantWarnings {
+				t.Errorf("warnings = %v, want %d", f.topbarWarnings, tt.wantWarnings)
+			}
+		})
+	}
+}
+
+func TestSwitchEffortNeverWaitsOnTheRunningTurn(t *testing.T) {
+	// Arrange: the shim holds the switch until the running turn ends.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	turnEnds := make(chan struct{})
+	f.client.effortHold = turnEnds
+
+	// Act: SwitchEffort answers with the shim still holding the switch.
+	f.fleet.SwitchEffort(f.log.logger, ws.ID, effortLow)
+
+	// Assert: nothing has landed while the turn runs, and the switch lands
+	// once it ends.
+	if _, landed := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opSetEffort, Message: "the effort switch landed"}); landed {
+		t.Fatal("the switch landed while the shim still held it")
+	}
+	close(turnEnds)
+	awaitSwitch(t, f, "info", "the effort switch landed")
+	if f.picked != effortLow {
+		t.Fatalf("picked = %v, want low once the turn ended", f.picked)
 	}
 }

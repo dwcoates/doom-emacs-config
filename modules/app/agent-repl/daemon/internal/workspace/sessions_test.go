@@ -65,6 +65,9 @@ type fakeClient struct {
 	efforts        []*shimv1.SetSessionEffortRequest
 	effortResponse *shimv1.SetSessionEffortResponse
 	effortErr      error
+	// effortHold, when set, holds each SetSessionEffort until it is closed,
+	// as the shim holds a switch asked mid-turn until the turn ends.
+	effortHold chan struct{}
 	// remoteControls is every SetSessionRemoteControl asked;
 	// remoteControlResponse and remoteControlErr script the answer (a nil
 	// response confirms the state asked for, re-binding the bridge named or
@@ -380,6 +383,9 @@ func (c *fakeClient) PID() int { return c.pid }
 // scripted it confirms the level asked for.
 func (c *fakeClient) SetSessionEffort(_ context.Context, req *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error) {
 	c.efforts = append(c.efforts, req)
+	if c.effortHold != nil {
+		<-c.effortHold
+	}
 	if c.effortErr != nil || c.effortResponse != nil {
 		return c.effortResponse, c.effortErr
 	}

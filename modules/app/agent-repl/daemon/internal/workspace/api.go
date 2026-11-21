@@ -1319,6 +1319,10 @@ type Sessions interface {
 	// SetEffort asks the workspace's shim for an effort level and, once it
 	// confirms, states the level in effect to the topbar.
 	SetEffort(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// SwitchEffort switches the workspace's live session to an effort level
+	// off the caller's goroutine and answers at once: the shim holds a switch
+	// asked mid-turn until the turn ends (Fleet.SwitchEffort).
+	SwitchEffort(log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel)
 	// SetRemoteControl records the remote-control mode a change leaves on the
 	// workspace, states it to the topbar, and puts it in force on the live
 	// shim; no shim holding a session is the no_session refusal.
