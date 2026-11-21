@@ -102,6 +102,7 @@ import "agentrepl/v1/endpoint_report_composer_entries.proto";
 import "agentrepl/v1/endpoint_report_editor_focus.proto";
 import "agentrepl/v1/endpoint_report_recency_reach.proto";
 import "agentrepl/v1/endpoint_report_latencies.proto";
+import "agentrepl/v1/endpoint_report_vendor_spend.proto";
 import "agentrepl/v1/endpoint_report_page_drawn.proto";
 import "agentrepl/v1/endpoint_report_page_residency.proto";
 import "agentrepl/v1/endpoint_report_page_unloading.proto";
@@ -602,6 +603,10 @@ service AgentRepl {
   // A client's finished interaction latencies, into the always-on metrics.
   // See endpoint_report_latencies.proto.
   rpc ReportLatencies(ReportLatenciesRequest) returns (ReportLatenciesResponse);
+
+  // A vendor call Emacs made itself, into the always-on spend metrics. See
+  // endpoint_report_vendor_spend.proto.
+  rpc ReportVendorSpend(ReportVendorSpendRequest) returns (ReportVendorSpendResponse);
 
   // ---- HOST MACHINE ----
   // Facts and controls about the machine the daemon runs on, never about a

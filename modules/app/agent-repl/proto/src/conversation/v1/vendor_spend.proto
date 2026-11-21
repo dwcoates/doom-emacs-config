@@ -1,0 +1,187 @@
+// vendor_spend.proto — WHAT VENDOR CALLS SPENT: the vendor's own usage of
+// each call, tagged by what the call was, for the daemon's always-on spend
+// metrics (skills/agent-repl-metrics/CATALOG.md, `agentrepl_vendor_*`).
+//
+// IN conversation.v1 BECAUSE EVERY PRODUCER SHARES IT: the shim counts its
+// session's calls into its measurements frame (shim.v1.ShimMeasurements),
+// and Emacs reports its own headless calls to the daemon
+// (agentrepl.v1.ReportVendorSpend). conversation.v1 is the one package both
+// import, and it is where PromptOrigin's causes are declared.
+//
+// THE FIGURES ARE THE VENDOR'S. A producer counts the counters of each
+// call's `usage` as the vendor stated them, once per call (one per message
+// id), and derives only the tags below from them. No price is stored: a
+// price-weighted figure is the metrics skill's to derive, from the one table
+// of weights it keeps (skills/agent-repl-metrics/spend-weights.json).
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// The cause a PromptOrigin's turn is spent under. EVERY PromptOrigin value
+// but UNSPECIFIED declares one (the shim's and the daemon's tests refuse a
+// value that does not), so a new origin cannot be added without saying what
+// its spending counts as, and the one table of origins to causes is the enum
+// itself.
+extend google.protobuf.EnumValueOptions {
+  VendorCallCause spend_cause = 60003;
+}
+
+// Why a vendor call was made: the cause of the turn it belongs to.
+enum VendorCallCause {
+  // Never sent: a producer always names a cause, UNSTATED when it cannot.
+  VENDOR_CALL_CAUSE_UNSPECIFIED = 0;
+  // The producer could not name the turn the call belongs to. Recorded at
+  // ERROR by the producer, so an unattributed call is seen, never folded
+  // into another cause.
+  VENDOR_CALL_CAUSE_UNSTATED = 1;
+  // A prompt the user wrote or a command the user ran.
+  VENDOR_CALL_CAUSE_USER_PROMPT = 2;
+  // The daemon's keep-alive of a warm cache (cachelapse.Keeper), parked
+  // conversations' included.
+  VENDOR_CALL_CAUSE_KEEPALIVE = 3;
+  // The first turn a session runs after its cold gate was answered with a
+  // payment: the turn that pays the cold read the user agreed to.
+  VENDOR_CALL_CAUSE_COLD_GATE_ANSWER = 4;
+  // The merge queue's work: its prompts to a merge's workspace (pick,
+  // conflicts, tests, notices) and the deploy checks it runs.
+  VENDOR_CALL_CAUSE_MERGE = 5;
+  // Any other prompt the daemon or Emacs submits on its own: hooks, repairs,
+  // placement, pull-request and GitHub notices, re-drives after a restart.
+  VENDOR_CALL_CAUSE_AUTOMATED = 6;
+  // A notice about, or a prompt from, another workspace: an agent's
+  // `workspace prompt`, a subscription's notice, a derived workspace's notice.
+  VENDOR_CALL_CAUSE_WORKSPACE_NOTICE = 7;
+  // A compaction of the conversation: the compact prompt's turn, and the
+  // summary query the shim runs for a compaction.
+  VENDOR_CALL_CAUSE_COMPACTION = 8;
+  // A turn the vendor started on its own (PROMPT_ORIGIN_VENDOR_STARTED): a
+  // background task's completion, a prompt typed on claude.ai.
+  VENDOR_CALL_CAUSE_VENDOR_STARTED = 9;
+  // The shim's own prompt resuming a turn a network outage broke.
+  VENDOR_CALL_CAUSE_NETWORK_RESUME = 10;
+  // The shim's own prompt retrying a turn a vendor error ended.
+  VENDOR_CALL_CAUSE_VENDOR_ERROR_RETRY = 11;
+  // Claude Code's own cross-session message (SendMessage between sessions).
+  VENDOR_CALL_CAUSE_PEER_MESSAGE = 12;
+  // A created workspace's task prompt.
+  VENDOR_CALL_CAUSE_WORKSPACE_TASK = 13;
+  // Emacs's headless one-line summary of a sent prompt.
+  VENDOR_CALL_CAUSE_PROMPT_SUMMARY = 14;
+  // The daemon's headless questions (internal/headless): names, classifiers.
+  VENDOR_CALL_CAUSE_HEADLESS_QUESTION = 15;
+  // The shim's revision of a response (RevisePrompt's side query).
+  VENDOR_CALL_CAUSE_RESPONSE_REVISION = 16;
+}
+
+// Which agent made a vendor call.
+enum VendorCallAgent {
+  // Never sent.
+  VENDOR_CALL_AGENT_UNSPECIFIED = 0;
+  // The session's main loop.
+  VENDOR_CALL_AGENT_MAIN = 1;
+  // A subagent the session spawned; VendorSpend.subagent_type names its type.
+  VENDOR_CALL_AGENT_SUBAGENT = 2;
+  // A query of its own the shim runs about the conversation: a compaction's
+  // summary, a response revision, a parked conversation's keep-alive.
+  VENDOR_CALL_AGENT_SIDE_QUERY = 3;
+  // A headless CLI run outside any session (the daemon's, Emacs's).
+  VENDOR_CALL_AGENT_HEADLESS = 4;
+}
+
+// What the prompt cache did for a call, read off its usage alone. THE ONE
+// RULE (both producers test against proto/vocab/vendor-spend.json's cases):
+// with context = cache_read + cache_write + uncached and fresh = cache_write
+// + uncached,
+//   - WARM when fresh * 2 <= context * 0.1: what the cache did not serve
+//     costs no more to write than the context costs to re-read;
+//   - otherwise UNCACHED_NO_WRITE when nothing was written;
+//   - otherwise COLD_REWRITE when fresh exceeds what the cache served;
+//   - otherwise PARTIAL.
+enum VendorCacheOutcome {
+  // Never sent.
+  VENDOR_CACHE_OUTCOME_UNSPECIFIED = 0;
+  // The cache served the prefix.
+  VENDOR_CACHE_OUTCOME_WARM = 1;
+  // The cache served the larger part, and a costly tail was written.
+  VENDOR_CACHE_OUTCOME_PARTIAL = 2;
+  // Most of the context was written to the cache again.
+  VENDOR_CACHE_OUTCOME_COLD_REWRITE = 3;
+  // A costly part of the context was sent uncached and nothing was written:
+  // the next call pays for it again.
+  VENDOR_CACHE_OUTCOME_UNCACHED_NO_WRITE = 4;
+}
+
+// Why the cache did not serve a call that was not WARM, by the first that
+// holds of: FIRST_CALL, COMPACTION, MODEL_SWITCH, LAPSE_1H, LAPSE_5M,
+// VENDOR_ERROR_RETRY, PREFIX_CHANGE, else UNSTATED.
+enum VendorColdReason {
+  // A WARM call: no reason.
+  VENDOR_COLD_REASON_UNSPECIFIED = 0;
+  // None of the reasons below explains it.
+  VENDOR_COLD_REASON_UNSTATED = 1;
+  // The agent's first call: no earlier call of the same agent is known
+  // (a fresh session, a subagent's first call, a headless run).
+  VENDOR_COLD_REASON_FIRST_CALL = 2;
+  // The agent's earlier call wrote at the 5-minute tier and was longer ago.
+  VENDOR_COLD_REASON_LAPSE_5M = 3;
+  // The agent's earlier call wrote at the 1-hour tier and was longer ago.
+  VENDOR_COLD_REASON_LAPSE_1H = 4;
+  // The agent's earlier call ran on another model.
+  VENDOR_COLD_REASON_MODEL_SWITCH = 5;
+  // Within its tier and on its model, the cache served less than the
+  // agent's earlier call left cached: the prefix it sent changed (the
+  // vendor's thinking_drop / prefix_mismatch).
+  VENDOR_COLD_REASON_PREFIX_CHANGE = 6;
+  // The first call after the conversation was compacted.
+  VENDOR_COLD_REASON_COMPACTION = 7;
+  // The call retries a turn a vendor error ended.
+  VENDOR_COLD_REASON_VENDOR_ERROR_RETRY = 8;
+}
+
+// Token counts by kind, as the vendor's usage states them.
+message VendorTokens {
+  // Input processed fresh and not cached (`input_tokens`).
+  uint64 uncached_input = 1;
+  // Input the prompt cache served (`cache_read_input_tokens`).
+  uint64 cache_read = 2;
+  // Input written to the cache at the 5-minute tier
+  // (`cache_creation.ephemeral_5m_input_tokens`, or the whole
+  // `cache_creation_input_tokens` when the usage states no tier split).
+  uint64 cache_write_5m = 3;
+  // Input written to the cache at the 1-hour tier
+  // (`cache_creation.ephemeral_1h_input_tokens`).
+  uint64 cache_write_1h = 4;
+  // Generated tokens, thinking included (`output_tokens`).
+  uint64 output = 5;
+}
+
+// The spend of one kind of vendor call: every call with these tags. In a
+// shim's measurements frame it is CUMULATIVE since the frame's counting
+// instant, each tag set at most once; in Emacs's report it is the calls of
+// one run.
+message VendorSpend {
+  // The model the call ran on, as the vendor named it. Never `<synthetic>`:
+  // a call the CLI made up is no vendor call and is not counted.
+  string model = 1;
+  VendorCallAgent agent = 2;
+  // A SUBAGENT's type as its spawn named it (`subagent_type`), `unstated`
+  // when the spawn was not seen; empty for every other agent.
+  string subagent_type = 3;
+  VendorCallCause cause = 4;
+  VendorCacheOutcome cache_outcome = 5;
+  // UNSPECIFIED exactly when cache_outcome is WARM.
+  VendorColdReason cold_reason = 6;
+  // The upper bound, in tokens, of the context bucket the calls' context
+  // fell in (proto/vocab/vendor-spend.json `context_buckets_tokens`); unset
+  // for a context above every bound.
+  optional uint64 context_le_tokens = 7;
+  // How many calls.
+  uint64 calls = 8;
+  // What they spent, summed.
+  VendorTokens tokens = 9;
+}
