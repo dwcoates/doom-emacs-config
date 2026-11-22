@@ -3916,12 +3916,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // takes in this turn now, while nobody waits on it.
       transcriptIndexOf(identity.vendorSessionId).refresh();
     }
+    // ONE RECORD CLOSES EVERY TURN, keep-alive or not, which its keepalive
+    // field tells apart.
+    const closed = (): void => LOGGER.info({ turn_id: ended.id.value, keepalive: ended.keepalive }, "closed a turn");
     if (ended.keepalive) {
       // A KEEP-ALIVE'S END IS NOBODY'S TURN END. Nothing is pushed for it: the
       // context usage it moved, the title it cannot have changed and the
       // account usage it spent all belong to housekeeping no surface shows, and
       // the next real turn's own end restates every one of them.
-      LOGGER.info({ turn_id: ended.id.value, keepalive: true }, "closed a keep-alive turn");
+      closed();
       return;
     }
     await pushContextUsage();
@@ -3936,7 +3939,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // Awaited, not fired and forgotten: an unawaited probe would race the next
     // turn's own close.
     await reprobeSessionFacts();
-    LOGGER.info({ turn_id: ended.id.value, keepalive: false }, "closed a turn");
+    closed();
   }
 
   /** A model change that waited for the turn to end lands now, and its caller is answered. */
