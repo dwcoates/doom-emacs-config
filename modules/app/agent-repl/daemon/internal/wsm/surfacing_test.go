@@ -186,28 +186,6 @@ func TestEndSurfacingTakesTheMarkOff(t *testing.T) {
 	}
 }
 
-func TestClearSurfacedTakesOffOnlyTheNamedWorkspaces(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	w := newSelectionFoldWorld(t, s)
-	for _, ws := range []Workspace{w.root, w.child, w.other} {
-		if _, err := s.SurfaceHeldWork(context.Background(), ws.ID); err != nil {
-			t.Fatalf("SurfaceHeldWork: %v", err)
-		}
-	}
-
-	// Act
-	err := s.ClearSurfaced(context.Background(), []WorkspaceID{w.root.ID, w.child.ID})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ClearSurfaced: %v", err)
-	}
-	if surfacedOf(t, s, w.root.ID) || surfacedOf(t, s, w.child.ID) || !surfacedOf(t, s, w.other.ID) {
-		t.Errorf("surfaced root/child/other = %v/%v/%v, want false/false/true", surfacedOf(t, s, w.root.ID), surfacedOf(t, s, w.child.ID), surfacedOf(t, s, w.other.ID))
-	}
-}
-
 func TestAListedWorkspaceCarriesItsSurfacedMark(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -240,7 +218,6 @@ func TestSurfacingWritesSurfaceAStoreFailure(t *testing.T) {
 			return err
 		}},
 		{name: "EndSurfacing", call: func(s *store, id WorkspaceID) error { _, err := s.EndSurfacing(context.Background(), id); return err }},
-		{name: "ClearSurfaced", call: func(s *store, id WorkspaceID) error { return s.ClearSurfaced(context.Background(), []WorkspaceID{id}) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

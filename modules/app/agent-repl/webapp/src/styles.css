@@ -1827,7 +1827,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    count (owner request, 2026-11-20: the one parenthetical, drawn by
    showWorkspaceCountParenthetical): slightly smaller, its parentheses, slashes
    and total in the subsection count's ink, never shrunk away by a long name.
-   Its working and merging numbers wear their own tones (.tone-red, .tone-purple). */
+   Its merging number wears its own tone (.tone-purple). */
 #ws-sidebar .row .sb-child-count { font-size: 0.85em; color: var(--repo-head-expanded); flex: none; margin-left: 0.3em; }
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A NAME'S PREFIX (src/name-prefix.ts) stands right before the name, its

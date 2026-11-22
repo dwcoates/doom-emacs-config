@@ -132,7 +132,7 @@ func TestEndSurfacingTakesTheMarkOffAndRepublishes(t *testing.T) {
 	}
 }
 
-func TestAFoldTheUserMakesClearsTheSurfacingOfItsMembers(t *testing.T) {
+func TestAFoldTheUserMakesLeavesTheSurfacingOfItsMembers(t *testing.T) {
 	// Arrange
 	f := foldedFixture(t)
 	f.db.subsections[0].Folded = false
@@ -149,15 +149,12 @@ func TestAFoldTheUserMakesClearsTheSurfacingOfItsMembers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FoldSubsection: %v", err)
 	}
-	if !slices.Equal(f.db.clearedSurfaced, []ids.WorkspaceID{"inside"}) {
-		t.Errorf("cleared = %v, want only the subsection's member", f.db.clearedSurfaced)
-	}
-	if f.db.workspaces["inside"].Surfaced || !f.db.workspaces["outside"].Surfaced {
-		t.Errorf("inside surfaced = %v, outside surfaced = %v; want false, true", f.db.workspaces["inside"].Surfaced, f.db.workspaces["outside"].Surfaced)
+	if !f.db.workspaces["inside"].Surfaced || !f.db.workspaces["outside"].Surfaced {
+		t.Errorf("inside surfaced = %v, outside surfaced = %v; want true, true", f.db.workspaces["inside"].Surfaced, f.db.workspaces["outside"].Surfaced)
 	}
 }
 
-func TestAnExpandClearsNoSurfacing(t *testing.T) {
+func TestAnExpandLeavesTheSurfacing(t *testing.T) {
 	// Arrange
 	f := foldedFixture(t)
 	inside := f.db.workspaces["inside"]
@@ -171,8 +168,8 @@ func TestAnExpandClearsNoSurfacing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FoldSubsection: %v", err)
 	}
-	if len(f.db.clearedSurfaced) != 0 {
-		t.Errorf("cleared = %v, want none", f.db.clearedSurfaced)
+	if !f.db.workspaces["inside"].Surfaced {
+		t.Errorf("inside surfaced = false, want true")
 	}
 }
 

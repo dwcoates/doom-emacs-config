@@ -1192,8 +1192,8 @@ export type RosterOpenRow = Message<"frontend.v1.RosterOpenRow"> & {
    * subsection's, or an ancestor's `children_fold`) and the turn is still
    * running, or it is the workspace the user is on. The fold stays collapsed
    * and hides every other row under it; this one is drawn, and its `tab` is
-   * numbered, not folded. It ends with the turn, when the user switches away
-   * from it, and when the user folds the section again. False on a row no
+   * numbered, not folded. It ends with the turn and when the user switches away
+   * from it; folding the section again does not end it. False on a row no
    * fold covers and on a row the fold hides.
    *
    * @generated from field: bool surfaced = 7;

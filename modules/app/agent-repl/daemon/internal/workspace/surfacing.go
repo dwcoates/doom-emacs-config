@@ -12,7 +12,7 @@ import (
 // while a fold hides it (its repository's, its subsection's, or its
 // ancestors' children fold) is marked surfaced: the roster draws it, and only
 // it, inside the fold. The fold itself stays folded. The mark comes off when
-// the turn ends, and when the user folds the section again.
+// the turn ends, and folding the section again leaves it.
 
 const (
 	opSurfaceForWork = "daemon.workspace.surface_for_work"

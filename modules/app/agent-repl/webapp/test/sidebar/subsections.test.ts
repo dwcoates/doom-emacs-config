@@ -203,7 +203,7 @@ describe("a repository's subsections", () => {
     ]).toEqual(["sub-1", "later", "(1)", true]);
   });
 
-  it("draw their count as the working, the synchronously merging and every row, folded or not", () => {
+  it("draw their count as the synchronously merging and every row, folded or not", () => {
     // Arrange
     const rows = [
       row({ id: "ws-1", status: { case: "thinking", value: {} } }),
@@ -219,12 +219,11 @@ describe("a repository's subsections", () => {
     const count = pane.querySelector(".sb-subsection .sb-count") as HTMLElement;
     expect([
       count.textContent,
-      count.querySelector(".sb-count-working")?.className,
       count.querySelector(".sb-count-merging")?.className,
-    ]).toEqual(["(1/1/3)", "sb-count-working tone-red", "sb-count-merging tone-purple"]);
+    ]).toEqual(["(1/3)", "sb-count-merging tone-purple"]);
   });
 
-  it("count a nested child's work toward the subsection", () => {
+  it("count a nested working child as no merge and draw no working number", () => {
     // Arrange
     const sub = { id: "sub-1", rows: [row({ id: "p", children: [row({ id: "c", status: { case: "thinking", value: {} } })] })] };
 
@@ -232,7 +231,7 @@ describe("a repository's subsections", () => {
     const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [sub] })] }), sidebarContext());
 
     // Assert
-    expect(pane.querySelector(".sb-subsection .sb-count-working")?.textContent).toBe("1");
+    expect(pane.querySelector(".sb-subsection .sb-count")?.textContent).toBe("(1)");
   });
 
   it("refuse a count with more unfolded rows than rows", () => {

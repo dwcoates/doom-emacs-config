@@ -278,22 +278,9 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 		log.Error(spec.op, "could not record the "+spec.what+"'s fold", dlog.Context{"cause": err.Error()})
 		return nil, nil, fmt.Errorf("fold %s %q: %w", spec.what, spec.target, err)
 	}
-	// A FOLD THE USER MAKES HIDES EVERYTHING UNDER IT, a working workspace
-	// that surfaced under an earlier fold included (surfacing.go).
-	if spec.folded {
-		var surfaced []ids.WorkspaceID
-		for _, ws := range workspaces {
-			if ws.Surfaced && members(ws) {
-				surfaced = append(surfaced, ws.ID)
-			}
-		}
-		if len(surfaced) > 0 {
-			if err := v.deps.DB.ClearSurfaced(ctx, surfaced); err != nil {
-				log.Error(spec.op, "could not take the surfacing off the workspaces the "+spec.what+"'s fold hides", dlog.Context{"cause": err.Error(), "workspaces": len(surfaced)})
-				return nil, nil, fmt.Errorf("fold %s %q: clear the surfacing of its workspaces: %w", spec.what, spec.target, err)
-			}
-		}
-	}
+	// A FOLD THE USER MAKES LEAVES A WORKING WORKSPACE DRAWN: a surfaced mark
+	// stands until its turn ends (surfacing.go), through any number of
+	// unfolds and folds.
 	return workspaces, members, nil
 }
 

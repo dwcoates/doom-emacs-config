@@ -27,21 +27,21 @@ const drawnCount = (n: number): HTMLElement | null => {
 };
 
 describe("childCountOf", () => {
-  it("counts own children, the working ones and the synchronously merging ones", () => {
+  it("counts own children and the synchronously merging ones", () => {
     // Act / Assert
-    expect(childCountOf({ children: children(4, 1, 2) }, "R")).toEqual({ workspaces: 4, working: 1, syncMerging: 2 });
+    expect(childCountOf({ children: children(4, 1, 2) }, "R")).toEqual({ workspaces: 4, syncMerging: 2 });
   });
   it("counts a folded child's work as any other's", () => {
     // Arrange: child 0 is folded and working.
     // Act / Assert
-    expect(childCountOf({ children: children(2, 1) }, "R")).toEqual({ workspaces: 2, working: 1, syncMerging: 0 });
+    expect(childCountOf({ children: children(2, 1) }, "R")).toEqual({ workspaces: 2, syncMerging: 0 });
   });
   it("counts every repository block's rows", () => {
     // Arrange
     const blocks = [{ rows: [openRow(row({ id: "b-1" })), openRow(row({ id: "b-2" }))] }] as unknown as RowFamily["repositoryBlocks"];
 
     // Act / Assert
-    expect(childCountOf({ children: children(1, 1), repositoryBlocks: blocks }, "R")).toEqual({ workspaces: 3, working: 1, syncMerging: 0 });
+    expect(childCountOf({ children: children(1, 1), repositoryBlocks: blocks }, "R")).toEqual({ workspaces: 3, syncMerging: 0 });
   });
   it("counts exactly the rows openKin reads, the one walk of a row's kin", () => {
     // Arrange
@@ -51,7 +51,7 @@ describe("childCountOf", () => {
     expect(childCountOf(open, "R").workspaces).toBe(openKin(open, "R").length);
   });
   it("counts nothing for no kin", () => {
-    expect(childCountOf({}, "R")).toEqual({ workspaces: 0, working: 0, syncMerging: 0 });
+    expect(childCountOf({}, "R")).toEqual({ workspaces: 0, syncMerging: 0 });
   });
   it("refuses a child with no row", () => {
     expect(() => childCountOf({ children: [{}] }, "R")).toThrow(MalformedView);
@@ -67,7 +67,7 @@ describe("drawChildCount", () => {
     const drawn = drawChildCount({ children: children(6, 2, 1) }, "R");
 
     // Assert
-    expect([drawn?.textContent, drawn?.classList.contains("sb-count")]).toEqual(["(2/1/6)", true]);
+    expect([drawn?.textContent, drawn?.classList.contains("sb-count")]).toEqual(["(1/6)", true]);
   });
 });
 
