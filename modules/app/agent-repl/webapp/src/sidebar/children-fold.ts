@@ -76,3 +76,14 @@ export function wireChildrenFold(
     gesture(row, mark);
   });
 }
+
+/**
+ * Make MARK, the status mark of a row with no children, a no-op: a click on it
+ * neither folds nor reaches the row's select click (owner request, 2026-11-21).
+ */
+export function swallowChildlessMarkClick(mark: HTMLElement): void {
+  mark.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+}

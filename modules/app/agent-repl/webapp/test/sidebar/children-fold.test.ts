@@ -99,6 +99,32 @@ describe("a row's children fold", () => {
     expect([markOf(drawn).hasAttribute(CHILDREN_FOLD_CONTROL_ATTRIBUTE), drawn.classList.contains("folded")]).toEqual([false, false]);
   });
 
+  it("selects and folds nothing on a click of the mark of a row with no children", () => {
+    // Arrange
+    const selected: string[] = [];
+    const asked: UpdateSidebarViewRequest[] = [];
+    const sc = sidebarContext(
+      appContext({
+        updateSidebarView: (request) => {
+          asked.push(request);
+          return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
+        },
+        selectInEditor: (request) => {
+          selected.push(request.workspace?.id ?? "");
+          throw new Error("a childless mark click selected a workspace");
+        },
+      }),
+    );
+    const drawn = drawRosterFamily(openRow(row({ id: "ws-1" })), sc, "R");
+    document.body.appendChild(drawn);
+
+    // Act
+    markOf(drawn).click();
+
+    // Assert
+    expect([selected, asked]).toEqual([[], []]);
+  });
+
   it.each([
     { name: "collapsible", fold: COLLAPSIBLE, ask: "collapse" },
     { name: "collapsed", fold: COLLAPSED, ask: "expand" },
