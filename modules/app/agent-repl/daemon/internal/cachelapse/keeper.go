@@ -128,6 +128,10 @@ type DB interface {
 	// ReadOnly reports whether the handle is a joining successor's, not yet
 	// promoted: the incumbent is still the sole writer.
 	ReadOnly() bool
+	// Promoted is the handle's promotion latch, closed exactly when it
+	// writes (wsm.DB.Promoted): what a joining successor withheld is written
+	// when it closes (promotion.go).
+	Promoted() <-chan struct{}
 	// Session reads a workspace's session record: its engagement clock and
 	// its park.
 	Session(ctx context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error)
@@ -358,6 +362,12 @@ type Keeper struct {
 	// the instant it was pulled to, until a beat is answered (outage.go);
 	// owned by Run alone.
 	early map[ids.WorkspaceID]time.Time
+	// withheldEnds is each workspace's keep-alive run end a joining
+	// successor withheld, at the ending that decides most, and withheldOwing
+	// each workspace whose owing decision it withheld; both written at the
+	// promotion (promotion.go) and owned by Run alone.
+	withheldEnds  map[ids.WorkspaceID]wsm.KeepaliveRunEnding
+	withheldOwing map[ids.WorkspaceID]struct{}
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -424,6 +434,9 @@ func New(deps Deps) (*Keeper, error) {
 		coldDue:      map[ids.WorkspaceID]time.Time{},
 		early:        map[ids.WorkspaceID]time.Time{},
 		runSpendMark: map[ids.WorkspaceID]*conversationv1.VendorTokens{},
+
+		withheldEnds:  map[ids.WorkspaceID]wsm.KeepaliveRunEnding{},
+		withheldOwing: map[ids.WorkspaceID]struct{}{},
 	}, nil
 }
 
@@ -525,8 +538,14 @@ func (k *Keeper) enqueue(e edge) {
 }
 
 // Run arms every recorded lapse, then applies edges and takes lapses until
-// ctx ends.
+// ctx ends. It writes what a joining successor withheld once the state
+// handle's promotion latch closes, once (promotion.go).
+//
+// RUN IS THE KEEPER'S ONE GOROUTINE for everything it owns: the boot pass,
+// every edge and every deadline run here, so its maps take no lock.
 func (k *Keeper) Run(ctx context.Context) error {
+	// A nil channel after the latch is taken: the promotion happens once.
+	promoted := k.deps.DB.Promoted()
 	if err := k.restore(ctx); err != nil {
 		k.driveStopped(ctx, err)
 		return err
@@ -556,6 +575,10 @@ func (k *Keeper) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-promoted:
+			promoted = nil
+			k.promoted(ctx)
+			k.stateNextKeepalives()
 		case <-k.wake:
 			for _, e := range k.take() {
 				k.apply(ctx, e)

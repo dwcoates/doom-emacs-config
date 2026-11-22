@@ -288,11 +288,11 @@ func (k *Keeper) owesAgain(ctx context.Context, log dlog.Logger, record wsm.Work
 //
 // A JOINING SUCCESSOR WRITES NOTHING: its handle is read-only until its
 // promotion, and the incumbent, still the sole writer, records its own
-// decisions. The row still reads as it did, so this keeper's first plan
-// after the promotion writes the decision then.
+// decisions. The workspace is withheld instead, and the loop reconciles it
+// the moment the handle writes (promotion.go), which takes the decision
+// afresh from the row and writes it then.
 func (k *Keeper) recordOwing(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, owing bool, fields dlog.Context) {
-	if k.deps.DB.ReadOnly() {
-		log.Debug(opDrive, "the state handle is not promoted yet; whether the workspace owes keep-alives is recorded once it writes", dlog.Merge(fields, dlog.Context{"owing": owing}))
+	if k.withheldWhileJoining(log, "whether the workspace owes keep-alives", dlog.Merge(fields, dlog.Context{"owing": owing}), func() { k.withholdOwing(ws) }) {
 		return
 	}
 	if err := k.deps.DB.SetKeepaliveOwing(ctx, ws, owing, k.deps.Clock.Now()); err != nil && !leaving(ctx, log, opDrive, "recording whether the workspace owes keep-alives", err) {
