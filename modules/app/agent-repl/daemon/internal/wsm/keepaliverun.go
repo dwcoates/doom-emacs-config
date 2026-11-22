@@ -3,7 +3,6 @@ package wsm
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -149,12 +148,8 @@ func (s *store) EndKeepaliveRun(ctx context.Context, id WorkspaceID, ending Keep
 	var recorded bool
 	err := s.write(ctx, "daemon.wsm.end_keepalive_run", dlog.Context{"workspace": string(id), "ending": int(ending)}, func(ctx context.Context, tx *sql.Tx) error {
 		var stands, ended, closed bool
-		if err := tx.QueryRowContext(ctx, `SELECT keepalive_run_beats, keepalive_run_turn_at IS `+lastTurnEndedColumn+`, keepalive_run_ended, closed,
-			`+strings.Join(runSpendColumns, ", ")+` FROM workspaces WHERE id = ?`, id).Scan(
+		if err := scanWorkspaceRow(ctx, tx, id, `keepalive_run_beats, keepalive_run_turn_at IS `+lastTurnEndedColumn+`, keepalive_run_ended, closed, `+strings.Join(runSpendColumns, ", "),
 			&run.Beats, &stands, &ended, &closed, &run.Spent.Uncached, &run.Spent.CacheRead, &run.Spent.Write5m, &run.Spent.Write1h, &run.Spent.Output); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-			}
 			return err
 		}
 		if run.Beats == 0 || ended {

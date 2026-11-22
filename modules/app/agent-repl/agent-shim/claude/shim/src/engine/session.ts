@@ -222,6 +222,7 @@ import {
   toVendorPermissionMode,
 } from "./permission-gate.js";
 import { Measurements, MeasurementsCursor, processHeap, sampleEventLoop, withMeasurements, type Wait } from "./measurements.js";
+import { SEND_MESSAGE_TOOL } from "../sdk/agent-repl-hooks.js";
 import { causeOfOrigin, MAIN_AGENT, UNSTATED_SUBAGENT_TYPE } from "./vendor-spend.js";
 import { spawnsSubagent } from "../convert/tools/registry.js";
 import { SessionPushes } from "./pushes.js";
@@ -2264,7 +2265,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const content = (message.message as { content?: unknown } | undefined)?.content;
     if (!Array.isArray(content)) return;
     for (const block of content as readonly { type?: unknown; id?: unknown; name?: unknown; input?: unknown }[]) {
-      if (block.type !== "tool_use" || typeof block.id !== "string" || !spawnsSubagent(String(block.name))) continue;
+      // A SendMessage that resumes an agent parents the resumed run's calls, as a spawn does the first run's.
+      if (block.type !== "tool_use" || typeof block.id !== "string" || !(spawnsSubagent(String(block.name)) || block.name === SEND_MESSAGE_TOOL)) continue;
       const type = (block.input as { subagent_type?: unknown } | undefined)?.subagent_type;
       ledger.noteSpawn(block.id, typeof type === "string" && type !== "" ? type : undefined, cause);
     }

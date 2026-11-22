@@ -62,6 +62,7 @@
 (declare-function agent-repl-wire--decoded "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire-decode-inside-temporary-directory "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--object "agent-repl-wire-common" (message-name value))
+(declare-function agent-repl-wire--encode-string "agent-repl-wire-common" (message-name field value))
 (declare-function agent-repl-wire--check-keys "agent-repl-wire-common" (message-name object allowed))
 (declare-function agent-repl-wire--decode-oneof "agent-repl-wire-common"
                   (message-name oneof object arms &optional unset-legal))

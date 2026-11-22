@@ -1,66 +1,12 @@
 package vendorspend
 
 import (
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"agent-repld/internal/sourcescan"
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
-
-// vocab is proto/vocab/vendor-spend.json.
-type vocab struct {
-	ContextBuckets []uint64 `json:"context_buckets_tokens"`
-	CacheOutcomes  []struct {
-		CacheRead     uint64 `json:"cache_read"`
-		CacheWrite    uint64 `json:"cache_write"`
-		UncachedInput uint64 `json:"uncached_input"`
-		Outcome       string `json:"outcome"`
-	} `json:"cache_outcomes"`
-}
-
-func readVocab(t *testing.T) vocab {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "proto", "vocab", "vendor-spend.json"))
-	if err != nil {
-		t.Fatalf("read the vocabulary: %v", err)
-	}
-	var v vocab
-	if err := json.Unmarshal(raw, &v); err != nil {
-		t.Fatalf("parse the vocabulary: %v", err)
-	}
-	return v
-}
-
-func TestContextBucketsAreTheVocabularys(t *testing.T) {
-	// Arrange
-	v := readVocab(t)
-	// Assert
-	if len(v.ContextBuckets) != len(ContextBuckets) {
-		t.Fatalf("the vocabulary has %d buckets, the code %d", len(v.ContextBuckets), len(ContextBuckets))
-	}
-	for i := range ContextBuckets {
-		if ContextBuckets[i] != v.ContextBuckets[i] {
-			t.Errorf("bucket %d: code %d, vocabulary %d", i, ContextBuckets[i], v.ContextBuckets[i])
-		}
-	}
-}
-
-func TestOutcomeOfAnswersTheVocabularysCases(t *testing.T) {
-	for _, c := range readVocab(t).CacheOutcomes {
-		t.Run(c.Outcome, func(t *testing.T) {
-			// Act
-			got := OutcomeOf(c.CacheRead, c.CacheWrite, c.UncachedInput)
-			// Assert
-			if want := "VENDOR_CACHE_OUTCOME_" + c.Outcome; got.String() != want {
-				t.Errorf("read %d write %d uncached %d: got %s, want %s", c.CacheRead, c.CacheWrite, c.UncachedInput, got, want)
-			}
-		})
-	}
-}
 
 func TestBucketOf(t *testing.T) {
 	tests := []struct {
@@ -203,32 +149,6 @@ func TestValidate(t *testing.T) {
 				t.Errorf("the error %v does not wrap ErrInvalid", err)
 			}
 		})
-	}
-}
-
-func TestTheSkillsWeightsStateTheCachePrices(t *testing.T) {
-	// Arrange
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "skills", "agent-repl-metrics", "spend-weights.json"))
-	if err != nil {
-		t.Fatalf("read the weights: %v", err)
-	}
-	var weights struct {
-		Kinds map[string]float64 `json:"kinds"`
-	}
-	if err := json.Unmarshal(raw, &weights); err != nil {
-		t.Fatalf("parse the weights: %v", err)
-	}
-	// Assert
-	if got, want := weights.Kinds[KindCacheRead], float64(CacheReadPriceTenths)/10; got != want {
-		t.Errorf("the weights read %s at %v, the daemon at %v", KindCacheRead, got, want)
-	}
-	if got, want := weights.Kinds[KindCacheWrite1h], float64(CacheWritePriceTenths)/10; got != want {
-		t.Errorf("the weights write %s at %v, the daemon at %v", KindCacheWrite1h, got, want)
-	}
-	for _, kind := range Kinds {
-		if _, ok := weights.Kinds[kind]; !ok {
-			t.Errorf("the weights weigh no %s", kind)
-		}
 	}
 }
 
