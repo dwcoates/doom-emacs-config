@@ -738,13 +738,9 @@ type Arrangement struct {
 // in ONE read transaction, so they are one snapshot of the store.
 func (s *store) ReadArrangement(ctx context.Context) (Arrangement, error) {
 	var out Arrangement
-	err := s.read(ctx, "daemon.wsm.read_arrangement", dlog.Context{}, func(ctx context.Context) error {
-		tx, err := s.q(ctx).BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-		if err != nil {
-			return fmt.Errorf("wsm: begin the arrangement read: %w", err)
-		}
-		defer s.endTx(tx, "daemon.wsm.read_arrangement", dlog.Context{})
+	err := s.snapshot(ctx, "daemon.wsm.read_arrangement", "the arrangement read", func(ctx context.Context, tx *sql.Tx) error {
 		var read Arrangement
+		var err error
 		if read.Workspaces, err = listWorkspaces(ctx, tx); err != nil {
 			return err
 		}
@@ -761,6 +757,21 @@ func (s *store) ReadArrangement(ctx context.Context) (Arrangement, error) {
 		return nil
 	})
 	return out, err
+}
+
+// snapshot runs fn in ONE read-only transaction, so every read it makes is
+// one snapshot of the store: rows read apart from each other can never
+// disagree because a write landed between the reads. WHAT names the read in
+// its begin failure.
+func (s *store) snapshot(ctx context.Context, op, what string, fn func(context.Context, *sql.Tx) error) error {
+	return s.read(ctx, op, dlog.Context{}, func(ctx context.Context) error {
+		tx, err := s.q(ctx).BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return fmt.Errorf("wsm: begin %s: %w", what, err)
+		}
+		defer s.endTx(tx, op, dlog.Context{})
+		return fn(ctx, tx)
+	})
 }
 
 // nullableID is a typed id as a SQL argument, NULL for none.
