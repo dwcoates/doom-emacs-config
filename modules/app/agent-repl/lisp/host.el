@@ -2107,7 +2107,8 @@ back with the page kept and Emacs measures it here
     (agent-repl-host--measure-downtime ws trigger (cdr agent-repl-host--landing-downtime))))
 
 (defun agent-repl-host--measure-downtime (ws trigger started)
-  "Report WS\='s outage from STARTED (epoch ms, or nil) to now, no page having loaded."
+  "Report WS\='s outage from STARTED (epoch ms, or nil) to now.
+No page loaded to carry STARTED, so Emacs measures it."
   (when started
     (let ((seconds (/ (- (agent-repl--now-unix-ms) started) 1000.0)))
       (agent-repl--info ws "elisp.host.downtime-measured ws=%s trigger=%s seconds=%.3f"
