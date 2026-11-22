@@ -14,13 +14,7 @@ import (
 // prK: the workspace owns the pull request.
 func (r *rig) own(t *testing.T) {
 	t.Helper()
-	sub, _, err := r.w.Anchor(context.Background(), r.ws, prK, wsm.AllPullRequestEvents(), wsm.PullRequestOriginOwnedLink)
-	if err != nil {
-		t.Fatalf("Anchor: %v", err)
-	}
-	if _, err := r.db.SubscribePullRequest(context.Background(), sub); err != nil {
-		t.Fatalf("SubscribePullRequest: %v", err)
-	}
+	r.anchorAs(t, prK, wsm.AllPullRequestEvents(), wsm.PullRequestOriginOwnedLink)
 }
 
 func TestAnOwnedPullRequestInAGithubMergeQueueIsToldAsADeployment(t *testing.T) {

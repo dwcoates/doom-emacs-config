@@ -1653,6 +1653,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Serves:       rolloutController.ServesIntake,
 		Clock:        clock.System{},
 		Every:        prwatch.DefaultEvery,
+		OwnedEvery:   prwatch.DefaultOwnedEvery,
 		// Every owned pull request standing in a GitHub merge queue is drawn
 		// by the merge orchestrator as its owner's deploying place.
 		Deployments: mergeOrchestrator,
