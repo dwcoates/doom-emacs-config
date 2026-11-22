@@ -886,3 +886,110 @@ func TestARestartOfTheTestServiceLeavesARemediationsGateRunning(t *testing.T) {
 		t.Fatalf("record = %+v (%v), want no gate taken off the service", rec, ok)
 	}
 }
+
+// exhaustedGatingFinish records ws-fixer's finish at gating with its fixing
+// rounds spent (MaxFixAttempts), as the finish a last failing gate gives up.
+func exhaustedGatingFinish(t *testing.T, h *harness) wsm.RemediationFinish {
+	t.Helper()
+	ctx := context.Background()
+	begin := wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}
+	if _, err := h.db.BeginRemediationFinish(ctx, begin); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < MaxFixAttempts; i++ {
+		if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationFixing, deployStarted); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.db.BeginRemediationFinish(ctx, begin); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return *finishOf(t, h)
+}
+
+func TestAGivenUpRemediationsFinishEndsAndTheNextFinishBegins(t *testing.T) {
+	tests := []struct {
+		name          string
+		endChain      bool
+		wantEscalated bool
+	}{
+		{name: "its chain ended already", endChain: true},
+		{name: "its chain is live and escalated", wantEscalated: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			ctx := context.Background()
+			f := exhaustedGatingFinish(t, h)
+			if tt.endChain {
+				if _, err := h.db.ReleaseMediation(ctx, mediationKey(h), deployStarted); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}}
+
+			// Act
+			h.o.runRemediationFinish(ctx, f)
+
+			// Assert
+			if got := finishOf(t, h); got != nil {
+				t.Fatalf("finish %+v, want it ended", got)
+			}
+			if m := owedCheck(t, h); (m != nil && m.Escalated()) != tt.wantEscalated {
+				t.Fatalf("check %+v, want escalated %v", m, tt.wantEscalated)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish,
+				Message: "the finish of a given-up fix was ended"}); !ok {
+				t.Fatalf("records = %v, want the end at INFO", h.logs.Records())
+			}
+			if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+				t.Fatalf("a new finish after the give-up: %v", err)
+			}
+		})
+	}
+}
+
+func TestAnAlreadyLeakedGivenUpFinishHealsAtTheNextFinish(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		wantArm string
+	}{
+		{name: "a gating finish with spent rounds and no run heals", arrange: func(t *testing.T, h *harness) { exhaustedGatingFinish(t, h) }},
+		{name: "one whose run goes in this daemon is refused", wantArm: ArmAlreadyMerging, arrange: func(t *testing.T, h *harness) {
+			exhaustedGatingFinish(t, h)
+			h.o.mu.Lock()
+			h.o.remediationRuns = map[ids.WorkspaceID]bool{"ws-fixer": true}
+			h.o.mu.Unlock()
+		}},
+		{name: "a gating finish with rounds left is refused", wantArm: ArmAlreadyMerging, arrange: func(t *testing.T, h *harness) {
+			if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}}
+			tt.arrange(t, h)
+
+			// Act
+			err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+			// Assert
+			if tt.wantArm == "" {
+				if err != nil {
+					t.Fatalf("FinishRemediation: %v", err)
+				}
+				return
+			}
+			var refusal *RefusalError
+			if !errors.As(err, &refusal) || refusal.Arm != tt.wantArm {
+				t.Fatalf("err = %v, want refusal %s", err, tt.wantArm)
+			}
+		})
+	}
+}
