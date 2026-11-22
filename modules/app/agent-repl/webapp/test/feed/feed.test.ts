@@ -2743,10 +2743,25 @@ describe("mountFeed: the latest-visible latch", () => {
     return { feed, host, tray, scroll, channel, place };
   }
 
-  it("keeps the tail after a scroll brings the last row into view", async () => {
+  it("leaves the reader above the tail where they are after a scroll brings the last row into view", async () => {
     // Arrange
     const m = await mounted(0);
     m.place(m.host.querySelector('[data-feed-row="r1"]'), 250);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(100);
+    m.feed.dispose();
+  });
+
+  it("keeps the tail after the reader scrolls down to it with the last row in view", async () => {
+    // Arrange
+    const m = await mounted(0);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), 250);
+    m.scroll.dispatchEvent(new Event("wheel"));
+    m.scroll.scrollTop = 1700;
     m.scroll.dispatchEvent(new Event("scroll"));
     // Act
     m.channel.push(push(responseRow("r2")));
@@ -2769,11 +2784,27 @@ describe("mountFeed: the latest-visible latch", () => {
     m.feed.dispose();
   });
 
-  it("latches on a held prompt in view even with the last row scrolled above it", async () => {
+  it("leaves the reader above the tail where they are with a held prompt in view", async () => {
     // Arrange
     const m = await mounted(1);
     m.place(m.host.querySelector('[data-feed-row="r1"]'), -200);
     m.place(m.tray.querySelector('[data-held-turn="t0"]'), 150);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(100);
+    m.feed.dispose();
+  });
+
+  it("latches on a held prompt in view once the reader scrolls down to the tail", async () => {
+    // Arrange
+    const m = await mounted(1);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), -200);
+    m.place(m.tray.querySelector('[data-held-turn="t0"]'), 150);
+    m.scroll.dispatchEvent(new Event("wheel"));
+    m.scroll.scrollTop = 1700;
     m.scroll.dispatchEvent(new Event("scroll"));
     // Act
     m.channel.push(push(responseRow("r2")));
