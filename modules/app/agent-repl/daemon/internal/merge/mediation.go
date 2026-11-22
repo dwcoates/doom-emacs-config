@@ -1098,14 +1098,21 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 // queue nothing holds now advances. ADVANCES is the record of a queue nothing
 // holds any more. A release while the mediator's remediation finish stands
 // leaves the queue held for it (deployHold), and so does a newer deploy's
-// check; the record then says so and names the holder (held_by).
+// check; the record then says so and names the holder (held_by), and the
+// release a caller recorded (FIELDS' released) is named check_released, since
+// the queue was not released.
 func (o *orchestrator) releasedCheck(ctx context.Context, repo wsm.RepoKey, what, advances string, fields dlog.Context) {
 	hold, err := o.deployHoldOf(ctx, repo)
 	switch {
 	case err != nil:
 		o.deps.Log.Global().Error(opMediation, what+"; what holds the queue after it could not be read, and the queue is kicked to read it again", withField(fields, "error", err.Error()))
 	case hold.holdsQueue():
-		o.deps.Log.Global().Info(opMediation, what+"; the queue stays held for "+heldByWords(hold.heldBy()), withField(fields, "held_by", hold.heldBy()))
+		held := withField(fields, "held_by", hold.heldBy())
+		if released, ok := held["released"]; ok {
+			delete(held, "released")
+			held["check_released"] = released
+		}
+		o.deps.Log.Global().Info(opMediation, what+"; the queue stays held for "+heldByWords(hold.heldBy()), held)
 	default:
 		o.deps.Log.Global().Info(opMediation, advances, fields)
 	}

@@ -1757,10 +1757,16 @@ func TestAReleaseWhileTheMediatorsFinishStandsLeavesTheQueueHeldAndSaysSo(t *tes
 			}
 			want := logLike{level: "info", op: opMediation, text: tt.wantMessage}
 			if tt.wantHeld {
-				want.context = map[string]string{"held_by": heldByRemediationFinish}
+				want.context = map[string]string{"held_by": heldByRemediationFinish, "check_released": "true"}
 			}
 			if !loggedLike(h, want) {
 				t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)
+			}
+			// A HELD QUEUE'S RECORD NEVER SAYS IT WAS RELEASED: only the check was.
+			rec, _ := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Match: func(r dlog.Record) bool { return strings.Contains(r.Message, tt.wantMessage) }})
+			if _, said := rec.Context["released"]; tt.wantHeld && said {
+				t.Fatalf("record %+v says released, want only check_released while the queue stays held", rec)
 			}
 		})
 	}
