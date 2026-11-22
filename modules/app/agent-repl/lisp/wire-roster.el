@@ -31,6 +31,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-wire--check-keys "wire-common")
 (declare-function agent-repl-wire--decode-bool "wire-common")
+(declare-function agent-repl-wire--decode-double "wire-common")
 (declare-function agent-repl-wire--decode-empty "wire-common")
 (declare-function agent-repl-wire--decode-int64 "wire-common")
 (declare-function agent-repl-wire--decode-uint32 "wire-common")
@@ -951,7 +952,8 @@ unknown field by the row's key check."
 Returns `(:workspace W :attention A :viewed V
 :view-dwell VD :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:merge-paused MP :merge-turn MT :open-owned-pull-request OP :context-heat CH :visibility VIS
+:merge-paused MP :merge-turn MT :open-owned-pull-request OP
+:context-heat CH :visibility VIS
 :last-selected L :last-turn-ended LT
 :last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
