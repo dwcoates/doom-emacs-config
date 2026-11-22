@@ -1071,7 +1071,15 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 	// the listeners before it runs this hook, so no new connection can
 	// arrive; the ones that never sent a request are closed as a closed
 	// listener would have refused them.
-	srv.RegisterOnShutdown(conns.closeRequestless)
+	// THE EXIT WAITS FOR THIS HOOK. `Server.Shutdown` starts it on its own
+	// goroutine and never waits for it, and a hand-back's connection is
+	// closed by net/http the moment its read is interrupted, so Shutdown
+	// returned while the holder was still answering a return: the process
+	// exited over the exchange and the holder's answer hit a broken pipe
+	// (2026-11-22, e2e AStopAfterACompletedTurnLeavesOnTheStop). Each
+	// hand-back is bounded by sockethold.TakeBound, so the wait is too.
+	closeRequestless, requestlessClosed := joined(conns.closeRequestless)
+	srv.RegisterOnShutdown(closeRequestless)
 	done := make(chan error, 1)
 	// SERVED THROUGH THE GATE'S OWN LISTENER, so the calls it counts are held
 	// open until their bytes are on the socket. A handler returning is not its
@@ -1167,6 +1175,9 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		err := srv.Shutdown(shutdown)
 		after := conns.summary()
 		mark("serve_http_shutdown(held "+held+"; after "+after+")", start)
+		start = time.Now()
+		requestlessClosed()
+		mark("serve_requestless_closed", start)
 		if errors.Is(err, context.DeadlineExceeded) {
 			exit.Log.Warn("daemon.cmd.serve", "the exit's http shutdown grace expired with connections still held; closing them under their requests", dlog.Context{
 				"grace_ms": grace.Milliseconds(),
@@ -1194,6 +1205,20 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		mark("serve_go_away", start)
 		return err
 	}
+}
+
+// joined answers RUN, which runs F, and WAIT, which returns once RUN has
+// returned: for work handed to a caller that starts it and does not wait for
+// it. WAIT before any RUN blocks until one runs.
+func joined(f func()) (run func(), wait func()) {
+	done := make(chan struct{})
+	var once sync.Once
+	return func() {
+			defer once.Do(func() { close(done) })
+			f()
+		}, func() {
+			<-done
+		}
 }
 
 // connStates tracks every connection net/http still holds, by state, so the

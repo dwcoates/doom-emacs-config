@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1648,6 +1649,82 @@ func TestARequestlessConnectionDoesNotHoldTheExit(t *testing.T) {
 	// grace -- the grace running out is the stall, and it is reported.
 	if holdsRecord(log.Records(), "warn", graceExpired) {
 		t.Fatalf("records = %+v, want the requestless connection closed rather than waited on until the grace ran out", log.Records())
+	}
+}
+
+func TestJoinedWaitReturnsOnlyAfterTheRunReturned(t *testing.T) {
+	tests := []struct {
+		name string
+		runs int
+	}{
+		{name: "one run", runs: 1},
+		{name: "a second run is waited on no differently", runs: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: work that finishes only once released.
+			release := make(chan struct{})
+			var finished atomic.Int32
+			run, wait := joined(func() {
+				<-release
+				finished.Add(1)
+			})
+			var runs sync.WaitGroup
+			for range tt.runs {
+				runs.Add(1)
+				go func() { defer runs.Done(); run() }()
+			}
+			waited := make(chan int32, 1)
+			go func() { wait(); waited <- finished.Load() }()
+
+			// Act
+			close(release)
+
+			// Assert: the wait saw the work finished.
+			if got := <-waited; got < 1 {
+				t.Fatalf("wait returned with %d run(s) finished, want it to return only after one", got)
+			}
+			runs.Wait()
+		})
+	}
+}
+
+func TestServeWaitsForTheRequestlessCloseAfterItsHTTPShutdown(t *testing.T) {
+	// Arrange: a served listener with one connection that sends nothing.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	var mu sync.Mutex
+	var marks []string
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() {
+		served <- serve(ctx, listener, gate, serveExit{Log: dlog.NewTestLogger(), Mark: func(step string, _ time.Time) {
+			mu.Lock()
+			defer mu.Unlock()
+			marks = append(marks, step)
+		}})
+	}()
+	resp, err := http.Get("http://" + listener.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	// Act
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want an orderly shutdown", err)
+	}
+
+	// Assert: the wait is marked right after the http shutdown's own mark.
+	mu.Lock()
+	defer mu.Unlock()
+	at := slices.Index(marks, "serve_requestless_closed")
+	if at < 1 || !strings.HasPrefix(marks[at-1], "serve_http_shutdown(") {
+		t.Fatalf("marks = %q, want serve_requestless_closed right after serve_http_shutdown", marks)
 	}
 }
 
