@@ -864,6 +864,18 @@ func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) {
 	return d.current, nil
 }
 
+func (d *fakeDB) ReadRegistry(ctx context.Context) (wsm.Registry, error) {
+	workspaces, err := d.ListWorkspaces(ctx)
+	if err != nil {
+		return wsm.Registry{}, err
+	}
+	repositories, err := d.ListRepositories(ctx)
+	if err != nil {
+		return wsm.Registry{}, err
+	}
+	return wsm.Registry{Workspaces: workspaces, Repositories: repositories}, nil
+}
+
 func (d *fakeDB) ReadArrangement(ctx context.Context) (wsm.Arrangement, error) {
 	d.arrangementReads++
 	if d.onReadArrangement != nil {

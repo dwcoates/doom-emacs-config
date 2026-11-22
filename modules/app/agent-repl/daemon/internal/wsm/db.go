@@ -188,6 +188,9 @@ type DB interface {
 	// ReadArrangement reads the workspaces, repositories and subsections as
 	// ONE snapshot (arrange.go).
 	ReadArrangement(ctx context.Context) (Arrangement, error)
+	// ReadRegistry reads every workspace and every repository as ONE
+	// snapshot (workspaces.go).
+	ReadRegistry(ctx context.Context) (Registry, error)
 	// CreateSubsection records a named subsection after REPO's others.
 	CreateSubsection(ctx context.Context, repo RepoID, name string) (Subsection, error)
 	// CreateAgentSubsection records a named subsection a workspace's agent

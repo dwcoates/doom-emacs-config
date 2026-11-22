@@ -687,6 +687,34 @@ func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	return out, nil
 }
 
+// Registry is every workspace and every repository, read as ONE snapshot
+// (ReadRegistry). Read apart, a repository and its first workspace
+// registered between the two reads left the workspace naming a repository
+// the list did not hold (2026-11-22, FindWorkspaces on a shared test daemon).
+type Registry struct {
+	Workspaces   []Workspace
+	Repositories []Repository
+}
+
+// ReadRegistry reads every workspace and every repository in one read
+// transaction.
+func (s *store) ReadRegistry(ctx context.Context) (Registry, error) {
+	var out Registry
+	err := s.snapshot(ctx, "daemon.wsm.read_registry", "the registry read", func(ctx context.Context, tx *sql.Tx) error {
+		var read Registry
+		var err error
+		if read.Workspaces, err = listWorkspaces(ctx, tx); err != nil {
+			return err
+		}
+		if read.Repositories, err = listRepositories(ctx, tx); err != nil {
+			return err
+		}
+		out = read
+		return nil
+	})
+	return out, err
+}
+
 // listRepositories loads every repository through Q, in their stored order,
 // all-or-nothing.
 func listRepositories(ctx context.Context, q querier) ([]Repository, error) {

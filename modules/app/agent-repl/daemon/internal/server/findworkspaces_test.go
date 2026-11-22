@@ -345,7 +345,7 @@ func TestFindWorkspacesFailsAndRecordsAFailedRead(t *testing.T) {
 		edit  func(*fakeDB)
 		cause string
 	}{
-		{name: "the repositories", edit: func(d *fakeDB) { d.listRepositoriesErr = errors.New("disk gone") }, cause: "list the repositories: disk gone"},
+		{name: "the registry", edit: func(d *fakeDB) { d.readRegistryErr = errors.New("disk gone") }, cause: "read the registry: disk gone"},
 		{name: "the summaries", edit: func(d *fakeDB) { d.summariesErr = errors.New("disk gone") }, cause: "list the workspace summaries: disk gone"},
 		{name: "the vendor titles", edit: func(d *fakeDB) { d.titlesErr = errors.New("disk gone") }, cause: "list the vendor titles: disk gone"},
 		{name: "a workspace of an unregistered repository", edit: func(d *fakeDB) {
@@ -371,6 +371,25 @@ func TestFindWorkspacesFailsAndRecordsAFailedRead(t *testing.T) {
 				t.Fatalf("ERROR record = %v (%v), want cause %q", rec.Context, ok, tt.cause)
 			}
 		})
+	}
+}
+
+func TestFindWorkspacesReadsTheRegistryAsOneSnapshot(t *testing.T) {
+	// Arrange: the separate workspace and repository reads both fail, so
+	// only the one snapshot can answer.
+	h := findHarness(t)
+	h.DB.listWorkspacesErr = errors.New("a separate read")
+	h.DB.listRepositoriesErr = errors.New("a separate read")
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FindWorkspaces = %v, want it answered from the registry snapshot alone", err)
+	}
+	if got := len(resp.Msg.GetSuccess().GetComplete().GetWorkspaces()); got != 2 {
+		t.Fatalf("found %d workspaces, want both", got)
 	}
 }
 
