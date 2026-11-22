@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1303,29 +1304,157 @@ func runLogRecord(t *testing.T, root, operation, level string) map[string]any {
 	return nil
 }
 
+// runCapturingDeaths runs the spine against ROOT, as runIn does, and
+// answers the deaths the boot handed its graph (process.Died), which the
+// graph owes the deploy mediator a check of (mediationHook.deathReaped).
+func runCapturingDeaths(t *testing.T, root string, adjust ...func(*options)) []predecessorDeath {
+	t.Helper()
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
+	opts := options{stateDir: root, holder: testHolder(t)}
+	for _, a := range adjust {
+		a(&opts)
+	}
+	th := newTestHooks()
+	var died []predecessorDeath
+	reached := false
+	th.hooks.Graph = func(_ context.Context, p process) (*graph, error) {
+		died, reached = p.Died, true
+		return nil, errServed
+	}
+	_ = run(context.Background(), opts, th.hooks)
+	if !reached {
+		t.Fatal("the spine never reached its graph")
+	}
+	return died
+}
+
+// TestABootRecordsALeftoverLifeLockAsADeath pins the 2026-11-21 20:28 miss:
+// daemon pid 78035 panicked and the next boot recorded nothing. A life lock
+// standing with no holder is a daemon that ended without Release, so the boot
+// records it at ERROR with its panic and hands the death to its graph, which
+// owes the deploy mediator the check of it. Production's case has no
+// daemon.addr at all (Emacs deleted the dead daemon's), and the death stands
+// on the life lock alone.
+func TestABootRecordsALeftoverLifeLockAsADeath(t *testing.T) {
+	tests := []struct {
+		name string
+		// ad is the daemon.addr left standing, "" for none.
+		ad string
+	}{
+		{name: "a leftover life lock with no daemon.addr at all"},
+		{name: "a leftover life lock beside a standing daemon.addr", ad: "127.0.0.1:1\npid=78035\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the dead daemon's life lock, and its panic in the stdio log.
+			root := shortRoot(t)
+			const instance, deadPID = "641fd388dc8e496c", 78035
+			if err := os.MkdirAll(filepath.Join(root, daemonaddr.LifeDirName), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			lock := daemonaddr.LifePath(filepath.Join(root, "daemon.addr"), instance)
+			if err := os.WriteFile(lock, []byte("pid="+strconv.Itoa(deadPID)+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			stdio := `{"message":"x","pid":78035}` + "\npanic: boom\n\ngoroutine 1 [running]:\nagent-repld/internal/x.f(0x1)\n\tagent-repld/internal/x/x.go:9 +0x10\n"
+			if err := os.WriteFile(filepath.Join(root, "logs", dlog.StdioLogName), []byte(stdio), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tt.ad != "" {
+				if err := os.WriteFile(filepath.Join(root, "daemon.addr"), []byte(tt.ad), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			died := runCapturingDeaths(t, root)
+
+			// Assert
+			record := runLogRecord(t, root, opPredecessorDied, dlog.LevelError)
+			if record == nil {
+				t.Fatalf("no ERROR %s record, want the leftover life lock recorded as a death", opPredecessorDied)
+			}
+			context, _ := record["context"].(map[string]any)
+			if context["instance"] != instance || context["pid"] != float64(deadPID) || context["panic"] != "panic: boom" {
+				t.Fatalf("record context %v, want instance %s, pid %d and its panic", context, instance, deadPID)
+			}
+			if len(died) != 1 || died[0].Instance != instance || !died[0].Panicked {
+				t.Fatalf("the graph was handed %+v, want the one death, which owes the mediator its check", died)
+			}
+			if _, err := os.Stat(lock); !os.IsNotExist(err) {
+				t.Fatalf("the leftover life lock = %v, want it reaped", err)
+			}
+		})
+	}
+}
+
 // TestAStaleAdvertisementIsRecordedBeforeItIsReplaced pins the realtest-1
-// finding: a predecessor that went without withdrawing left Emacs an address
-// to dial and time out on, and the boot that overwrites it says so, at ERROR,
-// as the predecessor's disorderly death (readPredecessorDeath).
+// finding: the boot that overwrites a standing advertisement says so. It is
+// no death: daemon.addr is shared between an incumbent and its successor
+// across a yield, so orderly sequences leave one standing, and the deaths
+// are the life locks'. The advertisement names the SHARED address the socket
+// holder keeps answering, as production's does.
 func TestAStaleAdvertisementIsRecordedBeforeItIsReplaced(t *testing.T) {
-	// Arrange: an address nothing is listening on. Port 0 can never be
-	// connected to, so the probe is certain rather than merely likely.
+	// Arrange: a standing advertisement of the holder's live address, and no
+	// leftover life lock.
 	root := shortRoot(t)
-	if err := os.WriteFile(filepath.Join(root, "daemon.addr"), []byte("127.0.0.1:0\n"), 0o644); err != nil {
-		t.Fatalf("write the stale daemon.addr: %v", err)
+	file, shared := holdtest.TCP(t)
+	holder := holdtest.Start(t, map[string]*os.File{holderDaemonSocket: file}, nil)
+	standingPID := os.Getpid() + 1
+	ad := shared + "\npid=" + strconv.Itoa(standingPID) + "\nprivate=127.0.0.1:1\n"
+	if err := os.WriteFile(filepath.Join(root, "daemon.addr"), []byte(ad), 0o644); err != nil {
+		t.Fatalf("write the standing daemon.addr: %v", err)
+	}
+
+	// Act
+	died := runCapturingDeaths(t, root, func(o *options) { o.holder = holder })
+
+	// Assert
+	want := "a standing advertisement naming pid " + strconv.Itoa(standingPID) + " is replaced under the boot claim"
+	var replaced map[string]any
+	for _, r := range runLogRecords(t, root) {
+		if r.Operation == "daemon.cmd.claim" && r.Level == dlog.LevelInfo && r.Message == want {
+			replaced = r.Context
+		}
+	}
+	if replaced == nil || replaced["address"] != shared {
+		t.Fatalf("no INFO daemon.cmd.claim %q naming the address %s (got %v)", want, shared, replaced)
+	}
+	if record := runLogRecord(t, root, opPredecessorDied, dlog.LevelError); record != nil {
+		t.Fatalf("an ERROR %s record %v, want a standing advertisement read as no death", opPredecessorDied, record)
+	}
+	if len(died) != 0 {
+		t.Fatalf("the graph was handed deaths %+v, want none and no check owed", died)
+	}
+}
+
+// TestAnUnreadableAdvertisementIsRecordedAtBoot pins that an advertisement
+// the boot cannot read is recorded at ERROR with its path, never read as
+// none.
+func TestAnUnreadableAdvertisementIsRecordedAtBoot(t *testing.T) {
+	// Arrange: a directory where daemon.addr belongs.
+	root := shortRoot(t)
+	addrPath := filepath.Join(root, "daemon.addr")
+	if err := os.Mkdir(addrPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 
 	// Act.
 	_ = runIn(t, root)
 
 	// Assert.
-	record := runLogRecord(t, root, opPredecessorDied, dlog.LevelError)
+	record := runLogRecord(t, root, "daemon.cmd.claim", dlog.LevelError)
 	if record == nil {
-		t.Fatalf("no ERROR %s record, want the stale advertisement reported as the predecessor's death", opPredecessorDied)
+		t.Fatal("no ERROR daemon.cmd.claim record, want the unreadable advertisement recorded")
 	}
 	context, _ := record["context"].(map[string]any)
-	if got := context["stale_address"]; got != "127.0.0.1:0" {
-		t.Fatalf("stale_address = %v, want the address the predecessor left", got)
+	if context["addr_path"] != addrPath || context["error"] == nil {
+		t.Fatalf("record context %v, want the path %s and the read's error", context, addrPath)
 	}
 }
 

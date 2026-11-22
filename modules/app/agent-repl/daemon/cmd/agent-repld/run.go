@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -74,10 +75,10 @@ type process struct {
 	// — and it is handed to the graph rather than taken by it, because only
 	// the boot spine owns the lifetime.
 	Exit func(standDownReason)
-	// Died is how the daemon before this one died, when it died without its
-	// orderly exit (readPredecessorDeath); nil otherwise. The boot owes the
-	// deploy mediator a check of it.
-	Died *predecessorDeath
+	// Died is every daemon of this state root the boot found dead without its
+	// orderly exit, each already recorded (readPredecessorDeath); empty
+	// otherwise. The boot owes the deploy mediator a check of them.
+	Died []predecessorDeath
 }
 
 // hooks are the seams the process-level tests drive. Production supplies the
@@ -427,9 +428,30 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"waited_ms": claimWaited.Milliseconds(),
 	})
 
-	// died is how the daemon before this one died, when it died without its
-	// orderly exit; nil for a predecessor that withdrew, or none.
-	var died *predecessorDeath
+	// EVERY BOOT REAPS THE LIFE LOCKS OF THE DAEMONS THAT DIED, joining or
+	// not, once it holds its own life lock and is past the boot claim (a boot
+	// that lost the claim exits above, owing no check it could run). A life
+	// lock standing with no holder is a daemon that ended without Release,
+	// which removes the file before it releases the lock: the kernel freed it
+	// with a holder that panicked or was killed (daemonaddr.LiveOthers). Each
+	// death is recorded at ERROR with its panic, exactly once since the reap
+	// removes the file before it lets the lock go, and this boot owes the
+	// deploy mediator a check of them (mediationHook.deathReaped). A daemon.addr
+	// is no such evidence: it is shared between an incumbent and its successor
+	// across a yield, and Emacs may delete it. A joining successor reaps here a
+	// third daemon that died; its incumbent is alive and holds its lock.
+	//
+	// A lock that cannot be probed is recorded at ERROR, never read as no
+	// death; the deaths reaped beside it are still recorded.
+	var died []predecessorDeath
+	_, deaths, err := daemonaddr.LiveOthers(layout.DaemonAddr(), string(instance))
+	if err != nil {
+		log.Error("daemon.cmd.life", "the other daemons' life locks could not all be judged at boot; a death among them is recorded by the next reap", dlog.Context{
+			"state_dir": layout.Dir(), "instance": string(instance), "deaths_reaped": len(deaths), "error": err.Error()})
+	}
+	for _, death := range deaths {
+		died = append(died, readPredecessorDeath(layout.LogsDir(), death, log))
+	}
 	if joining {
 		// A JOINING DAEMON DOES NOT ADVERTISE. It reports its address where the
 		// incumbent that spawned it is waiting, and daemon.addr is written only
@@ -446,19 +468,30 @@ func run(ctx context.Context, opts options, h hooks) error {
 			"incumbent": opts.joining,
 		})
 	} else {
-		// A STALE ADVERTISEMENT IS RECORDED BEFORE IT IS REPLACED. This
-		// daemon holds the boot claim, so any address standing here is a
-		// predecessor's; one that does not answer is what the next client
-		// would have dialled and timed out on, and the record is the only
-		// thing that says the predecessor went without withdrawing.
-		//
-		// A STALE ADVERTISEMENT IS A PREDECESSOR'S DISORDERLY DEATH, since
-		// every orderly exit withdraws it: the death is recorded at ERROR with
-		// its panic, and this boot owes the deploy mediator a check of it
-		// (mediationHook.crashed), as a deploy does.
-		if stale, isStale := daemonaddr.StaleAdvertisement(layout.DaemonAddr()); isStale {
-			death := readPredecessorDeath(layout.DaemonAddr(), layout.LogsDir(), stale, log)
-			died = &death
+		// A STANDING ADVERTISEMENT IS RECORDED BEFORE IT IS REPLACED, at INFO,
+		// and it is no death: daemon.addr is shared between an incumbent and
+		// its successor across a yield, so orderly sequences leave one
+		// standing, and the deaths are the life locks' (reaped above). No dial
+		// judges it either: the address is the shared one the socket holder
+		// keeps listening, so a connect lands in the holder's backlog and
+		// succeeds for a dead daemon too. An advertisement that cannot be read
+		// is recorded at ERROR, never read as none; the publish below then
+		// replaces it or fails loudly itself.
+		ad, standing, err := daemonaddr.StandingAdvertisement(layout.DaemonAddr(), os.Getpid())
+		switch {
+		case err != nil:
+			log.Error("daemon.cmd.claim", "the advertisement standing at boot could not be read", dlog.Context{
+				"addr_path": layout.DaemonAddr(),
+				"error":     err.Error(),
+			})
+		case standing:
+			fields := dlog.Context{"addr_path": layout.DaemonAddr(), "address": ad.Address}
+			pid := "unknown"
+			if ad.PIDKnown {
+				pid = strconv.Itoa(ad.PID)
+				fields["pid"] = ad.PID
+			}
+			log.Info("daemon.cmd.claim", "a standing advertisement naming pid "+pid+" is replaced under the boot claim", fields)
 		}
 		if err := publishOwnership(claim, metricsSurface, shared); err != nil {
 			log.Error("daemon.cmd.claim", "the daemon's advertisement could not be published", dlog.Context{
@@ -482,7 +515,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// (main's signal.NotifyContext cancels ctx, which ends the serve), `Serve`
 	// returning on its own, and every boot error that returns before serving
 	// was ever reached. SIGKILL is not observable by anything, which is what
-	// the boot's own staleness check above exists for.
+	// the next boot's reap of the life lock it leaves standing exists for.
 	//
 	// A run that reached serving withdraws EARLIER, via withdrawal.begin at the
 	// start of the shutdown sequence (passed to h.Serve below), so a forward

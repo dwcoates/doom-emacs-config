@@ -217,14 +217,38 @@ legacy daemon wrote, and a file that carries no `pid=<n>` line reads as
 The pid makes a dead advertiser distinguishable from a live-but-unreachable
 one WITHOUT a dial. When Emacs reads a `daemon.addr` whose pid names no live
 process — a predecessor that died without withdrawing (crash, SIGKILL, or a
-restart that skipped withdraw) — it treats the advertisement as ABSENT: it
-retires the file at INFO (`elisp.daemon.addr-retired-dead-advertiser`, with the
-address and pid) and proceeds straight to a spawn, with no dial and so none of
-the transport records (`elisp.connect.dial-failed`, `elisp.connect.unary-failure`,
+restart that skipped withdraw) — it treats the advertisement as ABSENT and
+proceeds straight to a spawn, with no dial and so none of the transport records
+(`elisp.connect.dial-failed`, `elisp.connect.unary-failure`,
 `elisp.rpc.transport-failure`, `elisp.daemon.stale-addr`) a live-but-unreachable
-daemon would rightly earn. A pid that names a live process, and a legacy file
-that names no pid, are dialed as before; a live-but-unreachable daemon remains a
-real WARN/ERROR.
+daemon would rightly earn. It LEAVES the file standing for the booting daemon
+to record and replace, noting it at INFO (`elisp.daemon.addr-dead-advertiser-left`,
+with the address, pid and file): only a daemon writes or removes an
+advertisement that names a pid. The boot wait then refuses that advertisement
+by its advertiser's pid, not by its address, since every daemon advertises the
+same shared address. A pid that names a live process is dialed as before, and a
+live-but-unreachable daemon remains a real WARN/ERROR. Only a legacy file that
+names no pid, whose probe is refused, is deleted by Emacs
+(`elisp.daemon.stale-addr-removed`).
+
+The booting daemon, holding the boot claim, records a standing advertisement
+it replaces at INFO (`daemon.cmd.claim`), with no dial: the shared address is
+answered by the socket holder's backlog even when no daemon lives, so a
+connect proves nothing. A standing advertisement is no death: `daemon.addr`
+is shared between an incumbent and its successor across a yield, so orderly
+sequences leave one standing.
+
+A daemon's death is recorded from its life lock (`daemons/<instance>.lock`
+beside `daemon.addr`). Every daemon holds an exclusive record lock on its own
+file for its whole life, the file names its pid, and an orderly end removes
+the file before it releases the lock; the kernel frees the lock however its
+holder died. A life lock that stands with no holder is therefore a daemon that
+died without its orderly exit. The daemon that reaps it (every boot, joining
+or not, and a successor's probe of and wait for the older daemons) removes it
+before letting the lock go, and records the death exactly once as
+`daemon.boot.predecessor_died` at ERROR, with the `instance`, the `pid` when
+the file names one, and the `panic` and `site` when the stdio log holds that
+pid's panic. Emacs never touches the life locks.
 
 ## JSONL schema
 

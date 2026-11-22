@@ -338,83 +338,119 @@ func TestWithdrawLeavesASuccessorsAdvertisementAlone(t *testing.T) {
 	}
 }
 
-// TestStaleAdvertisementNamesAnAddressNobodyAnswers pins the boot's evidence:
-// a predecessor that exited without withdrawing left an address the next
-// client would dial and time out on.
-func TestStaleAdvertisementNamesAnAddressNobodyAnswers(t *testing.T) {
-	// Arrange.
-	addrPath := newAddrPath(t)
-	if err := os.WriteFile(addrPath, []byte("127.0.0.1:58161\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+// TestStandingAdvertisement pins what the boot replaces: under the boot
+// claim, an advertisement standing with an address, and nothing else.
+func TestStandingAdvertisement(t *testing.T) {
+	tests := []struct {
+		name         string
+		raw          string
+		wantStanding bool
+		wantAd       Advertisement
+	}{
+		{name: "a shared address with its pid and private address stands",
+			raw:          "127.0.0.1:58161\npid=61885\nprivate=127.0.0.1:58200\n",
+			wantStanding: true,
+			wantAd:       Advertisement{Address: "127.0.0.1:58161", PID: 61885, PIDKnown: true, Private: "127.0.0.1:58200"}},
+		{name: "a legacy bare address stands",
+			raw:          "127.0.0.1:58161\n",
+			wantStanding: true,
+			wantAd:       Advertisement{Address: "127.0.0.1:58161"}},
+		{name: "an empty file is none", raw: "\n"},
+		{name: "a file naming no address is none", raw: "\npid=61885\n",
+			wantAd: Advertisement{PID: 61885, PIDKnown: true}},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			addrPath := newAddrPath(t)
+			if err := os.WriteFile(addrPath, []byte(tt.raw), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
 
-	// Act.
-	addr, stale := staleAdvertisement(addrPath, func(string) error { return errors.New("connection refused") })
+			// Act
+			ad, standing, err := StandingAdvertisement(addrPath, os.Getpid())
 
-	// Assert.
-	if !stale {
-		t.Fatal("staleAdvertisement reported a live advertisement, want it stale")
-	}
-	if addr != "127.0.0.1:58161" {
-		t.Fatalf("stale address = %q, want the advertised one", addr)
-	}
-}
-
-// TestAnAnsweringAdvertisementIsNotStale is the other arm: an address a
-// listener answers on is never reported as stale.
-func TestAnAnsweringAdvertisementIsNotStale(t *testing.T) {
-	// Arrange.
-	addrPath := newAddrPath(t)
-	if err := os.WriteFile(addrPath, []byte("127.0.0.1:58161\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	// Act.
-	addr, stale := staleAdvertisement(addrPath, func(string) error { return nil })
-
-	// Assert.
-	if stale {
-		t.Fatal("staleAdvertisement reported an answering address stale")
-	}
-	if addr != "127.0.0.1:58161" {
-		t.Fatalf("address = %q, want the advertised one", addr)
+			// Assert
+			if err != nil || standing != tt.wantStanding || ad != tt.wantAd {
+				t.Fatalf("StandingAdvertisement = (%+v, %v, %v), want (%+v, %v, nil)", ad, standing, err, tt.wantAd, tt.wantStanding)
+			}
+		})
 	}
 }
 
-// TestAnAbsentAdvertisementIsNotStale pins the ordinary first boot: there is
-// nothing to warn about, so nothing is reported.
-func TestAnAbsentAdvertisementIsNotStale(t *testing.T) {
-	// Arrange, Act.
-	addr, stale := staleAdvertisement(newAddrPath(t), func(string) error {
-		t.Fatal("the probe was called for an absent advertisement")
-		return nil
-	})
-
-	// Assert.
-	if stale || addr != "" {
-		t.Fatalf("staleAdvertisement of an absent file = (%q, %v), want (\"\", false)", addr, stale)
+// TestAnAnsweringSharedAddressIsStillStanding pins that nothing is dialed:
+// the shared address the socket holder keeps answers a connect whether or
+// not any daemon lives, so a standing advertisement is answered whatever
+// answers there.
+func TestAnAnsweringSharedAddressIsStillStanding(t *testing.T) {
+	// Arrange: a listener on the advertised address, as the holder keeps one.
+	ln, err := net.Listen("tcp", net.JoinHostPort(LoopbackHost, "0"))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
 	}
-}
-
-// TestAnEmptyAdvertisementIsNotStale pins the half-written file the atomic
-// publish cannot produce but a foreign writer can: there is no address to
-// probe, so nothing is reported rather than an empty one.
-func TestAnEmptyAdvertisementIsNotStale(t *testing.T) {
-	// Arrange.
+	t.Cleanup(func() { _ = ln.Close() })
 	addrPath := newAddrPath(t)
-	if err := os.WriteFile(addrPath, []byte("\n"), 0o644); err != nil {
+	raw := ln.Addr().String() + "\npid=61885\nprivate=127.0.0.1:58200\n"
+	if err := os.WriteFile(addrPath, []byte(raw), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	// Act.
-	addr, stale := staleAdvertisement(addrPath, func(string) error {
-		t.Fatal("the probe was called for an empty advertisement")
-		return nil
-	})
+	// Act
+	ad, standing, err := StandingAdvertisement(addrPath, os.Getpid())
 
-	// Assert.
-	if stale || addr != "" {
-		t.Fatalf("staleAdvertisement of an empty file = (%q, %v), want (\"\", false)", addr, stale)
+	// Assert
+	if err != nil || !standing || ad.Address != ln.Addr().String() || ad.PID != 61885 {
+		t.Fatalf("StandingAdvertisement = (%+v, %v, %v), want the answering address reported standing", ad, standing, err)
+	}
+}
+
+// TestAnAbsentAdvertisementIsNoneStanding pins the ordinary first boot, and
+// every boot after an orderly exit withdrew the file.
+func TestAnAbsentAdvertisementIsNoneStanding(t *testing.T) {
+	// Arrange, Act
+	ad, standing, err := StandingAdvertisement(newAddrPath(t), os.Getpid())
+
+	// Assert
+	if err != nil || standing || ad != (Advertisement{}) {
+		t.Fatalf("StandingAdvertisement of an absent file = (%+v, %v, %v), want none standing", ad, standing, err)
+	}
+}
+
+// TestAnUnreadableAdvertisementIsAnError pins that a file which cannot be read
+// is surfaced, never read as none standing.
+func TestAnUnreadableAdvertisementIsAnError(t *testing.T) {
+	// Arrange: a directory where daemon.addr belongs.
+	addrPath := newAddrPath(t)
+	if err := os.Mkdir(addrPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act
+	_, standing, err := StandingAdvertisement(addrPath, os.Getpid())
+
+	// Assert
+	if err == nil || standing || !strings.Contains(err.Error(), addrPath) {
+		t.Fatalf("StandingAdvertisement of a directory = (%v, %v), want an error naming %s", standing, err, addrPath)
+	}
+}
+
+// TestAnAdvertisementNamingThisProcessIsAnError pins the invariant guard: a
+// boot that has not yet published cannot have written the file, so one
+// naming its own pid is a contradiction surfaced, not an advertisement
+// standing from an earlier daemon.
+func TestAnAdvertisementNamingThisProcessIsAnError(t *testing.T) {
+	// Arrange
+	addrPath := newAddrPath(t)
+	if err := os.WriteFile(addrPath, []byte("127.0.0.1:58161\npid="+strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Act
+	_, standing, err := StandingAdvertisement(addrPath, os.Getpid())
+
+	// Assert
+	if err == nil || standing {
+		t.Fatalf("StandingAdvertisement of this process's own pid = (%v, %v), want an error and none standing", standing, err)
 	}
 }
 

@@ -104,7 +104,7 @@ func TestSettleThenMediate(t *testing.T) {
 	settled := false
 
 	// Act
-	settleThenMediate(func(context.Context) { settled = true }, h, nil)(context.Background())
+	settleThenMediate(func(context.Context) { settled = true }, h)(context.Background())
 
 	// Assert
 	<-o.mediated
@@ -114,7 +114,7 @@ func TestSettleThenMediate(t *testing.T) {
 	if len(o.owed) != 0 {
 		t.Fatalf("owed %v; a boot whose predecessor withdrew owes no check", o.owed)
 	}
-	if settleThenMediate(nil, h, &predecessorDeath{}) != nil {
+	if settleThenMediate(nil, h) != nil {
 		t.Fatal("a successor, which settles nothing here, was given a settle")
 	}
 }
@@ -328,17 +328,20 @@ func TestEveryReadOfTheHooksBindingGoesThroughOrchestrator(t *testing.T) {
 	}
 }
 
-// A BOOT AFTER A CRASH OWES THE CHECK OF IT: the death is owed as a check
-// whose ending is the crash, before the boot's rounds run it.
+// A BOOT AFTER A CRASH OWES THE CHECK OF IT: the death the boot reaped is
+// owed as a check whose ending is the crash when its serving settles, inside
+// the settle (the rollout's SettleBoot tells ServingSettled), before the
+// boot's rounds run it.
 func TestABootAfterACrashOwesTheCheckOfItBeforeItsRounds(t *testing.T) {
 	// Arrange
 	at := time.Date(2026, 11, 21, 20, 22, 30, 0, time.UTC)
 	o := &mediationOrchestrator{mediated: make(chan struct{})}
 	h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: dlog.NewTestLogger()}
 	h.bind(o)
+	h.deathReaped()
 
 	// Act
-	settleThenMediate(func(context.Context) {}, h, &predecessorDeath{Address: "127.0.0.1:1", PID: 7})(context.Background())
+	settleThenMediate(func(context.Context) { h.servingSettled() }, h)(context.Background())
 
 	// Assert
 	<-o.mediated
@@ -378,5 +381,69 @@ func TestACrashBeforeTheBindingIsRecordedAtError(t *testing.T) {
 	// Assert
 	if rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opMediationHook}); !ok || rec.Context["edge"] != "crashed" {
 		t.Fatalf("no ERROR record of the unbound crash: %+v", log.Records())
+	}
+}
+
+// A DEATH REAPED BEFORE THE SERVING SETTLED IS NOT OWED YET: a joining
+// successor's state handle is read-only until its takeover, so the check
+// waits for the settle.
+func TestADeathReapedBeforeTheSettleIsOwedOnlyAtIt(t *testing.T) {
+	// Arrange
+	o := &mediationOrchestrator{mediated: make(chan struct{})}
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+	h.bind(o)
+
+	// Act
+	h.deathReaped()
+	o.mu.Lock()
+	before := len(o.owed)
+	o.mu.Unlock()
+	owed := h.servingSettled()
+
+	// Assert
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if before != 0 || !owed || len(o.owed) != 1 {
+		t.Fatalf("owed %d before the settle and %d after (settle answered %v), want none, then one", before, len(o.owed), owed)
+	}
+}
+
+func TestASettleWithNoDeathReapedOwesNothing(t *testing.T) {
+	// Arrange
+	o := &mediationOrchestrator{mediated: make(chan struct{})}
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+	h.bind(o)
+
+	// Act
+	owed := h.servingSettled()
+
+	// Assert
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if owed || len(o.owed) != 0 || len(o.calls) != 0 {
+		t.Fatalf("settle answered %v, owed %v, calls %v; want nothing owed", owed, o.owed, o.calls)
+	}
+}
+
+// A DEATH REAPED WHILE THIS DAEMON SERVES (an elder that died while this
+// daemon awaited it) is owed at once, its ending recorded, and its round run.
+func TestADeathReapedAfterTheSettleIsOwedAtOnceWithItsRound(t *testing.T) {
+	// Arrange
+	at := time.Date(2026, 11, 21, 21, 0, 0, 0, time.UTC)
+	o := &mediationOrchestrator{mediated: make(chan struct{})}
+	h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: dlog.NewTestLogger()}
+	h.bind(o)
+	h.servingSettled()
+
+	// Act
+	h.deathReaped()
+
+	// Assert
+	<-o.mediated
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	want := []string{"ending crashed 2026-11-21T21:00:00Z", "mediate"}
+	if len(o.owed) != 1 || !o.owed[0].Equal(at) || !reflect.DeepEqual(o.calls, want) {
+		t.Fatalf("owed %v, calls %v; want the death owed at once and its round run", o.owed, o.calls)
 	}
 }

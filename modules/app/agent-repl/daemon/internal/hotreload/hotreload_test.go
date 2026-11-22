@@ -364,6 +364,8 @@ func TestBuildSteps(t *testing.T) {
 		{"a target that failed", func(f *fixture) { f.t.BuildStepBegan("store"); f.t.BuildStepEnded("store", errors.New("x")) }, ServiceStore, "build", "failed:the build failed"},
 		{"a rider target gets its own step", func(f *fixture) { f.t.BuildStepBegan("lock") }, ServiceShim, "build shim-lock", "running:building"},
 		{"the Wi-Fi helper rides with the daemon", func(f *fixture) { f.t.BuildStepBegan("wifi") }, ServiceDaemon, "build Wi-Fi helper", "running:building"},
+		{"the socket holder building rides with the daemon", func(f *fixture) { f.t.BuildStepBegan("sockethold") }, ServiceDaemon, "build socket holder", "running:building"},
+		{"the socket holder built", func(f *fixture) { f.t.BuildStepBegan("sockethold"); f.t.BuildStepEnded("sockethold", nil) }, ServiceDaemon, "build socket holder", "done:built"},
 		{"an override builds every service", func(f *fixture) { f.t.BuildStepBegan("build") }, ServiceTests, "build", "running:building"},
 		{"the test service's target", func(f *fixture) { f.t.BuildStepBegan("tests") }, ServiceTests, "build", "running:building"},
 	}
@@ -397,6 +399,24 @@ func TestARiderBuildStepSitsBeforeTheInstall(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "build,build shim-lock,install,replace" {
 		t.Fatalf("steps %v, want the rider's build before the install", names)
+	}
+}
+
+func TestTwoRiderBuildStepsOnOneServiceBothSitBeforeTheInstall(t *testing.T) {
+	// Arrange
+	f := begun(t)
+
+	// Act
+	f.t.BuildStepBegan("wifi")
+	f.t.BuildStepBegan("sockethold")
+
+	// Assert
+	var names []string
+	for _, st := range service(t, f.feed.last(t), ServiceDaemon).GetSteps() {
+		names = append(names, st.GetName().GetText())
+	}
+	if strings.Join(names, ",") != "build,build Wi-Fi helper,build socket holder,install,hand over" {
+		t.Fatalf("steps %v, want both riders' builds before the install", names)
 	}
 }
 

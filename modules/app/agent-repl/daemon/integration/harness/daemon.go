@@ -1058,6 +1058,21 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 			t.Fatalf("harness: remove the stale daemon.addr: %v", err)
 		}
 	}
+	// A DAEMON KILLED ON THIS STATE ROOT LEFT ITS LIFE LOCK STANDING with no
+	// holder, and the boot reaps it as that daemon's death, at ERROR
+	// (daemon.boot.predecessor_died). The record is derived from the root
+	// itself, so every crash-restart test declares it without naming it: it
+	// is required, unless the test expects this daemon to be refused before
+	// its boot reaps anything.
+	if deaths := leftoverLives(t, d.StateDir); deaths > 0 {
+		if opts.ExpectEarlyExit {
+			d.ExpectWarnings(opPredecessorDied)
+		} else {
+			d.RequireWarnings(opPredecessorDied)
+		}
+	}
+	rootPeers.join(d)
+	t.Cleanup(func() { rootPeers.leave(d) })
 
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = root
@@ -1576,6 +1591,14 @@ func (d *Daemon) Kill() {
 	d.refuseOnView("Kill")
 	if d.cmd == nil || d.cmd.Process == nil {
 		return
+	}
+	// A DAEMON KILLED WHILE ANOTHER RUNS ON ITS STATE ROOT is that one's to
+	// reap: its takeover's probe of the older daemons, or its wait for them,
+	// finds the life lock standing and records the death at ERROR. Whether it
+	// reaps it before its test ends is the test's schedule, so the record is
+	// licensed, not required, and licensed before the kill can produce it.
+	for _, peer := range rootPeers.others(d) {
+		peer.ExpectWarnings(opPredecessorDied)
 	}
 	if !d.killGroup() {
 		return
@@ -2664,4 +2687,72 @@ func TranscriptPath(configDir, workspaceDir, vendorSessionID string) string {
 func HasTranscript(configDir, workspaceDir, vendorSessionID string) bool {
 	_, err := os.Stat(TranscriptPath(configDir, workspaceDir, vendorSessionID))
 	return err == nil
+}
+
+// opPredecessorDied is the operation a booting daemon records a leftover
+// life lock's death under (cmd/agent-repld predecessor.go).
+const opPredecessorDied = "daemon.boot.predecessor_died"
+
+// leftoverLives counts the life locks under STATEDIR that stand with no
+// holder: daemons that ended without Release, which the next boot reaps as
+// deaths. It reaps nothing and creates nothing (daemonaddr.Alive).
+func leftoverLives(t testing.TB, stateDir string) int {
+	t.Helper()
+	addr := filepath.Join(stateDir, "daemon.addr")
+	lives, err := daemonaddr.OtherLives(addr, "")
+	if err != nil {
+		t.Fatalf("harness: list the life locks: %v", err)
+	}
+	n := 0
+	for _, instance := range lives {
+		alive, err := daemonaddr.Alive(addr, instance)
+		if err != nil {
+			t.Fatalf("harness: probe the life lock of %s: %v", instance, err)
+		}
+		if !alive {
+			n++
+		}
+	}
+	return n
+}
+
+// rootPeers is every Daemon this suite process has started and whose test
+// has not ended, by state root: the daemons that may reap one another's
+// deaths (Kill).
+var rootPeers = &peersByRoot{byRoot: map[string][]*Daemon{}}
+
+// peersByRoot is the registry rootPeers keeps.
+type peersByRoot struct {
+	mu     sync.Mutex
+	byRoot map[string][]*Daemon
+}
+
+func (r *peersByRoot) join(d *Daemon) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byRoot[d.StateDir] = append(r.byRoot[d.StateDir], d)
+}
+
+func (r *peersByRoot) leave(d *Daemon) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	peers := slices.DeleteFunc(r.byRoot[d.StateDir], func(p *Daemon) bool { return p == d })
+	if len(peers) == 0 {
+		delete(r.byRoot, d.StateDir)
+		return
+	}
+	r.byRoot[d.StateDir] = peers
+}
+
+// others answers the Daemons on D's state root other than D.
+func (r *peersByRoot) others(d *Daemon) []*Daemon {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*Daemon
+	for _, p := range r.byRoot[d.StateDir] {
+		if p != d {
+			out = append(out, p)
+		}
+	}
+	return out
 }

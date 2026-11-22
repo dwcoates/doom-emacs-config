@@ -98,18 +98,22 @@ var specs = []serviceSpec{
 }
 
 // buildTargets map each build-frontend target to the service whose build it
-// is, and the step it draws as there.
+// is, and the step it draws as there. The socket holder rides with the daemon:
+// it keeps the daemon's shared address open across a handover, and is
+// installed with it (deploy.go). Every step a deploy's builder runs must be
+// here: deploy's TestEveryBuildStepIsATrackedTarget holds the two in step.
 var buildTargets = map[string]struct{ service, step string }{
-	"shim":     {ServiceShim, stepBuild},
-	"lock":     {ServiceShim, "build shim-lock"},
-	"webapp":   {ServiceWebapp, stepBuild},
-	"daemon":   {ServiceDaemon, stepBuild},
-	"wifi":     {ServiceDaemon, "build Wi-Fi helper"},
-	"store":    {ServiceStore, stepBuild},
-	"sidecar":  {ServiceSidecar, stepBuild},
-	"zettel":   {ServiceZettel, stepBuild},
-	"tests":    {ServiceTests, stepBuild},
-	"launcher": {ServiceLauncher, stepBuild},
+	"shim":       {ServiceShim, stepBuild},
+	"lock":       {ServiceShim, "build shim-lock"},
+	"webapp":     {ServiceWebapp, stepBuild},
+	"daemon":     {ServiceDaemon, stepBuild},
+	"wifi":       {ServiceDaemon, "build Wi-Fi helper"},
+	"sockethold": {ServiceDaemon, "build socket holder"},
+	"store":      {ServiceStore, stepBuild},
+	"sidecar":    {ServiceSidecar, stepBuild},
+	"zettel":     {ServiceZettel, stepBuild},
+	"tests":      {ServiceTests, stepBuild},
+	"launcher":   {ServiceLauncher, stepBuild},
 }
 
 // buildEverything is the one step a builder override runs in place of every
@@ -393,7 +397,7 @@ func (t *Tracker) BuildStepEnded(target string, err error) {
 // buildStepsLocked answers the steps build target TARGET draws as: the
 // protobufs step, every service's build for an override's one step, or one
 // service's step, made when a target the card did not foresee (the Wi-Fi
-// helper, shim-lock) first runs. An unknown target is a caller's bug.
+// helper, the socket holder, shim-lock) first runs. An unknown target is a caller's bug.
 func (t *Tracker) buildStepsLocked(c *Card, target string) []*Step {
 	switch target {
 	case "proto":

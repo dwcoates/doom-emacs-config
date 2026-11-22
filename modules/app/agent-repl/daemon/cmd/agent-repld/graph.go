@@ -517,6 +517,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// mediation, and its end (here or in a successor) runs the rounds. Every
 	// main turn's spend reaches it too, which meters the mediator's turns.
 	mediation := &mediationHook{ctx: ctx, now: time.Now, log: log}
+	// A DEATH THE BOOT REAPED (process.Died, recorded at ERROR by run) owes
+	// the deploy mediator its check, once this daemon's serving settles.
+	if len(p.Died) > 0 {
+		mediation.deathReaped()
+	}
 	// THE LID-CLOSED QUIET STATE STOPS EVERY VIEW NOBODY CAN SEE (viewquiet):
 	// one gate, moved by the persistent-wifi controller, followed by the four
 	// view resolvers.
@@ -1361,8 +1366,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// NOT pushed here: each Emacs stream is decided as it connects
 		// (deploy.Deployer.ElispVerdict), so whether this daemon settles
 		// before or after Emacs reconnects changes nothing.
-		ServingSettled: func(ctx context.Context) { drainController.ResumeFolded(ctx) },
-		PublishViews:   views.PublishViews,
+		//
+		// THE CHECK OF A DEATH REAPED BEFORE THE SETTLE is owed here, once
+		// this daemon writes (mediationHook.servingSettled). A fresh boot's
+		// settle runs the rounds after (settleThenMediate); a successor's
+		// takeover runs them here.
+		ServingSettled: func(ctx context.Context) {
+			drainController.ResumeFolded(ctx)
+			if mediation.servingSettled() && p.Opts.joining != "" {
+				mediation.rounds()
+			}
+		},
+		PublishViews: views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)
@@ -1376,11 +1391,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return ad.Daemon(), err
 		},
 		AnnounceHanded: announceHanded,
+		// A DEATH THE ELDERS' REAPS FIND IS RECORDED AND CHECKED as a boot's
+		// is (deathsReaped): a daemon that died while this one ran is reaped
+		// here, and only here, once.
 		LiveElders: func() ([]string, error) {
-			return daemonaddr.LiveOthers(p.Layout.DaemonAddr(), string(p.Instance))
+			live, deaths, err := daemonaddr.LiveOthers(p.Layout.DaemonAddr(), string(p.Instance))
+			deathsReaped(p.Layout.LogsDir(), mediation, log, deaths...)
+			return live, err
 		},
 		AwaitElders: func(ctx context.Context, elders []string) error {
-			return daemonaddr.AwaitGone(ctx, p.Layout.DaemonAddr(), elders)
+			return daemonaddr.AwaitGone(ctx, p.Layout.DaemonAddr(), elders, func(death daemonaddr.Death) {
+				deathsReaped(p.Layout.LogsDir(), mediation, log, death)
+			})
 		},
 		ShimBuild: shimBundle.Build,
 		ColdGate:  fleet.RaiseColdGate,
@@ -2165,7 +2187,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}),
 		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		AwaitCreates: awaitCreatesAtExit(creates, holdoutWarnEvery, time.After, log),
-		SettleBoot:   settleThenMediate(freshBootSettle(p.Opts.joining != "", rolloutController), mediation, p.Died),
+		SettleBoot:   settleThenMediate(freshBootSettle(p.Opts.joining != "", rolloutController), mediation),
 	}, nil
 }
 
@@ -2785,20 +2807,29 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 }
 
 // settleThenMediate is a fresh boot's settle, followed by the rounds of every
-// mediation owed: a round a crash cut short is taken up again. A boot whose
-// predecessor died without its orderly exit (DIED) first owes the check of
-// that death. A successor settles nothing here (SETTLE nil); its takeover's
-// deploy end runs them.
-func settleThenMediate(settle func(ctx context.Context), mediation *mediationHook, died *predecessorDeath) func(ctx context.Context) {
+// mediation owed: a round a crash cut short is taken up again. The check of
+// a death the boot reaped is owed inside the settle, as its serving settles
+// (mediationHook.servingSettled), so before the rounds. A successor settles
+// nothing here (SETTLE nil); its takeover's deploy end runs them.
+func settleThenMediate(settle func(ctx context.Context), mediation *mediationHook) func(ctx context.Context) {
 	if settle == nil {
 		return nil
 	}
 	return func(ctx context.Context) {
 		settle(ctx)
-		if died != nil {
-			mediation.crashed()
-		}
 		mediation.rounds()
+	}
+}
+
+// deathsReaped records each death a reap of the life locks answered, at
+// ERROR (readPredecessorDeath), and owes the deploy mediator the check of
+// them (mediationHook.deathReaped).
+func deathsReaped(logsDir string, mediation *mediationHook, log dlog.Logger, deaths ...daemonaddr.Death) {
+	for _, death := range deaths {
+		readPredecessorDeath(logsDir, death, log)
+	}
+	if len(deaths) > 0 {
+		mediation.deathReaped()
 	}
 }
 

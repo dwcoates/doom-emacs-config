@@ -202,7 +202,8 @@ a scenario names which pids are alive rather than depending on the host.")
          (agent-repl-daemon--boot-timer nil)
          (agent-repl-daemon--boot-deadline nil)
          (agent-repl-daemon--boot-continuation nil)
-         (agent-repl-daemon--boot-rejected-address nil)
+         (agent-repl-daemon--boot-rejected-pid nil)
+         (agent-repl-daemon--boot-rejection-logged nil)
          (agent-repl-daemon--own-address nil)
          (agent-repl-daemon--lifecycle nil)
          (agent-repl-daemon--lifecycle-timer nil)
@@ -1064,14 +1065,17 @@ the spawn, called the daemon booted, and linked to a refused port."
              :info "elisp.daemon.boot-addr-rejected"))))
 
 (ert-deftest agent-repl-test-daemon-boot-wait-accepts-the-new-daemons-address ()
-  "A DIFFERENT address is the daemon we started, and it is accepted at once."
+  "An advertisement NAMING A PID is the daemon we started, and it is accepted.
+The refused file was a pid-less legacy one; every current daemon names its
+pid, so its advertisement is never the one refused."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address "127.0.0.1:9001"
           agent-repl-test-daemon--health-answer
           (list :failure (list :kind :transport :message "connection refused")))
     (agent-repl-daemon-ensure)
-    (setq agent-repl-test-daemon--address "127.0.0.1:9002")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9002"
+          agent-repl-test-daemon--addr-pid 5151)
     ;; Act
     (agent-repl-daemon--boot-tick)
     ;; Assert
@@ -1079,8 +1083,8 @@ the spawn, called the daemon booted, and linked to a refused port."
 
 ;;;; ---- An advertisement whose advertiser is dead ----
 
-(ert-deftest agent-repl-test-daemon-dead-advertiser-addr-is-retired-at-info ()
-  "A pid that names no live process retires the address at INFO."
+(ert-deftest agent-repl-test-daemon-dead-advertiser-addr-is-noted-at-info ()
+  "A pid that names no live process is recorded at INFO as left for the boot."
   (agent-repl-test-daemon--with-harness
     ;; Arrange: an advertisement whose pid is not among the live pids.
     (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
@@ -1091,7 +1095,7 @@ the spawn, called the daemon booted, and linked to a refused port."
     (agent-repl-daemon-ensure)
     ;; Assert
     (should (agent-repl-test-daemon--logged-p
-             :info "elisp.daemon.addr-retired-dead-advertiser"))))
+             :info "elisp.daemon.addr-dead-advertiser-left address=\"127.0.0.1:9001\" pid=4242"))))
 
 (ert-deftest agent-repl-test-daemon-dead-advertiser-is-not-dialled ()
   "A dead advertiser's address is absent, so the probe never runs."
@@ -1122,8 +1126,9 @@ the spawn, called the daemon booted, and linked to a refused port."
     ;; Assert
     (should-not (agent-repl-test-daemon--logged-p :warn "elisp.daemon.stale-addr"))))
 
-(ert-deftest agent-repl-test-daemon-dead-advertiser-file-is-retired ()
-  "The dead advertiser's `daemon.addr' is removed before the build."
+(ert-deftest agent-repl-test-daemon-dead-advertiser-file-is-left-for-the-boot ()
+  "The dead advertiser's `daemon.addr' stays: it is the booting daemon's evidence.
+On 2026-11-21 Emacs deleted it and the new daemon never recorded the panic."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
@@ -1133,7 +1138,176 @@ the spawn, called the daemon booted, and linked to a refused port."
     ;; Act
     (agent-repl-daemon-ensure)
     ;; Assert
-    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+    (should (file-exists-p agent-repl-test-daemon--addr-file))))
+
+(ert-deftest agent-repl-test-daemon-dead-advertiser-pid-is-given-to-the-boot-wait ()
+  "The boot wait refuses the dead advertiser by its PID."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids nil)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (eql agent-repl-daemon--boot-rejected-pid 4242))))
+
+(ert-deftest agent-repl-test-daemon-dead-advertiser-successor-at-the-same-address-links ()
+  "The new daemon advertising the SAME shared address under its own pid is readiness.
+On 2026-11-21 the boot wait rejected by address, refused the live daemon's
+advertisement for 30 seconds, and logged a boot-timeout ERROR."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:59704")
+    (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+          agent-repl-test-daemon--addr-pid 78035
+          agent-repl-test-daemon--alive-pids nil)
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--addr-pid 14617)
+    ;; Act
+    (agent-repl-daemon--boot-tick)
+    ;; Assert
+    (should (= agent-repl-test-daemon--link-connect-calls 1))))
+
+;;;; ---- The boot wait identifies an advertisement by its pid ----
+
+(defun agent-repl-test-daemon--count-logged (level substring)
+  "Return how many LEVEL entries containing SUBSTRING were recorded."
+  (seq-count (lambda (entry)
+               (and (eq (car entry) level)
+                    (string-search substring (cdr entry))))
+             agent-repl-test-daemon--logs))
+
+(ert-deftest agent-repl-test-daemon-boot-tick-rejected-pid-is-not-readiness ()
+  "A file naming the rejected pid is not the new daemon, at any address."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (let ((settled 'none))
+      (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+            agent-repl-test-daemon--addr-pid 4242)
+      (agent-repl-daemon--await-address (lambda (address) (setq settled address)) nil 4242)
+      ;; Act
+      (agent-repl-daemon--boot-tick)
+      ;; Assert
+      (should (eq settled 'none)))))
+
+(ert-deftest agent-repl-test-daemon-boot-tick-rejection-is-logged-once-per-wait ()
+  "Reading the rejected advertisement on every tick records it once, not per tick."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+          agent-repl-test-daemon--addr-pid 4242)
+    (agent-repl-daemon--await-address #'ignore nil 4242)
+    ;; Act
+    (agent-repl-daemon--boot-tick)
+    (agent-repl-daemon--boot-tick)
+    ;; Assert
+    (should (= (agent-repl-test-daemon--count-logged
+                :info "elisp.daemon.boot-addr-rejected address=\"127.0.0.1:59704\" pid=4242")
+               1))))
+
+(ert-deftest agent-repl-test-daemon-boot-tick-other-pid-at-the-same-address-is-readiness ()
+  "A different pid at the SAME address as the rejected one is the new daemon."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (let ((settled 'none))
+      (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+            agent-repl-test-daemon--addr-pid 4242)
+      (agent-repl-daemon--await-address (lambda (address) (setq settled address)) nil 4242)
+      (setq agent-repl-test-daemon--addr-pid 5151)
+      ;; Act
+      (agent-repl-daemon--boot-tick)
+      ;; Assert
+      (should (equal settled "127.0.0.1:59704")))))
+
+(ert-deftest agent-repl-test-daemon-boot-tick-without-a-rejection-takes-any-advertisement ()
+  "With no rejected pid, the first advertisement read is readiness."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (let ((settled 'none))
+      (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+            agent-repl-test-daemon--addr-pid 4242)
+      ;; Act: the wait polls once inline.
+      (agent-repl-daemon--await-address (lambda (address) (setq settled address)) nil nil)
+      ;; Assert
+      (should (equal settled "127.0.0.1:59704")))))
+
+(ert-deftest agent-repl-test-daemon-boot-tick-pid-less-rejection-refuses-a-legacy-file ()
+  "A `pid-less' rejection refuses an advertisement that names no pid."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (let ((settled 'none))
+      (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+            agent-repl-test-daemon--addr-pid nil)
+      ;; Act
+      (agent-repl-daemon--await-address (lambda (address) (setq settled address)) nil 'pid-less)
+      ;; Assert
+      (should (eq settled 'none)))))
+
+(ert-deftest agent-repl-test-daemon-boot-tick-unreadable-pid-is-not-readiness ()
+  "A pid read that fails while a rejection stands is not readiness, and it WARNs."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (let ((settled 'none))
+      (setq agent-repl-test-daemon--address "127.0.0.1:59704")
+      (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr-pid)
+                 (lambda () (error "the file vanished mid-read"))))
+        ;; Act
+        (agent-repl-daemon--await-address (lambda (address) (setq settled address)) nil 4242))
+      ;; Assert
+      (should (eq settled 'none))
+      (should (agent-repl-test-daemon--logged-p :warn "elisp.daemon.boot-addr-pid-unreadable")))))
+
+;;;; ---- A live advertiser whose probe failed ----
+
+(ert-deftest agent-repl-test-daemon-probe-refused-live-advertiser-file-is-kept ()
+  "A live process's advertisement is never Emacs's to delete, even when its probe failed."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids '(4242)
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (file-exists-p agent-repl-test-daemon--addr-file))
+    (should-not (agent-repl-test-daemon--logged-p :info "elisp.daemon.stale-addr-removed"))))
+
+(ert-deftest agent-repl-test-daemon-probe-refused-live-advertiser-pid-is-rejected ()
+  "The spawn after a failed probe of a live advertiser refuses that pid as readiness."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-test-daemon--alive-pids '(4242)
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should agent-repl-test-daemon--spawns)
+    (should (eql agent-repl-daemon--boot-rejected-pid 4242))))
+
+(ert-deftest agent-repl-test-daemon-legacy-stale-addr-removal-failure-is-an-error ()
+  "A legacy file that cannot be removed is recorded at ERROR, never swallowed."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl-test-daemon--addr-pid nil
+          agent-repl-test-daemon--health-answer
+          (list :failure (list :kind :transport :message "connection refused")))
+    (cl-letf (((symbol-function 'delete-file)
+               (lambda (&rest _) (signal 'file-error '("Removing old name" "permission denied")))))
+      ;; Act
+      (agent-repl-daemon-ensure))
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p :error "elisp.daemon.stale-addr-remove-failed"))))
 
 (ert-deftest agent-repl-test-daemon-dead-advertiser-spawns-a-fresh-daemon ()
   "A dead advertiser leads straight to a build and a start."
@@ -1215,8 +1389,10 @@ the spawn, called the daemon booted, and linked to a refused port."
       ;; Arrange, Act, Assert.
       (should-not (agent-repl-daemon--advertiser-alive-p 0)))))
 
-(ert-deftest agent-repl-test-daemon-own-daemons-exit-removes-its-address-file ()
-  "A daemon THIS Emacs spawned leaves no address behind when it dies."
+(ert-deftest agent-repl-test-daemon-own-daemons-exit-leaves-its-address-file ()
+  "A daemon THIS Emacs spawned keeps its pid-naming address file when it dies.
+Only a daemon removes an advertisement that names a pid; the next boot
+replaces it."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address nil)
@@ -1232,7 +1408,8 @@ the spawn, called the daemon booted, and linked to a refused port."
       ;; Act
       (agent-repl-daemon--sentinel 'the-daemon-process "killed\n"))
     ;; Assert
-    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+    (should (file-exists-p agent-repl-test-daemon--addr-file))
+    (should-not agent-repl-daemon--own-address)))
 
 (ert-deftest agent-repl-test-daemon-own-daemons-exit-keeps-a-successors-address ()
   "A file that has moved on belongs to another daemon and is left alone."
@@ -1640,7 +1817,8 @@ has to survive the spawn to excuse the exit it was given for."
                 (agent-repl-daemon--sentinel 'the-daemon-process "killed\n"))))))
 
 (ert-deftest agent-repl-test-daemon-sentinel-records-the-exit-despite-a-pending-quit ()
-  "A quit already requested does not stop the address file being retired."
+  "A quit already requested does not stop the exit being recorded.
+The exited daemon's own address is forgotten and its file left, at INFO."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address nil)
@@ -1657,7 +1835,9 @@ has to survive the spawn to excuse the exit it was given for."
       (agent-repl-test--with-pending-quit
         (agent-repl-daemon--sentinel 'the-daemon-process "killed\n")))
     ;; Assert
-    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+    (should-not agent-repl-daemon--own-address)
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.own-addr-left address=\"127.0.0.1:9001\""))))
 
 ;;;; ---- Idempotence ----
 
@@ -2786,8 +2966,9 @@ the shutdown schedule exists to avoid."
 
 ;;; The exited daemon's own advertisement, identified by its pid.
 
-(ert-deftest agent-repl-test-daemon-own-addr-retired-when-it-names-the-exited-pid ()
-  "The file of the daemon this Emacs spawned goes when it still carries that pid."
+(ert-deftest agent-repl-test-daemon-own-addr-left-when-it-names-the-exited-pid ()
+  "The exited daemon's own file stays: only a daemon removes a pid-naming file.
+The next boot replaces it under the boot claim."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (agent-repl-test-daemon--write-addr-file "127.0.0.1:59704")
@@ -2795,10 +2976,23 @@ the shutdown schedule exists to avoid."
           agent-repl-test-daemon--addr-pid 4242
           agent-repl-daemon--own-address "127.0.0.1:59704")
     ;; Act
-    (agent-repl-daemon--retire-own-addr 4242)
+    (agent-repl-daemon--forget-own-addr 4242)
     ;; Assert
-    (should-not (file-exists-p agent-repl-test-daemon--addr-file))
-    (should (agent-repl-test-daemon--logged-p :info "elisp.daemon.stale-addr-removed"))))
+    (should (file-exists-p agent-repl-test-daemon--addr-file))))
+
+(ert-deftest agent-repl-test-daemon-own-addr-left-is-recorded-at-info ()
+  "Leaving the exited daemon's advertisement is stated at INFO."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:59704")
+    (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-daemon--own-address "127.0.0.1:59704")
+    ;; Act
+    (agent-repl-daemon--forget-own-addr 4242)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.own-addr-left address=\"127.0.0.1:59704\" pid=4242"))))
 
 (ert-deftest agent-repl-test-daemon-own-addr-kept-when-a-successor-advertises-the-same-address ()
   "A successor advertising the shared address under its own pid is never retired.
@@ -2810,7 +3004,7 @@ On 2026-11-18 a match on the address alone deleted the successor's file."
           agent-repl-test-daemon--addr-pid 5151
           agent-repl-daemon--own-address "127.0.0.1:59704")
     ;; Act
-    (agent-repl-daemon--retire-own-addr 4242)
+    (agent-repl-daemon--forget-own-addr 4242)
     ;; Assert
     (should (file-exists-p agent-repl-test-daemon--addr-file))
     (should (agent-repl-test-daemon--logged-p :info "elisp.daemon.own-addr-kept"))))
@@ -2824,7 +3018,7 @@ On 2026-11-18 a match on the address alone deleted the successor's file."
           agent-repl-test-daemon--addr-pid nil
           agent-repl-daemon--own-address "127.0.0.1:59704")
     ;; Act
-    (agent-repl-daemon--retire-own-addr 4242)
+    (agent-repl-daemon--forget-own-addr 4242)
     ;; Assert
     (should (file-exists-p agent-repl-test-daemon--addr-file))))
 
@@ -2835,7 +3029,7 @@ On 2026-11-18 a match on the address alone deleted the successor's file."
     (setq agent-repl-test-daemon--address nil
           agent-repl-daemon--own-address "127.0.0.1:59704")
     ;; Act
-    (agent-repl-daemon--retire-own-addr 4242)
+    (agent-repl-daemon--forget-own-addr 4242)
     ;; Assert
     (should-not agent-repl-daemon--own-address)
     (should (agent-repl-test-daemon--logged-p :log "elisp.daemon.own-addr-already-gone"))))
