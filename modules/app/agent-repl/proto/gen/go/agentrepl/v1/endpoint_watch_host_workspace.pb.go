@@ -696,10 +696,18 @@ func (x *HostEvaluate) GetText() string {
 	return ""
 }
 
-// Empty: the stream it rides names the workspace. A handover touches no page
-// (owner ruling, 2026-11-22): the page moves itself (WebWorkspaceTransferred).
+// The stream it rides names the workspace. A handover touches no page (owner
+// ruling, 2026-11-22): the page moves itself (WebWorkspaceTransferred).
 type HostWorkspaceTransferred struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// RETIRED 2026-11-22, NEVER SET by this daemon and IGNORED by every reader:
+	// it was the outgoing daemon's decision whether the handover loaded the
+	// workspace's page, and no handover loads, reloads or drops one now. Still
+	// declared because the first deploy after its retirement hands over from a
+	// daemon that sends it; it is reserved once no such daemon can run.
+	//
+	// Deprecated: Marked as deprecated in agentrepl/v1/endpoint_watch_host_workspace.proto.
+	ReloadPage    *bool `protobuf:"varint,1,opt,name=reload_page,json=reloadPage,proto3,oneof" json:"reload_page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -732,6 +740,14 @@ func (x *HostWorkspaceTransferred) ProtoReflect() protoreflect.Message {
 // Deprecated: Use HostWorkspaceTransferred.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceTransferred) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+// Deprecated: Marked as deprecated in agentrepl/v1/endpoint_watch_host_workspace.proto.
+func (x *HostWorkspaceTransferred) GetReloadPage() bool {
+	if x != nil && x.ReloadPage != nil {
+		return *x.ReloadPage
+	}
+	return false
 }
 
 type HostWorkspaceTransferWithdrawn struct {
@@ -4019,8 +4035,11 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x05_line\"]\n" +
 	"\fHostEvaluate\x129\n" +
 	"\x05token\x18\x01 \x01(\v2#.agentrepl.v1.EditorEvaluationTokenR\x05token\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"-\n" +
-	"\x18HostWorkspaceTransferredJ\x04\b\x01\x10\x02R\vreload_page\" \n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"T\n" +
+	"\x18HostWorkspaceTransferred\x12(\n" +
+	"\vreload_page\x18\x01 \x01(\bB\x02\x18\x01H\x00R\n" +
+	"reloadPage\x88\x01\x01B\x0e\n" +
+	"\f_reload_page\" \n" +
 	"\x1eHostWorkspaceTransferWithdrawn\"T\n" +
 	"\x19HostWorkspaceReloadWebapp\x12&\n" +
 	"\fwebapp_build\x18\x01 \x01(\tH\x00R\vwebappBuild\x88\x01\x01B\x0f\n" +
@@ -4410,6 +4429,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*WatchHostWorkspaceResponse_LinkFollowed)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[2].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[4].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[6].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[11].OneofWrappers = []any{
 		(*HostWorkspaceResponseQuestion_Asked)(nil),

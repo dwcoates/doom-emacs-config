@@ -825,8 +825,8 @@ is a contract breach."
 ;;;; ---- The remaining WatchHostWorkspace push arms ----
 
 (defun agent-repl-wire-decode-host-workspace-transferred (value)
-  "Decode VALUE as `HostWorkspaceTransferred', which carries nothing: nil.
-The retired `reload_page' is still accepted and ignored, because the first
+  "Decode VALUE as `HostWorkspaceTransferred', which carries nothing used: nil.
+Its retired `reload_page' is still declared and ignored, because the first
 deploy after its retirement hands over from a daemon that still sends it."
   (let ((object (agent-repl-wire--object "HostWorkspaceTransferred" value)))
     (agent-repl-wire--check-keys "HostWorkspaceTransferred" object '(reloadPage))

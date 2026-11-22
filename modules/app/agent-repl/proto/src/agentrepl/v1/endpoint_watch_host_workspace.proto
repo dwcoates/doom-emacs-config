@@ -202,13 +202,15 @@ message HostEvaluate {
   string text = 2;
 }
 
-// Empty: the stream it rides names the workspace. A handover touches no page
-// (owner ruling, 2026-11-22): the page moves itself (WebWorkspaceTransferred).
+// The stream it rides names the workspace. A handover touches no page (owner
+// ruling, 2026-11-22): the page moves itself (WebWorkspaceTransferred).
 message HostWorkspaceTransferred {
-  // Retired 2026-11-22: the outgoing daemon's decision whether the handover
-  // loaded the workspace's page. No handover loads, reloads or drops one.
-  reserved 1;
-  reserved "reload_page";
+  // RETIRED 2026-11-22, NEVER SET by this daemon and IGNORED by every reader:
+  // it was the outgoing daemon's decision whether the handover loaded the
+  // workspace's page, and no handover loads, reloads or drops one now. Still
+  // declared because the first deploy after its retirement hands over from a
+  // daemon that sends it; it is reserved once no such daemon can run.
+  optional bool reload_page = 1 [deprecated = true];
 }
 message HostWorkspaceTransferWithdrawn {}
 message HostWorkspaceReloadWebapp {
