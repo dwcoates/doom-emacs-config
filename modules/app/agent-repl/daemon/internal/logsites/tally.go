@@ -260,7 +260,7 @@ func (t *Tallier) tallyFile(ctx context.Context, src source, id string, deploys 
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(f, 64<<10)
+	r := bufio.NewReaderSize(f, readBufferBytes)
 	malformedAt := int64(-1)
 	var malformed int64
 	for {
@@ -336,6 +336,10 @@ func (c chunkTally) counts() []wsm.LogSiteCount {
 	return out
 }
 
+// readBufferBytes is the read buffer of a file's pass; a longer record is
+// read whole past it (readChunk).
+const readBufferBytes = 64 << 10
+
 // readChunk reads whole lines from R, which stands at FROM, until a chunk's
 // worth, the end of its last whole line, or a record at or after UNTIL; DONE
 // reports that the file holds nothing more for this pass.
@@ -348,9 +352,12 @@ func readChunk(ctx context.Context, r *bufio.Reader, from int64, deploys []time.
 		}
 		line, err := r.ReadSlice('\n')
 		if errors.Is(err, bufio.ErrBufferFull) {
-			// A record longer than the buffer: read it whole.
+			// A record longer than the buffer: read it whole. ReadSlice's
+			// bytes are the buffer's own, which the next read overwrites, so
+			// its head is copied before the rest is read.
+			head := append([]byte(nil), line...)
 			rest, err2 := r.ReadBytes('\n')
-			line = append(append([]byte{}, line...), rest...)
+			line = append(head, rest...)
 			err = err2
 		}
 		if errors.Is(err, io.EOF) {

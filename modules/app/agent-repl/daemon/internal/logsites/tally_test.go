@@ -118,6 +118,28 @@ func TestAPassTalliesEveryKeyedRecordAndCountsTheRest(t *testing.T) {
 	}
 }
 
+func TestAPassTalliesARecordLongerThanItsReadBuffer(t *testing.T) {
+	// Arrange: a keyed record whose message alone passes the read buffer,
+	// between two short ones.
+	f := newFixture(t)
+	long := strings.Repeat("z", readBufferBytes+readBufferBytes/2)
+	f.write(t, "daemon.run.log",
+		keyed(t0.Add(time.Minute), "info", "pkg.A", "said {what}", "said x")+
+			keyed(t0.Add(2*time.Minute), "error", "pkg.B", "failed {what}", "failed "+long)+
+			keyed(t0.Add(3*time.Minute), "info", "pkg.A", "said {what}", "said y"))
+
+	// Act
+	report := f.pass(t)
+
+	// Assert
+	if report.Records != 3 || report.Malformed != 0 {
+		t.Fatalf("report = %+v, want 3 records and none malformed", report)
+	}
+	if got, want := counts(f.rows(t)), sorted(siteA+":2", siteB+":1"); !reflect.DeepEqual(got, want) {
+		t.Errorf("rows = %v, want %v", got, want)
+	}
+}
+
 func TestAPassReadsEachFileFromItsCursor(t *testing.T) {
 	tests := []struct {
 		name      string
