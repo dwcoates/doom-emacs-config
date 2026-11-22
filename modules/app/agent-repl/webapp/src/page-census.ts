@@ -76,14 +76,14 @@ function requireView(doc: Document): Window & typeof globalThis {
 /** Install the census on DOC's page; answers the stop. */
 export function installPageCensus(doc: Document, after: After = pageAfter): () => void {
   return every(after, CENSUS_EVERY_MS, () => {
-    const size = pageSize(doc);
-    const animations = animationCensus(doc);
+    const { dom_nodes, feed_rows, ...size } = pageSize(doc);
+    const { animations, ...named } = animationCensus(doc);
     log.info(
       "the page holds {dom_nodes} elements, {feed_rows} feed rows and {animations} animations",
       {
         operation: "page.census",
-        context: { ...size, ...animations, visibility: doc.visibilityState },
-      }, { dom_nodes: size.dom_nodes, feed_rows: size.feed_rows, animations: animations.animations },
+        context: { ...size, ...named, visibility: doc.visibilityState },
+      }, { dom_nodes, feed_rows, animations },
     );
   });
 }
