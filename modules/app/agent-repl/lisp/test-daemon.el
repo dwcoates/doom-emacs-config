@@ -1389,8 +1389,10 @@ advertisement for 30 seconds, and logged a boot-timeout ERROR."
       ;; Arrange, Act, Assert.
       (should-not (agent-repl-daemon--advertiser-alive-p 0)))))
 
-(ert-deftest agent-repl-test-daemon-own-daemons-exit-removes-its-address-file ()
-  "A daemon THIS Emacs spawned leaves no address behind when it dies."
+(ert-deftest agent-repl-test-daemon-own-daemons-exit-leaves-its-address-file ()
+  "A daemon THIS Emacs spawned keeps its pid-naming address file when it dies.
+Only a daemon removes an advertisement that names a pid; the next boot
+replaces it."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address nil)
@@ -1406,7 +1408,8 @@ advertisement for 30 seconds, and logged a boot-timeout ERROR."
       ;; Act
       (agent-repl-daemon--sentinel 'the-daemon-process "killed\n"))
     ;; Assert
-    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+    (should (file-exists-p agent-repl-test-daemon--addr-file))
+    (should-not agent-repl-daemon--own-address)))
 
 (ert-deftest agent-repl-test-daemon-own-daemons-exit-keeps-a-successors-address ()
   "A file that has moved on belongs to another daemon and is left alone."
@@ -1814,7 +1817,8 @@ has to survive the spawn to excuse the exit it was given for."
                 (agent-repl-daemon--sentinel 'the-daemon-process "killed\n"))))))
 
 (ert-deftest agent-repl-test-daemon-sentinel-records-the-exit-despite-a-pending-quit ()
-  "A quit already requested does not stop the address file being retired."
+  "A quit already requested does not stop the exit being recorded.
+The exited daemon's own address is forgotten and its file left, at INFO."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address nil)
@@ -1831,7 +1835,9 @@ has to survive the spawn to excuse the exit it was given for."
       (agent-repl-test--with-pending-quit
         (agent-repl-daemon--sentinel 'the-daemon-process "killed\n")))
     ;; Assert
-    (should-not (file-exists-p agent-repl-test-daemon--addr-file))))
+    (should-not agent-repl-daemon--own-address)
+    (should (agent-repl-test-daemon--logged-p
+             :info "elisp.daemon.own-addr-left address=\"127.0.0.1:9001\""))))
 
 ;;;; ---- Idempotence ----
 

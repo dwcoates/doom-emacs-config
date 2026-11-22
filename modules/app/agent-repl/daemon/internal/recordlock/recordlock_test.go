@@ -428,8 +428,9 @@ func TestOpenFileCreatesAReadWriteFile(t *testing.T) {
 	}
 }
 
-// Every lock file this package opens goes through OpenFile: a hand-rolled
-// open elsewhere is a drifted copy.
+// Every lock file this package opens goes through openLockFile, the one open
+// OpenFile and OpenExisting share: a hand-rolled open elsewhere is a drifted
+// copy.
 func TestEveryLockFileOpenGoesThroughOpenFile(t *testing.T) {
 	body, err := os.ReadFile("recordlock.go")
 	if err != nil {
@@ -437,8 +438,8 @@ func TestEveryLockFileOpenGoesThroughOpenFile(t *testing.T) {
 	}
 	lines := strings.Split(string(body), "\n")
 	for i, line := range lines {
-		if strings.Contains(line, "os.OpenFile(") && !strings.Contains(lines[max(i-1, 0)], "func OpenFile") {
-			t.Errorf("recordlock.go:%d opens a file by hand; use OpenFile: %s", i+1, strings.TrimSpace(line))
+		if strings.Contains(line, "os.OpenFile(") && !strings.Contains(lines[max(i-1, 0)], "func openLockFile") {
+			t.Errorf("recordlock.go:%d opens a file by hand; use OpenFile or OpenExisting: %s", i+1, strings.TrimSpace(line))
 		}
 	}
 }

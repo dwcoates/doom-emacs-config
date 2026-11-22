@@ -1836,7 +1836,7 @@ with its own.  The boot wait refuses PID instead (see
                     address pid (agent-repl-connect-daemon-addr-file)))
 
 (defun agent-repl-daemon--retire-stale-addr (address reason)
-  "Remove a LEGACY `daemon.addr' (one naming no pid) whose ADDRESS proved dead.
+  "Remove a LEGACY `daemon.addr', naming no pid, whose ADDRESS proved dead.
 REASON names which proof retired it, for the record.
 A legacy file names no advertiser, so no daemon will ever account for it
 or replace it; left on disk while a fresh daemon boots, it is a corpse no

@@ -121,7 +121,13 @@ func gateLocked(info os.FileInfo, path string) (*sync.RWMutex, error) {
 // when absent but never its directory: THE one open every lock file goes
 // through, so every descriptor is one a record lock can be taken on.
 func OpenFile(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	return openLockFile(path, os.O_CREATE)
+}
+
+// openLockFile is the package's ONE open of a lock file, for reading and
+// writing, with EXTRA added to its flags (os.O_CREATE, or none).
+func openLockFile(path string, extra int) (*os.File, error) {
+	return os.OpenFile(path, extra|os.O_RDWR, 0o644)
 }
 
 // wholeFile is a record lock request of TYPE over the whole file.
@@ -284,7 +290,7 @@ func TryExistingExclusive(path string) (*Record, Holder, error) {
 // the open of a caller that waits for a lock file another process made
 // (BlockExclusive) and must not put one back where its holder removed it.
 func OpenExisting(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_RDWR, 0)
+	return openLockFile(path, 0)
 }
 
 // Hold takes the lock at PATH without blocking, for the length of some work,
