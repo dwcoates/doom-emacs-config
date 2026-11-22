@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/childproc"
 )
 
 // Mode is what a helper process does with PATH. A mode that answers its own
@@ -72,7 +74,13 @@ type Process struct {
 // at the end of the test.
 func Start(t testing.TB, helper, env, mode, path string) *Process {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^"+helper+"$")
+	// The helper runs where the test does, as a child built with os/exec
+	// directly would.
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("the test's working directory: %v", err)
+	}
+	cmd := childproc.Command(dir, os.Args[0], "-test.run=^"+helper+"$")
 	cmd.Env = append(os.Environ(), env+"="+mode, env+"_PATH="+path)
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
