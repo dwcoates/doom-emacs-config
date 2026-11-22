@@ -2,6 +2,7 @@ package cachelapse
 
 import (
 	"context"
+	"errors"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -72,7 +73,8 @@ func growth(was, now uint64) uint64 {
 
 // endRun records WS's keep-alive run's end asked at ENDING, when it has
 // ended, into the telemetry. A failed write is recorded at ERROR, and the run
-// is asked again at its next moment.
+// is asked again at its next moment. A workspace forgotten meanwhile is
+// recorded at INFO and forgotten here too.
 //
 // A JOINING SUCCESSOR WRITES NOTHING: its handle is read-only until its
 // promotion, so the end is withheld, and the loop asks it again at the same
@@ -84,6 +86,13 @@ func (k *Keeper) endRun(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID
 	}
 	run, ended, err := k.deps.DB.EndKeepaliveRun(ctx, ws, ending)
 	if err != nil {
+		// A WORKSPACE FORGOTTEN MEANWHILE HAS NO RUN TO END: its row left the
+		// store with its runs, as reconcile finds it, so nothing is asked again.
+		if errors.Is(err, wsm.ErrNotFound) {
+			log.Info(opDrive, "the workspace is no longer registered; it has no keep-alive run to end", dlog.Context{"ending": int(ending)})
+			k.forget(ws)
+			return
+		}
 		if !leaving(ctx, log, opDrive, "recording the end of the keep-alive run", err) {
 			log.Error(opDrive, "could not record the end of the workspace's keep-alive run; it is asked again at its next moment", dlog.Context{
 				"ending": int(ending), "cause": err.Error(),
