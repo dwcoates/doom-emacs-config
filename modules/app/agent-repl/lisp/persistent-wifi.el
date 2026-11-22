@@ -250,9 +250,10 @@ push of the same standing then reads as unchanged."
 On: join the phone hotspot and disable system sleep; while on, the daemon
 rejoins the hotspot whenever Wi-Fi is lost, and a closed lid puts the
 machine in the lid-closed quiet state (Low Power Mode on battery power,
-High Power Mode on AC power, the display sleeps, the configured applications freeze, nothing draws)
-until it opens, when the energy mode in use before the quiet state set one
-is restored.  The energy mode is never changed with the lid open.  Off: leave the hotspot,
+High Power Mode on AC power, the display sleeps, the configured
+applications freeze, nothing draws) until it opens, when the energy mode
+in use before the quiet state set one is restored.  The energy mode is
+never changed with the lid open.  Off: leave the hotspot,
 enable sleep, and leave the quiet state if it stands.  The daemon reads
 the mode and turns it; a refusal (no sudo grant for pmset) is reported as
 the daemon's refusal."
