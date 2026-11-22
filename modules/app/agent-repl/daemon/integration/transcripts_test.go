@@ -91,7 +91,7 @@ func TestListWorkspaceTranscriptsLetsTheDAEMONSRecordDecideWhatIsCurrent(t *test
 func TestARestartIsAPlainResumeAndLeavesTheWorkspacesBookWhereItIs(t *testing.T) {
 	// Arrange: an opened workspace with a transcript on disk, so its restart
 	// resumes rather than coming up fresh.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
 		t.Fatalf("the opening StartSession = %v, want fresh", req)
 	}

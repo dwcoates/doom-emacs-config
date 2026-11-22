@@ -2665,3 +2665,28 @@ func TestARegistrationWhoseOriginatorCannotBeRecordedRegistersNothing(t *testing
 		t.Fatalf("no error record under daemon.wsm.register_workspace naming the originator; got %+v", log.Records())
 	}
 }
+
+func TestReadRegistryReadsEveryWorkspaceWithItsRepository(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := registerIn(t, s, arrangeRepo(t, "repo"), "w", nil)
+
+	// Act
+	got, err := s.ReadRegistry(context.Background())
+
+	// Assert: every workspace read names a repository the same read holds.
+	if err != nil {
+		t.Fatalf("ReadRegistry: %v", err)
+	}
+	if len(got.Repositories) != 1 || got.Repositories[0].ID != ws.Repo {
+		t.Fatalf("repositories = %+v, want the one repository %q", got.Repositories, ws.Repo)
+	}
+	if len(got.Workspaces) != 2 {
+		t.Fatalf("workspaces = %+v, want the workspace and its main worktree", got.Workspaces)
+	}
+	for _, w := range got.Workspaces {
+		if w.Repo != ws.Repo {
+			t.Fatalf("workspace %s names repository %q, want %q", w.ID, w.Repo, ws.Repo)
+		}
+	}
+}

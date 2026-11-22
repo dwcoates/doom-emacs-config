@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // skillsChangedUpdate is the shim's statement that its vendor's skill set went
@@ -27,7 +25,7 @@ func skillsChangedUpdate(paths ...string) *conversationv1.SessionUpdate {
 func TestAStaleSkillSetReplacesAnIdleSessionsShim(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of the
 	// graceful stand-down the fake shim ends by exiting, and the shim link it
 	// severs, exactly as a restart's.

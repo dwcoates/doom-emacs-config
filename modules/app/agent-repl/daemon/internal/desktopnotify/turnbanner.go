@@ -65,7 +65,7 @@ func NewTurnBanners(deps TurnDeps) *TurnBanners {
 // made (after its summary is composed); a turn whose banner is not made, such
 // as one ending while Emacs is focused, makes no sound.
 func (t *TurnBanners) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.TurnClose) {
-	log := t.deps.Log.With(dlog.Context{"workspace": string(ws), "turn": string(turn)})
+	log := t.deps.Log.With(bannerContext(ws, dlog.Context{"turn": string(turn)}))
 	ending, ok := t.deps.Endings.TakeTurnEnding(ws, turn)
 	if !ok {
 		log.Info(opTurn, "the turn drew no live ending (a /clear, or a turn this feed never saw); no banner", nil)

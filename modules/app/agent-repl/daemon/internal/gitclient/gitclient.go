@@ -226,6 +226,14 @@ func (c *client) ResolveRef(ctx context.Context, repoDir, ref string) (string, e
 	return c.run(ctx, "daemon.gitclient.resolve_ref", repoDir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 }
 
+// forWorktree is the logger for a record about the workspace at WORKTREEDIR
+// while it is created or removed: the central sink, since its own sinks are
+// detached around both, stamped with the workspace it is about, so its
+// records are read back with that workspace's.
+func (c *client) forWorktree(worktreeDir string) dlog.Logger {
+	return c.log.Global().With(dlog.Context{dlog.KeyWorkspaceDir: worktreeDir})
+}
+
 // CreateWorktree creates branch at baseRef and checks it out at worktreeDir.
 // One command does both, so there is no window in which the branch exists
 // without its tree.
@@ -238,7 +246,7 @@ func (c *client) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, w
 	// A WORKTREE AT A PATH A REMOVAL DETACHED IS A NEW WORKSPACE'S: its log
 	// sinks link into it again (see RemoveWorktree).
 	if err := c.log.AttachDir(worktreeDir); err != nil {
-		c.log.Global().Error(operation, "the new worktree could not be re-attached to its log sinks", dlog.Context{
+		c.forWorktree(worktreeDir).Error(operation, "the new worktree could not be re-attached to its log sinks", dlog.Context{
 			"dir": repoDir, "worktree_dir": worktreeDir, "cause": err.Error(),
 		})
 		return fmt.Errorf("gitclient: attach the log sinks of %s: %w", worktreeDir, err)
@@ -259,7 +267,7 @@ func (c *client) RestoreWorktree(ctx context.Context, repoDir, worktreeDir, bran
 		return err
 	}
 	if err := c.log.AttachDir(worktreeDir); err != nil {
-		c.log.Global().Error(operation, "the restored worktree could not be re-attached to its log sinks", dlog.Context{
+		c.forWorktree(worktreeDir).Error(operation, "the restored worktree could not be re-attached to its log sinks", dlog.Context{
 			"dir": repoDir, "worktree_dir": worktreeDir, "branch": branch, "cause": err.Error(),
 		})
 		return fmt.Errorf("gitclient: attach the log sinks of %s: %w", worktreeDir, err)
@@ -383,7 +391,7 @@ func (c *client) RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir s
 	}
 	stillThere, statErr := pathPresent(worktreeDir)
 	if statErr != nil {
-		c.log.Global().Error(operation, "could not tell whether the refused worktree is still present; its log sinks stay detached", dlog.Context{
+		c.forWorktree(worktreeDir).Error(operation, "could not tell whether the refused worktree is still present; its log sinks stay detached", dlog.Context{
 			"dir": repoDir, "worktree_dir": worktreeDir, "cause": statErr.Error(), "removal": err.Error(),
 		})
 		return errors.Join(err, statErr)
@@ -392,7 +400,7 @@ func (c *client) RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir s
 		return err
 	}
 	if attachErr := c.log.AttachDir(worktreeDir); attachErr != nil {
-		c.log.Global().Error(operation, "the refused worktree could not be re-attached to its log sinks", dlog.Context{
+		c.forWorktree(worktreeDir).Error(operation, "the refused worktree could not be re-attached to its log sinks", dlog.Context{
 			"dir": repoDir, "worktree_dir": worktreeDir, "cause": attachErr.Error(), "removal": err.Error(),
 		})
 		return errors.Join(err, fmt.Errorf("gitclient: re-attach the log sinks of %s: %w", worktreeDir, attachErr))
@@ -403,19 +411,20 @@ func (c *client) RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir s
 // removeWorktree is the one removal door both RemoveWorktree and
 // RemoveCleanWorktree go through; force is the only thing they differ in.
 func (c *client) removeWorktree(ctx context.Context, operation, repoDir, worktreeDir string, force bool) error {
+	log := c.forWorktree(worktreeDir)
 	// THE LOG SINKS LET GO OF THE DIRECTORY BEFORE ANYTHING REMOVES IT. A
 	// workspace sink opened mid-removal re-created `<worktree>/.claude/emacs`
 	// with its canonical link, and the postcondition below then found the
 	// worktree "still present after removal" (TestHandoverTransfersAtFreeness,
 	// 2026-09-23). Detached first, no sink creates anything inside it again.
 	if err := c.log.DetachDir(worktreeDir); err != nil {
-		c.log.Global().Error(operation, "the worktree could not be detached from its log sinks; it is not removed", dlog.Context{
+		log.Error(operation, "the worktree could not be detached from its log sinks; it is not removed", dlog.Context{
 			"dir": repoDir, "worktree_dir": worktreeDir, "cause": err.Error(),
 		})
 		return fmt.Errorf("gitclient: detach the log sinks of %s: %w", worktreeDir, err)
 	}
 	if !force {
-		return c.removeAt(ctx, operation, repoDir, worktreeDir, false)
+		return c.removeAt(ctx, log, operation, repoDir, worktreeDir, false)
 	}
 	// A FORCED REMOVAL MOVES THE TREE OFF ITS PATH FIRST, then removes it
 	// under a name nothing writes to. Detaching the daemon's own sinks is not
@@ -425,11 +434,11 @@ func (c *client) removeWorktree(ctx context.Context, operation, repoDir, worktre
 	// empty" with the tree half gone (doom, 2026-11-11: a failed create's
 	// undo). `git worktree move` is one rename: once it returns the path is
 	// empty, and a writer of the old path finds no parent to create into.
-	aside, err := c.moveAside(ctx, operation, repoDir, worktreeDir)
+	aside, err := c.moveAside(ctx, log, operation, repoDir, worktreeDir)
 	if err != nil {
 		return err
 	}
-	return c.removeAt(ctx, operation, repoDir, aside, true)
+	return c.removeAt(ctx, log, operation, repoDir, aside, true)
 }
 
 // asideDir is where a forced removal moves WORKTREEDIR before removing it: a
@@ -444,8 +453,8 @@ func asideDir(worktreeDir string) string {
 // worktree move`, and answers the aside path. An aside copy an earlier removal
 // left is removed first, so the move has somewhere to go. A move git refuses
 // leaves the tree whole at its path, and is answered as the failure, recorded
-// at ERROR.
-func (c *client) moveAside(ctx context.Context, operation, repoDir, worktreeDir string) (string, error) {
+// at ERROR, through LOG.
+func (c *client) moveAside(ctx context.Context, log dlog.Logger, operation, repoDir, worktreeDir string) (string, error) {
 	aside := asideDir(worktreeDir)
 	present, err := pathPresent(worktreeDir)
 	if err != nil || !present {
@@ -456,10 +465,10 @@ func (c *client) moveAside(ctx context.Context, operation, repoDir, worktreeDir 
 		return "", err
 	}
 	if stale {
-		c.log.Global().Info(operation, "an earlier removal left this tree's aside copy; it is removed before the tree is moved aside", dlog.Context{
+		log.Info(operation, "an earlier removal left this tree's aside copy; it is removed before the tree is moved aside", dlog.Context{
 			"dir": repoDir, "worktree_dir": worktreeDir, "aside": aside,
 		})
-		if err := c.removeAt(ctx, operation, repoDir, aside, true); err != nil {
+		if err := c.removeAt(ctx, log, operation, repoDir, aside, true); err != nil {
 			return "", err
 		}
 	}
@@ -469,7 +478,7 @@ func (c *client) moveAside(ctx context.Context, operation, repoDir, worktreeDir 
 	}
 	if in.exitCode != 0 {
 		failure := in.fail()
-		c.log.Global().Error(operation, "git would not move the worktree aside; it stays whole at its path", dlog.Context{
+		log.Error(operation, "git would not move the worktree aside; it stays whole at its path", dlog.Context{
 			"dir": repoDir, "worktree_dir": worktreeDir, "aside": aside, "cause": failure.Error(),
 		})
 		return "", failure
@@ -478,8 +487,10 @@ func (c *client) moveAside(ctx context.Context, operation, repoDir, worktreeDir 
 }
 
 // removeAt removes the worktree at WORKTREEDIR with `git worktree remove`
-// (--force when FORCE), then prunes; THE POSTCONDITION decides success.
-func (c *client) removeAt(ctx context.Context, operation, repoDir, worktreeDir string, force bool) error {
+// (--force when FORCE), then prunes; THE POSTCONDITION decides success. A
+// failure is recorded through LOG, the removed workspace's logger, since
+// WORKTREEDIR may be the aside path the workspace was moved to.
+func (c *client) removeAt(ctx context.Context, log dlog.Logger, operation, repoDir, worktreeDir string, force bool) error {
 	present, err := pathPresent(worktreeDir)
 	if err != nil {
 		return err
@@ -512,7 +523,7 @@ func (c *client) removeAt(ctx context.Context, operation, repoDir, worktreeDir s
 		return nil
 	}
 	if removeFailure != nil {
-		c.log.Global().Error(operation, "the worktree survived `git "+strings.Join(command[:len(command)-1], " ")+"`", dlog.Context{
+		log.Error(operation, "the worktree survived `git "+strings.Join(command[:len(command)-1], " ")+"`", dlog.Context{
 			"dir":          repoDir,
 			"worktree_dir": worktreeDir,
 			"force":        force,
@@ -520,7 +531,7 @@ func (c *client) removeAt(ctx context.Context, operation, repoDir, worktreeDir s
 		})
 		return removeFailure
 	}
-	c.log.Global().Error(operation, "the worktree is still present after removal", dlog.Context{
+	log.Error(operation, "the worktree is still present after removal", dlog.Context{
 		"dir":          repoDir,
 		"worktree_dir": worktreeDir,
 		"force":        force,

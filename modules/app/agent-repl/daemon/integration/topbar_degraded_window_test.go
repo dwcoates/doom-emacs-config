@@ -7,8 +7,6 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 func degradedWindowWarning(v *frontendv1.TopbarView, closed bool, began int64) *frontendv1.TopbarDegradedWindowWarningDetail {
@@ -27,7 +25,7 @@ func degradedWindowWarning(v *frontendv1.TopbarView, closed bool, began int64) *
 func TestADegradedWindowTheShimOpensIsDrawnOpenAndThenClosedWithItsDroppedCount(t *testing.T) {
 	t.Parallel()
 	// Arrange: the open fault the unhealthy push raises is the subject.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.health.open_fault")
 	topbar := f.d.WatchTopbar(f.ws)
 	const began = int64(1_700_000_000_000)

@@ -100,7 +100,7 @@ func TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused(t *testing.T) {
 func TestARetryOfAnUndeliveredSubmissionRestartsTheSameTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
 	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
 	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
@@ -332,7 +332,7 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndItsRelea
 	t.Parallel()
 	// Arrange: /clear runs as the turn in front, marking it uninterruptible
 	// (internal/promptqueue/acts.go's runContextCut).
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	cutResp := f.submit("/clear", "k-clear-running", origin)
 	if cutResp.GetError() != nil {
 		t.Fatalf("SubmitPrompt(/clear) = %v, want a success", cutResp)
@@ -702,9 +702,10 @@ func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 // merge lease that stays open for the assertions.
 func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 	t.Helper()
+	// The view comes first: the repository is minted in its daemon's git world.
+	d := canonicalView(t)
 	selfRepo := harness.NewRepo(t)
 	selfRepo.DeploysAsAgentRepl()
-	d := harness.StartDaemon(t, harness.Opts{})
 	// The workspace is CREATED, never merely registered: a merge runs off the
 	// creation job's recorded geometry and a registered worktree has none, so
 	// a registered one is refused before any lease is ever taken.
@@ -844,7 +845,7 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 func TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The queue records the shim's refusal of the delivery it attempted; the
 	// refusal is an ANSWER to the caller and the record is its evidence.
 	f.d.ExpectWarnings("daemon.promptqueue.deliver")
@@ -916,7 +917,7 @@ func contextPanelAfter(t *testing.T, f *fixture, topbar *harness.Stream[*fronten
 func TestContextPanelAnswersAComposedHeaderAndSectionsFromThePushedUsage(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
 
@@ -942,7 +943,7 @@ func TestContextPanelAnswersAComposedHeaderAndSectionsFromThePushedUsage(t *test
 func TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
 	first := contextPanelAfter(t, f, topbar, "142.3k", "k-context-first")
@@ -1130,7 +1131,7 @@ func TestBareModelIsRefusedOrAbsorbedWithoutChangingTheModel(t *testing.T) {
 func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn in flight.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 
@@ -1169,7 +1170,7 @@ func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing
 func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnModelChanged(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the initial model", func(v *frontendv1.TopbarView) bool {
 		return v.GetModelSelector().GetSelected().GetModel().GetName() != ""
@@ -1226,7 +1227,7 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 func TestAModelSwitchSurvivesAWorkspaceRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session switched to sonnet.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWorkspaceRestartWarnings()
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the initial model", func(v *frontendv1.TopbarView) bool {
@@ -1320,7 +1321,7 @@ func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdates
 func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The first, unconfirmed interrupt is refused at WARN while detached work
 	// is live.
 	f.d.ExpectWarnings("daemon.workspace.interrupt")
@@ -1450,7 +1451,7 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 	t.Parallel()
 	// Arrange: a lone detached subagent. Shells are swept too; that half is
 	// TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
 	awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
@@ -1486,7 +1487,7 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 func TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents(t *testing.T) {
 	t.Parallel()
 	// Arrange: one live detached agent and one live detached shell.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
 	pushDetachedShell(f.shim, "work-2", "sleep 5")
@@ -1562,7 +1563,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 	t.Parallel()
 	t.Run("allow_once", func(t *testing.T) {
 		t.Parallel()
-		f := newOpened(t, harness.Opts{})
+		f := newCanonical(t)
 		feed := f.watchRootFeed()
 		f.shim.AwaitAgentWatch()
 		f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
@@ -1589,7 +1590,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 
 	t.Run("allow_standing echoes the daemon-held offer", func(t *testing.T) {
 		t.Parallel()
-		f := newOpened(t, harness.Opts{})
+		f := newCanonical(t)
 		feed := f.watchRootFeed()
 		offer := standingPermission("perm-standing", "act-standing")
 		f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
@@ -1615,7 +1616,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 
 	t.Run("deny with a reason", func(t *testing.T) {
 		t.Parallel()
-		f := newOpened(t, harness.Opts{})
+		f := newCanonical(t)
 		feed := f.watchRootFeed()
 		f.shim.AwaitAgentWatch()
 		f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
@@ -1856,7 +1857,7 @@ func (f *fixture) submitDeferred(text, key string) *agentreplv1.SubmitPromptResp
 func TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the long task", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	holds := f.d.WatchHolds(f.ws)
@@ -1929,7 +1930,7 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn with a prompt deferred behind it.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of the
 	// restart's own stand-down of the shim, which the fake answers by exiting.
 	f.d.ExpectWorkspaceRestartWarnings()

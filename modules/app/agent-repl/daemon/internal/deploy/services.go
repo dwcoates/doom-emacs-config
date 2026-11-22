@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/restarttiming"
 )
@@ -721,6 +722,24 @@ func (r *Restarter) restartOn(ctx context.Context, label string, changed bool, f
 		return err
 	}
 	return r.Services.Start(ctx, label)
+}
+
+// RestartHolder restarts the socket holder H on the definition its installer
+// wrote, and answers once it serves its control socket again (EnsureHolder).
+// NOTHING IT HOLDS GOES OUT: the service manager owns every held socket, so
+// a connect made while the holder restarts queues in the kernel as ever.
+func (r *Restarter) RestartHolder(ctx context.Context, h holderensure.Holder) error {
+	fields := dlog.Context{"holder": h.ID, "label": h.Label}
+	if err := r.restartOn(ctx, h.Label, false, fields); err != nil {
+		r.failed("the socket holder's restart failed", fields, err)
+		return fmt.Errorf("deploy: restart the socket holder %s: %w", h.Label, err)
+	}
+	if err := r.EnsureHolder(ctx, h.ID); err != nil {
+		// The ensure recorded its own failure (holderensure).
+		return fmt.Errorf("deploy: the restarted socket holder %s: %w", h.ID, err)
+	}
+	r.Log.Info(opServices, "restarted the socket holder; it serves its control socket", fields)
+	return nil
 }
 
 // RestartSidecar restarts the sidecar alone. The store never moved, so its

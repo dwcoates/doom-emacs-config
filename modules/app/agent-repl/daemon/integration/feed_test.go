@@ -110,7 +110,7 @@ func TestAFeedTextScaleFrameIsNotARowOnTheFeedTail(t *testing.T) {
 func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	stream, err := f.d.Client().WatchFeed(f.d.Ctx(), connect.NewRequest(&agentreplv1.WatchFeedRequest{
@@ -910,7 +910,7 @@ func planRows(page *frontendv1.FeedPage) []*frontendv1.FeedRow {
 func TestAPlanEpisodeIsOneRowOnTheOpenedPage(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-plan-one-row", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act: enter, exit with the plan, then the turn concludes.
@@ -935,7 +935,7 @@ func TestAPlanEpisodeIsOneRowOnTheOpenedPage(t *testing.T) {
 func TestAPlanBubbleStaysPlannedWhenTheEnterIsDeliveredAgainAfterTheExit(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-plan-late-enter", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	for _, frame := range append(planEnterFrames("plan-enter"), planExitFrames("plan-exit", "1. do it")...) {
@@ -1105,7 +1105,7 @@ func TestAClearDrawsOnlyItsBarThenTheFollowUpPromptOnTheRealPath(t *testing.T) {
 func TestPermissionStartDrawsOpenRowFooterAndBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDesktopBanner)
 	f.submit("go", "k-permstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)
@@ -1125,7 +1125,7 @@ func TestPermissionStartDrawsOpenRowFooterAndBanner(t *testing.T) {
 	awaitFooter(t, f, footer, "footer permission", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetPermission() != nil
 	})
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the permission ask's desktop banner", func(r harness.LogRecord) bool {
+	f.d.AwaitOwnRunLogRecord("the permission ask's desktop banner", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.desktopnotify.post" && r.Message == "posting a desktop banner" &&
 			r.Context["kind"] == "permission_requested"
 	})
@@ -1508,7 +1508,7 @@ func TestARateLimitedTerminalCarriesTheVendorsStatedWaitAndNoneWhenUnstated(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			f := newOpened(t, harness.Opts{})
+			f := newCanonical(t)
 			f.submit("go", "k-429", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 			tail := f.watchRootFeed()
 

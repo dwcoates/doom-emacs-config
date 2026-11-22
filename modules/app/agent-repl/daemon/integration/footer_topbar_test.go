@@ -78,14 +78,31 @@ func TestFooterStatusTreeFollowsIdleWorkingDone(t *testing.T) {
 		return v.GetStrip().GetStatus().GetIdle().GetReady() != nil
 	})
 
-	// Act: StartTurn should be visible as working.submitting before the fake
-	// even answers.
-	f.submit("do it", "k-tree", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	// Act: the fake does not answer StartTurn until the footer has been seen
+	// submitting, because the daemon moves it on to thinking the moment the
+	// answer lands and a reader that is slow to take pushes would never see
+	// the submitting view between them. The submission waits on that answer,
+	// so it is sent from a goroutine.
+	f.shim.Hang()
+	submitted := make(chan error, 1)
+	go func() {
+		_, err := f.d.Client().SubmitPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+			Workspace:      f.ws,
+			Said:           said("do it"),
+			IdempotencyKey: "k-tree",
+			Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+		}))
+		submitted <- err
+	}()
 
 	// Assert: submitting, then thinking, then done once the turn concludes.
 	awaitFooter(t, f, footer, "working.submitting on StartTurn", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWorking().GetSubmitting() != nil
 	})
+	f.shim.Unhang()
+	if err := <-submitted; err != nil {
+		t.Fatalf("SubmitPrompt(\"do it\") = error %v, want an answer", err)
+	}
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("think-1"),
 		Item:       &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{Result: &conversationv1.AgentThinking_Start{Start: &conversationv1.AgentThinkingStart{}}}},
@@ -242,7 +259,7 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 func TestFooterCronsChipCountsACreatedJobForAReaderOpenedAfterTheTurnEnded(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-cron-create", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	feed := f.watchRootFeed()
 
@@ -458,7 +475,7 @@ func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 func TestFooterWeeklyAllowanceDrawnFromASevenDayWarningCarriesItsVerdictAndFigureAndNoSalientLine(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "idle before any rate-limit event", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
@@ -655,7 +672,7 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_session", "daemon.shimclient.redial")
@@ -665,6 +682,9 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
 	watchesBefore := f.shim.Count(harness.RPCWatchSession)
+	// THE SEVERING LASTS UNTIL IT IS SEEN: the daemon redials at once, and a
+	// footer reader slower than the redial saw only the link restored.
+	f.shim.HoldSessionReopen()
 
 	// Act: sever the session stream.
 	f.shim.DropStream(harness.StreamSession)
@@ -677,6 +697,7 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetSevered() != nil
 	})
+	f.shim.ReleaseSessionReopen()
 
 	// Assert: the daemon redials — a fresh WatchSession is opened without any
 	// client action.
@@ -800,7 +821,7 @@ func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T)
 func TestTopbarModelSelectorCarriesTheLoginsDefaultAndMakeDefaultMovesIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a personal login nobody chose a default for defaults to opus.
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDefaultModel)
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the built-in default", func(v *frontendv1.TopbarView) bool {
 		return v.GetModelSelector().GetDefaultModel().GetName() == "opus"
@@ -1319,8 +1340,11 @@ func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 		ratelimittest.Allowed(ratelimittest.SevenDay()), 12, time.Now().Add(7*24*time.Hour).UnixMilli())))
 
 	// Assert
+	// The account's usage outlives a case, so a footer opened on the group's
+	// daemon may first draw the figure an earlier case moved it to: only the
+	// event's own figure is the driven view.
 	got := awaitFooter(t, f, footer, "the enduring usage line", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly() != nil
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall().GetUtilization() == 0.12
 	})
 	enduring := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring()
 	if weekly := enduring.GetUsage().GetWeekly().GetOverall(); weekly.GetUtilization() != 0.12 || weekly.GetNewsworthy() {

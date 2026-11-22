@@ -95,6 +95,50 @@ const (
 	// a rate-limit event: every workspace spends as the daemon's one
 	// account, whose allowances (and a refusal's block) are the account's.
 	groupAccountUsage daemonGroup = "the account's usage"
+	// groupSelection is the daemon whose selected workspace a case changes:
+	// the selection is one per daemon, and every roster says which it is.
+	groupSelection daemonGroup = "the selected workspace"
+	// groupUnservedCatalog is the daemon whose login has never served a model
+	// catalog: a workspace with no shim draws the catalog its login last
+	// served, and every case's workspace signs in as the daemon's one login.
+	// No case of the group starts a session.
+	groupUnservedCatalog daemonGroup = "a login that never served a model catalog"
+	// groupHiddenKeepalives is the daemon whose hidden workspaces a case
+	// keeps alive: SendHiddenKeepalives asks every hidden shim of the
+	// daemon, so one case's send reaches every other's.
+	groupHiddenKeepalives daemonGroup = "the hidden workspaces' keep-alives"
+	// groupTabOrder is the daemon whose sidebar a case arranges or reads
+	// whole: tab numbers run across every repository the daemon holds, and
+	// the arrangement lists every one of them.
+	groupTabOrder daemonGroup = "the sidebar's tab order"
+	// groupDesktopBanner is the daemon whose desktop banners a case raises or
+	// reads: whether a banner shows turns on the one editor's focus, and a
+	// focus gain claims the newest banner held for any workspace.
+	groupDesktopBanner daemonGroup = "the desktop banner"
+	// groupLoginTerminal is the daemon whose login terminal a case opens:
+	// there is one per account root, and every case's workspace signs in as
+	// the same default account.
+	groupLoginTerminal daemonGroup = "the login terminal"
+	// groupDefaultModel is the daemon whose login's default model a case
+	// moves: every workspace signs in as the one login, and its topbar
+	// offers that login's default.
+	groupDefaultModel daemonGroup = "the login's default model"
+	// groupEditorSession is the daemon an Emacs stream connects to as a new
+	// editor: agent-repl's session is begun by the editor, one per daemon.
+	groupEditorSession daemonGroup = "the editor's session"
+	// groupDaemonStream is the daemon whose daemon-wide stream a case reads
+	// whole and then waits on for quiet: the barrier that wait takes is the
+	// daemon's, so no other case may be submitting on it.
+	groupDaemonStream daemonGroup = "a daemon-wide stream read for quiet"
+	// groupEditorStream is the daemon a case connects an Emacs stream to for
+	// what the stream draws, not for the session it begins: the first stream
+	// of a daemon begins its session, so a case that asserts the session
+	// began during it shares its daemon with no other case that connects one.
+	groupEditorStream daemonGroup = "an editor's stream"
+	// groupDerived is the daemon a case creates a child or a fork on: the
+	// derived workspace's notice reaches its source after the case is
+	// answered (newDerivingDaemon).
+	groupDerived daemonGroup = "workspaces derived from another"
 )
 
 var (
@@ -114,10 +158,17 @@ func newInGroup(t *testing.T, group daemonGroup) *fixture {
 // the group's toggle as newInGroup does.
 func newRegisteredInGroup(t *testing.T, group daemonGroup) *fixture {
 	t.Helper()
-	d := groupOwner(t, group).View(t)
+	d := viewInGroup(t, group)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	return &fixture{d: d, repo: repo, ws: ws, t: t}
+}
+
+// viewInGroup is t's view of GROUP's daemon, for a case that registers its
+// slice itself, holding the group's toggle as newInGroup does.
+func viewInGroup(t *testing.T, group daemonGroup) *harness.Daemon {
+	t.Helper()
+	return groupOwner(t, group).View(t)
 }
 
 // groupOwner answers GROUP's daemon, started at its first case, and takes the
@@ -137,4 +188,23 @@ func groupOwner(t *testing.T, group daemonGroup) *harness.Daemon {
 	// slice before the next case of the group starts.
 	t.Cleanup(g.toggle.Unlock)
 	return owner
+}
+
+// A CASE THAT CREATES A CHILD OR A FORK SHARES groupDerived: the derived
+// workspace's notice to its source is held while the source revives and is
+// delivered after the case is answered, so these cases run one at a time,
+// and no case's notice meets another's retirement.
+
+// newDerivingDaemon is t's view of groupDerived, for a case that registers
+// its slice itself and creates a child or a fork from it.
+func newDerivingDaemon(t *testing.T) *harness.Daemon {
+	t.Helper()
+	return viewInGroup(t, groupDerived)
+}
+
+// newDerivingOpened is newInGroup on groupDerived, for a case whose opened
+// workspace creates a child or a fork.
+func newDerivingOpened(t *testing.T) *fixture {
+	t.Helper()
+	return newInGroup(t, groupDerived)
 }

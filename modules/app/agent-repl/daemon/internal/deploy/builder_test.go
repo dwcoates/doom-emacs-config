@@ -566,3 +566,13 @@ func TestAFailedBuildStepIsTimedAsFailedAndItsSiblingsAsTheirOwn(t *testing.T) {
 		})
 	}
 }
+
+func TestTheBuildStagesTheSocketHolder(t *testing.T) {
+	// Act
+	staged := slices.Contains(Targets, HolderBinary)
+
+	// Assert: a deploy builds the holder its fresh daemon's requests need.
+	if !staged {
+		t.Fatalf("Targets = %v, want %s staged", Targets, HolderBinary)
+	}
+}

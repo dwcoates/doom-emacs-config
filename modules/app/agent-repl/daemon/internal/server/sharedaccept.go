@@ -2,8 +2,11 @@ package server
 
 import (
 	"errors"
+	"io"
 	"net"
 	"sync"
+
+	"agent-repld/internal/dlog"
 )
 
 // SharedAccept is the daemon's listener: its own private one, which every
@@ -18,13 +21,16 @@ import (
 type SharedAccept struct {
 	private net.Listener
 	shared  net.Listener
-	conns   chan acceptResult
-	done    chan struct{}
-	once    sync.Once
-	stop    sync.Once
-	wg      sync.WaitGroup
-	mu      sync.Mutex
-	stopped bool
+	// returned is the holder's accept stream of the connections a departing
+	// daemon handed back (HandBackUnread), nil until AddShared.
+	returned Returned
+	conns    chan acceptResult
+	done     chan struct{}
+	once     sync.Once
+	stop     sync.Once
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	stopped  bool
 }
 
 type acceptResult struct {
@@ -42,19 +48,59 @@ func NewSharedAccept(private net.Listener) *SharedAccept {
 	return l
 }
 
+// Returned is the holder's accept stream of handed-back connections
+// (sockethold.Returned).
+type Returned interface {
+	Next() (net.Conn, error)
+	Stop() error
+	Close() error
+}
+
 // AddShared starts accepting on SHARED, the listener taken from the holder
-// under the boot claim. A second shared listener is a programming error.
-func (l *SharedAccept) AddShared(shared net.Listener) {
+// under the boot claim, and on RETURNED, the holder's stream of the
+// connections a departing daemon handed back. LOG records the stream's end.
+// A second shared listener is a programming error.
+func (l *SharedAccept) AddShared(shared net.Listener, returned Returned, log dlog.Logger) {
 	l.mu.Lock()
 	if l.shared != nil {
 		l.mu.Unlock()
 		panic("server: SharedAccept was given a second shared listener")
 	}
 	l.shared = shared
+	l.returned = returned
 	l.mu.Unlock()
-	l.wg.Add(1)
+	l.wg.Add(2)
 	// inflight: joined: Close waits for every pump.
 	go l.pump(shared, true)
+	// inflight: joined: Close waits for every pump.
+	go l.pumpReturned(returned, log)
+}
+
+// pumpReturned feeds every handed-back connection to Accept, wrapped as one
+// taken from the shared address, until the holder ends the stream. A stream
+// that fails is recorded at ERROR and ends: the shared listener goes on.
+func (l *SharedAccept) pumpReturned(returned Returned, log dlog.Logger) {
+	defer l.wg.Done()
+	for {
+		conn, err := returned.Next()
+		if errors.Is(err, io.EOF) {
+			log.Info("daemon.server.returned", "the holder ended its stream of handed-back connections", nil)
+			return
+		}
+		if err != nil {
+			if l.sharedStopped() {
+				return
+			}
+			log.Error("daemon.server.returned", "the holder's stream of handed-back connections failed; none more reach this daemon", dlog.Context{"error": err.Error()})
+			return
+		}
+		select {
+		case l.conns <- acceptResult{conn: newSharedConn(conn)}:
+		case <-l.done:
+			conn.Close()
+			return
+		}
+	}
 }
 
 // pump feeds IN's connections to Accept until IN fails. The shared
@@ -65,6 +111,9 @@ func (l *SharedAccept) pump(in net.Listener, shared bool) {
 		conn, err := in.Accept()
 		if err != nil && shared && l.sharedStopped() {
 			return
+		}
+		if err == nil && shared {
+			conn = newSharedConn(conn)
 		}
 		select {
 		case l.conns <- acceptResult{conn: conn, err: err}:
@@ -104,10 +153,15 @@ func (l *SharedAccept) StopShared() error {
 	l.stop.Do(func() {
 		l.mu.Lock()
 		l.stopped = true
-		shared := l.shared
+		shared, returned := l.shared, l.returned
 		l.mu.Unlock()
 		if shared != nil {
 			err = shared.Close()
+		}
+		// THE STREAM ENDS WITH THE ACCEPT RIGHT: the holder sends nothing
+		// more, and what it sent already is still served here.
+		if returned != nil {
+			err = errors.Join(err, returned.Stop())
 		}
 	})
 	return err
@@ -119,6 +173,12 @@ func (l *SharedAccept) Close() error {
 	l.once.Do(func() {
 		err = errors.Join(l.StopShared(), l.private.Close())
 		close(l.done)
+		l.mu.Lock()
+		returned := l.returned
+		l.mu.Unlock()
+		if returned != nil {
+			err = errors.Join(err, returned.Close())
+		}
 		l.wg.Wait()
 	})
 	return err

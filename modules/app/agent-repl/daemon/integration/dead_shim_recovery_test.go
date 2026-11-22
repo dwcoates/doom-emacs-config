@@ -105,7 +105,7 @@ func expectSessionHealthy(t *testing.T, d *harness.Daemon, f *fixture) {
 func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 	t.Parallel()
 	// Arrange: a session with one finished turn.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.RequireWarnings(deadShimRecords...)
 	start := f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
@@ -149,7 +149,7 @@ func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 func TestAPromptSentRightAfterAShimDiesIsDelivered(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
@@ -177,7 +177,7 @@ func TestAPromptSentRightAfterAShimDiesIsDelivered(t *testing.T) {
 func TestAShimThatDiesMidTurnEndsThatTurnInterrupted(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the shim dies.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	resp := f.submit("the turn the death cuts", "k-dead-shim-cut", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -198,7 +198,7 @@ func TestAShimThatDiesMidTurnEndsThatTurnInterrupted(t *testing.T) {
 func TestAShimThatDiesMidTurnHasThatTurnContinuedOnTheRevivedSession(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the shim dies.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	f.submit("the turn the death cuts", "k-dead-shim-continue", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -223,7 +223,7 @@ func TestAShimThatDiesMidTurnHasThatTurnContinuedOnTheRevivedSession(t *testing.
 func TestAResumptionWhoseShimDiesLeavesTheRowOnTurnDied(t *testing.T) {
 	t.Parallel()
 	// Arrange: the shim died under a turn, and its resumption runs.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	f.submit("the turn the death cuts", "k-dead-shim-failed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -457,7 +457,7 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 func TestADaemonWarningAboutTheWorkspaceIsAnnouncedOnItsFooter(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)

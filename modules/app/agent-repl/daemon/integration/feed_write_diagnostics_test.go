@@ -8,8 +8,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"agent-repld/integration/harness"
-
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,7 +15,7 @@ func TestDiagnosticsAfterTheirWriteCardLandOnThatCard(t *testing.T) {
 	t.Parallel()
 	// Arrange: the order the shim emits them in, the diagnostics report on the
 	// write's own activity AFTER its settled success.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-diagnostics-after-write", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	write := func(result *conversationv1.AgentWrite) *conversationv1.AgentFrame {

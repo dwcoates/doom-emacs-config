@@ -34,7 +34,7 @@ func registerRepository(t *testing.T, d *harness.Daemon, path string) *agentrepl
 func TestRegisterRepositoryFromAFileInsideItMintsTheRepository(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 
 	// Act
@@ -62,7 +62,7 @@ func TestRegisterRepositoryFromAFileInsideItMintsTheRepository(t *testing.T) {
 func TestRegisterRepositorySaysWhenItAlreadyHadTheRepository(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	first := registerRepository(t, d, repo.Dir).GetSuccess()
 
@@ -107,7 +107,7 @@ func TestRegisterRepositoryAdoptsARepositoryAWorkspaceAlreadyMinted(t *testing.T
 func TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 
@@ -132,7 +132,7 @@ func TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster(t *testing.T) {
 func TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 
 	// Act
@@ -173,7 +173,7 @@ func TestRegisterRepositoryAdoptsTheWorkspaceAlreadyRegisteredForTheMainWorktree
 func TestRegisterRepositoryRefusesAPathOutsideAnyRepository(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	plain := t.TempDir()
 	path := filepath.Join(plain, "loose.txt")
 	if err := os.WriteFile(path, []byte("loose\n"), 0o644); err != nil {
@@ -192,7 +192,7 @@ func TestRegisterRepositoryRefusesAPathOutsideAnyRepository(t *testing.T) {
 func TestRegisterRepositoryRefusesAPathThatIsNotThere(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	absent := filepath.Join(t.TempDir(), "absent.txt")
 
 	// Act
@@ -207,7 +207,7 @@ func TestRegisterRepositoryRefusesAPathThatIsNotThere(t *testing.T) {
 func TestRegisterRepositoryRefusesABlankPathAsAValidationFailure(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 
 	// Act
 	_, err := d.Client().RegisterRepository(context.Background(), connect.NewRequest(&agentreplv1.RegisterRepositoryRequest{}))

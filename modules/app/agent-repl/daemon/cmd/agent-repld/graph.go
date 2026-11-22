@@ -933,6 +933,32 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// A LONG OUTAGE PULLS THE NEAR KEEP-ALIVES FORWARD (cachelapse.outage.go):
 	// the restore edge tells the keeper how long the network was down.
 	network.OnRestored(func(outage netstate.Outage) { cacheKeeper.NetworkRestored(outage.Duration()) })
+	// THE DAEMON POSTS EVERY DESKTOP BANNER. Emacs's focus rides its
+	// WatchDaemon stream (server.Deps.Focus) and decides each one; a click is
+	// relayed to the host stream through the server, bound late. On macOS the
+	// launcher (Zettel.app) posts every banner, handed to it on its own
+	// socket, which outlives this daemon.
+	selfExe, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: resolve this daemon's own binary: %w", err)
+	}
+	focus := desktopnotify.NewFocus(log)
+	launcher := desktopnotify.NewLauncher(p.Opts.launcherSocket, desktopnotify.LauncherPostBound, log)
+	backend, backendErr := resolveBannerBackend(log, launcher)
+	chime, chimeErr := resolveChime(log)
+	clicks := &clickForwarder{}
+	// A MADE BANNER IS READ ALOUD with persistent wifi mode on and a private
+	// listening device as the audio output; the controller's standing is bound below.
+	wifiStanding := &wifiStandingForwarder{}
+	notifier := desktopnotify.New(desktopnotify.Deps{
+		Focus: focus, Backend: backend, BackendErr: backendErr,
+		Chime: chime, ChimeErr: chimeErr, Speech: buildSpeech(wifiStanding, selfExe),
+		Clicks: clicks, Workspaces: bannerWorkspaces{db: p.DB}, Log: log,
+	})
+	// EVERY CLOSE AND FORGET LETS GO OF THE WORKSPACE'S HELD BANNER
+	// (desktopnotify.DropBannersOnEnd), so a later focus gain never claims a
+	// banner for a workspace that is gone.
+	p.DB = desktopnotify.DropBannersOnEnd(p.DB, notifier)
 	// EVERY CLOSE AND REOPEN RECONCILES THE CADENCE (cachelapse.ObserveClosures):
 	// a closed workspace's session gets one last keep-alive round and is then
 	// left to lapse. Every component built from here on writes through it; the
@@ -1078,28 +1104,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// ---- the desktop notifier ----
 
-	// THE DAEMON POSTS EVERY DESKTOP BANNER. Emacs's focus rides its
-	// WatchDaemon stream (server.Deps.Focus) and decides each one; a click is
-	// relayed to the host stream through the server, bound late. On macOS the
-	// launcher (Zettel.app) posts every banner, handed to it on its own
-	// socket, which outlives this daemon.
-	selfExe, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("agent-repld: resolve this daemon's own binary: %w", err)
-	}
-	focus := desktopnotify.NewFocus(log)
-	launcher := desktopnotify.NewLauncher(p.Opts.launcherSocket, desktopnotify.LauncherPostBound, log)
-	backend, backendErr := resolveBannerBackend(log, launcher)
-	chime, chimeErr := resolveChime(log)
-	clicks := &clickForwarder{}
-	// A MADE BANNER IS READ ALOUD with persistent wifi mode on and a private
-	// listening device as the audio output; the controller's standing is bound below.
-	wifiStanding := &wifiStandingForwarder{}
-	notifier := desktopnotify.New(desktopnotify.Deps{
-		Focus: focus, Backend: backend, BackendErr: backendErr,
-		Chime: chime, ChimeErr: chimeErr, Speech: buildSpeech(wifiStanding, selfExe),
-		Clicks: clicks, Workspaces: bannerWorkspaces{db: p.DB}, Log: log,
-	})
 	// One Haiku summarizer writes every banner's one-sentence body: a turn's
 	// final answer, and a pull-request comment.
 	bannerSummaries := desktopnotify.Summarizer{

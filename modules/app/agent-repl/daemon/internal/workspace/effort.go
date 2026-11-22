@@ -163,7 +163,7 @@ func switchFoundNoSession(err error) bool {
 // surface, as a failed put-back is. A switch that found no session, or that
 // the daemon's exit cut, is recorded at INFO by SetEffort: the pick stands.
 func (f *Fleet) SwitchEffort(log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) {
-	f.Detach(func(ctx context.Context) {
+	f.Detach(ws, func(ctx context.Context) {
 		err := f.SetEffort(ctx, log, ws, level)
 		switch {
 		case err == nil:

@@ -153,7 +153,7 @@ func TestNotifySendBackendSpeaksNotifySendsArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
-	want := []string{"--app-name=Emacs", "--hint=boolean:suppress-sound:true", "--action=default=Open", "--wait", "--expire-time=10000", "T", "B"}
+	want := []string{"--app-name=Emacs", "--hint=boolean:suppress-sound:true", "--hint=string:x-canonical-private-synchronous:" + bannerGroup(target.ID), "--action=default=Open", "--wait", "--expire-time=10000", "T", "B"}
 	if !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("argv = %q, want %q", runner.args, want)
 	}

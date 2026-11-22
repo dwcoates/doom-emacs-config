@@ -608,7 +608,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		// A WITHHELD STAND-DOWN RUNS IN LINE in tests, so its outcome is
 		// settled when the call returns; a test that needs it parked
 		// overrides this.
-		Detach: func(run func(context.Context)) { run(context.Background()) },
+		Detach: func(_ ids.WorkspaceID, run func(context.Context)) { run(context.Background()) },
 		Clock:  h.clock,
 		Log:    log,
 	}

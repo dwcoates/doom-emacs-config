@@ -37,6 +37,15 @@ type Workspaces interface {
 	Workspace(ctx context.Context, ws ids.WorkspaceID) (Workspace, error)
 }
 
+// bannerContext is the context every record about WS's banner carries,
+// merged over EXTRA: the workspace both as the "workspace" context field
+// these records always carried and as the record's own workspace_id, so a
+// per-workspace read finds a banner's records though they go to the central
+// sink.
+func bannerContext(ws ids.WorkspaceID, extra dlog.Context) dlog.Context {
+	return dlog.Merge(extra, dlog.Context{"workspace": string(ws), dlog.KeyWorkspaceID: string(ws)})
+}
+
 // Compose builds one banner from the workspace's name. It runs on the banner's
 // own goroutine, so it may take its time (a model call summarizing the turn).
 type Compose func(ctx context.Context, name string) Banner
@@ -150,7 +159,7 @@ func (d Decision) String() string {
 // all, and again once the banner is composed, so focus gained meanwhile still
 // suppresses it.
 func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) Decision {
-	log := n.deps.Log.With(dlog.Context{"workspace": string(ws), "kind": kind})
+	log := n.deps.Log.With(bannerContext(ws, dlog.Context{"kind": kind}))
 	if n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs is focused; no desktop banner", nil)
 		return EditorFocused

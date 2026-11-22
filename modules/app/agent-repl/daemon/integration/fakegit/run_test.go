@@ -862,6 +862,42 @@ func TestAScriptedFailureIsConsumedOnce(t *testing.T) {
 	}
 }
 
+func TestAScriptedFailureOfOneRepositoryFailsOnlyItsOwnCommands(t *testing.T) {
+	tests := []struct {
+		name     string
+		inOther  bool
+		wantExit int
+	}{
+		{name: "a command in another repository passes the failure by", inOther: true, wantExit: 0},
+		{name: "a command in the failure's repository spends it", inOther: false, wantExit: 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: two repositories in one world, the failure scripted
+			// for the first.
+			s, first, dir := world(t)
+			other, _, otherDir := world(t)
+			s.Repos = append(s.Repos, other.Repos...)
+			s.Failures = append(s.Failures, &Failure{Repo: first.Dir, Match: []string{"status"}, Stderr: "scripted\n", Exit: 3})
+			runIn := dir
+			if tc.inOther {
+				runIn = otherDir
+			}
+
+			// Act.
+			got := Run(s, "/", []string{"-C", runIn, "status", "--porcelain"})
+
+			// Assert.
+			if got.Exit != tc.wantExit {
+				t.Fatalf("status = %+v, want exit %d", got, tc.wantExit)
+			}
+			if spent := len(s.Failures) == 0; spent != !tc.inOther {
+				t.Fatalf("the failure spent = %v, want %v", spent, !tc.inOther)
+			}
+		})
+	}
+}
+
 func TestRunAnswersGitVersionOutsideAnyRepository(t *testing.T) {
 	tests := []struct {
 		name string

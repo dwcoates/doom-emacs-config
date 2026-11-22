@@ -78,7 +78,7 @@ type Summarizer struct {
 // made is recorded at ERROR and the body says so, naming the cause: the
 // banner still tells the user the turn completed.
 func (s Summarizer) Summarize(ctx context.Context, ws ids.WorkspaceID, answer string) string {
-	log := s.Log.With(dlog.Context{"workspace": string(ws)})
+	log := s.Log.With(bannerContext(ws, nil))
 	if strings.TrimSpace(answer) == "" {
 		log.Info(opSummary, "the turn named no final answer; nothing to summarize", nil)
 		return NoAnswerLine
@@ -91,7 +91,7 @@ func (s Summarizer) Summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 // blank comment is summarized as nothing, with no call: the banner names its
 // author alone.
 func (s Summarizer) SummarizeComment(ctx context.Context, ws ids.WorkspaceID, comment string) string {
-	log := s.Log.With(dlog.Context{"workspace": string(ws)})
+	log := s.Log.With(bannerContext(ws, nil))
 	if strings.TrimSpace(comment) == "" {
 		log.Info(opSummary, "the pull-request comment is blank; nothing to summarize", nil)
 		return ""

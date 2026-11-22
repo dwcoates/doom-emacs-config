@@ -52,7 +52,7 @@ func settleParentNotice(t *testing.T, f *retargetFamily, unit string, n int) {
 func TestAParentWithAnOpenChildIsNotClosed(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
+	f := newRetargetFamily(t, harness.Opts{}, nil)
 	settleParentNotice(t, f, "created-notice", 1)
 
 	// Act
@@ -69,7 +69,7 @@ func TestAParentWithAnOpenChildIsNotClosed(t *testing.T) {
 func TestAParentWithAnOpenChildIsNotKilled(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
+	f := newRetargetFamily(t, harness.Opts{}, nil)
 
 	// Act
 	resp, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.parent}))
@@ -85,7 +85,7 @@ func TestAParentWithAnOpenChildIsNotKilled(t *testing.T) {
 func TestAParentWithAnOpenChildIsNotHidden(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
+	f := newRetargetFamily(t, harness.Opts{}, nil)
 
 	// Act
 	resp, err := f.d.Client().SetWorkspaceHidden(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{
@@ -103,7 +103,7 @@ func TestAParentWithAnOpenChildIsNotHidden(t *testing.T) {
 func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent with no children, hidden.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repository := createRepositoryRef(t, d, harness.NewRepo(t))
 	created, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository)))
 	if err != nil || created.Msg.GetSuccess() == nil {
@@ -131,7 +131,7 @@ func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 func TestAChildDoesNotSwapPlacesWithItsParent(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
+	f := newRetargetFamily(t, harness.Opts{}, nil)
 
 	// Act
 	resp, err := f.d.Client().SwapWorkspaces(f.d.Ctx(), connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: f.child, Target: f.parent}))
@@ -147,7 +147,7 @@ func TestAParentWhoseChildIsClosedIsClosed(t *testing.T) {
 	t.Parallel()
 	// Arrange: the child closed first, as the rules ask, and both parent
 	// notices settled.
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
+	f := newRetargetFamily(t, harness.Opts{}, nil)
 	settleParentNotice(t, f, "created-notice", 1)
 	if resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.child})); err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CloseWorkspace(child) = (%v, %v), want a success", resp, err)

@@ -28,10 +28,15 @@ func (s *server) FindWorkspaces(
 		return nil, err
 	}
 	resp := &agentreplv1.FindWorkspacesResponse{}
-	repositories, err := s.deps.DB.ListRepositories(ctx)
+	// THE WORKSPACES AND THE REPOSITORIES ARE ONE SNAPSHOT (wsm.ReadRegistry),
+	// so every workspace's repository is among those read: a repository and
+	// its first workspace registered between two reads left the workspace
+	// naming a repository the first read did not hold.
+	registry, err := s.deps.DB.ReadRegistry(ctx)
 	if err != nil {
-		return nil, fail(s.log, rpc, fmt.Errorf("list the repositories: %w", err))
+		return nil, fail(s.log, rpc, fmt.Errorf("read the registry: %w", err))
 	}
+	repositories, records := registry.Repositories, registry.Workspaces
 	query := findQueryOf(req.Msg)
 	if ref := req.Msg.Repository; ref != nil {
 		repo, ok := wsm.RepositoryNamed(repositories, wsm.RepoID(ref.GetId()), ref.GetDir())
@@ -41,10 +46,6 @@ func (s *server) FindWorkspaces(
 			})))
 		}
 		query.Repository = &repo.ID
-	}
-	records, err := s.deps.DB.ListWorkspaces(ctx)
-	if err != nil {
-		return nil, fail(s.log, rpc, fmt.Errorf("list the workspaces: %w", err))
 	}
 	byID := make(map[wsm.WorkspaceID]wsm.Workspace, len(records))
 	for _, ws := range records {

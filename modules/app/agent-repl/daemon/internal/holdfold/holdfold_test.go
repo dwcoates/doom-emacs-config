@@ -137,6 +137,31 @@ func TestSeen(t *testing.T) {
 	}
 }
 
+func TestDrawn(t *testing.T) {
+	retired := prompt("a")
+	retired.Tombstone = &wsm.Tombstone{Kind: "dropped"}
+	tests := []struct {
+		name string
+		hold wsm.HeldPrompt
+		want bool
+	}{
+		{name: "the user's standing prompt is drawn", hold: prompt("a"), want: true},
+		{name: "a prompt kept at a cold gate's answer is drawn", hold: kept(prompt("a")), want: true},
+		{name: "a notice drawn nowhere is not", hold: wsm.HeldPrompt{Origin: "PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE"}, want: false},
+		{name: "a retired hold is not", hold: retired, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := Drawn(tt.hold)
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Drawn = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // held answers H held under KIND.
 func held(h wsm.HeldPrompt, kind wsm.HoldKind) wsm.HeldPrompt {
 	h.Hold = &kind

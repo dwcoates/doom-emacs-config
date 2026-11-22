@@ -21,7 +21,7 @@ import (
 func TestRegisterWorkspaceIsIdempotentAcrossSpellings(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	first := harness.Register(t, d, repo.Dir)
 	link := filepath.Join(t.TempDir(), "link")
@@ -90,7 +90,7 @@ func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
 func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	plain := t.TempDir()
 
 	// Act
@@ -110,8 +110,9 @@ func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 
 func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	t.Parallel()
+	// It changes the daemon's one selection.
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newRegisteredInGroup(t, groupSelection)
 	// A SELECT STARTS NO SHIM (owner ruling, 2026-10-28), so the window below
 	// is the re-selection's alone.
 	f.selectWorkspace()
@@ -134,7 +135,7 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 	t.Parallel()
 	// Arrange: two opened workspaces, both ready, A selected.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupSelection)
 	opened := func(repo *harness.Repo) *fixture {
 		f := &fixture{d: d, repo: repo, ws: harness.Register(t, d, repo.Dir), t: t}
 		f.open()
@@ -177,7 +178,7 @@ func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	// unknown_workspace is a LANDED CloseWorkspaceError arm (see the comment
 	// above), answered in band at DEBUG through server.refuse — never the
 	// daemon.refusal.unlanded_arm WARN this path was originally written
@@ -255,7 +256,7 @@ func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T) {
 	t.Parallel()
 	// Arrange: two workspaces in separate repos, A carrying a notification.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repoA := harness.NewRepo(t)
 	repoB := harness.NewRepo(t)
 	a := harness.Register(t, d, repoA.Dir)
@@ -305,7 +306,7 @@ func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T
 func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace, closed.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
 	}

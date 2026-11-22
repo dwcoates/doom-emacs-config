@@ -2,8 +2,12 @@ package server
 
 import (
 	"errors"
+	"io"
 	"net"
+	"sync"
 	"testing"
+
+	"agent-repld/internal/dlog"
 )
 
 // sharedPair answers a listener standing for the holder's shared socket and a
@@ -46,7 +50,7 @@ func TestSharedAcceptAcceptsOnBothListeners(t *testing.T) {
 	shared, successorCopy := sharedPair(t)
 	defer successorCopy.Close()
 	l := NewSharedAccept(private)
-	l.AddShared(shared)
+	l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger())
 	defer l.Close()
 
 	// Act
@@ -73,7 +77,7 @@ func TestAStoppedSharedListenerLeavesItsConnectsToTheNextDaemon(t *testing.T) {
 	defer successorCopy.Close()
 	sharedAddr := shared.Addr()
 	l := NewSharedAccept(private)
-	l.AddShared(shared)
+	l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger())
 	defer l.Close()
 
 	// Act
@@ -121,3 +125,28 @@ func TestSharedAcceptClosesBoth(t *testing.T) {
 		t.Fatal("StopShared with no shared listener must be a no-op")
 	}
 }
+
+// fakeReturned is a holder's accept stream the test feeds: Next answers each
+// connection put on conns, then io.EOF once the stream is stopped.
+type fakeReturned struct {
+	conns chan net.Conn
+	stop  chan struct{}
+	once  sync.Once
+}
+
+func newFakeReturned() *fakeReturned {
+	return &fakeReturned{conns: make(chan net.Conn, 4), stop: make(chan struct{})}
+}
+
+func (f *fakeReturned) Next() (net.Conn, error) {
+	select {
+	case c := <-f.conns:
+		return c, nil
+	case <-f.stop:
+		return nil, io.EOF
+	}
+}
+
+func (f *fakeReturned) Stop() error { f.once.Do(func() { close(f.stop) }); return nil }
+
+func (f *fakeReturned) Close() error { return f.Stop() }

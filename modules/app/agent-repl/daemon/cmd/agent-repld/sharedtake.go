@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -40,6 +41,14 @@ type sharedTake struct {
 	taken atomic.Value
 	// takeFn is sockethold.Take; a seam for the tests.
 	takeFn sockethold.TakeFunc
+	// subscribeFn opens the holder's stream of handed-back connections
+	// (sockethold.Subscribe); a seam for the tests.
+	subscribeFn func(ctx context.Context, control, name string) (server.Returned, error)
+	// returnFn hands one unread connection back (sockethold.Return); a seam
+	// for the tests.
+	returnFn func(ctx context.Context, control, name string, file *os.File) error
+	// takeErr is take's answer once it ran.
+	takeErr error
 	// ensure proves a holder serves the control socket, bringing a declared
 	// one up when none does (holderensure.Ensurer.Ensure), before the take.
 	// REQUIRED.
@@ -89,9 +98,39 @@ func (s *sharedTake) take() error {
 		return err
 	}
 	s.once.Do(func() {
-		s.accept.AddShared(s.ln)
+		subscribe := s.subscribeFn
+		if subscribe == nil {
+			subscribe = func(ctx context.Context, control, name string) (server.Returned, error) {
+				return sockethold.Subscribe(ctx, control, name)
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), sockethold.TakeBound)
+		returned, err := subscribe(ctx, s.holder, holderDaemonSocket)
+		cancel()
+		if err != nil {
+			s.log.Error("daemon.cmd.holder", "the holder's stream of handed-back connections could not be opened", dlog.Context{
+				"holder": s.holder, "bound_ms": sockethold.TakeBound.Milliseconds(), "error": err.Error()})
+			s.takeErr = fmt.Errorf("open the holder's stream of handed-back connections at %s: %w", s.holder, err)
+			return
+		}
+		s.accept.AddShared(s.ln, returned, s.log)
 		s.claim.Advertise(s.ln.Addr().String())
 	})
+	return s.takeErr
+}
+
+// handBack gives the holder FILE, a connection this daemon accepted on the
+// shared address and never read, for the daemon accepting next.
+func (s *sharedTake) handBack(file *os.File) error {
+	give := s.returnFn
+	if give == nil {
+		give = sockethold.Return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sockethold.TakeBound)
+	defer cancel()
+	if err := give(ctx, s.holder, holderDaemonSocket, file); err != nil {
+		return fmt.Errorf("hand an unread connection back to the holder at %s: %w", s.holder, err)
+	}
 	return nil
 }
 

@@ -2177,6 +2177,7 @@ func RegisterOwingSummary(t testing.TB, d *Daemon, dir string) *workspacev1.Work
 		if ref.GetDir() != dir {
 			d.Claim(ref.GetDir())
 		}
+		d.claimID(ref.GetId())
 		d.mu.Lock()
 		d.slice = append(d.slice, ref)
 		d.mu.Unlock()

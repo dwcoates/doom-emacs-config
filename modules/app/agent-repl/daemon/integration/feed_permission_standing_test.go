@@ -9,8 +9,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"agent-repld/integration/harness"
-
 	"connectrpc.com/connect"
 )
 
@@ -18,7 +16,7 @@ func TestAnAllowStandingAnswerSettlesTheAskAllowedStandingAndTheGatedBashDrawsSu
 	t.Parallel()
 	// Arrange: a gated Bash whose ask offers a standing rule, the order the
 	// shim emits them in.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-allow-standing", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const gated = "gated-standing"

@@ -1198,7 +1198,7 @@ func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conve
 	// recorded, so it is raised from the record from now on, and the adopted
 	// shim is stood down.
 	f.recordGate(ctx, log, ws, wsm.ColdGateRecord{VendorSessionID: session.VendorSessionID, Cold: cold, ConfigDir: configDir})
-	f.Detach(func(ctx context.Context) { f.settleGateShim(ctx, ws) })
+	f.Detach(ws, func(ctx context.Context) { f.settleGateShim(ctx, ws) })
 	return client, nil
 }
 

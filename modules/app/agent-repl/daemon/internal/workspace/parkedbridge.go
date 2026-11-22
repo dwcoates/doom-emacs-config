@@ -113,7 +113,7 @@ func (f *Fleet) gateShim(ctx context.Context, ws ids.WorkspaceID, off func(conte
 		off(ctx, ws)
 		return
 	}
-	f.Detach(func(ctx context.Context) { f.holdBridgeAtGate(ctx, f.logFor(ctx, ws), ws) })
+	f.Detach(ws, func(ctx context.Context) { f.holdBridgeAtGate(ctx, f.logFor(ctx, ws), ws) })
 }
 
 // holdBridgeAtGate gives WS's standing gate a shim holding its conversation's

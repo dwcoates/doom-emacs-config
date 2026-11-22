@@ -7,8 +7,6 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // hookFrame wraps one AgentHook arm as the frame the shim pushes for the firing.
@@ -38,7 +36,7 @@ func hookCards(page *frontendv1.FeedPage) []*frontendv1.FeedHook {
 func TestABlockingHookDrawsOneCardCarryingItsReason(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-hook-blocked", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -64,7 +62,7 @@ func TestABlockingHookDrawsOneCardCarryingItsReason(t *testing.T) {
 func TestAFailedHookDrawsOneCardCarryingItsExitCodeAndOutput(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-hook-failed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 

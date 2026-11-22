@@ -163,13 +163,19 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 		}, true
 
 	case "WatchDaemon":
+		// scheduledAt is the time this case's own schedule names: the group's
+		// daemon may still stand scheduled by an earlier case, and a witness
+		// opened on it is replayed that schedule first, so only the one at
+		// this time is the driven view.
+		var scheduledAt int64
 		return subscriptionScenario{
 			// A shutdown schedule holds every workspace's intake.
 			group: groupShutdownSchedule,
 			drive1: func(t *testing.T, f *fixture) {
+				scheduledAt = time.Now().Add(time.Hour).UnixMilli()
 				_, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 					Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
-						AtMs:   time.Now().Add(time.Hour).UnixMilli(),
+						AtMs:   scheduledAt,
 						Reason: drainReasonDeploy(),
 					}},
 				}))
@@ -178,7 +184,7 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 				}
 			},
 			isFirst: func(msg proto.Message) bool {
-				return msg.(*agentreplv1.WatchDaemonResponse).GetDrainScheduled() != nil
+				return msg.(*agentreplv1.WatchDaemonResponse).GetDrainScheduled().GetAtMs() == scheduledAt
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				_, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
@@ -296,11 +302,20 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 			t.Parallel()
 			var d *harness.Daemon
 			var ws *workspacev1.WorkspaceRef
-			if k.PerWorkspace {
-				f := newRegistered(t, harness.Opts{})
+			switch {
+			case k.Name == "WatchTopbar":
+				// It reads the login's model catalog at its default: never
+				// served.
+				f := newRegisteredInGroup(t, groupUnservedCatalog)
 				d, ws = f.d, f.ws
-			} else {
-				d = newDaemon(t, harness.Opts{})
+			case k.PerWorkspace:
+				f := newCanonicalRegistered(t)
+				d, ws = f.d, f.ws
+			default:
+				// A fresh daemon: the subject is what a daemon-wide stream
+				// carries straight after the boot, before anything is
+				// published (the daemon's own lifecycle).
+				d = canonicalView(t)
 			}
 
 			s := k.Open(d, ws)
@@ -408,8 +423,10 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 // sends that one standing and nothing else.
 func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	// Arrange: a daemon no other case submits on, because the check that no
+	// other frame follows asks the daemon for a barrier, which a submission in
+	// flight on the shared daemon refuses.
+	d := viewInGroup(t, groupDaemonStream)
 
 	// Act
 	s := d.WatchWebviewDaemonStream()
@@ -583,12 +600,13 @@ func transportClosedRPCs() []transportClosedRPC {
 // daemon.refusal.transport_closed, and never warned.
 func assertTransportClosed(t *testing.T, d *harness.Daemon, rpcName, wantCause string) {
 	t.Helper()
-	rec := d.AwaitRunLogOperation("daemon.refusal.transport_closed")
+	// THE RECORD IS FOUND BY ITS OWN RPC AND CAUSE: on a shared daemon the
+	// other rpcs' refusals, and other cases', are in the run log beside it.
+	rec := d.AwaitLogRecord(d.RunLogPath(), "the "+rpcName+" transport-closed record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.refusal.transport_closed" && r.Context["rpc"] == rpcName && r.Context["cause"] == wantCause
+	})
 	if !strings.EqualFold(rec.Level, "info") {
 		t.Fatalf("the transport-closed record = level %q, want INFO", rec.Level)
-	}
-	if rec.Context["rpc"] != rpcName || rec.Context["cause"] != wantCause {
-		t.Fatalf("the transport-closed record's context = %v, want rpc %q and cause %q", rec.Context, rpcName, wantCause)
 	}
 }
 
@@ -601,7 +619,7 @@ func TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed(t *testing.
 		t.Run(rpc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			d := newDaemon(t, harness.Opts{})
+			d := canonicalView(t)
 			bogus := &workspacev1.WorkspaceRef{Id: "bogus-unregistered-workspace-id"}
 
 			// Act
@@ -626,7 +644,7 @@ func TestPerWorkspaceWatchOpensWithAMismatchedDirAreTransportClosed(t *testing.T
 		t.Run(rpc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			f := newRegistered(t, harness.Opts{})
+			f := newCanonicalRegistered(t)
 			mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: f.ws.GetDir() + "-mismatched"}
 
 			// Act

@@ -43,7 +43,7 @@ func (c *controller) StandDownFolded(ws ids.WorkspaceID) {
 	c.mu.Unlock()
 	fields := dlog.Context{"workspace": string(ws), "wait": wait, "delay": c.deps.FoldDelay.String()}
 	c.log.Debug(opFolded, "a folded workspace's stand-down waits out the fold's delay", fields)
-	c.deps.Detach(func(ctx context.Context) {
+	c.deps.Detach(ws, func(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			c.log.Info(opFolded, "the daemon is leaving; a folded workspace's stand-down is not taken", dlog.WithCause(fields, ctx.Err()))

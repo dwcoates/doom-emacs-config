@@ -277,6 +277,27 @@ func (d *Daemon) AwaitRunLogOperation(operation string) LogRecord {
 	})
 }
 
+// AwaitOwnRunLogRecord waits for a run-log record this Daemon answers for
+// (Owns) that matches pred: on a view, one naming a workspace the case
+// claimed, so another case's record on the shared daemon never ends the wait.
+func (d *Daemon) AwaitOwnRunLogRecord(what string, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
+	return d.AwaitLogRecord(d.RunLogPath(), what, func(r LogRecord) bool { return d.Owns(r) && pred(r) })
+}
+
+// OwnRunLog is every run-log record of this process this Daemon answers for
+// (Owns).
+func (d *Daemon) OwnRunLog() []LogRecord {
+	d.t.Helper()
+	var out []LogRecord
+	for _, r := range d.RunLog() {
+		if d.Owns(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // AwaitWorkspaceLogOperation waits for a workspace-log record by operation.
 func (d *Daemon) AwaitWorkspaceLogOperation(workspaceDir, operation string) LogRecord {
 	d.t.Helper()

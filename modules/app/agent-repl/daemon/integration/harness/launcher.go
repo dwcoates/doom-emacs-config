@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -119,10 +121,20 @@ func daemonHungUp(err error) bool {
 }
 
 // Banners answers every banner the launcher was handed, in order.
-func (l *FakeLauncher) Banners() []*agentreplv1.DesktopBanner {
+func (l *FakeLauncher) Banners() []*agentreplv1.DesktopBanner { return l.BannersFor("") }
+
+// BannersFor answers the banners of GROUP (a workspace's banner group), or
+// every banner when GROUP is empty.
+func (l *FakeLauncher) BannersFor(group string) []*agentreplv1.DesktopBanner {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return append([]*agentreplv1.DesktopBanner(nil), l.banners...)
+	var out []*agentreplv1.DesktopBanner
+	for _, b := range l.banners {
+		if group == "" || b.GetGroup().GetId() == group {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // PostedBanners answers the words of every banner the daemon posted, in
@@ -131,16 +143,35 @@ func (l *FakeLauncher) Banners() []*agentreplv1.DesktopBanner {
 // program's argv (the boot's version query set aside).
 func (d *Daemon) PostedBanners() [][]string {
 	d.t.Helper()
+	return d.postedBanners("")
+}
+
+// PostedBannersFor answers PostedBanners's words for the banners of one
+// workspace alone, so a case on a shared daemon reads none of another's.
+// Every banner names its workspace's group, "agent-repl:<workspace id>".
+func (d *Daemon) PostedBannersFor(workspaceID string) [][]string {
+	d.t.Helper()
+	return d.postedBanners(bannerGroupPrefix + workspaceID)
+}
+
+// bannerGroupPrefix is what the daemon prefixes a workspace's id with to make
+// its banners' group (desktopnotify's bannerGroupPrefix).
+const bannerGroupPrefix = "agent-repl:"
+
+// postedBanners answers every banner's words, or only those of GROUP when it
+// is not empty.
+func (d *Daemon) postedBanners(group string) [][]string {
+	var words [][]string
 	if runtime.GOOS == "darwin" {
-		var words [][]string
-		for _, b := range d.Launcher.Banners() {
+		for _, b := range d.Launcher.BannersFor(group) {
 			words = append(words, []string{b.GetTitle().GetText(), b.GetBody().GetText()})
 		}
 		return words
 	}
-	var words [][]string
 	for _, inv := range d.Notifier.Invocations() {
-		words = append(words, inv.Argv)
+		if group == "" || slices.ContainsFunc(inv.Argv, func(arg string) bool { return strings.HasSuffix(arg, group) }) {
+			words = append(words, inv.Argv)
+		}
 	}
 	return words
 }

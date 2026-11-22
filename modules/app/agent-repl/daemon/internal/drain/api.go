@@ -208,9 +208,9 @@ type Deps struct {
 	// Nil means no session-scoped view is wired.
 	SetParked func(ws ids.WorkspaceID, parked bool)
 	// Detach runs a withheld workspace's stand-down off the caller's
-	// goroutine, on a lifetime the daemon's exit ends and joins
+	// goroutine, as WS's work, on a lifetime the daemon's exit ends and joins
 	// (workspace.Fleet.Detach). Required.
-	Detach func(run func(context.Context))
+	Detach func(ws ids.WorkspaceID, run func(context.Context))
 	// Clock is the controller's view of time, injected so a schedule's deadline
 	// and the sweep's cadence are assertable without a real one.
 	Clock Clock

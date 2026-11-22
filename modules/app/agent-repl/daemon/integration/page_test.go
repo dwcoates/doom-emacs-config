@@ -92,7 +92,7 @@ func pageFrames(
 func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace, and a page client whose dials are counted.
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupShutdownSchedule)
 	ctx := f.d.Ctx()
 	dialer := &countingDialer{}
 	page := agentreplv1connect.NewAgentReplClient(dialer.client(), "http://"+f.d.Addr)

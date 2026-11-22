@@ -146,11 +146,14 @@ const notifySendAction = "default"
 // notifySendArgs is notify-send's argv. The `default` action is what a click
 // on the banner body invokes, and --wait keeps the program alive to print it.
 // The suppress-sound hint keeps the notification server silent: the banner's
-// one sound is the notifier's chime.
-func notifySendArgs(_ Target, banner Banner) []string {
+// one sound is the notifier's chime. The synchronous hint keyed to the
+// workspace's group replaces that workspace's previous banner, as
+// terminal-notifier's -group does.
+func notifySendArgs(target Target, banner Banner) []string {
 	return []string{
 		"--app-name=Emacs",
 		"--hint=boolean:suppress-sound:true",
+		"--hint=string:x-canonical-private-synchronous:" + bannerGroup(target.ID),
 		"--action=" + notifySendAction + "=Open",
 		"--wait",
 		"--expire-time=" + strconv.Itoa(int(ClickTimeout/time.Millisecond)),

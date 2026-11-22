@@ -50,8 +50,8 @@ func awaitTypedRefusal(t *testing.T, d *harness.Daemon) {
 func TestRegisterRepositoryRefusesARepositoryInsideATemporaryFolder(t *testing.T) {
 	t.Parallel()
 	// Arrange
+	d := canonicalView(t)
 	repo, root := scratchRepo(t)
-	d := newDaemon(t, harness.Opts{})
 
 	// Act
 	msg := registerRepository(t, d, filepath.Join(repo.Dir, "README.md"))
@@ -70,8 +70,8 @@ func TestRegisterRepositoryRefusesARepositoryInsideATemporaryFolder(t *testing.T
 func TestRegisterWorkspaceRefusesAWorktreeInsideATemporaryFolder(t *testing.T) {
 	t.Parallel()
 	// Arrange
+	d := canonicalView(t)
 	repo, root := scratchRepo(t)
-	d := newDaemon(t, harness.Opts{})
 
 	// Act
 	resp, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: repo.Dir}))

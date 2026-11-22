@@ -34,7 +34,7 @@ func runWorkspaceCLI(t *testing.T, ctx context.Context, d *harness.Daemon, args 
 func TestTheCLIRenamesAWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	roster := f.d.WatchRoster()
 	before := awaitRoster(t, f.d, roster, "the workspace's row", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()) != nil

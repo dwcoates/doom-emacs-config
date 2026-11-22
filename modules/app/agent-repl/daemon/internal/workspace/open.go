@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/worktreereap"
@@ -174,9 +175,18 @@ func (v *verbs) blockedClose(ctx context.Context, ws ids.WorkspaceID, ownTurn bo
 		blocked.LiveWork = uint32(agents + shells)
 		liveDetail = fmt.Sprintf("%d detached agents and %d detached shells are still live", agents, shells)
 	}
-	held, err := v.deps.DB.HeldPrompts(ctx, ws)
+	holds, err := v.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("read the held prompts: %w", err)
+	}
+	// ONLY WHAT THE HELD SECTION SHOWS BLOCKS (holdfold.Drawn): the refusal
+	// asks the user to release or drop them, which a notice drawn nowhere
+	// (a merge queue or workspace notice to the agent) never lets them do.
+	var held []wsm.HeldPrompt
+	for _, h := range holds {
+		if holdfold.Drawn(h) {
+			held = append(held, h)
+		}
 	}
 	blocked.HeldPrompts = uint32(len(held))
 	mergeState := ""

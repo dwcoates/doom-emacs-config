@@ -148,7 +148,9 @@ func (in invocation) cancelled(cause error) *Cancelled {
 }
 
 // logContext is the structured context every record about this invocation
-// carries.
+// carries. The record is ABOUT the worktree git ran in, so it names that
+// directory as its workspace too: written to the central sink, it is still
+// read back with that workspace's records.
 func (in invocation) logContext() dlog.Context {
 	fields := dlog.Context{
 		"dir":       in.dir,
@@ -156,6 +158,9 @@ func (in invocation) logContext() dlog.Context {
 		"exit_code": in.exitCode,
 		"stdout":    in.stdout,
 		"stderr":    in.stderr,
+	}
+	if in.dir != "" {
+		fields[dlog.KeyWorkspaceDir] = in.dir
 	}
 	// THE SIGNAL IS THE EVIDENCE when there is one, and it is the ONLY
 	// evidence: a killed git writes no stderr, so a record without this field

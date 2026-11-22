@@ -38,7 +38,7 @@ const (
 func TestAForksFeedReadsItsParentsTurnAboveItsOwn(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent asked something, then forked.
-	f := newOpened(t, harness.Opts{})
+	f := newDerivingOpened(t)
 	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
 		t.Fatalf("the parent's StartSession = %v, want fresh", req)
 	}

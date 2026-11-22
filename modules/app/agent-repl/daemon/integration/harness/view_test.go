@@ -545,6 +545,14 @@ type retiringClient struct {
 	kill    func(id string) (*agentreplv1.KillWorkspaceResponse, error)
 	forgets map[string][]*agentreplv1.ForgetWorkspaceResponse
 	held    []string
+	// found answers FindWorkspaces.
+	found []*agentreplv1.FoundWorkspace
+}
+
+func (c retiringClient) FindWorkspaces(context.Context, *connect.Request[agentreplv1.FindWorkspacesRequest]) (*connect.Response[agentreplv1.FindWorkspacesResponse], error) {
+	*c.calls = append(*c.calls, "find")
+	return connect.NewResponse(&agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
+		Extent: &agentreplv1.FindWorkspacesSuccess_Complete{Complete: &agentreplv1.FindWorkspacesSuccessComplete{Workspaces: c.found}}}}}), nil
 }
 
 func (c retiringClient) RegisterWorkspace(_ context.Context, req *connect.Request[agentreplv1.RegisterWorkspaceRequest]) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
@@ -600,12 +608,13 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 		kill      func(id string) (*agentreplv1.KillWorkspaceResponse, error)
 		forgets   map[string][]*agentreplv1.ForgetWorkspaceResponse
 		held      []string
+		found     func(d1, d2 string) []*agentreplv1.FoundWorkspace
 		wantCalls []string
 		wantFail  string
 	}{
 		{
 			name:      "every workspace is killed and forgotten, latest first",
-			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill w1", "forget w1"},
 		},
 		{
 			name: "a workspace the test already removed is passed over",
@@ -613,37 +622,72 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 				return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
 					Cause: &agentreplv1.KillWorkspaceError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.KillWorkspaceUnknownWorkspace{}}}}}, nil
 			},
-			wantCalls: []string{"kill w2", "kill w1"},
+			wantCalls: []string{"find", "kill w2", "kill w1"},
 		},
 		{
 			name: "a forget its held prompts block drops them and forgets again",
 			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w2": {forgetError(&agentreplv1.ForgetWorkspaceError{
 				Cause: &agentreplv1.ForgetWorkspaceError_Blocked{Blocked: &agentreplv1.ForgetWorkspaceBlocked{HeldPrompts: 1}}})}},
 			held:      []string{"t1"},
-			wantCalls: []string{"kill w2", "forget w2", "open_feed w2", "drop t1", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "open_feed w2", "drop t1", "forget w2", "kill w1", "forget w1"},
+		},
+		{
+			name: "a main worktree's repository mates are retired before it is forgotten",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w1": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_MainWorktree{MainWorktree: &agentreplv1.ForgetWorkspaceMainWorktree{OtherWorkspaces: 1}}})}},
+			found: func(d1, d2 string) []*agentreplv1.FoundWorkspace {
+				return []*agentreplv1.FoundWorkspace{
+					{Workspace: &workspacev1.WorkspaceRef{Id: "w1", Dir: d1}, Repository: &workspacev1.RepositoryRef{Dir: d1}},
+					{Workspace: &workspacev1.WorkspaceRef{Id: "m1"}, Repository: &workspacev1.RepositoryRef{Dir: d1}},
+					{Workspace: &workspacev1.WorkspaceRef{Id: "x1"}, Repository: &workspacev1.RepositoryRef{Dir: d2 + "-elsewhere"}},
+				}
+			},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill w1", "forget w1", "find", "kill m1", "forget m1", "forget w1"},
+		},
+		{
+			name: "a workspace's closed children are retired before it is forgotten",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w2": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_HasChildren{HasChildren: &agentreplv1.ForgetWorkspaceHasChildren{Children: []string{"c1"}}}})}},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill c1", "forget c1", "forget w2", "kill w1", "forget w1"},
+		},
+		{
+			name: "a workspace's open children are retired before it",
+			kill: func() func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
+				refused := false
+				return func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
+					if id == "w2" && !refused {
+						refused = true
+						return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
+							Cause: &agentreplv1.KillWorkspaceError_HasOpenChildren{HasOpenChildren: &agentreplv1.WorkspaceHasOpenChildren{
+								Children: []*workspacev1.WorkspaceRef{{Id: "c1"}}}}}}}, nil
+					}
+					return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Success{Success: &agentreplv1.KillWorkspaceSuccess{}}}, nil
+				}
+			}(),
+			wantCalls: []string{"find", "kill w2", "kill c1", "forget c1", "kill w2", "forget w2", "kill w1", "forget w1"},
 		},
 		{
 			name: "a refused kill fails the test and forgets nothing",
 			kill: func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
 				return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
-					Cause: &agentreplv1.KillWorkspaceError_HasOpenChildren{HasOpenChildren: &agentreplv1.WorkspaceHasOpenChildren{}}}}}, nil
+					Cause: &agentreplv1.KillWorkspaceError_TransferringAway{TransferringAway: &agentreplv1.KillWorkspaceTransferringAway{}}}}}, nil
 			},
-			wantCalls: []string{"kill w2", "kill w1"},
-			wantFail:  "KillWorkspace = error:{has_open_children",
+			wantCalls: []string{"find", "kill w2", "kill w1"},
+			wantFail:  "KillWorkspace = error:{transferring_away",
 		},
 		{
 			name: "a kill that cannot be asked fails the test",
 			kill: func(string) (*agentreplv1.KillWorkspaceResponse, error) {
 				return nil, errors.New("connection refused")
 			},
-			wantCalls: []string{"kill w2", "kill w1"},
+			wantCalls: []string{"find", "kill w2", "kill w1"},
 			wantFail:  "KillWorkspace = error connection refused",
 		},
 		{
 			name: "a refused forget fails the test",
 			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w1": {forgetError(&agentreplv1.ForgetWorkspaceError{
 				Cause: &agentreplv1.ForgetWorkspaceError_NotClosed{NotClosed: &agentreplv1.ForgetWorkspaceNotClosed{}}})}},
-			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill w1", "forget w1"},
 			wantFail:  "ForgetWorkspace = error:{not_closed",
 		},
 	}
@@ -656,6 +700,11 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 			owner.client = retiringClient{
 				refs:  map[string]*workspacev1.WorkspaceRef{d1: {Id: "w1", Dir: d1}, d2: {Id: "w2", Dir: d2}},
 				calls: &calls, kill: tc.kill, forgets: tc.forgets, held: tc.held,
+			}
+			if tc.found != nil {
+				client := owner.client.(retiringClient)
+				client.found = tc.found(d1, d2)
+				owner.client = client
 			}
 			tb := NewRecordingTB(t, "TestRetires")
 			view := owner.View(tb)
@@ -718,5 +767,194 @@ func TestTheBarrierAsksAboutAViewsOwnWorkspacesOnly(t *testing.T) {
 	want := [][]string{{"w1", "w2"}, nil}
 	if !reflect.DeepEqual(asked, want) {
 		t.Fatalf("barrier scopes = %v, want %v", asked, want)
+	}
+}
+
+func TestMainWorktreesBesideTheSlice(t *testing.T) {
+	// Every directory is a plain path no symlink resolves, so canonicalDir
+	// answers it as given.
+	found := func(id, dir, repo string) *agentreplv1.FoundWorkspace {
+		return &agentreplv1.FoundWorkspace{
+			Workspace:  &workspacev1.WorkspaceRef{Id: id, Dir: dir},
+			Repository: &workspacev1.RepositoryRef{Dir: repo},
+		}
+	}
+	ref := func(id string) *workspacev1.WorkspaceRef { return &workspacev1.WorkspaceRef{Id: id} }
+	cases := []struct {
+		name  string
+		found []*agentreplv1.FoundWorkspace
+		slice []*workspacev1.WorkspaceRef
+		want  []string
+	}{
+		{
+			name:  "a linked worktree's main worktree is taken",
+			found: []*agentreplv1.FoundWorkspace{found("main", "/r/a", "/r/a"), found("linked", "/r/a-one", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("linked")},
+			want:  []string{"main"},
+		},
+		{
+			name:  "a main worktree in the slice is not taken twice",
+			found: []*agentreplv1.FoundWorkspace{found("main", "/r/a", "/r/a"), found("linked", "/r/a-one", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("main"), ref("linked")},
+			want:  nil,
+		},
+		{
+			name:  "another repository's main worktree is left alone",
+			found: []*agentreplv1.FoundWorkspace{found("other", "/r/b", "/r/b"), found("linked", "/r/a-one", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("linked")},
+			want:  nil,
+		},
+		{
+			name:  "a linked worktree beside the slice's is no main worktree",
+			found: []*agentreplv1.FoundWorkspace{found("linked", "/r/a-one", "/r/a"), found("created", "/r/a-two", "/r/a")},
+			slice: []*workspacev1.WorkspaceRef{ref("linked")},
+			want:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := mainWorktreesBeside(tc.found, tc.slice)
+
+			// Assert.
+			var ids []string
+			for _, ws := range got {
+				ids = append(ids, ws.GetId())
+			}
+			if !reflect.DeepEqual(ids, tc.want) {
+				t.Fatalf("mainWorktreesBeside = %v, want %v", ids, tc.want)
+			}
+		})
+	}
+}
+
+// findingClient answers FindWorkspaces with resp or err; every other call is
+// unexpected.
+type findingClient struct {
+	agentreplv1connect.AgentReplClient
+	resp *agentreplv1.FindWorkspacesResponse
+	err  error
+}
+
+func (c findingClient) FindWorkspaces(context.Context, *connect.Request[agentreplv1.FindWorkspacesRequest]) (*connect.Response[agentreplv1.FindWorkspacesResponse], error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return connect.NewResponse(c.resp), nil
+}
+
+func TestEveryWorkspaceTakesOnlyACompleteAnswer(t *testing.T) {
+	one := &agentreplv1.FoundWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: "w1"}}
+	success := func(s *agentreplv1.FindWorkspacesSuccess) *agentreplv1.FindWorkspacesResponse {
+		return &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: s}}
+	}
+	cases := []struct {
+		name       string
+		client     findingClient
+		wantIDs    []string
+		wantFailed bool
+	}{
+		{
+			name: "a complete answer is every workspace",
+			client: findingClient{resp: success(&agentreplv1.FindWorkspacesSuccess{Extent: &agentreplv1.FindWorkspacesSuccess_Complete{
+				Complete: &agentreplv1.FindWorkspacesSuccessComplete{Workspaces: []*agentreplv1.FoundWorkspace{one}}}})},
+			wantIDs: []string{"w1"},
+		},
+		{
+			name: "a partial answer fails the retirement",
+			client: findingClient{resp: success(&agentreplv1.FindWorkspacesSuccess{Extent: &agentreplv1.FindWorkspacesSuccess_Partial{
+				Partial: &agentreplv1.FindWorkspacesSuccessPartial{}}})},
+			wantFailed: true,
+		},
+		{
+			name:       "a transport error fails the retirement",
+			client:     findingClient{err: errors.New("connection refused")},
+			wantFailed: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			rec := NewRecordingTB(t, "TestRetiring")
+			owner := newOwnerForViews(t, rec)
+			owner.client = tc.client
+
+			// Act.
+			got := owner.everyWorkspace("retire the slice")
+
+			// Assert.
+			var ids []string
+			for _, w := range got {
+				ids = append(ids, w.GetWorkspace().GetId())
+			}
+			if !reflect.DeepEqual(ids, tc.wantIDs) {
+				t.Fatalf("everyWorkspace = %v, want %v", ids, tc.wantIDs)
+			}
+			if rec.Failed() != tc.wantFailed {
+				t.Fatalf("failed = %v (%q), want %v", rec.Failed(), rec.Failures(), tc.wantFailed)
+			}
+			if tc.wantFailed && !strings.Contains(rec.Failures(), "retire the slice from the shared daemon: FindWorkspaces") {
+				t.Fatalf("failure = %q, want it to name the retirement step", rec.Failures())
+			}
+		})
+	}
+}
+
+func TestRecordKeyNamesTheWorkspaceByDirectoryThenID(t *testing.T) {
+	cases := []struct {
+		name   string
+		record LogRecord
+		want   string
+	}{
+		{name: "a directory wins", record: LogRecord{WorkspaceDir: "/r/a", WorkspaceID: "w1"}, want: "/r/a"},
+		{name: "an id alone is keyed as an id", record: LogRecord{WorkspaceID: "w1"}, want: "id:w1"},
+		{name: "neither is no workspace's", record: LogRecord{}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := recordKey(tc.record)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("recordKey = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegisterThroughAViewClaimsTheWorkspacesIDRecords(t *testing.T) {
+	cases := []struct {
+		name     string
+		record   LogRecord
+		viewOwns bool
+	}{
+		{name: "a record naming the registered id is the view's", record: LogRecord{Level: "warn", Operation: "daemon.banner", Message: "m", WorkspaceID: "w1"}, viewOwns: true},
+		{name: "a record naming another id is not", record: LogRecord{Level: "warn", Operation: "daemon.banner", Message: "m", WorkspaceID: "w2"}, viewOwns: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			owner := newOwnerForViews(t, t)
+			owner.client = registeringClient{ref: &workspacev1.WorkspaceRef{Id: "w1", Dir: t.TempDir()}}
+			view := owner.View(NewRecordingTB(t, "TestMine"))
+			Register(t, view, owner.client.(registeringClient).ref.GetDir())
+			appendRecords(t, owner, tc.record)
+
+			// Act
+			owns := view.Owns(tc.record)
+
+			// Assert
+			if owns != tc.viewOwns || !owner.Owns(tc.record) {
+				t.Fatalf("view.Owns = %v, owner.Owns = %v; want %v and true", owns, owner.Owns(tc.record), tc.viewOwns)
+			}
+			viewSwept, ownerSwept := len(view.UnexpectedWarnings()), len(owner.UnexpectedWarnings())
+			if wantView := map[bool]int{true: 1, false: 0}[tc.viewOwns]; viewSwept != wantView || ownerSwept != 1-wantView {
+				t.Fatalf("swept by view %d, by owner %d; want the record swept once, by its owner", viewSwept, ownerSwept)
+			}
+			if got := len(view.OwnRunLog()); got != map[bool]int{true: 1, false: 0}[tc.viewOwns] {
+				t.Fatalf("view.OwnRunLog holds %d records, want the view's own only", got)
+			}
+		})
 	}
 }

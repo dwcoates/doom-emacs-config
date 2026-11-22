@@ -45,7 +45,7 @@ func mergedBandCollapsed(r *frontendv1.RosterPush) bool {
 func TestTheRecentlyMergedBandStartsExpanded(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	first := harness.AwaitNext(t, f.d.Ctx(), f.d.WatchRoster(), "the opening roster")

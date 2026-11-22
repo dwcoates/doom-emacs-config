@@ -234,7 +234,7 @@ func (c *controller) kickCycle(ws ids.WorkspaceID, st *cycleState) {
 	}
 	st.running = true
 	c.mu.Unlock()
-	c.deps.Detach(func(ctx context.Context) {
+	c.deps.Detach(ws, func(ctx context.Context) {
 		for {
 			c.mu.Lock()
 			beat, reason, merge := st.beat, st.reason, st.merge

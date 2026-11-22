@@ -92,9 +92,11 @@ func TestRollbackRestartRecordsAndHandsOnItsFailure(t *testing.T) {
 }
 
 // TestEverySingleServiceRestartGoesThroughTheHelpers pins the shared shape: in
-// a deploy and in its rollback, the only service restart called directly is
-// the store's (which restarts the sidecar with it and so has two outcomes);
-// every other goes through restartOnto or rollbackRestart.
+// a deploy and in its rollback, the only service restarts called directly are
+// the store's (which restarts the sidecar with it and so has two outcomes) and
+// a socket holder's (one per holder, restarted before anything else moves,
+// with no phase of its own on the update line); every other goes through
+// restartOnto or rollbackRestart.
 func TestEverySingleServiceRestartGoesThroughTheHelpers(t *testing.T) {
 	direct := regexp.MustCompile(`Services\.Restart(\w+)\(ctx[,)]`)
 	for _, file := range []string{"deploy.go", "rollback.go"} {
@@ -109,7 +111,7 @@ func TestEverySingleServiceRestartGoesThroughTheHelpers(t *testing.T) {
 
 		// Assert
 		for _, call := range calls {
-			if call[1] != "Store" {
+			if call[1] != "Store" && call[1] != "Holder" {
 				t.Errorf("%s calls Services.Restart%s directly; a single service restarts through restartOnto or rollbackRestart", file, call[1])
 			}
 		}

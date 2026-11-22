@@ -554,6 +554,14 @@ func (p *process) apply(line []byte) Reply {
 		p.srv.hang()
 		return Reply{OK: true}
 
+	case OpHoldReopen:
+		p.srv.holdSessionReopen()
+		return Reply{OK: true}
+
+	case OpReleaseReopen:
+		p.srv.releaseSessionReopen()
+		return Reply{OK: true}
+
 	case OpUnhang:
 		p.srv.release()
 		return Reply{OK: true}

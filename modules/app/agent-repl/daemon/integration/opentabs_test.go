@@ -76,7 +76,7 @@ func hide(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 func TestOpenTabsAnswersEachWorkspaceReadyWithNoShim(t *testing.T) {
 	t.Parallel()
 	// Arrange: two registered workspaces, neither opened.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	first := harness.Register(t, d, harness.NewRepo(t).Dir)
 	second := harness.Register(t, d, harness.NewRepo(t).Dir)
 
@@ -99,7 +99,7 @@ func TestOpenTabsAnswersEachWorkspaceReadyWithNoShim(t *testing.T) {
 func TestOpenTabsWaitsForTheWorkspacesPageToDraw(t *testing.T) {
 	t.Parallel()
 	// Arrange: an open whose editor is loading the workspace's page.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
 	ctx := d.Ctx()
 	pageStream, err := d.Client().WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{Page: "page-1"}))
@@ -211,7 +211,7 @@ func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T
 func TestANewEmacsStreamStartsNoWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace nothing has opened, its roster drawn.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupEditorStream)
 	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
 	roster := d.WatchRoster()
 	awaitRoster(t, d, roster, "the registered workspace's row", func(r *frontendv1.RosterPush) bool {

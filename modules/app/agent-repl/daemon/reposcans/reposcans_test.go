@@ -231,6 +231,9 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 		t.Fatalf("resolve this package: %v", err)
 	}
 	var offenders []string
+	// A refusal's or a status's list of child workspaces is no tree, and
+	// reading it is no walk (childGetters).
+	lists := childGetters(t, generated)
 
 	// Act.
 	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -253,7 +256,9 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 			return err
 		}
 		if strings.Contains(string(body), "GetChildren()") {
-			offenders = append(offenders, path)
+			for _, line := range handChildWalks(t, path, body, lists) {
+				offenders = append(offenders, fmt.Sprintf("%s:%d", path, line))
+			}
 		}
 		return nil
 	})

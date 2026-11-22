@@ -186,6 +186,8 @@ type fakeDB struct {
 	repositories   []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
+	// readRegistryErr fails the registry snapshot (ReadRegistry).
+	readRegistryErr error
 	// testCases is each workspace's recorded test cases; recordCasesErr,
 	// testCasesErr and forgetCasesErr fail their write, read and forgetting.
 	testCases      map[ids.WorkspaceID][]*testrunv1.TestSelection
@@ -316,6 +318,21 @@ func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 		return nil, f.listRepositoriesErr
 	}
 	return f.repositories, nil
+}
+
+// ReadRegistry answers the seeded workspaces and repositories as one
+// snapshot, failing with readRegistryErr. It reads the seeds directly, never
+// through ListWorkspaces or ListRepositories, so a caller that reads only the
+// snapshot is untouched by those reads' failures.
+func (f *fakeDB) ReadRegistry(context.Context) (wsm.Registry, error) {
+	if f.readRegistryErr != nil {
+		return wsm.Registry{}, f.readRegistryErr
+	}
+	out := wsm.Registry{Repositories: f.repositories}
+	for _, ws := range f.workspaces {
+		out.Workspaces = append(out.Workspaces, ws)
+	}
+	return out, nil
 }
 
 // ReadArrangement answers the seeded workspaces, repositories and

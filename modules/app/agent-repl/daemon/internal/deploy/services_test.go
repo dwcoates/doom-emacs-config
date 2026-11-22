@@ -17,6 +17,7 @@ import (
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 )
@@ -1631,5 +1632,51 @@ func TestRestartOnWaitsForTheStoppedProcessToExitBeforeStarting(t *testing.T) {
 	}
 	if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint([]string{"stop " + SidecarLabel, "start " + SidecarLabel}) {
 		t.Fatalf("restartOn = %v, acts %v; want the start only after the exit", err, h.acts())
+	}
+}
+
+func TestRestartHolderKickstartsItThenProvesItServes(t *testing.T) {
+	holder := holderensure.Holder{ID: "socket-holder-daemon", Label: "com.agentrepl.sockethold.daemon", Service: "sockethold-daemon"}
+	cases := []struct {
+		name       string
+		restartErr error
+		ensureErr  error
+		wantMsg    string
+	}{
+		{name: "kickstarted and serving", wantMsg: "restarted the socket holder; it serves its control socket"},
+		{name: "a failed kickstart is surfaced", restartErr: errors.New("kickstart refused"), wantMsg: "the socket holder's restart failed"},
+		{name: "a holder that does not come back is surfaced", ensureErr: errors.New("no holder serves")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the holder is loaded from its definition.
+			h := newRestarter(t)
+			writeFile(t, filepath.Join(h.services.dir, holder.Label+".plist"), "<plist/>")
+			h.services.loaded[holder.Label] = true
+			h.services.restartErr = tc.restartErr
+			h.holderErr = tc.ensureErr
+
+			// Act
+			err := h.r.RestartHolder(context.Background(), holder)
+
+			// Assert
+			failed := tc.restartErr != nil || tc.ensureErr != nil
+			if (err != nil) != failed {
+				t.Fatalf("RestartHolder = %v, want a failure %v", err, failed)
+			}
+			wantActs := []string{"restart " + holder.Label}
+			if tc.restartErr == nil {
+				wantActs = append(wantActs, "ensure-holder "+holder.ID)
+			}
+			if fmt.Sprint(h.acts()) != fmt.Sprint(wantActs) {
+				t.Fatalf("acts = %v, want %v: one kickstart, then the holder proven serving", h.acts(), wantActs)
+			}
+			if tc.restartErr == nil && fmt.Sprint(h.ensuredHolders) != fmt.Sprint([]string{holder.ID}) {
+				t.Fatalf("ensured = %v, want the holder proven serving after its restart", h.ensuredHolders)
+			}
+			if tc.wantMsg != "" && !loggedTo(h.log, map[bool]string{true: "error", false: "info"}[failed], tc.wantMsg) {
+				t.Fatalf("records = %+v, want %q", h.log.Records(), tc.wantMsg)
+			}
+		})
 	}
 }

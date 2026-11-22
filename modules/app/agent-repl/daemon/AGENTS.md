@@ -249,21 +249,45 @@ mechanics (`integration/shareddaemon_test.go`).
   shared stub records (the browser launcher's).
 - **The view retires its slice when the case ends** (`retireSlice`,
   `integration/harness/view.go`): KillWorkspace, ForgetWorkspace, and any held
-  prompts a forget is blocked by dropped first, before the case's sweep. The
-  daemon therefore holds only the running cases' workspaces; one that kept
-  every finished case's cost more CPU than a daemon per case.
+  prompts a forget is blocked by dropped first, before the case's sweep, and
+  last the main worktree of every repository the slice is in, which
+  registering a linked worktree registers beside it, closed. The daemon
+  therefore holds only the running cases' workspaces and repositories; one
+  that kept every finished case's cost more CPU than a daemon per case.
 - **A case that changes state the whole daemon owns joins its group**:
   `newInGroup(t, group)` or `newRegisteredInGroup(t, group)`, one daemon per
   `daemonGroup`, its cases running one at a time. The groups are
   `groupShutdownSchedule` (a shutdown schedule holds every workspace's
   intake), `groupBrowserLauncher` (a case makes the one launcher stub fail)
   and `groupAccountUsage` (a rate-limit event moves the one account's usage,
-  and a refusal blocks it). A new precondition is a new `daemonGroup`
+  and a refusal blocks it), `groupSelection` (the selected workspace is one
+  per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
+  catalog its login last served; no case of it starts a session) and
+  `groupHiddenKeepalives` (SendHiddenKeepalives asks every hidden shim of
+  the daemon), `groupTabOrder` (tab numbers run across every repository,
+  and the arrangement lists them all), `groupDesktopBanner` (a banner
+  turns on the one editor's focus, and a focus gain claims the newest held
+  banner of any workspace), `groupLoginTerminal` (one login terminal per
+  account root), `groupDefaultModel` (the one login's default model) and
+  `groupEditorSession` (a new editor begins agent-repl's one session) and
+  `groupDerived` (a case creating a child or a fork, whose notice reaches its
+  source after the case: `newDerivingDaemon`, `newDerivingOpened`). A new
+  precondition is a new `daemonGroup`
   constant, never a daemon for one case.
 - **A fresh daemon (`newOpened`, `newRegistered`, `harness.StartDaemon`) is
   only for a case whose subject is the daemon's own lifecycle**: startup,
   restart, handover, crash, shutdown, or a boot-time option or environment
-  (`harness.Opts` other than the default). Its fixture line says so.
+  (`harness.Opts` other than the default). Its fixture line says so. The one
+  other reason is a create that fails in a way the daemon reports to the
+  repository's main worktree (`newReportedCreateDaemon`): the report reopens
+  that workspace after the case is answered, which a slice's retirement
+  would race.
+- **A case reads the run log through its own records**
+  (`Daemon.AwaitOwnRunLogRecord`, `Daemon.OwnRunLog`): a view owns a record
+  naming a workspace it registered, by `workspace_dir` or, for a central
+  record stamped with the id alone, `workspace_id`; another case's record
+  never ends its wait. A shared stub's runs are read by what names the
+  workspace in them (a banner's group), never whole.
 - **A view's idle barrier is its own slice's** (`ExpectNoPush`,
   `ExpectNoPushMatching`, `ExpectFileUnchanged`, `Daemon.AwaitIdle`): it names
   the view's workspaces (`agentrepl.v1.AwaitIdleRequest.workspaces`) and waits

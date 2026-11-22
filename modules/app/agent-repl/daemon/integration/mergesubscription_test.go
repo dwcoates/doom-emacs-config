@@ -65,7 +65,7 @@ func TestAMergeQueueSubscriptionSurvivesADaemonRestart(t *testing.T) {
 func TestClosingAWorkspaceEndsItsMergeQueueSubscription(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, worktreeOf(t, repo, "subscriber"))
 	if got := subscribeEvery(t, d, ws); got.GetSuccess() == nil {

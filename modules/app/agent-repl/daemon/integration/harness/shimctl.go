@@ -939,6 +939,19 @@ func (s *ShimControl) SilenceNextReannouncement() {
 	s.send(controlCommand{Op: "silence_reannouncement"})
 }
 
+// HoldSessionReopen holds every later open of the session stream until
+// ReleaseSessionReopen, so a dropped link stays severed while the test looks.
+func (s *ShimControl) HoldSessionReopen() {
+	s.t.Helper()
+	s.send(controlCommand{Op: "hold_reopen", Stream: StreamSession})
+}
+
+// ReleaseSessionReopen lets the held opens of the session stream through.
+func (s *ShimControl) ReleaseSessionReopen() {
+	s.t.Helper()
+	s.send(controlCommand{Op: "release_reopen", Stream: StreamSession})
+}
+
 // Hang stops the fake answering anything.
 func (s *ShimControl) Hang() {
 	s.t.Helper()

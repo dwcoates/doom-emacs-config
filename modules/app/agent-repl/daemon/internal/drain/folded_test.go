@@ -60,7 +60,7 @@ func newFoldedHarness(t *testing.T, adjust ...func(*Deps)) *foldedHarness {
 	f.ctx, f.cancel = context.WithCancel(context.Background())
 	f.harness = newHarness(t, func(d *Deps) {
 		d.Clock = f.waits
-		d.Detach = func(run func(context.Context)) {
+		d.Detach = func(_ ids.WorkspaceID, run func(context.Context)) {
 			done := make(chan struct{})
 			f.mu.Lock()
 			f.runs = append(f.runs, done)

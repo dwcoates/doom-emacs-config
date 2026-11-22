@@ -44,11 +44,14 @@ func TestDeclaredReadsEveryHolderTheManifestsDeclareForThisPlatform(t *testing.T
 	}{
 		{name: "a holder in an included manifest is read with its control expanded", files: map[string]string{
 			"requirements.json":   `{"includes": ["d/requirements.json"], "requirements": []}`,
-			"d/requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "control": "~/c.sock", "sockets": [{"name": "s", "unix": "~/s.sock"}, {"name": "t", "tcp": "127.0.0.1"}]}]}`,
-		}, want: []Holder{{ID: "h", Control: "/home/me/c.sock", Sockets: []string{"/home/me/s.sock"}}}},
+			"d/requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "label": "com.x.h", "control": "~/c.sock", "sockets": [{"name": "s", "unix": "~/s.sock"}, {"name": "t", "tcp": "127.0.0.1"}]}]}`,
+		}, want: []Holder{{ID: "h", Control: "/home/me/c.sock", Sockets: []string{"/home/me/s.sock"}, Label: "com.x.h", Service: "sockethold-s"}}},
 		{name: "a holder in the root manifest is read", files: map[string]string{
-			"requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "platforms": ["` + runtime.GOOS + `"], "control": "/c.sock"}]}`,
-		}, want: []Holder{{ID: "h", Control: "/c.sock"}}},
+			"requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "platforms": ["` + runtime.GOOS + `"], "control": "/c.sock", "sockets": [{"name": "d", "tcp": "127.0.0.1"}]}]}`,
+		}, want: []Holder{{ID: "h", Control: "/c.sock", Service: "sockethold-d"}}},
+		{name: "a holder that holds no socket is an error", files: map[string]string{
+			"requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "control": "/c.sock"}]}`,
+		}, wantErr: true},
 		{name: "every other kind is passed over", files: map[string]string{
 			"requirements.json": `{"requirements": [{"id": "s", "kind": "service", "control": "/c.sock"}]}`,
 		}},

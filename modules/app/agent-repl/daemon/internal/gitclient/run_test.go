@@ -429,6 +429,36 @@ func TestFailureRecordCarriesTheGitEvidence(t *testing.T) {
 	}
 }
 
+func TestARecordAboutAnInvocationNamesTheWorktreeItRanInAsItsWorkspace(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		fake  gitFixture
+	}{
+		{name: "a failure", level: "error", fake: fails(1, "boom\n")},
+		{name: "the ordinary path", level: "debug", fake: ok("abc123\n")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, tc.fake)
+
+			// Act.
+			_, _ = git.ResolveRef(context.Background(), "/repo", "main")
+
+			// Assert.
+			record, found := recordFor(surfaces.records(), tc.level, "daemon.gitclient.resolve_ref")
+			if !found {
+				t.Fatalf("no %s record for resolve_ref", tc.level)
+			}
+			if got := record.Context[dlog.KeyWorkspaceDir]; got != "/repo" {
+				t.Fatalf("the record's workspace_dir = %v, want the directory git ran in", got)
+			}
+		})
+	}
+}
+
 func TestOrdinaryPathIsLoggedAtDebug(t *testing.T) {
 	// Arrange.
 	git, surfaces := newTestClient(t)
