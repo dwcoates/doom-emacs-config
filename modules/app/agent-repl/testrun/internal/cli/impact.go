@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -218,11 +217,6 @@ func impactData(layout suites.Layout, s roster.Suite, moduleDir, pkg, tags strin
 		unit += "[" + tags + "]"
 	}
 	declared := append(append([]string(nil), s.Reuse.Units[unit]...), s.Reuse.Inputs...)
-	moduleRel, err := filepath.Rel(layout.Repo, layout.Module)
-	if err != nil {
-		return nil, fmt.Errorf("place the module %s in the checkout %s: %w", layout.Module, layout.Repo, err)
-	}
-	moduleRel = filepath.ToSlash(moduleRel)
 	sourceRel, err := filepath.Rel(layout.Repo, moduleDir)
 	if err != nil {
 		return nil, fmt.Errorf("place %s in the checkout %s: %w", moduleDir, layout.Repo, err)
@@ -230,10 +224,12 @@ func impactData(layout suites.Layout, s roster.Suite, moduleDir, pkg, tags strin
 	sourceRel = filepath.ToSlash(sourceRel) + "/"
 	var prefixes, exact []string
 	for _, p := range declared {
-		rel := path.Join(moduleRel, p)
-		if strings.HasPrefix(p, "/") {
-			rel = strings.TrimPrefix(p, "/")
+		abs := roster.Resolve(layout.Repo, layout.Module, p)
+		rel, err := filepath.Rel(layout.Repo, abs)
+		if err != nil {
+			return nil, fmt.Errorf("place the declared input %s in the checkout %s: %w", p, layout.Repo, err)
 		}
+		rel = filepath.ToSlash(rel)
 		if strings.HasSuffix(p, "/") {
 			prefixes = append(prefixes, strings.TrimSuffix(rel, "/")+"/")
 		} else {
