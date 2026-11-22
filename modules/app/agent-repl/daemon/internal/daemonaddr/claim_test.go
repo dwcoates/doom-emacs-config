@@ -338,6 +338,74 @@ func TestWithdrawLeavesASuccessorsAdvertisementAlone(t *testing.T) {
 	}
 }
 
+// TestWithdrawLeavesAnAdvertisementNotNamingThisProcess pins the incident of
+// 2026-11-22: every daemon advertises the same shared address, so an
+// incumbent's exit that matched on the address alone removed its successor's
+// advertisement, and the successor stood down.
+func TestWithdrawLeavesAnAdvertisementNotNamingThisProcess(t *testing.T) {
+	const shared = "127.0.0.1:41000"
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{name: "this claim's address and another pid", raw: shared + "\npid=" + strconv.Itoa(os.Getpid()+1) + "\nprivate=127.0.0.1:5001\n"},
+		{name: "this claim's address and no pid", raw: shared + "\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			addrPath := newAddrPath(t)
+			c := mustBind(t, addrPath)
+			c.Advertise(shared)
+			if err := c.Publish(); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if err := os.WriteFile(addrPath, []byte(tc.raw), 0o644); err != nil {
+				t.Fatalf("write the other advertisement: %v", err)
+			}
+
+			// Act
+			withdrawn, err := c.Withdraw()
+
+			// Assert
+			if err != nil || withdrawn {
+				t.Fatalf("Withdraw = (%v, %v), want (false, nil)", withdrawn, err)
+			}
+			if raw, err := os.ReadFile(addrPath); err != nil || string(raw) != tc.raw {
+				t.Fatalf("daemon.addr = %q (%v), want it left as %q", raw, err, tc.raw)
+			}
+		})
+	}
+}
+
+func TestAnAdvertisementNamesAClaimByItsAddressAndPid(t *testing.T) {
+	c := &claim{address: "127.0.0.1:5000", advertised: "127.0.0.1:41000", pid: 7}
+	cases := []struct {
+		name string
+		ad   Advertisement
+		want bool
+	}{
+		{name: "its advertised address and its pid", ad: Advertisement{Address: "127.0.0.1:41000", PID: 7, PIDKnown: true}, want: true},
+		{name: "its advertised address and another pid", ad: Advertisement{Address: "127.0.0.1:41000", PID: 8, PIDKnown: true}},
+		{name: "its advertised address and no pid", ad: Advertisement{Address: "127.0.0.1:41000"}},
+		{name: "another address and its pid", ad: Advertisement{Address: "127.0.0.1:41001", PID: 7, PIDKnown: true}},
+		{name: "its own private address, not the advertised one", ad: Advertisement{Address: "127.0.0.1:5000", PID: 7, PIDKnown: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			c.mu.Lock()
+			got := c.namesLocked(tc.ad)
+			c.mu.Unlock()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("namesLocked(%+v) = %v, want %v", tc.ad, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestStandingAdvertisement pins what the boot replaces: under the boot
 // claim, an advertisement standing with an address, and nothing else.
 func TestStandingAdvertisement(t *testing.T) {
@@ -710,6 +778,26 @@ func TestVerify(t *testing.T) {
 				}
 			},
 			want: "127.0.0.1:1",
+		},
+		{
+			name:    "a daemon.addr naming this address and another pid is a loss while published",
+			publish: true,
+			mutate: func(t *testing.T, c Claim, addrPath string) {
+				if err := os.WriteFile(addrPath, []byte(c.Address()+"\npid=1\n"), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			},
+			want: "names pid 1, not this daemon's " + strconv.Itoa(os.Getpid()),
+		},
+		{
+			name:    "a daemon.addr naming this address and no pid is a loss while published",
+			publish: true,
+			mutate: func(t *testing.T, c Claim, addrPath string) {
+				if err := os.WriteFile(addrPath, []byte(c.Address()+"\n"), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			},
+			want: "names no pid",
 		},
 		{
 			name:   "an unpublished claim owes no daemon.addr",
