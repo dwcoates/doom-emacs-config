@@ -87,6 +87,7 @@ import { installPageDrawnReport } from "./page-drawn-report.js";
 import { installDaemonLatencyReport } from "./latency-report.js";
 import { pageSwitchLatencyEnv, watchPageBoot, watchSwitchLatency } from "./switch-latency.js";
 import { watchReloadBlank } from "./reload-blank.js";
+import { watchViewedDowntime } from "./viewed-downtime.js";
 import { watchPageStall } from "./page-stall.js";
 import { createPromptEcho, installPromptEcho } from "./prompt-echo.js";
 import { createPageSeen } from "./page-seen.js";
@@ -257,6 +258,7 @@ export async function boot(): Promise<void> {
     if (pagePresence().embedded) {
       stopAtPageTeardown(watchSwitchLatency(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds)));
       stopAtPageTeardown(watchReloadBlank(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds)));
+      stopAtPageTeardown(watchViewedDowntime(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds)));
     }
     // A STALL OF THIS PAGE'S MAIN THREAD while it is seen (page-stall.ts).
     stopAtPageTeardown(watchPageStall(

@@ -47,17 +47,21 @@ var (
 	// stallBuckets bound the waits a person sits through: a stalled loop, a
 	// blank page, a reload the editor runs nothing else during.
 	stallBuckets = []float64{0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30}
+	// downtimeBuckets bound a viewed workspace's downtime across a daemon
+	// change: handover p50 8.4s and workspace_reconnect p99 71s (2026-11-22).
+	downtimeBuckets = []float64{0.1, 0.3, 1, 2, 5, 10, 20, 30, 60, 120}
 )
 
 // ReportedKinds are the latencies Emacs and the webapp report.
 var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_REPEAT:  {Name: "switch_repeat", Buckets: navigationBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_FIRST:   {Name: "switch_first", Buckets: navigationBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT:      {Name: "page_boot", Buckets: pageBootBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO:    {Name: "prompt_echo", Buckets: navigationBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_STALL:     {Name: "page_stall", Buckets: stallBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_RELOAD_BLANK:   {Name: "reload_blank", Buckets: stallBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_SIDEBAR: {Name: "switch_sidebar", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_REPEAT:   {Name: "switch_repeat", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_FIRST:    {Name: "switch_first", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT:       {Name: "page_boot", Buckets: pageBootBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO:     {Name: "prompt_echo", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_STALL:      {Name: "page_stall", Buckets: stallBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_RELOAD_BLANK:    {Name: "reload_blank", Buckets: stallBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_SIDEBAR:  {Name: "switch_sidebar", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_VIEWED_DOWNTIME: {Name: "viewed_downtime", Buckets: downtimeBuckets},
 }
 
 // EditorKinds are the editor-wide latencies Emacs reports, which name no

@@ -225,6 +225,29 @@ describe("presence switch start", () => {
   });
 });
 
+describe("downtimeStartedAt", () => {
+  it("knows no downtime start until the host names one", () => {
+    // Act
+    presence = createPresence(document, true);
+
+    // Assert
+    expect(presence.downtimeStartedAt()).toBeNull();
+  });
+
+  it("keeps the downtime start the host named, through a hide", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    presence.setDowntimeStartedAt(1_700_000_000_400);
+
+    // Act
+    presence.setShown(true);
+    presence.setShown(false);
+
+    // Assert
+    expect(presence.downtimeStartedAt()).toBe(1_700_000_000_400);
+  });
+});
+
 describe("pageIsEmbedded", () => {
   it("is false for a top-level window", () => {
     expect(pageIsEmbedded(window)).toBe(false);

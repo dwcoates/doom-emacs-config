@@ -61,6 +61,14 @@ interface PresenceMessage {
    * first host load), and on every message but the one its hello replays.
    */
   readonly reloadStartedAtMs?: number;
+  /**
+   * When Emacs found this page's workspace's host stream detached or handed
+   * on by a daemon change: the wall-clock instant (Unix milliseconds). The
+   * page measures how long the workspace could not be used from it
+   * (viewed-downtime.ts). ABSENT when no daemon change preceded the load, and
+   * on every message but the one its hello replays.
+   */
+  readonly downtimeStartedAtMs?: number;
 }
 
 /** host -> page: close the standing news digest, as its close control does. */
@@ -304,13 +312,15 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         value === undefined ? undefined : typeof value === "number" && Number.isFinite(value) ? value : null;
       const switchStartedAtMs = instant(data.switchStartedAtMs);
       const reloadStartedAtMs = instant(data.reloadStartedAtMs);
-      if (switchStartedAtMs === null || reloadStartedAtMs === null) return null;
+      const downtimeStartedAtMs = instant(data.downtimeStartedAtMs);
+      if (switchStartedAtMs === null || reloadStartedAtMs === null || downtimeStartedAtMs === null) return null;
       return {
         channel: HOST_CHANNEL,
         kind: "presence",
         shown: data.shown,
         ...(switchStartedAtMs === undefined ? {} : { switchStartedAtMs }),
         ...(reloadStartedAtMs === undefined ? {} : { reloadStartedAtMs }),
+        ...(downtimeStartedAtMs === undefined ? {} : { downtimeStartedAtMs }),
       };
     }
     case "dismissDigest":

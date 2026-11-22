@@ -50,6 +50,12 @@ export interface Presence {
    * milliseconds), or null when no reload loaded it.
    */
   reloadStartedAt(): number | null;
+  /**
+   * When Emacs found the workspace's host stream taken by a daemon change
+   * (wall-clock Unix milliseconds), handed with the load that followed, or
+   * null when no daemon change loaded this page (viewed-downtime.ts).
+   */
+  downtimeStartedAt(): number | null;
 }
 
 /** The presence plus the one writer the host link holds. */
@@ -61,6 +67,8 @@ export interface PresenceSource extends Presence {
   setShown(shown: boolean, switchStartedAtMs?: number | null): void;
   /** The host said a reload that began at STARTEDATMS loaded this page. */
   setReloadStartedAt(startedAtMs: number): void;
+  /** The host said a daemon change that began at STARTEDATMS took this page's workspace's daemon. */
+  setDowntimeStartedAt(startedAtMs: number): void;
   /** Stop listening to the document. */
   dispose(): void;
 }
@@ -75,6 +83,7 @@ export function createPresence(doc: Document, embedded: boolean, quiet?: Quiet):
   let hostShown = !embedded;
   let switchStartedAtMs: number | null = null;
   let reloadStartedAtMs: number | null = null;
+  let downtimeStartedAtMs: number | null = null;
   const listeners = createListeners<Parameters<PresenceListener>>();
   const visible = (): boolean => doc.visibilityState === "visible";
   const seen = (): boolean => hostShown && visible() && quiet?.quiet() !== true;
@@ -91,6 +100,7 @@ export function createPresence(doc: Document, embedded: boolean, quiet?: Quiet):
     shown: () => hostShown,
     switchStartedAt: () => switchStartedAtMs,
     reloadStartedAt: () => reloadStartedAtMs,
+    downtimeStartedAt: () => downtimeStartedAtMs,
     onChange(listener) {
       return listeners.add(listener);
     },
@@ -102,6 +112,9 @@ export function createPresence(doc: Document, embedded: boolean, quiet?: Quiet):
     },
     setReloadStartedAt(startedAtMs) {
       reloadStartedAtMs = startedAtMs;
+    },
+    setDowntimeStartedAt(startedAtMs) {
+      downtimeStartedAtMs = startedAtMs;
     },
     dispose() {
       doc.removeEventListener("visibilitychange", onVisibility);

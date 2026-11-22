@@ -109,6 +109,12 @@ interface Frame {
    * reload loaded.
    */
   pendingReloadStartedAtMs: number | null;
+  /**
+   * When Emacs found the workspace's host stream taken by a daemon change
+   * (downtimeStartedAtMs), while the page now in the frame has not said hello
+   * yet: handed over with the presence its hello replays, then forgotten.
+   */
+  pendingDowntimeStartedAtMs: number | null;
 }
 
 /** A page held back until the user asks for it (`Host.holdBack`). */
@@ -129,7 +135,13 @@ export interface Host {
    * (the presence message's reloadStartedAtMs), null when no reload asks: it
    * is handed to a page this call loads, and to nothing else.
    */
-  ensure(id: string, url: string, lane?: string | null, reloadStartedAtMs?: number | null): string;
+  ensure(
+    id: string,
+    url: string,
+    lane?: string | null,
+    reloadStartedAtMs?: number | null,
+    downtimeStartedAtMs?: number | null,
+  ): string;
   /**
    * Show workspace ID's page and hide every other. SWITCH_STARTED_AT_MS is
    * when the user's switch that asked for it began (the presence message's
@@ -164,7 +176,7 @@ export interface Host {
    * Load workspace ID's page again from its URL. RELOAD_STARTED_AT_MS is when
    * the reload began, handed to the page it loads.
    */
-  reload(id: string, reloadStartedAtMs?: number | null): string;
+  reload(id: string, reloadStartedAtMs?: number | null, downtimeStartedAtMs?: number | null): string;
   /**
    * Record the slot workspace ID's gate takes: the input window's height. The
    * webhost draws the gate (host/gate.ts), so the slot is kept whether or not
@@ -358,12 +370,14 @@ export function createHost(env: HostEnv): Host {
     frame: Frame,
     switchStartedAtMs: number | null = null,
     reloadStartedAtMs: number | null = null,
+    downtimeStartedAtMs: number | null = null,
   ): HostToPage => ({
     channel: HOST_CHANNEL,
     kind: "presence",
     shown: frame.id === shownId,
     ...(switchStartedAtMs === null ? {} : { switchStartedAtMs }),
     ...(reloadStartedAtMs === null ? {} : { reloadStartedAtMs }),
+    ...(downtimeStartedAtMs === null ? {} : { downtimeStartedAtMs }),
   });
 
   /** The webhost's failures, as every page is told. */
@@ -381,7 +395,9 @@ export function createHost(env: HostEnv): Host {
     // has drawn, whether anyone saw it blank.
     const reloadStartedAtMs = frame.pendingReloadStartedAtMs;
     frame.pendingReloadStartedAtMs = null;
-    post(frame, presenceOf(frame, switchStartedAtMs, reloadStartedAtMs));
+    const downtimeStartedAtMs = frame.pendingDowntimeStartedAtMs;
+    frame.pendingDowntimeStartedAtMs = null;
+    post(frame, presenceOf(frame, switchStartedAtMs, reloadStartedAtMs, downtimeStartedAtMs));
     post(frame, failuresMessage());
     if (logLevel !== null && logLevel.untilMs > now()) {
       post(frame, { channel: HOST_CHANNEL, kind: "logLevel", level: logLevel.level, untilMs: logLevel.untilMs });
@@ -720,6 +736,7 @@ export function createHost(env: HostEnv): Host {
       attached: false,
       pendingSwitchStartedAtMs: null,
       pendingReloadStartedAtMs: null,
+      pendingDowntimeStartedAtMs: null,
     };
     frameParent.append(iframe);
     // Laid out first, so a frame created hidden is fixed at the size it fills.
@@ -781,7 +798,7 @@ export function createHost(env: HostEnv): Host {
   };
 
   return {
-    ensure(id, url, lane, reloadStartedAtMs = null) {
+    ensure(id, url, lane, reloadStartedAtMs = null, downtimeStartedAtMs = null) {
       const frame = frames.get(id);
       const laneName = lane ?? undefined;
       // A HELD PAGE IS HELD BACK NO LONGER.
@@ -789,6 +806,7 @@ export function createHost(env: HostEnv): Host {
       if (frame === undefined) {
         const created = create(id, url, laneName);
         created.pendingReloadStartedAtMs = reloadStartedAtMs;
+        created.pendingDowntimeStartedAtMs = downtimeStartedAtMs;
         // A PAGE ASKED FOR WHILE ITS LOAD BUTTON STANDS takes the button's
         // place, and the keyboard with it.
         if (id === shownId) {
@@ -807,6 +825,7 @@ export function createHost(env: HostEnv): Host {
         const fresh = newFrame(id, url, false);
         carryDesiredState(frame, fresh);
         fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
+        fresh.pendingDowntimeStartedAtMs = downtimeStartedAtMs;
         const bound = win.setTimeout(() => {
           note("warn", `page ${id}'s replacement did not say it had drawn within ${REPLACEMENT_BOUND_MS}ms; it is shown as it is`);
           swapIn(id);
@@ -833,6 +852,7 @@ export function createHost(env: HostEnv): Host {
       carryDesiredState(frame, fresh);
       fresh.pendingSwitchStartedAtMs = frame.pendingSwitchStartedAtMs;
       fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
+      fresh.pendingDowntimeStartedAtMs = downtimeStartedAtMs;
       return answer("ensure", id, "navigated");
     },
     show(id, switchStartedAtMs = null) {
@@ -898,7 +918,7 @@ export function createHost(env: HostEnv): Host {
       }
       return answer("setDaemon", null, env.daemon.set(origin) ? "retargeted" : "unchanged", { origin });
     },
-    reload(id, reloadStartedAtMs = null) {
+    reload(id, reloadStartedAtMs = null, downtimeStartedAtMs = null) {
       return withFrame("reload", id, (frame) => {
         // A PAGE BEING REPLACED RELOADS ITS REPLACEMENT, at the URL Emacs last
         // pointed it to, and the shown page stays until that replacement has
@@ -913,6 +933,7 @@ export function createHost(env: HostEnv): Host {
         target.attached = false;
         target.pendingSwitchStartedAtMs = null;
         target.pendingReloadStartedAtMs = reloadStartedAtMs;
+        target.pendingDowntimeStartedAtMs = downtimeStartedAtMs;
         load(target);
         return "reloaded";
       });

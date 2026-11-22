@@ -64,6 +64,16 @@ enum ReportedLatencyKind {
   // carries (frontend.v1.RosterCurrentWorkspace.switch_started_at_ms). Its
   // gap to SWITCH_REPEAT is how far the sidebar trails the page.
   REPORTED_LATENCY_KIND_SWITCH_SIDEBAR = 7;
+  // How long the workspace the person is viewing could not be used because a
+  // daemon change (a deploy's handover or restart) took its daemon away: from
+  // the instant Emacs first found the workspace's host stream detached or
+  // handed on, to the instant the workspace's page, shown at the time,
+  // first drew its conversation after that. Measured by the webapp from the
+  // instant Emacs hands the page with the load that follows the detachment,
+  // on the host's wall clock. A page not shown when it draws reports nothing:
+  // nobody was waiting on it. It spans at least as much as RELOAD_BLANK for
+  // the same deploy, since it starts no later than the page's reload.
+  REPORTED_LATENCY_KIND_VIEWED_DOWNTIME = 8;
 }
 
 // One finished interaction.
