@@ -299,6 +299,12 @@ type Resolver interface {
 	Topic() *publish.Topic[*frontendv1.RosterPush]
 }
 
+// DeployCheckHold is a queue's hold for its deploy check.
+type DeployCheckHold struct {
+	// Since is when the hold began, zero when it is not known.
+	Since time.Time
+}
+
 // MergeQueue is one repository's merge queue as the roster draws it. It is
 // stated whole on every change, so nothing a queue no longer says can linger
 // in the roster.
@@ -308,6 +314,12 @@ type MergeQueue struct {
 	// merge indicator (frontend.v1.RosterRowMergePaused), and the queue's
 	// group in the Merge Queue section draws it (frontend.v1.RosterMergeQueuePaused).
 	Pause *wsm.MergeQueuePause
+	// DeployCheck is the queue's hold for its deploy check, nil while none
+	// holds it: from a deploy's start until the deploy mediator approves a
+	// deploy, a remediation's finish included (merge.deployHold). It is drawn
+	// as the queue's pause (frontend.v1.RosterMergeQueuePauserDeployCheck)
+	// and marks its rows as Pause does; a real Pause is drawn over it.
+	DeployCheck *DeployCheckHold
 	// Workspaces are the workspaces with a row on the queue, in queue order:
 	// the queue a `merging` or `merge_queued` row's own merge is on.
 	Workspaces []ids.WorkspaceID

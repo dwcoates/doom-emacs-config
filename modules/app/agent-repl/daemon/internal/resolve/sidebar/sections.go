@@ -130,6 +130,7 @@ type repoQueue struct {
 	line        []QueueEntry
 	remediating []QueueEntry
 	pause       *wsm.MergeQueuePause
+	deployCheck *DeployCheckHold
 	// github are the repository's workspaces standing in a GitHub merge
 	// queue, in queue order.
 	github []GithubQueueEntry
@@ -159,7 +160,7 @@ func (q repoQueue) listed() bool {
 // merges awaiting each, under the head.
 func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
 	const op = "daemon.sidebar.merge_queue"
-	out := &frontendv1.RosterRepoMergeQueue{Paused: drawMergeQueuePause(q.pause)}
+	out := &frontendv1.RosterRepoMergeQueue{Paused: drawMergeQueuePause(q.pause, q.deployCheck)}
 	byID := r.workspacesByID()
 	subject := func(entry QueueEntry) (*frontendv1.RosterMergeQueueSubject, bool) {
 		credited, ok := byID[entry.Credited]
@@ -341,11 +342,13 @@ func clockDefect(entry QueueEntry, want string, log dlog.Logger) {
 }
 
 // drawMergeQueuePause renders a queue's standing pause as the roster draws
-// it, nil while the queue runs. A pause recorded before its record was kept
-// carries neither its instant nor its pauser.
-func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueuePaused {
+// it, else its deploy check's hold (DEPLOYCHECK), nil while the queue runs.
+// A REAL PAUSE IS DRAWN OVER THE HOLD: the hold's reason stays on the
+// mediation's label beside the repository's name. A pause recorded before its
+// record was kept carries neither its instant nor its pauser.
+func drawMergeQueuePause(pause *wsm.MergeQueuePause, deployCheck *DeployCheckHold) *frontendv1.RosterMergeQueuePaused {
 	if pause == nil {
-		return nil
+		return drawDeployCheckHold(deployCheck)
 	}
 	out := &frontendv1.RosterMergeQueuePaused{Hard: pause.Hard}
 	if !pause.At.IsZero() {
@@ -361,6 +364,21 @@ func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueu
 	case wsm.MergeQueuePauserHost:
 		out.By = &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_Host{
 			Host: &frontendv1.RosterMergeQueuePauserHost{Cause: pause.By.Cause}}}
+	}
+	return out
+}
+
+// drawDeployCheckHold renders a queue's deploy check hold H as its pause, nil
+// for none. It is never a hard stop: the hold suspends merges at their step.
+func drawDeployCheckHold(h *DeployCheckHold) *frontendv1.RosterMergeQueuePaused {
+	if h == nil {
+		return nil
+	}
+	out := &frontendv1.RosterMergeQueuePaused{By: &frontendv1.RosterMergeQueuePauser{
+		Asker: &frontendv1.RosterMergeQueuePauser_DeployCheck{DeployCheck: &frontendv1.RosterMergeQueuePauserDeployCheck{}}}}
+	if !h.Since.IsZero() {
+		at := h.Since.UnixMilli()
+		out.PausedAtMs = &at
 	}
 	return out
 }
@@ -508,7 +526,7 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			claim(key, ws.Repo, entry.Workspace)
 			rq := out[ws.Repo]
 			rq.line = append(rq.line, entry)
-			rq.pause = q.pause
+			rq.pause, rq.deployCheck = q.pause, q.deployCheck
 			out[ws.Repo] = rq
 		}
 		for _, entry := range q.remediating {
@@ -522,7 +540,7 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			claim(key, ws.Repo, entry.Workspace)
 			rq := out[ws.Repo]
 			rq.remediating = append(rq.remediating, entry)
-			rq.pause = q.pause
+			rq.pause, rq.deployCheck = q.pause, q.deployCheck
 			out[ws.Repo] = rq
 		}
 		// THE MEDIATION NAMES THE REPOSITORY whose queue it holds: the
@@ -531,7 +549,7 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			claim(key, m.Repo, "")
 			rq := out[m.Repo]
 			rq.mediation = m
-			rq.pause = q.pause
+			rq.pause, rq.deployCheck = q.pause, q.deployCheck
 			out[m.Repo] = rq
 		}
 	}

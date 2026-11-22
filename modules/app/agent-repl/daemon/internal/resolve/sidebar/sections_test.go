@@ -1332,9 +1332,11 @@ func pausedBy() *wsm.MergeQueuePause {
 
 func TestAPausedQueueCarriesItsRecord(t *testing.T) {
 	at := epoch.UnixMilli()
+	deployCheck := &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_DeployCheck{DeployCheck: &frontendv1.RosterMergeQueuePauserDeployCheck{}}}
 	tests := []struct {
 		name  string
 		pause *wsm.MergeQueuePause
+		hold  *sidebar.DeployCheckHold
 		want  *frontendv1.RosterMergeQueuePaused
 	}{
 		{name: "the user's pause", pause: pausedBy(), want: &frontendv1.RosterMergeQueuePaused{PausedAtMs: &at,
@@ -1346,12 +1348,19 @@ func TestAPausedQueueCarriesItsRecord(t *testing.T) {
 			want: &frontendv1.RosterMergeQueuePaused{PausedAtMs: &at, Hard: true,
 				By: &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_Workspace{Workspace: &frontendv1.RosterMergeQueuePauserWorkspace{Name: "doom"}}}}},
 		{name: "a pause recorded before its record was kept", pause: &wsm.MergeQueuePause{}, want: &frontendv1.RosterMergeQueuePaused{}},
+		{name: "a queue its deploy check holds is paused by the deploy check since the hold began", hold: &sidebar.DeployCheckHold{Since: epoch},
+			want: &frontendv1.RosterMergeQueuePaused{PausedAtMs: &at, By: deployCheck}},
+		{name: "a deploy check's hold whose start is not known carries no instant", hold: &sidebar.DeployCheckHold{},
+			want: &frontendv1.RosterMergeQueuePaused{By: deployCheck}},
+		{name: "a real pause is drawn over the deploy check's hold", pause: pausedBy(), hold: &sidebar.DeployCheckHold{Since: epoch.Add(-time.Hour)},
+			want: &frontendv1.RosterMergeQueuePaused{PausedAtMs: &at,
+				By: &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_User{User: &frontendv1.RosterMergeQueuePauserUser{}}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			r, _ := newResolver(t)
-			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: tt.pause, Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: tt.pause, DeployCheck: tt.hold, Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
 
 			// Act.
 			r.SetRegistry(queueView(workspace("w1", "one")))

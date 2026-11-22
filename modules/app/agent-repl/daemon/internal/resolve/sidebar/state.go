@@ -508,6 +508,8 @@ type coldGate struct {
 type mergeQueue struct {
 	// pause is the queue's standing pause, nil while it runs.
 	pause *wsm.MergeQueuePause
+	// deployCheck is the queue's hold for its deploy check, nil for none.
+	deployCheck *DeployCheckHold
 	// members are the workspaces with a row on the queue.
 	members map[ids.WorkspaceID]struct{}
 	// async are the workspaces whose own branch has an async merge on it.
@@ -523,7 +525,7 @@ type mergeQueue struct {
 
 // newMergeQueue indexes one stated queue.
 func newMergeQueue(q MergeQueue) mergeQueue {
-	return mergeQueue{pause: q.Pause, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, remediating: q.Remediating, mediation: q.Mediation}
+	return mergeQueue{pause: q.Pause, deployCheck: q.DeployCheck, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, remediating: q.Remediating, mediation: q.Mediation}
 }
 
 // setOf indexes WS as a set.
@@ -538,7 +540,7 @@ func setOf(ws []ids.WorkspaceID) map[ids.WorkspaceID]struct{} {
 // empty reports whether the queue says nothing the roster could draw: not
 // paused, and no workspace on it.
 func (q mergeQueue) empty() bool {
-	return q.pause == nil && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0 && len(q.remediating) == 0 && q.mediation == nil
+	return q.pause == nil && q.deployCheck == nil && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0 && len(q.remediating) == 0 && q.mediation == nil
 }
 
 // newRosterState builds an empty roster accumulation.
@@ -562,6 +564,10 @@ func (r *rosterState) asyncMerging(ws ids.WorkspaceID) bool {
 	return false
 }
 
+// paused reports whether the queue draws as paused: a standing pause, or its
+// deploy check's hold.
+func (q mergeQueue) paused() bool { return q.pause != nil || q.deployCheck != nil }
+
 // pausedMergeQueue answers the paused repository queue that holds a merge the
 // row of WS draws, and false when none does. The row draws its own merge
 // (OWNMERGE, ownMergeDrawn), which is on the queue WS has a row on, and an
@@ -570,7 +576,7 @@ func (r *rosterState) asyncMerging(ws ids.WorkspaceID) bool {
 // draws no merge for a pause to change.
 func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, ownMerge, async bool) (wsm.RepoKey, bool) {
 	for repo, q := range r.queues {
-		if q.pause == nil {
+		if !q.paused() {
 			continue
 		}
 		if _, on := q.members[ws]; ownMerge && on {

@@ -2317,6 +2317,18 @@ func TestMergePausedMarker(t *testing.T) {
 			want:  true,
 		},
 		{
+			name:    "a merging row on a queue its deploy check holds",
+			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
+			queue:   sidebar.MergeQueue{DeployCheck: &sidebar.DeployCheckHold{Since: epoch}, Workspaces: []ids.WorkspaceID{theWS}},
+			want:    true,
+		},
+		{
+			name:    "an async-merge row on a queue its deploy check holds",
+			arrange: func(r sidebarResolver) {},
+			queue:   sidebar.MergeQueue{DeployCheck: &sidebar.DeployCheckHold{Since: epoch}, AsyncRequesters: []ids.WorkspaceID{theWS}},
+			want:    true,
+		},
+		{
 			name:    "a merging row on a running queue",
 			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
 			queue:   sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{theWS}},

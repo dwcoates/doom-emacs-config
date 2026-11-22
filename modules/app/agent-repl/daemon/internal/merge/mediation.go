@@ -1170,8 +1170,11 @@ func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*
 		return o.rosterFinish(ctx, repo, *finish)
 	}
 	owed, err := o.owedMediation(ctx, repo)
-	if err != nil || owed == nil {
+	if err != nil {
 		return nil, err
+	}
+	if owed == nil {
+		return o.rosterFixingUnowed(ctx, repo)
 	}
 	out := &sidebar.QueueMediation{Repo: owed.Repository, Mediator: owed.Mediator}
 	switch owed.Stage {
@@ -1210,6 +1213,28 @@ func (o *orchestrator) rosterFinish(ctx context.Context, repo wsm.RepoKey, f wsm
 		return out, nil
 	}
 	panic(fmt.Sprintf("merge: the finish of %s under way stands at %q", f.Workspace, f.Step))
+}
+
+// rosterFixingUnowed is the label of REPO's queue while the mediator's
+// finish, sent back to fix by its gate, holds it with no check owed: the
+// finish holds the queue (deployHold), so its reason is drawn as a check's
+// fixing is. Nil when no such finish stands.
+func (o *orchestrator) rosterFixingUnowed(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
+	finishes, err := o.deps.DB.RemediationFinishes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range finishes {
+		if !sameQueue(f.Repo, repo) || f.Step != wsm.RemediationFixing {
+			continue
+		}
+		q, ok, err := o.checkedQueueOf(ctx, repo)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationFixing, Mediator: f.Workspace}, nil
+	}
+	return nil, nil
 }
 
 // republishMediation tells the roster and the queue's subscribers a change
