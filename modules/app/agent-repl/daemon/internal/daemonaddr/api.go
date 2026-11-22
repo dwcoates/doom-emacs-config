@@ -38,8 +38,14 @@ type Claim interface {
 	// (write a temporary file, then rename). The payload is the bare address
 	// on the first line and "pid=<n>" -- this daemon's process id -- on the
 	// second; see ReadAdvertisement for the format and its legacy fallback. A
-	// joining daemon calls it only once it owns every workspace.
+	// joining daemon calls it only once it owns every workspace. A claim that
+	// departed, yielded or closed publishes nothing and answers ErrDeparted.
 	Publish() error
+	// Departed reports whether this claim is standing down: Depart, Yield or
+	// Close ran. A caller that does work of its own before Publish (taking
+	// the shared listener) asks it first, so a daemon standing down takes and
+	// advertises nothing; Publish refuses on its own whatever the answer.
+	Departed() bool
 	// Withdraw removes the daemon.addr file WHILE IT STILL NAMES THIS CLAIM
 	// (its advertised address and this process's pid; every daemon advertises
 	// the same shared address), and answers whether it removed anything.
@@ -86,6 +92,16 @@ type Claim interface {
 // exclusive state root -- a second daemon booting on a recreated root takes a
 // daemon.lock nobody holds -- and must stand down.
 var ErrVanished = errors.New("the daemon's state on disk vanished")
+
+// ErrDeparted marks a Publish refused because this daemon is STANDING DOWN:
+// its claim departed (Depart), yielded (Yield) or closed (Close). It is an
+// expected outcome, not a fault: a successor whose adoption finishes after it
+// began shutting down must not advertise an address it is about to withdraw
+// (2026-11-22, pid 30922 published 4s into its stand-down). The refusal and
+// every write are under the claim's own lock, so a Publish racing a Depart
+// either lands first, and the departure's withdrawal removes it, or is
+// refused: no ordering leaves an address published after a departure.
+var ErrDeparted = errors.New("this daemon is standing down, so it advertises nothing")
 
 // Bind claims a loopback listener and prepares the advertisement at addrPath.
 // port 0 asks the kernel for a free port, which is what Address then reports.

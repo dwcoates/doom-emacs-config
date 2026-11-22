@@ -224,6 +224,81 @@ func TestReadAdvertisementSurfacesAReadError(t *testing.T) {
 	}
 }
 
+// TestAClaimStandingDownPublishesNothing pins the incident of 2026-11-22: a
+// successor whose adoption finished after it began standing down published
+// daemon.addr. A claim that departed, yielded or closed writes nothing and
+// answers ErrDeparted, and Departed says so first.
+func TestAClaimStandingDownPublishesNothing(t *testing.T) {
+	tests := []struct {
+		name      string
+		standDown func(c Claim) error
+	}{
+		{name: "after Depart", standDown: func(c Claim) error { return c.Depart() }},
+		{name: "after Yield", standDown: func(c Claim) error { return c.Yield() }},
+		{name: "after Close", standDown: func(c Claim) error { return c.Close() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			addrPath := newAddrPath(t)
+			c := mustBind(t, addrPath)
+			if err := tt.standDown(c); err != nil {
+				t.Fatalf("stand down: %v", err)
+			}
+
+			// Act
+			departed := c.Departed()
+			err := c.Publish()
+
+			// Assert
+			if !departed {
+				t.Fatal("Departed = false, want true once the claim stood down")
+			}
+			if !errors.Is(err, ErrDeparted) {
+				t.Fatalf("Publish = %v, want ErrDeparted", err)
+			}
+			if _, statErr := os.Stat(addrPath); !os.IsNotExist(statErr) {
+				t.Fatalf("daemon.addr was written by a claim standing down (stat err = %v)", statErr)
+			}
+		})
+	}
+}
+
+// TestAClaimPublishedBeforeItDepartsIsWithdrawnByTheDeparture pins the other
+// ordering of a publish racing a departure: the publish lands first, and the
+// departure's withdrawal takes it down, so neither ordering leaves an address.
+func TestAClaimPublishedBeforeItDepartsIsWithdrawnByTheDeparture(t *testing.T) {
+	// Arrange
+	addrPath := newAddrPath(t)
+	c := mustBind(t, addrPath)
+	if c.Departed() {
+		t.Fatal("Departed = true before any departure")
+	}
+	if err := c.Publish(); err != nil {
+		t.Fatalf("Publish before Depart = %v, want the address written", err)
+	}
+	if got := readAddrFile(t, addrPath); got != c.Address() {
+		t.Fatalf("daemon.addr = %q, want %q", got, c.Address())
+	}
+
+	// Act
+	if err := c.Depart(); err != nil {
+		t.Fatalf("Depart: %v", err)
+	}
+	withdrawn, err := c.Withdraw()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+	if !withdrawn {
+		t.Fatal("Withdraw removed nothing, want the published address withdrawn")
+	}
+	if _, statErr := os.Stat(addrPath); !os.IsNotExist(statErr) {
+		t.Fatalf("daemon.addr survived the departure (stat err = %v)", statErr)
+	}
+}
+
 func TestPublishReplacesAStaleAdvertisement(t *testing.T) {
 	// Arrange.
 	addrPath := newAddrPath(t)

@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -1388,6 +1389,60 @@ func TestAdvertiseDoesNotRetryAFailureThatIsNotAHeldClaim(t *testing.T) {
 	}
 	if got := len(levelRecords(records(h.log, opAdopt), "error")); got != 1 {
 		t.Fatalf("ERROR records = %d, want 1", got)
+	}
+}
+
+// TestADaemonStandingDownRecordsThatItPublishedNothing pins the incident of
+// 2026-11-22: a successor whose adoption finished after it began standing
+// down logged "wrote daemon.addr". Its claim refuses (ErrDeparted), and each
+// write site records that refusal once at INFO, naming this daemon's address,
+// with no "wrote" record, no ERROR and no retry.
+func TestADaemonStandingDownRecordsThatItPublishedNothing(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness)
+		// armsNoWait: the advertise arms no retry; retryAdvertise arms its own
+		// held-claim bound before the claim arrives, whatever follows.
+		armsNoWait bool
+	}{
+		{name: "the adoption's advertise", act: func(h *harness) { h.c.advertise(context.Background(), nil) }, armsNoWait: true},
+		{name: "the write under the held boot claim", act: func(h *harness) {
+			h.incumbentExits()
+			h.c.retryAdvertise(context.Background(), nil)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, func(d *Deps) {
+				d.WriteDaemonAddr = func(context.Context) error {
+					return fmt.Errorf("publish daemon.addr: %w", daemonaddr.ErrDeparted)
+				}
+			})
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			got := dlog.FilterRecords(records(h.log, opAdopt), dlog.RecordQuery{Level: "info", Message: "daemon.addr was not published: this daemon is standing down"})
+			if len(got) != 1 {
+				t.Fatalf("standing-down records = %d, want 1; records %+v", len(got), records(h.log, opAdopt))
+			}
+			if got[0].Context["address"] != "127.0.0.1:7777" {
+				t.Fatalf("address = %v, want this daemon's own", got[0].Context["address"])
+			}
+			for _, wrote := range []string{"every workspace is owned; wrote daemon.addr", "the incumbent exited; wrote daemon.addr"} {
+				if recordWithMessage(h, opAdopt, "", wrote) {
+					t.Fatalf("recorded %q for a daemon that published nothing", wrote)
+				}
+			}
+			if errs := levelRecords(records(h.log, opAdopt), "error"); len(errs) != 0 {
+				t.Fatalf("ERROR records = %+v, want none for an expected refusal", errs)
+			}
+			if waits := h.clock.Waits(); tt.armsNoWait && len(waits) != 0 {
+				t.Fatalf("waits armed = %v, want no retry", waits)
+			}
+		})
 	}
 }
 

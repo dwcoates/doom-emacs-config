@@ -281,13 +281,21 @@ func (c *claim) advertisement() string {
 func (c *claim) Publish() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// A DAEMON STANDING DOWN ADVERTISES NOTHING (ErrDeparted). The check and
+	// the write below are under c.mu, as Depart, Yield and Close are, so a
+	// publish racing one of them either completes first or is refused here.
+	switch {
+	case c.yielded:
+		return fmt.Errorf("advertise %q: the boot claim was yielded to a successor: %w", c.addrPath, ErrDeparted)
+	case c.departed:
+		return fmt.Errorf("advertise %q: the claim departed at the start of shutdown: %w", c.addrPath, ErrDeparted)
+	case c.closed:
+		return fmt.Errorf("advertise %q: the claim was closed: %w", c.addrPath, ErrDeparted)
+	}
 	// A SUCCESSOR TAKES THE BOOT CLAIM WHEN IT TAKES OVER. It bound without
 	// one -- the incumbent held it -- and publishing daemon.addr is the moment
 	// it becomes the daemon of this state root. Failing to take it here is a
 	// refusal, never a publish that advertises an address nobody claims.
-	if c.yielded {
-		return fmt.Errorf("advertise %q: the boot claim was yielded to a successor, so this daemon advertises nothing", c.addrPath)
-	}
 	if c.lock == nil {
 		// A WAIT FOR THE CLAIM IS ALREADY QUEUED IN THE KERNEL, and the
 		// claim is ITS to take: a second, single-shot take on another
@@ -310,6 +318,13 @@ func (c *claim) Publish() error {
 	}
 	c.published = true
 	return nil
+}
+
+// Departed implements Claim.
+func (c *claim) Departed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.departed || c.closed
 }
 
 // Withdraw implements Claim. It removes daemon.addr ONLY while the file still

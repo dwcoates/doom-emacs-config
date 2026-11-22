@@ -1,21 +1,27 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/server"
 
 	"agentrepl/logging/metrics"
 )
 
-// recordingClaim is a claim whose Publish succeeds or fails on demand.
+// recordingClaim is a claim whose Publish succeeds or fails on demand, and
+// which answers Departed as told.
 type recordingClaim struct {
 	err       error
+	departed  bool
 	published int
 }
 
@@ -23,6 +29,8 @@ func (c *recordingClaim) Publish() error {
 	c.published++
 	return c.err
 }
+
+func (c *recordingClaim) Departed() bool { return c.departed }
 
 func openOwnershipSurface(t *testing.T, root string) *runtimemetrics.Surface {
 	t.Helper()
@@ -81,5 +89,51 @@ func TestPublishOwnership(t *testing.T) {
 				t.Fatalf("target present = %v, want %v", statErr == nil, tt.wantTarget)
 			}
 		})
+	}
+}
+
+// TestADepartedDaemonPublishesNoOwnership pins the incident of 2026-11-22: a
+// successor that had begun standing down took the shared listener and
+// published daemon.addr once its adoption finished. A departed claim takes no
+// shared listener, writes no daemon.addr and no metrics target, and answers
+// ErrDeparted.
+func TestADepartedDaemonPublishesNoOwnership(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	surface := openOwnershipSurface(t, root)
+	claim := &recordingClaim{departed: true}
+	var touched []string
+	shared := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: &advertisingClaim{}, log: &spyLogger{},
+		ensure: func(context.Context, string) error {
+			touched = append(touched, "ensure")
+			return nil
+		},
+		takeFn: func(context.Context, string, string) (net.Listener, error) {
+			touched = append(touched, "take")
+			return nil, errors.New("a departed daemon took the shared listener")
+		},
+		subscribeFn: func(context.Context, string, string) (server.Returned, error) {
+			touched = append(touched, "subscribe")
+			return nil, errors.New("a departed daemon opened the returned stream")
+		}}
+
+	// Act
+	err := publishOwnership(claim, surface, shared)
+
+	// Assert
+	if !errors.Is(err, daemonaddr.ErrDeparted) {
+		t.Fatalf("publishOwnership = %v, want ErrDeparted", err)
+	}
+	if len(touched) != 0 {
+		t.Fatalf("the shared take ran %v, want nothing taken", touched)
+	}
+	if shared.address() != "" {
+		t.Fatalf("shared address = %q, want none taken", shared.address())
+	}
+	if claim.published != 0 {
+		t.Fatalf("daemon.addr published %d times, want never", claim.published)
+	}
+	if _, statErr := os.Stat(metrics.TargetPath(root, metrics.ProgramDaemon)); !os.IsNotExist(statErr) {
+		t.Fatalf("metrics target advertised by a departed daemon (stat err = %v)", statErr)
 	}
 }

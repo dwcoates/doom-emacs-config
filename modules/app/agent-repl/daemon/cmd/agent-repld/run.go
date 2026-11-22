@@ -1353,10 +1353,6 @@ func hostOnBattery() (bool, error) {
 	return hostpower.OnBattery(&hostpower.Host{})
 }
 
-// publishOwnership publishes the two advertisements of a daemon that owns
-// its workspaces, daemon.addr and then the metrics target, always together and
-// in that order: an incumbent at boot, a successor through the rollout's
-// WriteDaemonAddr hook once it owns every workspace.
 // expectBootReconnects expects the host and webview streams of every open,
 // unhidden workspace back, timed from started: the workspaces Emacs reopens
 // after an ordinary boot.
@@ -1378,7 +1374,32 @@ func expectBootReconnects(ctx context.Context, db interface {
 	return nil
 }
 
-func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface, shared *sharedTake) error {
+// publisher is the slice of daemonaddr.Claim publishOwnership needs.
+type publisher interface {
+	Publish() error
+	Departed() bool
+}
+
+// publishOwnership publishes the two advertisements of a daemon that owns
+// its workspaces, daemon.addr and then the metrics target, always together and
+// in that order: an incumbent at boot, a successor through the rollout's
+// WriteDaemonAddr hook once it owns every workspace.
+//
+// THE SHARED LISTENER IS TAKEN FIRST because the take names the shared
+// address in the claim (sharedTake.take, Claim.Advertise), and that address is
+// what Publish writes; a publish first would advertise the private address.
+//
+// A DAEMON STANDING DOWN TAKES AND ADVERTISES NOTHING. Its claim departed at
+// the start of its shutdown (beginShutdown), so it neither takes the shared
+// listener nor writes daemon.addr or the metrics target, and answers
+// daemonaddr.ErrDeparted (a successor whose adoption finished 4s into its
+// stand-down published, 2026-11-22). The question is asked up front; Publish
+// asks it again under the claim's lock, which is what makes a departure racing
+// this call leave no address standing.
+func publishOwnership(claim publisher, surface *runtimemetrics.Surface, shared *sharedTake) error {
+	if claim.Departed() {
+		return fmt.Errorf("publish daemon.addr: %w", daemonaddr.ErrDeparted)
+	}
 	if err := shared.take(); err != nil {
 		return err
 	}
