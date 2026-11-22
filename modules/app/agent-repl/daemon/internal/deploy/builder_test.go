@@ -12,7 +12,12 @@ import (
 	"testing"
 	"time"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/hotreload"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 )
@@ -574,5 +579,62 @@ func TestTheBuildStagesTheSocketHolder(t *testing.T) {
 	// Assert: a deploy builds the holder its fresh daemon's requests need.
 	if !staged {
 		t.Fatalf("Targets = %v, want %s staged", Targets, HolderBinary)
+	}
+}
+
+// discardFeed is a hot reload card's feed that draws nowhere.
+type discardFeed struct{}
+
+func (discardFeed) UpsertDurable(ids.WorkspaceID, feedid.Feed, *frontendv1.FeedRow) {}
+
+// TestEveryBuildStepIsATrackedTarget holds the builder's steps and the hot
+// reload card's build targets in step: a step the card does not know panics
+// the daemon at its first deploy (hotreload buildStepsLocked), as "sockethold"
+// once did. The steps come from the builder itself, so a new target is covered
+// the moment it is added.
+func TestEveryBuildStepIsATrackedTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		launcher bool
+		wifi     string
+		override string
+	}{
+		{name: "every target, no launcher, no Wi-Fi helper"},
+		{name: "every target with the launcher and the Wi-Fi helper", launcher: true, wifi: "/installed/wifi.app"},
+		{name: "the builder override", override: "/harness/fake-build"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			b, _, _ := newScriptBuilder(t, nil)
+			b.Launcher, b.WifiInstalled, b.Override = tt.launcher, tt.wifi, tt.override
+			tracker, err := hotreload.New(hotreload.Deps{
+				Feed:          discardFeed{},
+				Mediator:      func(context.Context) (ids.WorkspaceID, bool, error) { return "mediator", true, nil },
+				WorkspaceName: func(_ context.Context, ws ids.WorkspaceID) (string, error) { return string(ws), nil },
+				Launcher:      tt.launcher,
+				Now:           time.Now,
+				Log:           dlog.NewTestLogger(),
+			})
+			if err != nil {
+				t.Fatalf("hotreload.New: %v", err)
+			}
+			tracker.Begin(context.Background(), time.UnixMilli(1_000_000))
+
+			for _, step := range b.steps("/staging/1") {
+				// Act
+				panicked := func() (p any) {
+					defer func() { p = recover() }()
+					tracker.BuildStepBegan(step.name)
+					tracker.BuildStepEnded(step.name, nil)
+					return nil
+				}()
+
+				// Assert
+				if panicked != nil {
+					t.Errorf("build step %q is unknown to the hot reload card: %v", step.name, panicked)
+				}
+			}
+		})
 	}
 }
