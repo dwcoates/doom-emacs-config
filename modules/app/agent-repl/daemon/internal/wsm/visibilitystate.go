@@ -86,6 +86,12 @@ type VisibilityInput struct {
 	// Unviewed reports whether its last turn ended with a result the user has
 	// not read: its name is still drawn full.
 	Unviewed bool
+	// Starting reports whether its session is booting: the grey initializing
+	// mark (roster arm `init`).
+	Starting bool
+	// TopPriority reports whether it has priority P0.5 or P1
+	// (Workspace.TopPriority).
+	TopPriority bool
 	// Selected reports whether it is the user's selection.
 	Selected bool
 }
@@ -96,8 +102,9 @@ type VisibilityInput struct {
 //   - only an Open workspace can be visible;
 //   - an Open workspace no fold covers is visible (every top-level workspace
 //     of an unfolded section, and every child of a visible, unfolded parent);
-//   - one a fold covers, at any depth, is visible when it is Working or
-//     Unviewed;
+//   - one a fold covers, at any depth, is visible when it is Working,
+//     Unviewed or Starting, and an Open workspace of priority P0.5 or P1
+//     (TopPriority) is always visible, whatever covers it;
 //   - the parent of a visible workspace is visible, recursively, so every
 //     visible workspace has an unbroken chain of rows above it;
 //   - the selection is Selected, whatever the rules above say.
@@ -125,7 +132,7 @@ func Visibilities(inputs []VisibilityInput) map[WorkspaceID]Visibility {
 		}
 	}
 	for _, in := range inputs {
-		if in.Open && (!in.Covered || in.Working || in.Unviewed) {
+		if in.Open && (!in.Covered || in.Working || in.Unviewed || in.Starting || in.TopPriority) {
 			mark(in.ID)
 		}
 	}
@@ -155,14 +162,15 @@ ALTER TABLE workspaces ADD COLUMN visibility TEXT NOT NULL DEFAULT 'not_visible'
 
 // seedVisibility fills the visibility of every workspace a file migrated to
 // layout 192 already holds, by the one derivation (Visibilities) over what
-// the file records: the open rows, their folds, their parents and the
-// selection. Whether a workspace works, or its result is unread, is the
-// roster's live fact and no part of the file, so the seed reads both as false;
+// the file records: the open rows, their folds, their parents, their
+// priorities and the selection. Whether a workspace works, starts, or its
+// result is unread, is the roster's live fact and no part of the file, so
+// the seed reads all three as false;
 // the roster's first render after the boot writes them in. The boot that
 // migrates therefore starts nothing for a workspace only those facts made
 // visible, which the roster then opens.
 func seedVisibility(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id, parent_id, closed, hidden, merge_of IS NOT NULL AND merge_revealed = 0 AND merged_at IS NULL, kind, is_current FROM workspaces`)
+	rows, err := tx.QueryContext(ctx, `SELECT id, parent_id, closed, hidden, merge_of IS NOT NULL AND merge_revealed = 0 AND merged_at IS NULL, kind, is_current, priority FROM workspaces`)
 	if err != nil {
 		return fmt.Errorf("wsm: read the workspaces to seed their visibility: %w", err)
 	}
@@ -173,12 +181,16 @@ func seedVisibility(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
 			parent                           sql.NullString
 			closed, hidden, mergeHidden, cur bool
 			kind                             string
+			priority                         sql.NullInt64
 		)
-		if err := rows.Scan(&id, &parent, &closed, &hidden, &mergeHidden, &kind, &cur); err != nil {
+		if err := rows.Scan(&id, &parent, &closed, &hidden, &mergeHidden, &kind, &cur, &priority); err != nil {
 			rows.Close()
 			return fmt.Errorf("wsm: scan a workspace to seed its visibility: %w", err)
 		}
-		in := VisibilityInput{ID: id, Open: !closed && !hidden && !mergeHidden && kind != string(WorkspaceKindThread), Selected: cur}
+		in := VisibilityInput{
+			ID: id, Open: !closed && !hidden && !mergeHidden && kind != string(WorkspaceKindThread), Selected: cur,
+			TopPriority: priority.Valid && isTopPriority(Priority(priority.Int64)),
+		}
 		if parent.Valid {
 			p := WorkspaceID(parent.String)
 			in.Parent = &p

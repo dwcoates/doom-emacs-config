@@ -363,3 +363,31 @@ func TestACollapsedWorkspaceThatRunsNothingIsStillKeptWarm(t *testing.T) {
 		t.Fatalf("Runs collapsed = %v, KeptWarm = %v; want a collapsed workspace withheld from running but kept warm", runs, warm)
 	}
 }
+
+func TestTopPriority(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority *Priority
+		want     bool
+	}{
+		{name: "P0.5", priority: &[]Priority{PriorityP05}[0], want: true},
+		{name: "P1", priority: &[]Priority{PriorityP1}[0], want: true},
+		{name: "P2", priority: &[]Priority{PriorityP2}[0], want: false},
+		{name: "P3", priority: &[]Priority{PriorityP3}[0], want: false},
+		{name: "unset", priority: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ws := Workspace{Priority: tt.priority}
+
+			// Act
+			got := ws.TopPriority()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("TopPriority = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

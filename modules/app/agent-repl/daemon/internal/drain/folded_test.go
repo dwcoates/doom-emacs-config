@@ -402,6 +402,40 @@ func TestResumeFoldedResumesNothingForASessionAFoldDoesNotWithhold(t *testing.T)
 	}
 }
 
+func TestResumeFoldedResumesNothingForAFoldedWorkspaceOfTopPriority(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority wsm.Priority
+		resumed  int
+	}{
+		{name: "P0.5", priority: wsm.PriorityP05, resumed: 0},
+		{name: "P1", priority: wsm.PriorityP1, resumed: 0},
+		{name: "P2", priority: wsm.PriorityP2, resumed: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFoldedHarness(t)
+			ws := f.collapsed(t)
+			if err := f.db.SetPriority(context.Background(), ws, &tt.priority); err != nil {
+				t.Fatalf("SetPriority: %v", err)
+			}
+
+			// Act
+			f.c.ResumeFolded(context.Background())
+
+			// Assert
+			rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: opFolded, Message: "resumed the folds' stand-downs for the running sessions they withhold"})
+			if !ok {
+				t.Fatal("no record of the resumed folds")
+			}
+			if resumed, _ := rec.Context["resumed"].([]string); len(resumed) != tt.resumed {
+				t.Fatalf("resumed = %v, want %d", resumed, tt.resumed)
+			}
+		})
+	}
+}
+
 func TestResumeFoldedRecordsAFailedReadAndResumesNothing(t *testing.T) {
 	cases := []struct {
 		name    string

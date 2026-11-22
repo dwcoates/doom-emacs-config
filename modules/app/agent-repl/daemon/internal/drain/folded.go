@@ -111,6 +111,10 @@ func (c *controller) ResumeFolded(ctx context.Context) {
 			spared[string(ws.ID)] = string(spare)
 			continue
 		}
+		// A top-priority workspace stays visible under a fold, so none stands it down.
+		if ws.TopPriority() {
+			continue
+		}
 		resumed = append(resumed, string(ws.ID))
 		c.StandDownFolded(ws.ID)
 	}

@@ -240,7 +240,9 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 	}
 	hidden, spared, standingDown := []string{}, map[string]string{}, []string{}
 	for _, ws := range workspaces {
-		if !members.StandsDown(ws) {
+		// A TOP-PRIORITY WORKSPACE STAYS VISIBLE UNDER A FOLD
+		// (wsm.Workspace.TopPriority), so the fold neither hides nor stands it down.
+		if !members.StandsDown(ws) || ws.TopPriority() {
 			continue
 		}
 		hidden = append(hidden, string(ws.ID))

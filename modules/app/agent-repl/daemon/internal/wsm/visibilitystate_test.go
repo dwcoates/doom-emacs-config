@@ -34,6 +34,16 @@ func TestVisibilities(t *testing.T) {
 			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Working: true}}, id: "a", want: UnselectedVisible},
 		{name: "a covered workspace that is unviewed is visible",
 			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Unviewed: true}}, id: "a", want: UnselectedVisible},
+		{name: "a covered workspace that is starting is visible",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, Starting: true}}, id: "a", want: UnselectedVisible},
+		{name: "a covered workspace of priority P0.5 or P1 is visible",
+			inputs: []VisibilityInput{{ID: "a", Open: true, Covered: true, TopPriority: true}}, id: "a", want: UnselectedVisible},
+		{name: "a workspace of priority P0.5 or P1 that is not open is not visible",
+			inputs: []VisibilityInput{{ID: "a", Covered: true, TopPriority: true}}, id: "a", want: NotVisible},
+		{name: "the parent of a covered top-priority workspace is visible",
+			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, TopPriority: true}}, id: "p", want: UnselectedVisible},
+		{name: "a sibling of a covered top-priority workspace stays not visible",
+			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, TopPriority: true}, {ID: "s", Parent: under("p"), Open: true, Covered: true}}, id: "s", want: NotVisible},
 		{name: "the parent of a visible covered workspace is visible",
 			inputs: []VisibilityInput{{ID: "p", Open: true, Covered: true}, {ID: "c", Parent: under("p"), Open: true, Covered: true, Working: true}}, id: "p", want: UnselectedVisible},
 		{name: "every ancestor of a visible covered workspace is visible",
@@ -297,5 +307,40 @@ func TestTheVisibilityStepIsAdditiveAndSeedsItsColumn(t *testing.T) {
 	}
 	if got := rawScalar[int](t, path, `SELECT count(*) FROM pragma_table_info('workspaces') WHERE name = 'visibility'`); got != 1 {
 		t.Fatalf("workspaces.visibility exists %d times, want once", got)
+	}
+}
+
+func TestTheVisibilitySeedKeepsATopPriorityWorkspaceVisibleUnderAFold(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority *Priority
+		want     Visibility
+	}{
+		{name: "P0.5", priority: &[]Priority{PriorityP05}[0], want: UnselectedVisible},
+		{name: "P1", priority: &[]Priority{PriorityP1}[0], want: UnselectedVisible},
+		{name: "P2", priority: &[]Priority{PriorityP2}[0], want: NotVisible},
+		{name: "P3", priority: &[]Priority{PriorityP3}[0], want: NotVisible},
+		{name: "none", priority: nil, want: NotVisible},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			if err := s.SetPriority(context.Background(), ws.ID, tt.priority); err != nil {
+				t.Fatalf("SetPriority: %v", err)
+			}
+			if _, err := s.db().Exec(`UPDATE repositories SET folded = 1 WHERE id = ?`, string(ws.Repo)); err != nil {
+				t.Fatalf("fold: %v", err)
+			}
+
+			// Act
+			got := seedOver(t, s, ws.ID)
+
+			// Assert
+			if got[ws.ID] != tt.want {
+				t.Fatalf("seeded visibility under a folded repository = %v, want %v", got[ws.ID], tt.want)
+			}
+		})
 	}
 }

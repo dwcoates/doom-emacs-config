@@ -1093,3 +1093,40 @@ func TestFoldChildrenExpandRefusesAnUnknownWorkspaceAndWritesNothing(t *testing.
 		t.Fatalf("an unknown workspace's expand changed state: stamps = %v, republications = %d", f.db.userStamps, len(f.sidebar.registries))
 	}
 }
+
+func TestACollapseNeitherHidesNorStandsDownAWorkspaceOfTopPriority(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority *wsm.Priority
+		standing bool
+	}{
+		{name: "P0.5", priority: &[]wsm.Priority{wsm.PriorityP05}[0]},
+		{name: "P1", priority: &[]wsm.Priority{wsm.PriorityP1}[0]},
+		{name: "P2", priority: &[]wsm.Priority{wsm.PriorityP2}[0], standing: true},
+		{name: "no priority", standing: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			childFamily(t, f)
+			child := f.db.workspaces["c1"]
+			child.Priority = tt.priority
+			f.db.workspaces["c1"] = child
+
+			// Act
+			err := f.verbs.FoldChildren(context.Background(), "p1", true, testRequester)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FoldChildren: %v", err)
+			}
+			if got := slices.Contains(f.standDowns, ids.WorkspaceID("c1")); got != tt.standing {
+				t.Fatalf("stand-downs = %v, want c1 standing down = %v", f.standDowns, tt.standing)
+			}
+			if !slices.Contains(f.standDowns, ids.WorkspaceID("g1")) {
+				t.Fatalf("stand-downs = %v, want the grandchild of no priority stood down", f.standDowns)
+			}
+		})
+	}
+}

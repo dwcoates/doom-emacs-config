@@ -108,6 +108,68 @@ func TestAFoldedUnviewedWorkspaceIsVisible(t *testing.T) {
 	}
 }
 
+func TestAFoldedStartingWorkspaceIsVisible(t *testing.T) {
+	// Arrange
+	r := arrange(t)
+	r.SetRegistry(foldedOne())
+
+	// Act: the session is dialing, which draws the grey init mark.
+	r.OnLink(theWS, shimclient.LinkDialing)
+
+	// Assert
+	if got := visibilities(t, r)[string(theWS)]; got != "unselected_visible" {
+		t.Fatalf("visibility = %s, want unselected_visible: a starting workspace is visible under a fold", got)
+	}
+}
+
+func TestAFoldedWorkspaceOfTopPriorityIsVisible(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority wsm.Priority
+		want     string
+	}{
+		{name: "P0.5", priority: wsm.PriorityP05, want: "unselected_visible"},
+		{name: "P1", priority: wsm.PriorityP1, want: "unselected_visible"},
+		{name: "P2", priority: wsm.PriorityP2, want: "not_visible"},
+		{name: "P3", priority: wsm.PriorityP3, want: "not_visible"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reg := foldedOne()
+			reg.Workspaces[0] = prioritized(reg.Workspaces[0], tt.priority)
+			r := arrange(t, reg.Workspaces...)
+
+			// Act
+			r.SetRegistry(reg)
+
+			// Assert
+			if got := visibilities(t, r)[string(theWS)]; got != tt.want {
+				t.Fatalf("visibility = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheParentOfAFoldedTopPriorityWorkspaceIsVisible(t *testing.T) {
+	// Arrange
+	parent, child := workspace("w-parent", "parent"), prioritized(workspace("w-child", "child"), wsm.PriorityP1)
+	pid := ids.WorkspaceID("w-parent")
+	child.Parent = &pid
+	reg := registry(parent, child)
+	reg.Repositories[0].Folded = true
+	r := arrange(t, reg.Workspaces...)
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	got := visibilities(t, r)
+	if got["w-parent"] != "unselected_visible" || got["w-child"] != "unselected_visible" {
+		t.Fatalf("visibilities = %v, want the top-priority child and its parent visible", got)
+	}
+}
+
 func TestAFoldedWorkspaceWhoseResultIsReadIsNotVisible(t *testing.T) {
 	// Arrange
 	r := arrange(t)
