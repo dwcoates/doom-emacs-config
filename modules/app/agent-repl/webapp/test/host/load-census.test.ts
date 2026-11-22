@@ -18,6 +18,7 @@ let capture: LogCapture;
 let census: LoadCensus | null;
 let clock: number;
 let timers: { fn: () => void; at: number }[];
+let beat: ((sentAt: number) => void) | null;
 
 /** Add a workspace page holding ROWS feed rows. */
 function addPage(workspace: string, rows: number, shown = false): HTMLIFrameElement {
@@ -55,6 +56,12 @@ function block(ms: number): void {
   clock += ms;
 }
 
+/** A beat the worker SENT at SENT_AT, delivered now. */
+function deliverBeat(sentAt: number): void {
+  if (beat === null) throw new Error("no heartbeat installed");
+  beat(sentAt);
+}
+
 function setVisibility(state: "visible" | "hidden"): void {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
   document.dispatchEvent(new Event("visibilitychange"));
@@ -79,6 +86,12 @@ function install(): void {
         timers = timers.filter((t) => t !== timer);
       };
     },
+    heartbeat: (_ms, onBeat) => {
+      beat = onBeat;
+      return () => {
+        beat = null;
+      };
+    },
   });
 }
 
@@ -86,6 +99,7 @@ beforeEach(() => {
   capture = captureLogRecords();
   clock = 0;
   timers = [];
+  beat = null;
   census = null;
   document.body.replaceChildren();
   setVisibility("visible");
@@ -136,14 +150,14 @@ describe("summarize", () => {
 });
 
 describe("the stall probe", () => {
-  it("records a probe that fired at the threshold late, with the census", async () => {
+  it("records a beat delivered at the threshold late, with the census", async () => {
     // Arrange
     addPage("heavy", 5, true);
     install();
 
     // Act
-    block(STALL_PROBE_MS + STALL_THRESHOLD_MS);
-    advance(0);
+    block(STALL_THRESHOLD_MS);
+    deliverBeat(0);
 
     // Assert
     const stalls = await records("webhost.stall");
@@ -153,57 +167,92 @@ describe("the stall probe", () => {
     expect(stalls[0]?.shown_workspace).toBe("heavy");
   });
 
-  it("records nothing for a probe just under the threshold", async () => {
+  it("records nothing for a beat just under the threshold", async () => {
     // Arrange
     install();
 
     // Act
-    block(STALL_PROBE_MS + STALL_THRESHOLD_MS - 1);
-    advance(0);
+    block(STALL_THRESHOLD_MS - 1);
+    deliverBeat(0);
 
     // Assert
     expect(await records("webhost.stall")).toEqual([]);
+  });
+
+  it("never records throttled timers: beats arrive on time while the main-thread timer lands 750ms late", async () => {
+    // Arrange
+    install();
+
+    // Act
+    for (let i = 0; i < 4; i++) {
+      clock += STALL_PROBE_MS;
+      deliverBeat(clock);
+      // An occluded view's timers land about 750ms late; the census timer is one.
+      clock += 750;
+      advance(0);
+    }
+
+    // Assert
+    expect(await records("webhost.stall")).toEqual([]);
+  });
+
+  it("records a block once, though the beats queued behind it arrive after it", async () => {
+    // Arrange
+    install();
+    block(STALL_PROBE_MS + 700);
+
+    // Act
+    deliverBeat(0);
+    deliverBeat(STALL_PROBE_MS);
+    deliverBeat(2 * STALL_PROBE_MS);
+
+    // Assert
+    const stalls = await records("webhost.stall");
+    expect(stalls).toHaveLength(1);
+    expect(stalls[0]?.blocked_ms).toBe(STALL_PROBE_MS + 700);
   });
 
   it("keeps probing after a stall", async () => {
     // Arrange
     install();
-    block(STALL_PROBE_MS + STALL_THRESHOLD_MS);
-    advance(0);
+    block(STALL_THRESHOLD_MS);
+    deliverBeat(0);
+    const sentAt = clock;
 
     // Act
-    block(STALL_PROBE_MS + STALL_THRESHOLD_MS);
-    advance(0);
+    block(STALL_THRESHOLD_MS);
+    deliverBeat(sentAt);
 
     // Assert
     expect(await records("webhost.stall")).toHaveLength(2);
   });
 
-  it("never reports a probe that spanned a hidden stretch", async () => {
+  it("never reports a beat that spanned a hidden stretch", async () => {
     // Arrange
     install();
 
     // Act
     setVisibility("hidden");
     setVisibility("visible");
-    block(STALL_PROBE_MS + 5_000);
-    advance(0);
+    block(5_000);
+    deliverBeat(0);
 
     // Assert
     expect(await records("webhost.stall")).toEqual([]);
   });
 
-  it("reports again on the probe after a hidden stretch", async () => {
+  it("reports again on the beat after a hidden stretch", async () => {
     // Arrange
     install();
     setVisibility("hidden");
     setVisibility("visible");
-    block(STALL_PROBE_MS + 5_000);
-    advance(0);
+    block(5_000);
+    deliverBeat(0);
+    const sentAt = clock;
 
     // Act
-    block(STALL_PROBE_MS + STALL_THRESHOLD_MS);
-    advance(0);
+    block(STALL_THRESHOLD_MS);
+    deliverBeat(sentAt);
 
     // Assert
     expect(await records("webhost.stall")).toHaveLength(1);
@@ -215,11 +264,23 @@ describe("the stall probe", () => {
     setVisibility("hidden");
 
     // Act
-    block(STALL_PROBE_MS + 5_000);
-    advance(0);
+    block(5_000);
+    deliverBeat(0);
 
     // Assert
     expect(await records("webhost.stall")).toEqual([]);
+  });
+
+  it("stops the heartbeat when stopped", () => {
+    // Arrange
+    install();
+
+    // Act
+    census?.stop();
+    census = null;
+
+    // Assert
+    expect(beat).toBeNull();
   });
 });
 
@@ -259,7 +320,6 @@ describe("the census", () => {
     // Act
     census?.stop();
     census = null;
-    block(STALL_PROBE_MS + STALL_THRESHOLD_MS);
     advance(CENSUS_EVERY_MS);
 
     // Assert

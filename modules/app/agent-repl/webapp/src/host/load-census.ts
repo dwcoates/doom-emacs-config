@@ -15,16 +15,21 @@
  * and the size of its own document, which holds the rail.
  *
  * - THE CENSUS: every CENSUS_EVERY_MS, that state.
- * - THE STALL PROBE: a timer that should fire every STALL_PROBE_MS; one firing
- *   STALL_THRESHOLD_MS or more late means the main thread was blocked that
- *   long, recorded with the census at that instant. A probe across a time the
- *   webhost was hidden proves nothing (WebKit throttles a hidden page's
- *   timers), so it is never reported.
+ * - THE STALL PROBE: a heartbeat on a clock the main thread cannot delay (a
+ *   worker's) posts a message to the main thread every STALL_PROBE_MS; a
+ *   message delivered STALL_THRESHOLD_MS or more after it was sent means the
+ *   main thread was blocked that long, recorded with the census at that
+ *   instant. It is NOT a main-thread timer: macOS throttles the timers of a
+ *   covered (occluded, still "visible") WebKit view to about 1s, which made a
+ *   timer probe record a 750ms "stall" every tick (2026-11-22), while message
+ *   delivery is not throttled. A beat across a time the webhost was hidden
+ *   proves nothing, so it is never reported.
  */
 import { log } from "../log.js";
 import { pageSize, type PageSize } from "../page-size.js";
 import { CENSUS_EVERY_MS } from "../page-census.js";
 import { every, pageAfter, type After } from "../every.js";
+import { workerHeartbeat, type Heartbeat } from "./stall-heartbeat.js";
 import { FRAME_SHOWN_ATTRIBUTE, FRAME_WORKSPACE_ATTRIBUTE } from "./host.js";
 import { queryAll } from "../dom.js";
 
@@ -59,6 +64,8 @@ export interface LoadCensusEnv {
   /** Monotonic milliseconds. */
   readonly now: () => number;
   readonly after: After;
+  /** The beats of the clock the main thread cannot delay. */
+  readonly heartbeat: Heartbeat;
 }
 
 /** The installed census; `stop` cancels both loops. */
@@ -69,7 +76,12 @@ export interface LoadCensus {
 /** Install the census and the stall probe on the webhost's DOC. */
 export function installLoadCensus(
   doc: Document,
-  env: LoadCensusEnv = { doc, now: () => performance.now(), after: pageAfter },
+  env: LoadCensusEnv = {
+    doc,
+    now: () => performance.now(),
+    after: pageAfter,
+    heartbeat: workerHeartbeat,
+  },
 ): LoadCensus {
   const { now, after } = env;
   // A HIDDEN STRETCH VOIDS THE PROBE that spans it: the timer was throttled,
@@ -80,13 +92,18 @@ export function installLoadCensus(
   };
   env.doc.addEventListener("visibilitychange", onVisibility);
 
-  let expected = now() + STALL_PROBE_MS;
-  const stopProbe = every(after, STALL_PROBE_MS, () => {
-    const late = Math.round(now() - expected);
-    expected = now() + STALL_PROBE_MS;
+  // A beat is the OLDEST of its block when it was sent after the previous
+  // beat was delivered; beats queued behind the same block were sent before
+  // that delivery and are not a second stall.
+  let lastDeliveredAt = now();
+  const stopProbe = env.heartbeat(STALL_PROBE_MS, (sentAt) => {
+    const deliveredAt = now();
+    const late = Math.round(deliveredAt - sentAt);
+    const oldestOfBlock = sentAt >= lastDeliveredAt;
+    lastDeliveredAt = deliveredAt;
     const voided = hiddenSinceProbe || env.doc.visibilityState !== "visible";
     hiddenSinceProbe = false;
-    if (voided || late < STALL_THRESHOLD_MS) return;
+    if (voided || !oldestOfBlock || late < STALL_THRESHOLD_MS) return;
     log.info(`the web process's main thread was blocked ${late}ms`, {
       operation: "webhost.stall",
       context: { blocked_ms: late, ...summarize(env.doc) },
