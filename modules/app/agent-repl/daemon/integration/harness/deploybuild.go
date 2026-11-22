@@ -12,8 +12,6 @@ import (
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/internal/buildid"
-	"agent-repld/internal/deploy"
-	"agent-repld/internal/holderensure"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/shellword"
 	"agent-repld/internal/wsm"
@@ -251,18 +249,6 @@ func (b *DeployBuilder) StatePlaceholderBuilds(t testing.TB, lockDir string, pid
 		sum := sha256.Sum256([]byte(fakeServiceBinary(service)))
 		if err := buildreport.Write(lockDir, service, buildreport.Report{PID: pid, Build: hex.EncodeToString(sum[:])}); err != nil {
 			t.Fatalf("harness: state the %s build report: %v", service, err)
-		}
-	}
-	// EVERY DECLARED SOCKET HOLDER RUNS THE STAGED HOLDER BUILD: this world's
-	// holder is the test's own (holdtest), never a service a deploy restarts.
-	holders, err := holderensure.Declared(RepoRoot(t), t.TempDir())
-	if err != nil {
-		t.Fatalf("harness: read the declared socket holders: %v", err)
-	}
-	sum := sha256.Sum256([]byte(fakeServiceBinary(deploy.HolderBinary)))
-	for _, h := range holders {
-		if err := buildreport.Write(lockDir, h.Service, buildreport.Report{PID: pid, Build: hex.EncodeToString(sum[:])}); err != nil {
-			t.Fatalf("harness: state the %s build report: %v", h.Service, err)
 		}
 	}
 }
