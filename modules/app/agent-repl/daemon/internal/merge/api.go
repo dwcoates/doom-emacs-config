@@ -908,6 +908,10 @@ type DeployCheckWorkspaces interface {
 	// Compact compacts a standing deploy check's conversation by Haiku now,
 	// answering whether it had one to compact.
 	Compact(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// OweCompaction owes a standing deploy check's compaction to its
+	// session's next start and ends the live session, starting none,
+	// answering whether the compaction stands owed with no session running.
+	OweCompaction(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// ContextTokens answers the tokens of context a deploy check workspace's
 	// conversation holds now, 0 when it states none.
 	ContextTokens(ws ids.WorkspaceID) (int64, error)

@@ -437,6 +437,14 @@ func (d deployChecks) Compact(ctx context.Context, ws ids.WorkspaceID) (bool, er
 	return verbs.CompactDeployCheck(ctx, ws)
 }
 
+func (d deployChecks) OweCompaction(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	verbs, err := d.f.bound("the merge queue owed a standing deploy check's compaction")
+	if err != nil {
+		return false, err
+	}
+	return verbs.OweDeployCheckCompaction(ctx, ws)
+}
+
 func (d deployChecks) ContextTokens(ws ids.WorkspaceID) (int64, error) {
 	verbs, err := d.f.bound("the merge queue read a deploy check's context")
 	if err != nil {

@@ -16,9 +16,11 @@ import (
 // never one per check: it checks each deploy, hidden; fixes what it
 // dispatches itself, in sight in its repository's section; and settles an
 // escalation with the user. Its conversation carries what the earlier checks
-// found, fixed and settled, and is never cleared, only compacted
-// (compactMediator): when a remediation's deploy starts, and after a quiet
-// check only past QuietCheckCompactionTokens. It stays open and warm
+// found, fixed and settled, and is never cleared, only compacted: when a
+// remediation's deploy starts, the compaction is owed to its session's next
+// start and the session ended (compactMediatorAfterRemediation); after a
+// quiet check, only past QuietCheckCompactionTokens, it is compacted at once
+// (compactMediator). It stays open and warm
 // (wsm.Workspace.DeployMediator). The daemon makes it only for a queue
 // that has none, and reopens it when the user closed it.
 
@@ -211,16 +213,42 @@ func (o *orchestrator) noteQuietCheck(ctx context.Context, q wsm.RepoKey, fields
 	o.compactMediator(ctx, q, "the mediator's context passed its bound after a quiet check", fields)
 }
 
-// compactMediatorAfterRemediation compacts queue Q's mediator as a
-// remediation or an escalation's fix deploys (owner ruling, 2026-11-20): its
-// work is concluded, so its conversation is carried over as a summary.
+// compactMediatorAfterRemediation owes queue Q's mediator's compaction to
+// its session's next start as a remediation or an escalation's fix deploys
+// (owner ruling, 2026-11-20): its work is concluded, so its conversation is
+// carried over as a summary. Its session is ended and none started
+// (DeployChecks.OweCompaction): the rollout beside it hands the mediator to
+// a successor about 30s in, which cut every compacting start (the summarizer
+// takes about 70s) and logged three false errors (2026-11-22 17:30:34). The
+// next start compacts it: the successor's bring-up after a handover, or the
+// next brief's when the deploy replaces no daemon. It runs inline, since it
+// runs no summarizer, and its caller tells the rollout of the landing only
+// after it, on CTX, the mediation's lifetime.
 func (o *orchestrator) compactMediatorAfterRemediation(ctx context.Context, q wsm.RepoKey, fields dlog.Context) {
-	o.compactMediator(ctx, q, "the mediator's remediation concluded and its deploy started", fields)
+	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to compact; it is not compacted", withField(fields, "error", err.Error()))
+		return
+	}
+	if !found {
+		return
+	}
+	fields = withField(withField(fields, "workspace", string(recorded.Workspace)), "why", "the mediator's remediation concluded and its deploy starts")
+	started := o.deps.Now()
+	owed, err := o.deps.DeployChecks.OweCompaction(ctx, recorded.Workspace)
+	o.deps.Meter.ObserveMediatorCompaction(mediatorOwedCompactionOutcome(owed, err), o.deps.Now().Sub(started))
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the deploy mediator's compaction could not be owed to its next start", withField(fields, "error", err.Error()))
+		return
+	}
+	o.deps.Log.Global().Info(opMediation, "owed the deploy mediator's compaction to its next start", withField(fields, "owed", owed))
 }
 
 // compactMediator compacts queue Q's mediator by Haiku NOW (owner ruling,
 // 2026-11-17): a conversation is never cleared, only compacted, and never left for
-// a later check to wait on. WHY says what called for it. A quiet
+// a later check to wait on. WHY says what called for it. It serves a quiet
+// check past its bound, beside which no rollout runs to hand the mediator to
+// a successor mid-start (compactMediatorAfterRemediation owes it instead). A quiet
 // check's approving turn may still be ending: a turn under way is never cut,
 // and its next start compacts it (workspace.CompactDeployCheck). The
 // compaction runs off the decision's path, under the mediation's lifetime,

@@ -53,8 +53,9 @@ const (
 	// token. Its count per phase and kind is how many turns ended in it.
 	MediatorTurnTokensName = "agentrepl_deploy_mediator_turn_tokens"
 	// MediatorCompactionName is how long each compaction of a deploy
-	// mediator took, by how it ended. Its count per outcome is how many
-	// compactions ended so.
+	// mediator took, or, after a remediation, owing it to the session's next
+	// start (outcome "owed"), by how it ended. Its count per outcome is how
+	// many compactions ended so.
 	MediatorCompactionName = "agentrepl_deploy_mediator_compaction_seconds"
 	// MediatorRunsName counts the deploy mediator's runs, from a deploy's
 	// hot reload to the approval or the finish that ended the run, by how
@@ -135,7 +136,7 @@ func newMerges() merges {
 			Name: MediatorTurnTokensName, Help: "Tokens a deploy mediator's turn spent, by the phase of its run the turn ended in and the kind of token.", Buckets: turnTokenBuckets,
 		}, []string{"phase", "kind"}),
 		mediatorCompactions: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name: MediatorCompactionName, Help: "How long a compaction of a deploy mediator took, by how it ended.", Buckets: mergeBuckets,
+			Name: MediatorCompactionName, Help: "How long a compaction of a deploy mediator, or owing it to its next start, took, by how it ended.", Buckets: mergeBuckets,
 		}, []string{"outcome"}),
 		mediatorRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: MediatorRunsName, Help: "Deploy mediator runs, from a deploy's hot reload to the approval or finish that ended it, by how it ended.",

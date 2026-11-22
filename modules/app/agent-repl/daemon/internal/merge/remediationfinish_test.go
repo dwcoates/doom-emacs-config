@@ -145,20 +145,58 @@ func TestARemediationFinishGatesLandsDirectlyAndDeploys(t *testing.T) {
 	}
 }
 
-func TestARemediationsDeployCompactsTheMediatorWhateverItsContext(t *testing.T) {
-	// Arrange: a context far under the quiet check's bound.
-	h := finishing(t)
-	h.checks.contextTokens = 1
-
-	// Act
-	err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("FinishRemediation: %v", err)
+func TestARemediationsDeployOwesTheMediatorsCompactionBeforeTheRollout(t *testing.T) {
+	tests := []struct {
+		name    string
+		notOwed bool
+		oweErr  error
+		level   string
+		message string
+		context dlog.Context
+	}{
+		{name: "an owed compaction is recorded at INFO", level: "info",
+			message: "owed the deploy mediator's compaction to its next start",
+			context: dlog.Context{"workspace": "ws-fixer", "owed": true}},
+		{name: "a mediator with nothing to compact is recorded at INFO", notOwed: true, level: "info",
+			message: "owed the deploy mediator's compaction to its next start",
+			context: dlog.Context{"workspace": "ws-fixer", "owed": false}},
+		{name: "a compaction that cannot be owed is recorded at ERROR and the rollout still starts", oweErr: errors.New("database is locked"), level: "error",
+			message: "the deploy mediator's compaction could not be owed to its next start",
+			context: dlog.Context{"workspace": "ws-fixer", "error": "database is locked"}},
 	}
-	if !slices.Equal(h.checks.compacted, []ids.WorkspaceID{"ws-fixer"}) {
-		t.Fatalf("compacted %v, want the mediator compacted as its deploy starts", h.checks.compacted)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a context far under the quiet check's bound.
+			h := finishing(t)
+			h.checks.contextTokens = 1
+			h.checks.notOwed, h.checks.oweErr = tt.notOwed, tt.oweErr
+
+			// Act
+			err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FinishRemediation: %v", err)
+			}
+			if !slices.Equal(h.checks.owed, []ids.WorkspaceID{"ws-fixer"}) || !slices.Equal(h.checks.firedAtOwe, []int{0}) {
+				t.Fatalf("owed %v with the rollout told %v times, want the mediator owed once before the rollout is told", h.checks.owed, h.checks.firedAtOwe)
+			}
+			if h.rollout.fired != 1 {
+				t.Fatalf("rollout fired %d, want once", h.rollout.fired)
+			}
+			if len(h.checks.compacted) != 0 {
+				t.Fatalf("compacted %v, want no compacting start beside the rollout", h.checks.compacted)
+			}
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.level, Operation: opMediation, Message: tt.message})
+			if !ok {
+				t.Fatalf("records = %v, want %q at %s", h.logs.Records(), tt.message, tt.level)
+			}
+			for key, want := range tt.context {
+				if record.Context[key] != want {
+					t.Fatalf("record context %v, want %s=%v", record.Context, key, want)
+				}
+			}
+		})
 	}
 }
 
@@ -174,8 +212,8 @@ func TestARemediationThatDoesNotDeployCompactsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FinishRemediation: %v", err)
 	}
-	if len(h.checks.compacted) != 0 {
-		t.Fatalf("compacted %v, want none before a deploy starts", h.checks.compacted)
+	if len(h.checks.compacted) != 0 || len(h.checks.owed) != 0 {
+		t.Fatalf("compacted %v, owed %v; want none before a deploy starts", h.checks.compacted, h.checks.owed)
 	}
 }
 

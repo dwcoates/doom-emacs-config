@@ -283,7 +283,8 @@ func TestQuietApprovalsAfterADispatchCompactNothingWithinTheBound(t *testing.T) 
 	}
 
 	// Assert: a dispatch arms nothing and the context is within its bound, so
-	// only the fix's own deploy compacts the mediator (remediationDeploy).
+	// only the fix's own deploy owes the mediator's compaction
+	// (remediationDeploy).
 	if len(h.checks.compacted) != 0 {
 		t.Fatalf("compacted %v, want none from quiet approvals within the bound", h.checks.compacted)
 	}

@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -163,6 +164,26 @@ func TestARunEndThatFailsAfterThePromotionIsAnError(t *testing.T) {
 	// Assert
 	if rec.Context["ending"] != int(wsm.RunEndingCap) || rec.Context["cause"] != "store unreachable" {
 		t.Fatalf("error record = %+v, want the cap's ending and the cause", rec)
+	}
+}
+
+func TestARunEndForAWorkspaceForgottenMeanwhileIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := joining(t, capped())
+	h.db.endErr = fmt.Errorf("wsm: workspace %s: %w", theWorkspace, wsm.ErrNotFound)
+	log, stop := runKeeper(t, h)
+	await(t, log, dlog.RecordQuery{Level: "info", Operation: opDrive, Message: bootArmed})
+	// Act
+	h.db.promote()
+	rec := await(t, log, dlog.RecordQuery{Level: "info", Operation: opDrive,
+		Message: "the workspace is no longer registered; it has no keep-alive run to end"})
+	stop()
+	// Assert
+	if rec.Context["ending"] != int(wsm.RunEndingCap) {
+		t.Fatalf("record = %+v, want the cap's ending", rec)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opDrive}); ok {
+		t.Fatalf("records = %+v, want no error for a forgotten workspace's run end", log.Records())
 	}
 }
 
