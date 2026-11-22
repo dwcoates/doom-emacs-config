@@ -282,3 +282,40 @@ func TestARecordingRunStartsTheCoverBuildAndArmsTheTeardown(t *testing.T) {
 		t.Fatalf("daemonProgramName() = %q, want the cover build", got)
 	}
 }
+
+func TestImpactRecorderMarksATestIncompleteWhenItsDaemonIsGoneAtWindowClose(t *testing.T) {
+	// Arrange: the daemon refuses the window write, as a daemon that has left does.
+	f := newRecorderFixture(t, []string{"m/boot.go"})
+	f.r.UseShared("TestA", "d1", f.api)
+	f.api.failOp = "counters"
+
+	// Act
+	f.r.Finish()
+
+	// Assert: the problem is reported, and the window says it is incomplete
+	// so the runner never records the test, instead of the run failing.
+	w := f.window("TestA")
+	if w == nil || !strings.Contains(w.Incomplete, "close TestA's window on a shared daemon") {
+		t.Fatalf("window = %+v, want it incomplete with the cause", w)
+	}
+	if len(f.fails) != 1 {
+		t.Fatalf("reports = %v, want the one problem said", f.fails)
+	}
+}
+
+func TestImpactRecorderKeepsOneTestsProblemsOutOfTheNextWindow(t *testing.T) {
+	// Arrange
+	f := newRecorderFixture(t, []string{"m/boot.go"}, []string{"m/b.go"})
+	f.r.UseShared("TestA", "d1", f.api)
+	f.api.failOp = "counters"
+	f.r.UseShared("TestB", "d1", f.api)
+	f.api.failOp = ""
+
+	// Act
+	f.r.Finish()
+
+	// Assert
+	if a, b := f.window("TestA"), f.window("TestB"); a == nil || a.Incomplete == "" || b == nil || b.Incomplete != "" {
+		t.Fatalf("windows A=%+v B=%+v, want only A incomplete", a, b)
+	}
+}

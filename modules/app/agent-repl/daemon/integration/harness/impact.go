@@ -111,8 +111,13 @@ type impactRecorder struct {
 	root    string // scratch directory for counters and meta-data, removed with the run root
 	reducer covReducer
 	emit    func(testenv.ImpactWindow) error
-	// fail reports a recording failure loudly, ending the run in failure.
-	fail func(format string, args ...any)
+	// report says a recording problem loudly, on the process's stderr. It
+	// never fails the run: shadow mode must not stand between a change and its
+	// landing, so the test whose window the problem touched is marked
+	// incomplete instead (problem), which the runner never records.
+	report func(format string, args ...any)
+	// pending are the problems of the current test's window so far.
+	pending []string
 
 	mu      sync.Mutex
 	current string
@@ -124,8 +129,16 @@ type impactRecorder struct {
 	seq   int
 }
 
-func newImpactRecorder(root string, reducer covReducer, emit func(testenv.ImpactWindow) error, fail func(string, ...any)) *impactRecorder {
-	return &impactRecorder{root: root, reducer: reducer, emit: emit, fail: fail, shared: map[string]*sharedCov{}}
+func newImpactRecorder(root string, reducer covReducer, emit func(testenv.ImpactWindow) error, report func(string, ...any)) *impactRecorder {
+	return &impactRecorder{root: root, reducer: reducer, emit: emit, report: report, shared: map[string]*sharedCov{}}
+}
+
+// problem reports a recording problem and marks the current test's window
+// incomplete.
+func (r *impactRecorder) problem(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	r.report("%s", msg)
+	r.pending = append(r.pending, msg)
 }
 
 // topLevel is the top-level test a (sub)test name belongs to.
@@ -165,21 +178,21 @@ func (r *impactRecorder) UseShared(test, key string, api windowAPI) {
 		s = &sharedCov{api: api, opened: map[string]bool{}}
 		bootCPU, err := r.cutBoot(s)
 		if err != nil {
-			r.fail("%v", err)
+			r.problem("%v", err)
 			return
 		}
 		r.shared[key] = s
 		// The boot's own cost is the recording's overhead, and nobody's reach:
 		// each test that uses the daemon is credited the files it executed.
 		if err := r.emit(testenv.ImpactWindow{CPUSeconds: bootCPU}); err != nil {
-			r.fail("harness: record a shared daemon's boot cost: %v", err)
+			r.problem("harness: record a shared daemon's boot cost: %v", err)
 		}
 	}
 	if s.opened[test] {
 		return
 	}
 	if err := s.api.Do("clear", ""); err != nil {
-		r.fail("%v", err)
+		r.problem("%v", err)
 		return
 	}
 	s.opened[test] = true
@@ -254,25 +267,25 @@ func (r *impactRecorder) closeLocked() {
 			err = s.api.Do("counters", counters)
 		}
 		if err != nil {
-			r.fail("harness: close %s's window on a shared daemon: %v", r.current, err)
+			r.problem("harness: close %s's window on a shared daemon: %v", r.current, err)
 			continue
 		}
 		files, cpu, err := r.reducer.Reduce(s.metaDir, counters)
 		if err != nil {
-			r.fail("harness: reduce %s's window on a shared daemon: %v", r.current, err)
+			r.problem("harness: reduce %s's window on a shared daemon: %v", r.current, err)
 			continue
 		}
 		add(files)
 		add(s.boot)
 		w.CPUSeconds += cpu
 		if err := os.RemoveAll(counters); err != nil {
-			r.fail("harness: remove %s's raw counters %s: %v", r.current, counters, err)
+			r.problem("harness: remove %s's raw counters %s: %v", r.current, counters, err)
 		}
 	}
 	for _, dir := range r.fresh {
 		files, cpu, incomplete, err := r.reduceOwn(dir)
 		if err != nil {
-			r.fail("harness: reduce %s's own daemon's counters %s: %v", r.current, dir, err)
+			r.problem("harness: reduce %s's own daemon's counters %s: %v", r.current, dir, err)
 			continue
 		}
 		if incomplete != "" {
@@ -281,14 +294,18 @@ func (r *impactRecorder) closeLocked() {
 		add(files)
 		w.CPUSeconds += cpu
 		if err := os.RemoveAll(dir); err != nil {
-			r.fail("harness: remove %s's raw counters %s: %v", r.current, dir, err)
+			r.problem("harness: remove %s's raw counters %s: %v", r.current, dir, err)
 		}
 	}
 	for f := range executed {
 		w.Executed = append(w.Executed, f)
 	}
+	if len(r.pending) > 0 {
+		w.Incomplete = strings.Join(r.pending, "; ")
+	}
+	r.pending = nil
 	if err := r.emit(w); err != nil {
-		r.fail("harness: record %s's window: %v", r.current, err)
+		r.problem("harness: record %s's window: %v", r.current, err)
 	}
 	for _, s := range r.shared {
 		delete(s.opened, r.current)
@@ -325,12 +342,14 @@ func recorder() *impactRecorder {
 	impactOnce.Do(func() {
 		reducer, err := testenv.DefaultCovReducer()
 		if err != nil {
-			Suite().Errorf("%v", err)
+			fmt.Fprintf(os.Stderr, "harness: impact recording is off for this process (shadow mode never fails a run): %v\n", err)
 			return
 		}
 		impactRec = newImpactRecorder(RunRoot(), reducer,
 			func(w testenv.ImpactWindow) error { return testenv.AppendImpactWindow(os.Getenv, w) },
-			func(format string, args ...any) { Suite().Errorf(format, args...) })
+			func(format string, args ...any) {
+				fmt.Fprintf(os.Stderr, "harness: impact recording problem (shadow mode never fails a run; the test is recorded as incomplete): "+format+"\n", args...)
+			})
 	})
 	return impactRec
 }
