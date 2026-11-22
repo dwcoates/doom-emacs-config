@@ -4340,15 +4340,15 @@ describe("the one code wash (owner request, 2026-10-28)", () => {
   });
 });
 
-describe("inline code's canonical orange wash (owner requests, 2026-11-09 and 2026-11-10)", () => {
-  it("is a wash of the canonical orange a step over the tree highlight's, once, on :root", () => {
+describe("inline code's ground, halfway between the highlight grey and a response bubble (owner request, 2026-11-22)", () => {
+  it("is halfway from the highlight grey to the response bubble's fill, once, on :root", () => {
     // Arrange / Act
-    const declarations = withoutBlockComments(stylesheet).match(/--canonical-orange-light\s*:[^;]+;/g) ?? [];
+    const declarations = withoutBlockComments(stylesheet).match(/--inline-code-bg\s*:[^;]+;/g) ?? [];
     // Assert
-    expect(declarations).toEqual(["--canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 26%, transparent);"]);
+    expect(declarations).toEqual(["--inline-code-bg: color-mix(in srgb, var(--highlight-grey) 50%, var(--assistant));"]);
   });
 
-  it.each([["background", "var(--canonical-orange-light)"], ["color", "var(--canonical-orange-light-ink)"]])(
+  it.each([["background", "var(--inline-code-bg)"], ["color", "var(--inline-code-ink)"]])(
     "paints inline code's %s from it",
     (property, want) => {
       // Arrange / Act
@@ -4805,7 +4805,7 @@ describe("the tool card's command grey", () => {
 
     // Assert
     expect(withoutBlockComments(stylesheet)).toContain(
-      "--row-highlight-tint: color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)));",
+      "--highlight-grey: color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)));",
     );
     expect(tint).toEqual([0x30, 0x30, 0x30]);
   });
@@ -6787,6 +6787,25 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
     expect(rule).not.toMatch(/--accent/);
   });
 
+  // Owner request, 2026-11-22: a prompt entry lit by its response's label wears
+  // the highlight grey with the canonical orange as its text.
+  it.each([["background", "var(--highlight-grey)"], ["color", "var(--canonical-orange)"]])(
+    "lights a prompt entry's %s as %s",
+    (property, want) => {
+      // Arrange / Act
+      const rule = declarationsOf(".mp-entry.mp-entry-lit") ?? "";
+      // Assert
+      expect(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+);`).exec(rule)?.[1]?.trim()).toBe(want);
+    },
+  );
+
+  it("shares the sidebar's selected row fill as the one highlight grey", () => {
+    // Arrange / Act
+    const sheet = withoutBlockComments(stylesheet);
+    // Assert
+    expect(sheet).toContain("--row-highlight-tint: var(--highlight-grey)");
+  });
+
   // Owner request, 2026-10-26: every citation wears the subtle orange its
   // cited node's box is drawn in, so it reads as hoverable.
   it("draws every citation in the orange its cited node's box wears", () => {
@@ -6797,7 +6816,7 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
     // Assert
     expect([citation, fill]).toEqual([
       expect.stringMatching(/color:\s*var\(--reference\)/),
-      expect.stringContaining("--reference-bg: color-mix(in srgb, var(--reference) 18%, transparent)"),
+      expect.stringContaining("--reference-bg: var(--highlight-grey)"),
     ]);
   });
 });
