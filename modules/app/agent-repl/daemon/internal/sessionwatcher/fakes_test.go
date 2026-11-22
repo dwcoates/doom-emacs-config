@@ -1,14 +1,13 @@
 package sessionwatcher
 
 import (
+	"agent-repld/internal/sessionwatcher/watchtest"
 	"context"
 	"errors"
-	"io"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,7 +21,6 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lockwatch"
-	"agent-repld/internal/proflabel"
 	"agent-repld/internal/shimclient"
 )
 
@@ -31,608 +29,6 @@ import (
 // synchronization device: every wait below returns the moment its event
 // arrives.
 const waitDeadline = 5 * time.Second
-
-// ---- channel-backed streams ----
-
-// fakeStream is one shim stream driven by the test. Its frame channel is
-// UNBUFFERED, which is what makes the tests deterministic without a sleep: a
-// send returns only once the watcher has received the frame, and the watcher
-// receives the next frame only after it has finished routing the previous one.
-type fakeStream[T any] struct {
-	frames chan T
-	errs   chan error
-	closed chan struct{}
-	once   sync.Once
-	// drained is closed when Recv has answered io.EOF, which is the exact
-	// moment the watcher's reader for this stream has finished routing
-	// everything it was given: the loop only returns to Recv after routing and
-	// its off-lock flush are done. It is how a test bounds a frame that reaps
-	// its own stream -- see routeReaping.
-	drained     chan struct{}
-	drainedOnce sync.Once
-	// blockClose, when non-nil, holds Close until it is closed. It stands for
-	// the real transport's Close, which drains the response body and does not
-	// return until the SERVER ends the stream.
-	blockClose chan struct{}
-}
-
-func newFakeStream[T any]() *fakeStream[T] {
-	return &fakeStream[T]{
-		frames:  make(chan T),
-		errs:    make(chan error, 1),
-		closed:  make(chan struct{}),
-		drained: make(chan struct{}),
-	}
-}
-
-// Recv implements shimclient.Stream.
-func (s *fakeStream[T]) Recv() (T, error) {
-	var zero T
-	select {
-	case frame := <-s.frames:
-		return frame, nil
-	case err := <-s.errs:
-		return zero, err
-	case <-s.closed:
-		s.drainedOnce.Do(func() { close(s.drained) })
-		return zero, io.EOF
-	}
-}
-
-// Close implements shimclient.Stream.
-func (s *fakeStream[T]) Close() {
-	s.once.Do(func() {
-		if s.blockClose != nil {
-			<-s.blockClose
-		}
-		close(s.closed)
-	})
-}
-
-// send hands one frame to the watcher and returns once it has been received.
-func (s *fakeStream[T]) send(t *testing.T, frame T) {
-	t.Helper()
-	select {
-	case s.frames <- frame:
-	case <-time.After(waitDeadline):
-		t.Fatal("the watcher never received the frame")
-	}
-}
-
-// fail ends the stream with a transport error.
-func (s *fakeStream[T]) fail(err error) { s.errs <- err }
-
-// awaitDrained waits until the watcher's reader for this stream has answered
-// io.EOF, which it can only do once it has finished routing every frame it was
-// handed.
-func (s *fakeStream[T]) awaitDrained(t *testing.T) {
-	t.Helper()
-	select {
-	case <-s.drained:
-	case <-time.After(waitDeadline):
-		t.Fatal("the watcher never finished the reaped stream")
-	}
-}
-
-// isClosed reports whether the watcher closed this stream.
-func (s *fakeStream[T]) isClosed() bool {
-	select {
-	case <-s.closed:
-		return true
-	default:
-		return false
-	}
-}
-
-// ---- the fake shim client ----
-
-type agentOpen struct {
-	req    *shimv1.WatchAgentRequest
-	stream *fakeStream[*shimv1.WatchAgentResponse]
-}
-
-type bashOpen struct {
-	work   *conversationv1.DetachedWorkId
-	stream *fakeStream[*conversationv1.AgentBash]
-}
-
-// fakeClient is a shimclient.Client whose watches are channel-backed streams
-// the test drives. Only the three watch verbs and Connectivity are exercised;
-// every other verb belongs to callers this package is not.
-type fakeClient struct {
-	sessionOpens chan *fakeStream[*shimv1.WatchSessionResponse]
-	// sessionLabel is the profiler label (internal/proflabel) the last
-	// WatchSession's context carried, and sessionLabeled whether it carried one.
-	sessionLabel   ids.WorkspaceID
-	sessionLabeled bool
-	agentOpens     chan agentOpen
-	bashOpens      chan bashOpen
-	links          chan shimclient.LinkState
-	// connections is what Connections answers; an adopted client starts
-	// connected once.
-	connections atomic.Uint64
-	exits       chan shimclient.ExitInfo
-	// refusedOpens carries the procedure of every watch open the fake
-	// answered with an error, the moment it answers. With the watcher's
-	// opens made off its lock, it is how a test knows a refused open was
-	// MADE before it joins the open's completion (awaitRefusedOpen).
-	refusedOpens chan string
-
-	// stashedAgentOpens are opens nextAgentOpenFor read past while looking
-	// for another target. Opens decided together are MADE concurrently, so
-	// the order they reach agentOpens in means nothing; a test that wants one
-	// by target takes it by target, and the rest stay queued in order. Read
-	// and written by the test goroutine alone.
-	stashedAgentOpens []agentOpen
-	// settle joins every watch open the watcher has in flight. The harness
-	// sets it, and the no-open assertions call it first, so they judge every
-	// open the watcher decided rather than only the ones already made.
-	settle func()
-
-	// sessionGate, agentGate and bashGate each hold the NEXT open of their
-	// verb until released: a shim that never serves a stream's first frame.
-	// Each is taken by the one open it holds (see openGate.hold).
-	sessionGate *openGate
-	agentGate   *openGate
-	bashGate    *openGate
-
-	mu           sync.Mutex
-	agentErr     error
-	bashErr      error
-	sessionCount int
-	// reaped is the decoded exit Reaped answers, nil when nothing was reaped.
-	reaped *shimclient.ExitInfo
-	// exiting, when set, is the inferred exit Died answers for a process that
-	// reads exiting before its reap is in: the EOF-before-reap order, staged.
-	exiting *shimclient.ExitInfo
-	// standingDown is the shim's stand-down latch, which the real client sets
-	// the moment a KillSession is asked of it.
-	standingDown bool
-	// askedOnly marks the latch raised by a KillSession still awaiting its
-	// answer, which a refusal can undo: StandDownOrdered reads it false.
-	askedOnly bool
-}
-
-// standDown latches the fake as having been asked to end its session, which is
-// what every route to a deliberate teardown does to the real client.
-func (c *fakeClient) StandDown() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.standingDown = true
-	return true
-}
-
-// StandingDown answers the stand-down latch.
-func (c *fakeClient) StandingDown() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.standingDown
-}
-
-// StandDownOrdered answers the fake's settled stand-down: its latch, unless
-// a KillSession is only awaiting its answer (askedOnly).
-func (c *fakeClient) StandDownOrdered() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.standingDown && !c.askedOnly
-}
-
-// setReaped arranges the decoded exit a dead link's fault carries.
-func (c *fakeClient) setReaped(info shimclient.ExitInfo) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.reaped = &info
-}
-
-// openGate holds one watch open inside the fake's verb, the way a shim that
-// never serves the stream's first frame holds shimclient.openStream.
-type openGate struct {
-	// blocked is signalled the moment the open is being held.
-	blocked chan struct{}
-	// release lets the held open complete, successfully.
-	release chan struct{}
-	// honorCtx lets the open's context end the hold, as the real transport
-	// does; without it only release does, which is how a test makes an open
-	// COMPLETE after the watcher stopped wanting it.
-	honorCtx bool
-}
-
-func newOpenGate(honorCtx bool) *openGate {
-	return &openGate{blocked: make(chan struct{}, 1), release: make(chan struct{}), honorCtx: honorCtx}
-}
-
-// hold blocks one open until it is released, or until ctx ends when the gate
-// honors it. It answers the context's error for an open ended that way.
-func (g *openGate) hold(ctx context.Context) error {
-	if g == nil {
-		return nil
-	}
-	g.blocked <- struct{}{}
-	if !g.honorCtx {
-		<-g.release
-		return nil
-	}
-	select {
-	case <-g.release:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// awaitBlocked waits until the gate is holding its open.
-func (g *openGate) awaitBlocked(t *testing.T) {
-	t.Helper()
-	select {
-	case <-g.blocked:
-	case <-time.After(waitDeadline):
-		t.Fatal("the gated open was never made")
-	}
-}
-
-// takeGate hands the caller the gate *slot holds, clearing it, so a gate holds
-// exactly one open.
-func (c *fakeClient) takeGate(slot **openGate) *openGate {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	g := *slot
-	*slot = nil
-	return g
-}
-
-// gate arranges a gate for the next open of one verb and returns it.
-func (c *fakeClient) gate(slot **openGate, honorCtx bool) *openGate {
-	g := newOpenGate(honorCtx)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	*slot = g
-	return g
-}
-
-func newFakeClient() *fakeClient {
-	c := &fakeClient{
-		sessionOpens: make(chan *fakeStream[*shimv1.WatchSessionResponse], 8),
-		agentOpens:   make(chan agentOpen, 32),
-		bashOpens:    make(chan bashOpen, 32),
-		links:        make(chan shimclient.LinkState, 8),
-		exits:        make(chan shimclient.ExitInfo),
-		refusedOpens: make(chan string, 64),
-	}
-	c.connections.Store(1)
-	return c
-}
-
-func (c *fakeClient) WatchSession(ctx context.Context) (shimclient.Stream[*shimv1.WatchSessionResponse], error) {
-	if err := c.takeGate(&c.sessionGate).hold(ctx); err != nil {
-		return nil, err
-	}
-	stream := newFakeStream[*shimv1.WatchSessionResponse]()
-	c.mu.Lock()
-	c.sessionCount++
-	c.sessionLabel, c.sessionLabeled = proflabel.Of(ctx)
-	c.mu.Unlock()
-	c.sessionOpens <- stream
-	return stream, nil
-}
-
-func (c *fakeClient) WatchAgent(ctx context.Context, req *shimv1.WatchAgentRequest) (shimclient.Stream[*shimv1.WatchAgentResponse], error) {
-	if err := c.takeGate(&c.agentGate).hold(ctx); err != nil {
-		return nil, err
-	}
-	c.mu.Lock()
-	err := c.agentErr
-	c.mu.Unlock()
-	if err != nil {
-		c.refusedOpens <- "WatchAgent"
-		return nil, err
-	}
-	stream := newFakeStream[*shimv1.WatchAgentResponse]()
-	c.agentOpens <- agentOpen{req: req, stream: stream}
-	return stream, nil
-}
-
-// setAgentErr arranges the refusal WatchAgent answers with. The shim really
-// does refuse a book its store has not registered yet.
-func (c *fakeClient) setAgentErr(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.agentErr = err
-}
-
-// setBashErr arranges the refusal WatchBash answers with. The shim really does
-// refuse a handle its store holds no rows for yet.
-func (c *fakeClient) setBashErr(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.bashErr = err
-}
-
-func (c *fakeClient) WatchBash(ctx context.Context, work *conversationv1.DetachedWorkId) (shimclient.Stream[*conversationv1.AgentBash], error) {
-	if err := c.takeGate(&c.bashGate).hold(ctx); err != nil {
-		return nil, err
-	}
-	c.mu.Lock()
-	err := c.bashErr
-	c.mu.Unlock()
-	if err != nil {
-		c.refusedOpens <- "WatchBash"
-		return nil, err
-	}
-	stream := newFakeStream[*conversationv1.AgentBash]()
-	c.bashOpens <- bashOpen{work: work, stream: stream}
-	return stream, nil
-}
-
-func (c *fakeClient) Connectivity() <-chan shimclient.LinkState { return c.links }
-
-func (c *fakeClient) Connections() uint64 { return c.connections.Load() }
-
-// linkBack is the client re-establishing its link: the connection count
-// advances before LinkConnected is published, as the real client's connected()
-// does. A replayed bring-up transition is sent on links directly instead,
-// because it announces no new connection.
-func (c *fakeClient) linkBack() {
-	c.connections.Add(1)
-	c.links <- shimclient.LinkConnected
-}
-
-// nextAgentOpen returns the next WatchAgent the watcher opened, a stashed one
-// first.
-func (c *fakeClient) nextAgentOpen(t *testing.T) agentOpen {
-	t.Helper()
-	if len(c.stashedAgentOpens) > 0 {
-		open := c.stashedAgentOpens[0]
-		c.stashedAgentOpens = c.stashedAgentOpens[1:]
-		return open
-	}
-	select {
-	case open := <-c.agentOpens:
-		return open
-	case <-time.After(waitDeadline):
-		t.Fatal("no WatchAgent was opened")
-		return agentOpen{}
-	}
-}
-
-// nextAgentOpenFor returns the next WatchAgent opened for target (empty for
-// the main agent's unset target), stashing every other open it reads past for
-// nextAgentOpen.
-func (c *fakeClient) nextAgentOpenFor(t *testing.T, target string) agentOpen {
-	t.Helper()
-	for i, open := range c.stashedAgentOpens {
-		if open.req.GetTarget().GetValue() == target {
-			c.stashedAgentOpens = append(c.stashedAgentOpens[:i:i], c.stashedAgentOpens[i+1:]...)
-			return open
-		}
-	}
-	deadline := time.After(waitDeadline)
-	for {
-		select {
-		case open := <-c.agentOpens:
-			if open.req.GetTarget().GetValue() == target {
-				return open
-			}
-			c.stashedAgentOpens = append(c.stashedAgentOpens, open)
-		case <-deadline:
-			t.Fatalf("no WatchAgent was opened for %q", target)
-			return agentOpen{}
-		}
-	}
-}
-
-// awaitRefusedOpen waits until the fake has answered one open of procedure
-// with its arranged error, then joins every open in flight, so the watcher
-// has ruled on the refusal by the time it returns.
-func (c *fakeClient) awaitRefusedOpen(t *testing.T, procedure string) {
-	t.Helper()
-	select {
-	case got := <-c.refusedOpens:
-		if got != procedure {
-			t.Fatalf("refused open = %s, want %s", got, procedure)
-		}
-	case <-time.After(waitDeadline):
-		t.Fatalf("no %s open was refused", procedure)
-	}
-	c.settleOpens()
-}
-
-// settleOpens joins every open the watcher has in flight.
-func (c *fakeClient) settleOpens() {
-	if c.settle != nil {
-		c.settle()
-	}
-}
-
-// nextBashOpen returns the next WatchBash the watcher opened.
-func (c *fakeClient) nextBashOpen(t *testing.T) bashOpen {
-	t.Helper()
-	select {
-	case open := <-c.bashOpens:
-		return open
-	case <-time.After(waitDeadline):
-		t.Fatal("no WatchBash was opened")
-		return bashOpen{}
-	}
-}
-
-// nextSessionOpen returns the next WatchSession the watcher opened.
-func (c *fakeClient) nextSessionOpen(t *testing.T) *fakeStream[*shimv1.WatchSessionResponse] {
-	t.Helper()
-	select {
-	case stream := <-c.sessionOpens:
-		return stream
-	case <-time.After(waitDeadline):
-		t.Fatal("no WatchSession was opened")
-		return nil
-	}
-}
-
-// noAgentOpen asserts no further WatchAgent was opened. It reads what is
-// already queued rather than waiting: every open the watcher makes is queued
-// before the call that provoked it has been observed to finish.
-func (c *fakeClient) noAgentOpen(t *testing.T) {
-	t.Helper()
-	c.settleOpens()
-	if len(c.stashedAgentOpens) > 0 {
-		t.Fatalf("an unexpected WatchAgent was opened for %q", c.stashedAgentOpens[0].req.GetTarget().GetValue())
-	}
-	select {
-	case open := <-c.agentOpens:
-		t.Fatalf("an unexpected WatchAgent was opened for %q", open.req.GetTarget().GetValue())
-	default:
-	}
-}
-
-// noSessionOpen asserts no further WatchSession was opened.
-func (c *fakeClient) noSessionOpen(t *testing.T) {
-	t.Helper()
-	c.settleOpens()
-	select {
-	case <-c.sessionOpens:
-		t.Fatal("an unexpected WatchSession was opened")
-	default:
-	}
-}
-
-// noBashOpen asserts no further WatchBash was opened.
-func (c *fakeClient) noBashOpen(t *testing.T) {
-	t.Helper()
-	c.settleOpens()
-	select {
-	case open := <-c.bashOpens:
-		t.Fatalf("an unexpected WatchBash was opened for %q", open.work.GetValue())
-	default:
-	}
-}
-
-// The verbs the sessionwatcher never calls. A watcher that grew a write would
-// fail here rather than reaching a real shim.
-func (c *fakeClient) StartSession(context.Context, *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
-	panic("sessionwatcher must not call StartSession")
-}
-
-func (c *fakeClient) SummarizeConversation(context.Context, *shimv1.SummarizeConversationRequest) (*shimv1.SummarizeConversationResponse, error) {
-	panic("sessionwatcher must not call SummarizeConversation")
-}
-
-func (c *fakeClient) SetSessionModel(context.Context, *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error) {
-	panic("sessionwatcher must not call SetSessionModel")
-}
-
-func (c *fakeClient) SetSessionEffort(context.Context, *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error) {
-	panic("sessionwatcher must not call SetSessionEffort")
-}
-
-func (c *fakeClient) SetSessionRemoteControl(context.Context, *shimv1.SetSessionRemoteControlRequest) (*shimv1.SetSessionRemoteControlResponse, error) {
-	panic("sessionwatcher must not call SetSessionRemoteControl")
-}
-
-func (c *fakeClient) SetSessionPermissionMode(context.Context, *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error) {
-	panic("sessionwatcher must not call SetSessionPermissionMode")
-}
-
-func (c *fakeClient) RetryVendorErrorNow(context.Context, *shimv1.RetryVendorErrorNowRequest) (*shimv1.RetryVendorErrorNowResponse, error) {
-	panic("sessionwatcher must not call RetryVendorErrorNow")
-}
-
-func (c *fakeClient) NetworkChanged(context.Context, *shimv1.NetworkChangedRequest) (*shimv1.NetworkChangedResponse, error) {
-	panic("sessionwatcher must not call NetworkChanged")
-}
-
-func (c *fakeClient) ReviseResponse(context.Context, *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
-	panic("sessionwatcher must not call ReviseResponse")
-}
-
-func (c *fakeClient) SendKeepalive(context.Context, *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error) {
-	panic("sessionwatcher must not call SendKeepalive")
-}
-
-func (c *fakeClient) HoldParkedBridge(context.Context, *shimv1.HoldParkedBridgeRequest) (shimclient.Stream[*shimv1.HoldParkedBridgeResponse], error) {
-	panic("sessionwatcher must not call HoldParkedBridge")
-}
-
-func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
-	panic("sessionwatcher must not call Hibernate")
-}
-
-func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
-	panic("sessionwatcher must not call KillSession")
-}
-
-func (c *fakeClient) StartTurn(context.Context, *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {
-	panic("sessionwatcher must not call StartTurn")
-}
-
-func (c *fakeClient) UpdateAgent(context.Context, *shimv1.UpdateAgentRequest) (*shimv1.UpdateAgentResponse, error) {
-	panic("sessionwatcher must not call UpdateAgent")
-}
-
-func (c *fakeClient) KillTurn(context.Context, *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error) {
-	panic("sessionwatcher must not call KillTurn")
-}
-
-func (c *fakeClient) RollBackSession(context.Context, *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
-	panic("sessionwatcher must not call RollBackSession")
-}
-
-func (c *fakeClient) StopBash(context.Context, *shimv1.StopBashRequest) (*shimv1.StopBashResponse, error) {
-	panic("sessionwatcher must not call StopBash")
-}
-
-func (c *fakeClient) DetachForeground(context.Context, *shimv1.DetachForegroundRequest) (*shimv1.DetachForegroundResponse, error) {
-	panic("sessionwatcher must not call DetachForeground")
-}
-
-func (c *fakeClient) ReadTranscripts(context.Context, *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error) {
-	panic("sessionwatcher must not call ReadTranscripts")
-}
-
-func (c *fakeClient) ResolvePeerDelivery(context.Context, *shimv1.ResolvePeerDeliveryRequest) (*shimv1.ResolvePeerDeliveryResponse, error) {
-	panic("sessionwatcher must not call ResolvePeerDelivery")
-}
-
-func (c *fakeClient) ResolveVendorTask(context.Context, *shimv1.ResolveVendorTaskRequest) (*shimv1.ResolveVendorTaskResponse, error) {
-	panic("sessionwatcher must not call ResolveVendorTask")
-}
-
-func (c *fakeClient) GetForkPoint(context.Context, *shimv1.GetForkPointRequest) (*shimv1.GetForkPointResponse, error) {
-	panic("sessionwatcher must not call GetForkPoint")
-}
-
-func (c *fakeClient) ForkSession(context.Context, *shimv1.ForkSessionRequest) (*shimv1.ForkSessionResponse, error) {
-	panic("sessionwatcher must not call ForkSession")
-}
-
-func (c *fakeClient) Occupy(string) (func(), error) { panic("sessionwatcher must not take the lease") }
-func (c *fakeClient) Kill(context.Context, shimclient.KillAttribution) error {
-	panic("sessionwatcher must never kill: attach ends nothing")
-}
-func (c *fakeClient) Detach()                            { panic("sessionwatcher must not detach the client") }
-func (c *fakeClient) Exited() <-chan shimclient.ExitInfo { return c.exits }
-func (c *fakeClient) PID() int                           { return 4242 }
-
-// Died answers the reaped exit, or the staged exiting one when no reap is in.
-func (c *fakeClient) Died() (shimclient.ExitInfo, bool) {
-	if info, ok := c.Reaped(); ok {
-		return info, true
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.exiting == nil {
-		return shimclient.ExitInfo{}, false
-	}
-	return *c.exiting, true
-}
-
-// Reaped answers the decoded exit the fake was told to hold.
-func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.reaped == nil {
-		return shimclient.ExitInfo{}, false
-	}
-	return *c.reaped, true
-}
 
 // ---- recording sinks ----
 
@@ -1243,13 +639,13 @@ type harness struct {
 	// measurements receives every shim measurements frame the watcher folds.
 	measurements *measurementsSink
 	t            *testing.T
-	client       *fakeClient
+	client       *watchtest.Client
 	rec          *recorder
 	log          *dlog.TestLogger
 	w            *watcher
 
-	session *fakeStream[*shimv1.WatchSessionResponse]
-	main    *fakeStream[*shimv1.WatchAgentResponse]
+	session *watchtest.Stream[*shimv1.WatchSessionResponse]
+	main    *watchtest.Stream[*shimv1.WatchAgentResponse]
 	mainReq *shimv1.WatchAgentRequest
 
 	// lifecycle is the lifecycle sink the watcher was built with.
@@ -1270,9 +666,9 @@ type harness struct {
 func newHarness(t *testing.T, session Session) *harness {
 	t.Helper()
 	h := startHarness(t, session, nil)
-	h.session = h.client.nextSessionOpen(t)
-	open := h.client.nextAgentOpenFor(t, "")
-	h.main, h.mainReq = open.stream, open.req
+	h.session = h.client.NextSessionOpen(t)
+	open := h.client.NextAgentOpenFor(t, "")
+	h.main, h.mainReq = open.Stream, open.Req
 	return h
 }
 
@@ -1283,7 +679,7 @@ func newHarness(t *testing.T, session Session) *harness {
 func newHarnessAttachingPurely(t *testing.T) *harness {
 	t.Helper()
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 	return h
 }
 
@@ -1293,11 +689,11 @@ func newHarnessAttachingPurely(t *testing.T) *harness {
 // caller takes only the session stream.
 func newHarnessRefusingAgents(t *testing.T, session Session, refusal error) *harness {
 	t.Helper()
-	h := startHarness(t, session, func(c *fakeClient) { c.setAgentErr(refusal) })
-	h.session = h.client.nextSessionOpen(t)
+	h := startHarness(t, session, func(c *watchtest.Client) { c.SetAgentErr(refusal) })
+	h.session = h.client.NextSessionOpen(t)
 	// The start's main open is made off the watcher's lock: it is joined
 	// here, so every test begins with the refusal already ruled on.
-	h.client.awaitRefusedOpen(t, "WatchAgent")
+	h.client.AwaitRefusedOpen(t, "WatchAgent")
 	return h
 }
 
@@ -1312,14 +708,14 @@ func refusedOpenError(procedure string, code connect.Code, message string) error
 
 // startHarness starts a watcher, applying prep to the fake client first, and
 // consumes nothing the start emitted.
-func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harness {
+func startHarness(t *testing.T, session Session, prep func(*watchtest.Client)) *harness {
 	t.Helper()
 	return startHarnessWatched(t, session, prep, nil)
 }
 
 // startHarnessWatched is startHarness with the watcher's mutex registered with
 // stalls.
-func startHarnessWatched(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry) *harness {
+func startHarnessWatched(t *testing.T, session Session, prep func(*watchtest.Client), stalls lockwatch.Registry) *harness {
 	t.Helper()
 	return startHarnessSinks(t, session, prep, stalls, nil)
 }
@@ -1328,24 +724,24 @@ func startHarnessWatched(t *testing.T, session Session, prep func(*fakeClient), 
 func newHarnessWithMerge(t *testing.T, session Session) *harness {
 	t.Helper()
 	h := startHarnessSinks(t, session, nil, nil, &mergeSink{})
-	h.session = h.client.nextSessionOpen(t)
-	open := h.client.nextAgentOpenFor(t, "")
-	h.main, h.mainReq = open.stream, open.req
+	h.session = h.client.NextSessionOpen(t)
+	open := h.client.NextAgentOpenFor(t, "")
+	h.main, h.mainReq = open.Stream, open.Req
 	return h
 }
 
 // startHarnessSinks starts a watcher with the stall registry and, when set,
 // the merge sink, which records into the harness's recorder.
-func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry, merge *mergeSink) *harness {
+func startHarnessSinks(t *testing.T, session Session, prep func(*watchtest.Client), stalls lockwatch.Registry, merge *mergeSink) *harness {
 	t.Helper()
 	return startHarnessFeed(t, session, prep, stalls, merge, nil)
 }
 
 // startHarnessFeed is startHarnessSinks with the feed fake FEED, whose
 // standing asks the watcher reads at its start; nil is an empty feed.
-func startHarnessFeed(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry, merge *mergeSink, feed *feedSink) *harness {
+func startHarnessFeed(t *testing.T, session Session, prep func(*watchtest.Client), stalls lockwatch.Registry, merge *mergeSink, feed *feedSink) *harness {
 	t.Helper()
-	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger(), clock: newManualClock(), measurements: &measurementsSink{folded: make(chan foldedMeasurements, 8)}}
+	h := &harness{t: t, client: watchtest.NewClient(), rec: newRecorder(), log: dlog.NewTestLogger(), clock: newManualClock(), measurements: &measurementsSink{folded: make(chan foldedMeasurements, 8)}}
 	h.lifecycle = &lifecycleSink{rec: h.rec}
 	if prep != nil {
 		prep(h.client)
@@ -1379,7 +775,7 @@ func startHarnessFeed(t *testing.T, session Session, prep func(*fakeClient), sta
 		t.Fatalf("Start: %v", err)
 	}
 	h.w = started.(*watcher)
-	h.client.settle = h.w.opens.Wait
+	h.client.Settle = h.w.opens.Wait
 	t.Cleanup(func() { _ = h.w.Close() })
 	return h
 }
@@ -1394,10 +790,10 @@ func (h *harness) quiet() {
 // sentinel pushes a context cut, whose routing is fixed and short (the feed,
 // then the footer, then the topbar), and reads the recorder up to it.
 // Everything returned is what the frame under test provoked.
-func (h *harness) sentinel(stream *fakeStream[*shimv1.WatchAgentResponse]) []event {
+func (h *harness) sentinel(stream *watchtest.Stream[*shimv1.WatchAgentResponse]) []event {
 	h.t.Helper()
 	h.sentinels++
-	stream.send(h.t, entryFrameAt(frameUpdate("sentinel", &conversationv1.AgentUpdate{
+	stream.Send(h.t, entryFrameAt(frameUpdate("sentinel", &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{}},
 	}), "ptr-sentinel-"+itoa(h.sentinels)))
 	// The cut reaches the feed, the footer AND the topbar in that order, so
@@ -1419,9 +815,9 @@ func (h *harness) sentinel(stream *fakeStream[*shimv1.WatchAgentResponse]) []eve
 
 // route sends one frame down a stream and returns exactly the sink calls it
 // provoked.
-func (h *harness) route(stream *fakeStream[*shimv1.WatchAgentResponse], frame *shimv1.WatchAgentResponse) []event {
+func (h *harness) route(stream *watchtest.Stream[*shimv1.WatchAgentResponse], frame *shimv1.WatchAgentResponse) []event {
 	h.t.Helper()
-	stream.send(h.t, frame)
+	stream.Send(h.t, frame)
 	return h.sentinel(stream)
 }
 
@@ -1653,7 +1049,7 @@ func detachedSubagentHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
-	h.client.nextAgentOpen(t)
+	h.client.NextAgentOpen(t)
 	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "spawn-1", subagentKind("sub-1")))))
 	if live := h.w.LiveWork(); len(live.Agents) != 1 {
 		t.Fatalf("live work = %v, want the detached subagent live before its terminal", live.Agents)
@@ -2357,10 +1753,10 @@ func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
 // there means every sink call this frame provoked is already recorded -- which
 // makes the drain below both complete AND exhaustive, so an unexpected extra
 // call still fails the assertion.
-func (h *harness) routeReaping(stream *fakeStream[*shimResponse], frame *shimResponse) []event {
+func (h *harness) routeReaping(stream *watchtest.Stream[*shimResponse], frame *shimResponse) []event {
 	h.t.Helper()
-	stream.send(h.t, frame)
-	stream.awaitDrained(h.t)
+	stream.Send(h.t, frame)
+	stream.AwaitDrained(h.t)
 	return h.drainNow()
 }
 
@@ -2408,7 +1804,7 @@ func (h *harness) awaitRefusal(t *testing.T) WatchOpenRefusal {
 // frame, which is the shape the shim client hands the watcher.
 func (h *harness) sendSessionUpdate(t *testing.T, u *conversationv1.SessionUpdate) {
 	t.Helper()
-	h.session.send(t, &shimv1.WatchSessionResponse{
+	h.session.Send(t, &shimv1.WatchSessionResponse{
 		Frame: &shimv1.WatchSessionResponse_Update{Update: u},
 	})
 }
@@ -2416,7 +1812,7 @@ func (h *harness) sendSessionUpdate(t *testing.T, u *conversationv1.SessionUpdat
 // sendSessionStarted pushes the shim's once-per-watch re-announcement.
 func (h *harness) sendSessionStarted(t *testing.T, started *conversationv1.SessionStarted) {
 	t.Helper()
-	h.session.send(t, &shimv1.WatchSessionResponse{
+	h.session.Send(t, &shimv1.WatchSessionResponse{
 		Frame: &shimv1.WatchSessionResponse_SessionStarted{SessionStarted: started},
 	})
 }
@@ -2439,24 +1835,24 @@ func (h *harness) recordContext(t *testing.T, level, operation string) dlog.Cont
 // for. Nothing emitted is drained: the caller quiets when it wants to.
 func (h *harness) relink(t *testing.T) *shimv1.WatchAgentRequest {
 	t.Helper()
-	h.session.fail(errors.New("connection reset"))
+	h.session.Fail(errors.New("connection reset"))
 	h.rec.until(t, "sidebar.OnLink")
 	// THE SEVERING IS RAISED BEFORE THE LINK IS PUBLISHED (setLinkLocked),
 	// so the sidebar's link edge read above settles whether one was.
 	h.w.mu.Lock()
 	severed := h.w.severingRaised
 	h.w.mu.Unlock()
-	h.client.linkBack()
-	h.session = h.client.nextSessionOpen(t)
-	open := h.client.nextAgentOpenFor(t, "")
-	h.main, h.mainReq = open.stream, open.req
+	h.client.LinkBack()
+	h.session = h.client.NextSessionOpen(t)
+	open := h.client.NextAgentOpenFor(t, "")
+	h.main, h.mainReq = open.Stream, open.Req
 	// A RAISED SEVERING ENDS WITH THE RE-OPENED WATCH (linkRestoredLocked):
 	// its telling is awaited here, so it never lands among what a test
 	// routes next.
 	if severed {
 		h.rec.until(t, "lifecycle.OnLinkRestored")
 	}
-	return open.req
+	return open.Req
 }
 
 // withSummary installs a recording summary sink, under the watcher's own lock
@@ -2552,7 +1948,7 @@ func (h *harness) measurementsSink() MeasurementsSink {
 // sendMeasurements pushes one measurements frame on the session stream.
 func (h *harness) sendMeasurements(t *testing.T, m *shimv1.ShimMeasurements) {
 	t.Helper()
-	h.session.send(t, &shimv1.WatchSessionResponse{
+	h.session.Send(t, &shimv1.WatchSessionResponse{
 		Frame: &shimv1.WatchSessionResponse_Measurements{Measurements: m},
 	})
 }

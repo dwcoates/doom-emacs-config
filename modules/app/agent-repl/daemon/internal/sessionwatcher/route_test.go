@@ -778,17 +778,17 @@ func TestAHandoverSeesTheTurnCloseWhereverItFell(t *testing.T) {
 				Opening:      ResumeFrom(Pointers{Main: &conversationv1.HistoryPointer{Value: "ptr-main"}}),
 				OpenAtAttach: openRows("turn-merge"),
 			}, nil)
-			h.session = h.client.nextSessionOpen(t)
+			h.session = h.client.NextSessionOpen(t)
 			h.sendSessionStarted(t, sessionStarted(tt.inFlight))
-			open := h.client.nextAgentOpenFor(t, "")
-			if got := open.req.GetKnownThrough().GetValue(); got != "ptr-main" {
+			open := h.client.NextAgentOpenFor(t, "")
+			if got := open.Req.GetKnownThrough().GetValue(); got != "ptr-main" {
 				t.Fatalf("the main watch caught up from %q, want ptr-main", got)
 			}
 
 			// Act.
-			seen := h.route(open.stream, pageFrame(tt.page...))
+			seen := h.route(open.Stream, pageFrame(tt.page...))
 			if tt.live != "" {
-				seen = append(seen, h.route(open.stream, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-live", tt.live))...)
+				seen = append(seen, h.route(open.Stream, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-live", tt.live))...)
 			}
 
 			// Assert.
@@ -956,11 +956,11 @@ func TestTurnCloseOf(t *testing.T) {
 func TestDetachedLostIsAnOrdinaryTerminal(t *testing.T) {
 	// Arrange: a detached subagent with its own watch.
 	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))})
-	open := h.client.nextAgentOpen(t)
+	open := h.client.NextAgentOpen(t)
 	h.quiet()
 
 	// Act.
-	got := h.routeReaping(open.stream, entryFrame(&conversationv1.AgentFrame{
+	got := h.routeReaping(open.Stream, entryFrame(&conversationv1.AgentFrame{
 		AgentId: agentID("sub-1"),
 		Result:  &conversationv1.AgentFrame_Failure{Failure: lostFailure()},
 	}))
@@ -981,7 +981,7 @@ func TestDetachedLostIsAnOrdinaryTerminal(t *testing.T) {
 func TestRouteBashFrame(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 	h.quiet()
 	entry := h.shellWatchFor("w-1")
 
@@ -1003,7 +1003,7 @@ func TestRouteBashFrame(t *testing.T) {
 func TestRouteBashTerminalSettlesTheFeedBeforeTheSetDropsIt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 	h.quiet()
 	entry := h.shellWatchFor("w-1")
 
@@ -1032,14 +1032,14 @@ func TestRouteBashTerminalSettlesTheFeedBeforeTheSetDropsIt(t *testing.T) {
 func TestRouteDetachedSubagentFrame(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("", createdWork("sub-1", subagentWork("sub-1")))})
-	open := h.client.nextAgentOpen(t)
+	open := h.client.NextAgentOpen(t)
 	h.quiet()
 
 	// Act.
 	// The frame is this run's terminal, so it REAPS its own stream: it is
 	// bounded by the stream's end, never by a sentinel the reap would close
 	// out from under (see routeReaping).
-	got := h.routeReaping(open.stream, entryFrame(&conversationv1.AgentFrame{
+	got := h.routeReaping(open.Stream, entryFrame(&conversationv1.AgentFrame{
 		AgentId: agentID("sub-1"),
 		Result: &conversationv1.AgentFrame_Update{Update: activityUpdate(&conversationv1.AgentActivity{
 			ActivityId: &conversationv1.AgentActivityId{Value: "sub-unit-9"},
@@ -1267,7 +1267,7 @@ func positionOf(routed []string, name string) int {
 func TestRouteQueryDied(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("turn-1", createdWork("w-1", bashWork()))})
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 	h.w.SetMainAgent(agentID("main-1"))
 	h.quiet()
 
@@ -1503,11 +1503,11 @@ func TestSessionStreamReachesRouting(t *testing.T) {
 func TestBashStreamReachesRouting(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
-	open := h.client.nextBashOpen(t)
+	open := h.client.NextBashOpen(t)
 	h.quiet()
 
 	// Act.
-	open.stream.send(t, &conversationv1.AgentBash{
+	open.Stream.Send(t, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{}},
 	})
 
@@ -1529,9 +1529,9 @@ func TestASyncSubagentSpawnOpensItsOwnWatch(t *testing.T) {
 	})))
 
 	// Assert.
-	open := h.client.nextAgentOpen(t)
-	if open.req.GetTarget().GetValue() != "sub-1" {
-		t.Fatalf("the spawn opened a watch on %q, want the created agent sub-1", open.req.GetTarget().GetValue())
+	open := h.client.NextAgentOpen(t)
+	if open.Req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the spawn opened a watch on %q, want the created agent sub-1", open.Req.GetTarget().GetValue())
 	}
 }
 
@@ -1560,7 +1560,7 @@ func TestDetachedAnnouncementPromotesTheSyncWatch(t *testing.T) {
 	// Arrange: the spawn's own watch, opened with no handle.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
-	h.client.nextAgentOpen(t)
+	h.client.NextAgentOpen(t)
 	h.quiet()
 
 	// Act.
@@ -1579,14 +1579,14 @@ func TestPromotedWatchIsNotOpenedTwice(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
-	h.client.nextAgentOpen(t)
+	h.client.NextAgentOpen(t)
 	h.quiet()
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
 
 	// Assert.
-	h.client.noAgentOpen(t)
+	h.client.NoAgentOpen(t)
 }
 
 // TestARefusedShellWatchOpenKeepsTheShellLive covers the refusal: a watch the
@@ -1598,12 +1598,12 @@ func TestARefusedShellWatchOpenKeepsTheShellLive(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
+	h.client.SetBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-	h.client.awaitRefusedOpen(t, "WatchBash")
-	h.client.settleOpens()
+	h.client.AwaitRefusedOpen(t, "WatchBash")
+	h.client.SettleOpens()
 
 	// Assert.
 	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Shells: []*conversationv1.DetachedWorkId{workID("w-1")}})
@@ -1616,11 +1616,11 @@ func TestARefusedShellWatchOpenNeverSeversTheLink(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
+	h.client.SetBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-	h.client.awaitRefusedOpen(t, "WatchBash")
+	h.client.AwaitRefusedOpen(t, "WatchBash")
 
 	// Assert.
 	if got := h.w.Link(); got != shimclient.LinkConnected {
@@ -1635,17 +1635,17 @@ func TestRepeatedAnnouncementReopensARefusedSubagentWatch(t *testing.T) {
 	// Arrange: a first announcement the shim refused.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+	h.client.SetAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
-	h.client.awaitRefusedOpen(t, "WatchAgent")
-	h.client.setAgentErr(nil)
+	h.client.AwaitRefusedOpen(t, "WatchAgent")
+	h.client.SetAgentErr(nil)
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
 
 	// Assert.
-	if open := h.client.nextAgentOpen(t); open.req.GetTarget().GetValue() != "sub-1" {
-		t.Fatalf("re-opened watch = %q, want sub-1", open.req.GetTarget().GetValue())
+	if open := h.client.NextAgentOpen(t); open.Req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("re-opened watch = %q, want sub-1", open.Req.GetTarget().GetValue())
 	}
 }
 
@@ -1656,17 +1656,17 @@ func TestRepeatedAnnouncementReopensARefusedShellWatch(t *testing.T) {
 	// Arrange: a first announcement the shim refused.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
+	h.client.SetBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
-	h.client.awaitRefusedOpen(t, "WatchBash")
-	h.client.setBashErr(nil)
+	h.client.AwaitRefusedOpen(t, "WatchBash")
+	h.client.SetBashErr(nil)
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
 
 	// Assert.
-	if open := h.client.nextBashOpen(t); open.work.GetValue() != "w-1" {
-		t.Fatalf("re-opened watch = %q, want w-1", open.work.GetValue())
+	if open := h.client.NextBashOpen(t); open.Work.GetValue() != "w-1" {
+		t.Fatalf("re-opened watch = %q, want w-1", open.Work.GetValue())
 	}
 	if live := h.w.LiveWork(); len(live.Shells) != 1 {
 		t.Fatalf("live work = %v, want the re-opened shell", live.Shells)
@@ -1740,9 +1740,9 @@ func TestOpeningPageOpensAWatchForAnInTurnSpawnedSubagent(t *testing.T) {
 		frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1"))))))
 
 	// Assert.
-	open := h.client.nextAgentOpen(t)
-	if open.req.GetTarget().GetValue() != "sub-1" {
-		t.Fatalf("the opening page opened a watch on %q, want the created agent sub-1", open.req.GetTarget().GetValue())
+	open := h.client.NextAgentOpen(t)
+	if open.Req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the opening page opened a watch on %q, want the created agent sub-1", open.Req.GetTarget().GetValue())
 	}
 }
 
@@ -1761,9 +1761,9 @@ func TestOpeningPageOpensAWatchForADetachedAnnouncedSubagent(t *testing.T) {
 		frameDetached("main-1", createdWork("w-1", subagentWork("sub-1"))))))
 
 	// Assert.
-	open := h.client.nextAgentOpen(t)
-	if open.req.GetTarget().GetValue() != "sub-1" {
-		t.Fatalf("the opening page opened a watch on %q, want the created agent sub-1", open.req.GetTarget().GetValue())
+	open := h.client.NextAgentOpen(t)
+	if open.Req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the opening page opened a watch on %q, want the created agent sub-1", open.Req.GetTarget().GetValue())
 	}
 }
 
@@ -1791,7 +1791,7 @@ func TestOpeningPageSpawnAboveItsNewestCutOpensNoWatch(t *testing.T) {
 			))
 
 			// Assert.
-			h.client.noAgentOpen(t)
+			h.client.NoAgentOpen(t)
 		})
 	}
 }
@@ -1808,9 +1808,9 @@ func TestOpeningPageSpawnBelowItsNewestCutStillOpensAWatch(t *testing.T) {
 	))
 
 	// Assert.
-	open := h.client.nextAgentOpen(t)
-	if open.req.GetTarget().GetValue() != "sub-1" {
-		t.Fatalf("the page opened a watch on %q, want sub-1", open.req.GetTarget().GetValue())
+	open := h.client.NextAgentOpen(t)
+	if open.Req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the page opened a watch on %q, want sub-1", open.Req.GetTarget().GetValue())
 	}
 }
 
@@ -1821,7 +1821,7 @@ func TestOpeningPageDoesNotReopenAnAlreadyWatchedSubagent(t *testing.T) {
 	// Arrange: the live spawn opened sub-1's watch.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
-	h.client.nextAgentOpen(t)
+	h.client.NextAgentOpen(t)
 	h.quiet()
 
 	// Act: the opening page restates the same spawn.
@@ -1829,7 +1829,7 @@ func TestOpeningPageDoesNotReopenAnAlreadyWatchedSubagent(t *testing.T) {
 		frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1"))))))
 
 	// Assert.
-	h.client.noAgentOpen(t)
+	h.client.NoAgentOpen(t)
 }
 
 // TestOpeningPageOpensWatchesForNestedSpawnsRecursively covers the whole
@@ -1844,19 +1844,19 @@ func TestOpeningPageOpensWatchesForNestedSpawnsRecursively(t *testing.T) {
 	h.quiet()
 	h.route(h.main, pageFrame(frameEntryAt("ptr-1",
 		frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1"))))))
-	child := h.client.nextAgentOpen(t)
-	if child.req.GetTarget().GetValue() != "sub-1" {
-		t.Fatalf("first open = %q, want the child sub-1", child.req.GetTarget().GetValue())
+	child := h.client.NextAgentOpen(t)
+	if child.Req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("first open = %q, want the child sub-1", child.Req.GetTarget().GetValue())
 	}
 
 	// Act: the child's OWN opening page names grandchild sub-2.
-	child.stream.send(t, pageFrame(frameEntryAt("ptr-2",
+	child.Stream.Send(t, pageFrame(frameEntryAt("ptr-2",
 		frameUpdate("sub-1", activityUpdate(subagentActivity("spawn-2", "sub-2"))))))
 
 	// Assert.
-	grandchild := h.client.nextAgentOpen(t)
-	if grandchild.req.GetTarget().GetValue() != "sub-2" {
-		t.Fatalf("second open = %q, want the grandchild sub-2", grandchild.req.GetTarget().GetValue())
+	grandchild := h.client.NextAgentOpen(t)
+	if grandchild.Req.GetTarget().GetValue() != "sub-2" {
+		t.Fatalf("second open = %q, want the grandchild sub-2", grandchild.Req.GetTarget().GetValue())
 	}
 }
 
@@ -2355,7 +2355,7 @@ func TestARetiredDetachedHandleIsNeverReadmitted(t *testing.T) {
 			name: "a settled shell",
 			settle: func(t *testing.T) (*harness, *conversationv1.AgentDetachedWork) {
 				h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-2", bashWork()))})
-				h.client.nextBashOpen(t)
+				h.client.NextBashOpen(t)
 				h.quiet()
 				entry := h.shellWatchFor("w-2")
 				h.routeNow(func(w *watcher) {
@@ -2387,8 +2387,8 @@ func TestARetiredDetachedHandleIsNeverReadmitted(t *testing.T) {
 			if !h.w.LiveWork().Empty() {
 				t.Fatalf("live work = %+v, want the settled work kept out", h.w.LiveWork())
 			}
-			h.client.noAgentOpen(t)
-			h.client.noBashOpen(t)
+			h.client.NoAgentOpen(t)
+			h.client.NoBashOpen(t)
 			if !h.hasRecord("debug", "daemon.sessionwatcher.detached_work_retired") {
 				t.Fatal("the re-served announcement left no debug record")
 			}
@@ -2412,12 +2412,12 @@ func TestANestedSpawnOnADetachedRunsStreamIsNotAddressedByTheRunsHandle(t *testi
 			// Arrange: a detached run whose own stream has already started a
 			// nested spawn (so the unit is known to name another agent).
 			h := newHarness(t, Session{Started: sessionStarted("", createdWork("sub-1", subagentWork("sub-1")))})
-			open := h.client.nextAgentOpen(t)
-			h.route(open.stream, entryFrame(frameUpdate("sub-1", activityUpdate(subagentActivity("nested-unit", "nested-agent")))))
+			open := h.client.NextAgentOpen(t)
+			h.route(open.Stream, entryFrame(frameUpdate("sub-1", activityUpdate(subagentActivity("nested-unit", "nested-agent")))))
 			h.quiet()
 
 			// Act
-			got := h.route(open.stream, entryFrame(frameUpdate("sub-1", activityUpdate(tt.frame))))
+			got := h.route(open.Stream, entryFrame(frameUpdate("sub-1", activityUpdate(tt.frame))))
 
 			// Assert
 			if _, routed := find(got, "footer.OnSubagent"); routed {
@@ -2573,8 +2573,8 @@ func TestAnAdoptedTurnEndsOnItsMainWatchTerminal(t *testing.T) {
 	// Arrange: a pure attach whose shim re-announces a running turn.
 	h := newHarnessAttachingPurely(t)
 	h.sendSessionStarted(t, sessionStarted("turn-1"))
-	open := h.client.nextAgentOpen(t)
-	h.main, h.mainReq = open.stream, open.req
+	open := h.client.NextAgentOpen(t)
+	h.main, h.mainReq = open.Stream, open.Req
 	h.quiet()
 
 	// Act.

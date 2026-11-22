@@ -43,7 +43,7 @@ func TestWorkFirstAnnouncedAtItsConclusionIsNeverLive(t *testing.T) {
 
 			// Act.
 			h.route(h.main, entryFrame(frameDetached("main-1", concludedWork(tt.work))))
-			h.client.settleOpens()
+			h.client.SettleOpens()
 
 			// Assert.
 			if live := h.w.LiveWork(); !live.Empty() {
@@ -67,8 +67,8 @@ func TestAConcludedFirstShellsRecordIsReadToItsEnd(t *testing.T) {
 	h.route(h.main, entryFrame(frameDetached("main-1", concludedWork(detachedWork("w-1", "act-1", bashKind())))))
 
 	// Assert.
-	if open := h.client.nextBashOpen(t); open.work.GetValue() != "w-1" {
-		t.Fatalf("record read opened for %q, want w-1", open.work.GetValue())
+	if open := h.client.NextBashOpen(t); open.Work.GetValue() != "w-1" {
+		t.Fatalf("record read opened for %q, want w-1", open.Work.GetValue())
 	}
 }
 
@@ -79,7 +79,7 @@ func TestAConcludedFirstShellsTerminalReapsItsReadWatch(t *testing.T) {
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 	h.route(h.main, entryFrame(frameDetached("main-1", concludedWork(detachedWork("w-1", "act-1", bashKind())))))
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 	entry := h.shellWatchFor("w-1")
 
 	// Act.
@@ -110,7 +110,7 @@ func TestALaterRunningAnnouncementNeverRevivesConcludedWork(t *testing.T) {
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1", bashKind()))))
-	h.client.settleOpens()
+	h.client.SettleOpens()
 
 	// Assert.
 	if live := h.w.LiveWork(); !live.Empty() {
@@ -125,7 +125,7 @@ func TestAConcludedRestatementOfALiveShellLeavesItLive(t *testing.T) {
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 	h.route(h.main, entryFrame(frameDetached("main-1", detachedWork("w-1", "act-1", bashKind()))))
-	h.client.nextBashOpen(t)
+	h.client.NextBashOpen(t)
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", concludedWork(detachedWork("w-1", "act-1", bashKind())))))
@@ -142,11 +142,11 @@ func TestTheIncidentsConcludedFirstRefusedShellLeavesTheWorkspaceFree(t *testing
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "the store holds no rows for shell run w-1"))
+	h.client.SetBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "the store holds no rows for shell run w-1"))
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", concludedWork(detachedWork("w-1", "act-1", bashKind())))))
-	h.client.awaitRefusedOpen(t, "WatchBash")
+	h.client.AwaitRefusedOpen(t, "WatchBash")
 
 	// Assert.
 	if !h.w.Free() {

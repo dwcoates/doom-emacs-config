@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agent-repld/integration/fakeshim/shimfacts"
 	"agent-repld/integration/fakestore"
 )
 
@@ -136,11 +137,7 @@ func (b *book) record(f agentFrame) agentFrame {
 		b.minted[agent]++
 		f.pointer = pointerAt(agent, b.minted[agent])
 	}
-	b.entries[agent] = append(b.entries[agent], f.place(&conversationv1.HistoryEntryAt{
-		At:    &conversationv1.HistoryPointer{Value: f.pointer},
-		Entry: f.entry(),
-		Turn:  f.stamp(),
-	}))
+	b.entries[agent] = append(b.entries[agent], f.served())
 	b.keepLocked(agent)
 	b.noteAskLocked(f.frame)
 	return f
@@ -233,7 +230,7 @@ func (b *book) since(agent string, known *conversationv1.HistoryPointer) *conver
 func (s *server) openingPageFor(req *shimv1.WatchAgentRequest) *conversationv1.HistoryPage {
 	switch {
 	case req.GetTailOnly() != nil:
-		return &conversationv1.HistoryPage{}
+		return shimfacts.TailOnlyPage()
 	case req.GetKnownThrough() != nil:
 		return s.book.since(req.GetTarget().GetValue(), req.GetKnownThrough())
 	}

@@ -216,7 +216,7 @@ func TestSessionFactsInAnswersTrueForAStartedSession(t *testing.T) {
 func TestSessionFactsInAnswersFalseForAPureAttachBeforeItsFacts(t *testing.T) {
 	// Arrange.
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 
 	// Act / Assert.
 	if h.w.SessionFactsIn() {
@@ -433,7 +433,7 @@ func TestACloseAnswersATurnWaitByWhetherTheWatcherHadTheTurn(t *testing.T) {
 			name: "a turn the adoption found open",
 			start: func(t *testing.T) *harness {
 				h := startHarness(t, Session{OpenAtAttach: openRows("turn-open")}, nil)
-				h.session = h.client.nextSessionOpen(t)
+				h.session = h.client.NextSessionOpen(t)
 				return h
 			},
 			turn: "turn-open",
@@ -637,7 +637,7 @@ func TestNoFreenessEdgeForAWatcherThatWasNeverBusy(t *testing.T) {
 func TestAPureAttachIsNotFreeBeforeItsFacts(t *testing.T) {
 	// Arrange.
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 
 	// Act.
 	free := h.w.Free()
@@ -651,7 +651,7 @@ func TestAPureAttachIsNotFreeBeforeItsFacts(t *testing.T) {
 func TestAPureAttachFallsFreeWhenItsFactsNameNothingInFlight(t *testing.T) {
 	// Arrange.
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 
 	// Act.
 	h.reannounce(t, sessionStarted(""))
@@ -666,7 +666,7 @@ func TestAPureAttachFallsFreeWhenItsFactsNameNothingInFlight(t *testing.T) {
 func TestAPureAttachWhoseFactsNameATurnStaysBusy(t *testing.T) {
 	// Arrange.
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 
 	// Act.
 	h.reannounce(t, sessionStarted("turn-1"))
@@ -694,7 +694,7 @@ func (h *harness) freeWorkEnded(t *testing.T) bool {
 func TestAPureAttachsOwnFreeEdgeSaysNoWorkEnded(t *testing.T) {
 	// Arrange.
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 
 	// Act.
 	h.reannounce(t, sessionStarted(""))
@@ -728,11 +728,11 @@ func TestATurnsEndSaysWorkEnded(t *testing.T) {
 func TestAnAttachedTurnsEndSaysWorkEnded(t *testing.T) {
 	// Arrange.
 	h := startHarness(t, Session{}, nil)
-	h.session = h.client.nextSessionOpen(t)
+	h.session = h.client.NextSessionOpen(t)
 	h.reannounce(t, sessionStarted("turn-1"))
 	h.noFree(t)
-	open := h.client.nextAgentOpenFor(t, "")
-	h.main, h.mainReq = open.stream, open.req
+	open := h.client.NextAgentOpenFor(t, "")
+	h.main, h.mainReq = open.Stream, open.Req
 	h.w.SetMainAgent(agentID("main-1"))
 	h.quiet()
 
@@ -799,10 +799,10 @@ func TestASubagentsOpeningPageDoesNotReleaseTheMainWatchLatch(t *testing.T) {
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
-	sub := h.client.nextAgentOpen(t)
+	sub := h.client.NextAgentOpen(t)
 
 	// Act.
-	h.route(sub.stream, pageFrame())
+	h.route(sub.Stream, pageFrame())
 
 	// Assert.
 	if h.mainWatched() {

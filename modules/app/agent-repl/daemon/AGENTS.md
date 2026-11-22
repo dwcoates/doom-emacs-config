@@ -299,6 +299,34 @@ mechanics (`integration/shareddaemon_test.go`).
   case, 47.4 CPU-s shared; summed unit wall rose from 11.6s to 18.7s, the
   accepted cost.
 
+### Projection goldens run in process
+
+A golden that checks what the daemon DRAWS from given frames is a projection,
+and a projection needs no process. The scenario goldens
+(`testdata/scenario-goldens`) run in `internal/scenariogolden`: each scenario
+drives the REAL session watcher and the REAL feed resolver, built with the
+daemon's own painter, sentinel stripper (`prompts.SentinelStripper`) and image
+resolver, from the in-memory shim client `internal/sessionwatcher/watchtest`,
+serving the fake shim's own opening frames and entry stamps
+(`integration/fakeshim/shimfacts`). No daemon, shim process, repository, fake
+git or log file is made; the routing records the drive awaits are the
+in-memory logger's (owner ruling, 2026-11-20).
+
+- **One drive loop, two drivers.** `scenariogolden.Drive` serves a scenario
+  through a `scenariogolden.Driver`. The in-process driver carries every
+  scenario; `integration/scenariogoldens_test.go` drives one or two through a
+  real daemon (`endToEndScenarios`) to prove the seam the projection cannot:
+  frames over the shim socket, routed by the daemon's watcher into its feed
+  and read back over its API. A new scenario needs nothing but its golden.
+- **Rewriting a golden** is `AGENT_REPL_SCENARIO_GOLDENS_WRITE=1` on the
+  in-process test.
+- **A new projection golden** (any check of what given input draws) follows
+  the same shape: the real resolver and the real router in process, the
+  daemon only for the one seam test.
+- Why: the daemon-driven goldens registered a repository and workspace and
+  started a fake shim process for each of their 125 scenarios, about 46% of
+  the daemon integration suite's per-test time in merge gates (2026-11-20).
+
 ## Command line (binding spellings; Go's flag package accepts one or two dashes)
 
 Emacs launches `daemon/bin/agent-repld` with NO argv — state comes from the

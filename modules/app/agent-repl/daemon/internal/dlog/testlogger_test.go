@@ -163,7 +163,7 @@ func TestFindRecord(t *testing.T) {
 	records := []Record{
 		{Level: "info", Operation: "op.a", Message: "first"},
 		{Level: "error", Operation: "op.a", Message: "second"},
-		{Level: "error", Operation: "op.b", Message: "second"},
+		{Level: "error", Operation: "op.b", Message: "second", Context: Context{"turn": "t1"}},
 	}
 	tests := []struct {
 		name      string
@@ -177,6 +177,8 @@ func TestFindRecord(t *testing.T) {
 		{name: "an empty message matches any message", query: RecordQuery{Level: "error", Operation: "op.a"}, wantFound: true, wantIndex: 1},
 		{name: "the first of several matches is answered", query: RecordQuery{Message: "second"}, wantFound: true, wantIndex: 1},
 		{name: "a query nothing matches finds nothing", query: RecordQuery{Level: "warn"}, wantFound: false},
+		{name: "a match on the context finds the record it accepts", query: RecordQuery{Match: func(r Record) bool { return r.Context["turn"] == "t1" }}, wantFound: true, wantIndex: 2},
+		{name: "a match must hold beside the named fields", query: RecordQuery{Operation: "op.a", Match: func(r Record) bool { return r.Context["turn"] == "t1" }}, wantFound: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

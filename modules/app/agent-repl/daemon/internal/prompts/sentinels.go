@@ -1,6 +1,7 @@
 package prompts
 
 import (
+	"agent-repld/internal/dlog"
 	"fmt"
 	"strings"
 )
@@ -97,4 +98,22 @@ func splitLeadingSpace(s string) (space, rest string) {
 
 func isSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\v' || b == '\f'
+}
+
+// SentinelStripper is StripSentinels for DRAWN text: a prompt whose injected
+// spans are unbalanced is drawn unstripped, and that is recorded on LOG. The
+// record keeps the full text. The feed resolver and the prompt queue's mirror
+// draw prompt rows through the one stripper the daemon builds, and the
+// in-process scenario projection (internal/scenariogolden) through the same.
+func SentinelStripper(log dlog.Logger) func(string) string {
+	return func(text string) string {
+		drawn, err := StripSentinels(text)
+		if err != nil {
+			log.Warn("daemon.cmd.strip_sentinels",
+				"a prompt's injected spans are unbalanced; it is drawn unstripped",
+				dlog.Context{"error": err.Error()})
+			return text
+		}
+		return drawn
+	}
 }
