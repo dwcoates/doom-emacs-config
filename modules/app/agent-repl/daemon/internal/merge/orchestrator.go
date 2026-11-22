@@ -612,30 +612,70 @@ func (o *orchestrator) footerSetMerge(ws ids.WorkspaceID, facts MergeFacts) {
 
 // reveal draws hidden merge workspace WS in the tab bar and the sidebar from
 // now on, CAUSE naming why, and restates its bubble's head with the switch to
-// it. A reveal that fails is recorded at ERROR: the merge goes on, and the
-// workspace stays hidden until a later reveal succeeds.
+// it. It is the reveal a merge makes for itself (it failed, its agent asks):
+// revealOrFail records a failure at ERROR, and the merge goes on with the
+// workspace hidden until a later reveal succeeds.
 func (o *orchestrator) reveal(ctx context.Context, ws ids.WorkspaceID, cause string) {
+	_ = o.revealOrFail(ctx, ws, cause)
+}
+
+// revealOrFail is THE ONE REVEAL: every reveal of a merge workspace, the
+// merge's own and a caller's, runs it. A reveal that fails is recorded here at
+// ERROR, once, and answered as the error.
+func (o *orchestrator) revealOrFail(ctx context.Context, ws ids.WorkspaceID, cause string) error {
 	const op = "daemon.merge.reveal"
 	revealed, err := o.deps.Detached.Reveal(ctx, ws)
 	if err != nil {
 		o.log(ctx, ws).Error(op, "could not reveal the merge workspace; it stays hidden", dlog.Context{
 			"workspace": string(ws), "cause": cause, "error": err.Error()})
-		return
+		return fmt.Errorf("merge: reveal merge workspace %q (%s): %w", ws, cause, err)
 	}
 	if !revealed {
-		return
+		return nil
 	}
 	o.log(ctx, ws).Info(op, "revealed the merge workspace: it needs the user", dlog.Context{"workspace": string(ws), "cause": cause})
 	o.restateHead(ws, headReveal)
+	return nil
 }
 
-// RevealMergeWorkspace reveals hidden merge workspace WS (Orchestrator).
+// RevealMergeWorkspace reveals hidden merge workspace WS (Orchestrator). A
+// CALLER'S REVEAL ENDS WITH THE WORKSPACE DRAWABLE, OR IT IS THE CALLER'S
+// ERROR: a select or a show that asked for it must not answer success over a
+// workspace still drawn nowhere. So the workspace's standing is read from the
+// store before the reveal and read back after it, never taken from the cached
+// origin, and a reveal that answered success over a workspace still hidden is
+// recorded at ERROR and answered as an error.
 func (o *orchestrator) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error {
-	if _, async := o.requesterOf(ws); !async {
-		return nil
+	hidden, err := o.mergeHidden(ctx, ws, cause, "before its reveal")
+	if err != nil || !hidden {
+		return err
 	}
-	o.reveal(ctx, ws, cause)
+	if err := o.revealOrFail(ctx, ws, cause); err != nil {
+		return err
+	}
+	hidden, err = o.mergeHidden(ctx, ws, cause, "after its reveal")
+	if err != nil {
+		return err
+	}
+	if hidden {
+		o.log(ctx, ws).Error("daemon.merge.reveal", "the reveal answered success but the merge workspace is still hidden", dlog.Context{
+			"workspace": string(ws), "cause": cause})
+		return fmt.Errorf("merge: reveal merge workspace %q (%s): the reveal left it hidden", ws, cause)
+	}
 	return nil
+}
+
+// mergeHidden reads whether WS is a merge workspace its async merge still
+// withholds (wsm.Workspace.MergeHidden), WHEN naming the read in its record. A
+// record that cannot be read is recorded at ERROR and answered as the error.
+func (o *orchestrator) mergeHidden(ctx context.Context, ws ids.WorkspaceID, cause, when string) (bool, error) {
+	record, err := o.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		o.log(ctx, ws).Error("daemon.merge.reveal", "could not read whether the merge workspace is hidden", dlog.Context{
+			"workspace": string(ws), "cause": cause, "read": when, "error": err.Error()})
+		return false, fmt.Errorf("merge: reveal merge workspace %q (%s): read it %s: %w", ws, cause, when, err)
+	}
+	return record.MergeHidden(), nil
 }
 
 // runFor addresses one workspace's in-flight run.

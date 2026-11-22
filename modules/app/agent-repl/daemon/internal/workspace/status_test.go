@@ -245,6 +245,63 @@ func TestStatusAnswersAClosedOrHiddenWorkspace(t *testing.T) {
 	}
 }
 
+func TestStatusHiddenAgreesWithWhatTheSidebarDraws(t *testing.T) {
+	merge := &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
+	tests := []struct {
+		name   string
+		record wsm.Workspace
+	}{
+		{name: "a shown workspace", record: wsm.Workspace{ID: "ws-1"}},
+		{name: "a hidden workspace", record: wsm.Workspace{ID: "ws-1", Hidden: true}},
+		{name: "a merge workspace its merge withholds", record: wsm.Workspace{ID: "ws-1", MergeOf: merge}},
+		{name: "a revealed merge workspace", record: wsm.Workspace{ID: "ws-1", MergeOf: merge, MergeRevealed: true}},
+		{name: "a revealed merge workspace the user hid", record: wsm.Workspace{ID: "ws-1", MergeOf: merge, MergeRevealed: true, Hidden: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.workspaces[tt.record.ID] = tt.record
+			f.db.jobs[tt.record.ID] = wsm.CreationJob{Workspace: tt.record.ID}
+			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{tt.record.ID: footerIdle()}
+
+			// Act
+			got, err := f.verbs.Status(context.Background(), tt.record.ID)
+
+			// Assert: an open workspace is hidden exactly when the sidebar
+			// does not list it open.
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if got.GetHidden() == tt.record.ListedOpen() {
+				t.Errorf("Status hidden = %v while the sidebar lists it open = %v", got.GetHidden(), tt.record.ListedOpen())
+			}
+		})
+	}
+}
+
+func TestStatusAfterAShowOfAHiddenMergeWorkspaceIsNotHidden(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	hiddenMergeWorkspace(t, f, "ws-merge", true)
+	f.db.jobs["ws-merge"] = wsm.CreationJob{Workspace: "ws-merge"}
+	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-merge": footerIdle()}
+
+	// Act
+	if err := f.verbs.SetHidden(context.Background(), "ws-merge", false); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+	got, err := f.verbs.Status(context.Background(), "ws-merge")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.GetHidden() || !drawnOpen(t, f, "ws-merge") {
+		t.Fatalf("Status hidden = %v, drawn open = %v; want shown in both", got.GetHidden(), drawnOpen(t, f, "ws-merge"))
+	}
+}
+
 func TestStatusNamesAStandingColdGateByItsRow(t *testing.T) {
 	// Arrange
 	f := newFixture(t)

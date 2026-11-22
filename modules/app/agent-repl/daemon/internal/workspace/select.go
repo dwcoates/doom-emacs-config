@@ -282,10 +282,29 @@ func (v *verbs) StopViewDwell(ctx context.Context, ws ids.WorkspaceID) error {
 // nothing by itself; the editor asks with OpenTabs. HIDING THE WORKSPACE THE
 // USER STANDS ON LANDS THEM on the workspace they selected before it
 // (landAfterHiding). Asking for the place it already holds is success.
+//
+// A SHOW ENDS WITH THE WORKSPACE DRAWN, OR IT IS AN ERROR. Two separate facts
+// keep a workspace out of the Open section: the hidden flag, and a merge
+// workspace's unrevealed standing (wsm.Workspace.MergeHidden). A show clears
+// both (revealMergeHidden, whose reveal answers an error unless the workspace
+// ends drawable, then the flag), so it never answers success over a workspace
+// the sidebar still draws nowhere (2026-11-21: a show of a hidden
+// merge workspace wrote only the flag and left it undrawn).
+//
+// A REVEAL IS ONE-WAY, SO HIDING A REVEALED MERGE WORKSPACE IS AN ORDINARY
+// HIDE: it writes the hidden flag and the workspace is listed in the hidden
+// section like any other, where the user can see it and show it again. It
+// never goes back to being drawn nowhere, which only its async merge does to
+// it, before anyone has asked to see it.
 func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error {
-	_, log, err := v.owned(ctx, "SetWorkspaceHidden", ws)
+	record, log, err := v.owned(ctx, "SetWorkspaceHidden", ws)
 	if err != nil {
 		return err
+	}
+	if !hidden {
+		if err := v.revealMergeHidden(ctx, record); err != nil {
+			return err
+		}
 	}
 	if err := v.recordHidden(ctx, log, ws, hidden); err != nil {
 		return err
@@ -297,6 +316,22 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	// 2026-11-11): a merge kept at its place at the gate leaves its queue.
 	v.deps.Merge.OnHidden(ws)
 	return v.landAfterHiding(ctx, log, ws)
+}
+
+// revealMergeHidden is a show's reveal of a hidden merge workspace, through
+// the same reveal a select makes (merge.Orchestrator.RevealMergeWorkspace), so
+// the requester's bubble head gains its switch either way. Any other workspace
+// is left as it is. The orchestrator owns the reveal's guarantee and its
+// records: it answers an error, recorded at ERROR, unless the workspace ends
+// drawable, and that error refuses the show before the flag is written.
+func (v *verbs) revealMergeHidden(ctx context.Context, record wsm.Workspace) error {
+	if !record.MergeHidden() {
+		return nil
+	}
+	if err := v.deps.Merge.RevealMergeWorkspace(ctx, record.ID, "it was shown"); err != nil {
+		return fmt.Errorf("show %q: %w", record.ID, err)
+	}
+	return nil
 }
 
 // recordHidden is THE ONE WRITE of a workspace's hidden flag: the row, the
