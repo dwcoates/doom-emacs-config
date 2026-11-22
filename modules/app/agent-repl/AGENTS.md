@@ -3146,12 +3146,11 @@ status signal or reads it.
     (`--answer-label`);
   - a card's question mark while the question about that card stands
     (`.question-control[data-asking]`, `webapp/src/feed/response-question.ts`).
-- **The lighter canonical orange is `--canonical-orange-light`**, derived
-  from the token rather than declared as a literal:
-  `color-mix(in srgb, var(--canonical-orange) 85%, #ffffff)`.
-  - It is the ground of every inline code span in the feed (`.md code`).
-  - Its ink is `--canonical-orange-light-ink` (black), chosen for WCAG AA
-    contrast on it in both themes and pinned by `webapp/test/styles.test.ts`.
+- **Inline code's ground is `--inline-code-bg`** (owner request, 2026-11-22),
+  halfway between `--highlight-grey` (the sidebar's selected row fill) and a
+  response bubble's fill (`--assistant`).
+  - Its ink is `--inline-code-ink` (the bubble's own text color), pinned by
+    `webapp/test/styles.test.ts`.
 - **A new use of orange reads `var(--canonical-orange)`**, or a token that
   reads it, and never declares a hue of its own.
 - **Status oranges are not the canonical orange** and stay as they are: the

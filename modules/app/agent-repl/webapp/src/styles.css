@@ -127,7 +127,12 @@
      a citation reads as hoverable and its box never reads as the pointer's
      own blue one. */
   --reference: var(--canonical-orange);
-  --reference-bg: color-mix(in srgb, var(--reference) 18%, transparent);
+  /* THE HIGHLIGHT GREY (owner request, 2026-11-22): the sidebar's selected
+     workspace row's fill, declared on :root so the feed wears the very same
+     grey: a node a citation or the composer references, a lit prompt entry,
+     and (halfway to a response bubble's fill) inline code. */
+  --highlight-grey: color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)));
+  --reference-bg: var(--highlight-grey);
   /* A link inside a blue prompt bubble wears the known command's purple
      (owner request, 2026-10-19), so a prompt's links and its skill names
      read in one color. Resolved through --known-command, so each theme's
@@ -272,14 +277,12 @@
      orange and was taken darker and richer (owner request, 2026-10-30): in
      OKLCH, lightness -0.13, chroma x1.45, hue -3 degrees. */
   --canonical-orange: #cc4d00;
-  /* THE INLINE CODE GROUND (owner requests, 2026-11-09 and 2026-11-10): a
-     wash of the canonical orange, a step more opaque than a response tree's
-     cited-node highlight (--reference-bg, 18%) and close to it in intensity,
-     so code reads as marked without standing out of the prose. Transparent,
-     so it sits on whatever bubble holds it, and its ink is the bubble's own
-     text color in both themes. */
-  --canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 26%, transparent);
-  --canonical-orange-light-ink: inherit;
+  /* THE INLINE CODE GROUND (owner request, 2026-11-22, replacing the canonical
+     orange wash of 2026-11-09): halfway between the highlight grey and a
+     response bubble's fill, so code reads as marked without standing out of
+     the prose. Its ink is the bubble's own text color in both themes. */
+  --inline-code-bg: color-mix(in srgb, var(--highlight-grey) 50%, var(--assistant));
+  --inline-code-ink: inherit;
   /* AN ANSWERED BRANCH'S LABEL (owner request, 2026-10-26): a pastel orange
      on both ends of an answer, the prompt's entry labels and the response's
      linked labels alike (feed/entries.ts). An entry's implied ancestor wears
@@ -2090,7 +2093,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    2026-11-08): 4.4% white over the 69% mix takes the dark theme's #262626
    to #303030. */
 #ws-sidebar {
-  --row-highlight-tint: color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)));
+  --row-highlight-tint: var(--highlight-grey);
 }
 #ws-sidebar .ws.current > .row { background-color: var(--row-highlight-tint); }
 /* THE SELECTED WORKSPACE'S MERGES IN THE MERGE QUEUE wear the same fill
@@ -3461,7 +3464,7 @@ html[data-page-unshown] {
 /* INLINE CODE wears the lighter canonical orange, in its own black ink so it
    reads at WCAG AA (owner request, 2026-11-09). A fenced block's inner code
    is unfilled and keeps the block's ink (below). */
-.md code, .q-text code, .q-opt code { background: var(--canonical-orange-light); color: var(--canonical-orange-light-ink); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
+.md code, .q-text code, .q-opt code { background: var(--inline-code-bg); color: var(--inline-code-ink); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
 .md pre.md-code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
 .md pre.md-code code { background: none; color: inherit; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 /* THE ONE COPY CONTROL (src/copy-control.ts, owner requests 2026-10-20): a
@@ -3702,7 +3705,7 @@ html[data-page-unshown] {
 .mp-entry-label { cursor: pointer; }
 /* The prompt entry whose answered response label the pointer is on, lit in the
    citation's orange (feed/branch-hover.ts). */
-.mp-entry.mp-entry-lit { background: var(--reference-bg); }
+.mp-entry.mp-entry-lit { background: var(--highlight-grey); color: var(--canonical-orange); }
 /* A RESPONSE NODE'S SUBTREE IS ONE BOX (feed/subtree-box.ts): each line
    inside it is painted from its left edge, the column the node's label starts
    at, to its right edge, the widest line's text. The box carries no accent bar

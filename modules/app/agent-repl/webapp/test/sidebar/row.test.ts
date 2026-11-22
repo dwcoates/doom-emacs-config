@@ -390,7 +390,17 @@ describe("the highlight and the receded styling", () => {
     expect([
       declarations.some((d) => /background-color:\s*var\(--row-highlight-tint\)/.test(d)),
       token("--row-highlight-tint"),
-    ]).toEqual([true, "color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)))"]);
+    ]).toEqual([true, "var(--highlight-grey)"]);
+  });
+
+  it("derives the shared highlight grey midway from --card toward the rail, 4.4% brighter", () => {
+    // Arrange / Act
+    const root = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(":root"))
+      .map((rule) => /--highlight-grey:\s*([^;]+);/.exec(rule.declarations)?.[1])
+      .find((value) => value !== undefined);
+    // Assert
+    expect(root).toBe("color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)))");
   });
 
   it("paints the current row's tint through the cascade", () => {
