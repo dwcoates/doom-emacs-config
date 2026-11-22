@@ -96,6 +96,13 @@ const landDirectBoundSeconds = 8
 // landed, and the finish records it itself.
 const landDirectUnrecorded = 5
 
+// landDirectRefused is land-direct.sh's exit for a landing its gate refused
+// (lib-land-gate.sh's LAND_GATE_REFUSED): the branch is not rebased onto the
+// main branch's head (the main branch moved while the gate ran), is dirty or
+// checked out nowhere, or is not the commit gated. Every such refusal is the
+// mediator's to fix, so none parks the finish.
+const landDirectRefused = 4
+
 // LandsDirectly implements Orchestrator: WS is a deploy mediator, whose
 // finish lands directly whichever work it finishes.
 func (o *orchestrator) LandsDirectly(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
@@ -691,6 +698,13 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 		if f.GatedHead == "" {
 			return fmt.Errorf("merge: the remediation %s reached its landing with no gated commit recorded", f.Workspace)
 		}
+		// A FINISH TAKEN UP AT ITS LANDING BY THE NEXT DAEMON lands only the
+		// commit its gate passed on: a branch that moved since goes back to
+		// its workspace, never to the landing.
+		if head != f.GatedHead {
+			why := fmt.Sprintf("your branch moved from %s, the commit its gate passed on, to %s before it landed, so what passed is not what would land", shortSHA(f.GatedHead), shortSHA(head))
+			return o.resumeRemediation(ctx, f, BriefRemediationBehind, map[string]string{"main_branch": mainBranch, "why": why}, withField(fields, "gated", f.GatedHead))
+		}
 		kept := RunKeptScript(ctx, o.deps.HookRunner, target.repoRoot, script, nil, logPath, "--gated-at", f.GatedHead, target.repoRoot, part, line, record.Branch)
 		if kept.Err != nil {
 			return fmt.Errorf("merge: run the remediation's direct landing: %w", kept.Err)
@@ -706,7 +720,13 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 			// THE BRANCH LANDED; only the script's report of it was not
 			// recorded, and the finish's own record below covers it.
 			o.deps.Log.Global().Error(opRemediationFinish, "the remediation's direct landing landed but its report was not recorded; the finish records it", withField(fields, "output", strings.TrimSpace(run.Output)))
-		case run.ExitCode == 1:
+		// A REFUSED LANDING GOES BACK LIKE A BRANCH THAT DID NOT MERGE
+		// (owner ruling, 2026-11-22): the main branch moving while the gate
+		// ran refused the landing at exit 4 and parked the finish for every
+		// daemon after, which retried the same unrebased landing. It counts a
+		// failed gate round exactly as the other sent-back finishes do, so
+		// the MaxFixAttempts bound still ends a chain that never lands.
+		case run.ExitCode == 1 || run.ExitCode == landDirectRefused:
 			return o.resumeRemediation(ctx, f, BriefRemediationBehind, map[string]string{"main_branch": mainBranch, "why": strings.TrimSpace(run.Output)}, fields)
 		case run.ExitCode != 0:
 			return fmt.Errorf("merge: the remediation's direct landing failed (exit %d): %s", run.ExitCode, strings.TrimSpace(run.Output))
