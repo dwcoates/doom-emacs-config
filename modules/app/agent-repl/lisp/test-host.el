@@ -2945,125 +2945,23 @@ answers `:unknown' and records the breach rather than opening."
                      (list "AdoptHostWorkspace" successor
                            (list :workspace (agent-repl-test-host--ref))))))))
 
-(defmacro agent-repl-test-host--with-page (shown held &rest body)
-  "Run BODY with the host showing ws-1\='s page when SHOWN, holding it when
-HELD, and recording every page it drops in `agent-repl-test-host--effects'."
-  (declare (indent 2))
-  `(cl-letf (((symbol-function 'agent-repl-webhost-shown-p) (lambda (_ws) ,shown))
-             ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) ,held))
-             ((symbol-function 'agent-repl-webhost-remove)
-              (lambda (ws &optional unloading)
-                (push (list :removed ws unloading) agent-repl-test-host--effects))))
-     ,@body))
-
-(defun agent-repl-test-host--transfer-with-page (decision shown held)
-  "Push ws-1\='s transfer notice carrying DECISION, the page SHOWN and HELD."
-  (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-    (setq agent-repl-test-host--successor successor)
+(ert-deftest agent-repl-test-host-transferred-touches-no-page ()
+  "A handover never reloads or drops a page, shown or held: the page moves itself."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
     (agent-repl-test-host--subscribe "ws-1")
     (setq agent-repl-test-host--effects nil)
-    (agent-repl-test-host--with-page shown held
-      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value (list :reload-page decision))))))
-
-(ert-deftest agent-repl-test-host-transferred-reloads-the-page-it-is-told-to ()
-  "A notice deciding :reload reloads the held page at the successor."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-test-host--transfer-with-page :reload nil t)
-    ;; Assert
-    (should (member '(:reload . "ws-1") agent-repl-test-host--effects))))
-
-(ert-deftest agent-repl-test-host-transferred-from-an-older-daemon-reloads-as-before ()
-  "A notice with no decision (:unset) reloads a held page, as it always did."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-test-host--transfer-with-page :unset nil t)
-    ;; Assert
-    (should (member '(:reload . "ws-1") agent-repl-test-host--effects))))
-
-(ert-deftest agent-repl-test-host-transferred-loads-no-page-it-is-told-not-to ()
-  "A notice deciding :no-reload reloads nothing."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-test-host--transfer-with-page :no-reload nil t)
-    ;; Assert
-    (should-not (assq :reload agent-repl-test-host--effects))))
-
-(ert-deftest agent-repl-test-host-transferred-drops-a-held-page-it-is-told-not-to-load ()
-  "A held page a :no-reload notice leaves is dropped, never left on the old daemon."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-test-host--transfer-with-page :no-reload nil t)
-    ;; Assert
-    (should (member '(:removed "ws-1" t) agent-repl-test-host--effects))
-    (should (agent-repl-test-host--logged-p :info "elisp.host.handover-page ws=ws-1 action=dropped"))))
-
-(ert-deftest agent-repl-test-host-transferred-tells-the-daemon-before-it-drops-the-page ()
-  "The page of a workspace that stays open goes only once the daemon is told.
-Dropped unannounced, its page stream's end is drawn as a broken link."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--unloading-answer (list :held))
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
-          agent-repl-test-host--effects nil)
-    (agent-repl-test-host--with-page nil t
-      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value (list :reload-page :no-reload)))
-      (let ((before (assq :removed agent-repl-test-host--effects)))
-        ;; Act
-        (agent-repl-test-host--answer-held (list :arm :success :value nil))
-        ;; Assert
-        (should (assoc "ReportPageUnloading" agent-repl-test-host--calls))
-        (should-not before)
-        (should (member '(:removed "ws-1" t) agent-repl-test-host--effects))))))
-
-(ert-deftest agent-repl-test-host-transferred-keeps-the-page-a-refused-report-leaves ()
-  "A report the daemon refuses keeps the page, recorded."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--unloading-answer (list :response (list :arm :error :value nil)))
-    ;; Act
-    (agent-repl-test-host--transfer-with-page :no-reload nil t)
-    ;; Assert
-    (should-not (assq :removed agent-repl-test-host--effects))
-    (should (agent-repl-test-host--logged-p :info "elisp.host.handover-page ws=ws-1 action=kept reason=not-reported"))))
-
-(ert-deftest agent-repl-test-host-transferred-reloads-a-page-that-came-on-screen-while-told ()
-  "A page the user switched to while the report was in flight is theirs: it is reloaded."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--unloading-answer (list :held))
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
-          agent-repl-test-host--effects nil)
-    (agent-repl-test-host--with-page nil t
-      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value (list :reload-page :no-reload))))
-    (agent-repl-test-host--with-page t t
+    (cl-letf (((symbol-function 'agent-repl-webhost-shown-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-webhost-remove)
+               (lambda (ws &optional unloading)
+                 (push (list :removed ws unloading) agent-repl-test-host--effects))))
       ;; Act
-      (agent-repl-test-host--answer-held (list :arm :success :value nil))
-      ;; Assert
-      (should-not (assq :removed agent-repl-test-host--effects))
-      (should (member '(:reload . "ws-1") agent-repl-test-host--effects))
-      (should (agent-repl-test-host--logged-p :info "elisp.host.handover-page ws=ws-1 action=kept reason=changed")))))
-
-(ert-deftest agent-repl-test-host-transferred-reloads-the-shown-page-whatever-it-is-told ()
-  "The page on screen is the user's: a :no-reload notice still reloads it."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-test-host--transfer-with-page :no-reload t t)
-    ;; Assert
-    (should (member '(:reload . "ws-1") agent-repl-test-host--effects))
-    (should-not (assq :removed agent-repl-test-host--effects))))
-
-(ert-deftest agent-repl-test-host-transferred-drops-nothing-without-a-page ()
-  "A :no-reload notice for a workspace with no page touches no page."
-  (agent-repl-test-host--with-harness
-    ;; Act
-    (agent-repl-test-host--transfer-with-page :no-reload nil nil)
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil)))
     ;; Assert
     (should-not (assq :removed agent-repl-test-host--effects))
     (should-not (assq :reload agent-repl-test-host--effects))))
-
 (ert-deftest agent-repl-test-host-transferred-cancels-the-old-stream-after-adopting ()
   "Order is the contract's: adopt, THEN cancel, then re-subscribe."
   (agent-repl-test-host--with-harness
@@ -3200,7 +3098,7 @@ far too late."
     (agent-repl-test-host--with-failing-adopt (list :kind :timeout :message "no answer")
       ;; Assert
       (should (eq (agent-repl-host--recorded-conn "ws-1") successor))
-      (should-not (agent-repl-test-host--logged-p :info "elisp.host.webview-restored")))))
+      (should-not (agent-repl-test-host--logged-p :info "elisp.host.restored")))))
 
 (ert-deftest agent-repl-test-host-adopt-retry-stops-on-an-unreached-successor ()
   "A dial no daemon answered ends the retry: nobody listens to adopt onto."
@@ -3232,8 +3130,8 @@ far too late."
       (should (null agent-repl-test-host--timers))
       (should (agent-repl-test-host--logged-p :error "retrying=nil stopped=closed")))))
 
-(ert-deftest agent-repl-test-host-adopt-retry-ending-restores-the-page-once ()
-  "Across a retried attempt and the stop, the page moves out once and back once."
+(ert-deftest agent-repl-test-host-adopt-retry-ending-restores-the-conn-and-reloads-no-page ()
+  "Across a retried attempt and the stop, the connection goes back and no page reloads."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--with-failing-adopt (list :kind :timeout :message "no answer")
       ;; Arrange
@@ -3242,7 +3140,7 @@ far too late."
       ;; Act
       (agent-repl-test-host--run-retry)
       ;; Assert
-      (should (= 2 (cl-count :reload agent-repl-test-host--walk)))
+      (should (= 0 (cl-count :reload agent-repl-test-host--walk)))
       (should (eq (agent-repl-host--recorded-conn "ws-1") old)))))
 
 (ert-deftest agent-repl-test-host-adopt-call-waits-out-the-adoptions-own-bound ()
@@ -3314,8 +3212,8 @@ moved to the successor goes back to the daemon that serves it."
       ;; Assert
       (should (eq (agent-repl-host--recorded-conn "ws-1") kept)))))
 
-(ert-deftest agent-repl-test-host-transfer-withdrawn-mid-adopt-reloads-the-page-back ()
-  "The page follows the connection back to the daemon that kept the workspace."
+(ert-deftest agent-repl-test-host-transfer-withdrawn-mid-adopt-reloads-no-page ()
+  "The connection goes back to the daemon that kept the workspace; the page is left alone."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
@@ -3326,8 +3224,7 @@ moved to the successor goes back to the daemon that serves it."
     ;; Act
     (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
     ;; Assert
-    (should (equal agent-repl-test-host--walk '(:reload)))))
-
+    (should-not (memq :reload agent-repl-test-host--walk))))
 (ert-deftest agent-repl-test-host-transfer-withdrawn-ends-the-scheduled-adopt-retry ()
   "A retry armed by a failed adopt finds its walk ended and adopts nothing."
   (agent-repl-test-host--with-harness
@@ -3708,14 +3605,8 @@ registry rather than a stub: a pseudo perspective cannot reach the walk."
       (should (equal (plist-get (agent-repl-host-stream "ws-1") :ref)
                      (agent-repl-test-host--ref))))))
 
-(ert-deftest agent-repl-test-host-link-up-repoints-the-webview-at-the-new-daemon ()
-  "A daemon Emacs relaunches listens on a FRESH PORT, so the page must move.
-
-Without this the tab bar healed, the roster came back and the composer
-worked while the webview went on dialing a daemon that had exited, and
-the page drew a permanent `daemonUnreachable\=' card over its last feed.
-The reload is what re-points it, and it must see the NEW connection —
-frontend.el derives the page url from `agent-repl-host-conn\='."
+(ert-deftest agent-repl-test-host-link-up-reloads-no-page ()
+  "Every daemon serves one shared address, so a relaunch leaves the page to reopen its own streams."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
@@ -3724,24 +3615,9 @@ frontend.el derives the page url from `agent-repl-host-conn\='."
         ;; Act
         (agent-repl-host-on-link-up conn))
       ;; Assert
-      (should (equal (assq :reload agent-repl-test-host--effects) '(:reload . "ws-1")))
-      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects)) conn)))))
-
-(ert-deftest agent-repl-test-host-link-up-repoints-after-subscribing ()
-  "The reload comes AFTER the subscribe, which is what moved `:conn'.
-Reloading first would navigate the page at the daemon that just died."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
-      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
-                ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) "/tmp/ws-1")))
-        (setq agent-repl-test-host--walk nil)
-        ;; Act
-        (agent-repl-host-on-link-up conn))
-      ;; Assert
-      (let ((walk (reverse agent-repl-test-host--walk)))
-        (should (< (seq-position walk :subscribe) (seq-position walk :reload)))))))
-
+      (should-not (assq :reload agent-repl-test-host--effects))
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.link-up-registered ws=ws-1 address=\"127.0.0.1:9001\"")))))
 (ert-deftest agent-repl-test-host-link-up-register-failure-repoints-nothing ()
   "A workspace the new daemon would not register is not re-pointed at it."
   (agent-repl-test-host--with-harness
@@ -3891,7 +3767,7 @@ stamp `current' again and undo the user's selection."
         (agent-repl-host-on-link-up conn))
       ;; Assert
       (let ((entries (mapcar #'cdr (reverse agent-repl-test-host--logs))))
-        (should (< (seq-position entries "elisp.host.link-up-webview-repointed ws=ws-2 address=\"127.0.0.1:9001\"")
+        (should (< (seq-position entries "elisp.host.link-up-registered ws=ws-2 address=\"127.0.0.1:9001\"")
                    (seq-position entries "elisp.host.link-up-reselect ws=ws-1 dir=\"/tmp/ws-1\"")))))))
 
 (ert-deftest agent-repl-test-host-link-up-reselect-holds-the-frame-until-acknowledged ()
@@ -4373,19 +4249,12 @@ retry is scheduled: retrying flipped the webview between the daemons."
     ;; Assert
     (should (agent-repl-test-host--logged-p :error "elisp.host.unknown-refusal-arm"))))
 
-;;;; ---- The handover's webview redial ----
+;;;; ---- The handover leaves the page alone ----
 
-(ert-deftest agent-repl-test-host-adoption-walks-conn-reload-adopt-cancel-subscribe ()
-  "THE ORDER IS THE CONTRACT, and the whole of it is asserted here.
-
-THE RELOAD COMES FIRST, and it is a fix rather than a preference.  The
-successor\='s adopt is a RENDEZVOUS that completes only when every
-participant snapshotted at announcement has called, and for an OPEN
-workspace those are the host AND the reloaded page.  Reloading only after
-the adopt ANSWERED made the host\='s call wait for the very page its own
-return was supposed to create: measured in the sandbox,
-`AdoptHostWorkspace timed out after 10s\=' and the outgoing daemon then
-sat out its whole 30s adoption window."
+(ert-deftest agent-repl-test-host-adoption-walks-adopt-cancel-subscribe ()
+  "THE ORDER IS THE CONTRACT: adopt, then cancel, then subscribe, and no reload.
+The page is the rendezvous\='s other participant, and it adopts itself in
+place on its own transfer notice, so the host\='s adopt waits on no reload."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
@@ -4395,42 +4264,9 @@ sat out its whole 30s adoption window."
     (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
     ;; Assert
     (should (equal (reverse agent-repl-test-host--walk)
-                   '(:reload :adopt :cancel :subscribe)))))
-
-(ert-deftest agent-repl-test-host-adoption-reloads-before-the-adopt-is-issued ()
-  "The web participant exists BEFORE the host waits on it, or neither does.
-
-This is the deadlock\='s own regression test, stated as the one ordering
-that breaks it: the reload is recorded before the AdoptHostWorkspace call
-is even issued, so the reloaded page can complete the rendezvous the
-host\='s call is parked in."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
-    (agent-repl-test-host--subscribe "ws-1")
-    (setq agent-repl-test-host--walk nil)
-    ;; Act
-    (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
-    ;; Assert
-    (let ((walk (reverse agent-repl-test-host--walk)))
-      (should (< (seq-position walk :reload) (seq-position walk :adopt))))))
-
-(ert-deftest agent-repl-test-host-adoption-moves-the-conn-before-the-reload ()
-  "frontend.el reads the URL off `agent-repl-host-conn': reloading first
-would navigate the page straight back at the daemon that released it."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      (setq agent-repl-test-host--successor successor)
-      (agent-repl-test-host--subscribe "ws-1")
-      ;; Act
-      (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
-      ;; Assert
-      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects))
-                  successor)))))
-
-(ert-deftest agent-repl-test-host-adoption-reloads-the-webview-once ()
-  "One adoption is one navigation, never two."
+                   '(:adopt :cancel :subscribe)))))
+(ert-deftest agent-repl-test-host-adoption-reloads-no-page ()
+  "An adoption navigates no page."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
@@ -4438,51 +4274,11 @@ would navigate the page straight back at the daemon that released it."
     ;; Act
     (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
     ;; Assert
-    (should (= 1 (length (seq-filter (lambda (e) (eq (car-safe e) :reload))
+    (should (= 0 (length (seq-filter (lambda (e) (eq (car-safe e) :reload))
                                      agent-repl-test-host--effects))))))
 
-(ert-deftest agent-repl-test-host-adoption-logs-the-webview-redial ()
-  "The page's move is on the record with the address it moved to."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p
-             :info "elisp.host.webview-redialed ws=ws-1 address=\"127.0.0.1:9100\""))))
-
-(ert-deftest agent-repl-test-host-refused-adopt-puts-the-page-back-on-the-old-daemon ()
-  "An adopt that was REFUSED moved nothing, so the page ends where it began.
-
-AMENDED, and the reason is the deadlock above: the page is redialed
-BEFORE the adopt is issued, because it is the participant the adopt waits
-on.  So a refusal can no longer be answered by never having moved it —
-it is answered by moving it back, which is the same guarantee stated
-about the END state instead of about the absence of an act."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (let ((old (agent-repl-connect-open "127.0.0.1:9001")))
-      (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
-            agent-repl-test-host--adopt-answer
-            (list :response (list :arm :error :value (list :message "no"))))
-      (agent-repl-test-host--subscribe "ws-1" old)
-      ;; Act
-      (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
-      ;; Assert: the LAST reload the page was given saw the OLD connection,
-      ;; which is the URL frontend.el would have navigated it to. `assq'
-      ;; answers the most recent record, because effects are pushed.
-      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects)) old)))))
-
-(ert-deftest agent-repl-test-host-failed-adopt-puts-the-page-back-on-the-old-daemon ()
-  "A TRANSPORT failure that ends the walk restores the page too — not only a refusal arm.
-
-AMENDED 2026-11-15: a transport failure that is RETRIED keeps the page on
-the successor, because restoring it and reloading it again on every
-attempt was ~800k reloads in the 0.440.1 handover
-\(`agent-repl-test-host-adopt-retry-reloads-nothing').  The restore is
-now owed when the retry stops, here on a dial no daemon answered."
+(ert-deftest agent-repl-test-host-failed-adopt-puts-the-conn-back-on-the-old-daemon ()
+  "A TRANSPORT failure that ends the walk puts the connection back, and reloads no page."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (let ((old (agent-repl-connect-open "127.0.0.1:9001")))
@@ -4495,7 +4291,7 @@ now owed when the retry stops, here on a dial no daemon answered."
       (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
       ;; Assert
       (should (eq (agent-repl-host-conn "ws-1") old))
-      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects)) old)))))
+      (should-not (assq :reload agent-repl-test-host--effects)))))
 
 (ert-deftest agent-repl-test-host-refused-adopt-leaves-the-conn-on-the-old-daemon ()
   "Moving `:conn' on a refusal would point the page at a daemon that said no."
@@ -4511,8 +4307,8 @@ now owed when the retry stops, here on a dial no daemon answered."
       ;; Assert
       (should (eq (agent-repl-host-conn "ws-1") old)))))
 
-(ert-deftest agent-repl-test-host-transferring-away-reloads-the-webview ()
-  "The refusal path is the same walk, so the page moves there too."
+(ert-deftest agent-repl-test-host-transferring-away-reloads-no-page ()
+  "The refusal path is the same walk, so it reloads no page either."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
@@ -4521,22 +4317,8 @@ now owed when the retry stops, here on a dial no daemon answered."
     (agent-repl-host-handle-refusal
      "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
     ;; Assert
-    (should (= 1 (length (seq-filter (lambda (e) (eq (car-safe e) :reload))
+    (should (= 0 (length (seq-filter (lambda (e) (eq (car-safe e) :reload))
                                      agent-repl-test-host--effects))))))
-
-(ert-deftest agent-repl-test-host-transferring-away-moves-the-conn-before-the-reload ()
-  "Same order on the refusal path, for the same reason."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      (setq agent-repl-test-host--successor successor)
-      (agent-repl-test-host--subscribe "ws-1")
-      ;; Act
-      (agent-repl-host-handle-refusal
-       "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
-      ;; Assert
-      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects))
-                  successor)))))
 
 (ert-deftest agent-repl-test-host-transferred-adopts-the-recorded-successor ()
   "A `transferred' push adopts onto the link\='s RECORDED successor.
@@ -5063,8 +4845,8 @@ On one shared address the daemon it reaches is the one adopting WS."
         ;; Assert
         (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) live))))))
 
-(ert-deftest agent-repl-test-host-stream-lost-reloads-the-webview-onto-the-live-daemon ()
-  "The page is navigated to the LIVE daemon's origin, never the dead one's."
+(ert-deftest agent-repl-test-host-stream-lost-reloads-no-page ()
+  "The page reopens its own streams at the shared address, so nothing reloads it."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--with-dir
       ;; Arrange
@@ -5075,7 +4857,7 @@ On one shared address the daemon it reaches is the one adopting WS."
         ;; Act
         (agent-repl-test-host--lose "ws-1")
         ;; Assert
-        (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects)) live))))))
+        (should-not (assq :reload agent-repl-test-host--effects))))))
 
 (ert-deftest agent-repl-test-host-stream-lost-records-the-reattach-at-info ()
   "The loss is ERROR already; the reattach that answers it is INFO."
@@ -6146,10 +5928,11 @@ workspaces stayed severed."
     ;; Act / Assert
     (should-not (agent-repl-host-page-conn "ws-1"))))
 
-(ert-deftest agent-repl-test-host-switching-to-a-detached-workspace-walks-it-and-loads-its-page ()
-  "A switch to a detached workspace walks it onto the live daemon and reloads its page.
-2026-11-03: the switch selected the workspace, loaded no page and started
-no walk."
+(ert-deftest agent-repl-test-host-switching-to-a-detached-workspace-walks-it-onto-the-live-daemon ()
+  "A switch to a detached workspace walks it onto the live daemon.
+2026-11-03: the switch selected the workspace and started no walk.  The
+walk reloads no page: the page reopens its own streams at the shared
+address."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--with-dirs '("ws-1")
       ;; Arrange
@@ -6163,8 +5946,7 @@ no walk."
           (agent-repl-host-request-switch "ws-1" 'cycle))
         ;; Assert
         (should (equal (agent-repl-test-host--registered-dirs live) '("/tmp/ws-1")))
-        (should (equal (cdr (assq :reload agent-repl-test-host--effects)) "ws-1"))
-        (should (equal (cdr (assq :reload-conn agent-repl-test-host--effects)) live))))))
+        (should-not (assq :reload agent-repl-test-host--effects))))))
 
 ;;;; ---- The one record of a registration's fate ----
 
