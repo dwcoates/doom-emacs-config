@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -527,16 +528,13 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 // the finish, which would hold the queue for nobody. A queue a finish was
 // ended in is republished and kicked.
 func (o *orchestrator) endUncheckedDeploys(ctx context.Context, repo wsm.RepoKey) error {
-	finishes, err := o.deps.DB.RemediationFinishes(ctx)
+	finishes, err := o.queueFinishesAt(ctx, repo, wsm.RemediationDeploying)
 	if err != nil {
 		return err
 	}
 	ended := false
 	var errs []error
 	for _, f := range finishes {
-		if !sameQueue(f.Repo, repo) || f.Step != wsm.RemediationDeploying {
-			continue
-		}
 		did, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace)
 		if err != nil {
 			errs = append(errs, err)
@@ -1207,20 +1205,29 @@ func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*
 	// A DIRECT FINISH UNDER WAY IS DRAWN FIRST, owed check or none (an
 	// escalation's finish runs after its chain ended): its gate and landing
 	// test the fix, its deploy rolls out. A finish sent back to fix is drawn
-	// as its owed check draws it.
-	finish, err := o.finishUnderWay(ctx, repo)
+	// as its owed check draws it, and as FIXING with none owed.
+	finishes, err := o.queueFinishesAt(ctx, repo, wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying, wsm.RemediationFixing)
 	if err != nil {
 		return nil, err
 	}
-	if finish != nil {
-		return o.rosterFinish(ctx, repo, *finish)
+	var fixing *wsm.RemediationFinish
+	for i, f := range finishes {
+		if f.Step != wsm.RemediationFixing {
+			return o.rosterFinish(ctx, repo, f)
+		}
+		if fixing == nil {
+			fixing = &finishes[i]
+		}
 	}
 	owed, err := o.owedMediation(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
 	if owed == nil {
-		return o.rosterFixingUnowed(ctx, repo)
+		if fixing == nil {
+			return nil, nil
+		}
+		return o.rosterFixingUnowed(ctx, repo, *fixing)
 	}
 	out := &sidebar.QueueMediation{Repo: owed.Repository, Mediator: owed.Mediator}
 	switch owed.Stage {
@@ -1262,25 +1269,15 @@ func (o *orchestrator) rosterFinish(ctx context.Context, repo wsm.RepoKey, f wsm
 }
 
 // rosterFixingUnowed is the label of REPO's queue while the mediator's
-// finish, sent back to fix by its gate, holds it with no check owed: the
+// finish F, sent back to fix by its gate, holds it with no check owed: the
 // finish holds the queue (deployHold), so its reason is drawn as a check's
-// fixing is. Nil when no such finish stands.
-func (o *orchestrator) rosterFixingUnowed(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
-	finishes, err := o.deps.DB.RemediationFinishes(ctx)
-	if err != nil {
+// fixing is.
+func (o *orchestrator) rosterFixingUnowed(ctx context.Context, repo wsm.RepoKey, f wsm.RemediationFinish) (*sidebar.QueueMediation, error) {
+	q, ok, err := o.checkedQueueOf(ctx, repo)
+	if err != nil || !ok {
 		return nil, err
 	}
-	for _, f := range finishes {
-		if !sameQueue(f.Repo, repo) || f.Step != wsm.RemediationFixing {
-			continue
-		}
-		q, ok, err := o.checkedQueueOf(ctx, repo)
-		if err != nil || !ok {
-			return nil, err
-		}
-		return &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationFixing, Mediator: f.Workspace}, nil
-	}
-	return nil, nil
+	return &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationFixing, Mediator: f.Workspace}, nil
 }
 
 // republishMediation tells the roster and the queue's subscribers a change
@@ -1535,18 +1532,31 @@ func (o *orchestrator) remakeHeldEscalation(ctx context.Context, q checkedQueue,
 // finishUnderWay answers the direct finish under way in REPO's queue:
 // gating, landing or deploying. Nil when none is.
 func (o *orchestrator) finishUnderWay(ctx context.Context, repo wsm.RepoKey) (*wsm.RemediationFinish, error) {
+	return o.queueFinishAt(ctx, repo, wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying)
+}
+
+// queueFinishAt answers the first finish of REPO's queue standing at one of
+// STEPS (queueFinishesAt), nil when none does.
+func (o *orchestrator) queueFinishAt(ctx context.Context, repo wsm.RepoKey, steps ...wsm.RemediationStep) (*wsm.RemediationFinish, error) {
+	finishes, err := o.queueFinishesAt(ctx, repo, steps...)
+	if err != nil || len(finishes) == 0 {
+		return nil, err
+	}
+	return &finishes[0], nil
+}
+
+// queueFinishesAt answers every finish of REPO's queue standing at one of
+// STEPS, in the store's order. A failed read is answered.
+func (o *orchestrator) queueFinishesAt(ctx context.Context, repo wsm.RepoKey, steps ...wsm.RemediationStep) ([]wsm.RemediationFinish, error) {
 	finishes, err := o.deps.DB.RemediationFinishes(ctx)
 	if err != nil {
 		return nil, err
 	}
+	var out []wsm.RemediationFinish
 	for _, f := range finishes {
-		if !sameQueue(f.Repo, repo) {
-			continue
-		}
-		switch f.Step {
-		case wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying:
-			return &f, nil
+		if sameQueue(f.Repo, repo) && slices.Contains(steps, f.Step) {
+			out = append(out, f)
 		}
 	}
-	return nil, nil
+	return out, nil
 }

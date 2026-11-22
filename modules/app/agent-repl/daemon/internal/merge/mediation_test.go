@@ -1866,3 +1866,82 @@ func TestAFinishDeployingInARepositoryThatChecksNoDeploysIsEnded(t *testing.T) {
 		})
 	}
 }
+
+func TestQueueFinishesAtAnswersTheQueuesFinishesStandingAtTheSteps(t *testing.T) {
+	tests := []struct {
+		name      string
+		elsewhere bool
+		steps     []wsm.RemediationStep
+		readErr   error
+		want      int
+		wantErr   bool
+	}{
+		{name: "a finish at one of the steps is answered", steps: []wsm.RemediationStep{wsm.RemediationGating, wsm.RemediationFixing}, want: 1},
+		{name: "a finish at none of the steps is not", steps: []wsm.RemediationStep{wsm.RemediationDeploying}},
+		{name: "another queue's finish is not", elsewhere: true, steps: []wsm.RemediationStep{wsm.RemediationFixing}},
+		{name: "a failed read is answered", steps: []wsm.RemediationStep{wsm.RemediationFixing}, readErr: errors.New("database is locked"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			repo := mediationKey(h)
+			if tt.elsewhere {
+				repo = wsm.RepoKey(t.TempDir())
+			}
+			standFinish(t, h, repo, wsm.RemediationFixing, true)
+			h.db.mu.Lock()
+			h.db.remediationFinishesErr = tt.readErr
+			h.db.mu.Unlock()
+
+			// Act
+			got, err := h.o.queueFinishesAt(context.Background(), mediationKey(h), tt.steps...)
+			first, firstErr := h.o.queueFinishAt(context.Background(), mediationKey(h), tt.steps...)
+
+			// Assert
+			if (err != nil) != tt.wantErr || (firstErr != nil) != tt.wantErr {
+				t.Fatalf("errors (%v, %v), want failed %v", err, firstErr, tt.wantErr)
+			}
+			if len(got) != tt.want || (first != nil) != (tt.want > 0) {
+				t.Fatalf("queueFinishesAt = %+v, queueFinishAt = %+v; want %d", got, first, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheRosterLabelOfAQueueWhoseMediatorWasSentBackToFix(t *testing.T) {
+	tests := []struct {
+		name      string
+		readErr   error
+		wantStage sidebar.MediationStage
+		wantErr   bool
+	}{
+		{name: "a finish sent back to fix with no check owed is labelled fixing", wantStage: sidebar.MediationFixing},
+		{name: "finishes that cannot be read are answered", readErr: errors.New("database is locked"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			withMediator(t, h)
+			standFinishAt(t, h, mediationKey(h), wsm.RemediationFixing)
+			h.db.mu.Lock()
+			h.db.remediationFinishesErr = tt.readErr
+			h.db.mu.Unlock()
+
+			// Act
+			got, err := h.o.rosterMediation(context.Background(), mediationKey(h))
+
+			// Assert
+			if tt.wantErr {
+				if err == nil || got != nil {
+					t.Fatalf("rosterMediation = (%+v, %v), want the read's failure", got, err)
+				}
+				return
+			}
+			if err != nil || got == nil || got.Stage != tt.wantStage || got.Mediator != "ws-fixer" {
+				t.Fatalf("rosterMediation = (%+v, %v), want the fixing label selecting the mediator", got, err)
+			}
+		})
+	}
+}

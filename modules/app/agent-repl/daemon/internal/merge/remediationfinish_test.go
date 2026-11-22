@@ -1174,21 +1174,6 @@ func TestAFinishOnARunningQueueSuspendsItsHead(t *testing.T) {
 	}
 }
 
-func TestAFinishSentBackToFixWithNoCheckOwedIsLabelledFixing(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	withMediator(t, h)
-	standFinishAt(t, h, mediationKey(h), wsm.RemediationFixing)
-
-	// Act
-	got, err := h.o.rosterMediation(context.Background(), mediationKey(h))
-
-	// Assert
-	if err != nil || got == nil || got.Stage != sidebar.MediationFixing || got.Mediator != "ws-fixer" {
-		t.Fatalf("rosterMediation = (%+v, %v), want the fixing label selecting the mediator", got, err)
-	}
-}
-
 func TestAGivenUpFixOfADispatchedCheckEndsItsFinishSoTheUsersReleaseFreesTheQueue(t *testing.T) {
 	// Arrange: the fix dispatched for the owed check gates with
 	// MaxFixAttempts failed rounds behind it, and its next gate fails.
