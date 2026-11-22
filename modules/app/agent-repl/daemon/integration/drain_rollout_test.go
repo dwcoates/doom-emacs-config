@@ -812,6 +812,14 @@ func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 	stop := make(chan struct{})
 	readErrs := make(chan error, workspaces)
 	var readers sync.WaitGroup
+	// EACH READ DIALS ITS OWN CONNECTION. The shared listener lets the
+	// incumbent accept a read too, and the incumbent exits once its last
+	// workspace has transferred: a connection kept idle across that exit
+	// meets a closed peer on its next write (`broken pipe`) however the
+	// registry answers. A connection that carries one request is served to
+	// its end by the incumbent's graceful stop, so only the registry read is
+	// under test.
+	reader := drainDialPerRequest(addr)
 	for _, f := range fixtures[1:] {
 		readers.Add(1)
 		go func() {
@@ -822,7 +830,7 @@ func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 					return
 				default:
 				}
-				if _, err := successor.ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+				if _, err := reader.ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 					Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 					Record: &agentreplv1.ClientLogRecord{
 						Level:     &agentreplv1.ClientLogRecord_Debug{Debug: &agentreplv1.ClientLogLevelDebug{}},
@@ -1546,6 +1554,15 @@ func stampEveryWorkspacePrompted(t *testing.T, d *harness.Daemon) {
 func drainAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 	t.Helper()
 	d.AwaitAddrMatching(want, func(addr string) bool { return addr == want })
+}
+
+// drainDialPerRequest is drainDial over HTTP/1.1 with keep-alives off: every
+// request dials its own connection, so no connection idles across a daemon's
+// exit.
+func drainDialPerRequest(addr string) agentreplv1connect.AgentReplClient {
+	return agentreplv1connect.NewAgentReplClient(&http.Client{
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}, "http://"+addr)
 }
 
 // drainDial builds a raw Connect client against an arbitrary address, for the
