@@ -46,7 +46,13 @@ import (
 // holding the queue for nobody: a gate given up past MaxFixAttempts, and a
 // mediator whose failed gate sent it back to fix and that stopped without
 // finishing again (settleStoppedFix). An owed check is escalated to the user
-// first, and holds the queue for them; with none owed the queue advances.
+// first, and holds the queue for them; with none owed the queue advances. A
+// closed mediator's finish not yet deploying ends too (remediationClosed),
+// and so does a finish deploying in a repository that checks no deploys,
+// whose deploy owes no check there (endUncheckedDeploys). A CHAIN'S END NEVER
+// ENDS A FINISH UNDER WAY (wsm.EndRemediationFinishesOf forgets only deployed
+// ones): an approval of an earlier deploy leaves the fix's finish holding the
+// queue.
 //
 // EACH STEP IS RECORDED BEFORE IT STARTS (wsm.RemediationFinish): the deploy
 // restarts the daemon, and the one that serves after it carries on where the
@@ -493,11 +499,13 @@ const fixStoppedSummary = "the deploy mediator stopped without finishing the fix
 
 // abandonFinish ends finish F, which nothing finishes any more, and hands its
 // queue to whoever decides it next, so no finish holds the queue for nobody.
-// A check owed is escalated to the user for the mediator first (escalateForMediator),
-// so it holds the queue across the finish's end; a fix dispatched for that
-// check keeps its finish, which the chain's end forgets with the check's
-// release. With no check owed nothing holds the queue any more: the finish
-// ends at ERROR, since a fix was lost, and the queue advances.
+// A check owed is escalated to the user for the mediator first
+// (escalateForMediator), so it holds the queue across the finish's end, for
+// the user. The finish is then ended whatever it served: a chain's end keeps
+// a finish under way (wsm.EndRemediationFinishesOf), so one left standing
+// would hold the queue past the user's release of the escalation. With no
+// check owed nothing holds the queue any more: the finish ends at ERROR,
+// since a fix was lost, and the queue advances.
 func (o *orchestrator) abandonFinish(ctx context.Context, f wsm.RemediationFinish, summary string, fields dlog.Context) error {
 	m, err := o.deps.DB.MediationOf(ctx, f.Repo)
 	if err != nil {
@@ -506,9 +514,6 @@ func (o *orchestrator) abandonFinish(ctx context.Context, f wsm.RemediationFinis
 	if m != nil {
 		if err := o.escalateForMediator(ctx, f.Repo, summary, fields); err != nil {
 			return err
-		}
-		if !f.ServesEscalation {
-			return nil
 		}
 	}
 	ended, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace)
@@ -851,8 +856,10 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 // for when the user closes it: a fix dispatched and not yet deploying is
 // escalated for it, since nobody else fixes the deploy; an escalation is
 // released, the close being the user's ruling that the queue moves on
-// (owner ruling, 2026-11-16); and a finish that serves an escalation ends,
-// since nobody finishes it now. Any other workspace's close is no check's.
+// (owner ruling, 2026-11-16); and a finish not yet deploying ends, since
+// nobody finishes it now and it would hold the queue for nobody. A finish
+// deploying is left to its deploy, which owes the next check. Any other
+// workspace's close is no check's.
 func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
 	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
@@ -875,17 +882,17 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 		return
 	}
 	deploying := f != nil && (f.Step == wsm.RemediationDeploying || f.Step == wsm.RemediationDeployed)
-	switch {
-	case m != nil && m.Dispatched && !deploying:
+	// A FIX DISPATCHED AND NOT DEPLOYING IS ESCALATED FIRST, so its check
+	// holds the queue for the user across its finish's end.
+	dispatched := m != nil && m.Dispatched && !deploying
+	if dispatched {
 		summary := "the deploy mediator was closed before its fix landed; the queue waits for you"
 		if err := o.escalateForMediator(ctx, repo, summary, fields); err != nil {
 			o.deps.Log.Global().Error(opRemediationFinish, "the deploy mediator closed before its fix landed, and its chain could not be escalated; the queue stays held", withField(fields, "error", err.Error()))
+			return
 		}
-		return
-	case m != nil && m.Escalated():
-		_ = o.releaseEscalated(ctx, repo, *m, "the user closed the deploy mediator holding the escalation", fields)
 	}
-	if f != nil && f.ServesEscalation && !deploying {
+	if f != nil && !deploying {
 		ended, err := o.deps.DB.EndRemediationFinish(ctx, ws)
 		if err != nil {
 			o.deps.Log.Global().Error(opRemediationFinish, "a closed deploy mediator's finish could not be ended; it holds the queue", withField(fields, "error", err.Error()))
@@ -898,5 +905,10 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 			o.republishMediation(ctx, repo)
 			o.kick(repo)
 		}
+	}
+	// AN ESCALATION IS RELEASED ONCE NO FINISH OF THE CLOSED MEDIATOR HOLDS
+	// THE QUEUE, so its release's record names what holds the queue after it.
+	if !dispatched && m != nil && m.Escalated() {
+		_ = o.releaseEscalated(ctx, repo, *m, "the user closed the deploy mediator holding the escalation", fields)
 	}
 }

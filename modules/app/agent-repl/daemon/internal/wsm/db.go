@@ -862,8 +862,8 @@ type DB interface {
 	// commit its gate passed on.
 	PassRemediationGate(ctx context.Context, ws WorkspaceID, head string, at time.Time) (bool, error)
 	RecordRemediationLanded(ctx context.Context, ws WorkspaceID, head string, paths []string, at time.Time) (bool, error)
-	// EndRemediationFinishesOf removes every remediation finish of a queue
-	// whose chain ended.
+	// EndRemediationFinishesOf removes every deployed remediation finish of
+	// a queue whose chain ended; a finish still under way is kept.
 	EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int, error)
 	// SubscribeMergeQueue records a merge queue subscription, replacing the
 	// detail of the one its subscriber holds in the same scope, and answers

@@ -490,6 +490,12 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 				continue
 			}
 		}
+		if err := o.endUncheckedDeploys(ctx, q.key); err != nil {
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not end the remediation finishes deploying in a repository that checks no deploys; they hold its queue until the next pass", err) {
+				return
+			}
+			continue
+		}
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
 			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not read whether a repository that checks no deploys owes a check", err) {
@@ -513,6 +519,39 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 					"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
 		}
 	}
+}
+
+// endUncheckedDeploys ends every remediation finish of REPO, a repository
+// that checks its deploys no more, whose deploy is starting: that deploy owes
+// no check in REPO (OweMediations), so nothing would take the hold on from
+// the finish, which would hold the queue for nobody. A queue a finish was
+// ended in is republished and kicked.
+func (o *orchestrator) endUncheckedDeploys(ctx context.Context, repo wsm.RepoKey) error {
+	finishes, err := o.deps.DB.RemediationFinishes(ctx)
+	if err != nil {
+		return err
+	}
+	ended := false
+	var errs []error
+	for _, f := range finishes {
+		if !sameQueue(f.Repo, repo) || f.Step != wsm.RemediationDeploying {
+			continue
+		}
+		did, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if did {
+			ended = true
+			o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy owes no check in a repository that checks no deploys; its finish is ended and holds the queue no more", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
+		}
+	}
+	if ended {
+		o.republishMediation(ctx, repo)
+		o.kick(repo)
+	}
+	return errors.Join(errs...)
 }
 
 // owes reports whether M, a repository's owed check or nil for none, is the

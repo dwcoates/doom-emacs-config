@@ -257,8 +257,13 @@ func joinPaths(a, b []string) string {
 	return strings.Join(all, "\n")
 }
 
-// EndRemediationFinishesOf removes every remediation finish of REPO's queue,
-// answering how many: its chain ended. A finish that serves an escalation
+// EndRemediationFinishesOf removes every DEPLOYED remediation finish of
+// REPO's queue, answering how many: its chain ended, and what the chain's
+// fixes landed is forgotten. A finish still under way (gating, fixing,
+// landing, deploying) is kept: it holds the queue until its own deploy owes
+// the next check (owner ruling, 2026-11-22), and a chain's end ended by the
+// approval of an earlier deploy forgot it while its gate ran, letting the
+// queue's head run beside it (2026-11-22 12:24:51). A finish that serves an escalation
 // (RemediationFinish.ServesEscalation) is no chain's: it outlives every chain
 // until its own deploy, and a chain that ended meanwhile forgot it, stranding
 // its failed gate (2026-11-15, deploy-escalation-20261115-174608).
@@ -270,7 +275,7 @@ func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int
 	}
 	n := 0
 	err = s.write(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ? AND serves_escalation = 0`, string(key))
+		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ? AND serves_escalation = 0 AND step = ?`, string(key), string(RemediationDeployed))
 		if err != nil {
 			return err
 		}

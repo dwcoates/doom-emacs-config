@@ -738,9 +738,7 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	withMediator(t, h)
-	if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
-		t.Fatal(err)
-	}
+	standFinish(t, h, mediationKey(h), wsm.RemediationDeployed, false)
 
 	// Act
 	err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"})
@@ -1763,6 +1761,101 @@ func TestAReleaseWhileTheMediatorsFinishStandsLeavesTheQueueHeldAndSaysSo(t *tes
 			}
 			if !loggedLike(h, want) {
 				t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestAChainsEndLeavesAFixsFinishUnderWayHoldingTheQueue(t *testing.T) {
+	tests := []struct {
+		name       string
+		step       wsm.RemediationStep
+		wantFinish bool
+		wantHeld   bool
+	}{
+		{name: "a finish gating holds the queue past its chain's end", step: wsm.RemediationGating, wantFinish: true, wantHeld: true},
+		{name: "a finish sent back to fix holds the queue past its chain's end", step: wsm.RemediationFixing, wantFinish: true, wantHeld: true},
+		{name: "a finish landing holds the queue past its chain's end", step: wsm.RemediationLanding, wantFinish: true, wantHeld: true},
+		{name: "a finish starting its deploy holds the queue past its chain's end", step: wsm.RemediationDeploying, wantFinish: true, wantHeld: true},
+		{name: "a finish deployed is forgotten with its chain", step: wsm.RemediationDeployed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a fix's finish of the chain, serving no escalation.
+			h := checked(t)
+			owe(t, h)
+			withMediator(t, h)
+			told(t, h, deployStarted, "turn-told")
+			standFinish(t, h, mediationKey(h), tt.step, false)
+			ctx := context.Background()
+
+			// Act: the chain's check is released, ending the chain.
+			released, err := h.o.releaseCheck(ctx, mediationKey(h), *owedCheck(t, h), MediationApproved)
+
+			// Assert
+			if err != nil || !released {
+				t.Fatalf("releaseCheck = (%v, %v), want the check released", released, err)
+			}
+			if f := finishOf(t, h); (f != nil) != tt.wantFinish {
+				t.Fatalf("finish %+v, want it kept %v", f, tt.wantFinish)
+			}
+			held, err := h.o.queueHeld(ctx, mediationKey(h))
+			if err != nil || held != tt.wantHeld {
+				t.Fatalf("queueHeld = (%v, %v), want %v", held, err, tt.wantHeld)
+			}
+		})
+	}
+}
+
+func TestAFinishDeployingInARepositoryThatChecksNoDeploysIsEnded(t *testing.T) {
+	tests := []struct {
+		name       string
+		step       wsm.RemediationStep
+		dropChecks bool
+		finishErr  error
+		wantFinish bool
+		wantKicked bool
+		wantRecord logLike
+	}{
+		{name: "a finish deploying where no deploy owes a check is ended and the queue kicked", step: wsm.RemediationDeploying, dropChecks: true, wantKicked: true,
+			wantRecord: logLike{level: "info", op: opRemediationFinish, text: "its finish is ended and holds the queue no more"}},
+		{name: "a finish gating there is left to reach its deploy", step: wsm.RemediationGating, dropChecks: true, wantFinish: true},
+		{name: "a finish deploying where deploys are checked is left to its deploy's check", step: wsm.RemediationDeploying, wantFinish: true},
+		{name: "an unreadable list of finishes is recorded and leaves the finish holding", step: wsm.RemediationDeploying, dropChecks: true, finishErr: errors.New("database is locked"), wantFinish: true,
+			wantRecord: logLike{level: "error", op: opMediation, text: "could not end the remediation finishes deploying in a repository that checks no deploys"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			withMediator(t, h)
+			standFinish(t, h, mediationKey(h), tt.step, true)
+			if tt.dropChecks {
+				h.config.DeployChecks = nil
+			}
+			ctx := context.Background()
+			checkedNow, err := h.o.checkedQueues(ctx, opMediation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.db.mu.Lock()
+			h.db.remediationFinishesErr = tt.finishErr
+			h.db.mu.Unlock()
+			var kicked []wsm.RepoKey
+			h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+			// Act
+			h.o.releaseUnchecked(ctx, checkedNow)
+
+			// Assert
+			if f := finishOf(t, h); (f != nil) != tt.wantFinish {
+				t.Fatalf("finish %+v, want it standing %v", f, tt.wantFinish)
+			}
+			if (len(kicked) > 0) != tt.wantKicked {
+				t.Fatalf("kicked %v, want kicked %v", kicked, tt.wantKicked)
+			}
+			if tt.wantRecord.text != "" && !loggedLike(h, tt.wantRecord) {
+				t.Fatalf("records = %v, want %+v", h.logs.Records(), tt.wantRecord)
 			}
 		})
 	}
