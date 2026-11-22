@@ -48,10 +48,11 @@ type Claim interface {
 	Departed() bool
 	// Withdraw removes the daemon.addr file WHILE IT STILL NAMES THIS CLAIM
 	// (its advertised address and this process's pid; every daemon advertises
-	// the same shared address), and answers whether it removed anything.
+	// the same shared address), and answers what it read there and whether
+	// it removed anything (Withdrawal), on an error too as far as it got.
 	// Orderly exit calls it; it is idempotent, removing an absent file is
 	// success, and a successor's advertisement is left alone.
-	Withdraw() (bool, error)
+	Withdraw() (Withdrawal, error)
 	// Verify reports whether what this claim OWNS ON DISK is still there: the
 	// state root it was bound in (the same directory, not one recreated at
 	// the same path), the daemon.lock whose kernel lock it holds (the same

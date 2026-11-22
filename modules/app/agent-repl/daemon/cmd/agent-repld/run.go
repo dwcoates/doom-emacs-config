@@ -1453,10 +1453,9 @@ func beginShutdown(claim departer, accept sharedStopper, withdrawal *addrWithdra
 }
 
 // withdrawer is the slice of daemonaddr.Claim that addrWithdrawal needs: the
-// idempotent, address/pid-guarded removal and the address it names.
+// idempotent, address/pid-guarded removal, answering what it read.
 type withdrawer interface {
-	Withdraw() (bool, error)
-	Address() string
+	Withdraw() (daemonaddr.Withdrawal, error)
 }
 
 // addrWithdrawal takes daemon.addr down and keeps the exit's records honest.
@@ -1472,57 +1471,81 @@ type withdrawer interface {
 // begin; the early flag keeps that no-op from being recorded as a successor
 // takeover. A "withdrew" record fires only when a call actually removed the
 // file, and a Withdraw error is always surfaced at ERROR.
+//
+// EVERY RECORD NAMES WHAT THE FILE HELD (withdrawalFields): this daemon's own
+// advertisement beside the pid and addresses daemon.addr named when it was
+// read, or that it was absent or unread. A record naming only this daemon's
+// address could not tell whose file a withdrawal left alone, and every daemon
+// advertises the same shared address (2026-11-22).
 type addrWithdrawal struct {
 	claim withdrawer
 	log   dlog.Logger
 	early bool
 }
 
+// withdrawalFields are what every withdrawal record carries: this claim's
+// advertised address, pid and private address, and daemon.addr's pid, shared
+// address and private address as read, or "file" naming why there are none.
+func withdrawalFields(wd daemonaddr.Withdrawal) dlog.Context {
+	fields := dlog.Context{
+		"address":         wd.Address,
+		"pid":             wd.PID,
+		"private_address": wd.Private,
+	}
+	switch {
+	case !wd.Read:
+		fields["file"] = "unread"
+	case !wd.Present:
+		fields["file"] = "absent"
+	default:
+		fields["file"] = "present"
+		fields["file_address"] = wd.File.Address
+		fields["file_pid_known"] = wd.File.PIDKnown
+		if wd.File.PIDKnown {
+			fields["file_pid"] = wd.File.PID
+		}
+		fields["file_private_address"] = wd.File.Private
+	}
+	return fields
+}
+
 // begin withdraws the advertisement at the start of the shutdown sequence.
 func (w *addrWithdrawal) begin() {
-	withdrawn, err := w.claim.Withdraw()
+	wd, err := w.claim.Withdraw()
 	if err != nil {
-		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Merge(withdrawalFields(wd), dlog.Context{
 			"error": err.Error(),
-		})
+		}))
 		return
 	}
-	if withdrawn {
+	if wd.Withdrawn {
 		w.early = true
-		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", dlog.Context{
-			"address": w.claim.Address(),
-		})
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", withdrawalFields(wd))
 	}
 }
 
 // finish is the deferred catch-all withdrawal, run on every exit.
 func (w *addrWithdrawal) finish() {
-	withdrawn, err := w.claim.Withdraw()
+	wd, err := w.claim.Withdraw()
 	if err != nil {
-		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Merge(withdrawalFields(wd), dlog.Context{
 			"error": err.Error(),
-		})
+		}))
 		return
 	}
-	if withdrawn {
-		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", dlog.Context{
-			"address": w.claim.Address(),
-		})
+	if wd.Withdrawn {
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", withdrawalFields(wd))
 		return
 	}
 	if w.early {
 		// begin already took the file down at the start of shutdown; this
 		// catch-all had nothing left to do.
-		w.log.Debug("daemon.cmd.exit", "daemon.addr was already withdrawn at the start of shutdown", dlog.Context{
-			"address": w.claim.Address(),
-		})
+		w.log.Debug("daemon.cmd.exit", "daemon.addr was already withdrawn at the start of shutdown", withdrawalFields(wd))
 		return
 	}
 	// The file names somebody else -- a successor that took over and published
 	// its own address -- or nothing at all.
-	w.log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", dlog.Context{
-		"address": w.claim.Address(),
-	})
+	w.log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", withdrawalFields(wd))
 }
 
 // testBarrierEnv is set to "1" by the integration harness for every daemon it
