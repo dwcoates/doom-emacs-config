@@ -15,7 +15,17 @@
  * for every section it sized in ONE UpdateSidebarView (`changeViews`), whose
  * roster push draws it on every page. The Open section is never sized: it
  * fills what the bands leave, so a drag against it sizes the band below
- * alone, and a drag between two bands sizes both. Escape, or a pointer lost
+ * alone, and a drag between two bands sizes both. EITHER WAY THE DRAG MOVES
+ * ITS OWN RULE ALONE (owner report, 2026-11-21): the band below is given
+ * exactly the room the section above it gives up, at the section above's
+ * stops, so a drag against an Open section that shows every line cannot hand
+ * the band's room on to the band below it. THE ROOM BETWEEN THE TWO IS
+ * CONSERVED (owner report, 2026-11-21, a Merge Queue of nine lines dragged to
+ * none against a Recently Merged of one): the section above gives up only the
+ * room the section below can take, and the reverse. A drag sizes only the
+ * sections it changed: one it could not change keeps the height it had,
+ * fitted or sized, so a drag never pins a section the owner did not move.
+ * Escape, or a pointer lost
  * mid-drag, puts back what the wire says. A double click on a rule fits the
  * sections beside it by their share again.
  */
@@ -25,7 +35,7 @@ import type { SidebarViewSectionSizeSchema, UpdateSidebarViewRequestSchema } fro
 import { DRAGGING_CLASS } from "../drag.js";
 import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { BAND_SIZED_ATTRIBUTE, fittedSection, type FittedSection } from "./band-fit.js";
+import { BAND_SIZED_ATTRIBUTE, bandSize, fittedSection, type FittedSection } from "./band-fit.js";
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
 import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, type SidebarContext } from "./context.js";
 import { changeViews, type ViewPiece } from "./view-change.js";
@@ -118,17 +128,29 @@ export function nearestStop(stops: readonly number[], px: number): number {
 
 /**
  * The lines a drag DY px down (up when negative) gives the sections beside
- * a rule, from what the last fit measured of them. Against the Open section
- * (UPPER null) only the band below is sized: it gives up what the rule moves
- * down. Between two bands, the upper's new height snaps to its nearest stop
- * and the lower keeps the lines that fit in what the two stood in together.
+ * a rule, from what the last fit measured of them. The two stood in
+ * COMBINED px together, and the rule moves that room between them, none of it
+ * out: the upper's new height snaps to its nearest stop, but never shorter than
+ * the last stop that still leaves the lower room to take every line it holds
+ * (past it the lower could take no more, and the room would go to the Open
+ * section or the band below), and never taller than the two stood in
+ * together (past it the upper would take the band below the lower's room). The lower
+ * keeps the lines that fit in what the upper leaves. The Open section as
+ * UPPER is measured the same, though only the band below it is sized.
  */
-export function draggedLines(upper: FittedSection | null, lower: FittedSection, dy: number): { upper: number | null; lower: number } {
+export function draggedLines(upper: FittedSection, lower: FittedSection, dy: number): { upper: number; lower: number } {
   const lowerPx = lower.stops[lower.lines];
-  if (upper === null) return { upper: null, lower: nearestStop(lower.stops, lowerPx - dy) };
   const upperPx = upper.stops[upper.lines];
-  const upperLines = nearestStop(upper.stops, upperPx + dy);
-  const left = upperPx + lowerPx - upper.stops[upperLines];
+  const combined = upperPx + lowerPx;
+  const lowerWhole = lower.stops[lower.stops.length - 1];
+  let floor = 0;
+  let ceiling = 0;
+  upper.stops.forEach((stop, i) => {
+    if (stop + lowerWhole <= combined + 0.5) floor = i;
+    if (stop <= combined + 0.5) ceiling = i;
+  });
+  const upperLines = Math.min(ceiling, Math.max(floor, nearestStop(upper.stops, upperPx + dy)));
+  const left = combined - upper.stops[upperLines];
   let lowerLines = 0;
   while (lowerLines + 1 < lower.stops.length && lower.stops[lowerLines + 1] <= left + 0.5) lowerLines += 1;
   return { upper: upperLines, lower: lowerLines };
@@ -182,10 +204,14 @@ export function measuredSection(section: HTMLElement, fitOf: (section: HTMLEleme
   return fit;
 }
 
-/** The view pieces, and the request's sizes, for the sections of PAIR at LINES (null: fitted). */
-function sizedPieces(pair: ResizePair, lines: { upper: number | null; lower: number | null }, upperSized: boolean) {
-  const entries: Array<{ section: HTMLElement; lines: number | null }> = [{ section: pair.lower, lines: lines.lower }];
-  if (upperSized) entries.unshift({ section: pair.upper, lines: lines.upper });
+/** One section a rule's drag sizes, at LINES (null: fitted). */
+interface SizedSection {
+  section: HTMLElement;
+  lines: number | null;
+}
+
+/** The view pieces, and the request's sizes, for ENTRIES. */
+function sizedPieces(entries: readonly SizedSection[]) {
   const pieces: ViewPiece[] = entries.map((e) => ({ key: heightViewKey(foldKeyOf(e.section)), value: e.lines }));
   const sizes = entries.map(
     (e): MessageInitShape<typeof SidebarViewSectionSizeSchema> => ({
@@ -226,21 +252,31 @@ export function installSectionResize(
     if (pressed === null) return;
     const { grip, pair } = pressed;
     event.preventDefault();
-    const upperSized = !pair.upper.classList.contains(OPEN_SECTION_CLASS);
-    const upperFit = upperSized ? measuredSection(pair.upper, fitOf) : null;
+    const sizing = pair.upper.classList.contains(OPEN_SECTION_CLASS) ? [pair.lower] : [pair.upper, pair.lower];
+    const upperFit = measuredSection(pair.upper, fitOf);
     const lowerFit = measuredSection(pair.lower, fitOf);
     const startY = event.clientY;
-    const start = { upper: upperFit?.lines ?? null, lower: lowerFit.lines };
+    const linesOf = (lines: { upper: number; lower: number }): number[] => (sizing.length === 2 ? [lines.upper, lines.lower] : [lines.lower]);
+    const startLines = { upper: upperFit.lines, lower: lowerFit.lines };
+    const start = linesOf(startLines);
+    // What the wire says of each section, which one the drag leaves unchanged keeps.
+    const startSizes = sizing.map((section) => bandSize(section));
+    let shownLines = startLines;
     let shown = start;
+    let pointerPx = 0;
     const held: Array<{ key: string; token: number }> = [];
     grip.setPointerCapture(event.pointerId);
     doc.documentElement.classList.add(DRAGGING_CLASS, RESIZING_CLASS);
 
     const move = (e: PointerEvent): void => {
-      const next = draggedLines(upperFit, lowerFit, e.clientY - startY);
-      if (next.upper === shown.upper && next.lower === shown.lower) return;
+      pointerPx = e.clientY - startY;
+      const nextLines = draggedLines(upperFit, lowerFit, pointerPx);
+      const next = linesOf(nextLines);
+      if (next.every((lines, i) => lines === shown[i])) return;
+      shownLines = nextLines;
       shown = next;
-      for (const piece of sizedPieces(pair, next, upperSized).pieces) held.push({ key: piece.key, token: sc.view.ask(piece.key, piece.value) });
+      const asked = sizing.map((section, i) => ({ section, lines: next[i] === start[i] ? startSizes[i] : next[i] }));
+      for (const piece of sizedPieces(asked).pieces) held.push({ key: piece.key, token: sc.view.ask(piece.key, piece.value) });
       refit();
     };
     const end = (commit: boolean): void => {
@@ -251,8 +287,9 @@ export function installSectionResize(
       doc.removeEventListener("keydown", key, true);
       doc.documentElement.classList.remove(DRAGGING_CLASS, RESIZING_CLASS);
       dragging = null;
-      const moved = shown.upper !== start.upper || shown.lower !== start.lower;
-      if (!commit || !moved) {
+      // ONLY A SECTION THE DRAG CHANGED IS SIZED: one it left as it stood keeps its height.
+      const changed = sizing.map((section, i) => ({ section, lines: shown[i] })).filter((_, i) => shown[i] !== start[i]);
+      if (!commit || changed.length === 0) {
         for (const { key: k, token } of held) sc.view.abandon(k, token);
         refit();
         log.debug(commit ? "a sidebar rule was pressed and let go where it stood" : "a sidebar rule's drag was cancelled", {
@@ -261,10 +298,20 @@ export function installSectionResize(
         });
         return;
       }
-      const { pieces, change } = sizedPieces(pair, shown, upperSized);
+      const { pieces, change } = sizedPieces(changed);
       log.info("a sidebar rule was dragged: asking the daemon for the sections' heights", {
         operation: "sidebar.section-resize",
-        context: { upper: pair.upper.className, lower: pair.lower.className, from: `${start.upper}/${start.lower}`, to: `${shown.upper}/${shown.lower}` },
+        context: {
+          upper: pair.upper.className,
+          lower: pair.lower.className,
+          from: `${startLines.upper}/${startLines.lower}`,
+          to: `${shownLines.upper}/${shownLines.lower}`,
+          upper_total: upperFit.stops.length - 1,
+          lower_total: lowerFit.stops.length - 1,
+          pointer_px: pointerPx,
+          moved_px: upperFit.stops[shownLines.upper] - upperFit.stops[startLines.upper],
+          sized: changed.map((c) => foldKeyOf(c.section)).join(" "),
+        },
       });
       void changeViews(sc, { pieces, change, control: grip }).then((took) => {
         if (!took) refit();
@@ -292,7 +339,8 @@ export function installSectionResize(
     if (pressed === null) return;
     const { grip, pair } = pressed;
     event.preventDefault();
-    const { pieces, change } = sizedPieces(pair, { upper: null, lower: null }, !pair.upper.classList.contains(OPEN_SECTION_CLASS));
+    const bands = pair.upper.classList.contains(OPEN_SECTION_CLASS) ? [pair.lower] : [pair.upper, pair.lower];
+    const { pieces, change } = sizedPieces(bands.map((section) => ({ section, lines: null })));
     log.info("a sidebar rule was double clicked: asking the daemon to fit the sections beside it", {
       operation: "sidebar.section-resize.fit",
       context: { upper: pair.upper.className, lower: pair.lower.className },

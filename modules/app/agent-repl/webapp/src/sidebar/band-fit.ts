@@ -736,9 +736,20 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     });
     throw new Error(`band fit: fitting moved the room from ${room}px to ${fittedRoom}px`);
   }
-  log.debug("fitted the sidebar bands", { operation: "sidebar.band-fit", context });
+  // A FIT THAT DREW OTHER LINES THAN THE LAST ONE IS KEPT in the log (owner
+  // report, 2026-11-21: what a dragged rule drew could not be read from it);
+  // a fit that drew the same lines is debug.
+  const drawn = `${lines.open}/${lines.queue}/${lines.merged}/${lines.hidden}`;
+  const changed = drawnLines.get(pane) !== drawn;
+  drawnLines.set(pane, drawn);
+  const record = { operation: "sidebar.band-fit", context: { ...context, drawn } };
+  if (changed) log.info("fitted the sidebar bands to other lines than before", record);
+  else log.debug("fitted the sidebar bands", record);
   return lines;
 }
+
+/** The lines (open/queue/merged/hidden) each pane's last fit drew. */
+const drawnLines = new WeakMap<HTMLElement, string>();
 
 /** What the last fit measured of one section: its stops and the whole lines it shows. */
 export interface FittedSection {
