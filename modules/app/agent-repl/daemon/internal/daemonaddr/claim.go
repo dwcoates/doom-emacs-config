@@ -2,6 +2,7 @@ package daemonaddr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -312,8 +313,47 @@ func (c *claim) Publish() error {
 	return nil
 }
 
+// WithdrawOutcome says what a Withdraw found at daemon.addr and did with it.
+type WithdrawOutcome string
+
+const (
+	// WithdrawRemoved: the file named this daemon and was removed under the
+	// boot claim.
+	WithdrawRemoved WithdrawOutcome = "removed"
+	// WithdrawAbsent: there was no file to remove.
+	WithdrawAbsent WithdrawOutcome = "absent"
+	// WithdrawNamesAnother: the file names another daemon and was left.
+	WithdrawNamesAnother WithdrawOutcome = "names_another"
+	// WithdrawHoldsNoClaim: this claim never held the boot claim (a successor
+	// that never took over), so the file was not touched.
+	WithdrawHoldsNoClaim WithdrawOutcome = "holds_no_claim"
+	// WithdrawClaimHeld: this claim had yielded the boot claim and another
+	// process holds it now, so the file is the holder's and was not read.
+	WithdrawClaimHeld WithdrawOutcome = "claim_held"
+)
+
+// Withdrawal is what a Withdraw did, for the caller's record.
+type Withdrawal struct {
+	Outcome WithdrawOutcome
+	// Yielded is true when the claim had yielded the boot claim, so the
+	// withdrawal re-took it to judge the file (or found it held).
+	Yielded bool
+	// Path is the daemon.addr path judged.
+	Path string
+	// PID is this daemon's process id.
+	PID int
+	// Named is what the file named when it was read and present.
+	Named Advertisement
+	// Holder is the process the kernel named holding the boot claim, for
+	// WithdrawClaimHeld; its PID is zero when the kernel named none.
+	Holder Holder
+}
+
+// Removed answers whether the withdrawal removed daemon.addr.
+func (w Withdrawal) Removed() bool { return w.Outcome == WithdrawRemoved }
+
 // Withdraw implements Claim. It removes daemon.addr ONLY while the file still
-// names THIS claim's address, and answers whether it removed anything.
+// names THIS claim's address, and answers what it did.
 //
 // THE ADVERTISEMENT IS NOT REMOVED BY WHOEVER EXITS LAST. A blue-green
 // handover ends with the SUCCESSOR publishing its own address into this same
@@ -332,30 +372,144 @@ func (c *claim) Publish() error {
 // instant, and a read-then-remove there deleted the successor's fresh
 // advertisement when it landed between the two (2026-11-17), leaving the
 // successor to read its own state as vanished and stand down.
-func (c *claim) Withdraw() (bool, error) {
+//
+// A CLAIM THAT YIELDED RE-TAKES THE BOOT CLAIM to withdraw; see
+// withdrawAfterYieldLocked.
+func (c *claim) Withdraw() (Withdrawal, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// THE ADVERTISEMENT IS NO LONGER THIS CLAIM'S TO VERIFY from the first
 	// call on, whatever the file then says: an orderly exit is taking it down,
 	// or a successor has already replaced it.
 	c.published = false
+	w := Withdrawal{Path: c.addrPath, PID: c.pid, Yielded: c.yielded}
+	if c.yielded {
+		return c.withdrawAfterYieldLocked(w)
+	}
 	if c.lock == nil {
-		return false, nil
+		w.Outcome = WithdrawHoldsNoClaim
+		return w, nil
 	}
 	raw, err := os.ReadFile(c.addrPath)
 	if os.IsNotExist(err) {
-		return false, nil
+		w.Outcome = WithdrawAbsent
+		return w, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
+		return w, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
 	}
-	if ParseAdvertisement(string(raw)).Address != c.advertisedLocked() {
-		return false, nil
+	w.Named = ParseAdvertisement(string(raw))
+	if w.Named.Address != c.advertisedLocked() {
+		w.Outcome = WithdrawNamesAnother
+		return w, nil
 	}
 	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
-		return false, fmt.Errorf("remove %q: %w", c.addrPath, err)
+		return w, fmt.Errorf("remove %q: %w", c.addrPath, err)
 	}
-	return true, nil
+	w.Outcome = WithdrawRemoved
+	return w, nil
+}
+
+// withdrawAfterYieldLocked is Withdraw for a claim that YIELDED the boot
+// claim. c.mu is held.
+//
+// THE INVARIANT: when a daemon that advertised exits orderly, either it
+// removed its own advertisement while holding the boot claim, or another
+// process holds the claim at that moment and so owns the file. A booting
+// daemon reads a standing advertisement as its predecessor's death
+// (PredecessorAdvertisement), so a yielded incumbent that left its file for a
+// successor that never took the claim up -- the successor was shut down
+// before its wait (AwaitBootClaim) took the lock -- was recorded dead though
+// nobody crashed (2026-11-21).
+//
+// So the yielded claim re-takes the boot claim NON-BLOCKING, on the same
+// kernel lock (acquireBootLock), and never its serving lock: this daemon is
+// no longer serving. Taken, nobody else holds it, so the file is this
+// daemon's to judge: it is removed only while it still names THIS PROCESS'S
+// pid, and the claim is released at once. Refused, another process holds it
+// and owns the file, which is left unread.
+//
+// Every interleaving with the successor (S) against this incumbent's exit
+// (I), each covered by the kernel's arbitration of the one lock:
+//
+//   - S takes the claim BEFORE I's exit, and publishes: I's attempt is
+//     refused while S holds it (left to S, which already rewrote the file);
+//     after S released it, I takes it and the file names S's pid (left).
+//   - S takes the claim before I's exit and abandons before publishing: I's
+//     attempt is refused while S holds it (S owns the file; see below), or,
+//     once S released it, I takes it and removes its own file.
+//   - S takes the claim AFTER I's exit: I took it, removed its own file and
+//     released it before S could hold it; S's Publish then writes a fresh
+//     file under the claim.
+//   - S abandons its wait BEFORE I's exit: nobody holds the claim, I takes it
+//     and removes its own file -- the 2026-11-21 sequence.
+//   - S abandons its wait AFTER I's exit: I took it and removed its own file
+//     first; S's later abandon touches nothing.
+//   - S is BLOCKED in its wait while I briefly re-holds the claim: S's wait
+//     is a blocking kernel record lock (blockForBootLock, raced only against
+//     the daemon's lifetime, never a bound), so it simply acquires on I's
+//     release; the re-hold is one read and one remove. Its Publish (or
+//     retryAdvertise, whose 30s advertiseRefusedBound is only an ERROR said
+//     while the wait goes on) is not failed by it. An ORDINARY boot that
+//     collides with the re-hold finds the serving lock free and waits for
+//     the release within ClaimWaitBound (acquireBootLockWithin), and then
+//     reads the file already gone.
+//   - A third, ordinary boot holds the claim at I's exit: I's attempt is
+//     refused, and the holder owns the file.
+//
+// The one case the holder's ownership does not cover by itself: S takes the
+// claim, I exits while S holds it, and S then exits orderly WITHOUT
+// publishing. S's own Withdraw removes the file only when it names S's
+// advertised address (the shared one, once advertised), so I's file can be
+// left behind. Closing it needs S to tell I's orderly exit from I's death,
+// which nothing on disk says today; it is not closed here.
+//
+// A CLOSED CLAIM DOES NOT RE-TAKE: Close is the end of this claim's footprint
+// on the state root (as in AwaitBootClaim), and the exit withdraws before it
+// closes, so a withdrawal after it is an ordering defect, surfaced.
+func (c *claim) withdrawAfterYieldLocked(w Withdrawal) (Withdrawal, error) {
+	if c.closed {
+		return w, fmt.Errorf("withdraw %q after a yield: the claim was closed, so the boot claim is not re-taken to judge the file", c.addrPath)
+	}
+	lock, err := acquireBootLock(LockPath(c.addrPath))
+	if err != nil {
+		var held *HeldError
+		if errors.As(err, &held) {
+			w.Outcome = WithdrawClaimHeld
+			w.Holder = held.Holder
+			return w, nil
+		}
+		return w, fmt.Errorf("re-take the yielded boot claim to withdraw %q: %w", c.addrPath, err)
+	}
+	w, judgeErr := c.removeOwnPIDLocked(w)
+	if rerr := lock.release(); rerr != nil {
+		return w, errors.Join(judgeErr, fmt.Errorf("release the boot claim re-taken to withdraw %q: %w", c.addrPath, rerr))
+	}
+	return w, judgeErr
+}
+
+// removeOwnPIDLocked removes daemon.addr when it names this process's pid,
+// under a boot claim the caller holds. A shared address names every daemon
+// alike, so the pid is what makes the advertisement this daemon's own.
+func (c *claim) removeOwnPIDLocked(w Withdrawal) (Withdrawal, error) {
+	raw, err := os.ReadFile(c.addrPath)
+	if os.IsNotExist(err) {
+		w.Outcome = WithdrawAbsent
+		return w, nil
+	}
+	if err != nil {
+		return w, fmt.Errorf("read %q before withdrawing it after a yield: %w", c.addrPath, err)
+	}
+	w.Named = ParseAdvertisement(string(raw))
+	if !w.Named.PIDKnown || w.Named.PID != c.pid {
+		w.Outcome = WithdrawNamesAnother
+		return w, nil
+	}
+	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
+		return w, fmt.Errorf("remove %q after a yield: %w", c.addrPath, err)
+	}
+	w.Outcome = WithdrawRemoved
+	return w, nil
 }
 
 // Depart implements Claim. It releases the serving lock and keeps the boot
