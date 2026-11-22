@@ -5424,11 +5424,13 @@ encoder reads: the common codec owns the real encoding.")
                     (list :editor-latencies
                           (list (list :kind :stall :seconds 0.25)
                                 (list :kind :elisp-reload :seconds 1)
-                                (list :kind :input-wait :seconds 0.4))))
+                                (list :kind :input-wait :seconds 0.4)
+                                (list :kind :viewed-reattach :seconds 12.5))))
                    '((editorStartup . [])
                      (editorLatencies . [((kind . "EDITOR_LATENCY_KIND_STALL") (seconds . 0.25))
                                          ((kind . "EDITOR_LATENCY_KIND_ELISP_RELOAD") (seconds . 1.0))
-                                         ((kind . "EDITOR_LATENCY_KIND_INPUT_WAIT") (seconds . 0.4))]))))))
+                                         ((kind . "EDITOR_LATENCY_KIND_INPUT_WAIT") (seconds . 0.4))
+                                         ((kind . "EDITOR_LATENCY_KIND_VIEWED_REATTACH") (seconds . 12.5))]))))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-editor-latency ()
   "An unknown kind or a bad time never reaches the wire."

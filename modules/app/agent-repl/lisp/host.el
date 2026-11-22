@@ -111,8 +111,9 @@
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
 ;; owns the webview, popup.el owns the one shared editor popup.
-(declare-function agent-repl-webhost-note-downtime "webhost" (ws))
-(declare-function agent-repl-webhost-end-downtime "webhost" (ws))
+(declare-function agent-repl-webhost-downtime-start "webhost" (ws))
+(declare-function agent-repl-latency-report-editor "latency-report" (kind seconds))
+(declare-function agent-repl--now-unix-ms "core" ())
 (declare-function agent-repl-frontend-reload-webapp "frontend" (ws build))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
 (declare-function agent-repl-magit-log-commit "magit" (ws dir branch commit))
@@ -1982,10 +1983,15 @@ and superseded one way.  TRIGGER is recorded."
     ;; DOWNTIME: the page, handed the instant with its next load, measures
     ;; from it to its conversation drawn (`viewed_downtime').  A first
     ;; attachment has no recorded daemon, so it is no downtime.
-    (when (agent-repl-host--recorded-conn ws)
-      (agent-repl-webhost-note-downtime ws))
-    (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger
-                                             :promotions (agent-repl-link-promotions)))
+    ;; THE START LIVES IN THE WALK, never in a table of its own: a walk
+    ;; superseded by a newer one hands its start on (one outage, its first
+    ;; instant), and a walk that ends any other way takes its start with it.
+    (let ((downtime (or (plist-get was :downtime-ms)
+                        (and (agent-repl-host--recorded-conn ws)
+                             (agent-repl-webhost-downtime-start ws)))))
+      (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger
+                                               :promotions (agent-repl-link-promotions)
+                                               :downtime-ms downtime)))
     ;; A NEWER WALK THAT IS NOT AN ADOPT ONTO THE SAME DAEMON ENDS THE HOLD:
     ;; the superseded adopt's answer is dropped, so nothing else would send
     ;; what it held.
@@ -2065,6 +2071,49 @@ was attached, and a stalled handover grew the loaded pages to 78."
 (defun agent-repl-host--reattach-current-p (ws token)
   "Return non-nil when TOKEN is WS\='s newest reattach walk."
   (equal token (plist-get (plist-get (agent-repl-host--entry ws) :reattach) :token)))
+
+;;;; ---- The viewed workspace's outage: one episode, ended once ----
+
+(defvar agent-repl-host--landing-downtime nil
+  "(WS . MS) while WS\='s walk lands, MS its unclaimed downtime start or nil.
+Bound only for the extent of `agent-repl-host--landed', whose reattach
+loads WS\='s page: the load takes MS from here, the walk having been
+cleared by then.")
+
+(defun agent-repl-host-take-downtime (ws)
+  "WS\='s downtime start in epoch ms, or nil; given up once.
+Read from the landing walk when one is landing for WS, else from WS\='s
+walk in flight (an adopt\='s page loads beside the adopt, before it lands)."
+  (if (and agent-repl-host--landing-downtime
+           (equal (car agent-repl-host--landing-downtime) ws))
+      (prog1 (cdr agent-repl-host--landing-downtime)
+        (setcdr agent-repl-host--landing-downtime nil))
+    (let ((walk (plist-get (agent-repl-host--entry ws) :reattach)))
+      (prog1 (plist-get walk :downtime-ms)
+        (when walk
+          (agent-repl-host--put ws :reattach (plist-put walk :downtime-ms nil)))))))
+
+(defun agent-repl-host--landed (ws trigger settle)
+  "Land WS\='s walk by calling SETTLE, and end its outage exactly once.
+SETTLE moves the stream and loads the page (a reattach, or an adopt\='s
+settling that may defer the move); TRIGGER is recorded.
+The outage ends in one of two ways: a page load during the landing takes
+its start and the page measures it (`viewed_downtime'), or the stream comes
+back with the page kept and Emacs measures it here
+\(`agent-repl-host--measure-downtime')."
+  (let* ((walk (plist-get (agent-repl-host--entry ws) :reattach))
+         (agent-repl-host--landing-downtime (cons ws (plist-get walk :downtime-ms))))
+    (funcall settle)
+    (agent-repl-host--measure-downtime ws trigger (cdr agent-repl-host--landing-downtime))))
+
+(defun agent-repl-host--measure-downtime (ws trigger started)
+  "Report WS\='s outage from STARTED (epoch ms, or nil) to now.
+No page loaded to carry STARTED, so Emacs measures it."
+  (when started
+    (let ((seconds (/ (- (agent-repl--now-unix-ms) started) 1000.0)))
+      (agent-repl--info ws "elisp.host.downtime-measured ws=%s trigger=%s seconds=%.3f"
+                        ws trigger seconds)
+      (agent-repl-latency-report-editor :viewed-reattach seconds))))
 
 (defun agent-repl-host--reattached (ws new ref trigger)
   "Finish WS\='s reattach onto NEW with REF: move the stream, then say so.
@@ -2242,9 +2291,8 @@ incumbent failed after the successor was promoted, and `main
      ;; THE PAGE IS LEFT AS IT IS: every daemon serves one shared address,
      ;; so the page's own streams reopen there by themselves.
      (t
-      (agent-repl-host--reattached ws new ref trigger)
-      ;; NO PAGE LOAD FOLLOWS to carry the noted start, so the outage ends here.
-      (agent-repl-webhost-end-downtime ws)
+      (agent-repl-host--landed
+       ws trigger (lambda () (agent-repl-host--reattached ws new ref trigger)))
       (agent-repl--info ws (format "elisp.host.%s-registered ws=%%s address=%%S" trigger)
                         ws (agent-repl-connect-connection-address new))))))
 
@@ -2561,8 +2609,8 @@ is recorded."
                 (:success
                  (agent-repl--info ws "elisp.host.adopted ws=%s address=%S conn=%s"
                                    ws address (agent-repl-host--conn-id new))
-                 (agent-repl-host--adopt-settled ws new ref trigger)
-                 (agent-repl-webhost-end-downtime ws)
+                 (agent-repl-host--landed
+                  ws trigger (lambda () (agent-repl-host--adopt-settled ws new ref trigger)))
                  (agent-repl-host--release-held ws "adopted"))
                 (:error
                  (funcall restore)

@@ -5388,66 +5388,137 @@ Registering on a daemon that is handing over would only fail."
 
 ;;;; ---- Downtime of the viewed workspace across a daemon change ----
 
-(defmacro agent-repl-test-host--with-downtime-calls (&rest body)
-  "Run BODY with the webhost's downtime calls recorded in `downtime-calls', newest first."
-  (declare (indent 0))
-  `(let ((downtime-calls nil))
-     (cl-letf (((symbol-function 'agent-repl-webhost-note-downtime)
-                (lambda (ws) (push (list :note ws) downtime-calls)))
-               ((symbol-function 'agent-repl-webhost-end-downtime)
-                (lambda (ws) (push (list :end ws) downtime-calls))))
+(defmacro agent-repl-test-host--with-downtime-calls (now &rest body)
+  "Run BODY with the clock at NOW ms and every reported latency in `reported', newest first.
+The webhost answers the instant the clock reads when the walk begins."
+  (declare (indent 1))
+  `(let ((reported nil)
+         (clock ,now))
+     (cl-letf (((symbol-function 'agent-repl-webhost-downtime-start)
+                (lambda (_ws) clock))
+               ((symbol-function 'agent-repl--now-unix-ms) (lambda () clock))
+               ((symbol-function 'agent-repl-latency-report-editor)
+                (lambda (kind seconds) (push (list kind seconds) reported))))
        ,@body)))
 
-(ert-deftest agent-repl-test-host-a-walk-of-a-workspace-that-stood-on-a-daemon-notes-its-downtime ()
+(defun agent-repl-test-host--walk-downtime (ws)
+  "The downtime start WS\='s walk in flight carries, or nil."
+  (plist-get (plist-get (agent-repl-host--entry ws) :reattach) :downtime-ms))
+
+(ert-deftest agent-repl-test-host-a-walk-of-a-workspace-that-stood-on-a-daemon-carries-its-downtime-start ()
   "THE START OF `viewed_downtime': a workspace with a recorded daemon begins a walk."
   (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-downtime-calls
+    (agent-repl-test-host--with-downtime-calls 1000
       ;; Arrange
       (agent-repl-test-host--subscribe "ws-1")
       ;; Act
       (agent-repl-host--begin-walk "ws-1" (agent-repl-connect-open "127.0.0.1:9100") :register "test")
       ;; Assert
-      (should (equal downtime-calls '((:note "ws-1")))))))
+      (should (= 1000 (agent-repl-test-host--walk-downtime "ws-1"))))))
 
-(ert-deftest agent-repl-test-host-a-first-attachment-notes-no-downtime ()
+(ert-deftest agent-repl-test-host-a-first-attachment-carries-no-downtime-start ()
   "A workspace with no recorded daemon was never served, so its first walk is no outage."
   (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-downtime-calls
+    (agent-repl-test-host--with-downtime-calls 1000
       ;; Act
       (agent-repl-host--begin-walk "ws-1" (agent-repl-connect-open "127.0.0.1:9100") :register "link-up")
       ;; Assert
-      (should (null downtime-calls)))))
+      (should (null (agent-repl-test-host--walk-downtime "ws-1"))))))
 
-(ert-deftest agent-repl-test-host-an-adopt-that-lands-ends-the-downtime-after-the-reattach ()
-  "The adopt's page reload came beside the adopt, so the episode ends once it lands."
+(ert-deftest agent-repl-test-host-a-newer-walk-of-one-outage-keeps-the-first-start ()
+  "The outage's first instant stands when a second walk supersedes the first."
   (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-downtime-calls
+    (agent-repl-test-host--with-downtime-calls 1000
       ;; Arrange
-      (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
       (agent-repl-test-host--subscribe "ws-1")
+      (agent-repl-host--begin-walk "ws-1" (agent-repl-connect-open "127.0.0.1:9100") :register "first")
+      (setq clock 1450)
       ;; Act
-      (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+      (agent-repl-host--begin-walk "ws-1" (agent-repl-connect-open "127.0.0.1:9101") :register "second")
       ;; Assert
-      (should (equal (reverse downtime-calls) '((:note "ws-1") (:end "ws-1")))))))
+      (should (= 1000 (agent-repl-test-host--walk-downtime "ws-1"))))))
 
-(ert-deftest agent-repl-test-host-a-register-walk-that-lands-ends-the-downtime ()
-  "No page load follows a register walk, so the noted start is forgotten when it lands."
+(ert-deftest agent-repl-test-host-a-walk-gives-its-start-up-once ()
+  "A load takes the start, and a second load of the same walk finds none."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-downtime-calls 1000
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      (agent-repl-host--begin-walk "ws-1" (agent-repl-connect-open "127.0.0.1:9100") :register "test")
+      ;; Act
+      (let ((first (agent-repl-host-take-downtime "ws-1"))
+            (second (agent-repl-host-take-downtime "ws-1")))
+        ;; Assert
+        (should (= 1000 first))
+        (should (null second))))))
+
+(ert-deftest agent-repl-test-host-a-stale-start-of-an-ended-walk-never-reaches-a-later-load ()
+  "A walk that ended with no landing takes its start with it: a later load finds nothing."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-downtime-calls 1000
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      (agent-repl-host--begin-walk "ws-1" (agent-repl-connect-open "127.0.0.1:9100") :register "dead-connection")
+      (agent-repl-host--put "ws-1" :reattach nil)
+      (setq clock 5000000)
+      ;; Act
+      (let ((taken (agent-repl-host-take-downtime "ws-1")))
+        ;; Assert
+        (should (null taken))
+        (should (null reported))))))
+
+(ert-deftest agent-repl-test-host-a-register-walk-that-lands-with-no-load-measures-its-own-outage ()
+  "THE SECOND END: the stream came back with the page kept, so Emacs measures it."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--with-dir
-      (agent-repl-test-host--with-downtime-calls
+      (agent-repl-test-host--with-downtime-calls 1000
         ;; Arrange
         (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:61043"))
         (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:58175"))
-        ;; Act
-        (agent-repl-test-host--end-planned "ws-1")
+        (cl-letf (((symbol-function 'agent-repl-host--reattached)
+                   (lambda (&rest _) (setq clock 1400))))
+          ;; Act
+          (agent-repl-test-host--end-planned "ws-1"))
         ;; Assert
-        (should (equal (reverse downtime-calls) '((:note "ws-1") (:end "ws-1"))))))))
+        (should (equal reported '((:viewed-reattach 0.4))))
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.downtime-measured ws=ws-1"))))))
 
-(ert-deftest agent-repl-test-host-a-register-walk-that-fails-keeps-the-downtime ()
-  "A refused registration leaves the workspace down, so the noted start stands for its next walk."
+(ert-deftest agent-repl-test-host-an-adopt-whose-landing-loads-the-page-leaves-the-measure-to-the-page ()
+  "THE FIRST END: a load during the landing takes the start, so Emacs reports nothing."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-downtime-calls 1000
+      ;; Arrange
+      (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+      (agent-repl-test-host--subscribe "ws-1")
+      (let ((taken nil))
+        (cl-letf (((symbol-value 'agent-repl-host-reattached-functions)
+                   (list (lambda (ws) (setq taken (agent-repl-host-take-downtime ws))))))
+          ;; Act
+          (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil)))
+        ;; Assert
+        (should (= 1000 taken))
+        (should (null reported))))))
+
+(ert-deftest agent-repl-test-host-an-adopt-that-lands-with-no-load-measures-its-outage ()
+  "An adopt landing whose reattach loads no page is measured by Emacs."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-downtime-calls 1000
+      ;; Arrange
+      (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+      (agent-repl-test-host--subscribe "ws-1")
+      (cl-letf (((symbol-function 'agent-repl-host--reattached)
+                 (lambda (&rest _) (setq clock 13200))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil)))
+      ;; Assert
+      (should (equal reported '((:viewed-reattach 12.2)))))))
+
+(ert-deftest agent-repl-test-host-a-register-walk-that-fails-reports-nothing-and-leaves-no-start ()
+  "A refused registration is logged at ERROR, and its start dies with its walk."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--with-dir
-      (agent-repl-test-host--with-downtime-calls
+      (agent-repl-test-host--with-downtime-calls 1000
         ;; Arrange
         (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:61043"))
         (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:58175")
@@ -5456,7 +5527,8 @@ Registering on a daemon that is handing over would only fail."
         ;; Act
         (agent-repl-test-host--lose "ws-1")
         ;; Assert
-        (should (equal downtime-calls '((:note "ws-1"))))
+        (should (null reported))
+        (should (null (agent-repl-test-host--walk-downtime "ws-1")))
         (should (agent-repl-test-host--logged-p
                  :error "elisp.host.stream-lost-register-failed ws=ws-1"))))))
 

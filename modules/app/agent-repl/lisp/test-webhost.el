@@ -47,7 +47,6 @@
            (agent-repl--webhost-reload-generation 0)
            (agent-repl--webhost-daemon-origin nil)
            (agent-repl--webhost-reload-started-ms nil)
-           (agent-repl--webhost-downtime-started (make-hash-table :test #'equal))
            (agent-repl-test-wh--primary (agent-repl-test-wh--conn "127.0.0.1:1"))
            (agent-repl-test-wh--successor nil))
        (cl-letf (((symbol-function 'agent-repl-webhost-xwidget)
@@ -2331,113 +2330,113 @@ and seven rows drew severed on every webapp deploy."
 
 ;;;; ---- Downtime of the viewed workspace across a daemon change ----
 
-(ert-deftest agent-repl-test-wh-a-daemon-change-takes-the-viewed-workspaces-page-and-hands-the-start-with-its-reload ()
+(defvar agent-repl-test-wh--walk-start nil
+  "The downtime start the stubbed walk of every workspace carries, or nil.")
+
+(defmacro agent-repl-test-wh--with-walk-start (ms &rest body)
+  "Run BODY with every walk carrying downtime start MS, given up once."
+  (declare (indent 1))
+  `(let ((agent-repl-test-wh--walk-start ,ms))
+     (cl-letf (((symbol-function 'agent-repl-host-take-downtime)
+                (lambda (_ws) (prog1 agent-repl-test-wh--walk-start
+                                (setq agent-repl-test-wh--walk-start nil)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-a-walk-carrying-a-start-hands-it-with-the-reload ()
   "THE START OF `viewed_downtime' rides the reload of the page the user is viewing."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-show "alpha")
-    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000400)))
-      (agent-repl-webhost-note-downtime "alpha"))
-    ;; Act
-    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
-      (agent-repl-webhost-reload-page "alpha"))
-    ;; Assert
-    (should (equal (agent-repl-test-wh--sent "reload")
-                   (list (agent-repl--webhost-script "reload" "id-alpha" 1700000000500 1700000000400))))))
+    (agent-repl-test-wh--with-walk-start 1700000000400
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
+        (agent-repl-webhost-reload-page "alpha"))
+      ;; Assert
+      (should (equal (agent-repl-test-wh--sent "reload")
+                     (list (agent-repl--webhost-script "reload" "id-alpha" 1700000000500 1700000000400)))))))
 
-(ert-deftest agent-repl-test-wh-a-daemon-change-hands-its-start-with-a-re-pointing-ensure ()
+(ert-deftest agent-repl-test-wh-a-walk-carrying-a-start-hands-it-with-a-re-pointing-ensure ()
   "A handover re-points the page at the successor; the ensure carries the downtime start."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-show "alpha")
-    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000400)))
-      (agent-repl-webhost-note-downtime "alpha"))
-    ;; Act
-    (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
-               (lambda (_ws) "http://ws-alpha.localhost:2/"))
-              ((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
-      (agent-repl-webhost-reload-page "alpha"))
-    ;; Assert
-    (should (equal (cadr (agent-repl-test-wh--sent "ensure"))
-                   (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:2/" nil
-                                               1700000000500 1700000000400)))))
+    (agent-repl-test-wh--with-walk-start 1700000000400
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
+                 (lambda (_ws) "http://ws-alpha.localhost:2/"))
+                ((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
+        (agent-repl-webhost-reload-page "alpha"))
+      ;; Assert
+      (should (equal (cadr (agent-repl-test-wh--sent "ensure"))
+                     (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:2/" nil
+                                                 1700000000500 1700000000400))))))
 
 (ert-deftest agent-repl-test-wh-a-host-replay-hands-the-viewed-pages-downtime-start ()
-  "A replay after a host reload loads the shown page with the start noted for it."
+  "A replay after a host reload loads the shown page with the start its walk carries."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-show "alpha")
-    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000400)))
-      (agent-repl-webhost-note-downtime "alpha"))
-    (setq agent-repl-test-wh--calls nil)
-    ;; Act
-    (agent-repl--webhost-replay-page "id-alpha" nil)
-    ;; Assert
-    (should (equal (agent-repl-test-wh--sent "ensure")
-                   (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/" nil nil
-                                                     1700000000400))))))
+    (agent-repl-test-wh--with-walk-start 1700000000400
+      (setq agent-repl-test-wh--calls nil)
+      ;; Act
+      (agent-repl--webhost-replay-page "id-alpha" nil)
+      ;; Assert
+      (should (equal (agent-repl-test-wh--sent "ensure")
+                     (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/" nil nil
+                                                       1700000000400)))))))
 
 (ert-deftest agent-repl-test-wh-the-downtime-start-is-handed-once ()
-  "A later load of the page carries no start: it belongs to one outage."
+  "A later load of the page carries no start: the walk gave it up once."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-show "alpha")
-    (agent-repl-webhost-note-downtime "alpha")
-    (agent-repl-webhost-reload-page "alpha")
-    (setq agent-repl-test-wh--calls nil)
-    ;; Act
-    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000900)))
-      (agent-repl-webhost-reload-page "alpha"))
-    ;; Assert
-    (should (equal (agent-repl-test-wh--sent "reload")
-                   (list (agent-repl--webhost-script "reload" "id-alpha" 1700000000900))))))
+    (agent-repl-test-wh--with-walk-start 1700000000400
+      (agent-repl-webhost-reload-page "alpha")
+      (setq agent-repl-test-wh--calls nil)
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000900)))
+        (agent-repl-webhost-reload-page "alpha"))
+      ;; Assert
+      (should (equal (agent-repl-test-wh--sent "reload")
+                     (list (agent-repl--webhost-script "reload" "id-alpha" 1700000000900)))))))
 
-(ert-deftest agent-repl-test-wh-a-later-walk-of-one-outage-keeps-the-first-start ()
-  "The outage's first instant stands when a second walk notes again."
+(ert-deftest agent-repl-test-wh-a-load-with-no-walk-start-sends-the-call-as-it-always-was ()
+  "A load that no outage preceded asks for no downtime."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-show "alpha")
-    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000400)))
-      (agent-repl-webhost-note-downtime "alpha"))
-    ;; Act
-    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000450)))
-      (agent-repl-webhost-note-downtime "alpha"))
-    ;; Assert
-    (should (= 1700000000400 (gethash "id-alpha" agent-repl--webhost-downtime-started)))))
+    (agent-repl-test-wh--with-walk-start nil
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000900)))
+        (agent-repl-webhost-reload-page "alpha"))
+      ;; Assert
+      (should (equal (agent-repl-test-wh--sent "reload")
+                     (list (agent-repl--webhost-script "reload" "id-alpha" 1700000000900)))))))
 
-(ert-deftest agent-repl-test-wh-a-workspace-the-user-is-not-viewing-notes-no-downtime ()
+(ert-deftest agent-repl-test-wh-the-downtime-start-of-the-shown-workspace-is-now ()
+  "The start answered for the workspace the user is viewing is the instant of the call."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-show "alpha")
+    ;; Act
+    (let ((started (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000400)))
+                     (agent-repl-webhost-downtime-start "alpha"))))
+      ;; Assert
+      (should (= started 1700000000400)))))
+
+(ert-deftest agent-repl-test-wh-a-workspace-the-user-is-not-viewing-has-no-downtime-start ()
   "Only the shown page's workspace is the one whose downtime the user feels."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-ensure-page "beta")
     (agent-repl-webhost-show "beta")
-    ;; Act
-    (agent-repl-webhost-note-downtime "alpha")
-    ;; Assert
-    (should (zerop (hash-table-count agent-repl--webhost-downtime-started)))))
+    ;; Act / Assert
+    (should (null (agent-repl-webhost-downtime-start "alpha")))))
 
-(ert-deftest agent-repl-test-wh-an-outage-that-ends-without-a-page-load-forgets-its-start ()
-  "A reattach with no page load to carry the start must not leak it into a later reload."
-  ;; Arrange
-  (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-show "alpha")
-    (agent-repl-webhost-note-downtime "alpha")
-    ;; Act
-    (agent-repl-webhost-end-downtime "alpha")
-    ;; Assert
-    (should (zerop (hash-table-count agent-repl--webhost-downtime-started)))))
-
-(ert-deftest agent-repl-test-wh-ending-the-downtime-of-a-workspace-with-no-ref-is-inert ()
-  "A workspace with no ref has no page id, so there is nothing to forget."
-  ;; Arrange
-  (agent-repl-test-wh--with-host
-    (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
-      ;; Act / Assert
-      (should (null (agent-repl-webhost-end-downtime "alpha"))))))

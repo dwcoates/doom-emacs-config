@@ -129,6 +129,14 @@ enum EditorLatencyKind {
   // enough to run the timer, so EDITOR_LATENCY_KIND_STALL never saw it, yet
   // nothing typed reached the screen.
   EDITOR_LATENCY_KIND_INPUT_WAIT = 3;
+  // How long the workspace the person is viewing could not be used across a
+  // daemon change that reloaded no page: from the instant Emacs found the
+  // workspace's host stream detached or handed on, to the instant the walk
+  // that moved it onto the serving daemon completed with the page kept. The
+  // page reports REPORTED_LATENCY_KIND_VIEWED_DOWNTIME for the same outage
+  // when a page load follows the detachment, so an outage is measured by
+  // exactly one of the two.
+  EDITOR_LATENCY_KIND_VIEWED_REATTACH = 4;
 }
 
 // One finished editor-wide interaction.
