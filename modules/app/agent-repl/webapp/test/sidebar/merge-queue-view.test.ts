@@ -22,6 +22,7 @@ import {
   RosterMergeQueueHeadSchema,
   RosterMergeQueueMediationSchema,
   RosterMergeQueuePausedSchema,
+  type RosterMergeQueuePaused,
   RosterMergeQueueFixingTestsSchema,
   RosterMergeQueueStageSchema,
   RosterMergeQueueSubjectSchema,
@@ -143,6 +144,14 @@ function paused(init: { atMs?: number; workspace?: string; hard?: boolean } = {}
   });
 }
 
+/** A queue's hold for its deploy check, begun at AT_MS when given. */
+function heldForCheck(atMs?: number) {
+  return create(RosterMergeQueuePausedSchema, {
+    pausedAtMs: atMs === undefined ? undefined : BigInt(atMs),
+    by: { asker: { case: "deployCheck", value: {} } },
+  });
+}
+
 /** A context recording every UpdateMergeQueue ask, answering each with ANSWER. */
 function queueDaemon(answer: () => ReturnType<typeof create<typeof UpdateMergeQueueResponseSchema>> = () =>
   create(UpdateMergeQueueResponseSchema, { result: { case: "success", value: {} } })) {
@@ -167,6 +176,16 @@ describe("pausedText", () => {
       name: "the host's pause for its fault",
       pause: () => create(RosterMergeQueuePausedSchema, { by: { asker: { case: "host", value: { cause: "too many open files in system" } } } }),
       want: "Paused by the host, which could not run a test gate: too many open files in system. Double-click to resume.",
+    },
+    {
+      name: "a deploy check's hold",
+      pause: () => heldForCheck(NOW - 90_000),
+      want: `Held for a deploy check ${formatAge(90_000)} ago; the deploy mediator's approval releases it. Double-click to pause the queue.`,
+    },
+    {
+      name: "a deploy check's hold whose start is not known",
+      pause: () => heldForCheck(),
+      want: "Held for a deploy check; the deploy mediator's approval releases it. Double-click to pause the queue.",
     },
   ])("says $name", ({ pause, want }) => {
     expect(pausedText(pause(), NOW, "paused")).toBe(want);
@@ -257,7 +276,7 @@ describe("drawQueuedGroupHead", () => {
   const repository = { id: "repo-1", dir: "/r/repo-1" } as const;
 
   /** A queued group's box and header, the header made the queue's control. */
-  function drawn(sc: ReturnType<typeof daemon>["sc"], pause?: ReturnType<typeof paused>): { group: HTMLElement; head: HTMLElement } {
+  function drawn(sc: ReturnType<typeof daemon>["sc"], pause?: RosterMergeQueuePaused): { group: HTMLElement; head: HTMLElement } {
     const group = document.createElement("div");
     const head = document.createElement("div");
     group.appendChild(head);
@@ -270,6 +289,7 @@ describe("drawQueuedGroupHead", () => {
     { name: "a running queue", pause: undefined, want: null },
     { name: "a paused queue", pause: paused(), want: "pause" },
     { name: "a hard-stopped queue", pause: paused({ hard: true }), want: "hard" },
+    { name: "a queue held for its deploy check", pause: heldForCheck(NOW), want: "pause" },
   ])("marks $name", ({ pause, want }) => {
     expect(drawn(daemon().sc, pause).group.getAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE)).toBe(want);
   });
@@ -277,6 +297,7 @@ describe("drawQueuedGroupHead", () => {
   it.each([
     { name: "pauses a running queue", pause: undefined, want: "pause" },
     { name: "resumes a paused queue", pause: paused(), want: "resume" },
+    { name: "pauses a queue held only for its deploy check", pause: heldForCheck(NOW), want: "pause" },
   ])("$name on a double click of its header", async ({ pause, want }) => {
     const { asked, sc } = queueDaemon();
     drawn(sc, pause).head.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
@@ -352,6 +373,7 @@ describe("queueSwitchOf", () => {
     { name: "pauses a running queue", pause: undefined, want: "pause" },
     { name: "resumes a paused queue", pause: paused(), want: "resume" },
     { name: "resumes a hard-stopped queue", pause: paused({ hard: true }), want: "resume" },
+    { name: "pauses a queue held only for its deploy check", pause: heldForCheck(NOW), want: "pause" },
   ])("$name", ({ pause, want }) => {
     expect(queueSwitchOf(create(RosterRepoMergeQueueSchema, { paused: pause }))).toBe(want);
   });
@@ -1076,6 +1098,7 @@ describe("drawHeadClock", () => {
   it.each([
     { name: "ticks while the queue runs", pause: undefined, want: formatTickedElapsed(5_000) },
     { name: "stands at the pause while it is paused", pause: paused({ atMs: NOW - 1_000 }), want: formatElapsed(4_000) },
+    { name: "stands where the hold began while its deploy check holds it", pause: heldForCheck(NOW - 1_000), want: formatElapsed(4_000) },
   ])("$name", ({ pause, want }) => {
     const sc = sidebarContext(appContext({}, fakeTicker(NOW)));
     expect(drawHeadClock(sc, NOW - 5_000, pause, "paused")?.textContent).toBe(want);

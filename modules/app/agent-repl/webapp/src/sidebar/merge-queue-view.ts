@@ -8,6 +8,10 @@
  * 2026-10-27): the group's label in the error red, the queue's merge glyphs
  * in the amber a paused merge bubble is framed in, and the head's clock
  * stopped at the pause. The label's hover says who paused it and when. A
+ * QUEUE HELD FOR ITS DEPLOY CHECK IS DRAWN PAUSED THE SAME (owner ruling,
+ * 2026-11-22; frontend.v1.RosterMergeQueuePauserDeployCheck), from a deploy's
+ * start until the deploy mediator approves a deploy; only that approval
+ * releases it, so its toggle asks for a real pause. A
  * DOUBLE CLICK ON THE LABEL PAUSES A RUNNING QUEUE OR RESUMES A PAUSED ONE
  * (owner request, 2026-10-31), a single click being the group's fold, and
  * A SINGLE CLICK ON THE QUEUE'S MERGE GLYPH DOES THE SAME (owner request,
@@ -136,15 +140,27 @@ export function queueHoverText(u: RosterRepoMergeQueue, nowMs: number, path: str
 }
 
 /**
+ * Whether PAUSED is the hold of the queue's deploy check alone: no real pause
+ * stands (one is drawn over the hold), so a resume would release nothing.
+ */
+export function heldForDeployCheck(paused: RosterMergeQueuePaused | undefined, path: string): boolean {
+  return paused?.by !== undefined && requireCase(paused.by.asker, `${path}.by.asker`).case === "deployCheck";
+}
+
+/**
  * The hover on a paused queue's label: whether it was paused or stopped, how
  * long ago and by whom, as far as the daemon recorded them, and that a click
- * resumes it.
+ * resumes it. A queue held for its deploy check says what releases it, and
+ * that a double click pauses it.
  */
 export function pausedText(u: RosterMergeQueuePaused, nowMs: number, path: string): string {
-  let text = u.hard ? "Stopped" : "Paused";
-  if (u.pausedAtMs !== undefined) text += ` ${formatAge(nowMs - msOf(u.pausedAtMs, `${path}.paused_at_ms`))} ago`;
-  if (u.by !== undefined) {
-    const asker = requireCase(u.by.asker, `${path}.by.asker`);
+  const age = u.pausedAtMs === undefined ? "" : ` ${formatAge(nowMs - msOf(u.pausedAtMs, `${path}.paused_at_ms`))} ago`;
+  const asker = u.by === undefined ? undefined : requireCase(u.by.asker, `${path}.by.asker`);
+  if (asker?.case === "deployCheck") {
+    return `Held for a deploy check${age}; the deploy mediator's approval releases it. Double-click to pause the queue.`;
+  }
+  let text = (u.hard ? "Stopped" : "Paused") + age;
+  if (asker !== undefined) {
     switch (asker.case) {
       case "user":
         text += " by you";
@@ -167,9 +183,13 @@ export function pausedText(u: RosterMergeQueuePaused, nowMs: number, path: strin
 /** What a double click on a queued group's header, or a click on its glyph, asks of its queue. */
 export type QueueSwitch = "pause" | "resume";
 
-/** What a toggle of QUEUE asks: a running queue is paused, a paused (or stopped) one resumed. */
+/**
+ * What a toggle of QUEUE asks: a running queue is paused, a paused (or
+ * stopped) one resumed. A queue held only for its deploy check is paused, as
+ * a running one is: a resume cannot release that hold.
+ */
 export function queueSwitchOf(queue: RosterRepoMergeQueue): QueueSwitch {
-  return queue.paused === undefined ? "pause" : "resume";
+  return queue.paused === undefined || heldForDeployCheck(queue.paused, "queue.paused") ? "pause" : "resume";
 }
 
 /**
