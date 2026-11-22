@@ -40,16 +40,17 @@ type Claim interface {
 	// second; see ReadAdvertisement for the format and its legacy fallback. A
 	// joining daemon calls it only once it owns every workspace.
 	Publish() error
-	// Withdraw removes the daemon.addr file WHILE IT STILL NAMES THIS CLAIM'S
-	// ADDRESS, and answers whether it removed anything. Orderly exit calls it;
-	// it is idempotent, removing an absent file is success, and a successor's
-	// advertisement is left alone.
+	// Withdraw removes the daemon.addr file WHILE IT STILL NAMES THIS CLAIM
+	// (its advertised address and this process's pid; every daemon advertises
+	// the same shared address), and answers whether it removed anything.
+	// Orderly exit calls it; it is idempotent, removing an absent file is
+	// success, and a successor's advertisement is left alone.
 	Withdraw() (bool, error)
 	// Verify reports whether what this claim OWNS ON DISK is still there: the
 	// state root it was bound in (the same directory, not one recreated at
 	// the same path), the daemon.lock whose kernel lock it holds (the same
 	// inode), and -- while it is published and not withdrawn -- daemon.addr
-	// naming this claim's address. A loss wraps ErrVanished and names what
+	// naming this claim's address and this process's pid. A loss wraps ErrVanished and names what
 	// vanished; any other error means the question could not be answered.
 	Verify() error
 	// Depart releases the serving lock (ServingName) and keeps the boot

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"agent-repld/internal/recordlock/locktest"
 )
 
 func TestHoldLifeHoldsOneInstanceOnce(t *testing.T) {
@@ -352,15 +354,15 @@ func TestADaemonKilledLeavesADeathItsSuccessorReaps(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "daemon.addr")
 	helper := startLockHelper(t, "life", path)
-	pid := helper.field(t, "ready")
+	pid := helper.Field(t, "ready")
 	live, deaths, err := LiveOthers(path, "self")
 	if err != nil || !slices.Equal(live, []string{"helper"}) || deaths != nil {
 		t.Fatalf("LiveOthers while it runs = (%v, %+v, %v), want it live", live, deaths, err)
 	}
-	if err := helper.cmd.Process.Kill(); err != nil {
+	if err := helper.Cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	_ = helper.cmd.Wait()
+	_ = helper.Cmd.Wait()
 
 	// Act
 	live, deaths, err = LiveOthers(path, "self")
@@ -375,21 +377,21 @@ func TestADaemonKilledLeavesADeathItsSuccessorReaps(t *testing.T) {
 func TestAwaitGoneJudgesHowTheDaemonEnded(t *testing.T) {
 	tests := []struct {
 		name      string
-		end       func(t *testing.T, h *lockHelper)
+		end       func(t *testing.T, h *locktest.Process)
 		wantDeath bool
 	}{
-		{name: "a holder that ends by Release is no death", end: func(t *testing.T, h *lockHelper) {
-			h.stdin.Close()
-			if err := h.cmd.Wait(); err != nil {
+		{name: "a holder that ends by Release is no death", end: func(t *testing.T, h *locktest.Process) {
+			h.Stdin.Close()
+			if err := h.Cmd.Wait(); err != nil {
 				t.Fatalf("the helper's orderly exit: %v", err)
 			}
 		}},
 		{name: "a holder killed with its file standing is a death with its pid", wantDeath: true,
-			end: func(t *testing.T, h *lockHelper) {
-				if err := h.cmd.Process.Kill(); err != nil {
+			end: func(t *testing.T, h *locktest.Process) {
+				if err := h.Cmd.Process.Kill(); err != nil {
 					t.Fatal(err)
 				}
-				_ = h.cmd.Wait()
+				_ = h.Cmd.Wait()
 			}},
 	}
 	for _, tt := range tests {
@@ -397,7 +399,7 @@ func TestAwaitGoneJudgesHowTheDaemonEnded(t *testing.T) {
 			// Arrange
 			path := filepath.Join(t.TempDir(), "daemon.addr")
 			helper := startLockHelper(t, "life", path)
-			pid := helper.field(t, "ready")
+			pid := helper.Field(t, "ready")
 			var deaths []Death
 			var mu sync.Mutex
 			awaited := make(chan error, 1)

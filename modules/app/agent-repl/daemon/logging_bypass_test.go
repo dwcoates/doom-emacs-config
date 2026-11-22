@@ -48,6 +48,8 @@ func TestProductionDiagnosticsDoNotBypassDlog(t *testing.T) {
 		{path: "cmd/agent-repld/testcli.go", fn: "streamTestRun", callee: "fmt.Fprintln", count: 1, reason: "the agent CLI is a command whose product is its output: each event of a test run is a line of its injected stdout, and the daemon logs the run it answers itself"},
 		{path: "cmd/agent-repld/agentcli.go", fn: "runtimeHealth", callee: "fmt.Fprintln", count: 1, reason: "the agent CLI is a command whose product is its output: its usage, its refusals and the daemon's answer are its injected stdout and stderr, and the daemon logs every rpc it answers itself"},
 		{path: "cmd/agent-repld/roster.go", fn: "say", callee: "fmt.Fprintf", count: 1, reason: "the agent CLI is a command whose product is its output: its usage, its refusals and the daemon's answer are its injected stdout and stderr, and the daemon logs every rpc it answers itself"},
+		{path: "internal/recordlock/locktest/locktest.go", fn: "Hold", callee: "fmt.Printf", count: 1, reason: "a re-exec'd lock helper is a test process that opens no log surfaces: its ready line on stdout is its protocol with the test that started it, and its failure on stderr is carried into that test's output"},
+		{path: "internal/recordlock/locktest/locktest.go", fn: "fail", callee: "fmt.Fprintln", count: 1, reason: "a re-exec'd lock helper is a test process that opens no log surfaces: its ready line on stdout is its protocol with the test that started it, and its failure on stderr is carried into that test's output"},
 		{path: "internal/dlog/surfaces.go", fn: "write", callee: "fmt.Fprintf", count: 1, reason: "a request racing closed surfaces must be answered while the first dropped record is surfaced"},
 	}
 

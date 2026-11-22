@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/token"
 	"io"
@@ -14,6 +15,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"agentrepl/logging/sockethold"
+	"agentrepl/logging/sockethold/holdtest"
 
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
@@ -227,6 +231,82 @@ func TestYieldStopsTheSharedAcceptBeforeItYieldsTheClaim(t *testing.T) {
 	}
 	if dialErr == nil {
 		t.Fatal("the shared listener still accepts after the yield, want it stopped")
+	}
+}
+
+// stopFailingReturned is a holder's accept stream whose stop fails.
+type stopFailingReturned struct {
+	*fakeReturned
+	err error
+}
+
+func (f stopFailingReturned) Stop() error { return f.err }
+
+func TestYieldBootClaimYieldsUnlessTheStreamGenuinelyFailsToStop(t *testing.T) {
+	stopErr := errors.New("sockethold: end the accept stream of \"daemon\": write: bad file descriptor")
+	cases := []struct {
+		name string
+		// returned is the shared accept's stream of handed-back connections.
+		returned    func(t *testing.T) server.Returned
+		wantYielded bool
+		wantErr     error
+	}{
+		// 2026-11-22: the holder had refused the stream at boot and closed it,
+		// so the stop failed and the claim was never yielded.
+		{name: "a stream the holder already ended is yielded past", wantYielded: true, returned: func(t *testing.T) server.Returned {
+			file, _ := holdtest.TCP(t)
+			control := holdtest.Start(t, map[string]*os.File{holderDaemonSocket: file}, nil)
+			ctx, cancel := context.WithTimeout(context.Background(), sockethold.TakeBound)
+			defer cancel()
+			r, err := sockethold.Subscribe(ctx, control, "elsewhere")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.Next(); !errors.Is(err, sockethold.ErrRefused) {
+				t.Fatalf("Next = %v, want the holder's refusal", err)
+			}
+			return r
+		}},
+		{name: "a stream that genuinely fails to stop keeps the claim", wantErr: stopErr, returned: func(*testing.T) server.Returned {
+			return stopFailingReturned{fakeReturned: newFakeReturned(), err: stopErr}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			shared, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			accept := newPrivateAccept(t)
+			accept.AddShared(shared, tc.returned(t), &spyLogger{})
+			claim := &yieldingClaim{}
+			log := &spyLogger{}
+			s := &sharedTake{accept: accept, log: log}
+
+			// Act
+			err = yieldBootClaim(claim, s)
+
+			// Assert
+			if !errors.Is(err, tc.wantErr) || claim.yielded != tc.wantYielded {
+				t.Fatalf("yield = %v, yielded %v; want %v, yielded %v", err, claim.yielded, tc.wantErr, tc.wantYielded)
+			}
+			var holderErrors []spyRecord
+			for _, r := range log.records {
+				if r.level == dlog.LevelError && r.operation == "daemon.cmd.holder" {
+					holderErrors = append(holderErrors, r)
+				}
+			}
+			if tc.wantErr == nil {
+				if len(log.records) != 0 {
+					t.Fatalf("records = %+v, want none", log.records)
+				}
+				return
+			}
+			if len(holderErrors) != 1 || !strings.Contains(fmt.Sprint(holderErrors[0].context["error"]), stopErr.Error()) {
+				t.Fatalf("records = %+v, want one daemon.cmd.holder ERROR naming the cause", log.records)
+			}
+		})
 	}
 }
 

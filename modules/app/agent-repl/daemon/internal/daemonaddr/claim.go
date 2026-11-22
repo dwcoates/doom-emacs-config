@@ -313,7 +313,14 @@ func (c *claim) Publish() error {
 }
 
 // Withdraw implements Claim. It removes daemon.addr ONLY while the file still
-// names THIS claim's address, and answers whether it removed anything.
+// names THIS claim (namesLocked: its advertised address AND this process's
+// pid), and answers whether it removed anything. An advertisement naming
+// another pid, or none, is not this claim's, and is left.
+//
+// THE ADDRESS ALONE NAMES NO DAEMON. Every daemon advertises the shared
+// address its socket holder keeps, so an incumbent's exit read its
+// successor's fresh advertisement as its own and removed it, and the
+// successor stood down on its state read as vanished (2026-11-22).
 //
 // THE ADVERTISEMENT IS NOT REMOVED BY WHOEVER EXITS LAST. A blue-green
 // handover ends with the SUCCESSOR publishing its own address into this same
@@ -349,7 +356,7 @@ func (c *claim) Withdraw() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
 	}
-	if ParseAdvertisement(string(raw)).Address != c.advertisedLocked() {
+	if !c.namesLocked(ParseAdvertisement(string(raw))) {
 		return false, nil
 	}
 	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
@@ -555,8 +562,23 @@ func (c *claim) Verify() error {
 	case err != nil:
 		return fmt.Errorf("read daemon.addr %q: %w", c.addrPath, err)
 	}
-	if named := ParseAdvertisement(string(raw)).Address; named != c.advertisedLocked() {
-		return fmt.Errorf("%w: daemon.addr %q names %q, not this daemon's %q", ErrVanished, c.addrPath, named, c.advertisedLocked())
+	ad := ParseAdvertisement(string(raw))
+	if c.namesLocked(ad) {
+		return nil
 	}
-	return nil
+	if ad.Address != c.advertisedLocked() {
+		return fmt.Errorf("%w: daemon.addr %q names %q, not this daemon's %q", ErrVanished, c.addrPath, ad.Address, c.advertisedLocked())
+	}
+	if !ad.PIDKnown {
+		return fmt.Errorf("%w: daemon.addr %q names no pid, not this daemon's %d", ErrVanished, c.addrPath, c.pid)
+	}
+	return fmt.Errorf("%w: daemon.addr %q names pid %d, not this daemon's %d", ErrVanished, c.addrPath, ad.PID, c.pid)
+}
+
+// namesLocked reports whether AD is this claim's advertisement: its
+// advertised address and this process's pid. The address alone is not
+// enough, since every daemon advertises the same shared address. c.mu is
+// held.
+func (c *claim) namesLocked(ad Advertisement) bool {
+	return ad.Address == c.advertisedLocked() && ad.PIDKnown && ad.PID == c.pid
 }

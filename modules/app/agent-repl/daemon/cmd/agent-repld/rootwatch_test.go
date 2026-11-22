@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/kernelevent"
+	"agent-repld/internal/recordlock/locktest"
 )
 
 // fakeChanges is the watch's change source in the test's hands: each send
@@ -144,13 +148,167 @@ func TestALostRootNamesWhatVanished(t *testing.T) {
 	t.Fatalf("records = %+v, want an ERROR whose cause is %q", log.Records(), loss.Error())
 }
 
-func TestRootWatchPathsNameTheRootItsParentTheLockAndTheAddress(t *testing.T) {
+func TestRootWatchPathsNameTheRootItsParentAndTheAddress(t *testing.T) {
 	// Act
 	got := rootWatchPaths("/state/root", "/state/root/daemon.addr")
 
 	// Assert
-	want := []string{"/state", "/state/root", daemonaddr.LockPath("/state/root/daemon.addr"), "/state/root/daemon.addr"}
+	want := []string{"/state", "/state/root", "/state/root/daemon.addr"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("rootWatchPaths = %v, want %v", got, want)
+	}
+}
+
+// TestRootWatchPathsNameNoLockFile pins that the watch opens no lock file: a
+// watch's descriptor closing drops this process's record locks on the file
+// (2026-11-22: the boot claim went to the successor before the incumbent
+// exited, and its exit withdrew the successor's daemon.addr).
+func TestRootWatchPathsNameNoLockFile(t *testing.T) {
+	addrPath := "/state/root/daemon.addr"
+	cases := []struct {
+		name string
+		lock string
+	}{
+		{name: "the boot lock", lock: daemonaddr.LockPath(addrPath)},
+		{name: "the serving lock", lock: daemonaddr.ServingPath(addrPath)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := rootWatchPaths("/state/root", addrPath)
+
+			// Assert
+			if slices.Contains(got, tc.lock) {
+				t.Fatalf("rootWatchPaths = %v, want no %s", got, tc.lock)
+			}
+		})
+	}
+}
+
+// rootChangeBound bounds one reported change, the kernelevent tests' bound
+// for the same kernel report (kernelevent's waitBound).
+const rootChangeBound = 5 * time.Second
+
+func TestTheRootWatchReportsTheBootLockRemovedOrReplaced(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(t *testing.T, lock string)
+	}{
+		{name: "removed", change: func(t *testing.T, lock string) {
+			if err := os.Remove(lock); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "replaced by rename", change: func(t *testing.T, lock string) {
+			other := lock + ".new"
+			if err := os.WriteFile(other, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(other, lock); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			root := t.TempDir()
+			addrPath := filepath.Join(root, "daemon.addr")
+			lock := daemonaddr.LockPath(addrPath)
+			if err := os.WriteFile(lock, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), rootChangeBound)
+			defer cancel()
+			changes, stop := kernelevent.FollowPaths(rootWatchPaths(root, addrPath)...)(ctx)
+			defer stop()
+
+			// Act
+			tc.change(t, lock)
+
+			// Assert
+			select {
+			case err := <-changes:
+				if err != nil {
+					t.Fatalf("the watch reported %v, want the change", err)
+				}
+			case <-ctx.Done():
+				t.Fatalf("no change reported within %s of daemon.lock %s", rootChangeBound, tc.name)
+			}
+		})
+	}
+}
+
+// rootWatchHelperEnv runs this test binary as TestLockHelperProcess.
+const rootWatchHelperEnv = "AGENT_REPLD_ROOTWATCH_HELPER"
+
+// TestLockHelperProcess asks about a record lock from another process
+// (locktest). Its one mode:
+//
+//	probe PATH   print "boot <pid>", the boot claim's holder beside the
+//	             daemon.addr PATH, 0 for none, and exit
+func TestLockHelperProcess(t *testing.T) {
+	locktest.Run(rootWatchHelperEnv, map[string]locktest.Mode{
+		"probe": func(path string) error {
+			boot, _, err := daemonaddr.LockHolders(path)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("boot %d\n", boot.PID)
+			os.Exit(0)
+			return nil
+		},
+	})
+}
+
+func TestARootWatchLeavesTheBootClaimHeld(t *testing.T) {
+	// Arrange: this process holds the boot claim and publishes.
+	root := t.TempDir()
+	addrPath := filepath.Join(root, "daemon.addr")
+	claim, err := daemonaddr.Bind(addrPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer claim.Close()
+	if err := claim.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	verified := make(chan struct{}, 2)
+	w := rootWatch{
+		verify: func() error {
+			err := claim.Verify()
+			verified <- struct{}{}
+			return err
+		},
+		changes:   kernelevent.FollowPaths(rootWatchPaths(root, addrPath)...),
+		log:       dlog.NewTestLogger(),
+		standDown: func(cause error) { t.Errorf("stood down: %v", cause) },
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	awaitVerify := func(what string) {
+		t.Helper()
+		select {
+		case <-verified:
+		case <-time.After(rootChangeBound):
+			t.Fatalf("no verify within %s %s", rootChangeBound, what)
+		}
+	}
+
+	// Act: the watch runs, re-watches at a change, and stops.
+	go func() { done <- w.run(ctx) }()
+	awaitVerify("once the watch was taken")
+	if err := os.WriteFile(filepath.Join(root, "other"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	awaitVerify("after a change of the root")
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run = %v, want nil", err)
+	}
+
+	// Assert: another process still sees this one holding the claim.
+	if holder := locktest.Start(t, "TestLockHelperProcess", rootWatchHelperEnv, "probe", addrPath).Field(t, "boot"); holder != os.Getpid() {
+		t.Fatalf("the boot claim's holder is pid %d, want this process's %d", holder, os.Getpid())
 	}
 }
