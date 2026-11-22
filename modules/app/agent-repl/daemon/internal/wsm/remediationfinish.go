@@ -257,8 +257,13 @@ func joinPaths(a, b []string) string {
 	return strings.Join(all, "\n")
 }
 
-// EndRemediationFinishesOf removes every remediation finish of REPO's queue,
-// answering how many: its chain ended. A finish that serves an escalation
+// EndRemediationFinishesOf removes every DEPLOYED remediation finish of
+// REPO's queue, answering how many: its chain ended, and what the chain's
+// fixes landed is forgotten. A finish still under way (gating, fixing,
+// landing, deploying) is kept: it holds the queue until its own deploy owes
+// the next check (owner ruling, 2026-11-22), and a chain's end ended by the
+// approval of an earlier deploy forgot it while its gate ran, letting the
+// queue's head run beside it (2026-11-22 12:24:51). A finish that serves an escalation
 // (RemediationFinish.ServesEscalation) is no chain's: it outlives every chain
 // until its own deploy, and a chain that ended meanwhile forgot it, stranding
 // its failed gate (2026-11-15, deploy-escalation-20261115-174608).
@@ -270,7 +275,7 @@ func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int
 	}
 	n := 0
 	err = s.write(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ? AND serves_escalation = 0`, string(key))
+		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ? AND serves_escalation = 0 AND step = ?`, string(key), string(RemediationDeployed))
 		if err != nil {
 			return err
 		}
@@ -345,6 +350,43 @@ func (s *store) RemediationFinishes(ctx context.Context) ([]RemediationFinish, e
 		return err
 	})
 	return out, err
+}
+
+// DeployCheckHold is everything that may hold a queue for its deploy
+// mediator, read together: the check its last deploy owes, nil for none, and
+// every remediation finish of the queue, oldest first.
+type DeployCheckHold struct {
+	Mediation *Mediation
+	Finishes  []RemediationFinish
+}
+
+// DeployCheckHoldOf answers REPO's owed check and remediation finishes in ONE
+// snapshot of the store. Read apart, a finish that begins while its check is
+// approved could fall between the two reads, so that neither is seen and the
+// queue reads as held by nothing at an instant both stood.
+func (s *store) DeployCheckHoldOf(ctx context.Context, repo RepoKey) (DeployCheckHold, error) {
+	const op = "daemon.wsm.deploy_check_hold_of"
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
+	if err != nil {
+		return DeployCheckHold{}, err
+	}
+	var out DeployCheckHold
+	err = s.snapshot(ctx, op, "the deploy check hold read", dlog.Context{"repo": string(key)}, func(ctx context.Context, tx *sql.Tx) error {
+		m, err := scanMediation(string(key), tx.QueryRowContext(ctx, mediationQuery, key))
+		if err != nil {
+			return err
+		}
+		finishes, err := listRows(ctx, tx, remediationFinishQuery+` WHERE repo_key = ? ORDER BY started_at, workspace_id`, scanRemediationFinishRow, string(key))
+		if err != nil {
+			return err
+		}
+		out = DeployCheckHold{Mediation: m, Finishes: finishes}
+		return nil
+	})
+	if err != nil {
+		return DeployCheckHold{}, err
+	}
+	return out, nil
 }
 
 // EndRemediationFinish removes WS's finish, answering whether one was

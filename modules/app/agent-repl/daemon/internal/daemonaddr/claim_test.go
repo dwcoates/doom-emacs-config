@@ -224,6 +224,81 @@ func TestReadAdvertisementSurfacesAReadError(t *testing.T) {
 	}
 }
 
+// TestAClaimStandingDownPublishesNothing pins the incident of 2026-11-22: a
+// successor whose adoption finished after it began standing down published
+// daemon.addr. A claim that departed, yielded or closed writes nothing and
+// answers ErrDeparted, and Departed says so first.
+func TestAClaimStandingDownPublishesNothing(t *testing.T) {
+	tests := []struct {
+		name      string
+		standDown func(c Claim) error
+	}{
+		{name: "after Depart", standDown: func(c Claim) error { return c.Depart() }},
+		{name: "after Yield", standDown: func(c Claim) error { return c.Yield() }},
+		{name: "after Close", standDown: func(c Claim) error { return c.Close() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			addrPath := newAddrPath(t)
+			c := mustBind(t, addrPath)
+			if err := tt.standDown(c); err != nil {
+				t.Fatalf("stand down: %v", err)
+			}
+
+			// Act
+			departed := c.Departed()
+			err := c.Publish()
+
+			// Assert
+			if !departed {
+				t.Fatal("Departed = false, want true once the claim stood down")
+			}
+			if !errors.Is(err, ErrDeparted) {
+				t.Fatalf("Publish = %v, want ErrDeparted", err)
+			}
+			if _, statErr := os.Stat(addrPath); !os.IsNotExist(statErr) {
+				t.Fatalf("daemon.addr was written by a claim standing down (stat err = %v)", statErr)
+			}
+		})
+	}
+}
+
+// TestAClaimPublishedBeforeItDepartsIsWithdrawnByTheDeparture pins the other
+// ordering of a publish racing a departure: the publish lands first, and the
+// departure's withdrawal takes it down, so neither ordering leaves an address.
+func TestAClaimPublishedBeforeItDepartsIsWithdrawnByTheDeparture(t *testing.T) {
+	// Arrange
+	addrPath := newAddrPath(t)
+	c := mustBind(t, addrPath)
+	if c.Departed() {
+		t.Fatal("Departed = true before any departure")
+	}
+	if err := c.Publish(); err != nil {
+		t.Fatalf("Publish before Depart = %v, want the address written", err)
+	}
+	if got := readAddrFile(t, addrPath); got != c.Address() {
+		t.Fatalf("daemon.addr = %q, want %q", got, c.Address())
+	}
+
+	// Act
+	if err := c.Depart(); err != nil {
+		t.Fatalf("Depart: %v", err)
+	}
+	withdrawal, err := c.Withdraw()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+	if !withdrawal.Withdrawn {
+		t.Fatal("Withdraw removed nothing, want the published address withdrawn")
+	}
+	if _, statErr := os.Stat(addrPath); !os.IsNotExist(statErr) {
+		t.Fatalf("daemon.addr survived the departure (stat err = %v)", statErr)
+	}
+}
+
 func TestPublishReplacesAStaleAdvertisement(t *testing.T) {
 	// Arrange.
 	addrPath := newAddrPath(t)
@@ -278,17 +353,88 @@ func TestWithdrawRemovesTheAdvertisement(t *testing.T) {
 	}
 
 	// Act.
-	withdrawn, err := c.Withdraw()
+	withdrawal, err := c.Withdraw()
 	if err != nil {
 		t.Fatalf("Withdraw: %v", err)
 	}
 
 	// Assert.
-	if !withdrawn {
+	if !withdrawal.Withdrawn {
 		t.Fatal("Withdraw reported nothing removed, want its own advertisement withdrawn")
 	}
 	if _, err := os.Stat(addrPath); !os.IsNotExist(err) {
 		t.Fatalf("daemon.addr survived Withdraw (stat err = %v)", err)
+	}
+}
+
+// TestWithdrawAnswersWhatItRead pins the Withdrawal every exit record is
+// built from: this claim's own advertisement, and what daemon.addr held.
+func TestWithdrawAnswersWhatItRead(t *testing.T) {
+	const shared = "127.0.0.1:41000"
+	other := os.Getpid() + 1
+	tests := []struct {
+		name string
+		// file is daemon.addr's content before the withdrawal; "" for none,
+		// "own" for this claim's own publish.
+		file        string
+		joining     bool
+		wantRead    bool
+		wantPresent bool
+		wantFile    Advertisement
+		wantRemoved bool
+	}{
+		{name: "its own advertisement is read and removed", file: "own", wantRead: true, wantPresent: true,
+			wantFile: Advertisement{Address: shared, PID: os.Getpid(), PIDKnown: true}, wantRemoved: true},
+		{name: "another daemon's advertisement is read and left", file: shared + "\npid=" + strconv.Itoa(other) + "\nprivate=127.0.0.1:5001\n",
+			wantRead: true, wantPresent: true, wantFile: Advertisement{Address: shared, PID: other, PIDKnown: true, Private: "127.0.0.1:5001"}},
+		{name: "no file is read as absent", wantRead: true},
+		{name: "a claim holding no boot claim reads nothing", file: shared + "\npid=" + strconv.Itoa(other) + "\n", joining: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			addrPath := newAddrPath(t)
+			var c Claim
+			if tt.joining {
+				// The incumbent holds the boot claim; the successor holds none.
+				mustBind(t, addrPath)
+				var err error
+				if c, err = BindJoining(addrPath, 0); err != nil {
+					t.Fatalf("BindJoining: %v", err)
+				}
+				t.Cleanup(func() { c.Close() })
+			} else {
+				c = mustBind(t, addrPath)
+			}
+			c.Advertise(shared)
+			switch tt.file {
+			case "":
+			case "own":
+				if err := c.Publish(); err != nil {
+					t.Fatalf("Publish: %v", err)
+				}
+			default:
+				if err := os.WriteFile(addrPath, []byte(tt.file), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.file == "own" {
+				tt.wantFile.Private = c.Address()
+			}
+
+			// Act
+			got, err := c.Withdraw()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Withdraw: %v", err)
+			}
+			want := Withdrawal{Address: shared, PID: os.Getpid(), Private: c.Address(),
+				Read: tt.wantRead, Present: tt.wantPresent, File: tt.wantFile, Withdrawn: tt.wantRemoved}
+			if got != want {
+				t.Fatalf("Withdraw = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
 
@@ -297,13 +443,13 @@ func TestWithdrawingAnAbsentAdvertisementIsSuccess(t *testing.T) {
 	c := mustBind(t, newAddrPath(t))
 
 	// Act.
-	withdrawn, err := c.Withdraw()
+	withdrawal, err := c.Withdraw()
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("Withdraw = %v, want success", err)
 	}
-	if withdrawn {
+	if withdrawal.Withdrawn {
 		t.Fatal("Withdraw reported a removal, want none: nothing was ever published")
 	}
 }
@@ -324,13 +470,13 @@ func TestWithdrawLeavesASuccessorsAdvertisementAlone(t *testing.T) {
 	}
 
 	// Act.
-	withdrawn, err := incumbent.Withdraw()
+	withdrawal, err := incumbent.Withdraw()
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("Withdraw = %v, want success", err)
 	}
-	if withdrawn {
+	if withdrawal.Withdrawn {
 		t.Fatal("Withdraw removed an address it does not own")
 	}
 	if got := readAddrFile(t, addrPath); got != "127.0.0.1:65000" {
@@ -365,11 +511,11 @@ func TestWithdrawLeavesAnAdvertisementNotNamingThisProcess(t *testing.T) {
 			}
 
 			// Act
-			withdrawn, err := c.Withdraw()
+			withdrawal, err := c.Withdraw()
 
 			// Assert
-			if err != nil || withdrawn {
-				t.Fatalf("Withdraw = (%v, %v), want (false, nil)", withdrawn, err)
+			if err != nil || withdrawal.Withdrawn {
+				t.Fatalf("Withdraw = (%v, %v), want (false, nil)", withdrawal.Withdrawn, err)
 			}
 			if raw, err := os.ReadFile(addrPath); err != nil || string(raw) != tc.raw {
 				t.Fatalf("daemon.addr = %q (%v), want it left as %q", raw, err, tc.raw)
@@ -538,13 +684,13 @@ func TestAYieldedClaimNeverWithdrawsTheAdvertisement(t *testing.T) {
 	}
 
 	// Act.
-	withdrawn, err := incumbent.Withdraw()
+	withdrawal, err := incumbent.Withdraw()
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("Withdraw = %v, want success", err)
 	}
-	if withdrawn {
+	if withdrawal.Withdrawn {
 		t.Fatal("a yielded claim removed daemon.addr, want it left for the boot claim's holder")
 	}
 	if got := readAddrFile(t, addrPath); got != incumbent.Address() {
@@ -1377,11 +1523,13 @@ func TestAClaimThatDepartedTakesNoServingLockWithALaterClaim(t *testing.T) {
 	}
 
 	// Act.
-	if err := successor.Publish(); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
+	err = successor.Publish()
 
-	// Assert.
+	// Assert: a departed claim's publish is refused (ErrDeparted), and it
+	// took no serving lock on the way to that refusal.
+	if !errors.Is(err, ErrDeparted) {
+		t.Fatalf("Publish after Depart = %v, want ErrDeparted", err)
+	}
 	requireServing(t, addrPath, false)
 }
 
@@ -1581,8 +1729,8 @@ func TestAnAdvertisedSharedAddressIsPublishedVerifiedAndWithdrawn(t *testing.T) 
 	if verifyErr != nil {
 		t.Fatalf("Verify of the advertised address: %v", verifyErr)
 	}
-	if withdrawErr != nil || !removed {
-		t.Fatalf("Withdraw = %v, %v; want the advertisement removed", removed, withdrawErr)
+	if withdrawErr != nil || !removed.Withdrawn {
+		t.Fatalf("Withdraw = %+v, %v; want the advertisement removed", removed, withdrawErr)
 	}
 }
 

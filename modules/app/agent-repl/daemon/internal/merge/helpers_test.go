@@ -142,6 +142,13 @@ type fakeDB struct {
 	remediationFinishErr error
 	// remediationFinishesErr fails RemediationFinishes.
 	remediationFinishesErr error
+	// deployCheckHoldErr fails DeployCheckHoldOf.
+	deployCheckHoldErr error
+	// afterHoldWrite, when set, runs after every write that may move a
+	// queue's deploy hold (holdWritten).
+	afterHoldWrite func()
+	// heldPrompts are the prompts waiting in each workspace's queue.
+	heldPrompts map[ids.WorkspaceID][]wsm.HeldPrompt
 	// contextUsage is each workspace's last context reading.
 	contextUsage map[ids.WorkspaceID]wsm.ContextUsageRecord
 	// listWorkspacesErr fails ListWorkspaces.
@@ -406,7 +413,19 @@ func inMemoryChecks() wsm.DB {
 }
 
 func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.ReplacedMediation, error) {
+	defer f.holdWritten()
 	return f.checks.OweMediation(ctx, repo, at, version)
+}
+
+// holdWritten runs afterHoldWrite, when set, once a write that may move a
+// queue's deploy hold returned: a test reads the hold after every one.
+func (f *fakeDB) holdWritten() {
+	f.mu.Lock()
+	hook := f.afterHoldWrite
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 }
 
 func (f *fakeDB) MarkMediationPrompted(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
@@ -449,6 +468,7 @@ func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed ti
 	if err != nil {
 		return false, err
 	}
+	defer f.holdWritten()
 	return f.checks.ReleaseMediation(ctx, repo, owed)
 }
 
@@ -605,6 +625,7 @@ func (f *fakeDB) PassRemediationGate(ctx context.Context, ws ids.WorkspaceID, he
 }
 
 func (f *fakeDB) AdvanceRemediationFinish(ctx context.Context, ws ids.WorkspaceID, from, to wsm.RemediationStep, at time.Time) (bool, error) {
+	defer f.holdWritten()
 	return f.checks.AdvanceRemediationFinish(ctx, ws, from, to, at)
 }
 
@@ -622,7 +643,20 @@ func (f *fakeDB) RemediationFinishes(ctx context.Context) ([]wsm.RemediationFini
 	return f.checks.RemediationFinishes(ctx)
 }
 
+// DeployCheckHoldOf reads the hold from the checks' real store, failing as
+// a check's read does (mediationErr) or on its own (deployCheckHoldErr).
+func (f *fakeDB) DeployCheckHoldOf(ctx context.Context, repo wsm.RepoKey) (wsm.DeployCheckHold, error) {
+	f.mu.Lock()
+	err := errors.Join(f.mediationErr, f.deployCheckHoldErr)
+	f.mu.Unlock()
+	if err != nil {
+		return wsm.DeployCheckHold{}, err
+	}
+	return f.checks.DeployCheckHoldOf(ctx, repo)
+}
+
 func (f *fakeDB) EndRemediationFinish(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	defer f.holdWritten()
 	return f.checks.EndRemediationFinish(ctx, ws)
 }
 
@@ -909,6 +943,13 @@ func (f *fakeDB) HasTurns(_ context.Context, id ids.WorkspaceID) (bool, error) {
 		return false, f.hasTurnsErr
 	}
 	return len(f.turns[id]) > 0, nil
+}
+
+// HeldPrompts answers the prompts a test held for workspace ID.
+func (f *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]wsm.HeldPrompt(nil), f.heldPrompts[id]...), nil
 }
 
 func (f *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, error) {

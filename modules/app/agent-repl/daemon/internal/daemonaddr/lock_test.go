@@ -19,6 +19,58 @@ func TestLockPathSitsBesideTheAdvertisement(t *testing.T) {
 	}
 }
 
+// TestLockFilesNameEveryLockADaemonHolds pins the lock files a caller that
+// must never open one (the state-root watch) is refused by.
+func TestLockFilesNameEveryLockADaemonHolds(t *testing.T) {
+	// Act
+	got := LockFiles("/state/daemon.addr", "inst")
+
+	// Assert
+	want := []LockFile{
+		{Kind: LockBoot, Path: "/state/daemon.lock"},
+		{Kind: LockServing, Path: "/state/daemon.serving"},
+		{Kind: LockLife, Path: "/state/daemons/inst.lock"},
+		{Kind: LockLifePending, Path: "/state/daemons/inst.lock.pending"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("LockFiles = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("LockFiles[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestLockKindOf(t *testing.T) {
+	cases := []struct {
+		name     string
+		path     string
+		wantKind LockKind
+		wantOK   bool
+	}{
+		{name: "the boot lock", path: "/state/daemon.lock", wantKind: LockBoot, wantOK: true},
+		{name: "the serving lock", path: "/state/daemon.serving", wantKind: LockServing, wantOK: true},
+		{name: "a life lock", path: "/state/daemons/other.lock", wantKind: LockLife, wantOK: true},
+		{name: "a life lock's pending name", path: "/state/daemons/other.lock.pending", wantKind: LockLifePending, wantOK: true},
+		{name: "the address file", path: "/state/daemon.addr"},
+		{name: "an instance's address file", path: "/state/daemons/other.addr"},
+		{name: "a .lock file outside the life locks' directory", path: "/state/other.lock"},
+		{name: "the state root", path: "/state"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			kind, ok := LockKindOf(tc.path)
+
+			// Assert
+			if kind != tc.wantKind || ok != tc.wantOK {
+				t.Fatalf("LockKindOf(%q) = %q, %v; want %q, %v", tc.path, kind, ok, tc.wantKind, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestAcquireBootLockTakesAFreeClaim(t *testing.T) {
 	// Arrange.
 	path := filepath.Join(t.TempDir(), LockName)

@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -848,5 +852,382 @@ func TestAGateStoodAgainWhileItsAnswerRunsLeavesTheFailureToTheAnswersOwnRecord(
 	}
 	if errs != 1 {
 		t.Fatalf("%d ERROR records under %s, want only the answer's own: %v", errs, opColdGate, h.logs.Records())
+	}
+}
+
+// standAtColdGate stands WS's cold gate in the harness as the fleet and the
+// prompt queue see it: AtColdGate answers it parked, the queue refuses a
+// submission to it by the gate's name, and an answer that does not fail
+// passes it, as the session it brings up retires the gate.
+func standAtColdGate(h *harness, ws ids.WorkspaceID) {
+	h.mu.Lock()
+	if h.coldGated == nil {
+		h.coldGated = map[ids.WorkspaceID]bool{}
+	}
+	h.coldGated[ws] = true
+	h.duringCompactGate = func(gated ids.WorkspaceID) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.compactGateErr == nil && !h.compactGateAbandoned {
+			delete(h.coldGated, gated)
+		}
+	}
+	h.mu.Unlock()
+	h.queue.mu.Lock()
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		h.mu.Lock()
+		gated := h.coldGated[sub.WS]
+		h.mu.Unlock()
+		h.queue.mu.Lock()
+		defer h.queue.mu.Unlock()
+		h.queue.err = nil
+		if gated {
+			h.queue.err = &promptqueue.ColdGateRefusal{Detail: "the conversation is cold at 574,592 context tokens"}
+		}
+	}
+	h.queue.mu.Unlock()
+}
+
+// compacted answers every workspace whose gate CompactColdGate was asked to
+// answer.
+func compacted(h *harness) []ids.WorkspaceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.gatesCompacted)
+}
+
+// submitted answers every submission the harness's prompt queue took.
+func submitted(h *harness) []promptqueue.Submission {
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	return slices.Clone(h.queue.submissions)
+}
+
+func TestEveryMergeTurnKindPassesAStandingColdGateBeforeItIsHandedOff(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+	}{
+		{"a pick", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK},
+		{"a configured prompt before an action", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION},
+		{"a configured prompt after an action", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION},
+		{"a deploy hook's prompt", conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK},
+		{"a conflict repair", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR},
+		{"a test repair", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR},
+		{"a finish hook's prompt", conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			standAtColdGate(h, theWorkspace)
+
+			// Act
+			err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", tt.origin)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("handOff = %v, want the turn handed off past the gate", err)
+			}
+			if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+				t.Fatalf("gates compacted = %v, want the workspace's gate answered once", got)
+			}
+			if subs := submitted(h); len(subs) != 1 || subs[0].Turn != "turn-1" || subs[0].Origin != tt.origin {
+				t.Fatalf("submissions = %+v, want the turn submitted once past the gate", subs)
+			}
+			rec, ok := coldGateRecord(h, "info", "a merge turn met its workspace's cold gate; the gate is answered by a compaction before the turn is submitted")
+			if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["origin"] != tt.origin.String() || rec.Context["turn"] != "turn-1" {
+				t.Fatalf("the pass was recorded as %+v, want an INFO naming the workspace, the turn and its origin", rec)
+			}
+		})
+	}
+}
+
+func TestAMergeTurnWithNoColdGateStandingNeverCompacts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("handOff = %v, want the turn handed off", err)
+	}
+	if got := compacted(h); len(got) != 0 {
+		t.Fatalf("gates compacted = %v, want none", got)
+	}
+}
+
+func TestADeployCheckTurnLeavesItsColdGateToTheDeployChecksOwnAnswer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	standAtColdGate(h, theWorkspace)
+
+	// Act
+	_ = h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
+
+	// Assert
+	if got := compacted(h); len(got) != 0 {
+		t.Fatalf("gates compacted = %v, want none: the deploy check answers its own gate at its raise", got)
+	}
+}
+
+func TestAMergeTurnsFailedColdGateAnswerFailsTheTurnWithOneError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	standAtColdGate(h, theWorkspace)
+	h.compactGateErr = errors.New("the summarizer is down")
+
+	// Act
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the summarizer is down") {
+		t.Fatalf("handOff = %v, want the answer's failure", err)
+	}
+	if subs := submitted(h); len(subs) != 0 {
+		t.Fatalf("submissions = %+v, want none past a gate that still stands", subs)
+	}
+	found := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opColdGate,
+		Message: "the cold gate of a merge's workspace could not be answered by a compaction; the merge turn waiting on the answer fails the merge, and the gate stands for the user"})
+	if len(found) != 1 || found[0].Context["workspace"] != string(theWorkspace) || found[0].Context["error"] != "the summarizer is down" {
+		t.Fatalf("records %v, want the failure recorded once naming the workspace and the cause", found)
+	}
+}
+
+func TestAMergeTurnAtAGateWhoseOneAnswerFailedIsNotAnsweredAgain(t *testing.T) {
+	// Arrange: an answer to the gate failed, and the gate stood again.
+	h := newHarness(t)
+	standAtColdGate(h, theWorkspace)
+	h.o.ColdGateStoodAfterFailedAnswer(theWorkspace)
+
+	// Act
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+
+	// Assert
+	if err == nil {
+		t.Fatal("handOff succeeded at a gate whose answer failed")
+	}
+	if got := compacted(h); len(got) != 0 {
+		t.Fatalf("gates compacted = %v, want none after the failed answer", got)
+	}
+	if subs := submitted(h); len(subs) != 0 {
+		t.Fatalf("submissions = %+v, want none", subs)
+	}
+	rec, ok := coldGateRecord(h, "error", "a merge turn met its workspace's cold gate standing after its one answer failed; the gate is not answered again, and the merge fails with the gate standing for the user")
+	if !ok || rec.Context["workspace"] != string(theWorkspace) {
+		t.Fatalf("the refusal was recorded as %+v, want an ERROR naming the workspace", rec)
+	}
+}
+
+func TestAMergeTurnAtAGateRetiredAfterAFailedAnswerIsAnsweredAgain(t *testing.T) {
+	// Arrange: the failed gate was passed (the user answered it), and a new
+	// gate stands at a later bring-up.
+	h := newHarness(t)
+	standAtColdGate(h, theWorkspace)
+	h.o.ColdGateStoodAfterFailedAnswer(theWorkspace)
+	h.o.ColdGateRetired(theWorkspace)
+
+	// Act
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("handOff = %v, want the new gate answered and the turn handed off", err)
+	}
+	if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want the new gate answered once", got)
+	}
+}
+
+func TestAGateRaisedWhileAMergeTurnsAnswerRunsIsNotAnsweredTwice(t *testing.T) {
+	// Arrange: the queue's merge is in line, and its raise edge arrives
+	// while the merge turn's own answer runs.
+	h := newHarness(t)
+	enqueue(t, h)
+	standAtColdGate(h, theWorkspace)
+	pass := h.duringCompactGate
+	h.duringCompactGate = func(ws ids.WorkspaceID) {
+		h.o.ColdGateRaised(ws)
+		pass(ws)
+	}
+
+	// Act
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("handOff = %v, want the turn handed off", err)
+	}
+	if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want one answer", got)
+	}
+}
+
+func TestAMergeTurnsAnswerThatBringsNoSessionUpWithTheGateStandingFailsTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	standAtColdGate(h, theWorkspace)
+	h.compactGateAbandoned = true
+
+	// Act
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+
+	// Assert
+	if err == nil {
+		t.Fatal("handOff succeeded with the gate still standing")
+	}
+	if subs := submitted(h); len(subs) != 0 {
+		t.Fatalf("submissions = %+v, want none", subs)
+	}
+	if _, ok := coldGateRecord(h, "error", "the answer to a merge's workspace cold gate settled with no session up and the gate still standing; the merge's turn is not submitted, and the merge fails"); !ok {
+		t.Fatalf("records %v, want the abandoned answer recorded at ERROR", h.logs.Records())
+	}
+}
+
+func TestOnlyTheHandOffAndTheHeldDeliveryPassTheColdGate(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "o.passColdGate(")
+
+	// Assert: every merge turn reaches its queue through one of the two.
+	if !slices.Equal(sites, []string{"resume.go", "run.go"}) {
+		t.Fatalf("the gate is passed at %v, want bringTurnOn's held delivery and handOff alone", sites)
+	}
+}
+
+// heldQueueAnswer queues the harness's merge at a standing cold gate and
+// starts the queue's own answer to its raise, held inside its compaction
+// until the test closes the answer's release: a merge turn that meets the
+// gate meanwhile meets an answer already running. It answers the release and
+// a channel closed once the queue's answer settled.
+func heldQueueAnswer(t *testing.T, h *harness) (release, settled chan struct{}) {
+	t.Helper()
+	enqueue(t, h)
+	standAtColdGate(h, theWorkspace)
+	pass := h.duringCompactGate
+	entered := make(chan struct{})
+	release, settled = make(chan struct{}), make(chan struct{})
+	h.duringCompactGate = func(ws ids.WorkspaceID) {
+		close(entered)
+		<-release
+		pass(ws)
+	}
+	go func() {
+		defer close(settled)
+		h.o.ColdGateRaised(theWorkspace)
+	}()
+	<-entered
+	return release, settled
+}
+
+// joinedMessage is the record of a merge turn joining an answer running.
+const joinedMessage = "a merge turn met its workspace's cold gate while the gate's answer runs; the turn waits for that answer before it is submitted"
+
+// joinHeldAnswer hands a merge turn off while the queue's answer is held,
+// and waits for the join's own record: the turn is then counted as waiting
+// on that answer. It answers the hand-off's result once it returns.
+func joinHeldAnswer(t *testing.T, h *harness, ctx context.Context) <-chan error {
+	t.Helper()
+	handedOff := make(chan error, 1)
+	go func() {
+		handedOff <- h.o.handOff(ctx, theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+	}()
+	if _, err := h.logs.Await(t.Context(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opColdGate, Message: joinedMessage}); err != nil {
+		t.Fatalf("awaiting the join: %v", err)
+	}
+	return handedOff
+}
+
+func TestAMergeTurnThatMeetsTheQueuesAnswerRunningJoinsIt(t *testing.T) {
+	t.Run("the turn waits for the answer, which runs once, and is then submitted", func(t *testing.T) {
+		// Arrange
+		h := newHarness(t)
+		release, settled := heldQueueAnswer(t, h)
+		handedOff := joinHeldAnswer(t, h, t.Context())
+		before := submitted(h)
+
+		// Act
+		close(release)
+		err := <-handedOff
+		<-settled
+
+		// Assert
+		if len(before) != 0 {
+			t.Fatalf("submissions before the release = %+v, want none while the answer runs", before)
+		}
+		if err != nil {
+			t.Fatalf("handOff = %v, want the turn handed off past the gate", err)
+		}
+		if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+			t.Fatalf("gates compacted = %v, want the one answer the queue made", got)
+		}
+		if subs := submitted(h); len(subs) != 1 || subs[0].Turn != "turn-1" {
+			t.Fatalf("submissions = %+v, want the turn once", subs)
+		}
+		rec, ok := coldGateRecord(h, "info", joinedMessage)
+		if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["turn"] != "turn-1" {
+			t.Fatalf("the join was recorded as %+v, want an INFO naming the workspace and the turn", rec)
+		}
+	})
+	t.Run("a failed answer fails the turn, recorded once, and the queue does not end the merge too", func(t *testing.T) {
+		// Arrange
+		h := newHarness(t)
+		h.compactGateErr = errors.New("the summarizer is down")
+		release, settled := heldQueueAnswer(t, h)
+		handedOff := joinHeldAnswer(t, h, t.Context())
+
+		// Act
+		close(release)
+		err := <-handedOff
+		<-settled
+
+		// Assert
+		if err == nil || !strings.Contains(err.Error(), "the summarizer is down") {
+			t.Fatalf("handOff = %v, want the answer's failure", err)
+		}
+		if subs := submitted(h); len(subs) != 0 {
+			t.Fatalf("submissions = %+v, want none", subs)
+		}
+		errs := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opColdGate})
+		if len(errs) != 1 || errs[0].Message != "the cold gate of a merge's workspace could not be answered by a compaction; the merge turn waiting on the answer fails the merge, and the gate stands for the user" {
+			t.Fatalf("ERROR records %v, want only the failure the waiting turn ends the merge on", errs)
+		}
+		if _, ok := h.entryOf(theWorkspace); !ok {
+			t.Fatal("the queue took the merge off as failed; the waiting turn's own failure path ends it")
+		}
+	})
+}
+
+func TestAMergeTurnsWithdrawnWaitLeavesTheAnswerRunning(t *testing.T) {
+	// Arrange: the turn joins the queue's held answer, which then fails.
+	h := newHarness(t)
+	h.compactGateErr = errors.New("the summarizer is down")
+	release, settled := heldQueueAnswer(t, h)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	handedOff := joinHeldAnswer(t, h, ctx)
+	withdrawn := errors.New("the merge left its queue")
+
+	// Act
+	cancel(withdrawn)
+	err := <-handedOff
+	close(release)
+	<-settled
+
+	// Assert
+	if !errors.Is(err, withdrawn) {
+		t.Fatalf("handOff = %v, want the withdrawal's cause wrapped", err)
+	}
+	if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want the one answer, run on to its end", got)
+	}
+	if subs := submitted(h); len(subs) != 0 {
+		t.Fatalf("submissions = %+v, want none", subs)
+	}
+	if _, ok := coldGateRecord(h, "error", "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge leaves its queue as failed, and the gate stands for the user"); !ok {
+		t.Fatalf("records %v, want the failure no turn waits on recorded as the queue's", h.logs.Records())
+	}
+	if _, ok := h.entryOf(theWorkspace); ok {
+		t.Fatal("the merge whose answer failed with no turn waiting still stands in the queue")
 	}
 }

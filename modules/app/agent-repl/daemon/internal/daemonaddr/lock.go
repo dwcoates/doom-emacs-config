@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"agent-repld/internal/inflight"
@@ -100,6 +101,66 @@ const ServingName = "daemon.serving"
 // ServingPath is the serving lock's path for a given daemon.addr path.
 func ServingPath(addrPath string) string {
 	return filepath.Join(filepath.Dir(addrPath), ServingName)
+}
+
+// LockKind names one of the lock files a daemon holds record locks on.
+type LockKind string
+
+const (
+	// LockBoot is the boot claim (LockName).
+	LockBoot LockKind = "boot"
+	// LockServing is the serving lock (ServingName).
+	LockServing LockKind = "serving"
+	// LockLife is a daemon's life lock (LifePath).
+	LockLife LockKind = "life"
+	// LockLifePending is a life lock's name before it is linked to its own
+	// (LifePendingPath).
+	LockLifePending LockKind = "life pending"
+)
+
+// LockFile is one lock file a daemon holds record locks on: its kind and its
+// path.
+type LockFile struct {
+	Kind LockKind
+	Path string
+}
+
+// LockFiles are the lock files daemon INSTANCE holds record locks on for the
+// state root of ADDRPATH: the boot claim, the serving lock, its life lock,
+// and the pending name its life lock is made under. Closing ANY descriptor of
+// one of them drops every record lock this process holds on it
+// (recordlock's package comment), so nothing but the lock's own holder may
+// open one.
+func LockFiles(addrPath, instance string) []LockFile {
+	return []LockFile{
+		{Kind: LockBoot, Path: LockPath(addrPath)},
+		{Kind: LockServing, Path: ServingPath(addrPath)},
+		{Kind: LockLife, Path: LifePath(addrPath, instance)},
+		{Kind: LockLifePending, Path: LifePendingPath(addrPath, instance)},
+	}
+}
+
+// LockKindOf answers the kind of lock file PATH is by its name's shape, any
+// daemon's, and false for a path no daemon locks: daemon.lock, daemon.serving,
+// or a life lock or its pending name inside a LifeDirName directory.
+func LockKindOf(path string) (LockKind, bool) {
+	base := filepath.Base(path)
+	switch base {
+	case LockName:
+		return LockBoot, true
+	case ServingName:
+		return LockServing, true
+	}
+	if filepath.Base(filepath.Dir(path)) != LifeDirName {
+		return "", false
+	}
+	switch {
+	case strings.HasSuffix(base, lifeSuffix+pendingSuffix):
+		return LockLifePending, true
+	case strings.HasSuffix(base, lifeSuffix):
+		return LockLife, true
+	}
+	return "", false
 }
 
 // BootMode says how a booting daemon reads a held boot claim.

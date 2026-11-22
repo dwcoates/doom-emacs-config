@@ -525,6 +525,13 @@ type logLike struct {
 // loggedLike reports whether h's log holds a record like want. It is the one
 // matcher every "was it recorded" helper of this package's tests reads.
 func loggedLike(h *harness, want logLike) bool {
+	_, ok := recordLike(h, want)
+	return ok
+}
+
+// recordLike returns the first record loggedLike matches, for a test that
+// asserts on what that record carries beyond the match.
+func recordLike(h *harness, want logLike) (dlog.Record, bool) {
 	for _, r := range h.logs.Records() {
 		if want.level != "" && r.Level != want.level || want.op != "" && r.Operation != want.op || !strings.Contains(r.Message, want.text) {
 			continue
@@ -536,10 +543,10 @@ func loggedLike(h *harness, want logLike) bool {
 			}
 		}
 		if matched {
-			return true
+			return r, true
 		}
 	}
-	return false
+	return dlog.Record{}, false
 }
 
 func TestRecoverSweepsTheMergeStateNoQueueEntryNames(t *testing.T) {
@@ -686,6 +693,40 @@ func TestLoggedLikeMatchesEveryFieldItIsGiven(t *testing.T) {
 			// Act / Assert.
 			if got := loggedLike(h, tt.want); got != tt.hit {
 				t.Fatalf("loggedLike(%+v) = %v, want %v", tt.want, got, tt.hit)
+			}
+		})
+	}
+}
+
+func TestRecordLikeReturnsTheRecordItMatched(t *testing.T) {
+	tests := []struct {
+		name   string
+		want   logLike
+		wantOK bool
+		round  string
+	}{
+		{name: "the first matching record is returned", want: logLike{op: "daemon.merge.test", context: map[string]string{"workspace": "ws-2"}}, wantOK: true, round: "3"},
+		{name: "no match returns no record", want: logLike{text: "did nothing"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two records of one operation.
+			h := newHarness(t)
+			h.logs.Global().Info("daemon.merge.test", "the merge did the thing", dlog.Context{"workspace": "ws-1", "round": 2})
+			h.logs.Global().Info("daemon.merge.test", "the merge did the thing", dlog.Context{"workspace": "ws-2", "round": 3})
+
+			// Act
+			rec, ok := recordLike(h, tt.want)
+
+			// Assert
+			if ok != tt.wantOK {
+				t.Fatalf("recordLike(%+v) ok = %v, want %v", tt.want, ok, tt.wantOK)
+			}
+			if tt.wantOK && fmt.Sprint(rec.Context["round"]) != tt.round {
+				t.Fatalf("record %+v, want round %s", rec, tt.round)
+			}
+			if !tt.wantOK && rec.Message != "" {
+				t.Fatalf("record %+v, want none", rec)
 			}
 		})
 	}

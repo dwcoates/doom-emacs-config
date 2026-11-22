@@ -264,9 +264,7 @@ func TestEndRemediationFinishesOfEndsOnlyThatQueuesFinishes(t *testing.T) {
 	ctx := context.Background()
 	ended, kept := RepoKey(t.TempDir()), RepoKey(t.TempDir())
 	for ws, repo := range map[WorkspaceID]RepoKey{"a": ended, "b": ended, "c": kept} {
-		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant}); err != nil {
-			t.Fatal(err)
-		}
+		finishAt(t, s, ws, repo, false, RemediationDeployed)
 	}
 
 	// Act
@@ -285,9 +283,7 @@ func TestAChainsEndKeepsADeployEscalationsFinish(t *testing.T) {
 	ctx := context.Background()
 	repo := RepoKey(t.TempDir())
 	for _, ws := range []WorkspaceID{"remedy", "escalation"} {
-		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant, ServesEscalation: ws == "escalation"}); err != nil {
-			t.Fatal(err)
-		}
+		finishAt(t, s, ws, repo, ws == "escalation", RemediationDeployed)
 	}
 
 	// Act
@@ -297,6 +293,63 @@ func TestAChainsEndKeepsADeployEscalationsFinish(t *testing.T) {
 	// Assert
 	if err != nil || n != 1 || len(all) != 1 || all[0].Workspace != "escalation" {
 		t.Fatalf("EndRemediationFinishesOf = (%d, %v) leaving %+v, want the chain's remediation ended and the escalation kept", n, err, all)
+	}
+}
+
+func TestAChainsEndKeepsAFinishStillUnderWay(t *testing.T) {
+	tests := []struct {
+		name string
+		step RemediationStep
+	}{
+		{name: "a finish gating is kept", step: RemediationGating},
+		{name: "a finish sent back to fix is kept", step: RemediationFixing},
+		{name: "a finish landing is kept", step: RemediationLanding},
+		{name: "a finish starting its deploy is kept", step: RemediationDeploying},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+			finishAt(t, s, "remedy", repo, false, tt.step)
+
+			// Act
+			n, err := s.EndRemediationFinishesOf(ctx, repo)
+			f, readErr := s.RemediationFinishOf(ctx, "remedy")
+
+			// Assert
+			if err != nil || n != 0 {
+				t.Fatalf("EndRemediationFinishesOf = (%d, %v), want nothing ended", n, err)
+			}
+			if readErr != nil || f == nil || f.Step != tt.step {
+				t.Fatalf("RemediationFinishOf = (%+v, %v), want the finish kept at %s", f, readErr, tt.step)
+			}
+		})
+	}
+}
+
+// finishAt begins WS's finish of REPO, serving an escalation when SERVES, and
+// walks it to STEP through the store's own steps.
+func finishAt(t *testing.T, s *store, ws WorkspaceID, repo RepoKey, serves bool, step RemediationStep) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant, ServesEscalation: serves}); err != nil {
+		t.Fatal(err)
+	}
+	walk := map[RemediationStep][]RemediationStep{
+		RemediationGating:    nil,
+		RemediationFixing:    {RemediationFixing},
+		RemediationLanding:   {RemediationLanding},
+		RemediationDeploying: {RemediationLanding, RemediationDeploying},
+		RemediationDeployed:  {RemediationLanding, RemediationDeploying, RemediationDeployed},
+	}[step]
+	from := RemediationGating
+	for _, to := range walk {
+		if moved, err := s.AdvanceRemediationFinish(ctx, ws, from, to, instant); err != nil || !moved {
+			t.Fatalf("AdvanceRemediationFinish(%s -> %s) = (%v, %v)", from, to, moved, err)
+		}
+		from = to
 	}
 }
 
@@ -429,4 +482,89 @@ func TestTheBackfillMarksAnEarlierEscalationsFinish(t *testing.T) {
 	if remedy != 0 || escalation != 1 {
 		t.Fatalf("serves_escalation remedy %d, escalation %d; want only the escalation's finish marked", remedy, escalation)
 	}
+}
+
+func TestDeployCheckHoldOfReadsTheCheckAndTheQueuesFinishesTogether(t *testing.T) {
+	tests := []struct {
+		name         string
+		owe          bool
+		finishHere   bool
+		finishThere  bool
+		wantCheck    bool
+		wantFinishes []WorkspaceID
+	}{
+		{name: "a queue with neither reads nothing holding it"},
+		{name: "an owed check is read", owe: true, wantCheck: true},
+		{name: "a finish of the queue is read with no check owed", finishHere: true, wantFinishes: []WorkspaceID{"remedy"}},
+		{name: "a check and a finish are read together", owe: true, finishHere: true, wantCheck: true, wantFinishes: []WorkspaceID{"remedy"}},
+		{name: "another queue's finish is not this queue's", finishThere: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo, other := RepoKey(t.TempDir()), RepoKey(t.TempDir())
+			if tt.owe {
+				if _, err := s.OweMediation(ctx, repo, instant, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.finishHere {
+				beginFinish(t, s, repo, instant, nil)
+			}
+			if tt.finishThere {
+				if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: "elsewhere", Repo: other, StartedAt: instant}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got, err := s.DeployCheckHoldOf(ctx, repo)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("DeployCheckHoldOf: %v", err)
+			}
+			if (got.Mediation != nil) != tt.wantCheck || (got.Mediation != nil && !got.Mediation.OwedAt.Equal(instant)) {
+				t.Fatalf("mediation = %+v, want owed %v", got.Mediation, tt.wantCheck)
+			}
+			var finishes []WorkspaceID
+			for _, f := range got.Finishes {
+				finishes = append(finishes, f.Workspace)
+			}
+			if strings.Join(workspaceStrings(finishes), ",") != strings.Join(workspaceStrings(tt.wantFinishes), ",") {
+				t.Fatalf("finishes = %v, want %v", finishes, tt.wantFinishes)
+			}
+		})
+	}
+}
+
+func TestDeployCheckHoldOfAnswersAndRecordsAFailedRead(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	repo := RepoKey(t.TempDir())
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := s.DeployCheckHoldOf(context.Background(), repo)
+
+	// Assert
+	if err == nil {
+		t.Fatal("DeployCheckHoldOf on a closed store = nil error, want the read's failure")
+	}
+	if !loggedOperation(log, "daemon.wsm.deploy_check_hold_of", "error") {
+		t.Fatalf("records = %v, want the failed read at ERROR", log.Records())
+	}
+}
+
+// workspaceStrings spells WS as strings, for a comparison.
+func workspaceStrings(ws []WorkspaceID) []string {
+	out := make([]string, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, string(w))
+	}
+	return out
 }

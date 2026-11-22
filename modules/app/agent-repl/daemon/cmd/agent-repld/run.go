@@ -22,7 +22,6 @@ import (
 	"agent-repld/internal/holderensure"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
-	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/pprofsurface"
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
@@ -806,7 +805,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	loops.Go("state_root_watch", func() {
 		_ = rootWatch{
 			verify:  claim.Verify,
-			changes: kernelevent.FollowPaths(rootWatchPaths(layout.Dir(), layout.DaemonAddr())...),
+			changes: followRootPaths(layout.DaemonAddr(), string(instance), rootWatchPaths(layout.Dir(), layout.DaemonAddr())...),
 			log:     log,
 			standDown: func(cause error) {
 				ended.record(standDownStateRootLost, cause)
@@ -1072,7 +1071,15 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 	// the listeners before it runs this hook, so no new connection can
 	// arrive; the ones that never sent a request are closed as a closed
 	// listener would have refused them.
-	srv.RegisterOnShutdown(conns.closeRequestless)
+	// THE EXIT WAITS FOR THIS HOOK. `Server.Shutdown` starts it on its own
+	// goroutine and never waits for it, and a hand-back's connection is
+	// closed by net/http the moment its read is interrupted, so Shutdown
+	// returned while the holder was still answering a return: the process
+	// exited over the exchange and the holder's answer hit a broken pipe
+	// (2026-11-22, e2e AStopAfterACompletedTurnLeavesOnTheStop). Each
+	// hand-back is bounded by sockethold.TakeBound, so the wait is too.
+	closeRequestless, requestlessClosed := joined(conns.closeRequestless)
+	srv.RegisterOnShutdown(closeRequestless)
 	done := make(chan error, 1)
 	// SERVED THROUGH THE GATE'S OWN LISTENER, so the calls it counts are held
 	// open until their bytes are on the socket. A handler returning is not its
@@ -1168,6 +1175,9 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		err := srv.Shutdown(shutdown)
 		after := conns.summary()
 		mark("serve_http_shutdown(held "+held+"; after "+after+")", start)
+		start = time.Now()
+		requestlessClosed()
+		mark("serve_requestless_closed", start)
 		if errors.Is(err, context.DeadlineExceeded) {
 			exit.Log.Warn("daemon.cmd.serve", "the exit's http shutdown grace expired with connections still held; closing them under their requests", dlog.Context{
 				"grace_ms": grace.Milliseconds(),
@@ -1195,6 +1205,20 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		mark("serve_go_away", start)
 		return err
 	}
+}
+
+// joined answers RUN, which runs F, and WAIT, which returns once RUN has
+// returned: for work handed to a caller that starts it and does not wait for
+// it. WAIT before any RUN blocks until one runs.
+func joined(f func()) (run func(), wait func()) {
+	done := make(chan struct{})
+	var once sync.Once
+	return func() {
+			defer once.Do(func() { close(done) })
+			f()
+		}, func() {
+			<-done
+		}
 }
 
 // connStates tracks every connection net/http still holds, by state, so the
@@ -1353,10 +1377,6 @@ func hostOnBattery() (bool, error) {
 	return hostpower.OnBattery(&hostpower.Host{})
 }
 
-// publishOwnership publishes the two advertisements of a daemon that owns
-// its workspaces, daemon.addr and then the metrics target, always together and
-// in that order: an incumbent at boot, a successor through the rollout's
-// WriteDaemonAddr hook once it owns every workspace.
 // expectBootReconnects expects the host and webview streams of every open,
 // unhidden workspace back, timed from started: the workspaces Emacs reopens
 // after an ordinary boot.
@@ -1378,7 +1398,32 @@ func expectBootReconnects(ctx context.Context, db interface {
 	return nil
 }
 
-func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface, shared *sharedTake) error {
+// publisher is the slice of daemonaddr.Claim publishOwnership needs.
+type publisher interface {
+	Publish() error
+	Departed() bool
+}
+
+// publishOwnership publishes the two advertisements of a daemon that owns
+// its workspaces, daemon.addr and then the metrics target, always together and
+// in that order: an incumbent at boot, a successor through the rollout's
+// WriteDaemonAddr hook once it owns every workspace.
+//
+// THE SHARED LISTENER IS TAKEN FIRST because the take names the shared
+// address in the claim (sharedTake.take, Claim.Advertise), and that address is
+// what Publish writes; a publish first would advertise the private address.
+//
+// A DAEMON STANDING DOWN TAKES AND ADVERTISES NOTHING. Its claim departed at
+// the start of its shutdown (beginShutdown), so it neither takes the shared
+// listener nor writes daemon.addr or the metrics target, and answers
+// daemonaddr.ErrDeparted (a successor whose adoption finished 4s into its
+// stand-down published, 2026-11-22). The question is asked up front; Publish
+// asks it again under the claim's lock, which is what makes a departure racing
+// this call leave no address standing.
+func publishOwnership(claim publisher, surface *runtimemetrics.Surface, shared *sharedTake) error {
+	if claim.Departed() {
+		return fmt.Errorf("publish daemon.addr: %w", daemonaddr.ErrDeparted)
+	}
 	if err := shared.take(); err != nil {
 		return err
 	}
@@ -1433,10 +1478,9 @@ func beginShutdown(claim departer, accept sharedStopper, withdrawal *addrWithdra
 }
 
 // withdrawer is the slice of daemonaddr.Claim that addrWithdrawal needs: the
-// idempotent, address/pid-guarded removal and the address it names.
+// idempotent, address/pid-guarded removal, answering what it read.
 type withdrawer interface {
-	Withdraw() (bool, error)
-	Address() string
+	Withdraw() (daemonaddr.Withdrawal, error)
 }
 
 // addrWithdrawal takes daemon.addr down and keeps the exit's records honest.
@@ -1452,57 +1496,81 @@ type withdrawer interface {
 // begin; the early flag keeps that no-op from being recorded as a successor
 // takeover. A "withdrew" record fires only when a call actually removed the
 // file, and a Withdraw error is always surfaced at ERROR.
+//
+// EVERY RECORD NAMES WHAT THE FILE HELD (withdrawalFields): this daemon's own
+// advertisement beside the pid and addresses daemon.addr named when it was
+// read, or that it was absent or unread. A record naming only this daemon's
+// address could not tell whose file a withdrawal left alone, and every daemon
+// advertises the same shared address (2026-11-22).
 type addrWithdrawal struct {
 	claim withdrawer
 	log   dlog.Logger
 	early bool
 }
 
+// withdrawalFields are what every withdrawal record carries: this claim's
+// advertised address, pid and private address, and daemon.addr's pid, shared
+// address and private address as read, or "file" naming why there are none.
+func withdrawalFields(wd daemonaddr.Withdrawal) dlog.Context {
+	fields := dlog.Context{
+		"address":         wd.Address,
+		"pid":             wd.PID,
+		"private_address": wd.Private,
+	}
+	switch {
+	case !wd.Read:
+		fields["file"] = "unread"
+	case !wd.Present:
+		fields["file"] = "absent"
+	default:
+		fields["file"] = "present"
+		fields["file_address"] = wd.File.Address
+		fields["file_pid_known"] = wd.File.PIDKnown
+		if wd.File.PIDKnown {
+			fields["file_pid"] = wd.File.PID
+		}
+		fields["file_private_address"] = wd.File.Private
+	}
+	return fields
+}
+
 // begin withdraws the advertisement at the start of the shutdown sequence.
 func (w *addrWithdrawal) begin() {
-	withdrawn, err := w.claim.Withdraw()
+	wd, err := w.claim.Withdraw()
 	if err != nil {
-		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Merge(withdrawalFields(wd), dlog.Context{
 			"error": err.Error(),
-		})
+		}))
 		return
 	}
-	if withdrawn {
+	if wd.Withdrawn {
 		w.early = true
-		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", dlog.Context{
-			"address": w.claim.Address(),
-		})
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", withdrawalFields(wd))
 	}
 }
 
 // finish is the deferred catch-all withdrawal, run on every exit.
 func (w *addrWithdrawal) finish() {
-	withdrawn, err := w.claim.Withdraw()
+	wd, err := w.claim.Withdraw()
 	if err != nil {
-		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Merge(withdrawalFields(wd), dlog.Context{
 			"error": err.Error(),
-		})
+		}))
 		return
 	}
-	if withdrawn {
-		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", dlog.Context{
-			"address": w.claim.Address(),
-		})
+	if wd.Withdrawn {
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", withdrawalFields(wd))
 		return
 	}
 	if w.early {
 		// begin already took the file down at the start of shutdown; this
 		// catch-all had nothing left to do.
-		w.log.Debug("daemon.cmd.exit", "daemon.addr was already withdrawn at the start of shutdown", dlog.Context{
-			"address": w.claim.Address(),
-		})
+		w.log.Debug("daemon.cmd.exit", "daemon.addr was already withdrawn at the start of shutdown", withdrawalFields(wd))
 		return
 	}
 	// The file names somebody else -- a successor that took over and published
 	// its own address -- or nothing at all.
-	w.log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", dlog.Context{
-		"address": w.claim.Address(),
-	})
+	w.log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", withdrawalFields(wd))
 }
 
 // testBarrierEnv is set to "1" by the integration harness for every daemon it

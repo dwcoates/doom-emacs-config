@@ -1126,10 +1126,23 @@ func (o *orchestrator) submitThen(ctx context.Context, ws ids.WorkspaceID, turn 
 // exit) lets its turn live on in the session and reattaches to it on resume,
 // so the delivery it began is never cut halfway: only the wait for the
 // turn's end is the run's to cancel.
+//
+// EVERY MERGE TURN PASSES ITS WORKSPACE'S COLD GATE FIRST (passColdGate):
+// this is the one place a merge turn reaches the prompt queue, so no merge
+// turn meets a standing gate there. A refusal by the gate's name after it
+// was passed breaks that invariant, and is an ERROR that fails the turn.
 func (o *orchestrator) handOff(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) error {
+	if err := o.passColdGate(ctx, ws, turn, origin); err != nil {
+		return err
+	}
 	disposition, err := o.deps.Queue.Submit(context.WithoutCancel(ctx), promptqueue.Submission{
 		WS: ws, Turn: turn, Said: saidText(text), Origin: origin,
 	})
+	if errors.Is(err, promptqueue.ErrColdGate) && origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
+		o.log(ctx, ws).Error(opColdGate, "a merge turn was refused by its workspace's cold gate after the gate was passed; the invariant that no merge turn meets a standing gate is broken, and the turn fails", dlog.Context{
+			"workspace": string(ws), "turn": string(turn), "origin": origin.String(), "error": err.Error()})
+		return fmt.Errorf("merge: invariant violated: the merge turn %s was refused by the cold gate of %s after the gate was passed: %w", turn, ws, err)
+	}
 	if err != nil {
 		return err
 	}

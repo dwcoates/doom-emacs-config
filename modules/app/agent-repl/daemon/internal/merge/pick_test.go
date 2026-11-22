@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -593,5 +595,118 @@ func TestAPickRoundThatCannotBeRecordedIsAnError(t *testing.T) {
 	// Assert
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.pick", Message: "could not record the pick's round; its stage is missing from the merge's view"}); !ok {
 		t.Fatalf("records = %+v, want the failed round at ERROR", h.logs.Records())
+	}
+}
+
+// recoverCutPick records a pick a restart cut short, its turn never
+// delivered, and takes it back, as TestAResumedPickReattachesToItsRecordedTurn.
+func recoverCutPick(t *testing.T, h *harness) {
+	t.Helper()
+	h.registerMergeWorkspace(theWorkspace, "request-1", "master")
+	started := time.UnixMilli(1_700_000_000_000)
+	h.db.mu.Lock()
+	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{
+		Repo: h.repoKey(), Workspace: theMergeWorkspace, State: wsm.MergeRequested, Ledger: "ledger-1", EnqueuedAt: started,
+		Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: "feature-merge", Pick: "the reconnect fix", PickStartedAt: &started, PickTurn: "turn-pick"},
+	}}
+	h.db.mu.Unlock()
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+}
+
+func TestAPickWhoseMergeWorkspaceStandsAtItsColdGatePassesItAndRuns(t *testing.T) {
+	tests := []struct {
+		name    string
+		resumed bool
+		arrange func(t *testing.T, h *harness)
+	}{
+		{name: "a fresh pick", arrange: requestPick},
+		{name: "a pick a restart cut short", resumed: true, arrange: recoverCutPick},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the merge workspace was cold overnight, and its
+			// bring-up parked at the gate (2026-11-22 11:32:58).
+			h := pickHarness(t)
+			tt.arrange(t, h)
+			standAtColdGate(h, theMergeWorkspace)
+
+			// Act
+			runThePick(t, h, context.Background(), tt.resumed)
+
+			// Assert
+			if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theMergeWorkspace}) {
+				t.Fatalf("gates compacted = %v, want the merge workspace's gate answered once", got)
+			}
+			if subs := submitted(h); len(subs) != 1 || subs[0].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK {
+				t.Fatalf("submissions = %+v, want the pick's turn submitted once past the gate", subs)
+			}
+			if sent := h.detached.sent(); len(sent) != 0 {
+				t.Fatalf("handbacks = %+v, want the merge not failed", sent)
+			}
+			if _, ok := h.entryOf(theMergeWorkspace); !ok {
+				t.Fatal("the merge whose pick passed its gate left the queue")
+			}
+		})
+	}
+}
+
+func TestAPickWhoseColdGateCannotBeAnsweredFailsTheMergeWithTheCause(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	requestPick(t, h)
+	standAtColdGate(h, theMergeWorkspace)
+	h.compactGateErr = errors.New("the summarizer is down")
+
+	// Act
+	runThePick(t, h, context.Background(), false)
+
+	// Assert
+	if subs := submitted(h); len(subs) != 0 {
+		t.Fatalf("submissions = %+v, want none past the gate that still stands", subs)
+	}
+	if sent := h.detached.sent(); len(sent) != 1 || sent[0].outcome.Kind != DetachedFailed || !strings.Contains(sent[0].outcome.Summary, "the summarizer is down") {
+		t.Fatalf("handbacks = %+v, want the failure and its cause told to the requester", sent)
+	}
+	if _, ok := h.entryOf(theMergeWorkspace); ok {
+		t.Fatal("the merge whose gate could not be answered still stands in the queue")
+	}
+	rec, ok := coldGateRecord(h, "error", "the cold gate of a merge's workspace could not be answered by a compaction; the merge turn waiting on the answer fails the merge, and the gate stands for the user")
+	if !ok || rec.Context["workspace"] != string(theMergeWorkspace) || rec.Context["error"] != "the summarizer is down" {
+		t.Fatalf("the failure was recorded as %+v, want an ERROR naming the workspace and the cause", rec)
+	}
+}
+
+func TestAPickAtAColdGateWhoseOneAnswerFailedFailsTheMergeWithoutAnsweringAgain(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	requestPick(t, h)
+	standAtColdGate(h, theMergeWorkspace)
+	h.o.ColdGateStoodAfterFailedAnswer(theMergeWorkspace)
+
+	// Act
+	runThePick(t, h, context.Background(), false)
+
+	// Assert
+	if got := compacted(h); len(got) != 0 {
+		t.Fatalf("gates compacted = %v, want none after the failed answer", got)
+	}
+	if sent := h.detached.sent(); len(sent) != 1 || sent[0].outcome.Kind != DetachedFailed {
+		t.Fatalf("handbacks = %+v, want the merge failed", sent)
+	}
+}
+
+func TestAPickWithNoColdGateStandingNeverCompacts(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	requestPick(t, h)
+
+	// Act
+	runThePick(t, h, context.Background(), false)
+
+	// Assert
+	if got := compacted(h); len(got) != 0 {
+		t.Fatalf("gates compacted = %v, want none", got)
 	}
 }

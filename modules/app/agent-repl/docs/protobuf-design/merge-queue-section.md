@@ -128,3 +128,32 @@ section, above Hidden. The message keeps its name
   Deploys' queue and today's merges first, then Hidden, then older merges.
 - Hidden is now the lowest section, so it is the one stretched to the rail's
   foot.
+
+## Follow-up: a queue held for its deploy check reads as paused (owner ruling, 2026-11-22)
+
+### `frontend.v1.RosterMergeQueuePauser.deploy_check` / `frontend.v1.RosterMergeQueuePauserDeployCheck`
+
+- WHAT: a fourth arm of the pauser oneof, an empty message, naming the
+  queue's deploy check as what holds it. `RosterRepoMergeQueue.paused` is now
+  present for that hold too, from a deploy's start until the deploy mediator
+  approves a deploy, the whole of a remediation's gate, landing and deploy
+  included; `RosterRowMergePaused` follows it. `paused_at_ms` is when the hold
+  began: the first deploy of the chain whose check holds the queue, or the
+  remediation finish's first finish when it began with no check owed,
+  whichever came first. `hard` is always false for it.
+- WHY: the owner ruled that a merge queue is blocked, and reads as paused in
+  the canonical paused amber, for the whole time a deploy is unapproved; a
+  remediation never unblocks it. The purple `RosterMergeQueueMediation` label
+  beside the repository's name stays, unchanged, as the hold's reason.
+- CONSEQUENCES:
+  - A real pause (the user, the host, a workspace's agent) is drawn over the
+    deploy check's hold when both stand; the label still names the check.
+  - The daemon derives the drawn hold from the one function the hold itself
+    reads (`merge.deployHold`), so the drawing and the hold cannot disagree.
+    The handover's hold (`Standing.ServesQueue`) stays undrawn.
+  - A resume cannot release the deploy check's hold, so the header's toggle
+    on a queue held only by it asks for a real pause, as on a running queue.
+  - Every reader that switches on the pauser arm handles the new one: the
+    webapp's `merge-queue-view.ts` and the editor's `wire-roster.el` decoder,
+    which refuses an unknown key.
+- No obviated declaration: the sweep found nothing the arm supersedes.

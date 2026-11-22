@@ -47,6 +47,12 @@ func LifePath(addrPath, instance string) string {
 	return filepath.Join(filepath.Dir(addrPath), LifeDirName, instance+lifeSuffix)
 }
 
+// LifePendingPath is the name daemon INSTANCE's life lock is made and locked
+// under before it is linked to LifePath (HoldLife).
+func LifePendingPath(addrPath, instance string) string {
+	return LifePath(addrPath, instance) + pendingSuffix
+}
+
 // addressSuffix ends the file in which a daemon records its private address.
 const addressSuffix = ".addr"
 
@@ -121,7 +127,7 @@ func HoldLife(addrPath, instance string) (*Life, error) {
 		return nil, fmt.Errorf("make the life locks' directory %q: %w", dir, err)
 	}
 	path := LifePath(addrPath, instance)
-	pending := path + pendingSuffix
+	pending := LifePendingPath(addrPath, instance)
 	rec, held, err := recordlock.HoldIn(pending)
 	if err != nil {
 		return nil, fmt.Errorf("hold the life lock %q: %w", pending, err)

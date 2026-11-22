@@ -193,6 +193,12 @@ func TestAShimThatDiesMidTurnEndsThatTurnInterrupted(t *testing.T) {
 	awaitRow(t, f, feed, "the cut turn's interrupted ending", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == cut && r.GetTurnEnded().GetInterrupted() != nil
 	})
+	// THE REVIVAL THE DEATH STARTED IS SEEN THROUGH before the case ends: its
+	// retirement kills the session, and a kill landing under the resumption's
+	// delivery leaves the cut work unresumed, which the daemon records at ERROR.
+	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	revived.ExpectStartSession()
+	revived.ExpectStartTurn()
 }
 
 func TestAShimThatDiesMidTurnHasThatTurnContinuedOnTheRevivedSession(t *testing.T) {

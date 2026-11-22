@@ -1227,6 +1227,9 @@ const advertiseRefusedBound = 30 * time.Second
 // forever.
 func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 	err := c.deps.WriteDaemonAddr(ctx)
+	if c.refusedStandingDown(err, fields) {
+		return
+	}
 	if err == nil {
 		c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", nil)
 		c.becomeIncumbent(fields)
@@ -1246,6 +1249,20 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 		lifetime = context.WithoutCancel(ctx)
 	}
 	inflight.Standing(func() { c.retryAdvertise(lifetime, fields) })
+}
+
+// refusedStandingDown answers whether ERR, a WriteDaemonAddr answer, is the
+// refusal of a daemon that has begun standing down (daemonaddr.ErrDeparted),
+// and records it, once, at INFO: an expected outcome, never a fault, and no
+// write. The caller then neither retries nor takes over: this daemon is on
+// its way out (2026-11-22, pid 30922 published 4s into its stand-down).
+func (c *controller) refusedStandingDown(err error, fields dlog.Context) bool {
+	if !errors.Is(err, daemonaddr.ErrDeparted) {
+		return false
+	}
+	c.log.Info(opAdopt, "daemon.addr was not published: this daemon is standing down",
+		dlog.Merge(fields, dlog.Context{"address": c.deps.SelfAddress, "reason": err.Error()}))
+	return true
 }
 
 // becomeIncumbent ends this daemon's JOINING standing: it is now the only
@@ -1749,6 +1766,9 @@ func (c *controller) takeOverOnClaim(ctx context.Context, awaited error, fields 
 		return
 	}
 	if err := c.deps.WriteDaemonAddr(ctx); err != nil {
+		if c.refusedStandingDown(err, fields) {
+			return
+		}
 		c.log.Error(opAdopt, "daemon.addr could not be written under the held boot claim", dlog.WithCause(fields, err))
 		return
 	}

@@ -1579,3 +1579,84 @@ func TestHostReadsAreRecordedThroughOneHelper(t *testing.T) {
 		t.Fatalf("host.go tests ctxend.Is %d times, want once, inside logHostStreamRead", branches)
 	}
 }
+
+// ---- the workspace forgotten meanwhile -------------------------------------
+
+// TestHostViewForAWorkspaceForgottenMeanwhileIsRecordedAtInfo pins the
+// interleaving a forget makes with an edge's publish: the record is gone by the
+// time the composition reads it. That is no fault; it is INFO naming the
+// outcome, and nothing is published. A record read failing any other way, and
+// a missing record under a read of something else a live workspace owns, stay
+// ERROR.
+func TestHostViewForAWorkspaceForgottenMeanwhileIsRecordedAtInfo(t *testing.T) {
+	notFound := fmt.Errorf("wsm: workspace %s: %w", testWorkspaceID, wsm.ErrNotFound)
+	tests := []struct {
+		name          string
+		reads         []error
+		wantForgotten bool
+	}{
+		{name: "forgotten after the logger resolved", reads: []error{nil, notFound}, wantForgotten: true},
+		{name: "forgotten before the logger resolved", reads: []error{notFound}, wantForgotten: true},
+		{name: "the record read fails otherwise", reads: []error{nil, errors.New("the database is gone")}, wantForgotten: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(d *Deps) {
+				d.Log = &fakeSurfaces{global: log, workspace: log}
+			})
+			h.DB.workspaceReadErrs = tc.reads
+			surface := h.Server.(*server)
+
+			// Act.
+			surface.PublishHostWorkspace(context.Background(), testWorkspaceID)
+
+			// Assert.
+			if _, ok := surface.hostStateTopic(testWorkspaceID).Latest(); ok {
+				t.Fatal("a view reached the state topic")
+			}
+			if len(log.at("WARN")) != 0 {
+				t.Fatalf("recorded %v at WARN, want none", log.at("WARN"))
+			}
+			errs := log.at("ERROR")
+			if !tc.wantForgotten {
+				if len(errs) != 1 || errs[0].Context["cause"] == nil {
+					t.Fatalf("ERROR records = %v, want exactly one carrying its cause", errs)
+				}
+				return
+			}
+			if len(errs) != 0 {
+				t.Fatalf("recorded %v at ERROR, want none", errs)
+			}
+			info := log.at("INFO")
+			if len(info) != 1 || info[0].Context["workspace_record"] != "forgotten" || info[0].Context["cause"] == nil {
+				t.Fatalf("INFO records = %v, want exactly one naming the forgotten record and its cause", info)
+			}
+		})
+	}
+}
+
+// TestAMissingRecordUnderAnotherHostReadStaysAnError pins that only the
+// workspace's own record takes the INFO path: a not-found from a read of
+// something a live workspace owns is a fault.
+func TestAMissingRecordUnderAnotherHostReadStaysAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessionErr = fmt.Errorf("session: %w", wsm.ErrNotFound)
+	log := &recordingLogger{}
+
+	// Act.
+	_, ok := h.Server.(*server).composeHostWorkspace(context.Background(), log, testWorkspaceID)
+
+	// Assert.
+	if ok {
+		t.Fatal("the host view was composed from a failed read")
+	}
+	if errs := log.at("ERROR"); len(errs) != 1 {
+		t.Fatalf("ERROR records = %v, want exactly one", errs)
+	}
+	if info := log.at("INFO"); len(info) != 0 {
+		t.Fatalf("INFO records = %v, want none", info)
+	}
+}

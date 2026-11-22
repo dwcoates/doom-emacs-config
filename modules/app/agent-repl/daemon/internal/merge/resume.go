@@ -221,6 +221,11 @@ func (o *orchestrator) bringTurnOn(ctx context.Context, ws ids.WorkspaceID, fiel
 		if err := o.ensureSession(ctx, ws); err != nil {
 			return 0, wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's held turn: %w", err)
 		}
+		// A HELD TURN IS DELIVERED PAST THE GATE TOO (passColdGate): a gate
+		// standing would keep it held, and the merge waiting on it forever.
+		if err := o.passColdGate(ctx, ws, turn, origin); err != nil {
+			return 0, wsm.CloseFailed, err
+		}
 		// THE QUEUE IS ASKED TO DELIVER IT NOW: the edge that would have
 		// delivered it (a turn's end, a drain's end) may have come and gone
 		// while no run of this merge stood, and an idle workspace has no

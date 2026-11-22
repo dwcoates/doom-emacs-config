@@ -20,8 +20,12 @@ import (
 )
 
 // THE REMEDIATION'S FINISH (agentrepl.v1.FinishWorkspaceSuccess
-// .landing_directly; owner ruling, 2026-11-14). A remediation workspace's
-// `workspace finished` never joins the queue, which is held for it. The
+// .landing_directly; owner ruling, 2026-11-14). A deploy mediator's
+// `workspace finished` never joins the queue: THE FINISH HOLDS THE QUEUE
+// ITSELF (owner ruling, 2026-11-22; deployHold), from its record until its
+// deploy owes the chain's next check, whether or not a check is owed when it
+// begins and whatever the mediator decides of that check meanwhile, and every
+// merge running in the queue is suspended for it (holdForFinish). The
 // daemon:
 //
 //  1. GATES: the full suite runs in the workspace's worktree, as the queue's
@@ -32,8 +36,23 @@ import (
 //  2. LANDS directly on the main branch: the merge, changelog line and
 //     version tag bin/land-direct.sh makes.
 //  3. DEPLOYS: the workspace is closed as a landed merge closes it, and the
-//     rollout starts. The deploy owes the chain's next check; only the
-//     intake's approval of it releases the queue.
+//     rollout starts. The deploy owes the chain's next check BEFORE the
+//     finish leaves its deploying step (OweMediations, then
+//     remediationDeployed), so the hold passes from the finish to that check
+//     with no instant between; only the mediator's approval of it releases
+//     the queue.
+//
+// A FINISH NOTHING FINISHES ANY MORE IS ENDED (abandonFinish), never left
+// holding the queue for nobody: a gate given up past MaxFixAttempts, and a
+// mediator whose failed gate sent it back to fix and that stopped without
+// finishing again (settleStoppedFix). An owed check is escalated to the user
+// first, and holds the queue for them; with none owed the queue advances. A
+// closed mediator's finish not yet deploying ends too (remediationClosed),
+// and so does a finish deploying in a repository that checks no deploys,
+// whose deploy owes no check there (endUncheckedDeploys). A CHAIN'S END NEVER
+// ENDS A FINISH UNDER WAY (wsm.EndRemediationFinishesOf forgets only deployed
+// ones): an approval of an earlier deploy leaves the fix's finish holding the
+// queue.
 //
 // EACH STEP IS RECORDED BEFORE IT STARTS (wsm.RemediationFinish): the deploy
 // restarts the daemon, and the one that serves after it carries on where the
@@ -144,7 +163,8 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 		o.deps.Log.Global().Error(opRemediationFinish, "could not record the remediation's finish", withField(fields, "error", err.Error()))
 		return err
 	}
-	o.deps.Log.Global().Info(opRemediationFinish, "the remediation finished; its gate runs", withField(fields, "gate_rounds", f.GateRounds))
+	o.deps.Log.Global().Info(opRemediationFinish, "the remediation finished; its gate runs, and the finish holds the queue until its deploy is approved", withField(fields, "gate_rounds", f.GateRounds))
+	o.holdForFinish(context.WithoutCancel(ctx), repo, fields)
 	o.startRemediationFinish(f, true)
 	return nil
 }
@@ -186,6 +206,20 @@ func (o *orchestrator) endGivenUpFinish(ctx context.Context, f wsm.RemediationFi
 	return nil
 }
 
+// holdForFinish has REPO's queue take the hold its mediator's finish, just
+// recorded, puts on it, as a pause takes its own: every merge running in it
+// is suspended at its step and taken straight back, waiting there until the
+// mediator approves a deploy (suspendDeployCheck), so no merge's tests run
+// beside the fix's gate. The roster draws the hold at once. A merge that
+// could not be suspended is recorded; it runs on to its next step, which
+// reads the hold.
+func (o *orchestrator) holdForFinish(ctx context.Context, repo wsm.RepoKey, fields dlog.Context) {
+	if err := o.suspendHeld(ctx, []wsm.RepoKey{repo}, suspendDeployCheck); err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not suspend every merge running in the queue the finish holds; one that runs on stops at its next step", withField(fields, "error", err.Error()))
+	}
+	o.republishMediation(ctx, repo)
+}
+
 // remediationTarget is the deploy config of the repository remediation WS
 // lands in: its main worktree's.
 func (o *orchestrator) remediationTarget(ctx context.Context, ws ids.WorkspaceID) (deployTarget, error) {
@@ -210,6 +244,12 @@ func (o *orchestrator) resumeRemediationFinishes(ctx context.Context) {
 		return
 	}
 	for _, f := range finishes {
+		// A FINISH SENT BACK TO FIX WHOSE MEDIATOR STOPPED while no daemon
+		// served the queues has no turn's end left to settle it.
+		if f.Step == wsm.RemediationFixing {
+			o.settleStoppedFix(ctx, f.Repo, f.Workspace, dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo)})
+			continue
+		}
 		o.startRemediationFinish(f, false)
 	}
 }
@@ -441,7 +481,7 @@ func (o *orchestrator) resumeRemediation(ctx context.Context, f wsm.RemediationF
 
 // giveUpRemediation escalates F's chain to the user: its gate failed
 // MaxFixAttempts times. The daemon escalates for the mediator, so the queue
-// is never left held by a fix that cannot land.
+// is never left held by a fix that cannot land (abandonFinish).
 func (o *orchestrator) giveUpRemediation(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
 	o.deps.Meter.ObserveRemediationGateRounds(RemediationGateGivenUp, f.GateRounds)
 	// A MEDIATOR WHOSE FIX IS GIVEN UP IS SHOWN AGAIN, for the escalation
@@ -450,13 +490,91 @@ func (o *orchestrator) giveUpRemediation(ctx context.Context, f wsm.RemediationF
 		return err
 	}
 	summary := fmt.Sprintf("the deploy mediator's fix could not pass its gate after %d fixing attempts; the queue waits for you", MaxFixAttempts)
-	if err := o.escalateForMediator(ctx, f.Repo, summary, withField(fields, "gave_up", true)); err != nil {
+	return o.abandonFinish(ctx, f, summary, withField(fields, "gave_up", true))
+}
+
+// fixStoppedSummary is what the user is told when the mediator, sent back to
+// fix by its failed gate, stopped without finishing again.
+const fixStoppedSummary = "the deploy mediator stopped without finishing the fix its failed gate sent it back to; the queue waits for you"
+
+// abandonFinish ends finish F, which nothing finishes any more, and hands its
+// queue to whoever decides it next, so no finish holds the queue for nobody.
+// A check owed is escalated to the user for the mediator first
+// (escalateForMediator), so it holds the queue across the finish's end, for
+// the user. The finish is then ended whatever it served: a chain's end keeps
+// a finish under way (wsm.EndRemediationFinishesOf), so one left standing
+// would hold the queue past the user's release of the escalation. With no
+// check owed nothing holds the queue any more, and it advances. The end is
+// recorded once, by endGivenUpFinish.
+func (o *orchestrator) abandonFinish(ctx context.Context, f wsm.RemediationFinish, summary string, fields dlog.Context) error {
+	m, err := o.deps.DB.MediationOf(ctx, f.Repo)
+	if err != nil {
 		return err
 	}
-	// THE GIVEN-UP FINISH ENDS ON EVERY PATH, escalated or not: nothing
-	// deploys it, and a record left at gating refuses the workspace's every
-	// later finish.
-	return o.endGivenUpFinish(ctx, f, fields)
+	if m != nil {
+		if err := o.escalateForMediator(ctx, f.Repo, summary, fields); err != nil {
+			return err
+		}
+	}
+	if err := o.endGivenUpFinish(ctx, f, fields); err != nil {
+		return err
+	}
+	o.republishMediation(ctx, f.Repo)
+	o.kick(f.Repo)
+	return nil
+}
+
+// settleStoppedFix settles the finish of deploy mediator WS of queue REPO
+// that its failed gate sent back to fix, once WS has nothing more to do: no
+// turn open and no prompt waiting. WS stopped without finishing again, so
+// nothing would finish the fix, and it is abandoned (abandonFinish). A
+// mediator still at work, or one whose finish is not fixing, is left.
+func (o *orchestrator) settleStoppedFix(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, fields dlog.Context) {
+	f, err := o.deps.DB.RemediationFinishOf(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read the finish of the mediator whose turn ended; a finish it stopped fixing holds the queue until the next turn's end", withField(fields, "error", err.Error()))
+		return
+	}
+	// A RUN OF THE FINISH HERE IS STILL MOVING IT: the run that sent it back
+	// to fix briefs the mediator after the step is recorded.
+	o.mu.Lock()
+	running := o.remediationRuns[ws]
+	o.mu.Unlock()
+	if f == nil || f.Step != wsm.RemediationFixing || running {
+		return
+	}
+	idle, err := o.mediatorIdle(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether the mediator sent back to fix has more to do; its finish holds the queue until the next turn's end", withField(fields, "error", err.Error()))
+		return
+	}
+	if !idle {
+		o.deps.Log.Global().Info(opRemediationFinish, "the mediator sent back to fix has more to do; its finish holds the queue for it", fields)
+		return
+	}
+	o.deps.Log.Global().Info(opRemediationFinish, "the deploy mediator stopped without finishing the fix its failed gate sent it back to; the finish is abandoned", withField(fields, "gate_rounds", f.GateRounds))
+	if err := o.abandonFinish(ctx, *f, fixStoppedSummary, withField(fields, "stopped", true)); err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "the finish the mediator stopped fixing could not be abandoned; it holds the queue until the next turn's end", withField(fields, "error", err.Error()))
+	}
+}
+
+// mediatorIdle reports whether WS has nothing more to do: no turn open and no
+// prompt waiting in its queue.
+func (o *orchestrator) mediatorIdle(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	open, err := o.deps.DB.OpenTurns(ctx, ws)
+	if err != nil || len(open) > 0 {
+		return false, err
+	}
+	held, err := o.deps.DB.HeldPrompts(ctx, ws)
+	if err != nil {
+		return false, err
+	}
+	for _, h := range held {
+		if h.Tombstone == nil {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // escalateForMediator escalates the check REPO owes as the daemon's
@@ -525,9 +643,7 @@ func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m
 		return err
 	}
 	if released {
-		o.deps.Log.Global().Info(opMediation, why+"; its check is released and the queue advances", fields)
-		o.republishMediation(ctx, repo)
-		o.kick(repo)
+		o.releasedCheck(ctx, repo, why+"; its check is released", why+"; its check is released and the queue advances", fields)
 	}
 	return nil
 }
@@ -733,8 +849,10 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 // for when the user closes it: a fix dispatched and not yet deploying is
 // escalated for it, since nobody else fixes the deploy; an escalation is
 // released, the close being the user's ruling that the queue moves on
-// (owner ruling, 2026-11-16); and a finish that serves an escalation ends,
-// since nobody finishes it now. Any other workspace's close is no check's.
+// (owner ruling, 2026-11-16); and a finish not yet deploying ends, since
+// nobody finishes it now and it would hold the queue for nobody. A finish
+// deploying is left to its deploy, which owes the next check. Any other
+// workspace's close is no check's.
 func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
 	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
@@ -757,22 +875,33 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 		return
 	}
 	deploying := f != nil && (f.Step == wsm.RemediationDeploying || f.Step == wsm.RemediationDeployed)
-	switch {
-	case m != nil && m.Dispatched && !deploying:
+	// A FIX DISPATCHED AND NOT DEPLOYING IS ESCALATED FIRST, so its check
+	// holds the queue for the user across its finish's end.
+	dispatched := m != nil && m.Dispatched && !deploying
+	if dispatched {
 		summary := "the deploy mediator was closed before its fix landed; the queue waits for you"
 		if err := o.escalateForMediator(ctx, repo, summary, fields); err != nil {
 			o.deps.Log.Global().Error(opRemediationFinish, "the deploy mediator closed before its fix landed, and its chain could not be escalated; the queue stays held", withField(fields, "error", err.Error()))
+			return
 		}
-		return
-	case m != nil && m.Escalated():
-		_ = o.releaseEscalated(ctx, repo, *m, "the user closed the deploy mediator holding the escalation", fields)
 	}
-	if f != nil && f.ServesEscalation && !deploying {
+	if f != nil && !deploying {
 		ended, err := o.deps.DB.EndRemediationFinish(ctx, ws)
 		if err != nil {
-			o.deps.Log.Global().Error(opRemediationFinish, "a closed deploy mediator's finish could not be ended", withField(fields, "error", err.Error()))
-		} else if ended {
-			o.deps.Log.Global().Info(opRemediationFinish, "a closed deploy mediator's finish was ended", fields)
+			o.deps.Log.Global().Error(opRemediationFinish, "a closed deploy mediator's finish could not be ended; it holds the queue", withField(fields, "error", err.Error()))
+			return
 		}
+		if ended {
+			// THE FINISH HELD THE QUEUE: with it gone the queue advances
+			// unless a check holds it still.
+			o.deps.Log.Global().Info(opRemediationFinish, "a closed deploy mediator's finish was ended", fields)
+			o.republishMediation(ctx, repo)
+			o.kick(repo)
+		}
+	}
+	// AN ESCALATION IS RELEASED ONCE NO FINISH OF THE CLOSED MEDIATOR HOLDS
+	// THE QUEUE, so its release's record names what holds the queue after it.
+	if !dispatched && m != nil && m.Escalated() {
+		_ = o.releaseEscalated(ctx, repo, *m, "the user closed the deploy mediator holding the escalation", fields)
 	}
 }

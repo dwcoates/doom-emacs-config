@@ -753,16 +753,18 @@ func TestEveryStepOfAFinishRedrawsTheDeployCheckLabel(t *testing.T) {
 	testing_ := fmt.Sprintf("%d:ws-fixer", sidebar.MediationTesting)
 	fixing := fmt.Sprintf("%d:ws-fixer", sidebar.MediationFixing)
 	hotLoading := fmt.Sprintf("%d:ws-fixer", sidebar.MediationWaiting)
+	// EVERY FINISH'S RECORD IS DRAWN AT ONCE, as the hold it takes of the
+	// queue (holdForFinish), before its turn's end draws its gate.
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
 		want    []string
 	}{
 		{name: "a passing gate is tested, landed and hot-loaded",
-			want: []string{testing_, testing_, hotLoading, hotLoading, hotLoading}},
+			want: []string{testing_, testing_, testing_, hotLoading, hotLoading, hotLoading}},
 		{name: "a failing gate is fixed, then tested, landed and hot-loaded",
 			arrange: func(h *harness) { h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}} },
-			want:    []string{testing_, fixing, testing_, testing_, hotLoading, hotLoading, hotLoading}},
+			want:    []string{testing_, testing_, fixing, testing_, testing_, testing_, hotLoading, hotLoading, hotLoading}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -950,6 +952,60 @@ func TestAGivenUpRemediationsFinishEndsAndTheNextFinishBegins(t *testing.T) {
 	}
 }
 
+func TestAFinishsDeployPassesTheHoldToItsCheckWithNoInstantBetween(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange stands ws-fixer's finish deploying, with whatever check
+		// it serves.
+		arrange func(t *testing.T) *harness
+	}{
+		{name: "a finish begun with no check owed", arrange: func(t *testing.T) *harness {
+			h := checked(t)
+			withMediator(t, h)
+			standFinish(t, h, mediationKey(h), wsm.RemediationDeploying, true)
+			return h
+		}},
+		{name: "the finish of a fix dispatched for the check", arrange: func(t *testing.T) *harness {
+			h := finishing(t)
+			standFinish(t, h, mediationKey(h), wsm.RemediationDeploying, false)
+			return h
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the hold is read after every write the deploy makes.
+			h := tt.arrange(t)
+			ctx := context.Background()
+			var reads []bool
+			h.db.mu.Lock()
+			h.db.afterHoldWrite = func() {
+				held, err := h.o.queueHeld(ctx, mediationKey(h))
+				if err != nil {
+					t.Errorf("queueHeld: %v", err)
+				}
+				reads = append(reads, held)
+			}
+			h.db.mu.Unlock()
+
+			// Act: the fix's deploy begins.
+			if err := h.o.OweMediations(ctx, deployStarted.Add(time.Hour)); err != nil {
+				t.Fatalf("OweMediations: %v", err)
+			}
+
+			// Assert
+			if len(reads) < 2 || slices.Contains(reads, false) {
+				t.Fatalf("held after each write = %v, want the queue held after every one", reads)
+			}
+			if f := finishOf(t, h); f != nil && finishHolds(f.Step) {
+				t.Fatalf("finish %+v, want it holding nothing once its deploy began", f)
+			}
+			if m := owedCheck(t, h); m == nil || !m.OwedAt.Equal(deployStarted.Add(time.Hour)) {
+				t.Fatalf("check %+v, want the deploy's check holding the queue", m)
+			}
+		})
+	}
+}
+
 func TestAnAlreadyLeakedGivenUpFinishHealsAtTheNextFinish(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -989,6 +1045,225 @@ func TestAnAlreadyLeakedGivenUpFinishHealsAtTheNextFinish(t *testing.T) {
 			var refusal *RefusalError
 			if !errors.As(err, &refusal) || refusal.Arm != tt.wantArm {
 				t.Fatalf("err = %v, want refusal %s", err, tt.wantArm)
+			}
+		})
+	}
+}
+
+func TestAFinishNothingFinishesAnyMoreHandsTheQueueOn(t *testing.T) {
+	// givenUp stands ws-fixer's finish gating with MaxFixAttempts failed
+	// rounds behind it, and its next gate failing.
+	givenUp := func(t *testing.T, h *harness) {
+		ctx := context.Background()
+		standFinish(t, h, mediationKey(h), wsm.RemediationGating, true)
+		for i := 0; i < MaxFixAttempts; i++ {
+			if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationFixing, epochPause); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: epochPause, ServesEscalation: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}}
+		h.o.runRemediationFinish(ctx, *finishOf(t, h))
+	}
+	// stopped stands ws-fixer's finish sent back to fix, and the mediator's
+	// turn ends with nothing more for it to do.
+	stopped := func(t *testing.T, h *harness) {
+		standFinish(t, h, mediationKey(h), wsm.RemediationFixing, true)
+		h.o.FixerTurnEnded(context.Background(), "ws-fixer")
+	}
+	tests := []struct {
+		name          string
+		owe           bool
+		busy          bool
+		act           func(*testing.T, *harness)
+		wantFinish    bool
+		wantHeld      bool
+		wantEscalated bool
+		wantRecord    logLike
+	}{
+		{name: "a gate given up with no check owed releases the queue", act: givenUp,
+			wantRecord: logLike{level: "info", op: opRemediationFinish, text: "the finish of a given-up fix was ended"}},
+		{name: "a gate given up with a check owed escalates it, and the check holds the queue for the user", owe: true, act: givenUp, wantHeld: true, wantEscalated: true,
+			wantRecord: logLike{level: "error", op: opRemediationFinish, text: "the chain is escalated to the user and the queue is held for them"}},
+		{name: "a mediator that stopped fixing with no check owed releases the queue", act: stopped,
+			wantRecord: logLike{level: "info", op: opRemediationFinish, text: "stopped without finishing the fix its failed gate sent it back to"}},
+		{name: "a mediator that stopped fixing with a check owed has it escalated", owe: true, act: stopped, wantHeld: true, wantEscalated: true,
+			wantRecord: logLike{level: "error", op: opRemediationFinish, text: "the chain is escalated to the user and the queue is held for them"}},
+		{name: "a mediator with a prompt still waiting keeps its finish holding the queue", busy: true, act: stopped, wantFinish: true, wantHeld: true,
+			wantRecord: logLike{level: "info", op: opRemediationFinish, text: "the mediator sent back to fix has more to do"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the dispatched check finishing() owes is released, and
+			// a later deploy's, undispatched, owed when the case owes one.
+			h := finishing(t)
+			if _, err := h.db.ReleaseMediation(context.Background(), mediationKey(h), deployStarted); err != nil {
+				t.Fatal(err)
+			}
+			if tt.owe {
+				later := deployStarted.Add(time.Second)
+				oweAt(t, h, later)
+				told(t, h, later, "turn-told")
+			}
+			if tt.busy {
+				h.db.mu.Lock()
+				h.db.heldPrompts = map[ids.WorkspaceID][]wsm.HeldPrompt{"ws-fixer": {{Turn: "turn-waiting"}}}
+				h.db.mu.Unlock()
+			}
+			var kicked []wsm.RepoKey
+			h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+			// Act
+			tt.act(t, h)
+
+			// Assert
+			if f := finishOf(t, h); (f != nil) != tt.wantFinish {
+				t.Fatalf("finish %+v, want it standing %v", f, tt.wantFinish)
+			}
+			held, err := h.o.queueHeld(context.Background(), mediationKey(h))
+			if err != nil || held != tt.wantHeld {
+				t.Fatalf("queueHeld = (%v, %v), want %v", held, err, tt.wantHeld)
+			}
+			if tt.wantEscalated && heldEscalation(t, h) != "ws-fixer" {
+				t.Fatalf("check %+v, want it escalated for the user", owedCheck(t, h))
+			}
+			if !tt.wantHeld && len(kicked) == 0 {
+				t.Fatal("the released queue was not kicked")
+			}
+			if !loggedLike(h, tt.wantRecord) {
+				t.Fatalf("records = %v, want %+v", h.logs.Records(), tt.wantRecord)
+			}
+		})
+	}
+}
+
+func TestAFinishOnARunningQueueSuspendsItsHead(t *testing.T) {
+	// Arrange: the head holds in its gate on a queue nothing holds.
+	c, done, release := headHeldInGate(t)
+	ctx := context.Background()
+	standFinishAt(t, c.h, c.h.repoKey(), wsm.RemediationGating)
+
+	// Act
+	c.h.o.holdForFinish(ctx, c.h.repoKey(), dlog.Context{})
+	<-done
+
+	// Assert
+	if !c.recorded("info", opRemediationFinish, "suspended for the deploy mediator's remediation finish") {
+		t.Fatalf("records = %v, want the head suspended for the finish", c.h.logs.Records())
+	}
+	queued, err := c.h.db.MergeQueue(ctx, c.h.repoKey())
+	if err != nil || len(queued) != 1 || queued[0].State != wsm.MergeAdmitted {
+		t.Fatalf("queue %v (%v), want the merge still admitted in line", queued, err)
+	}
+	if got := c.git.landedOwn(); len(got) != 0 {
+		t.Fatalf("landed %v while the finish holds the queue, want nothing", got)
+	}
+
+	// Act: the finish ends, and the queue takes its merge on at its step.
+	if _, err := c.h.db.EndRemediationFinish(ctx, "ws-fixer"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	c.promote(t)
+
+	// Assert
+	if got := c.git.landedOwn(); len(got) != 1 {
+		t.Fatalf("landings after the finish ended %v, want the merge landed once", got)
+	}
+}
+
+func TestAGivenUpFixOfADispatchedCheckEndsItsFinishSoTheUsersReleaseFreesTheQueue(t *testing.T) {
+	// Arrange: the fix dispatched for the owed check gates with
+	// MaxFixAttempts failed rounds behind it, and its next gate fails.
+	h := finishing(t)
+	ctx := context.Background()
+	standFinish(t, h, mediationKey(h), wsm.RemediationGating, false)
+	for i := 0; i < MaxFixAttempts; i++ {
+		if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationFixing, epochPause); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: epochPause}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}}
+
+	// Act: the gate is given up.
+	h.o.runRemediationFinish(ctx, *finishOf(t, h))
+
+	// Assert: the finish is ended, and the escalated check holds the queue.
+	if f := finishOf(t, h); f != nil {
+		t.Fatalf("finish %+v, want it ended", f)
+	}
+	if m := owedCheck(t, h); m == nil || !m.Escalated() {
+		t.Fatalf("check %+v, want it escalated for the user", m)
+	}
+	if held, err := h.o.queueHeld(ctx, mediationKey(h)); err != nil || !held {
+		t.Fatalf("queueHeld = (%v, %v), want the escalation holding it", held, err)
+	}
+
+	// Act: the user releases the escalation.
+	if err := h.o.releaseEscalated(ctx, mediationKey(h), *owedCheck(t, h), "the user released the escalation's hold", dlog.Context{}); err != nil {
+		t.Fatalf("releaseEscalated: %v", err)
+	}
+
+	// Assert: nothing is left holding the queue.
+	if held, err := h.o.queueHeld(ctx, mediationKey(h)); err != nil || held {
+		t.Fatalf("queueHeld = (%v, %v), want the queue released", held, err)
+	}
+}
+
+func TestAClosedMediatorsFinishLeavesTheQueueHeldOnlyByWhatOwesADecision(t *testing.T) {
+	tests := []struct {
+		name          string
+		dispatched    bool
+		step          wsm.RemediationStep
+		wantFinish    bool
+		wantHeld      bool
+		wantEscalated bool
+	}{
+		{name: "a dispatched fix's finish gating is ended and its escalated check holds the queue", dispatched: true, step: wsm.RemediationGating, wantHeld: true, wantEscalated: true},
+		{name: "a fix's finish gating with no check owed is ended and the queue advances", step: wsm.RemediationGating},
+		{name: "a fix's finish sent back to fix with no check owed is ended and the queue advances", step: wsm.RemediationFixing},
+		{name: "a finish deploying is left to its deploy, whose check takes the hold on", step: wsm.RemediationDeploying, wantFinish: true, wantHeld: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a fix's finish, serving no escalation, as one a chain's
+			// end left standing.
+			h := checked(t)
+			withMediator(t, h)
+			ctx := context.Background()
+			if tt.dispatched {
+				owe(t, h)
+				if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
+					t.Fatal(err)
+				}
+			}
+			standFinish(t, h, mediationKey(h), tt.step, false)
+			var kicked []wsm.RepoKey
+			h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+			// Act
+			h.o.OnWorkspaceClosed(ctx, "ws-fixer")
+
+			// Assert
+			if f := finishOf(t, h); (f != nil) != tt.wantFinish {
+				t.Fatalf("finish %+v, want it standing %v", f, tt.wantFinish)
+			}
+			held, err := h.o.queueHeld(ctx, mediationKey(h))
+			if err != nil || held != tt.wantHeld {
+				t.Fatalf("queueHeld = (%v, %v), want %v", held, err, tt.wantHeld)
+			}
+			if tt.wantEscalated {
+				if m := owedCheck(t, h); m == nil || !m.Escalated() {
+					t.Fatalf("check %+v, want it escalated for the user", m)
+				}
+			}
+			if !tt.wantHeld && len(kicked) == 0 {
+				t.Fatal("the released queue was not kicked")
 			}
 		})
 	}

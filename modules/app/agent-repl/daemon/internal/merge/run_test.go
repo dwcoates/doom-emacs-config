@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sourcescan"
@@ -1371,5 +1372,35 @@ func TestARunsLabelIsItsSubjectOrItsWorkspace(t *testing.T) {
 				t.Fatalf("label = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAMergeTurnRefusedByItsColdGateAfterTheGateWasPassedIsAnInvariantViolation(t *testing.T) {
+	// Arrange: the gate's answer brings the session up, yet the queue still
+	// refuses the turn by the gate's name.
+	h := newHarness(t)
+	standAtColdGate(h, theWorkspace)
+	h.queue.mu.Lock()
+	h.queue.onSubmit = nil
+	h.queue.err = &promptqueue.ColdGateRefusal{Detail: "the conversation is cold at 574,592 context tokens"}
+	h.queue.mu.Unlock()
+
+	// Act
+	err := h.o.handOff(context.Background(), theWorkspace, "turn-1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+
+	// Assert
+	if !errors.Is(err, promptqueue.ErrColdGate) || !strings.Contains(err.Error(), "invariant violated") {
+		t.Fatalf("handOff = %v, want the refusal failed loudly as an invariant violation", err)
+	}
+	if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want one answer and no retry", got)
+	}
+	if subs := submitted(h); len(subs) != 1 {
+		t.Fatalf("submissions = %+v, want one and no retry", subs)
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opColdGate,
+		Message: "a merge turn was refused by its workspace's cold gate after the gate was passed; the invariant that no merge turn meets a standing gate is broken, and the turn fails"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["turn"] != "turn-1" {
+		t.Fatalf("the violation was recorded as %+v, want an ERROR naming the workspace and the turn", rec)
 	}
 }

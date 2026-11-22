@@ -148,6 +148,15 @@ var (
 		by:        "its workspace's restart",
 		resumes:   "it resumes at the step it recorded once the restart finished",
 		gateRerun: "its run goes on on the test service, and the merge watches it again once the restart finished", keepsGateRun: true}
+	// suspendDeployCheck is the deploy mediator's remediation finish taking
+	// the hold of a queue nothing held (FinishRemediation): like a pause,
+	// this daemon takes the merge straight back, and the queue's release by
+	// the mediator's approval of the fix's deploy kicks it on.
+	suspendDeployCheck = suspension{headExit: HeadExitDeployCheck, op: opRemediationFinish, cause: errHeldForDeployCheck,
+		moved:     "a merge is suspended for the deploy mediator's remediation finish; it resumes at the step it recorded once the mediator approves a deploy",
+		by:        "the deploy mediator's remediation finish",
+		resumes:   "it stays suspended at the step it recorded until the mediator approves a deploy",
+		gateRerun: "its run goes on on the test service, and the merge watches it again once the mediator approves a deploy", keepsGateRun: true}
 	// suspendHandover is a deploy's handover holding every queue
 	// (standingMoved): like a pause, this daemon takes the merge straight
 	// back, so a handover that does not finish leaves it here to go on, and
@@ -188,6 +197,10 @@ func (r *run) suspendedFor() (suspension, bool) {
 
 // errPaused is the cause a pause cuts a running merge with.
 var errPaused = errors.New("merge: the queue was paused; the merge is suspended until the queue is resumed")
+
+// errHeldForDeployCheck is the cause a remediation finish's hold cuts a
+// running merge with.
+var errHeldForDeployCheck = errors.New("merge: the deploy mediator's remediation finish holds the queue; the merge is suspended until the mediator approves a deploy")
 
 // errHandingOver is the cause a handover's hold cuts a running merge with.
 var errHandingOver = errors.New("merge: a handover holds the queue; the merge is suspended for the daemon that serves its workspace next")

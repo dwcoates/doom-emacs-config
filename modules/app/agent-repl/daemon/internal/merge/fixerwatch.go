@@ -92,7 +92,10 @@ func (o *orchestrator) FixerTurnEnded(ctx context.Context, ws wsm.WorkspaceID) {
 		o.mediationFailed(ctx, withField(fields, "repo", string(repo)), "could not read the mediator's check after its turn ended; it is settled by the next pass", err)
 		return
 	}
+	// A FINISH SENT BACK TO FIX FOR NO DISPATCHED CHECK has no fixer watch
+	// (briefFixer): this turn's end settles it when the mediator stopped.
 	if m == nil || !m.Dispatched {
+		o.settleStoppedFix(ctx, repo, ws, withField(fields, "repo", string(repo)))
 		return
 	}
 	o.deps.Log.Global().Info(opMediation, "the mediator's turn ended with its fix dispatched; its check is settled", withField(fields, "repo", string(repo)))

@@ -129,7 +129,7 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 		// can land after the forget removed the record; there is no view left
 		// to compose and no stream left to carry one, so nothing is published.
 		s.log.Info(op, "the workspace was forgotten; it has no host view to publish",
-			dlog.Context{"workspace": string(ws), "cause": err.Error()})
+			dlog.Context{"workspace": string(ws), "workspace_record": "forgotten", "cause": err.Error()})
 		return
 	}
 	if err != nil {
@@ -138,7 +138,7 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 		// is cancelled the moment the client goes away or the daemon exits in
 		// an orderly way. The view is simply not published; there is nobody
 		// left to publish it to, and it is not a fault.
-		logHostStreamRead(s.log, op, "the host view was not published",
+		logHostWorkspaceRecordRead(s.log, op, "the host view was not published",
 			"could not resolve the workspace", err, dlog.Context{"workspace": string(ws)})
 		return
 	}
@@ -178,7 +178,7 @@ func (s *server) composeHostWorkspace(
 
 	record, err := s.deps.DB.Workspace(ctx, ws)
 	if err != nil {
-		logHostStreamRead(log, op, "the host view was not composed", "could not read the workspace record", err, nil)
+		logHostWorkspaceRecordRead(log, op, "the host view was not composed", "could not read the workspace record", err, nil)
 		return nil, false
 	}
 	session, hasSession, err := s.deps.DB.Session(ctx, ws)
@@ -666,9 +666,35 @@ func (s *server) hostInitialPrompt(
 // (`skipped`) and naming the stream. Any other cause is a fault: ERROR, saying
 // what could not be read (`failed`). Both carry `fields` and the cause.
 func logHostStreamRead(log dlog.Logger, op, skipped, failed string, err error, fields dlog.Context) {
+	logHostRead(log, op, skipped, failed, err, fields, false)
+}
+
+// logHostWorkspaceRecordRead is logHostStreamRead for a read of the
+// WORKSPACE'S OWN RECORD (or the resolution that reads it). A publish is
+// edge-triggered and runs concurrently with a forget, so a record that is gone
+// by the time the composition reads it means the workspace was forgotten
+// between the edge and the read: there is no view to publish, and that is not
+// a fault. It is INFO, naming the outcome. Reads of anything else a live
+// workspace owns keep logHostStreamRead, where a not-found stays a fault.
+func logHostWorkspaceRecordRead(log dlog.Logger, op, skipped, failed string, err error, fields dlog.Context) {
+	logHostRead(log, op, skipped, failed, err, fields, true)
+}
+
+func logHostRead(
+	log dlog.Logger,
+	op, skipped, failed string,
+	err error,
+	fields dlog.Context,
+	workspaceRecord bool,
+) {
 	out := dlog.Context{"cause": err.Error()}
 	for k, v := range fields {
 		out[k] = v
+	}
+	if workspaceRecord && errors.Is(err, wsm.ErrNotFound) {
+		out["workspace_record"] = "forgotten"
+		log.Info(op, skipped+"; the workspace was forgotten before this read", out)
+		return
 	}
 	if ctxend.Is(err) {
 		out["stream"] = "WatchHostWorkspace"

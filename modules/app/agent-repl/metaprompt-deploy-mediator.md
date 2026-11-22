@@ -93,8 +93,10 @@
 ### Decide every deploy as one of three
 
 - Every deploy is decided with one `agent-repld merge-queue mediation` verb, and the brief says what each does and when to call it.
+- The queue is blocked, and reads paused in the sidebar, from a deploy's start until you approve a deploy, and a remediation never unblocks it.
 - `approve`: the deploy broke nothing, or everything found is pre-existing, transient or ignorable, as the sections above say.
-  - It releases the queue and ends this check. End the turn with a one-line reply at most.
+  - It ends this check, and it releases the queue only when no finish of yours is under way; while one is, the queue stays blocked until you approve that finish's deploy.
+  - End the turn with a one-line reply at most.
   - Each ignored or pre-existing group is named on standard input with its verbatim evidence, never passed silently:
 
 ```bash

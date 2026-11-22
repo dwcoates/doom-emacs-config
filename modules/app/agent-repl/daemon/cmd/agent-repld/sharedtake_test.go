@@ -216,7 +216,9 @@ func TestYieldStopsTheSharedAcceptBeforeItYieldsTheClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	accept := newPrivateAccept(t)
-	accept.AddShared(shared, newFakeReturned(), &spyLogger{})
+	if err := accept.AddShared(shared, newFakeReturned(), &spyLogger{}); err != nil {
+		t.Fatalf("AddShared: %v", err)
+	}
 	claim := &yieldingClaim{}
 	s := &sharedTake{accept: accept, log: &spyLogger{}}
 
@@ -279,7 +281,9 @@ func TestYieldBootClaimYieldsUnlessTheStreamGenuinelyFailsToStop(t *testing.T) {
 				t.Fatal(err)
 			}
 			accept := newPrivateAccept(t)
-			accept.AddShared(shared, tc.returned(t), &spyLogger{})
+			if err := accept.AddShared(shared, tc.returned(t), &spyLogger{}); err != nil {
+				t.Fatalf("AddShared: %v", err)
+			}
 			claim := &yieldingClaim{}
 			log := &spyLogger{}
 			s := &sharedTake{accept: accept, log: log}
@@ -493,7 +497,9 @@ func acceptedShared(t *testing.T) (net.Conn, net.Conn) {
 		t.Fatal(err)
 	}
 	accept := newPrivateAccept(t)
-	accept.AddShared(shared, newFakeReturned(), &spyLogger{})
+	if err := accept.AddShared(shared, newFakeReturned(), &spyLogger{}); err != nil {
+		t.Fatalf("AddShared: %v", err)
+	}
 	client, err := net.Dial("tcp", shared.Addr().String())
 	if err != nil {
 		t.Fatal(err)

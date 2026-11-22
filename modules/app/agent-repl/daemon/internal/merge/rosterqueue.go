@@ -223,7 +223,16 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
-	queue := sidebar.MergeQueue{Pause: pause, AsyncRequesters: requesters}
+	// THE DEPLOY CHECK'S HOLD IS DRAWN FROM THE ONE READ THE HOLD ITSELF
+	// TAKES (deployHoldOf), so the paused drawing and the hold never disagree.
+	hold, err := o.deployHoldOf(ctx, repo)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not read whether the deploy check holds the merge queue, so the roster is not told the queue",
+			"the deploy check hold's read ended when its context was cancelled; the roster is not told the queue",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
+	}
+	queue := sidebar.MergeQueue{Pause: pause, DeployCheck: rosterDeployCheck(hold), AsyncRequesters: requesters}
 	for _, entry := range entries {
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
@@ -272,13 +281,22 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 		return
 	}
 	queue.Mediation = mediation
-	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
+	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "held_by": hold.heldBy(), "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.noteOrder(repo, queue)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
 	// EVERY QUEUE WRITE MAY MOVE A MERGE OFF ITS QUEUE OR BACK (an exit, a
 	// requeue), so the merges off their queues are republished with it.
 	o.publishOffQueueLocked(ctx)
+}
+
+// rosterDeployCheck is HOLD as the roster draws it: the queue's pause by its
+// deploy check while the hold stands, nil while it holds nothing.
+func rosterDeployCheck(hold deployHold) *sidebar.DeployCheckHold {
+	if !hold.holdsQueue() {
+		return nil
+	}
+	return &sidebar.DeployCheckHold{Since: hold.since()}
 }
 
 // publishOffQueue tells the roster every merge standing off its queue, whole.

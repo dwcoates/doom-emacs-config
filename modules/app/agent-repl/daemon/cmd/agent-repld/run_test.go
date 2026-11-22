@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -486,19 +488,22 @@ type fakeWithdrawer struct {
 
 type withdrawOutcome struct {
 	withdrawn bool
-	err       error
+	// read is the rest of what the Withdraw answers (its Withdrawn is
+	// withdrawn's).
+	read daemonaddr.Withdrawal
+	err  error
 }
 
-func (f *fakeWithdrawer) Withdraw() (bool, error) {
+func (f *fakeWithdrawer) Withdraw() (daemonaddr.Withdrawal, error) {
 	if f.calls >= len(f.outcomes) {
-		return false, nil
+		return daemonaddr.Withdrawal{}, nil
 	}
 	o := f.outcomes[f.calls]
 	f.calls++
-	return o.withdrawn, o.err
+	wd := o.read
+	wd.Withdrawn = o.withdrawn
+	return wd, o.err
 }
-
-func (f *fakeWithdrawer) Address() string { return "127.0.0.1:0" }
 
 // spyLogger records the operation, level and message of each record so a test
 // asserts what a withdrawal wrote.
@@ -662,6 +667,83 @@ func TestAddrWithdrawalSurfacesAWithdrawError(t *testing.T) {
 			msg, ok := log.message(dlog.LevelError)
 			if !ok || !strings.Contains(msg, "could not be withdrawn") {
 				t.Fatalf("%s ERROR message = %q (present = %v), want the failure surfaced", tc.name, msg, ok)
+			}
+		})
+	}
+}
+
+// TestEveryWithdrawalRecordNamesWhatTheFileHeld pins the fields of every
+// withdrawal record: this daemon's own advertised address, pid and private
+// address, and daemon.addr's pid, shared address and private address as read,
+// or "file" naming why there are none. A record naming only this daemon's
+// address could not tell whose file it left (2026-11-22).
+func TestEveryWithdrawalRecordNamesWhatTheFileHeld(t *testing.T) {
+	own := daemonaddr.Withdrawal{Address: "127.0.0.1:41000", PID: 30922, Private: "127.0.0.1:5001"}
+	read := func(file daemonaddr.Advertisement) daemonaddr.Withdrawal {
+		wd := own
+		wd.Read, wd.Present, wd.File = true, true, file
+		return wd
+	}
+	ownFile := read(daemonaddr.Advertisement{Address: "127.0.0.1:41000", PID: 30922, PIDKnown: true, Private: "127.0.0.1:5001"})
+	absent := own
+	absent.Read = true
+	ownFields := dlog.Context{"address": "127.0.0.1:41000", "pid": 30922, "private_address": "127.0.0.1:5001"}
+	ownFileFields := dlog.Merge(ownFields, dlog.Context{"file": "present", "file_address": "127.0.0.1:41000", "file_pid_known": true, "file_pid": 30922, "file_private_address": "127.0.0.1:5001"})
+	tests := []struct {
+		name     string
+		outcomes []withdrawOutcome
+		act      func(*addrWithdrawal)
+		level    string
+		message  string
+		want     dlog.Context
+	}{
+		{name: "withdrew early", outcomes: []withdrawOutcome{{withdrawn: true, read: ownFile}}, act: (*addrWithdrawal).begin,
+			level: dlog.LevelInfo, message: "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", want: ownFileFields},
+		{name: "withdrew at finish", outcomes: []withdrawOutcome{{withdrawn: true, read: ownFile}}, act: (*addrWithdrawal).finish,
+			level: dlog.LevelInfo, message: "daemon.addr was withdrawn", want: ownFileFields},
+		{name: "already withdrawn", outcomes: []withdrawOutcome{{withdrawn: true, read: ownFile}, {read: absent}},
+			act:   func(w *addrWithdrawal) { w.begin(); w.finish() },
+			level: dlog.LevelDebug, message: "daemon.addr was already withdrawn at the start of shutdown", want: dlog.Merge(ownFields, dlog.Context{"file": "absent"})},
+		{name: "left alone naming another pid", outcomes: []withdrawOutcome{{read: read(daemonaddr.Advertisement{Address: "127.0.0.1:41000", PID: 31000, PIDKnown: true, Private: "127.0.0.1:5002"})}},
+			act: (*addrWithdrawal).finish, level: dlog.LevelInfo, message: "daemon.addr was left alone; it does not name this daemon",
+			want: dlog.Merge(ownFields, dlog.Context{"file": "present", "file_address": "127.0.0.1:41000", "file_pid_known": true, "file_pid": 31000, "file_private_address": "127.0.0.1:5002"})},
+		{name: "left alone naming no pid", outcomes: []withdrawOutcome{{read: read(daemonaddr.Advertisement{Address: "127.0.0.1:41000"})}},
+			act: (*addrWithdrawal).finish, level: dlog.LevelInfo, message: "daemon.addr was left alone; it does not name this daemon",
+			want: dlog.Merge(ownFields, dlog.Context{"file": "present", "file_address": "127.0.0.1:41000", "file_pid_known": false, "file_private_address": ""})},
+		{name: "left alone with no file", outcomes: []withdrawOutcome{{read: absent}},
+			act: (*addrWithdrawal).finish, level: dlog.LevelInfo, message: "daemon.addr was left alone; it does not name this daemon",
+			want: dlog.Merge(ownFields, dlog.Context{"file": "absent"})},
+		{name: "left alone unread, holding no boot claim", outcomes: []withdrawOutcome{{read: own}},
+			act: (*addrWithdrawal).finish, level: dlog.LevelInfo, message: "daemon.addr was left alone; it does not name this daemon",
+			want: dlog.Merge(ownFields, dlog.Context{"file": "unread"})},
+		{name: "a remove that failed after the read", outcomes: []withdrawOutcome{{read: ownFile, err: errors.New("remove refused")}},
+			act: (*addrWithdrawal).finish, level: dlog.LevelError, message: "daemon.addr could not be withdrawn",
+			want: dlog.Merge(ownFileFields, dlog.Context{"error": "remove refused"})},
+		{name: "a read that failed", outcomes: []withdrawOutcome{{read: own, err: errors.New("read refused")}},
+			act: (*addrWithdrawal).begin, level: dlog.LevelError, message: "daemon.addr could not be withdrawn",
+			want: dlog.Merge(ownFields, dlog.Context{"file": "unread", "error": "read refused"})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := &spyLogger{}
+			w := &addrWithdrawal{claim: &fakeWithdrawer{outcomes: tt.outcomes}, log: log}
+
+			// Act
+			tt.act(w)
+
+			// Assert
+			var got *spyRecord
+			for i := range log.records {
+				if r := log.records[i]; r.level == tt.level && r.message == tt.message {
+					got = &log.records[i]
+				}
+			}
+			if got == nil {
+				t.Fatalf("records = %+v, want %s %q", log.records, tt.level, tt.message)
+			}
+			if !maps.Equal(got.context, tt.want) {
+				t.Fatalf("fields = %v, want %v", got.context, tt.want)
 			}
 		})
 	}
@@ -1570,6 +1652,82 @@ func TestARequestlessConnectionDoesNotHoldTheExit(t *testing.T) {
 	}
 }
 
+func TestJoinedWaitReturnsOnlyAfterTheRunReturned(t *testing.T) {
+	tests := []struct {
+		name string
+		runs int
+	}{
+		{name: "one run", runs: 1},
+		{name: "a second run is waited on no differently", runs: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: work that finishes only once released.
+			release := make(chan struct{})
+			var finished atomic.Int32
+			run, wait := joined(func() {
+				<-release
+				finished.Add(1)
+			})
+			var runs sync.WaitGroup
+			for range tt.runs {
+				runs.Add(1)
+				go func() { defer runs.Done(); run() }()
+			}
+			waited := make(chan int32, 1)
+			go func() { wait(); waited <- finished.Load() }()
+
+			// Act
+			close(release)
+
+			// Assert: the wait saw the work finished.
+			if got := <-waited; got < 1 {
+				t.Fatalf("wait returned with %d run(s) finished, want it to return only after one", got)
+			}
+			runs.Wait()
+		})
+	}
+}
+
+func TestServeWaitsForTheRequestlessCloseAfterItsHTTPShutdown(t *testing.T) {
+	// Arrange: a served listener with one connection that sends nothing.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	var mu sync.Mutex
+	var marks []string
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() {
+		served <- serve(ctx, listener, gate, serveExit{Log: dlog.NewTestLogger(), Mark: func(step string, _ time.Time) {
+			mu.Lock()
+			defer mu.Unlock()
+			marks = append(marks, step)
+		}})
+	}()
+	resp, err := http.Get("http://" + listener.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	// Act
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want an orderly shutdown", err)
+	}
+
+	// Assert: the wait is marked right after the http shutdown's own mark.
+	mu.Lock()
+	defer mu.Unlock()
+	at := slices.Index(marks, "serve_requestless_closed")
+	if at < 1 || !strings.HasPrefix(marks[at-1], "serve_http_shutdown(") {
+		t.Fatalf("marks = %q, want serve_requestless_closed right after serve_http_shutdown", marks)
+	}
+}
+
 // graceExpired is the record serve writes when the http shutdown's grace runs
 // out with connections still held.
 const graceExpired = "the exit's http shutdown grace expired with connections still held; closing them under their requests"
@@ -1669,12 +1827,10 @@ func (o *orderingClaim) Depart() error {
 	return o.departErr
 }
 
-func (o *orderingClaim) Withdraw() (bool, error) {
+func (o *orderingClaim) Withdraw() (daemonaddr.Withdrawal, error) {
 	o.steps = append(o.steps, "withdraw")
-	return true, nil
+	return daemonaddr.Withdrawal{Withdrawn: true}, nil
 }
-
-func (o *orderingClaim) Address() string { return "127.0.0.1:0" }
 
 // orderingStopper records the shared listener's stop into the claim's steps.
 type orderingStopper struct {

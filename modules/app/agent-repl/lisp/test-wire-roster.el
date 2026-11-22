@@ -2478,6 +2478,14 @@ carrying it is an unknown field."
                             :by)
                  '(:arm :host :value "too many open files"))))
 
+(ert-deftest agent-repl-test-wire-roster-the-deploy-checks-hold-decodes-its-pauser ()
+  "A queue its deploy check holds decodes its pauser as the deploy check arm."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-merge-queue-paused
+                             "{\"pausedAtMs\":\"3\",\"by\":{\"deployCheck\":{}}}")
+                            :by)
+                 '(:arm :deploy-check :value t))))
+
 (ert-deftest agent-repl-test-wire-roster-a-pauser-with-no-arm-is-a-breach ()
   "A pauser names who paused the queue; an unset one is refused."
   (should (equal (agent-repl-test-wire-roster--breach

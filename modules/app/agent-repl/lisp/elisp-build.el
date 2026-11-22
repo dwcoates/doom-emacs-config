@@ -27,6 +27,20 @@
 ;; load runs OUT of the process filter that delivered the push: loading from
 ;; inside a filter runs arbitrary top-level code (and the event loop) in the
 ;; middle of the WatchDaemon stream's own read.
+;;
+;; A LOAD NEVER UNDEFINES, so the reload retires what the new build dropped.
+;; Loading a file replaces its `load-history' entry and defines what the new
+;; source defines, but a function the new source no longer defines stays
+;; callable, still on every hook and timer that named it.  On 2026-11-22 a
+;; retired `agent-repl-page-unload-on-reattached' stayed on
+;; `agent-repl-host-reattached-functions' after a deploy and failed every
+;; reattach with the old signature's arity, inside RegisterWorkspace's
+;; answer.  After a clean load, an agent-repl function no loaded file
+;; defines (`symbol-file' answers nil) is exactly such a leftover: it is
+;; taken off every hook and timer and unbound
+;; \=(`agent-repl--elisp-retire-undefined').  bytecode.el's compile installs
+;; its byte-code with `fset' from a timer, outside any load, so a compiled
+;; function keeps the `symbol-file' its load recorded.
 
 ;;; Code:
 
@@ -313,10 +327,79 @@ failure would strand every later module's timers too."
       (message "agent-repl: elisp reload left required timers unarmed: %s"
                (mapconcat (lambda (key) (format "%s" key)) failed ", ")))))
 
+;;;; ---- A reload's retired definitions ----
+
+(defun agent-repl--elisp-undefined-functions ()
+  "Return every agent-repl function no loaded file defines, in name order.
+An interned symbol named with the `agent-repl' prefix, `fboundp', whose
+`symbol-file' as a `defun' is nil: the load that last read its file no
+longer defined it.  An autoload answers its file, so it is never listed.
+Reads only; nothing is changed."
+  (let (found)
+    (mapatoms (lambda (symbol)
+                (when (and (fboundp symbol)
+                           (string-prefix-p "agent-repl" (symbol-name symbol))
+                           (null (symbol-file symbol 'defun)))
+                  (push symbol found))))
+    (sort found #'string<)))
+
+(defun agent-repl--elisp-retire-undefined ()
+  "Retire every agent-repl function no loaded file defines.
+Each function `agent-repl--elisp-undefined-functions' answers is removed
+from the GLOBAL value of every variable whose default value is a list
+holding it (`remove-hook', run from a temporary buffer so no buffer-local
+value is the one changed), every timer of `timer-list' and
+`timer-idle-list' whose function is the symbol itself is cancelled, and
+the symbol is unbound (`fmakunbound').  Buffer-local hook values, and a
+timer or hook whose function is a closure calling the symbol, are out of
+scope: neither names the symbol where this can see it.
+
+Returns (:functions SYMBOLS :hooks ((VARIABLE . SYMBOL) ...) :timers
+SYMBOLS): the functions retired, each hook entry cleared, and the function
+of each timer cancelled, one per timer."
+  (let ((retired (agent-repl--elisp-undefined-functions))
+        (hooks nil)
+        (timers nil))
+    (when retired
+      (with-temp-buffer
+        (mapatoms (lambda (variable)
+                    (when (default-boundp variable)
+                      (let ((value (default-value variable)))
+                        (when (proper-list-p value)
+                          (dolist (symbol retired)
+                            (when (memq symbol value)
+                              (remove-hook variable symbol)
+                              (push (cons variable symbol) hooks)))))))))
+      (dolist (timer (append timer-list timer-idle-list))
+        (when (memq (timer--function timer) retired)
+          (push (timer--function timer) timers)
+          (cancel-timer timer)))
+      (mapc #'fmakunbound retired))
+    (list :functions retired
+          :hooks (sort hooks (lambda (a b) (string< (car a) (car b))))
+          :timers (nreverse timers))))
+
+(defun agent-repl--elisp-reload-report-retired (result)
+  "Record the retirement RESULT of a reload: INFO when it retired anything.
+A retirement that found nothing to retire is the quiet outcome, recorded
+at the debug rung."
+  (let ((functions (plist-get result :functions)))
+    (if functions
+        (agent-repl--info agent-repl--elisp-build-log-scope
+                          "elisp.elisp-build.retired count=%d functions=%S hooks=%S timers=%S"
+                          (length functions) functions
+                          (plist-get result :hooks) (plist-get result :timers))
+      (agent-repl--log agent-repl--elisp-build-log-scope
+                       "elisp.elisp-build.retired-none reason=%s"
+                       "every agent-repl function is defined by a loaded file"))))
+
 (defun agent-repl--elisp-reload-run (root build)
   "Hot-load the module set from ROOT, which the daemon built as BUILD.
 Reads config.el's `agent-repl--load-module' order, loads every source in
-it, then runs the heartbeat assertion.  The recorded module builds are
+it, then runs the heartbeat assertion.  When every module loaded, the
+functions the new sources no longer define are retired
+\=(`agent-repl--elisp-retire-undefined'); a failed module skips that, at
+INFO.  The recorded module builds are
 recomputed from the bytes just loaded, so the next WatchDaemon reports the
 new build; a recomputed build that differs from BUILD means the files moved
 between the deploy and the load, and is an ERROR.  Returns non-nil when
@@ -362,6 +445,14 @@ failure is already recorded at ERROR."
           (message "agent-repl: elisp reload: %d module(s) failed to load: %s"
                    (length failures)
                    (mapconcat #'car failures ", ")))
+        ;; A module that failed to load still needs the functions its last
+        ;; good load defined, which its new `load-history' entry may not name.
+        (if failures
+            (agent-repl--info agent-repl--elisp-build-log-scope
+                              "elisp.elisp-build.retire-skipped failed=%d reason=%s"
+                              (length failures)
+                              "a module failed to load, so its functions may still be needed")
+          (agent-repl--elisp-reload-report-retired (agent-repl--elisp-retire-undefined)))
         (let ((loaded-build (agent-repl-elisp-build-of entries)))
           (unless (string= loaded-build build)
             (agent-repl--error agent-repl--elisp-build-log-scope

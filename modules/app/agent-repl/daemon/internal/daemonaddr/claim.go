@@ -281,13 +281,21 @@ func (c *claim) advertisement() string {
 func (c *claim) Publish() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// A DAEMON STANDING DOWN ADVERTISES NOTHING (ErrDeparted). The check and
+	// the write below are under c.mu, as Depart, Yield and Close are, so a
+	// publish racing one of them either completes first or is refused here.
+	switch {
+	case c.yielded:
+		return fmt.Errorf("advertise %q: the boot claim was yielded to a successor: %w", c.addrPath, ErrDeparted)
+	case c.departed:
+		return fmt.Errorf("advertise %q: the claim departed at the start of shutdown: %w", c.addrPath, ErrDeparted)
+	case c.closed:
+		return fmt.Errorf("advertise %q: the claim was closed: %w", c.addrPath, ErrDeparted)
+	}
 	// A SUCCESSOR TAKES THE BOOT CLAIM WHEN IT TAKES OVER. It bound without
 	// one -- the incumbent held it -- and publishing daemon.addr is the moment
 	// it becomes the daemon of this state root. Failing to take it here is a
 	// refusal, never a publish that advertises an address nobody claims.
-	if c.yielded {
-		return fmt.Errorf("advertise %q: the boot claim was yielded to a successor, so this daemon advertises nothing", c.addrPath)
-	}
 	if c.lock == nil {
 		// A WAIT FOR THE CLAIM IS ALREADY QUEUED IN THE KERNEL, and the
 		// claim is ITS to take: a second, single-shot take on another
@@ -312,10 +320,38 @@ func (c *claim) Publish() error {
 	return nil
 }
 
+// Departed implements Claim.
+func (c *claim) Departed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.departed || c.closed
+}
+
+// Withdrawal is what one Withdraw found and did: the advertisement this claim
+// names, what daemon.addr held when it was read, and whether this call
+// removed it. The exit's records name all of it, so a withdrawal left alone
+// says whose file it left (2026-11-22).
+type Withdrawal struct {
+	// Address is the address this claim advertises (Advertise's shared one,
+	// or its own), PID this process's, and Private this claim's own private
+	// listener address.
+	Address string
+	PID     int
+	Private string
+	// Read is true once daemon.addr was read: false for a claim that holds no
+	// boot claim, which reads nothing, and for a read that failed.
+	Read bool
+	// Present is true when the read found a file, and File is what it held.
+	Present bool
+	File    Advertisement
+	// Withdrawn is true when this call removed the file.
+	Withdrawn bool
+}
+
 // Withdraw implements Claim. It removes daemon.addr ONLY while the file still
 // names THIS claim (namesLocked: its advertised address AND this process's
-// pid), and answers whether it removed anything. An advertisement naming
-// another pid, or none, is not this claim's, and is left.
+// pid), and answers what it read and whether it removed anything. An
+// advertisement naming another pid, or none, is not this claim's, and is left.
 //
 // THE ADDRESS ALONE NAMES NO DAEMON. Every daemon advertises the shared
 // address its socket holder keeps, so an incumbent's exit read its
@@ -339,30 +375,34 @@ func (c *claim) Publish() error {
 // instant, and a read-then-remove there deleted the successor's fresh
 // advertisement when it landed between the two (2026-11-17), leaving the
 // successor to read its own state as vanished and stand down.
-func (c *claim) Withdraw() (bool, error) {
+func (c *claim) Withdraw() (Withdrawal, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// THE ADVERTISEMENT IS NO LONGER THIS CLAIM'S TO VERIFY from the first
 	// call on, whatever the file then says: an orderly exit is taking it down,
 	// or a successor has already replaced it.
 	c.published = false
+	w := Withdrawal{Address: c.advertisedLocked(), PID: c.pid, Private: c.address}
 	if c.lock == nil {
-		return false, nil
+		return w, nil
 	}
 	raw, err := os.ReadFile(c.addrPath)
 	if os.IsNotExist(err) {
-		return false, nil
+		w.Read = true
+		return w, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
+		return w, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
 	}
-	if !c.namesLocked(ParseAdvertisement(string(raw))) {
-		return false, nil
+	w.Read, w.Present, w.File = true, true, ParseAdvertisement(string(raw))
+	if !c.namesLocked(w.File) {
+		return w, nil
 	}
 	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
-		return false, fmt.Errorf("remove %q: %w", c.addrPath, err)
+		return w, fmt.Errorf("remove %q: %w", c.addrPath, err)
 	}
-	return true, nil
+	w.Withdrawn = true
+	return w, nil
 }
 
 // Depart implements Claim. It releases the serving lock and keeps the boot

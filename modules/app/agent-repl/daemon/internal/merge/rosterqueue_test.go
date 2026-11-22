@@ -855,3 +855,61 @@ func TestTheRosterQueueOrderIsRecordedAtInfoOnlyWhenItChanges(t *testing.T) {
 		t.Fatalf("after the move: %d records, the last %+v; want one more, naming ws-2 first", n, last)
 	}
 }
+
+func TestTheRosterQueueIsPausedByItsDeployCheckWhileTheCheckOrAFinishHoldsIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		owe    bool
+		finish wsm.RemediationStep
+		want   *sidebar.DeployCheckHold
+	}{
+		{name: "a queue nothing holds is not held for its deploy check"},
+		{name: "an owed check holds it since its chain began", owe: true, want: &sidebar.DeployCheckHold{Since: epochPause}},
+		{name: "a finish standing with no check owed holds it since its first finish", finish: wsm.RemediationGating, want: &sidebar.DeployCheckHold{Since: epochPause}},
+		{name: "a finish deployed holds nothing itself", finish: wsm.RemediationDeployed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			enqueue(t, h)
+			ctx := context.Background()
+			if tt.owe {
+				if _, err := h.db.OweMediation(ctx, h.repoKey(), epochPause, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.finish != "" {
+				standFinishAt(t, h, h.repoKey(), tt.finish)
+			}
+
+			// Act
+			h.o.publishRosterQueue(ctx, h.repoKey())
+
+			// Assert
+			got := h.sidebar.queueOf(h.repoKey()).DeployCheck
+			if (got == nil) != (tt.want == nil) || (got != nil && !got.Since.Equal(tt.want.Since)) {
+				t.Fatalf("deploy check hold told = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnUnreadableDeployCheckHoldTellsTheRosterNothingAndIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.deployCheckHoldErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.publishRosterQueue(context.Background(), h.repoKey())
+
+	// Assert
+	if told := h.sidebar.toldCount(); told != 0 {
+		t.Fatalf("the roster was told %d queues, want none", told)
+	}
+	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.roster_queue"); !ok {
+		t.Fatal("the unreadable hold was not recorded at ERROR")
+	}
+}

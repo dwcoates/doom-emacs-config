@@ -317,7 +317,7 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 		// THE REQUEUE OWNS ONE ANSWER to the gate (answerQueuedColdGate),
 		// which outlives the request that asked for it.
 		log.Info(op, "the requeued merge's workspace was parked at its cold gate; the gate is answered once by a compaction, and the merge resumes at its place once the session is up", fields)
-		o.compactQueuedColdGate(context.WithoutCancel(ctx), ws)
+		o.compactQueuedColdGate(context.WithoutCancel(ctx), ws, true)
 	}
 	return Requeued{Position: position, InLine: inLine}, nil
 }

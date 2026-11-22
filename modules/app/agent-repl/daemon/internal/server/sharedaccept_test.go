@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 )
@@ -50,7 +51,9 @@ func TestSharedAcceptAcceptsOnBothListeners(t *testing.T) {
 	shared, successorCopy := sharedPair(t)
 	defer successorCopy.Close()
 	l := NewSharedAccept(private)
-	l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger())
+	if err := l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger()); err != nil {
+		t.Fatalf("AddShared: %v", err)
+	}
 	defer l.Close()
 
 	// Act
@@ -77,7 +80,9 @@ func TestAStoppedSharedListenerLeavesItsConnectsToTheNextDaemon(t *testing.T) {
 	defer successorCopy.Close()
 	sharedAddr := shared.Addr()
 	l := NewSharedAccept(private)
-	l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger())
+	if err := l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger()); err != nil {
+		t.Fatalf("AddShared: %v", err)
+	}
 	defer l.Close()
 
 	// Act
@@ -100,6 +105,123 @@ func TestAStoppedSharedListenerLeavesItsConnectsToTheNextDaemon(t *testing.T) {
 		t.Fatalf("the private accept after the stop = %v, want it served", ownErr)
 	}
 	own.Close()
+}
+
+// TestAStoppedSharedListenerNeverAcceptsAgain pins that the accept right on
+// the shared address, once given up, is never taken back: an AddShared after
+// StopShared adds nothing and starts no accept loop, while one before it
+// still serves.
+func TestAStoppedSharedListenerNeverAcceptsAgain(t *testing.T) {
+	cases := []struct {
+		name      string
+		stopFirst bool
+		wantErr   error
+	}{
+		{name: "an add before the stop accepts on the shared listener"},
+		{name: "an add after the stop is refused and adds nothing", stopFirst: true, wantErr: ErrSharedStopped},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			private, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			shared, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer shared.Close()
+			l := NewSharedAccept(private)
+			defer l.Close()
+			if tc.stopFirst {
+				if err := l.StopShared(); err != nil {
+					t.Fatalf("StopShared: %v", err)
+				}
+			}
+
+			// Act
+			addErr := l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger())
+
+			// Assert
+			if !errors.Is(addErr, tc.wantErr) || (tc.wantErr == nil && addErr != nil) {
+				t.Fatalf("AddShared = %v, want %v", addErr, tc.wantErr)
+			}
+			l.mu.Lock()
+			added := l.shared != nil || l.returned != nil
+			l.mu.Unlock()
+			if added == tc.stopFirst {
+				t.Fatalf("shared listener added = %v after a stop first = %v", added, tc.stopFirst)
+			}
+			if tc.stopFirst {
+				return
+			}
+			dialTCP(t, shared.Addr())
+			conn, err := l.Accept()
+			if err != nil {
+				t.Fatalf("Accept on the added shared listener = %v", err)
+			}
+			conn.Close()
+		})
+	}
+}
+
+// TestAStopRacingAnAddLeavesNoSharedAccept pins that the add and the stop
+// are one critical section: whichever wins, no shared listener is left
+// accepting once both returned. The add either landed first, and the stop
+// closed it, or was refused.
+func TestAStopRacingAnAddLeavesNoSharedAccept(t *testing.T) {
+	for round := 0; round < 32; round++ {
+		// Arrange
+		private, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		shared, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		l := NewSharedAccept(private)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var addErr, stopErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			addErr = l.AddShared(shared, newFakeReturned(), dlog.NewTestLogger())
+		}()
+		go func() { defer wg.Done(); <-start; stopErr = l.StopShared() }()
+
+		// Act
+		close(start)
+		wg.Wait()
+
+		// Assert
+		if stopErr != nil {
+			t.Fatalf("round %d: StopShared = %v", round, stopErr)
+		}
+		switch {
+		case addErr == nil:
+			// The add won: the stop must have closed the listener it added
+			// (a deadline set on an open listener succeeds; on a closed one
+			// it answers net.ErrClosed, without blocking either way).
+			if err := shared.(*net.TCPListener).SetDeadline(time.Now()); !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("round %d: the added shared listener is still open after the stop (SetDeadline = %v)", round, err)
+			}
+		case errors.Is(addErr, ErrSharedStopped):
+			l.mu.Lock()
+			added := l.shared != nil
+			l.mu.Unlock()
+			if added {
+				t.Fatalf("round %d: a refused add left a shared listener", round)
+			}
+			shared.Close()
+		default:
+			t.Fatalf("round %d: AddShared = %v, want nil or ErrSharedStopped", round, addErr)
+		}
+		l.Close()
+	}
 }
 
 func TestSharedAcceptClosesBoth(t *testing.T) {

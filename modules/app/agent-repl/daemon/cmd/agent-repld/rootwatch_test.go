@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/recordlock/locktest"
+	"agent-repld/internal/sourcescan"
 )
 
 // fakeChanges is the watch's change source in the test's hands: each send
@@ -185,6 +189,95 @@ func TestRootWatchPathsNameNoLockFile(t *testing.T) {
 	}
 }
 
+// TestFollowRootPathsRefusesEveryLockFile pins the refusal at the watch
+// itself: a root watch asked to follow any of this daemon's lock files, or a
+// file named as one, panics naming the path and the lock's kind, before it
+// opens anything.
+func TestFollowRootPathsRefusesEveryLockFile(t *testing.T) {
+	const addrPath, instance = "/state/root/daemon.addr", "inst"
+	cases := []struct {
+		name     string
+		path     string
+		wantKind daemonaddr.LockKind
+		wantWhy  string
+	}{
+		{name: "the boot lock", path: daemonaddr.LockPath(addrPath), wantKind: daemonaddr.LockBoot, wantWhy: "this daemon's"},
+		{name: "the serving lock", path: daemonaddr.ServingPath(addrPath), wantKind: daemonaddr.LockServing, wantWhy: "this daemon's"},
+		{name: "the life lock", path: daemonaddr.LifePath(addrPath, instance), wantKind: daemonaddr.LockLife, wantWhy: "this daemon's"},
+		{name: "the life lock's pending name", path: daemonaddr.LifePendingPath(addrPath, instance), wantKind: daemonaddr.LockLifePending, wantWhy: "this daemon's"},
+		{name: "the boot lock by an uncleaned path", path: "/state/root/./daemon.lock", wantKind: daemonaddr.LockBoot, wantWhy: "this daemon's"},
+		{name: "another daemon's life lock, by its name", path: daemonaddr.LifePath(addrPath, "other"), wantKind: daemonaddr.LockLife, wantWhy: "named as a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			paths := append(rootWatchPaths("/state/root", addrPath), tc.path)
+			var recovered any
+
+			// Act
+			func() {
+				defer func() { recovered = recover() }()
+				followRootPaths(addrPath, instance, paths...)
+			}()
+
+			// Assert
+			msg, ok := recovered.(string)
+			if !ok {
+				t.Fatalf("followRootPaths(%q) recovered %v, want a panic naming the lock", tc.path, recovered)
+			}
+			for _, want := range []string{"invariant violated", fmt.Sprintf("%q", tc.path), string(tc.wantKind) + " lock", tc.wantWhy} {
+				if !strings.Contains(msg, want) {
+					t.Fatalf("panic = %q, want it to contain %q", msg, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFollowRootPathsAcceptsTheRootWatchsOwnPaths(t *testing.T) {
+	// Arrange
+	addrPath := "/state/root/daemon.addr"
+
+	// Act
+	src := followRootPaths(addrPath, "inst", rootWatchPaths("/state/root", addrPath)...)
+
+	// Assert
+	if src == nil {
+		t.Fatal("followRootPaths answered no source for the root watch's own paths")
+	}
+}
+
+// TestOnlyFollowRootPathsBuildsTheRootWatchsSource pins that the refusal
+// cannot be stepped around: this package follows paths only through
+// followRootPaths, whose one kernelevent.FollowPaths call is the only follow
+// in its production sources.
+func TestOnlyFollowRootPathsBuildsTheRootWatchsSource(t *testing.T) {
+	// Arrange
+	var sites []string
+
+	// Act
+	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, f *ast.File) {
+		for _, decl := range f.Decls {
+			fn, _ := decl.(*ast.FuncDecl)
+			ast.Inspect(decl, func(n ast.Node) bool {
+				if sourcescan.IsSelector(n, "kernelevent", "Follow") || sourcescan.IsSelector(n, "kernelevent", "FollowPaths") {
+					owner := ""
+					if fn != nil {
+						owner = fn.Name.Name
+					}
+					sites = append(sites, owner+"@"+filepath.Base(fset.Position(n.Pos()).Filename))
+				}
+				return true
+			})
+		}
+	})
+
+	// Assert
+	if want := []string{"followRootPaths@rootwatch.go"}; !slices.Equal(sites, want) {
+		t.Fatalf("kernelevent follows at %v, want only %v", sites, want)
+	}
+}
+
 // rootChangeBound bounds one reported change, the kernelevent tests' bound
 // for the same kernel report (kernelevent's waitBound).
 const rootChangeBound = 5 * time.Second
@@ -220,7 +313,7 @@ func TestTheRootWatchReportsTheBootLockRemovedOrReplaced(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), rootChangeBound)
 			defer cancel()
-			changes, stop := kernelevent.FollowPaths(rootWatchPaths(root, addrPath)...)(ctx)
+			changes, stop := followRootPaths(addrPath, "inst", rootWatchPaths(root, addrPath)...)(ctx)
 			defer stop()
 
 			// Act
@@ -280,7 +373,7 @@ func TestARootWatchLeavesTheBootClaimHeld(t *testing.T) {
 			verified <- struct{}{}
 			return err
 		},
-		changes:   kernelevent.FollowPaths(rootWatchPaths(root, addrPath)...),
+		changes:   followRootPaths(addrPath, "inst", rootWatchPaths(root, addrPath)...),
 		log:       dlog.NewTestLogger(),
 		standDown: func(cause error) { t.Errorf("stood down: %v", cause) },
 	}

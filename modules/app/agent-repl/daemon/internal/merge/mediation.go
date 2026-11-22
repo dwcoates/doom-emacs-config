@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,15 +26,22 @@ import (
 //
 // EVERY DEPLOY OWES A CHECK, durably, at its start (OweMediations): the
 // queue's head lands nothing while one is owed (queueHeld). Deploys owed in a
-// row form a CHAIN, which has one hidden INTAKE workspace, made when the
-// chain's first deploy has rolled out and told of every deploy of the chain
-// in turn (Mediate). Within that turn the intake approves the deploy or
-// escalates it to the user (either releases the queue and ends the chain), or
-// DISPATCHES the problems the deploy caused to a remediation workspace
-// (dispatch.go), whose finish lands and deploys its fix directly
-// (remediationfinish.go): that deploy owes the chain's next check. A turn
-// that ends with the check still owed and nothing dispatched decided
-// nothing: the queue is let through, loudly, and the user is told.
+// row form a CHAIN, which has one deploy mediator, told of every deploy of
+// the chain in turn (Mediate). Within that turn the mediator approves the
+// deploy, escalates it to the user, who holds the queue until the mediator
+// approves it or the user releases it, or DISPATCHES the problems the deploy
+// caused to itself (dispatch.go). A fix, dispatched or not, lands and deploys
+// through the mediator's finish (remediationfinish.go), which holds the queue
+// itself from its first finish until its deploy owes the chain's next check.
+//
+// THE QUEUE IS HELD FROM A DEPLOY'S START UNTIL THE MEDIATOR APPROVES A
+// DEPLOY (owner ruling, 2026-11-22; deployHold). An approval while the
+// mediator's finish stands releases the check but not the queue: the finish
+// holds it through its deploy, whose own check the mediator then decides.
+// Only agent-repl's release of a check whose window holds no warning and no
+// error (releaseQuiet), a deploy that changed nothing, and the user's
+// release of an escalation release a check without the mediator's word, and
+// none of them releases a queue a finish holds.
 
 // BriefDeployIntake is the intake's brief of one deploy.
 const BriefDeployIntake = "deploy-intake"
@@ -386,9 +394,7 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 		if !released {
 			continue
 		}
-		o.deps.Log.Global().Info(opMediation, "the deploy changed nothing; its check is released unchecked and the queue advances", fields)
-		o.republishMediation(ctx, q.key)
-		o.kick(q.key)
+		o.releasedCheck(ctx, q.key, "the deploy changed nothing; its check is released unchecked", "the deploy changed nothing; its check is released unchecked and the queue advances", fields)
 	}
 	return errors.Join(errs...)
 }
@@ -485,6 +491,12 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 				continue
 			}
 		}
+		if err := o.endUncheckedDeploys(ctx, q.key); err != nil {
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not end the remediation finishes deploying in a repository that checks no deploys; they hold its queue until the next pass", err) {
+				return
+			}
+			continue
+		}
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
 			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not read whether a repository that checks no deploys owes a check", err) {
@@ -503,12 +515,41 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 			continue
 		}
 		if released {
-			o.deps.Log.Global().Info(opMediation, "released a check owed by a repository whose lifecycle config checks no deploys now; its queue advances", dlog.Context{
-				"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
-			o.republishMediation(ctx, q.key)
-			o.kick(q.key)
+			o.releasedCheck(ctx, q.key, "released a check owed by a repository whose lifecycle config checks no deploys now",
+				"released a check owed by a repository whose lifecycle config checks no deploys now; its queue advances", dlog.Context{
+					"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
 		}
 	}
+}
+
+// endUncheckedDeploys ends every remediation finish of REPO, a repository
+// that checks its deploys no more, whose deploy is starting: that deploy owes
+// no check in REPO (OweMediations), so nothing would take the hold on from
+// the finish, which would hold the queue for nobody. A queue a finish was
+// ended in is republished and kicked.
+func (o *orchestrator) endUncheckedDeploys(ctx context.Context, repo wsm.RepoKey) error {
+	finishes, err := o.queueFinishesAt(ctx, repo, wsm.RemediationDeploying)
+	if err != nil {
+		return err
+	}
+	ended := false
+	var errs []error
+	for _, f := range finishes {
+		did, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if did {
+			ended = true
+			o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy owes no check in a repository that checks no deploys; its finish is ended and holds the queue no more", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
+		}
+	}
+	if ended {
+		o.republishMediation(ctx, repo)
+		o.kick(repo)
+	}
+	return errors.Join(errs...)
 }
 
 // owes reports whether M, a repository's owed check or nil for none, is the
@@ -725,9 +766,8 @@ func (o *orchestrator) releaseQuiet(ctx context.Context, q checkedQueue, m wsm.M
 		o.roundFailed(ctx, q, m, "the quiet check could not be released", err, fields)
 		return
 	}
-	o.deps.Log.Global().Info(opMediation, "no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run", withField(fields, "released", released))
-	o.republishMediation(ctx, q.key)
-	o.kick(q.key)
+	const what = "no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run"
+	o.releasedCheck(ctx, q.key, what, what, withField(fields, "released", released))
 }
 
 // awaitFailed settles a failed await of the mediator's turn on check M. An
@@ -932,7 +972,8 @@ func mediationVersion(m wsm.Mediation) string {
 
 // DecideMediation implements Orchestrator: the deploy mediator WS decides
 // the deploy its queue owes a check of, once it was told of it. An approval
-// releases the check, ends the chain and lets the queue advance; an
+// releases the check, ends the chain and lets the queue advance unless the
+// mediator's own remediation finish holds it (deployHold); an
 // escalation holds the queue for the user; a dispatch keeps the queue held
 // while the mediator fixes the problems itself (dispatch.go).
 func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error {
@@ -1046,10 +1087,43 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	if released {
 		o.endMediatorRun(q.key, escalatedPhase(m.Escalated(), MediatorPhaseAssessing), MediatorRunApproved)
 	}
-	o.deps.Log.Global().Info(opMediation, "the mediator approved the deploy; the queue advances", withField(fields, "released", released))
-	o.republishMediation(ctx, q.key)
-	o.kick(q.key)
+	o.releasedCheck(ctx, q.key, "the mediator approved the deploy", "the mediator approved the deploy; the queue advances", withField(fields, "released", released))
 	return nil
+}
+
+// releasedCheck records the release of REPO's check, WHAT, with what holds
+// the queue after it, and moves the queue on: republished, and kicked, so a
+// queue nothing holds now advances. ADVANCES is the record of a queue nothing
+// holds any more. A release while the mediator's remediation finish stands
+// leaves the queue held for it (deployHold), and so does a newer deploy's
+// check; the record then says so and names the holder (held_by), and the
+// release a caller recorded (FIELDS' released) is named check_released, since
+// the queue was not released.
+func (o *orchestrator) releasedCheck(ctx context.Context, repo wsm.RepoKey, what, advances string, fields dlog.Context) {
+	hold, err := o.deployHoldOf(ctx, repo)
+	switch {
+	case err != nil:
+		o.deps.Log.Global().Error(opMediation, what+"; what holds the queue after it could not be read, and the queue is kicked to read it again", withField(fields, "error", err.Error()))
+	case hold.holdsQueue():
+		held := withField(fields, "held_by", hold.heldBy())
+		if released, ok := held["released"]; ok {
+			delete(held, "released")
+			held["check_released"] = released
+		}
+		o.deps.Log.Global().Info(opMediation, what+"; the queue stays held for "+heldByWords(hold.heldBy()), held)
+	default:
+		o.deps.Log.Global().Info(opMediation, advances, fields)
+	}
+	o.republishMediation(ctx, repo)
+	o.kick(repo)
+}
+
+// heldByWords is how a record names what holds a queue (deployHold.heldBy).
+func heldByWords(by string) string {
+	if by == heldByRemediationFinish {
+		return "the deploy mediator's remediation finish under way, until the mediator approves its deploy"
+	}
+	return "the check a newer deploy owes"
 }
 
 // CheckStage is where an owed deploy check stands.
@@ -1131,17 +1205,29 @@ func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*
 	// A DIRECT FINISH UNDER WAY IS DRAWN FIRST, owed check or none (an
 	// escalation's finish runs after its chain ended): its gate and landing
 	// test the fix, its deploy rolls out. A finish sent back to fix is drawn
-	// as its owed check draws it.
-	finish, err := o.finishUnderWay(ctx, repo)
+	// as its owed check draws it, and as FIXING with none owed.
+	finishes, err := o.queueFinishesAt(ctx, repo, wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying, wsm.RemediationFixing)
 	if err != nil {
 		return nil, err
 	}
-	if finish != nil {
-		return o.rosterFinish(ctx, repo, *finish)
+	var fixing *wsm.RemediationFinish
+	for i, f := range finishes {
+		if f.Step != wsm.RemediationFixing {
+			return o.rosterFinish(ctx, repo, f)
+		}
+		if fixing == nil {
+			fixing = &finishes[i]
+		}
 	}
 	owed, err := o.owedMediation(ctx, repo)
-	if err != nil || owed == nil {
+	if err != nil {
 		return nil, err
+	}
+	if owed == nil {
+		if fixing == nil {
+			return nil, nil
+		}
+		return o.rosterFixingUnowed(ctx, repo, *fixing)
 	}
 	out := &sidebar.QueueMediation{Repo: owed.Repository, Mediator: owed.Mediator}
 	switch owed.Stage {
@@ -1180,6 +1266,18 @@ func (o *orchestrator) rosterFinish(ctx context.Context, repo wsm.RepoKey, f wsm
 		return out, nil
 	}
 	panic(fmt.Sprintf("merge: the finish of %s under way stands at %q", f.Workspace, f.Step))
+}
+
+// rosterFixingUnowed is the label of REPO's queue while the mediator's
+// finish F, sent back to fix by its gate, holds it with no check owed: the
+// finish holds the queue (deployHold), so its reason is drawn as a check's
+// fixing is.
+func (o *orchestrator) rosterFixingUnowed(ctx context.Context, repo wsm.RepoKey, f wsm.RemediationFinish) (*sidebar.QueueMediation, error) {
+	q, ok, err := o.checkedQueueOf(ctx, repo)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationFixing, Mediator: f.Workspace}, nil
 }
 
 // republishMediation tells the roster and the queue's subscribers a change
@@ -1434,18 +1532,31 @@ func (o *orchestrator) remakeHeldEscalation(ctx context.Context, q checkedQueue,
 // finishUnderWay answers the direct finish under way in REPO's queue:
 // gating, landing or deploying. Nil when none is.
 func (o *orchestrator) finishUnderWay(ctx context.Context, repo wsm.RepoKey) (*wsm.RemediationFinish, error) {
+	return o.queueFinishAt(ctx, repo, wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying)
+}
+
+// queueFinishAt answers the first finish of REPO's queue standing at one of
+// STEPS (queueFinishesAt), nil when none does.
+func (o *orchestrator) queueFinishAt(ctx context.Context, repo wsm.RepoKey, steps ...wsm.RemediationStep) (*wsm.RemediationFinish, error) {
+	finishes, err := o.queueFinishesAt(ctx, repo, steps...)
+	if err != nil || len(finishes) == 0 {
+		return nil, err
+	}
+	return &finishes[0], nil
+}
+
+// queueFinishesAt answers every finish of REPO's queue standing at one of
+// STEPS, in the store's order. A failed read is answered.
+func (o *orchestrator) queueFinishesAt(ctx context.Context, repo wsm.RepoKey, steps ...wsm.RemediationStep) ([]wsm.RemediationFinish, error) {
 	finishes, err := o.deps.DB.RemediationFinishes(ctx)
 	if err != nil {
 		return nil, err
 	}
+	var out []wsm.RemediationFinish
 	for _, f := range finishes {
-		if !sameQueue(f.Repo, repo) {
-			continue
-		}
-		switch f.Step {
-		case wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying:
-			return &f, nil
+		if sameQueue(f.Repo, repo) && slices.Contains(steps, f.Step) {
+			out = append(out, f)
 		}
 	}
-	return nil, nil
+	return out, nil
 }

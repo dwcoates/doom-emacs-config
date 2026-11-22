@@ -306,7 +306,9 @@ func TestAHandedBackConnectionIsAcceptedFromTheStream(t *testing.T) {
 	returned := newFakeReturned()
 	log := dlog.NewTestLogger()
 	l := NewSharedAccept(private)
-	l.AddShared(shared, returned, log)
+	if err := l.AddShared(shared, returned, log); err != nil {
+		t.Fatalf("AddShared: %v", err)
+	}
 	defer l.Close()
 	client, handed := tcpPair(t)
 
