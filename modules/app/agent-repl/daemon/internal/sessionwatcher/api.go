@@ -771,6 +771,12 @@ type Watcher interface {
 	// AwaitTurnEnd blocks until the named turn ends and reports how. A turn
 	// that ended just before the call is answered from the watcher's memory of
 	// recently closed turns, so the caller cannot miss the edge it submitted.
+	// A watcher closed under the wait, or before it, answers
+	// ErrClosedBeforeTurn when it never had the turn in hand (no caller
+	// recorded it going to the shim through this watcher, and no stream or
+	// session fact named it), so the turn may yet run on the session's next
+	// watcher; otherwise it answers ErrWatcherClosed. ErrClosedBeforeTurn
+	// wraps ErrWatcherClosed.
 	AwaitTurnEnd(ctx context.Context, turn ids.TurnID) (TurnClose, error)
 	// AwaitSessionFacts blocks until the session facts have been taken up
 	// (StartSession's answer, or an adopted shim's re-announcement), so a
