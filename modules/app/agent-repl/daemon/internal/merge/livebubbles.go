@@ -266,9 +266,9 @@ func runningBadge(field protoreflect.FieldDescriptor) bool {
 		return false
 	}
 	switch field.Message().FullName() {
-	case (&frontendv1.FeedMergeTabLive{}).ProtoReflect().Descriptor().FullName(),
-		(&frontendv1.FeedMergeTabWaitingOnUser{}).ProtoReflect().Descriptor().FullName(),
-		(&frontendv1.FeedMergeTabHeld{}).ProtoReflect().Descriptor().FullName():
+	case (*frontendv1.FeedMergeTabLive)(nil).ProtoReflect().Descriptor().FullName(),
+		(*frontendv1.FeedMergeTabWaitingOnUser)(nil).ProtoReflect().Descriptor().FullName(),
+		(*frontendv1.FeedMergeTabHeld)(nil).ProtoReflect().Descriptor().FullName():
 		return true
 	}
 	return false
