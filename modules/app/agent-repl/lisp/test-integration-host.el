@@ -1192,55 +1192,11 @@ targeted one."
        (agent-repl-connect-close conn))))
 
 ;; audit-2 #8
-(ert-deftest agent-repl-itest-host-conn-moves-before-the-webview-reload ()
-  "`:conn' is the successor's ALREADY when the webview reload is called.
-host.el: \"`:conn' MUST move before the reload because frontend.el derives
-the page URL from `agent-repl-host-conn' — reloading first would navigate
-the webview straight back at the daemon that just released the
-workspace.\"  The order is only observable from inside the reload."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (let ((successor-conn (agent-repl-connect-open
-                               (agent-repl-itest-daemon-address successor)))
-              (conn-at-reload 'unset))
-          (unwind-protect
-              (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn))
-                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn))
-                        ((symbol-function 'agent-repl-frontend-reload-webview)
-                         (lambda (ws) (setq conn-at-reload (agent-repl-host-conn ws)))))
-                ;; Act.
-                (agent-repl-itest--push primary "host" '((transferred . ()))
-                                        (plist-get ref :id))
-                ;; Assert.
-                (agent-repl-itest--wait-until
-                 (lambda () (not (eq conn-at-reload 'unset))) nil
-                 "the webview reload to be called")
-                (should (eq conn-at-reload successor-conn)))
-            (agent-repl-connect-close successor-conn)))))))
-
-(ert-deftest agent-repl-itest-host-webview-is-redialed-before-the-successor-sees-the-adopt ()
-  "The successor's rendezvous can COMPLETE, because its second participant
-already exists when its first one calls.
-
-THE DEADLOCK THIS PINS, measured in the e2e sandbox on a handover of a
-workspace with a live panel: the successor's `AdoptHostWorkspace' is a
-RENDEZVOUS that completes only when every participant the outgoing daemon
-snapshotted at announcement has called, and for an OPEN workspace those
-are the host AND the reloaded page.  The webapp never redials a successor
-of its own, so the reloaded page is the host's to produce — and producing
-it only once the adopt ANSWERED made the host's call wait for itself.
-The daemon logged `AdoptHostWorkspace timed out after 10s' and `the
-caller gave up before the rendezvous completed', and the outgoing daemon
-then sat out its whole adoption window before exiting, so the promotion
-Emacs makes on the primary stream's close never came.
-
-The claim is an ORDERING ACROSS TWO PROCESSES, which is why it belongs
-here rather than only in the unit suite: by the time the SUCCESSOR
-DAEMON has observed the adopt on the wire, this Emacs must already have
-navigated the page at it."
+(ert-deftest agent-repl-itest-host-handover-adopts-on-the-successor-and-reloads-no-page ()
+  "A handover's adopt reaches the successor, and no page is reloaded for it.
+The page is the rendezvous\='s other participant and adopts itself in
+place on its own transfer notice (owner ruling, 2026-11-22), so the
+host\='s adopt waits on nothing Emacs produces."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary ref
@@ -1259,10 +1215,9 @@ navigated the page at it."
                                         (plist-get ref :id))
                 ;; Assert.
                 (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-                (should reloaded))
+                (should-not reloaded))
             (agent-repl-connect-close successor-conn)))))))
 
-;; audit-2 #9
 (ert-deftest agent-repl-itest-host-transferring-away-without-address-is-a-breach ()
   "`transferring_away' carrying NO address is a breach: ERROR, no dial.
 `address' is a plain string on the wire, so an empty one is the daemon's
@@ -1697,10 +1652,8 @@ successor stream makes it, and the assertions read the walk\='s end."
                                                 primary "host" (plist-get ref :id)))))
                       (should-not (eq (agent-repl-host-conn agent-repl-itest-host--ws)
                                       successor-conn))
-                      ;; The LAST navigation the page was given is the URL it
-                      ;; is sitting on, and it is not the successor's.
-                      (should conn-at-reload)
-                      (should-not (eq (car conn-at-reload) successor-conn)))
+                      ;; No handover walk navigates the page (2026-11-22).
+                      (should-not conn-at-reload))
                   (agent-repl-itest--release-gate successor "AdoptHostWorkspace")))
             (agent-repl-connect-close successor-conn)))))))
 
@@ -1782,19 +1735,14 @@ it."
         (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
         (agent-repl-connect-close conn)))))
 
-(ert-deftest agent-repl-itest-host-link-up-navigates-the-webview-at-the-new-daemon ()
-  "After a daemon restart the page is navigated at the daemon that is SERVING.
+(ert-deftest agent-repl-itest-host-link-up-navigates-no-page ()
+  "After a daemon restart the page is left to reopen its own streams.
 
-THE DEFECT THIS PINS, measured in the e2e sandbox: a daemon Emacs
-relaunches listens on a FRESH PORT, and the page\='s url names the port it
-was opened at.  Stopping the daemon and ensuring another healed the tab
-bar, the roster and the composer while the webview went on dialing the
-daemon that had exited -- the page reported
-`failureArms=[daemonUnreachable]\=' at a url naming the dead port, and the
-only way out was the user reaching for `SPC o l\='.
-
-The observable is the URL the host is asked to hold the page at, because
-the page is re-pointed in the one host web view rather than remounted."
+Every daemon serves one shared address, the one its socket holder keeps
+\(docs/investigations/2026-11-18-stable-sockets-design.md), so the page\='s
+url still names the daemon that serves, and its streams reopen there by
+themselves (owner ruling, 2026-11-22).  Re-pointing the page reloaded it
+on every relaunch."
   ;; Arrange: a mounted webview, and a SECOND daemon to come back on.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary _ref
@@ -1832,16 +1780,11 @@ the page is re-pointed in the one host web view rather than remounted."
                 (agent-repl-host-on-link-up fresh)
                 ;; Assert.
                 (agent-repl-itest--await-call successor "RegisterWorkspaces")
-                (agent-repl-itest--wait-until (lambda () navigated) nil
-                                              "the webview to be re-pointed")
-                ;; The workspace's own page host, at the NEW daemon's port.
-                (should (string-match-p
-                         (format "\\`http://ws-[a-z0-9-]+\\.localhost:%s/"
-                                 (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
-                         (car navigated)))
-                ;; The webhost stays, and the page's re-point leaves its own
-                ;; calls alone: the link's up edge moves those (webhost.el,
-                ;; test-webhost.el).
+                (agent-repl-itest--wait-until
+                 (lambda () (eq (agent-repl-host-conn agent-repl-itest-host--ws) fresh)) nil
+                 "the workspace to be registered on the new daemon")
+                ;; Assert.
+                (should (null navigated))
                 (should (null host-moved))
                 (should (null calls-moved)))
             (agent-repl-connect-close fresh)))))))

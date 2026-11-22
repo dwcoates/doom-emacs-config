@@ -15,7 +15,9 @@
  * takes every view at once, a subscription set that can leak, and a refusal
  * that must stay local to the view that earned it.
  */
+import { create } from "@bufbuild/protobuf";
 import { afterEach, describe, expect, it } from "vitest";
+import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
@@ -301,15 +303,20 @@ describe("one view's subscription refused", () => {
 
 describe("the workspace moving away", () => {
   /**
-   * THE PAGE IS PINNED TO ONE WORKSPACE. `ctx.workspace` is readonly and a
-   * successor daemon is a different origin, so there is no in-page switch to
-   * cover: the move is the whole of it. The page draws the notice, goes quiet,
-   * and stops — and under the mux "stops" is one connection to let go of
-   * rather than seven, which is what these two assert.
+   * A PAGE ADOPTED ON ANOTHER WEBAPP BUILD GOES QUIET (lifecycle.ts
+   * `adoptInPlace`): it draws the notice and stops until the host reloads it —
+   * and under the mux "stops" is one connection to let go of rather than
+   * seven, which is what these two assert.
    */
   const moveAway = async (): Promise<void> => {
     harness = await startHarness();
     await harness.fake.awaitStream("watchWebWorkspace");
+    harness.fake.answer(
+      "adoptWebWorkspace",
+      create(AdoptWebWorkspaceResponseSchema, {
+        result: { case: "success", value: { page: { kind: { case: "agent", value: {} } }, webappBuild: "another-build" } },
+      }),
+    );
     const second = await harness.startSecondDaemon();
     harness.fake.transfer(WORKSPACE_ID, second.baseUrl);
     await harness.settle();

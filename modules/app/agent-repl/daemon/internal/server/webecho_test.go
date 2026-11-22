@@ -69,7 +69,7 @@ func TestPromptEchoOfHandsBackOnlyAStampedPromptDrawnAtSubmit(t *testing.T) {
 // after every topic of the stream is subscribed.
 func openWebAttached(t *testing.T, h *harness) *connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse] {
 	t.Helper()
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	stream := openWeb(t, h)
 	if receiveWebEvent(t, stream).GetTransferred() == nil {
 		t.Fatal("the web stream's first event was not the transfer notice")

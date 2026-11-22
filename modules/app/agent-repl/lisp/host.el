@@ -112,7 +112,6 @@
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
 ;; owns the webview, popup.el owns the one shared editor popup.
-(declare-function agent-repl-frontend-reload-webview "frontend" (ws))
 (declare-function agent-repl-frontend-reload-webapp "frontend" (ws build))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
 (declare-function agent-repl-magit-log-commit "magit" (ws dir branch commit))
@@ -737,9 +736,6 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl-roster-apply-current "roster" ())
 (declare-function agent-repl-roster-move-frame "roster" (name))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
-(declare-function agent-repl-webhost-shown-p "webhost" (ws))
-(declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
-(declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-note-switch "webhost" (ws))
 (declare-function agent-repl--frontend-fit-webviews "frontend" (&optional frame))
@@ -2079,7 +2075,7 @@ incumbent failed after the successor was promoted, and `main
       (agent-repl--info ws (format "elisp.host.%s-register-handed-over ws=%%s dir=%%S address=%%S" trigger)
                         ws dir (agent-repl-connect-connection-address new)))
      ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
-     ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
+     ;; `elisp.host.stream-lost-registered', ...), a closed
      ;; vocabulary, so a reader can ask for one edge's walks alone.
      ((null ref)
       (agent-repl-host--put ws :reattach nil)
@@ -2093,10 +2089,11 @@ incumbent failed after the successor was promoted, and `main
             (agent-repl-host--follow-live-daemon ws "promotion-passed"))
         (agent-repl--info ws "elisp.host.reattach-armed ws=%s trigger=%s edges=link-up,promotion,select"
                           ws trigger)))
+     ;; THE PAGE IS LEFT AS IT IS: every daemon serves one shared address,
+     ;; so the page's own streams reopen there by themselves.
      (t
       (agent-repl-host--reattached ws new ref trigger)
-      (agent-repl-frontend-reload-webview ws)
-      (agent-repl--info ws (format "elisp.host.%s-webview-repointed ws=%%s address=%%S" trigger)
+      (agent-repl--info ws (format "elisp.host.%s-registered ws=%%s address=%%S" trigger)
                         ws (agent-repl-connect-connection-address new))))))
 
 (defun agent-repl-host--promoted-since-p (ws walk)
@@ -2352,9 +2349,6 @@ walk."
                             (plist-put (plist-get (agent-repl-host--entry ws) :reattach)
                                        :from old))
       (agent-repl-host--put ws :conn new)
-      (agent-repl-host--handover-reload-webview ws)
-      (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
-                        ws (agent-repl-connect-connection-address new))
       (agent-repl-host--adopt-call ws new token trigger old)))))
 
 (defun agent-repl-host--adopt-retryable-p (new detail)
@@ -2395,8 +2389,7 @@ is recorded."
         (restore
          (lambda ()
            (agent-repl-host--put ws :conn old)
-           (agent-repl-frontend-reload-webview ws)
-           (agent-repl--info ws "elisp.host.webview-restored ws=%s address=%S"
+           (agent-repl--info ws "elisp.host.restored ws=%s address=%S"
                              ws (and old (agent-repl-connect-connection-address old))))))
     (if (not (agent-repl-host--reattach-current-p ws token))
         (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger)
@@ -2414,7 +2407,6 @@ is recorded."
              (t
               (pcase (plist-get response :arm)
                 (:success
-                 (agent-repl-host--put ws :handover-page nil)
                  (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
                  (agent-repl-host--reattached ws new ref trigger)
                  (agent-repl-host--release-held ws "adopted"))
@@ -2465,73 +2457,26 @@ is recorded."
                       (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil stopped=%s"
                                          ws detail retry)))))))))))))))
 
-(defun agent-repl-host--transferred (ws &optional value)
+(defun agent-repl-host--transferred (ws &optional _value)
   "Adopt WS onto the daemon its old one handed it to, after the release.
 
-`HostWorkspaceTransferred' NAMES NO DAEMON.  VALUE carries only the
-outgoing daemon\='s page decision, `(:reload-page R)\=', which the adopt
-walk follows (`agent-repl-host--handover-reload-webview').
+`HostWorkspaceTransferred' NAMES NO DAEMON and carries nothing.
 
 EVERY DAEMON SERVES ONE SHARED ADDRESS, the one its socket holder keeps
 \=(docs/investigations/2026-11-18-stable-sockets-design.md), so the adopt
 goes out on the primary link at once: the daemon that accepts it forwards
 it to the successor, and no second link is dialed or waited on.
 
+A HANDOVER TOUCHES NO PAGE (owner ruling, 2026-11-22): WS\='s page is
+never reloaded, loaded or dropped for it.  The page moves itself on its
+own transfer notice (`WebWorkspaceTransferred'): on the successor\='s
+webapp build it adopts WS in place, and on another it goes quiet until the
+deploy reloads the host.
+
 `transferred\=' is a PUSH, never a terminal frame, so the old stream stays
 standing until the adopt lands and the shared walk cancels it."
-  (agent-repl-host--put ws :handover-page (plist-get value :reload-page))
   (agent-repl--info ws "elisp.host.transferred ws=%s adopting=t" ws)
   (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "transferred"))
-
-(defun agent-repl-host--handover-reload-webview (ws)
-  "Load WS\='s page at the daemon WS is being adopted onto, as decided.
-
-THE OUTGOING DAEMON DECIDES WHAT A HANDOVER LOADS, from what stood when it
-announced the stand-down (owner ruling, 2026-11-13): a page that was not
-loaded then, or whose sidebar row was folded away, is never loaded by the
-handover.  Its `transferred' push says which (`:handover-page'):
-
-- :no-reload: nothing is loaded.  A page the host still holds would be
-  left on the departing daemon, so it is dropped instead, and the next
-  open mounts it fresh on the successor.  THE DROP IS ANNOUNCED
-  \=(`agent-repl-page-drop-announced'): the workspace stays open, so the
-  daemon is told first, or its page stream\='s end is drawn as a broken
-  link.  The report is about a workspace whose adopt is unanswered, so it
-  is held and sent from the adopt\='s answer (`agent-repl-host-gate-call'),
-  and the page goes once it is answered and the page is still held and
-  not on screen.  A page the report leaves kept stays as it is, and one
-  that came on screen meanwhile is reloaded.  THE PAGE ON SCREEN IS THE
-  ONE EXCEPTION: it is the user\='s, not the handover\='s, and is
-  reloaded.
-- :reload, :unset (a daemon predating the decision), or no transfer
-  decision at all: the page is reloaded when the host holds one
-  \=(`agent-repl-frontend-reload-webview'), which never loads one it
-  does not."
-  (let ((decision (plist-get (agent-repl-host--entry ws) :handover-page)))
-    (cond
-     ((not (eq decision :no-reload))
-      (agent-repl-frontend-reload-webview ws))
-     ((agent-repl-webhost-shown-p ws)
-      (agent-repl--info ws "elisp.host.handover-page ws=%s action=reloaded reason=shown" ws)
-      (agent-repl-frontend-reload-webview ws))
-     ((agent-repl-webhost-has-page-p ws)
-      (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropping" ws)
-      (agent-repl-page-drop-announced
-       ws
-       (lambda () (and (agent-repl-webhost-has-page-p ws)
-                       (not (agent-repl-webhost-shown-p ws))))
-       (lambda ()
-         (agent-repl-webhost-remove ws t)
-         (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropped" ws))
-       (lambda (why)
-         (agent-repl--info ws "elisp.host.handover-page ws=%s action=kept reason=%s" ws why)
-         (when (agent-repl-webhost-shown-p ws)
-           (agent-repl--info ws "elisp.host.handover-page ws=%s action=reloaded reason=shown" ws)
-           (agent-repl-frontend-reload-webview ws))))
-      nil)
-     (t
-      (agent-repl--log ws "elisp.host.handover-page ws=%s action=none" ws)
-      nil))))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
 
@@ -2541,7 +2486,8 @@ handover.  Its `transferred' push says which (`:handover-page'):
 THE OUTGOING DAEMON TOOK WS BACK, so there is nothing to adopt until its
 next `transferred' push.  The adopt walk that notice began is ended, so a
 scheduled retry and a late answer both find themselves superseded, and
-WS\='s connection and page go back to where the walk took them from.
+WS\='s connection goes back to where the walk took it from; its page,
+which no handover touches, re-adopts by itself.
 Regression, 2026-10-26: never told, Emacs re-adopted on the successor
 every 10s for as long as the workspace\='s turn ran, reloading its page
 each time and recording an ERROR for every adopt."
@@ -2549,13 +2495,11 @@ each time and recording an ERROR for every adopt."
          (from (plist-get walk :from))
          (pending (plist-get (agent-repl-host--entry ws) :adopt-pending)))
     (agent-repl-host--put ws :adopt-pending nil)
-    (agent-repl-host--put ws :handover-page nil)
     (cond
      ((eq (plist-get walk :claim) :adopt)
       (agent-repl-host--put ws :reattach nil)
       (when (and from (not (eq from (agent-repl-host--recorded-conn ws))))
-        (agent-repl-host--put ws :conn from)
-        (agent-repl-frontend-reload-webview ws))
+        (agent-repl-host--put ws :conn from))
       (agent-repl-host--release-held ws "withdrawn")
       (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s address=%S adopt=ended"
                         ws (and from (agent-repl-connect-connection-address from))))

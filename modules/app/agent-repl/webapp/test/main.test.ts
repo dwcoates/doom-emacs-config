@@ -67,7 +67,7 @@ interface BootRecord {
   /** The rejection `main.ts` handed to `queueMicrotask` to re-raise. */
   rethrown: (() => void)[];
   /** What `adoptAtBoot` does when the boot reaches it. */
-  adopt: () => Promise<import("../src/lifecycle/lifecycle.js").AdoptedPage | "deferred" | "moved">;
+  adopt: () => Promise<import("../src/lifecycle/lifecycle.js").AdoptedPage>;
   /** The composer gate the boot built, so the footer's status can be read off it. */
   gateSet: Mock;
   /** The footer's status subscriber, captured so a test can drive it. */
@@ -873,28 +873,24 @@ describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.bootedContext?.isQuiesced()).toBe(true);
   });
 
-  // A DEFERRED transfer (the incumbent kept the workspace) and a MOVE (the
-  // page booted on the daemon its workspace left) both end with Emacs
-  // reloading the page, so both stop it quietly the same way.
-  for (const outcome of ["deferred", "moved"] as const) {
-    test(`a ${outcome} adoption stops the page's one stream without a boot failure`, async () => {
-      page.adopt = async () => outcome;
+  // A DEFERRED transfer (the incumbent kept the workspace) boots on: the
+  // incumbent serves it, and no handover reloads a page.
+  test("a deferred adoption leaves the page's one stream running", async () => {
+    page.adopt = async () => ({ outcome: "deferred", page: "agent" });
 
-      await bootMain();
+    await bootMain();
 
-      expect(page.bootedContext?.isQuiesced()).toBe(true);
-      expect(chipEvidence("bootFailed")).toEqual([]);
-      expect(page.rethrown).toHaveLength(0);
-    });
+    expect(page.bootedContext?.isQuiesced()).toBe(false);
+    expect(chipEvidence("bootFailed")).toEqual([]);
+  });
 
-    test(`a ${outcome} adoption mounts nothing after the adoption`, async () => {
-      page.adopt = async () => outcome;
+  test("a deferred adoption mounts the page after the adoption", async () => {
+    page.adopt = async () => ({ outcome: "deferred", page: "agent" });
 
-      await bootMain();
+    await bootMain();
 
-      expect(page.order.slice(page.order.indexOf("adopt") + 1)).toEqual([]);
-    });
-  }
+    expect(page.order.slice(page.order.indexOf("adopt") + 1)).not.toEqual([]);
+  });
 
   test("leaves the page's one stream running when the boot succeeds", async () => {
     // The other side of it: quiescing is the FAILURE path's act, and a healthy

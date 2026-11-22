@@ -538,23 +538,20 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                               :arm)
                    (nth 1 case)))))
 
-(ert-deftest agent-repl-test-wire-host-transferred-reload-page-set-true ()
-  "A transfer notice that reloads the page decodes :reload."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-host-workspace-transferred "{\"reloadPage\":true}")
-                 '(:reload-page :reload))))
+(ert-deftest agent-repl-test-wire-host-transferred-decodes-to-nil ()
+  "`HostWorkspaceTransferred' carries nothing."
+  (should (null (agent-repl-test-wire-host--decode
+                 #'agent-repl-wire-decode-host-workspace-transferred "{}"))))
 
-(ert-deftest agent-repl-test-wire-host-transferred-reload-page-set-false ()
-  "A transfer notice that loads no page decodes :no-reload."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-host-workspace-transferred "{\"reloadPage\":false}")
-                 '(:reload-page :no-reload))))
+(ert-deftest agent-repl-test-wire-host-transferred-ignores-the-retired-reload-page ()
+  "A daemon from before its retirement still sends `reloadPage'; it is ignored."
+  (should (null (agent-repl-test-wire-host--decode
+                 #'agent-repl-wire-decode-host-workspace-transferred "{\"reloadPage\":true}"))))
 
-(ert-deftest agent-repl-test-wire-host-transferred-reload-page-unset ()
-  "A transfer notice from a daemon predating the decision decodes :unset."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-host-workspace-transferred "{}")
-                 '(:reload-page :unset))))
+(ert-deftest agent-repl-test-wire-host-transferred-refuses-an-unknown-key ()
+  "Any other key is a contract breach."
+  (should-error (agent-repl-test-wire-host--decode
+                 #'agent-repl-wire-decode-host-workspace-transferred "{\"other\":1}")))
 
 (ert-deftest agent-repl-test-wire-host-mentions-decode-both-lists ()
   "The mentions push decodes its commands and workspaces, newest first, as sent."

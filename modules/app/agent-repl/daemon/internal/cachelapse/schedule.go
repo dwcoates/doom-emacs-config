@@ -295,7 +295,16 @@ func (k *Keeper) recordOwing(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if k.withheldWhileJoining(log, "whether the workspace owes keep-alives", dlog.Merge(fields, dlog.Context{"owing": owing}), func() { k.withholdOwing(ws) }) {
 		return
 	}
-	if err := k.deps.DB.SetKeepaliveOwing(ctx, ws, owing, k.deps.Clock.Now()); err != nil && !leaving(ctx, log, opDrive, "recording whether the workspace owes keep-alives", err) {
+	err := k.deps.DB.SetKeepaliveOwing(ctx, ws, owing, k.deps.Clock.Now())
+	// A ROW THAT IS GONE OWES NOTHING: the workspace was closed or forgotten
+	// between the edge that drove this decision and its write, so there is no
+	// lapse left to judge against it.
+	if errors.Is(err, wsm.ErrNotFound) {
+		log.Info(opDrive, "the workspace's row is gone, so whether it owes keep-alives is recorded nowhere",
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"owing": owing}), err))
+		return
+	}
+	if err != nil && !leaving(ctx, log, opDrive, "recording whether the workspace owes keep-alives", err) {
 		log.Error(opDrive, "could not record whether the workspace owes keep-alives; a lapse judged against the row may misjudge a miss",
 			dlog.WithCause(dlog.Merge(fields, dlog.Context{"owing": owing}), err))
 	}

@@ -1,6 +1,7 @@
 // endpoint_adopt_web_workspace.proto — AdoptWebWorkspace: the webview's half
 // of the per-workspace handover rendezvous. WEB LINK section, called on the
-// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace.
+// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace,
+// or by the page in place (forwarded by whichever daemon its call reaches).
 // The VERB identifies the participant; rendezvous semantics are stated on
 // AdoptHostWorkspace and are identical here: all expected participants'
 // calls succeed together when adoption completes.
@@ -19,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_adopt_web_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_adopt_web_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkkKGEFkb3B0V2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpcBChlBZG9wdFdlYldvcmtzcGFjZVJlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCJIChhBZG9wdFdlYldvcmtzcGFjZVN1Y2Nlc3MSLAoEcGFnZRgBIAEoCzIeLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQYWdlIogBChBXZWJXb3Jrc3BhY2VQYWdlEjQKBWFnZW50GAEgASgLMiMuYWdlbnRyZXBsLnYxLldlYldvcmtzcGFjZVBhZ2VBZ2VudEgAEjYKBnRocmVhZBgCIAEoCzIkLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQYWdlVGhyZWFkSABCBgoEa2luZCIXChVXZWJXb3Jrc3BhY2VQYWdlQWdlbnQiGAoWV2ViV29ya3NwYWNlUGFnZVRocmVhZCLbBAoWQWRvcHRXZWJXb3Jrc3BhY2VFcnJvchJMChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIvLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJVChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjMuYWdlbnRyZXBsLnYxLkFkb3B0V2ViV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJMChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIvLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJHCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASUwoVbm9fdHJhbnNmZXJfYW5ub3VuY2VkGAUgASgLMjIuYWdlbnRyZXBsLnYxLkFkb3B0V2ViV29ya3NwYWNlTm9UcmFuc2ZlckFubm91bmNlZEgAElkKGHBhcnRpY2lwYW50X25vdF9leHBlY3RlZBgGIAEoCzI1LmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVBhcnRpY2lwYW50Tm90RXhwZWN0ZWRIABJMChF0cmFuc2Zlcl9kZWZlcnJlZBgHIAEoCzIvLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVRyYW5zZmVyRGVmZXJyZWRIAEIHCgVjYXVzZSIjCiFBZG9wdFdlYldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiPQolQWRvcHRXZWJXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNAohQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQgoeQWRvcHRXZWJXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyJUCiRBZG9wdFdlYldvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWQSLAoEcGFnZRgBIAEoCzIeLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQYWdlIikKJ0Fkb3B0V2ViV29ya3NwYWNlUGFydGljaXBhbnROb3RFeHBlY3RlZCIjCiFBZG9wdFdlYldvcmtzcGFjZVRyYW5zZmVyRGVmZXJyZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkkKGEFkb3B0V2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpcBChlBZG9wdFdlYldvcmtzcGFjZVJlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCJeChhBZG9wdFdlYldvcmtzcGFjZVN1Y2Nlc3MSLAoEcGFnZRgBIAEoCzIeLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQYWdlEhQKDHdlYmFwcF9idWlsZBgCIAEoCSKIAQoQV2ViV29ya3NwYWNlUGFnZRI0CgVhZ2VudBgBIAEoCzIjLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQYWdlQWdlbnRIABI2CgZ0aHJlYWQYAiABKAsyJC5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlUGFnZVRocmVhZEgAQgYKBGtpbmQiFwoVV2ViV29ya3NwYWNlUGFnZUFnZW50IhgKFldlYldvcmtzcGFjZVBhZ2VUaHJlYWQi2wQKFkFkb3B0V2ViV29ya3NwYWNlRXJyb3ISTAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASVQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIzLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASTAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASRwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiwuYWdlbnRyZXBsLnYxLkFkb3B0V2ViV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAElMKFW5vX3RyYW5zZmVyX2Fubm91bmNlZBgFIAEoCzIyLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWRIABJZChhwYXJ0aWNpcGFudF9ub3RfZXhwZWN0ZWQYBiABKAsyNS5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VQYXJ0aWNpcGFudE5vdEV4cGVjdGVkSAASTAoRdHJhbnNmZXJfZGVmZXJyZWQYByABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlckRlZmVycmVkSABCBwoFY2F1c2UiIwohQWRvcHRXZWJXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIj0KJUFkb3B0V2ViV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjQKIUFkb3B0V2ViV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkIKHkFkb3B0V2ViV29ya3NwYWNlTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiVAokQWRvcHRXZWJXb3Jrc3BhY2VOb1RyYW5zZmVyQW5ub3VuY2VkEiwKBHBhZ2UYASABKAsyHi5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlUGFnZSIpCidBZG9wdFdlYldvcmtzcGFjZVBhcnRpY2lwYW50Tm90RXhwZWN0ZWQiUQohQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlckRlZmVycmVkEiwKBHBhZ2UYASABKAsyHi5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlUGFnZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceRequest
@@ -83,6 +84,18 @@ export type AdoptWebWorkspaceSuccess = Message<"agentrepl.v1.AdoptWebWorkspaceSu
    * @generated from field: agentrepl.v1.WebWorkspacePage page = 1;
    */
   page?: WebWorkspacePage | undefined;
+
+  /**
+   * THE WEBAPP BUILD THE ADOPTING DAEMON SERVES: the installed dist's entry
+   * bundle hash (webapp/src/webapp-build.ts reads a page's own). REQUIRED and
+   * not empty. A page that adopts in place after a handover, rather than
+   * booting, reopens its subscriptions only when this is its own build: on
+   * another it goes quiet, because a newer daemon's frames carry fields it has
+   * no descriptor for, and the deploy's host reload brings it onto this one.
+   *
+   * @generated from field: string webapp_build = 2;
+   */
+  webappBuild: string;
 };
 
 /**
@@ -353,11 +366,20 @@ export const AdoptWebWorkspaceParticipantNotExpectedSchema: GenMessage<AdoptWebW
  * workspace until it is free; it carries nothing because the incumbent's next
  * `transferred` push, not this answer, says when and where to adopt. Distinct
  * from `not_yet_adopted`, which means a rendezvous still under way and is
- * retried.
+ * retried. It names the page, as `no_transfer_announced` does, because a page
+ * answered it goes on to mount its body on the incumbent: no handover reloads
+ * a page (owner ruling, 2026-11-22).
  *
  * @generated from message agentrepl.v1.AdoptWebWorkspaceTransferDeferred
  */
 export type AdoptWebWorkspaceTransferDeferred = Message<"agentrepl.v1.AdoptWebWorkspaceTransferDeferred"> & {
+  /**
+   * What the page is for, deciding which body it mounts below its topbar.
+   * Always set.
+   *
+   * @generated from field: agentrepl.v1.WebWorkspacePage page = 1;
+   */
+  page?: WebWorkspacePage | undefined;
 };
 
 /**

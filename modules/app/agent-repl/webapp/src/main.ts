@@ -288,15 +288,9 @@ export async function boot(): Promise<void> {
     // the whole rendezvous filing refusals for calls that were merely early.
     // A terminal refusal throws `AdoptionFailed`, which the catch below mints
     // as `boot_failed` — the page has no workspace to show and says so.
-    // A DEFERRED TRANSFER ENDS THE BOOT QUIETLY: the incumbent kept this
-    // workspace, and Emacs is reloading the page onto it. So does a MOVE: the
-    // page booted on the daemon its workspace left, and Emacs is reloading it
-    // onto the successor.
+    // A DEFERRED TRANSFER BOOTS ON: the incumbent kept this workspace and
+    // serves it, and no handover reloads a page.
     const adopted = await adoptAtBoot(ctx);
-    if (adopted === "deferred" || adopted === "moved") {
-      ctx.quiesce();
-      return;
-    }
 
     // THE LIFECYCLE COMES NEXT, BEFORE ANY VIEW. `transferring_away` is the
     // `transferred` push arriving as an ANSWER, and it can come back at the

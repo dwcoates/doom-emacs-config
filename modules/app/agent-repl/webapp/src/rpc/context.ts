@@ -81,11 +81,17 @@ export interface DaemonContext {
    */
   onQuiesced(fn: () => void): () => void;
   /**
-   * Run FN every time the daemon this context dials moves. See
-   * StreamContext.onDaemonMoved: only the web view host's daemon moves, and a
-   * context built without one (`DaemonContextInit.daemon`) never calls FN.
+   * Run FN every time the daemon this context dials moves, or the page is
+   * re-homed (`rehome`). See StreamContext.onDaemonMoved.
    */
   onDaemonMoved(fn: () => void): () => void;
+  /**
+   * The workspace moved to another daemon behind this page's one origin, and
+   * the page adopted it there in place (lifecycle.ts): every standing stream
+   * ends its run and reopens at once, exactly as a daemon move makes it, so
+   * every subscription is made again where the workspace is served now.
+   */
+  rehome(): void;
   /**
    * Announce that a stream frame arrived and could be read.
    *
@@ -220,6 +226,7 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   const quietListeners = createListeners();
   const pushListeners = createListeners();
   const restoredListeners = createListeners();
+  const rehomeListeners = createListeners();
   const base = {
     webappBuild: init.webappBuild,
     client: init.client,
@@ -258,9 +265,20 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
       return restoredListeners.add(fn);
     },
     onDaemonMoved(fn: () => void): () => void {
-      // A PAGE'S DAEMON IS ITS OWN ORIGIN and never moves, so there is
-      // nothing to subscribe to.
-      return init.daemon?.onMoved(fn) ?? ((): void => undefined);
+      // A PAGE'S DAEMON IS ITS OWN ORIGIN and never moves, so only a rehome
+      // tells it; the web view host's origin moves as well.
+      const unsubscribeFromRehome = rehomeListeners.add(fn);
+      const unsubscribeFromOrigin = init.daemon?.onMoved(fn) ?? ((): void => undefined);
+      return () => {
+        unsubscribeFromRehome();
+        unsubscribeFromOrigin();
+      };
+    },
+    rehome(): void {
+      log.info("the page adopted its workspace in place; every stream reopens where it is served now", {
+        operation: "rpc.context-rehome",
+      });
+      rehomeListeners.notify();
     },
     onQuiesced(fn: () => void): () => void {
       // A subscriber arriving AFTER the page went quiet is told at once, or a

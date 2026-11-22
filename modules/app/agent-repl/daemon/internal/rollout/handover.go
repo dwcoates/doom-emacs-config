@@ -34,8 +34,7 @@ type handoverPlan struct {
 	snapshot       map[ids.WorkspaceID]Participants
 	// folded marks each workspace whose sidebar row was folded away when the
 	// handover was announced: its repository or its subsection folded
-	// (foldedRows). A folded workspace transfers after every unfolded one,
-	// and its page is never loaded by the handover (reloadsPage).
+	// (foldedRows). A folded workspace transfers after every unfolded one.
 	folded map[ids.WorkspaceID]bool
 	forced bool
 	fields dlog.Context
@@ -395,13 +394,6 @@ func unfoldedFirst(workspaces []wsm.Workspace, folded map[ids.WorkspaceID]bool) 
 		}
 	}
 	return out
-}
-
-// reloadsPage reports whether WS's transfer loads its page at the successor:
-// only when its page was loaded when the handover was announced (its web
-// stream was open, the snapshot) and its row was not folded away then.
-func (p *handoverPlan) reloadsPage(ws ids.WorkspaceID) bool {
-	return p.snapshot[ws].Web && !p.folded[ws]
 }
 
 // completeHandover is the UNBOUNDED half: every workspace's transfer is
@@ -785,11 +777,10 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	}
 
 	c.recordTransfer(ws.ID, successor)
-	reloadPage := plan.reloadsPage(ws.ID)
-	c.deps.Pusher.PushTransferred(ws.ID, daemonaddr.ClientAddress(c.deps.SharedAddress(), successor), reloadPage)
+	c.deps.Pusher.PushTransferred(ws.ID, daemonaddr.ClientAddress(c.deps.SharedAddress(), successor))
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
 		dlog.Merge(fields, dlog.Context{"expected_host": move.participants.Host, "expected_web": move.participants.Web,
-			"reload_page": reloadPage, "page_at_announcement": plan.snapshot[ws.ID].Web, "folded": plan.folded[ws.ID]}))
+			"page_at_announcement": plan.snapshot[ws.ID].Web, "folded": plan.folded[ws.ID]}))
 	wsLog.Info(opTransfer, "the workspace is the successor's now; any later record from this daemon about it is the predecessor winding down, not the workspace's status",
 		dlog.Merge(plan.fields, fields))
 

@@ -1031,7 +1031,7 @@ func (s *server) pushLoadPageRequested(ws ids.WorkspaceID) int {
 // received is an adoption that cannot land; without the live holders on the
 // record, a window that expired could not say whether anyone was told
 // (2026-10-12).
-func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string, reloadPage bool) {
+func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
 	// THE MARK PRECEDES THE NOTICE, so every stream edge the notice causes
 	// finds it: the participants leaving now are the workspace moving to its
 	// successor, and drawing them as a hop down painted every row severed on
@@ -1046,11 +1046,10 @@ func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string, re
 			"successor":   successorAddress,
 			"host_stream": live.Host,
 			"web_stream":  live.Web,
-			"reload_page": reloadPage,
 		})
 	s.hostNoticeTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_Transferred{
-			Transferred: &agentreplv1.HostWorkspaceTransferred{ReloadPage: &reloadPage},
+			Transferred: &agentreplv1.HostWorkspaceTransferred{},
 		},
 	})
 	s.webTopic(ws).Publish(&agentreplv1.WatchWebWorkspaceResponse{

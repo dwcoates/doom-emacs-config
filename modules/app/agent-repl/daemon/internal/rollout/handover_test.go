@@ -2438,43 +2438,6 @@ func TestAFoldedTransferDoesNotWaitOnAnUnfoldedOneRegisteredBehindItsWork(t *tes
 	}
 }
 
-func TestTheTransferNoticeSaysWhetherTheHandoverLoadsThePage(t *testing.T) {
-	tests := []struct {
-		name string
-		web  bool
-		fold func(t *testing.T, h *harness, ws ids.WorkspaceID)
-		want bool
-	}{
-		{name: "a page loaded at the announcement, unfolded, is reloaded", web: true, fold: func(*testing.T, *harness, ids.WorkspaceID) {}, want: true},
-		{name: "no page loaded at the announcement is never loaded", web: false, fold: func(*testing.T, *harness, ids.WorkspaceID) {}, want: false},
-		{name: "a folded workspace's page is never loaded", web: true, fold: foldRepositoryOf, want: false},
-		{name: "a workspace in a folded subsection has its page never loaded", web: true, fold: foldSubsectionOf, want: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			ws, _ := h.workspace(t)
-			h.participants.Set(ws, Participants{Host: true, Web: tc.web})
-			tc.fold(t, h, ws)
-
-			// Act
-			handOverUntilWindow(t, h)
-
-			// Assert
-			var got []bool
-			for _, call := range h.pusher.Calls() {
-				if call.WS == ws && call.Kind == "transferred" {
-					got = append(got, call.ReloadPage)
-				}
-			}
-			if len(got) != 1 || got[0] != tc.want {
-				t.Fatalf("transferred reload_page = %v, want [%v]", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestAHandoverWhoseFoldsCannotBeReadIsAbandonedBeforeTheAnnouncement(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

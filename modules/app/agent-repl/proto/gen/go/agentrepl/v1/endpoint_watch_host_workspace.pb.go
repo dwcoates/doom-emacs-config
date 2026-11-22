@@ -349,16 +349,17 @@ type WatchHostWorkspaceResponse_Transferred struct {
 	// daemon's connection (address from WatchDaemon's shutdown
 	// announcement), then CANCEL this stream and re-subscribe there. The
 	// stream stays standing until the client cancels — this arm is a push,
-	// never a terminal frame.
+	// never a terminal frame. Emacs never reloads, loads or drops the page
+	// for it: the page moves itself (WebWorkspaceTransferred).
 	Transferred *HostWorkspaceTransferred `protobuf:"bytes,3,opt,name=transferred,proto3,oneof"`
 }
 
 type WatchHostWorkspaceResponse_ReloadWebapp struct {
 	// RELOAD AGAINST THE SAME DAEMON: Emacs reloads this workspace's page.
-	// No address rides it (the daemon is not changing), and a combined
-	// daemon+webapp rollout never sends it — the handover's fresh attach
-	// pulls the new assets as a side effect. The reloaded page's default
-	// first-page load is the whole of the recovery. A webapp deploy names
+	// No address rides it (the daemon is not changing). A handover reloads
+	// no page, so a deploy that brings another webapp sends it from the
+	// successor. The reloaded page's default first-page load is the whole of
+	// the recovery. A webapp deploy names
 	// the build it brings (`webapp_build`); a restart reloads one page.
 	ReloadWebapp *HostWorkspaceReloadWebapp `protobuf:"bytes,4,opt,name=reload_webapp,json=reloadWebapp,proto3,oneof"`
 }
@@ -695,17 +696,17 @@ func (x *HostEvaluate) GetText() string {
 	return ""
 }
 
+// The stream it rides names the workspace. A handover touches no page (owner
+// ruling, 2026-11-22): the page moves itself (WebWorkspaceTransferred).
 type HostWorkspaceTransferred struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// WHETHER THE HANDOVER LOADS THE WORKSPACE'S PAGE AT THE SUCCESSOR, decided
-	// by the outgoing daemon from what stood when it announced the stand-down:
-	// true only for a workspace whose page was loaded then (its web stream was
-	// open) and whose sidebar row was not folded away (neither its repository
-	// nor its subsection folded). False: the handover loads no page for it, and
-	// a page the editor holds is dropped rather than reloaded, so its next open
-	// mounts it fresh on the successor (owner ruling, 2026-11-13). UNSET from a
-	// daemon that predates the field: the editor reloads a page it holds, as it
-	// always did.
+	// RETIRED 2026-11-22, NEVER SET by this daemon and IGNORED by every reader:
+	// it was the outgoing daemon's decision whether the handover loaded the
+	// workspace's page, and no handover loads, reloads or drops one now. Still
+	// declared because the first deploy after its retirement hands over from a
+	// daemon that sends it; it is reserved once no such daemon can run.
+	//
+	// Deprecated: Marked as deprecated in agentrepl/v1/endpoint_watch_host_workspace.proto.
 	ReloadPage    *bool `protobuf:"varint,1,opt,name=reload_page,json=reloadPage,proto3,oneof" json:"reload_page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -741,6 +742,7 @@ func (*HostWorkspaceTransferred) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{4}
 }
 
+// Deprecated: Marked as deprecated in agentrepl/v1/endpoint_watch_host_workspace.proto.
 func (x *HostWorkspaceTransferred) GetReloadPage() bool {
 	if x != nil && x.ReloadPage != nil {
 		return *x.ReloadPage
@@ -4033,9 +4035,9 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x05_line\"]\n" +
 	"\fHostEvaluate\x129\n" +
 	"\x05token\x18\x01 \x01(\v2#.agentrepl.v1.EditorEvaluationTokenR\x05token\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\"P\n" +
-	"\x18HostWorkspaceTransferred\x12$\n" +
-	"\vreload_page\x18\x01 \x01(\bH\x00R\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"T\n" +
+	"\x18HostWorkspaceTransferred\x12(\n" +
+	"\vreload_page\x18\x01 \x01(\bB\x02\x18\x01H\x00R\n" +
 	"reloadPage\x88\x01\x01B\x0e\n" +
 	"\f_reload_page\" \n" +
 	"\x1eHostWorkspaceTransferWithdrawn\"T\n" +

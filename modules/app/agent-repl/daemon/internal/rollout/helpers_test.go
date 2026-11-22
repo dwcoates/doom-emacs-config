@@ -357,8 +357,6 @@ type pushCall struct {
 	WS      ids.WorkspaceID
 	Kind    string
 	Address string
-	// ReloadPage is a transferred push's reload_page.
-	ReloadPage bool
 }
 
 // fakePusher captures the transferred and reload_webapp pushes.
@@ -367,10 +365,10 @@ type fakePusher struct {
 	calls []pushCall
 }
 
-func (p *fakePusher) PushTransferred(ws ids.WorkspaceID, address string, reloadPage bool) {
+func (p *fakePusher) PushTransferred(ws ids.WorkspaceID, address string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.calls = append(p.calls, pushCall{WS: ws, Kind: "transferred", Address: address, ReloadPage: reloadPage})
+	p.calls = append(p.calls, pushCall{WS: ws, Kind: "transferred", Address: address})
 }
 
 func (p *fakePusher) RetractTransferred(ws ids.WorkspaceID) {
