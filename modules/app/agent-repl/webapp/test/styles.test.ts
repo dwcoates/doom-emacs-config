@@ -6432,12 +6432,18 @@ describe("the repository's subsections and the drag", () => {
     ]).toEqual([expect.stringMatching(/display:\s*none/), expect.stringMatching(/display:\s*none/)]);
   });
 
-  it("leaves a subsection's top-level rows unindented under its header", () => {
-    expect(
-      rulesOf(stylesheet).filter(
-        (rule) => rule.selectors.includes(".sb-subsection") && /--row-indent(-parent)?:/.test(rule.declarations),
-      ),
-    ).toEqual([]);
+  it("indents a subsection's top-level rows one generation step under its header", () => {
+    expect([
+      declarationsOf("#ws-sidebar .sb-subsection > .rows"),
+      declarationsOf("#ws-sidebar .sb-subsection > .rows > .ws"),
+    ]).toEqual([
+      expect.stringMatching(/--row-indent-parent:\s*var\(--row-indent\)/),
+      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/),
+    ]);
+  });
+
+  it("draws a subsection's guide as a parent's family guide", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection > .rows::before")).toBe(declarationsOf("#ws-sidebar .kids::before"));
   });
 
   it("lights the subsection a dragged row would join, subtly", () => {
@@ -6606,16 +6612,16 @@ describe("the row indent", () => {
       /margin-left/.test(kids),
       /--row-indent-parent:\s*var\(--row-indent\)/.test(kids),
       declarationsOf("#ws-sidebar .kids > .ws"),
-    ]).toEqual([false, true, expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/)]);
+    ]).toEqual([false, true, expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/)]);
   });
 
   it("indents a repository block's rows one generation step, as an own-repository child", () => {
-    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-block > .ws")).toMatch(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/);
+    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-block > .ws")).toMatch(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/);
   });
 
   it("starts a block's divider at its rows' indent, adding none of its own", () => {
     expect(declarationsOf("#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider")).toMatch(
-      /margin:\s*0\.15rem calc\(0\.7rem \+ var\(--when-col-w\)\) 0\.05rem calc\(0\.9rem \+ var\(--row-indent-parent\) \+ 1\.2rem\)/,
+      /margin:\s*0\.15rem calc\(0\.7rem \+ var\(--when-col-w\)\) 0\.05rem calc\(0\.9rem \+ var\(--row-indent-parent\) \+ var\(--row-indent-step\)\)/,
     );
   });
 
@@ -6627,8 +6633,22 @@ describe("the row indent", () => {
     ]).toEqual([undefined, undefined, undefined]);
   });
 
-  it("draws the family guide where the generation's box once began", () => {
-    expect(declarationsOf("#ws-sidebar .kids::before")).toMatch(/left:\s*calc\(var\(--row-indent-parent\) \+ 1\.55rem\)/);
+  it("steps one generation by one token", () => {
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes("#ws-sidebar") && /--row-indent-step:\s*1\.2rem/.test(rule.declarations))).toBe(true);
+  });
+
+  it("draws the family guide down the middle of the parent's status mark", () => {
+    expect(declarationsOf("#ws-sidebar .kids::before")).toMatch(/left:\s*calc\(var\(--row-indent-parent\) \+ var\(--ws-mark-center\) - 0\.5px\)/);
+  });
+
+  it("builds the mark's center from the row's parts left of the mark", () => {
+    expect(
+      rulesOf(stylesheet).some(
+        (rule) =>
+          rule.selectors.includes("#ws-sidebar") &&
+          /--ws-mark-center:\s*calc\(0\.9rem - 0\.4rem \+ var\(--tab-number-w\) \+ 0\.1rem \+ var\(--row-gap\) \+ var\(--ws-mark-width\) \/ 2\)/.test(rule.declarations),
+      ),
+    ).toBe(true);
   });
 
   it("pads the current row as every row, the indent included", () => {
@@ -7259,6 +7279,10 @@ describe("the recency gutter", () => {
   it("draws the bar only on a reached row's slot", () => {
     expect(declarationsOf("#ws-sidebar .sb-gutter[data-recency]::before")).toContain("var(--gutter-hue) var(--gutter-strength)");
     expect(declarationsOf("#ws-sidebar .sb-gutter")).not.toContain("background");
+  });
+
+  it("hands back exactly the row's gap token, so the slot takes no width", () => {
+    expect(declarationsOf("#ws-sidebar .sb-gutter")).toMatch(/margin-right:\s*calc\(-1 \* var\(--row-gap\)\)/);
   });
 });
 
