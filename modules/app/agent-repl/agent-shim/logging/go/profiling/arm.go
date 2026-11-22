@@ -82,10 +82,10 @@ func Describe(runtime string, e Event) Description {
 		return Description{"profiling.level_closed", "info", logsite.Msg("the profiling session's log level window closed; the {process} is back at info"),
 			[]Field{session, process, {"level", e.Level}, {"reason", e.Reason}, {"until", e.Until.Unix()}}}
 	case ExitStarted:
-		return Description{"profiling.exit_started", "info", logsite.Msg("the {process} profiles its whole life and writes the profile when it stops"),
+		return Description{"profiling.exit_started", "info", logsite.Msg("the {process} profiles its whole life and writes the profile {files} when it stops"),
 			[]Field{process, {"files", e.Files}}}
 	case ExitStopped:
-		return Description{"profiling.exit_stopped", "info", logsite.Msg("the {process} stopped and wrote its whole-life profile"),
+		return Description{"profiling.exit_stopped", "info", logsite.Msg("the {process} stopped and wrote its whole-life profile {files}"),
 			[]Field{process, {"reason", e.Reason}, {"files", e.Files}}}
 	case Failed:
 		return Description{"profiling.failed", "error", logsite.Msg("runtime profiling could not do what the session asked"),
