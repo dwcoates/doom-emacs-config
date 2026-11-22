@@ -163,13 +163,19 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 		}, true
 
 	case "WatchDaemon":
+		// scheduledAt is the time this case's own schedule names: the group's
+		// daemon may still stand scheduled by an earlier case, and a witness
+		// opened on it is replayed that schedule first, so only the one at
+		// this time is the driven view.
+		var scheduledAt int64
 		return subscriptionScenario{
 			// A shutdown schedule holds every workspace's intake.
 			group: groupShutdownSchedule,
 			drive1: func(t *testing.T, f *fixture) {
+				scheduledAt = time.Now().Add(time.Hour).UnixMilli()
 				_, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 					Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
-						AtMs:   time.Now().Add(time.Hour).UnixMilli(),
+						AtMs:   scheduledAt,
 						Reason: drainReasonDeploy(),
 					}},
 				}))
@@ -178,7 +184,7 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 				}
 			},
 			isFirst: func(msg proto.Message) bool {
-				return msg.(*agentreplv1.WatchDaemonResponse).GetDrainScheduled() != nil
+				return msg.(*agentreplv1.WatchDaemonResponse).GetDrainScheduled().GetAtMs() == scheduledAt
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				_, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
