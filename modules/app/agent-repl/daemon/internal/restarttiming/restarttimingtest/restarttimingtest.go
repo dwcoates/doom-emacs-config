@@ -3,6 +3,7 @@
 package restarttimingtest
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -37,6 +38,17 @@ func (r *Recorder) Of(restart restarttiming.Restart) []restarttiming.Observation
 		if o.Restart() == restart {
 			out = append(out, o)
 		}
+	}
+	return out
+}
+
+// WaveMarks answers every reconnect_wave mark recorded, in order, each as
+// "<phase>_<mark> <cause> <seconds>", so a test asserts a wave's whole shape
+// in one comparison.
+func (r *Recorder) WaveMarks() []string {
+	var out []string
+	for _, o := range r.Of(restarttiming.ReconnectWave) {
+		out = append(out, fmt.Sprintf("%s %s %v", o.Phase(), o.Cause(), o.Seconds()))
 	}
 	return out
 }

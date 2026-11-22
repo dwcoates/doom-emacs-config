@@ -1518,22 +1518,33 @@ func (d *Deployer) shims(ctx context.Context, fresh builds, force bool) (Outcome
 // webapp tells every workspace with a webview on an older build to reload it.
 func (d *Deployer) webapp(fresh builds) Outcome {
 	out := Outcome{Component: ComponentWebapp, Build: fresh.webapp, Kind: UpToDate}
+	type staleWebview struct {
+		ws      ids.WorkspaceID
+		running []string
+	}
+	var stale []staleWebview
 	for ws, running := range d.deps.Clients.WebviewBuilds() {
-		stale := false
 		for _, build := range running {
 			if build != fresh.webapp {
-				stale = true
+				stale = append(stale, staleWebview{ws: ws, running: running})
+				break
 			}
 		}
-		if !stale {
-			continue
-		}
-		d.deps.Reconnects.Expect(restarttiming.ReconnectWebappReload, d.deps.Clock.Now(), restarttiming.ReconnectWeb, ws)
-		d.deps.HotReload.WebviewReloading(context.Background(), ws)
-		d.deps.Clients.PushReloadWebappBuild(ws, fresh.webapp)
+	}
+	// EVERY WEBVIEW ABOUT TO RELOAD IS EXPECTED BACK AS ONE WAVE, opened
+	// before the first push so no reload can come back unexpected: a wave per
+	// webview would time each alone.
+	reloading := make([]ids.WorkspaceID, len(stale))
+	for i, s := range stale {
+		reloading[i] = s.ws
+	}
+	d.deps.Reconnects.Expect(restarttiming.ReconnectWebappReload, d.deps.Clock.Now(), restarttiming.ReconnectWeb, reloading...)
+	for _, s := range stale {
+		d.deps.HotReload.WebviewReloading(context.Background(), s.ws)
+		d.deps.Clients.PushReloadWebappBuild(s.ws, fresh.webapp)
 		out.Recipients++
 		d.log.Info(opDecide, "a webview runs an older webapp; pushed the reload", dlog.Context{
-			"workspace": string(ws), "running": running, "fresh": fresh.webapp,
+			"workspace": string(s.ws), "running": s.running, "fresh": fresh.webapp,
 		})
 	}
 	// THE WEB VIEW HOST is no workspace's webview, and a handover no longer

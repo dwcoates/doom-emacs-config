@@ -445,20 +445,24 @@ func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, s
 			"path": c.deps.IntentManifest, "armed": added,
 		})
 	}
+	var host, web []ids.WorkspaceID
 	for _, session := range armed {
 		c.logTransition(opJoin, session.Workspace, "rendezvous", "unarmed", "armed", dlog.Context{
 			"expected_host": session.ExpectedHost,
 			"expected_web":  session.ExpectedWeb,
 		})
-		// EACH PARTICIPANT THE OUTGOING DAEMON NAMED IS TO COME BACK HERE,
-		// timed from its manifest (restarttiming.ReconnectSuccessor).
 		if session.ExpectedHost {
-			c.deps.Reconnects.Expect(restarttiming.ReconnectSuccessor, writtenAt, restarttiming.ReconnectHost, session.Workspace)
+			host = append(host, session.Workspace)
 		}
 		if session.ExpectedWeb {
-			c.deps.Reconnects.Expect(restarttiming.ReconnectSuccessor, writtenAt, restarttiming.ReconnectWeb, session.Workspace)
+			web = append(web, session.Workspace)
 		}
 	}
+	// EACH PARTICIPANT THE OUTGOING DAEMON NAMED IS TO COME BACK HERE, timed
+	// from its manifest (restarttiming.ReconnectSuccessor), AS ONE WAVE PER
+	// PHASE: a wave per workspace would time each alone, spread always zero.
+	c.deps.Reconnects.Expect(restarttiming.ReconnectSuccessor, writtenAt, restarttiming.ReconnectHost, host...)
+	c.deps.Reconnects.Expect(restarttiming.ReconnectSuccessor, writtenAt, restarttiming.ReconnectWeb, web...)
 	return added
 }
 

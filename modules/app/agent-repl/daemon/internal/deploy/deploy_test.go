@@ -1776,6 +1776,42 @@ func TestAReloadedWebviewIsExpectedBackFromItsPush(t *testing.T) {
 	}
 }
 
+func TestAWebappReloadExpectsEveryReloadedWebviewBackAsOneWave(t *testing.T) {
+	// Arrange: three webviews run an older build, one the fresh one.
+	h := newHarness(t)
+	h.clients.webviews["ws-a"] = []string{"Web1"}
+	h.clients.webviews["ws-b"] = []string{"Web2", "Web1"}
+	h.clients.webviews["ws-c"] = []string{"Web1"}
+	h.clients.webviews["ws-d"] = []string{"Web2"}
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Act: the reloaded webviews come back 1s, 3s and 7s after the deploy
+	// ended, and the fresh one's stream opens too, expected by nothing.
+	h.wifiAsks.clock.After(time.Second)
+	h.d.deps.Reconnects.Connected("ws-b", restarttiming.ReconnectWeb)
+	h.d.deps.Reconnects.Connected("ws-d", restarttiming.ReconnectWeb)
+	h.wifiAsks.clock.After(2 * time.Second)
+	h.d.deps.Reconnects.Connected("ws-a", restarttiming.ReconnectWeb)
+	h.wifiAsks.clock.After(4 * time.Second)
+	h.d.deps.Reconnects.Connected("ws-c", restarttiming.ReconnectWeb)
+
+	// Assert: ONE web wave holding the three reloaded webviews, its spread
+	// the 6s between its first and last arrival.
+	got := h.restarts.Of(restarttiming.ReconnectWave)
+	var marks []string
+	for _, o := range got {
+		marks = append(marks, o.Phase()+" "+o.Cause())
+	}
+	if want := []string{"web_first webapp_reload", "web_last webapp_reload", "web_spread webapp_reload"}; !slices.Equal(marks, want) {
+		t.Fatalf("wave marks = %v, want %v", marks, want)
+	}
+	if got[2].Seconds() != 6 || got[1].Seconds()-got[0].Seconds() != 6 {
+		t.Fatalf("wave = %v, want a 6s spread between first and last", h.restarts.WaveMarks())
+	}
+}
+
 func TestNewRefusesAMissingReconnectTracker(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

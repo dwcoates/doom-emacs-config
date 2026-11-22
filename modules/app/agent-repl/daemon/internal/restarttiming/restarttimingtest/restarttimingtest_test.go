@@ -1,6 +1,7 @@
 package restarttimingtest
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -37,6 +38,37 @@ func TestOfAnswersOneRestartsObservations(t *testing.T) {
 	// Assert
 	if len(got) != 1 || got[0] != boot {
 		t.Fatalf("Of(daemon_boot) = %+v, want only the boot", got)
+	}
+}
+
+func TestWaveMarksAnswersEveryWaveMarkInOrder(t *testing.T) {
+	// Arrange
+	var r Recorder
+	r.ObserveRestart(restarttiming.OfReconnectWave(restarttiming.ReconnectHost, restarttiming.WaveFirst, restarttiming.ReconnectSuccessor, 2*time.Second))
+	r.ObserveRestart(restarttiming.OfDeploy(restarttiming.DeployBuild, restarttiming.OK, time.Second))
+	r.ObserveRestart(restarttiming.OfReconnectWave(restarttiming.ReconnectWeb, restarttiming.WaveSpread, restarttiming.ReconnectWebappReload, 1500*time.Millisecond))
+
+	// Act
+	got := r.WaveMarks()
+
+	// Assert
+	want := []string{"host_first successor 2", "web_spread webapp_reload 1.5"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("WaveMarks = %v, want %v", got, want)
+	}
+}
+
+func TestWaveMarksAnswersNothingWithoutAWave(t *testing.T) {
+	// Arrange
+	var r Recorder
+	r.ObserveRestart(restarttiming.OfDeploy(restarttiming.DeployBuild, restarttiming.OK, time.Second))
+
+	// Act
+	got := r.WaveMarks()
+
+	// Assert
+	if len(got) != 0 {
+		t.Fatalf("WaveMarks = %v, want none", got)
 	}
 }
 

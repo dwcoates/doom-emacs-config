@@ -1,7 +1,6 @@
 package restarttiming_test
 
 import (
-	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -96,15 +95,6 @@ func TestAStartAfterNowIsStatedAsZero(t *testing.T) {
 	}
 }
 
-// waveMarks answers the reconnect wave observations as "<phase> <cause> <seconds>".
-func waveMarks(rec *restarttimingtest.Recorder) []string {
-	var out []string
-	for _, o := range rec.Of(restarttiming.ReconnectWave) {
-		out = append(out, fmt.Sprintf("%s %s %v", o.Phase(), o.Cause(), o.Seconds()))
-	}
-	return out
-}
-
 func TestAWaveIsTimedAtItsFirstAndLastConnectionAndItsSpread(t *testing.T) {
 	// Arrange
 	began := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
@@ -123,7 +113,7 @@ func TestAWaveIsTimedAtItsFirstAndLastConnectionAndItsSpread(t *testing.T) {
 
 	// Assert
 	want := []string{"host_first successor 2", "host_last successor 9", "host_spread successor 7"}
-	if got := waveMarks(&rec); !slices.Equal(got, want) {
+	if got := rec.WaveMarks(); !slices.Equal(got, want) {
 		t.Fatalf("wave = %v, want %v", got, want)
 	}
 }
@@ -139,7 +129,7 @@ func TestAWaveWithAMemberStillOutTimesOnlyItsFirst(t *testing.T) {
 	r.Connected("w1", restarttiming.ReconnectWeb)
 
 	// Assert
-	if got := waveMarks(&rec); !slices.Equal(got, []string{"web_first cold 1"}) {
+	if got := rec.WaveMarks(); !slices.Equal(got, []string{"web_first cold 1"}) {
 		t.Fatalf("wave = %v, want only its first", got)
 	}
 }
@@ -162,7 +152,7 @@ func TestAWaveAMemberOfWhichALaterRestartExpectedNeverTimesItsLast(t *testing.T)
 	// Assert: the boot's wave lost w2, so only its first is timed; the
 	// reload's wave of one is whole.
 	want := []string{"web_first cold 1", "web_first webapp_reload 3", "web_last webapp_reload 3", "web_spread webapp_reload 0"}
-	if got := waveMarks(&rec); !slices.Equal(got, want) {
+	if got := rec.WaveMarks(); !slices.Equal(got, want) {
 		t.Fatalf("wave = %v, want %v", got, want)
 	}
 }
@@ -179,7 +169,7 @@ func TestAWorkspaceNamedTwiceInOneExpectationIsOneMemberOfItsWave(t *testing.T) 
 
 	// Assert
 	want := []string{"host_first cold 4", "host_last cold 4", "host_spread cold 0"}
-	if got := waveMarks(&rec); !slices.Equal(got, want) {
+	if got := rec.WaveMarks(); !slices.Equal(got, want) {
 		t.Fatalf("wave = %v, want %v", got, want)
 	}
 }
