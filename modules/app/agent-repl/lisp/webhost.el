@@ -728,7 +728,8 @@ asks for no downtime sends the call as it always was."
     (list started)))
 
 (defun agent-repl-webhost-end-downtime (ws)
-  "Forget the downtime noted for WS: its outage ended with no page load to carry it."
+  "Forget the downtime noted for WS.
+Its outage ended with no page load to carry the start."
   (when-let ((id (agent-repl--webhost-id ws)))
     (remhash id agent-repl--webhost-downtime-started)))
 
