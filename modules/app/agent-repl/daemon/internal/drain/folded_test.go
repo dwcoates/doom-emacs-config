@@ -256,7 +256,7 @@ func TestACollapsedSubsectionsWorkspaceIsStoodDown(t *testing.T) {
 	h.inCollapsedSubsection(t, ws)
 
 	// Act
-	h.c.StandDownWithheld(ws)
+	h.c.StandDownWithheld(ws, WithheldCacheLapse)
 
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 1 || killed[0].WS != ws {

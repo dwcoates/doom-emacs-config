@@ -537,6 +537,60 @@ func (s *fakeSpawns) fail(err error) {
 	s.err = err
 }
 
+// fakeRemoteGate is the remote-control gate workspace.Fleet keeps: one real
+// mutex per workspace, which a test may take itself to stand for a change of
+// the mode under way.
+type fakeRemoteGate struct {
+	mu    sync.Mutex
+	gates map[ids.WorkspaceID]*sync.Mutex
+	// held counts the stand-downs that took a workspace's gate.
+	held map[ids.WorkspaceID]int
+	// asking, when made, is told each workspace whose gate a stand-down asks
+	// for, before it waits for it.
+	asking chan ids.WorkspaceID
+}
+
+// gate answers WS's mutex, minting it on first use.
+func (g *fakeRemoteGate) gate(ws ids.WorkspaceID) *sync.Mutex {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.gates == nil {
+		g.gates = map[ids.WorkspaceID]*sync.Mutex{}
+	}
+	gate, ok := g.gates[ws]
+	if !ok {
+		gate = &sync.Mutex{}
+		g.gates[ws] = gate
+	}
+	return gate
+}
+
+// hold answers Deps.HoldRemoteControl.
+func (g *fakeRemoteGate) hold(ws ids.WorkspaceID) func() {
+	g.mu.Lock()
+	asking := g.asking
+	g.mu.Unlock()
+	if asking != nil {
+		asking <- ws
+	}
+	gate := g.gate(ws)
+	gate.Lock()
+	g.mu.Lock()
+	if g.held == nil {
+		g.held = map[ids.WorkspaceID]int{}
+	}
+	g.held[ws]++
+	g.mu.Unlock()
+	return gate.Unlock
+}
+
+// heldCount answers how many stand-downs took WS's gate.
+func (g *fakeRemoteGate) heldCount(ws ids.WorkspaceID) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.held[ws]
+}
+
 // harness is one controller under test with every fake reachable.
 type harness struct {
 	c         *controller
@@ -550,10 +604,12 @@ type harness struct {
 	// bouncing answers Deps.Bouncing: nil answers false.
 	bouncing func(ws ids.WorkspaceID) bool
 	stand    *fakeStand
-	spawns   *fakeSpawns
-	merges   *fakeMerges
-	log      *dlog.TestSurfaces
-	exits    chan struct{}
+	// remote is the remote-control gate Deps.HoldRemoteControl takes.
+	remote *fakeRemoteGate
+	spawns *fakeSpawns
+	merges *fakeMerges
+	log    *dlog.TestSurfaces
+	exits  chan struct{}
 }
 
 // newHarness builds a controller over a real (in-memory) WSM store —
@@ -576,6 +632,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		freeness:  newFakeFreeness(),
 		reviving:  newFakeReviving(),
 		stand:     newFakeStand(),
+		remote:    &fakeRemoteGate{},
 		spawns:    newFakeSpawns(),
 		merges:    &fakeMerges{},
 		log:       log,
@@ -603,8 +660,9 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			}
 			return h.bouncing(ws)
 		},
-		Announcer: h.announcer,
-		Exit:      func(context.Context) error { h.exits <- struct{}{}; return nil },
+		HoldRemoteControl: h.remote.hold,
+		Announcer:         h.announcer,
+		Exit:              func(context.Context) error { h.exits <- struct{}{}; return nil },
 		// A WITHHELD STAND-DOWN RUNS IN LINE in tests, so its outcome is
 		// settled when the call returns; a test that needs it parked
 		// overrides this.

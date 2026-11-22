@@ -888,9 +888,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// LATE-BOUND like its neighbours: a method value here would bind the
 		// nil fleet this keeper is built before, and the first parked beat
 		// would dereference it (the 2026-11-11 boot loop).
-		Parked:          lateParkedKeepalive(p.Surfaces.Global(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil }),
-		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
-		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
+		Parked:   lateParkedKeepalive(p.Surfaces.Global(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil }),
+		ColdGate: func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
+		StandDowns: standDownsFunc(func(ws ids.WorkspaceID, trigger drain.WithheldTrigger) {
+			drainController.StandDownWithheld(ws, trigger)
+		}),
 		PublishRegistry: verbsRef.republishRoster("a hidden workspace's cache lapse moved"),
 		IdleCutoff:      idleCutoff,
 		Interval:        keepaliveInterval,
@@ -1486,14 +1488,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Spawns: supervisor,
 		// THE ORCHESTRATOR, through the forwarder: it is built below, and
 		// nothing shuts down before the graph is whole.
-		Merges:       mergeMover,
-		Freeness:     fleet.Freeness(),
-		Reviving:     queue.Reviving,
-		Delivering:   queue.Delivering,
-		Bouncing:     queue.Bouncing,
-		Announcer:    pushes,
-		LeaseChanged: queue.OnLeaseChanged,
-		PublishHost:  relay.PublishHostWorkspace,
+		Merges:     mergeMover,
+		Freeness:   fleet.Freeness(),
+		Reviving:   queue.Reviving,
+		Delivering: queue.Delivering,
+		Bouncing:   queue.Bouncing,
+		// THE FLEET'S OWN REMOTE-CONTROL GATE, the one every mode change is
+		// put in force under, so a stand-down's reading of the mode and a
+		// turn-on are serialized.
+		HoldRemoteControl: fleet.HoldRemoteControl,
+		Announcer:         pushes,
+		LeaseChanged:      queue.OnLeaseChanged,
+		PublishHost:       relay.PublishHostWorkspace,
 		// The verbs own the roster's durable half and are built AFTER this
 		// controller, so the republish reads them out of the forwarder --
 		// exactly as the merge orchestrator's own roster republish does.

@@ -19,7 +19,8 @@ import (
 //
 // THE IDLE SWEEP IS ONE TRIGGER OF THE ONE PARK (owner ruling, 2026-11-09).
 // It reaches the sessions no other stand-down does -- the workspace the user
-// is looking at, one whose remote control is on -- and parks them as the
+// is looking at, one whose remote control is on (its reason's remoteParks,
+// read at the act like every trigger's) -- and parks them as the
 // keep-alive cycle parks the rest: the same gate, the same steps, the same
 // `parked` terminal (wsm.TerminalParked), with its own detail naming it.
 //
@@ -108,7 +109,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 				dlog.Merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
 			continue
 		}
-		switch c.park(ctx, log, ws.ID, fields, c.idleReason()) {
+		switch outcome := c.park(ctx, log, ws.ID, fields, c.idleReason()); outcome {
 		case parkDone:
 			c.clearRetry(ws.ID)
 			parked = append(parked, ws.ID)
@@ -118,6 +119,8 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			retry := c.recordFailure(ws.ID, now)
 			log.Debug(opSweep, "backing off the failed park",
 				dlog.Merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
+		default:
+			panic(fmt.Sprintf("drain: the idle sweep's park answered %d, which its remoteParks policy never answers", outcome))
 		}
 	}
 	c.log.Debug(opSweep, "one idle-sweep pass finished",
@@ -215,9 +218,16 @@ const (
 	parkDeferred
 	// parkFailed: something that should have worked did not -- a failed
 	// or unreadable directive, a warned refusal, a failed stand-down or
-	// record. The workspace is BACKED OFF (see parkRetryDelay).
+	// record, an unreadable remote-control mode. The workspace is BACKED OFF
+	// (see parkRetryDelay).
 	parkFailed
+	// parkSpared: remote control is on and the reason spares it
+	// (remoteSpares); the session keeps its shim.
+	parkSpared
 )
+
+// remoteSpared is the account of a stand-down remote control spared.
+const remoteSpared = "remote control is on; the shim stays up for claude.ai"
 
 // standDownReason is why a session is stood down: the records it is filed
 // under, the detail its terminal carries, and the sentence its success says.
@@ -231,15 +241,53 @@ type standDownReason struct {
 	done   string
 	// life is the reason the shim lifecycle series counts it under.
 	life shimlife.StandDownReason
+	// trigger names what asked for the stand-down; every record park writes
+	// carries it.
+	trigger string
+	// remote is what a remote-control mode that is on does to the
+	// stand-down, read at the act (park). Every reason names one.
+	remote remotePolicy
 }
+
+// remotePolicy is what a stand-down does with a session whose remote control
+// is on.
+type remotePolicy int
+
+const (
+	// remoteSpares: the session keeps its shim, because claude.ai reaches it
+	// only through a shim that is up (owner ruling, 2026-10-31). Every
+	// trigger but the idle sweep's.
+	remoteSpares remotePolicy = iota + 1
+	// remoteParks: the session is parked all the same. Only the idle sweep
+	// (owner ruling, 2026-11-09): a session nobody, on this machine or on
+	// claude.ai, engaged for the whole cutoff is parked like any other.
+	remoteParks
+)
+
+// String names the policy for a record.
+func (p remotePolicy) String() string {
+	switch p {
+	case remoteSpares:
+		return "spares"
+	case remoteParks:
+		return "parks"
+	default:
+		return fmt.Sprintf("remotePolicy(%d)", int(p))
+	}
+}
+
+// triggerIdle is the idle sweep's trigger.
+const triggerIdle = "idle_cutoff"
 
 // idleReason is the idle sweep's.
 func (c *controller) idleReason() standDownReason {
 	return standDownReason{
-		op:     opSweep,
-		detail: fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
-		done:   "parked a session idle past the cutoff",
-		life:   shimlife.StandDownHibernate,
+		op:      opSweep,
+		detail:  fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
+		done:    "parked a session idle past the cutoff",
+		life:    shimlife.StandDownHibernate,
+		trigger: triggerIdle,
+		remote:  remoteParks,
 	}
 }
 
@@ -248,7 +296,21 @@ func (c *controller) idleReason() standDownReason {
 // what the attempt came to; every failure and every refusal DEFERS the
 // workspace rather than failing the whole pass, because one wedged session
 // must not stop the sweep reaching the rest.
+//
+// IT IS THE ONE GATE EVERY STAND-DOWN PASSES, so no trigger can skip the
+// remote-control rule: every record it writes names the trigger
+// (standDownReason.trigger), and the mode is read HERE, under the
+// workspace's remote-control gate (Deps.HoldRemoteControl), which is held
+// through the shim's stand-down and the park's record. A turn-on is recorded
+// and put in force under the same gate (workspace.Fleet.SetRemoteControl), so
+// it lands either before the read, which then spares the session, or after
+// the shim is gone, which its own no-shim path starts again
+// (UpdateRemoteControlMode): never between the decision and the act.
 func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) parkOutcome {
+	if why.remote != remoteSpares && why.remote != remoteParks {
+		panic(fmt.Sprintf("drain: the %s stand-down names no remote-control policy (%s)", why.op, why.remote))
+	}
+	fields = dlog.Merge(fields, dlog.Context{"trigger": why.trigger})
 	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderHibernate, wsm.PolicyHold)
 	if err != nil {
 		log.Debug(why.op, "another holder has the lease; deferring the park",
@@ -276,6 +338,26 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		// makes the parked workspace revivable by a prompt.
 		c.publishHost(ws)
 	}()
+
+	// THE MODE AND THE ACT ARE ONE DECISION. The gate is released before the
+	// lease is (defers run last-in first-out), so a turn-on that waited on
+	// the gate finds the shim gone and the lease free for the start it asks.
+	release := c.deps.HoldRemoteControl(ws)
+	defer release()
+	remote, err := c.deps.DB.RemoteControl(ctx, ws)
+	if err != nil {
+		log.Error(why.op, "could not read the workspace's remote-control mode; its stand-down is dropped", dlog.WithCause(fields, err))
+		return parkFailed
+	}
+	fields = dlog.Merge(fields, dlog.Context{
+		"remote_control":          remote.On,
+		"remote_control_recorded": remote.Recorded,
+		"remote_control_policy":   why.remote.String(),
+	})
+	if remote.On && why.remote == remoteSpares {
+		log.Info(why.op, remoteSpared, fields)
+		return parkSpared
+	}
 
 	// A DELIVERY UNDER WAY IS ENGAGEMENT. The gate read the session free
 	// before the lease was taken, and a submission may have decided in

@@ -86,6 +86,7 @@ func TestAHiddenWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *t
 	// Arrange
 	f := hiddenAndHeld(t)
 	f.d.ExpectWarnings(standDownWarnings...)
+	f.remoteControlOff()
 	roster := f.d.WatchRoster()
 
 	// Act: the projection names a lapse already come.
@@ -187,6 +188,7 @@ func TestAClosedWorkspaceIsStoodDownWhenItsCacheLapses(t *testing.T) {
 	// Arrange
 	f := closedAndLastRound(t)
 	f.d.ExpectWarnings(standDownWarnings...)
+	f.remoteControlOff()
 
 	// Act: the spent round's projection names a lapse already come.
 	f.d.OpenedShim(f.ws).PushSessionUpdate(cacheLapse(time.Now().Add(-time.Minute), 120_000))

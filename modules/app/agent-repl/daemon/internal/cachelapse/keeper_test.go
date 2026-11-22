@@ -389,9 +389,17 @@ func (f *fakeShim) Beat(context.Context) (*shimv1.SendKeepaliveSuccess, error) {
 
 type fakeStandDowns struct {
 	stood chan ids.WorkspaceID
+	// triggers, when made, receives each stand-down's trigger before its
+	// workspace reaches stood.
+	triggers chan drain.WithheldTrigger
 }
 
-func (f *fakeStandDowns) StandDownWithheld(ws ids.WorkspaceID) { f.stood <- ws }
+func (f *fakeStandDowns) StandDownWithheld(ws ids.WorkspaceID, trigger drain.WithheldTrigger) {
+	if f.triggers != nil {
+		f.triggers <- trigger
+	}
+	f.stood <- ws
+}
 
 type harness struct {
 	keeper *Keeper
@@ -1552,5 +1560,51 @@ func TestQueuedEdgesAreAppliedOnlyThroughApplyQueued(t *testing.T) {
 	// Assert
 	if !slices.Equal(sites, []string{"keeper_test.go"}) {
 		t.Fatalf("the take-and-apply loop is at %v, want only harness.applyQueued in keeper_test.go", sites)
+	}
+}
+
+// EVERY WITHHELD STAND-DOWN THE KEEPER ASKS FOR NAMES ITS TRIGGER, so the
+// drain's record says which one stood the session down.
+func TestEveryWithheldStandDownTheKeeperAsksNamesItsTrigger(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  func() wsm.Workspace
+		ask  func(h *harness)
+		want drain.WithheldTrigger
+	}{
+		{name: "a hidden workspace's cache lapse", rec: func() wsm.Workspace {
+			rec := hidden()
+			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
+			return rec
+		}, ask: func(h *harness) {
+			h.keeper.deadlines[theWorkspace] = lapseAt
+			h.clock.Set(lapseAt)
+			h.keeper.lapseDue(context.Background())
+		}, want: drain.WithheldCacheLapse},
+		{name: "a hidden merge workspace's ended merge", rec: func() wsm.Workspace {
+			return beatable(mergeWorkspace(), 10*time.Minute)
+		}, ask: func(h *harness) {
+			h.keeper.reconcile(context.Background(), theWorkspace, "test")
+		}, want: drain.WithheldMergeEnded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, tt.rec())
+			h.standDowns.triggers = make(chan drain.WithheldTrigger, 1)
+
+			// Act
+			tt.ask(h)
+
+			// Assert
+			select {
+			case got := <-h.standDowns.triggers:
+				if got != tt.want {
+					t.Fatalf("trigger = %s, want %s", got, tt.want)
+				}
+			default:
+				t.Fatalf("no stand-down was asked for, want one naming %s", tt.want)
+			}
+		})
 	}
 }

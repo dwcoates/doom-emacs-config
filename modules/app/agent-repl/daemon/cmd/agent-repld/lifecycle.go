@@ -12,6 +12,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
@@ -70,10 +71,12 @@ type sessionUpNotifiee interface {
 
 // standDownsFunc adapts a function to the cache keeper's withheld
 // stand-downs, so the keeper can reach a drain controller built after it.
-type standDownsFunc func(ws ids.WorkspaceID)
+type standDownsFunc func(ws ids.WorkspaceID, trigger drain.WithheldTrigger)
 
 // StandDownWithheld implements cachelapse.StandDowns.
-func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
+func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID, trigger drain.WithheldTrigger) {
+	f(ws, trigger)
+}
 
 // parkedKeepaliver is the slice of the session fleet the cache keeper reads a
 // parked conversation's keep-alive through.

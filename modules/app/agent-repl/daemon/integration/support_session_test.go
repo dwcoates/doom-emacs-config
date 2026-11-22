@@ -122,7 +122,8 @@ func (f *fixture) awaitGateShimStoodDown() {
 // remoteControlOff turns the fixture workspace's remote control off. A
 // repository's main worktree defaults to on, and a gate in remote control
 // keeps a shim holding its bridge rather than standing it down
-// (workspace/parkedbridge.go), so a test of the gate with no bridge says so.
+// (workspace/parkedbridge.go), and so does every stand-down (drain's one gate,
+// park), so a test of a stand-down with no bridge says so.
 func (f *fixture) remoteControlOff() {
 	f.t.Helper()
 	resp, err := f.d.Client().UpdateRemoteControlMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateRemoteControlModeRequest{

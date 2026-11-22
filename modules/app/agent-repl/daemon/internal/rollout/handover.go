@@ -375,7 +375,7 @@ func (c *controller) foldedRows(ctx context.Context, workspaces []wsm.Workspace)
 	}
 	out := make(map[ids.WorkspaceID]bool, len(workspaces))
 	for _, ws := range workspaces {
-		out[ws.ID] = folds[ws.ID]
+		_, out[ws.ID] = folds[ws.ID]
 	}
 	return out, nil
 }

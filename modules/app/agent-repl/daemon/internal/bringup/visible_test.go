@@ -3,12 +3,14 @@ package bringup
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -278,3 +280,65 @@ func TestMergeQueuedAtSurfacesAQueueReadFailure(t *testing.T) {
 		t.Fatal("MergeQueuedAt over a failed read answered no error")
 	}
 }
+
+func TestVisibilityOfNamesTheFoldItDecidedOn(t *testing.T) {
+	folded := ids.SubsectionID("folded-sub")
+	cases := []struct {
+		name     string
+		ws       wsm.Workspace
+		wantRuns bool
+		wantFold *sidebar.Fold
+	}{
+		{name: "a drawn workspace runs under no fold", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a"}, wantRuns: true},
+		{name: "a workspace in a collapsed repository names it", ws: wsm.Workspace{ID: "a", Repo: "folded", Place: 1, Dir: "/worktrees/a"},
+			wantFold: &sidebar.Fold{By: sidebar.FoldedByRepository, Repository: "gamma"}},
+		{name: "a workspace in a collapsed subsection names it", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded},
+			wantFold: &sidebar.Fold{By: sidebar.FoldedBySubsection, Repository: "alpha", Subsection: "folded"}},
+		{name: "a one-shot under a fold runs and still names it", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded, OneShot: true},
+			wantRuns: true, wantFold: &sidebar.Fold{By: sidebar.FoldedBySubsection, Repository: "alpha", Subsection: "folded"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			reg := &fakeRegistry{
+				repos:       []wsm.Repository{{ID: "r", Name: "alpha", Place: 1, Dir: "/repo"}, {ID: "folded", Name: "gamma", Folded: true, Place: 2, Dir: "/folded"}},
+				subsections: []wsm.Subsection{{ID: folded, Repo: "r", Name: "folded", Place: 1, Folded: true}},
+				workspaces:  map[ids.WorkspaceID]wsm.Workspace{"a": tc.ws},
+			}
+
+			// Act
+			got, err := VisibilityOf(context.Background(), reg, dlog.NewTestLogger(), "a")
+
+			// Assert
+			if err != nil || got.Runs != tc.wantRuns || !reflect.DeepEqual(got.Fold, tc.wantFold) {
+				t.Fatalf("VisibilityOf = %+v (fold %+v), %v; want runs %v under %+v", got, got.Fold, err, tc.wantRuns, tc.wantFold)
+			}
+		})
+	}
+}
+
+func TestVisibilityOfRefusesWhatItCannotRead(t *testing.T) {
+	cases := []struct {
+		name string
+		reg  *fakeRegistry
+		want error
+	}{
+		{name: "an unreadable record", reg: &fakeRegistry{workspaces: map[ids.WorkspaceID]wsm.Workspace{}}, want: wsm.ErrNotFound},
+		{name: "unreadable folds", reg: &fakeRegistry{reposErr: errFolds, workspaces: map[ids.WorkspaceID]wsm.Workspace{"a": {ID: "a", Repo: "r"}}}, want: errFolds},
+		{name: "unreadable queues", reg: &fakeRegistry{queuesErr: errFolds, workspaces: map[ids.WorkspaceID]wsm.Workspace{"a": {ID: "a", Repo: "r"}}}, want: errFolds},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := VisibilityOf(context.Background(), tc.reg, dlog.NewTestLogger(), "a")
+
+			// Assert
+			if !errors.Is(err, tc.want) || got.Runs || got.Fold != nil {
+				t.Fatalf("VisibilityOf = %+v, %v; want nothing and %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// errFolds is the failure the fake registry answers a read with.
+var errFolds = errors.New("the fake registry refused")

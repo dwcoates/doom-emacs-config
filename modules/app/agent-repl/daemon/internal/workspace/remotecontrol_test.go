@@ -1038,3 +1038,28 @@ func TestARegisteredHolderStatesItsLiftOnTheNaming(t *testing.T) {
 		t.Fatalf("namings = %+v, want the last carrying the lifted remote control on", f.topbarNamings)
 	}
 }
+
+// A STAND-DOWN HOLDS THE GATE EVERY CHANGE OF THE MODE TAKES
+// (drain.Deps.HoldRemoteControl), so the mode a stand-down read is the one in
+// force until its act is done.
+func TestHoldRemoteControlHoldsTheGateEveryChangeTakes(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	gate := f.fleet.remoteControlGate(ws.ID)
+
+	// Act.
+	release := f.fleet.HoldRemoteControl(ws.ID)
+	heldFree := gate.TryLock()
+	release()
+	releasedFree := gate.TryLock()
+
+	// Assert.
+	if heldFree {
+		t.Fatal("the gate was free while a stand-down held it")
+	}
+	if !releasedFree {
+		t.Fatal("the gate stayed held once the stand-down released it")
+	}
+	gate.Unlock()
+}

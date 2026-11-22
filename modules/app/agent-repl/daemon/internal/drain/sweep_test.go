@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1593,7 +1595,7 @@ func TestEveryTriggerLeavesTheOnePark(t *testing.T) {
 		}},
 		{name: "a withheld workspace's stand-down", wantDetail: "hidden, collapsed or closed", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.hidden(t)
-			h.c.StandDownWithheld(ws)
+			h.c.StandDownWithheld(ws, WithheldCacheLapse)
 			return ws
 		}},
 		{name: "the keep-alive cycle", wantDetail: "between keep-alives", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
@@ -1630,5 +1632,336 @@ func TestEveryTriggerLeavesTheOnePark(t *testing.T) {
 				t.Errorf("SetParked calls = %v, want the one park raised once", told)
 			}
 		})
+	}
+}
+
+// remoteControlFailingDB fails every remote-control read.
+type remoteControlFailingDB struct{ wsm.DB }
+
+func (d remoteControlFailingDB) RemoteControl(context.Context, ids.WorkspaceID) (wsm.RemoteControl, error) {
+	return wsm.RemoteControl{}, errFake
+}
+
+// standDownPath is one trigger of the one park, asked for WS.
+type standDownPath struct {
+	name    string
+	op      string
+	trigger string
+	// withhold arranges what makes the path take WS: withheld paths need
+	// the workspace withheld, the cycle's need nothing.
+	withhold func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	ask      func(t *testing.T, h *harness, ws ids.WorkspaceID)
+}
+
+// sparingPaths is every stand-down path whose reason spares a session in
+// remote control: every one but the idle sweep's.
+var sparingPaths = []standDownPath{
+	{name: "a collapse's withheld stand-down", op: opWithheld, trigger: "collapse",
+		withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.inCollapsedSubsection(t, ws) },
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.StandDownWithheld(ws, WithheldCollapse) }},
+	{name: "a hidden workspace's cache lapse", op: opWithheld, trigger: "cache_lapse",
+		withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.hide(t, ws) },
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.StandDownWithheld(ws, WithheldCacheLapse) }},
+	{name: "a hidden merge workspace's ended merge", op: opWithheld, trigger: "merge_ended",
+		withhold: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.hide(t, ws) },
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.StandDownWithheld(ws, WithheldMergeEnded) }},
+	{name: "the keep-alive cycle", op: opCycle, trigger: "keepalive_cycle",
+		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.CycleDown(ws, beatAfter) }},
+	{name: "a cold cache's park", op: opCold, trigger: "cold_park",
+		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.ColdDown(ws, beatAfter) }},
+	{name: "a settings visit's end", op: opVisit, trigger: "settings_visit",
+		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.VisitDown(ws, beatAfter) }},
+	{name: "a sync merge put in line", op: opMergeQueued, trigger: "merge_queued",
+		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
+		ask: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			h.mergeQueuedDown(ws, queuedAt(t, h, ws, instant))
+		}},
+}
+
+// recordWith answers the first record under OP whose message is MESSAGE.
+func recordWith(t *testing.T, h *harness, op, message string) dlog.Record {
+	t.Helper()
+	if record, ok := dlog.FindRecord(records(h.log, op), dlog.RecordQuery{Message: message}); ok {
+		return record
+	}
+	t.Fatalf("records = %+v, want %q under %s", records(h.log, op), message, op)
+	return dlog.Record{}
+}
+
+// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM (owner ruling, 2026-10-31),
+// whichever trigger but the idle sweep's asks.
+func TestEveryStandDownPathSparesARemoteControlledSession(t *testing.T) {
+	for _, path := range sparingPaths {
+		t.Run(path.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.remoteControlOn(t)
+			path.withhold(t, h, ws)
+
+			// Act
+			path.ask(t, h, ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none for a session in remote control", killed)
+			}
+			if term := h.terminal(t, ws); term != nil {
+				t.Fatalf("terminal = %+v, want the session left live", term)
+			}
+			if held := h.remote.heldCount(ws); held != 1 {
+				t.Fatalf("the remote-control gate was taken %d times, want once", held)
+			}
+			record := recordWith(t, h, path.op, remoteSpared)
+			if record.Level != "info" || record.Context["trigger"] != path.trigger || record.Context["remote_control"] != true {
+				t.Fatalf("record = %+v, want the spare at info naming trigger %q and remote control on", record, path.trigger)
+			}
+		})
+	}
+}
+
+// THE IDLE SWEEP PARKS A SESSION IN REMOTE CONTROL (owner ruling,
+// 2026-11-09) through the same gate, which records the mode it read.
+func TestTheIdleSweepParksARemoteControlledSessionThroughTheGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.mainWorktree(t, instant.Add(-2*time.Hour))
+
+	// Act
+	parked, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil || len(parked) != 1 || parked[0] != ws {
+		t.Fatalf("Sweep = %v, %v; want [%s] parked", parked, err, ws)
+	}
+	if held := h.remote.heldCount(ws); held != 1 {
+		t.Fatalf("the remote-control gate was taken %d times, want once", held)
+	}
+	record := recordWith(t, h, opSweep, "parked a session idle past the cutoff")
+	if record.Context["remote_control"] != true || record.Context["remote_control_policy"] != "parks" || record.Context["trigger"] != triggerIdle {
+		t.Fatalf("record = %+v, want the park naming the idle cutoff and the mode it read", record)
+	}
+}
+
+// A TURN-ON THAT LANDS BETWEEN THE ASK AND THE ACT IS HONORED: the mode is
+// read under the gate a change of it holds (park), so a change under way when
+// the stand-down reaches the act is waited for and read.
+func TestARemoteControlTurnOnBetweenTheAskAndTheActIsHonored(t *testing.T) {
+	for _, path := range sparingPaths {
+		t.Run(path.name, func(t *testing.T) {
+			// Arrange: the mode is off at the ask, and a turn-on holds the gate.
+			ran := make(chan struct{})
+			h := newHarness(t, func(d *Deps) {
+				d.Detach = func(_ ids.WorkspaceID, run func(context.Context)) {
+					go func() {
+						defer close(ran)
+						run(context.Background())
+					}()
+				}
+			})
+			ws := h.workspace(t, instant)
+			path.withhold(t, h, ws)
+			turnOn := h.remote.hold(ws)
+			asking := make(chan ids.WorkspaceID, 1)
+			h.remote.mu.Lock()
+			h.remote.asking = asking
+			h.remote.mu.Unlock()
+
+			// Act
+			path.ask(t, h, ws)
+			select {
+			case <-asking:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the stand-down never reached the remote-control gate")
+			}
+			if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOn); err != nil {
+				t.Fatalf("SetRemoteControlMode: %v", err)
+			}
+			turnOn()
+			select {
+			case <-ran:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the stand-down never settled")
+			}
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none for a mode turned on before the act", killed)
+			}
+			if record := recordWith(t, h, path.op, remoteSpared); record.Context["remote_control"] != true {
+				t.Fatalf("record = %+v, want the spare reading the mode turned on", record)
+			}
+		})
+	}
+}
+
+// EVERY STAND-DOWN RECORD NAMES ITS TRIGGER and the mode it decided on.
+func TestEveryStandDownRecordNamesItsTrigger(t *testing.T) {
+	idle := standDownPath{name: "the idle sweep", op: opSweep, trigger: triggerIdle,
+		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
+		ask: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, err := h.c.Sweep(context.Background(), instant.Add(2*time.Hour)); err != nil {
+				t.Fatalf("Sweep: %v", err)
+			}
+		}}
+	for _, path := range append(append([]standDownPath{}, sparingPaths...), idle) {
+		t.Run(path.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			path.withhold(t, h, ws)
+
+			// Act
+			path.ask(t, h, ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 1 {
+				t.Fatalf("kills = %+v, want the session stood down", killed)
+			}
+			var done dlog.Record
+			for _, record := range records(h.log, path.op) {
+				if record.Level == "info" && record.Context["trigger"] == path.trigger && record.Context["remote_control"] == false {
+					done = record
+				}
+			}
+			if done.Message == "" {
+				t.Fatalf("records = %+v, want the stand-down at info naming trigger %q and remote control off", records(h.log, path.op), path.trigger)
+			}
+		})
+	}
+}
+
+// A COLLAPSE'S RECORD NAMES THE FOLD it decided on.
+func TestACollapseStandDownNamesItsFold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.inCollapsedSubsection(t, ws)
+
+	// Act
+	h.c.StandDownWithheld(ws, WithheldCollapse)
+
+	// Assert
+	record := recordWith(t, h, opWithheld, "stood a withheld workspace's session down")
+	if record.Context["fold"] != "subsection" || record.Context["fold_subsection"] != "folded" || record.Context["trigger"] != "collapse" {
+		t.Fatalf("record = %+v, want the collapse naming its subsection", record)
+	}
+}
+
+// AN UNREADABLE MODE STANDS NOTHING DOWN: the act is not taken on a mode
+// nobody read, and the failure is recorded once at ERROR with its trigger.
+func TestAnUnreadableRemoteControlModeStandsNothingDown(t *testing.T) {
+	for _, path := range sparingPaths {
+		t.Run(path.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, func(d *Deps) { d.DB = remoteControlFailingDB{DB: d.DB} })
+			ws := h.workspace(t, instant)
+			path.withhold(t, h, ws)
+
+			// Act
+			path.ask(t, h, ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none on an unreadable mode", killed)
+			}
+			if term := h.terminal(t, ws); term != nil {
+				t.Fatalf("terminal = %+v, want no park recorded", term)
+			}
+			record := recordWith(t, h, path.op, "could not read the workspace's remote-control mode; its stand-down is dropped")
+			if record.Level != "error" || record.Context["trigger"] != path.trigger || !strings.Contains(fmt.Sprint(record.Context["cause"]), errFake.Error()) {
+				t.Fatalf("record = %+v, want the failure at error naming its trigger and cause", record)
+			}
+		})
+	}
+}
+
+// allReasons is every stand-down reason the package declares.
+func allReasons(c *controller) []standDownReason {
+	return []standDownReason{
+		c.idleReason(), cycleReason, visitReason, coldReason, mergeQueuedReason,
+		withheldReason(WithheldCollapse), withheldReason(WithheldCacheLapse), withheldReason(WithheldMergeEnded),
+	}
+}
+
+// EVERY STAND-DOWN PATH GOES THROUGH THE ONE GATE: the shim is stood down,
+// and the mode read, only in park, and every reason park is handed names
+// its trigger and a remote-control policy, which only the idle sweep's lets
+// park a session in remote control.
+func TestEveryStandDownPathGoesThroughTheRemoteControlGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reasons := allReasons(h.c)
+
+	// Act
+	kills := sourcescan.Sites(t, "Stand.KillSession(")
+	hibernates := sourcescan.Sites(t, "Stand.Hibernate(")
+	modeReads := sourcescan.Sites(t, "DB.RemoteControl(")
+	literals := sourcescan.Sites(t, "standDownReason{")
+	parks := sourcescan.Sites(t, "c.park(")
+
+	// Assert
+	// controller.go's is the daemon's own immediate shutdown, which forces
+	// every session down for its exit and is no trigger of the park.
+	if !slices.Equal(kills, []string{"controller.go", "sweep.go"}) || !slices.Equal(hibernates, []string{"sweep.go"}) {
+		t.Fatalf("KillSession sites = %v, Hibernate sites = %v; want the shutdown's and park's alone", kills, hibernates)
+	}
+	if !slices.Equal(modeReads, []string{"sweep.go"}) {
+		t.Fatalf("remote-control reads = %v, want park's alone", modeReads)
+	}
+	if !slices.Equal(parks, []string{"cycle.go", "sweep.go", "withheld.go"}) {
+		t.Fatalf("park sites = %v, want the cycle's, the sweep's and the withheld path's", parks)
+	}
+	if len(literals) != 6 {
+		t.Fatalf("standDownReason literals = %v, want the six allReasons builds from", literals)
+	}
+	for _, reason := range reasons {
+		if reason.trigger == "" {
+			t.Errorf("the %s reason names no trigger", reason.op)
+		}
+		want := remoteSpares
+		if reason.op == opSweep {
+			want = remoteParks
+		}
+		if reason.remote != want {
+			t.Errorf("the %s reason's remote-control policy = %s, want %s", reason.op, reason.remote, want)
+		}
+	}
+}
+
+func TestParkRefusesAReasonWithNoRemoteControlPolicy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	reason := cycleReason
+	reason.remote = 0
+
+	// Act
+	defer func() {
+		// Assert
+		if recovered := recover(); recovered == nil || !strings.Contains(fmt.Sprint(recovered), "no remote-control policy") {
+			t.Fatalf("recovered = %v, want the missing policy refused", recovered)
+		}
+		if killed := h.stand.Killed(); len(killed) != 0 {
+			t.Fatalf("kills = %+v, want none", killed)
+		}
+	}()
+	h.c.park(context.Background(), h.c.log, ws, dlog.Context{}, reason)
+}
+
+func TestNewRefusesWithoutARemoteControlGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.c.deps
+	deps.HoldRemoteControl = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "remote-control gate") {
+		t.Fatalf("New = %v, want the missing remote-control gate refused", err)
 	}
 }
