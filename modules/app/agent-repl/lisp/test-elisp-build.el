@@ -103,8 +103,37 @@ Every module in ABSENT is named by config.el but gets no file."
 (defvar agent-repl-test-eb--reported nil
   "Every editor latency the reload reported, newest first, as (KIND SECONDS).")
 
+(defconst agent-repl-test-eb--real-undefined-functions
+  (symbol-function 'agent-repl--elisp-undefined-functions)
+  "The real collector of agent-repl functions no loaded file defines.")
+
+(defvar agent-repl-test-eb--retirable []
+  "The symbols a case lets the retirement reach.
+The retirement walks the whole obarray of the batch Emacs, so every case
+confines it to the symbols the case itself defines: the real collector
+still decides, and its answer is narrowed to these, so no other definition
+of the batch Emacs is ever retired.  A VECTOR, never a list: the retirement
+clears every list variable holding a retired symbol, this one included.")
+
+(defun agent-repl-test-eb--confined-undefined-functions ()
+  "Answer the real collector's functions that are `agent-repl-test-eb--retirable'."
+  (seq-filter (lambda (symbol) (seq-contains-p agent-repl-test-eb--retirable symbol #'eq))
+              (funcall agent-repl-test-eb--real-undefined-functions)))
+
+(defmacro agent-repl-test-eb--with-retirable (symbols &rest body)
+  "Run BODY with the retirement confined to SYMBOLS, each unbound afterwards."
+  (declare (indent 1))
+  `(let ((agent-repl-test-eb--retirable (vconcat ,symbols)))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl--elisp-undefined-functions)
+                    #'agent-repl-test-eb--confined-undefined-functions))
+           ,@body)
+       (seq-do #'fmakunbound agent-repl-test-eb--retirable))))
+
 (defmacro agent-repl-test-eb--with-harness (&rest body)
-  "Run BODY with the logger, `message', the load and the assertion stubbed."
+  "Run BODY with the logger, `message', the load and the assertion stubbed.
+The retirement is confined to `agent-repl-test-eb--retirable', empty unless
+a case binds it."
   (declare (indent 0))
   `(let ((agent-repl-test-eb--logs nil)
          (agent-repl-test-eb--messages nil)
@@ -116,7 +145,9 @@ Every module in ABSENT is named by config.el but gets no file."
          (agent-repl-test-eb--reported nil)
          (agent-repl-test-eb--compiles nil)
          (agent-repl--elisp-module-builds agent-repl--elisp-module-builds))
-     (cl-letf (((symbol-function 'agent-repl-bytecode-schedule)
+     (cl-letf (((symbol-function 'agent-repl--elisp-undefined-functions)
+                #'agent-repl-test-eb--confined-undefined-functions)
+               ((symbol-function 'agent-repl-bytecode-schedule)
                 (lambda (root modules) (push (list root modules) agent-repl-test-eb--compiles)))
                ((symbol-function 'agent-repl-latency-report-editor)
                 (lambda (kind seconds) (push (list kind seconds) agent-repl-test-eb--reported)))
@@ -910,6 +941,156 @@ Its value and declared default are restored afterwards."
               ;; Assert
               (should (equal agent-repl-test-eb--option "old")))
           (put 'agent-repl-test-eb--option 'customized-value nil))))))
+
+;;;; ---- A reload's retired definitions ----
+;;
+;; A retired definition is a function defined OUTSIDE any load, as the one
+;; a reloaded file no longer defines is: `defalias' at run time leaves no
+;; `load-history' entry, so `symbol-file' answers nil.  Every case confines
+;; the retirement to its own symbols (`agent-repl-test-eb--with-retirable').
+
+(defvar agent-repl-test-eb--hook nil
+  "A hook the retirement cases put their functions on; each case let-binds it.")
+
+(defun agent-repl-test-eb--define-orphan (symbol)
+  "Define SYMBOL outside any load, so no loaded file defines it."
+  (defalias symbol (lambda () 'orphan)))
+
+(defun agent-repl-test-eb--timer-pending-p (timer)
+  "Return non-nil when TIMER is still in `timer-list'."
+  (and (memq timer timer-list) t))
+
+(ert-deftest agent-repl-test-eb-retire-unbinds-a-function-no-file-defines ()
+  "An agent-repl function no loaded file defines is unbound by the retirement."
+  (agent-repl-test-eb--with-retirable '(agent-repl-test-eb--orphan)
+    ;; Arrange
+    (agent-repl-test-eb--define-orphan 'agent-repl-test-eb--orphan)
+    ;; Act
+    (agent-repl--elisp-retire-undefined)
+    ;; Assert
+    (should-not (fboundp 'agent-repl-test-eb--orphan))))
+
+(ert-deftest agent-repl-test-eb-retire-removes-it-from-a-hook-keeping-the-others ()
+  "The retired function leaves every hook holding it; the hook's other functions stay."
+  (agent-repl-test-eb--with-retirable '(agent-repl-test-eb--orphan)
+    ;; Arrange
+    (agent-repl-test-eb--define-orphan 'agent-repl-test-eb--orphan)
+    (let ((agent-repl-test-eb--hook (list #'ignore 'agent-repl-test-eb--orphan #'identity)))
+      ;; Act
+      (let ((result (agent-repl--elisp-retire-undefined)))
+        ;; Assert
+        (should (equal (list agent-repl-test-eb--hook (plist-get result :hooks))
+                       '((ignore identity)
+                         ((agent-repl-test-eb--hook . agent-repl-test-eb--orphan)))))))))
+
+(ert-deftest agent-repl-test-eb-retire-cancels-a-timer-calling-it-keeping-the-others ()
+  "A timer whose function is the retired one is cancelled; another timer stays."
+  (agent-repl-test-eb--with-retirable '(agent-repl-test-eb--orphan)
+    ;; Arrange
+    (agent-repl-test-eb--define-orphan 'agent-repl-test-eb--orphan)
+    (let ((retired (run-at-time 3600 nil 'agent-repl-test-eb--orphan))
+          (kept (run-at-time 3600 nil #'ignore)))
+      (unwind-protect
+          ;; Act
+          (let ((result (agent-repl--elisp-retire-undefined)))
+            ;; Assert
+            (should (equal (list (agent-repl-test-eb--timer-pending-p retired)
+                                 (agent-repl-test-eb--timer-pending-p kept)
+                                 (plist-get result :timers))
+                           '(nil t (agent-repl-test-eb--orphan)))))
+        (cancel-timer retired)
+        (cancel-timer kept)))))
+
+(ert-deftest agent-repl-test-eb-retire-keeps-a-function-a-loaded-file-defines ()
+  "An agent-repl function a loaded file defines stays defined and on its hook."
+  (agent-repl-test-eb--with-root root
+    (agent-repl-test-eb--with-retirable '(agent-repl-test-eb--file-defined)
+      ;; Arrange
+      (let ((file (expand-file-name "defines.el" root)))
+        (agent-repl-test-eb--write-bytes
+         file ";;; -*- lexical-binding: t; -*-\n(defun agent-repl-test-eb--file-defined () 'defined)\n")
+        (unwind-protect
+            (progn
+              (load file nil t t)
+              (let ((agent-repl-test-eb--hook (list 'agent-repl-test-eb--file-defined)))
+                ;; Act
+                (agent-repl--elisp-retire-undefined)
+                ;; Assert
+                (should (equal (list (fboundp 'agent-repl-test-eb--file-defined)
+                                     agent-repl-test-eb--hook)
+                               '(t (agent-repl-test-eb--file-defined))))))
+          (setq load-history (assoc-delete-all file load-history)))))))
+
+(ert-deftest agent-repl-test-eb-retire-keeps-an-unprefixed-function-no-file-defines ()
+  "A function outside the agent-repl prefix is kept though no loaded file defines it."
+  (agent-repl-test-eb--with-retirable '(test-eb-unprefixed--orphan)
+    ;; Arrange
+    (agent-repl-test-eb--define-orphan 'test-eb-unprefixed--orphan)
+    ;; Act
+    (agent-repl--elisp-retire-undefined)
+    ;; Assert
+    (should (fboundp 'test-eb-unprefixed--orphan))))
+
+(ert-deftest agent-repl-test-eb-reload-retires-after-a-clean-load ()
+  "A reload whose every module loaded retires the leftover and records it at INFO."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      (agent-repl-test-eb--with-retirable '(agent-repl-test-eb--orphan)
+        ;; Arrange
+        (agent-repl-test-eb--write-root root '("core" "status"))
+        (agent-repl-test-eb--define-orphan 'agent-repl-test-eb--orphan)
+        ;; Act
+        (agent-repl--elisp-reload-run root "any")
+        ;; Assert
+        (should (equal (list (fboundp 'agent-repl-test-eb--orphan)
+                             (agent-repl-test-eb--logged :info "elisp.elisp-build.retired"))
+                       '(nil ((:info . "elisp.elisp-build.retired count=1 functions=(agent-repl-test-eb--orphan) hooks=nil timers=nil")))))))))
+
+(ert-deftest agent-repl-test-eb-reload-with-a-failed-module-retires-nothing ()
+  "A reload in which a module failed to load leaves the leftover defined."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      (agent-repl-test-eb--with-retirable '(agent-repl-test-eb--orphan)
+        ;; Arrange
+        (agent-repl-test-eb--write-root root '("core" "status"))
+        (setq agent-repl-test-eb--failing-loads '("status"))
+        (agent-repl-test-eb--define-orphan 'agent-repl-test-eb--orphan)
+        ;; Act
+        (agent-repl--elisp-reload-run root "any")
+        ;; Assert
+        (should (fboundp 'agent-repl-test-eb--orphan))))))
+
+(ert-deftest agent-repl-test-eb-reload-with-a-failed-module-records-the-skip ()
+  "A reload in which a module failed to load records at INFO that it retired nothing, and why."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      (agent-repl-test-eb--with-retirable '(agent-repl-test-eb--orphan)
+        ;; Arrange
+        (agent-repl-test-eb--write-root root '("core" "status"))
+        (setq agent-repl-test-eb--failing-loads '("status"))
+        (agent-repl-test-eb--define-orphan 'agent-repl-test-eb--orphan)
+        ;; Act
+        (agent-repl--elisp-reload-run root "any")
+        ;; Assert
+        (should (equal (list (agent-repl-test-eb--logged :info "elisp.elisp-build.retire")
+                             (agent-repl-test-eb--logged :log "elisp.elisp-build.retire"))
+                       '(((:info . "elisp.elisp-build.retire-skipped failed=1 reason=a module failed to load, so its functions may still be needed"))
+                         nil)))))))
+
+(ert-deftest agent-repl-test-eb-reload-with-nothing-to-retire-records-the-quiet-outcome ()
+  "A clean reload that finds nothing to retire records so at the debug rung, not at INFO."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      (agent-repl-test-eb--with-retirable nil
+        ;; Arrange
+        (agent-repl-test-eb--write-root root '("core"))
+        ;; Act
+        (agent-repl--elisp-reload-run root "any")
+        ;; Assert
+        (should (equal (list (agent-repl-test-eb--logged :log "elisp.elisp-build.retire")
+                             (agent-repl-test-eb--logged :info "elisp.elisp-build.retire"))
+                       '(((:log . "elisp.elisp-build.retired-none reason=every agent-repl function is defined by a loaded file"))
+                         nil)))))))
 
 (provide 'test-elisp-build)
 
