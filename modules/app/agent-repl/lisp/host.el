@@ -190,7 +190,7 @@ registered on the current daemon yet."
   (plist-get (agent-repl-host--entry ws) :ref))
 
 (defun agent-repl-host--conn-id (conn)
-  "Return a short identity for CONN, which tells two connections at one address apart.
+  "Return a short identity for CONN, telling connections at one address apart.
 Every daemon of a handover serves the one shared address, so the address
 names no connection; this identity does, in the records of the walks and
 the dead-connection check.  Nil CONN answers \"none\"."
