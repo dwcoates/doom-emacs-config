@@ -22,7 +22,6 @@ import (
 	"agent-repld/internal/holderensure"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
-	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/pprofsurface"
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
@@ -806,7 +805,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	loops.Go("state_root_watch", func() {
 		_ = rootWatch{
 			verify:  claim.Verify,
-			changes: kernelevent.FollowPaths(rootWatchPaths(layout.Dir(), layout.DaemonAddr())...),
+			changes: followRootPaths(layout.DaemonAddr(), string(instance), rootWatchPaths(layout.Dir(), layout.DaemonAddr())...),
 			log:     log,
 			standDown: func(cause error) {
 				ended.record(standDownStateRootLost, cause)

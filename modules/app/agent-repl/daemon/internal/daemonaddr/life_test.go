@@ -14,6 +14,25 @@ import (
 	"agent-repld/internal/recordlock/locktest"
 )
 
+// TestHoldLifeLocksUnderLifePendingPathFirst pins LifePendingPath to the name
+// HoldLife makes its lock under: another holder's lock there refuses it.
+func TestHoldLifeLocksUnderLifePendingPathFirst(t *testing.T) {
+	// Arrange: another process holds a record lock on the pending name.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(path), LifeDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	startLockHelper(t, "shared", LifePendingPath(path, "a"))
+
+	// Act
+	_, err := HoldLife(path, "a")
+
+	// Assert
+	if !errors.Is(err, ErrClaimed) {
+		t.Fatalf("HoldLife beside a held pending name = %v, want ErrClaimed", err)
+	}
+}
+
 func TestHoldLifeHoldsOneInstanceOnce(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "daemon.addr")

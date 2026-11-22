@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 
@@ -24,15 +25,23 @@ import (
 // is seen the instant it happens, and a root nobody touches costs no check
 // at all.
 //
-// THE WATCH NEVER OPENS A LOCK FILE. Closing ANY descriptor of a file drops
-// every record lock this process holds on it (recordlock's package comment),
-// and the watch closes and reopens what it follows at every change and at
-// its stop. Following daemon.lock dropped the boot claim while the daemon
-// still ran: at a handover the successor took the claim and published
-// before the incumbent exited, and the incumbent's exit then withdrew the
-// successor's advertisement (2026-11-22). The root's own watch reports
-// daemon.lock removed or replaced, a change of its entries, and Verify
-// checks the lock's inode at that change.
+// THE WATCH NEVER OPENS A LOCK FILE, AND REFUSES TO. Closing ANY descriptor
+// of a file drops every record lock this process holds on it (recordlock's
+// package comment), and the watch closes and reopens what it follows at every
+// change and at its stop. Following daemon.lock dropped the boot claim while
+// the daemon still ran: at a handover the successor took the claim and
+// published before the incumbent exited, and the incumbent's exit then
+// withdrew the successor's advertisement (2026-11-22). The root's own watch
+// reports daemon.lock removed or replaced, a change of its entries, and
+// Verify checks the lock's inode at that change.
+//
+// The refusal is the watch's own, not only its path list's: the root watch's
+// change source is built by followRootPaths alone, which PANICS on any path
+// that is one of this daemon's lock files (daemonaddr.LockFiles: the boot
+// claim, the serving lock, its life lock and that lock's pending name, by
+// cleaned path) or has a lock file's name (daemonaddr.LockKindOf), and
+// TestOnlyFollowRootPathsBuildsTheRootWatchsSource keeps every other follow
+// out of this package.
 
 // rootWatch stands the daemon down when what it owns on disk vanishes.
 type rootWatch struct {
@@ -51,6 +60,27 @@ type rootWatch struct {
 // watch reports one removed or replaced.
 func rootWatchPaths(root, addrPath string) []string {
 	return []string{filepath.Dir(root), root, addrPath}
+}
+
+// followRootPaths is THE ONE constructor of the root watch's change source
+// (kernelevent.FollowPaths over PATHS). It PANICS, an invariant violation,
+// when any of PATHS is a lock file of daemon INSTANCE on the state root of
+// ADDRPATH, or has a lock file's name: following one would drop this
+// daemon's record lock on it the first time the watch's descriptor closed.
+func followRootPaths(addrPath, instance string, paths ...string) kernelevent.Source {
+	locks := daemonaddr.LockFiles(addrPath, instance)
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		for _, lock := range locks {
+			if clean == filepath.Clean(lock.Path) {
+				panic(fmt.Sprintf("agent-repld: invariant violated: the state-root watch was asked to follow %q, this daemon's %s lock; closing the watch's descriptor would drop its record lock", path, lock.Kind))
+			}
+		}
+		if kind, ok := daemonaddr.LockKindOf(clean); ok {
+			panic(fmt.Sprintf("agent-repld: invariant violated: the state-root watch was asked to follow %q, named as a %s lock; closing the watch's descriptor would drop a record lock on it", path, kind))
+		}
+	}
+	return kernelevent.FollowPaths(paths...)
 }
 
 // run verifies once the watch is taken, then at every change it reports,
