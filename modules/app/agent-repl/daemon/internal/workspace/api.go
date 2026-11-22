@@ -628,7 +628,8 @@ type Verbs interface {
 	// summary the workspace now has.
 	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary string) (string, error)
 	// SetHidden moves the workspace into the roster's hidden section, or back
-	// out of it, and republishes the roster.
+	// out of it, and republishes the roster. A show also reveals a hidden
+	// merge workspace, so it ends with the workspace drawn or with an error.
 	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
 	// BacklogColdGate moves a shown workspace whose cold gate, lapsed at
 	// gateLapsedAt, has stood too long into the hidden section, once per gate

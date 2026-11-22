@@ -2383,6 +2383,13 @@ type fakeMerge struct {
 	closed []ids.WorkspaceID
 	// hidden are the workspaces OnHidden was told of, in order.
 	hidden []ids.WorkspaceID
+	// reveals are the workspaces RevealMergeWorkspace was asked to reveal, in
+	// order, and revealCauses the cause each named. reveal, when set, stands
+	// for the orchestrator's reveal and answers it; unset, a reveal answers
+	// success and changes nothing.
+	reveals      []ids.WorkspaceID
+	revealCauses []string
+	reveal       func(context.Context, ids.WorkspaceID) error
 	// linksChanged records every WorkspaceLinksChanged.
 	linksChanged []ids.WorkspaceID
 	enqueued     []ids.WorkspaceID
@@ -2482,6 +2489,16 @@ func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {
 // OnHidden records the hidden workspace.
 func (m *fakeMerge) OnHidden(ws ids.WorkspaceID) {
 	m.hidden = append(m.hidden, ws)
+}
+
+// RevealMergeWorkspace records the reveal and answers the scripted one.
+func (m *fakeMerge) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error {
+	m.reveals = append(m.reveals, ws)
+	m.revealCauses = append(m.revealCauses, cause)
+	if m.reveal == nil {
+		return nil
+	}
+	return m.reveal(ctx, ws)
 }
 
 func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {

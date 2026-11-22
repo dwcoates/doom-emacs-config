@@ -980,6 +980,186 @@ func TestTheHiddenFlagHasOneWrite(t *testing.T) {
 	}
 }
 
+// hiddenMergeWorkspace registers WS as a merge workspace its async merge still
+// withholds, with the hidden flag as HIDDEN, and makes the fixture's merge
+// queue reveal through the verbs' own durable reveal, as the orchestrator does.
+func hiddenMergeWorkspace(t *testing.T, f *fixture, ws ids.WorkspaceID, hidden bool) {
+	t.Helper()
+	record := f.workspace(ws, t.TempDir())
+	record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
+	record.Hidden = hidden
+	f.db.with(record)
+	f.merge.reveal = func(ctx context.Context, id ids.WorkspaceID) error {
+		_, err := f.verbs.RevealMergeWorkspace(ctx, id)
+		return err
+	}
+}
+
+// drawnOpen reports whether the last roster the sidebar was handed lists WS in
+// its Open section.
+func drawnOpen(t *testing.T, f *fixture, ws ids.WorkspaceID) bool {
+	t.Helper()
+	if len(f.sidebar.registries) == 0 {
+		t.Fatal("no roster was published")
+	}
+	for _, record := range f.sidebar.registries[len(f.sidebar.registries)-1].Workspaces {
+		if record.ID == ws {
+			return record.ListedOpen()
+		}
+	}
+	t.Fatalf("the published roster does not hold %s", ws)
+	return false
+}
+
+func TestShowingAHiddenMergeWorkspaceRevealsItAndTheRosterDrawsIt(t *testing.T) {
+	tests := []struct {
+		name string
+		// hidden is the hidden flag beside the unrevealed standing.
+		hidden bool
+	}{
+		{name: "withheld by its merge only", hidden: false},
+		{name: "withheld by its merge and hidden by the flag", hidden: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			hiddenMergeWorkspace(t, f, "ws-merge", tt.hidden)
+
+			// Act
+			err := f.verbs.SetHidden(context.Background(), "ws-merge", false)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+			if !slices.Equal(f.merge.reveals, []ids.WorkspaceID{"ws-merge"}) || f.merge.revealCauses[0] != "it was shown" {
+				t.Fatalf("reveals = %v causes = %v, want the one reveal a show asks for", f.merge.reveals, f.merge.revealCauses)
+			}
+			if !drawnOpen(t, f, "ws-merge") {
+				t.Fatalf("the roster does not draw the shown merge workspace: %+v", f.db.workspaces["ws-merge"])
+			}
+		})
+	}
+}
+
+func TestShowingAnOrdinaryWorkspaceRevealsNothing(t *testing.T) {
+	tests := []struct {
+		name   string
+		record func(wsm.Workspace) wsm.Workspace
+	}{
+		{name: "an ordinary hidden workspace", record: func(ws wsm.Workspace) wsm.Workspace { return ws }},
+		{name: "a revealed merge workspace the user hid", record: func(ws wsm.Workspace) wsm.Workspace {
+			ws.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
+			ws.MergeRevealed = true
+			return ws
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			record := tt.record(f.workspace("w1", t.TempDir()))
+			record.Hidden = true
+			f.db.with(record)
+
+			// Act
+			err := f.verbs.SetHidden(context.Background(), "w1", false)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+			if len(f.merge.reveals) != 0 {
+				t.Fatalf("reveals = %v, want none", f.merge.reveals)
+			}
+			if len(f.sidebar.registries) != 1 || !drawnOpen(t, f, "w1") {
+				t.Fatalf("roster republications = %d, want the one that draws the shown workspace", len(f.sidebar.registries))
+			}
+		})
+	}
+}
+
+func TestHidingARevealedMergeWorkspaceIsAnOrdinaryHide(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	record := f.workspace("ws-merge", t.TempDir())
+	record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
+	record.MergeRevealed = true
+	f.db.with(record)
+
+	// Act
+	err := f.verbs.SetHidden(context.Background(), "ws-merge", true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+	got := f.db.workspaces["ws-merge"]
+	if !got.InHiddenSection() || got.MergeHidden() || !got.MergeRevealed {
+		t.Fatalf("record = %+v, want it in the hidden section and still revealed", got)
+	}
+}
+
+func TestAShowWhoseRevealFailsIsAnErrorAndWritesNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	hiddenMergeWorkspace(t, f, "ws-merge", true)
+	f.db.revealErr = errors.New("database is locked")
+
+	// Act
+	err := f.verbs.SetHidden(context.Background(), "ws-merge", false)
+
+	// Assert
+	if !errors.Is(err, f.db.revealErr) {
+		t.Fatalf("SetHidden = %v, want the reveal's failure", err)
+	}
+	if !loggedAtError(f, opRevealMergeWorkspace) {
+		t.Fatal("the failed reveal was not recorded at error")
+	}
+	got := f.db.workspaces["ws-merge"]
+	if !got.Hidden || !got.MergeHidden() {
+		t.Fatalf("record = %+v, want the hidden flag and the merge's withholding both untouched", got)
+	}
+	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
+		t.Fatalf("roster republications = %d, visibility edges = %v; want none for a failed show", len(f.sidebar.registries), f.visibilityEdges)
+	}
+}
+
+func TestAShowIsRefusedByAnyErrorItsRevealAnswers(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	hiddenMergeWorkspace(t, f, "ws-merge", true)
+	refused := errors.New("the reveal left it hidden")
+	f.merge.reveal = func(context.Context, ids.WorkspaceID) error { return refused }
+
+	// Act
+	err := f.verbs.SetHidden(context.Background(), "ws-merge", false)
+
+	// Assert
+	if !errors.Is(err, refused) {
+		t.Fatalf("SetHidden = %v, want the reveal's error", err)
+	}
+	if !f.db.workspaces["ws-merge"].Hidden || len(f.sidebar.registries) != 0 {
+		t.Fatalf("hidden = %v, roster republications = %d; want the flag untouched and no roster",
+			f.db.workspaces["ws-merge"].Hidden, len(f.sidebar.registries))
+	}
+}
+
+// A show and a select are the two callers that reveal a merge workspace for
+// the user, and both go through the orchestrator's one reveal: the verbs ask
+// it only from revealMergeHidden, and never write the reveal around it.
+func TestAShowRevealsThroughTheOrchestratorsOneReveal(t *testing.T) {
+	// Act
+	asked := sourcescan.Sites(t, "v.deps.Merge.RevealMergeWorkspace(")
+	written := sourcescan.Sites(t, "v.deps.DB.RevealMergeWorkspace(")
+
+	// Assert
+	if len(asked) != 1 || asked[0] != "select.go" || len(written) != 1 || written[0] != "select.go" {
+		t.Fatalf("the reveal is asked for at %v and written at %v, want each once in select.go", asked, written)
+	}
+}
+
 func TestSwapSwapsTheWorkspacesAndRepublishes(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

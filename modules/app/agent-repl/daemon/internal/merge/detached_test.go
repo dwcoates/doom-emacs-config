@@ -36,7 +36,10 @@ type fakeDetached struct {
 	// revealErr fails every reveal; reveals records each merge workspace a
 	// reveal named.
 	revealErr error
-	reveals   []ids.WorkspaceID
+	// revealWritesNothing makes a reveal answer that it revealed the workspace
+	// while leaving its record hidden: a broken reveal.
+	revealWritesNothing bool
+	reveals             []ids.WorkspaceID
 	// claimsAtFork is how many name claims still stood, unreleased, when
 	// each fork ran.
 	claimsAtFork []int
@@ -96,6 +99,9 @@ func (d *fakeDetached) Reveal(_ context.Context, mergeWS ids.WorkspaceID) (bool,
 	d.mu.Unlock()
 	if err != nil {
 		return false, err
+	}
+	if d.revealWritesNothing {
+		return true, nil
 	}
 	d.h.db.mu.Lock()
 	defer d.h.db.mu.Unlock()
@@ -662,14 +668,61 @@ func TestARevealThatFailsIsAnErrorAndTheWorkspaceStaysHidden(t *testing.T) {
 	err := h.o.RevealMergeWorkspace(context.Background(), theMergeWorkspace, "the user selected it")
 
 	// Assert
-	if err != nil {
-		t.Fatalf("RevealMergeWorkspace = %v, want the failure recorded, not raised", err)
+	if err == nil || !errors.Is(err, h.detached.revealErr) {
+		t.Fatalf("RevealMergeWorkspace = %v, want the failure raised to the caller", err)
 	}
 	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.reveal"); !ok {
 		t.Fatal("the failed reveal was not recorded at ERROR")
 	}
 	if h.db.workspaces[theMergeWorkspace].MergeRevealed {
 		t.Fatal("the merge workspace was revealed despite the failure")
+	}
+}
+
+func TestARevealThatLeavesTheMergeWorkspaceHiddenIsAnError(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		// wantRead is the record's `read` field, unset for the broken reveal.
+		wantRead string
+	}{
+		{name: "the reveal answered success and revealed nothing",
+			arrange: func(h *harness) { h.detached.revealWritesNothing = true }},
+		{name: "the record cannot be read",
+			arrange: func(h *harness) {
+				h.db.mu.Lock()
+				h.db.workspaceErr = errors.New("database is locked")
+				h.db.mu.Unlock()
+			}, wantRead: "before its reveal"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+			tt.arrange(h)
+
+			// Act
+			err := h.o.RevealMergeWorkspace(context.Background(), theMergeWorkspace, "it was shown")
+
+			// Assert
+			if err == nil {
+				t.Fatal("a reveal that left the merge workspace hidden was answered as success")
+			}
+			record, ok := h.recordFor(dlog.LevelError, "daemon.merge.reveal")
+			if !ok {
+				t.Fatal("the reveal that left the workspace hidden was not recorded at ERROR")
+			}
+			if record.Context["workspace"] != string(theMergeWorkspace) || record.Context["cause"] != "it was shown" {
+				t.Fatalf("the error record carries %v, want the workspace and the cause", record.Context)
+			}
+			if read, _ := record.Context["read"].(string); read != tt.wantRead {
+				t.Fatalf("the error record's read = %q, want %q", read, tt.wantRead)
+			}
+			if h.db.workspaces[theMergeWorkspace].MergeRevealed {
+				t.Fatal("the merge workspace was recorded revealed")
+			}
+		})
 	}
 }
 
