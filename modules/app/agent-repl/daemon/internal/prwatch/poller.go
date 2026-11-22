@@ -179,6 +179,7 @@ func New(deps Deps) (*Watcher, error) {
 // Run returns once both loops have stopped.
 func (w *Watcher) Run(ctx context.Context, prompts prompthandler.Submitter) {
 	others := make(chan struct{})
+	// inflight: joined: Run waits on others before it returns.
 	go func() {
 		defer close(others)
 		w.TickOthers(ctx)
@@ -313,6 +314,7 @@ func (w *Watcher) pollOwned(ctx context.Context, queues *queueReads) {
 	for i, pr := range read {
 		wg.Add(1)
 		slots <- struct{}{}
+		// inflight: joined: pollOwned waits on wg before it returns.
 		go func() {
 			defer wg.Done()
 			defer func() { <-slots }()
