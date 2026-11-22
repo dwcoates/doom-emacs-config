@@ -132,6 +132,9 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 		return err
 	}
 	servesEscalation := m == nil || !m.Dispatched
+	if err := o.endLeakedGivenUpFinish(ctx, ws, fields); err != nil {
+		return err
+	}
 	f, err := o.deps.DB.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: ws, Repo: repo, StartedAt: o.deps.Now(), Version: version, ServesEscalation: servesEscalation})
 	if errors.Is(err, wsm.ErrRemediationFinishing) {
 		o.deps.Log.Global().Info(opRemediationFinish, "refused a remediation finish while its finish runs", fields)
@@ -143,6 +146,43 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 	}
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation finished; its gate runs", withField(fields, "gate_rounds", f.GateRounds))
 	o.startRemediationFinish(f, true)
+	return nil
+}
+
+// endLeakedGivenUpFinish ends WS's recorded finish when it is one a fix was
+// given up on and nothing ended: it stands at gating with its rounds spent
+// (MaxFixAttempts) and no run of it goes in this daemon. Giving a fix up ends
+// its finish (giveUpRemediation), so such a row was left by a daemon that did
+// not, and it would refuse every later finish of WS.
+func (o *orchestrator) endLeakedGivenUpFinish(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
+	f, err := o.deps.DB.RemediationFinishOf(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read the finish recorded for the workspace finishing", withField(fields, "error", err.Error()))
+		return err
+	}
+	if f == nil || f.Step != wsm.RemediationGating || f.GateRounds < MaxFixAttempts {
+		return nil
+	}
+	o.mu.Lock()
+	running := o.remediationRuns[ws]
+	o.mu.Unlock()
+	if running {
+		return nil
+	}
+	return o.endGivenUpFinish(ctx, *f, withField(fields, "leaked", true))
+}
+
+// endGivenUpFinish ends F's finish, whose fix was given up: nothing finishes
+// it now. It is recorded once, at INFO.
+func (o *orchestrator) endGivenUpFinish(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
+	ended, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "the finish of a given-up fix could not be ended", withField(fields, "error", err.Error()))
+		return err
+	}
+	if ended {
+		o.deps.Log.Global().Info(opRemediationFinish, "the finish of a given-up fix was ended", withField(withField(withField(fields, "workspace", string(f.Workspace)), "repo", string(f.Repo)), "gate_rounds", f.GateRounds))
+	}
 	return nil
 }
 
@@ -410,7 +450,13 @@ func (o *orchestrator) giveUpRemediation(ctx context.Context, f wsm.RemediationF
 		return err
 	}
 	summary := fmt.Sprintf("the deploy mediator's fix could not pass its gate after %d fixing attempts; the queue waits for you", MaxFixAttempts)
-	return o.escalateForMediator(ctx, f.Repo, summary, withField(fields, "gave_up", true))
+	if err := o.escalateForMediator(ctx, f.Repo, summary, withField(fields, "gave_up", true)); err != nil {
+		return err
+	}
+	// THE GIVEN-UP FINISH ENDS ON EVERY PATH, escalated or not: nothing
+	// deploys it, and a record left at gating refuses the workspace's every
+	// later finish.
+	return o.endGivenUpFinish(ctx, f, fields)
 }
 
 // escalateForMediator escalates the check REPO owes as the daemon's
