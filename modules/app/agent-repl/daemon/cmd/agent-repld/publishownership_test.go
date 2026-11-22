@@ -137,3 +137,80 @@ func TestADepartedDaemonPublishesNoOwnership(t *testing.T) {
 		t.Fatalf("metrics target advertised by a departed daemon (stat err = %v)", statErr)
 	}
 }
+
+// TestATakeAfterTheSharedStopPublishesNothing pins the other ordering of a
+// departure racing publishOwnership: the claim had not departed at the check,
+// but the shutdown's StopShared ran before the take's add. The stopped accept
+// refuses the add, so the daemon advertises nothing, ends the stream it
+// opened, and answers ErrDeparted for the rollout's one standing-down record.
+// Only a stream that cannot be ended is an ERROR of the take's own.
+func TestATakeAfterTheSharedStopPublishesNothing(t *testing.T) {
+	endErr := errors.New("sockethold: end the accept stream of \"daemon\": write: bad file descriptor")
+	cases := []struct {
+		name      string
+		stopErr   error
+		wantError string
+	}{
+		{name: "the stream it opened is ended, with no ERROR"},
+		{name: "a stream that cannot be ended is an ERROR", stopErr: endErr,
+			wantError: "the holder's stream of handed-back connections could not be ended after the stopped shared listener refused its add"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			root := t.TempDir()
+			surface := openOwnershipSurface(t, root)
+			claim := &recordingClaim{}
+			accept := newPrivateAccept(t)
+			if err := accept.StopShared(); err != nil {
+				t.Fatalf("StopShared: %v", err)
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { listener.Close() })
+			stream := newFakeReturned()
+			var returned server.Returned = stream
+			if tc.stopErr != nil {
+				returned = stopFailingReturned{fakeReturned: stream, err: tc.stopErr}
+			}
+			advertised := &advertisingClaim{}
+			log := &spyLogger{}
+			shared := &sharedTake{holder: "/h/daemon-holder.sock", accept: accept, claim: advertised, log: log, ensure: holderServes,
+				takeFn: func(context.Context, string, string) (net.Listener, error) { return listener, nil },
+				subscribeFn: func(context.Context, string, string) (server.Returned, error) {
+					return returned, nil
+				}}
+
+			// Act
+			err = publishOwnership(claim, surface, shared)
+
+			// Assert
+			if !errors.Is(err, daemonaddr.ErrDeparted) || !errors.Is(err, server.ErrSharedStopped) {
+				t.Fatalf("publishOwnership = %v, want ErrDeparted carrying ErrSharedStopped", err)
+			}
+			if len(advertised.advertised) != 0 {
+				t.Fatalf("advertised %v, want nothing", advertised.advertised)
+			}
+			if claim.published != 0 {
+				t.Fatalf("daemon.addr published %d times, want never", claim.published)
+			}
+			if _, statErr := os.Stat(metrics.TargetPath(root, metrics.ProgramDaemon)); !os.IsNotExist(statErr) {
+				t.Fatalf("metrics target advertised (stat err = %v)", statErr)
+			}
+			select {
+			case <-stream.stop:
+			default:
+				t.Fatal("the holder's stream was left open, want it released")
+			}
+			msg, ok := log.message(dlog.LevelError)
+			if tc.wantError == "" && ok {
+				t.Fatalf("ERROR %q, want none for a standing-down refusal", msg)
+			}
+			if tc.wantError != "" && msg != tc.wantError {
+				t.Fatalf("ERROR = %q (present %v), want %q", msg, ok, tc.wantError)
+			}
+		})
+	}
+}

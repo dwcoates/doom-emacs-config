@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -113,7 +114,21 @@ func (s *sharedTake) take() error {
 			s.takeErr = fmt.Errorf("open the holder's stream of handed-back connections at %s: %w", s.holder, err)
 			return
 		}
-		s.accept.AddShared(s.ln, returned, s.log)
+		if err := s.accept.AddShared(s.ln, returned, s.log); err != nil {
+			// THE STOP CAME FIRST: this daemon's shutdown (or yield) stopped
+			// the shared accept between the caller's departed check and this
+			// add, so it is standing down. It advertises nothing, and the
+			// refusal is daemonaddr.ErrDeparted, whose one record is the
+			// caller's (rollout's refusedStandingDown). The stream it opened
+			// is ended and released, never left subscribed; a stream that
+			// cannot be ended is a fault of its own, at ERROR here.
+			s.takeErr = fmt.Errorf("add the shared listener: %w: %w", daemonaddr.ErrDeparted, err)
+			if cerr := errors.Join(returned.Stop(), returned.Close()); cerr != nil {
+				s.log.Error("daemon.cmd.holder", "the holder's stream of handed-back connections could not be ended after the stopped shared listener refused its add", dlog.Context{
+					"holder": s.holder, "error": cerr.Error()})
+			}
+			return
+		}
 		s.claim.Advertise(s.ln.Addr().String())
 	})
 	return s.takeErr

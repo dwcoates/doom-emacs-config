@@ -78,7 +78,9 @@ func startDaemonOnHolder(t *testing.T, control, name string) *daemonOnHolder {
 	}
 	log := dlog.NewTestLogger()
 	accept := server.NewSharedAccept(private)
-	accept.AddShared(shared, returned, log)
+	if err := accept.AddShared(shared, returned, log); err != nil {
+		t.Fatalf("AddShared: %v", err)
+	}
 	gate := &acceptsGate{second: make(chan struct{})}
 	gate.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, name) })
 	serveCtx, stop := context.WithCancel(context.Background())

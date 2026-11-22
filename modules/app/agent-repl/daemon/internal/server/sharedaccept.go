@@ -56,24 +56,46 @@ type Returned interface {
 	Close() error
 }
 
+// ErrSharedStopped marks an AddShared refused because StopShared already
+// ran: this daemon gave up its accept right on the shared address, and a
+// listener added after that would take connects meant for the daemon that
+// accepts next.
+var ErrSharedStopped = errors.New("the shared listener was stopped, so this daemon accepts on it no more")
+
 // AddShared starts accepting on SHARED, the listener taken from the holder
 // under the boot claim, and on RETURNED, the holder's stream of the
 // connections a departing daemon handed back. LOG records the stream's end.
 // A second shared listener is a programming error.
-func (l *SharedAccept) AddShared(shared net.Listener, returned Returned, log dlog.Logger) {
+//
+// A STOPPED SHARED LISTENER NEVER ACCEPTS AGAIN. Once StopShared ran,
+// AddShared adds nothing, starts no accept loop and answers ErrSharedStopped;
+// the check and the add are under l.mu, as StopShared's stop is, so an add
+// racing the stop either lands first, and the stop closes it, or is refused.
+// No healthy path adds after a stop: the stop is the shutdown's first step
+// (beginShutdown) or the handover's yield (yieldBootClaim), and both end
+// this daemon's accept right for good.
+func (l *SharedAccept) AddShared(shared net.Listener, returned Returned, log dlog.Logger) error {
 	l.mu.Lock()
+	if l.stopped {
+		l.mu.Unlock()
+		return ErrSharedStopped
+	}
 	if l.shared != nil {
 		l.mu.Unlock()
 		panic("server: SharedAccept was given a second shared listener")
 	}
 	l.shared = shared
 	l.returned = returned
-	l.mu.Unlock()
+	// Counted under l.mu, before a stop can see the listener: Close stops
+	// under this lock and then waits, so its wait never starts ahead of
+	// these two pumps' count.
 	l.wg.Add(2)
+	l.mu.Unlock()
 	// inflight: joined: Close waits for every pump.
 	go l.pump(shared, true)
 	// inflight: joined: Close waits for every pump.
 	go l.pumpReturned(returned, log)
+	return nil
 }
 
 // pumpReturned feeds every handed-back connection to Accept, wrapped as one
