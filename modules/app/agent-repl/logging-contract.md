@@ -231,11 +231,24 @@ live-but-unreachable daemon remains a real WARN/ERROR. Only a legacy file that
 names no pid, whose probe is refused, is deleted by Emacs
 (`elisp.daemon.stale-addr-removed`).
 
-The booting daemon, holding the boot claim, records a standing predecessor
-advertisement as `daemon.boot.predecessor_died` at ERROR, with no dial: the
-shared address is answered by the socket holder's backlog even when no daemon
-lives, so a connect proves nothing, and every orderly exit withdraws its
-advertisement (a daemon that yielded its boot claim re-takes it to do so).
+The booting daemon, holding the boot claim, records a standing advertisement
+it replaces at INFO (`daemon.cmd.claim`), with no dial: the shared address is
+answered by the socket holder's backlog even when no daemon lives, so a
+connect proves nothing. A standing advertisement is no death: `daemon.addr`
+is shared between an incumbent and its successor across a yield, so orderly
+sequences leave one standing.
+
+A daemon's death is recorded from its life lock (`daemons/<instance>.lock`
+beside `daemon.addr`). Every daemon holds an exclusive record lock on its own
+file for its whole life, the file names its pid, and an orderly end removes
+the file before it releases the lock; the kernel frees the lock however its
+holder died. A life lock that stands with no holder is therefore a daemon that
+died without its orderly exit. The daemon that reaps it (every boot, joining
+or not, and a successor's probe of and wait for the older daemons) removes it
+before letting the lock go, and records the death exactly once as
+`daemon.boot.predecessor_died` at ERROR, with the `instance`, the `pid` when
+the file names one, and the `panic` and `site` when the stdio log holds that
+pid's panic. Emacs never touches the life locks.
 
 ## JSONL schema
 
