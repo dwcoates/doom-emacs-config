@@ -67,9 +67,10 @@ var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
 // EditorKinds are the editor-wide latencies Emacs reports, which name no
 // workspace: their series carry an empty `workspace` label.
 var EditorKinds = map[agentreplv1.EditorLatencyKind]LatencyKind{
-	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL:        {Name: "editor_stall", Buckets: stallBuckets},
-	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD: {Name: "elisp_reload", Buckets: stallBuckets},
-	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_INPUT_WAIT:   {Name: "editor_input_wait", Buckets: stallBuckets},
+	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL:           {Name: "editor_stall", Buckets: stallBuckets},
+	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD:    {Name: "elisp_reload", Buckets: stallBuckets},
+	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_INPUT_WAIT:      {Name: "editor_input_wait", Buckets: stallBuckets},
+	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_VIEWED_REATTACH: {Name: "viewed_reattach", Buckets: downtimeBuckets},
 }
 
 // WorkspaceOpen is the daemon-measured latency from an OpenWorkspace's

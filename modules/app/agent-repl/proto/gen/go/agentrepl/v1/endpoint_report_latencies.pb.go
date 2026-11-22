@@ -171,6 +171,14 @@ const (
 	// enough to run the timer, so EDITOR_LATENCY_KIND_STALL never saw it, yet
 	// nothing typed reached the screen.
 	EditorLatencyKind_EDITOR_LATENCY_KIND_INPUT_WAIT EditorLatencyKind = 3
+	// How long the workspace the person is viewing could not be used across a
+	// daemon change that reloaded no page: from the instant Emacs found the
+	// workspace's host stream detached or handed on, to the instant the walk
+	// that moved it onto the serving daemon completed with the page kept. The
+	// page reports REPORTED_LATENCY_KIND_VIEWED_DOWNTIME for the same outage
+	// when a page load follows the detachment, so an outage is measured by
+	// exactly one of the two.
+	EditorLatencyKind_EDITOR_LATENCY_KIND_VIEWED_REATTACH EditorLatencyKind = 4
 )
 
 // Enum value maps for EditorLatencyKind.
@@ -180,12 +188,14 @@ var (
 		1: "EDITOR_LATENCY_KIND_STALL",
 		2: "EDITOR_LATENCY_KIND_ELISP_RELOAD",
 		3: "EDITOR_LATENCY_KIND_INPUT_WAIT",
+		4: "EDITOR_LATENCY_KIND_VIEWED_REATTACH",
 	}
 	EditorLatencyKind_value = map[string]int32{
-		"EDITOR_LATENCY_KIND_UNSPECIFIED":  0,
-		"EDITOR_LATENCY_KIND_STALL":        1,
-		"EDITOR_LATENCY_KIND_ELISP_RELOAD": 2,
-		"EDITOR_LATENCY_KIND_INPUT_WAIT":   3,
+		"EDITOR_LATENCY_KIND_UNSPECIFIED":     0,
+		"EDITOR_LATENCY_KIND_STALL":           1,
+		"EDITOR_LATENCY_KIND_ELISP_RELOAD":    2,
+		"EDITOR_LATENCY_KIND_INPUT_WAIT":      3,
+		"EDITOR_LATENCY_KIND_VIEWED_REATTACH": 4,
 	}
 )
 
@@ -1196,12 +1206,13 @@ const file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc = "" +
 	" REPORTED_LATENCY_KIND_PAGE_STALL\x10\x05\x12&\n" +
 	"\"REPORTED_LATENCY_KIND_RELOAD_BLANK\x10\x06\x12(\n" +
 	"$REPORTED_LATENCY_KIND_SWITCH_SIDEBAR\x10\a\x12)\n" +
-	"%REPORTED_LATENCY_KIND_VIEWED_DOWNTIME\x10\b*\xa1\x01\n" +
+	"%REPORTED_LATENCY_KIND_VIEWED_DOWNTIME\x10\b*\xca\x01\n" +
 	"\x11EditorLatencyKind\x12#\n" +
 	"\x1fEDITOR_LATENCY_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19EDITOR_LATENCY_KIND_STALL\x10\x01\x12$\n" +
 	" EDITOR_LATENCY_KIND_ELISP_RELOAD\x10\x02\x12\"\n" +
-	"\x1eEDITOR_LATENCY_KIND_INPUT_WAIT\x10\x03*\xe0\x01\n" +
+	"\x1eEDITOR_LATENCY_KIND_INPUT_WAIT\x10\x03\x12'\n" +
+	"#EDITOR_LATENCY_KIND_VIEWED_REATTACH\x10\x04*\xe0\x01\n" +
 	"\x16EditorStartupMilestone\x12(\n" +
 	"$EDITOR_STARTUP_MILESTONE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dEDITOR_STARTUP_MILESTONE_INIT\x10\x01\x12*\n" +

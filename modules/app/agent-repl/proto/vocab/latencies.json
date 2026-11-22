@@ -152,6 +152,17 @@
       "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
     },
     {
+      "name": "viewed_reattach",
+      "description": "how long the viewed workspace could not be used during a daemon change that reloaded no page (its host stream detached or handed on, to the walk onto the serving daemon complete with the page kept)",
+      "start": "Emacs finds the shown workspace's host stream detached or handed on by a daemon change (elisp.host.reattach, a walk of a workspace that stood on a daemon)",
+      "end": "the walk lands with no page load having taken the start (elisp.host.downtime-measured)",
+      "measured_by": "emacs",
+      "threshold_ms": 1000,
+      "reason": "the one workspace the user is looking at cannot be used meanwhile; the page's viewed_downtime measures the outages that reload it, so every outage is measured once",
+      "reported_as": "EDITOR_LATENCY_KIND_VIEWED_REATTACH",
+      "buckets_seconds": [0.1, 0.3, 1, 2, 5, 10, 20, 30, 60, 120]
+    },
+    {
       "name": "page_stall",
       "description": "a stall of a shown page's main thread",
       "start": "the moment the shown page's steady sampling timer was due",

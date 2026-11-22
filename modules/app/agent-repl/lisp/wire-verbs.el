@@ -6461,7 +6461,8 @@ the seconds a finite, non-negative number since the process start."
 (defconst agent-repl-wire-editor-latency-kinds
   '((:stall . "EDITOR_LATENCY_KIND_STALL")
     (:elisp-reload . "EDITOR_LATENCY_KIND_ELISP_RELOAD")
-    (:input-wait . "EDITOR_LATENCY_KIND_INPUT_WAIT"))
+    (:input-wait . "EDITOR_LATENCY_KIND_INPUT_WAIT")
+    (:viewed-reattach . "EDITOR_LATENCY_KIND_VIEWED_REATTACH"))
   "The EditorLatencyKind vocabulary Emacs sends, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT, as for the startup milestones.")
 
