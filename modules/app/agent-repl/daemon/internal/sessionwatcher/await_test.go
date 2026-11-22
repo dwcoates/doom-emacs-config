@@ -433,7 +433,7 @@ func TestACloseAnswersATurnWaitByWhetherTheWatcherHadTheTurn(t *testing.T) {
 			name: "a turn the adoption found open",
 			start: func(t *testing.T) *harness {
 				h := startHarness(t, Session{OpenAtAttach: openRows("turn-open")}, nil)
-				h.session = h.client.nextSessionOpen(t)
+				h.session = h.client.NextSessionOpen(t)
 				return h
 			},
 			turn: "turn-open",
