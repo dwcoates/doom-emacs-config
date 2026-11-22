@@ -2608,6 +2608,15 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    padding would shrink the size container's content box and so every `cqh`
    measured against it. It is not a DOM child, so the tail follow's child
    observer and the background-click hit test see exactly what they saw. */
+/* THE WALK'S HOLD (scroll.ts createWalkHold): while an older page loads, and
+   until the wheel gesture that asked for it goes quiet, the feed cannot be
+   scrolled, so a flick's momentum stops dead at the top rather than carrying
+   on into the rows that land. Programmatic writes (the prepend's
+   compensation) still apply under `hidden`. */
+#feed-scroll[data-walk-hold] {
+  overflow-y: hidden;
+}
+
 #feed-scroll::after {
   content: "";
   display: block;

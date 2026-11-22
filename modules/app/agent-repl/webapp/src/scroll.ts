@@ -1726,6 +1726,144 @@ export function holdViewOnClicks(zone: HTMLElement, tail: TailFollow): () => voi
   };
 }
 
+/** The attribute the feed's scroll box wears while the walk holds it still (`createWalkHold`). */
+export const WALK_HOLD_ATTRIBUTE = "data-walk-hold";
+
+/**
+ * How many frames in a row must pass with no wheel event before the reader's
+ * wheel stream counts as over and the walk's hold lets go. WebKit delivers
+ * wheel events at most once per rendering update, a trackpad's momentum tail
+ * included (one coalesced event per frame while it decays), so the stream's
+ * expected gap is ONE frame; three is three times it. Counted in frames, not
+ * milliseconds, so a loaded main thread that delays the frames delays the
+ * count with them. `scroll.walk-released` records the longest gap the hold
+ * saw (`longest_gap_frames`), which is the measurement this bound stands on.
+ */
+export const WALK_HOLD_QUIET_FRAMES = 3;
+
+/**
+ * THE FEED HOLDS STILL WHILE IT WALKS INTO THE PAST (owner request,
+ * 2026-11-21). A reader who flicks up past the oldest loaded row brings the
+ * walk's control into view, and the page above is asked for. Their gesture
+ * then must END there, as though the feed had simply run out:
+ *
+ * - while the page loads, the feed does not move at all;
+ * - once it lands, the momentum the flick still carries does not carry the
+ *   reader up into the new rows -- the view stays exactly where it stopped,
+ *   with the rows landing above it (`prependCompensation`);
+ * - nothing moves on its own afterwards either.
+ *
+ * WebKit honors `preventDefault` on only the first wheel event of a gesture,
+ * so a gesture already under way cannot be cancelled event by event. The hold
+ * instead takes the box's own scrollability away (`WALK_HOLD_ATTRIBUTE`, which
+ * styles.css maps to `overflow-y: hidden`): the platform has nothing left to
+ * scroll, a momentum in flight stops dead, and programmatic writes (the
+ * prepend's compensation) still land. The wheel redirect off a section
+ * (`installIntentScroll`) reads the same attribute and moves nothing.
+ *
+ * The hold is a count: `begin` for every page asked for, `end` for every one
+ * settled (landed, refused, or failed). When the last one settles, the hold
+ * stays until the reader's wheel stream has gone quiet for
+ * `WALK_HOLD_QUIET_FRAMES` frames, so the tail of the very gesture that asked
+ * for the page is absorbed rather than replayed onto the fresh rows. A NEW
+ * gesture after that quiet scrolls as ever.
+ */
+export interface WalkHold {
+  /** A page was asked for: hold the box still (again, if already held). */
+  begin(): void;
+  /** A page asked for settled: once none is out, let go when the wheel is quiet. */
+  end(): void;
+  /** The feed is going away: let go at once and stop listening. */
+  dispose(): void;
+}
+
+/** Whether BOX is held still by the walk (`createWalkHold`). */
+export function walkHeld(box: Element): boolean {
+  return box.hasAttribute(WALK_HOLD_ATTRIBUTE);
+}
+
+/** The walk's hold on BOX (`WalkHold`). FRAME is the frame seam a test runs by hand. */
+export function createWalkHold(box: HTMLElement, frame: (fn: () => void) => void = nextFrame): WalkHold {
+  let pending = 0;
+  // Bumped whenever a quiet count must stop (a new page asked for, a
+  // release), so a frame scheduled by an earlier count runs nothing.
+  let generation = 0;
+  let wheeled = false;
+  let absorbed = 0;
+  let quiet = 0;
+  let waited = 0;
+  let longestGap = 0;
+  const onWheel = (): void => {
+    wheeled = true;
+    absorbed += 1;
+  };
+  const release = (by: "quiet" | "dispose"): void => {
+    generation += 1;
+    if (!walkHeld(box)) return;
+    box.removeAttribute(WALK_HOLD_ATTRIBUTE);
+    box.removeEventListener("wheel", onWheel, { capture: true });
+    log.info("the walk's hold on the feed let go", {
+      operation: "scroll.walk-released",
+      context: { by, wheels_absorbed: absorbed, frames_waited: waited, longest_gap_frames: longestGap },
+    });
+  };
+  const count = (gen: number): void => {
+    if (gen !== generation) return;
+    waited += 1;
+    if (wheeled) {
+      // A quiet run a wheel broke is a gap INSIDE the stream: the figure the
+      // quiet bound must stay above.
+      longestGap = Math.max(longestGap, quiet);
+      wheeled = false;
+      quiet = 0;
+    } else {
+      quiet += 1;
+    }
+    if (quiet >= WALK_HOLD_QUIET_FRAMES) {
+      release("quiet");
+      return;
+    }
+    frame(() => count(gen));
+  };
+  return {
+    begin: () => {
+      pending += 1;
+      generation += 1;
+      if (walkHeld(box)) return;
+      absorbed = 0;
+      wheeled = false;
+      box.setAttribute(WALK_HOLD_ATTRIBUTE, "");
+      box.addEventListener("wheel", onWheel, { passive: true, capture: true });
+      log.info("the feed holds still while the walk loads a page", {
+        operation: "scroll.walk-held",
+        context: { at: box.scrollTop },
+      });
+    },
+    end: () => {
+      if (pending === 0) {
+        log.error("the walk's hold was ended with no page out", {
+          operation: "scroll.walk-hold-unbalanced",
+          context: { held: walkHeld(box) },
+        });
+        throw new Error("walk hold: end without a matching begin");
+      }
+      pending -= 1;
+      if (pending > 0) return;
+      // A wheel that arrived while the page loaded still counts against the
+      // first frame: the stream it belongs to may not be over.
+      quiet = 0;
+      waited = 0;
+      longestGap = 0;
+      const gen = generation;
+      frame(() => count(gen));
+    },
+    dispose: () => {
+      pending = 0;
+      release("dispose");
+    },
+  };
+}
+
 /**
  * EVERY WAY THE READER CAN MOVE THIS BOX, as the events that arrive first.
  *
@@ -2130,6 +2268,10 @@ export function installIntentScroll(
     });
     if (redirect === null) return;
     e.preventDefault();
+    // THE WALK HOLDS THE FEED STILL (`createWalkHold`): a wheel redirected off
+    // a section onto the held feed is consumed, so a gesture that began over a
+    // section cannot carry the reader on while a page loads either.
+    if (redirect.to === feed && walkHeld(feed)) return;
     // NOT through TailFollow, and deliberately so: this IS the reader's own
     // wheel, merely redirected off a section onto the box they mean (the armed
     // box enclosing it, or the feed), so it is user input and no implicit

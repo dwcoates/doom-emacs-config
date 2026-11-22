@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
+import { WALK_HOLD_ATTRIBUTE } from "../src/scroll.js";
 import sidebarPageStylesheet from "../src/host/sidebar-page.css?raw";
 import renderColors from "../../proto/vocab/render-colors.json";
 import { colorValuesStylesheet } from "../src/vocab.js";
@@ -7258,5 +7259,19 @@ describe("the recency gutter", () => {
   it("draws the bar only on a reached row's slot", () => {
     expect(declarationsOf("#ws-sidebar .sb-gutter[data-recency]::before")).toContain("var(--gutter-hue) var(--gutter-strength)");
     expect(declarationsOf("#ws-sidebar .sb-gutter")).not.toContain("background");
+  });
+});
+
+// THE WALK'S HOLD (scroll.ts createWalkHold): the attribute the hold sets on
+// the feed's scroll box takes its scrollability away, which is what stops a
+// flick's momentum while an older page loads.
+describe("the walk's hold on the feed", () => {
+  it("hides the feed's overflow while the hold stands", () => {
+    // Arrange
+    const selector = `#feed-scroll[${WALK_HOLD_ATTRIBUTE}]`;
+    // Act
+    const rules = rulesOf(stylesheet).filter((rule) => rule.selectors.includes(selector));
+    // Assert
+    expect(rules.map((rule) => rule.declarations.trim())).toEqual(["overflow-y: hidden;"]);
   });
 });

@@ -64,6 +64,7 @@ import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
   TailFollow,
+  createWalkHold,
   holdViewOnClicks,
   installIntentScroll,
   observeScrollBox,
@@ -223,6 +224,9 @@ export function mountFeed(
     scrollBox === null || tail === null
       ? null
       : observeScrollBox(scrollBox, tail);
+  // THE WALK'S HOLD: the box stands still while an older page loads, and until
+  // the gesture that asked for it is over (scroll.ts createWalkHold).
+  const walkHold = scrollBox === null ? null : createWalkHold(scrollBox);
   // A click in a zone outside the box that draws part of the feed holds the
   // view as a click in the box does.
   const unholdZones = tail === null ? [] : (deps.clickZones ?? []).map((zone) => holdViewOnClicks(zone, tail));
@@ -337,9 +341,9 @@ export function mountFeed(
     bubble: bubbleFor,
     bodyContext: feedContext(),
     scroll:
-      scrollBox === null || tail === null
+      scrollBox === null || tail === null || walkHold === null
         ? undefined
-        : { box: scrollBox, tail },
+        : { box: scrollBox, tail, hold: walkHold },
     selectionVisibility: selectionVisibility ?? undefined,
     onSelectionExpand: afterSelectionToggle,
   });
@@ -1215,6 +1219,7 @@ export function mountFeed(
     selectionVisibility?.dispose();
     outOfView?.dispose();
     root.dispose();
+    walkHold?.dispose();
   }
 }
 
