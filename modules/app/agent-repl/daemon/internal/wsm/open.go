@@ -102,6 +102,10 @@ type store struct {
 	// handover, where it became a false unknown_workspace for an adopting
 	// page). Guarded by mu.
 	retired []*sql.DB
+	// promoted is the PROMOTION LATCH (Promoted): closed at the open of a
+	// writing handle, and by Promote at the swap of a read-only one, after
+	// the writing handle is in force. Made once at open; closed once.
+	promoted chan struct{}
 	// keeper holds an in-memory handle's database for the handle's life
 	// (memory.go); nil for a file. Closed with the handle.
 	keeper io.Closer
@@ -362,6 +366,10 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 	}
 	s := &store{path: path, log: discardLogger{}, canonicalDir: dirpath.Canonical, now: time.Now}
 	s.current.Store(&handleState{db: handle, readOnly: readOnly})
+	s.promoted = make(chan struct{})
+	if !readOnly {
+		close(s.promoted)
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -515,6 +523,14 @@ func (s *store) ReadOnly() bool {
 	return s.current.Load().readOnly
 }
 
+// Promoted answers the handle's promotion latch: a channel closed exactly
+// when the handle writes. A handle opened writing has it closed from the
+// start; a read-only one has it closed by Promote, once the writing handle
+// is in force, so a reader the latch wakes finds ReadOnly false.
+func (s *store) Promoted() <-chan struct{} {
+	return s.promoted
+}
+
 // ApplyContracts applies the contract steps a joining open left owed
 // (joinable), in their order, once this daemon serves alone: its incumbent
 // has exited, so no running build reads what they remove. A file that owes
@@ -581,6 +597,10 @@ func (s *store) Promote(ctx context.Context) error {
 	// store.
 	s.retired = append(s.retired, previous.db)
 	s.current.Store(&handleState{db: handle, readOnly: false})
+	// THE LATCH CLOSES AFTER THE SWAP, so whoever it wakes writes on the
+	// promoted handle. Only this branch reaches it, and only once: a handle
+	// already writing returned above.
+	close(s.promoted)
 	s.log.Info(op, "promoted the state handle to writing", dlog.Context{"path": s.path})
 	// STILL UNDER THE EXCLUSIVE LOCK, so a usage write that arrives now
 	// waits and lands after the held one it supersedes, never before it.

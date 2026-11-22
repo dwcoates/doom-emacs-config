@@ -30,6 +30,13 @@ type DB interface {
 	// incumbent is still the sole writer and becomes a writer at its first
 	// adoption. Promoting a handle that already writes is success.
 	Promote(ctx context.Context) error
+	// Promoted answers the promotion latch: a channel closed exactly when the
+	// handle writes, already closed on a handle opened writing, closed by
+	// Promote's swap on a read-only one, and never closed on a handle that
+	// stays read-only. A reader the latch wakes finds ReadOnly false, so what
+	// a joining successor withheld while read-only is written on that wake
+	// rather than hoped for at some later moment.
+	Promoted() <-chan struct{}
 	// ApplyContracts applies the contract steps a joining open left, once the
 	// daemon serves alone (MigrationContract).
 	ApplyContracts(ctx context.Context) error

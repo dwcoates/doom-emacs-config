@@ -72,8 +72,12 @@ type fakeDB struct {
 	runSpends    []wsm.KeepaliveRunTokens
 	spendErr     error
 	spendRefused bool
-	// readOnly stands for a joining successor's unpromoted handle.
+	// readOnly stands for a joining successor's unpromoted handle, and
+	// promoted, when set, is its promotion latch, which the test closes after
+	// clearing readOnly; unset, the latch is closed for a writing handle and
+	// never closes for a read-only one.
 	readOnly bool
+	promoted chan struct{}
 	// remote is each workspace's remote-control mode, off when absent;
 	// remoteErr fails its read.
 	remote    map[ids.WorkspaceID]bool
@@ -124,7 +128,41 @@ func (f *fakeDB) EndSettingsVisit(_ context.Context, id wsm.WorkspaceID, at time
 	return true, nil
 }
 
-func (f *fakeDB) ReadOnly() bool { return f.readOnly }
+func (f *fakeDB) ReadOnly() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.readOnly
+}
+
+// writing is the promotion latch of a handle that writes from its open.
+var writing = func() chan struct{} {
+	latch := make(chan struct{})
+	close(latch)
+	return latch
+}()
+
+func (f *fakeDB) Promoted() <-chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case f.promoted != nil:
+		return f.promoted
+	case f.readOnly:
+		return nil
+	default:
+		return writing
+	}
+}
+
+// promote stands for the store's promotion: the handle writes, then its latch
+// closes, in the store's order.
+func (f *fakeDB) promote() {
+	f.mu.Lock()
+	f.readOnly = false
+	latch := f.promoted
+	f.mu.Unlock()
+	close(latch)
+}
 
 // SetKeepaliveOwing records the owing decision on the record, as the store's
 // one statement each does.

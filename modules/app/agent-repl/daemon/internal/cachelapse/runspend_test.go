@@ -196,3 +196,35 @@ func TestTheEdgesNameTheirRunMoments(t *testing.T) {
 		t.Fatalf("queued = %+v, want a turn-closed edge and a closure edge", queued)
 	}
 }
+
+func TestAJoiningSuccessorWritesNoRunEnd(t *testing.T) {
+	// Arrange
+	h := overdue(t)
+	h.db.readOnly = true
+	// Act
+	h.keeper.endRun(context.Background(), h.log.Global(), theWorkspace, wsm.RunEndingCap)
+	// Assert
+	if len(h.db.runEndings) != 0 {
+		t.Fatalf("run endings asked = %v, want none on a read-only handle", h.db.runEndings)
+	}
+	if _, errored := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error"}); errored {
+		t.Fatalf("records = %+v, want no ERROR for a joining successor", h.log.Records())
+	}
+}
+
+func TestAJoiningSuccessorRecordsTheWithheldRunEndAtDebug(t *testing.T) {
+	// Arrange
+	h := overdue(t)
+	h.db.readOnly = true
+	// Act
+	h.keeper.endRun(context.Background(), h.log.Global(), theWorkspace, wsm.RunEndingCap)
+	// Assert
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "debug", Operation: opDrive,
+		Message: "the state handle is not promoted yet; the end of the workspace's keep-alive run is recorded once it writes"})
+	if !ok || rec.Context["ending"] != int(wsm.RunEndingCap) {
+		t.Fatalf("records = %+v, want the withheld end at DEBUG naming its ending", h.log.Records())
+	}
+	if got := h.keeper.withheldEnds[theWorkspace]; got != wsm.RunEndingCap {
+		t.Fatalf("withheld ending = %v, want %v", got, wsm.RunEndingCap)
+	}
+}

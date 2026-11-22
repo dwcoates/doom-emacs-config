@@ -71,9 +71,17 @@ func growth(was, now uint64) uint64 {
 }
 
 // endRun records WS's keep-alive run's end asked at ENDING, when it has
-// ended, into the telemetry. A failed read is recorded at ERROR, and the run
+// ended, into the telemetry. A failed write is recorded at ERROR, and the run
 // is asked again at its next moment.
+//
+// A JOINING SUCCESSOR WRITES NOTHING: its handle is read-only until its
+// promotion, so the end is withheld, and the loop asks it again at the same
+// ending the moment the handle writes (promotion.go). It is never left to
+// some later moment, which would read a run capped at boot as resumed.
 func (k *Keeper) endRun(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, ending wsm.KeepaliveRunEnding) {
+	if k.withheldWhileJoining(log, "the end of the workspace's keep-alive run", dlog.Context{"ending": int(ending)}, func() { k.withholdEnd(ws, ending) }) {
+		return
+	}
 	run, ended, err := k.deps.DB.EndKeepaliveRun(ctx, ws, ending)
 	if err != nil {
 		if !leaving(ctx, log, opDrive, "recording the end of the keep-alive run", err) {
