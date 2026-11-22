@@ -144,6 +144,7 @@ func newImpactFixture(t *testing.T) *impactFixture {
 		"mod/daemon/internal/a/a.go":                "package a\n\nfunc A() int { return 1 }\n",
 		"mod/daemon/integration/harness/h.go":       "package harness\n\nfunc Start() {}\n",
 		"mod/daemon/integration/one_test.go":        "package integration\n\nimport (\n\t\"testing\"\n\n\t\"fx/integration/harness\"\n)\n\nfunc TestOne(t *testing.T) { harness.Start() }\n",
+		"mod/goroot/testing/testing.go":             "package testing\n\ntype T struct{}\n",
 		"mod/prompts/p.txt":                         "p\n",
 		"mod/agent-shim/logging/go/go.mod":          "module agentrepl/logging\n",
 		"mod/agent-shim/claude/shim-sidecar/go.mod": "module agentrepl/shim-claude-sidecar\n",
@@ -193,7 +194,9 @@ func (f *impactFixture) list(dir, tags string, test bool, patterns ...string) ([
 	if test {
 		variant := pkg("fx/integration [fx/integration.test]", "integration", "one_test.go")
 		variant.ForTest = "fx/integration"
-		return []impact.Pkg{pkg("fx/integration/harness", "integration/harness", "h.go"), variant}, nil
+		// A real listing holds the standard packages the tests import.
+		std := impact.Pkg{ImportPath: "testing", Dir: filepath.Join(f.module, "goroot", "testing"), GoFiles: []string{"testing.go"}, Standard: true}
+		return []impact.Pkg{std, pkg("fx/integration/harness", "integration/harness", "h.go"), variant}, nil
 	}
 	return []impact.Pkg{pkg("fx/internal/a", "internal/a", "a.go"), pkg("fx/cmd/agent-repld", "cmd/agent-repld", "main.go")}, nil
 }
@@ -229,7 +232,7 @@ func TestRecordImpactRecordsDecidesAndLogsEveryDecision(t *testing.T) {
 
 	// Assert
 	if len(first) != 1 || first[0].WouldSkip != 0 || first[0].RecordsWritten != 1 || first[0].Errors != 0 {
-		t.Fatalf("first = %+v, want one record written and nothing to skip", first)
+		t.Fatalf("first = %+v, want one record written and nothing to skip\nerror log: %s", first, f.errOut.String())
 	}
 	if len(second) != 1 || second[0].WouldSkip != 1 || second[0].WouldSkipCPU != 3 || second[0].Misses != 0 {
 		t.Fatalf("second = %+v, want the test would-skipped with its CPU", second)
