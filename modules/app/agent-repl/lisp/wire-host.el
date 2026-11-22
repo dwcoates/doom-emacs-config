@@ -828,10 +828,9 @@ is a contract breach."
   "Decode VALUE as `HostWorkspaceTransferred', which carries nothing: nil.
 The retired `reload_page' is still accepted and ignored, because the first
 deploy after its retirement hands over from a daemon that still sends it."
-  (agent-repl-wire--check-keys
-   "HostWorkspaceTransferred"
-   (agent-repl-wire--object "HostWorkspaceTransferred" value) '(reloadPage))
-  nil)
+  (let ((object (agent-repl-wire--object "HostWorkspaceTransferred" value)))
+    (agent-repl-wire--check-keys "HostWorkspaceTransferred" object '(reloadPage))
+    nil))
 
 (defun agent-repl-wire-decode-host-workspace-transfer-withdrawn (value)
   "Decode VALUE as the empty message `HostWorkspaceTransferWithdrawn'."

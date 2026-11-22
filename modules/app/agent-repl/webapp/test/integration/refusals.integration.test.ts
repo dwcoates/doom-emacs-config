@@ -19,6 +19,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 
+import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
 import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { CloseWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
@@ -793,6 +794,18 @@ const PAGE_LIFECYCLE_ARMS: ReadonlySet<string> = new Set(["transferringAway", "n
 async function provoke(testCase: RefusalSite, arm: string): Promise<Harness> {
   const h = PAGE_LIFECYCLE_ARMS.has(arm) ? await startHarness({ composer: true }) : await shared();
   if (!shared.owns(h)) await h.fake.awaitStream("watchFeed");
+  // A `transferring_away` refusal starts the page's in-place adoption
+  // (lifecycle.ts `adoptInPlace`). Adopted on another build, the page goes
+  // quiet and nothing redraws over the refusal these cases read; the re-homed
+  // page is lifecycle.integration.test.ts's.
+  if (arm === "transferringAway") {
+    h.fake.answer(
+      "adoptWebWorkspace",
+      create(AdoptWebWorkspaceResponseSchema, {
+        result: { case: "success", value: { page: { kind: { case: "agent", value: {} } }, webappBuild: "another-build" } },
+      }),
+    );
+  }
   h.fake.refuse(testCase.rpc, arm);
   await testCase.arrange?.(h);
   await h.settle();

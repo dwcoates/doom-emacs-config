@@ -29,7 +29,6 @@ package e2e
 import (
 	"sort"
 	"testing"
-	"time"
 
 	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -182,18 +181,14 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 //     deploy finds the daemon stale and hands it over blue-green), adDial (reaching the
 //     successor at the address the announcement carried). There is no second
 //     way to replace a daemon in this package.
-//   - THE ADOPTS ARE ISSUED FROM HERE, not from the page, and that is the
-//     contract: "THE WEBAPP DOES NOT REDIAL (project lead, final) ...
-//     re-pointing the webview is Emacs's job" (webapp/src/lifecycle/
-//     lifecycle.ts:12-21). Emacs is the external system this suite mocks, so
-//     this test plays the lagging client for BOTH hops exactly as
-//     TestRefusalOrderingDuringHandover does — concurrently, because "EVERY
-//     EXPECTED PARTICIPANT SUCCEEDS TOGETHER" (daemon/internal/rollout/
-//     adopt.go:222-251). The page's own web participant is its standing
-//     WatchWebWorkspace, which is what then receives `transferred`.
-//   - The page's recovery is its OWN fresh boot at the successor's address —
-//     the reload Emacs performs — so the successor's AdoptWebWorkspace on the
-//     recovered page is issued by the real app.
+//   - THE HOST ADOPT IS ISSUED FROM HERE, playing Emacs, the external system
+//     this suite mocks; THE WEB ADOPT IS THE PAGE'S OWN. No handover reloads
+//     a page (owner ruling, 2026-11-22): on `transferred` the mounted page
+//     adopts its workspace in place through the shared address, which the
+//     incumbent forwards to the successor, and re-homes every stream there
+//     (webapp/src/lifecycle/lifecycle.ts `adoptInPlace`). Its adopt is the
+//     rendezvous's web participant, so the host adopt below succeeds only
+//     together with it.
 //
 // THE DECLARED WARNING is this test's own subject, as in the adoption area:
 // the standing unlanded-arm refusal record is the evidence of the refusal a
@@ -253,64 +248,15 @@ func testWebappLayerRestartHandover(t *testing.T) {
 	}
 	successor := adDial(addr)
 
-	// Act: complete the rendezvous on the successor, CONCURRENTLY — one after
-	// the other blocks the first inside the rendezvous until its own context
-	// expires (adopt.go:222-251).
-	adopts := make(chan error, 2)
+	// Act: the host half of the rendezvous on the successor. Its web half is
+	// the mounted page's own in-place adoption, and "EVERY EXPECTED
+	// PARTICIPANT SUCCEEDS TOGETHER" (daemon/internal/rollout/adopt.go), so
+	// this returning is the page having adopted too.
+	adopted := make(chan error, 1)
 	go func() {
 		_, err := successor.AdoptHostWorkspace(w.Ctx(),
 			connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws}))
-		adopts <- err
-	}()
-	go func() {
-		_, err := successor.AdoptWebWorkspace(w.Ctx(),
-			connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws}))
-		adopts <- err
-	}()
-	for i := 0; i < 2; i++ {
-		if err := <-adopts; err != nil {
-			t.Fatalf("adopting the workspace on the successor = error %v, want a success (both adopts succeed together)", err)
-		}
-	}
-
-	// Act: KEEP THE HOST HOP ARRIVING, because the page is about to reload.
-	//
-	// A fresh page adopts at boot (lifecycle.ts:23-28), so the recovered page
-	// issues its OWN AdoptWebWorkspace against the successor — and the
-	// successor RE-ARMS the rendezvous from the stand-down intent manifest
-	// after the first arming was already satisfied (observed here:
-	// `daemon.rollout.join` "armed the adopt rendezvous from the intent
-	// manifest" resets host_called/web_called), so that second web caller
-	// waits for a host participant all over again. In production the host is
-	// Emacs, which re-points the webview AND re-adopts the host hop; this
-	// suite mocks Emacs, so the host half of that reload is issued here. The
-	// loop keeps a host caller arriving until one is accepted, so whenever the
-	// recovered page's web adopt lands there is a partner in the rendezvous.
-	// IT KEEPS CALLING FOR AS LONG AS THE PAGE IS RUNNING, rather than
-	// stopping at its first success: a host adopt that returns "the workspace
-	// is already adopted; the call succeeds at once" satisfies nothing for a
-	// rendezvous that is re-armed a millisecond later, which is exactly the
-	// order observed (host accepted at once, the manifest re-armed after it,
-	// then the page's web adopt waiting alone until it gave up).
-	stopReadopting := make(chan struct{})
-	readopted := make(chan int, 1)
-	go func() {
-		accepted := 0
-		for {
-			if _, err := successor.AdoptHostWorkspace(w.Ctx(),
-				connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws})); err == nil {
-				accepted++
-			}
-			select {
-			case <-time.After(stack.PollInterval):
-			case <-stopReadopting:
-				readopted <- accepted
-				return
-			case <-w.Ctx().Done():
-				readopted <- accepted
-				return
-			}
-		}
+		adopted <- err
 	}()
 
 	// Assert (the Go half): the transfer really happened and names the
@@ -322,20 +268,14 @@ func testWebappLayerRestartHandover(t *testing.T) {
 	}
 	adAwaitAddrFileChange(t, w.Daemon, addr)
 
-	// Assert (the page's half): every assertion in
-	// restart-handover.layer.test.ts — the moved notice naming this same
-	// successor, the quiesced page's local refusal, and the fresh page's own
-	// boot and adoption at the new address.
-	waitErr := child.WaitFor(stack.WebappLayerHandoverTimeout)
-	close(stopReadopting)
-	accepted := <-readopted
-	if waitErr != nil {
-		t.Fatalf("e2e/webapp-layer: restart-handover.layer.test.ts failed: %v", waitErr)
+	if err := <-adopted; err != nil {
+		t.Fatalf("adopting the workspace's host on the successor = error %v, want a success beside the page's own adopt", err)
 	}
 
-	// And the host half of that reload really was accepted: a page recovering
-	// beside a host hop that never re-adopted would be a different scenario.
-	if accepted == 0 {
-		t.Fatal("no AdoptHostWorkspace call on the successor was ever accepted, so the page's own recovery adopt had no partner in the rendezvous")
+	// Assert (the page's half): every assertion in
+	// restart-handover.layer.test.ts — the page re-homed in place, never quiet
+	// and never reloaded, its views drawn again from the successor.
+	if err := child.WaitFor(stack.WebappLayerHandoverTimeout); err != nil {
+		t.Fatalf("e2e/webapp-layer: restart-handover.layer.test.ts failed: %v", err)
 	}
 }

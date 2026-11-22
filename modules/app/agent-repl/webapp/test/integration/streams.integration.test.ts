@@ -347,8 +347,9 @@ describe("WatchWebWorkspace", () => {
     // Act
     harness.fake.transfer(WORKSPACE_ID, "http://127.0.0.1:9998");
     await harness.settle();
-    // Assert
-    expect(harness.$('[data-moved="http://127.0.0.1:9998"]')).not.toBeNull();
+    // Assert: the readable push starts the in-place adoption, after the one at
+    // boot; the undecodable one started none.
+    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(2);
   });
 });
 
