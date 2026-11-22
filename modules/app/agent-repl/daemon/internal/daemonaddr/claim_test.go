@@ -338,26 +338,25 @@ func TestWithdrawLeavesASuccessorsAdvertisementAlone(t *testing.T) {
 	}
 }
 
-// TestPredecessorAdvertisement pins the boot's evidence: under the boot
-// claim, an advertisement standing with an address is a predecessor's that
-// died without its orderly exit, and nothing else is.
-func TestPredecessorAdvertisement(t *testing.T) {
+// TestStandingAdvertisement pins what the boot replaces: under the boot
+// claim, an advertisement standing with an address, and nothing else.
+func TestStandingAdvertisement(t *testing.T) {
 	tests := []struct {
 		name         string
 		raw          string
 		wantStanding bool
 		wantAd       Advertisement
 	}{
-		{name: "a shared address with its pid and private address is a predecessor's",
+		{name: "a shared address with its pid and private address stands",
 			raw:          "127.0.0.1:58161\npid=61885\nprivate=127.0.0.1:58200\n",
 			wantStanding: true,
 			wantAd:       Advertisement{Address: "127.0.0.1:58161", PID: 61885, PIDKnown: true, Private: "127.0.0.1:58200"}},
-		{name: "a legacy bare address is a predecessor's",
+		{name: "a legacy bare address stands",
 			raw:          "127.0.0.1:58161\n",
 			wantStanding: true,
 			wantAd:       Advertisement{Address: "127.0.0.1:58161"}},
-		{name: "an empty file is no predecessor", raw: "\n"},
-		{name: "a file naming no address is no predecessor", raw: "\npid=61885\n",
+		{name: "an empty file is none", raw: "\n"},
+		{name: "a file naming no address is none", raw: "\npid=61885\n",
 			wantAd: Advertisement{PID: 61885, PIDKnown: true}},
 	}
 	for _, tt := range tests {
@@ -369,21 +368,21 @@ func TestPredecessorAdvertisement(t *testing.T) {
 			}
 
 			// Act
-			ad, standing, err := PredecessorAdvertisement(addrPath, os.Getpid())
+			ad, standing, err := StandingAdvertisement(addrPath, os.Getpid())
 
 			// Assert
 			if err != nil || standing != tt.wantStanding || ad != tt.wantAd {
-				t.Fatalf("PredecessorAdvertisement = (%+v, %v, %v), want (%+v, %v, nil)", ad, standing, err, tt.wantAd, tt.wantStanding)
+				t.Fatalf("StandingAdvertisement = (%+v, %v, %v), want (%+v, %v, nil)", ad, standing, err, tt.wantAd, tt.wantStanding)
 			}
 		})
 	}
 }
 
-// TestAnAnsweringSharedAddressIsStillAPredecessors pins the 2026-11-21
-// failure: the shared address the socket holder keeps answers a connect
-// whether or not any daemon lives, so a dead daemon's advertisement must be
-// reported as its predecessor's whatever answers there.
-func TestAnAnsweringSharedAddressIsStillAPredecessors(t *testing.T) {
+// TestAnAnsweringSharedAddressIsStillStanding pins that nothing is dialed:
+// the shared address the socket holder keeps answers a connect whether or
+// not any daemon lives, so a standing advertisement is answered whatever
+// answers there.
+func TestAnAnsweringSharedAddressIsStillStanding(t *testing.T) {
 	// Arrange: a listener on the advertised address, as the holder keeps one.
 	ln, err := net.Listen("tcp", net.JoinHostPort(LoopbackHost, "0"))
 	if err != nil {
@@ -397,28 +396,28 @@ func TestAnAnsweringSharedAddressIsStillAPredecessors(t *testing.T) {
 	}
 
 	// Act
-	ad, standing, err := PredecessorAdvertisement(addrPath, os.Getpid())
+	ad, standing, err := StandingAdvertisement(addrPath, os.Getpid())
 
 	// Assert
 	if err != nil || !standing || ad.Address != ln.Addr().String() || ad.PID != 61885 {
-		t.Fatalf("PredecessorAdvertisement = (%+v, %v, %v), want the answering address reported as the predecessor's", ad, standing, err)
+		t.Fatalf("StandingAdvertisement = (%+v, %v, %v), want the answering address reported standing", ad, standing, err)
 	}
 }
 
-// TestAnAbsentAdvertisementIsNoPredecessor pins the ordinary first boot, and
+// TestAnAbsentAdvertisementIsNoneStanding pins the ordinary first boot, and
 // every boot after an orderly exit withdrew the file.
-func TestAnAbsentAdvertisementIsNoPredecessor(t *testing.T) {
+func TestAnAbsentAdvertisementIsNoneStanding(t *testing.T) {
 	// Arrange, Act
-	ad, standing, err := PredecessorAdvertisement(newAddrPath(t), os.Getpid())
+	ad, standing, err := StandingAdvertisement(newAddrPath(t), os.Getpid())
 
 	// Assert
 	if err != nil || standing || ad != (Advertisement{}) {
-		t.Fatalf("PredecessorAdvertisement of an absent file = (%+v, %v, %v), want no predecessor", ad, standing, err)
+		t.Fatalf("StandingAdvertisement of an absent file = (%+v, %v, %v), want none standing", ad, standing, err)
 	}
 }
 
 // TestAnUnreadableAdvertisementIsAnError pins that a file which cannot be read
-// is surfaced, never read as no predecessor.
+// is surfaced, never read as none standing.
 func TestAnUnreadableAdvertisementIsAnError(t *testing.T) {
 	// Arrange: a directory where daemon.addr belongs.
 	addrPath := newAddrPath(t)
@@ -427,18 +426,19 @@ func TestAnUnreadableAdvertisementIsAnError(t *testing.T) {
 	}
 
 	// Act
-	_, standing, err := PredecessorAdvertisement(addrPath, os.Getpid())
+	_, standing, err := StandingAdvertisement(addrPath, os.Getpid())
 
 	// Assert
 	if err == nil || standing || !strings.Contains(err.Error(), addrPath) {
-		t.Fatalf("PredecessorAdvertisement of a directory = (%v, %v), want an error naming %s", standing, err, addrPath)
+		t.Fatalf("StandingAdvertisement of a directory = (%v, %v), want an error naming %s", standing, err, addrPath)
 	}
 }
 
-// TestAnAdvertisementNamingThisProcessIsNoPredecessors pins the invariant
-// guard: a boot that has not yet published cannot have written the file, so
-// one naming its own pid is a contradiction surfaced, not a predecessor.
-func TestAnAdvertisementNamingThisProcessIsNoPredecessors(t *testing.T) {
+// TestAnAdvertisementNamingThisProcessIsAnError pins the invariant guard: a
+// boot that has not yet published cannot have written the file, so one
+// naming its own pid is a contradiction surfaced, not an advertisement
+// standing from an earlier daemon.
+func TestAnAdvertisementNamingThisProcessIsAnError(t *testing.T) {
 	// Arrange
 	addrPath := newAddrPath(t)
 	if err := os.WriteFile(addrPath, []byte("127.0.0.1:58161\npid="+strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
@@ -446,11 +446,11 @@ func TestAnAdvertisementNamingThisProcessIsNoPredecessors(t *testing.T) {
 	}
 
 	// Act
-	_, standing, err := PredecessorAdvertisement(addrPath, os.Getpid())
+	_, standing, err := StandingAdvertisement(addrPath, os.Getpid())
 
 	// Assert
 	if err == nil || standing {
-		t.Fatalf("PredecessorAdvertisement of this process's own pid = (%v, %v), want an error and no predecessor", standing, err)
+		t.Fatalf("StandingAdvertisement of this process's own pid = (%v, %v), want an error and none standing", standing, err)
 	}
 }
 

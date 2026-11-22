@@ -477,7 +477,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		// succeeds for a dead daemon too. An advertisement that cannot be read
 		// is recorded at ERROR, never read as none; the publish below then
 		// replaces it or fails loudly itself.
-		ad, standing, err := daemonaddr.PredecessorAdvertisement(layout.DaemonAddr(), os.Getpid())
+		ad, standing, err := daemonaddr.StandingAdvertisement(layout.DaemonAddr(), os.Getpid())
 		switch {
 		case err != nil:
 			log.Error("daemon.cmd.claim", "the advertisement standing at boot could not be read", dlog.Context{

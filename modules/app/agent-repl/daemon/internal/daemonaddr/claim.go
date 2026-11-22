@@ -390,39 +390,36 @@ func (c *claim) Yield() error {
 	return nil
 }
 
-// PredecessorAdvertisement reads daemon.addr at a boot that HOLDS THE BOOT
+// StandingAdvertisement reads daemon.addr at a boot that HOLDS THE BOOT
 // CLAIM and has not yet published, and answers the advertisement standing
-// there and whether it is a predecessor's.
+// there, the one this boot is about to replace, and whether one stands.
 //
-// THE ADVERTISEMENT'S PRESENCE IS THE EVIDENCE; nothing is probed. The boot
-// claim is kernel-enforced, so no other daemon is alive on this state root,
-// and every orderly exit withdraws its advertisement (Withdraw), so one that
-// still stands and names an address was left by a daemon that died without
-// its orderly exit: SIGKILLed, killed with its whole session, or panicked.
-// A dial cannot tell: the advertised address is the SHARED one the socket
-// holder keeps listening, so a connect to it lands in the holder's backlog
-// and succeeds whether or not any daemon lives (2026-11-21, a deploy's
-// panic went unrecorded because the dead daemon's address "answered").
+// IT IS NO DEATH'S EVIDENCE. daemon.addr is shared between an incumbent and
+// its successor across a yield, so orderly sequences leave one standing, and
+// Emacs may delete it; a daemon's death is its life lock left standing with
+// no holder (life.go, LiveOthers). The boot records the replacement at INFO.
+// Nothing is dialed either: the advertised address is the SHARED one the
+// socket holder keeps listening, so a connect to it lands in the holder's
+// backlog and succeeds whether or not any daemon lives.
 //
-// An absent file, or one naming no address, is no predecessor. A read that
-// fails for any other reason is an error, never read as no predecessor. An
-// advertisement naming OWNPID is not a predecessor's: this process has not
-// published yet, so the file cannot be its own, and the contradiction is an
-// error for the caller to record.
-func PredecessorAdvertisement(addrPath string, ownPID int) (Advertisement, bool, error) {
+// An absent file, or one naming no address, is none. A read that fails for
+// any other reason is an error, never read as none. An advertisement naming
+// OWNPID cannot be standing from before this boot: this process has not
+// published yet, and the contradiction is an error for the caller to record.
+func StandingAdvertisement(addrPath string, ownPID int) (Advertisement, bool, error) {
 	raw, err := os.ReadFile(addrPath)
 	if os.IsNotExist(err) {
 		return Advertisement{}, false, nil
 	}
 	if err != nil {
-		return Advertisement{}, false, fmt.Errorf("read the predecessor's advertisement %q: %w", addrPath, err)
+		return Advertisement{}, false, fmt.Errorf("read the standing advertisement %q: %w", addrPath, err)
 	}
 	ad := ParseAdvertisement(string(raw))
 	if ad.Address == "" {
 		return ad, false, nil
 	}
 	if ad.PIDKnown && ad.PID == ownPID {
-		return ad, false, fmt.Errorf("the advertisement %q names this process (pid %d) before it published: it is no predecessor's", addrPath, ownPID)
+		return ad, false, fmt.Errorf("the advertisement %q names this process (pid %d) before it published: it stood from no earlier daemon", addrPath, ownPID)
 	}
 	return ad, true, nil
 }
