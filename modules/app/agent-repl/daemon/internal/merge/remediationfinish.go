@@ -504,8 +504,8 @@ const fixStoppedSummary = "the deploy mediator stopped without finishing the fix
 // the user. The finish is then ended whatever it served: a chain's end keeps
 // a finish under way (wsm.EndRemediationFinishesOf), so one left standing
 // would hold the queue past the user's release of the escalation. With no
-// check owed nothing holds the queue any more: the finish ends at ERROR,
-// since a fix was lost, and the queue advances.
+// check owed nothing holds the queue any more, and it advances. The end is
+// recorded once, by endGivenUpFinish.
 func (o *orchestrator) abandonFinish(ctx context.Context, f wsm.RemediationFinish, summary string, fields dlog.Context) error {
 	m, err := o.deps.DB.MediationOf(ctx, f.Repo)
 	if err != nil {
@@ -516,15 +516,8 @@ func (o *orchestrator) abandonFinish(ctx context.Context, f wsm.RemediationFinis
 			return err
 		}
 	}
-	ended, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace)
-	if err != nil {
+	if err := o.endGivenUpFinish(ctx, f, fields); err != nil {
 		return err
-	}
-	switch {
-	case m == nil:
-		o.deps.Log.Global().Error(opRemediationFinish, "the deploy mediator's fix cannot land and no check is owed; its finish is ended, nothing holds the queue, and it advances", withField(withField(fields, "summary", summary), "ended", ended))
-	default:
-		o.deps.Log.Global().Info(opRemediationFinish, "the finish nothing finishes any more is ended; the escalated check holds the queue for the user", withField(fields, "ended", ended))
 	}
 	o.republishMediation(ctx, f.Repo)
 	o.kick(f.Repo)
