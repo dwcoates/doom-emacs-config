@@ -35,6 +35,11 @@ const (
 	StatusOK byte = '1'
 	// StatusRefused precedes the reason a request was refused.
 	StatusRefused byte = '0'
+	// StreamReceived is an accept stream's client telling the holder it
+	// took the oldest connection sent and not yet told received.
+	StreamReceived byte = 'r'
+	// StreamStop is an accept stream's client asking the holder to end it.
+	StreamStop byte = 's'
 )
 
 // Verb names one request a holder answers. THE VERBS AND THE STATUS BYTES ARE
@@ -214,7 +219,7 @@ func Serve(ctx context.Context, control *net.UnixListener, sockets map[string]*o
 // answer serves one request on CONN and closes it.
 func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File, held *returns) Grant {
 	defer conn.Close()
-	line, fds, err := readRequest(conn)
+	line, rest, fds, err := readRequest(conn)
 	// A DESCRIPTOR ONLY A RETURN CARRIES IS THE HOLDER'S once read; any other
 	// request's is closed with it.
 	var carried *os.File
@@ -265,7 +270,9 @@ func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File
 		if _, ok := sockets[name]; !ok {
 			return refuse(g, fmt.Sprintf("this holder holds no socket named %q", name))
 		}
-		held.subscribe(ctx, name, conn)
+		if err := held.subscribe(ctx, name, conn, rest); err != nil {
+			g.Err = err
+		}
 		return g
 	}
 	file, ok := sockets[line]
@@ -278,8 +285,10 @@ func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File
 	return Grant{Name: line, Verb: VerbTake}
 }
 
-// readRequest reads CONN's one request line and every fd it carried.
-func readRequest(conn *net.UnixConn) (string, []int, error) {
+// readRequest reads CONN's one request line and every fd it carried, and
+// answers what was read past the line: an accept stream's client may have
+// written its first receipt or its stop already.
+func readRequest(conn *net.UnixConn) (string, []byte, []int, error) {
 	var line []byte
 	var fds []int
 	buf := make([]byte, 256)
@@ -298,13 +307,13 @@ func readRequest(conn *net.UnixConn) (string, []int, error) {
 		}
 		line = append(line, buf[:n]...)
 		if i := bytes.IndexByte(line, '\n'); i >= 0 {
-			return string(line[:i]), fds, nil
+			return string(line[:i]), line[i+1:], fds, nil
 		}
 		if err != nil {
-			return "", fds, err
+			return "", nil, fds, err
 		}
 		if n == 0 {
-			return "", fds, io.ErrUnexpectedEOF
+			return "", nil, fds, io.ErrUnexpectedEOF
 		}
 	}
 }

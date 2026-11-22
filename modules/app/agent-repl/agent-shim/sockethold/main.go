@@ -112,7 +112,7 @@ func run(ctx context.Context, control string, hold []string, activateSockets fun
 		case g.Verb == sockethold.VerbReturn:
 			log.Info("sockethold.return", "kept a connection a departing server handed back, for the next to accept", recordlog.Context{"socket": g.Name})
 		case g.Verb == sockethold.VerbAccept && g.Err != nil:
-			log.Error("sockethold.accept", "an accept stream of handed-back connections was refused", recordlog.Context{"socket": g.Name, "cause": g.Err.Error()})
+			log.Error("sockethold.accept", "an accept stream of handed-back connections was refused, or failed before its end", recordlog.Context{"socket": g.Name, "cause": g.Err.Error()})
 		case g.Verb == sockethold.VerbAccept:
 			log.Info("sockethold.accept", "an accept stream of handed-back connections ended", recordlog.Context{"socket": g.Name})
 		case g.Err != nil:

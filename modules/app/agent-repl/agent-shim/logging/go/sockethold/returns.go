@@ -29,9 +29,23 @@ import (
 //   - "return NAME", with the connection's fd attached, answered StatusOK once
 //     the holder has it (or StatusRefused and a reason).
 //   - "accept NAME", which stays open: the holder sends StatusOK with one fd
-//     attached for every connection handed back, queued ones first, until the
-//     client half-closes (Returned.Stop), when the holder ends the stream. A
-//     newer stream for NAME ends the older one.
+//     attached for every connection handed back, queued ones first, and the
+//     client answers StreamReceived for each fd it took, until the client
+//     sends StreamStop (Returned.Stop), or half-closes, when the holder ends
+//     the stream. A newer stream for NAME ends the older one.
+//
+// A DESCRIPTOR IN FLIGHT IS NEVER THE SOCKET'S ONLY ONE. While every
+// descriptor of a socket is in flight in a unix socket's buffer, darwin's
+// collector of unreachable in-flight descriptors, which runs whenever any
+// unix socket on the host closes, flushes the socket's receive side: the
+// client's next segment is answered with a reset, and the server that takes
+// the descriptor finds the connection closed (2026-11-22: a successor
+// received a handed-back connection already CLOSED, getpeername EINVAL, and
+// the client read "connection reset by peer"). So every sender keeps its
+// copy until the receiver has the descriptor: Return's caller until the
+// holder's answer, which follows its taking the fd; the holder each one it
+// sent on a stream until that stream's client answers StreamReceived for it,
+// or the stream ends.
 
 // Return hands the connection FILE, accepted on the held socket NAME and
 // never read, to the holder serving CONTROL, for the server accepting on NAME
@@ -69,6 +83,9 @@ func Return(ctx context.Context, control, name string, file *os.File) error {
 type Returned struct {
 	uc   *net.UnixConn
 	name string
+	// receiptErr is the failure to tell the holder a connection was
+	// received, answered by the Next after the one that received it.
+	receiptErr error
 }
 
 // Subscribe opens the accept stream of the held socket NAME at the holder
@@ -98,6 +115,9 @@ func Subscribe(ctx context.Context, control, name string) (*Returned, error) {
 // for a newer stream of the socket. A refusal (the holder holds no such
 // socket) answers ErrRefused.
 func (r *Returned) Next() (net.Conn, error) {
+	if r.receiptErr != nil {
+		return nil, r.receiptErr
+	}
 	buf := make([]byte, 1)
 	oob := make([]byte, syscall.CmsgSpace(4))
 	n, oobn, _, _, err := r.uc.ReadMsgUnix(buf, oob)
@@ -122,6 +142,12 @@ func (r *Returned) Next() (net.Conn, error) {
 	if err != nil || len(fds) != 1 {
 		return nil, fmt.Errorf("sockethold: the accept stream of %q sent %d fds: %v", r.name, len(fds), err)
 	}
+	// THE FD IS THIS SERVER'S NOW, so the holder may close its copy. A
+	// failure to say so is answered by the next Next, never by losing the
+	// connection received.
+	if _, err := r.uc.Write([]byte{StreamReceived}); err != nil {
+		r.receiptErr = fmt.Errorf("sockethold: tell the accept stream of %q a connection was received: %w", r.name, err)
+	}
 	file := os.NewFile(uintptr(fds[0]), r.name)
 	defer file.Close()
 	conn, err := net.FileConn(file)
@@ -132,9 +158,11 @@ func (r *Returned) Next() (net.Conn, error) {
 }
 
 // Stop asks the holder to end the stream: it sends nothing more, and Next
-// answers what was already on its way, then io.EOF.
+// answers what was already on its way, then io.EOF. The stream stays open
+// both ways until Close, so what Next receives after Stop is still told to
+// the holder.
 func (r *Returned) Stop() error {
-	if err := r.uc.CloseWrite(); err != nil {
+	if _, err := r.uc.Write([]byte{StreamStop}); err != nil {
 		return fmt.Errorf("sockethold: end the accept stream of %q: %w", r.name, err)
 	}
 	return nil
@@ -164,6 +192,10 @@ type stream struct {
 	conn *net.UnixConn
 	send sync.Mutex
 	done bool
+	// sent are the connections sent and not yet received, oldest first: the
+	// holder's copies, closed as the client answers StreamReceived for each,
+	// or at the stream's end.
+	sent []*os.File
 }
 
 func newReturns() *returns {
@@ -187,8 +219,9 @@ func (r *returns) put(name string, file *os.File) {
 	}
 }
 
-// deliver sends FILE on S and closes the holder's copy, answering false when
-// S has ended (the file stays the holder's).
+// deliver sends FILE on S, answering false when S has ended (the file stays
+// the holder's). The holder's copy stays open until the client received it
+// (received).
 func (r *returns) deliver(name string, s *stream, file *os.File) bool {
 	s.send.Lock()
 	defer s.send.Unlock()
@@ -199,14 +232,46 @@ func (r *returns) deliver(name string, s *stream, file *os.File) bool {
 		s.done = true
 		return false
 	}
-	file.Close()
+	s.sent = append(s.sent, file)
 	return true
 }
 
+// errNothingSent is a client's receipt on a stream with nothing in flight.
+var errNothingSent = errors.New("the client told of a connection received with none sent")
+
+// received closes the holder's copy of the oldest connection sent on S, which
+// its client now has.
+func (s *stream) received() error {
+	s.send.Lock()
+	defer s.send.Unlock()
+	if len(s.sent) == 0 {
+		return errNothingSent
+	}
+	file := s.sent[0]
+	s.sent = s.sent[1:]
+	return file.Close()
+}
+
+// release closes the holder's copy of every connection sent on S and not
+// told received, at the stream's end: the client either took each or never
+// will.
+func (s *stream) release() error {
+	s.send.Lock()
+	defer s.send.Unlock()
+	var err error
+	for _, file := range s.sent {
+		err = errors.Join(err, file.Close())
+	}
+	s.sent = nil
+	return err
+}
+
 // subscribe makes CONN NAME's accept stream, ending the one before it, sends
-// every connection waiting, and holds the stream until its client
-// half-closes or the holder stops.
-func (r *returns) subscribe(ctx context.Context, name string, conn *net.UnixConn) {
+// every connection waiting, and holds the stream until its client asks to
+// stop, half-closes, or the holder stops. READ is what its client wrote past
+// the request line. It answers the client's breach of the stream, or the
+// failure reading it.
+func (r *returns) subscribe(ctx context.Context, name string, conn *net.UnixConn, read []byte) error {
 	s := &stream{conn: conn}
 	r.mu.Lock()
 	older := r.streams[name]
@@ -225,21 +290,50 @@ func (r *returns) subscribe(ctx context.Context, name string, conn *net.UnixConn
 			break
 		}
 	}
-	// THE CLIENT'S HALF-CLOSE IS THE STREAM'S END: its read sees EOF.
-	ended := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
-	go func() {
-		_, _ = io.Copy(io.Discard, conn)
-		close(ended)
-	}()
-	<-ended
+	err := r.serveStream(ctx, name, s, read)
 	r.mu.Lock()
 	if r.streams[name] == s {
 		delete(r.streams, name)
 	}
 	r.mu.Unlock()
 	r.end(s)
+	return errors.Join(err, s.release())
+}
+
+// serveStream reads S's client, from what was READ already, until it
+// closes: StreamReceived for each connection it took, StreamStop to end the
+// stream, which then still reads its receipts. A half-close or close ends
+// the stream, the holder's stop included; any other byte is a breach,
+// answered.
+func (r *returns) serveStream(ctx context.Context, name string, s *stream, read []byte) error {
+	buf := make([]byte, 64)
+	for {
+		for _, b := range read {
+			switch b {
+			case StreamReceived:
+				if rerr := s.received(); rerr != nil {
+					return fmt.Errorf("the accept stream of %q: %w", name, rerr)
+				}
+			case StreamStop:
+				r.end(s)
+			default:
+				return fmt.Errorf("the accept stream of %q sent %q, neither a receipt nor a stop", name, b)
+			}
+		}
+		n, err := s.conn.Read(buf)
+		read = buf[:n]
+		if n > 0 {
+			continue
+		}
+		if errors.Is(err, io.EOF) || (err != nil && ctx.Err() != nil) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read the accept stream of %q: %w", name, err)
+		}
+	}
 }
 
 // end ends S: nothing more is sent, and its client reads EOF.
