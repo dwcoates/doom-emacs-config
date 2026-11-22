@@ -31,6 +31,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-wire--check-keys "wire-common")
 (declare-function agent-repl-wire--decode-bool "wire-common")
+(declare-function agent-repl-wire--decode-double "wire-common")
 (declare-function agent-repl-wire--decode-empty "wire-common")
 (declare-function agent-repl-wire--decode-int64 "wire-common")
 (declare-function agent-repl-wire--decode-uint32 "wire-common")
@@ -375,6 +376,18 @@ It is decoded because the codec refuses unknown fields, and refusing this
 one dropped every roster push (deploy of 2026-11-20 06:29Z)."
   (agent-repl-wire--decode-empty "RosterRowOpenOwnedPullRequest" value)
   t)
+
+(defun agent-repl-wire-decode-roster-row-context-heat (value)
+  "Decode VALUE as `RosterRowContextHeat' and return its window fill.
+The CONTEXT-HEAT marker: the workspace's context holds at least 400,000
+tokens, and `windowFill' is the fraction of the window it fills.
+
+EMACS DECODES IT AND DRAWS NOTHING FROM IT.  The webapp sidebar inks the
+open row's duration by it.  It is decoded because the codec refuses
+unknown fields."
+  (let ((object (agent-repl-wire--object "RosterRowContextHeat" value)))
+    (agent-repl-wire--check-keys "RosterRowContextHeat" object '(windowFill))
+    (agent-repl-wire--decode-double "RosterRowContextHeat" 'windowFill object)))
 
 (defun agent-repl-wire-decode-roster-row-opening (value)
   "Decode VALUE as `RosterRowOpening' and return t.
@@ -930,7 +943,7 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest visibility lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest contextHeat visibility lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -939,7 +952,8 @@ unknown field by the row's key check."
 Returns `(:workspace W :attention A :viewed V
 :view-dwell VD :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:merge-paused MP :merge-turn MT :open-owned-pull-request OP :visibility VIS
+:merge-paused MP :merge-turn MT :open-owned-pull-request OP
+:context-heat CH :visibility VIS
 :last-selected L :last-turn-ended LT
 :last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
@@ -993,6 +1007,10 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            (agent-repl-wire--decode-optional-message
             "RosterRow" 'openOwnedPullRequest object
             #'agent-repl-wire-decode-roster-row-open-owned-pull-request)
+           :context-heat
+           (agent-repl-wire--decode-optional-message
+            "RosterRow" 'contextHeat object
+            #'agent-repl-wire-decode-roster-row-context-heat)
            :visibility (agent-repl-wire--decode-message
                         "RosterRow" 'visibility object
                         #'agent-repl-wire-decode-roster-row-visibility)

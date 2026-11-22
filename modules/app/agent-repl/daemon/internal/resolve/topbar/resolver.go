@@ -49,6 +49,8 @@ type resolver struct {
 	// mints each request's id.
 	signInRequests map[string]string
 	signInSeq      uint64
+	// contextFill is the sink BindContextFill installed, nil before it.
+	contextFill ContextFillSink
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -169,6 +171,9 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	r.mu.Lock()
 	s := r.stateLocked(ws)
 	apply(s)
+	if r.contextFill != nil {
+		r.contextFill(ws, contextTokens(s), windowFill(s))
+	}
 	// THE QUIET STATE STOPS THE STRIP, NEVER ITS FACTS: the fact is taken
 	// above, and the strip is resolved and published once when the gate opens
 	// (followQuiet). The gate is read under the lock the resync takes, so a

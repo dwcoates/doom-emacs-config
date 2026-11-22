@@ -270,6 +270,11 @@ type Resolver interface {
 	// workspace verbs, at registration, on every ChangeWorkspaceLinks, and on
 	// every end of a followed pull request.
 	SetOpenOwnedPullRequest(ws ids.WorkspaceID, open bool)
+	// SetContextFill installs the workspace's context size in tokens and how
+	// full its window is (0..1), as the topbar's context chip states them. The
+	// row's context-heat marker stands while TOKENS reaches ContextHeatTokens.
+	// Its sole producer is the topbar resolver, on every fact it takes.
+	SetContextFill(ws ids.WorkspaceID, tokens int64, fill float64)
 	// SetRepoDivergence installs a repository's latest ahead/behind measure
 	// (repodivergence), drawn as its section label's hover. A repository never
 	// measured is drawn pending.

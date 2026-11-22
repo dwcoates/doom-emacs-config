@@ -166,6 +166,10 @@ type wsState struct {
 	// still open (SetOpenOwnedPullRequest), which the row's
 	// frontend.v1.RosterRowOpenOwnedPullRequest marker states.
 	openOwnedPullRequest bool
+	// contextHeat is the window fill (0..1) of a context that has reached
+	// ContextHeatTokens (SetContextFill), nil below it; the row's
+	// frontend.v1.RosterRowContextHeat marker states it.
+	contextHeat *float64
 	// outline is a chat thread's outline, as the chat service last handed
 	// it; nil while it has none.
 	outline *frontendv1.RosterThreadOutline

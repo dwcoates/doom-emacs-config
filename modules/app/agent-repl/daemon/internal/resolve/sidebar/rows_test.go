@@ -2335,3 +2335,71 @@ func TestARowsRecordsGoToItsOwnWorkspacesSink(t *testing.T) {
 		t.Fatalf("status records seen for %v, want both rows'", seen)
 	}
 }
+
+// THE CONTEXT-HEAT MARKER (frontend.v1.RosterRowContextHeat) stands exactly
+// while the context holds sidebar.ContextHeatTokens or more, carrying the window fill.
+func TestContextHeatMarkerStandsFromTheThreshold(t *testing.T) {
+	cases := []struct {
+		name     string
+		tokens   int64
+		fill     float64
+		wantHeat bool
+	}{
+		{name: "just below the threshold carries no marker", tokens: sidebar.ContextHeatTokens - 1, fill: 0.399, wantHeat: false},
+		{name: "exactly the threshold carries the marker", tokens: sidebar.ContextHeatTokens, fill: 0.4, wantHeat: true},
+		{name: "far above the threshold carries the marker with its fill", tokens: 900_000, fill: 0.9, wantHeat: true},
+		{name: "a cleared context carries no marker", tokens: 0, fill: 0, wantHeat: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t, workspace(string(theWS), "one")))
+
+			// Act.
+			r.SetContextFill(theWS, tc.tokens, tc.fill)
+
+			// Assert.
+			heat := onlyRow(t, r).GetContextHeat()
+			if (heat != nil) != tc.wantHeat {
+				t.Fatalf("context_heat present = %v, want %v", heat != nil, tc.wantHeat)
+			}
+			if heat != nil && heat.GetWindowFill() != tc.fill {
+				t.Fatalf("window_fill = %v, want %v", heat.GetWindowFill(), tc.fill)
+			}
+		})
+	}
+}
+
+func TestContextHeatMarkerLeavesWhenTheContextShrinks(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t, workspace(string(theWS), "one")))
+	r.SetContextFill(theWS, 500_000, 0.5)
+
+	// Act.
+	r.SetContextFill(theWS, 20_000, 0.02)
+
+	// Assert.
+	if onlyRow(t, r).GetContextHeat() != nil {
+		t.Fatal("context_heat still present after the context shrank below the threshold")
+	}
+}
+
+// A figure that leaves the marker as it stood renders nothing.
+func TestContextHeatUnchangedPublishesNothing(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	ch := subscribe(t, r)
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	<-ch
+
+	// Act: two readings below the threshold, then a change that must still arrive.
+	r.SetContextFill(theWS, 10_000, 0.01)
+	r.SetContextFill(theWS, 20_000, 0.02)
+	r.SetSummary(theWS, "a change")
+
+	// Assert.
+	row := rowFor(repoRows(t, (<-ch).GetWorkspaces()), string(theWS))
+	if got := row.GetDetail().GetSummary().GetText(); got != "a change" {
+		t.Fatalf("next delivery carried %q, want the change: an unchanged marker published a push", got)
+	}
+}

@@ -1253,6 +1253,27 @@ func (r *resolver) SetOpenOwnedPullRequest(ws ids.WorkspaceID, open bool) {
 		})
 }
 
+// ContextHeatTokens is the context size from which a row's duration is inked
+// by how full the window is (owner request, 2026-11-21): 400,000 tokens.
+const ContextHeatTokens int64 = 400_000
+
+// SetContextFill installs the workspace's context size and window fill. A
+// change that leaves the marker as it stood renders nothing.
+func (r *resolver) SetContextFill(ws ids.WorkspaceID, tokens int64, fill float64) {
+	var heat *float64
+	if tokens >= ContextHeatTokens {
+		heat = &fill
+	}
+	r.mutateWorkspaceIf(ws, "daemon.sidebar.set_context_fill", "the roster took the workspace's context size",
+		dlog.Context{"tokens": tokens, "fill": fill, "heated": heat != nil}, func(s *wsState, _ dlog.Logger) bool {
+			if (s.contextHeat == nil) == (heat == nil) && (heat == nil || *s.contextHeat == *heat) {
+				return false
+			}
+			s.contextHeat = heat
+			return true
+		})
+}
+
 // ---- SidebarSink ----------------------------------------------------------
 
 // OnSessionStarted marks the row live.

@@ -921,6 +921,19 @@ message RosterVisibilityUnselectedVisible {}
 // The user is looking at the workspace. Empty: the arm is the state.
 message RosterVisibilitySelected {}
 
+// The CONTEXT-HEAT marker: the workspace's context has reached 400,000 tokens
+// (owner request, 2026-11-21). The open workspaces section inks the row's
+// duration by `window_fill` through the same gradient the topbar's context
+// figure uses, so a long context stands out; below 400,000 tokens the marker
+// is absent and the duration keeps its ordinary ink. The bands (Recently
+// Merged, Hidden) draw nothing for it.
+message RosterRowContextHeat {
+  // How full the model's context window is, 0..1: exactly
+  // frontend.v1.TopbarContextChip.window_fill, the figure the topbar colors.
+  // Never outside [0, 1].
+  double window_fill = 1;
+}
+
 // The ASYNC-MERGING marker: the workspace's OWN BRANCH is merging async, in a
 // hidden merge workspace forked from it. Empty: presence is the fact.
 //
@@ -2523,6 +2536,9 @@ message RosterRow {
   // The row's VISIBILITY, which gates every per-workspace allocation. Always
   // set. See RosterRowVisibility, which carries its whole contract.
   RosterRowVisibility visibility = 78;
+  // The row's CONTEXT HEAT: present while the workspace's context holds at
+  // least 400,000 tokens. See RosterRowContextHeat.
+  optional RosterRowContextHeat context_heat = 79;
 
   // The row's display name.
   RosterRowName name = 2;

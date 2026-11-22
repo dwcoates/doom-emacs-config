@@ -300,6 +300,8 @@ export function row(init: {
   mergeTurn?: boolean;
   /** The OPEN-OWNED-PULL-REQUEST marker: present while the workspace owns a pull request still open. */
   openOwnedPullRequest?: boolean;
+  /** The context-heat marker's window fill; absent draws no marker. */
+  contextHeat?: number;
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
   /** The priority icon the name's prefix wears; omitted = unprioritized. */
@@ -338,6 +340,7 @@ export function row(init: {
     ...(init.mergePaused === true ? { mergePaused: {} } : {}),
     ...(init.mergeTurn === true ? { mergeTurn: {} } : {}),
     ...(init.openOwnedPullRequest === true ? { openOwnedPullRequest: {} } : {}),
+    ...(init.contextHeat !== undefined ? { contextHeat: { windowFill: init.contextHeat } } : {}),
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
   });
   return withFamily(built, init.children ?? []);

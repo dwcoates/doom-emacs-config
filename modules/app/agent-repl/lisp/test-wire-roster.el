@@ -83,6 +83,7 @@ See `agent-repl-test-wire-roster--row-json'."
                    :merge-paused nil
                    :merge-turn nil
                    :open-owned-pull-request nil
+                   :context-heat nil
                    :visibility :unselected-visible
                    :last-selected nil
                    :last-turn-ended nil
@@ -245,6 +246,16 @@ See `agent-repl-test-wire-roster--row-json'."
                   (agent-repl-test-wire-roster--row
                    "\"thinking\":{}" "\"mergeTurn\":{\"step\":{}}"))
                  '("RosterRowMergeTurn" step "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-context-heat-marker ()
+  "A row carrying `contextHeat\=' decodes its window fill."
+  ;; Act
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-row
+              (agent-repl-test-wire-roster--row
+               "\"ready\":{}" "\"contextHeat\":{\"windowFill\":0.5}"))))
+    ;; Assert
+    (should (equal (plist-get row :context-heat) 0.5))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-open-owned-pull-request-marker ()
   "A row carrying `openOwnedPullRequest\=' decodes it as PRESENT."

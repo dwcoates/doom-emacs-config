@@ -46,6 +46,7 @@ import type {
   RosterRowDetailSummary,
   RosterRowName,
   RosterRowOneShot,
+  RosterRowContextHeat,
   RosterRowOpenOwnedPullRequest,
   RosterRowOpening,
   RosterRowAsyncMerging,
@@ -73,6 +74,7 @@ import { SetWorkspaceHiddenResponseSchema, type SetWorkspaceHiddenError } from "
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
+import { contextFigureColor } from "../topbar/context-chip.js";
 import { sameLocalDate } from "../clock.js";
 import { liveElapsedReading, settledElapsedClock } from "../elapsed-clock.js";
 import { heatColor } from "../heat.js";
@@ -387,6 +389,15 @@ export function drawRosterRow(
   ) {
     duration.setAttribute("data-open-owned-pull-request", "");
   }
+  // A LONG CONTEXT INKS THE DURATION BY HOW FULL THE WINDOW IS (owner request,
+  // 2026-11-21): the topbar chip's own gradient, in the open section only. The
+  // daemon states the marker only from 400,000 tokens, so absent means the
+  // ordinary ink. Inline, so it wins over the green an open pull request gives.
+  if (place === "grouping" && !hidden && u.contextHeat !== undefined) {
+    const heat = drawRosterRowContextHeat(u.contextHeat, `${path}.contextHeat`);
+    duration.setAttribute("data-context-heat", "");
+    duration.style.color = contextFigureColor(heat);
+  }
   line.appendChild(duration);
   const target: VerbTarget = { sc, workspace, name, kind: "workspace" };
   const more = drawMenuControl(ws, target);
@@ -632,6 +643,16 @@ export function drawRosterRowOpenOwnedPullRequest(u: RosterRowOpenOwnedPullReque
   void u;
   void path;
   return true;
+}
+
+/**
+ * The CONTEXT-HEAT marker: the workspace's context holds 400,000 tokens or
+ * more. Answers the window fill (0..1) the duration is colored by, which the
+ * topbar's `contextFigureColor` refuses outside [0, 1].
+ */
+export function drawRosterRowContextHeat(u: RosterRowContextHeat, path: string): number {
+  void path;
+  return u.windowFill;
 }
 
 /**
