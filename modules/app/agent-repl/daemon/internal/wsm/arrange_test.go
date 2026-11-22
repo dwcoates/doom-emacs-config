@@ -1632,3 +1632,119 @@ func TestTheUserStillSortsAMainWorkspace(t *testing.T) {
 		t.Fatalf("main workspace sits in %v, want %s", got, sub.ID)
 	}
 }
+
+// siblingFixture registers a parent with children c1..c3 and an unrelated
+// root "other" with a child "o1", and answers the workspaces by name.
+func siblingFixture(t *testing.T, s *store) map[string]Workspace {
+	t.Helper()
+	repoDir := arrangeRepo(t, "repo")
+	byName := map[string]Workspace{}
+	byName["parent"] = registerIn(t, s, repoDir, "parent", nil)
+	for _, name := range []string{"c1", "c2", "c3"} {
+		byName[name] = registerChild(t, s, repoDir, name, byName["parent"].ID)
+	}
+	byName["other"] = registerIn(t, s, repoDir, "other", nil)
+	byName["o1"] = registerChild(t, s, repoDir, "o1", byName["other"].ID)
+	// Registration fixes no order among the children, so pin c1, c2, c3.
+	if err := writeSiblings(t, s, byName["parent"].ID, func([]WorkspaceID) []WorkspaceID {
+		return []WorkspaceID{byName["c1"].ID, byName["c2"].ID, byName["c3"].ID}
+	}); err != nil {
+		t.Fatalf("pin the children's order: %v", err)
+	}
+	return byName
+}
+
+// writeSiblings runs reorderSiblings over PARENT's children in one write.
+func writeSiblings(t *testing.T, s *store, parent WorkspaceID, order func([]WorkspaceID) []WorkspaceID) error {
+	t.Helper()
+	return s.write(context.Background(), "test.reorder_siblings", nil, func(ctx context.Context, tx *sql.Tx) error {
+		return reorderSiblings(ctx, tx, string(parent), order)
+	})
+}
+
+func TestReorderSiblingsWritesTheOrderOverTheChildrensOwnPlaces(t *testing.T) {
+	tests := []struct {
+		name  string
+		order func(siblings []WorkspaceID) []WorkspaceID
+		want  []string
+	}{
+		{name: "reversed", order: func(s []WorkspaceID) []WorkspaceID { return []WorkspaceID{s[2], s[1], s[0]} }, want: []string{"c3", "c2", "c1"}},
+		{name: "unchanged", order: func(s []WorkspaceID) []WorkspaceID { return s }, want: []string{"c1", "c2", "c3"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := siblingFixture(t, s)
+			before := placesByName(t, s)
+
+			// Act
+			err := writeSiblings(t, s, ws["parent"].ID, tt.order)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("reorderSiblings: %v", err)
+			}
+			if got := namesAmong(t, s, "c1", "c2", "c3"); !slices.Equal(got, tt.want) {
+				t.Fatalf("children order = %v, want %v", got, tt.want)
+			}
+			after := placesByName(t, s)
+			for _, name := range []string{"parent", "other", "o1"} {
+				if after[name] != before[name] {
+					t.Fatalf("%s's place moved from %d to %d", name, before[name], after[name])
+				}
+			}
+		})
+	}
+}
+
+func TestReorderSiblingsReadsOnlyTheParentsChildrenInPlaceOrder(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := siblingFixture(t, s)
+	var seen []WorkspaceID
+
+	// Act
+	err := writeSiblings(t, s, ws["parent"].ID, func(siblings []WorkspaceID) []WorkspaceID {
+		seen = siblings
+		return siblings
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("reorderSiblings: %v", err)
+	}
+	want := []WorkspaceID{ws["c1"].ID, ws["c2"].ID, ws["c3"].ID}
+	if !slices.Equal(seen, want) {
+		t.Fatalf("siblings = %v, want %v", seen, want)
+	}
+}
+
+func TestMoveWorkspaceBetweenChildrenReordersThemUnderTheirParent(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws, target string
+		want       []string
+	}{
+		{name: "from an earlier sibling it lands just after the target", ws: "c1", target: "c2", want: []string{"c2", "c1", "c3"}},
+		{name: "from a later sibling it lands just before the target", ws: "c3", target: "c1", want: []string{"c3", "c1", "c2"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := siblingFixture(t, s)
+
+			// Act
+			err := s.MoveWorkspace(context.Background(), ws[tt.ws].ID, ws[tt.target].ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("MoveWorkspace: %v", err)
+			}
+			if got := namesAmong(t, s, "c1", "c2", "c3"); !slices.Equal(got, tt.want) {
+				t.Fatalf("children order = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

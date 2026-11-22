@@ -535,13 +535,10 @@ func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 			return ErrNotSiblings
 		}
 		if ownParent.Valid {
-			siblings, err := idsByPlace[WorkspaceID](ctx, tx, `SELECT id FROM workspaces WHERE parent_id = ? ORDER BY place`, ownParent.String)
-			if err != nil {
-				return err
-			}
-			after := slices.Index(siblings, ws) < slices.Index(siblings, target)
-			_, err = permutePlaces(ctx, tx, moveBeside(siblings, ws, target, after))
-			return err
+			return reorderSiblings(ctx, tx, ownParent.String, func(siblings []WorkspaceID) []WorkspaceID {
+				after := slices.Index(siblings, ws) < slices.Index(siblings, target)
+				return moveBeside(siblings, ws, target, after)
+			})
 		}
 		walk, err := readWalk(ctx, tx, ownRepo)
 		if err != nil {
@@ -566,6 +563,20 @@ func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 		}
 		return fmt.Errorf("wsm: move workspace: root %s is in no entry of its repository's walk", target)
 	})
+}
+
+// reorderSiblings reads the children of PARENT in their order (by place),
+// has ORDER answer the order they take, and writes it back as a permutation
+// of the places the children already hold, so no other workspace's place
+// moves. It is the one write every sibling reordering shares: the tab-bar
+// move (MoveWorkspace) and the sidebar's child move (MoveChild).
+func reorderSiblings(ctx context.Context, tx *sql.Tx, parent string, order func(siblings []WorkspaceID) []WorkspaceID) error {
+	siblings, err := idsByPlace[WorkspaceID](ctx, tx, `SELECT id FROM workspaces WHERE parent_id = ? ORDER BY place`, parent)
+	if err != nil {
+		return err
+	}
+	_, err = permutePlaces(ctx, tx, order(siblings))
+	return err
 }
 
 // moveBeside answers ORDER with ID taken out and put back just before TARGET,
