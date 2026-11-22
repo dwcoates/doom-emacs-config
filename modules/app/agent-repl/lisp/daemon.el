@@ -1841,7 +1841,8 @@ REASON names which proof retired it, for the record.
 A legacy file names no advertiser, so no daemon will ever account for it
 or replace it; left on disk while a fresh daemon boots, it is a corpse no
 one owns.  An advertisement that names a pid is never removed here: only
-a daemon writes or removes those (see `agent-repl-daemon--note-dead-advertiser')."
+a daemon writes or removes those; see
+`agent-repl-daemon--note-dead-advertiser'."
   (let ((file (agent-repl-connect-daemon-addr-file)))
     (when (file-exists-p file)
       (condition-case err
