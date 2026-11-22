@@ -239,11 +239,10 @@ func arrangementRefusal(log dlog.Logger, err error) *Refusal {
 		return refuse(log, arrangeRPC, ArmMainWorkspaceNotSortable, err.Error(), false)
 	case errors.Is(err, wsm.ErrNotAChild):
 		return refuse(log, arrangeRPC, ArmNotAChild, err.Error(), false)
-	case errors.Is(err, wsm.ErrNotSiblings):
-		return refuse(log, arrangeRPC, ArmNotSiblings, err.Error(), false)
 	case errors.Is(err, wsm.ErrNoRepositoryBlock):
 		return refuse(log, arrangeRPC, ArmNoRepositoryBlock, err.Error(), false)
 	default:
-		return nil
+		// Not siblings is the arm Swap and Move answer too (placeRefusal).
+		return placeRefusal(log, arrangeRPC, err)
 	}
 }

@@ -68,7 +68,7 @@ func (s *store) ExpandChildrenWithAncestry(ctx context.Context, id WorkspaceID) 
 				parent     sql.NullString
 				subsection sql.NullString
 			)
-			if err := tx.QueryRowContext(ctx, `SELECT repo_id, parent_id, subsection_id FROM workspaces WHERE id = ?`, id).Scan(&repo, &parent, &subsection); err != nil {
+			if err := scanWorkspaceRow(ctx, tx, id, "repo_id, parent_id, subsection_id", &repo, &parent, &subsection); err != nil {
 				return err
 			}
 			seen := map[string]bool{string(id): true}
@@ -79,8 +79,7 @@ func (s *store) ExpandChildrenWithAncestry(ctx context.Context, id WorkspaceID) 
 				seen[parent.String] = true
 				ancestor := parent.String
 				var folded bool
-				if err := tx.QueryRowContext(ctx, `SELECT repo_id, parent_id, subsection_id, children_folded FROM workspaces WHERE id = ?`, ancestor).
-					Scan(&repo, &parent, &subsection, &folded); err != nil {
+				if err := scanWorkspaceRow(ctx, tx, WorkspaceID(ancestor), "repo_id, parent_id, subsection_id, children_folded", &repo, &parent, &subsection, &folded); err != nil {
 					return err
 				}
 				if !folded {
@@ -99,7 +98,7 @@ func (s *store) ExpandChildrenWithAncestry(ctx context.Context, id WorkspaceID) 
 					return err
 				}
 				if folded {
-					if _, err := tx.ExecContext(ctx, `UPDATE subsections SET folded = 0 WHERE id = ?`, subsection.String); err != nil {
+					if err := writeSubsectionFolded(ctx, tx, SubsectionID(subsection.String), false); err != nil {
 						return err
 					}
 					opened = append(opened, OpenedFold{Kind: AttentionOpenedSubsection, Target: subsection.String})
