@@ -28,6 +28,8 @@ const lockHelperEnv = "DAEMONADDR_LOCK_HELPER"
 //	serve PATH    hold the boot claim at PATH and its serving lock
 //	shared PATH   hold a shared record lock on PATH
 //	probe PATH    print who holds the boot claim and the serving lock
+//	life PATH     hold the life lock of instance "helper" beside the
+//	              daemon.addr PATH, and Release it when stdin closes
 func TestLockHelperProcess(t *testing.T) {
 	mode := os.Getenv(lockHelperEnv)
 	if mode == "" {
@@ -65,6 +67,17 @@ func TestLockHelperProcess(t *testing.T) {
 			fail(err)
 		}
 		fmt.Printf("boot %d serving %d\n", boot.PID, serving.PID)
+		os.Exit(0)
+	case "life":
+		life, err := HoldLife(path, "helper")
+		if err != nil {
+			fail(err)
+		}
+		fmt.Printf("ready %d\n", os.Getpid())
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		if err := life.Release(); err != nil {
+			fail(err)
+		}
 		os.Exit(0)
 	default:
 		fail(fmt.Errorf("unknown helper mode %q", mode))

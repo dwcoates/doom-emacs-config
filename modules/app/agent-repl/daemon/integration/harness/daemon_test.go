@@ -192,3 +192,65 @@ func TestAwaitExitAnswersAFailingExitTheProcessLatchClosesOn(t *testing.T) {
 		t.Fatalf("AwaitExit = %d, want the exit code 3", code)
 	}
 }
+
+func TestLeftoverLivesCountsOnlyTheLocksNobodyHolds(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, root string)
+		want    int
+	}{
+		{name: "a root with no life locks has none", arrange: func(*testing.T, string) {}},
+		{name: "a running daemon's lock is no leftover", arrange: func(t *testing.T, root string) {
+			life, err := daemonaddr.HoldLife(filepath.Join(root, "daemon.addr"), "running")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { life.Release() })
+		}},
+		{name: "a killed daemon's standing lock is one", want: 1, arrange: func(t *testing.T, root string) {
+			if err := os.MkdirAll(filepath.Join(root, daemonaddr.LifeDirName), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(daemonaddr.LifePath(filepath.Join(root, "daemon.addr"), "killed"), []byte("pid=1\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := t.TempDir()
+			tt.arrange(t, root)
+
+			// Act
+			got := leftoverLives(t, root)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("leftoverLives = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRootPeersAnswerTheOtherDaemonsOnOneStateRoot(t *testing.T) {
+	// Arrange
+	r := &peersByRoot{byRoot: map[string][]*Daemon{}}
+	a, b, elsewhere := &Daemon{StateDir: "/root"}, &Daemon{StateDir: "/root"}, &Daemon{StateDir: "/other"}
+	for _, d := range []*Daemon{a, b, elsewhere} {
+		r.join(d)
+	}
+
+	// Act
+	withB := r.others(a)
+	r.leave(b)
+	withoutB := r.others(a)
+
+	// Assert
+	if len(withB) != 1 || withB[0] != b {
+		t.Fatalf("others(a) = %v, want b alone", withB)
+	}
+	if len(withoutB) != 0 {
+		t.Fatalf("others(a) after b left = %v, want none", withoutB)
+	}
+}

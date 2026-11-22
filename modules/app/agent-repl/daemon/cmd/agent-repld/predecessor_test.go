@@ -9,48 +9,50 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-func TestABootRecordsItsPredecessorsDisorderlyDeath(t *testing.T) {
+func TestADeathReapedIsRecordedWithItsPanic(t *testing.T) {
+	const (
+		panicked = "the daemon before this one died of a panic, leaving its life lock standing"
+		killed   = "the daemon before this one died without its orderly exit, leaving its life lock standing, and its stdio log holds no panic of its (killed, or its output lost)"
+	)
 	tests := []struct {
 		name        string
-		ad          string
+		death       daemonaddr.Death
 		stdio       string
 		wantPID     int
 		wantPanic   bool
 		wantMessage string
 		wantFields  dlog.Context
+		// wantAbsent are the fields the record must not carry.
+		wantAbsent []string
 	}{
-		{name: "a predecessor that panicked", ad: "127.0.0.1:59704\npid=61885\n",
+		{name: "a daemon that panicked", death: daemonaddr.Death{Instance: "641fd388dc8e496c", PID: 61885, PIDKnown: true},
 			stdio:   `{"message":"x","pid":61885}` + "\npanic: boom\n\ngoroutine 1 [running]:\nagent-repld/internal/x.f(0x1)\n\tagent-repld/internal/x/x.go:9 +0x10\n",
-			wantPID: 61885, wantPanic: true, wantMessage: "the daemon before this one died of a panic, leaving its advertisement stale",
-			wantFields: dlog.Context{"pid": 61885, "panic": "panic: boom", "site": "agent-repld/internal/x.f at agent-repld/internal/x/x.go:9"}},
-		{name: "a predecessor killed without a panic", ad: "127.0.0.1:59704\npid=61885\n", stdio: `{"message":"x","pid":61885}` + "\n",
-			wantPID: 61885, wantMessage: "the daemon before this one died without its orderly exit, leaving its advertisement stale, and its stdio log holds no panic of its (killed, or its output lost)",
-			wantFields: dlog.Context{"pid": 61885}},
-		{name: "a shared address's advertisement names its private address", ad: "127.0.0.1:59704\npid=61885\nprivate=127.0.0.1:59800\n", stdio: `{"message":"x","pid":61885}` + "\n",
-			wantPID: 61885, wantMessage: "the daemon before this one died without its orderly exit, leaving its advertisement stale, and its stdio log holds no panic of its (killed, or its output lost)",
-			wantFields: dlog.Context{"pid": 61885, "stale_address": "127.0.0.1:59704", "private_address": "127.0.0.1:59800"}},
-		{name: "a legacy advertisement naming no pid", ad: "127.0.0.1:59704\n",
-			wantMessage: "the daemon before this one died without its orderly exit, leaving its advertisement stale, and its stdio log holds no panic of its (killed, or its output lost)",
-			wantFields:  dlog.Context{"stale_address": "127.0.0.1:59704"}},
+			wantPID: 61885, wantPanic: true, wantMessage: panicked,
+			wantFields: dlog.Context{"instance": "641fd388dc8e496c", "pid": 61885, "panic": "panic: boom", "site": "agent-repld/internal/x.f at agent-repld/internal/x/x.go:9"}},
+		{name: "a daemon killed without a panic", death: daemonaddr.Death{Instance: "641fd388dc8e496c", PID: 61885, PIDKnown: true},
+			stdio:   `{"message":"x","pid":61885}` + "\n",
+			wantPID: 61885, wantMessage: killed,
+			wantFields: dlog.Context{"instance": "641fd388dc8e496c", "pid": 61885}, wantAbsent: []string{"panic", "site"}},
+		{name: "an older build's life lock naming no pid", death: daemonaddr.Death{Instance: "641fd388dc8e496c"},
+			stdio:       `{"message":"x","pid":61885}` + "\npanic: boom\n",
+			wantMessage: killed,
+			wantFields:  dlog.Context{"instance": "641fd388dc8e496c"}, wantAbsent: []string{"pid", "panic", "site"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			dir := t.TempDir()
-			addr := filepath.Join(dir, "daemon.addr")
-			if tt.stdio != "" {
-				if err := os.WriteFile(filepath.Join(dir, dlog.StdioLogName), []byte(tt.stdio), 0o644); err != nil {
-					t.Fatal(err)
-				}
+			if err := os.WriteFile(filepath.Join(dir, dlog.StdioLogName), []byte(tt.stdio), 0o644); err != nil {
+				t.Fatal(err)
 			}
 			log := dlog.NewTestLogger()
 
 			// Act
-			d := readPredecessorDeath(addr, dir, daemonaddr.ParseAdvertisement(tt.ad), log)
+			d := readPredecessorDeath(dir, tt.death, log)
 
 			// Assert
-			if d.PID != tt.wantPID || d.Panicked != tt.wantPanic || d.Address != "127.0.0.1:59704" {
-				t.Fatalf("death = %+v; want pid %d, panicked %v", d, tt.wantPID, tt.wantPanic)
+			if d.PID != tt.wantPID || d.Panicked != tt.wantPanic || d.Instance != tt.death.Instance {
+				t.Fatalf("death = %+v; want pid %d, panicked %v, instance %s", d, tt.wantPID, tt.wantPanic, tt.death.Instance)
 			}
 			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opPredecessorDied, Message: tt.wantMessage})
 			if !ok {
@@ -61,6 +63,29 @@ func TestABootRecordsItsPredecessorsDisorderlyDeath(t *testing.T) {
 					t.Fatalf("record %v: %s = %v, want %v", rec.Context, k, rec.Context[k], v)
 				}
 			}
+			for _, k := range tt.wantAbsent {
+				if _, has := rec.Context[k]; has {
+					t.Fatalf("record %v carries %s, want none", rec.Context, k)
+				}
+			}
 		})
+	}
+}
+
+func TestADeathWhoseStdioLogCannotBeReadIsStillRecorded(t *testing.T) {
+	// Arrange: a directory where the stdio log belongs.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, dlog.StdioLogName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := dlog.NewTestLogger()
+
+	// Act
+	readPredecessorDeath(dir, daemonaddr.Death{Instance: "a", PID: 7, PIDKnown: true}, log)
+
+	// Assert
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opPredecessorDied})
+	if !ok || rec.Context["stdio_log_error"] == nil || rec.Context["pid"] != 7 {
+		t.Fatalf("records %+v; want the death recorded with why its stdio log could not be read", log.Records())
 	}
 }

@@ -34,6 +34,11 @@ type mediationHook struct {
 	// owed is the start of the deploy that began here and has not ended,
 	// zero when none has: the check an unchanged deploy releases.
 	owed time.Time
+	// serving is set once this daemon's serving settled (servingSettled):
+	// its state handle writes from then on, so a death it reaps is owed at
+	// once. crashOwed is a death reaped before then, owed at the settle.
+	serving   bool
+	crashOwed bool
 }
 
 func (h *mediationHook) bind(o merge.Orchestrator) {
@@ -87,6 +92,39 @@ func (h *mediationHook) crashed() {
 		return
 	}
 	_ = o.NoteDeployEnding(h.ctx, at, wsm.DaemonCrashed)
+}
+
+// deathReaped owes the check of a daemon's disorderly death this daemon
+// reaped (readPredecessorDeath recorded it): at once, with its rounds, once
+// this daemon's serving settled; otherwise at the settle (servingSettled),
+// since before it a joining successor's state handle is read-only and the
+// check could not be written. A boot and every reap after it go through here.
+func (h *mediationHook) deathReaped() {
+	h.mu.Lock()
+	if !h.serving {
+		h.crashOwed = true
+		h.mu.Unlock()
+		return
+	}
+	h.mu.Unlock()
+	h.crashed()
+	h.rounds()
+}
+
+// servingSettled is told once this daemon owns everything it serves, at a
+// fresh boot's settle or a successor's takeover, and owes the check of every
+// death reaped before it (deathReaped), answering whether it owed one. Its
+// rounds are the caller's.
+func (h *mediationHook) servingSettled() bool {
+	h.mu.Lock()
+	h.serving = true
+	owed := h.crashOwed
+	h.crashOwed = false
+	h.mu.Unlock()
+	if owed {
+		h.crashed()
+	}
+	return owed
 }
 
 // rounds runs the rounds of every mediation owed, off the caller's
