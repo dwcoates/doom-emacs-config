@@ -19,8 +19,7 @@
 ;;
 ;; ONLY A DAEMON WRITES OR REMOVES AN ADVERTISEMENT THAT NAMES A PID.  Emacs
 ;; judges a dead advertiser's file absent purely by reading it, and leaves
-;; it: the booting daemon reads it as its predecessor's death, records that,
-;; and replaces it.  The boot wait identifies advertisements by pid, so the
+;; it: the booting daemon replaces it under the boot claim.  The boot wait identifies advertisements by pid, so the
 ;; dead pid's file is never the new daemon's readiness.  The dead-pid arm is
 ;; what a legacy, pid-less advertisement cannot take: it falls through to the
 ;; dial, and a refused one is removed (no daemon would ever replace it).
@@ -1524,12 +1523,9 @@ address is decided now, at INFO; otherwise the process is remembered
 PID is that daemon's process id.  A daemon that exits cleanly removes its
 own file; one that is killed, or that dies, does not.
 
-THE FILE IT LEAVES IS ITS DEATH'S EVIDENCE.  Only a daemon writes or
-removes an advertisement that names a pid.  The next daemon to boot reads a
-standing predecessor advertisement, records `daemon.boot.predecessor_died'
-with the panic its stdio log holds for that pid, and replaces the file with
-its own; Emacs deleting it erased the death, and a panic went unseen by the
-deploy checks (2026-11-21 20:28).  So a file naming PID is left, at INFO.
+THE FILE IS LEFT because only a daemon writes or removes an advertisement
+that names a pid.  The next daemon to boot replaces a standing predecessor
+advertisement under the boot claim.  So a file naming PID is left, at INFO.
 Nothing mistakes it for a live daemon: an advertisement whose pid is dead
 is ABSENT to `agent-repl-daemon--begin', which spawns and has the boot
 wait refuse that pid.
@@ -1553,10 +1549,10 @@ exited, and the successor stood down on its vanished state
          ((null current)
           (agent-repl--log scope "elisp.daemon.own-addr-already-gone address=%S" own))
          ((and (integerp pid) (eql advertiser pid))
-          ;; Regression 2026-11-21: deleting this file erased the panic's
-          ;; only evidence; the next daemon's boot records and replaces it.
+          ;; Single ownership: only a daemon removes a pid-naming file;
+          ;; the next daemon's boot replaces it under the boot claim.
           (agent-repl--info scope
-                            "elisp.daemon.own-addr-left address=%S pid=%S file=%S reason=death-evidence-for-next-boot"
+                            "elisp.daemon.own-addr-left address=%S pid=%S file=%S reason=the-next-boot-replaces-it"
                             current pid (agent-repl-connect-daemon-addr-file)))
          (t
           (agent-repl--info scope
@@ -1831,13 +1827,9 @@ records a live-but-unreachable daemon would earn ever fires on a plain
 cold start after a predecessor died without withdrawing (crash, SIGKILL,
 or a restart path that skipped withdraw).
 
-THE FILE IS LEFT because it is the booting daemon's only evidence that
-its predecessor died without its orderly exit: the daemon, holding the
-boot claim, reads the standing advertisement, records
-`daemon.boot.predecessor_died' with the panic from the stdio log by that
-pid, and replaces the file with its own.  Only a daemon writes or removes
-an advertisement that names a pid.  Deleting it here hid a panic from the
-deploy checks (2026-11-21 20:28); the boot wait refuses PID instead (see
+THE FILE IS LEFT because only a daemon writes or removes an advertisement
+that names a pid: the booting daemon, holding the boot claim, replaces it
+with its own.  The boot wait refuses PID instead (see
 `agent-repl-daemon--boot-rejected-pid').  ADDRESS is logged for context."
   (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
                     "elisp.daemon.addr-dead-advertiser-left address=%S pid=%S file=%S"
@@ -1925,9 +1917,9 @@ WHOLE decision, signals included."
                     nil))))
         (if (and pid (not (agent-repl-daemon--advertiser-alive-p pid)))
             (progn
-              ;; Regression 2026-11-21: this branch deleted the file (erasing
-              ;; the panic's evidence) and rejected by ADDRESS (refusing the
-              ;; new daemon's same-address advertisement until boot-timeout).
+              ;; Regression 2026-11-21: this branch deleted the file, which only
+              ;; a daemon may do, and rejected by ADDRESS (refusing the new
+              ;; daemon's same-address advertisement until boot-timeout).
               (agent-repl-daemon--note-dead-advertiser address pid)
               ;; The dead PID travels with the boot wait: the file still names
               ;; it until the new daemon replaces it, and it is never readiness.

@@ -2961,8 +2961,8 @@ the shutdown schedule exists to avoid."
 ;;; The exited daemon's own advertisement, identified by its pid.
 
 (ert-deftest agent-repl-test-daemon-own-addr-left-when-it-names-the-exited-pid ()
-  "The exited daemon's own file stays: it is the next boot's evidence of the death.
-On 2026-11-21 Emacs deleted it and the panic never reached the deploy checks."
+  "The exited daemon's own file stays: only a daemon removes a pid-naming file.
+The next boot replaces it under the boot claim."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (agent-repl-test-daemon--write-addr-file "127.0.0.1:59704")
