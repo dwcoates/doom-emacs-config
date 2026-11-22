@@ -714,9 +714,9 @@ export class VendorErrorRetry {
       return;
     }
     this.closeChain({ abandoned: true, failedTurn: promised, cause });
-    const abandoned = { chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, failed_turn: promised, abandoned: true, ...fields };
-    if (level === "error") LOGGER.error(abandoned, why);
-    else LOGGER.info(abandoned, why);
+    const abandoned = { chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", failed_turn: promised, abandoned: true, ...fields };
+    if (level === "error") LOGGER.error({ cause, ...abandoned }, why);
+    else LOGGER.info({ cause, ...abandoned }, why);
   }
 
   private end(chain: Chain, why: LogMessage, fields: Record<string, unknown>): void {
