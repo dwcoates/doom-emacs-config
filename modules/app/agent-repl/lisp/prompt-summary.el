@@ -45,9 +45,12 @@
 (declare-function agent-repl--state-save "history")
 (declare-function agent-repl--warn "core")
 (declare-function agent-repl--info "core")
+(declare-function agent-repl--error "core")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl--ws-known-p "workspace" (ws))
+(declare-function agent-repl-link-newest "link" ())
+(declare-function agent-repl-rpc-report-vendor-spend "rpc" (conn request &rest keys))
 (declare-function agent-repl--ws-render-status "workspace" (ws))
 
 (declare-function agent-repl--async-command "core" (label dir command callback &optional input))
@@ -534,7 +537,10 @@ rejection is a defect and warns."
 Called as `agent-repl--async-command' calls it, with OK and the run's
 OUTPUT; the runner owns the process and its buffer."
   (lambda (ok output)
-    (let ((cleaned (agent-repl--prompt-summary-clean output)))
+    (let* ((stream (agent-repl--prompt-summary-read-stream output))
+           (cleaned (agent-repl--prompt-summary-clean (or (car stream) ""))))
+      ;; EVERY CALL THE RUN MADE IS REPORTED, whether or not it answered.
+      (agent-repl--prompt-summary-report-spend ws (cdr stream))
       (agent-repl--log ws "prompt-summary: run complete ok=%s stdout-len=%d summary-len=%d"
                         ok (length output) (length cleaned))
       (if (and ok (not (string-empty-p cleaned)))
@@ -593,11 +599,104 @@ absent stays visible in the log."
 
 (defun agent-repl--prompt-summary-command ()
   "Return the argv of the headless summary run.
-`-p' is the headless print mode: one prompt on stdin, one answer on
-stdout, no session and no tools."
+`-p' is the headless print mode: one prompt on stdin, no session and no
+tools.  The answer is read off the CLI's event stream
+\(`--output-format stream-json'), the one shape that states each vendor
+call's usage, which is reported to the daemon's spend metrics
+\(`agent-repl--prompt-summary-report-spend')."
   (list agent-repl-prompt-summary-program
         "-p"
+        "--output-format" "stream-json" "--verbose"
         "--model" agent-repl-prompt-summary-model))
+
+(defun agent-repl--prompt-summary-read-stream (output)
+  "Read the summary run's OUTPUT as the CLI's event stream.
+Return (RESULT . CALLS): RESULT the result envelope's text, nil when the
+stream carried none (a run that failed before it, or output that is no
+stream at all); CALLS every vendor call the stream states, in order, each
+once (one per message id, its last restatement), as plists for
+`agent-repl-wire-encode-reported-vendor-call'.  A line that is no JSON
+object is no stream line and is skipped: a failed run prints its
+complaint in plain text."
+  (let ((result nil) (calls nil) (ids nil))
+    (dolist (line (split-string (or output "") "\n" t "[ \t\r]+"))
+      (let ((json (condition-case nil
+                      (json-parse-string line :object-type 'plist :null-object nil :false-object nil)
+                    (error nil))))
+        (when (and json (listp json))
+          (pcase (plist-get json :type)
+            ("result" (setq result (plist-get json :result)))
+            ("assistant"
+             (let* ((message (plist-get json :message))
+                    (id (plist-get message :id))
+                    (model (plist-get message :model))
+                    (usage (plist-get message :usage)))
+               (when (and (stringp id) (stringp model) usage
+                          (not (equal model "<synthetic>")))
+                 (let ((call (list :model model
+                                   :tokens (agent-repl--prompt-summary-tokens usage))))
+                   (if (assoc id ids)
+                       (setcdr (assoc id ids) call)
+                     (push (cons id call) ids)
+                     (push id calls))))))))))
+    (cons result
+          (mapcar (lambda (id) (cdr (assoc id ids))) (nreverse calls)))))
+
+(defun agent-repl--prompt-summary-tokens (usage)
+  "The VendorTokens plist of one stream message's USAGE plist.
+A write with no tier split is the five-minute tier's, as the shim and
+the daemon read it."
+  (let* ((created (or (plist-get usage :cache_creation_input_tokens) 0))
+         (split (plist-get usage :cache_creation))
+         (hour (or (plist-get split :ephemeral_1h_input_tokens) 0)))
+    (list :uncached-input (or (plist-get usage :input_tokens) 0)
+          :cache-read (or (plist-get usage :cache_read_input_tokens) 0)
+          :cache-write-5m (max 0 (- created hour))
+          :cache-write-1h hour
+          :output (or (plist-get usage :output_tokens) 0))))
+
+(defun agent-repl--prompt-summary-config-dir ()
+  "The account root the summary run bills: its `CLAUDE_CONFIG_DIR'.
+The run inherits Emacs's environment, so it is Emacs's own, or the
+CLI's default under the home directory when none is set."
+  (or (getenv "CLAUDE_CONFIG_DIR") (expand-file-name "~/.claude")))
+
+(defun agent-repl--prompt-summary-report-spend (ws calls)
+  "Report the summary run's CALLS for WS to the daemon's spend metrics.
+A report is sent once (endpoint_report_vendor_spend.proto): one no
+daemon takes, or one sent for a workspace the daemon never named, is
+recorded and lost, never retried."
+  (let ((ref (and calls (agent-repl--ws-get ws :ref)))
+        (conn (and calls (agent-repl-link-newest))))
+    (cond
+     ((null calls) nil)
+     ((not (and (plist-get ref :id) (plist-get ref :dir)))
+      (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls=%d reason=no-ref; the daemon never named this workspace"
+                        (length calls)))
+     ((null conn)
+      (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls=%d reason=no-daemon" (length calls)))
+     (t
+      (agent-repl-rpc-report-vendor-spend
+       conn
+       (list :workspace ref
+             :config-dir (agent-repl--prompt-summary-config-dir)
+             :cause "VENDOR_CALL_CAUSE_PROMPT_SUMMARY"
+             :calls calls)
+       :on-response (lambda (response) (agent-repl--prompt-summary-spend-answered ws calls response))
+       :on-failure (lambda (detail)
+                     (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls=%d reason=transport detail=%S"
+                                       (length calls) detail)))))))
+
+(defun agent-repl--prompt-summary-spend-answered (ws calls response)
+  "Record the daemon's RESPONSE to WS's spend report of CALLS."
+  (pcase (plist-get response :arm)
+    (:success
+     (agent-repl--log ws "elisp.prompt-summary.spend-reported calls=%d outcome=%s"
+                      (length calls) (plist-get (plist-get response :value) :arm)))
+    (_
+     (agent-repl--error ws "elisp.prompt-summary.spend-refused calls=%d detail=%S"
+                        (length calls)
+                        (plist-get (plist-get (plist-get response :value) :value) :detail)))))
 
 (defun agent-repl--prompt-summary-directory ()
   "Return the empty private directory a headless summary runs from.

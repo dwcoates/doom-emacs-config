@@ -62,6 +62,7 @@
 (declare-function agent-repl-wire--decoded "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire-decode-inside-temporary-directory "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--object "agent-repl-wire-common" (message-name value))
+(declare-function agent-repl-wire--encode-string "agent-repl-wire-common" (message-name field value))
 (declare-function agent-repl-wire--check-keys "agent-repl-wire-common" (message-name object allowed))
 (declare-function agent-repl-wire--decode-oneof "agent-repl-wire-common"
                   (message-name oneof object arms &optional unset-legal))
@@ -6541,6 +6542,63 @@ Every arm is an answer to a valid report, so every arm ends the batch."
    "ReportLatenciesResponse" json
    #'agent-repl-wire-decode-report-latencies-success
    #'agent-repl-wire-decode-report-latencies-error))
+
+;;;; ---- ReportVendorSpend -------------------------------------------
+;;
+;; Emacs reports the vendor calls of the headless runs it makes itself (the
+;; prompt summaries): each call's model and raw usage, which the daemon
+;; tallies.  See endpoint_report_vendor_spend.proto.
+
+(defun agent-repl-wire-encode-vendor-tokens (tokens)
+  "Encode VendorTokens from plist TOKENS.
+TOKENS is (:uncached-input N :cache-read N :cache-write-5m N
+:cache-write-1h N :output N), every count a natural number."
+  (list (cons 'uncachedInput (or (plist-get tokens :uncached-input) 0))
+        (cons 'cacheRead (or (plist-get tokens :cache-read) 0))
+        (cons 'cacheWrite5m (or (plist-get tokens :cache-write-5m) 0))
+        (cons 'cacheWrite1h (or (plist-get tokens :cache-write-1h) 0))
+        (cons 'output (or (plist-get tokens :output) 0))))
+
+(defun agent-repl-wire-encode-reported-vendor-call (call)
+  "Encode ReportedVendorCall from plist CALL, (:model M :tokens TOKENS)."
+  (list (cons 'model (agent-repl-wire--encode-string "ReportedVendorCall" 'model (plist-get call :model)))
+        (cons 'tokens (agent-repl-wire-encode-vendor-tokens (plist-get call :tokens)))))
+
+(defun agent-repl-wire-encode-report-vendor-spend-request (request)
+  "Encode ReportVendorSpendRequest from plist REQUEST.
+REQUEST is (:workspace REF :config-dir DIR :cause CAUSE :calls CALLS):
+CAUSE a conversation.v1.VendorCallCause spelling such as
+\"VENDOR_CALL_CAUSE_PROMPT_SUMMARY\", each call a plist for
+`agent-repl-wire-encode-reported-vendor-call'."
+  (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get request :workspace)))
+        (cons 'configDir (agent-repl-wire--encode-string "ReportVendorSpendRequest" 'configDir (plist-get request :config-dir)))
+        (cons 'cause (agent-repl-wire--encode-string "ReportVendorSpendRequest" 'cause (plist-get request :cause)))
+        (cons 'calls (vconcat (mapcar #'agent-repl-wire-encode-reported-vendor-call (plist-get request :calls))))))
+
+(defun agent-repl-wire-decode-report-vendor-spend-success (json)
+  "Decode ReportVendorSpendSuccess from JSON into (:arm ARM :value nil)."
+  (let ((message "ReportVendorSpendSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(recorded metricsOff))
+    (agent-repl-wire-verbs--decode-oneof
+     message "outcome" json
+     (list (list 'recorded :recorded (agent-repl-wire-verbs--empty-arm "ReportVendorSpendRecorded"))
+           (list 'metricsOff :metrics-off (agent-repl-wire-verbs--empty-arm "ReportVendorSpendMetricsOff"))))))
+
+(defun agent-repl-wire-decode-report-vendor-spend-error (json)
+  "Decode ReportVendorSpendError from JSON into (:arm :invalid :value (:detail D))."
+  (let ((message "ReportVendorSpendError"))
+    (agent-repl-wire-verbs--check-keys message json '(invalid))
+    (agent-repl-wire-verbs--decode-oneof
+     message "kind" json
+     (list (list 'invalid :invalid
+                 (lambda (v) (agent-repl-wire-verbs--decode-detail "ReportVendorSpendInvalid" v)))))))
+
+(defun agent-repl-wire-decode-report-vendor-spend-response (json)
+  "Decode ReportVendorSpendResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "ReportVendorSpendResponse" json
+   #'agent-repl-wire-decode-report-vendor-spend-success
+   #'agent-repl-wire-decode-report-vendor-spend-error))
 
 ;;;; ---- GetWorkspaceStatus -------------------------------------------
 ;;

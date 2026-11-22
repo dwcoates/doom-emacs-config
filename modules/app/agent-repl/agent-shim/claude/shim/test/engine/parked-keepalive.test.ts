@@ -16,6 +16,7 @@ import { KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
 import { beatParkedConversation, parkedResumeAnchor, type ParkedBeatQuery } from "../../src/engine/parked-keepalive.js";
 import { readTranscriptChain, type ChainRecord } from "../../src/engine/rollback.js";
 import { transcriptPath } from "../../src/engine/vendor-paths.js";
+import { VendorSpendLedger } from "../../src/engine/vendor-spend.js";
 import { shimv1 } from "../../src/proto.js";
 import { errorResultMessage, initMessage, resultMessage, ScriptedQuery } from "./fakes.js";
 
@@ -91,6 +92,7 @@ function beatDeps(lines: Record<string, unknown>[] | undefined, query: ScriptedQ
       configDir,
       cwd,
       nowMs: () => nowMs,
+      spend: new VendorSpendLedger(),
       createQuery: (spec: ParkedBeatQuery) => {
         built.push(spec);
         prompts.push(spec.prompt[Symbol.asyncIterator]().next());

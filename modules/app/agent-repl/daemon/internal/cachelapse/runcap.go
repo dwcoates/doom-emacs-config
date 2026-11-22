@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/vendorspend"
 	"agent-repld/internal/wsm"
 )
 
@@ -27,13 +28,11 @@ import (
 // NEVER CAPPED (owner ruling, 2026-10-26, in beatPlanFor): its merge's prompts
 // run on its session.
 
-// The vendor's cache prices, in tenths of the base input price: a read at a
-// tenth of it, a write at the one-hour tier at twice it. The shim's coverage
-// rule names the same two prices (shim.engine.cold.CACHE_READ_PRICE and
-// CACHE_WRITE_PRICE).
+// The vendor's cache prices, in tenths of the base input price, from their
+// one home in the daemon (vendorspend.CacheReadPriceTenths).
 const (
-	CacheReadPriceTenths  = 1
-	CacheWritePriceTenths = 20
+	CacheReadPriceTenths  = vendorspend.CacheReadPriceTenths
+	CacheWritePriceTenths = vendorspend.CacheWritePriceTenths
 )
 
 // KeepaliveRunCap is how many keep-alives a run spends before the rewrite it
@@ -59,5 +58,6 @@ func (k *Keeper) runCapped(ctx context.Context, log dlog.Logger, ws ids.Workspac
 		// run still owes no keep-alive, and the next reconcile marks again.
 		_ = k.markCold(ctx, ws, why)
 	}
+	k.endRun(ctx, log, ws, wsm.RunEndingCap)
 	return why, true
 }

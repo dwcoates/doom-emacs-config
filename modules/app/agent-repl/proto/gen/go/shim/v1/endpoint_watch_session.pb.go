@@ -262,7 +262,23 @@ type ShimMeasurements struct {
 	// snapshot, not a figure since the counting instant, so the daemon
 	// publishes it as a gauge. UNSET only on a frame built before the first
 	// heap read; every frame after it carries one.
-	Heap          *ShimHeap `protobuf:"bytes,4,opt,name=heap,proto3,oneof" json:"heap,omitempty"`
+	Heap *ShimHeap `protobuf:"bytes,4,opt,name=heap,proto3,oneof" json:"heap,omitempty"`
+	// Every vendor call this shim's session made since the counting instant,
+	// its main loop's, its subagents' and its own side queries', each counted
+	// once (one per message id), by what the call was: each tag set at most
+	// once, cumulative like every figure here. A tag set with no call yet is
+	// absent.
+	//
+	// A FRAME FOLLOWS EVERY COUNTED CALL BEFORE ANY LATER FRAME OF THE STREAM:
+	// once a call is counted, the next frame the watch carries is a
+	// measurements frame stating it (after the opening frames), so whatever
+	// the daemon learns from a later frame (a keep-alive's answer, a turn's
+	// end) it learns with that call's spend already folded.
+	VendorSpend []*v1.VendorSpend `protobuf:"bytes,5,rep,name=vendor_spend,json=vendorSpend,proto3" json:"vendor_spend,omitempty"`
+	// The account root this shim's vendor calls bill to: its
+	// `CLAUDE_CONFIG_DIR`. The same in every frame of one process's lifetime;
+	// the daemon labels the spend with the account it names.
+	ConfigDir     string `protobuf:"bytes,6,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -323,6 +339,20 @@ func (x *ShimMeasurements) GetHeap() *ShimHeap {
 		return x.Heap
 	}
 	return nil
+}
+
+func (x *ShimMeasurements) GetVendorSpend() []*v1.VendorSpend {
+	if x != nil {
+		return x.VendorSpend
+	}
+	return nil
+}
+
+func (x *ShimMeasurements) GetConfigDir() string {
+	if x != nil {
+		return x.ConfigDir
+	}
+	return ""
 }
 
 // The shim process's JavaScript heap, as Node's process.memoryUsage() reads
@@ -588,18 +618,21 @@ var File_shim_v1_endpoint_watch_session_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_watch_session_proto_rawDesc = "" +
 	"\n" +
-	"$shim/v1/endpoint_watch_session.proto\x12\ashim.v1\x1a\x1dconversation/v1/session.proto\"\x15\n" +
+	"$shim/v1/endpoint_watch_session.proto\x12\ashim.v1\x1a\x1dconversation/v1/session.proto\x1a\"conversation/v1/vendor_spend.proto\"\x15\n" +
 	"\x13WatchSessionRequest\"\xe6\x01\n" +
 	"\x14WatchSessionResponse\x128\n" +
 	"\x06update\x18\x01 \x01(\v2\x1e.conversation.v1.SessionUpdateH\x00R\x06update\x12J\n" +
 	"\x0fsession_started\x18\x02 \x01(\v2\x1f.conversation.v1.SessionStartedH\x00R\x0esessionStarted\x12?\n" +
 	"\fmeasurements\x18\x03 \x01(\v2\x19.shim.v1.ShimMeasurementsH\x00R\fmeasurementsB\a\n" +
-	"\x05frame\"\x92\x02\n" +
+	"\x05frame\"\xf2\x02\n" +
 	"\x10ShimMeasurements\x121\n" +
 	"\x15counted_since_unix_ms\x18\x01 \x01(\x03R\x12countedSinceUnixMs\x12F\n" +
 	"\x0evendor_traffic\x18\x02 \x01(\v2\x1a.shim.v1.ShimVendorTrafficH\x00R\rvendorTraffic\x88\x01\x01\x12;\n" +
 	"\tlatencies\x18\x03 \x03(\v2\x1d.shim.v1.ShimLatencyHistogramR\tlatencies\x12*\n" +
-	"\x04heap\x18\x04 \x01(\v2\x11.shim.v1.ShimHeapH\x01R\x04heap\x88\x01\x01B\x11\n" +
+	"\x04heap\x18\x04 \x01(\v2\x11.shim.v1.ShimHeapH\x01R\x04heap\x88\x01\x01\x12?\n" +
+	"\fvendor_spend\x18\x05 \x03(\v2\x1c.conversation.v1.VendorSpendR\vvendorSpend\x12\x1d\n" +
+	"\n" +
+	"config_dir\x18\x06 \x01(\tR\tconfigDirB\x11\n" +
 	"\x0f_vendor_trafficB\a\n" +
 	"\x05_heap\"q\n" +
 	"\bShimHeap\x12\x1d\n" +
@@ -651,21 +684,23 @@ var file_shim_v1_endpoint_watch_session_proto_goTypes = []any{
 	(*ShimLatencyBucket)(nil),    // 7: shim.v1.ShimLatencyBucket
 	(*v1.SessionUpdate)(nil),     // 8: conversation.v1.SessionUpdate
 	(*v1.SessionStarted)(nil),    // 9: conversation.v1.SessionStarted
+	(*v1.VendorSpend)(nil),       // 10: conversation.v1.VendorSpend
 }
 var file_shim_v1_endpoint_watch_session_proto_depIdxs = []int32{
-	8, // 0: shim.v1.WatchSessionResponse.update:type_name -> conversation.v1.SessionUpdate
-	9, // 1: shim.v1.WatchSessionResponse.session_started:type_name -> conversation.v1.SessionStarted
-	3, // 2: shim.v1.WatchSessionResponse.measurements:type_name -> shim.v1.ShimMeasurements
-	5, // 3: shim.v1.ShimMeasurements.vendor_traffic:type_name -> shim.v1.ShimVendorTraffic
-	6, // 4: shim.v1.ShimMeasurements.latencies:type_name -> shim.v1.ShimLatencyHistogram
-	4, // 5: shim.v1.ShimMeasurements.heap:type_name -> shim.v1.ShimHeap
-	0, // 6: shim.v1.ShimLatencyHistogram.kind:type_name -> shim.v1.ShimLatencyKind
-	7, // 7: shim.v1.ShimLatencyHistogram.buckets:type_name -> shim.v1.ShimLatencyBucket
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	8,  // 0: shim.v1.WatchSessionResponse.update:type_name -> conversation.v1.SessionUpdate
+	9,  // 1: shim.v1.WatchSessionResponse.session_started:type_name -> conversation.v1.SessionStarted
+	3,  // 2: shim.v1.WatchSessionResponse.measurements:type_name -> shim.v1.ShimMeasurements
+	5,  // 3: shim.v1.ShimMeasurements.vendor_traffic:type_name -> shim.v1.ShimVendorTraffic
+	6,  // 4: shim.v1.ShimMeasurements.latencies:type_name -> shim.v1.ShimLatencyHistogram
+	4,  // 5: shim.v1.ShimMeasurements.heap:type_name -> shim.v1.ShimHeap
+	10, // 6: shim.v1.ShimMeasurements.vendor_spend:type_name -> conversation.v1.VendorSpend
+	0,  // 7: shim.v1.ShimLatencyHistogram.kind:type_name -> shim.v1.ShimLatencyKind
+	7,  // 8: shim.v1.ShimLatencyHistogram.buckets:type_name -> shim.v1.ShimLatencyBucket
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_watch_session_proto_init() }

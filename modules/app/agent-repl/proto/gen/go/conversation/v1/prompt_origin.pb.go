@@ -51,6 +51,9 @@ const (
 // that the one event it waits on ends, and that wait outlives a daemon
 // restart. The comments below that say such a prompt is "submitted through
 // the prompt queue" mean this path.
+//
+// EVERY VALUE BUT UNSPECIFIED DECLARES ITS SPEND CAUSE (spend_cause,
+// vendor_spend.proto): what the vendor calls of its turn count as.
 type PromptOrigin int32
 
 const (
@@ -449,62 +452,62 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xe8\x0f\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xa0\x12\n" +
 	"\fPromptOrigin\x12\x1d\n" +
-	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
-	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
-	" PROMPT_ORIGIN_USER_SENT_AND_HIDE\x10\x02\x12+\n" +
-	"'PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT\x10\x03\x12(\n" +
-	"$PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX\x10\x04\x12'\n" +
-	"#PROMPT_ORIGIN_USER_SENT_WITH_PREFIX\x10\x05\x12!\n" +
-	"\x1dPROMPT_ORIGIN_METAPROMPT_READ\x10\x06\x12'\n" +
-	"#PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS\x10\a\x12)\n" +
-	"%PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT\x10\b\x12(\n" +
-	"$PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT\x10\t\x12#\n" +
+	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x1a\x04\x98\xa6\x1d\x02\x12*\n" +
+	" PROMPT_ORIGIN_USER_SENT_AND_HIDE\x10\x02\x1a\x04\x98\xa6\x1d\x02\x121\n" +
+	"'PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT\x10\x03\x1a\x04\x98\xa6\x1d\x02\x12.\n" +
+	"$PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX\x10\x04\x1a\x04\x98\xa6\x1d\x02\x12-\n" +
+	"#PROMPT_ORIGIN_USER_SENT_WITH_PREFIX\x10\x05\x1a\x04\x98\xa6\x1d\x02\x12'\n" +
+	"\x1dPROMPT_ORIGIN_METAPROMPT_READ\x10\x06\x1a\x04\x98\xa6\x1d\x02\x12-\n" +
+	"#PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS\x10\a\x1a\x04\x98\xa6\x1d\x02\x12/\n" +
+	"%PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT\x10\b\x1a\x04\x98\xa6\x1d\x02\x12.\n" +
+	"$PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT\x10\t\x1a\x04\x98\xa6\x1d\x02\x12)\n" +
 	"\x1fPROMPT_ORIGIN_COMMAND_UPDATE_PR\x10\n" +
-	"\x12 \n" +
-	"\x1cPROMPT_ORIGIN_COMMAND_REBASE\x10\v\x12-\n" +
-	")PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR\x10\f\x12!\n" +
-	"\x1dPROMPT_ORIGIN_PANEL_SELECTION\x10\r\x12!\n" +
-	"\x1dPROMPT_ORIGIN_DEFERRED_PROMPT\x10\x0e\x12$\n" +
-	" PROMPT_ORIGIN_LEGACY_HOST_PROMPT\x10\x0f\x12#\n" +
-	"\x1fPROMPT_ORIGIN_GNS_SOCKETS_CLOSE\x10\x10\x12)\n" +
-	"%PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT\x10\x11\x12 \n" +
-	"\x1cPROMPT_ORIGIN_EXPLAIN_CONFIG\x10\x12\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_WEBAPP_USER_SENT\x10\x13\x12$\n" +
-	" PROMPT_ORIGIN_WEBAPP_CARD_ACTION\x10\x14\x12#\n" +
-	"\x1fPROMPT_ORIGIN_WORKSPACE_CREATED\x10\x15\x12'\n" +
-	"#PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR\x10\x16\x12#\n" +
-	"\x1fPROMPT_ORIGIN_MERGE_TEST_REPAIR\x10\x17\x12%\n" +
-	"!PROMPT_ORIGIN_MERGE_BEFORE_ACTION\x10\x18\x12$\n" +
-	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x19\x12-\n" +
-	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1a\x12&\n" +
-	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1c\x12 \n" +
-	"\x1cPROMPT_ORIGIN_VENDOR_STARTED\x10\x1d\x12!\n" +
-	"\x1dPROMPT_ORIGIN_LINK_UNRESOLVED\x10\x1e\x12 \n" +
-	"\x1cPROMPT_ORIGIN_MERGE_HANDBACK\x10\x1f\x12&\n" +
-	"\"PROMPT_ORIGIN_WORKSPACE_RETARGETED\x10 \x12\x1c\n" +
-	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!\x12%\n" +
-	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"\x12)\n" +
-	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#\x12$\n" +
-	" PROMPT_ORIGIN_MERGE_QUEUE_NOTICE\x10$\x12\x1e\n" +
-	"\x1aPROMPT_ORIGIN_MERGE_REVERT\x10%\x12*\n" +
-	"&PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE\x10&\x12\x1e\n" +
-	"\x1aPROMPT_ORIGIN_OWNER_NOTICE\x10'\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_WORKSPACE_NOTICE\x10(\x12\x1c\n" +
-	"\x18PROMPT_ORIGIN_AGENT_SENT\x10)\x12#\n" +
-	"\x1fPROMPT_ORIGIN_WORKSPACE_COMPACT\x10*\x12\x1d\n" +
-	"\x19PROMPT_ORIGIN_DEPLOY_HOOK\x10+\x12&\n" +
-	"\"PROMPT_ORIGIN_SUBSECTION_PLACEMENT\x10,\x12 \n" +
-	"\x1cPROMPT_ORIGIN_REMOTE_CONTROL\x10-\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_MAIN_SYNC_REPAIR\x10.\x12%\n" +
-	"!PROMPT_ORIGIN_PULL_REQUEST_NOTICE\x10/\x12+\n" +
-	"'PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND\x100\x12\x1d\n" +
-	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101\x12+\n" +
-	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102\x12)\n" +
-	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104\x12,\n" +
-	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1a\x04\x98\xa6\x1d\x02\x12&\n" +
+	"\x1cPROMPT_ORIGIN_COMMAND_REBASE\x10\v\x1a\x04\x98\xa6\x1d\x02\x123\n" +
+	")PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR\x10\f\x1a\x04\x98\xa6\x1d\x02\x12'\n" +
+	"\x1dPROMPT_ORIGIN_PANEL_SELECTION\x10\r\x1a\x04\x98\xa6\x1d\x02\x12'\n" +
+	"\x1dPROMPT_ORIGIN_DEFERRED_PROMPT\x10\x0e\x1a\x04\x98\xa6\x1d\x02\x12*\n" +
+	" PROMPT_ORIGIN_LEGACY_HOST_PROMPT\x10\x0f\x1a\x04\x98\xa6\x1d\x02\x12)\n" +
+	"\x1fPROMPT_ORIGIN_GNS_SOCKETS_CLOSE\x10\x10\x1a\x04\x98\xa6\x1d\x06\x12/\n" +
+	"%PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT\x10\x11\x1a\x04\x98\xa6\x1d\x02\x12&\n" +
+	"\x1cPROMPT_ORIGIN_EXPLAIN_CONFIG\x10\x12\x1a\x04\x98\xa6\x1d\x02\x12(\n" +
+	"\x1ePROMPT_ORIGIN_WEBAPP_USER_SENT\x10\x13\x1a\x04\x98\xa6\x1d\x02\x12*\n" +
+	" PROMPT_ORIGIN_WEBAPP_CARD_ACTION\x10\x14\x1a\x04\x98\xa6\x1d\x02\x12)\n" +
+	"\x1fPROMPT_ORIGIN_WORKSPACE_CREATED\x10\x15\x1a\x04\x98\xa6\x1d\f\x12-\n" +
+	"#PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR\x10\x16\x1a\x04\x98\xa6\x1d\x05\x12)\n" +
+	"\x1fPROMPT_ORIGIN_MERGE_TEST_REPAIR\x10\x17\x1a\x04\x98\xa6\x1d\x05\x12+\n" +
+	"!PROMPT_ORIGIN_MERGE_BEFORE_ACTION\x10\x18\x1a\x04\x98\xa6\x1d\x05\x12*\n" +
+	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x19\x1a\x04\x98\xa6\x1d\x05\x123\n" +
+	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1a\x1a\x04\x98\xa6\x1d\x05\x12,\n" +
+	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1c\x1a\x04\x98\xa6\x1d\x06\x12&\n" +
+	"\x1cPROMPT_ORIGIN_VENDOR_STARTED\x10\x1d\x1a\x04\x98\xa6\x1d\t\x12'\n" +
+	"\x1dPROMPT_ORIGIN_LINK_UNRESOLVED\x10\x1e\x1a\x04\x98\xa6\x1d\x06\x12&\n" +
+	"\x1cPROMPT_ORIGIN_MERGE_HANDBACK\x10\x1f\x1a\x04\x98\xa6\x1d\x05\x12,\n" +
+	"\"PROMPT_ORIGIN_WORKSPACE_RETARGETED\x10 \x1a\x04\x98\xa6\x1d\x06\x12\"\n" +
+	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!\x1a\x04\x98\xa6\x1d\x05\x12+\n" +
+	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"\x1a\x04\x98\xa6\x1d\b\x12/\n" +
+	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#\x1a\x04\x98\xa6\x1d\x06\x12*\n" +
+	" PROMPT_ORIGIN_MERGE_QUEUE_NOTICE\x10$\x1a\x04\x98\xa6\x1d\x05\x12$\n" +
+	"\x1aPROMPT_ORIGIN_MERGE_REVERT\x10%\x1a\x04\x98\xa6\x1d\x05\x120\n" +
+	"&PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE\x10&\x1a\x04\x98\xa6\x1d\a\x12$\n" +
+	"\x1aPROMPT_ORIGIN_OWNER_NOTICE\x10'\x1a\x04\x98\xa6\x1d\a\x12(\n" +
+	"\x1ePROMPT_ORIGIN_WORKSPACE_NOTICE\x10(\x1a\x04\x98\xa6\x1d\a\x12\"\n" +
+	"\x18PROMPT_ORIGIN_AGENT_SENT\x10)\x1a\x04\x98\xa6\x1d\a\x12)\n" +
+	"\x1fPROMPT_ORIGIN_WORKSPACE_COMPACT\x10*\x1a\x04\x98\xa6\x1d\b\x12#\n" +
+	"\x19PROMPT_ORIGIN_DEPLOY_HOOK\x10+\x1a\x04\x98\xa6\x1d\x06\x12,\n" +
+	"\"PROMPT_ORIGIN_SUBSECTION_PLACEMENT\x10,\x1a\x04\x98\xa6\x1d\x06\x12&\n" +
+	"\x1cPROMPT_ORIGIN_REMOTE_CONTROL\x10-\x1a\x04\x98\xa6\x1d\x02\x12(\n" +
+	"\x1ePROMPT_ORIGIN_MAIN_SYNC_REPAIR\x10.\x1a\x04\x98\xa6\x1d\x06\x12+\n" +
+	"!PROMPT_ORIGIN_PULL_REQUEST_NOTICE\x10/\x1a\x04\x98\xa6\x1d\x06\x121\n" +
+	"'PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND\x100\x1a\x04\x98\xa6\x1d\x02\x12#\n" +
+	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101\x1a\x04\x98\xa6\x1d\x06\x121\n" +
+	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102\x1a\x04\x98\xa6\x1d\x05\x12/\n" +
+	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103\x1a\x04\x98\xa6\x1d\x02\x12(\n" +
+	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104\x1a\x04\x98\xa6\x1d\x05\x122\n" +
+	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105\x1a\x04\x98\xa6\x1d\x06B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once
@@ -535,6 +538,7 @@ func file_conversation_v1_prompt_origin_proto_init() {
 	if File_conversation_v1_prompt_origin_proto != nil {
 		return
 	}
+	file_conversation_v1_vendor_spend_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

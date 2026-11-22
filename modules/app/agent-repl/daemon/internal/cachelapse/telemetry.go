@@ -6,6 +6,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // Telemetry is where the Keeper reports what happens to every workspace's
@@ -25,6 +26,9 @@ type Telemetry interface {
 	// (the ColdGate* outcomes), and how long the cache sat idle before it. A
 	// gate raised again from its record is the same gate, never counted twice.
 	ObserveColdGate(ws ids.WorkspaceID, outcome string, idle time.Duration)
+	// ObserveKeepaliveRun records one ended keep-alive run of WS: how many
+	// keep-alives it sent, what they spent and how it ended (runspend.go).
+	ObserveKeepaliveRun(ws ids.WorkspaceID, run wsm.KeepaliveRun)
 }
 
 // How an asked-for keep-alive ended (Telemetry.ObserveBeat).

@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "THE ONE HOME of the weights a price-weighted vendor spend is derived with",
+    "(run.sh --spend, --spend-over, --keepalive-runs). No weighted figure is",
+    "stored: the agentrepl_vendor_* series hold the vendor's own token counts,",
+    "and every weighted figure is derived from them here, so a price change",
+    "is one edit to this file and re-reads all of history.",
+    "",
+    "kinds weighs each token kind as a multiple of the base input price, the",
+    "vendor's own ratios: a 5-minute cache write is 1.25x, a 1-hour write 2x,",
+    "a cache read 0.1x and output 5x. The read and 1-hour write prices are",
+    "also the daemon's (vendorspend.CacheReadPriceTenths, CacheWritePriceTenths)",
+    "and the shim's (engine/cold.ts CACHE_READ_PRICE, CACHE_WRITE_PRICE),",
+    "and both runtimes' tests fail when this file disagrees with them.",
+    "",
+    "models weighs a model's base input price against the default's, for a",
+    "model the vendor prices differently; a model not listed weighs",
+    "default_model. A weighted figure is in base-input-token equivalents of",
+    "the default model."
+  ],
+  "kinds": {
+    "uncached_input": 1,
+    "cache_write_5m": 1.25,
+    "cache_write_1h": 2,
+    "cache_read": 0.1,
+    "output": 5
+  },
+  "default_model": 1,
+  "models": {}
+}

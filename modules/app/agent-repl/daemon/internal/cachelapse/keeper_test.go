@@ -61,6 +61,17 @@ type fakeDB struct {
 	// owingErr fails SetKeepaliveOwing; owingWrites counts every write.
 	owingErr    error
 	owingWrites int
+	// runEndings are the moments EndKeepaliveRun was asked at, in order;
+	// endedRun, when set, is the run it answers ended (once), and endErr
+	// fails it.
+	runEndings []wsm.KeepaliveRunEnding
+	endedRun   *wsm.KeepaliveRun
+	endErr     error
+	// runSpends are the spends AddKeepaliveRunSpend added, in order; spendErr
+	// fails it, and spendRefused answers that no standing run took it.
+	runSpends    []wsm.KeepaliveRunTokens
+	spendErr     error
+	spendRefused bool
 	// readOnly stands for a joining successor's unpromoted handle.
 	readOnly bool
 	// remote is each workspace's remote-control mode, off when absent;
@@ -259,6 +270,31 @@ func (f *fakeDB) SetCacheLapse(_ context.Context, id wsm.WorkspaceID, lapse wsm.
 	return true, nil
 }
 
+func (f *fakeDB) EndKeepaliveRun(_ context.Context, _ wsm.WorkspaceID, ending wsm.KeepaliveRunEnding) (wsm.KeepaliveRun, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runEndings = append(f.runEndings, ending)
+	if f.endErr != nil {
+		return wsm.KeepaliveRun{}, false, f.endErr
+	}
+	if f.endedRun == nil {
+		return wsm.KeepaliveRun{}, false, nil
+	}
+	run := *f.endedRun
+	f.endedRun = nil
+	return run, true, nil
+}
+
+func (f *fakeDB) AddKeepaliveRunSpend(_ context.Context, _ wsm.WorkspaceID, spent wsm.KeepaliveRunTokens) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.spendErr != nil {
+		return false, f.spendErr
+	}
+	f.runSpends = append(f.runSpends, spent)
+	return !f.spendRefused, nil
+}
+
 func (f *fakeDB) SetLastKeepalive(_ context.Context, id wsm.WorkspaceID, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -334,6 +370,8 @@ type harness struct {
 	clock      *clocktest.Scripted
 	log        *dlog.TestSurfaces
 	telemetry  *fakeTelemetry
+	// spent is each workspace's keep-alive spend the metrics surface answers.
+	spent map[ids.WorkspaceID]*conversationv1.VendorTokens
 	// cycled are the keep-alive cycle stand-downs asked for.
 	cycled []cycleCall
 	// coldDowns are the cold cache's parks asked for.
@@ -462,6 +500,12 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		},
 		Stat:   func(dir string) (fs.FileInfo, error) { return nil, h.statErr[dir] },
 		Faults: h.faults,
+		KeepaliveSpent: func(ws ids.WorkspaceID) *conversationv1.VendorTokens {
+			if t := h.spent[ws]; t != nil {
+				return t
+			}
+			return &conversationv1.VendorTokens{}
+		},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -523,6 +567,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			Parked:          func(context.Context, ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) { return nil, nil },
 			Stat:            func(string) (fs.FileInfo, error) { return nil, nil },
 			Faults:          &fakeFaults{},
+			KeepaliveSpent:  func(ids.WorkspaceID) *conversationv1.VendorTokens { return &conversationv1.VendorTokens{} },
 		}
 	}
 	tests := []struct {
@@ -547,6 +592,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "parked keep-alive requests", strip: func(d *Deps) { d.Parked = nil }},
 		{name: "directory stat", strip: func(d *Deps) { d.Stat = nil }},
 		{name: "fault records", strip: func(d *Deps) { d.Faults = nil }},
+		{name: "keep-alive spend", strip: func(d *Deps) { d.KeepaliveSpent = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

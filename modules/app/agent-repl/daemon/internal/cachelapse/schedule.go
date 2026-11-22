@@ -411,6 +411,10 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		// THE BEAT MOVES THE CACHE CLOCK, and it is recorded before the
 		// stand-down, whose edges re-time the next beat from that clock.
 		k.sent[ws] = now
+		// A RUN A TURN ENDED IS RECORDED BEFORE THIS BEAT STARTS A NEW ONE,
+		// and this beat's spend is read from the mark (runspend.go).
+		k.endRun(ctx, log, ws, wsm.RunEndingBeat)
+		k.markRunSpend(ws)
 		if err := k.deps.DB.SetLastKeepalive(ctx, ws, now); err != nil && !leaving(ctx, log, opDrive, "recording the keep-alive that was sent", err) {
 			log.Error(opDrive, "could not record the keep-alive that was sent; this daemon times the next beat from it, a successor from the turn before it",
 				dlog.WithCause(fields, err))

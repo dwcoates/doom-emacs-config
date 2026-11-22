@@ -8,6 +8,8 @@ syntax = "proto3";
 
 package conversation.v1;
 
+import "conversation/v1/vendor_spend.proto";
+
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
 // Why a prompt entered the agent-repl submit pipeline.
@@ -34,44 +36,47 @@ option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 // that the one event it waits on ends, and that wait outlives a daemon
 // restart. The comments below that say such a prompt is "submitted through
 // the prompt queue" mean this path.
+//
+// EVERY VALUE BUT UNSPECIFIED DECLARES ITS SPEND CAUSE (spend_cause,
+// vendor_spend.proto): what the vendor calls of its turn count as.
 enum PromptOrigin {
   PROMPT_ORIGIN_UNSPECIFIED = 0;
 
   // Emacs-originated sends. Each value has exactly one production send site.
-  PROMPT_ORIGIN_USER_SENT = 1;
-  PROMPT_ORIGIN_USER_SENT_AND_HIDE = 2;
-  PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT = 3;
-  PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX = 4;
-  PROMPT_ORIGIN_USER_SENT_WITH_PREFIX = 5;
-  PROMPT_ORIGIN_METAPROMPT_READ = 6;
-  PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS = 7;
-  PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT = 8;
-  PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT = 9;
-  PROMPT_ORIGIN_COMMAND_UPDATE_PR = 10;
-  PROMPT_ORIGIN_COMMAND_REBASE = 11;
-  PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR = 12;
-  PROMPT_ORIGIN_PANEL_SELECTION = 13;
-  PROMPT_ORIGIN_DEFERRED_PROMPT = 14;
-  PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 15;
-  PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 16;
-  PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 17;
-  PROMPT_ORIGIN_EXPLAIN_CONFIG = 18;
+  PROMPT_ORIGIN_USER_SENT = 1 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_USER_SENT_AND_HIDE = 2 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT = 3 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX = 4 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_USER_SENT_WITH_PREFIX = 5 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_METAPROMPT_READ = 6 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS = 7 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT = 8 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT = 9 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_COMMAND_UPDATE_PR = 10 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_COMMAND_REBASE = 11 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR = 12 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_PANEL_SELECTION = 13 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_DEFERRED_PROMPT = 14 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 15 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 16 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
+  PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 17 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_EXPLAIN_CONFIG = 18 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
 
   // Other producers remain explicit without being mislabeled as Emacs.
-  PROMPT_ORIGIN_WEBAPP_USER_SENT = 19;
-  PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 20;
-  PROMPT_ORIGIN_WORKSPACE_CREATED = 21;
-  PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 22;
-  PROMPT_ORIGIN_MERGE_TEST_REPAIR = 23;
+  PROMPT_ORIGIN_WEBAPP_USER_SENT = 19 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 20 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
+  PROMPT_ORIGIN_WORKSPACE_CREATED = 21 [(spend_cause) = VENDOR_CALL_CAUSE_WORKSPACE_TASK];
+  PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 22 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
+  PROMPT_ORIGIN_MERGE_TEST_REPAIR = 23 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // A deploy's `pre_deploy` prompt hook (repoconfig.v1.DeployPreDeployStage
   // hooks, or a request's own before prompts), run as a turn of the deploy's
   // owner.
-  PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 24;
+  PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 24 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // A deploy's `post_deploy` prompt hook (repoconfig.v1.LifecycleConfig
   // post_deploy, or a request's own after prompts), run as a turn of the
   // deploy's owner.
-  PROMPT_ORIGIN_MERGE_AFTER_ACTION = 25;
-  PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 26;
+  PROMPT_ORIGIN_MERGE_AFTER_ACTION = 25 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
+  PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 26 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
 
   // Tag 27 is RETIRED. The cache keep-alive is not a prompt the daemon
   // submits: it is the shim's own mechanism and never appears on this wire.
@@ -96,7 +101,7 @@ enum PromptOrigin {
   // What it IS for: saying WHY a turn is running. A status surface reads this
   // to report "resumed after restart" instead of presenting work the user did
   // not just ask for as though they had.
-  PROMPT_ORIGIN_RESUME_AFTER_RESTART = 28;
+  PROMPT_ORIGIN_RESUME_AFTER_RESTART = 28 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
 
   // A turn the VENDOR started on its own, with no StartTurn behind it.
   //
@@ -114,13 +119,13 @@ enum PromptOrigin {
   // turn opens the turn on it, once.
   //
   // Never submitted by a client: only the shim produces it.
-  PROMPT_ORIGIN_VENDOR_STARTED = 29;
+  PROMPT_ORIGIN_VENDOR_STARTED = 29 [(spend_cause) = VENDOR_CALL_CAUSE_VENDOR_STARTED];
   // The daemon's question after a link the user clicked in a bubble resolved
   // to no file: it quotes the bubble and asks the agent which file it meant
   // and how agent-repl could avoid or resolve such links. Delivered on
   // arrival (see the enum's header): it joins a running turn without
   // interrupting it.
-  PROMPT_ORIGIN_LINK_UNRESOLVED = 30;
+  PROMPT_ORIGIN_LINK_UNRESOLVED = 30 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // The daemon's report to a workspace's session that a merge it asked for
   // has ended: an ASYNC merge (agentrepl.v1.CreateWorkspaceAsyncMerge) that landed
   // or failed, or a ONE-SHOT (agentrepl.v1.MergeWorkspaceOneShot) that
@@ -130,14 +135,14 @@ enum PromptOrigin {
   // running turn rather than waiting for its end. The feed draws it as the
   // FeedRow.merge_handback marker, never as a prompt bubble: the words are
   // the daemon's, and the merge itself is read in its bubble.
-  PROMPT_ORIGIN_MERGE_HANDBACK = 31;
+  PROMPT_ORIGIN_MERGE_HANDBACK = 31 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // The daemon's notice to a workspace's session that its merge target was
   // changed (agentrepl.v1.SetWorkspaceParent): it names the new target — the
   // parent workspace's name and checkout, or the repository's default branch
   // — and says the workspace's own-branch merge now lands there. Delivered
   // on arrival (see the enum's header): it joins a running turn and wakes
   // an idle agent. Drawn as an ordinary prompt bubble.
-  PROMPT_ORIGIN_WORKSPACE_RETARGETED = 32;
+  PROMPT_ORIGIN_WORKSPACE_RETARGETED = 32 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // The daemon's resolving brief: the first turn of an ASYNC merge workspace
   // whose request carries an instruction
   // (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction). It carries the requesting
@@ -146,7 +151,7 @@ enum PromptOrigin {
   // instruction says. The turn is the merge's own: its rows draw under the
   // bubble's resolving tab (frontend.v1.FeedMergeTabResolving), and the merge
   // joins the queue once it ends.
-  PROMPT_ORIGIN_MERGE_PICK = 33;
+  PROMPT_ORIGIN_MERGE_PICK = 33 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // The daemon's `/compact` of a requester whose ASYNC merge landed and asked
   // to compact after it
   // (agentrepl.v1.CreateWorkspaceAsyncMerge.compact_after).
@@ -154,7 +159,7 @@ enum PromptOrigin {
   // runs behind the handback's turn. It is a context cut like any `/compact`:
   // no prompt bubble, and the compaction's status, footer and separator drawn
   // as for one the user typed.
-  PROMPT_ORIGIN_MERGE_COMPACT_AFTER = 34;
+  PROMPT_ORIGIN_MERGE_COMPACT_AFTER = 34 [(spend_cause) = VENDOR_CALL_CAUSE_COMPACTION];
   // The daemon's request that a repository's MAIN-WORKTREE workspace find out
   // why a workspace create in that repository failed. Every create, whichever
   // way it was asked for (agentrepl.v1.CreateWorkspace, synchronous or
@@ -167,7 +172,7 @@ enum PromptOrigin {
   // as an ordinary prompt bubble. A merge's own
   // workspace (the hidden one an async merge runs in) is not reported here:
   // the merge queue hands its failure back to the requester.
-  PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED = 35;
+  PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED = 35 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // The daemon's notice to a workspace's session that a merge queue it
   // subscribed to changed (agentrepl.v1.UpdateMergeQueueSubscribe): it names
   // each change and carries the queue as it stands after it. Delivered on
@@ -176,7 +181,7 @@ enum PromptOrigin {
   // draws it as a prompt the daemon sent, headed "Zettel Merge Queue Monitor"
   // (frontend.v1.FeedUserPromptDaemonSender), like every daemon notice (owner
   // ruling, 2026-11-21: notices were drawn as no row before).
-  PROMPT_ORIGIN_MERGE_QUEUE_NOTICE = 36;
+  PROMPT_ORIGIN_MERGE_QUEUE_NOTICE = 36 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // The daemon's brief asking a reopened merged workspace's agent to revert
   // the merge that workspace landed (agentrepl.v1.OpenWorkspaceRequest
   // .revert_merge). It names the branch, the branch the merge landed on, and
@@ -189,24 +194,24 @@ enum PromptOrigin {
   // because a reopened workspace whose conversation is large parks at its
   // gate on the very bring-up the brief follows. Drawn as an ordinary prompt
   // bubble, so the user follows the revert from the workspace's feed.
-  PROMPT_ORIGIN_MERGE_REVERT = 37;
+  PROMPT_ORIGIN_MERGE_REVERT = 37 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // The daemon's brief notice to a workspace that another workspace was
   // derived from it -- cut from its branch, or created with its conversation
   // forked -- sent when the derived workspace is created, when it lands, and
   // when it closes without landing (one combined notice when it is both). It
   // names the derived workspace and what happened. Delivered on arrival, like
   // a merge-queue notice, and drawn as one is. Never sent to the workspace that asked for the create.
-  PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE = 38;
+  PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE = 38 [(spend_cause) = VENDOR_CALL_CAUSE_WORKSPACE_NOTICE];
   // A notice to a child's OWNER that landing the child's work was the owner's
   // responsibility. NO LONGER SENT: every workspace lands itself, so no owner
   // is told so. The value stays because conversations recorded before then
   // hold such prompts, which are still drawn as ordinary prompt bubbles.
-  PROMPT_ORIGIN_OWNER_NOTICE = 39;
+  PROMPT_ORIGIN_OWNER_NOTICE = 39 [(spend_cause) = VENDOR_CALL_CAUSE_WORKSPACE_NOTICE];
   // A notice that a workspace a subscriber follows changed
   // (agentrepl.v1.SubscribeWorkspaceRequest): the change, and the followed
   // workspace's status after it. Submitted and drawn as a merge-queue notice
   // is.
-  PROMPT_ORIGIN_WORKSPACE_NOTICE = 40;
+  PROMPT_ORIGIN_WORKSPACE_NOTICE = 40 [(spend_cause) = VENDOR_CALL_CAUSE_WORKSPACE_NOTICE];
   // A prompt a workspace's AGENT sent to a workspace through the agent API
   // (`agent-repld workspace prompt`). It names its sender
   // (agentrepl.v1.SubmitPromptRequest.sent_by), and the recipient's feed
@@ -220,22 +225,22 @@ enum PromptOrigin {
   // after its current tool call and is never held, and at a standing cold
   // gate it is refused (agentrepl.v1.SubmitPromptColdGate) so the sending
   // agent learns it did not go.
-  PROMPT_ORIGIN_AGENT_SENT = 41;
+  PROMPT_ORIGIN_AGENT_SENT = 41 [(spend_cause) = VENDOR_CALL_CAUSE_WORKSPACE_NOTICE];
   // The compaction CompactWorkspace submitted. Waits behind a running turn
   // like any deferred prompt; drawn as the context cut it produces.
-  PROMPT_ORIGIN_WORKSPACE_COMPACT = 42;
+  PROMPT_ORIGIN_WORKSPACE_COMPACT = 42 [(spend_cause) = VENDOR_CALL_CAUSE_COMPACTION];
   // A deploy's `deploy` stage prompt hook (repoconfig.v1.LifecycleConfig.deploy),
   // run as a turn of the deploy's owner. Drawn, like the other two hook
   // origins, inside the deploy bubble's hook tab rather than as a prompt the
   // user said.
-  PROMPT_ORIGIN_DEPLOY_HOOK = 43;
+  PROMPT_ORIGIN_DEPLOY_HOOK = 43 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // The daemon's brief asking a workspace that just LEFT its one-shot state
   // to file itself into its repository's sidebar subsections. Drawn as a workspace notice is.
   // THE DAEMON NO LONGER SENDS IT (owner request, 2026-11-03): a one-shot
   // files itself like any other workspace and an unmark moves nothing, so
   // there is nothing left to file. The value stays so the prompt rows already
   // stored with it still decode and draw.
-  PROMPT_ORIGIN_SUBSECTION_PLACEMENT = 44;
+  PROMPT_ORIGIN_SUBSECTION_PLACEMENT = 44 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // A prompt typed on claude.ai (or its mobile app) into a workspace whose
   // remote control is on (agentrepl.v1.UpdateRemoteControlMode). The vendor
   // queues it itself, past agent-repl's own submit pipeline, so the shim
@@ -246,49 +251,49 @@ enum PromptOrigin {
   // said.
   //
   // Never submitted by a client: only the shim produces it.
-  PROMPT_ORIGIN_REMOTE_CONTROL = 45;
+  PROMPT_ORIGIN_REMOTE_CONTROL = 45 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
   // The daemon's brief asking a repository's main workspace to repair its
   // main checkout after the daemon's fast-forward of the primary branch to
   // its upstream failed in the index or the worktree
   // (agentrepl.v1.MainSyncFailure). Delivered on arrival (see the enum's
   // header), reopening a closed main workspace first, and drawn as an ordinary prompt bubble, so
   // the user follows the repair from the workspace's feed.
-  PROMPT_ORIGIN_MAIN_SYNC_REPAIR = 46;
+  PROMPT_ORIGIN_MAIN_SYNC_REPAIR = 46 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // A notice of a followed GitHub pull request's activity
   // (agentrepl.v1.PullRequestNotice): comments, reviews, line comments,
   // edits, deletions, state changes and finished checks since the subscriber
   // was last told. Submitted and drawn as a workspace notice is.
-  PROMPT_ORIGIN_PULL_REQUEST_NOTICE = 47;
+  PROMPT_ORIGIN_PULL_REQUEST_NOTICE = 47 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // A prompt Emacs sends to the zettel chat thread viewed last without
   // switching to it (`SPC C-SPC`): the words are read in the minibuffer and
   // the frame stays where it is. Its one Emacs send site is
   // `agent-repl-thread-send-background`.
-  PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND = 48;
+  PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND = 48 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
   // A finish-stage prompt hook (repoconfig.v1.LifecycleConfig.finish), run as
   // a turn of the workspace that called `workspace finished`, once that call's
   // turn has ended and before its deploy is put in the queue. No deploy bubble
   // exists yet, so it is drawn in the workspace's own feed as an ordinary
   // prompt bubble the daemon sent, never as a prompt the user said.
-  PROMPT_ORIGIN_FINISH_HOOK = 49;
+  PROMPT_ORIGIN_FINISH_HOOK = 49 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
   // A notice of a followed GitHub merge queue's movement
   // (agentrepl.v1.GithubMergeQueueNotice): entries that joined, merged or
   // were removed, and the new head, since the subscriber was last told.
   // Delivered on arrival and drawn as a workspace notice is.
-  PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE = 50;
+  PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE = 50 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // The outcome of a shell command a person ran from a bubble's code block
   // run control, sent to that workspace's agent once the command exited
   // (success or failure alike): the command's output when it is short, or the
   // path of a file holding it, its size and the exit status when it is long.
   // Its one Emacs send site is `agent-repl-terminal-finished`.
-  PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT = 51;
+  PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT = 51 [(spend_cause) = VENDOR_CALL_CAUSE_USER_PROMPT];
   // The deploy mediator's brief: a deploy began, and the repository's merge
   // queue advances nothing until the mediator approves it, escalates it, or
   // deploys its remediation (repoconfig.v1.LifecycleConfig.deploy_mediator).
   // Drawn as the daemon's prompt to its own hidden workspace.
-  PROMPT_ORIGIN_DEPLOY_MEDIATION = 52;
+  PROMPT_ORIGIN_DEPLOY_MEDIATION = 52 [(spend_cause) = VENDOR_CALL_CAUSE_MERGE];
   // The one notice of a followed GitHub Actions workflow run
   // (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
   // workflow's name, its conclusion, its head commit and its web address.
   // Delivered on arrival and drawn as a workspace notice is.
-  PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE = 53;
+  PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE = 53 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
 }

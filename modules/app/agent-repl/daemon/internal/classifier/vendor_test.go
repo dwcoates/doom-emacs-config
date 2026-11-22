@@ -1,6 +1,7 @@
 package classifier
 
 import (
+	conversationv1 "agentrepl/proto/conversation/v1"
 	"context"
 	"errors"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 func TestVendorJudgeTakesTheFastPathWithoutAskingTheGuard(t *testing.T) {
 	// Arrange: the forbidding guard every test process runs under.
-	j := newVendorJudge(forbiddingGuard(t), headless.New(forbiddingGuard(t), "fake-claude"), "unused")
+	j := newVendorJudge(forbiddingGuard(t), headless.New(forbiddingGuard(t), "fake-claude", func(string, []*conversationv1.VendorSpend) {}), "unused")
 	j.run = func(context.Context, string) (string, error) {
 		t.Fatal("the fast path must not run the vendor")
 		return "", nil
@@ -31,7 +32,7 @@ func TestVendorJudgeTakesTheFastPathWithoutAskingTheGuard(t *testing.T) {
 
 func TestVendorJudgeRefusesWhenVendorCallsAreForbidden(t *testing.T) {
 	// Arrange
-	j := newVendorJudge(forbiddingGuard(t), headless.New(forbiddingGuard(t), "fake-claude"), "unused")
+	j := newVendorJudge(forbiddingGuard(t), headless.New(forbiddingGuard(t), "fake-claude", func(string, []*conversationv1.VendorSpend) {}), "unused")
 	// Act
 	_, err := j.Judge(context.Background(), "running", "an ordinary follow-up")
 	// Assert
@@ -97,7 +98,7 @@ func TestVendorJudgeSplicesBothPromptsIntoTheQuestion(t *testing.T) {
 
 func TestVendorJudgeSurfacesAnAbsentBrief(t *testing.T) {
 	// Arrange
-	j := newVendorJudge(permissiveGuard(t), headless.New(permissiveGuard(t), "fake-claude"), "unused")
+	j := newVendorJudge(permissiveGuard(t), headless.New(permissiveGuard(t), "fake-claude", func(string, []*conversationv1.VendorSpend) {}), "unused")
 	j.load = func(string, string) (prompts.Prompt, error) { return prompts.Prompt{}, errLoad }
 	// Act
 	_, err := j.Judge(context.Background(), "running", "an ordinary follow-up")

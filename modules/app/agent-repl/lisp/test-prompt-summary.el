@@ -341,8 +341,77 @@ cost up to seven cores per summary."
     (let ((applied nil))
       (cl-letf (((symbol-function 'agent-repl--prompt-summary-apply)
                  (lambda (ws raw summary) (setq applied (list ws raw summary)))))
-        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") t "  a summary  \n")
+        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") t
+                 "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"  a summary  \\n\"}\n")
         (should (equal applied '("ws" "raw" "a summary.")))))))
+
+;;;; ---- The run's event stream and its spend ----
+
+(defconst agent-repl-test-ps--call-line
+  "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"model\":\"claude-haiku-5-5\",\"usage\":{\"input_tokens\":3,\"output_tokens\":%d,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":2000,\"cache_creation\":{\"ephemeral_1h_input_tokens\":500}}}}"
+  "One stream line of call m1, its output count a format argument.")
+
+(ert-deftest agent-repl-ps-read-stream-answers-the-result-and-each-call-once ()
+  "A call restated as it streamed is one call, at its last restatement."
+  (let ((stream (agent-repl--prompt-summary-read-stream
+                 (concat (format agent-repl-test-ps--call-line 4) "\n"
+                         (format agent-repl-test-ps--call-line 9) "\n"
+                         "{\"type\":\"result\",\"result\":\"done\"}\n"))))
+    (should (equal (car stream) "done"))
+    (should (equal (cdr stream)
+                   '((:model "claude-haiku-5-5"
+                      :tokens (:uncached-input 3 :cache-read 0 :cache-write-5m 1500 :cache-write-1h 500 :output 9)))))))
+
+(ert-deftest agent-repl-ps-read-stream-skips-plain-text-and-the-clis-own-messages ()
+  "A plain-text complaint is no stream line, and a <synthetic> message no call."
+  (let ((stream (agent-repl--prompt-summary-read-stream
+                 (concat "auth failed\n"
+                         "{\"type\":\"assistant\",\"message\":{\"id\":\"m2\",\"model\":\"<synthetic>\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n"))))
+    (should-not (car stream))
+    (should-not (cdr stream))))
+
+(ert-deftest agent-repl-ps-a-run-reports-its-calls-for-its-workspace ()
+  "The callback reports the run's calls under the prompt-summary cause."
+  (agent-repl-test-ps--with
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agent-repl--prompt-summary-apply) #'ignore)
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (_ws key) (when (eq key :ref) '(:id "w1" :dir "/w"))))
+                ((symbol-function 'agent-repl-link-newest) (lambda () 'conn))
+                ((symbol-function 'agent-repl-rpc-report-vendor-spend)
+                 (lambda (conn request &rest _keys) (setq sent (list conn request)))))
+        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") t
+                 (concat (format agent-repl-test-ps--call-line 4) "\n{\"type\":\"result\",\"result\":\"a summary\"}\n"))
+        (should (eq (car sent) 'conn))
+        (should (equal (plist-get (cadr sent) :workspace) '(:id "w1" :dir "/w")))
+        (should (equal (plist-get (cadr sent) :cause) "VENDOR_CALL_CAUSE_PROMPT_SUMMARY"))
+        (should (= (length (plist-get (cadr sent) :calls)) 1))
+        (should (stringp (plist-get (cadr sent) :config-dir)))))))
+
+(ert-deftest agent-repl-ps-a-call-with-no-ref-is-recorded-unreported ()
+  "A workspace the daemon never named sends nothing and says so at INFO."
+  (let ((infos nil) (sent nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl-link-newest) (lambda () 'conn))
+              ((symbol-function 'agent-repl-rpc-report-vendor-spend) (lambda (&rest _) (setq sent t)))
+              ((symbol-function 'agent-repl--info) (lambda (&rest args) (push args infos))))
+      (agent-repl--prompt-summary-report-spend "ws" '((:model "m" :tokens nil)))
+      (should-not sent)
+      (should (string-match-p "reason=no-ref" (cadr (car infos)))))))
+
+(ert-deftest agent-repl-ps-a-refused-spend-report-is-recorded-at-error ()
+  "A report the daemon refused is a defect, recorded at ERROR with its detail."
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error) (lambda (&rest args) (push args errors))))
+      (agent-repl--prompt-summary-spend-answered
+       "ws" '((:model "m")) '(:arm :error :value (:arm :invalid :value (:detail "names no model"))))
+      (should (equal (car errors) '("ws" "elisp.prompt-summary.spend-refused calls=%d detail=%S" 1 "names no model"))))))
+
+(ert-deftest agent-repl-ps-the-command-reads-the-event-stream ()
+  "The summary run asks the CLI for its event stream."
+  (let ((cmd (agent-repl--prompt-summary-command)))
+    (should (member "stream-json" cmd))
+    (should (member "--verbose" cmd))))
 
 (ert-deftest agent-repl-ps-callback-rejects-a-failed-run-and-clears-pending ()
   "A failed run applies nothing, warns with what it said, and clears pending."

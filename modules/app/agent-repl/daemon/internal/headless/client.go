@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"agent-repld/internal/childproc"
 	"agent-repld/internal/envc"
+	"agent-repld/internal/vendorspend"
+	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
 // execFunc is the one exec site, as a seam so the client's own tests never
@@ -25,6 +28,8 @@ type Client struct {
 	bin   string
 	exec  execFunc
 	now   func() time.Time
+	// spend is told every vendor call a run made (SpendSink).
+	spend SpendSink
 }
 
 // Bin reports the vendor binary this client execs.
@@ -63,11 +68,7 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 		return Response{}, &Error{Cause: CauseNoBinary, Detail: "no vendor binary is configured"}
 	}
 
-	format := req.Format
-	if format == "" {
-		format = FormatText
-	}
-	args := []string{"-p", "--output-format", format}
+	args := []string{"-p", "--output-format", streamFormat, "--verbose"}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}
@@ -95,6 +96,12 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	started := c.now()
 	stdout, err := c.exec(runCtx, c.bin, args, env, req.Prompt)
 	elapsed := c.now().Sub(started)
+	// EVERY CALL THE RUN MADE IS COUNTED, whether or not it answered: a run
+	// that failed after its calls still spent them.
+	result, calls, streamErr := readStream(stdout)
+	if len(calls) > 0 {
+		c.spend(effectiveConfigDir(req.ConfigDir), vendorspend.Tally(calls, conversationv1.VendorCallAgent_VENDOR_CALL_AGENT_HEADLESS, conversationv1.VendorCallCause_VENDOR_CALL_CAUSE_HEADLESS_QUESTION))
+	}
 	if err != nil {
 		// A DEADLINE IS ITS OWN CAUSE. exec reports a killed child as a plain
 		// exit failure, so the context is what distinguishes "the model took
@@ -103,17 +110,30 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			return Response{}, &Error{Cause: CauseTimeout, Detail: err.Error()}
 		}
-		return Response{}, &Error{Cause: CauseExitStatus, Detail: err.Error() + exitAccount(format, stdout)}
+		return Response{}, &Error{Cause: CauseExitStatus, Detail: err.Error() + exitAccount(result, stdout)}
 	}
-
-	text := stdout
-	if format == FormatJSON {
-		text, err = resultOf(stdout)
-		if err != nil {
-			return Response{}, &Error{Cause: CauseUnreadableEnvelope, Detail: err.Error()}
-		}
+	text, err := resultOf(result, streamErr)
+	if err != nil {
+		return Response{}, &Error{Cause: CauseUnreadableEnvelope, Detail: err.Error()}
 	}
 	return Response{Text: text, Model: req.Model, Duration: elapsed}, nil
+}
+
+// effectiveConfigDir is the account root a run bills: the one it named, else
+// the environment's own CLAUDE_CONFIG_DIR, else the CLI's default under the
+// home directory.
+func effectiveConfigDir(named string) string {
+	if named != "" {
+		return named
+	}
+	if env := os.Getenv("CLAUDE_CONFIG_DIR"); env != "" {
+		return env
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude")
 }
 
 // pinnedSettings is the settings every headless run carries on `--settings`,
@@ -151,27 +171,28 @@ func mustPinnedArgs() []string {
 	return []string{"--settings", string(settings), "--strict-mcp-config", "--safe-mode"}
 }
 
-// envelope is the slice of the CLI's `--output-format json` answer this
-// package reads. The model's own answer is `result`; `is_error` is the CLI
-// reporting its own failure inside a zero exit.
+// envelope is the slice of the CLI's result envelope this package reads:
+// the stream's last line. The model's own answer is `result`; `is_error` is
+// the CLI reporting its own failure inside a zero exit.
 type envelope struct {
 	Result  string `json:"result"`
 	IsError bool   `json:"is_error"`
 	Subtype string `json:"subtype"`
 }
 
-// resultOf reads the model's answer out of a JSON envelope. An envelope that
-// does not parse, or that reports its own error, is a failure and never an
-// empty answer passed off as the model's.
-func resultOf(stdout string) (string, error) {
-	var env envelope
-	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
-		return "", fmt.Errorf("the json envelope did not parse: %w", err)
+// resultOf reads the model's answer out of a run's result envelope. A stream
+// that broke, one that carried no result, or a result reporting its own
+// error is a failure, never an empty answer passed off as the model's.
+func resultOf(result *envelope, streamErr error) (string, error) {
+	switch {
+	case streamErr != nil:
+		return "", fmt.Errorf("the stream did not parse: %w", streamErr)
+	case result == nil:
+		return "", errors.New("the stream carried no result")
+	case result.IsError:
+		return "", fmt.Errorf("the cli reported an error %s", result.account())
 	}
-	if env.IsError {
-		return "", fmt.Errorf("the cli reported an error %s", env.account())
-	}
-	return env.Result, nil
+	return result.Result, nil
 }
 
 // account words an error envelope's own account of its failure: its subtype
@@ -184,20 +205,17 @@ func (env envelope) account() string {
 // follow the exit's own error, or "" when it said nothing.
 //
 // GROUNDED (2026-10-19). A naming call under an account whose OAuth session
-// had expired exited 1 with an EMPTY stderr: `--output-format json` states its
-// failure in the stdout envelope, and the exit discarded it, so the log read
-// "exit status 1 (stderr: )" and named no cause at all. A JSON envelope is
-// read for its own account; anything else on stdout is carried as written.
-func exitAccount(format, stdout string) string {
+// had expired exited 1 with an EMPTY stderr: the CLI states its failure in
+// its result envelope, and the exit discarded it, so the log read "exit
+// status 1 (stderr: )" and named no cause at all. An error envelope is read
+// for its own account; anything else on stdout is carried as written.
+func exitAccount(result *envelope, stdout string) string {
+	if result != nil && result.IsError {
+		return "; the cli said " + result.account()
+	}
 	said := strings.TrimSpace(stdout)
 	if said == "" {
 		return ""
-	}
-	if format == FormatJSON {
-		var env envelope
-		if err := json.Unmarshal([]byte(said), &env); err == nil && env.IsError {
-			return "; the cli said " + env.account()
-		}
 	}
 	return "; the cli said: " + said
 }

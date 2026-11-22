@@ -883,6 +883,13 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was last sent
 	// (lastkeepalive.go).
 	SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
+	// EndKeepaliveRun records the end of a workspace's keep-alive run once
+	// it has ended, answering the run and whether an end was recorded
+	// (keepaliverun.go).
+	EndKeepaliveRun(ctx context.Context, id WorkspaceID, ending KeepaliveRunEnding) (KeepaliveRun, bool, error)
+	// AddKeepaliveRunSpend adds a keep-alive's spend to the workspace's
+	// standing run, answering whether one took it (keepaliverun.go).
+	AddKeepaliveRunSpend(ctx context.Context, id WorkspaceID, spent KeepaliveRunTokens) (bool, error)
 	// SetKeepaliveOwing records the keeper's decision that a workspace owes
 	// keep-alives, or owes none (keepaliveowing.go).
 	SetKeepaliveOwing(ctx context.Context, id WorkspaceID, owing bool, at time.Time) error

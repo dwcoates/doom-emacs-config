@@ -1,0 +1,76 @@
+// endpoint_report_vendor_spend.proto — ReportVendorSpend. DIAGNOSTICS section.
+//
+// EMACS REPORTS THE VENDOR CALLS IT MAKES ITSELF. Every other vendor call is
+// counted where it is made: a session's by its shim (shim.v1.ShimMeasurements
+// vendor_spend), the daemon's headless questions by the daemon's one headless
+// exec site. Emacs's headless prompt summaries are made by Emacs, so Emacs
+// reads each run's usage and reports it here, and the daemon folds it into
+// the same spend series (skills/agent-repl-metrics/CATALOG.md,
+// `agentrepl_vendor_*`).
+//
+// A REPORT IS ONE RUN'S CALLS, SENT ONCE. A report lost to a daemon restart
+// is lost: the run's figures are not kept for a retry, because a spend
+// series that could count a run twice is worse than one that misses one.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "conversation/v1/vendor_spend.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportVendorSpendRequest {
+  // The workspace the run was made for. Required; an unset ref is refused.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The account root the run billed to: the `CLAUDE_CONFIG_DIR` it ran
+  // under. Required; the daemon labels the spend with the account it names.
+  string config_dir = 2;
+  // Why the run was made. Required, never UNSPECIFIED or UNSTATED: Emacs
+  // knows what it ran (PROMPT_SUMMARY for a prompt's summary).
+  conversation.v1.VendorCallCause cause = 3;
+  // The run's vendor calls, each once (one per message id, its last
+  // restatement), in the order the run made them. At least one. The daemon
+  // judges each call's cache outcome and bucket itself, by the same rule as
+  // its own headless runs (agent-repld internal/vendorspend Tally), so the
+  // rule has no copy in Emacs.
+  repeated ReportedVendorCall calls = 4;
+}
+
+// One vendor call of the run.
+message ReportedVendorCall {
+  // The model the call ran on, as the vendor named it. Never `<synthetic>`.
+  string model = 1;
+  // Its usage, by kind.
+  conversation.v1.VendorTokens tokens = 2;
+}
+
+message ReportVendorSpendResponse {
+  oneof result {
+    ReportVendorSpendSuccess success = 1;
+    ReportVendorSpendError error = 2;
+  }
+}
+
+message ReportVendorSpendSuccess {
+  oneof outcome {
+    // Folded into the spend series.
+    ReportVendorSpendRecorded recorded = 1;
+    // The daemon runs with its metrics off; nothing was recorded.
+    ReportVendorSpendMetricsOff metrics_off = 2;
+  }
+}
+
+message ReportVendorSpendRecorded {}
+message ReportVendorSpendMetricsOff {}
+
+message ReportVendorSpendError {
+  oneof kind {
+    // The request broke the contract above; `detail` says how.
+    ReportVendorSpendInvalid invalid = 1;
+  }
+}
+
+message ReportVendorSpendInvalid {
+  string detail = 1;
+}

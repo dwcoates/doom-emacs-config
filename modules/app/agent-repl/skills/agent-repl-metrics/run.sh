@@ -33,13 +33,32 @@
 #                                    The restart phase's p95 per deployed
 #                                    version over the last [days] (default
 #                                    30), as --latency-by-version prints.
+#   --spend [window] [by] [selector] Vendor spend over the last [window]
+#                                    (as --restarts reads it; default 1d),
+#                                    one line per value of [by] (default
+#                                    workspace; also model, account, cause,
+#                                    agent, subagent_type, cache_outcome,
+#                                    cold_reason, kind, context), the most
+#                                    weighted first: price-weighted spend
+#                                    (spend-weights.json), its share, calls,
+#                                    tokens, and for a workspace its peak
+#                                    context bucket. [selector] narrows the
+#                                    series (PromQL matchers, such as
+#                                    cache_outcome="cold_rewrite").
+#   --spend-over <hours> <step>      Price-weighted spend per <step> (1h, 1d)
+#                                    over the last <hours>, oldest first.
+#   --keepalive-runs [window]        Keep-alive runs that ended in [window]
+#                                    (default 1d), by how each ended: runs,
+#                                    mean keep-alives per run, and their
+#                                    price-weighted spend.
 #
 # Exit codes:
 #   0  printed what the verb answers
 #   1  --status: the metrics store does not answer
 #      --catalog: no runtime advertises a metrics surface
 #      --query / --range / --latency-by-version / --process-trend /
-#      --restarts / --restart-by-version: no series
+#      --restarts / --restart-by-version / --spend / --spend-over /
+#      --keepalive-runs: no series
 #      --first-version-over: no version went over (the versions seen are
 #      printed)
 #   2  script/usage error, or the metrics store refused the query
@@ -58,6 +77,7 @@ SELF_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 STORE="${AGENT_REPL_METRICS_URL:-http://127.0.0.1:8428}"
 ROOT="${AGENT_REPL_METRICS_ROOT:-$HOME/.cache/agent-repl/metrics}"
 VOCAB="$SELF_DIR/../../proto/vocab/latencies.json"
+WEIGHTS="$SELF_DIR/spend-weights.json"
 
 die() {
   printf 'agent-repl-metrics: %s\n' "$*" >&2
@@ -134,6 +154,23 @@ per_version() {
     | [.v, (.first | floor | todate), .ps[$j], $n]
     | @tsv'
 }
+
+# window_of ARG DEFAULT — set WINDOW to ARG (or DEFAULT) as a PromQL range:
+# a bare number is whole days, as every other mode reads it; 30m, 6h and 7d
+# read the last half hour, six hours and week.
+WINDOW=""
+window_of() {
+  local window="${1:-$2}"
+  if [[ "$window" =~ ^[0-9]+$ ]]; then
+    window="${window}d"
+  fi
+  [[ "$window" =~ ^[1-9][0-9]*[mhd]$ ]] || die "the window must be whole days or a duration such as 30m, 6h or 7d, not ${1}"
+  WINDOW="$window"
+}
+
+# WEIGH is the jq definition every spend verb weighs tokens with: weight(kind;
+# model) from spend-weights.json, the one home of the weights.
+WEIGH='def weight($k; $m): ($w.kinds[$k] // error("spend-weights.json weighs no kind \($k)")) * ($w.models[$m] // $w.default_model);'
 
 case "${1:-}" in
   --status)
@@ -242,11 +279,8 @@ case "${1:-}" in
     # THE WINDOW IS WHOLE DAYS OR A DURATION: a bare number is days, as every
     # other mode reads it; 30m, 6h and 7d read the last half hour, six hours
     # and week, so a check right after a landing reads only its own restarts.
-    window="${2:-7}"
-    if [[ "$window" =~ ^[0-9]+$ ]]; then
-      window="${window}d"
-    fi
-    [[ "$window" =~ ^[1-9][0-9]*[mhd]$ ]] || die "the window must be whole days or a duration such as 30m, 6h or 7d, not ${2}"
+    window_of "${2:-}" 7
+    window="$WINDOW"
     counts="$(promql_data query "sum by (restart, phase, cause, outcome) (increase_pure(agentrepl_restart_seconds_count[$window]))")" || exit 2
     sums="$(promql_data query "sum by (restart, phase, cause) (increase_pure(agentrepl_restart_seconds_sum{outcome=\"ok\"}[$window]))")" || exit 2
     quantile() {
@@ -285,8 +319,78 @@ case "${1:-}" in
     result="$(p95_by_version agentrepl_restart_seconds "restart=\"$2\",phase=\"$3\",outcome=\"ok\"" "$days")" || exit 2
     print_per_version "$result"
     ;;
+  --spend)
+    window_of "${2:-}" 1
+    by="${3:-workspace}"
+    sel="${4:-}"
+    case "$by" in
+      workspace | model | account | cause | agent | subagent_type | cache_outcome | cold_reason | kind | context) ;;
+      *) die "--spend cannot break spend down by $by" ;;
+    esac
+    case "$by" in
+      context) tokens="$(promql_data query "sum by (context, kind, model) (increase_pure(agentrepl_vendor_context_tokens_total{$sel}[$WINDOW]))")" || exit 2 ;;
+      kind) tokens="$(promql_data query "sum by (kind, model) (increase_pure(agentrepl_vendor_tokens_total{$sel}[$WINDOW]))")" || exit 2 ;;
+      *) tokens="$(promql_data query "sum by ($by, kind, model) (increase_pure(agentrepl_vendor_tokens_total{$sel}[$WINDOW]))")" || exit 2 ;;
+    esac
+    calls='[]'
+    [ "$by" = kind ] || calls="$(promql_data query "sum by ($by) (increase_pure(agentrepl_vendor_calls_total{$sel}[$WINDOW]))")" || exit 2
+    peaks='[]'
+    [ "$by" != workspace ] || peaks="$(promql_data query "sum by (workspace, context) (increase_pure(agentrepl_vendor_calls_total{$sel}[$WINDOW])) > 0")" || exit 2
+    lines="$(jq -rn --argjson w "$(cat "$WEIGHTS")" --argjson t "$tokens" --argjson c "$calls" --argjson p "$peaks" --arg by "$by" "$WEIGH"'
+      def key: .metric[$by] // "";
+      def num: .value[1] | tonumber;
+      ([$t[] | {k: key, n: num, x: (num * weight(.metric.kind; .metric.model))}] | group_by(.k)
+        | map({k: .[0].k, tokens: (map(.n) | add), weighted: (map(.x) | add)})) as $rows
+      | ($rows | map(.weighted) | add // 0) as $total
+      | ([$c[] | {key: key, value: num}] | from_entries) as $calls
+      | ([$p[] | {k: .metric.workspace, b: (.metric.context | if . == "+Inf" then infinite else tonumber end)}]
+          | group_by(.k) | map({key: .[0].k, value: (map(.b) | max)}) | from_entries) as $peak
+      | def short: if . >= 1e6 then "\(. / 1e6 * 10 | round / 10)M" elif . >= 1e3 then "\(. / 1e3 | round)k" else "\(round)" end;
+      ($rows | sort_by(-.weighted))[]
+      | [(if .k == "" then "-" else .k end), (.weighted | short),
+         (if $total > 0 then "\(.weighted / $total * 1000 | round / 10)%" else "-" end),
+         ($calls[.k] // null | if . == null then "-" else round end), (.tokens | short)]
+        + (if $by == "workspace" then [($peak[.k] // null | if . == null then "-" elif . == infinite then ">1M" else (. | short) end)] else [] end)
+      | @tsv')" || die "could not read the spend"
+    [ -n "$lines" ] || exit 1
+    header="$by	weighted	share	calls	tokens"
+    [ "$by" != workspace ] || header="$header	peak_context"
+    printf '%s\n%s\n' "$header" "$lines"
+    ;;
+  --spend-over)
+    [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "--spend-over needs hours and a step (such as 1h or 1d)"
+    [[ "$2" =~ ^[0-9]+$ ]] || die "--spend-over hours must be a whole number, not $2"
+    [[ "$3" =~ ^[1-9][0-9]*[mhd]$ ]] || die "--spend-over step must be a duration such as 1h or 1d, not $3"
+    range_args "$2" "$3"
+    result="$(promql_data query_range "sum by (kind, model) (increase_pure(agentrepl_vendor_tokens_total[$3]))" "${RANGE_ARGS[@]}")" || exit 2
+    lines="$(jq -rn --argjson w "$(cat "$WEIGHTS")" --argjson r "$result" "$WEIGH"'
+      [$r[] | .metric as $m | .values[] | {t: .[0], x: ((.[1] | tonumber) * weight($m.kind; $m.model))}]
+      | group_by(.t) | map({t: .[0].t, x: (map(.x) | add)}) | sort_by(.t)[]
+      | [(.t | todate), (.x | round)] | @tsv')" || die "could not read the spend"
+    [ -n "$lines" ] || exit 1
+    printf 'until	weighted
+%s
+' "$lines"
+    ;;
+  --keepalive-runs)
+    window_of "${2:-}" 1
+    counts="$(promql_data query "sum by (end) (increase_pure(agentrepl_keepalive_run_beats_count[$WINDOW]))")" || exit 2
+    beats="$(promql_data query "sum by (end) (increase_pure(agentrepl_keepalive_run_beats_sum[$WINDOW]))")" || exit 2
+    spent="$(promql_data query "sum by (end, kind) (increase_pure(agentrepl_keepalive_run_tokens_total[$WINDOW]))")" || exit 2
+    lines="$(jq -rn --argjson w "$(cat "$WEIGHTS")" --argjson c "$counts" --argjson b "$beats" --argjson s "$spent" "$WEIGH"'
+      ([$b[] | {key: .metric.end, value: (.value[1] | tonumber)}] | from_entries) as $beats
+      | ([$s[] | {k: .metric.end, x: ((.value[1] | tonumber) * weight(.metric.kind; ""))}] | group_by(.k)
+          | map({key: .[0].k, value: (map(.x) | add)}) | from_entries) as $spent
+      | $c[] | (.value[1] | tonumber | round) as $n | select($n > 0)
+      | [.metric.end, $n, (($beats[.metric.end] // 0) / $n * 10 | round / 10), (($spent[.metric.end] // 0) | round)]
+      | @tsv')" || die "could not read the keep-alive runs"
+    [ -n "$lines" ] || exit 1
+    printf 'end	runs	mean_keepalives	weighted
+%s
+' "$lines"
+    ;;
   *)
-    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days] | --restarts [window] | --restart-by-version <restart> <phase> [days]\n' >&2
+    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days] | --restarts [window] | --restart-by-version <restart> <phase> [days] | --spend [window] [by] [selector] | --spend-over <hours> <step> | --keepalive-runs [window]\n' >&2
     exit 1
     ;;
 esac

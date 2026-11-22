@@ -13,6 +13,13 @@ import { askSideQuery } from "../../src/engine/side-query.js";
 import type { PromptQueue } from "../../src/engine/prompt-queue.js";
 import type { SdkUserMessage } from "../../src/sdk/types.js";
 import { errorResultMessage, initMessage, resultMessage, ScriptedQuery } from "./fakes.js";
+import { VendorSpendLedger, type SideQuerySpend } from "../../src/engine/vendor-spend.js";
+import { conversationv1 } from "../../src/proto.js";
+
+/** Where a test's side query counts its calls. */
+function spendOf(ledger = new VendorSpendLedger()): SideQuerySpend {
+  return { ledger, cause: conversationv1.VendorCallCause.COMPACTION, nowMs: () => 1_700_000_000_000 };
+}
 
 /** Build ScriptedQuery as a side query, capturing the prompt queue it was handed. */
 function scripted(query: ScriptedQuery): {
@@ -52,7 +59,7 @@ describe("asking a side query", () => {
     query.emit(initMessage({ model: "claude-sonnet-5" }));
     query.emit(resultMessage("r-1", { output_tokens: 7 }));
     // Act
-    const asked = await askSideQuery(scripted(query).build, "question");
+    const asked = await askSideQuery(scripted(query).build, "question", spendOf());
     // Assert
     expect(asked).toMatchObject({ kind: "answered", text: "done", model: "claude-sonnet-5" });
     expect(asked.kind === "answered" ? asked.usage.outputTokens : -1).toBe(7);
@@ -63,7 +70,7 @@ describe("asking a side query", () => {
     const query = new ScriptedQuery();
     query.emit(resultMessage());
     // Act
-    const asked = await askSideQuery(scripted(query).build, "question");
+    const asked = await askSideQuery(scripted(query).build, "question", spendOf());
     // Assert
     expect(asked).toMatchObject({ kind: "answered", model: undefined });
   });
@@ -74,7 +81,7 @@ describe("asking a side query", () => {
     query.emit(resultMessage());
     const side = scripted(query);
     // Act
-    await askSideQuery(side.build, "what is the meaning");
+    await askSideQuery(side.build, "what is the meaning", spendOf());
     // Assert
     expect(await firstPrompt(side.prompts())).toEqual({
       type: "user",
@@ -88,7 +95,7 @@ describe("asking a side query", () => {
     const query = new ScriptedQuery();
     query.emit({ ...(resultMessage() as object), is_error: true, result: "API Error: 529", api_error_status: 529 } as never);
     // Act
-    const asked = await askSideQuery(scripted(query).build, "question");
+    const asked = await askSideQuery(scripted(query).build, "question", spendOf());
     // Assert
     expect(asked).toEqual({ kind: "errorResult", subtype: "success", words: "API Error: 529", status: 529 });
   });
@@ -98,7 +105,7 @@ describe("asking a side query", () => {
     const query = new ScriptedQuery();
     query.emit(errorResultMessage({ errors: ["first", "second"] }));
     // Act
-    const asked = await askSideQuery(scripted(query).build, "question");
+    const asked = await askSideQuery(scripted(query).build, "question", spendOf());
     // Assert
     expect(asked).toEqual({ kind: "errorResult", subtype: "error_during_execution", words: "first; second", status: undefined });
   });
@@ -109,7 +116,7 @@ describe("asking a side query", () => {
     query.emit(initMessage());
     query.end();
     // Act
-    const asked = await askSideQuery(scripted(query).build, "question");
+    const asked = await askSideQuery(scripted(query).build, "question", spendOf());
     // Assert
     expect(asked).toEqual({ kind: "noResult" });
   });
@@ -118,7 +125,7 @@ describe("asking a side query", () => {
     // Arrange
     const build = (): Promise<ScriptedQuery> => Promise.reject(new Error("vendor calls are forbidden"));
     // Act
-    const asked = await askSideQuery(build, "question");
+    const asked = await askSideQuery(build, "question", spendOf());
     // Assert
     expect(asked).toEqual({ kind: "unbuilt", error: "vendor calls are forbidden" });
   });
@@ -128,7 +135,7 @@ describe("asking a side query", () => {
     const query = new ScriptedQuery();
     query.fail(new Error("the child went away"));
     // Act
-    const asked = await askSideQuery(scripted(query).build, "question");
+    const asked = await askSideQuery(scripted(query).build, "question", spendOf());
     // Assert
     expect(asked).toEqual({ kind: "broken", error: "the child went away" });
   });
@@ -143,7 +150,7 @@ describe("asking a side query", () => {
     script(query);
     const side = scripted(query);
     // Act
-    await askSideQuery(side.build, "question");
+    await askSideQuery(side.build, "question", spendOf());
     // Assert
     expect(query.calls).toContain("close");
     expect(side.controller().signal.aborted).toBe(true);
@@ -176,5 +183,23 @@ describe("the side query's call sites", () => {
     const asked = source.split("askSideQuery(").length - 1;
     // Assert
     expect(asked).toBe(1);
+  });
+
+  it("counts every call the query makes as a side query's, under the cause its caller names", async () => {
+    // Arrange
+    const query = new ScriptedQuery();
+    query.emit(initMessage({ model: "claude-sonnet-5" }));
+    query.emit({
+      type: "assistant",
+      message: { id: "msg_side", model: "claude-sonnet-5", content: [], usage: { input_tokens: 4, output_tokens: 7, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+    } as never);
+    query.emit(resultMessage("r-1", { output_tokens: 7 }));
+    const ledger = new VendorSpendLedger();
+    // Act
+    await askSideQuery(scripted(query).build, "question", spendOf(ledger));
+    // Assert
+    expect(ledger.snapshot().map((e) => [e.agent, e.cause, e.calls])).toEqual([
+      [conversationv1.VendorCallAgent.SIDE_QUERY, conversationv1.VendorCallCause.COMPACTION, 1n],
+    ]);
   });
 });

@@ -178,7 +178,6 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, call sent
 	resp, err := s.Headless.Run(ctx, headless.Request{
 		Site:      call.site,
 		Model:     SummaryModel,
-		Format:    headless.FormatText,
 		Kind:      headless.KindInference,
 		ConfigDir: configDir,
 		Prompt:    question,

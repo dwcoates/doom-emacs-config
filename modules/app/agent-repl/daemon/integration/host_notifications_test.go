@@ -128,8 +128,9 @@ func TestAgentAddressedRaisesABannerWithItsText(t *testing.T) {
 
 // TestACompletedTurnRaisesTheCompletedBanner pins the turn-end banner: a turn
 // that concluded raises "✅ <name>" over the summary the
-// daemon's headless call wrote (the fake vendor answers ROUTE_HOLD to text),
-// set in italics.
+// daemon's headless call wrote (the fake vendor answers a question that is
+// neither the classifier's nor an abbreviation with its minted name), set in
+// italics.
 func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -141,7 +142,7 @@ func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 
 	// Assert
 	argvs := awaitBannerSettled(t, f, "the completed-turn banner")
-	if !bannerCarrying(argvs, "✅", desktopnotify.Italic("ROUTE_HOLD")) {
+	if !bannerCarrying(argvs, "✅", desktopnotify.Italic(harness.FakeClaudeMintedName)) {
 		t.Fatalf("banners %q, want the completed title over the model's summary", argvs)
 	}
 }

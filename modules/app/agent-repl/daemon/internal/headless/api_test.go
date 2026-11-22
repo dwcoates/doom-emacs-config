@@ -99,7 +99,7 @@ func TestNewResolvesTheBinary(t *testing.T) {
 	t.Setenv(EnvClaudeBin, "/from/env")
 
 	// Act.
-	c := New(permissiveGuard(t), "")
+	c := New(permissiveGuard(t), "", discardSpend)
 
 	// Assert.
 	if c.Bin() != "/from/env" {

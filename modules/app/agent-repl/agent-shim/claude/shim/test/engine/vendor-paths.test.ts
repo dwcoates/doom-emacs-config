@@ -55,3 +55,20 @@ describe("the vendor's layout has one home", () => {
     expect(handRolled.map((file) => path.relative(root, file))).toEqual([]);
   });
 });
+
+// The anchor scan sits here with the other scans over the shim's own
+// sources: the test roster grants this file src/, which a scan of every
+// engine source needs.
+describe("the anchor a transcript's last request states", () => {
+  it("is the one reading of a transcript as an anchor: no other engine source builds one from the facts", () => {
+    // Arrange: every engine source but the helper's own.
+    const dir = path.join(path.dirname(new URL(import.meta.url).pathname), "../../src/engine");
+    const sources = readdirSync(dir).filter((name) => name.endsWith(".ts") && name !== "keepalive.ts");
+
+    // Act: the sources that read the facts' tier into an anchor by hand.
+    const handRolled = sources.filter((name) => /ttlMs:\s*facts\.cacheTtlMs|facts\.lastRequestAtMs\s*\+\s*facts\.cacheTtlMs/.test(readFileSync(path.join(dir, name), "utf8")));
+
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+});

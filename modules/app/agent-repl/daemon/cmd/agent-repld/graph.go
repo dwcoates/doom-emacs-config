@@ -345,6 +345,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the account resolver: %w", err)
 	}
+	// THE SPEND SERIES LABEL EACH ACCOUNT ROOT BY THIS RESOLVER, set before any
+	// session is watched (runtimemetrics.Surface.SetAccountLabeler).
+	p.Metrics.SetAccountLabeler(accounts.IsMultiRepo)
 	pullOwners, err := pullrefs.OwnersFromEnv(os.Getenv, paths.Home, p.Opts.multiRepoConfigDir)
 	if err != nil {
 		log.Error(opPullOwners, "the GitHub owners of the account roots could not be read", dlog.Context{"cause": err.Error()})
@@ -357,7 +360,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// boot because the alternative was invisible: buildJudge used to hand the
 	// classifier an empty binary, so every classification refused before it
 	// reached the model and nothing said so.
-	headlessClient := headless.New(guard, "")
+	// EVERY HEADLESS RUN'S VENDOR CALLS ARE COUNTED into the spend series,
+	// under no workspace: the daemon's own questions belong to none.
+	headlessClient := headless.New(guard, "", func(configDir string, entries []*conversationv1.VendorSpend) {
+		if err := p.Metrics.ObserveVendorSpend("", configDir, entries); err != nil {
+			log.Error(opHeadlessBinary, "a headless run's vendor spend was refused; it is not counted", dlog.Context{
+				"config_dir": configDir, "entries": len(entries), "cause": err.Error(),
+			})
+		}
+	})
 	log.Info(opHeadlessBinary, "resolved the vendor binary for the daemon's headless calls", dlog.Context{
 		"bin":    headlessClient.Bin(),
 		"source": headless.BinSource(""),
@@ -911,6 +922,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE OBSERVED STATE CLIENT, so every undelivered keep-alive's fault
 		// reaches the footer (health.ObserveFaults above).
 		Faults: p.DB,
+		// THE SPEND SERIES' OWN FIGURES, which a keep-alive run's spend is read
+		// from (cachelapse runspend.go); the off surface answers none.
+		KeepaliveSpent: p.Metrics.KeepaliveSpent,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
@@ -2035,6 +2049,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StallBeat:         stallBeat,
 			Pages:             supersededPages,
 			Latencies:         p.Metrics,
+			VendorSpend:       p.Metrics,
 			RPCs:              p.Metrics,
 			Reconnects:        p.Reconnects,
 			HotReload:         hotReload,

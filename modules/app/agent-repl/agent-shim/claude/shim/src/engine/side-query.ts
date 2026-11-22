@@ -14,6 +14,7 @@
 import type { QueryLike, SdkUserMessage } from "../sdk/types.js";
 import { normalizeApiUsage, type NormalizedApiUsage } from "../api-usage.js";
 import { PromptQueue } from "./prompt-queue.js";
+import { SIDE_QUERY_AGENT, type SideQuerySpend } from "./vendor-spend.js";
 
 /** How a side query ended. THE KIND IS THE OUTCOME. */
 export type SideQueryOutcome =
@@ -53,7 +54,12 @@ export type SideQueryOutcome =
 export async function askSideQuery(
   build: (prompt: PromptQueue, controller: AbortController) => Promise<QueryLike>,
   content: SdkUserMessage["message"]["content"],
+  spend: SideQuerySpend,
 ): Promise<SideQueryOutcome> {
+  // EVERY CALL THE QUERY MAKES IS COUNTED, under the cause its caller names and
+  // along a chain of its own: it shares no agent's cache clock.
+  const agent = SIDE_QUERY_AGENT(spend.ledger);
+  if (spend.seed !== undefined) spend.ledger.seedChain(agent.chain, spend.seed);
   const queue = new PromptQueue();
   const controller = new AbortController();
   let query: QueryLike | undefined;
@@ -69,6 +75,10 @@ export async function askSideQuery(
       for await (const message of query) {
         if (message.type === "system" && message.subtype === "init") {
           model = message.model;
+          continue;
+        }
+        if (message.type === "assistant") {
+          spend.ledger.countMessage(message, agent, spend.cause, spend.nowMs());
           continue;
         }
         if (message.type !== "result") continue;

@@ -130,7 +130,6 @@ func (j *vendorJudge) runHeadless(ctx context.Context, question string) (string,
 	resp, err := j.headless.Run(ctx, headless.Request{
 		Kind:    headless.KindInference,
 		Site:    VendorSite,
-		Format:  headless.FormatText,
 		Prompt:  question,
 		Timeout: RunTimeout,
 	})

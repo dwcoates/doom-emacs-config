@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"agent-repld/internal/envc"
+	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
 // EnvClaudeBin names the vendor binary every headless run execs. AGENTS.md
@@ -30,16 +31,6 @@ const EnvClaudeBin = "AGENT_REPL_CLAUDE_BIN"
 
 // DefaultBin is the vendor binary a headless run execs when nothing names one.
 const DefaultBin = "claude"
-
-// The output formats a run may ask the CLI for.
-const (
-	// FormatText is the bare answer on stdout, with no envelope.
-	FormatText = "text"
-	// FormatJSON is the CLI's result envelope, whose `result` string is the
-	// model's own answer. The envelope is parsed here so no caller learns the
-	// CLI's shape twice.
-	FormatJSON = "json"
-)
 
 // ModelHaiku is the small, fast model the daemon asks its own questions of.
 // It is the spelling the CLI's `--model` takes.
@@ -86,8 +77,6 @@ type Request struct {
 	// Model is the `--model` the run asks for. Empty omits the flag and takes
 	// the CLI's own default.
 	Model string
-	// Format is FormatText or FormatJSON. Empty means FormatText.
-	Format string
 	// ConfigDir is the account root the run bills, exported as
 	// CLAUDE_CONFIG_DIR. Empty leaves the environment's own.
 	ConfigDir string
@@ -129,8 +118,7 @@ const (
 
 // Response is one headless answer.
 type Response struct {
-	// Text is the model's answer: stdout for FormatText, the envelope's
-	// `result` for FormatJSON.
+	// Text is the model's answer: the result envelope's `result`.
 	Text string
 	// Model is the model the request asked for, echoed so a caller logging the
 	// answer does not have to hold the constant twice.
@@ -198,6 +186,14 @@ type Runner interface {
 }
 
 // New builds the production client. bin empty resolves through ResolveBin.
-func New(guard envc.VendorGuard, bin string) *Client {
-	return &Client{guard: guard, bin: ResolveBin(bin), exec: execCLI, now: time.Now}
+func New(guard envc.VendorGuard, bin string, spend SpendSink) *Client {
+	if spend == nil {
+		panic("headless: a client needs the spend sink every run's vendor calls are counted into")
+	}
+	return &Client{guard: guard, bin: ResolveBin(bin), exec: execCLI, now: time.Now, spend: spend}
 }
+
+// SpendSink is told the vendor calls one run made, billed to configDir, as
+// spend entries (conversation.v1.VendorSpend) the metrics surface folds
+// (runtimemetrics.Surface.ObserveVendorSpend).
+type SpendSink func(configDir string, entries []*conversationv1.VendorSpend)

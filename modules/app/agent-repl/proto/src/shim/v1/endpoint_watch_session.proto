@@ -6,6 +6,7 @@ syntax = "proto3";
 package shim.v1;
 
 import "conversation/v1/session.proto";
+import "conversation/v1/vendor_spend.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
@@ -65,6 +66,22 @@ message ShimMeasurements {
   // publishes it as a gauge. UNSET only on a frame built before the first
   // heap read; every frame after it carries one.
   optional ShimHeap heap = 4;
+  // Every vendor call this shim's session made since the counting instant,
+  // its main loop's, its subagents' and its own side queries', each counted
+  // once (one per message id), by what the call was: each tag set at most
+  // once, cumulative like every figure here. A tag set with no call yet is
+  // absent.
+  //
+  // A FRAME FOLLOWS EVERY COUNTED CALL BEFORE ANY LATER FRAME OF THE STREAM:
+  // once a call is counted, the next frame the watch carries is a
+  // measurements frame stating it (after the opening frames), so whatever
+  // the daemon learns from a later frame (a keep-alive's answer, a turn's
+  // end) it learns with that call's spend already folded.
+  repeated conversation.v1.VendorSpend vendor_spend = 5;
+  // The account root this shim's vendor calls bill to: its
+  // `CLAUDE_CONFIG_DIR`. The same in every frame of one process's lifetime;
+  // the daemon labels the spend with the account it names.
+  string config_dir = 6;
 }
 
 // The shim process's JavaScript heap, as Node's process.memoryUsage() reads

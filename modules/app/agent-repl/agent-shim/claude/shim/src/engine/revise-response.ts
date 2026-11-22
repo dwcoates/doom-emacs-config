@@ -19,6 +19,7 @@ import type { QueryLike } from "../sdk/types.js";
 import type { PromptQueue } from "./prompt-queue.js";
 import { askSideQuery } from "./side-query.js";
 import { saidContent } from "./said-content.js";
+import type { VendorSpendLedger } from "./vendor-spend.js";
 
 const LOGGER = bindLog({ component: "shim-engine-revise-response", operation: "shim.engine.revise_response" });
 
@@ -31,6 +32,8 @@ export type RevisionCut =
 
 /** What a revision needs from the session it revises. */
 export interface ReviseResponseDeps {
+  /** Where the revision's vendor calls are counted (engine/vendor-spend.ts). */
+  readonly spend: VendorSpendLedger;
   /** The vendor session the conversation lives in, or absence when no session is started. */
   readonly vendorSessionId: () => string | undefined;
   /** Where the fork ends: the newest finished turn's final record. */
@@ -88,6 +91,7 @@ export async function reviseResponse(
     // THE USER'S IMAGES RIDE ALONG: the instruction is a said, converted as
     // every prompt the shim sends is.
     saidContent(instruction),
+    { ledger: deps.spend, cause: conversationv1.VendorCallCause.RESPONSE_REVISION, nowMs: deps.nowMs },
   );
   // A CALLER THAT WENT AWAY (a turn stop stopped the revision) GETS NOTHING
   // WRITTEN, whatever the side query answered: the abort and this check run

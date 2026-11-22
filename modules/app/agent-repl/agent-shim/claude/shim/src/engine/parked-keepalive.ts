@@ -27,7 +27,7 @@
  * cache: a lapsed cache is answered `cache_lapsed`, because a keep-alive then
  * would buy the full-price read the cold gate exists to make the user decide on.
  */
-import type { shimv1 } from "../proto.js";
+import { conversationv1, type shimv1 } from "../proto.js";
 import { bindLog } from "../log.js";
 import type { QueryLike } from "../sdk/types.js";
 import { coverageContext, leftContextCached, readTranscriptFacts } from "./cold.js";
@@ -37,6 +37,7 @@ import type { PromptQueue } from "./prompt-queue.js";
 import { isKeepaliveRecord, isPromptRecord, readTranscriptChain, type ChainRecord } from "./rollback.js";
 import { askSideQuery } from "./side-query.js";
 import { transcriptPath } from "./vendor-paths.js";
+import type { VendorSpendLedger } from "./vendor-spend.js";
 
 const LOGGER = bindLog({ component: "shim-engine-parked-keepalive", operation: "shim.engine.parked_keepalive" });
 
@@ -66,6 +67,8 @@ export interface ParkedBeatDeps {
   /** This shim's working directory: where the workspace's transcripts are filed. */
   readonly cwd: string;
   readonly nowMs: () => number;
+  /** Where the beat's vendor calls are counted (engine/vendor-spend.ts). */
+  readonly spend: VendorSpendLedger;
   /** Build the beat's own query: the session's query factory, with its fixed policy. */
   readonly createQuery: (spec: ParkedBeatQuery) => Promise<QueryLike>;
 }
@@ -126,6 +129,9 @@ export async function beatParkedConversation(
         abortController,
       }),
     keepalivePromptText(parkedKeepaliveCount),
+    // JUDGED AGAINST THE PARKED CONVERSATION'S OWN LAST REQUEST, which the beat
+    // resumes after.
+    { ledger: deps.spend, cause: conversationv1.VendorCallCause.KEEPALIVE, nowMs: deps.nowMs, seed: facts },
   );
   switch (asked.kind) {
     case "answered":

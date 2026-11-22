@@ -270,6 +270,9 @@ type Deps struct {
 	// Latencies records what ReportLatencies accepts: the daemon's metrics
 	// surface, whose off value records nothing.
 	Latencies LatencyRecorder
+	// VendorSpend records what ReportVendorSpend accepts: the daemon's metrics
+	// surface, whose off value records nothing. REQUIRED.
+	VendorSpend VendorSpendRecorder
 	// RPCs times every unary rpc the daemon answers, from its arrival to its
 	// handler's return: the daemon's metrics surface, whose off value records
 	// nothing. REQUIRED.
@@ -670,6 +673,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the Emacs measure")
 	case deps.Latencies == nil:
 		return nil, missing("a latency recorder")
+	case deps.VendorSpend == nil:
+		return nil, missing("a vendor spend recorder")
 	case deps.RPCs == nil:
 		return nil, missing("an rpc recorder")
 	case deps.Reconnects == nil:

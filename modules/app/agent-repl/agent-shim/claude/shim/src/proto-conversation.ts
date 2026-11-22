@@ -17,4 +17,5 @@ export * from "../../../../proto/gen/ts/conversation/v1/session_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/slash_command_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/turn_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/user_pb.js";
+export * from "../../../../proto/gen/ts/conversation/v1/vendor_spend_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/workflow_pb.js";

@@ -17,6 +17,12 @@
  * run: its instant is strictly later than any earlier run's in this process,
  * so the daemon can never mistake one run for another.
  *
+ * VENDOR SPEND IS COUNTED HERE TOO (engine/vendor-spend.ts): every vendor
+ * call's usage, by what the call was. Unlike the other figures it is OWED
+ * PROMPTLY: a watch states a counted call before any later frame of its
+ * stream (MeasurementsCursor.owedSpend), so the daemon never learns of what a
+ * call caused (a keep-alive's answer, a turn's end) before the call's spend.
+ *
  * VENDOR TRAFFIC IS NOT COUNTED. The vendor's HTTP is made by the agent SDK's
  * own child process, outside this one, so `vendorTraffic` is left unset
  * rather than reported as zero (docs/METRICS-JUDGEMENT-CALLS.md, call 6).
@@ -24,6 +30,7 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { shimv1 } from "../proto.js";
+import { VendorSpendLedger } from "./vendor-spend.js";
 
 const LOGGER = bindLog({
   component: "shim-measurements",
@@ -120,10 +127,14 @@ export class Measurements {
   private readonly firstOutput = new CumulativeHistogram(shimv1.ShimLatencyKind.FIRST_OUTPUT, VENDOR_FIRST_OUTPUT_BUCKETS);
   private readonly eventLoopDelay = new CumulativeHistogram(shimv1.ShimLatencyKind.EVENT_LOOP_DELAY, EVENT_LOOP_DELAY_BUCKETS);
   private changes = 0;
+  /** Every vendor call this session made, by what it was. */
+  readonly vendorSpend = new VendorSpendLedger();
 
   constructor(
     nowMs: () => number,
     private readonly readHeap: ReadHeap,
+    /** The account root this shim's vendor calls bill to (`CLAUDE_CONFIG_DIR`). */
+    private readonly configDir = "",
   ) {
     this.countedSinceMs = nextCountingInstant(nowMs());
   }
@@ -133,7 +144,7 @@ export class Measurements {
    * moved since the frame before.
    */
   get version(): number {
-    return this.changes;
+    return this.changes + this.vendorSpend.version;
   }
 
   /** One vendor first output, in seconds, measured on a monotonic clock. */
@@ -157,6 +168,8 @@ export class Measurements {
     return create(shimv1.ShimMeasurementsSchema, {
       countedSinceUnixMs: BigInt(this.countedSinceMs),
       latencies,
+      vendorSpend: this.vendorSpend.snapshot(),
+      configDir: this.configDir,
       heap: create(shimv1.ShimHeapSchema, {
         usedBytes: BigInt(Math.trunc(heap.heapUsed)),
         totalBytes: BigInt(Math.trunc(heap.heapTotal)),
@@ -227,6 +240,40 @@ function measurementsFrame(m: Measurements): shimv1.WatchSessionResponse {
 }
 
 /**
+ * ONE WATCH'S POSITION IN THE FIGURES: what its last measurements frame
+ * stated. The watch's tick and its stream's frames share it, so a frame owed
+ * for the spend and the tick's frame never repeat each other.
+ */
+export class MeasurementsCursor {
+  private sentVersion = 0;
+  private sentSpend = 0;
+
+  constructor(private readonly measurements: Measurements) {}
+
+  /** A frame of the figures when any moved since this watch's last one. */
+  changed(): shimv1.WatchSessionResponse | undefined {
+    if (this.measurements.version === this.sentVersion) return undefined;
+    return this.take();
+  }
+
+  /**
+   * A frame OWED BEFORE THE STREAM'S NEXT FRAME: the vendor spend moved since
+   * this watch's last measurements frame. The heap and the latencies move
+   * every sample and wait for the tick.
+   */
+  owedSpend(): shimv1.WatchSessionResponse | undefined {
+    if (this.measurements.vendorSpend.version === this.sentSpend) return undefined;
+    return this.take();
+  }
+
+  private take(): shimv1.WatchSessionResponse {
+    this.sentVersion = this.measurements.version;
+    this.sentSpend = this.measurements.vendorSpend.version;
+    return measurementsFrame(this.measurements);
+  }
+}
+
+/**
  * The session stream's frames with the measurements arm merged in: every
  * frame of `frames` passes through unchanged and in order, and on a tick of
  * MEASUREMENTS_INTERVAL_MS that starts with the watch's first frame, one
@@ -239,6 +286,7 @@ export async function* withMeasurements(
   frames: AsyncIterable<shimv1.WatchSessionResponse>,
   measurements: Measurements,
   wait: Wait = timerWait,
+  cursor: MeasurementsCursor = new MeasurementsCursor(measurements),
 ): AsyncGenerator<shimv1.WatchSessionResponse> {
   const iterator = frames[Symbol.asyncIterator]();
   const stop = new AbortController();
@@ -259,7 +307,6 @@ export async function* withMeasurements(
     );
   let pendingFrame: Promise<Next> = pull();
   let pendingTick: Promise<Next> | undefined;
-  let sentVersion = 0;
   try {
     for (;;) {
       const next = pendingTick === undefined ? await pendingFrame : await Promise.race([pendingFrame, pendingTick]);
@@ -267,10 +314,8 @@ export async function* withMeasurements(
         pendingTick = wait(MEASUREMENTS_INTERVAL_MS, stop.signal).then(() => ({
           kind: "tick",
         }));
-        if (measurements.version !== sentVersion) {
-          sentVersion = measurements.version;
-          yield measurementsFrame(measurements);
-        }
+        const changed = cursor.changed();
+        if (changed !== undefined) yield changed;
         continue;
       }
       if (next.kind === "failed") throw next.error;

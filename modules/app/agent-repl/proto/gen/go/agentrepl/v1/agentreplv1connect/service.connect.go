@@ -307,6 +307,9 @@ const (
 	// AgentReplReportLatenciesProcedure is the fully-qualified name of the AgentRepl's ReportLatencies
 	// RPC.
 	AgentReplReportLatenciesProcedure = "/agentrepl.v1.AgentRepl/ReportLatencies"
+	// AgentReplReportVendorSpendProcedure is the fully-qualified name of the AgentRepl's
+	// ReportVendorSpend RPC.
+	AgentReplReportVendorSpendProcedure = "/agentrepl.v1.AgentRepl/ReportVendorSpend"
 	// AgentReplUpdatePersistentWifiModeProcedure is the fully-qualified name of the AgentRepl's
 	// UpdatePersistentWifiMode RPC.
 	AgentReplUpdatePersistentWifiModeProcedure = "/agentrepl.v1.AgentRepl/UpdatePersistentWifiMode"
@@ -593,6 +596,7 @@ var (
 	agentReplSessionHealthMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
 	agentReplClientLogMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("ClientLog")
 	agentReplReportLatenciesMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ReportLatencies")
+	agentReplReportVendorSpendMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ReportVendorSpend")
 	agentReplUpdatePersistentWifiModeMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
 	agentReplReportDesktopBannerClickedMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("ReportDesktopBannerClicked")
 	agentReplRegisterWorkspaceMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
@@ -975,6 +979,9 @@ type AgentReplClient interface {
 	// A client's finished interaction latencies, into the always-on metrics.
 	// See endpoint_report_latencies.proto.
 	ReportLatencies(context.Context, *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error)
+	// A vendor call Emacs made itself, into the always-on spend metrics. See
+	// endpoint_report_vendor_spend.proto.
+	ReportVendorSpend(context.Context, *connect.Request[v1.ReportVendorSpendRequest]) (*connect.Response[v1.ReportVendorSpendResponse], error)
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
@@ -1815,6 +1822,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplReportLatenciesMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		reportVendorSpend: connect.NewClient[v1.ReportVendorSpendRequest, v1.ReportVendorSpendResponse](
+			httpClient,
+			baseURL+AgentReplReportVendorSpendProcedure,
+			connect.WithSchema(agentReplReportVendorSpendMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		updatePersistentWifiMode: connect.NewClient[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse](
 			httpClient,
 			baseURL+AgentReplUpdatePersistentWifiModeProcedure,
@@ -2320,6 +2333,7 @@ type agentReplClient struct {
 	sessionHealth                      *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
 	clientLog                          *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
 	reportLatencies                    *connect.Client[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse]
+	reportVendorSpend                  *connect.Client[v1.ReportVendorSpendRequest, v1.ReportVendorSpendResponse]
 	updatePersistentWifiMode           *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
 	reportDesktopBannerClicked         *connect.Client[v1.ReportDesktopBannerClickedRequest, v1.ReportDesktopBannerClickedResponse]
 	registerWorkspace                  *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
@@ -2880,6 +2894,11 @@ func (c *agentReplClient) ClientLog(ctx context.Context, req *connect.Request[v1
 // ReportLatencies calls agentrepl.v1.AgentRepl.ReportLatencies.
 func (c *agentReplClient) ReportLatencies(ctx context.Context, req *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error) {
 	return c.reportLatencies.CallUnary(ctx, req)
+}
+
+// ReportVendorSpend calls agentrepl.v1.AgentRepl.ReportVendorSpend.
+func (c *agentReplClient) ReportVendorSpend(ctx context.Context, req *connect.Request[v1.ReportVendorSpendRequest]) (*connect.Response[v1.ReportVendorSpendResponse], error) {
+	return c.reportVendorSpend.CallUnary(ctx, req)
 }
 
 // UpdatePersistentWifiMode calls agentrepl.v1.AgentRepl.UpdatePersistentWifiMode.
@@ -3523,6 +3542,9 @@ type AgentReplHandler interface {
 	// A client's finished interaction latencies, into the always-on metrics.
 	// See endpoint_report_latencies.proto.
 	ReportLatencies(context.Context, *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error)
+	// A vendor call Emacs made itself, into the always-on spend metrics. See
+	// endpoint_report_vendor_spend.proto.
+	ReportVendorSpend(context.Context, *connect.Request[v1.ReportVendorSpendRequest]) (*connect.Response[v1.ReportVendorSpendResponse], error)
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
@@ -4359,6 +4381,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplReportLatenciesMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportVendorSpendHandler := connect.NewUnaryHandler(
+		AgentReplReportVendorSpendProcedure,
+		svc.ReportVendorSpend,
+		connect.WithSchema(agentReplReportVendorSpendMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplUpdatePersistentWifiModeHandler := connect.NewUnaryHandler(
 		AgentReplUpdatePersistentWifiModeProcedure,
 		svc.UpdatePersistentWifiMode,
@@ -4960,6 +4988,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplClientLogHandler.ServeHTTP(w, r)
 		case AgentReplReportLatenciesProcedure:
 			agentReplReportLatenciesHandler.ServeHTTP(w, r)
+		case AgentReplReportVendorSpendProcedure:
+			agentReplReportVendorSpendHandler.ServeHTTP(w, r)
 		case AgentReplUpdatePersistentWifiModeProcedure:
 			agentReplUpdatePersistentWifiModeHandler.ServeHTTP(w, r)
 		case AgentReplReportDesktopBannerClickedProcedure:
@@ -5493,6 +5523,10 @@ func (UnimplementedAgentReplHandler) ClientLog(context.Context, *connect.Request
 
 func (UnimplementedAgentReplHandler) ReportLatencies(context.Context, *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportLatencies is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportVendorSpend(context.Context, *connect.Request[v1.ReportVendorSpendRequest]) (*connect.Response[v1.ReportVendorSpendResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportVendorSpend is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {

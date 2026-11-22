@@ -94,3 +94,8 @@ export const TOOL_CONVERTERS: ReadonlyMap<string, ToolConverter> = new Map<strin
   // The fallback, filed under a key no vendor tool can be named.
   [UNMODELED_KEY, unmodeledConverter],
 ]);
+
+/** Whether a call of TOOLNAME spawns a subagent: the registry's own answer, however the vendor spells the spawn. */
+export function spawnsSubagent(toolName: string): boolean {
+  return TOOL_CONVERTERS.get(toolName)?.kind === "subagent";
+}

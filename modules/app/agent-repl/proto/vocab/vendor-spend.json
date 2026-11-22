@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "THE cross-runtime vendor spend vocabulary (conversation.v1",
+    "vendor_spend.proto). Readers, each of which asserts its own table",
+    "against this file:",
+    "  - the shim (agent-shim/claude/shim/src/engine/vendor-spend.ts) buckets",
+    "    each call's context and judges its cache outcome;",
+    "  - the daemon (daemon/internal/vendorspend) does the same for its own",
+    "    headless runs, validates every reported bucket, and publishes the",
+    "    context histogram with these bounds.",
+    "",
+    "context_buckets_tokens are the inclusive upper bounds, ascending, of the",
+    "context-size buckets (a call's context is cache_read + cache_write +",
+    "uncached_input); a context above the last is above every bound.",
+    "",
+    "cache_outcomes are cases of the one cache-outcome rule",
+    "(conversation.v1.VendorCacheOutcome): each is a call's cache_read,",
+    "cache_write (both tiers) and uncached_input, and the outcome the rule",
+    "gives it, named by the enum value's suffix."
+  ],
+  "context_buckets_tokens": [25000, 50000, 100000, 200000, 300000, 400000, 600000, 800000, 1000000],
+  "cache_outcomes": [
+    {"cache_read": 100000, "cache_write": 2000, "uncached_input": 3, "outcome": "WARM"},
+    {"cache_read": 0, "cache_write": 0, "uncached_input": 0, "outcome": "WARM"},
+    {"cache_read": 95000, "cache_write": 5000, "uncached_input": 0, "outcome": "WARM"},
+    {"cache_read": 94999, "cache_write": 5001, "uncached_input": 0, "outcome": "PARTIAL"},
+    {"cache_read": 60000, "cache_write": 40000, "uncached_input": 0, "outcome": "PARTIAL"},
+    {"cache_read": 50000, "cache_write": 50000, "uncached_input": 0, "outcome": "PARTIAL"},
+    {"cache_read": 49999, "cache_write": 50001, "uncached_input": 0, "outcome": "COLD_REWRITE"},
+    {"cache_read": 0, "cache_write": 917006, "uncached_input": 3, "outcome": "COLD_REWRITE"},
+    {"cache_read": 35089, "cache_write": 0, "uncached_input": 916455, "outcome": "UNCACHED_NO_WRITE"},
+    {"cache_read": 0, "cache_write": 0, "uncached_input": 12, "outcome": "UNCACHED_NO_WRITE"}
+  ]
+}

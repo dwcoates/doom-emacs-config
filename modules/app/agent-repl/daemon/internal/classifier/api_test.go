@@ -1,6 +1,7 @@
 package classifier
 
 import (
+	conversationv1 "agentrepl/proto/conversation/v1"
 	"context"
 	"testing"
 
@@ -15,7 +16,7 @@ func TestNewBuildsTheVendorJudge(t *testing.T) {
 	guard := forbiddingGuard(t)
 
 	// Act.
-	got, err := New(guard, headless.New(guard, "fake-claude"), "/prompts")
+	got, err := New(guard, headless.New(guard, "fake-claude", func(string, []*conversationv1.VendorSpend) {}), "/prompts")
 
 	// Assert.
 	if err != nil {
@@ -35,7 +36,7 @@ func TestNewBuildsTheVendorJudge(t *testing.T) {
 // first classification rather than refuse.
 func TestNewWiresTheProductionRunSeam(t *testing.T) {
 	// Arrange.
-	got, err := New(forbiddingGuard(t), headless.New(forbiddingGuard(t), "fake-claude"), "/prompts")
+	got, err := New(forbiddingGuard(t), headless.New(forbiddingGuard(t), "fake-claude", func(string, []*conversationv1.VendorSpend) {}), "/prompts")
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}

@@ -9,13 +9,15 @@ import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2"
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { SessionStarted, SessionUpdate } from "../../conversation/v1/session_pb";
 import { file_conversation_v1_session } from "../../conversation/v1/session_pb";
+import type { VendorSpend } from "../../conversation/v1/vendor_spend_pb";
+import { file_conversation_v1_vendor_spend } from "../../conversation/v1/vendor_spend_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file shim/v1/endpoint_watch_session.proto.
  */
 export const file_shim_v1_endpoint_watch_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCLAAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIABIxCgxtZWFzdXJlbWVudHMYAyABKAsyGS5zaGltLnYxLlNoaW1NZWFzdXJlbWVudHNIAEIHCgVmcmFtZSLeAQoQU2hpbU1lYXN1cmVtZW50cxIdChVjb3VudGVkX3NpbmNlX3VuaXhfbXMYASABKAMSNwoOdmVuZG9yX3RyYWZmaWMYAiABKAsyGi5zaGltLnYxLlNoaW1WZW5kb3JUcmFmZmljSACIAQESMAoJbGF0ZW5jaWVzGAMgAygLMh0uc2hpbS52MS5TaGltTGF0ZW5jeUhpc3RvZ3JhbRIkCgRoZWFwGAQgASgLMhEuc2hpbS52MS5TaGltSGVhcEgBiAEBQhEKD192ZW5kb3JfdHJhZmZpY0IHCgVfaGVhcCJLCghTaGltSGVhcBISCgp1c2VkX2J5dGVzGAEgASgEEhMKC3RvdGFsX2J5dGVzGAIgASgEEhYKDmV4dGVybmFsX2J5dGVzGAMgASgEIj8KEVNoaW1WZW5kb3JUcmFmZmljEhIKCmJ5dGVzX3NlbnQYASABKAQSFgoOYnl0ZXNfcmVjZWl2ZWQYAiABKAQijwEKFFNoaW1MYXRlbmN5SGlzdG9ncmFtEiYKBGtpbmQYASABKA4yGC5zaGltLnYxLlNoaW1MYXRlbmN5S2luZBIrCgdidWNrZXRzGAIgAygLMhouc2hpbS52MS5TaGltTGF0ZW5jeUJ1Y2tldBINCgVjb3VudBgDIAEoBBITCgtzdW1fc2Vjb25kcxgEIAEoASJKChFTaGltTGF0ZW5jeUJ1Y2tldBIbChN1cHBlcl9ib3VuZF9zZWNvbmRzGAEgASgBEhgKEGN1bXVsYXRpdmVfY291bnQYAiABKAQqgAEKD1NoaW1MYXRlbmN5S2luZBIhCh1TSElNX0xBVEVOQ1lfS0lORF9VTlNQRUNJRklFRBAAEiIKHlNISU1fTEFURU5DWV9LSU5EX0ZJUlNUX09VVFBVVBABEiYKIlNISU1fTEFURU5DWV9LSU5EX0VWRU5UX0xPT1BfREVMQVkQAkIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCLAAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIABIxCgxtZWFzdXJlbWVudHMYAyABKAsyGS5zaGltLnYxLlNoaW1NZWFzdXJlbWVudHNIAEIHCgVmcmFtZSKmAgoQU2hpbU1lYXN1cmVtZW50cxIdChVjb3VudGVkX3NpbmNlX3VuaXhfbXMYASABKAMSNwoOdmVuZG9yX3RyYWZmaWMYAiABKAsyGi5zaGltLnYxLlNoaW1WZW5kb3JUcmFmZmljSACIAQESMAoJbGF0ZW5jaWVzGAMgAygLMh0uc2hpbS52MS5TaGltTGF0ZW5jeUhpc3RvZ3JhbRIkCgRoZWFwGAQgASgLMhEuc2hpbS52MS5TaGltSGVhcEgBiAEBEjIKDHZlbmRvcl9zcGVuZBgFIAMoCzIcLmNvbnZlcnNhdGlvbi52MS5WZW5kb3JTcGVuZBISCgpjb25maWdfZGlyGAYgASgJQhEKD192ZW5kb3JfdHJhZmZpY0IHCgVfaGVhcCJLCghTaGltSGVhcBISCgp1c2VkX2J5dGVzGAEgASgEEhMKC3RvdGFsX2J5dGVzGAIgASgEEhYKDmV4dGVybmFsX2J5dGVzGAMgASgEIj8KEVNoaW1WZW5kb3JUcmFmZmljEhIKCmJ5dGVzX3NlbnQYASABKAQSFgoOYnl0ZXNfcmVjZWl2ZWQYAiABKAQijwEKFFNoaW1MYXRlbmN5SGlzdG9ncmFtEiYKBGtpbmQYASABKA4yGC5zaGltLnYxLlNoaW1MYXRlbmN5S2luZBIrCgdidWNrZXRzGAIgAygLMhouc2hpbS52MS5TaGltTGF0ZW5jeUJ1Y2tldBINCgVjb3VudBgDIAEoBBITCgtzdW1fc2Vjb25kcxgEIAEoASJKChFTaGltTGF0ZW5jeUJ1Y2tldBIbChN1cHBlcl9ib3VuZF9zZWNvbmRzGAEgASgBEhgKEGN1bXVsYXRpdmVfY291bnQYAiABKAQqgAEKD1NoaW1MYXRlbmN5S2luZBIhCh1TSElNX0xBVEVOQ1lfS0lORF9VTlNQRUNJRklFRBAAEiIKHlNISU1fTEFURU5DWV9LSU5EX0ZJUlNUX09VVFBVVBABEiYKIlNISU1fTEFURU5DWV9LSU5EX0VWRU5UX0xPT1BfREVMQVkQAkIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session, file_conversation_v1_vendor_spend]);
 
 /**
  * Nothing to say: the session is the connection's.
@@ -137,6 +139,32 @@ export type ShimMeasurements = Message<"shim.v1.ShimMeasurements"> & {
    * @generated from field: optional shim.v1.ShimHeap heap = 4;
    */
   heap?: ShimHeap | undefined;
+
+  /**
+   * Every vendor call this shim's session made since the counting instant,
+   * its main loop's, its subagents' and its own side queries', each counted
+   * once (one per message id), by what the call was: each tag set at most
+   * once, cumulative like every figure here. A tag set with no call yet is
+   * absent.
+   *
+   * A FRAME FOLLOWS EVERY COUNTED CALL BEFORE ANY LATER FRAME OF THE STREAM:
+   * once a call is counted, the next frame the watch carries is a
+   * measurements frame stating it (after the opening frames), so whatever
+   * the daemon learns from a later frame (a keep-alive's answer, a turn's
+   * end) it learns with that call's spend already folded.
+   *
+   * @generated from field: repeated conversation.v1.VendorSpend vendor_spend = 5;
+   */
+  vendorSpend: VendorSpend[];
+
+  /**
+   * The account root this shim's vendor calls bill to: its
+   * `CLAUDE_CONFIG_DIR`. The same in every frame of one process's lifetime;
+   * the daemon labels the spend with the account it names.
+   *
+   * @generated from field: string config_dir = 6;
+   */
+  configDir: string;
 };
 
 /**

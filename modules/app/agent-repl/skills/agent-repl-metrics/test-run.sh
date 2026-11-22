@@ -47,6 +47,13 @@ case "$query" in
   *"histogram_quantile(0.9,"*agentrepl_restart_seconds*) key="${key}_p90" ;;
   *"histogram_quantile(0.99,"*agentrepl_restart_seconds*) key="${key}_p99" ;;
   *"histogram_quantile(0.95,"*agentrepl_restart_seconds*) key="${key}_p95" ;;
+  *agentrepl_vendor_context_tokens_total*) key="${key}_context" ;;
+  *agentrepl_vendor_tokens_total*) key="${key}_tokens" ;;
+  *"sum by (workspace, context)"*agentrepl_vendor_calls_total*) key="${key}_peaks" ;;
+  *agentrepl_vendor_calls_total*) key="${key}_calls" ;;
+  *agentrepl_keepalive_run_beats_count*) key="${key}_runs" ;;
+  *agentrepl_keepalive_run_beats_sum*) key="${key}_beats" ;;
+  *agentrepl_keepalive_run_tokens_total*) key="${key}_runtokens" ;;
 esac
 if [ -f "$CASE_DIR/answers/$key" ]; then cat "$CASE_DIR/answers/$key"; exit 0; fi
 exit 7
@@ -126,6 +133,68 @@ test_first_version_over_refuses_an_unknown_latency() {
   new_case; answer api_v1_query_range "$BY_VERSION"
   run --first-version-over warp_drive
   if [ "$RC" -eq 2 ] && has "names no latency warp_drive"; then pass "first-version-over refuses a latency the vocabulary does not name"; else fail "unknown latency" "rc=$RC" "$OUT"; fi
+}
+
+# Two workspaces' spend: w1 read 1M from the cache and wrote 10k at the hour
+# tier (100k + 20k = 120k weighted), w2 output 10k (50k weighted).
+SPEND_TOKENS='{"status":"success","data":{"result":[
+ {"metric":{"workspace":"w1","kind":"cache_read","model":"m"},"value":[1,"1000000"]},
+ {"metric":{"workspace":"w1","kind":"cache_write_1h","model":"m"},"value":[1,"10000"]},
+ {"metric":{"workspace":"w2","kind":"output","model":"m"},"value":[1,"10000"]}]}}'
+SPEND_CALLS='{"status":"success","data":{"result":[{"metric":{"workspace":"w1"},"value":[1,"12"]},{"metric":{"workspace":"w2"},"value":[1,"3"]}]}}'
+SPEND_PEAKS='{"status":"success","data":{"result":[{"metric":{"workspace":"w1","context":"300000"},"value":[1,"2"]},{"metric":{"workspace":"w1","context":"800000"},"value":[1,"1"]},{"metric":{"workspace":"w2","context":"+Inf"},"value":[1,"1"]}]}}'
+
+test_spend_ranks_workspaces_by_their_weighted_spend() {
+  new_case; answer api_v1_query_tokens "$SPEND_TOKENS"; answer api_v1_query_calls "$SPEND_CALLS"; answer api_v1_query_peaks "$SPEND_PEAKS"
+  run --spend 1d workspace
+  if [ "$RC" -eq 0 ] && grep -q $'^w1\t120k\t70.6%\t12\t1M\t800k$' <<<"$OUT" && grep -q $'^w2\t50k\t29.4%\t3\t10k\t>1M$' <<<"$OUT" \
+     && [ "$(grep -n '^w1' <<<"$OUT" | cut -d: -f1)" -lt "$(grep -n '^w2' <<<"$OUT" | cut -d: -f1)" ]; then
+    pass "spend ranks workspaces by weighted spend with share, calls, tokens and peak context"
+  else fail "spend by workspace" "rc=$RC" "$OUT"; fi
+}
+
+test_spend_weighs_by_the_weights_file() {
+  new_case; answer api_v1_query_tokens "$SPEND_TOKENS"
+  run --spend 6h kind
+  if [ "$RC" -eq 0 ] && grep -q $'^cache_read\t100k\t' <<<"$OUT" && grep -q $'^cache_write_1h\t20k\t' <<<"$OUT" && grep -q $'^output\t50k\t' <<<"$OUT"; then
+    pass "spend weighs each kind by spend-weights.json"
+  else fail "spend by kind" "rc=$RC" "$OUT"; fi
+}
+
+test_spend_narrows_its_series_by_the_selector() {
+  new_case; answer api_v1_query_tokens "$SPEND_TOKENS"; answer api_v1_query_calls "$SPEND_CALLS"
+  run --spend 1d cold_reason 'cache_outcome="cold_rewrite"'
+  if [ "$RC" -eq 0 ] && grep -qF 'agentrepl_vendor_tokens_total{cache_outcome="cold_rewrite"}[1d]' "$CASE/requests" \
+     && grep -qF 'agentrepl_vendor_calls_total{cache_outcome="cold_rewrite"}[1d]' "$CASE/requests"; then
+    pass "spend narrows every series it reads by the selector"
+  else fail "spend selector" "rc=$RC" "$OUT"; fi
+}
+
+test_spend_refuses_an_unknown_breakdown() {
+  new_case
+  run --spend 1d colour
+  if [ "$RC" -eq 2 ] && has "cannot break spend down by colour"; then pass "spend refuses a breakdown it does not name"; else fail "spend by colour" "rc=$RC" "$OUT"; fi
+}
+
+test_spend_with_no_series_says_so() {
+  new_case; answer api_v1_query_tokens '{"status":"success","data":{"result":[]}}'; answer api_v1_query_calls '{"status":"success","data":{"result":[]}}'
+  run --spend 1d model
+  if [ "$RC" -eq 1 ]; then pass "spend with no series exits 1"; else fail "spend empty" "rc=$RC" "$OUT"; fi
+}
+
+test_spend_over_weighs_each_step() {
+  new_case; answer api_v1_query_range_tokens '{"status":"success","data":{"result":[{"metric":{"kind":"output","model":"m"},"values":[[1760000000,"10"],[1760003600,"20"]]},{"metric":{"kind":"cache_read","model":"m"},"values":[[1760000000,"1000"]]}]}}'
+  run --spend-over 2 1h
+  if [ "$RC" -eq 0 ] && grep -q $'\t150$' <<<"$OUT" && grep -q $'\t100$' <<<"$OUT"; then pass "spend-over weighs every step"; else fail "spend over" "rc=$RC" "$OUT"; fi
+}
+
+test_keepalive_runs_reads_each_end() {
+  new_case
+  answer api_v1_query_runs '{"status":"success","data":{"result":[{"metric":{"end":"run_cap"},"value":[1,"2"]},{"metric":{"end":"resumed"},"value":[1,"0"]}]}}'
+  answer api_v1_query_beats '{"status":"success","data":{"result":[{"metric":{"end":"run_cap"},"value":[1,"38"]}]}}'
+  answer api_v1_query_runtokens '{"status":"success","data":{"result":[{"metric":{"end":"run_cap","kind":"cache_read"},"value":[1,"5000000"]}]}}'
+  run --keepalive-runs 1d
+  if [ "$RC" -eq 0 ] && grep -q $'^run_cap\t2\t19\t500000$' <<<"$OUT" && ! has "resumed"; then pass "keepalive-runs reads each end's runs, mean length and weighted spend"; else fail "keepalive runs" "rc=$RC" "$OUT"; fi
 }
 
 test_a_refused_query_is_a_usage_error() {

@@ -69,6 +69,7 @@ func (k *Keeper) beatParked(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		return
 	}
 	k.parkedFlying[ws] = true
+	k.markRunSpend(ws)
 	log.Info(opDrive, "sent the parked conversation's keep-alive; its answer comes back on its own", dlog.Context{
 		"parked_vendor_session_id": parked.GetVendorSessionId(), "answer_bound": AnswerBound.String(),
 	})
@@ -110,6 +111,7 @@ func (k *Keeper) parkedAnswered(ctx context.Context, ws ids.WorkspaceID, answer 
 		} else {
 			log.Info(opDrive, "the parked conversation's keep-alive was answered; its cache is warm", nil)
 			k.delivered(ctx, log, ws)
+			k.addRunSpend(ctx, log, ws)
 		}
 	case answer.GetSkipped().GetCacheLapsed() != nil:
 		delete(k.parkedRetry, ws)

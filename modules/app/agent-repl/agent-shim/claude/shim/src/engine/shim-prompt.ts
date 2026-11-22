@@ -8,6 +8,8 @@
  */
 
 /** What delivering one shim-authored prompt came to. */
+import { conversationv1 } from "../proto.js";
+
 export type ShimPromptDelivery =
   /** The prompt opened the shim turn `turnId`. */
   | { readonly kind: "delivered"; readonly turnId: string }
@@ -24,6 +26,8 @@ export interface ShimPromptSource {
   readonly firstMessage: string;
   /** The prompt's name on the delivery records (`prompt`). */
   readonly label: string;
+  /** What the vendor calls of the turn it opens are spent under. */
+  readonly spendCause: conversationv1.VendorCallCause;
 }
 
 /** The network resume's source. */
@@ -31,6 +35,7 @@ export const NETWORK_RESUME_SOURCE: ShimPromptSource = {
   cause: "the shim asked the main agent to resume network-killed agents",
   firstMessage: "network_resume",
   label: "network-resume",
+  spendCause: conversationv1.VendorCallCause.NETWORK_RESUME,
 };
 
 /** The vendor-error retry's source. */
@@ -38,4 +43,5 @@ export const VENDOR_ERROR_RETRY_SOURCE: ShimPromptSource = {
   cause: "the shim asked the main agent to continue a turn the vendor failed",
   firstMessage: "vendor_error_retry",
   label: "vendor-error-retry",
+  spendCause: conversationv1.VendorCallCause.VENDOR_ERROR_RETRY,
 };

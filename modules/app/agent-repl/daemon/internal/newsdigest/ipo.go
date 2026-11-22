@@ -64,7 +64,6 @@ func (c condenser) ipoOutlook(ctx context.Context, today time.Time, prior *front
 		Kind:      headless.KindToolCalls,
 		Site:      IpoSite,
 		Model:     Model,
-		Format:    headless.FormatJSON,
 		ConfigDir: c.configDir,
 		Prompt:    question,
 		Timeout:   c.timeout,
