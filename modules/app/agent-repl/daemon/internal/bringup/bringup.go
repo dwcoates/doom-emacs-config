@@ -198,6 +198,11 @@ func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 		case NotBegun:
 		}
 	}
+	// A BOOT'S OR TAKEOVER'S SESSION COUNT is what the restart affected in
+	// shims; the editor's opening of its tabs is no restart.
+	if cause, restart := deps.Via.RestartCause(); restart {
+		deps.Restarts.ObserveAffected(restarttiming.OfAffected(restarttiming.AffectedShim, cause, len(report.Started)+len(report.Woken)))
+	}
 	// ONE SUMMARY, AT INFO. The per-workspace records are DEBUG because they
 	// are a loop body; what a person asks about after a bounce is how many
 	// sessions this daemon brought back, so that count is stated once at the

@@ -239,3 +239,45 @@ func TestAnExpectationOfNoWorkspaceOpensNoWindow(t *testing.T) {
 		t.Fatalf("windows = %+v, want none for a wave of nobody", got)
 	}
 }
+
+func TestAnExpectationRecordsItsWaveSizeOncePerPhaseAndCause(t *testing.T) {
+	tests := []struct {
+		name   string
+		expect func(r *restarttiming.Reconnects, began time.Time)
+		want   []string
+	}{
+		{"a cold boot states host then web", func(r *restarttiming.Reconnects, began time.Time) {
+			r.Expect(restarttiming.ReconnectCold, began, restarttiming.ReconnectHost, "a", "b", "c")
+			r.Expect(restarttiming.ReconnectCold, began, restarttiming.ReconnectWeb, "a")
+		}, []string{"host cold 3", "web cold 1"}},
+		{"a successor counts each phase's own members", func(r *restarttiming.Reconnects, began time.Time) {
+			r.Expect(restarttiming.ReconnectSuccessor, began, restarttiming.ReconnectHost, "a", "b")
+			r.Expect(restarttiming.ReconnectSuccessor, began, restarttiming.ReconnectWeb, "a", "b", "c", "d")
+		}, []string{"host successor 2", "web successor 4"}},
+		{"a webapp reload counts its webviews", func(r *restarttiming.Reconnects, began time.Time) {
+			r.Expect(restarttiming.ReconnectWebappReload, began, restarttiming.ReconnectWeb, "a", "b")
+		}, []string{"web webapp_reload 2"}},
+		{"a workspace named twice counts once", func(r *restarttiming.Reconnects, began time.Time) {
+			r.Expect(restarttiming.ReconnectCold, began, restarttiming.ReconnectHost, "a", "a")
+		}, []string{"host cold 1"}},
+		{"an empty expectation counts nothing", func(r *restarttiming.Reconnects, began time.Time) {
+			r.Expect(restarttiming.ReconnectCold, began, restarttiming.ReconnectHost)
+		}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			began := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+			var rec restarttimingtest.Recorder
+			r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return began })
+
+			// Act
+			tt.expect(r, began)
+
+			// Assert
+			if got := rec.Affecteds(); !slices.Equal(got, tt.want) {
+				t.Fatalf("affected = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

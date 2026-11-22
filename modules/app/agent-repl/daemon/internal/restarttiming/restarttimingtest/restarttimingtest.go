@@ -15,6 +15,26 @@ import (
 type Recorder struct {
 	mu  sync.Mutex
 	obs []restarttiming.Observation
+	aff []restarttiming.Affected
+}
+
+// ObserveAffected implements restarttiming.Recorder.
+func (r *Recorder) ObserveAffected(a restarttiming.Affected) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.aff = append(r.aff, a)
+}
+
+// Affecteds answers every affected count so far, each as
+// "<kind> <cause> <count>", in order.
+func (r *Recorder) Affecteds() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, a := range r.aff {
+		out = append(out, fmt.Sprintf("%s %s %d", a.Kind(), a.Cause(), a.Count()))
+	}
+	return out
 }
 
 // ObserveRestart implements restarttiming.Recorder.

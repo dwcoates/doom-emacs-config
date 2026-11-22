@@ -165,7 +165,11 @@ func (r *Reconnects) Expect(cause ReconnectCause, began time.Time, phase Reconne
 		w.pending++
 		r.expected[key] = expectation{began: began, cause: cause, wave: w}
 	}
+	// ONE RESTART'S EXPECTATION OF A PHASE IS ONE WAVE, so the wave's member
+	// count is the figure of what the restart affected. An empty expectation
+	// is no restart that expects connections back, so it counts nothing.
 	if w.pending > 0 {
+		r.recorder.ObserveAffected(OfAffected(AffectedKind(phase), cause, w.pending))
 		w.closeWindow = r.windows.OpenWindow(ReconnectWave, string(phase), waveWindowBounds[phase], waveWatches[phase]...)
 	}
 }
