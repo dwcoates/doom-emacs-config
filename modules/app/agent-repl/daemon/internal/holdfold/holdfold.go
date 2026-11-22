@@ -104,8 +104,8 @@ func Seen(h wsm.HeldPrompt) bool {
 
 // Drawn reports whether the held section shows the hold as a card the user
 // can release or drop: it stands (no tombstone) and is Seen. The workspace's
-// close and forget are blocked by exactly these, never by a notice drawn
-// nowhere, which the user could neither see nor drop.
+// close and forget are blocked by exactly these, never by a waiting notice,
+// which has no held card the user could release or drop.
 func Drawn(h wsm.HeldPrompt) bool {
 	return h.Tombstone == nil && Seen(h)
 }
