@@ -129,7 +129,7 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 		// can land after the forget removed the record; there is no view left
 		// to compose and no stream left to carry one, so nothing is published.
 		s.log.Info(op, "the workspace was forgotten; it has no host view to publish",
-			dlog.Context{"workspace": string(ws), "cause": err.Error()})
+			dlog.Context{"workspace": string(ws), "workspace_record": "forgotten", "cause": err.Error()})
 		return
 	}
 	if err != nil {

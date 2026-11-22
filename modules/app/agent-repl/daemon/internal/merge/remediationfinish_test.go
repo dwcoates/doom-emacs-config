@@ -1084,7 +1084,7 @@ func TestAFinishNothingFinishesAnyMoreHandsTheQueueOn(t *testing.T) {
 		wantRecord    logLike
 	}{
 		{name: "a gate given up with no check owed releases the queue", act: givenUp,
-			wantRecord: logLike{level: "error", op: opRemediationFinish, text: "no check is owed; its finish is ended, nothing holds the queue, and it advances"}},
+			wantRecord: logLike{level: "info", op: opRemediationFinish, text: "the finish of a given-up fix was ended"}},
 		{name: "a gate given up with a check owed escalates it, and the check holds the queue for the user", owe: true, act: givenUp, wantHeld: true, wantEscalated: true,
 			wantRecord: logLike{level: "error", op: opRemediationFinish, text: "the chain is escalated to the user and the queue is held for them"}},
 		{name: "a mediator that stopped fixing with no check owed releases the queue", act: stopped,
