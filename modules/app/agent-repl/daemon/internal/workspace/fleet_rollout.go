@@ -162,6 +162,19 @@ func (f *Fleet) movedLocked() {
 // resizable-sidebar-sections). A workspace with no live session and no hold
 // standing for the turn has no turn to wait on, which stays a refusal: the
 // caller asked about a turn it believes is running.
+//
+// A WAIT FOR A TURN THAT HAS NOT REACHED A SESSION IS NEVER BOUND TO ONE
+// WATCHER. Whether the turn stands held is read before each wait on a
+// standing watcher. When that watcher closes answering
+// sessionwatcher.ErrClosedBeforeTurn and the turn stood held before the wait,
+// the turn was undelivered when the wait began and never went to the shim
+// through that watcher, so the wait moves on to the workspace's next watcher
+// (or, with none standing, waits through the hold as above). An adopted inert
+// shim's watcher closed by the session start a held turn's own delivery
+// brought up answered the deploy mediator's wait with ErrWatcherClosed, and
+// the check escalated, though the turn ran on the started session right
+// after (2026-11-21 21:38:14). Every other answer -- ErrWatcherClosed for a
+// turn the watcher had in hand included -- is returned unchanged.
 func (f *Fleet) AwaitTurnEnd(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
 	waiting := false
 	for {
@@ -172,12 +185,29 @@ func (f *Fleet) AwaitTurnEnd(ctx context.Context, ws ids.WorkspaceID, turn ids.T
 		}
 		moved := f.sessionsMoved.Changed()
 		f.mu.RUnlock()
-		if watcher != nil {
-			return watcher.AwaitTurnEnd(ctx, turn)
-		}
 		held, err := f.turnHeld(ctx, ws, turn)
 		if err != nil {
 			return 0, err
+		}
+		if watcher != nil {
+			how, err := watcher.AwaitTurnEnd(ctx, turn)
+			if !held || !errors.Is(err, sessionwatcher.ErrClosedBeforeTurn) {
+				return how, err
+			}
+			f.logFor(ctx, ws).Info("daemon.workspace.await_turn_end", "the watcher closed before the held turn reached it; its end is awaited on the workspace's next watcher", dlog.Context{"turn": string(turn)})
+			// THE SAME CLOSED WATCHER IS NEVER WAITED ON TWICE: while the fleet
+			// still holds it, the wait is for the fleet's next session change.
+			f.mu.RLock()
+			current, still := f.sessions[ws]
+			unchanged := still && current.watcher == watcher
+			moved = f.sessionsMoved.Changed()
+			f.mu.RUnlock()
+			if unchanged {
+				if err := waitMoved(ctx, moved); err != nil {
+					return 0, err
+				}
+			}
+			continue
 		}
 		if !held {
 			return 0, fmt.Errorf("workspace: %q has no live session to await turn %q on", ws, turn)

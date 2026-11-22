@@ -2067,6 +2067,126 @@ func TestAwaitTurnEndRefusesATurnNoSessionWillRun(t *testing.T) {
 	}
 }
 
+// TestAwaitTurnEndOfAHeldTurnMovesPastAWatcherClosedBeforeIt reproduces
+// 2026-11-21 21:38:14: the deploy mediator awaited a held turn on an adopted
+// inert shim's watcher, the session start the turn's delivery brought up
+// closed that watcher, and the wait must be answered by the turn's end on
+// the started session's watcher rather than by the close.
+func TestAwaitTurnEndOfAHeldTurnMovesPastAWatcherClosedBeforeIt(t *testing.T) {
+	tests := []struct {
+		name string
+		// gap installs a session entry with no watcher between the closed
+		// watcher and its replacement, so the wait goes through the hold.
+		gap bool
+	}{
+		{name: "the session start installs the next watcher"},
+		{name: "the next watcher comes after a gap with none", gap: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the turn is held, and the wait stands on the
+			// session-less shim's watcher.
+			f := newFleetFixture(t)
+			f.db.holds = map[ids.TurnID]wsm.HeldPrompt{"t-1": {Workspace: "ws-1", Turn: "t-1"}}
+			inert := &fakeWatcher{turnErr: make(chan error)}
+			started := &fakeWatcher{turnEnded: make(chan wsm.TurnClose, 1)}
+			f.fleet.remember("ws-1", &live{client: f.client, watcher: inert})
+			started.turnEnded <- wsm.CloseCompleted
+			answered := make(chan error, 1)
+			var got wsm.TurnClose
+			go func() {
+				var err error
+				got, err = f.fleet.AwaitTurnEnd(context.Background(), "ws-1", "t-1")
+				answered <- err
+			}()
+
+			// Act: the inert watcher closes before the turn reached it (the
+			// unbuffered send returns once the wait standing on it took the
+			// answer), and the session comes up on its own watcher, where the
+			// turn ends.
+			inert.turnErr <- sessionwatcher.ErrClosedBeforeTurn
+			if tt.gap {
+				f.fleet.remember("ws-1", &live{client: f.client})
+			}
+			f.fleet.remember("ws-1", &live{client: f.client, watcher: started})
+
+			// Assert
+			select {
+			case err := <-answered:
+				if err != nil || got != wsm.CloseCompleted {
+					t.Fatalf("AwaitTurnEnd = (%v, %v), want the turn's end on the started session's watcher", got, err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("AwaitTurnEnd never answered once the started session's watcher stood")
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.workspace.await_turn_end",
+				Message: "the watcher closed before the held turn reached it; its end is awaited on the workspace's next watcher"}); !ok {
+				t.Fatalf("records = %+v, want the move past the closed watcher recorded", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+// TestAwaitTurnEndReturnsAWatchersCloseUnchanged pins what is NOT waited past:
+// a close before a turn that was not held when the wait began (it was
+// delivered elsewhere, or never submitted), and a close of a watcher that had
+// the turn in hand, which merge.cutByHandover reads as ErrWatcherClosed.
+func TestAwaitTurnEndReturnsAWatchersCloseUnchanged(t *testing.T) {
+	tests := []struct {
+		name  string
+		held  bool
+		close error
+	}{
+		{name: "a close before a turn that was not held", close: sessionwatcher.ErrClosedBeforeTurn},
+		{name: "a close of a watcher that had the held turn", held: true, close: sessionwatcher.ErrWatcherClosed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			if tt.held {
+				f.db.holds = map[ids.TurnID]wsm.HeldPrompt{"t-1": {Workspace: "ws-1", Turn: "t-1"}}
+			}
+			w := &fakeWatcher{turnErr: make(chan error, 1)}
+			f.fleet.remember("ws-1", &live{client: f.client, watcher: w})
+			w.turnErr <- tt.close
+
+			// Act
+			_, err := f.fleet.AwaitTurnEnd(context.Background(), "ws-1", "t-1")
+
+			// Assert
+			if err != tt.close {
+				t.Fatalf("AwaitTurnEnd = %v, want the watcher's own %v", err, tt.close)
+			}
+		})
+	}
+}
+
+// TestAwaitTurnEndSurfacesAHoldReadFailureBeforeAWatchersWait pins that the
+// hold read a standing watcher's wait now begins with is refused loudly, with
+// its ERROR record, rather than read as "not held".
+func TestAwaitTurnEndSurfacesAHoldReadFailureBeforeAWatchersWait(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	boom := errors.New("disk gone")
+	f.db.holdErr = boom
+	w := &fakeWatcher{turnEnded: make(chan wsm.TurnClose, 1)}
+	w.turnEnded <- wsm.CloseCompleted
+	f.fleet.remember("ws-1", &live{client: f.client, watcher: w})
+
+	// Act
+	_, err := f.fleet.AwaitTurnEnd(context.Background(), "ws-1", "t-1")
+
+	// Assert
+	if !errors.Is(err, boom) {
+		t.Fatalf("AwaitTurnEnd = %v, want the hold read's failure %v", err, boom)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.workspace.await_turn_end",
+		Message: "could not read whether the turn awaited stands held; the wait is refused"}); !ok {
+		t.Fatalf("records = %+v, want the failed hold read recorded", f.log.logger.Records())
+	}
+}
+
 func TestARelaunchedShimIsPutBackAtThePickedEffort(t *testing.T) {
 	tests := []struct {
 		name        string
