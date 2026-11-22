@@ -500,6 +500,14 @@ export interface FakeQueryOpts {
    * so the parent's transcript is never appended to.
    */
   readonly ephemeralFork?: boolean;
+  /**
+   * The query is a HEADLESS INFERENCE CALL: it continues no conversation and
+   * writes nothing anyone reads, as the real vendor's `persistSession: false`
+   * with no resume (sdk/real-query.ts, `realInferenceOptions`). The mock
+   * answers under a freshly minted session id and files its records in a
+   * throwaway directory, as it does for an ephemeral fork.
+   */
+  readonly unpersisted?: boolean;
   /** Mint a uuid. Injectable so goldens are stable. */
   readonly newUuid: () => string;
   /** Milliseconds since the epoch. Injectable so goldens are stable. */
@@ -675,7 +683,9 @@ export function createFakeQuery(
   // and mints a new one, and every message after that point carries the new
   // uuid. On resume it starts at the RESUMED uuid, which the real CLI reports
   // on every message of a continued session — not only on its init.
-  let sessionUuid = opts.ephemeralFork === true ? opts.newUuid() : (opts.resume ?? opts.sessionId);
+  /** Whether the mock writes nothing anyone reads: an ephemeral fork, or a headless inference call. */
+  const unpersisted = opts.ephemeralFork === true || opts.unpersisted === true;
+  let sessionUuid = unpersisted ? opts.newUuid() : (opts.resume ?? opts.sessionId);
   let model = opts.model ?? FAKE_DEFAULT_MODEL;
   let permissionMode: PermissionModeLike = opts.permissionMode ?? "default";
   /** The effort the flag layer holds; undefined until `applyFlagSettings` sets one. */
@@ -798,7 +808,7 @@ export function createFakeQuery(
   opts.abortSignal?.addEventListener("abort", () => out.end(), { once: true });
 
   const files = new VendorFiles({
-    configDir: opts.ephemeralFork === true ? mkdtempSync(path.join(os.tmpdir(), "fake-unpersisted-fork-")) : configDir,
+    configDir: unpersisted ? mkdtempSync(path.join(os.tmpdir(), "fake-unpersisted-")) : configDir,
     cwd,
     spoolRoot,
     sessionId: sessionUuid,

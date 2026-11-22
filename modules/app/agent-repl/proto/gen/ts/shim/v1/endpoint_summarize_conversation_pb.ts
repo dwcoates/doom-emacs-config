@@ -51,8 +51,9 @@ export const file_shim_v1_endpoint_summarize_conversation: GenFile = /*@__PURE__
 export type SummarizeConversationRequest = Message<"shim.v1.SummarizeConversationRequest"> & {
   /**
    * THE WORKSPACE'S NAME, as StartSessionRequest.workspace_name states it.
-   * REQUIRED: the summarizer is a query like any other, and every query the
-   * shim opens states the name in its system prompt.
+   * REQUIRED. The summarizer itself never reads it: it is a headless
+   * inference call with no system prompt and no session of the workspace's,
+   * which reads the conversation off its transcript.
    *
    * @generated from field: string workspace_name = 1;
    */
@@ -60,9 +61,8 @@ export type SummarizeConversationRequest = Message<"shim.v1.SummarizeConversatio
 
   /**
    * The profile the summarized conversation's session runs under, as
-   * StartSessionRequest.profile states it. REQUIRED: the prompt cache is
-   * keyed on the system prompt, so a summarizer under another profile reads
-   * the whole conversation cold.
+   * StartSessionRequest.profile states it. REQUIRED. The summarizer itself
+   * never reads it, for the same reason.
    *
    * @generated from field: shim.v1.SessionProfile profile = 2;
    */
@@ -152,8 +152,8 @@ export const SummarizeConversationCompactSchema: GenMessage<SummarizeConversatio
   messageDesc(file_shim_v1_endpoint_summarize_conversation, 1);
 
 /**
- * Another conversation of the workspace to summarize, on an ephemeral fork
- * that writes nothing to either transcript.
+ * Another conversation of the workspace to summarize, read off its transcript
+ * by the headless summarizer, which writes nothing to either transcript.
  *
  * @generated from message shim.v1.SummarizeConversationCarry
  */

@@ -31,7 +31,7 @@ import { workspaceLockKey } from "../../src/locks.js";
 import { queryFactory } from "../../src/main.js";
 import type { QueryLike } from "../../src/sdk/types.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
-import { ManualScheduler, RecordingPersistence, ScriptedProbe, unexpectedVendorFork } from "../engine/fakes.js";
+import { ManualScheduler, RecordingPersistence, ScriptedProbe, unexpectedInference, unexpectedVendorFork } from "../engine/fakes.js";
 import {
   allowOnce,
   answerQuestion,
@@ -127,6 +127,9 @@ export async function driveEngineScenario(prompt: string, policy: EnginePolicy, 
       real: () => {
         throw new Error("goldens: a golden drive never reaches the real vendor");
       },
+      realInference: () => {
+        throw new Error("goldens: a golden drive never reaches the real vendor");
+      },
       fake: (prompts, canUseTool, opts) =>
         endObserved(
           createFakeQuery(closedWhen(prompts, input.settled), canUseTool, {
@@ -142,6 +145,7 @@ export async function driveEngineScenario(prompt: string, policy: EnginePolicy, 
           },
         ),
     }),
+    createInference: unexpectedInference,
     forkVendorSession: unexpectedVendorFork,
     runtime: { shimBuildSha: "golden", sdkVersion: "golden" },
     env: { stateDir, configDir, cwd },

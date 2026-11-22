@@ -12,6 +12,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
   appendCompactionLines,
@@ -23,6 +24,7 @@ import {
   contextCutCompacted,
   contextCutFailed,
   readAmbient,
+  summarizerFailure,
   summarizerSpentTokens,
 } from "../../src/engine/compaction.js";
 import { normalizeApiUsage } from "../../src/api-usage.js";
@@ -435,5 +437,23 @@ describe("summarizerSpentTokens", () => {
 
     // Assert
     expect(spent).toBe(want);
+  });
+});
+
+describe("summarizerFailure", () => {
+  it("labels a failure with its words, its retry and whether its call ran", () => {
+    expect(summarizerFailure("the call broke", "retryable", true)).toEqual({
+      ok: false,
+      error: "the call broke",
+      retry: "retryable",
+      apiFailure: undefined,
+      stream: true,
+    });
+  });
+
+  it("carries the API's refusal when the failure was one", () => {
+    const apiFailure = create(conversationv1.ApiRequestFailedSchema, {});
+
+    expect(summarizerFailure("refused", "rejected", false, apiFailure).apiFailure).toBe(apiFailure);
   });
 });

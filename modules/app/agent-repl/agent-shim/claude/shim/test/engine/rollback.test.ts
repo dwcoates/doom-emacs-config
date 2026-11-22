@@ -16,6 +16,7 @@ import {
   chainRecordOf,
   createTranscriptIndex,
   readLiveChain,
+  readLiveConversation,
   readTranscriptChain,
   RESUME_DROPS_TURN_REFUSAL_PREFIX,
   vendorCutRefusal,
@@ -625,6 +626,33 @@ describe("liveEnd", () => {
 
     // Act, Assert.
     expect(liveEnd(chain, rolledBack("p0"))).toEqual({ kind: "firstPrompt", promptUuid: "p0" });
+  });
+});
+
+describe("readLiveConversation", () => {
+  it("keeps every record of the live chain whole", () => {
+    const file = transcript([user("p0", null), assistant("a0", "p0")]);
+
+    const read = readLiveConversation(file, new Set());
+
+    expect(read.kind === "ok" ? read.transcript.chain.map((record) => (record as { message?: unknown }).message) : read.kind).toEqual([
+      { role: "user", content: "prompt p0" },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+    ]);
+  });
+
+  it("ends the conversation before a rolled-back prompt", () => {
+    const file = transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1")]);
+
+    const read = readLiveConversation(file, new Set(["p1"]));
+
+    expect(read.kind === "ok" ? read.transcript.chain.map((record) => record.uuid) : read.kind).toEqual(["p0", "a0"]);
+  });
+
+  it("answers no_transcript for a file the vendor never wrote", () => {
+    const file = path.join(mkdtempSync(path.join(os.tmpdir(), "shim-rollback-")), "absent.jsonl");
+
+    expect(readLiveConversation(file, new Set()).kind).toBe("no_transcript");
   });
 });
 

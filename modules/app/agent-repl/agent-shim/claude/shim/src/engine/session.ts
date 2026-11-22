@@ -47,6 +47,7 @@ import { boundaryChange } from "./boundary-change.js";
 import { PromptQueue } from "./prompt-queue.js";
 import { beatParkedConversation } from "./parked-keepalive.js";
 import { askSideQuery } from "./side-query.js";
+import { chainPermissionMode, chunkConversation, renderConversation, summarizerPrompt } from "./conversation-text.js";
 import type { NormalizedApiUsage } from "../api-usage.js";
 import { reviseResponse, type RevisionCut } from "./revise-response.js";
 import type { VendorBinding } from "../sdk/real-query.js";
@@ -140,6 +141,7 @@ import {
   createTranscriptIndex,
   planCut,
   readLiveChain,
+  readLiveConversation,
   vendorCutRefusal,
   type CutPlan,
   type GuardArming,
@@ -158,12 +160,13 @@ import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
   compactionLines,
-  compactionPrompt,
   contextCutCompacted,
   contextCutFailed,
   readAmbient,
+  summarizerFailure,
   summarizerSpentTokens,
   type CompactionFigures,
+  type SummarizerFailure,
 } from "./compaction.js";
 import {
   cacheRequestOf,
@@ -334,11 +337,30 @@ const UNSPAWNABLE_ERRNOS: ReadonlySet<string> = new Set(["ENOENT", "EACCES"]);
 /** Build one query. `--fake` swaps the implementation and nothing else. */
 export type CreateQuery = (spec: QuerySpec) => Promise<QueryLike>;
 
+/**
+ * Everything one HEADLESS INFERENCE call needs (sdk/real-query.ts,
+ * `realInferenceOptions`): a model and a prompt, and NOTHING that names a
+ * session. The spec has no binding, no profile and no workspace name, so a
+ * call built from it cannot resume, fork or write any conversation: the cold
+ * gate's summarizer can never reach the workspace's transcript.
+ */
+export interface InferenceSpec {
+  /** The model to answer with, or absence for the account default. */
+  readonly model?: string;
+  readonly abortController: AbortController;
+  readonly prompt: AsyncIterable<SdkUserMessage>;
+}
+
+/** Build one headless inference call. `--fake` swaps the implementation and nothing else. */
+export type CreateInference = (spec: InferenceSpec) => Promise<QueryLike>;
+
 /** Everything the engine needs that it does not own. */
 interface EngineDeps {
   readonly persistence: Persistence;
   readonly fold: EngineFold;
   readonly createQuery: CreateQuery;
+  /** The headless inference call the cold gate's summarizer runs on; `--fake` swaps it with the query. */
+  readonly createInference: CreateInference;
   /** The vendor's session fork, real or mocked; `--fake` swaps it with the query. */
   readonly forkVendorSession: ForkVendorSession;
   readonly runtime: { shimBuildSha: string; sdkVersion: string };
@@ -6223,14 +6245,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * Who asks the summarizer: the workspace's name and the profile its
-   * session runs under, as SummarizeConversation states them. Passed rather
-   * than read from the started session's state, because a summary is asked
-   * before the session starts.
-   */
-  type SummarizerAsker = { readonly workspaceName: string; readonly profile: SessionProfile };
-
-  /**
    * The summarizer's failure as SummarizeConversation states it, labeled by
    * the summarizer's own cause; for a failure the NETWORK caused, the network
    * fault is stated first on the session stream, as a failed start's is.
@@ -6275,9 +6289,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       LOGGER.info(context, `refused SummarizeConversation: ${detail}`);
       return summarizeConversationRefused({ kind: "alreadyStarted" }, detail);
     }
-    const asker: SummarizerAsker = { workspaceName: request.workspaceName, profile: profileFromProto(request.profile) };
     if (use.case === "carry") {
-      const carried = await carrySummary(use.value.vendorSessionId, model, summarizer.scope, asker);
+      const carried = await carrySummary(use.value.vendorSessionId, model, summarizer.scope);
       return carried.ok
         ? summarizeConversationCarried(carried.text)
         : refuseSummary(carried.retry, carried.error, carried.apiFailure, context);
@@ -6295,33 +6308,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // replace whatever this process held, as a start's do.
     rolledBackTurns.clear();
     for (const turn of use.value.rolledBackTurns) rolledBackTurns.add(turn.value);
-    // THE CONVERSATION'S OWN MODE, as the start that resumes it restores it.
-    const mode =
-      facts.lastPermissionMode !== undefined
-        ? fromVendorPermissionMode(facts.lastPermissionMode as PermissionModeLike)
-        : permissionMode;
     compactedForStart = undefined;
-    const outcome = await compact(vendorSessionId, facts, model, summarizer.scope, asker, mode);
+    const outcome = await compact(vendorSessionId, facts, model, summarizer.scope);
     if (!outcome.ok) return refuseSummary(outcome.retry, outcome.error, outcome.apiFailure, context);
     compactedForStart = vendorSessionId;
     return summarizeConversationCompacted(facts.contextTokens, outcome.tokensAfter);
   }
 
   /**
-   * The cold gate's compaction, on a THROWAWAY query. The user is waiting on
-   * it, so every phase is narrated.
+   * The cold gate's compaction, on a HEADLESS INFERENCE call that holds no
+   * session (summarize). The user is waiting on it, so every phase is narrated.
    *
-   * The live query owns the session's identity, its lock and its in-flight
-   * turn; handing it a summarization prompt would put harness work inside the
-   * user's conversation.
+   * The conversation's transcript receives the compaction's own two records
+   * and nothing else: the summarizer reads the transcript and never writes it.
    */
   async function compact(
     vendorSessionId: string,
     facts: TranscriptFacts,
     model: string,
     scope: conversationv1.SessionCompactScope,
-    asker: SummarizerAsker,
-    mode: conversationv1.AgentPermissionMode,
   ): Promise<
     | { ok: true; summary: string; tokensAfter: number }
     | { ok: false; error: string; retry: VendorStartRetry; apiFailure: conversationv1.ApiRequestFailed | undefined }
@@ -6357,15 +6362,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     };
     coldCompactionFigures = undefined;
     coldCompactionRequestedModel = model;
-    // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
-    // part of the minute the user is waiting through, so a frame that waited
-    // for the query to exist would leave the opening of the wait unnarrated.
+    // BEFORE THE CALL, NOT AFTER IT. Reading the transcript and creating the
+    // headless call are themselves part of the minute the user is waiting
+    // through, so a frame that waited for the call to exist would leave the
+    // opening of the wait unnarrated.
     phase(
       conversationv1.SessionCompactionPhase.SUMMARIZING,
       { tokensBefore: facts.contextTokens },
-      "the cold gate is summarizing the conversation on a throwaway query",
+      "the cold gate is summarizing the conversation on a headless inference call",
     );
-    const asked = await summarize({ kind: "resume", resumeSessionId: vendorSessionId }, vendorSessionId, model, scope, asker);
+    const asked = await summarize(vendorSessionId, model, scope);
     if (!asked.ok) {
       // A QUERY THAT NEVER RAN OR BROKE MID-STREAM is a compaction the
       // conversation's record states as failed; an answer that came back
@@ -6374,8 +6380,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return failed(asked.error, asked.retry, asked.apiFailure);
     }
     const summary = asked.summary;
-    const outputTokens = asked.usage.outputTokens;
-    const spend = { model: asked.model, tokens: summarizerSpentTokens(asked.usage) };
+    const outputTokens = asked.outputTokens;
+    const spend = { model: asked.model, tokens: asked.spentTokens };
+    // THE SESSION'S OWN MODE: the last one the conversation's live chain
+    // states, which only the user's own turns write now that the summarizer
+    // holds no session. Absent from every record, it is the mode a start with
+    // no transcript to read would take.
+    const vendorMode = asked.mode ?? toVendorPermissionMode(permissionMode);
     try {
       const durationMs = deps.nowMs() - startedAtMs;
       const lines = compactionLines({
@@ -6390,14 +6401,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           durationMs,
           trigger: "manual",
           atMs: deps.nowMs(),
-          // THE SESSION'S OWN MODE, NOT THE THROWAWAY'S. The summarizing query
-          // above runs under `plan` and resumes the user's vendor session id,
-          // so the last `permissionMode` the transcript states is `plan` — and
-          // a resume restores the conversation's posture from that field. The
-          // summary line is the LAST record this compaction appends, so
-          // stating the session's own mode there is what keeps a revival from
-          // coming back in a mode nobody chose.
-          permissionMode: toVendorPermissionMode(mode),
+          // THE SESSION'S OWN MODE. A resume restores the conversation's
+          // posture from the last `permissionMode` the transcript states, and
+          // the summary line is the LAST record this compaction appends.
+          permissionMode: vendorMode,
       });
       appendCompactionLines(transcript, lines);
       // THE COMPACTION IS A BOUNDARY. Whatever the anchor named is on the far
@@ -6434,70 +6441,134 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * THE ONE SUMMARIZER: a throwaway query on BINDING, the conversation
-   * VENDORSESSIONID at its live end, asked the compaction prompt for SCOPE on
-   * MODEL (the session's own when empty), and read to its one result. It
-   * takes no tools. The cold gate's compaction and a resume's carried summary
-   * both ask it, so they agree on what a summary is and on how a failure is
-   * labeled: whether asking again can help, and the API's refusal when the
-   * failure was one. `stream` marks the failures whose query never ran or
-   * broke mid-stream.
+   * THE ONE SUMMARIZER: the conversation VENDORSESSIONID at its live end, read
+   * off its transcript and rendered as text (engine/conversation-text.ts),
+   * asked the compaction prompt for SCOPE on MODEL (the account's default when
+   * empty) through a HEADLESS INFERENCE call (deps.createInference), which
+   * takes no tools, carries no agent system prompt and holds no session: no
+   * record of it can ever reach any transcript. A conversation larger than one
+   * call reads is summarized in parts, oldest first, each carrying the summary
+   * so far.
+   *
+   * The cold gate's compaction and a resume's carried summary both ask it, so
+   * they agree on what a summary is and on how a failure is labeled: whether
+   * asking again can help, and the API's refusal when the failure was one.
+   * `stream` marks the failures whose call never ran or broke mid-stream.
    */
   async function summarize(
-    binding: VendorBinding,
     vendorSessionId: string,
     model: string,
     scope: conversationv1.SessionCompactScope,
-    asker: SummarizerAsker,
+  ): Promise<
+    | {
+        ok: true;
+        summary: string;
+        model: string;
+        /** Every token every part's call spent (summarizerSpentTokens). */
+        spentTokens: number;
+        /** The last part's output: the summary itself. */
+        outputTokens: number;
+        /** The permission mode the live chain last states, in the vendor's spelling. */
+        mode: string | undefined;
+      }
+    | SummarizerFailure
+  > {
+    const file = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
+    const context = { vendor_session_id: vendorSessionId, transcript: file, requested_model: model };
+    // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at the
+    // transcript's tail is not summarized.
+    const read = readLiveConversation(file, rolledBackPromptUuids());
+    switch (read.kind) {
+      case "no_transcript":
+        // The transcript will not appear by asking again (rejected).
+        return summarizerFailure(`no transcript exists for vendor session ${JSON.stringify(vendorSessionId)} in this workspace`, "rejected", false);
+      case "unreadable":
+        // The same transcript reads the same way on the next attempt (rejected).
+        return summarizerFailure(`the transcript to summarize could not be read: ${read.detail}`, "rejected", false);
+      case "ok":
+        break;
+    }
+    const parts = chunkConversation(renderConversation(read.transcript.chain));
+    if (parts.length === 0) return summarizerFailure("the conversation holds nothing to summarize", "rejected", false);
+    LOGGER.info(
+      { ...context, parts: parts.length, chars: parts.reduce((sum, part) => sum + part.length, 0) },
+      "rendered the conversation as text for the headless summarizer",
+    );
+    let summarySoFar: string | undefined;
+    let answeredModel = "";
+    let spentTokens = 0;
+    let outputTokens = 0;
+    for (const [at, text] of parts.entries()) {
+      const part = { text, index: at + 1, count: parts.length, ...(summarySoFar === undefined ? {} : { summarySoFar }) };
+      const asked = await summarizePart(summarizerPrompt(part, scope), model);
+      if (!asked.ok) {
+        // WHICH PART FAILED is said only when there were several, so a
+        // conversation read in one call states its failure exactly as before.
+        return parts.length === 1
+          ? asked
+          : { ...asked, error: `part ${part.index} of ${part.count}: ${asked.error}` };
+      }
+      summarySoFar = asked.summary;
+      answeredModel = asked.model;
+      spentTokens += summarizerSpentTokens(asked.usage);
+      outputTokens = asked.usage.outputTokens;
+      if (parts.length > 1) {
+        LOGGER.info(
+          { ...context, part: part.index, parts: part.count, model: asked.model, output_tokens: outputTokens },
+          "the headless summarizer folded one part of the conversation into the summary",
+        );
+      }
+    }
+    if (summarySoFar === undefined) {
+      // INVARIANT: parts is non-empty and every part either answered or returned.
+      throw new Error("shim session: the summarizer read every part and holds no summary");
+    }
+    return {
+      ok: true,
+      summary: summarySoFar,
+      model: answeredModel,
+      spentTokens,
+      outputTokens,
+      mode: chainPermissionMode(read.transcript.chain),
+    };
+  }
+
+  /**
+   * One headless inference call asked PROMPT on MODEL, read to its one result
+   * and labeled as {@link summarize} states.
+   */
+  async function summarizePart(
+    prompt: string,
+    model: string,
   ): Promise<
     | { ok: true; summary: string; model: string; usage: NormalizedApiUsage }
-    | {
-        ok: false;
-        error: string;
-        retry: VendorStartRetry;
-        apiFailure: conversationv1.ApiRequestFailed | undefined;
-        stream: boolean;
-      }
+    | SummarizerFailure
   > {
     const asked = await askSideQuery(
-      (prompt, abortController) =>
-        deps.createQuery({
-          profile: asker.profile,
-          binding,
-          workspaceName: asker.workspaceName,
-          // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at
-          // the transcript's tail is neither summarized nor chained under it.
-          ...resumeAtLiveEnd(vendorSessionId),
-          permissionMode: "plan",
-          canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })),
-          abortController,
-          prompt,
-          ...(model === "" ? {} : { model }),
-        }),
-      compactionPrompt(scope),
+      (queue, abortController) =>
+        deps.createInference({ abortController, prompt: queue, ...(model === "" ? {} : { model }) }),
+      prompt,
       { ledger: measurements.vendorSpend, cause: conversationv1.VendorCallCause.COMPACTION, nowMs: coldNowMs },
     );
-    const failed = (error: string, retry: VendorStartRetry, stream: boolean, apiFailure?: conversationv1.ApiRequestFailed) =>
-      ({ ok: false, error, retry, apiFailure, stream }) as const;
     switch (asked.kind) {
       case "unbuilt":
-        // THE QUERY THAT COULD NOT BE BUILT meets the same refusal on the next
+        // THE CALL THAT COULD NOT BE BUILT meets the same refusal on the next
         // attempt (rejected).
-        return failed(asked.error, "rejected", true);
+        return summarizerFailure(asked.error, "rejected", true);
       case "broken":
         // A THROW FROM INSIDE THE STREAM is a child or stream that ended
         // (retryable).
-        return failed(asked.error, "retryable", true);
+        return summarizerFailure(asked.error, "retryable", true);
       case "noResult":
         // A STREAM THAT ENDED WITHOUT A RESULT is a child that went away.
-        return failed("the summarizing session produced no summary", "retryable", false);
+        return summarizerFailure("the summarizing session produced no summary", "retryable", false);
       case "errorResult": {
         // AN ERROR RESULT IS A FAILURE WHATEVER ITS SUBTYPE: reading the
         // vendor's error sentence as a summary would write the error into the
         // transcript as the conversation's compacted context. READ EXACTLY AS
         // THE OPENING'S IS: its status and its words decide whether it can pass.
         const verdict = openingErrorVerdict(asked.status, asked.words);
-        return failed(
+        return summarizerFailure(
           asked.subtype === "success"
             ? `the summarizing session ended with an error result: ${asked.words}`
             : `the summarizing session ended as ${asked.subtype}`,
@@ -6511,50 +6582,42 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     if (asked.text === "") {
       // A result that summarized nothing is the vendor's answer to this
-      // transcript, and it will give the same one again (rejected).
-      return failed("the summarizing session produced no summary", "rejected", false);
+      // conversation, and it will give the same one again (rejected).
+      return summarizerFailure("the summarizing session produced no summary", "rejected", false);
     }
     if (asked.model === undefined) {
       // THE VENDOR OPENS EVERY QUERY WITH ITS INIT, before any result, so a
       // summary with no opening before it is a stream that broke the
       // vendor's own order. The summary cannot say on which model it was
       // written, and it fails rather than guess one.
-      return failed("the summarizing session answered without stating its model", "rejected", false);
+      return summarizerFailure("the summarizing session answered without stating its model", "rejected", false);
     }
     return { ok: true, summary: asked.text, model: asked.model, usage: asked.usage };
   }
 
   /**
    * THE SUMMARY A RESUME CARRIES (shim.v1.SummarizeConversationCarry):
-   * another conversation of this workspace, summarized by the one summarizer
-   * on an EPHEMERAL FORK, which writes nothing to either transcript. The
-   * daemon delivers the answer into the resumed conversation; nothing here
-   * touches it.
+   * another conversation of this workspace, summarized by the one summarizer,
+   * which writes nothing to either transcript. The daemon delivers the answer
+   * into the resumed conversation; nothing here touches it.
    */
   async function carrySummary(
     summarizedVendorSessionId: string,
     model: string,
     scope: conversationv1.SessionCompactScope,
-    asker: SummarizerAsker,
   ): Promise<
     | { ok: true; text: string }
     | { ok: false; error: string; retry: VendorStartRetry; apiFailure: conversationv1.ApiRequestFailed | undefined }
   > {
     const context = { summarized_vendor_session_id: summarizedVendorSessionId, requested_model: model, scope };
-    LOGGER.info(context, "summarizing another conversation of the workspace on an ephemeral fork, to carry into this resume");
-    const asked = await summarize(
-      { kind: "ephemeral_fork", parentSessionId: summarizedVendorSessionId },
-      summarizedVendorSessionId,
-      model,
-      scope,
-      asker,
-    );
+    LOGGER.info(context, "summarizing another conversation of the workspace on a headless inference call, to carry into this resume");
+    const asked = await summarize(summarizedVendorSessionId, model, scope);
     if (!asked.ok) {
       LOGGER.error({ ...context, retry: asked.retry, cause: asked.error }, "the summary this resume carries did not complete");
       return asked;
     }
     LOGGER.info(
-      { ...context, model: asked.model, output_tokens: asked.usage.outputTokens, spent_tokens: summarizerSpentTokens(asked.usage) },
+      { ...context, model: asked.model, output_tokens: asked.outputTokens, spent_tokens: asked.spentTokens },
       "the summary this resume carries came back",
     );
     return { ok: true, text: asked.summary };

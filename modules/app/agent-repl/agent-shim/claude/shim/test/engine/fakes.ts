@@ -1009,3 +1009,12 @@ function emptyContextUsage(): ContextUsageLike {
 export function unexpectedVendorFork(): Promise<string> {
   return Promise.reject(new Error("a vendor fork was asked for by a test that installed none"));
 }
+
+/**
+ * The headless inference call a suite installs when nothing it drives should
+ * summarize: reaching it is a defect in the code under test, so it fails the
+ * call loudly.
+ */
+export function unexpectedInference(): Promise<QueryLike> {
+  return Promise.reject(new Error("a headless inference call was asked for by a test that installed none"));
+}

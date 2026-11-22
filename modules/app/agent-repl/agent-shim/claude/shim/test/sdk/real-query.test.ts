@@ -12,6 +12,9 @@ import { logRecordsSince } from "../log-records.js";
 import {
   asQueryLike,
   boundSessionId,
+  createRealInference,
+  denyEveryTool,
+  realInferenceOptions,
   realQueryOptions,
   vendorSpawner,
   type RealQuerySpec,
@@ -20,6 +23,7 @@ import {
 } from "../../src/sdk/real-query.js";
 import { LANDING_REL_PATHS, METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, readLandingSection, standingSection, workspaceSection } from "../../src/metaprompt.js";
 import { agentReplHooks } from "../../src/sdk/agent-repl-hooks.js";
+import { VendorCallsForbiddenError } from "../../src/vendor-guard.js";
 
 /** The servers argument of a test that is not about agent-repl's own MCP server. */
 const NO_SERVERS = {};
@@ -878,5 +882,94 @@ describe("realQueryOptions on a resume or a fresh start", () => {
       forkSession: undefined,
       persistSession: undefined,
     });
+  });
+});
+
+describe("realInferenceOptions: the headless inference call", () => {
+  /** The options for a call on MODEL (none when absent). */
+  const optionsFor = (model?: string): Record<string, unknown> =>
+    realInferenceOptions({
+      cwd: "/ws",
+      claudeConfigDir: "/accounts/primary",
+      abortController: new AbortController(),
+      ...(model === undefined ? {} : { model }),
+    });
+
+  it.each([
+    ["takes no tools", "tools", []],
+    ["pre-allows no tools", "allowedTools", []],
+    ["carries no agent system prompt", "systemPrompt", ""],
+    ["persists no session", "persistSession", false],
+    ["loads none of the user's settings", "settingSources", []],
+    ["starts no MCP server", "mcpServers", {}],
+    ["refuses every MCP server it was not handed", "strictMcpConfig", true],
+    ["runs no hooks", "hooks", {}],
+    ["thinks not at all", "thinking", { type: "disabled" }],
+    ["answers in one turn", "maxTurns", 1],
+    ["runs in the directory it was handed", "cwd", "/ws"],
+  ] as const)("%s", (_case, option, value) => {
+    expect(optionsFor()[option]).toEqual(value);
+  });
+
+  it.each(["resume", "sessionId", "forkSession", "resumeSessionAt", "continue"])("names no session (%s)", (option) => {
+    expect(option in optionsFor()).toBe(false);
+  });
+
+  it("bills through the account root it was handed, with no vendor retry of its own", () => {
+    const env = optionsFor()["env"] as Record<string, string>;
+
+    expect([env["CLAUDE_CONFIG_DIR"], env["CLAUDE_CODE_MAX_RETRIES"]]).toEqual(["/accounts/primary", "0"]);
+  });
+
+  it("answers on the model it was handed", () => {
+    expect(optionsFor("claude-haiku-5-5")["model"]).toBe("claude-haiku-5-5");
+  });
+
+  it("names no model when none was handed, leaving the account default", () => {
+    expect("model" in optionsFor()).toBe(false);
+  });
+
+  it("refuses every tool that reaches its gate", async () => {
+    const canUseTool = optionsFor()["canUseTool"] as (name: string, input: unknown) => Promise<{ behavior: string }>;
+
+    expect((await canUseTool("Bash", {})).behavior).toBe("deny");
+  });
+});
+
+describe("createRealInference", () => {
+  it("refuses with the guard's own error naming createRealInference", async () => {
+    // Arrange: AGENT_REPL_FORBID_VENDOR_CALLS=1 is set for every test run.
+    let raised: unknown;
+
+    // Act.
+    try {
+      await createRealInference(
+        { cwd: "/ws", claudeConfigDir: "/accounts/primary", abortController: new AbortController() },
+        (async function* () {})(),
+      );
+    } catch (err) {
+      raised = err;
+    }
+
+    // Assert.
+    expect({
+      typed: raised instanceof VendorCallsForbiddenError,
+      site: raised instanceof Error && /blocked at: createRealInference/.test(raised.message),
+    }).toEqual({ typed: true, site: true });
+  });
+});
+
+describe("denyEveryTool", () => {
+  it("refuses whatever tool reaches it", async () => {
+    expect(await denyEveryTool("Bash", {}, {} as never)).toEqual({
+      behavior: "deny",
+      message: "a headless inference call takes no tools",
+    });
+  });
+
+  it("is the gate the real inference call is built with", () => {
+    expect(realInferenceOptions({ cwd: "/ws", claudeConfigDir: "/a", abortController: new AbortController() }).canUseTool).toBe(
+      denyEveryTool,
+    );
   });
 });
