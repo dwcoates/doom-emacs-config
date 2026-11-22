@@ -3106,6 +3106,10 @@ func (v *fakeVerbs) MoveSubsection(_ context.Context, id ids.SubsectionID, to ws
 	return v.arrange("MoveSubsection " + string(id) + " " + wsm.AnchorField(to))
 }
 
+func (v *fakeVerbs) MoveChild(_ context.Context, ws ids.WorkspaceID, before *ids.WorkspaceID) error {
+	return v.arrange("MoveChild " + string(ws) + " " + ids.Optional(before))
+}
+
 func (v *fakeVerbs) MoveRepositoryBlock(_ context.Context, parent ids.WorkspaceID, repo ids.RepoID, before *ids.RepoID) error {
 	return v.arrange("MoveRepositoryBlock " + string(parent) + " " + string(repo) + " " + ids.Optional(before))
 }

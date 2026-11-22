@@ -81,6 +81,9 @@ const (
 	// ArmNoRepositoryBlock is a block move naming a block the parent does
 	// not have (ArrangeSidebarError.no_repository_block).
 	ArmNoRepositoryBlock = "no_repository_block"
+	// ArmNotAChild is a child move naming a top-level workspace
+	// (ArrangeSidebarError.not_a_child).
+	ArmNotAChild = "not_a_child"
 	// ArmNotSiblings is a move between two workspaces that are not siblings
 	// in the arrangement's walk (MoveWorkspaceError.not_siblings).
 	ArmNotSiblings = "not_siblings"

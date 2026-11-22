@@ -161,7 +161,57 @@ var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
 // arm and records it at its own level.
 func isArrangementRefusal(err error) bool {
 	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName) ||
-		errors.Is(err, ErrNotSiblings) || errors.Is(err, ErrNoOpenConstituent) || errors.Is(err, ErrNoRepositoryBlock)
+		errors.Is(err, ErrNotSiblings) || errors.Is(err, ErrNotAChild) || errors.Is(err, ErrNoOpenConstituent) || errors.Is(err, ErrNoRepositoryBlock)
+}
+
+// ErrNotAChild refuses a child move naming a top-level workspace, which has
+// no parent whose children it could be reordered among. Nothing is written.
+var ErrNotAChild = errors.New("wsm: the workspace is top-level, so it has no siblings to move among")
+
+// MoveChild reorders workspace WS among its parent's children: just before
+// sibling BEFORE, or after every other child when BEFORE is nil. A child never
+// leaves its parent this way, so it keeps its parent, its subsection (always
+// its root's) and every other workspace's place (reorderSiblings).
+//
+// Refusals, each writing nothing: BEFORE naming WS is malformed; an unknown
+// workspace is ErrNotFound; a top-level WS is ErrNotAChild; a BEFORE of
+// another repository is ErrOtherRepository and any other BEFORE that is not a
+// child of WS's parent is ErrNotSiblings.
+func (s *store) MoveChild(ctx context.Context, ws WorkspaceID, before *WorkspaceID) error {
+	const op = "daemon.wsm.move_child"
+	fields := dlog.Context{"workspace": string(ws), "before": ids.Optional(before)}
+	if before != nil && *before == ws {
+		err := fmt.Errorf("wsm: move child: %s before itself", ws)
+		s.log.Error(op, "refused to move a child before itself", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var repo RepoID
+		var parent sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, parent_id", &repo, &parent); err != nil {
+			return err
+		}
+		if !parent.Valid {
+			return ErrNotAChild
+		}
+		fields["parent"] = parent.String
+		if before != nil {
+			var beforeRepo RepoID
+			var beforeParent sql.NullString
+			if err := scanWorkspaceRow(ctx, tx, *before, "repo_id, parent_id", &beforeRepo, &beforeParent); err != nil {
+				return err
+			}
+			if beforeRepo != repo {
+				return ErrOtherRepository
+			}
+			if beforeParent != parent {
+				return ErrNotSiblings
+			}
+		}
+		return reorderSiblings(ctx, tx, parent.String, func(siblings []WorkspaceID) []WorkspaceID {
+			return moveBefore(siblings, ws, before)
+		})
+	})
 }
 
 // subsectionName trims NAME and refuses it when nothing is left.

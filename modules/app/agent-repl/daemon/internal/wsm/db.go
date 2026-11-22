@@ -207,6 +207,9 @@ type DB interface {
 	// MoveRepositoryBlock moves a parent's block of one other repository
 	// before another of its blocks (nil: last) (repositoryblocks.go).
 	MoveRepositoryBlock(ctx context.Context, parent WorkspaceID, repo RepoID, before *RepoID) error
+	// MoveChild reorders a child among its parent's children, before a
+	// sibling (nil: last); it never leaves its parent.
+	MoveChild(ctx context.Context, ws WorkspaceID, before *WorkspaceID) error
 	// PlaceWorkspaces puts root workspaces, with their families, into a
 	// subsection of their repository (nil: none) as one block at an anchor
 	// there: before a root, before a subsection (into none only), or last.

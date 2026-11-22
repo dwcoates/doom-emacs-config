@@ -55,6 +55,8 @@ message ArrangeSidebarRequest {
     ArrangeCreateAgentSubsection create_agent_subsection = 8;
     // Move one repository block among its parent's blocks.
     ArrangeMoveRepositoryBlock move_repository_block = 10;
+    // Reorder one CHILD among its parent's children.
+    ArrangeMoveChild move_child = 11;
   }
   // THE REQUEST COMES FROM A WORKSPACE'S AGENT, not from the user's hands
   // (a drag, the sidebar's menus). THE MAIN WORKSPACE IS NEVER SORTED
@@ -173,6 +175,28 @@ message ArrangeMoveRepositoryBlock {
     workspace.v1.RepositoryRef before = 3;
     // After every other block of the parent.
     ArrangeEnd end = 4;
+  }
+}
+
+// Reorder one CHILD among its parent's children: the drag of a nested row,
+// which lifts that row and its own descendants and offers only its parent's
+// children as a place to drop. A child never leaves its parent this way: no
+// re-parenting, no going top-level, no subsection (ArrangePlaceWorkspace is
+// the family-level move, and a top-level workspace is refused here). The new
+// order is the children's `place`, so the sidebar and the tab bar both follow.
+message ArrangeMoveChild {
+  // The child to move. A top-level workspace (one with no recorded parent)
+  // is refused on not_a_child; nothing is written.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHERE AMONG ITS PARENT'S CHILDREN. THE ARM IS THE PLACE; unset is
+  // malformed.
+  oneof to {
+    // Just before this sibling, a child of the same parent (not_siblings
+    // otherwise, and other_repository for another repository's workspace).
+    // Naming the moved child itself is malformed.
+    workspace.v1.WorkspaceRef before = 2;
+    // After every other child of its parent.
+    ArrangeEnd end = 3;
   }
 }
 
@@ -319,6 +343,12 @@ message ArrangeSidebarError {
     // parent's own repository (whose children are no block), or a
     // repository with no child under the parent.
     ArrangeSidebarNoRepositoryBlock no_repository_block = 13;
+    // A child move named a workspace that is top-level, so it has no parent
+    // whose children it could be reordered among.
+    ArrangeSidebarNotAChild not_a_child = 14;
+    // A child move named a `before` that is not a child of the moved child's
+    // parent (a top-level workspace, or a child of another parent).
+    ArrangeSidebarNotSiblings not_siblings = 15;
   }
   // `has_parent` (field 10) is RETIRED and reserved: a family moves whole
   // (owner request, 2026-10-20), so placing a workspace with a recorded
@@ -360,3 +390,7 @@ message ArrangeSidebarNoOpenWorkspace {}
 message ArrangeSidebarMainWorkspaceNotSortable {}
 // DELIBERATELY EMPTY: the arm is the fact.
 message ArrangeSidebarNoRepositoryBlock {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarNotAChild {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarNotSiblings {}

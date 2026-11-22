@@ -51,6 +51,17 @@ func moveRepositoryBlock(parent *workspacev1.WorkspaceRef, repo string, before *
 	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock{MoveRepositoryBlock: move}}
 }
 
+// moveChild is a move_child change of WS, before sibling BEFORE (nil: last).
+func moveChild(ws, before *workspacev1.WorkspaceRef) *agentreplv1.ArrangeSidebarRequest {
+	move := &agentreplv1.ArrangeMoveChild{Workspace: ws}
+	if before != nil {
+		move.To = &agentreplv1.ArrangeMoveChild_Before{Before: before}
+	} else {
+		move.To = &agentreplv1.ArrangeMoveChild_End{End: endPlace()}
+	}
+	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveChild{MoveChild: move}}
+}
+
 // placeBeforeSubsection is a place_workspace change of WS into no
 // subsection, just before subsection SUB.
 func placeBeforeSubsection(ws *workspacev1.WorkspaceRef, sub string) *agentreplv1.ArrangeSidebarRequest {
@@ -123,6 +134,8 @@ func TestArrangeSidebarHandsEachChangeToItsVerb(t *testing.T) {
 			want: "MoveRepositoryBlock " + string(testWorkspaceID) + " repo-2 repo-1"},
 		{name: "move a repository block last", req: moveRepositoryBlock(ref(), "repo-2", nil),
 			want: "MoveRepositoryBlock " + string(testWorkspaceID) + " repo-2 "},
+		{name: "move a child before a sibling", req: moveChild(ref(), other), want: "MoveChild " + string(testWorkspaceID) + " ws-2"},
+		{name: "move a child last", req: moveChild(ref(), nil), want: "MoveChild " + string(testWorkspaceID) + " "},
 		{name: "place a workspace before another in a subsection", req: placeWorkspace(ref(), "sub-1", other),
 			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 before workspace ws-2"},
 		{name: "place a workspace last among the unsectioned", req: placeWorkspace(ref(), "", nil),
@@ -297,6 +310,8 @@ func TestArrangeSidebarMapsAVerbRefusalOntoItsArm(t *testing.T) {
 		{arm: workspace.ArmAnchorElsewhere, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetAnchorElsewhere() != nil }},
 		{arm: workspace.ArmNoOpenWorkspace, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNoOpenWorkspace() != nil }},
 		{arm: workspace.ArmMainWorkspaceNotSortable, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetMainWorkspaceNotSortable() != nil }},
+		{arm: workspace.ArmNotAChild, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNotAChild() != nil }},
+		{arm: workspace.ArmNotSiblings, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNotSiblings() != nil }},
 		{arm: workspace.ArmNoRepositoryBlock, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNoRepositoryBlock() != nil }},
 		{arm: workspace.ArmTransferringAway, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetTransferringAway() != nil }},
 		{arm: workspace.ArmNotYetAdopted, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNotYetAdopted() != nil }},
@@ -357,6 +372,10 @@ func TestValidateArrangeSidebarRequestRefusesAnIncompleteRequest(t *testing.T) {
 			MoveRepository: &agentreplv1.ArrangeMoveRepository{Repository: repoRef("repo-1")}}}},
 		{"a repository block move with no place", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock{
 			MoveRepositoryBlock: &agentreplv1.ArrangeMoveRepositoryBlock{Parent: ref(), Repository: repoRef("repo-1")}}}},
+		{"a child move with no workspace", moveChild(nil, nil)},
+		{"a child move with no place", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveChild{
+			MoveChild: &agentreplv1.ArrangeMoveChild{Workspace: ref()}}}},
+		{"a child moved before itself", moveChild(ref(), ref())},
 		{"a repository block move with no parent", moveRepositoryBlock(nil, "repo-1", nil)},
 		{"a repository block move with no repository", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock{
 			MoveRepositoryBlock: &agentreplv1.ArrangeMoveRepositoryBlock{Parent: ref(), To: &agentreplv1.ArrangeMoveRepositoryBlock_End{End: endPlace()}}}}},

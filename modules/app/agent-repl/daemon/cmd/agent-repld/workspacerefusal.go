@@ -336,6 +336,10 @@ func describeArrangeRefusal(e *agentreplv1.ArrangeSidebarError) (string, error) 
 		return "the change would move a repository's main workspace, or the family it roots, which agents never sort", nil
 	case *agentreplv1.ArrangeSidebarError_NoRepositoryBlock:
 		return "the change named a repository block the parent does not have", nil
+	case *agentreplv1.ArrangeSidebarError_NotAChild:
+		return "the workspace is top-level, so it has no parent whose children it could be reordered among", nil
+	case *agentreplv1.ArrangeSidebarError_NotSiblings:
+		return "the workspace to move before is not a child of the moved child's parent", nil
 	}
 	return "", undescribed("arranging the sidebar", e)
 }
