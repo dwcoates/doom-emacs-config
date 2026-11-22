@@ -346,7 +346,7 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 	defer release()
 	remote, err := c.deps.DB.RemoteControl(ctx, ws)
 	if err != nil {
-		log.Error(why.op, "could not read the workspace's remote-control mode; deferring the park", dlog.WithCause(fields, err))
+		log.Error(why.op, "could not read the workspace's remote-control mode; its stand-down is dropped", dlog.WithCause(fields, err))
 		return parkFailed
 	}
 	fields = dlog.Merge(fields, dlog.Context{

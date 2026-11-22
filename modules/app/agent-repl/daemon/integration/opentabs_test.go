@@ -170,6 +170,7 @@ func TestCollapsingARepositoryStandsItsWorkspacesSessionDown(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{FoldStandDownDelay: time.Millisecond})
 	f.d.ExpectWarnings(standDownWarnings...)
+	f.remoteControlOff()
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 
 	// Act
@@ -185,6 +186,7 @@ func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T
 	// Arrange: a turn running in the repository's one workspace.
 	f := newOpened(t, harness.Opts{FoldStandDownDelay: time.Millisecond})
 	f.d.ExpectWarnings(standDownWarnings...)
+	f.remoteControlOff()
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	if got := f.submit("keep working", "k-fold-busy", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
 		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)

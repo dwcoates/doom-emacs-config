@@ -1684,10 +1684,8 @@ var sparingPaths = []standDownPath{
 // recordWith answers the first record under OP whose message is MESSAGE.
 func recordWith(t *testing.T, h *harness, op, message string) dlog.Record {
 	t.Helper()
-	for _, record := range records(h.log, op) {
-		if record.Message == message {
-			return record
-		}
+	if record, ok := dlog.FindRecord(records(h.log, op), dlog.RecordQuery{Message: message}); ok {
+		return record
 	}
 	t.Fatalf("records = %+v, want %q under %s", records(h.log, op), message, op)
 	return dlog.Record{}
@@ -1872,7 +1870,7 @@ func TestAnUnreadableRemoteControlModeStandsNothingDown(t *testing.T) {
 			if term := h.terminal(t, ws); term != nil {
 				t.Fatalf("terminal = %+v, want no park recorded", term)
 			}
-			record := recordWith(t, h, path.op, "could not read the workspace's remote-control mode; deferring the park")
+			record := recordWith(t, h, path.op, "could not read the workspace's remote-control mode; its stand-down is dropped")
 			if record.Level != "error" || record.Context["trigger"] != path.trigger || !strings.Contains(fmt.Sprint(record.Context["cause"]), errFake.Error()) {
 				t.Fatalf("record = %+v, want the failure at error naming its trigger and cause", record)
 			}
@@ -1883,7 +1881,7 @@ func TestAnUnreadableRemoteControlModeStandsNothingDown(t *testing.T) {
 // allReasons is every stand-down reason the package declares.
 func allReasons(c *controller) []standDownReason {
 	return []standDownReason{
-		c.idleReason(), cycleReason, visitReason, coldReason,
+		c.idleReason(), cycleReason, visitReason, coldReason, mergeQueuedReason,
 		withheldReason(WithheldCollapse), withheldReason(WithheldCacheLapse), withheldReason(WithheldMergeEnded),
 	}
 }
@@ -1916,8 +1914,8 @@ func TestEveryStandDownPathGoesThroughTheRemoteControlGate(t *testing.T) {
 	if !slices.Equal(parks, []string{"cycle.go", "sweep.go", "withheld.go"}) {
 		t.Fatalf("park sites = %v, want the cycle's, the sweep's and the withheld path's", parks)
 	}
-	if len(literals) != 5 {
-		t.Fatalf("standDownReason literals = %v, want the five allReasons builds from", literals)
+	if len(literals) != 6 {
+		t.Fatalf("standDownReason literals = %v, want the six allReasons builds from", literals)
 	}
 	for _, reason := range reasons {
 		if reason.trigger == "" {
