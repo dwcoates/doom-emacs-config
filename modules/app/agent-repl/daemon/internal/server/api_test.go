@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -215,7 +214,7 @@ func TestPushTransferredReachesTheWebStreamWithTheAddress(t *testing.T) {
 	}
 
 	// Act.
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	push := receiveWebEvent(t, stream)
 
 	// Assert.
@@ -235,7 +234,7 @@ func TestPushTransferredRecordsWhoHeldTheStreams(t *testing.T) {
 	})
 
 	// Act.
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 
 	// Assert.
 	for _, rec := range log.at("INFO") {
@@ -258,7 +257,7 @@ func TestRetractTransferredStopsReplayingTheNoticeToALateWebStream(t *testing.T)
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	h.Server.RetractTransferred(testWorkspaceID)
 	stream, err := h.Client.WatchWebWorkspace(ctx,
 		connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ref(), WebappBuild: "webapp-test"}))
@@ -267,7 +266,7 @@ func TestRetractTransferredStopsReplayingTheNoticeToALateWebStream(t *testing.T)
 	}
 
 	// Act.
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:5353", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:5353")
 	push := receiveWebEvent(t, stream)
 
 	// Assert.
@@ -285,7 +284,7 @@ func TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream(t *testi
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := dialHostStream(t, h, ctx)
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	if receiveHostEvent(t, stream).GetTransferred() == nil {
 		t.Fatal("the first transfer notice did not arrive")
 	}
@@ -295,7 +294,7 @@ func TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream(t *testi
 	}
 
 	// Act.
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	push := receiveHostEvent(t, stream)
 
 	// Assert.
@@ -313,7 +312,7 @@ func TestRetractTransferredTellsAHostStreamThatHeardTheNotice(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := dialHostStream(t, h, ctx)
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	if receiveHostEvent(t, stream).GetTransferred() == nil {
 		t.Fatal("the transfer notice did not arrive")
 	}
@@ -335,12 +334,12 @@ func TestRetractTransferredReplaysNoWithdrawalToALateHostStream(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	h.Server.RetractTransferred(testWorkspaceID)
 	stream := dialHostStream(t, h, ctx)
 
 	// Act: a later notice marks where the stream's first event must be.
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:5353", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:5353")
 	push := receiveHostEvent(t, stream)
 
 	// Assert.
@@ -592,27 +591,22 @@ func TestNewRefusesMissingTimingDependencies(t *testing.T) {
 	}
 }
 
-// THE HOST'S TRANSFER NOTICE CARRIES THE OUTGOING DAEMON'S PAGE DECISION, so
-// the editor loads at the successor exactly the pages the handover decided at
-// its announcement (owner ruling, 2026-11-13).
-func TestPushTransferredCarriesWhetherThePageIsReloaded(t *testing.T) {
-	for _, reload := range []bool{true, false} {
-		t.Run(fmt.Sprintf("reload_page %v", reload), func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			stream := dialHostStream(t, h, ctx)
+// THE HOST'S TRANSFER NOTICE CARRIES NOTHING: no handover reloads, loads or
+// drops a page (owner ruling, 2026-11-22).
+func TestPushTransferredCarriesNoPageDecision(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
 
-			// Act.
-			h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", reload)
-			push := receiveHostEvent(t, stream)
+	// Act.
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	push := receiveHostEvent(t, stream)
 
-			// Assert.
-			if got := push.GetTransferred(); got == nil || got.ReloadPage == nil || *got.ReloadPage != reload {
-				t.Fatalf("transferred = %v, want reload_page set to %v", got, reload)
-			}
-		})
+	// Assert.
+	if got := push.GetTransferred(); got == nil || !proto.Equal(got, &agentreplv1.HostWorkspaceTransferred{}) {
+		t.Fatalf("transferred = %v, want the empty notice", got)
 	}
 }
 

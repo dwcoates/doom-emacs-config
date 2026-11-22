@@ -13,6 +13,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
 )
@@ -35,6 +36,56 @@ func TestAdoptWebAnswersNoTransferAnnouncedOnAnOrdinaryBoot(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetNoTransferAnnounced() == nil {
 		t.Fatalf("result = %v, want no_transfer_announced", resp.Msg.GetResult())
+	}
+}
+
+// TestAdoptWebSuccessNamesTheInstalledWebapp pins the build a page adopting in
+// place compares with its own before it opens its subscriptions again.
+func TestAdoptWebSuccessNamesTheInstalledWebapp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Deployer.webapp = "webapp-0450"
+
+	// Act.
+	resp, err := h.Client.AdoptWebWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetWebappBuild(); got != "webapp-0450" {
+		t.Fatalf("success webapp_build = %q, want the installed build", got)
+	}
+}
+
+// TestAdoptWebIsRefusedBeforeTheRendezvousWhenTheWebappCannotBeRead pins that
+// an unreadable build answers Internal, at ERROR, with nothing adopted.
+func TestAdoptWebIsRefusedBeforeTheRendezvousWhenTheWebappCannotBeRead(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Deployer.webappErr = errors.New("dist/index.html: no such file")
+	adopted := false
+	h.Rollout.adopting = func() { adopted = true }
+
+	// Act.
+	_, err := h.Client.AdoptWebWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("err = %v, want Internal", err)
+	}
+	if adopted {
+		t.Fatal("the rendezvous ran, want nothing adopted")
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "AdoptWebWorkspace", Message: "could not read the installed webapp's build; the webview's adoption is refused"})
+	if !ok {
+		t.Fatalf("records = %+v, want the refusal at ERROR", log.Records())
+	}
+	if !strings.Contains(fmt.Sprint(rec.Context["cause"]), "no such file") {
+		t.Fatalf("record context = %+v, want the cause", rec.Context)
 	}
 }
 
@@ -242,6 +293,26 @@ func TestAdoptHostAnswersTransferDeferredForARefusedMidWorkAdoption(t *testing.T
 	}
 	if resp.Msg.GetError().GetTransferDeferred() == nil {
 		t.Fatalf("result = %v, want transfer_deferred", resp.Msg.GetResult())
+	}
+}
+
+// TestAdoptWebTransferDeferredNamesThePage pins that a page answered with a
+// deferral can mount its body on the incumbent: no handover reloads it.
+func TestAdoptWebTransferDeferredNamesThePage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Rollout.adoptWebErr = fmt.Errorf("rollout: adopt %q: %w", "w1", rollout.ErrMidWorkRefused)
+
+	// Act.
+	resp, err := h.Client.AdoptWebWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetTransferDeferred().GetPage().GetAgent() == nil {
+		t.Fatalf("result = %v, want transfer_deferred naming the agent page", resp.Msg.GetResult())
 	}
 }
 

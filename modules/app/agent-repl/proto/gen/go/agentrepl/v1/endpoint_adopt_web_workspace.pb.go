@@ -1,6 +1,7 @@
 // endpoint_adopt_web_workspace.proto — AdoptWebWorkspace: the webview's half
 // of the per-workspace handover rendezvous. WEB LINK section, called on the
-// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace.
+// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace,
+// or by the page in place (forwarded by whichever daemon its call reaches).
 // The VERB identifies the participant; rendezvous semantics are stated on
 // AdoptHostWorkspace and are identical here: all expected participants'
 // calls succeed together when adoption completes.
@@ -162,7 +163,14 @@ type AdoptWebWorkspaceSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the page is for, deciding which body it mounts below its topbar.
 	// Always set.
-	Page          *WebWorkspacePage `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
+	Page *WebWorkspacePage `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
+	// THE WEBAPP BUILD THE ADOPTING DAEMON SERVES: the installed dist's entry
+	// bundle hash (webapp/src/webapp-build.ts reads a page's own). REQUIRED and
+	// not empty. A page that adopts in place after a handover, rather than
+	// booting, reopens its subscriptions only when this is its own build: on
+	// another it goes quiet, because a newer daemon's frames carry fields it has
+	// no descriptor for, and the deploy's host reload brings it onto this one.
+	WebappBuild   string `protobuf:"bytes,2,opt,name=webapp_build,json=webappBuild,proto3" json:"webapp_build,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -202,6 +210,13 @@ func (x *AdoptWebWorkspaceSuccess) GetPage() *WebWorkspacePage {
 		return x.Page
 	}
 	return nil
+}
+
+func (x *AdoptWebWorkspaceSuccess) GetWebappBuild() string {
+	if x != nil {
+		return x.WebappBuild
+	}
+	return ""
 }
 
 // What a workspace page shows. The set arm IS the kind of workspace.
@@ -804,9 +819,14 @@ func (*AdoptWebWorkspaceParticipantNotExpected) Descriptor() ([]byte, []int) {
 // workspace until it is free; it carries nothing because the incumbent's next
 // `transferred` push, not this answer, says when and where to adopt. Distinct
 // from `not_yet_adopted`, which means a rendezvous still under way and is
-// retried.
+// retried. It names the page, as `no_transfer_announced` does, because a page
+// answered it goes on to mount its body on the incumbent: no handover reloads
+// a page (owner ruling, 2026-11-22).
 type AdoptWebWorkspaceTransferDeferred struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What the page is for, deciding which body it mounts below its topbar.
+	// Always set.
+	Page          *WebWorkspacePage `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -841,6 +861,13 @@ func (*AdoptWebWorkspaceTransferDeferred) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{13}
 }
 
+func (x *AdoptWebWorkspaceTransferDeferred) GetPage() *WebWorkspacePage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
 var File_agentrepl_v1_endpoint_adopt_web_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
@@ -851,9 +878,10 @@ const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
 	"\x19AdoptWebWorkspaceResponse\x12B\n" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.AdoptWebWorkspaceSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.AdoptWebWorkspaceErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"N\n" +
+	"\x06result\"q\n" +
 	"\x18AdoptWebWorkspaceSuccess\x122\n" +
-	"\x04page\x18\x01 \x01(\v2\x1e.agentrepl.v1.WebWorkspacePageR\x04page\"\x97\x01\n" +
+	"\x04page\x18\x01 \x01(\v2\x1e.agentrepl.v1.WebWorkspacePageR\x04page\x12!\n" +
+	"\fwebapp_build\x18\x02 \x01(\tR\vwebappBuild\"\x97\x01\n" +
 	"\x10WebWorkspacePage\x12;\n" +
 	"\x05agent\x18\x01 \x01(\v2#.agentrepl.v1.WebWorkspacePageAgentH\x00R\x05agent\x12>\n" +
 	"\x06thread\x18\x02 \x01(\v2$.agentrepl.v1.WebWorkspacePageThreadH\x00R\x06threadB\x06\n" +
@@ -880,8 +908,9 @@ const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
 	"\b_address\"Z\n" +
 	"$AdoptWebWorkspaceNoTransferAnnounced\x122\n" +
 	"\x04page\x18\x01 \x01(\v2\x1e.agentrepl.v1.WebWorkspacePageR\x04page\")\n" +
-	"'AdoptWebWorkspaceParticipantNotExpected\"#\n" +
-	"!AdoptWebWorkspaceTransferDeferredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"'AdoptWebWorkspaceParticipantNotExpected\"W\n" +
+	"!AdoptWebWorkspaceTransferDeferred\x122\n" +
+	"\x04page\x18\x01 \x01(\v2\x1e.agentrepl.v1.WebWorkspacePageR\x04pageB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescOnce sync.Once
@@ -928,11 +957,12 @@ var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_depIdxs = []int32{
 	12, // 11: agentrepl.v1.AdoptWebWorkspaceError.participant_not_expected:type_name -> agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
 	13, // 12: agentrepl.v1.AdoptWebWorkspaceError.transfer_deferred:type_name -> agentrepl.v1.AdoptWebWorkspaceTransferDeferred
 	3,  // 13: agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced.page:type_name -> agentrepl.v1.WebWorkspacePage
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	3,  // 14: agentrepl.v1.AdoptWebWorkspaceTransferDeferred.page:type_name -> agentrepl.v1.WebWorkspacePage
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() }

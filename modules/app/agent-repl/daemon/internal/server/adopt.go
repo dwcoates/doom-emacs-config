@@ -6,6 +6,7 @@ import (
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -101,6 +102,15 @@ func (s *server) AdoptWebWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
+	// THE ANSWER NAMES THE WEBAPP THIS DAEMON SERVES, read BEFORE the
+	// rendezvous so a build that cannot be read refuses the call with nothing
+	// adopted: a page adopting in place opens its subscriptions only on its
+	// own build.
+	webapp, err := s.deps.Deploy.InstalledWebapp()
+	if err != nil {
+		subject.Log.Error(rpc, "could not read the installed webapp's build; the webview's adoption is refused", dlog.WithCause(nil, err))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s: read the installed webapp's build: %w", rpc, err))
+	}
 	if err := s.deps.Rollout.AdoptWeb(ctx, subject.Record.ID); err != nil {
 		refused, ok := s.asRefusal(err)
 		if !ok {
@@ -110,16 +120,17 @@ func (s *server) AdoptWebWorkspace(
 		// ordinary page boot's no_transfer_announced above all, which is an
 		// answer, not a failure.
 		refused.Info = true
-		// THE PLAIN BOOT'S ANSWER NAMES THE PAGE, as the success arm does.
-		if refused.Arm == "no_transfer_announced" {
+		// THE PLAIN BOOT'S ANSWER NAMES THE PAGE, as the success arm does, and
+		// so does a deferred transfer's: both pages go on to mount their body.
+		if refused.Arm == "no_transfer_announced" || refused.Arm == "transfer_deferred" {
 			refused.Fields["page"] = webPageOf(subject.Record)
 		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
 	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace",
-		dlog.Merge(s.adoptionCall(req.Header(), began), dlog.Context{"thread": subject.Record.IsThread()}))
+		dlog.Merge(s.adoptionCall(req.Header(), began), dlog.Context{"thread": subject.Record.IsThread(), "webapp_build": webapp}))
 	resp.Result = &agentreplv1.AdoptWebWorkspaceResponse_Success{
-		Success: &agentreplv1.AdoptWebWorkspaceSuccess{Page: webPageOf(subject.Record)},
+		Success: &agentreplv1.AdoptWebWorkspaceSuccess{Page: webPageOf(subject.Record), WebappBuild: webapp},
 	}
 	return connect.NewResponse(resp), nil
 }

@@ -1671,7 +1671,7 @@ func TestAMovingWorkspacesStreamClosingStatesNoHop(t *testing.T) {
 			h.Footer.AwaitEdge(t)
 			h.Topbar.AwaitEdge(t)
 			footerBefore, topbarBefore := len(h.Footer.Participants()), len(h.Topbar.Participants())
-			h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+			h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 
 			// Act
 			cancel()
@@ -1702,7 +1702,7 @@ func TestATakenBackWorkspaceStatesItsHopsAsTheyAre(t *testing.T) {
 	log.awaitEdge(t, "host")
 	h.Footer.AwaitEdge(t)
 	h.Topbar.AwaitEdge(t)
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	cancel()
 	log.awaitEdge(t, "host")
 
@@ -1723,7 +1723,7 @@ func TestATakenBackWorkspaceStatesItsHopsAsTheyAre(t *testing.T) {
 func TestAWorkspaceServedAgainStatesItsEdgesOnceMore(t *testing.T) {
 	// Arrange
 	h, log := movingHarness(t)
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	h.Server.RetractTransferred(testWorkspaceID)
 	h.Footer.AwaitEdge(t) // the retraction's own statement
 
@@ -1746,7 +1746,7 @@ func TestAWorkspaceServedAgainStatesItsEdgesOnceMore(t *testing.T) {
 func TestAMovingWorkspacesPageUnloadStatesNoHop(t *testing.T) {
 	// Arrange
 	h, log := movingHarness(t)
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	before := len(h.Footer.Participants())
 
 	// Act

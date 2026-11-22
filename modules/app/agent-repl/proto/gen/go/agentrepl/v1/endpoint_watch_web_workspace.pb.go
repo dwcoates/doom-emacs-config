@@ -347,6 +347,14 @@ func (x *WebWorkspacePromptEcho) GetSubmittedAtUnixMs() int64 {
 	return 0
 }
 
+// THE PAGE MOVES ITSELF (owner ruling, 2026-11-22): a handover never reloads,
+// loads or drops a page. Every daemon serves one shared address, and the
+// daemon a page's calls reach forwards each workspace call and relays each
+// page subscription to the daemon serving the workspace, so the page adopts
+// the workspace in place (AdoptWebWorkspace) and opens its subscriptions
+// again when the adopting daemon serves its own webapp build, and goes quiet
+// for the deploy's one host reload when it serves another
+// (AdoptWebWorkspaceSuccess.webapp_build).
 type WebWorkspaceTransferred struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The new daemon's socket address, verbatim.

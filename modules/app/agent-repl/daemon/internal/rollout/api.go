@@ -653,7 +653,7 @@ type WorkspacePusher interface {
 	// PushTransferred pushes `transferred` on the workspace's HOST stream and
 	// `transferred{address}` on its WEB stream. The address rides the web arm
 	// because a webview has no daemon-level stream to have learned it from.
-	PushTransferred(ws ids.WorkspaceID, successorAddress string, reloadPage bool)
+	PushTransferred(ws ids.WorkspaceID, successorAddress string)
 	// RetractTransferred withdraws the standing `transferred` notice once the
 	// workspace is taken back, so it is neither replayed to a participant
 	// that attaches here again nor left to swallow the next transfer's

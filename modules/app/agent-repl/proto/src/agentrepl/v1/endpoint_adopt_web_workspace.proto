@@ -1,6 +1,7 @@
 // endpoint_adopt_web_workspace.proto — AdoptWebWorkspace: the webview's half
 // of the per-workspace handover rendezvous. WEB LINK section, called on the
-// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace.
+// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace,
+// or by the page in place (forwarded by whichever daemon its call reaches).
 // The VERB identifies the participant; rendezvous semantics are stated on
 // AdoptHostWorkspace and are identical here: all expected participants'
 // calls succeed together when adoption completes.
@@ -31,6 +32,13 @@ message AdoptWebWorkspaceSuccess {
   // What the page is for, deciding which body it mounts below its topbar.
   // Always set.
   WebWorkspacePage page = 1;
+  // THE WEBAPP BUILD THE ADOPTING DAEMON SERVES: the installed dist's entry
+  // bundle hash (webapp/src/webapp-build.ts reads a page's own). REQUIRED and
+  // not empty. A page that adopts in place after a handover, rather than
+  // booting, reopens its subscriptions only when this is its own build: on
+  // another it goes quiet, because a newer daemon's frames carry fields it has
+  // no descriptor for, and the deploy's host reload brings it onto this one.
+  string webapp_build = 2;
 }
 
 // What a workspace page shows. The set arm IS the kind of workspace.
@@ -104,5 +112,11 @@ message AdoptWebWorkspaceParticipantNotExpected {}
 // workspace until it is free; it carries nothing because the incumbent's next
 // `transferred` push, not this answer, says when and where to adopt. Distinct
 // from `not_yet_adopted`, which means a rendezvous still under way and is
-// retried.
-message AdoptWebWorkspaceTransferDeferred {}
+// retried. It names the page, as `no_transfer_announced` does, because a page
+// answered it goes on to mount its body on the incumbent: no handover reloads
+// a page (owner ruling, 2026-11-22).
+message AdoptWebWorkspaceTransferDeferred {
+  // What the page is for, deciding which body it mounts below its topbar.
+  // Always set.
+  WebWorkspacePage page = 1;
+}
