@@ -185,6 +185,14 @@ describe("presence", () => {
     expect(presence.reloadStartedAt()).toBe(1_700_000_000_500);
   });
 
+  it("hands the presence the start of the daemon change that preceded its load, shown or not", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, downtimeStartedAtMs: 1_700_000_000_400 });
+
+    // Assert
+    expect(presence.downtimeStartedAt()).toBe(1_700_000_000_400);
+  });
+
   it("records the host showing it at info", async () => {
     // Act
     fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });

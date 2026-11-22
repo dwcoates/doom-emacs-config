@@ -83,6 +83,16 @@ const (
 	// carries (frontend.v1.RosterCurrentWorkspace.switch_started_at_ms). Its
 	// gap to SWITCH_REPEAT is how far the sidebar trails the page.
 	ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_SIDEBAR ReportedLatencyKind = 7
+	// How long the workspace the person is viewing could not be used because a
+	// daemon change (a deploy's handover or restart) took its daemon away: from
+	// the instant Emacs first found the workspace's host stream detached or
+	// handed on, to the instant the workspace's page, shown at the time,
+	// first drew its conversation after that. Measured by the webapp from the
+	// instant Emacs hands the page with the load that follows the detachment,
+	// on the host's wall clock. A page not shown when it draws reports nothing:
+	// nobody was waiting on it. It spans at least as much as RELOAD_BLANK for
+	// the same deploy, since it starts no later than the page's reload.
+	ReportedLatencyKind_REPORTED_LATENCY_KIND_VIEWED_DOWNTIME ReportedLatencyKind = 8
 )
 
 // Enum value maps for ReportedLatencyKind.
@@ -96,16 +106,18 @@ var (
 		5: "REPORTED_LATENCY_KIND_PAGE_STALL",
 		6: "REPORTED_LATENCY_KIND_RELOAD_BLANK",
 		7: "REPORTED_LATENCY_KIND_SWITCH_SIDEBAR",
+		8: "REPORTED_LATENCY_KIND_VIEWED_DOWNTIME",
 	}
 	ReportedLatencyKind_value = map[string]int32{
-		"REPORTED_LATENCY_KIND_UNSPECIFIED":    0,
-		"REPORTED_LATENCY_KIND_SWITCH_REPEAT":  1,
-		"REPORTED_LATENCY_KIND_SWITCH_FIRST":   2,
-		"REPORTED_LATENCY_KIND_PAGE_BOOT":      3,
-		"REPORTED_LATENCY_KIND_PROMPT_ECHO":    4,
-		"REPORTED_LATENCY_KIND_PAGE_STALL":     5,
-		"REPORTED_LATENCY_KIND_RELOAD_BLANK":   6,
-		"REPORTED_LATENCY_KIND_SWITCH_SIDEBAR": 7,
+		"REPORTED_LATENCY_KIND_UNSPECIFIED":     0,
+		"REPORTED_LATENCY_KIND_SWITCH_REPEAT":   1,
+		"REPORTED_LATENCY_KIND_SWITCH_FIRST":    2,
+		"REPORTED_LATENCY_KIND_PAGE_BOOT":       3,
+		"REPORTED_LATENCY_KIND_PROMPT_ECHO":     4,
+		"REPORTED_LATENCY_KIND_PAGE_STALL":      5,
+		"REPORTED_LATENCY_KIND_RELOAD_BLANK":    6,
+		"REPORTED_LATENCY_KIND_SWITCH_SIDEBAR":  7,
+		"REPORTED_LATENCY_KIND_VIEWED_DOWNTIME": 8,
 	}
 )
 
@@ -1174,7 +1186,7 @@ const file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc = "" +
 	"#ReportLatenciesWorkspaceRefMismatch\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12!\n" +
 	"\freported_dir\x18\x02 \x01(\tR\vreportedDir\x12!\n" +
-	"\fregistry_dir\x18\x03 \x01(\tR\vregistryDir*\xd1\x02\n" +
+	"\fregistry_dir\x18\x03 \x01(\tR\vregistryDir*\xfc\x02\n" +
 	"\x13ReportedLatencyKind\x12%\n" +
 	"!REPORTED_LATENCY_KIND_UNSPECIFIED\x10\x00\x12'\n" +
 	"#REPORTED_LATENCY_KIND_SWITCH_REPEAT\x10\x01\x12&\n" +
@@ -1183,7 +1195,8 @@ const file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc = "" +
 	"!REPORTED_LATENCY_KIND_PROMPT_ECHO\x10\x04\x12$\n" +
 	" REPORTED_LATENCY_KIND_PAGE_STALL\x10\x05\x12&\n" +
 	"\"REPORTED_LATENCY_KIND_RELOAD_BLANK\x10\x06\x12(\n" +
-	"$REPORTED_LATENCY_KIND_SWITCH_SIDEBAR\x10\a*\xa1\x01\n" +
+	"$REPORTED_LATENCY_KIND_SWITCH_SIDEBAR\x10\a\x12)\n" +
+	"%REPORTED_LATENCY_KIND_VIEWED_DOWNTIME\x10\b*\xa1\x01\n" +
 	"\x11EditorLatencyKind\x12#\n" +
 	"\x1fEDITOR_LATENCY_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19EDITOR_LATENCY_KIND_STALL\x10\x01\x12$\n" +

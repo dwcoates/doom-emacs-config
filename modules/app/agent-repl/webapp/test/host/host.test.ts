@@ -1891,6 +1891,85 @@ describe("a page loaded by a reload", () => {
   });
 });
 
+describe("a page loaded after a daemon change took its workspace's daemon", () => {
+  const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
+  const presenceIn = (posted: HostToPage[]) =>
+    posted.filter((m) => m.kind === "presence");
+  const downtime = {
+    channel: HOST_CHANNEL,
+    kind: "presence",
+    shown: false,
+    downtimeStartedAtMs: 1_700_000_000_400,
+  };
+  const plain = { channel: HOST_CHANNEL, kind: "presence", shown: false };
+
+  it("hands a page an ensure created the downtime's start with the presence its hello replays, once", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/", null, null, 1_700_000_000_400);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([downtime, plain]);
+  });
+
+  it("hands a page re-pointed by an ensure the downtime's start in its fresh frame", () => {
+    // Arrange
+    pages(host, "a");
+    host.ensure("a", "http://ws-a.localhost:2/", null, null, 1_700_000_000_400);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([downtime]);
+  });
+
+  it("hands a reloaded page the downtime start the reload call named", () => {
+    // Arrange
+    pages(host, "a");
+    host.reload("a", null, 1_700_000_000_400);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([downtime]);
+  });
+
+  it("hands both instants when a reload and a downtime ride one load", () => {
+    // Arrange
+    pages(host, "a");
+    host.reload("a", 1_700_000_000_500, 1_700_000_000_400);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([
+      { ...downtime, reloadStartedAtMs: 1_700_000_000_500 },
+    ]);
+  });
+
+  it("hands nothing to a page no daemon change preceded", () => {
+    // Arrange
+    pages(host, "a");
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([plain]);
+  });
+});
+
 describe("a shown page re-pointed at another daemon", () => {
   const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
   const drew = { channel: HOST_CHANNEL, kind: "drawn", what: "page" } as const;

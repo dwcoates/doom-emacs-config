@@ -281,3 +281,17 @@ owner's delegation.
   - `ReportLatenciesRecorded.recorded` still counts `latencies` only.
 - Decided under the owner's delegation; additive.
 
+
+### 12. The viewed workspace's downtime across a daemon change is reported by its page
+
+- What:
+  - `agentrepl.v1.ReportedLatencyKind` gains `VIEWED_DOWNTIME = 8`, how long the workspace the person is viewing could not be used while a daemon change took its daemon away.
+  - The host-to-page presence message (webapp `host/protocol.ts`, not a protobuf) gains `downtimeStartedAtMs`, which Emacs hands the host with the `ensure` or `reload` call that loads the page after the detachment.
+- Definition of usable (decided under the owner's delegation, recorded in `proto/vocab/latencies.json`): the host stream is walked onto the serving daemon and the page, loaded against it, has drawn its conversation. Start is the instant Emacs begins a reattach walk of a workspace that stood on a daemon, if the workspace is the shown one.
+- Why the page ends it: Emacs sees the host stream's reattach but cannot see a page draw, and the page sees its draw. A page loads against the serving daemon only once Emacs has chosen it (adopt: beside the adopt, whose answer waits on the page's call; register: after the reattach), so the page's first shown draw after the load comes no earlier than the stream's return. One runtime therefore sees the end, and the start rides the load, the channel that already carries a reload's start (decision 11).
+- Why no `stream`/`page` metric label: `ReportedLatency` carries no label, and adding one is a wider contract change than the owner asked for. The page records the split (start to its reload, reload to its draw) at INFO as `page.viewed-downtime-parts` with `slower` set to `stream` or `page`.
+- Consequences:
+  - Emacs holds the noted start per page id (`agent-repl--webhost-downtime-started`) until a page load takes it or the outage's reattach ends it, so a start never reaches a later, unrelated reload.
+  - A walk of an unviewed workspace notes nothing.
+  - It overlaps `reload_blank` for the same deploy and starts no later than it.
+- Additive.

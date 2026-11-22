@@ -184,6 +184,17 @@
       "reason": "the same navigation; a sidebar trailing the page reads as the switch landing twice",
       "reported_as": "REPORTED_LATENCY_KIND_SWITCH_SIDEBAR",
       "buckets_seconds": [0.016, 0.033, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5]
+    },
+    {
+      "name": "viewed_downtime",
+      "description": "how long the viewed workspace could not be used during a daemon change (its host stream detached or handed on, to its page drawn again)",
+      "start": "Emacs finds the shown workspace's host stream detached or handed on by a daemon change (elisp.host.reattach, a walk of a workspace that stood on a daemon); the instant rides the page load that follows, as downtime_started_at_ms in the presence message",
+      "end": "the page's conversation first drawn while the page is shown (feed.page-placed); USABLE means the host stream is walked onto the serving daemon and the page, loaded against it, has drawn, because a page loads against the daemon only once the walk has chosen it",
+      "measured_by": "webapp",
+      "threshold_ms": 1000,
+      "reason": "the one workspace the user is looking at cannot be used meanwhile; a deploy should not be noticed",
+      "reported_as": "REPORTED_LATENCY_KIND_VIEWED_DOWNTIME",
+      "buckets_seconds": [0.1, 0.3, 1, 2, 5, 10, 20, 30, 60, 120]
     }
   ]
 }

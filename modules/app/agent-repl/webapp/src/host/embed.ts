@@ -112,6 +112,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         }
         // THE RELOAD FIRST, so a show it rides with already knows it.
         if (message.reloadStartedAtMs !== undefined) presence.setReloadStartedAt(message.reloadStartedAtMs);
+        if (message.downtimeStartedAtMs !== undefined) presence.setDowntimeStartedAt(message.downtimeStartedAtMs);
         presence.setShown(message.shown, message.switchStartedAtMs ?? null);
         return;
       case "webhostFailures":

@@ -112,6 +112,8 @@
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
 ;; owns the webview, popup.el owns the one shared editor popup.
+(declare-function agent-repl-webhost-note-downtime "webhost" (ws))
+(declare-function agent-repl-webhost-end-downtime "webhost" (ws))
 (declare-function agent-repl-frontend-reload-webapp "frontend" (ws build))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
 (declare-function agent-repl-magit-log-commit "magit" (ws dir branch commit))
@@ -1906,6 +1908,12 @@ and superseded one way.  TRIGGER is recorded."
     ;; THE WALK RECORDS THE PROMOTION EPOCH IT BEGAN IN, so its outcome can
     ;; read whether a promotion passed while it was in flight
     ;; (`agent-repl-host--register-settled').
+    ;; A WALK OF A WORKSPACE THAT STOOD ON A DAEMON IS THE START OF ITS
+    ;; DOWNTIME: the page, handed the instant with its next load, measures
+    ;; from it to its conversation drawn (`viewed_downtime').  A first
+    ;; attachment has no recorded daemon, so it is no downtime.
+    (when (agent-repl-host--recorded-conn ws)
+      (agent-repl-webhost-note-downtime ws))
     (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger
                                              :promotions (agent-repl-link-promotions)))
     ;; A NEWER WALK THAT IS NOT AN ADOPT ONTO THE SAME DAEMON ENDS THE HOLD:
@@ -2093,6 +2101,8 @@ incumbent failed after the successor was promoted, and `main
      ;; so the page's own streams reopen there by themselves.
      (t
       (agent-repl-host--reattached ws new ref trigger)
+      ;; NO PAGE LOAD FOLLOWS to carry the noted start, so the outage ends here.
+      (agent-repl-webhost-end-downtime ws)
       (agent-repl--info ws (format "elisp.host.%s-registered ws=%%s address=%%S" trigger)
                         ws (agent-repl-connect-connection-address new))))))
 
@@ -2409,6 +2419,7 @@ is recorded."
                 (:success
                  (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
                  (agent-repl-host--reattached ws new ref trigger)
+                 (agent-repl-webhost-end-downtime ws)
                  (agent-repl-host--release-held ws "adopted"))
                 (:error
                  (funcall restore)
