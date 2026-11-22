@@ -1120,7 +1120,7 @@ describe("a repository block", () => {
   it("indents a block row exactly as an own-repository sibling, at both depths", () => {
     inRail(blockFamily(), (rail) => {
       const indent = (id: string): string => cascadedValue(rail.querySelector(`[data-roster-row='${id}']`)!, "--row-indent");
-      const generationStep = "calc(var(--row-indent-parent) + 1.2rem)";
+      const generationStep = "calc(var(--row-indent-parent) + var(--row-indent-step))";
       expect([indent("ws-2"), indent("ws-3"), indent("ws-5"), indent("ws-2a"), indent("ws-3a")]).toEqual(Array(5).fill(generationStep));
     });
   });
