@@ -188,32 +188,66 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.DeployMediator {
 		return err
 	}
-	return v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,
-		"a cold gate stands on the standing deploy check; it is answered compact-and-resume at once")
+	_, err := v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,
+		"a cold gate stands on the standing deploy check; it is answered compact-and-resume at once", nil)
+	return err
 }
 
 // CompactRequeuedMergeColdGate implements Verbs: answers the cold gate that
-// stands on WS, whose merge was just requeued, by a compaction that keeps
+// stands on WS, whose merge waits in line at it, by a compaction that keeps
 // the prompts held at the gate (owner request, 2026-11-20: a requeue at a
 // cold gate compacts and goes in line, where it was refused). The held
 // prompts are the user's to send: the merge runs first.
-func (v *verbs) CompactRequeuedMergeColdGate(ctx context.Context, ws wsm.WorkspaceID) error {
-	return v.answerColdGateByCompaction(ctx, "CompactRequeuedMergeColdGate", ws, false,
-		"a cold gate stands on the workspace of a requeued merge; it is answered by a compaction at once")
+//
+// IT ANSWERS ONLY ONCE THE ANSWER'S RE-OPEN HAS SETTLED (owner ruling,
+// 2026-11-21), because the queue's one answer is spent by an attempt that
+// ended in failure, never by one still compacting. The re-open is a detached
+// bring-up whose every step runs under its own measured bound (the adoption
+// bound, DefaultSummarizeBound for the compaction, DefaultStartSessionBound
+// for the opening), and the daemon's stand-down ends it, so the wait is
+// bounded by them and adds no deadline of its own: a slow compaction inside
+// its bound is never judged failed here. It answers true when the session
+// came up; false with no error when no gate stood or the re-open was
+// abandoned (a stand-down, or its shim taken); and the failure otherwise,
+// the gate standing again.
+func (v *verbs) CompactRequeuedMergeColdGate(ctx context.Context, ws wsm.WorkspaceID) (bool, error) {
+	settled := make(chan ColdGateAnswerSettled, 1)
+	answered, err := v.answerColdGateByCompaction(ctx, "CompactRequeuedMergeColdGate", ws, false,
+		"a cold gate stands on the workspace of a requeued merge; it is answered by a compaction at once",
+		func(outcome ColdGateAnswerSettled) { settled <- outcome })
+	if err != nil || !answered {
+		return false, err
+	}
+	select {
+	case outcome := <-settled:
+		switch outcome.Outcome {
+		case GateAnswerResumed:
+			return true, nil
+		case GateAnswerAbandoned:
+			return false, nil
+		case GateAnswerFailed:
+			return false, outcome.Err
+		}
+		panic(fmt.Sprintf("workspace: a cold gate's re-open settled with the undeclared outcome %q", outcome.Outcome))
+	case <-ctx.Done():
+		return false, fmt.Errorf("compact the requeued merge's cold gate on %s: the wait for its re-open ended: %w", ws, context.Cause(ctx))
+	}
 }
 
 // answerColdGateByCompaction answers the cold gate standing on WS, for VERB,
 // by a compaction of the whole conversation with the gate's default
 // summarizer (Haiku, coldCompactMenu), recording WHY. RESUME sends the
 // prompts held at the gate once the session is up; otherwise they stay held.
-// A workspace with no gate standing is left as it is.
-func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws wsm.WorkspaceID, resume bool, why string) error {
+// SETTLED, when given, is told how the re-open ended (answerColdGate). It
+// answers whether a gate stood to answer: a workspace with no gate standing
+// is left as it is.
+func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws wsm.WorkspaceID, resume bool, why string, settled func(ColdGateAnswerSettled)) (bool, error) {
 	_, log, err := v.owned(ctx, verb, ws)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if _, standing := v.deps.Cards.ColdGate(ws); !standing {
-		return nil
+		return false, nil
 	}
 	compact := defaultSummarizerAnswer()
 	answer := &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: compact}}
@@ -221,7 +255,10 @@ func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws 
 		answer.Choice = &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: compact}
 	}
 	log.Info(opDeployChecks, why, dlog.Context{"resume": resume})
-	return v.AnswerColdGate(ctx, ws, answer)
+	if err := v.answerColdGate(ctx, ws, answer, settled); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RefreshDeployCheck implements Verbs: brings standing fixer WS's worktree

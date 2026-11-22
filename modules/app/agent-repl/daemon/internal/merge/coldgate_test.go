@@ -606,9 +606,9 @@ func TestAColdGateRaisedOnAQueuedMergesWorkspaceIsAnsweredByACompaction(t *testi
 	if !entryIn(t, h, theWorkspace).ColdGated {
 		t.Fatal("the merge was not marked skipped while the compaction runs")
 	}
-	rec, ok := coldGateRecord(h, "info", "the cold gate of a queued merge's workspace was answered by a compaction; the merge resumes at its place once the session is up")
-	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["repo"] == nil {
-		t.Fatalf("the compaction was recorded as %+v, want an INFO naming the workspace and the queue", rec)
+	rec, ok := coldGateRecord(h, "info", "the cold gate of a queued merge's workspace was answered by a compaction; the session is up, and the merge resumes at its place")
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["repo"] == nil || rec.Context["ledger"] == "" {
+		t.Fatalf("the compaction was recorded as %+v, want an INFO naming the workspace, the queue and the merge's ledger", rec)
 	}
 }
 
@@ -649,21 +649,145 @@ func TestACompactionOfAQueuedMergesGateIsAskedAgainWhenItsRecordIsRaisedAgain(t 
 	}
 }
 
-func TestACompactionThatFailsIsAnErrorAndLeavesTheMergeMarkedAndSkipped(t *testing.T) {
-	// Arrange
+// compactionFailsOnce queues two merges and answers theWorkspace's gate with
+// a compaction that fails, the gate raised again inside it as a failed
+// bring-up raises it (2026-11-21: 260 answers in 44 minutes).
+func compactionFailsOnce(t *testing.T) *harness {
+	t.Helper()
 	h := twoInLine(t)
 	h.compactGateErr = errors.New("the summarizer is down")
+	h.duringCompactGate = func(ws ids.WorkspaceID) { h.o.ColdGateRaised(ws) }
+	h.o.ColdGateRaised(theWorkspace)
+	return h
+}
+
+func TestAFailedAnswerToAQueuedMergesColdGateIsFinal(t *testing.T) {
+	t.Run("the gate raised while the answer runs is not answered again", func(t *testing.T) {
+		// Arrange, Act
+		h := compactionFailsOnce(t)
+
+		// Assert
+		if !slices.Equal(h.gatesCompacted, []ids.WorkspaceID{theWorkspace}) {
+			t.Fatalf("gates compacted = %v, want one answer", h.gatesCompacted)
+		}
+	})
+	t.Run("the gate raised after the failure is not answered again", func(t *testing.T) {
+		// Arrange
+		h := compactionFailsOnce(t)
+		h.duringCompactGate = nil
+
+		// Act
+		h.o.ColdGateRaised(theWorkspace)
+
+		// Assert
+		if !slices.Equal(h.gatesCompacted, []ids.WorkspaceID{theWorkspace}) {
+			t.Fatalf("gates compacted = %v, want one answer", h.gatesCompacted)
+		}
+	})
+	t.Run("the merge leaves the queue's line", func(t *testing.T) {
+		// Arrange, Act
+		h := compactionFailsOnce(t)
+
+		// Assert
+		if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{"ws-2"}) {
+			t.Fatalf("queue = %v, want the merge whose gate was not answered gone", got)
+		}
+	})
+	t.Run("the merge stands off its queue as failed", func(t *testing.T) {
+		// Arrange, Act
+		h := compactionFailsOnce(t)
+
+		// Assert
+		rec, kept, err := h.db.OffQueueMergeOf(context.Background(), theWorkspace)
+		if err != nil || !kept || rec.Cause != causeFailed {
+			t.Fatalf("off-queue record %+v (kept %v, err %v), want the request kept as failed for a requeue", rec, kept, err)
+		}
+		if OffQueueCause(rec.Cause).GetFailed() == nil {
+			t.Fatalf("off-queue cause %v, want the failed arm", OffQueueCause(rec.Cause))
+		}
+	})
+	t.Run("the merge's bubble names the failure", func(t *testing.T) {
+		// Arrange, Act
+		h := compactionFailsOnce(t)
+
+		// Assert
+		if got, want := h.feed.lastAbandonedSummary(), abandonSummaries[CauseColdGateAnswerFailed]; got != want {
+			t.Fatalf("the bubble ended %q, want %q", got, want)
+		}
+	})
+	t.Run("the failure is one ERROR naming the workspace, the merge and the cause", func(t *testing.T) {
+		// Arrange, Act
+		h := compactionFailsOnce(t)
+
+		// Assert
+		const message = "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge leaves its queue as failed, and the gate stands for the user"
+		found := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opColdGate, Message: message})
+		if len(found) != 1 {
+			t.Fatalf("records %v, want the failure recorded once", found)
+		}
+		ctx := found[0].Context
+		if ctx["workspace"] != string(theWorkspace) || ctx["repo"] != string(h.repoKey()) || ctx["ledger"] == "" || ctx["error"] != "the summarizer is down" {
+			t.Fatalf("the failure was recorded as %+v, want the workspace, the queue, the merge's ledger and the cause", ctx)
+		}
+	})
+}
+
+func TestTheRaiseWhileAnAnswerRunsIsRecordedAtDebug(t *testing.T) {
+	// Arrange, Act
+	h := compactionFailsOnce(t)
+
+	// Assert
+	rec, ok := coldGateRecord(h, "debug", "the cold gate of a queued merge's workspace is being answered already; the gate raised again is not answered twice")
+	if !ok || rec.Context["workspace"] != string(theWorkspace) {
+		t.Fatalf("the skipped raise was recorded as %+v, want a DEBUG naming the workspace", rec)
+	}
+}
+
+func TestASlowButHealthyAnswerToAQueuedMergesColdGateIsNotJudgedFailed(t *testing.T) {
+	// Arrange: the gate is raised again while the compaction still runs, as
+	// a summarizer reading a long conversation runs past the shim's bring-up.
+	h := twoInLine(t)
+	var duringAnswer []ids.WorkspaceID
+	h.duringCompactGate = func(ws ids.WorkspaceID) {
+		h.o.ColdGateRaised(ws)
+		duringAnswer = queueOrderOf(t, h)
+	}
 
 	// Act
 	h.o.ColdGateRaised(theWorkspace)
 
 	// Assert
+	if !slices.Equal(duringAnswer, []ids.WorkspaceID{theWorkspace, "ws-2"}) {
+		t.Fatalf("queue while compacting = %v, want the merge still at its place", duringAnswer)
+	}
+	if !slices.Equal(h.gatesCompacted, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want one answer", h.gatesCompacted)
+	}
+	if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace, "ws-2"}) {
+		t.Fatalf("queue = %v, want the slow answer's merge kept at its place", got)
+	}
+	if _, failed := coldGateRecord(h, "error", ""); failed {
+		t.Fatalf("records %v, want no failure recorded for a slow answer", h.logs.Records())
+	}
+}
+
+func TestAnAbandonedAnswerToAQueuedMergesColdGateLeavesTheMergeAtItsPlace(t *testing.T) {
+	// Arrange
+	h := twoInLine(t)
+	h.compactGateAbandoned = true
+
+	// Act
+	h.o.ColdGateRaised(theWorkspace)
+
+	// Assert
+	if got := queueOrderOf(t, h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace, "ws-2"}) {
+		t.Fatalf("queue = %v, want the merge kept at its place", got)
+	}
 	if !entryIn(t, h, theWorkspace).ColdGated {
 		t.Fatal("the merge was unmarked though its gate stands")
 	}
-	rec, ok := coldGateRecord(h, "error", "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge stays skipped until the gate is answered")
-	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["repo"] == nil || rec.Context["error"] == nil {
-		t.Fatalf("the failure was recorded as %+v, want an ERROR naming the workspace, the queue and the cause", rec)
+	if _, ok := coldGateRecord(h, "info", "the cold gate of a queued merge's workspace was not answered: no gate stood, or the answer's re-open was abandoned; the merge stays at its place"); !ok {
+		t.Fatalf("records %v, want the unanswered gate recorded at INFO", h.logs.Records())
 	}
 }
 
@@ -702,5 +826,27 @@ func TestAGateStoodAgainOnAWorkspaceWithNoQueuedMergeIsNeitherAnsweredNorAnError
 	}
 	if rec, ok := coldGateRecord(h, "error", "an answer to the cold gate of a queued merge's workspace failed and the gate stands again; the queue does not answer it again, and the merge stays skipped until the user answers it"); ok {
 		t.Fatalf("an ERROR %+v was recorded for a workspace with no merge", rec)
+	}
+}
+
+func TestAGateStoodAgainWhileItsAnswerRunsLeavesTheFailureToTheAnswersOwnRecord(t *testing.T) {
+	// Arrange: the answer's failed re-open stands the gate again before the
+	// answer returns its failure.
+	h := twoInLine(t)
+	h.compactGateErr = errors.New("the summarizer is down")
+	h.duringCompactGate = func(ws ids.WorkspaceID) { h.o.ColdGateStoodAfterFailedAnswer(ws) }
+
+	// Act
+	h.o.ColdGateRaised(theWorkspace)
+
+	// Assert
+	errs := 0
+	for _, r := range h.logs.Records() {
+		if r.Level == "error" && r.Operation == opColdGate {
+			errs++
+		}
+	}
+	if errs != 1 {
+		t.Fatalf("%d ERROR records under %s, want only the answer's own: %v", errs, opColdGate, h.logs.Records())
 	}
 }

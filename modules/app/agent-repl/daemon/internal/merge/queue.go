@@ -497,6 +497,12 @@ const (
 	// at its cold gate: hiding passes the gate without an answer, and takes
 	// the merge off its queue.
 	CauseHiddenAtColdGate AbandonCause = "hidden_at_cold_gate"
+	// CauseColdGateAnswerFailed is the queue's one answer to a waiting
+	// merge's cold gate, a compaction, failing (answerQueuedColdGate): the
+	// failure is final, so the merge leaves its queue as a failed merge
+	// (causeFailed, whose off-queue arm and queue change it shares) for the
+	// user to answer the gate and requeue it.
+	CauseColdGateAnswerFailed AbandonCause = causeFailed
 )
 
 // The causes a queue entry leaves its queue for that are NOT abandonments:
@@ -529,14 +535,15 @@ const (
 // abandonSummaries is the resolved sentence each cause draws as the bubble's
 // collapsed line, exactly as `FeedMergeFailed.summary` is drawn.
 var abandonSummaries = map[AbandonCause]string{
-	CauseUserDrop:         "the operator evicted this merge from the queue",
-	CauseUserDequeue:      "the user released this merge's queue slot",
-	CauseWorkspaceClosed:  "the workspace was closed while this merge was waiting in the queue",
-	CauseDaemonShutdown:   "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
-	CauseAheadDidNotLand:  "the merge this one was placed behind left the queue without landing",
-	CauseAgentGaveUp:      "the merge's own agent gave it up",
-	CauseColdGate:         "the workspace's session parked at its cold gate; the merge waits at its place in line until the gate is passed",
-	CauseHiddenAtColdGate: "the workspace was hidden at its cold gate while this merge was waiting in the queue",
+	CauseUserDrop:             "the operator evicted this merge from the queue",
+	CauseUserDequeue:          "the user released this merge's queue slot",
+	CauseWorkspaceClosed:      "the workspace was closed while this merge was waiting in the queue",
+	CauseDaemonShutdown:       "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
+	CauseAheadDidNotLand:      "the merge this one was placed behind left the queue without landing",
+	CauseAgentGaveUp:          "the merge's own agent gave it up",
+	CauseColdGate:             "the workspace's session parked at its cold gate; the merge waits at its place in line until the gate is passed",
+	CauseHiddenAtColdGate:     "the workspace was hidden at its cold gate while this merge was waiting in the queue",
+	CauseColdGateAnswerFailed: "the queue could not answer the workspace's cold gate by a compaction; the merge left the queue, and the gate stands for the user to answer before the merge is requeued",
 }
 
 // runningSummaries are the resolved sentences of a merge abandoned AFTER it

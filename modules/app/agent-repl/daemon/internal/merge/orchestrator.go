@@ -171,6 +171,10 @@ type orchestrator struct {
 	coldMu       sync.Mutex
 	coldEdges    []coldGateEdge
 	coldApplying bool
+	// coldAnswering holds the workspaces whose queued merge's cold gate the
+	// queue is answering now (answerQueuedColdGate), guarded by coldMu: a
+	// gate raised while its answer runs is never answered a second time.
+	coldAnswering map[ids.WorkspaceID]bool
 	// events serializes the queue's reported changes (subscriptions.go). It
 	// is its own lock, never taken with mu.
 	events *queueEvents
@@ -390,6 +394,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		kicked:             map[wsm.RepoKey]bool{},
 		syncing:            map[wsm.RepoKey]bool{},
 		displaces:          map[ids.WorkspaceID]bool{},
+		coldAnswering:      map[ids.WorkspaceID]bool{},
 		runsByWorkspace:    map[ids.WorkspaceID]*run{},
 		requested:          map[ids.WorkspaceID]*requestWait{},
 		requestingTurns:    map[ids.WorkspaceID]ids.TurnID{},
