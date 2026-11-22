@@ -6421,3 +6421,168 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
     ;; Assert
     (should (equal (mapcar #'car agent-repl-test-host--gated) '("MarkWorkspaceViewed")))
     (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=forgotten"))))
+
+;;;; ---- A handover walks a workspace ONCE, onto the connection that stays ----
+;;
+;; Every daemon of a handover serves one shared address, so an adopt goes
+;; out on the primary link, the OUTGOING daemon's connection.  2026-11-22:
+;; each deploy then walked the viewed workspace three times (the adopt, the
+;; promotion's register walk, and a later dead-connection walk).
+
+(defmacro agent-repl-test-host--with-retiring-primary (&rest body)
+  "Run BODY with `old' the live primary, `new' the promotion's connection, ws-1 on `old'."
+  (declare (indent 0))
+  `(agent-repl-test-host--with-harness
+     (agent-repl-test-host--with-dir
+       (let ((old (agent-repl-connect-open "127.0.0.1:59704"))
+             (new (agent-repl-connect-open "127.0.0.1:59704")))
+         (setq agent-repl-test-host--live old)
+         (agent-repl-test-host--subscribe "ws-1" old)
+         ,@body))))
+
+(defun agent-repl-test-host--adopt-on-retiring (ws)
+  "Deliver WS's `transferred' push, which adopts WS on the primary."
+  (agent-repl-test-host--push ws '(:arm :transferred :value nil)))
+
+(ert-deftest agent-repl-test-host-handover-adopt-leaves-the-stream-on-the-retiring-primary ()
+  "An adopt answered on the outgoing primary moves no stream."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Arrange
+    (setq agent-repl-test-host--walk nil)
+    ;; Act
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    ;; Assert
+    (should (equal (reverse agent-repl-test-host--walk) '(:adopt)))
+    (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) old))))
+
+(ert-deftest agent-repl-test-host-handover-adopt-settles-the-walk-and-logs-the-deferral ()
+  "The adopt ends its walk, and the deferral names the connection's identity."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Act
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    ;; Assert
+    (should-not (agent-repl-host-adopting-p "ws-1"))
+    (should-not (agent-repl-host-detached-p "ws-1"))
+    (should (agent-repl-test-host--logged-p
+             :info (format "elisp.host.stream-move-deferred ws=ws-1 conn=%s address=\"127.0.0.1:59704\""
+                           (agent-repl-host--conn-id old))))))
+
+(ert-deftest agent-repl-test-host-handover-promotion-moves-the-adopted-stream-once ()
+  "The promotion's one move puts the stream and the recorded connection on the successor."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Arrange
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    (setq agent-repl-test-host--walk nil)
+    ;; Act
+    (agent-repl-host-on-link-promote old new)
+    ;; Assert
+    (should (equal (reverse agent-repl-test-host--walk) '(:cancel :subscribe)))
+    (should (eq (agent-repl-host--recorded-conn "ws-1") new))
+    (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) new))
+    (should (agent-repl-test-host--logged-p
+             :info (format "elisp.host.stream-moved ws=ws-1 from=%s conn=%s address=\"127.0.0.1:59704\""
+                           (agent-repl-host--conn-id old) (agent-repl-host--conn-id new))))))
+
+(ert-deftest agent-repl-test-host-handover-promotion-runs-no-promotion-walk-for-an-adopted-workspace ()
+  "No registration and no `promotion' reattach follows an adopt that already moved WS."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Arrange
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    (setq agent-repl-test-host--calls nil)
+    ;; Act
+    (agent-repl-host-on-link-promote old new)
+    ;; Assert
+    (should-not (agent-repl-test-host--registered-dirs new))
+    (should-not (agent-repl-test-host--calls-to "RegisterWorkspaces" new))
+    (should-not (agent-repl-test-host--logged-p :info "trigger=promotion"))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.link-promote left-behind=0 moved=1"))))
+
+(ert-deftest agent-repl-test-host-handover-predecessor-exit-causes-no-dead-connection-walk ()
+  "After the promotion closes the old connection WS resolves its connection with no walk."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Arrange
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    (agent-repl-host-on-link-promote old new)
+    (setq agent-repl-test-host--live new
+          agent-repl-test-host--logs nil)
+    ;; Act
+    (agent-repl-connect-close old)
+    (let ((resolved (agent-repl-host-conn "ws-1")))
+      ;; Assert
+      (should (eq resolved new)))
+    (should-not (agent-repl-test-host--logged-p :info "elisp.host.dead-connection"))
+    (should-not (agent-repl-test-host--logged-p :info "elisp.host.reattach "))))
+
+(ert-deftest agent-repl-test-host-handover-old-stream-ending-before-the-promotion-starts-no-walk ()
+  "The outgoing daemon's exit ends WS's stream; the promotion, not a walk of its own, moves it."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Arrange
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    (setq agent-repl-test-host--logs nil
+          agent-repl-test-host--calls nil)
+    ;; Act
+    (agent-repl-test-host--lose "ws-1")
+    ;; Assert
+    (should-not (agent-repl-host-detached-p "ws-1"))
+    (should-not (agent-repl-test-host--logged-p :info "elisp.host.reattach "))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.stream-ended-awaiting-promotion ws=ws-1"))
+    ;; Act
+    (agent-repl-host-on-link-promote old new)
+    ;; Assert
+    (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) new))
+    (should-not (agent-repl-test-host--registered-dirs new))))
+
+(ert-deftest agent-repl-test-host-handover-adopt-onto-the-successor-moves-the-stream-at-once ()
+  "An adopt on a connection that is not retiring moves the stream as it always did."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--walk nil)
+    ;; Act
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    ;; Assert
+    (should (equal (reverse agent-repl-test-host--walk) '(:adopt :cancel :subscribe)))
+    (should (eq (plist-get (agent-repl-host-stream "ws-1") :conn) agent-repl-test-host--successor))
+    (should-not (plist-get (agent-repl-host--entry "ws-1") :stream-due))))
+
+(ert-deftest agent-repl-test-host-handover-link-down-forgets-the-owed-move ()
+  "A link that goes down before any promotion leaves no move owed."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Arrange
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    ;; Act
+    (agent-repl-host-on-link-down old)
+    ;; Assert
+    (should-not (plist-get (agent-repl-host--entry "ws-1") :stream-due))
+    (should-not (agent-repl-host--recorded-conn "ws-1"))))
+
+(ert-deftest agent-repl-test-host-handover-a-move-owed-off-the-old-connection-fails-hard ()
+  "A move owed for a workspace recorded elsewhere than on OLD is an invariant breach."
+  (agent-repl-test-host--with-retiring-primary
+    ;; Arrange
+    (agent-repl-test-host--adopt-on-retiring "ws-1")
+    (agent-repl-host--put "ws-1" :conn new)
+    (let ((fatals nil))
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+        ;; Act
+        (should-error (agent-repl-host--move-due-streams old new))
+        ;; Assert
+        (should (string-search "elisp.host.stream-due-off-old ws=ws-1" (car fatals)))))))
+
+(ert-deftest agent-repl-test-host-dead-connection-check-logs-the-recorded-connection ()
+  "The dead-connection walk's trigger names the recorded connection and the live one."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((dead (agent-repl-connect-open "127.0.0.1:59704"))
+            (live (agent-repl-connect-open "127.0.0.1:59704")))
+        (agent-repl-test-host--subscribe "ws-1" dead)
+        (setq agent-repl-test-host--live live)
+        (agent-repl-connect-close dead)
+        ;; Act
+        (agent-repl-host-conn "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :info (format "elisp.host.dead-connection ws=ws-1 recorded=%s address=\"127.0.0.1:59704\" live=%s"
+                               (agent-repl-host--conn-id dead) (agent-repl-host--conn-id live))))))))
