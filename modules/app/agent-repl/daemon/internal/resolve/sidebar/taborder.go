@@ -117,7 +117,7 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 		if placed[ws.ID] {
 			// THE SELECTION IS REG.CURRENT's, whatever the row's own flag says
 			// (the resolver takes a switch between registry installs), and it
-			// is what a fold draws inside itself (DrawnInsideFold).
+			// is what a fold draws inside itself (wsm.Visibility).
 			ws.Current = reg.Current != nil && *reg.Current == ws.ID
 			members = append(members, ws)
 		}
@@ -167,17 +167,11 @@ func openNodes(tree forest, order blockOrder, list []wsm.Workspace) []openNode {
 // each before its family (its own-repository children, then its blocks'),
 // saying whether the tab is FOLDED: FOLDED is the region's own fold, and a
 // workspace whose children are folded folds every tab below it, block rows
-// included (childrenFolded). A workspace the fold draws inside itself
-// (wsm.Workspace.DrawnInsideFold: its turn started under the fold and is
-// running, or the user is on it) is the one exception: its own tab is drawn,
-// and the fold still covers its family.
+// included (childrenFolded). It is the sections' own reading: which of the
+// covered workspaces are drawn anyway is the visibility (visibility.go).
 func walkOpen(nodes []openNode, fold *Fold, visit func(ws wsm.Workspace, fold *Fold)) {
 	for _, node := range nodes {
-		own := fold
-		if node.ws.DrawnInsideFold() {
-			own = nil
-		}
-		visit(node.ws, own)
+		visit(node.ws, fold)
 		walkOpen(flatten(node.children, node.blocks), familyFold(node, fold), visit)
 	}
 }
@@ -284,12 +278,12 @@ func tabsOf(repos []openRepo) []Tab {
 	var out []Tab
 	for _, repo := range repos {
 		for _, region := range repo.regions {
+			// THE TAB'S WITHHOLDING IS wsm.Workspace.Withheld, the one statement
+			// the daemon's Runs and Holds read, so the bar and the daemon cannot
+			// disagree about a tab. An open row is never in the hidden section,
+			// so it is Drawn or WithheldCollapsed.
 			walkOpen(region.rows, region.fold(repo.repo), func(ws wsm.Workspace, fold *Fold) {
-				withheld := wsm.Drawn
-				if fold != nil {
-					withheld = wsm.WithheldCollapsed
-				}
-				out = append(out, Tab{Workspace: ws, Withheld: withheld, Fold: fold})
+				out = append(out, Tab{Workspace: ws, Withheld: ws.Withheld(fold != nil), Fold: fold})
 			})
 		}
 	}

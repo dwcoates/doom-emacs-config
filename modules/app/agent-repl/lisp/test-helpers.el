@@ -898,7 +898,6 @@ re-routes their frontend resolution instead."
          (agent-repl-open-tabs-sender #'agent-repl-test--open-tabs-answer-ready)
          (agent-repl-roster--walked nil)
          (agent-repl-roster--walked-hidden nil)
-         (agent-repl-roster--walked-folded nil)
          (agent-repl-roster--tab-numbers nil))
      (unwind-protect
          (progn ,@body)
@@ -1362,9 +1361,28 @@ daemon numbers it."
                         (and (eq (plist-get arm :arm) :subsection) (plist-get arm :value))))
                     (plist-get section :entries))))
 
+(defun agent-repl-test--stamp-visibility (row drawn)
+  "Answer fixture ROW carrying its visibility, as the daemon would stamp it.
+DRAWN is whether the tab bar draws the row.  The selection is `:selected',
+a drawn row that is not closed `:unselected-visible', and every other
+`:not-visible' (`wsm.Workspace.Visibility'); a fixture that states
+`:visibility' itself keeps it.  A COPY is stamped, never ROW itself, so a
+row a test reuses across pushes is stamped afresh by each, as the daemon
+stamps every push."
+  (if (plist-member row :visibility)
+      row
+    (let ((current (eq (plist-get (plist-get row :current) :current) t))
+          (closed (eq (plist-get (plist-get row :closed) :closed) t)))
+      (append row (list :visibility (cond (current :selected)
+                                          ((and drawn (not closed)) :unselected-visible)
+                                          (t :not-visible)))))))
+
 (defun agent-repl-test--hidden-rows (rows)
-  "Return fixture ROWS as a decoded `RosterHiddenRows', families nested."
-  (cl-labels ((wrap (row) (list :row row :children (mapcar #'wrap (gethash row agent-repl-test--families)))))
+  "Return fixture ROWS as a decoded `RosterHiddenRows', families nested.
+A hidden row is visible only while it is the selection
+\(`agent-repl-test--stamp-visibility')."
+  (cl-labels ((wrap (row) (list :row (agent-repl-test--stamp-visibility row nil)
+                                :children (mapcar #'wrap (gethash row agent-repl-test--families)))))
     (list :rows (mapcar #'wrap rows))))
 
 (defun agent-repl-test--merged-rows (rows)
@@ -1382,9 +1400,14 @@ daemon numbers it."
 Repository by repository, entry by entry, a subsection's rows where it
 stands, each row before its family: 1, 2, ... for every row of an
 unfolded region, a folded tab for a collapsed repository's or a collapsed
-subsection's, exactly as the daemon numbers them.  Answers SECTIONS."
+subsection's, exactly as the daemon numbers them.  Each row's visibility
+is stamped as the daemon stamps it (`agent-repl-test--stamp-visibility'): a
+numbered tab's row is visible, a folded one's only while it is the
+selection.
+Answers SECTIONS."
   (let ((next 0))
     (cl-labels ((visit (open folded)
+                  (plist-put open :row (agent-repl-test--stamp-visibility (plist-get open :row) (not folded)))
                   (plist-put open :tab
                              (list :tab (if folded
                                             (list :arm :folded :value nil)

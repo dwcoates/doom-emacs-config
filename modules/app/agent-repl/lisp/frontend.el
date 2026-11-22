@@ -131,13 +131,11 @@
 (declare-function agent-repl-sidebar-view-show "sidebar-view" ())
 (declare-function agent-repl-sidebar-view-hide "sidebar-view" ())
 (declare-function agent-repl-webhost-xwidget "webhost" ())
-(declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
 (declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
-(declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl-webhost-reload-page "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-buffer "webhost" ())
@@ -947,7 +945,7 @@ window's background its page's gate wears.
 
 Either way the host is asked to hold WS's page
 \(`agent-repl-webhost-ensure-page') when it is wanted
-\(`agent-repl-page-unload-wanted-p': on screen, or working), which is
+\(`agent-repl-page-unload-wanted-p': unless cold-gated), which is
 idempotent: a page already held at WS's URL is left alone, so this is safe
 on every open and show.  A slot that is not wanted is made with no page.
 
@@ -976,12 +974,11 @@ webview window resolves against the worktree the REPL is attached to."
                     (agent-repl--ws-put ws :frontend-buffer buf)
                     (agent-repl--info ws "elisp.frontend.slot-mounted ws=%s buffer=%s" ws name)
                     buf)))))
-    ;; A PAGE IS LOADED ONLY WHERE IT IS WANTED (owner ruling, 2026-10-29):
-    ;; on screen, or working.  Any other slot is made with no page, and its
-    ;; show loads it (`agent-repl-page-unload-note-shown').
+    ;; A PAGE IS LOADED FOR EVERY WORKSPACE HELD HERE, which the daemon
+    ;; calls visible (owner ruling, 2026-11-21), but a cold-gated one: its
+    ;; slot is made with no page, and its show holds the page back
+    ;; (`agent-repl-page-unload-note-shown').
     (when (agent-repl-page-unload-wanted-p ws)
-      (unless (agent-repl-webhost-has-page-p ws)
-        (agent-repl-page-unload-note-mounted ws))
       (agent-repl-webhost-ensure-page ws))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
@@ -1275,11 +1272,6 @@ Refusals, all preconditions rather than failures:
   - `:no-ref'            no `WorkspaceRef' yet, so no URL exists to
                          mount — the roster has not reached this
                          workspace, and a guessed URL is not an option;
-  - `:hidden'            the user hid it, and the user is not looking at
-                         it: it runs nothing
-                         (`agent-repl-open-tabs-withheld-p').  A fold
-                         keeps the slot and withholds only its page
-                         (`agent-repl-page-unload-wanted-p');
   - `:already-mounted'   a live webview buffer already exists (this is
                          what makes pre-creation idempotent);
   - `:no-xwidget'        an Emacs with no xwidget support has no webview
@@ -1288,7 +1280,6 @@ Refusals, all preconditions rather than failures:
    ((not (agent-repl--ws-live-p ws)) :not-live)
    ((not (agent-repl--ws-gui-frontend-p ws)) :not-gui)
    ((null (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))) :no-ref)
-   ((and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)) :hidden)
    ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
    ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))
 

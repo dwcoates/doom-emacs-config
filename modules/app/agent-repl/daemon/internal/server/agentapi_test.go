@@ -823,16 +823,13 @@ func TestSubmitPromptSurfacesAnUnreadableSender(t *testing.T) {
 
 // ---- EvaluateInEditor ----------------------------------------------------------
 
-// evaluating starts an evaluation of TEXT for the harness workspace, with its
-// editor's host stream held, and answers the push the editor received and
-// the channel the rpc's answer arrives on.
-func evaluating(t *testing.T, h *harness, text string) (*agentreplv1.HostEvaluate, <-chan *connect.Response[agentreplv1.EvaluateInEditorResponse]) {
+// evaluating starts an evaluation of TEXT for the harness workspace, with one
+// Emacs daemon stream standing, and answers the push that stream received,
+// the stream, and the channel the rpc's answer arrives on.
+func evaluating(t *testing.T, h *harness, text string) (*agentreplv1.DaemonEvaluate, *daemonWatcher, <-chan *connect.Response[agentreplv1.EvaluateInEditorResponse]) {
 	t.Helper()
 	s := h.Server.(*server)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	pushes := s.hostEventStream(testWorkspaceID).Subscribe(ctx)
-	s.holdParticipant(testWorkspaceID, true, 1)
+	w := emacsWatcher(s)
 	answers := make(chan *connect.Response[agentreplv1.EvaluateInEditorResponse], 1)
 	go func() {
 		resp, err := h.Client.EvaluateInEditor(context.Background(), connect.NewRequest(&agentreplv1.EvaluateInEditorRequest{Workspace: ref(), Text: text}))
@@ -841,14 +838,15 @@ func evaluating(t *testing.T, h *harness, text string) (*agentreplv1.HostEvaluat
 		}
 		answers <- resp
 	}()
-	push := <-pushes
-	return push.GetEvaluate(), answers
+	push := <-w.elisp
+	push.sent()
+	return push.push.GetEvaluate(), w, answers
 }
 
 func TestAnEvaluationIsAnsweredWithTheEditorsOutcome(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	push, answers := evaluating(t, h, "(+ 1 2)")
+	push, _, answers := evaluating(t, h, "(+ 1 2)")
 	outcome := &agentreplv1.EditorEvaluationOutcome{Outcome: &agentreplv1.EditorEvaluationOutcome_Value{Value: &agentreplv1.EditorEvaluationValue{Printed: "3", Readable: true}},
 		Messages: []string{"done"}}
 
@@ -862,6 +860,9 @@ func TestAnEvaluationIsAnsweredWithTheEditorsOutcome(t *testing.T) {
 	}
 	if push.GetText() != "(+ 1 2)" {
 		t.Errorf("pushed text = %q, want the request's", push.GetText())
+	}
+	if push.GetWorkspace().GetId() != string(testWorkspaceID) {
+		t.Errorf("pushed workspace = %v, want the asking workspace", push.GetWorkspace())
 	}
 	resp := <-answers
 	if got := resp.Msg.GetSuccess().GetOutcome(); got.GetValue().GetPrinted() != "3" || !reflect.DeepEqual(got.GetMessages(), []string{"done"}) {
@@ -885,14 +886,52 @@ func TestAnEvaluationWithNoEditorIsAnAnswer(t *testing.T) {
 func TestAnEvaluationWhoseEditorLeavesIsAnswered(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	_, answers := evaluating(t, h, "(sleep-for 60)")
+	_, w, answers := evaluating(t, h, "(sleep-for 60)")
 
 	// Act
-	h.Server.(*server).holdParticipant(testWorkspaceID, true, -1)
+	h.Server.(*server).removeDaemonWatcher(w)
 
 	// Assert
 	if resp := <-answers; resp.Msg.GetError().GetNoEditor() == nil {
 		t.Fatalf("EvaluateInEditor = %v, want no_editor", resp)
+	}
+}
+
+func TestAnEvaluationNeedsNoHostStream(t *testing.T) {
+	// Arrange: an Emacs daemon stream stands, and no host stream holds the
+	// workspace, as for a workspace the editor does not hold.
+	h := newHarness(t)
+
+	// Act
+	push, _, _ := evaluating(t, h, "(+ 1 2)")
+
+	// Assert
+	if push.GetToken().GetValue() == "" {
+		t.Fatalf("push = %v, want an evaluation pushed to the editor", push)
+	}
+}
+
+func TestAnEvaluationOutlivesAllButTheLastEditorItReached(t *testing.T) {
+	// Arrange: two Emacs daemon streams take the evaluation.
+	h := newHarness(t)
+	s := h.Server.(*server)
+	other := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, editorPushQueue), emacs: true, id: "stream-2"}
+	s.addDaemonWatcher(other)
+	push, w, answers := evaluating(t, h, "(sleep-for 60)")
+	(<-other.elisp).sent()
+
+	// Act: the first leaves, then the evaluation is answered.
+	s.removeDaemonWatcher(w)
+	answer, err := h.Client.AnswerEditorEvaluation(context.Background(), connect.NewRequest(&agentreplv1.AnswerEditorEvaluationRequest{
+		Workspace: ref(), Token: push.GetToken(),
+		Outcome: &agentreplv1.EditorEvaluationOutcome{Outcome: &agentreplv1.EditorEvaluationOutcome_Value{Value: &agentreplv1.EditorEvaluationValue{Printed: "nil"}}}}))
+
+	// Assert
+	if err != nil || answer.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerEditorEvaluation = %v, %v; want the answer taken", answer, err)
+	}
+	if resp := <-answers; resp.Msg.GetSuccess().GetOutcome().GetValue().GetPrinted() != "nil" {
+		t.Fatalf("EvaluateInEditor = %v, want the remaining editor's answer", resp)
 	}
 }
 
@@ -902,7 +941,7 @@ func TestAnEvaluationTheEditorNeverAnswersTimesOut(t *testing.T) {
 	h.Server.(*server).evalDeadline = time.Millisecond
 
 	// Act
-	_, answers := evaluating(t, h, "(sleep-for 60)")
+	_, _, answers := evaluating(t, h, "(sleep-for 60)")
 
 	// Assert
 	if resp := <-answers; resp.Msg.GetError().GetTimedOut() == nil || resp.Msg.GetError().GetTimedOut().GetDeadlineMs() != 1 {

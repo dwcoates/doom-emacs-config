@@ -2996,6 +2996,12 @@ export const WATCH_DAEMON_PUSHES = [
   // EMACS stream's alone (Emacs's composer is the chat's only input), skipped
   // as the same skew.
   "newThreadRequested",
+  // A banner click, a rail click and an agent's evaluation, each naming its
+  // workspace: an EMACS stream's alone (Emacs switches or evaluates, held
+  // workspace or not), skipped by a page as the same skew.
+  "notificationClicked",
+  "selectRequested",
+  "evaluate",
 ] as const;
 
 export function shutdownAnnounced(init?: {

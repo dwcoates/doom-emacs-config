@@ -557,28 +557,32 @@ edit's CANCEL: the held prompt keeps its content and the queue resumes
 
 ;;;; ---- Unsent input across an Emacs restart ----------------------------
 
-;; WHAT A COMPOSER HELD WHEN EMACS QUIT IS THERE WHEN IT COMES BACK.  At
+;; WHAT A COMPOSER HELD WHEN IT DIED IS THERE WHEN IT COMES BACK.  At
 ;; shutdown every workspace's non-empty composer is saved to its history
 ;; exactly as `agent-repl-discard-input' saves it
 ;; (`agent-repl--input-save-to-history' with DISCARD), which leaves that text
-;; as the UNSENT head of the ring (history.el).  When the composer is born
-;; again its unsent head is put back in it.  Nothing is sent either way.
+;; as the UNSENT head of the ring (history.el), and so is the composer of a
+;; workspace the editor closes because the roster stopped marking it held
+;; (`agent-repl-roster--tear-down-tab').  When the composer is born again its
+;; unsent head is put back in it.  Nothing is sent either way.
 
-(defun agent-repl--input-save-on-shutdown (ws)
+(defun agent-repl--input-save-unsent (ws)
   "Save WS's composer contents as the discard does, when there are any.
+Run as the composer dies: at Emacs's shutdown, and when the editor closes
+the workspace.
 Returns `saved', `empty' or `no-composer'."
   (let ((buf (agent-repl--input-buffer ws)))
     (cond
      ((null buf)
-      (agent-repl--log-verbose ws "elisp.input.shutdown-save ws=%s outcome=no-composer" ws)
+      (agent-repl--log-verbose ws "elisp.input.save-unsent ws=%s outcome=no-composer" ws)
       'no-composer)
      ((string-empty-p (string-trim (with-current-buffer buf (buffer-string))))
-      (agent-repl--log ws "elisp.input.shutdown-save ws=%s outcome=empty" ws)
+      (agent-repl--log ws "elisp.input.save-unsent ws=%s outcome=empty" ws)
       'empty)
      (t
       (with-current-buffer buf
         (agent-repl--input-save-to-history ws t))
-      (agent-repl--info ws "elisp.input.shutdown-save ws=%s outcome=saved input-len=%d"
+      (agent-repl--info ws "elisp.input.save-unsent ws=%s outcome=saved input-len=%d"
                         ws (buffer-size buf))
       'saved))))
 
@@ -588,7 +592,7 @@ One workspace's failure is recorded at error and does not stop the others
 or the shutdown."
   (dolist (ws (agent-repl--ws-registered-names))
     (condition-case err
-        (agent-repl--input-save-on-shutdown ws)
+        (agent-repl--input-save-unsent ws)
       (error
        (agent-repl--error ws "elisp.input.shutdown-save-failed ws=%s err=%S" ws err)))))
 

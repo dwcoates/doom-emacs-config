@@ -41,16 +41,27 @@
         (progn (funcall decoder (agent-repl-test-wire-roster--parse json)) nil)
       (agent-repl-wire-error (cdr err)))))
 
-(defun agent-repl-test-wire-roster--row (&rest fragments)
-  "Return a minimal valid RosterRow JSON carrying FRAGMENTS.
-A row's non-optional message fields are all present; FRAGMENTS supply the
+(defun agent-repl-test-wire-roster--row-json (last-updated fragments)
+  "Return a minimal valid RosterRow JSON whose `lastUpdated' is LAST-UPDATED.
+LAST-UPDATED is the field's raw JSON, or nil to leave the field absent.  A
+row's other non-optional message fields are all present, its visibility
+`unselectedVisible' unless a fragment states one; FRAGMENTS supply the
 status arm and whatever else the case is about."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"name\":{\"text\":\"fix-flaky\"},"
           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
-          "\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"}"
+          "\"availability\":{\"available\":{}}"
+          (if last-updated (concat ",\"lastUpdated\":" last-updated) "")
+          (if (seq-some (lambda (f) (string-prefix-p "\"visibility\":" f)) fragments)
+              ""
+            ",\"visibility\":{\"unselectedVisible\":{}}")
           (mapconcat (lambda (f) (concat "," f)) fragments "")
           "}"))
+
+(defun agent-repl-test-wire-roster--row (&rest fragments)
+  "Return a minimal valid RosterRow JSON carrying FRAGMENTS.
+See `agent-repl-test-wire-roster--row-json'."
+  (agent-repl-test-wire-roster--row-json "{\"atMs\":\"1\"}" fragments))
 
 ;;;; ---- RosterRow, whole ----
 
@@ -72,6 +83,7 @@ status arm and whatever else the case is about."
                    :merge-paused nil
                    :merge-turn nil
                    :open-owned-pull-request nil
+                   :visibility :unselected-visible
                    :last-selected nil
                    :last-turn-ended nil
                    :last-turn-boundary nil
@@ -253,6 +265,64 @@ status arm and whatever else the case is about."
                    "\"ready\":{}" "\"openOwnedPullRequest\":{\"url\":{}}"))
                  '("RosterRowOpenOwnedPullRequest" url "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-roster-row-decodes-each-visibility ()
+  "A row's `visibility' decodes to its arm, one keyword per arm."
+  (dolist (case '(("notVisible" . :not-visible)
+                  ("unselectedVisible" . :unselected-visible)
+                  ("selected" . :selected)))
+    ;; Act
+    (let ((row (agent-repl-test-wire-roster--decode
+                #'agent-repl-wire-decode-roster-row
+                (agent-repl-test-wire-roster--row
+                 "\"ready\":{}" (format "\"visibility\":{\"%s\":{}}" (car case))))))
+      ;; Assert
+      (should (eq (plist-get row :visibility) (cdr case))))))
+
+(ert-deftest agent-repl-test-wire-roster-row-without-visibility-is-a-breach ()
+  "Every row states its visibility: an absent one is a contract breach."
+  ;; Arrange
+  (let ((json (agent-repl-test-wire-roster--row "\"ready\":{}" "\"visibility\":{\"selected\":{}}")))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-wire-roster--breach
+                    #'agent-repl-wire-decode-roster-row
+                    (replace-regexp-in-string ",\"visibility\":{\"selected\":{}}" "" json t t))
+                   '("RosterRow" visibility "required message field is absent")))))
+
+(ert-deftest agent-repl-test-wire-roster-row-visibility-with-no-arm-is-a-breach ()
+  "A visibility with no arm set is a contract breach, never a default."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"ready\":{}" "\"visibility\":{}"))
+                 '("RosterRowVisibility" visibility "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-visibility-with-two-arms-is-a-breach ()
+  "A visibility with two arms set is a contract breach."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"visibility\":{\"selected\":{},\"notVisible\":{}}"))
+                 '("RosterRowVisibility" visibility "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-visibility-arm-carries-no-payload ()
+  "Each visibility arm is EMPTY: a field in it is unknown."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"ready\":{}" "\"visibility\":{\"selected\":{\"why\":{}}}"))
+                 '("RosterVisibilitySelected" why "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-thread-row-decodes-its-visibility ()
+  "A thread row decodes its `visibility' as a workspace row does."
+  ;; Act
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-thread-row
+              (concat "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"},"
+                      "\"standing\":{\"open\":{}},\"visibility\":{\"selected\":{}}}"))))
+    ;; Assert
+    (should (eq (plist-get row :visibility) :selected))))
+
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-opening-marker ()
   "A row carrying `opening' decodes it as PRESENT, beside its status arm."
   (let ((row (agent-repl-test-wire-roster--decode
@@ -400,12 +470,7 @@ status arm and whatever else the case is about."
 (defun agent-repl-test-wire-roster--row-updated-at (last-updated)
   "Return a minimal valid RosterRow JSON whose `lastUpdated' is LAST-UPDATED.
 LAST-UPDATED is the field's raw JSON, or nil to leave the field absent."
-  (concat "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
-          "\"name\":{\"text\":\"fix-flaky\"},\"ready\":{},"
-          "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
-          "\"availability\":{\"available\":{}}"
-          (if last-updated (concat ",\"lastUpdated\":" last-updated) "")
-          "}"))
+  (agent-repl-test-wire-roster--row-json last-updated '("\"ready\":{}")))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-updated-instant ()
   "A row's `lastUpdated' decodes to its update recency in epoch ms."
@@ -644,7 +709,7 @@ reserved."
   "The row's join key is not optional."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
+                  (concat "{\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" workspace "required message field is absent"))))
 
@@ -652,7 +717,7 @@ reserved."
   "Every row has a display name element."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
-                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},"
+                  (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},"
                           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" name "required message field is absent"))))
 
@@ -661,7 +726,7 @@ reserved."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"detail\":{}}"))
                  '("RosterRow" closed "required message field is absent"))))
 
@@ -670,7 +735,7 @@ reserved."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-roster-row
                              (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                                     "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},"
+                                     "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},"
                                      "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},"
                                      "\"closed\":{\"closed\":true}}"))
                             :closed)
@@ -928,7 +993,7 @@ message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
                           "\"detail\":{},\"closed\":{}}"))
                  '("RosterRow" when "required message field is absent"))))
 
@@ -1045,7 +1110,7 @@ message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
-                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"current\":{},"
+                          "\"name\":{\"text\":\"n\"},\"ready\":{},\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}},\"current\":{},"
                           "\"when\":{\"noTurnRunning\":{}},\"closed\":{}}"))
                  '("RosterRow" detail "required message field is absent"))))
 
@@ -2202,7 +2267,7 @@ carried, KEY's decoded value, and the push revision."
                   #'agent-repl-wire-decode-roster-row
                   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w\"}},"
                           "\"name\":{\"text\":\"n\"},\"ready\":{},\"current\":{},"
-                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},\"lastUpdated\":{\"atMs\":\"1\"}}"))
+                          "\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},\"lastUpdated\":{\"atMs\":\"1\"},\"visibility\":{\"unselectedVisible\":{}}}"))
                  '("RosterRow" availability "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-section-header-decodes-its-count ()
@@ -2775,14 +2840,15 @@ its place and since it joined."
                   #'agent-repl-wire-decode-roster-thread-section
                   (concat "{\"newThread\":{\"label\":\"New thread\"},\"rows\":["
                           "{\"thread\":{\"id\":\"t2\",\"dir\":\"/z/b\"},\"name\":{\"text\":\"b\"},"
-                          "\"summary\":{\"text\":\"light\"},\"current\":{},\"standing\":{\"open\":{}}},"
+                          "\"summary\":{\"text\":\"light\"},\"current\":{},\"standing\":{\"open\":{}},"
+                          "\"visibility\":{\"selected\":{}}},"
                           "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"},"
-                          "\"standing\":{\"archived\":{}}}]}"))
+                          "\"standing\":{\"archived\":{}},\"visibility\":{\"notVisible\":{}}}]}"))
                  '(:new-thread "New thread"
                    :rows ((:thread (:id "t2" :dir "/z/b") :name "b" :summary "light" :current t
-                           :standing (:arm :open :value nil) :outline nil)
+                           :standing (:arm :open :value nil) :outline nil :visibility :selected)
                           (:thread (:id "t1" :dir "/z/a") :name "a" :summary nil :current nil
-                           :standing (:arm :archived :value nil) :outline nil))))))
+                           :standing (:arm :archived :value nil) :outline nil :visibility :not-visible))))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-a-threads-outline ()
   "A thread's outline decodes its breadcrumb and each row's place and counts."

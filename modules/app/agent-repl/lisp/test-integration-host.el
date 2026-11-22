@@ -626,29 +626,6 @@ dedicated ack verb exists."
                        (plist-get ref :id)))
         (should (equal agent-repl-host-last-selected-id (plist-get ref :id)))))))
 
-;;;; ---- Scenario 4: the notification click ----
-;;
-;; The daemon posts every desktop banner and reads its click back; the host
-;; stream's `notification_clicked' is the whole of what reaches Emacs.
-
-(ert-deftest agent-repl-itest-host-notification-click-selects-the-workspace ()
-  "A `notification_clicked' push asks the daemon to select that workspace.
-The daemon read the click back from the banner; like every switch trigger
-the click is a SelectWorkspace, and the frame follows the roster."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-host--with-subscription daemon ref
-      (cl-letf (((symbol-function 'select-frame-set-input-focus) #'ignore))
-        ;; Act.
-        (agent-repl-itest--push daemon "host" '((notificationClicked . ()))
-                                (plist-get ref :id))
-        ;; Assert.
-        (agent-repl-itest--await-call daemon "SelectWorkspace")
-        (let* ((call (car (agent-repl-itest--calls daemon "SelectWorkspace")))
-               (selected (alist-get 'workspace (alist-get 'body call))))
-          (should (equal (alist-get 'id selected) (plist-get ref :id))))
-        (should (agent-repl-itest--logged-p daemon "elisp.host.notification-clicked" "info"))))))
-
 ;;;; ---- Scenario 7: reload_webapp ----
 
 (ert-deftest agent-repl-itest-host-reload-webapp-reloads-that-workspace ()

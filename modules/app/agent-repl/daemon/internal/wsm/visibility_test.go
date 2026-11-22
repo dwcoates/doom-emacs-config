@@ -25,6 +25,7 @@ func TestWithheld(t *testing.T) {
 		{name: "a reopened merged workspace the user hid is withheld hidden", ws: Workspace{Hidden: true, MergedAt: &merged}, want: WithheldHidden},
 		{name: "a settled merge ignores its hidden flag", ws: Workspace{Hidden: true, Closed: true, MergedAt: &merged}, want: Drawn},
 		{name: "a merged workspace follows its repository's fold", ws: Workspace{MergedAt: &merged}, repoFolded: true, want: WithheldCollapsed},
+		{name: "the selection in a collapsed section is withheld collapsed by the sections alone", ws: Workspace{Current: true}, repoFolded: true, want: WithheldCollapsed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -193,6 +194,33 @@ func TestTheHiddenSectionIsOneStatement(t *testing.T) {
 	}
 }
 
+// TestEveryVisibleWorkspaceRuns pins the run rule as a superset of the
+// persisted visibility: over every combination of the facts Runs reads, a
+// visible workspace runs.
+func TestEveryVisibleWorkspaceRuns(t *testing.T) {
+	of := MergeOrigin{}
+	merged := time.Unix(100, 0)
+	for mask := 0; mask < 1<<7; mask++ {
+		bit := func(i int) bool { return mask&(1<<i) != 0 }
+		ws := Workspace{Hidden: bit(0), Closed: bit(1), Current: bit(2), OneShot: bit(3), DeployMediator: bit(4)}
+		if bit(5) {
+			ws.MergeOf = &of
+		}
+		if bit(6) {
+			ws.MergedAt = &merged
+		}
+		for _, v := range []Visibility{UnselectedVisible, Selected} {
+			ws.Visibility = v
+			for _, folded := range []bool{false, true} {
+				// Act / Assert
+				if !ws.Runs(folded, false) {
+					t.Fatalf("workspace %+v folded=%v is %v but does not run", ws, folded, v)
+				}
+			}
+		}
+	}
+}
+
 func TestRuns(t *testing.T) {
 	of := MergeOrigin{}
 	cases := []struct {
@@ -202,23 +230,22 @@ func TestRuns(t *testing.T) {
 		mergeQueued bool
 		want        bool
 	}{
-		{name: "a drawn workspace runs", ws: Workspace{}, want: true},
-		{name: "a hidden workspace does not run", ws: Workspace{Hidden: true}, want: false},
-		{name: "a collapsed workspace does not run", ws: Workspace{}, repoFolded: true, want: false},
+		{name: "a visible workspace runs", ws: Workspace{Visibility: UnselectedVisible}, want: true},
+		{name: "the selection runs", ws: Workspace{Visibility: Selected}, want: true},
+		{name: "a hidden selection runs", ws: Workspace{Hidden: true, Visibility: Selected}, want: true},
+		{name: "a workspace that is not visible does not run", ws: Workspace{}, want: false},
+		{name: "a collapsed workspace that is not visible does not run", ws: Workspace{}, repoFolded: true, want: false},
 		{name: "a hidden merge workspace runs in a collapsed section", ws: Workspace{MergeOf: &of}, repoFolded: true, mergeQueued: true, want: true},
 		{name: "a hidden merge workspace whose merge left every queue does not run", ws: Workspace{MergeOf: &of}, want: false},
-		{name: "a hidden merge workspace whose merge left every queue runs while the user looks at it", ws: Workspace{MergeOf: &of, Current: true}, want: true},
-		{name: "a revealed merge workspace the user hid does not run", ws: Workspace{MergeOf: &of, MergeRevealed: true, Hidden: true}, want: false},
-		{name: "a hidden workspace the user is looking at runs", ws: Workspace{Hidden: true, Current: true}, want: true},
-		{name: "a collapsed workspace the user is looking at runs", ws: Workspace{Current: true}, repoFolded: true, want: true},
+		{name: "a selected hidden merge workspace whose merge left every queue runs", ws: Workspace{MergeOf: &of, Visibility: Selected}, want: true},
 		{name: "a hidden workspace with a merge queued runs", ws: Workspace{Hidden: true}, mergeQueued: true, want: true},
 		{name: "a closed workspace with a merge queued runs", ws: Workspace{Closed: true}, mergeQueued: true, want: true},
-		{name: "a collapsed workspace with a merge queued runs", ws: Workspace{}, repoFolded: true, mergeQueued: true, want: true},
 		{name: "a collapsed one-shot runs, as the fold spares it", ws: Workspace{OneShot: true}, repoFolded: true, want: true},
 		{name: "a collapsed workspace with a merge pending runs, as the fold spares it", ws: Workspace{MergePending: true}, repoFolded: true, want: true},
 		{name: "a hidden one-shot does not run, as only a fold spares", ws: Workspace{OneShot: true, Hidden: true}, want: false},
+		{name: "an unfolded one-shot that is not visible does not run", ws: Workspace{OneShot: true}, want: false},
 		{name: "a hidden standing deploy check runs", ws: Workspace{Hidden: true, DeployMediator: true}, want: true},
-		{name: "a collapsed standing deploy check runs", ws: Workspace{DeployMediator: true}, repoFolded: true, want: true},
+		{name: "a thread that is not visible does not run", ws: Workspace{Kind: WorkspaceKindThread}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -326,7 +353,7 @@ func TestKeptWarmIgnoresCollapsingAndHonorsAHide(t *testing.T) {
 // difference from Runs: a collapse withholds the session, never the cache.
 func TestACollapsedWorkspaceThatRunsNothingIsStillKeptWarm(t *testing.T) {
 	// Arrange
-	ws := Workspace{ID: "w"}
+	ws := Workspace{ID: "w", Visibility: NotVisible}
 
 	// Act
 	runs, warm := ws.Runs(true, false), ws.KeptWarm(false)

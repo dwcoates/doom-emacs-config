@@ -1551,6 +1551,46 @@ as if it were understood."
       ;; Assert
       (should (= asked 1)))))
 
+;;;; ---- The editor events that name their workspace ----
+
+(ert-deftest agent-repl-test-link-a-banner-click-reaches-the-host-with-its-ref ()
+  "A `notification_clicked' push hands host.el the workspace it names."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (clicked nil))
+      (cl-letf (((symbol-function 'agent-repl-host-notification-clicked) (lambda (ref) (push ref clicked))))
+        ;; Act
+        (agent-repl-test-link--push conn (list :arm :notification-clicked :value '(:workspace (:id "w1" :dir "/w/1")))))
+      ;; Assert
+      (should (equal clicked '((:id "w1" :dir "/w/1")))))))
+
+(ert-deftest agent-repl-test-link-a-rail-click-reaches-the-host-with-its-ref ()
+  "A `select_requested' push hands host.el the workspace it names."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (clicked nil))
+      (cl-letf (((symbol-function 'agent-repl-host-select-requested) (lambda (ref) (push ref clicked))))
+        ;; Act
+        (agent-repl-test-link--push conn (list :arm :select-requested :value '(:workspace (:id "w1" :dir "/w/1")))))
+      ;; Assert
+      (should (equal clicked '((:id "w1" :dir "/w/1")))))))
+
+(ert-deftest agent-repl-test-link-an-evaluation-is-answered-on-the-connection-it-came-on ()
+  "An `evaluate' push hands host.el the evaluation and the stream's own connection."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (evaluated nil)
+          (request '(:workspace (:id "w1" :dir "/w/1") :token (:value "t-1") :text "1")))
+      (cl-letf (((symbol-function 'agent-repl-host-evaluate)
+                 (lambda (on value) (push (list on value) evaluated))))
+        ;; Act
+        (agent-repl-test-link--push conn (list :arm :evaluate :value request)))
+      ;; Assert
+      (should (equal evaluated (list (list conn request)))))))
+
 ;;;; ---- The daemon's standing loud faults ----
 
 (defun agent-repl-test-link--standing (&rest ids)

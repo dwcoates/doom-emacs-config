@@ -14,142 +14,6 @@ import (
 	"agent-repld/internal/memorypopup"
 )
 
-func residencyNotLoaded() *agentreplv1.PageResidency {
-	return &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_NotLoaded{NotLoaded: &agentreplv1.PageResidencyNotLoaded{}}}
-}
-
-func TestReportPageResidencyRecordsTheWorkspacesResidency(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	resp, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
-		Workspace: ref(), Residency: residencyNotLoaded(),
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ReportPageResidency = (%v, %v), want success", resp, err)
-	}
-	if h.Memory.reports[testWorkspaceID].GetNotLoaded() == nil {
-		t.Fatalf("recorded = %v, want the not-loaded residency", h.Memory.reports)
-	}
-}
-
-func TestReportPageResidencyPersistsWhetherThePageIsLoaded(t *testing.T) {
-	loadedHeld := &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_Loaded{Loaded: &agentreplv1.PageResidencyLoaded{
-		Release: &agentreplv1.PageResidencyRelease{When: &agentreplv1.PageResidencyRelease_Held{Held: &agentreplv1.PageResidencyReleaseHeld{}}},
-	}}}
-	tests := []struct {
-		name      string
-		residency *agentreplv1.PageResidency
-		want      bool
-	}{
-		{"a loaded page is stored loaded", loadedHeld, true},
-		{"an unloaded page is stored not loaded", residencyNotLoaded(), false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-
-			// Act
-			_, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
-				Workspace: ref(), Residency: tc.residency,
-			}))
-
-			// Assert
-			if err != nil {
-				t.Fatalf("ReportPageResidency: %v", err)
-			}
-			if loaded, known := h.DB.pages[testWorkspaceID]; !known || loaded != tc.want {
-				t.Fatalf("stored = (%v, %v), want (%v, true)", loaded, known, tc.want)
-			}
-		})
-	}
-}
-
-func TestReportPageResidencyThatCannotBeStoredIsInternalAndLogged(t *testing.T) {
-	// Arrange
-	log := &recordingLogger{}
-	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
-	h.DB.pageWriteErr = errors.New("disk full")
-
-	// Act
-	_, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
-		Workspace: ref(), Residency: residencyNotLoaded(),
-	}))
-
-	// Assert
-	if connect.CodeOf(err) != connect.CodeInternal {
-		t.Fatalf("err = %v, want Internal", err)
-	}
-	for _, rec := range log.at("ERROR") {
-		if rec.Operation == opMemory && rec.Context["cause"] == "disk full" {
-			return
-		}
-	}
-	t.Fatalf("ERROR records = %+v, want the store's cause", log.at("ERROR"))
-}
-
-func TestReportPageResidencyRefusesAMalformedResidency(t *testing.T) {
-	tests := []struct {
-		name      string
-		residency *agentreplv1.PageResidency
-	}{
-		{"no residency", nil},
-		{"no state", &agentreplv1.PageResidency{}},
-		{"loaded with no release rule", &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_Loaded{Loaded: &agentreplv1.PageResidencyLoaded{}}}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-
-			// Act
-			_, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
-				Workspace: ref(), Residency: tc.residency,
-			}))
-
-			// Assert
-			if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Memory.reports) != 0 {
-				t.Fatalf("err = %v, reports %v: want InvalidArgument and nothing recorded", err, h.Memory.reports)
-			}
-		})
-	}
-}
-
-func TestReportPageResidencyRefusesAnUnknownWorkspace(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	resp, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, Residency: residencyNotLoaded(),
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetError().GetUnknownWorkspace() == nil {
-		t.Fatalf("ReportPageResidency = (%v, %v), want unknown_workspace", resp, err)
-	}
-}
-
-func TestReportPageResidencyRefusedByThePopupsIsInternal(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.Memory.reportErr = errors.New("refused")
-
-	// Act
-	_, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
-		Workspace: ref(), Residency: residencyNotLoaded(),
-	}))
-
-	// Assert
-	if connect.CodeOf(err) != connect.CodeInternal {
-		t.Fatalf("err = %v, want Internal", err)
-	}
-}
-
 func TestGetMemoryOverviewAnswersTheMeasuredOverview(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -215,8 +79,8 @@ func TestGetMemoryOverviewCountsOnlyRegisteredOpenWorkspaces(t *testing.T) {
 	}
 
 	// Assert
-	if !h.Memory.open(testWorkspaceID) || h.Memory.open("ws-nope") {
-		t.Fatalf("the open set did not name exactly the registered open workspace")
+	if len(h.Memory.open) != 1 || h.Memory.open[0] != testWorkspaceID {
+		t.Fatalf("open set = %v, want exactly the registered open workspace", h.Memory.open)
 	}
 }
 

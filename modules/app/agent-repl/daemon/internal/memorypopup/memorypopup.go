@@ -6,21 +6,21 @@
 // EVERY FIGURE IS MEASURED. The process collector's latest sample
 // (procmetrics.Collector.Latest) gives each process group's physical
 // footprint, the stall detector (stallbeat) the page process's recent stalls,
-// and Emacs's reports (ReportPageResidency, kept here) each page's residency.
+// and each workspace's visibility (wsm.Visibility) whether its page is
+// loaded: the editor loads exactly the visible workspaces' pages.
 // Nothing is estimated: the pages share one web content process, so no
 // per-page byte figure exists, and none is served.
 package memorypopup
 
 import (
 	"errors"
-	"sync"
 	"time"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/procmetrics"
+	"agent-repld/internal/wsm"
 )
 
 // Deps are the popups' sources, every one required.
@@ -37,47 +37,24 @@ type Deps struct {
 	StallWindow time.Duration
 	// Running answers whether a workspace's shim runs.
 	Running func(ws ids.WorkspaceID) bool
+	// Visibility answers a workspace's visibility, which decides whether its
+	// page is loaded.
+	Visibility func(ws ids.WorkspaceID) wsm.Visibility
 	// Now is the clock the stall window is read against.
 	Now func() time.Time
 }
 
-// Popups holds the page residencies Emacs reported and answers both popups.
+// Popups answers both popups.
 type Popups struct {
 	deps Deps
-
-	mu        sync.Mutex
-	residency map[ids.WorkspaceID]*agentreplv1.PageResidency
 }
 
 // New builds the popups.
 func New(deps Deps) (*Popups, error) {
-	if deps.Processes == nil || deps.Stalls == nil || deps.StallWindow <= 0 || deps.Running == nil || deps.Now == nil {
-		return nil, errors.New("memorypopup: the collector, the stall detector and its window, the shim presence and a clock are required")
+	if deps.Processes == nil || deps.Stalls == nil || deps.StallWindow <= 0 || deps.Running == nil || deps.Visibility == nil || deps.Now == nil {
+		return nil, errors.New("memorypopup: the collector, the stall detector and its window, the shim presence, the visibility and a clock are required")
 	}
-	return &Popups{deps: deps, residency: map[ids.WorkspaceID]*agentreplv1.PageResidency{}}, nil
-}
-
-// ErrMalformedResidency is a report that names no state, or a loaded page
-// with no release rule: Emacs always states both, so it is refused rather
-// than read as some state.
-var ErrMalformedResidency = errors.New("memorypopup: a page residency names its state, and a loaded page its release rule")
-
-// Report records what Emacs holds of WS's page, replacing its earlier report.
-// A malformed report is refused and the earlier one kept.
-func (p *Popups) Report(ws ids.WorkspaceID, residency *agentreplv1.PageResidency) error {
-	switch state := residency.GetState().(type) {
-	case *agentreplv1.PageResidency_NotLoaded:
-	case *agentreplv1.PageResidency_Loaded:
-		if state.Loaded.GetRelease().GetWhen() == nil {
-			return ErrMalformedResidency
-		}
-	default:
-		return ErrMalformedResidency
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.residency[ws] = residency
-	return nil
+	return &Popups{deps: deps}, nil
 }
 
 // ErrMeasurementFailed is the latest sample having failed to list the host's
@@ -105,9 +82,9 @@ func isShim(process string) bool {
 }
 
 // Overview answers the version hover's popup, nil when no sample has run yet.
-// OPEN keeps the reported residencies of workspaces still open; a closed
-// workspace's last report is not counted.
-func (p *Popups) Overview(open func(ids.WorkspaceID) bool) (*frontendv1.SidebarMemoryOverview, error) {
+// OPEN are the open workspaces, whose pages are counted loaded or not by
+// their visibility.
+func (p *Popups) Overview(open []ids.WorkspaceID) (*frontendv1.SidebarMemoryOverview, error) {
 	snap, sampled := p.deps.Processes.Latest()
 	if !sampled {
 		return nil, nil
@@ -123,18 +100,13 @@ func (p *Popups) Overview(open func(ids.WorkspaceID) bool) (*frontendv1.SidebarM
 		pages.FootprintBytes = &bytes
 		total += bytes
 	}
-	p.mu.Lock()
-	for ws, residency := range p.residency {
-		if !open(ws) {
-			continue
-		}
-		if residency.GetLoaded() != nil {
+	for _, ws := range open {
+		if p.deps.Visibility(ws).Visible() {
 			pages.Loaded++
 		} else {
 			pages.NotLoaded++
 		}
 	}
-	p.mu.Unlock()
 	out.Pages = pages
 
 	stalls, blocked := p.deps.Stalls.Recent(p.deps.Now())
@@ -216,33 +188,15 @@ func (p *Popups) Workspace(ws ids.WorkspaceID) *frontendv1.SidebarWorkspaceMemor
 	} else {
 		out.Agent = &frontendv1.SidebarWorkspaceMemoryAgent{State: &frontendv1.SidebarWorkspaceMemoryAgent_NotRunning{NotRunning: &frontendv1.SidebarWorkspaceMemoryAgentNotRunning{}}}
 	}
-	p.mu.Lock()
-	residency := p.residency[ws]
-	p.mu.Unlock()
-	if residency != nil {
-		out.Page = pageOf(residency)
-	}
+	out.Page = pageOf(p.deps.Visibility(ws))
 	return out
 }
 
-// pageOf maps Emacs's report onto the hover's page line: the one place the
-// editor's spelling and the rail's meet.
-func pageOf(residency *agentreplv1.PageResidency) *frontendv1.SidebarWorkspaceMemoryPage {
-	loaded := residency.GetLoaded()
-	if loaded == nil {
+// pageOf answers the hover's page line for a workspace of visibility V: its
+// page is loaded exactly while it is visible.
+func pageOf(v wsm.Visibility) *frontendv1.SidebarWorkspaceMemoryPage {
+	if !v.Visible() {
 		return &frontendv1.SidebarWorkspaceMemoryPage{State: &frontendv1.SidebarWorkspaceMemoryPage_NotLoaded{NotLoaded: &frontendv1.SidebarWorkspaceMemoryPageNotLoaded{}}}
 	}
-	release := &frontendv1.SidebarWorkspaceMemoryPageRelease{}
-	switch when := loaded.GetRelease().GetWhen().(type) {
-	case *agentreplv1.PageResidencyRelease_OnLeave:
-		release.When = &frontendv1.SidebarWorkspaceMemoryPageRelease_OnLeave{OnLeave: &frontendv1.SidebarWorkspaceMemoryPageReleaseOnLeave{}}
-	case *agentreplv1.PageResidencyRelease_At:
-		release.When = &frontendv1.SidebarWorkspaceMemoryPageRelease_At{At: &frontendv1.SidebarWorkspaceMemoryPageReleaseAt{UnixMs: when.At.GetUnixMs()}}
-	case *agentreplv1.PageResidencyRelease_Held:
-		release.When = &frontendv1.SidebarWorkspaceMemoryPageRelease_Held{Held: &frontendv1.SidebarWorkspaceMemoryPageReleaseHeld{}}
-	default:
-		// Report refuses every residency without a rule, so none is stored.
-		panic("memorypopup: a stored residency has no release rule")
-	}
-	return &frontendv1.SidebarWorkspaceMemoryPage{State: &frontendv1.SidebarWorkspaceMemoryPage_Loaded{Loaded: &frontendv1.SidebarWorkspaceMemoryPageLoaded{Release: release}}}
+	return &frontendv1.SidebarWorkspaceMemoryPage{State: &frontendv1.SidebarWorkspaceMemoryPage_Loaded{Loaded: &frontendv1.SidebarWorkspaceMemoryPageLoaded{}}}
 }

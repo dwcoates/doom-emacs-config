@@ -96,6 +96,9 @@ type Resolver interface {
 
 	// SetRegistry installs the durable half, called on any WSM change.
 	SetRegistry(reg Registry)
+	// Visibility answers a workspace's visibility as the last render derived
+	// it (visibility.go): the value the roster just published.
+	Visibility(ws ids.WorkspaceID) wsm.Visibility
 	// SetMerge installs one workspace's merge facts, which drive its merge
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)

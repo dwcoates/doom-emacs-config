@@ -140,10 +140,10 @@ type Workspace struct {
 	// rows hidden in the sidebar and their tabs folded off the tab bar
 	// (SetChildrenFolded).
 	ChildrenFolded bool
-	// Surfaced reports whether the workspace started a turn while a fold hid
-	// it and that turn is still running: the roster draws it inside the fold
-	// (SurfaceHeldWork).
-	Surfaced bool
+	// Visibility is the workspace's persisted visibility (visibilitystate.go),
+	// as the roster last derived it: what every per-workspace allocation is
+	// gated on.
+	Visibility Visibility
 	// DeployMediator reports whether the workspace is its repository's deploy
 	// mediator (deploy_mediators): it runs and is kept warm like any open
 	// workspace, hidden or not (owner ruling, 2026-11-17), so a deploy's check

@@ -96,13 +96,14 @@
 (declare-function agent-repl-roster-thread-p "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
-(declare-function agent-repl-roster-navigable-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-family-of "agent-repl-roster" (name &optional roster))
 (declare-function agent-repl-roster-numbered-tab "agent-repl-roster" (number))
 (declare-function agent-repl-roster-tab-number-of "agent-repl-roster" (name))
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
 (declare-function agent-repl-roster-threads "agent-repl-roster" (&optional roster))
 (declare-function agent-repl-roster-thread-row-ws "agent-repl-roster" (row))
+(declare-function agent-repl-host-request-switch-ref "host" (ref trigger))
+(declare-function agent-repl-verb-show-ref "verbs" (ref))
 (declare-function agent-repl-roster-shown-app "agent-repl-roster" (&optional roster))
 (declare-function agent-repl-thread-new "threads" ())
 (declare-function agent-repl-roster-last-finished-name "agent-repl-roster" (names))
@@ -1283,6 +1284,20 @@ daemon-minted and there is no spelling of it Emacs could construct."
        (ws
         (agent-repl--info ws "elisp.commands.switch-chosen ws=%s all=%s" ws (and all t))
         (agent-repl-host-request-switch ws 'picker))
+       ;; A HIDDEN OR FOLDED WORKSPACE THIS EDITOR DOES NOT HOLD is open, so
+       ;; it is not reopened: a hidden one is shown (as a held one is), a
+       ;; folded one is selected and drawn inside its fold while it stays
+       ;; the selection (owner ruling, 2026-11-21).
+       ((and ref (eq (plist-get entry :section) :hidden))
+        (agent-repl--info (agent-repl--ws-current-log-name)
+                          "elisp.commands.switch-unhides-unheld name=%s id=%s"
+                          (plist-get entry :name) (plist-get ref :id))
+        (agent-repl-verb-show-ref ref))
+       ((and ref (eq (plist-get entry :section) :repository))
+        (agent-repl--info (agent-repl--ws-current-log-name)
+                          "elisp.commands.switch-selects-unheld name=%s id=%s"
+                          (plist-get entry :name) (plist-get ref :id))
+        (agent-repl-host-request-switch-ref ref 'picker))
        (ref
         (agent-repl--info (agent-repl--ws-current-log-name)
                           "elisp.commands.switch-opens-absent name=%s id=%s"
@@ -1523,7 +1538,7 @@ switched to here."
 (defun agent-repl--jump-to-ranked-workspace (rank-fn instant-fn slug none-message)
   "Request the switch to the drawn tab RANK-FN picks, standing elsewhere.
 The ONE body of the turn-recency jumps.  RANK-FN answers the best of the
-navigable tabs (`agent-repl--navigable-tab-names') less the workspace shown: the
+drawn tabs (`agent-repl--drawn-tab-names') less the workspace shown: the
 change the user is answering is the one the bar showed them, and switching
 to where they stand is no switch.  INSTANT-FN reads the ranking instant of
 the target for the record.  SLUG names the gesture in its records
@@ -1532,7 +1547,7 @@ request's trigger.  No candidate is a reported, logged no-op saying
 NONE-MESSAGE.  The target is REQUESTED of the daemon, never switched to here."
   (let* ((shown (agent-repl--ws-current-name))
          (log-ws (agent-repl--jump-log-ws shown))
-         (names (remove shown (agent-repl--navigable-tab-names)))
+         (names (remove shown (agent-repl--drawn-tab-names)))
          (target (funcall rank-fn names)))
     (if (null target)
         (progn
@@ -1616,19 +1631,6 @@ A TAB OF A COLLAPSED REPOSITORY IS NOT DRAWN, so it is not here either,
 and the daemon gives it no number."
   (and (fboundp 'agent-repl-roster-drawn-tab-order)
        (agent-repl-roster-drawn-tab-order)))
-
-(defun agent-repl--navigable-tab-names ()
-  "Return the workspace names a navigation gesture may land on, in tab order.
-
-THE DRAWN TABS, AND THE TABS A COLLAPSED SECTION FOLDS.  A gesture that
-picks a workspace (the picker, the jumps) may select one in a folded
-section or subsection: the section stays folded and the roster draws that
-workspace alone inside it until the user switches away.  The numerals and
-the walking chords (`s-{', `s-[') stay on `agent-repl--drawn-tab-names',
-because a folded tab has no number and no place on the bar.  A tab the
-user hid is a stop of neither."
-  (and (fboundp 'agent-repl-roster-navigable-tab-order)
-       (agent-repl-roster-navigable-tab-order)))
 
 (defun agent-repl--ring-walk (all drawn current step)
   "Return the DRAWN tabs one revolution of ALL meets from CURRENT, in order.
@@ -1872,9 +1874,9 @@ every numeral was off by one against the bar.  A tab still opening is
 NOT SELECTABLE, as its sidebar row is not: the press is a reported no-op.
 
 Called interactively with no prefix argument, completes over the
-NAVIGABLE NAMES (`agent-repl--navigable-tab-names') and switches to the
-chosen one: the drawn tabs and those a collapsed section folds, the same set
-the walking chords reach.
+DRAWN TABS (`agent-repl--drawn-tab-names') and switches to the chosen one,
+the same set the walking chords reach.  A folded or hidden workspace has no
+tab here (frontend.v1.RosterRowVisibility); `SPC p p' reaches it.
 
 An empty bar and a slot the bar does not draw are REPORTED no-ops rather
 than errors: the numerals are a glance-and-press gesture, and a press
@@ -1893,7 +1895,7 @@ afterwards is a logging defect."
       (agent-repl--info log-ws "elisp.commands.switch-to-workspace-no-tabs n=%S" n)
       (message "[agent-repl] No workspace tabs on the bar"))
      ((null index)
-      (let ((choice (completing-read "Switch to workspace: " (agent-repl--navigable-tab-names) nil t)))
+      (let ((choice (completing-read "Switch to workspace: " names nil t)))
         (agent-repl--info log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
         (agent-repl-host-request-switch choice 'picker)))
      ((null tab)

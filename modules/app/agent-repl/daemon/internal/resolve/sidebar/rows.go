@@ -27,6 +27,9 @@ type rowContext struct {
 	causes map[ids.WorkspaceID]string
 	// children are each workspace's children, by parent (childrenOf).
 	children map[ids.WorkspaceID][]wsm.Workspace
+	// arms are every workspace's status arm for this render (resolveArms),
+	// decided before any row is drawn.
+	arms map[ids.WorkspaceID]string
 }
 
 // causeOf is the operation a row's status arm change is attributed to: the
@@ -59,6 +62,7 @@ func (r *resolver) rowRepository(rec wsm.Workspace, log dlog.Logger) *frontendv1
 
 // row composes one workspace's row, as every list draws it. Its family is
 // its list's own row type's (openRow, hiddenRow).
+// row composes REC's row.
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
 	s := r.state.workspace(rec.ID)
 	session := rc.sessions[rec.ID]
@@ -79,27 +83,16 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		}
 		wasViewed = s.viewedOn(armName)
 	} else {
-		if s.restoreResult(rec) {
-			rowLog.Info("daemon.sidebar.result_restored",
-				"the roster drew the last turn result from the durable record, as it stood before this daemon", dlog.Context{
-					"end": s.restoredEnd, "result": s.result.String(),
-				})
+		// THE ARM WAS DECIDED BEFORE ANY ROW (resolveArms), so the visibility
+		// the rows are numbered by read the same arm this row draws.
+		var decided bool
+		armName, decided = rc.arms[rec.ID]
+		if !decided {
+			rowLog.Error("daemon.sidebar.row", "a row was drawn for a workspace the render decided no arm for",
+				dlog.Context{"invariant_violation": "resolveArms covers every registry workspace"})
+			panic(fmt.Sprintf("sidebar: no arm decided for workspace %s", rec.ID))
 		}
-		mirroredArm, mirrored := r.state.incumbentArms[rec.ID]
-		if mirrored {
-			// A ROW THIS JOINING DAEMON HAS NOT ADOPTED YET DRAWS THE
-			// INCUMBENT'S OWN ARM. This daemon's footer state for the
-			// workspace is frozen at what it last read, since the incumbent
-			// still serves it; the incumbent's arm is its own footer's
-			// resolved claim, checked there against that footer (statusArm),
-			// so the projection is skipped here rather than run against a
-			// frozen footer.
-			armName = mirroredArm
-			rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace not yet adopted",
-				dlog.Context{"arm": armName, "source": "incumbent"})
-		} else {
-			armName = statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
-		}
+		_, mirrored := r.state.incumbentArms[rec.ID]
 		r.noteResult(rec.ID, s, rowLog)
 		// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
 		// status, so the row's display mode cannot lag its status by a push
@@ -175,6 +168,8 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		// `pending`, so a row without it would never be opened.
 		Availability: availability(s),
 	}
+	// THE ROW'S VISIBILITY, as this render derived it (resolveVisibility).
+	out.Visibility = visibilityOf(r.state.visibility[rec.ID])
 	out.Repository = r.rowRepository(rec, rowLog)
 	setStatus(out, armName, rowLog)
 	if attention(rec, current) {

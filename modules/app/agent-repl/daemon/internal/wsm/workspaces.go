@@ -60,7 +60,7 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
 	mergeTurnStartedColumn + `, ` +
-	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, surfaced, ` +
+	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, visibility, ` +
 	`EXISTS (SELECT 1 FROM deploy_mediators WHERE deploy_mediators.workspace_id = workspaces.id), ` +
 	emojiAckColumn
 
@@ -131,10 +131,16 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		visitAt       sql.NullInt64
 		landsInto     sql.NullString
 		spawnedStart  sql.NullInt64
+		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &ws.Surfaced, &ws.DeployMediator, &ws.EmojiAck); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.DeployMediator, &ws.EmojiAck); err != nil {
 		return Workspace{}, err
 	}
+	v, err := parseVisibility(visibility)
+	if err != nil {
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "visibility", Err: err}
+	}
+	ws.Visibility = v
 	switch WorkspaceKind(kind) {
 	case WorkspaceKindRepository, WorkspaceKindThread:
 		ws.Kind = WorkspaceKind(kind)
@@ -1239,9 +1245,9 @@ func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceI
 // SELECTING A WORKSPACE NEVER OPENS A FOLD (owner ruling, 2026-11-15,
 // replacing the 2026-10-25 opening). A switch from anywhere -- `SPC p p`, a
 // walk's step, a notification, an agent's select -- to a workspace a fold
-// hides leaves the fold folded: the roster draws the current workspace, and
-// only it, inside the fold (Workspace.DrawnInsideFold), until the user
-// switches out of it.
+// hides leaves the fold folded: the roster draws the current workspace inside
+// the fold, as its persisted visibility says (Workspace.Visibility), until
+// the user switches out of it.
 func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp, walked *time.Time) error {
 	fields := selectionFields(id, stamp, walked)
 	var change currentChange

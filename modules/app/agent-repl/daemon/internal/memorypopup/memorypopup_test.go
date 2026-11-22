@@ -5,11 +5,9 @@ import (
 	"testing"
 	"time"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
-
 	"agent-repld/internal/ids"
 	"agent-repld/internal/procmetrics"
+	"agent-repld/internal/wsm"
 )
 
 type fakeProcesses struct {
@@ -27,9 +25,19 @@ func group(process, ws string) procmetrics.Group {
 	return procmetrics.Group{Process: process, Workspace: ws}
 }
 
+// visible are the workspaces the popups' tests read as visible; every other
+// one is not visible.
+var visible = map[ids.WorkspaceID]bool{"a": true}
+
 func newPopups(t *testing.T, procs fakeProcesses, running ...ids.WorkspaceID) *Popups {
 	t.Helper()
 	p, err := New(Deps{
+		Visibility: func(ws ids.WorkspaceID) wsm.Visibility {
+			if visible[ws] {
+				return wsm.UnselectedVisible
+			}
+			return wsm.NotVisible
+		},
 		Processes:   procs,
 		Stalls:      fakeStalls{count: 3, blocked: 1200},
 		StallWindow: 10 * time.Minute,
@@ -49,19 +57,8 @@ func newPopups(t *testing.T, procs fakeProcesses, running ...ids.WorkspaceID) *P
 	return p
 }
 
-func everyOpen(ids.WorkspaceID) bool { return true }
-
-func loaded(when *agentreplv1.PageResidencyRelease) *agentreplv1.PageResidency {
-	return &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_Loaded{Loaded: &agentreplv1.PageResidencyLoaded{Release: when}}}
-}
-
-func notLoaded() *agentreplv1.PageResidency {
-	return &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_NotLoaded{NotLoaded: &agentreplv1.PageResidencyNotLoaded{}}}
-}
-
-func held() *agentreplv1.PageResidencyRelease {
-	return &agentreplv1.PageResidencyRelease{When: &agentreplv1.PageResidencyRelease_Held{Held: &agentreplv1.PageResidencyReleaseHeld{}}}
-}
+// everyOpen is the open workspaces the overview's tests name.
+var everyOpen = []ids.WorkspaceID{"a"}
 
 func sampled(footprints map[procmetrics.Group]uint64) fakeProcesses {
 	return fakeProcesses{snap: procmetrics.Snapshot{Footprints: footprints}, sampled: true}
@@ -178,21 +175,16 @@ func TestNoShimRunningIsTheAgentsNoneArm(t *testing.T) {
 	}
 }
 
-func TestThePageCountsTakeOnlyOpenWorkspacesReports(t *testing.T) {
+func TestThePageCountsFollowTheOpenWorkspacesVisibility(t *testing.T) {
 	// Arrange
 	p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
-	for ws, r := range map[ids.WorkspaceID]*agentreplv1.PageResidency{"a": loaded(held()), "b": notLoaded(), "closed": loaded(held())} {
-		if err := p.Report(ws, r); err != nil {
-			t.Fatalf("Report: %v", err)
-		}
-	}
 
 	// Act
-	out, _ := p.Overview(func(ws ids.WorkspaceID) bool { return ws != "closed" })
+	out, _ := p.Overview([]ids.WorkspaceID{"a", "b"})
 
 	// Assert
 	if out.GetPages().GetLoaded() != 1 || out.GetPages().GetNotLoaded() != 1 {
-		t.Fatalf("pages = %v, want one loaded and one not, the closed one uncounted", out.GetPages())
+		t.Fatalf("pages = %v, want the visible one loaded and the other not", out.GetPages())
 	}
 }
 
@@ -251,89 +243,39 @@ func TestARunningShimNotYetMeasuredHasNoFigure(t *testing.T) {
 	}
 }
 
-func TestAnUnreportedPageHasNoLine(t *testing.T) {
+func TestAVisibleWorkspacesPageIsLoaded(t *testing.T) {
 	// Arrange
 	p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
 
 	// Act
-	out := p.Workspace("a")
+	page := p.Workspace("a").GetPage()
 
 	// Assert
-	if out.Page != nil {
-		t.Fatalf("page = %v, want none before Emacs reports", out.Page)
+	if page.GetLoaded() == nil {
+		t.Fatalf("page = %v, want loaded: the workspace is visible", page)
 	}
 }
 
-func TestEachReleaseRuleMapsOntoTheRail(t *testing.T) {
-	tests := []struct {
-		name    string
-		release *agentreplv1.PageResidencyRelease
-		check   func(*frontendv1.SidebarWorkspaceMemoryPageRelease) bool
-	}{
-		{"held", held(), func(r *frontendv1.SidebarWorkspaceMemoryPageRelease) bool { return r.GetHeld() != nil }},
-		{"on leave", &agentreplv1.PageResidencyRelease{When: &agentreplv1.PageResidencyRelease_OnLeave{OnLeave: &agentreplv1.PageResidencyReleaseOnLeave{}}},
-			func(r *frontendv1.SidebarWorkspaceMemoryPageRelease) bool { return r.GetOnLeave() != nil }},
-		{"at", &agentreplv1.PageResidencyRelease{When: &agentreplv1.PageResidencyRelease_At{At: &agentreplv1.PageResidencyReleaseAt{UnixMs: 42}}},
-			func(r *frontendv1.SidebarWorkspaceMemoryPageRelease) bool { return r.GetAt().GetUnixMs() == 42 }},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
-			if err := p.Report("a", loaded(tc.release)); err != nil {
-				t.Fatalf("Report: %v", err)
-			}
-
-			// Act
-			out := p.Workspace("a")
-
-			// Assert
-			if !tc.check(out.GetPage().GetLoaded().GetRelease()) {
-				t.Fatalf("page = %v, want the %s rule", out.GetPage(), tc.name)
-			}
-		})
-	}
-}
-
-func TestANotLoadedReportMapsOntoTheRail(t *testing.T) {
+func TestAWorkspaceThatIsNotVisibleHasNoPageLoaded(t *testing.T) {
 	// Arrange
 	p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
-	if err := p.Report("a", notLoaded()); err != nil {
-		t.Fatalf("Report: %v", err)
-	}
 
 	// Act
-	out := p.Workspace("a")
+	page := p.Workspace("b").GetPage()
 
 	// Assert
-	if out.GetPage().GetNotLoaded() == nil {
-		t.Fatalf("page = %v, want not loaded", out.GetPage())
+	if page.GetNotLoaded() == nil {
+		t.Fatalf("page = %v, want not loaded: the workspace is not visible", page)
 	}
 }
 
-func TestAMalformedReportIsRefusedAndTheEarlierKept(t *testing.T) {
-	tests := []struct {
-		name      string
-		residency *agentreplv1.PageResidency
-	}{
-		{"no state", &agentreplv1.PageResidency{}},
-		{"loaded with no rule", loaded(&agentreplv1.PageResidencyRelease{})},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			p := newPopups(t, sampled(map[procmetrics.Group]uint64{}))
-			if err := p.Report("a", notLoaded()); err != nil {
-				t.Fatalf("Report: %v", err)
-			}
+func TestNewRequiresTheVisibility(t *testing.T) {
+	// Act
+	_, err := New(Deps{Processes: fakeProcesses{}, Stalls: fakeStalls{}, StallWindow: time.Minute,
+		Running: func(ids.WorkspaceID) bool { return false }, Now: time.Now})
 
-			// Act
-			err := p.Report("a", tc.residency)
-
-			// Assert
-			if !errors.Is(err, ErrMalformedResidency) || p.Workspace("a").GetPage().GetNotLoaded() == nil {
-				t.Fatalf("Report = %v, page %v: want refused, the earlier report kept", err, p.Workspace("a").GetPage())
-			}
-		})
+	// Assert
+	if err == nil {
+		t.Fatal("New accepted no visibility source")
 	}
 }

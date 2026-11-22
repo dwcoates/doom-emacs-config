@@ -74,6 +74,13 @@ type resolver struct {
 	// the lock is released.
 	pendingStatusChanges []statusChange
 
+	// visibilities is told every change of a workspace's visibility, so the
+	// daemon keeps it durable (wsm.SetVisibilities). nil tells nobody.
+	visibilities VisibilitySink
+	// pendingVisibilities are the visibility changes a render found, reported
+	// after the lock is released.
+	pendingVisibilities map[ids.WorkspaceID]wsm.Visibility
+
 	// now is the clock a status change is stamped by (WithClock).
 	now func() time.Time
 
@@ -327,9 +334,11 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 		quiet:         quiet,
 		results:       r.pendingResults,
 		statusChanges: r.pendingStatusChanges,
+		visibilities:  r.pendingVisibilities,
 	}
 	r.pendingResults = nil
 	r.pendingStatusChanges = nil
+	r.pendingVisibilities = nil
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -397,6 +406,9 @@ func (r *resolver) report(batch []*mutation, out batchOutcome) {
 	}
 	for _, change := range out.statusChanges {
 		r.statusChanges(change.ws, change.at)
+	}
+	if len(out.visibilities) > 0 {
+		r.visibilities(out.visibilities)
 	}
 	if !out.applied {
 		return
@@ -518,8 +530,17 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 	set := mergedSetOf(lists.merged)
 	token := r.mergedToken(set)
 
+	// THE ARMS AND THE VISIBILITY COME FIRST, before any row is drawn: a row's
+	// tab is numbered by whether it is visible, which reads every row's arm
+	// and the Open tree's folds (visibility.go).
+	reg := r.state.reg
+	reg.Current = r.state.selected
+	repos, orphans := openTree(reg, log)
+	rc.arms = r.resolveArms(rc)
+	r.resolveVisibility(repos, rc, rc.arms)
+
 	workspaces := &frontendv1.WorkspaceRoster{
-		Repository: r.repositoryView(rc, log),
+		Repository: r.repositoryView(repos, orphans, rc, log),
 		Hidden:     r.hiddenSection(lists.hidden, rc, log),
 		Open:       r.openSection(),
 	}

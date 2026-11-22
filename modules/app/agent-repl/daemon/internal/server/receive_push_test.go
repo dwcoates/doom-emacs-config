@@ -52,14 +52,14 @@ func TestReceivePushAnswersTheFirstPushPickAccepts(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	stream := dialHostStream(t, h, t.Context())
-	h.Server.NotificationClicked(testWorkspaceID)
+	markHostStream(h, testWorkspaceID)
 	h.Server.(*server).hostEventStream(testWorkspaceID).Emit(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_FinalResponseClicked{
 			FinalResponseClicked: &agentreplv1.HostWorkspaceFinalResponseClicked{},
 		},
 	})
 
-	// Act — the host state and the notification click are skipped.
+	// Act — the host state and the mark are skipped.
 	got := receivePush(t, stream, "a final-response click",
 		func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.HostWorkspaceFinalResponseClicked {
 			return r.GetFinalResponseClicked()

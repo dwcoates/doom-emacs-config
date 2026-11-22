@@ -420,6 +420,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("history.el" agent-repl-history-search
      "[agent-repl] input history is empty"
      "answers the interactive history search")
+    ("host.el" agent-repl-host--unheld-select-refused "[agent-repl] The switch to %s did not happen (%s): pick it again"
+     "tells the user the workspace they picked could not be switched to, and that picking it again retries")
     ("host.el" agent-repl-host-request-switch
      "[agent-repl] Cannot switch to %s: the daemon has not registered it"
      "explains why the user's switch request went nowhere")
@@ -518,8 +520,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "reports an answer to the user's new thread this build cannot read")
     ("threads.el" agent-repl-thread-send-background "[agent-repl] Asked %s"
      "confirms the question sent to the last thread without switching to it, by the thread's name")
-    ("threads.el" agent-repl-threads--open "[agent-repl] Thread %s is still opening"
-     "tells the user the thread they picked has no workspace open yet")
     ("threads.el" agent-repl-threads--open-recent-launched
      "[agent-repl] There is no thread yet; SPC TAB t starts one"
      "tells the user who opened Chats from outside Emacs that there is no thread to show")
@@ -565,6 +565,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's priority command")
     ("verbs.el" agent-repl-verb-set-hidden "agent-repl: %s %s"
      "confirms the user's hide or show of a workspace")
+    ("verbs.el" agent-repl-verb-show-ref "agent-repl: %s shown"
+     "confirms the hidden workspace the user asked to show again is shown")
     ("verbs.el" agent-repl-verb-retry-vendor-error "%s"
      "reports what the user's RET in an empty composer did to the scheduled retry")
     ("verbs.el" agent-repl-remote-control-toggle "agent-repl: remote control %s for %s"
@@ -7676,7 +7678,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 
 (ert-deftest agent-repl-test-core-vocab-read-reads-the-checked-in-files ()
   "The real vocabulary directory resolves beside the module."
-  (should (natnump (agent-repl-vocab-read "page-hold.json" "hold_seconds"))))
+  (should (natnump (agent-repl-vocab-read "name-fade.json" "hold_seconds"))))
 
 (ert-deftest agent-repl-test-core-every-vocab-file-is-read-through-the-reader ()
   "No source outside core.el resolves a proto/vocab path by hand."

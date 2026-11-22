@@ -120,7 +120,7 @@ func (s *server) RequestNewThread(
 	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_NewThreadRequested{
 		NewThreadRequested: &agentreplv1.DaemonNewThreadRequested{},
 	}}
-	reached := s.pushToEditors(rpc, push, func(*daemonWatcher) bool { return true }, nil)
+	reached := s.pushToEditors(rpc, push, everyEditor, nil)
 	if reached == 0 {
 		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: "no_editor", Reason: "no Emacs is connected to open the new-thread prompt"})))
 	}

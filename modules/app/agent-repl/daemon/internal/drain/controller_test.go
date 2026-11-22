@@ -1038,14 +1038,15 @@ func TestNewRefusesWithoutAMergeSuspension(t *testing.T) {
 func TestNewRefusesWithoutARevivalAnswer(t *testing.T) {
 	// Arrange & Act
 	_, err := New(Deps{
-		DB:        newHarness(t).db,
-		Stand:     newFakeStand(),
-		Spawns:    newFakeSpawns(),
-		Merges:    &fakeMerges{},
-		Freeness:  newFakeFreeness(),
-		Announcer: &fakeAnnouncer{},
-		Exit:      func(context.Context) error { return nil },
-		Log:       dlog.NewTestSurfaces(),
+		DB:         newHarness(t).db,
+		Stand:      newFakeStand(),
+		Spawns:     newFakeSpawns(),
+		Merges:     &fakeMerges{},
+		Freeness:   newFakeFreeness(),
+		Visibility: func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible },
+		Announcer:  &fakeAnnouncer{},
+		Exit:       func(context.Context) error { return nil },
+		Log:        dlog.NewTestSurfaces(),
 	})
 
 	// Assert
@@ -1054,10 +1055,11 @@ func TestNewRefusesWithoutARevivalAnswer(t *testing.T) {
 	}
 }
 
-// TestNewRefusesWithoutADeliveryAnswer pins that the prompt queue's delivery
-// state is REQUIRED wiring: a stand-down that cannot see a delivery under way
-// hibernates the shim the prompt is on its way to.
-func TestNewRefusesWithoutADeliveryAnswer(t *testing.T) {
+// TestNewRefusesWithoutAVisibilityAnswer pins that the roster's live
+// visibility is REQUIRED wiring: a stand-down that cannot read it would decide
+// whether a workspace is still withheld off the store's copy, written a moment
+// after the push that showed it again.
+func TestNewRefusesWithoutAVisibilityAnswer(t *testing.T) {
 	// Arrange & Act
 	_, err := New(Deps{
 		DB:        newHarness(t).db,
@@ -1069,6 +1071,30 @@ func TestNewRefusesWithoutADeliveryAnswer(t *testing.T) {
 		Announcer: &fakeAnnouncer{},
 		Exit:      func(context.Context) error { return nil },
 		Log:       dlog.NewTestSurfaces(),
+	})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "visibility answer") {
+		t.Fatalf("New = %v, want the missing visibility answer refused", err)
+	}
+}
+
+// TestNewRefusesWithoutADeliveryAnswer pins that the prompt queue's delivery
+// state is REQUIRED wiring: a stand-down that cannot see a delivery under way
+// hibernates the shim the prompt is on its way to.
+func TestNewRefusesWithoutADeliveryAnswer(t *testing.T) {
+	// Arrange & Act
+	_, err := New(Deps{
+		DB:         newHarness(t).db,
+		Stand:      newFakeStand(),
+		Spawns:     newFakeSpawns(),
+		Merges:     &fakeMerges{},
+		Freeness:   newFakeFreeness(),
+		Visibility: func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible },
+		Reviving:   newFakeReviving().Reviving,
+		Announcer:  &fakeAnnouncer{},
+		Exit:       func(context.Context) error { return nil },
+		Log:        dlog.NewTestSurfaces(),
 	})
 
 	// Assert
@@ -1085,6 +1111,7 @@ func TestNewRefusesAMissingBounceAnswer(t *testing.T) {
 		Spawns:     newFakeSpawns(),
 		Merges:     &fakeMerges{},
 		Freeness:   newFakeFreeness(),
+		Visibility: func(ids.WorkspaceID) wsm.Visibility { return wsm.UnselectedVisible },
 		Reviving:   newFakeReviving().Reviving,
 		Delivering: func(ids.WorkspaceID) bool { return false },
 		Announcer:  &fakeAnnouncer{},

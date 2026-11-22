@@ -17,12 +17,12 @@
 
 (defmacro agent-repl-test-notifications--recording (&rest body)
   "Run BODY with the switch request and every log level recorded.
-`switches' collects (WS . TRIGGER), `records' each (LEVEL . LINE), LEVEL
+`switches' collects (REF . TRIGGER), `records' each (LEVEL . LINE), LEVEL
 one of `debug', `info', `warn' and `error'."
   `(let ((switches nil)
          (records nil))
-     (cl-letf (((symbol-function 'agent-repl-host-request-switch)
-                (lambda (ws trigger) (push (cons ws trigger) switches) t))
+     (cl-letf (((symbol-function 'agent-repl-host-request-switch-ref)
+                (lambda (ref trigger) (push (cons ref trigger) switches) t))
                ((symbol-function 'agent-repl--log)
                 (agent-repl-test--record-leveled-into records 'debug))
                ((symbol-function 'agent-repl--info)
@@ -50,8 +50,8 @@ one of `debug', `info', `warn' and `error'."
 (ert-deftest agent-repl-test-notifications-recorder-records-switches ()
   "The recorder records each switch request instead of making it."
   (agent-repl-test-notifications--recording
-   (should (agent-repl-host-request-switch "ws" 'trigger))
-   (should (equal switches '(("ws" . trigger))))))
+   (should (agent-repl-host-request-switch-ref '(:id "ws") 'trigger))
+   (should (equal switches '(((:id "ws") . trigger))))))
 
 (ert-deftest agent-repl-test-notifications-recorded-p-matches-level-and-pattern ()
   "A line matches only under its own level."
@@ -216,33 +216,64 @@ with its callbacks in `answers', so a test answers each one itself."
 
 ;;;; ---- Tests: the claim a focus gain makes ----
 
-(ert-deftest agent-repl-test-focus-gain-claim-selects-the-banners-tab ()
-  "A report answered with a claimed banner requests the switch to its tab."
+(defun agent-repl-test-notifications--claim (id)
+  "Return the decoded `:banner' claim naming the workspace ID."
+  (plist-get (plist-get (agent-repl-test-notifications--banner id) :value) :claim))
+
+(defmacro agent-repl-test-notifications--with-rows (rows &rest body)
+  "Run BODY with the roster listing ROWS, each (ID . CLOSED)."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-roster-row-of-id)
+              (lambda (id) (let ((row (assoc id ,rows)))
+                             (and row (list :closed (list :closed (if (cdr row) t :false)))))))
+             ((symbol-function 'agent-repl-roster-row-closed-p)
+              (lambda (row) (eq (plist-get (plist-get row :closed) :closed) t))))
+     ,@body))
+
+(ert-deftest agent-repl-test-focus-gain-claim-selects-the-banners-workspace ()
+  "A report answered with a claimed banner requests the switch to its workspace."
   (agent-repl-test-notifications--with-reporter t 'conn
     (agent-repl-test-notifications--recording
-     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
-                (lambda (id) (and (equal id "id-1") "tab-1"))))
+     (agent-repl-test-notifications--with-rows '(("id-1" . nil))
        (agent-repl--focus-report)
        (agent-repl-test-notifications--answer (car answers) (agent-repl-test-notifications--banner "id-1")))
-     (should (equal switches '(("tab-1" . notification-focus))))
-     (should (agent-repl-test-notifications--recorded-p records 'info "claim banner ws=tab-1 id=id-1"))
+     (should (equal (mapcar (lambda (switch) (cons (plist-get (car switch) :id) (cdr switch))) switches)
+                    '(("id-1" . notification-focus))))
+     (should (agent-repl-test-notifications--recorded-p records 'info "claim banner id=id-1"))
      (should-not (agent-repl-serial-in-flight agent-repl--focus-serial)))))
 
 (ert-deftest agent-repl-test-focus-gain-claim-is-one-call ()
   "The switch a claimed banner asks for needs no call beyond the report."
   (agent-repl-test-notifications--with-reporter t 'conn
     (agent-repl-test-notifications--recording
-     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "tab-1")))
+     (agent-repl-test-notifications--with-rows '(("id-1" . nil))
        (agent-repl--focus-report)
        (agent-repl-test-notifications--answer (car answers) (agent-repl-test-notifications--banner "id-1")))
      (should (= (length calls) 1))
      (should (= (length switches) 1)))))
 
-(ert-deftest agent-repl-test-focus-gain-claim-without-a-tab-moves-nothing ()
-  "A claimed banner whose workspace has no tab here moves the user nowhere."
+(ert-deftest agent-repl-test-focus-gain-claim-of-an-unheld-workspace-lands-on-it ()
+  "A claimed banner of an open workspace this editor does not hold still lands."
   (agent-repl-test-notifications--recording
-   (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
-     (agent-repl--focus-claim-answered t (plist-get (plist-get (agent-repl-test-notifications--banner "id-gone") :value) :claim)))
+   (agent-repl-test-notifications--with-rows '(("id-folded" . nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) #'ignore))
+       (agent-repl--focus-claim-answered t (agent-repl-test-notifications--claim "id-folded"))))
+   (should (equal (plist-get (caar switches) :id) "id-folded"))
+   (should (agent-repl-test-notifications--recorded-p records 'info "claim banner id=id-folded held=nil"))))
+
+(ert-deftest agent-repl-test-focus-gain-claim-of-a-closed-workspace-moves-nothing ()
+  "A claimed banner whose workspace has closed moves the user nowhere."
+  (agent-repl-test-notifications--recording
+   (agent-repl-test-notifications--with-rows '(("id-shut" . t))
+     (agent-repl--focus-claim-answered t (agent-repl-test-notifications--claim "id-shut")))
+   (should-not switches)
+   (should (agent-repl-test-notifications--recorded-p records 'info "claim banner-without-tab id=id-shut"))))
+
+(ert-deftest agent-repl-test-focus-gain-claim-of-a-workspace-gone-moves-nothing ()
+  "A claimed banner whose workspace the roster no longer lists moves the user nowhere."
+  (agent-repl-test-notifications--recording
+   (agent-repl-test-notifications--with-rows '()
+     (agent-repl--focus-claim-answered t (agent-repl-test-notifications--claim "id-gone")))
    (should-not switches)
    (should (agent-repl-test-notifications--recorded-p records 'info "claim banner-without-tab id=id-gone"))))
 
@@ -289,11 +320,11 @@ recorded into `focused'."
         ,@body))))
 
 (ert-deftest agent-repl-test-activate-requests-the-workspace ()
-  "A banner click REQUESTS the workspace's selection of the daemon.
+  "A banner click REQUESTS the workspace's selection of the daemon, by its ref.
 Like every switch trigger, the frame follows the roster's `current'."
   (agent-repl-test-notifications--activating
-   (agent-repl--notification-activate "ws-a")
-   (should (equal switches '(("ws-a" . notification))))))
+   (agent-repl--notification-activate '(:id "id-a" :dir "/w/a"))
+   (should (equal switches '(((:id "id-a" :dir "/w/a") . notification))))))
 
 (ert-deftest agent-repl-test-activate-moves-no-frame-itself ()
   "A banner click never switches the frame locally."
@@ -301,29 +332,14 @@ Like every switch trigger, the frame follows the roster's `current'."
    (let (jumped)
      (cl-letf (((symbol-function 'agent-repl--ws-switch)
                 (lambda (ws &rest _) (setq jumped ws))))
-       (agent-repl--notification-activate "ws-a")
+       (agent-repl--notification-activate '(:id "id-a" :dir "/w/a"))
        (should-not jumped)))))
 
 (ert-deftest agent-repl-test-activate-focuses-selected-frame ()
   "Activate should focus the selected frame so Emacs comes forward."
   (agent-repl-test-notifications--activating
-   (agent-repl--notification-activate "ws-a")
+   (agent-repl--notification-activate '(:id "id-a" :dir "/w/a"))
    (should (eq focused 'frame))))
-
-(ert-deftest agent-repl-test-activate-nil-ws-focuses-without-jump ()
-  "Activate with a nil WS should focus Emacs but not attempt a jump."
-  (agent-repl-test-notifications--activating
-   (agent-repl--notification-activate nil)
-   (should-not switches)
-   (should focused)))
-
-(ert-deftest agent-repl-test-activate-unknown-ws-warns ()
-  "An activation naming no workspace is a WARNING, not a silent no-op:
-the click happened and went nowhere, which is worth the record."
-  (agent-repl-test-notifications--activating
-   (agent-repl--notification-activate "")
-   (should-not switches)
-   (should (agent-repl-test-notifications--recorded-p records 'warn "activate-unknown-workspace"))))
 
 ;;;; ---- Tests: agent-repl--emacs-focused-p ----
 

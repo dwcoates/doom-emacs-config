@@ -63,14 +63,11 @@
                  "{\"dir\":\"~/w/fix\"}")))
 
 (ert-deftest agent-repl-test-wire-host-register-success-carries-the-minted-ref ()
-  "The success arm carries the daemon-minted WorkspaceRef, whole.
-A success that states no page residency decodes it as nil: the daemon
-knows nothing of the page."
+  "The success arm carries the daemon-minted WorkspaceRef, whole."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-register-workspace-response
                   "{\"success\":{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}}")
-                 '(:arm :success :value (:workspace (:id "ws-7" :dir "/w/fix")
-                                         :last-known-page nil)))))
+                 '(:arm :success :value (:workspace (:id "ws-7" :dir "/w/fix"))))))
 
 (ert-deftest agent-repl-test-wire-host-register-error-arm-carries-its-cause ()
   "The error arm carries the refusal the daemon named."
@@ -127,24 +124,9 @@ knows nothing of the page."
                           "{\"dir\":\"/w/b\",\"refused\":{\"notAWorktree\":{}}},"
                           "{\"dir\":\"/w/c\",\"failed\":{\"cause\":\"git broke\"}}]}"))
                  '(:outcomes
-                   ((:dir "/w/a" :outcome (:arm :registered :value (:workspace (:id "ws-a" :dir "/w/a") :last-known-page nil)))
+                   ((:dir "/w/a" :outcome (:arm :registered :value (:workspace (:id "ws-a" :dir "/w/a"))))
                     (:dir "/w/b" :outcome (:arm :refused :value (:cause (:arm :not-a-worktree :value nil))))
                     (:dir "/w/c" :outcome (:arm :failed :value (:cause "git broke"))))))))
-
-(ert-deftest agent-repl-test-wire-host-register-workspace-success-decodes-the-last-known-page ()
-  "A registration answers the page the daemon last knew: loaded, not loaded, or none."
-  (dolist (case '(("{\"loaded\":{}}" . :loaded) ("{\"notLoaded\":{}}" . :not-loaded)))
-    (should (equal (agent-repl-test-wire-host--decode
-                    #'agent-repl-wire-decode-register-workspace-success
-                    (format "{\"workspace\":{\"id\":\"ws-a\",\"dir\":\"/w/a\"},\"lastKnownPage\":%s}" (car case)))
-                   (list :workspace '(:id "ws-a" :dir "/w/a") :last-known-page (cdr case))))))
-
-(ert-deftest agent-repl-test-wire-host-last-known-page-with-no-state-is-a-breach ()
-  "A last-known page naming no state is a contract breach."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-register-workspace-success
-                  "{\"workspace\":{\"id\":\"ws-a\",\"dir\":\"/w/a\"},\"lastKnownPage\":{}}")
-                 '("LastKnownPage" state "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-host-register-workspaces-unset-outcome-is-a-breach ()
   "An outcome with no arm set is a contract breach."
@@ -361,62 +343,6 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                    (agent-repl-test-wire-host--decode
                     #'agent-repl-wire-decode-report-page-unloading-response json)))))
 
-;;;; ---- ReportPageResidency ----
-
-(defun agent-repl-test-wire-host--residency-json (residency)
-  "RESIDENCY's request encoded for workspace ws-7, as JSON text."
-  (agent-repl-test-wire-host--quiet
-   (json-serialize
-    (agent-repl-wire-encode-report-page-residency-request
-     (list :workspace '(:id "ws-7" :dir "/w/fix") :residency residency)))))
-
-(ert-deftest agent-repl-test-wire-host-page-residency-encodes-each-release-rule ()
-  "Each release rule, and a page not loaded, encodes to its protojson arm."
-  (dolist (case '(((:arm :loaded :value (:release (:arm :held :value nil)))
-                   . "{\"loaded\":{\"release\":{\"held\":{}}}}")
-                  ((:arm :loaded :value (:release (:arm :on-leave :value nil)))
-                   . "{\"loaded\":{\"release\":{\"onLeave\":{}}}}")
-                  ((:arm :loaded :value (:release (:arm :at :value (:unix-ms 1800000000000))))
-                   . "{\"loaded\":{\"release\":{\"at\":{\"unixMs\":1800000000000}}}}")
-                  ((:arm :not-loaded :value nil) . "{\"notLoaded\":{}}")))
-    (should (equal (agent-repl-test-wire-host--residency-json (car case))
-                   (concat "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},\"residency\":"
-                           (cdr case) "}")))))
-
-(ert-deftest agent-repl-test-wire-host-page-residency-without-a-residency-is-refused ()
-  "A request naming no residency errors before send."
-  (should (equal (car (agent-repl-test-wire-host--quiet
-                       (condition-case err
-                           (progn (agent-repl-wire-encode-report-page-residency-request
-                                   '(:workspace (:id "ws-7" :dir "/w"))) nil)
-                         (agent-repl-wire-error (cdr err)))))
-                 "ReportPageResidencyRequest")))
-
-(ert-deftest agent-repl-test-wire-host-page-residency-loaded-without-a-rule-is-refused ()
-  "A loaded page naming no release rule errors before send."
-  (should (equal (car (agent-repl-test-wire-host--quiet
-                       (condition-case err
-                           (progn (agent-repl-test-wire-host--residency-json '(:arm :loaded :value nil)) nil)
-                         (agent-repl-wire-error (cdr err)))))
-                 "PageResidencyLoaded")))
-
-(ert-deftest agent-repl-test-wire-host-page-residency-at-without-an-integer-is-refused ()
-  "An unload instant that is not an integer errors before send."
-  (should (equal (car (agent-repl-test-wire-host--quiet
-                       (condition-case err
-                           (progn (agent-repl-test-wire-host--residency-json
-                                   '(:arm :loaded :value (:release (:arm :at :value (:unix-ms "soon"))))) nil)
-                         (agent-repl-wire-error (cdr err)))))
-                 "PageResidencyReleaseAt")))
-
-(ert-deftest agent-repl-test-wire-host-page-residency-response-shares-the-subject-codec ()
-  "ReportPageResidency decodes every answer as every subject verb does."
-  (dolist (json '("{\"success\":{}}" "{\"error\":{\"notYetAdopted\":{}}}"))
-    (should (equal (agent-repl-test-wire-host--decode
-                    #'agent-repl-wire-decode-report-page-residency-response json)
-                   (agent-repl-test-wire-host--decode
-                    #'agent-repl-wire-decode-report-page-unloading-response json)))))
-
 ;;;; ---- ReportPageUnloading ----
 
 (ert-deftest agent-repl-test-wire-host-page-unloading-request-echoes-the-ref ()
@@ -513,7 +439,6 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "Every declared push arm decodes to its own keyword."
   (dolist (case (list (list (concat "{\"host\":" agent-repl-test-wire-host--live-json "}")
                             :host)
-                      (list "{\"notificationClicked\":{}}" :notification-clicked)
                       (list "{\"transferred\":{}}" :transferred)
                       (list "{\"reloadWebapp\":{}}" :reload-webapp)
                       (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)
@@ -523,9 +448,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"selection\":{\"none\":{}}}" :selection)
                       (list "{\"mentions\":{\"commands\":[\"merge-queue\"]}}" :mentions)
                       (list "{\"mentionTargets\":{}}" :mention-targets)
-                      (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
-                      (list "{\"selectRequested\":{}}" :select-requested)
                       (list "{\"loadPageRequested\":{}}" :load-page-requested)
                       (list "{\"linkFollowed\":{}}" :link-followed)
                       (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)
@@ -753,27 +676,38 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   "{\"command\":\"ls\",\"cwd\":\"/w\"}")
                  '("OpenInEditorTerminalCommand" cwd "unknown field"))))
 
-;;;; ---- HostEvaluate and AnswerEditorEvaluation ----
+;;;; ---- DaemonEvaluate and AnswerEditorEvaluation ----
 
-(ert-deftest agent-repl-test-wire-host-evaluate-decodes-token-and-text ()
-  "An evaluation push decodes its token and its text."
+(ert-deftest agent-repl-test-wire-host-evaluate-decodes-workspace-token-and-text ()
+  "An evaluation push decodes the workspace it names, its token and its text."
   (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-host-evaluate
-                  "{\"token\":{\"value\":\"eval-1-3\"},\"text\":\"(+ 1 2)\"}")
-                 '(:token (:value "eval-1-3") :text "(+ 1 2)"))))
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"evaluate\":{\"workspace\":" agent-repl-test-wire-host--ref-json
+                          ",\"token\":{\"value\":\"eval-1-3\"},\"text\":\"(+ 1 2)\"}}"))
+                 '(:arm :evaluate
+                   :value (:workspace (:id "w1" :dir "/t/w1") :token (:value "eval-1-3") :text "(+ 1 2)")))))
 
 (ert-deftest agent-repl-test-wire-host-evaluate-without-token-is-a-breach ()
   "An evaluation that could never be answered is a contract breach."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-evaluate "{\"text\":\"1\"}")
-                 '("HostEvaluate" token "required message field is absent"))))
+                  #'agent-repl-wire-decode-daemon-evaluate
+                  (concat "{\"workspace\":" agent-repl-test-wire-host--ref-json ",\"text\":\"1\"}"))
+                 '("DaemonEvaluate" token "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-evaluate-without-a-workspace-is-a-breach ()
+  "An evaluation naming no workspace could be run nowhere: a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-evaluate
+                  "{\"token\":{\"value\":\"t\"},\"text\":\"1\"}")
+                 '("DaemonEvaluate" workspace "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-host-evaluate-refuses-an-unknown-field ()
   "An unknown key on the evaluation push is refused."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-evaluate
-                  "{\"token\":{\"value\":\"t\"},\"deadline\":1}")
-                 '("HostEvaluate" deadline "unknown field"))))
+                  #'agent-repl-wire-decode-daemon-evaluate
+                  (concat "{\"workspace\":" agent-repl-test-wire-host--ref-json
+                          ",\"token\":{\"value\":\"t\"},\"deadline\":1}"))
+                 '("DaemonEvaluate" deadline "unknown field"))))
 
 (defun agent-repl-test-wire-host--answer-json (outcome)
   "Encode an AnswerEditorEvaluationRequest carrying OUTCOME, as JSON."
@@ -958,19 +892,25 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
 
 ;;;; ---- The rail's row click push ----
 
-(ert-deftest agent-repl-test-wire-host-select-requested-decodes-empty ()
-  "The click push is empty: presence is the fact, and the stream names the workspace."
+(ert-deftest agent-repl-test-wire-host-select-requested-decodes-its-workspace ()
+  "The daemon stream's rail click names the workspace it was made on."
   (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-watch-host-workspace-response
-                  "{\"selectRequested\":{}}")
-                 '(:arm :select-requested :value nil))))
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"selectRequested\":{\"workspace\":" agent-repl-test-wire-host--ref-json "}}"))
+                 '(:arm :select-requested :value (:workspace (:id "w1" :dir "/t/w1"))))))
 
-(ert-deftest agent-repl-test-wire-host-select-requested-refuses-a-field ()
-  "A field on the empty click message is refused, not ignored."
+(ert-deftest agent-repl-test-wire-host-select-requested-without-a-workspace-is-a-breach ()
+  "A rail click naming no workspace switches nowhere: a contract breach."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-select-requested
-                  "{\"workspace\":\"w\"}")
-                 '("HostWorkspaceSelectRequested" workspace "unknown field"))))
+                  #'agent-repl-wire-decode-daemon-workspace-select-requested "{}")
+                 '("DaemonWorkspaceSelectRequested" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-select-requested-refuses-an-unknown-field ()
+  "An unknown key on the click message is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-workspace-select-requested
+                  (concat "{\"workspace\":" agent-repl-test-wire-host--ref-json ",\"row\":\"r\"}"))
+                 '("DaemonWorkspaceSelectRequested" row "unknown field"))))
 
 ;;;; ---- The link-followed push ----
 
@@ -1021,21 +961,46 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                     #'agent-repl-wire-decode-host-workspace-compose-entry (car case))
                    (cadr case)))))
 
+;;;; ---- The daemon stream's workspace events share one decoder ----
+
+(ert-deftest agent-repl-test-wire-host-a-workspace-event-decodes-its-workspace ()
+  "The shared decoder answers the workspace a workspace event names."
+  (should (equal (agent-repl-test-wire-host--decode
+                  (lambda (v) (agent-repl-wire--decode-workspace-event "SomeEvent" v))
+                  (concat "{\"workspace\":" agent-repl-test-wire-host--ref-json "}"))
+                 '(:workspace (:id "w1" :dir "/t/w1")))))
+
+(ert-deftest agent-repl-test-wire-host-every-workspace-event-decoder-is-the-shared-one ()
+  "Each workspace event decoder is the shared one under its message's name:
+a breach names the event's own message."
+  (dolist (case '((agent-repl-wire-decode-daemon-workspace-notification-clicked . "DaemonWorkspaceNotificationClicked")
+                  (agent-repl-wire-decode-daemon-workspace-select-requested . "DaemonWorkspaceSelectRequested")))
+    (should (equal (car (agent-repl-test-wire-host--breach (car case) "{\"extra\":1}"))
+                   (cdr case)))))
+
 ;;;; ---- The notification click push ----
 
-(ert-deftest agent-repl-test-wire-host-notification-clicked-decodes-empty ()
-  "The click push is empty: presence is the fact, and the stream names the workspace."
+(ert-deftest agent-repl-test-wire-host-notification-clicked-decodes-its-workspace ()
+  "The daemon stream's banner click names the workspace the banner was posted for."
   (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-watch-host-workspace-response
-                  "{\"notificationClicked\":{}}")
-                 '(:arm :notification-clicked :value nil))))
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"notificationClicked\":{\"workspace\":" agent-repl-test-wire-host--ref-json "}}"))
+                 '(:arm :notification-clicked :value (:workspace (:id "w1" :dir "/t/w1"))))))
 
-(ert-deftest agent-repl-test-wire-host-notification-clicked-refuses-a-field ()
-  "A field on the empty click message is refused, not ignored."
+(ert-deftest agent-repl-test-wire-host-notification-clicked-without-a-workspace-is-a-breach ()
+  "A banner click naming no workspace switches nowhere: a contract breach."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-notification-clicked
-                  "{\"workspace\":\"w\"}")
-                 '("HostWorkspaceNotificationClicked" workspace "unknown field"))))
+                  #'agent-repl-wire-decode-daemon-workspace-notification-clicked "{}")
+                 '("DaemonWorkspaceNotificationClicked" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-the-host-stream-refuses-the-moved-click-arms ()
+  "The banner click, the rail click and the evaluation left the host stream:
+each is refused there as an unknown field."
+  (dolist (arm '(notificationClicked selectRequested evaluate))
+    (should (equal (agent-repl-test-wire-host--breach
+                    #'agent-repl-wire-decode-watch-host-workspace-response
+                    (format "{\"%s\":{}}" arm))
+                   (list "WatchHostWorkspaceResponse" arm "unknown field")))))
 
 (ert-deftest agent-repl-test-wire-host-retired-notification-arm-is-refused ()
   "The retired `notification' push is refused as an unknown field."
@@ -1741,7 +1706,8 @@ OpenTabs streams."
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
                              "mutationProgress" "reloadElisp" "elispCurrent" "ending" "faultsStanding"
-                             "persistentWifi" "newsDigest" "reloadWebhost" "newThreadRequested")
+                             "persistentWifi" "newsDigest" "reloadWebhost" "newThreadRequested"
+                             "notificationClicked" "selectRequested" "evaluate")
                        #'string<))))
 
 ;;;; ---- OpenTabs ----
@@ -1799,7 +1765,8 @@ OpenTabs streams."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w1\",\"dir\":\"/t/w1\"}},"
           "\"name\":{\"text\":\"one\"},"
           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
-          "\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"ready\":{}}")
+          "\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"ready\":{},"
+          "\"visibility\":{\"unselectedVisible\":{}}}")
   "A minimal valid RosterRow for workspace w1.")
 
 (defun agent-repl-test-wire-host--opened (arm value)
@@ -2011,9 +1978,9 @@ OpenTabs streams."
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "WatchHostWorkspaceResponse")
                        #'string<)
-                 (sort (list "evaluate" "host" "transferred" "reloadWebapp"
-                             "openInEditor" "openCommitLog" "runInTerminal" "ending" "notificationClicked" "selection"
-                             "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
+                 (sort (list "host" "transferred" "reloadWebapp"
+                             "openInEditor" "openCommitLog" "runInTerminal" "ending" "selection"
+                             "finalResponseClicked" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
                              "responseQuestion" "mentions" "mentionTargets" "linkFollowed")
                        #'string<))))

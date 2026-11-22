@@ -12,7 +12,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/bounce"
-	"agent-repld/internal/bringup"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
@@ -32,9 +31,9 @@ type handoverPlan struct {
 	workspaces     []wsm.Workspace
 	untransferable []wsm.Workspace
 	snapshot       map[ids.WorkspaceID]Participants
-	// folded marks each workspace whose sidebar row was folded away when the
-	// handover was announced: its repository or its subsection folded
-	// (foldedRows). A folded workspace transfers after every unfolded one.
+	// folded marks each workspace that was not visible when the handover was
+	// announced, by its persisted visibility (foldedRows). A folded workspace
+	// transfers after every unfolded one.
 	folded map[ids.WorkspaceID]bool
 	forced bool
 	fields dlog.Context
@@ -288,18 +287,13 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
-	// THE FOLDS ARE READ BEFORE THE ANNOUNCEMENT, as the participants are
-	// snapshotted at it: what the handover loads and in what order it moves
-	// the workspaces are decided from the sidebar as it stood when it began,
+	// THE VISIBILITY IS READ BEFORE THE ANNOUNCEMENT, from the workspaces
+	// listed above, as the participants are snapshotted at it: what the
+	// handover loads and in what order it moves the workspaces are decided
+	// from the sidebar as it stood when it began,
 	// never from what it has become by each transfer (owner ruling,
 	// 2026-11-13).
-	folded, err := c.foldedRows(ctx, workspaces)
-	if err != nil {
-		c.log.Error(opHandover, "could not read which sidebar rows are folded; the handover is abandoned before anything was announced",
-			dlog.WithCause(fields, err))
-		c.abandonHandover(ctx, slot, fields, err)
-		return nil, err
-	}
+	folded := foldedRows(workspaces)
 	workspaces = unfoldedFirst(workspaces, folded)
 	c.fixServed(slot, address, workspaces, untransferable, fields)
 
@@ -363,20 +357,16 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	}, nil
 }
 
-// foldedRows answers, for each of WORKSPACES, whether its sidebar row is
-// folded away: the one statement of a fold, the tab bar's (bringup.Folds), so
-// what a handover moves last and loads no page for is exactly what the bar
-// folds and the daemon withholds.
-func (c *controller) foldedRows(ctx context.Context, workspaces []wsm.Workspace) (map[ids.WorkspaceID]bool, error) {
-	folds, err := bringup.Folds(ctx, c.deps.DB, c.log)
-	if err != nil {
-		return nil, fmt.Errorf("rollout: handover: %w", err)
-	}
+// foldedRows answers, for each of WORKSPACES, whether the user cannot see it:
+// its persisted visibility (wsm.Workspace.Visibility), the one fact every
+// per-workspace allocation is gated on, so what a handover moves last is
+// exactly what the editor holds nothing for.
+func foldedRows(workspaces []wsm.Workspace) map[ids.WorkspaceID]bool {
 	out := make(map[ids.WorkspaceID]bool, len(workspaces))
 	for _, ws := range workspaces {
-		_, out[ws.ID] = folds[ws.ID]
+		out[ws.ID] = !ws.Visibility.Visible()
 	}
-	return out, nil
+	return out
 }
 
 // unfoldedFirst orders WORKSPACES with every unfolded one before every folded

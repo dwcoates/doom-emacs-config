@@ -325,6 +325,44 @@ unknown fields, and refusing this one would drop every roster push."
   (agent-repl-wire--decode-empty "RosterRowMergeTurn" value)
   t)
 
+(defconst agent-repl-wire--roster-row-visibility-arms
+  '((notVisible :not-visible agent-repl-wire-decode-roster-visibility-not-visible)
+    (unselectedVisible :unselected-visible
+                       agent-repl-wire-decode-roster-visibility-unselected-visible)
+    (selected :selected agent-repl-wire-decode-roster-visibility-selected))
+  "The arms of `RosterRowVisibility.visibility', as (WIRE ARM DECODER).")
+
+(defun agent-repl-wire-decode-roster-visibility-not-visible (value)
+  "Decode VALUE as the empty `RosterVisibilityNotVisible' and return t."
+  (agent-repl-wire--decode-empty "RosterVisibilityNotVisible" value)
+  t)
+
+(defun agent-repl-wire-decode-roster-visibility-unselected-visible (value)
+  "Decode VALUE as the empty `RosterVisibilityUnselectedVisible' and return t."
+  (agent-repl-wire--decode-empty "RosterVisibilityUnselectedVisible" value)
+  t)
+
+(defun agent-repl-wire-decode-roster-visibility-selected (value)
+  "Decode VALUE as the empty `RosterVisibilitySelected' and return t."
+  (agent-repl-wire--decode-empty "RosterVisibilitySelected" value)
+  t)
+
+(defun agent-repl-wire-decode-roster-row-visibility (value)
+  "Decode VALUE as `RosterRowVisibility' and return its arm.
+The arm is `:not-visible', `:unselected-visible' or `:selected'.  The
+daemon decides it (`wsm.Workspace.Visibility') and Emacs holds a
+workspace -- a perspective, a composer, a host stream and a page -- exactly
+while it is not `:not-visible' (`agent-repl-roster-row-visible-p').  Rows
+and threads carry the one message alike.  An unset arm is a contract
+breach, never a default."
+  (let ((object (agent-repl-wire--object "RosterRowVisibility" value)))
+    (agent-repl-wire--check-keys "RosterRowVisibility" object
+                                 (mapcar #'car agent-repl-wire--roster-row-visibility-arms))
+    (plist-get (agent-repl-wire--decode-oneof
+                "RosterRowVisibility" 'visibility object
+                agent-repl-wire--roster-row-visibility-arms)
+               :arm)))
+
 (defun agent-repl-wire-decode-roster-row-open-owned-pull-request (value)
   "Decode VALUE as `RosterRowOpenOwnedPullRequest' and return t.
 The OPEN-OWNED-PULL-REQUEST marker: the workspace owns a pull request
@@ -892,7 +930,7 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest visibility lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -901,7 +939,7 @@ unknown field by the row's key check."
 Returns `(:workspace W :attention A :viewed V
 :view-dwell VD :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:merge-paused MP :merge-turn MT :open-owned-pull-request OP
+:merge-paused MP :merge-turn MT :open-owned-pull-request OP :visibility VIS
 :last-selected L :last-turn-ended LT
 :last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
@@ -955,6 +993,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            (agent-repl-wire--decode-optional-message
             "RosterRow" 'openOwnedPullRequest object
             #'agent-repl-wire-decode-roster-row-open-owned-pull-request)
+           :visibility (agent-repl-wire--decode-message
+                        "RosterRow" 'visibility object
+                        #'agent-repl-wire-decode-roster-row-visibility)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
@@ -2488,12 +2529,14 @@ the row."
 
 (defun agent-repl-wire-decode-roster-thread-row (value)
   "Decode VALUE as `RosterThreadRow',
-`(:thread REF :name :summary :current :standing S :outline O)'.
+`(:thread REF :name :summary :current :standing S :outline O :visibility V)'.
 SUMMARY is nil when none is set; CURRENT is t on the selected thread;
+VISIBILITY is `agent-repl-wire-decode-roster-row-visibility''s, `:selected'
+only on the thread that is the selection;
 STANDING is `agent-repl-wire-decode-roster-thread-standing''s; OUTLINE is
 nil on every row but the current thread's."
   (let ((object (agent-repl-wire--object "RosterThreadRow" value)))
-    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current standing outline))
+    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current standing outline visibility))
     (agent-repl-wire--decoded
      "RosterThreadRow"
      (list :thread (agent-repl-wire--decode-message
@@ -2511,7 +2554,10 @@ nil on every row but the current thread's."
                       #'agent-repl-wire-decode-roster-thread-standing)
            :outline (agent-repl-wire--decode-optional-message
                      "RosterThreadRow" 'outline object
-                     #'agent-repl-wire-decode-roster-thread-outline)))))
+                     #'agent-repl-wire-decode-roster-thread-outline)
+           :visibility (agent-repl-wire--decode-message
+                        "RosterThreadRow" 'visibility object
+                        #'agent-repl-wire-decode-roster-row-visibility)))))
 
 (defun agent-repl-wire-decode-roster-thread-section (value)
   "Decode VALUE as `RosterThreadSection', `(:new-thread LABEL :rows ROWS)'.

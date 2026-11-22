@@ -731,13 +731,6 @@ func (s *requestLoggingServer) ReportPageUnloading(
 	return serveUnary(s, ctx, "ReportPageUnloading", req, s.server.ReportPageUnloading)
 }
 
-func (s *requestLoggingServer) ReportPageResidency(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.ReportPageResidencyRequest],
-) (*connect.Response[agentreplv1.ReportPageResidencyResponse], error) {
-	return serveUnary(s, ctx, "ReportPageResidency", req, s.server.ReportPageResidency)
-}
-
 func (s *requestLoggingServer) GetMemoryOverview(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.GetMemoryOverviewRequest],

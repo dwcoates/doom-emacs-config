@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -9,6 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/desktopnotify"
+	"agent-repld/internal/ids"
 )
 
 // unfocusedEditor is the focus an Emacs stream in these tests connects with.
@@ -219,19 +221,43 @@ func TestAnEmacsStreamWithNoFocusIsInvalid(t *testing.T) {
 	}
 }
 
-func TestNotificationClickedReachesTheHostStream(t *testing.T) {
-	// Arrange
+func TestNotificationClickedReachesTheEditorsDaemonStream(t *testing.T) {
+	// Arrange: no host stream holds the workspace, as for one the editor does
+	// not hold.
 	h := newHarness(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stream := dialHostStream(t, h, ctx)
+	w := emacsWatcher(h.Server.(*server))
 
 	// Act
 	h.Server.NotificationClicked(testWorkspaceID)
-	push := receiveHostEvent(t, stream)
+	push := <-w.elisp
+	push.sent()
 
 	// Assert
-	if push.GetNotificationClicked() == nil {
-		t.Fatalf("push = %v, want notification_clicked", push)
+	if got := push.push.GetNotificationClicked().GetWorkspace(); got.GetId() != string(testWorkspaceID) {
+		t.Fatalf("push = %v, want notification_clicked naming the workspace", push.push)
 	}
+}
+
+func TestANotificationClickOnAnUnreadableWorkspaceSwitchesNothing(t *testing.T) {
+	// Arrange
+	h, log := newLoggedHarness(t)
+	h.DB.workspaceErrs = map[ids.WorkspaceID]error{testWorkspaceID: errors.New("database is locked")}
+	w := emacsWatcher(h.Server.(*server))
+
+	// Act
+	h.Server.NotificationClicked(testWorkspaceID)
+
+	// Assert
+	select {
+	case push := <-w.elisp:
+		t.Fatalf("pushed %v, want nothing for an unreadable workspace", push.push)
+	default:
+	}
+	for _, record := range log.at("ERROR") {
+		if record.Operation == "daemon.server.notification_clicked" &&
+			record.Context["workspace"] == string(testWorkspaceID) && record.Context["cause"] == "database is locked" {
+			return
+		}
+	}
+	t.Fatalf("no error record named the unreadable workspace: %+v", log.at("ERROR"))
 }

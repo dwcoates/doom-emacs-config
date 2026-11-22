@@ -1196,7 +1196,7 @@ func receiveHostEventPastSelection(
 
 // TestSelectFeedRowClickOnAFinalResponseAsksTheHostToFocusTheComposer pins
 // which moves push final_response_clicked: only a click that selects a final
-// response. Every other move is followed by a notification click, which must
+// response. Every other move is followed by the mark (markHostStream), which must
 // then be the first event the host stream carries, so a stray
 // final_response_clicked shows up as the wrong first event.
 func TestSelectFeedRowClickOnAFinalResponseAsksTheHostToFocusTheComposer(t *testing.T) {
@@ -1233,7 +1233,7 @@ func TestSelectFeedRowClickOnAFinalResponseAsksTheHostToFocusTheComposer(t *test
 			if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.move)); err != nil {
 				t.Fatalf("SelectFeedRow: %v", err)
 			}
-			h.Server.NotificationClicked(testWorkspaceID)
+			markHostStream(h, testWorkspaceID)
 			first := receiveHostEventPastSelection(t, stream)
 
 			// Assert.
@@ -1257,12 +1257,12 @@ func TestSelectFeedRowFinalResponseClickIsNeverReplayed(t *testing.T) {
 	stream := dialHostStream(t, h, ctx)
 
 	// Act.
-	h.Server.NotificationClicked(testWorkspaceID)
+	markHostStream(h, testWorkspaceID)
 	first := receiveHostEventPastSelection(t, stream)
 
 	// Assert.
-	if first.GetNotificationClicked() == nil {
-		t.Fatalf("first event = %v, want notification_clicked (final_response_clicked is never replayed)", first)
+	if !isHostMark(first) {
+		t.Fatalf("first event = %v, want the mark (final_response_clicked is never replayed)", first)
 	}
 }
 
@@ -1429,7 +1429,7 @@ func TestSelectFeedRowEntrySelectsTheResponseRevealingTheNode(t *testing.T) {
 
 // TestSelectFeedRowEntryNeverDeselectsNorAsksTheHost pins that a second click
 // keeps the response selected, and that no click asks Emacs for anything: a
-// notification click is the first event the host stream carries.
+// mark (markHostStream) is the first event the host stream carries.
 func TestSelectFeedRowEntryNeverDeselectsNorAsksTheHost(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -1442,15 +1442,15 @@ func TestSelectFeedRowEntryNeverDeselectsNorAsksTheHost(t *testing.T) {
 
 	// Act.
 	resp := sendMove(t, h, entryMove("prompt-1", "3.1"))
-	h.Server.NotificationClicked(testWorkspaceID)
+	markHostStream(h, testWorkspaceID)
 	first := receiveHostEventPastSelection(t, stream)
 
 	// Assert.
 	if resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse() == nil {
 		t.Fatalf("result = %v, want the response still selected", resp.Msg.GetResult())
 	}
-	if first.GetNotificationClicked() == nil {
-		t.Fatalf("first event = %v, want the notification click: an entry's click asks nothing of the host", first)
+	if !isHostMark(first) {
+		t.Fatalf("first event = %v, want the mark: an entry's click asks nothing of the host", first)
 	}
 }
 
@@ -1799,7 +1799,7 @@ func TestUnchangedNamesTheSelectionInForce(t *testing.T) {
 
 // TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode
 // pins that a click the daemon cannot honor is refused, selects nothing and
-// asks nothing of the host: a notification click is then the first event.
+// asks nothing of the host: the mark (markHostStream) is then the first event.
 func TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1836,9 +1836,9 @@ func TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode(
 			if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
 				t.Fatal("a refused branch move selected a row")
 			}
-			h.Server.NotificationClicked(testWorkspaceID)
+			markHostStream(h, testWorkspaceID)
 			if first := receiveHostEventPastSelection(t, stream); first.GetComposeEntry() != nil {
-				t.Fatalf("first event = %v, want no compose_entry before the notification click", first)
+				t.Fatalf("first event = %v, want no compose_entry before the mark", first)
 			}
 		})
 	}

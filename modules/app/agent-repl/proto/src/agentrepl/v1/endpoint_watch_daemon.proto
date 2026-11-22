@@ -15,9 +15,11 @@ import "frontend/v1/news_digest.proto";
 import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/drain_reason.proto";
+import "agentrepl/v1/editor_evaluation.proto";
 import "agentrepl/v1/editor_focus.proto";
 import "agentrepl/v1/persistent_wifi.proto";
 import "agentrepl/v1/workspace_mutation_progress.proto";
+import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -175,7 +177,56 @@ message WatchDaemonResponse {
     // the new-thread prompt, as the new-thread binding does. An event, not
     // state: never replayed to a late subscriber.
     DaemonNewThreadRequested new_thread_requested = 12;
+    // THE USER CLICKED A WORKSPACE'S DESKTOP BANNER: raise Emacs's frame and
+    // switch to the workspace. The daemon posts every desktop notification
+    // and reads the click back from the banner itself, so the switch it asks
+    // for is the only part of a notification Emacs acts on. It rides this
+    // stream, never the workspace's host stream, because a banner can name a
+    // workspace the editor does not hold (frontend.v1.RosterRowVisibility). Sent
+    // ONLY on an Emacs stream. An event, not state: never replayed to a late
+    // subscriber, because a click belongs to the moment it was made.
+    DaemonWorkspaceNotificationClicked notification_clicked = 14;
+    // THE USER CLICKED A WORKSPACE'S ROW IN A PAGE'S RAIL (SelectInEditor):
+    // switch to the workspace exactly as a key switches to it. The editor
+    // makes the switch, never the daemon, which is what makes a click as fast
+    // as a key. It rides this stream because the clicked row can be a
+    // workspace the editor does not hold (a folded or hidden one), which has
+    // no host stream. Sent ONLY on an Emacs stream. An event, not state: never
+    // replayed to a late subscriber.
+    DaemonWorkspaceSelectRequested select_requested = 15;
+    // EVALUATE THIS ELISP for an agent (EvaluateInEditor), inside the editor's
+    // one error-catching handler, with the named workspace's composer current
+    // when the editor holds the workspace, and otherwise in a buffer of the
+    // editor's own whose directory is the workspace's. The editor answers with
+    // AnswerEditorEvaluation carrying the token, on the connection this
+    // stream stands on. A request, unlike the other events: the agent's call
+    // waits on the answer. Sent ONLY on an Emacs stream. An event, never
+    // replayed to a late subscriber: an evaluation not answered in time has
+    // already been answered `timed_out`.
+    DaemonEvaluate evaluate = 16;
   }
+}
+
+// A workspace's desktop banner was clicked (WatchDaemonResponse.notification_clicked).
+message DaemonWorkspaceNotificationClicked {
+  // The workspace the banner was posted for, which Emacs switches to.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// A workspace's rail row was clicked (WatchDaemonResponse.select_requested).
+message DaemonWorkspaceSelectRequested {
+  // The clicked workspace, which Emacs switches to.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// One evaluation an agent asked of the editor (WatchDaemonResponse.evaluate).
+message DaemonEvaluate {
+  // The workspace whose agent asked, echoed back in AnswerEditorEvaluation.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The token to echo back in AnswerEditorEvaluation.
+  EditorEvaluationToken token = 2;
+  // The elisp to read and evaluate, verbatim from the agent's request.
+  string text = 3;
 }
 
 // Whether a news digest stands. THE ARM IS THE STANDING; exactly one is set.

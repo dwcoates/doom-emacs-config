@@ -46,9 +46,7 @@ type VisibilityReader interface {
 // (sidebar.Tabs), so a collapsed repository section, a collapsed subsection
 // and a parent's folded children withhold exactly the workspaces whose tabs
 // they fold, and what the daemon runs never disagrees with what the bar
-// draws. A workspace with no tab (closed, a thread) is folded by nothing. A
-// handover orders its transfers and decides its page loads by it too
-// (rollout.foldedRows).
+// draws. A workspace with no tab (closed, a thread) is folded by nothing.
 func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[ids.WorkspaceID]sidebar.Fold, error) {
 	arrangement, err := repos.ReadArrangement(ctx)
 	if err != nil {
@@ -127,9 +125,10 @@ func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) 
 }
 
 // OnlyVisible splits pending into the workspaces the daemon runs and the ones
-// it withholds (hidden, in a collapsed repository section or subsection, or a
-// hidden merge workspace whose merge left every queue), each in
-// pending's order. A fold or a queue that cannot be read is an error and splits nothing:
+// it withholds, each in pending's order, by wsm.Workspace.Runs: the persisted
+// visibility, widened by a queued merge, the deploy mediator and a fold's
+// spared one-shots. A boot or a redeploy reads the visibility the last daemon
+// persisted, so it starts nothing for a workspace that is not visible. A fold or a queue that cannot be read is an error and splits nothing:
 // starting a workspace that may be hidden would break the principle, and
 // starting none silently would leave visible ones session-less, so the
 // caller states the failure.
@@ -165,21 +164,41 @@ type Visibility struct {
 	Fold *sidebar.Fold
 }
 
+// LiveVisibility answers a workspace's visibility as the roster derived it
+// last (sidebar.Resolver.Visibility).
+type LiveVisibility func(ws ids.WorkspaceID) wsm.Visibility
+
+// WithLiveVisibility answers RECORDS, each carrying LIVE's visibility in place
+// of the stored one. A running daemon decides by the roster's live value: the
+// store's copy is written a moment after the push that changed it, so a
+// decision read off the store could act on the visibility the editor has
+// already left. Only a boot, which runs before any render, reads the store's.
+func WithLiveVisibility(records []wsm.Workspace, live LiveVisibility) []wsm.Workspace {
+	out := make([]wsm.Workspace, len(records))
+	for i, ws := range records {
+		ws.Visibility = live(ws.ID)
+		out[i] = ws
+	}
+	return out
+}
+
 // Visible reports whether the daemon runs one workspace, read afresh from its
-// record and the folds of its section.
-func Visible(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID) (bool, error) {
-	visibility, err := VisibilityOf(ctx, db, log, ws)
+// record and the folds of its section, by the roster's live visibility.
+func Visible(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID, live LiveVisibility) (bool, error) {
+	visibility, err := VisibilityOf(ctx, db, log, ws, live)
 	return visibility.Runs, err
 }
 
 // VisibilityOf answers Visible's verdict and the fold behind it from ONE read
 // of the record, the folds and the queues, so the fold a record names is the
-// one the verdict was decided on.
-func VisibilityOf(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID) (Visibility, error) {
+// one the verdict was decided on. The record carries the roster's LIVE
+// visibility (WithLiveVisibility).
+func VisibilityOf(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID, live LiveVisibility) (Visibility, error) {
 	record, err := db.Workspace(ctx, ws)
 	if err != nil {
 		return Visibility{}, fmt.Errorf("bringup: read the workspace record of %q: %w", ws, err)
 	}
+	record = WithLiveVisibility([]wsm.Workspace{record}, live)[0]
 	folded, err := Folds(ctx, db, log)
 	if err != nil {
 		return Visibility{}, err

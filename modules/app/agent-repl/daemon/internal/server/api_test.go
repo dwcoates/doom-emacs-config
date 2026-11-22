@@ -360,12 +360,12 @@ func TestAHostEventIsNotReplayedToALateHostStream(t *testing.T) {
 	stream := dialHostStream(t, h, ctx)
 
 	// Act: a later event marks where the stream's first event must be.
-	h.Server.NotificationClicked(testWorkspaceID)
+	markHostStream(h, testWorkspaceID)
 	push := receiveHostEvent(t, stream)
 
 	// Assert.
-	if push.GetNotificationClicked() == nil {
-		t.Fatalf("first event = %v, want notification_clicked (reload_webapp is never replayed)", push)
+	if !isHostMark(push) {
+		t.Fatalf("first event = %v, want the mark (reload_webapp is never replayed)", push)
 	}
 }
 

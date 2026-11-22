@@ -1102,15 +1102,6 @@ func TestAnOpenHeadersUnfoldedCountsTheRowsNoFoldHides(t *testing.T) {
 			},
 			wantRepo: "1/3",
 		},
-		{
-			name: "a surfaced child of a folded parent",
-			reg: func() sidebar.Registry {
-				parent := workspace("w-p", "parent")
-				parent.ChildrenFolded = true
-				return surfacedIn(registry(parent, child("w-a", "a", parent.ID), child("w-b", "b", parent.ID)), "w-a")
-			},
-			wantRepo: "2/3",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

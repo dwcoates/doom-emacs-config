@@ -403,8 +403,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:         p.Surfaces,
 	})
 	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)
-	workSurfacings := workspace.NewWorkSurfacings(verbsRef.surfaceForWork, log)
-	workSurfacingEnds := workspace.NewWorkSurfacingEnds(verbsRef.endSurfacing, log)
 	bypassTurnEnds := workspace.NewBypassTurnEnds(verbsRef.letQueueThroughAfterBypassTurn, log)
 	// A CREATE HELD FOR ITS REQUESTER'S TURN resumes on these latches, which
 	// only the turn-end and close edges release.
@@ -419,7 +417,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Clock:   clock.System{},
 		Log:     p.Surfaces,
 	})
-	edges := wsedges.New(derivedNotices, followNotices, selfCloses, workSurfacings, workSurfacingEnds, bypassTurnEnds, turnEnds, gathers.Edges())
+	edges := wsedges.New(derivedNotices, followNotices, selfCloses, bypassTurnEnds, turnEnds, gathers.Edges())
 	p.DB = wsedges.ReportingEdges(p.DB, edges, log)
 
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
@@ -577,10 +575,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// INSTANT ITS STATUS LAST CHANGED: a restart still ranks the row by it.
 	// ITS WRITES ARE MADE OFF ITS CALLERS (rosterWrites): no roster caller
 	// waits on the state database's one connection.
-	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterStatusChanges(p.DB, p.Surfaces.Global()))
+	// SO IS EVERY WORKSPACE'S VISIBILITY: a boot and a deploy read it before
+	// they allocate anything (wsm.Workspace.Visibility).
+	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterStatusChanges(p.DB, p.Surfaces.Global()),
+		rosterVisibility(p.DB, p.Surfaces.Global()))
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
 		sidebar.WithResultSink(rosterDurable.ResultSink()),
 		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
+		sidebar.WithVisibilitySink(rosterDurable.VisibilitySink()),
 		sidebar.WithQuiet(viewGate))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the sidebar resolver: %w", err)
@@ -1480,6 +1482,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:         p.DB,
 		IdleCutoff: p.Opts.idleCutoff,
 		FoldDelay:  p.Opts.foldStandDownDelay,
+		// THE ROSTER'S LIVE VISIBILITY decides whether a withheld workspace is
+		// still withheld (bringup.WithLiveVisibility).
+		Visibility: sidebarResolver.Visibility,
 		Stand:      fleet,
 		// THE SUPERVISOR ITSELF, not the fleet: an immediate shutdown must
 		// also reach the shims that were spawned and have not yet reached the
@@ -1945,7 +1950,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			_, ok := fleet.Client(ws)
 			return ok
 		},
-		Now: time.Now,
+		Visibility: sidebarResolver.Visibility,
+		Now:        time.Now,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the memory popups: %w", err)
@@ -2190,8 +2196,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { pullRequests.Run(ctx, handler) },
 				func(ctx context.Context) { mainSync.Run(ctx, handler) },
 				selfCloses.Run,
-				workSurfacings.Run,
-				workSurfacingEnds.Run,
 				bypassTurnEnds.Run)
 		}),
 		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),

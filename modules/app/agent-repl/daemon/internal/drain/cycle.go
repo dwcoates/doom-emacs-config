@@ -336,7 +336,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	}
 	visible := true
 	if lapseOwnsWithheld {
-		visible, err = bringup.Visible(ctx, c.deps.DB, log, ws)
+		visible, err = bringup.Visible(ctx, c.deps.DB, log, ws, c.deps.Visibility)
 	}
 	if err != nil {
 		log.Error(op, "could not read whether the workspace is visible; its stand-down is dropped", dlog.WithCause(fields, err))

@@ -721,10 +721,8 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
         (agent-repl--frontend-dispatch-show ws))
       ;; A WORKSPACE THE USER SWITCHED TO WITH NO VIEW HAS ITS VIEW MADE NOW,
       ;; whatever left it without one: the user is looking at it, and its
-      ;; panels are owed by this switch, not by a later pass.  A withheld
-      ;; one (hidden by the user; a fold withholds nothing) holds no page
-      ;; until it is looked at (`agent-repl-open-tabs-withheld-p'); one not
-      ;; yet reached by the staggered pre-creation pass has none either.  An
+      ;; panels are owed by this switch, not by a later pass.  One not yet
+      ;; reached by the staggered pre-creation pass has none.  An
       ;; unloaded page never reaches here: it keeps its slot (page-unload.el),
       ;; and showing the slot puts its page back.  The mount's one
       ;; eligibility answer still refuses what is owed no view.  A persp

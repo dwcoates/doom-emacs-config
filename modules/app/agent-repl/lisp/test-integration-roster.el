@@ -73,7 +73,8 @@ ID names the workspace, NAME its row label, STATUS the status arm's
 protojson key symbol.  OVERRIDES replaces entries, so one test changes
 exactly one fact.
 
-Every non-optional field is populated.  `when' carries `noTurnRunning', and
+Every non-optional field is populated, `visibility' as an ordinary open
+row's.  `when' carries `noTurnRunning', and
 `detail' carries no lines, which the proto comments declare legal —
 presence itself is the fact for RosterRowDetail's three lines."
   (append overrides
@@ -86,7 +87,10 @@ presence itself is the fact for RosterRowDetail's three lines."
             (detail . ())
             (closed . ((closed . :false)))
             (availability . ((available . ())))
-            (lastUpdated . ((atMs . "1"))))))
+            (lastUpdated . ((atMs . "1")))
+            ;; THE DAEMON SHOWS AN ORDINARY OPEN ROW (wsm.Visibility); a test
+            ;; about another visibility overrides it.
+            (visibility . ((unselectedVisible . ()))))))
 
 (defun agent-repl-itest-roster--roster (rows &rest overrides)
   "Return a WorkspaceRoster protojson alist carrying ROWS in one repo section.
@@ -2016,13 +2020,16 @@ hidden, so its absence is a malformed push, dropped at ERROR."
                daemon "ws-no-hidden-marker")))))
 
 (ert-deftest agent-repl-itest-roster-a-hidden-row-keeps-its-tab-off-the-drawing ()
-  "A row in the pushed `hidden' section gets a tab the bar does not draw.
-The hidden section walks after the repository sections, as a collapsed
-repository's rows do: in the tab order, out of the drawn order."
+  "A hidden row the daemon shows gets a tab the bar does not draw.
+The daemon shows a hidden row only while it is the selection
+\(wsm.Visibility).  The hidden section walks after the repository
+sections, as a collapsed repository's rows do: in the tab order, out of
+the drawn order."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
-      (let ((hidden-row (agent-repl-itest-roster--row "ws-hidden" "ws-hidden" 'ready)))
+      (let ((hidden-row (agent-repl-itest-roster--row "ws-hidden" "ws-hidden" 'ready
+                                                      '(visibility . ((selected . ()))))))
         ;; Act.
         (agent-repl-itest-roster--push
          daemon (agent-repl-itest-roster--roster

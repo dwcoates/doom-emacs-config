@@ -31,10 +31,10 @@ const evaluationDeadline = 10 * time.Second
 // told apart from one this daemon never minted without remembering every
 // token it has seen.
 //
-// AN EVALUATION NEVER OUTWAITS ITS EDITOR: it is registered BEFORE the editor
-// is looked for, so the editor's host stream closing at any moment after the
-// look wakes it (editorGone), and none can wait out the deadline on a stream
-// that is gone.
+// AN EVALUATION NEVER OUTWAITS ITS EDITOR: it is registered BEFORE it is
+// pushed, every Emacs daemon stream the push reaches is added to it under the
+// lock that queues the push (reach), and the last of them closing wakes it
+// (editorGone), so none can wait out the deadline on streams that are gone.
 type editorEvals struct {
 	prefix  string
 	mu      sync.Mutex
@@ -47,6 +47,9 @@ type pendingEval struct {
 	ws     ids.WorkspaceID
 	answer chan *agentreplv1.EditorEvaluationOutcome
 	gone   chan struct{}
+	// editors are the Emacs daemon streams the evaluation was pushed to and
+	// that still stand.
+	editors map[*daemonWatcher]struct{}
 }
 
 func newEditorEvals(prefix string) *editorEvals {
@@ -58,7 +61,8 @@ func (e *editorEvals) open(ws ids.WorkspaceID) (string, *pendingEval) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.minted++
-	p := &pendingEval{ws: ws, answer: make(chan *agentreplv1.EditorEvaluationOutcome, 1), gone: make(chan struct{})}
+	p := &pendingEval{ws: ws, answer: make(chan *agentreplv1.EditorEvaluationOutcome, 1), gone: make(chan struct{}),
+		editors: map[*daemonWatcher]struct{}{}}
 	e.pending[e.minted] = p
 	return e.prefix + "-" + strconv.FormatUint(e.minted, 10), p
 }
@@ -108,12 +112,30 @@ func (e *editorEvals) take(token string, ws ids.WorkspaceID, outcome *agentreplv
 	return answerTaken
 }
 
-// editorGone wakes every evaluation waiting on WS's editor.
-func (e *editorEvals) editorGone(ws ids.WorkspaceID) {
+// reach records that TOKEN's evaluation was pushed to the Emacs stream W.
+func (e *editorEvals) reach(token string, w *daemonWatcher) {
+	n, ok := e.seq(token)
+	if !ok {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if p, waiting := e.pending[n]; waiting {
+		p.editors[w] = struct{}{}
+	}
+}
+
+// editorGone records that the Emacs stream W closed, waking every evaluation
+// it was the last standing stream of.
+func (e *editorEvals) editorGone(w *daemonWatcher) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for n, p := range e.pending {
-		if p.ws == ws {
+		if _, reached := p.editors[w]; !reached {
+			continue
+		}
+		delete(p.editors, w)
+		if len(p.editors) == 0 {
 			close(p.gone)
 			delete(e.pending, n)
 		}
@@ -149,15 +171,17 @@ func (s *server) EvaluateInEditor(
 	token, pending := s.evals.open(ws)
 	defer s.evals.end(token)
 	fields := dlog.Context{"token": token}
-	if !s.hostStreamHeld(ws) {
-		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{Arm: "no_editor", Reason: "no editor holds the workspace's host stream", Info: true})))
-	}
 	sent := time.Now()
-	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
-		Push: &agentreplv1.WatchHostWorkspaceResponse_Evaluate{Evaluate: &agentreplv1.HostEvaluate{
-			Token: &agentreplv1.EditorEvaluationToken{Value: token}, Text: req.Msg.GetText()}},
-	})
-	subject.Log.Debug(opEvaluate, "pushed an evaluation to the workspace's editor", fields)
+	editors := s.pushToEditors(opEvaluate, &agentreplv1.WatchDaemonResponse{
+		Push: &agentreplv1.WatchDaemonResponse_Evaluate{Evaluate: &agentreplv1.DaemonEvaluate{
+			Workspace: subject.Record.Ref(),
+			Token:     &agentreplv1.EditorEvaluationToken{Value: token}, Text: req.Msg.GetText()}},
+	}, everyEditor, func(w *daemonWatcher) { s.evals.reach(token, w) })
+	if editors == 0 {
+		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{Arm: "no_editor", Reason: "no Emacs daemon stream stands to evaluate the text", Info: true})))
+	}
+	fields["editors"] = editors
+	subject.Log.Debug(opEvaluate, "pushed an evaluation to the editors", fields)
 	deadline := time.NewTimer(s.evalDeadline)
 	defer deadline.Stop()
 	select {
@@ -168,7 +192,7 @@ func (s *server) EvaluateInEditor(
 		return connect.NewResponse(resp), nil
 	case <-pending.gone:
 		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{Arm: "no_editor",
-			Reason: "the workspace's editor closed its host stream before it answered", Info: true})))
+			Reason: "every Emacs daemon stream the evaluation reached closed before it answered", Info: true})))
 	case <-deadline.C:
 		subject.Log.Warn(opEvaluate, "the editor did not answer an evaluation within the deadline", dlog.Merge(fields, dlog.Context{
 			"deadline_ms": s.evalDeadline.Milliseconds()}))

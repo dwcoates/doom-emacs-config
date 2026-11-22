@@ -3,6 +3,7 @@ package sidebar
 import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // THE ROSTER IS RESOLVED ONCE PER BATCH OF CHANGES, NOT ONCE PER CHANGE.
@@ -61,6 +62,7 @@ type batchOutcome struct {
 	quiet         bool
 	results       []resultChange
 	statusChanges []statusChange
+	visibilities  map[ids.WorkspaceID]wsm.Visibility
 }
 
 // commit queues M and returns once a roster carrying it has been published

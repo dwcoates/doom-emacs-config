@@ -115,7 +115,7 @@ connection — calls to `127.0.0.1:61043` and a blank webview.
 The `:adopt` walk moves `:conn` to the successor BEFORE AdoptHostWorkspace
 is answered, so a call about that workspace made in between reached a
 daemon that had not adopted it and was refused `not_yet_adopted`: the
-2026-11-13 14:42 deploy lost ReportPageResidency, ReportPageUnloading,
+2026-11-13 14:42 deploy lost ReportPageUnloading,
 MarkWorkspaceViewed and SelectWorkspace for every workspace with a loaded
 page, 1-3s before its adopt was answered. So (owner ruling, 2026-11-13):
 

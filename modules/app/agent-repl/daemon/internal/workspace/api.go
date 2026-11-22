@@ -524,12 +524,6 @@ type Verbs interface {
 	// watcher calls it on
 	// every end.
 	PullRequestEnded(ctx context.Context, ws ids.WorkspaceID, merged bool) error
-	// SurfaceForWork marks a workspace whose turn starts under a fold as drawn
-	// inside it (WorkSurfacings calls it).
-	SurfaceForWork(ctx context.Context, ws ids.WorkspaceID) error
-	// EndSurfacing takes that mark off when the turn ends (WorkSurfacingEnds
-	// calls it).
-	EndSurfacing(ctx context.Context, ws ids.WorkspaceID) error
 	// LetQueueThroughAfterBypassTurn resumes the merge queue of the
 	// repository whose queue bypass mode WS holds, when the pause standing on
 	// it is WS's own, at the end of each of WS's turns (BypassTurnEnds calls

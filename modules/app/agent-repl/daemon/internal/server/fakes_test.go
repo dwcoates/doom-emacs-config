@@ -142,11 +142,6 @@ type fakeDB struct {
 	// workspaceLinksErr fails the read.
 	workspaceLinks    map[ids.WorkspaceID][]wsm.WorkspaceLink
 	workspaceLinksErr error
-	// pages is each workspace's last-known page residency; pageReadErr fails
-	// its read and pageWriteErr its write.
-	pages        map[ids.WorkspaceID]bool
-	pageReadErr  error
-	pageWriteErr error
 
 	// bypass is each workspace's queue-bypass standing, and bypassErr fails
 	// its read.
@@ -2418,6 +2413,10 @@ func (f *fakeTopbar) Participants() []participantEdge { return f.edges.all() }
 func (f *fakeTopbar) AwaitEdge(t *testing.T) participantEdge { return f.edges.await(t) }
 
 type fakeSidebar struct {
+	// visibility is each workspace's seeded visibility (Visibility), which a
+	// test may change while the server reads it, under visibilityMu.
+	visibilityMu sync.Mutex
+	visibility   map[ids.WorkspaceID]wsm.Visibility
 	sidebar.Resolver
 	topic publish.Topic[*frontendv1.RosterPush]
 	// revision is what Revision answers.
@@ -2473,6 +2472,27 @@ func (f *fakeSidebar) MergedPage(q sidebar.MergedPageQuery) (sidebar.MergedPage,
 }
 
 func (f *fakeSidebar) Revision() uint64 { return f.revision }
+
+// Visibility answers the seeded visibility of WS, UnselectedVisible for a
+// workspace no test seeded: the ordinary workspace a test drives is visible.
+func (f *fakeSidebar) Visibility(ws ids.WorkspaceID) wsm.Visibility {
+	f.visibilityMu.Lock()
+	defer f.visibilityMu.Unlock()
+	if v, ok := f.visibility[ws]; ok {
+		return v
+	}
+	return wsm.UnselectedVisible
+}
+
+// setVisibility seeds the visibility of WS.
+func (f *fakeSidebar) setVisibility(ws ids.WorkspaceID, v wsm.Visibility) {
+	f.visibilityMu.Lock()
+	defer f.visibilityMu.Unlock()
+	if f.visibility == nil {
+		f.visibility = map[ids.WorkspaceID]wsm.Visibility{}
+	}
+	f.visibility[ws] = v
+}
 
 // harness is one running surface over real Connect handlers.
 type harness struct {
@@ -3005,6 +3025,18 @@ func receiveWebEvent(
 // event a test waits for.
 func hostStandingState(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 	return r.GetHost() != nil || r.GetMentionTargets() != nil
+}
+
+// markHostStream pushes the event a test raises to mark where a host stream's
+// next event must be: a load-page request (LoadPageInEditor), which only a
+// held workspace's page can raise, so it rides that workspace's host stream.
+func markHostStream(h *harness, ws ids.WorkspaceID) {
+	h.Server.(*server).pushLoadPageRequested(ws)
+}
+
+// isHostMark reports whether PUSH is the event markHostStream raises.
+func isHostMark(push *agentreplv1.WatchHostWorkspaceResponse) bool {
+	return push.GetLoadPageRequested() != nil
 }
 
 func receiveHostEvent(
@@ -3676,33 +3708,18 @@ func (f *fakeFeed) RevisableFinalResponse(_ ids.WorkspaceID, row *frontendv1.Fee
 	return response, ok
 }
 
-// fakeMemory is the memory popups: it records reports and answers what the
-// test sets.
+// fakeMemory is the memory popups: it answers what the test sets and records
+// the open set each overview was handed.
 type fakeMemory struct {
-	mu        sync.Mutex
-	reports   map[ids.WorkspaceID]*agentreplv1.PageResidency
-	reportErr error
-	overview  *frontendv1.SidebarMemoryOverview
-	overErr   error
+	mu       sync.Mutex
+	overview *frontendv1.SidebarMemoryOverview
+	overErr  error
 	// open is the open set the last Overview call was handed, read back.
-	open      func(ids.WorkspaceID) bool
+	open      []ids.WorkspaceID
 	workspace *frontendv1.SidebarWorkspaceMemory
 }
 
-func (f *fakeMemory) Report(ws ids.WorkspaceID, r *agentreplv1.PageResidency) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.reportErr != nil {
-		return f.reportErr
-	}
-	if f.reports == nil {
-		f.reports = map[ids.WorkspaceID]*agentreplv1.PageResidency{}
-	}
-	f.reports[ws] = r
-	return nil
-}
-
-func (f *fakeMemory) Overview(open func(ids.WorkspaceID) bool) (*frontendv1.SidebarMemoryOverview, error) {
+func (f *fakeMemory) Overview(open []ids.WorkspaceID) (*frontendv1.SidebarMemoryOverview, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.open = open
@@ -3756,25 +3773,6 @@ func (d *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBy
 		return wsm.QueueBypass{}, fmt.Errorf("wsm: workspace %s: %w", ws, wsm.ErrNotFound)
 	}
 	return d.bypass[ws], nil
-}
-
-func (f *fakeDB) PageLoaded(_ context.Context, id ids.WorkspaceID) (bool, bool, error) {
-	if f.pageReadErr != nil {
-		return false, false, f.pageReadErr
-	}
-	loaded, known := f.pages[id]
-	return loaded, known, nil
-}
-
-func (f *fakeDB) SetPageLoaded(_ context.Context, id ids.WorkspaceID, loaded bool, _ time.Time) error {
-	if f.pageWriteErr != nil {
-		return f.pageWriteErr
-	}
-	if f.pages == nil {
-		f.pages = map[ids.WorkspaceID]bool{}
-	}
-	f.pages[id] = loaded
-	return nil
 }
 
 // fakeMentions is the composer mentions' record: one topic per workspace,

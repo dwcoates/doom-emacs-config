@@ -5,7 +5,8 @@
 // naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
 // what that one workspace holds. Every figure is MEASURED: the daemon's
 // process collector (procmetrics) samples each process's physical footprint,
-// and Emacs reports each page's residency (agentrepl.v1 ReportPageResidency).
+// and a workspace's page is loaded exactly while it is visible
+// (frontend.v1.RosterRowVisibility).
 // Nothing here is estimated: the workspace pages share one WebKit web content
 // process, which reports one footprint for all of them, so no per-page byte
 // figure exists to draw and none is served.
@@ -112,10 +113,9 @@ message SidebarMemoryTotal {
 message SidebarWorkspaceMemory {
   // The workspace's shim.
   SidebarWorkspaceMemoryAgent agent = 1;
-  // The workspace's page. UNSET until Emacs has reported it
-  // (ReportPageResidency), which it does for every open workspace it holds a
-  // slot for.
-  optional SidebarWorkspaceMemoryPage page = 2;
+  // The workspace's page, as its visibility decides it
+  // (frontend.v1.RosterRowVisibility). Always set.
+  SidebarWorkspaceMemoryPage page = 2;
 }
 
 // The workspace's shim.
@@ -141,45 +141,22 @@ message SidebarWorkspaceMemoryAgentNotRunning {}
 
 // The workspace's page.
 message SidebarWorkspaceMemoryPage {
-  // Whether Emacs holds it.
+  // Whether the page is loaded: exactly while the workspace is visible
+  // (frontend.v1.RosterRowVisibility), and let go once it is not.
   oneof state {
-    // It is loaded, and lets go as `release` says.
+    // It is loaded, held while the workspace is visible.
     SidebarWorkspaceMemoryPageLoaded loaded = 1;
-    // It is not loaded; the switch to the workspace loads it.
+    // It is not loaded: the workspace is not visible.
     SidebarWorkspaceMemoryPageNotLoaded not_loaded = 2;
   }
 }
 
-// The page is loaded.
+// The page is loaded, held while the workspace is visible. Empty: presence is
+// the fact. Field 1 (`release`) is RETIRED: a page is let go when its
+// workspace stops being visible, and by no other rule.
 message SidebarWorkspaceMemoryPageLoaded {
-  // When it is unloaded.
-  SidebarWorkspaceMemoryPageRelease release = 1;
-}
-
-// When a loaded page is unloaded (page-unload.el's rule for its status).
-message SidebarWorkspaceMemoryPageRelease {
-  // The one rule that applies now.
-  oneof when {
-    // Held while the workspace works; no unload is due.
-    SidebarWorkspaceMemoryPageReleaseHeld held = 1;
-    // Unloaded the moment the user switches away from it.
-    SidebarWorkspaceMemoryPageReleaseOnLeave on_leave = 2;
-    // Unloaded at an instant: an idle page an hour past its last prompt.
-    SidebarWorkspaceMemoryPageReleaseAt at = 3;
-  }
-}
-
-// Held while the workspace works. Empty: presence is the fact.
-message SidebarWorkspaceMemoryPageReleaseHeld {}
-
-// Unloaded when the user switches away. Empty: presence is the fact.
-message SidebarWorkspaceMemoryPageReleaseOnLeave {}
-
-// Unloaded at an instant.
-message SidebarWorkspaceMemoryPageReleaseAt {
-  // The instant, in Unix milliseconds; the page draws it as the time left
-  // ("unloads in 42 min") against its own clock, and as "soon" once past.
-  int64 unix_ms = 1;
+  reserved 1;
+  reserved "release";
 }
 
 // The page is not loaded. Empty: presence is the fact.

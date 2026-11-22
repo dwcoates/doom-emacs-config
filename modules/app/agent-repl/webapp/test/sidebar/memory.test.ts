@@ -22,7 +22,6 @@ import {
   addRowMemory,
   formatBlocked,
   formatBytes,
-  formatUnloadIn,
   installVersionHover,
   VERSION_POPUP_KEY,
   type VersionHoverOptions,
@@ -88,16 +87,6 @@ describe("formatting", () => {
   ])("states %d blocked milliseconds as %s", (ms, want) => {
     expect(formatBlocked(ms)).toBe(want);
   });
-
-  it.each([
-    [30_000, "soon"],
-    [-5_000, "soon"],
-    [42 * 60_000, "in 42 min"],
-    [120 * 60_000, "in 2 h"],
-    [185 * 60_000, "in 3 h 5 min"],
-  ])("states an unload %d ms away as %s", (left, want) => {
-    expect(formatUnloadIn(1_000_000 + left, 1_000_000)).toBe(want);
-  });
 });
 
 describe("the version hover's lines", () => {
@@ -138,17 +127,30 @@ describe("a workspace hover's lines", () => {
   const page = (when: Parameters<typeof create<typeof SidebarWorkspaceMemoryPageSchema>>[1]) => create(SidebarWorkspaceMemoryPageSchema, when);
 
   it.each([
-    ["held", { state: { case: "loaded" as const, value: { release: { when: { case: "held" as const, value: {} } } } } }, "loaded, held while working"],
-    ["on leave", { state: { case: "loaded" as const, value: { release: { when: { case: "onLeave" as const, value: {} } } } } }, "loaded, unloads when you leave"],
-    ["at", { state: { case: "loaded" as const, value: { release: { when: { case: "at" as const, value: { unixMs: 1_000_000n + 42n * 60_000n } } } } } }, "loaded, unloads in 42 min"],
+    ["loaded", { state: { case: "loaded" as const, value: {} } }, "loaded, held while visible"],
     ["not loaded", { state: { case: "notLoaded" as const, value: {} } }, "not loaded"],
   ])("states a page %s", (_name, init, want) => {
-    expect(pageLine(page(init), 1_000_000, "p")).toBe(want);
+    expect(pageLine(page(init), "p")).toBe(want);
+  });
+
+  it("refuses a page with no state", () => {
+    expect(() => pageLine(page({}), "p")).toThrow();
+  });
+
+  it("refuses a workspace memory with no page", () => {
+    const memory = create(SidebarWorkspaceMemorySchema, { agent: { state: { case: "notRunning", value: {} } } });
+    expect(() => workspaceLines(memory, "w")).toThrow();
   });
 
   it("states a running shim's footprint", () => {
-    const memory = create(SidebarWorkspaceMemorySchema, { agent: { state: { case: "running", value: { footprintBytes: BigInt(98 * MIB) } } } });
-    expect(workspaceLines(memory, 0, "w")).toEqual([["agent", "98 MB"]]);
+    const memory = create(SidebarWorkspaceMemorySchema, {
+      agent: { state: { case: "running", value: { footprintBytes: BigInt(98 * MIB) } } },
+      page: { state: { case: "loaded", value: {} } },
+    });
+    expect(workspaceLines(memory, "w")).toEqual([
+      ["agent", "98 MB"],
+      ["page", "loaded, held while visible"],
+    ]);
   });
 
   it("states only lines classified as details", () => {
@@ -156,20 +158,26 @@ describe("a workspace hover's lines", () => {
       agent: { state: { case: "running", value: { footprintBytes: BigInt(98 * MIB) } } },
       page: { state: { case: "notLoaded", value: {} } },
     });
-    expect(workspaceLines(memory, 0, "w").map(([label]) => factHome(label))).toEqual(["details", "details"]);
+    expect(workspaceLines(memory, "w").map(([label]) => factHome(label))).toEqual(["details", "details"]);
   });
 
   it("states a running shim not measured yet", () => {
-    const memory = create(SidebarWorkspaceMemorySchema, { agent: { state: { case: "running", value: {} } } });
-    expect(workspaceLines(memory, 0, "w")).toEqual([["agent", "running, not measured yet"]]);
+    const memory = create(SidebarWorkspaceMemorySchema, {
+      agent: { state: { case: "running", value: {} } },
+      page: { state: { case: "notLoaded", value: {} } },
+    });
+    expect(workspaceLines(memory, "w")).toEqual([
+      ["agent", "running, not measured yet"],
+      ["page", "not loaded"],
+    ]);
   });
 
-  it("states a shim not running, and the page when reported", () => {
+  it("states a shim not running, and its page", () => {
     const memory = create(SidebarWorkspaceMemorySchema, {
       agent: { state: { case: "notRunning", value: {} } },
       page: { state: { case: "notLoaded", value: {} } },
     });
-    expect(workspaceLines(memory, 0, "w")).toEqual([
+    expect(workspaceLines(memory, "w")).toEqual([
       ["agent", "not running"],
       ["page", "not loaded"],
     ]);
@@ -415,7 +423,10 @@ describe("an open row's memory", () => {
 
   const notRunning = () =>
     create(GetWorkspaceMemoryResponseSchema, {
-      result: { case: "success", value: { memory: { agent: { state: { case: "notRunning", value: {} } } } } },
+      result: {
+        case: "success",
+        value: { memory: { agent: { state: { case: "notRunning", value: {} } }, page: { state: { case: "notLoaded", value: {} } } } },
+      },
     });
 
   it("asks for the row's workspace when its panel opens, and draws the lines", async () => {

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -790,9 +791,13 @@ func TestPublishHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled(t *testing.
 		name      string
 		resolve   error
 		wantQuiet bool
+		// wantInfo is the INFO record's message, when it is not the
+		// cancellation's own (which names the stream).
+		wantInfo string
 	}{
 		{name: "cancelled", resolve: context.Canceled, wantQuiet: true},
 		{name: "deadline exceeded", resolve: context.DeadlineExceeded, wantQuiet: true},
+		{name: "a forgotten workspace", resolve: fmt.Errorf("wsm: workspace %s: %w", testWorkspaceID, wsm.ErrNotFound), wantQuiet: true, wantInfo: "the workspace was forgotten; it has no host view to publish"},
 		{name: "a genuine workspace-read failure", resolve: errors.New("the state is gone"), wantQuiet: false},
 	}
 	for _, tc := range tests {
@@ -815,6 +820,12 @@ func TestPublishHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled(t *testing.
 					t.Fatalf("recorded %v at ERROR, want none", errs)
 				}
 				info := log.at("INFO")
+				if tc.wantInfo != "" {
+					if len(info) != 1 || info[0].Message != tc.wantInfo || info[0].Context["workspace"] != string(testWorkspaceID) {
+						t.Fatalf("INFO records = %v, want exactly one saying %q for the workspace", info, tc.wantInfo)
+					}
+					return
+				}
 				if len(info) != 1 || info[0].Context["stream"] != "WatchHostWorkspace" {
 					t.Fatalf("INFO records = %v, want exactly one naming the stream", info)
 				}

@@ -329,12 +329,12 @@ func TestNotificationClickedPushIsAccepted(t *testing.T) {
 	// so this also proves the bindings in the tree carry the click arm.
 	server, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
-	stream, cancel := openHost(t, server, client, "ws-a")
+	stream, cancel := openDaemon(t, server, client)
 	defer cancel()
 
-	// Act.
+	// Act: the click rides the daemon stream, naming its workspace.
 	status, body := controlPost(t, baseURL, "/_fake/push",
-		`{"stream":"host","workspace_id":"ws-a","message":{"notificationClicked":{}}}`)
+		`{"stream":"daemon","message":{"notificationClicked":{"workspace":{"id":"ws-a","dir":"/w/a"}}}}`)
 	if status != http.StatusOK {
 		t.Fatalf("/_fake/push = %d %s", status, body)
 	}

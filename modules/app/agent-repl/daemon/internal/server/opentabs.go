@@ -121,8 +121,10 @@ func (s *server) resolveOpens(ctx context.Context, rpc string, asked []*agentrep
 		at[subject.Record.ID] = i
 		records = append(records, subject.Record)
 	}
-	// ONE READ OF THE FOLDS, through the one filter every bring-up shares.
-	_, withheld, err := bringup.OnlyVisible(ctx, s.deps.DB, s.log, records)
+	// ONE READ OF THE FOLDS, through the one filter every bring-up shares, by
+	// the roster's live visibility: the editor opens a workspace the moment a
+	// push shows it, before the store's copy is written.
+	_, withheld, err := bringup.OnlyVisible(ctx, s.deps.DB, s.log, bringup.WithLiveVisibility(records, s.deps.Sidebar.Visibility))
 	if err != nil {
 		return nil, fail(s.log, rpc, err)
 	}

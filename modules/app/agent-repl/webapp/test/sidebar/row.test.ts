@@ -908,7 +908,10 @@ describe("the detail panel", () => {
         getWorkspaceMemory: (request) => {
           asked.push(request.workspace?.id ?? "");
           return create(GetWorkspaceMemoryResponseSchema, {
-            result: { case: "success", value: { memory: { agent: { state: { case: "notRunning", value: {} } } } } },
+            result: {
+              case: "success",
+              value: { memory: { agent: { state: { case: "notRunning", value: {} } }, page: { state: { case: "notLoaded", value: {} } } } },
+            },
           });
         },
       }),

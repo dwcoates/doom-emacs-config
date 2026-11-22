@@ -24,6 +24,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/bringup"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
@@ -148,6 +150,11 @@ type Deps struct {
 	// Freeness answers, and waits for, a workspace's freeness. Teardown never
 	// interrupts: the wait is the whole mechanism.
 	Freeness Freeness
+	// Visibility answers a workspace's visibility as the roster derived it
+	// last (sidebar.Resolver.Visibility). REQUIRED: a stand-down decides
+	// whether the workspace is still withheld by it, never by the store's
+	// copy, which is written a moment after the push that changed it.
+	Visibility bringup.LiveVisibility
 	// Reviving reports whether the prompt queue is reviving the workspace's
 	// session for a held prompt. REQUIRED: a revival's bring-up serves the
 	// session before its prompt is delivered, and a sweep that cannot see the
@@ -402,6 +409,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Freeness == nil {
 		return nil, errors.New("drain: a freeness answer is required")
+	}
+	if deps.Visibility == nil {
+		return nil, errors.New("drain: a visibility answer is required")
 	}
 	if deps.Reviving == nil {
 		return nil, errors.New("drain: a revival answer is required")

@@ -15,85 +15,13 @@ import (
 	"agent-repld/internal/memorypopup"
 )
 
-// MemoryPopups is what the rail's memory popups read and Emacs's residency
-// reports write (memorypopup.Popups).
+// MemoryPopups is what the rail's memory popups read (memorypopup.Popups).
 type MemoryPopups interface {
-	Report(ws ids.WorkspaceID, residency *agentreplv1.PageResidency) error
-	Overview(open func(ids.WorkspaceID) bool) (*frontendv1.SidebarMemoryOverview, error)
+	Overview(open []ids.WorkspaceID) (*frontendv1.SidebarMemoryOverview, error)
 	Workspace(ws ids.WorkspaceID) *frontendv1.SidebarWorkspaceMemory
 }
 
 const opMemory = "daemon.server.memory"
-
-// validateReportPageResidencyRequest is ReportPageResidencyRequest's base
-// function.
-func validateReportPageResidencyRequest(req *agentreplv1.ReportPageResidencyRequest) *connect.Error {
-	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
-		return err
-	}
-	return validatePageResidency("residency", req.GetResidency())
-}
-
-// validatePageResidency is PageResidency's base function: its state is set,
-// and a loaded page names its release rule.
-func validatePageResidency(field string, r *agentreplv1.PageResidency) *connect.Error {
-	switch state := r.GetState().(type) {
-	case *agentreplv1.PageResidency_NotLoaded:
-		return nil
-	case *agentreplv1.PageResidency_Loaded:
-		return validatePageResidencyLoaded(field+".loaded", state.Loaded)
-	default:
-		return invalid(field+".state", "a page residency names its state")
-	}
-}
-
-// validatePageResidencyLoaded is PageResidencyLoaded's base function.
-func validatePageResidencyLoaded(field string, loaded *agentreplv1.PageResidencyLoaded) *connect.Error {
-	if loaded.GetRelease().GetWhen() == nil {
-		return invalid(field+".release.when", "a loaded page names when it is released")
-	}
-	return nil
-}
-
-// ReportPageResidency records what Emacs holds of a workspace's page, for its
-// row's memory hover.
-func (s *server) ReportPageResidency(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.ReportPageResidencyRequest],
-) (*connect.Response[agentreplv1.ReportPageResidencyResponse], error) {
-	const rpc = "ReportPageResidency"
-	if err := validateReportPageResidencyRequest(req.Msg); err != nil {
-		return nil, err
-	}
-	resp := &agentreplv1.ReportPageResidencyResponse{}
-	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
-	if done {
-		return answer(resp, cerr)
-	}
-	if err := s.deps.Memory.Report(subject.Record.ID, req.Msg.GetResidency()); err != nil {
-		subject.Log.Error(opMemory, "a validated page residency was refused by the memory popups", dlog.Context{"cause": err.Error()})
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", rpc, err))
-	}
-	// THE FACT OUTLIVES THE DAEMON: the registration Emacs makes after a
-	// bounce answers it (lastKnownPage), so Emacs loads again only the pages
-	// it held.
-	loaded := req.Msg.GetResidency().GetLoaded() != nil
-	if err := s.deps.DB.SetPageLoaded(ctx, subject.Record.ID, loaded, s.now()); err != nil {
-		subject.Log.Error(opMemory, "could not record the page's residency", dlog.Context{"loaded": loaded, "cause": err.Error()})
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s: record the residency: %w", rpc, err))
-	}
-	subject.Log.Debug(opMemory, "recorded the page's residency", dlog.Context{"loaded": loaded})
-	// EMACS HOLDING NO PAGE IS NO SEVERED HOP (owner ruling, 2026-10-31:
-	// severed means actually severed). Its statement is the truth about the
-	// web hop: an unload announcement that went to another daemon during a
-	// handover left this one reading the page's end as a cut, blue, until a
-	// turn proved otherwise. The statement is re-made at every link-up.
-	if req.Msg.GetResidency().GetNotLoaded() != nil {
-		s.awaitPage(subject.Record.ID, subject.Log, "Emacs holds no page for the workspace; its web hop is awaited until a page connects again")
-	}
-	resp.Result = &agentreplv1.ReportPageResidencyResponse_Success{Success: &agentreplv1.ReportPageResidencySuccess{}}
-	return connect.NewResponse(resp), nil
-}
 
 // GetMemoryOverview answers the version hover's popup.
 func (s *server) GetMemoryOverview(
@@ -105,14 +33,14 @@ func (s *server) GetMemoryOverview(
 		s.log.Error(opMemory, "could not read the registry for the memory overview", dlog.Context{"cause": err.Error()})
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("GetMemoryOverview: read the registry: %w", err))
 	}
-	open := make(map[ids.WorkspaceID]bool, len(records))
+	open := make([]ids.WorkspaceID, 0, len(records))
 	for _, record := range records {
 		if !record.Closed {
-			open[record.ID] = true
+			open = append(open, record.ID)
 		}
 	}
 	resp := &agentreplv1.GetMemoryOverviewResponse{}
-	overview, err := s.deps.Memory.Overview(func(ws ids.WorkspaceID) bool { return open[ws] })
+	overview, err := s.deps.Memory.Overview(open)
 	switch {
 	case errors.Is(err, memorypopup.ErrMeasurementFailed):
 		resp.Result = &agentreplv1.GetMemoryOverviewResponse_Error{Error: &agentreplv1.GetMemoryOverviewError{

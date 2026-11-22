@@ -87,12 +87,9 @@ type DB interface {
 	// SetChildrenFolded records whether a workspace's children are folded; an
 	// unknown workspace is ErrNotFound (childrenfolds.go).
 	SetChildrenFolded(ctx context.Context, id WorkspaceID, folded bool) error
-	// SurfaceHeldWork marks a workspace that starts a turn under a fold as
-	// drawn inside it, answering whether a fold hid it (surfacing.go).
-	SurfaceHeldWork(ctx context.Context, id WorkspaceID) (bool, error)
-	// EndSurfacing takes a workspace's mark off at its turn's end, answering
-	// whether it carried one.
-	EndSurfacing(ctx context.Context, id WorkspaceID) (bool, error)
+	// SetVisibilities persists each named workspace's visibility
+	// (visibilitystate.go), in one write.
+	SetVisibilities(ctx context.Context, changes map[WorkspaceID]Visibility) error
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
@@ -976,11 +973,6 @@ type DB interface {
 	SetParkedKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
 	// MarkParkedCold records the parked conversation's cache lapsed.
 	MarkParkedCold(ctx context.Context, id WorkspaceID) error
-	// PageLoaded answers whether Emacs last held a workspace's page, known
-	// false when Emacs never reported it (pageresidency.go).
-	PageLoaded(ctx context.Context, id WorkspaceID) (loaded, known bool, err error)
-	// SetPageLoaded records whether Emacs holds a workspace's page.
-	SetPageLoaded(ctx context.Context, id WorkspaceID, loaded bool, at time.Time) error
 	// RecordPullReference records a pull request a workspace's text named,
 	// keeping the first instant of one recorded before (pullreferences.go).
 	RecordPullReference(ctx context.Context, id WorkspaceID, ref pullrefs.Ref, at time.Time) error

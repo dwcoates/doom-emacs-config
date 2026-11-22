@@ -556,6 +556,13 @@ func (s *server) watchWebWorkspace(
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
 	}
+	// ONLY A VISIBLE WORKSPACE IS SERVED (endpoint_watch_web_workspace.proto):
+	// a page nobody can see costs no stream and no feed pushes. Decided by the
+	// roster's live value, the one the editor loaded the page on, never by the
+	// store's copy written a moment after it.
+	if v := s.deps.Sidebar.Visibility(subject.Record.ID); !v.Visible() {
+		return refuseStream(subject.Log, rpc, refusal{Arm: "not_visible", Reason: "the workspace is " + v.String() + ", so no page of it is served"})
+	}
 	s.holdParticipant(subject.Record.ID, false, +1)
 	defer s.holdParticipant(subject.Record.ID, false, -1)
 	s.deps.Reconnects.Connected(subject.Record.ID, restarttiming.ReconnectWeb)
@@ -705,7 +712,7 @@ func (s *server) watchDaemon(
 	events, ackEvent := s.daemonEventTopic.SubscribeStream(streamCtx)
 	ackFault, ackWifi, ackDigest := func() {}, func() {}, func() {}
 
-	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, 4)}
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, editorPushQueue)}
 	// THE STANDING LOUD FAULTS ARE AN EMACS STREAM'S ALONE: a webview draws
 	// them on the topbar and footer views it already holds. A nil channel is
 	// never ready, so a webview's select never takes that case.
@@ -974,6 +981,14 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 		// afresh, so a page not yet connected is never read as one gone.
 		delete(s.webSeen, ws)
 	}
+	// A WORKSPACE THAT IS NOT VISIBLE HOLDS NO STREAMS BY DESIGN: the editor
+	// closes both when the roster stops showing it (wsm.Visibility), so their
+	// close is no severed hop, and its next open is awaited afresh. Read
+	// off the roster's live value, which the close follows.
+	if delta < 0 && !s.deps.Sidebar.Visibility(ws).Visible() {
+		delete(s.hostSeen, ws)
+		delete(s.webSeen, ws)
+	}
 	hops := s.participantHopsLocked(ws)
 	moving := s.movedAway[ws]
 	s.mu.Unlock()
@@ -984,8 +999,6 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	// stream or is retired here.
 	if host && delta < 0 && !hops.hostStream {
 		s.deps.Queue.EditorGone(ws)
-		// The editor's evaluations are answered by nobody now.
-		s.evals.editorGone(ws)
 	}
 
 	// INFO, NOT DEBUG: the participant set is what a handover's adoption
@@ -1034,8 +1047,7 @@ func (s *server) ReportPageUnloading(
 
 // awaitPage records that WS holds no page on purpose, so its web hop is
 // AWAITED rather than broken until a page connects again, and publishes the
-// hops: Emacs's announcement of an unload, or its statement that it holds no
-// page (ReportPageResidency). MESSAGE is the record's.
+// hops: Emacs's announcement of an unload. MESSAGE is the record's.
 func (s *server) awaitPage(ws ids.WorkspaceID, log dlog.Logger, message string) {
 	s.mu.Lock()
 	delete(s.webSeen, ws)
