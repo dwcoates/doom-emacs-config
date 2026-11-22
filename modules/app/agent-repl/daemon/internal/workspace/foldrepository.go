@@ -106,7 +106,12 @@ const opFoldChildren = "daemon.workspace.fold_children"
 // THE OPEN WORKSPACES BELOW ws, standing down those it does not spare. A
 // collapse of the children of an ancestor of the current workspace SELECTS
 // ws first (selectParentOverCurrentDescendant), so the collapse never stands
-// the current workspace down. An unknown workspace is refused
+// the current workspace down. AN EXPAND ALSO EXPANDS EVERY FOLD ABOVE ws, in
+// the same write and republish: each ancestor's children fold, the fold of
+// the subsection its family sits in and the fold of its repository's section,
+// since a row a fold covers is drawn only while it is selected, working or
+// unviewed and so would stay hidden under an open fold of its own. Each fold
+// it opens leaves the user's attention stamp. An unknown workspace is refused
 // unknown_workspace.
 func (v *verbs) FoldChildren(ctx context.Context, ws ids.WorkspaceID, folded bool, requester FoldRequester) error {
 	log := v.deps.Log.Global().With(dlog.Merge(dlog.Context{"workspace": string(ws), "folded": folded}, requester.context()))
@@ -115,13 +120,22 @@ func (v *verbs) FoldChildren(ctx context.Context, ws ids.WorkspaceID, folded boo
 			return err
 		}
 	}
+	var opened []wsm.OpenedFold
 	return v.foldTabs(ctx, log, foldTabsSpec{
 		op:        opFoldChildren,
 		what:      "workspace's children",
 		target:    string(ws),
 		attention: wsm.AttentionOpenedChildren,
 		folded:    folded,
-		write:     func() error { return v.deps.DB.SetChildrenFolded(ctx, ws, folded) },
+		write: func() error {
+			if folded {
+				return v.deps.DB.SetChildrenFolded(ctx, ws, true)
+			}
+			var err error
+			opened, err = v.deps.DB.ExpandChildrenWithAncestry(ctx, ws)
+			return err
+		},
+		alsoOpened: func() []wsm.OpenedFold { return opened },
 		unknown: func(err error) error {
 			if !errors.Is(err, wsm.ErrNotFound) {
 				return nil
@@ -174,6 +188,10 @@ type foldTabsSpec struct {
 	folded bool
 	// write records the fold.
 	write func() error
+	// alsoOpened answers the other folds an expand's write opened, read after
+	// it; each leaves its own attention stamp beside the target's. Nil for a
+	// fold that opens only its target.
+	alsoOpened func() []wsm.OpenedFold
 	// unknown answers the refusal for a write that named no target, nil for
 	// any other failure.
 	unknown func(error) error
@@ -208,15 +226,23 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 	if !spec.folded {
 		// EVERY EXPAND IS THE USER'S OWN: only the sidebar's rpcs reach a
 		// fold, and the sweep never expands.
-		if err := v.deps.DB.StampUserAttention(ctx, spec.attention, spec.target, v.now()); err != nil {
-			log.Error(spec.op, "could not stamp the user's open of the "+spec.what, dlog.Context{"cause": err.Error(), "attention": string(spec.attention)})
-			return fmt.Errorf("stamp the open of %s %q: %w", spec.what, spec.target, err)
+		stamps := []wsm.OpenedFold{{Kind: spec.attention, Target: spec.target}}
+		if spec.alsoOpened != nil {
+			stamps = append(stamps, spec.alsoOpened()...)
+		}
+		for _, stamp := range stamps {
+			if err := v.deps.DB.StampUserAttention(ctx, stamp.Kind, stamp.Target, v.now()); err != nil {
+				log.Error(spec.op, "could not stamp the user's open of the "+spec.what, dlog.Context{"cause": err.Error(), "attention": string(stamp.Kind), "stamped": stamp.Target})
+				return fmt.Errorf("stamp the open of %s %q: %w", spec.what, stamp.Target, err)
+			}
 		}
 		return nil
 	}
 	hidden, spared, standingDown := []string{}, map[string]string{}, []string{}
 	for _, ws := range workspaces {
-		if !members.StandsDown(ws) {
+		// A TOP-PRIORITY WORKSPACE STAYS VISIBLE UNDER A FOLD
+		// (wsm.Workspace.TopPriority), so the fold neither hides nor stands it down.
+		if !members.StandsDown(ws) || ws.TopPriority() {
 			continue
 		}
 		hidden = append(hidden, string(ws.ID))

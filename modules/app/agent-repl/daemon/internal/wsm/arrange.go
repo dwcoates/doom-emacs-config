@@ -161,7 +161,57 @@ var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
 // arm and records it at its own level.
 func isArrangementRefusal(err error) bool {
 	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName) ||
-		errors.Is(err, ErrNotSiblings) || errors.Is(err, ErrNoOpenConstituent) || errors.Is(err, ErrNoRepositoryBlock)
+		errors.Is(err, ErrNotSiblings) || errors.Is(err, ErrNotAChild) || errors.Is(err, ErrNoOpenConstituent) || errors.Is(err, ErrNoRepositoryBlock)
+}
+
+// ErrNotAChild refuses a child move naming a top-level workspace, which has
+// no parent whose children it could be reordered among. Nothing is written.
+var ErrNotAChild = errors.New("wsm: the workspace is top-level, so it has no siblings to move among")
+
+// MoveChild reorders workspace WS among its parent's children: just before
+// sibling BEFORE, or after every other child when BEFORE is nil. A child never
+// leaves its parent this way, so it keeps its parent, its subsection (always
+// its root's) and every other workspace's place (reorderSiblings).
+//
+// Refusals, each writing nothing: BEFORE naming WS is malformed; an unknown
+// workspace is ErrNotFound; a top-level WS is ErrNotAChild; a BEFORE of
+// another repository is ErrOtherRepository and any other BEFORE that is not a
+// child of WS's parent is ErrNotSiblings.
+func (s *store) MoveChild(ctx context.Context, ws WorkspaceID, before *WorkspaceID) error {
+	const op = "daemon.wsm.move_child"
+	fields := dlog.Context{"workspace": string(ws), "before": ids.Optional(before)}
+	if before != nil && *before == ws {
+		err := fmt.Errorf("wsm: move child: %s before itself", ws)
+		s.log.Error(op, "refused to move a child before itself", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var repo RepoID
+		var parent sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, parent_id", &repo, &parent); err != nil {
+			return err
+		}
+		if !parent.Valid {
+			return ErrNotAChild
+		}
+		fields["parent"] = parent.String
+		if before != nil {
+			var beforeRepo RepoID
+			var beforeParent sql.NullString
+			if err := scanWorkspaceRow(ctx, tx, *before, "repo_id, parent_id", &beforeRepo, &beforeParent); err != nil {
+				return err
+			}
+			if beforeRepo != repo {
+				return ErrOtherRepository
+			}
+			if beforeParent != parent {
+				return ErrNotSiblings
+			}
+		}
+		return reorderSiblings(ctx, tx, parent.String, func(siblings []WorkspaceID) []WorkspaceID {
+			return moveBefore(siblings, ws, before)
+		})
+	})
 }
 
 // subsectionName trims NAME and refuses it when nothing is left.
@@ -535,13 +585,10 @@ func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 			return ErrNotSiblings
 		}
 		if ownParent.Valid {
-			siblings, err := idsByPlace[WorkspaceID](ctx, tx, `SELECT id FROM workspaces WHERE parent_id = ? ORDER BY place`, ownParent.String)
-			if err != nil {
-				return err
-			}
-			after := slices.Index(siblings, ws) < slices.Index(siblings, target)
-			_, err = permutePlaces(ctx, tx, moveBeside(siblings, ws, target, after))
-			return err
+			return reorderSiblings(ctx, tx, ownParent.String, func(siblings []WorkspaceID) []WorkspaceID {
+				after := slices.Index(siblings, ws) < slices.Index(siblings, target)
+				return moveBeside(siblings, ws, target, after)
+			})
 		}
 		walk, err := readWalk(ctx, tx, ownRepo)
 		if err != nil {
@@ -566,6 +613,20 @@ func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 		}
 		return fmt.Errorf("wsm: move workspace: root %s is in no entry of its repository's walk", target)
 	})
+}
+
+// reorderSiblings reads the children of PARENT in their order (by place),
+// has ORDER answer the order they take, and writes it back as a permutation
+// of the places the children already hold, so no other workspace's place
+// moves. It is the one write every sibling reordering shares: the tab-bar
+// move (MoveWorkspace) and the sidebar's child move (MoveChild).
+func reorderSiblings(ctx context.Context, tx *sql.Tx, parent string, order func(siblings []WorkspaceID) []WorkspaceID) error {
+	siblings, err := idsByPlace[WorkspaceID](ctx, tx, `SELECT id FROM workspaces WHERE parent_id = ? ORDER BY place`, parent)
+	if err != nil {
+		return err
+	}
+	_, err = permutePlaces(ctx, tx, order(siblings))
+	return err
 }
 
 // moveBeside answers ORDER with ID taken out and put back just before TARGET,

@@ -172,7 +172,10 @@ func TestARequiredWarningCountsAsStaleUntilItIsProduced(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	f := newCanonical(t)
-	f.d.ExpectWarnings("daemon.health.open_fault")
+	// The simulated crash starts a background relaunch revival
+	// (daemon.promptqueue.submit), which the test's end may cut short by
+	// forgetting the workspace; its failure is the crash's own consequence.
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.promptqueue.submit")
 	f.shim.ExpectStartSession()
 	f.d.RequireWarnings("daemon.shimclient.exit")
 	before := f.d.UnproducedRequiredWarnings()

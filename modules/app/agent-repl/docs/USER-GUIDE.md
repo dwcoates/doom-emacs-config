@@ -937,8 +937,10 @@ The top bar's phone chip, on the left after the account and just left of the wif
     - The row it would join lights up the same way, and the dragged row stands among that row's children.
     - The top and bottom edges of a row's line still place the dragged row just above or below it.
     - The new child's agent is told its new parent, and its work still lands where it landed before.
-  - A workspace's whole family moves with it.
-    - Dragging a parent takes its children, and dragging a child takes its parent and the rest of the family.
+  - A top-level workspace's whole family moves with it, its children and theirs.
+  - Dragging a child reorders it among its parent's children, and only there.
+    - The child's own children go with it.
+    - It can be dropped nowhere else: it never changes parent, goes top-level or joins a subsection.
 - **Drag a subsection's header to move it among the repository's rows and subsections.**
   - Dropped on a row's line, it stands just above that row, so a subsection can sit between two of the repository's own workspaces.
 - **Drag a repository's header to reorder the repositories.**

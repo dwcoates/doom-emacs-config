@@ -52,6 +52,13 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 			}},
 		{name: "move a repository block last", op: opMoveRepositoryBlock, want: "MoveRepositoryBlock w1 repo-2 ",
 			act: func(ctx context.Context, v Verbs) error { return v.MoveRepositoryBlock(ctx, "w1", "repo-2", nil) }},
+		{name: "move a child before a sibling", op: opMoveChild, want: "MoveChild w1 w2",
+			act: func(ctx context.Context, v Verbs) error {
+				before := ids.WorkspaceID("w2")
+				return v.MoveChild(ctx, "w1", &before)
+			}},
+		{name: "move a child last", op: opMoveChild, want: "MoveChild w1 ",
+			act: func(ctx context.Context, v Verbs) error { return v.MoveChild(ctx, "w1", nil) }},
 		{name: "place workspaces", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 before workspace w2",
 			act: func(ctx context.Context, v Verbs) error {
 				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.BeforeWorkspace{ID: "w2"})
@@ -116,6 +123,8 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 		{name: "no open workspace", err: wsm.ErrNoOpenConstituent, arm: ArmNoOpenWorkspace},
 		{name: "a main workspace an agent may not sort", err: fmt.Errorf("x: %w", wsm.ErrMainWorkspaceNotSortable), arm: ArmMainWorkspaceNotSortable},
 		{name: "no such repository block", err: wsm.ErrNoRepositoryBlock, arm: ArmNoRepositoryBlock},
+		{name: "a top-level workspace moved as a child", err: wsm.ErrNotAChild, arm: ArmNotAChild},
+		{name: "a before that is no sibling", err: fmt.Errorf("x: %w", wsm.ErrNotSiblings), arm: ArmNotSiblings},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -368,5 +377,32 @@ func TestCreateAgentSubsectionAnswersTheSubsectionItCreated(t *testing.T) {
 	}
 	if sub.ID != "sub-agent" || sub.CreatedBy == nil || *sub.CreatedBy != "w1" {
 		t.Fatalf("created = %+v, want the store's sub-agent created by w1", sub)
+	}
+}
+
+func TestMoveChildRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     ids.WorkspaceID
+		before *ids.WorkspaceID
+	}{
+		{name: "the moved child", ws: "w-nope"},
+		{name: "the sibling it moves before", ws: "w1", before: func() *ids.WorkspaceID { id := ids.WorkspaceID("w-nope"); return &id }()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+
+			// Act
+			err := f.verbs.MoveChild(context.Background(), tt.ws, tt.before)
+
+			// Assert
+			asRefusal(t, err, ArmUnknownWorkspace)
+			if len(f.db.arrangements) != 0 {
+				t.Fatalf("writes = %v, want none", f.db.arrangements)
+			}
+		})
 	}
 }

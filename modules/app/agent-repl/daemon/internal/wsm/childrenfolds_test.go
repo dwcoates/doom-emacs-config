@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -159,5 +160,174 @@ func TestDescendantMembersHoldTheCurrentWorkspaceOnlyBelowTheRoot(t *testing.T) 
 	closed := Workspace{ID: "child", Parent: &root, Current: true, Closed: true}
 	if members.HoldsCurrent(&closed) {
 		t.Fatal("a closed current child is held by the fold")
+	}
+}
+
+// foldAboveGrandchild files root in a new subsection and folds everything
+// above the grandchild: root's and child's children, the subsection, and the
+// repository's section. It answers the subsection.
+func foldAboveGrandchild(t *testing.T, s *store, w childrenFoldWorld) Subsection {
+	t.Helper()
+	ctx := context.Background()
+	sub := mustSubsection(t, s, w.root.Repo, "later")
+	mustPlace(t, s, w.root.ID, &sub.ID, AtEnd{})
+	for _, fold := range []func() error{
+		func() error { return s.SetChildrenFolded(ctx, w.root.ID, true) },
+		func() error { return s.SetChildrenFolded(ctx, w.child.ID, true) },
+		func() error { return s.SetSubsectionFolded(ctx, sub.ID, true) },
+		func() error { return s.SetRepositoryFolded(ctx, w.root.Repo, true) },
+	} {
+		if err := fold(); err != nil {
+			t.Fatalf("fold: %v", err)
+		}
+	}
+	return sub
+}
+
+// foldsAbove reads (root's children, child's children, subsection, repository)
+// folded.
+func foldsAbove(t *testing.T, s *store, w childrenFoldWorld, sub Subsection) [4]bool {
+	t.Helper()
+	subs, err := s.ListSubsections(context.Background())
+	if err != nil {
+		t.Fatalf("ListSubsections: %v", err)
+	}
+	repos, err := s.ListRepositories(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	var out [4]bool
+	out[0], out[1] = childrenFoldedOf(t, s, w.root.ID), childrenFoldedOf(t, s, w.child.ID)
+	for _, got := range subs {
+		if got.ID == sub.ID {
+			out[2] = got.Folded
+		}
+	}
+	for _, got := range repos {
+		if got.ID == w.root.Repo {
+			out[3] = got.Folded
+		}
+	}
+	return out
+}
+
+func TestExpandChildrenWithAncestryOpensEveryFoldAbove(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newChildrenFoldWorld(t, s)
+	sub := foldAboveGrandchild(t, s, w)
+	if err := s.SetChildrenFolded(context.Background(), w.grandchild.ID, true); err != nil {
+		t.Fatalf("SetChildrenFolded: %v", err)
+	}
+
+	// Act
+	opened, err := s.ExpandChildrenWithAncestry(context.Background(), w.grandchild.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ExpandChildrenWithAncestry: %v", err)
+	}
+	want := []OpenedFold{
+		{Kind: AttentionOpenedChildren, Target: string(w.child.ID)},
+		{Kind: AttentionOpenedChildren, Target: string(w.root.ID)},
+		{Kind: AttentionOpenedSubsection, Target: string(sub.ID)},
+		{Kind: AttentionOpenedRepository, Target: string(w.root.Repo)},
+	}
+	if !slices.Equal(opened, want) {
+		t.Fatalf("opened = %v, want %v", opened, want)
+	}
+	if folds := foldsAbove(t, s, w, sub); folds != [4]bool{} || childrenFoldedOf(t, s, w.grandchild.ID) {
+		t.Fatalf("folds above (root, child, subsection, repository) = %v, grandchild folded = %v; want everything open", folds, childrenFoldedOf(t, s, w.grandchild.ID))
+	}
+}
+
+func TestExpandChildrenWithAncestryLeavesWhatIsNotAboveFolded(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newChildrenFoldWorld(t, s)
+	sub := foldAboveGrandchild(t, s, w)
+	if err := s.SetChildrenFolded(context.Background(), w.sibling.ID, true); err != nil {
+		t.Fatalf("SetChildrenFolded: %v", err)
+	}
+	if err := s.SetChildrenFolded(context.Background(), w.grandchild.ID, true); err != nil {
+		t.Fatalf("SetChildrenFolded: %v", err)
+	}
+
+	// Act
+	_, err := s.ExpandChildrenWithAncestry(context.Background(), w.child.ID)
+
+	// Assert: child's own and everything above it opens; root's sibling stays.
+	if err != nil {
+		t.Fatalf("ExpandChildrenWithAncestry: %v", err)
+	}
+	if !childrenFoldedOf(t, s, w.sibling.ID) || !childrenFoldedOf(t, s, w.grandchild.ID) {
+		t.Fatal("the expand opened a fold that is not above the workspace")
+	}
+	if folds := foldsAbove(t, s, w, sub); folds != [4]bool{} {
+		t.Fatalf("folds above (root, child, subsection, repository) = %v, want all open", folds)
+	}
+}
+
+func TestExpandChildrenWithAncestryReportsOnlyTheFoldsItOpened(t *testing.T) {
+	// Arrange: only the repository's section is folded.
+	s, _ := testStore(t)
+	w := newChildrenFoldWorld(t, s)
+	if err := s.SetRepositoryFolded(context.Background(), w.root.Repo, true); err != nil {
+		t.Fatalf("SetRepositoryFolded: %v", err)
+	}
+
+	// Act
+	opened, err := s.ExpandChildrenWithAncestry(context.Background(), w.grandchild.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ExpandChildrenWithAncestry: %v", err)
+	}
+	want := []OpenedFold{{Kind: AttentionOpenedRepository, Target: string(w.root.Repo)}}
+	if !slices.Equal(opened, want) {
+		t.Fatalf("opened = %v, want %v", opened, want)
+	}
+}
+
+func TestExpandChildrenWithAncestryOfATopLevelWorkspaceOpensItsSectionFolds(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newChildrenFoldWorld(t, s)
+	sub := foldAboveGrandchild(t, s, w)
+
+	// Act
+	opened, err := s.ExpandChildrenWithAncestry(context.Background(), w.root.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ExpandChildrenWithAncestry: %v", err)
+	}
+	want := []OpenedFold{
+		{Kind: AttentionOpenedSubsection, Target: string(sub.ID)},
+		{Kind: AttentionOpenedRepository, Target: string(w.root.Repo)},
+	}
+	if !slices.Equal(opened, want) {
+		t.Fatalf("opened = %v, want %v", opened, want)
+	}
+	if !childrenFoldedOf(t, s, w.child.ID) {
+		t.Fatal("the expand opened a descendant's fold")
+	}
+}
+
+func TestExpandChildrenWithAncestryRefusesAnUnknownWorkspaceAndWritesNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newChildrenFoldWorld(t, s)
+	sub := foldAboveGrandchild(t, s, w)
+
+	// Act
+	opened, err := s.ExpandChildrenWithAncestry(context.Background(), "w-nope")
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) || opened != nil {
+		t.Fatalf("ExpandChildrenWithAncestry = %v, %v; want ErrNotFound and nothing opened", opened, err)
+	}
+	if folds := foldsAbove(t, s, w, sub); folds != [4]bool{true, true, true, true} {
+		t.Fatalf("folds above (root, child, subsection, repository) = %v, want all still folded", folds)
 	}
 }

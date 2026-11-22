@@ -166,3 +166,12 @@ func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 func (ws Workspace) KeepaliveHeld() bool {
 	return ws.InHiddenSection() && !ws.Current && !ws.DeployMediator
 }
+
+// isTopPriority reports whether P is P0.5 or P1, the priorities whose open
+// workspaces are always visible (Visibilities).
+func isTopPriority(p Priority) bool { return p == PriorityP05 || p == PriorityP1 }
+
+// TopPriority reports whether the workspace has priority P0.5 or P1, which
+// keeps it visible under every fold (VisibilityInput.TopPriority). A fold
+// therefore never stands such a workspace down (foldTabs, ResumeFolded).
+func (ws Workspace) TopPriority() bool { return ws.Priority != nil && isTopPriority(*ws.Priority) }

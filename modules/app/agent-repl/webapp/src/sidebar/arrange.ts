@@ -66,6 +66,10 @@ export function arrangeSidebarRefusal(
       return "the main workspace is arranged by hand, never sorted by an agent";
     case "noRepositoryBlock":
       return "the sidebar changed under the drag; try again";
+    case "notAChild":
+      return "only a child can be reordered among its parent's children";
+    case "notSiblings":
+      return "a child can only move among its own parent's children";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("ArrangeSidebarError.cause", other.case);

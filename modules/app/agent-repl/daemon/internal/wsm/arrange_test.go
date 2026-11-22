@@ -1632,3 +1632,238 @@ func TestTheUserStillSortsAMainWorkspace(t *testing.T) {
 		t.Fatalf("main workspace sits in %v, want %s", got, sub.ID)
 	}
 }
+
+// siblingFixture registers a parent with children c1..c3 and an unrelated
+// root "other" with a child "o1", and answers the workspaces by name.
+func siblingFixture(t *testing.T, s *store) map[string]Workspace {
+	t.Helper()
+	repoDir := arrangeRepo(t, "repo")
+	byName := map[string]Workspace{}
+	byName["parent"] = registerIn(t, s, repoDir, "parent", nil)
+	for _, name := range []string{"c1", "c2", "c3"} {
+		byName[name] = registerChild(t, s, repoDir, name, byName["parent"].ID)
+	}
+	byName["other"] = registerIn(t, s, repoDir, "other", nil)
+	byName["o1"] = registerChild(t, s, repoDir, "o1", byName["other"].ID)
+	// Registration fixes no order among the children, so pin c1, c2, c3.
+	if err := writeSiblings(t, s, byName["parent"].ID, func([]WorkspaceID) []WorkspaceID {
+		return []WorkspaceID{byName["c1"].ID, byName["c2"].ID, byName["c3"].ID}
+	}); err != nil {
+		t.Fatalf("pin the children's order: %v", err)
+	}
+	return byName
+}
+
+// writeSiblings runs reorderSiblings over PARENT's children in one write.
+func writeSiblings(t *testing.T, s *store, parent WorkspaceID, order func([]WorkspaceID) []WorkspaceID) error {
+	t.Helper()
+	return s.write(context.Background(), "test.reorder_siblings", nil, func(ctx context.Context, tx *sql.Tx) error {
+		return reorderSiblings(ctx, tx, string(parent), order)
+	})
+}
+
+func TestReorderSiblingsWritesTheOrderOverTheChildrensOwnPlaces(t *testing.T) {
+	tests := []struct {
+		name  string
+		order func(siblings []WorkspaceID) []WorkspaceID
+		want  []string
+	}{
+		{name: "reversed", order: func(s []WorkspaceID) []WorkspaceID { return []WorkspaceID{s[2], s[1], s[0]} }, want: []string{"c3", "c2", "c1"}},
+		{name: "unchanged", order: func(s []WorkspaceID) []WorkspaceID { return s }, want: []string{"c1", "c2", "c3"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := siblingFixture(t, s)
+			before := placesByName(t, s)
+
+			// Act
+			err := writeSiblings(t, s, ws["parent"].ID, tt.order)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("reorderSiblings: %v", err)
+			}
+			if got := namesAmong(t, s, "c1", "c2", "c3"); !slices.Equal(got, tt.want) {
+				t.Fatalf("children order = %v, want %v", got, tt.want)
+			}
+			after := placesByName(t, s)
+			for _, name := range []string{"parent", "other", "o1"} {
+				if after[name] != before[name] {
+					t.Fatalf("%s's place moved from %d to %d", name, before[name], after[name])
+				}
+			}
+		})
+	}
+}
+
+func TestReorderSiblingsReadsOnlyTheParentsChildrenInPlaceOrder(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := siblingFixture(t, s)
+	var seen []WorkspaceID
+
+	// Act
+	err := writeSiblings(t, s, ws["parent"].ID, func(siblings []WorkspaceID) []WorkspaceID {
+		seen = siblings
+		return siblings
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("reorderSiblings: %v", err)
+	}
+	want := []WorkspaceID{ws["c1"].ID, ws["c2"].ID, ws["c3"].ID}
+	if !slices.Equal(seen, want) {
+		t.Fatalf("siblings = %v, want %v", seen, want)
+	}
+}
+
+func TestMoveWorkspaceBetweenChildrenReordersThemUnderTheirParent(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws, target string
+		want       []string
+	}{
+		{name: "from an earlier sibling it lands just after the target", ws: "c1", target: "c2", want: []string{"c2", "c1", "c3"}},
+		{name: "from a later sibling it lands just before the target", ws: "c3", target: "c1", want: []string{"c3", "c1", "c2"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := siblingFixture(t, s)
+
+			// Act
+			err := s.MoveWorkspace(context.Background(), ws[tt.ws].ID, ws[tt.target].ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("MoveWorkspace: %v", err)
+			}
+			if got := namesAmong(t, s, "c1", "c2", "c3"); !slices.Equal(got, tt.want) {
+				t.Fatalf("children order = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMoveChildReordersAmongItsParentsChildren(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     string
+		before string // "" means last
+		want   []string
+	}{
+		{name: "a later child before an earlier sibling", ws: "c3", before: "c1", want: []string{"c3", "c1", "c2"}},
+		{name: "an earlier child before a later sibling", ws: "c1", before: "c3", want: []string{"c2", "c1", "c3"}},
+		{name: "a child before the sibling that already follows it", ws: "c1", before: "c2", want: []string{"c1", "c2", "c3"}},
+		{name: "the first child last", ws: "c1", want: []string{"c2", "c3", "c1"}},
+		{name: "the last child last", ws: "c3", want: []string{"c1", "c2", "c3"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := siblingFixture(t, s)
+			var before *WorkspaceID
+			if tt.before != "" {
+				before = &[]WorkspaceID{ws[tt.before].ID}[0]
+			}
+			places := placesByName(t, s)
+
+			// Act
+			err := s.MoveChild(context.Background(), ws[tt.ws].ID, before)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("MoveChild: %v", err)
+			}
+			if got := namesAmong(t, s, "c1", "c2", "c3"); !slices.Equal(got, tt.want) {
+				t.Fatalf("children order = %v, want %v", got, tt.want)
+			}
+			after := placesByName(t, s)
+			for _, name := range []string{"parent", "other", "o1"} {
+				if after[name] != places[name] {
+					t.Fatalf("%s's place moved from %d to %d", name, places[name], after[name])
+				}
+			}
+		})
+	}
+}
+
+func TestMoveChildRefusesAndWritesNothing(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     string
+		before string
+		want   error
+	}{
+		{name: "a top-level workspace", ws: "other", want: ErrNotAChild},
+		{name: "a before that is a child of another parent", ws: "c1", before: "o1", want: ErrNotSiblings},
+		{name: "a before that is the parent", ws: "c1", before: "parent", want: ErrNotSiblings},
+		{name: "a before of another repository", ws: "c1", before: "foreign", want: ErrOtherRepository},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := siblingFixture(t, s)
+			ws["foreign"] = registerIn(t, s, arrangeRepo(t, "elsewhere"), "foreign", nil)
+			var before *WorkspaceID
+			if tt.before != "" {
+				before = &[]WorkspaceID{ws[tt.before].ID}[0]
+			}
+			places := placesByName(t, s)
+
+			// Act
+			err := s.MoveChild(context.Background(), ws[tt.ws].ID, before)
+
+			// Assert
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("MoveChild = %v, want %v", err, tt.want)
+			}
+			if after := placesByName(t, s); !maps.Equal(after, places) {
+				t.Fatalf("places = %v, want unchanged %v", after, places)
+			}
+		})
+	}
+}
+
+func TestMoveChildRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := siblingFixture(t, s)
+	places := placesByName(t, s)
+
+	// Act
+	errMoved := s.MoveChild(context.Background(), "w-nope", nil)
+	errBefore := s.MoveChild(context.Background(), ws["c1"].ID, &[]WorkspaceID{"w-nope"}[0])
+
+	// Assert
+	if !errors.Is(errMoved, ErrNotFound) || !errors.Is(errBefore, ErrNotFound) {
+		t.Fatalf("MoveChild = %v and %v, want ErrNotFound for both", errMoved, errBefore)
+	}
+	if after := placesByName(t, s); !maps.Equal(after, places) {
+		t.Fatalf("places = %v, want unchanged %v", after, places)
+	}
+}
+
+func TestMoveChildRefusesAMalformedMoveAndLogsIt(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := siblingFixture(t, s)
+	self := ws["c1"].ID
+
+	// Act
+	err := s.MoveChild(context.Background(), self, &self)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("MoveChild accepted a child before itself")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.move_child"}); !ok {
+		t.Fatalf("no error record: %v", log.Records())
+	}
+}

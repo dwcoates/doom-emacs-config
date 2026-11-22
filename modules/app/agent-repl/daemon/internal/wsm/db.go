@@ -87,6 +87,10 @@ type DB interface {
 	// SetChildrenFolded records whether a workspace's children are folded; an
 	// unknown workspace is ErrNotFound (childrenfolds.go).
 	SetChildrenFolded(ctx context.Context, id WorkspaceID, folded bool) error
+	// ExpandChildrenWithAncestry expands a workspace's children and every
+	// fold above it in one write, answering the folds above it it opened
+	// (childrenfolds.go).
+	ExpandChildrenWithAncestry(ctx context.Context, id WorkspaceID) ([]OpenedFold, error)
 	// SetVisibilities persists each named workspace's visibility
 	// (visibilitystate.go), in one write.
 	SetVisibilities(ctx context.Context, changes map[WorkspaceID]Visibility) error
@@ -207,6 +211,9 @@ type DB interface {
 	// MoveRepositoryBlock moves a parent's block of one other repository
 	// before another of its blocks (nil: last) (repositoryblocks.go).
 	MoveRepositoryBlock(ctx context.Context, parent WorkspaceID, repo RepoID, before *RepoID) error
+	// MoveChild reorders a child among its parent's children, before a
+	// sibling (nil: last); it never leaves its parent.
+	MoveChild(ctx context.Context, ws WorkspaceID, before *WorkspaceID) error
 	// PlaceWorkspaces puts root workspaces, with their families, into a
 	// subsection of their repository (nil: none) as one block at an anchor
 	// there: before a root, before a subsection (into none only), or last.

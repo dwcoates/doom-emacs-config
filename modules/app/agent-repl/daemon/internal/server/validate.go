@@ -1113,6 +1113,8 @@ func validateArrangeSidebarRequest(req *agentreplv1.ArrangeSidebarRequest) *conn
 		return validateArrangeMoveRepository(change.MoveRepository)
 	case *agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock:
 		return validateArrangeMoveRepositoryBlock(change.MoveRepositoryBlock)
+	case *agentreplv1.ArrangeSidebarRequest_MoveChild:
+		return validateArrangeMoveChild(change.MoveChild)
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspace:
 		return validateArrangePlaceWorkspace(change.PlaceWorkspace)
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces:
@@ -1189,6 +1191,26 @@ func validateArrangeMoveRepositoryBlock(move *agentreplv1.ArrangeMoveRepositoryB
 		return invalid("move_repository_block.to", "a place arm is required")
 	case *agentreplv1.ArrangeMoveRepositoryBlock_Before:
 		return validateRepositoryRef("move_repository_block.before", to.Before)
+	}
+	return nil
+}
+
+// validateArrangeMoveChild is ArrangeMoveChild's base function: a child, and
+// a place arm that is not the child itself.
+func validateArrangeMoveChild(move *agentreplv1.ArrangeMoveChild) *connect.Error {
+	if err := validateWorkspaceRef("move_child.workspace", move.GetWorkspace()); err != nil {
+		return err
+	}
+	switch to := move.GetTo().(type) {
+	case nil:
+		return invalid("move_child.to", "a place arm is required")
+	case *agentreplv1.ArrangeMoveChild_Before:
+		if err := validateWorkspaceRef("move_child.before", to.Before); err != nil {
+			return err
+		}
+		if to.Before.GetId() == move.GetWorkspace().GetId() {
+			return invalid("move_child.before", "a child cannot move before itself")
+		}
 	}
 	return nil
 }

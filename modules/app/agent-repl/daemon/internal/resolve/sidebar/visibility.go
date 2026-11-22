@@ -16,6 +16,10 @@ import (
 // boot reads it before it allocates anything. No other layer works it out:
 // the editor, the web streams, the deploy and the run rule all read it.
 
+// startingArm is the status arm of a workspace whose session is booting: the
+// grey initializing mark. A fold leaves such a workspace visible.
+const startingArm = "init"
+
 // workingArms are the status arms of a workspace that WORKS: a turn or
 // detached work runs, or it asks the user something. A fold leaves such a
 // workspace visible.
@@ -84,14 +88,20 @@ func (r *resolver) resolveArms(rc rowContext) map[ids.WorkspaceID]string {
 func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[ids.WorkspaceID]string) []wsm.VisibilityInput {
 	inputs := make([]wsm.VisibilityInput, 0, len(r.state.reg.Workspaces))
 	seen := make(map[ids.WorkspaceID]bool, len(r.state.reg.Workspaces))
+	topPriority := make(map[ids.WorkspaceID]bool, len(r.state.reg.Workspaces))
+	for _, rec := range r.state.reg.Workspaces {
+		topPriority[rec.ID] = rec.TopPriority()
+	}
 	input := func(id ids.WorkspaceID) wsm.VisibilityInput {
 		arm := arms[id]
 		s := r.state.workspace(id)
 		return wsm.VisibilityInput{
-			ID:       id,
-			Working:  workingArms[arm],
-			Unviewed: isTurnEndArm(arm) && !s.viewedOn(arm),
-			Selected: rc.selected != nil && *rc.selected == id,
+			ID:          id,
+			Working:     workingArms[arm],
+			Unviewed:    isTurnEndArm(arm) && !s.viewedOn(arm),
+			Starting:    arm == startingArm,
+			TopPriority: topPriority[id],
+			Selected:    rc.selected != nil && *rc.selected == id,
 		}
 	}
 	var walk func(nodes []openNode, parent *ids.WorkspaceID, covered bool)

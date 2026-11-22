@@ -30,6 +30,7 @@ const (
 	opMoveSubsection        = "daemon.workspace.move_subsection"
 	opMoveRepository        = "daemon.workspace.move_repository"
 	opMoveRepositoryBlock   = "daemon.workspace.move_repository_block"
+	opMoveChild             = "daemon.workspace.move_child"
 	opPlaceWorkspace        = "daemon.workspace.place_workspaces"
 	// opPlaceWorkspaceByAgent is an agent's placement.
 	opPlaceWorkspaceByAgent = "daemon.workspace.place_workspaces_by_agent"
@@ -132,6 +133,25 @@ func (v *verbs) MoveRepositoryBlock(ctx context.Context, parent ids.WorkspaceID,
 	})
 }
 
+// MoveChild reorders child WS among its parent's children, just before
+// sibling BEFORE (nil: last). Every workspace named must be this daemon's to
+// serve, as every per-workspace verb's is.
+func (v *verbs) MoveChild(ctx context.Context, ws ids.WorkspaceID, before *ids.WorkspaceID) error {
+	named := []ids.WorkspaceID{ws}
+	if before != nil {
+		named = append(named, *before)
+	}
+	for _, id := range named {
+		if _, _, err := v.owned(ctx, arrangeRPC, id); err != nil {
+			return err
+		}
+	}
+	log := v.deps.Log.Global().With(dlog.Context{"workspace": string(ws), "before": ids.Optional(before)})
+	return v.arrange(ctx, log, opMoveChild, "move the child", func() error {
+		return v.deps.DB.MoveChild(ctx, ws, before)
+	})
+}
+
 // PlaceWorkspaces puts root workspaces WS, in that order and with their
 // families, into subsection INTO (nil: none) as one block at AT. Every
 // workspace named must be this daemon's to serve, as every per-workspace
@@ -217,9 +237,12 @@ func arrangementRefusal(log dlog.Logger, err error) *Refusal {
 		return refuse(log, arrangeRPC, ArmNoOpenWorkspace, err.Error(), false)
 	case errors.Is(err, wsm.ErrMainWorkspaceNotSortable):
 		return refuse(log, arrangeRPC, ArmMainWorkspaceNotSortable, err.Error(), false)
+	case errors.Is(err, wsm.ErrNotAChild):
+		return refuse(log, arrangeRPC, ArmNotAChild, err.Error(), false)
 	case errors.Is(err, wsm.ErrNoRepositoryBlock):
 		return refuse(log, arrangeRPC, ArmNoRepositoryBlock, err.Error(), false)
 	default:
-		return nil
+		// Not siblings is the arm Swap and Move answer too (placeRefusal).
+		return placeRefusal(log, arrangeRPC, err)
 	}
 }

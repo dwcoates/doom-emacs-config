@@ -8,7 +8,6 @@ import {
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
 import {
   bucketOf,
-  familyTop,
   paintSubsectionWork,
   sameBucket,
   showsNoRows,
@@ -937,64 +936,146 @@ describe("dragging a repository block", () => {
     expect([drawnKin(other), blockMove(sent)]).toEqual([["block:repo-2"], ["p", "repo-2", "end"]]);
   });
 
-  it("drags a block row's whole top-level family, as any nested row", () => {
-    // Arrange
-    const { sc } = arranged();
-    const pane = mount(blockRoster(), sc);
-    layOut(sectionList(pane), 0);
+  it("drags a block row among its repository block's rows only, as any nested row", async () => {
+    // Arrange: P's repo-2 block holds b1 and b2; the block stands at 40..70.
+    const { sc, sent } = arranged();
+    const made = blockRoster();
+    const pane = mount(made, sc);
+    const { blocks } = layOutP(pane);
+    const second = document.createElement("div");
+    second.setAttribute("data-roster-row", "b2");
+    second.appendChild(Object.assign(document.createElement("div"), { className: "row" }));
+    blocks[0].appendChild(second);
+    boxAt(blocks[0], 40, 40);
+    boxAt(pane.querySelector("[data-roster-row='b1']")!, 55, 15);
+    boxAt(second, 70, 15);
+    boxAt(rowLine(pane, "b1"), 55, 15);
 
-    // Act
-    pointer("pointerdown", rowLine(pane, "b1"), 5);
-    pointer("pointermove", window, 6);
-    pointer("pointermove", window, 15);
+    // Act: b1 dragged below b2.
+    await drag(rowLine(pane, "b1"), 60, 80);
 
     // Assert
-    expect(pane.querySelector(`.${DRAG_SLOT_CLASS}`)?.getAttribute("data-roster-row")).toBe("p");
-    pointer("pointerup", window, 15);
+    const change = sent[0]?.change;
+    expect(change?.case === "moveChild" ? [change.value.workspace?.id, change.value.to.case] : null).toEqual(["b1", "end"]);
   });
 });
 
 describe("a nested row", () => {
-  it("lifts its family's top row, so a child takes its ancestors", () => {
+  /** Repository repo-1's family a with children k1, k2, k3 (k2 with a child g), then top-level b. */
+  function familyRoster(): ReturnType<typeof roster> {
+    return roster({
+      repos: [
+        repoSection({
+          id: "repo-1",
+          rows: [row({ id: "a", children: [row({ id: "k1" }), row({ id: "k2", children: [row({ id: "g" })] }), row({ id: "k3" })] }), row({ id: "b" })],
+        }),
+      ],
+    });
+  }
+
+  /** Lay a's box of nested rows out under a's line at 20: k1 at 20, k2 at 40 (g at 60), k3 at 80. */
+  function layOutKids(pane: HTMLElement): HTMLElement {
+    const kids = pane.querySelector("[data-roster-row='a'] > .kids") as HTMLElement;
+    const at = (el: Element, top: number, height: number): void =>
+      void Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top, height, width: 200 }) });
+    at(kids, 20, 80);
+    at(pane.querySelector("[data-roster-row='k1']")!, 20, 20);
+    at(pane.querySelector("[data-roster-row='k2']")!, 40, 40);
+    at(pane.querySelector("[data-roster-row='g']")!, 60, 20);
+    at(pane.querySelector("[data-roster-row='k3']")!, 80, 20);
+    for (const id of ["k1", "k2", "g", "k3"]) at(rowLine(pane, id), Number(pane.querySelector(`[data-roster-row='${id}']`)!.getBoundingClientRect().top), 20);
+    return kids;
+  }
+
+  /** The child move SENT asked for: the child and where. */
+  function childMove(sent: ArrangeSidebarRequest[]): [string | undefined, string] | null {
+    const change = sent[0]?.change;
+    if (change?.case !== "moveChild") return null;
+    const to = change.value.to;
+    return [change.value.workspace?.id, to.case === "before" ? `before:${to.value.id}` : String(to.case)];
+  }
+
+  it("lifts only itself, so its parent's family stays where it is", () => {
     // Arrange
     const { sc } = arranged();
-    const pane = mount(
-      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid" })] }), row({ id: "b" })] })] }),
-      sc,
-    );
+    const pane = mount(familyRoster(), sc);
+    layOutKids(pane);
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "k1"), 25);
+    pointer("pointermove", window, 26);
+    pointer("pointermove", window, 50);
+    const slot = pane.querySelector(`.${DRAG_SLOT_CLASS}`)?.getAttribute("data-roster-row");
+    pointer("pointerup", window, 50);
+
+    // Assert
+    expect(slot).toBe("k1");
+  });
+
+  it.each([
+    { name: "before an earlier sibling", id: "k3", from: 85, to: 22, want: ["k3", "before:k1"] },
+    { name: "before a later sibling", id: "k1", from: 25, to: 82, want: ["k1", "before:k3"] },
+    { name: "after every sibling", id: "k1", from: 25, to: 99, want: ["k1", "end"] },
+  ])("reorders $id among its parent's children: $name", async ({ id, from, to, want }) => {
+    // Arrange
+    const { sc, sent } = arranged();
+    const pane = mount(familyRoster(), sc);
+    layOutKids(pane);
+
+    // Act
+    await drag(rowLine(pane, id), from, to);
+
+    // Assert
+    expect(childMove(sent)).toEqual(want);
+  });
+
+  it("takes its own descendants along", async () => {
+    // Arrange
+    const { sc, sent } = arranged();
+    const pane = mount(familyRoster(), sc);
+    layOutKids(pane);
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "k2"), 45);
+    pointer("pointermove", window, 46);
+    pointer("pointermove", window, 22);
+    const slot = pane.querySelector(`.${DRAG_SLOT_CLASS}`);
+    const lifted = slot?.querySelector("[data-roster-row='g']") !== null;
+    pointer("pointerup", window, 22);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert
+    expect([lifted, childMove(sent)]).toEqual([true, ["k2", "before:k1"]]);
+  });
+
+  it("is offered no list but its parent's children: never a bucket or another row's nest", async () => {
+    // Arrange: b, a top-level row, sits below a's family.
+    const { sc, sent, nested } = arranged();
+    const pane = mount(familyRoster(), sc);
+    layOutKids(pane);
+
+    // Act: k1 dropped far below a's family, over b.
+    await drag(rowLine(pane, "k1"), 25, 400);
+
+    // Assert
+    expect([childMove(sent), nested, sent.length]).toEqual([["k1", "end"], [], 1]);
+  });
+
+  it("leaves a press on a top-level row lifting its own whole family", () => {
+    // Arrange
+    const { sc } = arranged();
+    const pane = mount(familyRoster(), sc);
     layOut(sectionList(pane), 0);
 
     // Act
-    pointer("pointerdown", rowLine(pane, "kid"), 25);
-    pointer("pointermove", window, 60);
+    pointer("pointerdown", rowLine(pane, "a"), 5);
+    pointer("pointermove", window, 6);
+    pointer("pointermove", window, 15);
     const slot = pane.querySelector(`.${DRAG_SLOT_CLASS}`)?.getAttribute("data-roster-row");
-    pointer("pointerup", window, 60);
+    pointer("pointerup", window, 15);
 
     // Assert
     expect(slot).toBe("a");
-  });
-
-  it("places its family's top workspace into the subsection it is dropped in", async () => {
-    // Arrange -- a (with kid), then [foo: x]: foo spans 20 to 60.
-    const { sc, sent } = arranged();
-    const pane = mount(
-      roster({
-        repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid" })] })], subsections: [{ id: "foo", rows: [row({ id: "x" })] }] })],
-      }),
-      sc,
-    );
-    layOut(sectionList(pane), 0);
-
-    // Act
-    await drag(rowLine(pane, "kid"), 10, 50);
-
-    // Assert
-    const change = sent[0]?.change;
-    expect(
-      change?.case === "placeWorkspace"
-        ? [change.value.workspace?.id, change.value.into.case === "subsection" ? change.value.into.value.id : null]
-        : null,
-    ).toEqual(["a", "foo"]);
   });
 });
 
@@ -1216,36 +1297,6 @@ describe("dropping a row onto another row", () => {
       "cycle",
       false,
     ]);
-  });
-});
-
-describe("familyTop", () => {
-  it.each([
-    ["a top-level row is its own", "a", "a"],
-    ["a child climbs to its parent", "kid", "a"],
-    ["a grandchild climbs to the top", "grand", "a"],
-  ])("%s", (_name, pressed, want) => {
-    // Arrange
-    const pane = mount(
-      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid", children: [row({ id: "grand" })] })] })] })] }),
-      sidebarContext(),
-    );
-
-    // Act
-    const got = familyTop(pane.querySelector(`[data-roster-row='${pressed}']`) as HTMLElement);
-
-    // Assert
-    expect(got?.getAttribute("data-roster-row")).toBe(want);
-  });
-
-  it("finds none for a row in no arranged list", () => {
-    // Arrange
-    const loose = document.createElement("div");
-    loose.setAttribute("data-roster-row", "z");
-    document.createElement("div").appendChild(loose);
-
-    // Act / Assert
-    expect(familyTop(loose)).toBeNull();
   });
 });
 

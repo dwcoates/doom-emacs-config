@@ -75,6 +75,15 @@ func (s *server) ArrangeSidebar(
 		if answered {
 			return answer(resp, cerr)
 		}
+	case *agentreplv1.ArrangeSidebarRequest_MoveChild:
+		var (
+			answered bool
+			cerr     *connect.Error
+		)
+		answered, cerr, err = s.moveChild(ctx, rpc, resp, change.MoveChild)
+		if answered {
+			return answer(resp, cerr)
+		}
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspace:
 		place := change.PlaceWorkspace
 		var (
@@ -209,6 +218,31 @@ func (s *server) moveRepositoryBlock(
 		before = &anchor.ID
 	}
 	return false, nil, s.deps.Verbs.MoveRepositoryBlock(ctx, subjects[0].Record.ID, repository.ID, before)
+}
+
+// moveChild resolves the moved child and its sibling anchor as every
+// workspace ref is, so an unknown or mismatched one answers its own arm, then
+// reorders it. `answered` says a resolution refused and the caller answers at
+// once with cerr; otherwise err is the verb's.
+func (s *server) moveChild(
+	ctx context.Context,
+	rpc string,
+	resp *agentreplv1.ArrangeSidebarResponse,
+	move *agentreplv1.ArrangeMoveChild,
+) (answered bool, cerr *connect.Error, err error) {
+	named := []*workspacev1.WorkspaceRef{move.GetWorkspace()}
+	if before := move.GetBefore(); before != nil {
+		named = append(named, before)
+	}
+	subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, named)
+	if done {
+		return true, refused, nil
+	}
+	var before *ids.WorkspaceID
+	if len(subjects) > 1 {
+		before = &subjects[1].Record.ID
+	}
+	return false, nil, s.deps.Verbs.MoveChild(ctx, subjects[0].Record.ID, before)
 }
 
 // placeWorkspaces resolves the placed workspaces and their anchor (a

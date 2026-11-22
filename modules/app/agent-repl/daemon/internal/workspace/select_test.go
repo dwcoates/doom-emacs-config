@@ -1758,8 +1758,8 @@ func TestSwapAndMoveShareThePlaceRefusal(t *testing.T) {
 	byHand := sourcescan.Count(t, "ArmNotSiblings, err.Error()")
 
 	// Assert.
-	if shared != 2 || byHand != 1 {
-		t.Fatalf("placeRefusal calls = %d and hand-spelled not_siblings arms = %d, want Swap and Move sharing the one helper", shared, byHand)
+	if shared != 3 || byHand != 1 {
+		t.Fatalf("placeRefusal calls = %d and hand-spelled not_siblings arms = %d, want Swap, Move and the arrangement sharing the one helper", shared, byHand)
 	}
 }
 

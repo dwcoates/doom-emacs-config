@@ -970,3 +970,163 @@ func TestAnExpandSurfacesAFailedOpenStamp(t *testing.T) {
 		})
 	}
 }
+
+// foldedAbove folds everything above g1 in childFamily's chain (g1 under c1
+// under p1): both ancestors' children, the subsection sub-1 that p1's family
+// sits in, and repository repo-1's section.
+func foldedAbove(t *testing.T, f *fixture) {
+	t.Helper()
+	childFamily(t, f)
+	for _, id := range []ids.WorkspaceID{"p1", "c1", "g1"} {
+		record := f.db.workspaces[id]
+		record.ChildrenFolded = id != "g1"
+		if id == "p1" {
+			sub := ids.SubsectionID("sub-1")
+			record.Subsection = &sub
+		}
+		f.db.workspaces[id] = record
+	}
+	f.db.subsections = append(f.db.subsections, wsm.Subsection{ID: "sub-1", Repo: "repo-1", Name: "later", Place: 1, Folded: true})
+	for i := range f.db.repositories {
+		f.db.repositories[i].Folded = true
+	}
+}
+
+func TestFoldChildrenExpandAlsoExpandsEveryFoldAboveInOneRepublish(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	foldedAbove(t, f)
+	f.db.workspaces["g1"] = func() wsm.Workspace { g := f.db.workspaces["g1"]; g.ChildrenFolded = true; return g }()
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "g1", false, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldChildren: %v", err)
+	}
+	open := []bool{
+		!f.db.workspaces["g1"].ChildrenFolded, !f.db.workspaces["c1"].ChildrenFolded, !f.db.workspaces["p1"].ChildrenFolded,
+		!f.db.subsections[0].Folded, !f.db.repositories[0].Folded,
+	}
+	if !slices.Equal(open, []bool{true, true, true, true, true}) {
+		t.Fatalf("expanded (g1, c1, p1, sub-1, repo-1) = %v, want all", open)
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want one", len(f.sidebar.registries))
+	}
+}
+
+func TestFoldChildrenExpandStampsTheUsersOpenOfEveryFoldItOpens(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	foldedAbove(t, f)
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "g1", false, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldChildren: %v", err)
+	}
+	var got []string
+	for _, stamp := range f.db.userStamps {
+		got = append(got, string(stamp.Kind)+":"+stamp.Target)
+	}
+	want := []string{"opened_children:g1", "opened_children:c1", "opened_children:p1", "opened_subsection:sub-1", "opened_repository:repo-1"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("stamps = %v, want %v", got, want)
+	}
+}
+
+func TestFoldChildrenExpandStampsNothingForAFoldAboveItThatWasOpen(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	childFamily(t, f)
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "g1", false, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldChildren: %v", err)
+	}
+	if len(f.db.userStamps) != 1 || f.db.userStamps[0].Target != "g1" {
+		t.Fatalf("stamps = %v, want only g1's own", f.db.userStamps)
+	}
+}
+
+func TestFoldChildrenCollapseLeavesEveryFoldAboveAsItWas(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	foldedAbove(t, f)
+	for _, id := range []ids.WorkspaceID{"p1", "c1"} {
+		record := f.db.workspaces[id]
+		record.ChildrenFolded = false
+		f.db.workspaces[id] = record
+	}
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "c1", true, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldChildren: %v", err)
+	}
+	if !f.db.workspaces["c1"].ChildrenFolded || f.db.workspaces["p1"].ChildrenFolded || !f.db.subsections[0].Folded || !f.db.repositories[0].Folded {
+		t.Fatalf("c1 folded = %v, p1 folded = %v, sub-1 folded = %v, repo-1 folded = %v; want only c1 collapsed",
+			f.db.workspaces["c1"].ChildrenFolded, f.db.workspaces["p1"].ChildrenFolded, f.db.subsections[0].Folded, f.db.repositories[0].Folded)
+	}
+}
+
+func TestFoldChildrenExpandRefusesAnUnknownWorkspaceAndWritesNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	foldedAbove(t, f)
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "absent", false, testRequester)
+
+	// Assert
+	asRefusal(t, err, ArmUnknownWorkspace)
+	if !f.db.workspaces["c1"].ChildrenFolded || !f.db.subsections[0].Folded || len(f.db.userStamps) != 0 || len(f.sidebar.registries) != 0 {
+		t.Fatalf("an unknown workspace's expand changed state: stamps = %v, republications = %d", f.db.userStamps, len(f.sidebar.registries))
+	}
+}
+
+func TestACollapseNeitherHidesNorStandsDownAWorkspaceOfTopPriority(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority *wsm.Priority
+		standing bool
+	}{
+		{name: "P0.5", priority: &[]wsm.Priority{wsm.PriorityP05}[0]},
+		{name: "P1", priority: &[]wsm.Priority{wsm.PriorityP1}[0]},
+		{name: "P2", priority: &[]wsm.Priority{wsm.PriorityP2}[0], standing: true},
+		{name: "no priority", standing: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			childFamily(t, f)
+			child := f.db.workspaces["c1"]
+			child.Priority = tt.priority
+			f.db.workspaces["c1"] = child
+
+			// Act
+			err := f.verbs.FoldChildren(context.Background(), "p1", true, testRequester)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FoldChildren: %v", err)
+			}
+			if got := slices.Contains(f.standDowns, ids.WorkspaceID("c1")); got != tt.standing {
+				t.Fatalf("stand-downs = %v, want c1 standing down = %v", f.standDowns, tt.standing)
+			}
+			if !slices.Contains(f.standDowns, ids.WorkspaceID("g1")) {
+				t.Fatalf("stand-downs = %v, want the grandchild of no priority stood down", f.standDowns)
+			}
+		})
+	}
+}

@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
@@ -31,4 +32,95 @@ func (s *store) SetChildrenFolded(ctx context.Context, id WorkspaceID, folded bo
 			}
 			return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
 		})
+}
+
+// OpenedFold is one fold an expand opened: the stamp kind and target the
+// user's open of it is recorded under (AttentionKind).
+type OpenedFold struct {
+	Kind   AttentionKind
+	Target string
+}
+
+// ExpandChildrenWithAncestry records workspace ID's children as expanded and
+// expands every fold above it in the same write, so the row the user
+// expanded is drawn: the children fold of each ancestor, the subsection fold
+// its family's root sits in, and the repository section fold of that root. A
+// row a fold covers is drawn only while it is selected, working or unviewed
+// (Visibilities), so expanding only its own children shows nothing. It
+// answers the folds above ID that were folded and are now open, nearest
+// ancestor first, then the subsection, then the repository: ID's own fold is
+// the caller's. An unknown workspace is refused (ErrNotFound) and writes
+// nothing; a parent chain that cycles is a broken store and fails the write.
+func (s *store) ExpandChildrenWithAncestry(ctx context.Context, id WorkspaceID) ([]OpenedFold, error) {
+	var opened []OpenedFold
+	err := s.write(ctx, "daemon.wsm.expand_children_with_ancestry", dlog.Context{"workspace": string(id)},
+		func(ctx context.Context, tx *sql.Tx) error {
+			opened = nil
+			res, err := tx.ExecContext(ctx, `UPDATE workspaces SET children_folded = 0 WHERE id = ?`, id)
+			if err != nil {
+				return err
+			}
+			if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+				return err
+			}
+			var (
+				repo       RepoID
+				parent     sql.NullString
+				subsection sql.NullString
+			)
+			if err := scanWorkspaceRow(ctx, tx, id, "repo_id, parent_id, subsection_id", &repo, &parent, &subsection); err != nil {
+				return err
+			}
+			seen := map[string]bool{string(id): true}
+			for parent.Valid {
+				if seen[parent.String] {
+					return fmt.Errorf("wsm: the recorded parents above workspace %s cycle at %s", id, parent.String)
+				}
+				seen[parent.String] = true
+				ancestor := parent.String
+				var folded bool
+				if err := scanWorkspaceRow(ctx, tx, WorkspaceID(ancestor), "repo_id, parent_id, subsection_id, children_folded", &repo, &parent, &subsection, &folded); err != nil {
+					return err
+				}
+				if !folded {
+					continue
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET children_folded = 0 WHERE id = ?`, ancestor); err != nil {
+					return err
+				}
+				opened = append(opened, OpenedFold{Kind: AttentionOpenedChildren, Target: ancestor})
+			}
+			// The walk ends on the family's root, whose subsection and repository
+			// the family is drawn in.
+			if subsection.Valid {
+				var folded bool
+				if err := tx.QueryRowContext(ctx, `SELECT folded FROM subsections WHERE id = ?`, subsection.String).Scan(&folded); err != nil {
+					return err
+				}
+				if folded {
+					if err := writeSubsectionFolded(ctx, tx, SubsectionID(subsection.String), false); err != nil {
+						return err
+					}
+					opened = append(opened, OpenedFold{Kind: AttentionOpenedSubsection, Target: subsection.String})
+				}
+			}
+			var folded bool
+			if err := tx.QueryRowContext(ctx, `SELECT folded FROM repositories WHERE id = ?`, repo).Scan(&folded); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return fmt.Errorf("wsm: workspace %s's root sits in repository %s, which is not registered", id, repo)
+				}
+				return err
+			}
+			if folded {
+				if _, err := tx.ExecContext(ctx, `UPDATE repositories SET folded = 0 WHERE id = ?`, repo); err != nil {
+					return err
+				}
+				opened = append(opened, OpenedFold{Kind: AttentionOpenedRepository, Target: string(repo)})
+			}
+			return nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	return opened, nil
 }

@@ -322,6 +322,10 @@ var workspaceSettingRefusals = func() []describedRefusal {
 					want: "the new subsection would hold no open workspace, so the change that created it would delete it"},
 				{name: "main_workspace_not_sortable", err: armed(arrange, "main_workspace_not_sortable", nil),
 					want: "the change would move a repository's main workspace, or the family it roots, which agents never sort"},
+				{name: "not_a_child", err: armed(arrange, "not_a_child", nil),
+					want: "the workspace is top-level, so it has no parent whose children it could be reordered among"},
+				{name: "not_siblings", err: armed(arrange, "not_siblings", nil),
+					want: "the workspace to move before is not a child of the moved child's parent"},
 				{name: "no_repository_block", err: armed(arrange, "no_repository_block", nil), want: "the change named a repository block the parent does not have"},
 			},
 			describe: func(e proto.Message) (string, error) {
