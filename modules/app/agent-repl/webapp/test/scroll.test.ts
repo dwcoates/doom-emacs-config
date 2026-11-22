@@ -13,6 +13,9 @@ import { chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SCROLL_CAUSES,
+  TAIL_LANDING_CAUSES,
+  tailGap,
+  atTail as viewAtTail,
   armedWheelAction,
   bubbleNodeRevealed,
   collapseClicked,
@@ -411,7 +414,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the seventeen causes the owner rules allow", () => {
+  it("names exactly the fifteen causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -424,13 +427,72 @@ describe("SCROLL_CAUSES", () => {
       "replaceRestore",
       "rolledBack",
       "workspaceSelected",
-      "lastBubbleExpanded",
-      "lastBubbleCollapsed",
       "tailJumped",
       "prependCompensation",
       "latestVisible",
       "chatAnswerFollowed",
       "chatNodeRevealed",
+    ]);
+  });
+
+  it("no longer names the last bubble's fold, which holds the view as any fold does", () => {
+    // Arrange + Act + Assert — owner ruling, 2026-11-20.
+    expect(SCROLL_CAUSES.filter((c: string) => c.startsWith("lastBubble"))).toEqual([]);
+  });
+});
+
+/**
+ * THE CAUSES THAT LAND THE FEED AT ITS TAIL (owner rulings, 2026-11-20):
+ * exactly these seven, so a new one cannot slip in unnoticed.
+ */
+describe("tailGap", () => {
+  it("is the content below the view's bottom", () => {
+    // Arrange + Act + Assert
+    expect(tailGap({ scrollTop: 600, scrollHeight: 1000, clientHeight: 300 })).toBe(100);
+  });
+
+  it("is zero at the tail", () => {
+    // Arrange + Act + Assert
+    expect(tailGap({ scrollTop: 700, scrollHeight: 1000, clientHeight: 300 })).toBe(0);
+  });
+
+  it("is the one gap arithmetic: no other source module computes the gap below the view by hand", () => {
+    // Arrange
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
+    const sources = import.meta.glob(["../src/**/*.ts"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    const gap = /scrollHeight\s*-\s*\w+\.(scrollTop\s*-\s*\w+\.clientHeight|clientHeight\s*-\s*\w+\.scrollTop)\b/;
+    // Act
+    const handRolled = Object.entries(sources)
+      .filter(([, text]) => gap.test(text.replace(/export function tailGap[\s\S]*?\n}\n/, "")))
+      .map(([path]) => path);
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+});
+
+describe("atTail (imported as viewAtTail beside the fixture of that name)", () => {
+  it("is true within PIN_PX of the tail", () => {
+    // Arrange + Act + Assert
+    expect(viewAtTail({ scrollTop: 661, scrollHeight: 1000, clientHeight: 300 })).toBe(true);
+  });
+
+  it("is false at PIN_PX or farther above the tail", () => {
+    // Arrange + Act + Assert
+    expect(viewAtTail({ scrollTop: 660, scrollHeight: 1000, clientHeight: 300 })).toBe(false);
+  });
+});
+
+describe("TAIL_LANDING_CAUSES", () => {
+  it("is exactly the seven explicit acts that land the feed at its tail", () => {
+    // Arrange + Act + Assert
+    expect([...TAIL_LANDING_CAUSES]).toEqual([
+      "promptSent",
+      "promptHeld",
+      "workspaceSelected",
+      "rolledBack",
+      "tailJumped",
+      "initialPlacement",
+      "replaceRestore",
     ]);
   });
 });
@@ -443,7 +505,6 @@ describe("TailFollow's parking causes", () => {
     ["a replace restore", (tail) => tail.replaceRestore(), "replaceRestore"],
     ["a rolled-back row's removal", (tail) => tail.rolledBack(), "rolledBack"],
     ["a switch to this workspace", (tail) => tail.workspaceSelected(), "workspaceSelected"],
-    ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
     ["the jump-to-tail control", (tail) => tail.jumpToTail(), "tailJumped"],
   ];
 
@@ -1351,14 +1412,16 @@ describe("latestEntryVisible", () => {
 });
 
 /**
- * THE LATEST-VISIBLE LATCH (owner rule, 2026-09-23): a reader who can see the
- * feed's latest entry is following.
+ * THE AT-TAIL LATCH (owner ruling, 2026-11-20, superseding the latest-visible
+ * latch of 2026-09-23): the follow starts only where the view already stands
+ * at the tail, and never on the reader's own upward movement.
  *
  * The box is 1000px of content in a 300px viewport; the latest entry is the
  * last 100px of it (offset 900), read live off the box's position, so it is
- * visible exactly while `scrollTop > 600`.
+ * visible exactly while `scrollTop > 600`. The tail is 700, and the view
+ * stands at it while `scrollTop > 660` (`PIN_PX`).
  */
-describe("TailFollow's latest-visible latch", () => {
+describe("TailFollow's at-tail latch", () => {
   interface Entry {
     offset: number;
     height: number;
@@ -1391,11 +1454,11 @@ describe("TailFollow's latest-visible latch", () => {
     };
   }
 
-  it("latches when the reader scrolls back down until the latest entry shows", () => {
+  it("latches when the reader scrolls back down to the tail", () => {
     // Arrange
     const l = withLatest(100);
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
     expect(l.tail.isFollowing()).toBe(true);
@@ -1405,16 +1468,16 @@ describe("TailFollow's latest-visible latch", () => {
     // Arrange
     const l = withLatest(100);
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
-    expect(l.box.scrollTop).toBe(650);
+    expect(l.box.scrollTop).toBe(670);
   });
 
   it("keeps the tail in view when the next row arrives after the latch", () => {
     // Arrange
     const l = withLatest(100);
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Act
     l.append(100);
@@ -1426,14 +1489,14 @@ describe("TailFollow's latest-visible latch", () => {
   it("records the later follow move under latestVisible", async () => {
     // Arrange
     const l = withLatest(100);
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     const capture = captureLogRecords("debug");
     // Act
     l.append(100);
     l.tail.follow();
     // Assert
-    expect(await moves(capture)).toEqual([{ cause: "latestVisible", from: 650, to: 1100, follow: true }]);
+    expect(await moves(capture)).toEqual([{ cause: "latestVisible", from: 670, to: 1100, follow: true }]);
   });
 
   it("records the latch at INFO as a follow started by latestVisible", async () => {
@@ -1441,11 +1504,11 @@ describe("TailFollow's latest-visible latch", () => {
     const l = withLatest(100);
     const capture = captureLogRecords("info");
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
     const record = await forwardedRecord(capture, "scroll.follow-started");
-    expect([record.level.case, record.context]).toMatchObject(["info", { cause: "latestVisible", at: 650 }]);
+    expect([record.level.case, record.context]).toMatchObject(["info", { cause: "latestVisible", at: 670 }]);
   });
 
   it("does not latch while the latest entry is out of view", () => {
@@ -1458,36 +1521,36 @@ describe("TailFollow's latest-visible latch", () => {
     expect(l.tail.isFollowing()).toBe(false);
   });
 
-  it("latches on a resize that brings the latest entry into view", () => {
+  it("latches on a resize that brings the view to the tail", () => {
     // Arrange
     const l = withLatest(500);
     // Act
-    l.box.clientHeight = 450;
+    l.box.clientHeight = 480;
     l.resize();
     // Assert
     expect(l.tail.isFollowing()).toBe(true);
   });
 
-  it("latches on a row upsert that finds the latest entry in view, without moving", () => {
+  it("latches on a row upsert that finds the view at the tail, without moving", () => {
     // Arrange
-    const l = withLatest(650);
+    const l = withLatest(670);
     // Act
     l.tail.follow();
     // Assert
-    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 650]);
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 670]);
   });
 
-  it("latches on a movement with no reader behind it that brings the entry into view", () => {
+  it("latches on a movement with no reader behind it that brings the view to the tail", () => {
     // Arrange
     const l = withLatest(100);
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.scroll();
     // Assert
     expect(l.tail.isFollowing()).toBe(true);
   });
 
-  it("stays following when the reader scrolls up while the latest entry is still visible", () => {
+  it("ends following when the reader scrolls up while the latest entry stays partly visible", () => {
     // Arrange
     const l = withLatest(700);
     l.tail.promptSent();
@@ -1495,7 +1558,7 @@ describe("TailFollow's latest-visible latch", () => {
     l.box.scrollTop = 650;
     l.gesture();
     // Assert
-    expect(l.tail.isFollowing()).toBe(true);
+    expect(l.tail.isFollowing()).toBe(false);
   });
 
   it("ends following when the reader scrolls the latest entry out of view", () => {
@@ -1514,21 +1577,21 @@ describe("TailFollow's latest-visible latch", () => {
     const l = withLatest(100);
     l.tail.selectionMoved(null);
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
     expect(l.tail.isFollowing()).toBe(false);
   });
 
-  it("reports the held-off latch once per spell of visibility", async () => {
+  it("reports the held-off latch once per spell at the tail", async () => {
     // Arrange
     const l = withLatest(100);
     l.tail.selectionMoved(null);
     const capture = captureLogRecords("debug");
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
-    l.box.scrollTop = 680;
+    l.box.scrollTop = 690;
     l.gesture();
     // Assert
     capture.logger.flush();
@@ -1537,27 +1600,42 @@ describe("TailFollow's latest-visible latch", () => {
     expect(held.length).toBe(1);
   });
 
-  it("parks at the tail when the active selection clears", () => {
-    // Arrange
+  it("leaves a reader scrolled up where they are when the selection is dismissed", () => {
+    // Arrange — owner ruling, 2026-11-20: a dismissal no longer returns to
+    // the tail. 50px above it, the latest entry in sight.
     const l = withLatest(100);
     l.tail.selectionMoved(null);
     l.box.scrollTop = 650;
     l.gesture();
     // Act
-    l.tail.selectionCleared();
+    l.tail.selectionEnded();
     // Assert
-    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 1000]);
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 650]);
+  });
+
+  it("resumes the follow when the selection is dismissed at the tail", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    l.box.scrollTop = 690;
+    l.gesture();
+    // Act
+    l.tail.selectionEnded();
+    l.append(100);
+    l.tail.follow();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 1100]);
   });
 
   it("applies again once the selection has cleared", () => {
     // Arrange
     const l = withLatest(100);
     l.tail.selectionMoved(null);
-    l.tail.selectionCleared();
+    l.tail.selectionEnded();
     l.box.scrollTop = 100;
     l.gesture();
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
     expect(l.tail.isFollowing()).toBe(true);
@@ -1573,29 +1651,29 @@ describe("TailFollow's latest-visible latch", () => {
     expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 100]);
   });
 
-  it("latches once the reader reaches the latest entry after the selection ended in place", () => {
+  it("latches once the reader reaches the tail after the selection ended in place", () => {
     // Arrange
     const l = withLatest(100);
     l.tail.selectionMoved(null);
     l.tail.selectionEnded();
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
     expect(l.tail.isFollowing()).toBe(true);
   });
 
-  it("latches where the view stands when the latest entry is visible as the selection ends", () => {
+  it("latches where the view stands when it is at the tail as the selection ends", () => {
     // Arrange
-    const l = withLatest(650);
+    const l = withLatest(670);
     l.tail.selectionMoved(null);
     // Act
     l.tail.selectionEnded();
     // Assert
-    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 650]);
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 670]);
   });
 
-  it("latches after a detached-work selection that leaves the latest entry in view", () => {
+  it("latches after a detached-work selection that lands at the tail", () => {
     // Arrange
     const l = withLatest(500);
     // Act — centering the card (its middle 200px below the viewport's) brings
@@ -1605,7 +1683,7 @@ describe("TailFollow's latest-visible latch", () => {
     expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 700]);
   });
 
-  it("does not latch after a detached-work selection that leaves the latest entry out of view", () => {
+  it("does not latch after a detached-work selection that lands above the tail", () => {
     // Arrange
     const l = withLatest(700);
     l.tail.promptSent();
@@ -1625,12 +1703,12 @@ describe("TailFollow's latest-visible latch", () => {
     return counter;
   }
 
-  it("tells onTailReached when the reader scrolls back until the latest entry shows", () => {
+  it("tells onTailReached when the reader scrolls back to the tail", () => {
     // Arrange
     const l = withLatest(100);
     const c = counted(l);
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
     expect(c.reached).toBe(1);
@@ -1640,7 +1718,7 @@ describe("TailFollow's latest-visible latch", () => {
     // Arrange
     const l = withLatest(100);
     const c = counted(l);
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Act
     l.box.scrollTop = 700;
@@ -1674,27 +1752,30 @@ describe("TailFollow's latest-visible latch", () => {
     // Arrange
     const l = withLatest(100);
     const c = counted(l);
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     l.box.scrollTop = 100;
     l.gesture();
     // Act
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.gesture();
     // Assert
     expect(c.reached).toBe(2);
   });
 
-  it("does not tell onTailReached when the follow ends and re-latches with the latest entry still in view", () => {
-    // Arrange — parked at the tail, the latest entry (900..1000) in view.
+  it("tells onTailReached when the reader flicks up inside the tail's slack and back down", () => {
+    // Arrange — parked at the tail; a small flick up ends the follow, and the
+    // view, still within PIN_PX of the tail, is the reader's.
     const l = withLatest(700);
     l.tail.promptSent();
     const c = counted(l);
-    // Act — a small flick up: the follow ends, and the latch takes it again.
     l.box.scrollTop = 690;
     l.gesture();
+    // Act
+    l.box.scrollTop = 700;
+    l.gesture();
     // Assert
-    expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
+    expect([l.tail.isFollowing(), c.reached]).toEqual([true, 1]);
   });
 
   it("does not tell onTailReached for a latch no reader input is behind", () => {
@@ -1702,7 +1783,7 @@ describe("TailFollow's latest-visible latch", () => {
     const l = withLatest(100);
     const c = counted(l);
     // Act — the box's own movement: a scroll event with no input before it.
-    l.box.scrollTop = 650;
+    l.box.scrollTop = 670;
     l.scroll();
     // Assert
     expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
@@ -1729,7 +1810,7 @@ describe("TailFollow's latest-visible latch", () => {
     expect([l.tail.isFollowing(), c.reached]).toEqual([true, 0]);
   });
 
-  it("throws and reports at ERROR when the latest entry's geometry is not a real layout", async () => {
+  it("throws and reports at ERROR when the latest entry's geometry is not a real layout as a refusal is recorded", async () => {
     // Arrange
     const l = withLatest(100);
     l.entry.height = Number.NaN;
@@ -1745,7 +1826,7 @@ describe("TailFollow's latest-visible latch", () => {
   describe("TailFollow.readerClicked", () => {
     /** A reader following at the tail, with the clicked entry as the latest. */
     function following(): ReturnType<typeof withLatest> {
-      const l = withLatest(650);
+      const l = withLatest(670);
       l.scroll();
       return l;
     }
@@ -1770,10 +1851,10 @@ describe("TailFollow's latest-visible latch", () => {
       l.box.scrollHeight += 200;
       l.resize();
       // Assert
-      expect(l.box.scrollTop).toBe(650);
+      expect(l.box.scrollTop).toBe(670);
     });
 
-    it("holds the latest-visible latch off through a scroll event with no reader input", () => {
+    it("holds the at-tail latch off through a scroll event with no reader input", () => {
       // Arrange
       const l = following();
       l.tail.readerClicked(clicked());
@@ -1801,14 +1882,14 @@ describe("TailFollow's latest-visible latch", () => {
       l.tail.readerClicked(clicked());
       // Assert
       const record = await forwardedRecord(capture, "scroll.click-held");
-      expect([record.level.case, record.context]).toMatchObject(["info", { by: "click", at: 650, row: "none" }]);
+      expect([record.level.case, record.context]).toMatchObject(["info", { by: "click", at: 670, row: "none" }]);
     });
   });
 
   describe("TailFollow.selectionClicked", () => {
     it("holds the follow off for as long as a clicked selection stands", () => {
       // Arrange
-      const l = withLatest(650);
+      const l = withLatest(670);
       l.scroll();
       l.tail.selectionClicked(null, true);
       // Act -- the reader's next input would latch, but a selection stands.
@@ -1819,7 +1900,7 @@ describe("TailFollow's latest-visible latch", () => {
 
     it("lets the reader's next input latch once a click ended the selection", () => {
       // Arrange
-      const l = withLatest(650);
+      const l = withLatest(670);
       l.scroll();
       l.tail.selectionClicked(null, true);
       l.tail.selectionClicked(null, false);
@@ -1831,7 +1912,7 @@ describe("TailFollow's latest-visible latch", () => {
 
     it("moves nothing when the clicked bubble expands", () => {
       // Arrange
-      const l = withLatest(650);
+      const l = withLatest(670);
       l.scroll();
       l.input();
       l.tail.selectionClicked(null, true);
@@ -1840,7 +1921,7 @@ describe("TailFollow's latest-visible latch", () => {
       l.box.scrollHeight += 200;
       l.resize();
       // Assert
-      expect(l.box.scrollTop).toBe(650);
+      expect(l.box.scrollTop).toBe(670);
     });
 
     it.each([
@@ -1848,7 +1929,7 @@ describe("TailFollow's latest-visible latch", () => {
       [false, "deselection-click"],
     ])("records a click that selected=%s as %s", async (selected, by) => {
       // Arrange
-      const l = withLatest(650);
+      const l = withLatest(670);
       const capture = captureLogRecords("debug");
       // Act
       l.tail.selectionClicked(null, selected);
@@ -1856,6 +1937,276 @@ describe("TailFollow's latest-visible latch", () => {
       const record = await forwardedRecord(capture, "scroll.click-held");
       expect(record.context).toMatchObject({ by });
     });
+  });
+});
+
+/**
+ * A READER SCROLLING UP IS IN CONTROL (owner ruling, 2026-11-20): while a
+ * response streams in, the follow never re-latches under the reader's upward
+ * gesture or its momentum, so no write pulls them back to the tail. The
+ * follow re-latches only once the reader is back at the tail.
+ *
+ * The box CLAMPS like a browser's: 300px of viewport over content whose last
+ * entry is a streaming response taller than the view (offset 400, 600px), so
+ * any small scroll up leaves part of it in sight.
+ */
+describe("TailFollow leaves a reader scrolling up in control", () => {
+  interface Streaming extends TailTriggers {
+    tail: TailFollow;
+    box: ReanchorBox;
+    /** The streaming response grows by PX at the tail. */
+    grow: (px: number) => void;
+    /** The feed's one root row, the streaming response. */
+    row: Element;
+  }
+
+  /** A box clamping its position into [0, scrollHeight - clientHeight], like a browser's. */
+  function clampedBox(scrollHeight: number, clientHeight: number, scrollTop: number): ReanchorBox {
+    let top = scrollTop;
+    const box: ReanchorBox = {
+      scrollHeight,
+      clientHeight,
+      get scrollTop(): number {
+        return top;
+      },
+      set scrollTop(next: number) {
+        top = Math.max(0, Math.min(next, box.scrollHeight - box.clientHeight));
+      },
+    };
+    return box;
+  }
+
+  /**
+   * A feed following its tail while a response streams: CONTENT px of content
+   * in a VIEW px viewport, the response spanning from OFFSET to the end.
+   */
+  function streaming(content = 1000, view = 300, offset = 400): Streaming {
+    const box = clampedBox(content, view, content - view);
+    const host = document.createElement("main");
+    const row = document.createElement("div");
+    host.append(row);
+    const rows: AnchorRows = {
+      host,
+      viewportTop: () => 0,
+      edges: () => ({ top: offset - box.scrollTop, bottom: box.scrollHeight - box.scrollTop }),
+    };
+    const tail = new TailFollow(
+      box,
+      () => ({
+        boxTop: 0,
+        boxHeight: box.clientHeight,
+        nodeTop: offset - box.scrollTop,
+        nodeHeight: box.scrollHeight - offset,
+      }),
+      rows,
+    );
+    tail.promptSent();
+    return {
+      tail,
+      box,
+      row,
+      ...tailTriggers(tail),
+      grow: (px: number) => {
+        box.scrollHeight += px;
+      },
+    };
+  }
+
+  /** The operations of the records a capture holds, in order. */
+  async function operations(capture: LogCapture): Promise<string[]> {
+    capture.logger.flush();
+    await Promise.resolve();
+    return capture.sent.map((r) => r.operation);
+  }
+
+  it("ends the follow when the reader scrolls up while the latest entry stays partly visible", () => {
+    // Arrange
+    const s = streaming();
+    // Act — 50px up; the response's last 350px still show.
+    s.box.scrollTop = 650;
+    s.gesture();
+    // Assert
+    expect(s.tail.isFollowing()).toBe(false);
+  });
+
+  it("does not move the box on a write after the reader scrolled up with the latest entry partly visible", () => {
+    // Arrange
+    const s = streaming();
+    s.box.scrollTop = 650;
+    s.gesture();
+    // Act — the response streams 80px more.
+    s.grow(80);
+    s.tail.follow();
+    // Assert
+    expect(s.box.scrollTop).toBe(650);
+  });
+
+  it("does not re-latch on a flick up that stays inside the tail's slack", () => {
+    // Arrange
+    const s = streaming();
+    // Act — 10px up: within PIN_PX of the tail, but the reader's own rise.
+    s.box.scrollTop = 690;
+    s.gesture();
+    s.grow(5);
+    s.tail.follow();
+    // Assert
+    expect([s.tail.isFollowing(), s.box.scrollTop]).toEqual([false, 690]);
+  });
+
+  it("never moves the box down through a momentum flick upward with writes between its frames", () => {
+    // Arrange — a flick decelerating: the first frames carry the reader's
+    // input, the momentum frames after it only scroll events.
+    const s = streaming();
+    const frames: Array<[number, boolean]> = [
+      [692, true],
+      [680, true],
+      [664, false],
+      [651, false],
+      [643, false],
+      [640, false],
+    ];
+    const seen: number[] = [];
+    // Act
+    for (const [top, input] of frames) {
+      s.box.scrollTop = top;
+      if (input) s.gesture();
+      else s.scroll();
+      s.grow(30);
+      s.tail.follow();
+      s.resize();
+      seen.push(s.box.scrollTop);
+    }
+    // Assert
+    expect(seen).toEqual(frames.map(([top]) => top));
+  });
+
+  it("re-latches when the reader scrolls back down to the tail", () => {
+    // Arrange
+    const s = streaming();
+    s.box.scrollTop = 400;
+    s.gesture();
+    s.grow(100);
+    s.tail.follow();
+    // Act — the tail is now 1100 - 300 = 800.
+    s.box.scrollTop = 800;
+    s.gesture();
+    // Assert
+    expect(s.tail.isFollowing()).toBe(true);
+  });
+
+  it("follows the next write once the reader is back at the tail", () => {
+    // Arrange
+    const s = streaming();
+    s.box.scrollTop = 400;
+    s.gesture();
+    s.box.scrollTop = 700;
+    s.gesture();
+    // Act
+    s.grow(120);
+    s.tail.follow();
+    // Assert
+    expect(s.box.scrollTop).toBe(820);
+  });
+
+  it("does not re-latch a reader scrolling down who stops short of the tail", () => {
+    // Arrange
+    const s = streaming();
+    s.box.scrollTop = 400;
+    s.gesture();
+    // Act — 50px above the tail, beyond PIN_PX.
+    s.box.scrollTop = 650;
+    s.gesture();
+    s.grow(30);
+    s.tail.follow();
+    // Assert
+    expect([s.tail.isFollowing(), s.box.scrollTop]).toEqual([false, 650]);
+  });
+
+  const parks: Array<[string, (s: Streaming) => void]> = [
+    ["promptSent", (s) => s.tail.promptSent()],
+    ["promptHeld", (s) => s.tail.promptHeld()],
+    ["initialPlacement", (s) => s.tail.initialPlacement()],
+    ["replaceRestore", (s) => s.tail.replaceRestore()],
+    ["rolledBack", (s) => s.tail.rolledBack()],
+    ["workspaceSelected", (s) => s.tail.workspaceSelected()],
+    ["tailJumped", (s) => s.tail.jumpToTail()],
+  ];
+
+  it.each(parks)("%s still lands a reader who scrolled up at the tail, and follows", (_cause, act) => {
+    // Arrange
+    const s = streaming();
+    s.box.scrollTop = 400;
+    s.gesture();
+    s.grow(100);
+    s.tail.follow();
+    // Act
+    act(s);
+    // Assert
+    expect([s.box.scrollTop, s.tail.isFollowing()]).toEqual([800, true]);
+  });
+
+  it("records a refused latch at DEBUG once per gesture, with how far the view is from the tail", async () => {
+    // Arrange
+    const s = streaming();
+    const capture = captureLogRecords("debug");
+    // Act — one gesture up over two frames, with a write after each.
+    s.box.scrollTop = 680;
+    s.gesture();
+    s.tail.follow();
+    s.box.scrollTop = 650;
+    s.gesture();
+    s.tail.follow();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    const refused = capture.sent.filter((r) => r.operation === "scroll.follow-latch-refused");
+    expect([refused.length, refused[0]?.level.case, refused[0]?.context]).toMatchObject([
+      1,
+      "debug",
+      { trigger: "scroll", at: 680, from_tail: 20, reader_rose: true, latest_visible: true },
+    ]);
+  });
+
+  it("records a refused latch again for a new gesture in the other direction", async () => {
+    // Arrange
+    const s = streaming();
+    s.box.scrollTop = 400;
+    s.gesture();
+    const capture = captureLogRecords("debug");
+    // Act — the reader turns and scrolls down, short of the tail.
+    s.box.scrollTop = 500;
+    s.gesture();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    const refused = capture.sent.filter((r) => r.operation === "scroll.follow-latch-refused");
+    expect(refused.map((r) => r.context)).toMatchObject([
+      { trigger: "scroll", at: 500, from_tail: 200, reader_rose: false, latest_visible: true },
+    ]);
+  });
+
+  it("keeps the black-friday-ceac-prep reader where they scrolled: no re-latch, no pull to the tail", async () => {
+    // Arrange — the logged sequence (2026-11-20 15:15:17.985): following at
+    // the tail, 2470, under a response taller than the 600px view; the reader
+    // wheeled up to 2188 with the response still in sight, the follow ended
+    // and re-latched in the same ms, and the next write moved the feed
+    // latestVisible from=2188 to=2470.
+    const s = streaming(3070, 600, 1900);
+    const capture = captureLogRecords("debug");
+    // Act
+    s.box.scrollTop = 2188;
+    s.gesture();
+    s.grow(40);
+    s.tail.follow();
+    // Assert
+    const ops = await operations(capture);
+    const ended = ops.indexOf("scroll.follow-ended");
+    expect({
+      at: s.box.scrollTop,
+      endedFollow: ended >= 0,
+      restarted: ops.slice(ended).includes("scroll.follow-started"),
+      moved: await moves(capture),
+    }).toEqual({ at: 2188, endedFollow: true, restarted: false, moved: [] });
   });
 });
 
@@ -3370,7 +3721,7 @@ describe("installIntentScroll: an open section keeps its whole wheel", () => {
 function anchoredFeed(
   heights: number[],
   scrollTop: number,
-  opts: { round?: boolean; clamp?: boolean } = {},
+  opts: { round?: boolean; clamp?: boolean; floor?: ScrollFloor } = {},
 ) {
   const host = document.createElement("div");
   const h = [...heights];
@@ -3409,7 +3760,7 @@ function anchoredFeed(
       return { top: at, bottom: at + (h[i] ?? 0) };
     },
   };
-  const tail = new TailFollow(box, () => null, rows);
+  const tail = new TailFollow(box, () => null, rows, opts.floor ?? null);
   const triggers = tailTriggers(tail);
   return {
     box,
@@ -3428,105 +3779,114 @@ function anchoredFeed(
   };
 }
 
-describe.each(["lastBubbleExpanded", "lastBubbleCollapsed"] as const)("TailFollow.lastBubbleFolded under %s", (cause) => {
-  // Rows at content tops 0, 400, 800, 1200; the reader at 500.
-  const rows = [400, 400, 400, 400];
-
-  /** The feed after the reader's click folded a bubble inside row I. */
-  function foldedIn(i: number) {
-    const f = anchoredFeed(rows, 500);
+/**
+ * THE LAST BUBBLE'S FOLD IS ANY BUBBLE'S FOLD (owner ruling, 2026-11-20,
+ * superseding the `lastBubbleExpanded`/`lastBubbleCollapsed` parks of
+ * 2026-10-17): the click holds the view, and nothing lands the feed at its
+ * tail. Rows at content tops 0, 400, 800, 1200 in a 300px viewport.
+ */
+describe("TailFollow: folding the feed's last bubble", () => {
+  /** The feed at TOP after the reader's click on a bubble inside the last row. */
+  function clickedLast(top: number, opts: { follow?: boolean; clamp?: boolean } = {}) {
+    const f = anchoredFeed([400, 400, 400, 400], top, { clamp: opts.clamp ?? false });
+    if (opts.follow === true) f.tail.promptSent();
     f.scroll();
     const bubble = document.createElement("div");
-    f.host.children[i].append(bubble);
+    f.host.children[3].append(bubble);
     f.tail.readerClicked(bubble);
-    f.tail.lastBubbleFolded(bubble, cause);
     return f;
   }
 
-  it("parks the feed at its tail when the bubble is the feed's last row", () => {
-    // Arrange / Act
-    const f = foldedIn(3);
-    // Assert
-    expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([1600, true]);
-  });
-
-  it("records the move under its cause", async () => {
+  it("leaves the position unchanged when the last bubble expands while scrolled up", () => {
     // Arrange
-    const capture = captureLogRecords("debug");
-    // Act
-    foldedIn(3);
-    // Assert
-    expect(await moves(capture)).toEqual([{ cause, from: 500, to: 1600, follow: false }]);
-  });
-
-  it("records the click hold it ends under its cause", async () => {
-    // Arrange
-    const capture = captureLogRecords("info");
-    // Act
-    foldedIn(3);
-    // Assert
-    const record = await forwardedRecord(capture, "scroll.click-hold-ended");
-    expect(record.context).toMatchObject({ by: cause, held_top: 500, row: "r3" });
-  });
-
-  it("holds the view the click held for any other row's bubble", () => {
-    // Arrange / Act
-    const f = foldedIn(2);
+    const f = clickedLast(500);
+    // Act — the sub-feed lands, 300px taller.
+    f.h[3] += 300;
+    f.resize();
     // Assert
     expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([500, false]);
   });
 
-  it("records the held view with its cause for any other row's bubble", async () => {
-    // Arrange
-    const capture = captureLogRecords("debug");
-    // Act
-    foldedIn(2);
-    // Assert
-    const record = await forwardedRecord(capture, "scroll.bubble-folded-held");
-    expect(record.context).toMatchObject({ cause, row: "r2", last: "r3" });
-  });
-
-  it("takes the last row that draws a box as the feed's last", () => {
-    // Arrange
-    const f = anchoredFeed(rows, 500);
-    f.hidden.add(f.host.children[3]);
-    const bubble = document.createElement("div");
-    f.host.children[2].append(bubble);
-    // Act
-    f.tail.lastBubbleFolded(bubble, cause);
-    // Assert
-    expect(f.tail.isFollowing()).toBe(true);
-  });
-});
-
-describe("TailFollow.lastBubbleFolded: the fold's own effect on the tail", () => {
-  it("keeps the opening sub-feed in view as it draws", () => {
-    // Arrange
-    const f = anchoredFeed([400, 400, 400, 400], 500);
+  it("leaves the position unchanged when the last bubble collapses while scrolled up", () => {
+    // Arrange — the last row holds a 300px open sub-feed.
+    const f = anchoredFeed([400, 400, 400, 700], 500);
     f.scroll();
     const bubble = document.createElement("div");
     f.host.children[3].append(bubble);
     f.tail.readerClicked(bubble);
-    f.tail.lastBubbleFolded(bubble, "lastBubbleExpanded");
-    // Act -- the sub-feed lands, 300px taller.
+    // Act
+    f.h[3] -= 300;
+    f.resize();
+    // Assert
+    expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([500, false]);
+  });
+
+  it("ends at the new tail when the last bubble expands while following", () => {
+    // Arrange — parked at the tail (1600 - 300 = 1300, clamped).
+    const f = clickedLast(1300, { follow: true, clamp: true });
+    // Act — the sub-feed lands, 300px taller.
     f.h[3] += 300;
     f.resize();
     // Assert
-    expect(f.box.scrollTop).toBe(1900);
+    expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([1600, true]);
   });
 
-  it("fills the space the closed sub-feed left below the last bubble", () => {
-    // Arrange -- the reader sees the last row's head at 1200 of a 2100px feed.
-    const f = anchoredFeed([400, 400, 400, 900], 1200, { clamp: true });
+  it("ends at the new tail when the last bubble collapses while following, with no blank below and no floor", () => {
+    // Arrange — the last row holds a 300px open sub-feed; parked at 1600.
+    const tops: Array<number | null> = [];
+    const floor: ScrollFloor = { hold: (top) => tops.push(top) };
+    const f = anchoredFeed([400, 400, 400, 700], 1600, { clamp: true, floor });
+    f.tail.promptSent();
     f.scroll();
     const bubble = document.createElement("div");
     f.host.children[3].append(bubble);
     f.tail.readerClicked(bubble);
-    // Act -- the collapse closes 700px of sub-feed, then asks for the tail.
-    f.h[3] -= 700;
-    f.tail.lastBubbleFolded(bubble, "lastBubbleCollapsed");
-    // Assert -- the feed's end now sits at the viewport's bottom.
-    expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([1100, true]);
+    // Act — the collapse; the box clamps with the shrink.
+    f.h[3] -= 300;
+    f.box.scrollTop = f.box.scrollTop;
+    f.scroll();
+    f.resize();
+    // Assert — the feed's end sits at the viewport's bottom.
+    expect([f.box.scrollTop, f.box.scrollHeight - f.box.scrollTop - f.box.clientHeight, f.tail.isFollowing(), tops]).toEqual([1300, 0, true, []]);
+  });
+
+  it("records the last row's click under a standing follow at INFO with its row and fold", async () => {
+    // Arrange
+    const f = anchoredFeed([400, 400, 400, 400], 1300, { clamp: true });
+    f.tail.promptSent();
+    const bubble = document.createElement("div");
+    bubble.setAttribute("data-expanded", "false");
+    f.host.children[3].append(bubble);
+    const capture = captureLogRecords("info");
+    // Act
+    f.tail.readerClicked(bubble);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.last-row-click-followed");
+    expect([record.level.case, record.context]).toMatchObject(["info", { row: "r3", fold: "expand" }]);
+  });
+
+  it("still takes the hold for a click on a non-last bubble while following", () => {
+    // Arrange
+    const f = anchoredFeed([400, 400, 400, 400], 1300, { clamp: true });
+    f.tail.promptSent();
+    const bubble = document.createElement("div");
+    f.host.children[2].append(bubble);
+    // Act
+    f.tail.readerClicked(bubble);
+    f.h[2] += 300;
+    f.resize();
+    // Assert
+    expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([1300, false]);
+  });
+
+  it("still takes the hold for a click on the last bubble while scrolled up", async () => {
+    // Arrange
+    const capture = captureLogRecords("info");
+    // Act
+    clickedLast(500);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-held");
+    expect(record.context).toMatchObject({ by: "click", row: "r3" });
   });
 });
 

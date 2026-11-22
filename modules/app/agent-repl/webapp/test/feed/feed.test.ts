@@ -2573,9 +2573,17 @@ describe("createFeedTail", () => {
     document.body.replaceChildren();
   });
 
-  /** The page's scroll zone: a 300px viewport over the feed's rows, one row at TOP. */
-  function zone(top: number) {
+  /**
+   * The page's scroll zone: a 300px viewport over 1000px of the feed's rows,
+   * scrolled to SCROLLTOP, one row at TOP.
+   */
+  function zone(top: number, scrollTop = 700) {
     const box = document.createElement("div");
+    Object.defineProperties(box, {
+      scrollHeight: { configurable: true, get: () => 1000 },
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollTop: { configurable: true, writable: true, value: scrollTop },
+    });
     const host = document.createElement("main");
     const row = document.createElement("div");
     row.className = "feed-item";
@@ -2597,7 +2605,7 @@ describe("createFeedTail", () => {
     expect(box.lastElementChild?.className).toBe(SCROLL_FLOOR_CLASS);
   });
 
-  it("latches the follow when the column's latest entry is in view", () => {
+  it("latches the follow when the view stands at the tail", () => {
     // Arrange
     const { box, host } = zone(100);
     const tail = createFeedTail(box, host);
@@ -2607,9 +2615,10 @@ describe("createFeedTail", () => {
     expect(tail.isFollowing()).toBe(true);
   });
 
-  it("does not latch the follow when the column's latest entry is out of view", () => {
-    // Arrange
-    const { box, host } = zone(900);
+  it("does not latch the follow when the view stands above the tail, the latest entry in view", () => {
+    // Arrange — 50px above the tail (700), beyond PIN_PX (owner ruling,
+    // 2026-11-20: seeing the latest entry no longer latches).
+    const { box, host } = zone(100, 650);
     const tail = createFeedTail(box, host);
     // Act
     tail.onScroll();
@@ -2734,10 +2743,25 @@ describe("mountFeed: the latest-visible latch", () => {
     return { feed, host, tray, scroll, channel, place };
   }
 
-  it("keeps the tail after a scroll brings the last row into view", async () => {
+  it("leaves the reader above the tail where they are after a scroll brings the last row into view", async () => {
     // Arrange
     const m = await mounted(0);
     m.place(m.host.querySelector('[data-feed-row="r1"]'), 250);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(100);
+    m.feed.dispose();
+  });
+
+  it("keeps the tail after the reader scrolls down to it with the last row in view", async () => {
+    // Arrange
+    const m = await mounted(0);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), 250);
+    m.scroll.dispatchEvent(new Event("wheel"));
+    m.scroll.scrollTop = 1700;
     m.scroll.dispatchEvent(new Event("scroll"));
     // Act
     m.channel.push(push(responseRow("r2")));
@@ -2760,11 +2784,27 @@ describe("mountFeed: the latest-visible latch", () => {
     m.feed.dispose();
   });
 
-  it("latches on a held prompt in view even with the last row scrolled above it", async () => {
+  it("leaves the reader above the tail where they are with a held prompt in view", async () => {
     // Arrange
     const m = await mounted(1);
     m.place(m.host.querySelector('[data-feed-row="r1"]'), -200);
     m.place(m.tray.querySelector('[data-held-turn="t0"]'), 150);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(100);
+    m.feed.dispose();
+  });
+
+  it("latches on a held prompt in view once the reader scrolls down to the tail", async () => {
+    // Arrange
+    const m = await mounted(1);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), -200);
+    m.place(m.tray.querySelector('[data-held-turn="t0"]'), 150);
+    m.scroll.dispatchEvent(new Event("wheel"));
+    m.scroll.scrollTop = 1700;
     m.scroll.dispatchEvent(new Event("scroll"));
     // Act
     m.channel.push(push(responseRow("r2")));
@@ -2857,22 +2897,25 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
     m.feed.dispose();
   });
 
-  it("parks at the tail on the daemon's cleared push", async () => {
-    // Arrange
+  it("leaves the view where it stands on the daemon's cleared push", async () => {
+    // Arrange — owner ruling, 2026-11-20: a dismissal no longer returns to
+    // the tail.
     const m = await selected();
+    const before = m.scroll.scrollTop;
     clickBackground(m.host);
     await settle();
     // Act
     m.channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Assert
-    expect(m.scroll.scrollTop).toBe(2000);
+    expect(m.scroll.scrollTop).toBe(before);
     m.feed.dispose();
   });
 
-  it("follows later content after the daemon's cleared push", async () => {
+  it("does not pull a reader above the tail down to later content after the daemon's cleared push", async () => {
     // Arrange
     const m = await selected();
+    const before = m.scroll.scrollTop;
     clickBackground(m.host);
     await settle();
     m.channel.push(pushSelection({ none: "returnToTail" }));
@@ -2882,7 +2925,7 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
     m.channel.push(push(responseRow("r2")));
     await settle();
     // Assert
-    expect(m.scroll.scrollTop).toBe(2400);
+    expect(m.scroll.scrollTop).toBe(before);
     m.feed.dispose();
   });
 

@@ -528,9 +528,9 @@ hand any more:
   no eggshell border, and it closes once wholly out of view. Any
   other entry the READER expanded does NOT close when scrolled out of view: it
   closes when the reader scrolls back to the tail so the follow re-latches
-  (`TailFollow.onTailReached`, the one re-latch in `latchIfLatestVisible`,
-  fired only for the reader's own scroll after the latest entry was out of
-  view), which closes EVERY expanded entry once (INFO
+  (`TailFollow.onTailReached`, the one re-latch in `latchIfAtTail`,
+  fired only for the reader's own scroll back to the tail after the view had
+  left it), which closes EVERY expanded entry once (INFO
   `feed.tail-reached-collapse`) and drops the jump watches. A MERGE BUBBLE
   (`data-merge-bubble`) IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY,
   save a merge that ended in success, which the DAEMON ships folded (owner
@@ -665,18 +665,28 @@ hand any more:
   runs), `prependCompensation`, `latestVisible`
   — each a named `TailFollow` cause, each move recorded at DEBUG as
   `scroll.feed-moved` with its cause. A follow starts from a parking cause, or
-  (`latestVisible`, owner rule 2026-09-23) whenever the reader can SEE the feed
-  column's latest entry (the last root row, or the held section's last item;
-  `latestEntry` in src/feed/feed.ts, "can see" defined once by
-  `latestEntryVisible`), evaluated on every scroll event, resize and row
-  upsert. That latch moves nothing; later content then keeps the tail in view.
+  (`latestVisible`) whenever the view ALREADY STANDS AT THE TAIL (`atTail` in
+  src/scroll.ts: the view's bottom within `PIN_PX` of the content's end) with
+  the feed column's latest entry drawn (`latestEntry` in src/feed/feed.ts),
+  and the reader's own last movement did not go up, evaluated on every scroll
+  event, resize and row upsert (owner ruling, 2026-11-20, superseding the
+  2026-09-23 latch on the reader merely SEEING the latest entry, which
+  re-latched a reader scrolling up through a tall streaming response and
+  pulled them back down). Auto-scroll only MAINTAINS the tail: a reader who
+  scrolls up, momentum included, is never re-latched until they return to the
+  tail. A refused latch is recorded at DEBUG as `scroll.follow-latch-refused`
+  once per gesture, with `from_tail` and whether the latest entry still
+  showed. That latch moves nothing; later content then keeps the tail in view.
   An active reply selection holds it off until the selection clears, and a
   click on the feed OUTSIDE ANY BUBBLE (owner ruling 2026-09-23;
   `isFeedBackground` in src/feed/background-click.ts is the one hit test: the
   scroll box, its direct children, or a root row's `.feed-item` wrapper) is
   what clears it — by sending the daemon `SelectResponse` CLEAR, never locally;
-  the daemon's cleared push parks through `selectionCleared`. A follow
-  ends when the reader scrolls the latest entry away. The reader's own wheel
+  the daemon's cleared push ends the selection where the view stands
+  (`selectionEnded`, owner ruling 2026-11-20, superseding its return to the
+  tail), so the follow restarts only at the tail. A follow
+  ends on any upward movement of the reader's, and on a downward one that
+  stops short of the tail. The reader's own wheel
   redirect and
   collapse click are input, not causes, and are the only other writes.
   `detachedWorkSelected` CENTERS the picked card in the feed's viewport
@@ -697,13 +707,15 @@ hand any more:
   clicked ENTRY still, wherever its top sits: the innermost feed row holding
   the click (`entryOf`), not merely its root row, since a root row can be a
   group (a run of final responses) whose other entries change height on the
-  click, and its root row once a redraw takes the entry away. THE ONE EXCEPTION (owner
-  requests, 2026-10-17): the reader's fold of a ROOT bubble whose row is the
-  feed's last row that draws a box parks the feed at its tail
-  (`TailFollow.lastBubbleFolded`): under `lastBubbleExpanded` once the open
-  succeeds, so the sub-feed opening below the reader is followed into view,
-  and under `lastBubbleCollapsed` once the collapse has hidden the sub-feed,
-  so the space it left below is filled. THE BOX'S OWN CLAMP CANNOT
+  click, and its root row once a redraw takes the entry away. The fold of the
+  feed's LAST bubble is no exception (owner ruling, 2026-11-20, superseding
+  the `lastBubbleExpanded`/`lastBubbleCollapsed` parks of 2026-10-17) save
+  for ONE exception of the same ruling: a click in the feed's last drawn row
+  WHILE THE FOLLOW STANDS takes no hold, and the follow stands
+  (`TailFollow.followsLastRowClick`, INFO `scroll.last-row-click-followed`),
+  so an expansion is followed down to the new bottom and a collapse leaves
+  no blank tail. Off the tail, the last bubble's click holds the view as any
+  click does. THE BOX'S OWN CLAMP CANNOT
   MOVE A HELD VIEW: content shrinking below it, or the box growing under it
   (the gate dock hiding), would make the box clamp `scrollTop` upward, so the
   scroll floor (`ScrollFloor`, `scrollFloor`) holds the box's scrollable

@@ -483,24 +483,12 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     if (expanded) {
       collapse();
       tellReaderFold(true);
-      tellLastBubbleFolded("lastBubbleCollapsed");
       return;
     }
     void expand().then((opened) => {
       if (!opened) return;
       tellReaderFold(false);
-      tellLastBubbleFolded("lastBubbleExpanded");
     });
-  }
-
-  /**
-   * THE LAST BUBBLE FOLDS INTO VIEW: a root bubble the reader expanded or
-   * collapsed at the feed's end takes the feed to its tail, so the opening
-   * sub-feed is followed or the space the closed one left is filled
-   * (`TailFollow.lastBubbleFolded`).
-   */
-  function tellLastBubbleFolded(cause: "lastBubbleExpanded" | "lastBubbleCollapsed"): void {
-    if (opts.rc.feed === "root") opts.scroll?.tail.lastBubbleFolded(el, cause);
   }
 
   /**
