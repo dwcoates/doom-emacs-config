@@ -15,7 +15,8 @@ import (
 // (CountMediatorRun). Each turn the mediator ran is metered by the tokens it
 // spent, labeled by the phase of the run the turn ended in
 // (MediatorTurnSpent), and each compaction of its conversation by how long
-// it took (compactMediator).
+// it took (compactMediator), or, after a remediation, by how long owing it to
+// the session's next start took (compactMediatorAfterRemediation).
 
 // The phases of a mediator's run a turn's tokens are labeled by.
 const (
@@ -68,8 +69,12 @@ const (
 	// MediatorCompactionSkipped: it had no conversation to compact, or a turn
 	// ran, so its next start compacts it.
 	MediatorCompactionSkipped = "skipped"
-	// MediatorCompactionFailed: the compaction failed.
+	// MediatorCompactionFailed: the compaction, or owing it, failed.
 	MediatorCompactionFailed = "failed"
+	// MediatorCompactionOwed: the compaction was owed to the session's next
+	// start and the session ended, after a remediation; no compaction ran,
+	// and the duration is the owing's.
+	MediatorCompactionOwed = "owed"
 )
 
 // mediatorCompactionOutcome is how a compaction that answered COMPACTED and
@@ -80,6 +85,19 @@ func mediatorCompactionOutcome(compacted bool, err error) string {
 		return MediatorCompactionFailed
 	case compacted:
 		return MediatorCompactionCompacted
+	}
+	return MediatorCompactionSkipped
+}
+
+// mediatorOwedCompactionOutcome is how owing a compaction that answered OWED
+// and ERR ended: owed with the session ended, skipped (no conversation, or a
+// turn ran, so its next start compacts it), or failed.
+func mediatorOwedCompactionOutcome(owed bool, err error) string {
+	switch {
+	case err != nil:
+		return MediatorCompactionFailed
+	case owed:
+		return MediatorCompactionOwed
 	}
 	return MediatorCompactionSkipped
 }

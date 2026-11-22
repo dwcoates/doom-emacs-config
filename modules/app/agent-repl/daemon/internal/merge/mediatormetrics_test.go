@@ -299,6 +299,68 @@ func TestEachCompactionOfTheMediatorIsTimedByHowItEnded(t *testing.T) {
 	}
 }
 
+func TestEachCompactionOwedAfterARemediationIsTimedByHowItEnded(t *testing.T) {
+	tests := []struct {
+		name    string
+		notOwed bool
+		oweErr  error
+		want    string
+	}{
+		{name: "a compaction owed to the next start", want: MediatorCompactionOwed},
+		{name: "a mediator with nothing to compact", notOwed: true, want: MediatorCompactionSkipped},
+		{name: "a compaction that cannot be owed", oweErr: errors.New("database is locked"), want: MediatorCompactionFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			withMediator(t, h)
+			h.checks.notOwed, h.checks.oweErr = tt.notOwed, tt.oweErr
+
+			// Act
+			h.o.compactMediatorAfterRemediation(context.Background(), mediationKey(h), dlog.Context{})
+
+			// Assert
+			var got []string
+			for _, m := range h.meter.all() {
+				if strings.HasPrefix(m, "mediator_compaction:") {
+					got = append(got, m)
+				}
+			}
+			if !slices.Equal(got, []string{"mediator_compaction:" + tt.want}) || len(h.meter.compactionTook) != 1 {
+				t.Fatalf("timed %v over %v, want one %s with its duration", got, h.meter.compactionTook, tt.want)
+			}
+			if len(h.checks.compacted) != 0 {
+				t.Fatalf("compacted %v, want no compaction run", h.checks.compacted)
+			}
+		})
+	}
+}
+
+func TestMediatorOwedCompactionOutcome(t *testing.T) {
+	tests := []struct {
+		name string
+		owed bool
+		err  error
+		want string
+	}{
+		{name: "owed", owed: true, want: MediatorCompactionOwed},
+		{name: "nothing to compact", want: MediatorCompactionSkipped},
+		{name: "a failure", err: errors.New("boom"), want: MediatorCompactionFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := mediatorOwedCompactionOutcome(tt.owed, tt.err)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("mediatorOwedCompactionOutcome = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMediatorCompactionOutcome(t *testing.T) {
 	tests := []struct {
 		name      string

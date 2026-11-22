@@ -4195,7 +4195,7 @@ func newHarness(t *testing.T) *harness {
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next, db: h.db}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
-	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository, key: func() wsm.RepoKey { return scopedKey(h) }}
+	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository, rollout: h.rollout, key: func() wsm.RepoKey { return scopedKey(h) }}
 	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
@@ -5310,6 +5310,16 @@ type fakeDeployChecks struct {
 	// refreshErr and compactErr fail them.
 	refreshed, compacted   []ids.WorkspaceID
 	refreshErr, compactErr error
+	// owed records each compaction owed to a session's next start, and
+	// firedAtOwe how often the rollout had been told of a landing at each;
+	// notOwed answers that nothing was owed (no conversation, or a turn
+	// ran), and oweErr fails them.
+	owed       []ids.WorkspaceID
+	firedAtOwe []int
+	notOwed    bool
+	oweErr     error
+	// rollout is the harness's rollout, read by OweCompaction.
+	rollout *fakeRollout
 	// contextTokens is the context every deploy check workspace holds.
 	contextTokens int64
 	// contextErr fails every ContextTokens.
@@ -5383,6 +5393,20 @@ func (f *fakeDeployChecks) Compact(_ context.Context, ws ids.WorkspaceID) (bool,
 	defer f.mu.Unlock()
 	f.compacted = append(f.compacted, ws)
 	return f.compactErr == nil, f.compactErr
+}
+
+func (f *fakeDeployChecks) OweCompaction(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	fired := 0
+	if f.rollout != nil {
+		f.rollout.mu.Lock()
+		fired = f.rollout.fired
+		f.rollout.mu.Unlock()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.owed = append(f.owed, ws)
+	f.firedAtOwe = append(f.firedAtOwe, fired)
+	return f.oweErr == nil && !f.notOwed, f.oweErr
 }
 
 func (f *fakeDeployChecks) ContextTokens(ids.WorkspaceID) (int64, error) {
