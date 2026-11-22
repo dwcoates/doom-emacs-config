@@ -5473,12 +5473,10 @@ describe("createWalkHold", () => {
   function arrange() {
     const box = document.createElement("div");
     document.body.append(box);
-    const frames: Array<() => void> = [];
-    const hold = createWalkHold(box, (fn) => frames.push(fn));
+    const frames = frameQueue();
+    const hold = createWalkHold(box, frames.frame);
     /** Run the frames queued so far, one rendering update's worth. */
-    const frame = (): void => {
-      for (const fn of frames.splice(0)) fn();
-    };
+    const frame = frames.run;
     /** Dispatch one wheel event at the box. */
     const wheel = (): void => {
       box.dispatchEvent(new Event("wheel", { bubbles: true }));
@@ -5599,7 +5597,7 @@ describe("createWalkHold", () => {
     // Assert
     expect(act).toThrow("walk hold: end without a matching begin");
     const record = await forwardedRecord(capture, "scroll.walk-hold-unbalanced");
-    expect({ context: record.context, held: walkHeld(box), frames: frames.length }).toMatchObject({
+    expect({ context: record.context, held: walkHeld(box), frames: frames.pending() }).toMatchObject({
       context: { held: false },
       held: false,
       frames: 0,
