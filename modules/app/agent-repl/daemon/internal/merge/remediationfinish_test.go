@@ -231,6 +231,8 @@ func TestARemediationFinishSendsTheWorkspaceBackToWork(t *testing.T) {
 			arrange: func(h *harness) { h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}} }},
 		{name: "a branch that does not merge cleanly rebases first", wantBrief: BriefRemediationBehind, wantGates: 1,
 			arrange: func(h *harness) { h.hooks.exits["feature"] = 1 }},
+		{name: "a landing refused because the main branch moved during the gate rebases first", wantBrief: BriefRemediationBehind, wantGates: 1,
+			arrange: func(h *harness) { h.hooks.exits["feature"] = landDirectRefused }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -388,6 +390,50 @@ func TestALandingThatFailsLeavesTheFinishToBeTakenUpAgain(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
 		Message: "the remediation's finish could not go on; it is taken up again by the next daemon that serves the queues"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
+	}
+}
+
+func TestALandingRefusedForTheMainBranchMovingIsNotParked(t *testing.T) {
+	// Arrange
+	h := finishing(t)
+	h.hooks.exits["feature"] = landDirectRefused
+
+	// Act
+	err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FinishRemediation: %v", err)
+	}
+	if _, parked := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "the remediation's finish could not go on; it is taken up again by the next daemon that serves the queues"}); parked {
+		t.Fatalf("records = %v, want no parked finish", h.logs.Records())
+	}
+	if f := finishOf(t, h); f == nil || f.Step != wsm.RemediationFixing || f.GateRounds != 1 {
+		t.Fatalf("finish %+v, want it fixing after one counted round", f)
+	}
+}
+
+func TestAResumedFinishNeverLandsAnUngatedHead(t *testing.T) {
+	// Arrange: the branch reads the gated commit through the gate, then
+	// another when the landing reads it.
+	h := finishing(t)
+	record, err := h.db.Workspace(context.Background(), "ws-fixer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ungated = "3333333333333333333333333333333333333333"
+	h.git.mu.Lock()
+	h.git.refSeqs[record.Branch] = []string{tipBefore, tipBefore, ungated}
+	h.git.mu.Unlock()
+
+	// Act
+	err = h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+	// Assert
+	f := finishOf(t, h)
+	if err != nil || f == nil || f.Step != wsm.RemediationFixing || len(h.hooks.runs) != 0 {
+		t.Fatalf("FinishRemediation = %v, finish %+v, landings %d; want it sent back to work, nothing landed", err, f, len(h.hooks.runs))
 	}
 }
 
