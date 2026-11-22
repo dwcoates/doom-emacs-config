@@ -390,50 +390,41 @@ func (c *claim) Yield() error {
 	return nil
 }
 
-// ProbeBound is how long the staleness probe waits for a loopback connect. It
-// is a connect to a port on this machine's own loopback, which either answers
-// or is refused immediately; the bound covers only a kernel that is busy, and
-// it is paid in full ONLY by an advertised address whose listener is gone
-// without the port being closed, which a dead process's port cannot be.
-const ProbeBound = 250 * time.Millisecond
-
-// StaleAdvertisement reads daemon.addr and reports the address it names when
-// NOTHING ANSWERS there.
+// PredecessorAdvertisement reads daemon.addr at a boot that HOLDS THE BOOT
+// CLAIM and has not yet published, and answers the advertisement standing
+// there and whether it is a predecessor's.
 //
-// It is the boot's evidence, not its permission: an incumbent holds the boot
-// claim, so a daemon that reached this point is the only one entitled to the
-// state root, and an advertisement it did not write is by definition its
-// predecessor's. The predecessor that exited without withdrawing -- SIGKILLed,
-// or killed with its whole session -- left Emacs an address to probe and time
-// out on, so the boot says so out loud before overwriting it.
-func StaleAdvertisement(addrPath string) (string, bool) {
-	return staleAdvertisement(addrPath, dialLoopback)
-}
-
-// staleAdvertisement is StaleAdvertisement's test seam: the probe is injected
-// so a test never depends on a port being free.
-func staleAdvertisement(addrPath string, dial func(addr string) error) (string, bool) {
+// THE ADVERTISEMENT'S PRESENCE IS THE EVIDENCE; nothing is probed. The boot
+// claim is kernel-enforced, so no other daemon is alive on this state root,
+// and every orderly exit withdraws its advertisement (Withdraw), so one that
+// still stands and names an address was left by a daemon that died without
+// its orderly exit: SIGKILLed, killed with its whole session, or panicked.
+// A dial cannot tell: the advertised address is the SHARED one the socket
+// holder keeps listening, so a connect to it lands in the holder's backlog
+// and succeeds whether or not any daemon lives (2026-11-21, a deploy's
+// panic went unrecorded because the dead daemon's address "answered").
+//
+// An absent file, or one naming no address, is no predecessor. A read that
+// fails for any other reason is an error, never read as no predecessor. An
+// advertisement naming OWNPID is not a predecessor's: this process has not
+// published yet, so the file cannot be its own, and the contradiction is an
+// error for the caller to record.
+func PredecessorAdvertisement(addrPath string, ownPID int) (Advertisement, bool, error) {
 	raw, err := os.ReadFile(addrPath)
+	if os.IsNotExist(err) {
+		return Advertisement{}, false, nil
+	}
 	if err != nil {
-		return "", false
+		return Advertisement{}, false, fmt.Errorf("read the predecessor's advertisement %q: %w", addrPath, err)
 	}
-	addr := ParseAdvertisement(string(raw)).Address
-	if addr == "" {
-		return "", false
+	ad := ParseAdvertisement(string(raw))
+	if ad.Address == "" {
+		return ad, false, nil
 	}
-	if dial(addr) == nil {
-		return addr, false
+	if ad.PIDKnown && ad.PID == ownPID {
+		return ad, false, fmt.Errorf("the advertisement %q names this process (pid %d) before it published: it is no predecessor's", addrPath, ownPID)
 	}
-	return addr, true
-}
-
-// dialLoopback is the staleness probe: a bounded TCP connect, closed at once.
-func dialLoopback(addr string) error {
-	conn, err := net.DialTimeout("tcp", addr, ProbeBound)
-	if err != nil {
-		return err
-	}
-	return conn.Close()
+	return ad, true, nil
 }
 
 // Close implements Claim: it closes the listener and releases the boot claim,

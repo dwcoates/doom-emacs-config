@@ -446,18 +446,30 @@ func run(ctx context.Context, opts options, h hooks) error {
 			"incumbent": opts.joining,
 		})
 	} else {
-		// A STALE ADVERTISEMENT IS RECORDED BEFORE IT IS REPLACED. This
-		// daemon holds the boot claim, so any address standing here is a
-		// predecessor's; one that does not answer is what the next client
-		// would have dialled and timed out on, and the record is the only
-		// thing that says the predecessor went without withdrawing.
+		// A STANDING ADVERTISEMENT IS RECORDED BEFORE IT IS REPLACED. This
+		// daemon holds the boot claim, so no other daemon is alive on this
+		// state root, and every orderly exit withdraws its advertisement: one
+		// standing here that names an address is a predecessor's that died
+		// without its orderly exit, and the record is the only thing that says
+		// so. Its presence is the whole evidence. No dial can judge it: the
+		// address is the shared one the socket holder keeps listening, so a
+		// connect lands in the holder's backlog and succeeds for a dead daemon
+		// too (2026-11-21: a deploy's panic went unrecorded that way).
 		//
-		// A STALE ADVERTISEMENT IS A PREDECESSOR'S DISORDERLY DEATH, since
-		// every orderly exit withdraws it: the death is recorded at ERROR with
-		// its panic, and this boot owes the deploy mediator a check of it
-		// (mediationHook.crashed), as a deploy does.
-		if stale, isStale := daemonaddr.StaleAdvertisement(layout.DaemonAddr()); isStale {
-			death := readPredecessorDeath(layout.DaemonAddr(), layout.LogsDir(), stale, log)
+		// THE DEATH IS RECORDED AT ERROR with its panic, and this boot owes the
+		// deploy mediator a check of it (mediationHook.crashed), as a deploy
+		// does. An advertisement that cannot be read is recorded at ERROR in
+		// its place, never read as no predecessor; the publish below then
+		// replaces it or fails loudly itself.
+		ad, standing, err := daemonaddr.PredecessorAdvertisement(layout.DaemonAddr(), os.Getpid())
+		switch {
+		case err != nil:
+			log.Error(opPredecessorDied, "the advertisement standing at boot could not be judged a predecessor's", dlog.Context{
+				"addr_path": layout.DaemonAddr(),
+				"error":     err.Error(),
+			})
+		case standing:
+			death := readPredecessorDeath(layout.DaemonAddr(), layout.LogsDir(), ad, log)
 			died = &death
 		}
 		if err := publishOwnership(claim, metricsSurface, shared); err != nil {
@@ -482,7 +494,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// (main's signal.NotifyContext cancels ctx, which ends the serve), `Serve`
 	// returning on its own, and every boot error that returns before serving
 	// was ever reached. SIGKILL is not observable by anything, which is what
-	// the boot's own staleness check above exists for.
+	// the next boot's record of a standing advertisement above exists for.
 	//
 	// A run that reached serving withdraws EARLIER, via withdrawal.begin at the
 	// start of the shutdown sequence (passed to h.Serve below), so a forward

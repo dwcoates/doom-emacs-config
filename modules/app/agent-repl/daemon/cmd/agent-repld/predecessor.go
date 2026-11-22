@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 )
@@ -15,7 +13,7 @@ const opPredecessorDied = "daemon.boot.predecessor_died"
 // predecessorDeath is how the daemon before this one died, when it died
 // without the orderly exit that withdraws its advertisement.
 type predecessorDeath struct {
-	// Address is the address its stale advertisement named.
+	// Address is the address its standing advertisement named.
 	Address string
 	// PID is its process id, 0 when its advertisement named none.
 	PID int
@@ -24,20 +22,23 @@ type predecessorDeath struct {
 	Panicked bool
 }
 
-// readPredecessorDeath reads the advertisement at ADDRPATH, which a boot
-// found STALE (daemonaddr.StaleAdvertisement): the daemon that wrote it died
-// without its orderly exit, since every orderly exit withdraws it. Its panic
-// is read from the stdio log under LOGSDIR. The death is recorded at ERROR
-// through LOG, its panic and site with it, so the crash is in every digest
-// the deploy mediator reads; a stdio log that cannot be read is recorded
-// with the death, never in place of it.
-func readPredecessorDeath(addrPath, logsDir, stale string, log dlog.Logger) predecessorDeath {
-	d := predecessorDeath{Address: stale}
-	fields := dlog.Context{"stale_address": stale, "addr_path": addrPath}
-	raw, err := os.ReadFile(addrPath)
-	if err != nil {
-		fields["advertisement_error"] = err.Error()
-	} else if ad := daemonaddr.ParseAdvertisement(string(raw)); ad.PIDKnown {
+// readPredecessorDeath records the death of the daemon whose advertisement
+// AD, read from ADDRPATH, a boot holding the boot claim found standing
+// (daemonaddr.PredecessorAdvertisement): with no other daemon alive on the
+// state root and every orderly exit withdrawing its advertisement, the one
+// still there is a predecessor's that died without its orderly exit. No dial
+// judges it: the address is the shared one the socket holder keeps open, which
+// answers for a dead daemon too. Its panic is read from the stdio log under
+// LOGSDIR. The death is recorded at ERROR through LOG, its panic and site with
+// it, so the crash is in every digest the deploy mediator reads; a stdio log
+// that cannot be read is recorded with the death, never in place of it.
+func readPredecessorDeath(addrPath, logsDir string, ad daemonaddr.Advertisement, log dlog.Logger) predecessorDeath {
+	d := predecessorDeath{Address: ad.Address}
+	fields := dlog.Context{"stale_address": ad.Address, "addr_path": addrPath}
+	if ad.Private != "" {
+		fields["private_address"] = ad.Private
+	}
+	if ad.PIDKnown {
 		d.PID = ad.PID
 		fields["pid"] = ad.PID
 	}

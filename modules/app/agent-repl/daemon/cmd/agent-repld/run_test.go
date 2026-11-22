@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1304,15 +1305,46 @@ func runLogRecord(t *testing.T, root, operation, level string) map[string]any {
 }
 
 // TestAStaleAdvertisementIsRecordedBeforeItIsReplaced pins the realtest-1
-// finding: a predecessor that went without withdrawing left Emacs an address
-// to dial and time out on, and the boot that overwrites it says so, at ERROR,
-// as the predecessor's disorderly death (readPredecessorDeath).
+// finding and its 2026-11-21 recurrence: a predecessor that went without
+// withdrawing left its advertisement standing, and the boot that overwrites
+// it says so, at ERROR, as the predecessor's disorderly death
+// (readPredecessorDeath). The advertisement names the SHARED address the
+// socket holder keeps answering, as production's does, so the record cannot
+// rest on whether anything answers there.
 func TestAStaleAdvertisementIsRecordedBeforeItIsReplaced(t *testing.T) {
-	// Arrange: an address nothing is listening on. Port 0 can never be
-	// connected to, so the probe is certain rather than merely likely.
+	// Arrange: the dead daemon's advertisement of the holder's live address.
 	root := shortRoot(t)
-	if err := os.WriteFile(filepath.Join(root, "daemon.addr"), []byte("127.0.0.1:0\n"), 0o644); err != nil {
+	file, shared := holdtest.TCP(t)
+	holder := holdtest.Start(t, map[string]*os.File{holderDaemonSocket: file}, nil)
+	deadPID := os.Getpid() + 1
+	ad := shared + "\npid=" + strconv.Itoa(deadPID) + "\nprivate=127.0.0.1:1\n"
+	if err := os.WriteFile(filepath.Join(root, "daemon.addr"), []byte(ad), 0o644); err != nil {
 		t.Fatalf("write the stale daemon.addr: %v", err)
+	}
+
+	// Act.
+	_ = runIn(t, root, func(o *options) { o.holder = holder })
+
+	// Assert.
+	record := runLogRecord(t, root, opPredecessorDied, dlog.LevelError)
+	if record == nil {
+		t.Fatalf("no ERROR %s record, want the standing advertisement reported as the predecessor's death", opPredecessorDied)
+	}
+	context, _ := record["context"].(map[string]any)
+	if context["stale_address"] != shared || context["pid"] != float64(deadPID) {
+		t.Fatalf("record context %v, want the shared address %s and pid %d the predecessor left", context, shared, deadPID)
+	}
+}
+
+// TestAnUnreadableAdvertisementIsRecordedAtBoot pins that an advertisement
+// the boot cannot read is recorded at ERROR with its path, never read as no
+// predecessor.
+func TestAnUnreadableAdvertisementIsRecordedAtBoot(t *testing.T) {
+	// Arrange: a directory where daemon.addr belongs.
+	root := shortRoot(t)
+	addrPath := filepath.Join(root, "daemon.addr")
+	if err := os.Mkdir(addrPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 
 	// Act.
@@ -1321,11 +1353,11 @@ func TestAStaleAdvertisementIsRecordedBeforeItIsReplaced(t *testing.T) {
 	// Assert.
 	record := runLogRecord(t, root, opPredecessorDied, dlog.LevelError)
 	if record == nil {
-		t.Fatalf("no ERROR %s record, want the stale advertisement reported as the predecessor's death", opPredecessorDied)
+		t.Fatalf("no ERROR %s record, want the unreadable advertisement recorded", opPredecessorDied)
 	}
 	context, _ := record["context"].(map[string]any)
-	if got := context["stale_address"]; got != "127.0.0.1:0" {
-		t.Fatalf("stale_address = %v, want the address the predecessor left", got)
+	if context["addr_path"] != addrPath || context["error"] == nil {
+		t.Fatalf("record context %v, want the path %s and the read's error", context, addrPath)
 	}
 }
 
