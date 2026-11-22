@@ -48,9 +48,14 @@ type FakeLauncher struct {
 	// Socket is the socket it accepts on (AGENT_REPL_LAUNCHER_SOCKET).
 	Socket string
 
+	ln net.Listener
+
 	mu      sync.Mutex
 	banners []*agentreplv1.DesktopBanner
 }
+
+// Close stops accepting. It is safe to call twice.
+func (l *FakeLauncher) Close() { l.ln.Close() }
 
 // StartFakeLauncher accepts on a socket under sockRoot until the test ends,
 // and writes the launcher's build report into lockDir naming this process,
@@ -62,7 +67,13 @@ func StartFakeLauncher(t testing.TB, sockRoot, lockDir string) *FakeLauncher {
 	if err != nil {
 		t.Fatalf("harness: the fake launcher could not listen on %s: %v", l.Socket, err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	l.ln = ln
+	// An armed daemon's teardown runs after the warning sweep, so it closes
+	// this socket itself once the daemon is dead: a banner the daemon posts
+	// while it stands down must still find the launcher listening.
+	if !coverageTeardownArmed() {
+		t.Cleanup(l.Close)
+	}
 	if err := buildreport.Write(lockDir, buildreport.ServiceLauncher, buildreport.Report{PID: os.Getpid(), Build: FakeLauncherBuild}); err != nil {
 		t.Fatalf("harness: write the fake launcher's build report: %v", err)
 	}

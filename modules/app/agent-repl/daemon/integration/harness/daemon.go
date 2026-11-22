@@ -809,6 +809,9 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 			d.Kill()
 			d.standDownStraysForCoverage()
 			d.ReapStrays()
+			if d.Launcher != nil {
+				d.Launcher.Close()
+			}
 		})
 	}
 	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
