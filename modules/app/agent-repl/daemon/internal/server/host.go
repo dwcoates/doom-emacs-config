@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -122,6 +123,15 @@ func (s *server) hostStateTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.
 func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 	const op = "daemon.server.publish_host_workspace"
 	log, err := s.workspaceLog(ctx, "WatchHostWorkspace", ws)
+	if errors.Is(err, wsm.ErrNotFound) {
+		// A FORGOTTEN WORKSPACE HAS NO HOST VIEW. An edge that fires off the
+		// caller's goroutine (a shim link's detach, a detached teardown's end)
+		// can land after the forget removed the record; there is no view left
+		// to compose and no stream left to carry one, so nothing is published.
+		s.log.Info(op, "the workspace was forgotten; it has no host view to publish",
+			dlog.Context{"workspace": string(ws), "cause": err.Error()})
+		return
+	}
 	if err != nil {
 		// A CANCELLED CONTEXT IS THE CLIENT LEAVING. This publish runs under
 		// the host watch's own context on the composing path, and that context
