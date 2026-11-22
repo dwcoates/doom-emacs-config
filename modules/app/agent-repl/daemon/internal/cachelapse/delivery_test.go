@@ -404,6 +404,26 @@ func TestAJoiningSuccessorWritesNoOwingDecision(t *testing.T) {
 	}
 }
 
+func TestAnOwingDecisionForAWorkspaceWhoseRowIsGoneIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	h.db.owingErr = fmt.Errorf("wsm: workspace %s: %w", theWorkspace, wsm.ErrNotFound)
+	log := dlog.NewTestLogger()
+
+	// Act
+	h.keeper.owesNone(context.Background(), log, h.db.records[theWorkspace], "it has no session")
+
+	// Assert
+	if _, errored := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error"}); errored {
+		t.Fatalf("records = %+v, want no ERROR for a row that is gone", log.Records())
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opDrive,
+		Message: "the workspace's row is gone, so whether it owes keep-alives is recorded nowhere"})
+	if !ok || record.Context["owing"] != false || !strings.Contains(fmt.Sprint(record.Context["cause"]), "not found") {
+		t.Fatalf("records = %+v, want the gone row at INFO with its cause", log.Records())
+	}
+}
+
 func TestAnOwingDecisionThatCannotBeWrittenIsAnError(t *testing.T) {
 	// Arrange
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
