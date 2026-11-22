@@ -87,6 +87,10 @@ type DB interface {
 	// SetChildrenFolded records whether a workspace's children are folded; an
 	// unknown workspace is ErrNotFound (childrenfolds.go).
 	SetChildrenFolded(ctx context.Context, id WorkspaceID, folded bool) error
+	// ExpandChildrenWithAncestry expands a workspace's children and every
+	// fold above it in one write, answering the folds above it it opened
+	// (childrenfolds.go).
+	ExpandChildrenWithAncestry(ctx context.Context, id WorkspaceID) ([]OpenedFold, error)
 	// SetVisibilities persists each named workspace's visibility
 	// (visibilitystate.go), in one write.
 	SetVisibilities(ctx context.Context, changes map[WorkspaceID]Visibility) error

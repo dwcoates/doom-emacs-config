@@ -4863,6 +4863,47 @@ func (d *fakeDB) SetChildrenFolded(_ context.Context, id ids.WorkspaceID, folded
 	return nil
 }
 
+// ExpandChildrenWithAncestry expands the workspace's children and every fold
+// above it on the fake, as WSM does, and answers the ancestor, subsection and
+// repository folds it opened.
+func (d *fakeDB) ExpandChildrenWithAncestry(ctx context.Context, id ids.WorkspaceID) ([]wsm.OpenedFold, error) {
+	if err := d.SetChildrenFolded(ctx, id, false); err != nil {
+		return nil, err
+	}
+	var opened []wsm.OpenedFold
+	root := d.workspaces[id]
+	for root.Parent != nil {
+		parent := d.workspaces[*root.Parent]
+		if parent.ChildrenFolded {
+			parent.ChildrenFolded = false
+			d.workspaces[parent.ID] = parent
+			opened = append(opened, wsm.OpenedFold{Kind: wsm.AttentionOpenedChildren, Target: string(parent.ID)})
+		}
+		root = parent
+	}
+	if root.Subsection != nil {
+		for i := range d.subsections {
+			if d.subsections[i].ID == *root.Subsection && d.subsections[i].Folded {
+				d.subsections[i].Folded = false
+				opened = append(opened, wsm.OpenedFold{Kind: wsm.AttentionOpenedSubsection, Target: string(*root.Subsection)})
+			}
+		}
+	}
+	// The fixture's workspace helper registers the repository once per
+	// workspace, so one id may be held several times; it is one fold.
+	repoWasFolded := false
+	for i := range d.repositories {
+		if d.repositories[i].ID == root.Repo && d.repositories[i].Folded {
+			d.repositories[i].Folded = false
+			repoWasFolded = true
+		}
+	}
+	if repoWasFolded {
+		opened = append(opened, wsm.OpenedFold{Kind: wsm.AttentionOpenedRepository, Target: string(root.Repo)})
+	}
+	return opened, nil
+}
+
 // fakeNetwork is the network state a failed naming call is classified by. It
 // answers VERDICT to every classification and records the words it was asked
 // about; restore closes the restored latch.
