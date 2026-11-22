@@ -131,7 +131,7 @@ func TestRunOutputStatesTheBoundOnlyOnTheBatchThatCrossesIt(t *testing.T) {
 	r.Remember(ctx, []byte("more\n"))
 
 	// Assert.
-	if got := strings.Count(sink.String(), "the run has said more than"); got != 1 {
+	if got := strings.Count(sink.String(), `"message":"the run has said more than`); got != 1 {
 		t.Fatalf("the bound was recorded %d times, want once; log:\n%s", got, sink.String())
 	}
 }
