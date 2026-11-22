@@ -12,6 +12,7 @@
  * used to end on. A row still under way has no instant, so it shows nothing.
  */
 import type { Ticker } from "../clock.js";
+import { decorativeElement } from "../dom.js";
 import { formatTickedAge } from "../duration.js";
 import type { HoverStamp } from "./hover-stamp.js";
 import { stopTicking, tickWhileShown } from "./ticking.js";
@@ -45,9 +46,7 @@ export interface MarginStamp {
  * row.
  */
 export function mountMarginStamp(parent: HTMLElement, ticker: Ticker): MarginStamp {
-  const el = document.createElement("div");
-  el.className = MARGIN_STAMP_CLASS;
-  el.setAttribute("aria-hidden", "true");
+  const el = decorativeElement("div", MARGIN_STAMP_CLASS);
   parent.append(el);
   const hide = (): void => {
     el.removeAttribute(MARGIN_STAMP_SHOWN);
