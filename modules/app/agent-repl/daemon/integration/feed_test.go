@@ -130,12 +130,13 @@ func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 	// A refused Watch* open is transport-closed BY DESIGN (project lead): it is
 	// recorded at INFO under daemon.refusal.transport_closed, never warned as
 	// an unlanded arm.
-	rec := f.d.AwaitRunLogOperation("daemon.refusal.transport_closed")
+	// THE RECORD IS FOUND BY ITS OWN RPC AND CAUSE: on a shared daemon the
+	// other rpcs' refusals, and other cases', are in the run log beside it.
+	rec := f.d.AwaitLogRecord(f.d.RunLogPath(), "the WatchFeed unknown_token transport close", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.refusal.transport_closed" && r.Context["rpc"] == "WatchFeed" && r.Context["cause"] == "unknown_token"
+	})
 	if !strings.EqualFold(rec.Level, "info") {
 		t.Fatalf("the transport-closed record = level %q, want INFO", rec.Level)
-	}
-	if rec.Context["rpc"] != "WatchFeed" || rec.Context["cause"] != "unknown_token" {
-		t.Fatalf("the transport-closed record's context = %v, want rpc WatchFeed and cause unknown_token", rec.Context)
 	}
 	// No ExpectWarnings operation: the refusal must produce no WARN at all.
 }
