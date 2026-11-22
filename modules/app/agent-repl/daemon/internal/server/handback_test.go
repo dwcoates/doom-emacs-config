@@ -192,3 +192,39 @@ func TestAHandedBackConnectionIsAcceptedFromTheStream(t *testing.T) {
 		t.Fatalf("records = %+v, want the stream's end recorded", log.Records())
 	}
 }
+
+// addressless is a connection with no remote address, as net.FileConn makes
+// one whose peer reset before it was handed over.
+type addressless struct{ net.Conn }
+
+func (addressless) RemoteAddr() net.Addr { return nil }
+
+func TestRemoteAddress(t *testing.T) {
+	cases := []struct {
+		name string
+		conn func(t *testing.T) (conn net.Conn, want string)
+	}{
+		{name: "a connection with a remote address answers it", conn: func(t *testing.T) (net.Conn, string) {
+			client, accepted := tcpPair(t)
+			return accepted, client.LocalAddr().String()
+		}},
+		{name: "a connection with no remote address answers unknown", conn: func(t *testing.T) (net.Conn, string) {
+			_, accepted := tcpPair(t)
+			return addressless{accepted}, "unknown"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			conn, want := tc.conn(t)
+
+			// Act
+			got := RemoteAddress(conn)
+
+			// Assert
+			if got != want {
+				t.Fatalf("RemoteAddress = %q, want %q", got, want)
+			}
+		})
+	}
+}

@@ -1246,7 +1246,7 @@ func (c *connStates) track(conn net.Conn, state http.ConnState) {
 // the call's bytes never reached this daemon's listener.
 func (c *connStates) recordRequestless(conn net.Conn) {
 	c.log.Info("daemon.server.conn_requestless", "an accepted connection closed before it delivered a request", dlog.Context{
-		"remote": conn.RemoteAddr().String(),
+		"remote": server.RemoteAddress(conn),
 		"age_ms": time.Since(c.born[conn]).Milliseconds(),
 	})
 }
@@ -1280,11 +1280,11 @@ func (c *connStates) closeRequestless() {
 			switch {
 			case err != nil:
 				c.log.Error("daemon.server.hand_back", "an unread connection of the shared address could not be handed back; it was closed", dlog.Context{
-					"remote": conn.RemoteAddr().String(), "error": err.Error()})
+					"remote": server.RemoteAddress(conn), "error": err.Error()})
 				continue
 			case outcome == server.HandedBack:
 				c.log.Info("daemon.server.hand_back", "handed an unread connection of the shared address back to the holder, for the daemon accepting next", dlog.Context{
-					"remote": conn.RemoteAddr().String()})
+					"remote": server.RemoteAddress(conn)})
 				continue
 			case outcome == server.ReadFrom:
 				continue

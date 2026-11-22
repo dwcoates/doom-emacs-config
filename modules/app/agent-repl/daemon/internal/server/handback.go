@@ -125,6 +125,27 @@ func (c *sharedConn) decided(handed bool) {
 	c.mu.Unlock()
 }
 
+// unknownRemote is the remote address of a connection that has none.
+const unknownRemote = "unknown"
+
+// RemoteAddress answers CONN's remote address for a record, or "unknown" when
+// it has none.
+//
+// A CONNECTION HANDED OVER BY THE HOLDER CAN HAVE NO REMOTE ADDRESS.
+// sockethold.Returned.Next makes it with net.FileConn, which asks the kernel
+// for the peer's address (getpeername) and, when that fails, leaves
+// RemoteAddr nil rather than failing; on darwin getpeername fails with EINVAL
+// once the client's end reset the connection before it was handed over
+// (2026-11-22: a successor's requestless close of such a connection
+// dereferenced the nil address and crashed the daemon).
+func RemoteAddress(conn net.Conn) string {
+	addr := conn.RemoteAddr()
+	if addr == nil {
+		return unknownRemote
+	}
+	return addr.String()
+}
+
 // HandBackOutcome is what HandBackUnread did with a connection.
 type HandBackOutcome int
 

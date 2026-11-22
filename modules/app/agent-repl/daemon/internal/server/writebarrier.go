@@ -109,7 +109,7 @@ func (b *WriteBarrier) Open() (total int, byConn []string) {
 	defer b.mu.Unlock()
 	for c, streams := range b.open {
 		if len(streams) > 0 {
-			byConn = append(byConn, fmt.Sprintf("%s=%d", c.RemoteAddr(), len(streams)))
+			byConn = append(byConn, fmt.Sprintf("%s=%d", RemoteAddress(c), len(streams)))
 		}
 	}
 	sort.Strings(byConn)
@@ -192,7 +192,7 @@ func (b *WriteBarrier) Owing() []string {
 	defer b.mu.Unlock()
 	out := make([]string, 0, len(b.owing))
 	for c := range b.owing {
-		out = append(out, c.RemoteAddr().String())
+		out = append(out, RemoteAddress(c))
 	}
 	sort.Strings(out)
 	return out
