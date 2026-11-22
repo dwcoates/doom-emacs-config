@@ -386,3 +386,39 @@ func TestWithLogRecords(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeLandsTheShadowModeImpactSeriesPerSuiteAndPerTest(t *testing.T) {
+	// Arrange
+	at := time.UnixMilli(1_700_000_000_123)
+
+	// Act
+	got := string(Encode(Report{Impact: []Impact{{
+		Suite: "daemon", WouldSkip: 412, WouldSkipCPU: 388.25, Misses: 1, RecordsWritten: 548, OverheadCPU: 31.5, Incomplete: 3, Errors: 0,
+		Breadth: []ImpactBreadth{{Test: "integration.TestA", Share: 0.25}, {Test: `integration.TestB"x`, Share: 0.5}},
+	}}}, "merge_queue", at))
+
+	// Assert
+	labels := `{suite="daemon",trigger="merge_queue"}`
+	want := `agentrepl_test_impact_would_skip` + labels + ` 412 1700000000123` + "\n" +
+		`agentrepl_test_impact_would_skip_cpu_seconds` + labels + ` 388.25 1700000000123` + "\n" +
+		`agentrepl_test_impact_misses` + labels + ` 1 1700000000123` + "\n" +
+		`agentrepl_test_impact_records_written` + labels + ` 548 1700000000123` + "\n" +
+		`agentrepl_test_impact_overhead_cpu_seconds` + labels + ` 31.5 1700000000123` + "\n" +
+		`agentrepl_test_impact_incomplete` + labels + ` 3 1700000000123` + "\n" +
+		`agentrepl_test_impact_errors` + labels + ` 0 1700000000123` + "\n" +
+		`agentrepl_test_impact_record_breadth{suite="daemon",test="integration.TestA",trigger="merge_queue"} 0.25 1700000000123` + "\n" +
+		`agentrepl_test_impact_record_breadth{suite="daemon",test="integration.TestB\"x",trigger="merge_queue"} 0.5 1700000000123` + "\n"
+	if got != want {
+		t.Fatalf("Encode =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestEncodeWritesNoImpactSeriesForARunThatRecordedNone(t *testing.T) {
+	// Act
+	got := string(Encode(Report{Run: &Run{Seconds: 1, Outcome: Pass}}, "merge_queue", time.UnixMilli(1)))
+
+	// Assert
+	if strings.Contains(got, "agentrepl_test_impact_") {
+		t.Fatalf("Encode = %s, want no impact series", got)
+	}
+}

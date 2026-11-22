@@ -485,6 +485,9 @@ type Opts struct {
 
 // Daemon is one running agent-repld process and the client dialed to it.
 type Daemon struct {
+	// suiteOwned is set for a daemon the suite started (harness.Suite()), which
+	// serves many tests and outlives them all.
+	suiteOwned bool
 	// StateDir is the daemon's state root.
 	StateDir string
 	// Addr is the loopback address it serves on, read from daemon.addr.
@@ -763,6 +766,10 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		required:           map[string]bool{},
 		daemonProc:         newDaemonProc(nil),
 	}
+	// A daemon the SUITE owns outlives every test, so a test's coverage window
+	// on it can always close; a test's own daemon is gone when the test ends
+	// (impact.go).
+	_, d.suiteOwned = t.(*SuiteTB)
 	if opts.DefaultSettings != "" {
 		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)
 	}
@@ -803,12 +810,15 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	// sweep reads exactly the log content it reads without coverage and the
 	// suite's pass set is unchanged. The ordinary teardown below stands down
 	// while this one is armed, so the process is still killed exactly once.
-	if CoverageEnabled() {
+	if coverageTeardownArmed() {
 		t.Cleanup(func() {
 			d.gracefulStopForCoverage()
 			d.Kill()
 			d.standDownStraysForCoverage()
 			d.ReapStrays()
+			if d.Launcher != nil {
+				d.Launcher.Close()
+			}
 		})
 	}
 	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
@@ -1029,6 +1039,22 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		env = append(env, daemonCov...)
 		env = append(env, nodeCov...)
 	}
+	// A RUN THAT RECORDS WHICH FILES EACH TEST EXECUTES serves this daemon its
+	// coverage window route and gives it a counter directory: the test's own
+	// when the test starts the daemon, a scratch one when the suite does (its
+	// counters are cut through the route instead, impact.go).
+	if ImpactEnabled() {
+		env = append(env, coverageWindowsEnv+"=1")
+		if _, shared := t.(*SuiteTB); shared {
+			scratch, err := os.MkdirTemp(RunRoot(), "impact-shared-gocoverdir-")
+			if err != nil {
+				t.Fatalf("harness: %v", err)
+			}
+			env = append(env, "GOCOVERDIR="+scratch)
+		} else {
+			env = append(env, impactOwnDaemonEnv(t)...)
+		}
+	}
 	// A PROFILING RUN PROFILES THE DAEMON'S WHOLE LIFE AND ITS SHIMS' (profile.go).
 	profileEnv, profileDir := testenv.ExitProfile(t)
 	env = append(env, profileEnv...)
@@ -1103,7 +1129,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	t.Cleanup(func() {
 		// On a coverage run the teardown registered ahead of the warning
 		// sweep owns this and runs it after that sweep instead.
-		if CoverageEnabled() {
+		if coverageTeardownArmed() {
 			return
 		}
 		d.Kill()
@@ -1503,7 +1529,7 @@ func (d *Daemon) Stop() {
 // best-effort flush of the daemon's coverage counters ahead of the cleanup
 // kill, not a shutdown assertion. Daemon.Stop remains the assertion.
 func (d *Daemon) gracefulStopForCoverage() {
-	if !CoverageEnabled() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
+	if !coverageTeardownArmed() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
 		return
 	}
 	d.sigMu.Lock()
@@ -1521,7 +1547,7 @@ func (d *Daemon) gracefulStopForCoverage() {
 // run, and reporting nothing. ReapStrays still runs underneath, so a process
 // that ignores the signal is killed exactly as it always was.
 func (d *Daemon) standDownStraysForCoverage() {
-	if !CoverageEnabled() {
+	if !coverageTeardownArmed() {
 		return
 	}
 	pids := d.strayPIDs()

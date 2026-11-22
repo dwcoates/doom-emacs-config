@@ -71,6 +71,9 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	// The repositories this test mints must be ones the shared daemon's git
 	// can see, so the test's git world is the daemon's.
 	bindWorld(t, d.Git)
+	// THE TEST'S COVERAGE WINDOW on this shared daemon opens here, when the
+	// run records which files each test executes (impact.go).
+	impactUseShared(t, d)
 	requireGrantedClock(t)
 	ctx, cancel := grantedclock.WithBound(v.watchRecords(t, d.fault.ctx), v.waitBound*runBudgetWaits)
 	// A stream the view opens settles against the view (Stream.settle), as

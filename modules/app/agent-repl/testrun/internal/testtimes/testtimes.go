@@ -89,6 +89,35 @@ const (
 	UnitsReused = "reused"
 )
 
+// The gauges the shadow-mode impact recording lands in (internal/impact), one
+// sample per run each, labeled with the suite and the trigger.
+const (
+	// ImpactWouldSkipSeriesName counts the tests selection WOULD have skipped
+	// (a passing record matched every dependency), and
+	// ImpactWouldSkipCPUSeriesName is the CPU this run spent on them.
+	ImpactWouldSkipSeriesName    = "agentrepl_test_impact_would_skip"
+	ImpactWouldSkipCPUSeriesName = "agentrepl_test_impact_would_skip_cpu_seconds"
+	// ImpactMissesSeriesName counts the tests that failed although selection
+	// would have skipped them: zero, over a stretch of merges, is what
+	// enforcement waits for.
+	ImpactMissesSeriesName = "agentrepl_test_impact_misses"
+	// ImpactRecordsSeriesName counts the records the run wrote.
+	ImpactRecordsSeriesName = "agentrepl_test_impact_records_written"
+	// ImpactOverheadSeriesName is the CPU cutting and reducing the coverage
+	// windows cost the harnesses.
+	ImpactOverheadSeriesName = "agentrepl_test_impact_overhead_cpu_seconds"
+	// ImpactBreadthSeriesName is, per test, the share of the daemon's files
+	// its record covers.
+	ImpactBreadthSeriesName = "agentrepl_test_impact_record_breadth"
+	// ImpactIncompleteSeriesName counts the tests whose recording was
+	// incomplete (a window the harness could not cut, a daemon killed before
+	// it wrote its counters): never recorded, always would run.
+	ImpactIncompleteSeriesName = "agentrepl_test_impact_incomplete"
+	// ImpactErrorsSeriesName is 1 when recording or deciding failed in this
+	// run, and 0 otherwise.
+	ImpactErrorsSeriesName = "agentrepl_test_impact_errors"
+)
+
 // The outcomes a test is labeled with.
 const (
 	Pass = "pass"
@@ -170,6 +199,31 @@ type Report struct {
 	Run        *Run
 	SuiteUnits []SuiteUnits
 	Batching   string
+	// Impact is the run's shadow-mode impact recording, one per suite that
+	// recorded.
+	Impact []Impact
+}
+
+// Impact is one suite's shadow-mode impact recording in a run.
+type Impact struct {
+	Suite          string
+	WouldSkip      int
+	WouldSkipCPU   float64
+	Misses         int
+	RecordsWritten int
+	OverheadCPU    float64
+	// Incomplete counts tests whose recording was incomplete.
+	Incomplete int
+	// Errors is 1 when recording or deciding failed.
+	Errors int
+	// Breadth is each recorded test's share of the daemon's files.
+	Breadth []ImpactBreadth
+}
+
+// ImpactBreadth is how much of the program one test's record covers.
+type ImpactBreadth struct {
+	Test  string
+	Share float64
 }
 
 // Target is where a run pushes and what ran it.
@@ -429,6 +483,27 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 		}{{UnitsRun, su.Run}, {UnitsReused, su.Reused}} {
 			fmt.Fprintf(&b, "%s{suite=\"%s\",state=\"%s\",trigger=\"%s\",batching=\"%s\"} %d %d\n",
 				SuiteUnitsSeriesName, labelValue(su.Suite), v.state, labelValue(trigger), labelValue(su.Batching), v.n, ms)
+		}
+	}
+	for _, im := range report.Impact {
+		labels := fmt.Sprintf("suite=\"%s\",trigger=\"%s\"", labelValue(im.Suite), labelValue(trigger))
+		for _, v := range []struct {
+			name  string
+			value string
+		}{
+			{ImpactWouldSkipSeriesName, strconv.Itoa(im.WouldSkip)},
+			{ImpactWouldSkipCPUSeriesName, num(im.WouldSkipCPU)},
+			{ImpactMissesSeriesName, strconv.Itoa(im.Misses)},
+			{ImpactRecordsSeriesName, strconv.Itoa(im.RecordsWritten)},
+			{ImpactOverheadSeriesName, num(im.OverheadCPU)},
+			{ImpactIncompleteSeriesName, strconv.Itoa(im.Incomplete)},
+			{ImpactErrorsSeriesName, strconv.Itoa(im.Errors)},
+		} {
+			fmt.Fprintf(&b, "%s{%s} %s %d\n", v.name, labels, v.value, ms)
+		}
+		for _, br := range im.Breadth {
+			fmt.Fprintf(&b, "%s{suite=\"%s\",test=\"%s\",trigger=\"%s\"} %s %d\n",
+				ImpactBreadthSeriesName, labelValue(im.Suite), labelValue(br.Test), labelValue(trigger), num(br.Share), ms)
 		}
 	}
 	for _, u := range report.Units {

@@ -63,6 +63,26 @@ func serveStreamFrom[Res any](ctx context.Context, s *fakeServer, name, workspac
 			map[string]any{"id": sub.id, "stream": name})
 	}
 
+	// send delivers one push; it is the one place a push reaches the wire.
+	send := func(msg proto.Message) error {
+		typed, ok := any(msg).(*Res)
+		if !ok {
+			logError("fakedaemon.stream.push-type-mismatch", "pushed message does not match the stream",
+				map[string]any{"id": sub.id, "stream": name,
+					"pushed": string(proto.MessageName(msg))})
+			return connect.NewError(connect.CodeInternal,
+				fmt.Errorf("fakedaemon: %s push has the wrong message type", name))
+		}
+		if err := stream.Send(typed); err != nil {
+			logWarn("fakedaemon.stream.send-failed", "send to a stream subscriber failed",
+				map[string]any{"id": sub.id, "stream": name, "error": err.Error()})
+			return err
+		}
+		logDebug("fakedaemon.stream.sent", "delivered a push to a subscriber",
+			map[string]any{"id": sub.id, "stream": name, "workspace_id": workspaceID})
+		return nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,22 +91,26 @@ func serveStreamFrom[Res any](ctx context.Context, s *fakeServer, name, workspac
 				map[string]any{"id": sub.id, "stream": name, "workspace_id": workspaceID})
 			return ctx.Err()
 		case msg := <-sub.msgs:
-			typed, ok := any(msg).(*Res)
-			if !ok {
-				logError("fakedaemon.stream.push-type-mismatch", "pushed message does not match the stream",
-					map[string]any{"id": sub.id, "stream": name,
-						"pushed": string(proto.MessageName(msg))})
-				return connect.NewError(connect.CodeInternal,
-					fmt.Errorf("fakedaemon: %s push has the wrong message type", name))
-			}
-			if err := stream.Send(typed); err != nil {
-				logWarn("fakedaemon.stream.send-failed", "send to a stream subscriber failed",
-					map[string]any{"id": sub.id, "stream": name, "error": err.Error()})
+			if err := send(msg); err != nil {
 				return err
 			}
-			logDebug("fakedaemon.stream.sent", "delivered a push to a subscriber",
-				map[string]any{"id": sub.id, "stream": name, "workspace_id": workspaceID})
 		case req := <-sub.end:
+			// select picks at random when a push and the end are both
+			// ready, so an end must first deliver every push made before
+			// it: a producer's push-then-end is ordered on the stream. An
+			// abort drops the connection, so nothing is owed to it.
+			if !req.abort {
+				for drained := false; !drained; {
+					select {
+					case msg := <-sub.msgs:
+						if err := send(msg); err != nil {
+							return err
+						}
+					default:
+						drained = true
+					}
+				}
+			}
 			if req.abort {
 				if sub.conn == nil {
 					logError("fakedaemon.stream.abort-no-conn", "abort requested but no connection was captured",

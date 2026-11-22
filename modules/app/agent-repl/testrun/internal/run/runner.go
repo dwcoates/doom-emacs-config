@@ -58,6 +58,18 @@ type Spec struct {
 	// its tests start, which every unit of a profiling run is told the
 	// directory of.
 	Profiler Profiler
+	// Impact marks a chunk run recorded (testrun/internal/impact): what the
+	// runner needs to turn the chunk's results and its harness's windows into
+	// records. Nil for every other unit.
+	Impact *ImpactChunk
+}
+
+// ImpactChunk names one recorded Go chunk: the package pass its tests belong
+// to and the file its harness appends its windows to (testenv.ImpactOut).
+type ImpactChunk struct {
+	Suite, Package, Tags string
+	// Windows is the file the chunk's harness appends each window to.
+	Windows string
 }
 
 // Profiler is how a unit's own process writes a CPU profile.

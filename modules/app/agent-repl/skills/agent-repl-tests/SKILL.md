@@ -264,6 +264,15 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
   - Measured 2026-11-20, before per-file reuse (one full run each, loaded host): webapp 364 CPU-s at 48/12 against 428 at 96/24; at 192/48 one process of 146 files overflowed its stack, from computed-style wrappers stacked file over file (fixed in `test/animations.ts`).
 - How keys, profiles and records work is `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of each unit's exact inputs".
 
+## Test impact selection records in shadow mode
+
+Every run of the daemon's integration pass records which files each top-level test executed and logs, for every test, what selection WOULD do (`impact: <test>: would skip|would run: <why>`); it never skips a test, and a run's verdict never depends on it. What this means when writing or running tests:
+
+- A recorded chunk runs ONE test at a time per process (`-test.parallel=1`) against `agent-repld-impact`, so a case that needs concurrency inside a daemon drives several workspaces itself (`daemon/integration/concurrent_workspaces_test.go`); the planner runs more chunks at once.
+- A harness helper that gives a test a daemon goes through `Daemon.View` or `StartDaemon`; that is where a test's coverage window opens (`daemon/integration/harness/impact.go`).
+- A test that kills its daemon is recorded as incomplete and always would run. A test that reads the checkout is the known blind spot: a `MISS` line in a run log (`impact: MISS: ... failed although selection would have skipped it`) is the finding that shows it, and is fixed at the test (its dependency) or the analysis, never ignored.
+- Read the mechanism and its metrics in `modules/app/agent-repl/AGENTS.md`, "Test impact selection runs in SHADOW MODE"; the code is `testrun/internal/impact`. The full suite still gates every landing.
+
 ## Test performance standards (owner rulings, 2026-11-12 and 2026-11-13)
 
 - A change that makes a suite slower or costlier is a defect, fixed before it lands. Report it in numbers: the suite's wall time and CPU before and after.
