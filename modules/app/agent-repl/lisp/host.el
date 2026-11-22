@@ -189,6 +189,13 @@ roster and handed back verbatim.  Nil means the workspace has not been
 registered on the current daemon yet."
   (plist-get (agent-repl-host--entry ws) :ref))
 
+(defun agent-repl-host--conn-id (conn)
+  "Return a short identity for CONN, telling connections at one address apart.
+Every daemon of a handover serves the one shared address, so the address
+names no connection; this identity does, in the records of the walks and
+the dead-connection check.  Nil CONN answers \"none\"."
+  (if conn (format "%x" (sxhash-eq conn)) "none"))
+
 (defun agent-repl-host--recorded-conn (ws)
   "Return the connection recorded for WS, dead or alive, or nil.
 This file\='s own bookkeeping reads it; every consumer that is about to
@@ -214,6 +221,10 @@ treats as having no connection."
   (let ((conn (agent-repl-host--recorded-conn ws)))
     (if (or (null conn) (agent-repl-connect-connection-alive-p conn))
         conn
+      (agent-repl--info ws "elisp.host.dead-connection ws=%s recorded=%s address=%S live=%s"
+                        ws (agent-repl-host--conn-id conn)
+                        (agent-repl-connect-connection-address conn)
+                        (agent-repl-host--conn-id (agent-repl-link-live)))
       (agent-repl-host--follow-live-daemon ws "dead-connection")
       (let ((now (agent-repl-host--recorded-conn ws)))
         (if (and now (agent-repl-connect-connection-alive-p now))
@@ -1582,6 +1593,13 @@ it.  STREAM nil means the caller did not name the stream."
     (agent-repl--log ws "elisp.host.stale-stream-close ws=%s outcome=%S" ws outcome))
    ((eq (car outcome) :cancelled)
     (agent-repl--log ws "elisp.host.stream-cancelled ws=%s" ws))
+   ;; THE STREAM STANDS ON THE OUTGOING DAEMON ON PURPOSE, its move owed to
+   ;; the promotion (`agent-repl-host--adopt-settled'): its end is that
+   ;; daemon exiting, which the promotion answers with the one move, so no
+   ;; walk of its own starts here.
+   ((plist-get (agent-repl-host--entry ws) :stream-due)
+    (agent-repl--info ws "elisp.host.stream-ended-awaiting-promotion ws=%s outcome=%S" ws outcome)
+    (agent-repl-host--put ws :stream nil))
    ((agent-repl-host--planned-end-p ws outcome stream)
     ;; THE DAEMON SAID SO FIRST.  Its last frame was the planned ending, so
     ;; this clean end is a stand-down, not a fault: INFO, and the same
@@ -1973,8 +1991,10 @@ and superseded one way.  TRIGGER is recorded."
     ;; what it held.
     (unless (and (eq claim :adopt) (eq (plist-get was :conn) new))
       (agent-repl-host--release-held ws "superseded"))
-    (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s"
-                      ws (agent-repl-connect-connection-address new) claim trigger)
+    (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s conn=%s from=%s"
+                      ws (agent-repl-connect-connection-address new) claim trigger
+                      (agent-repl-host--conn-id new)
+                      (agent-repl-host--conn-id (agent-repl-host--recorded-conn ws)))
     token))
 
 (defun agent-repl-host--reattach-all (names new trigger &optional on-settled)
@@ -2051,14 +2071,84 @@ was attached, and a stalled handover grew the loaded pages to 78."
 The stream on the daemon WS is leaving is cancelled BEFORE the new one is
 opened, so no workspace ever holds two, and the subscribe is what moves
 `:conn' and `:ref' onto NEW.  TRIGGER is recorded."
+  (agent-repl-host--move-stream ws new ref)
+  (agent-repl-host--reattach-finished ws new trigger))
+
+(defun agent-repl-host--move-stream (ws new ref)
+  "Cancel WS\='s standing stream and subscribe it on NEW with REF.
+THE ONE UNSUBSCRIBE, RESUBSCRIBE AND SNAPSHOT a walk costs the viewed
+workspace, so a handover must spend it once, on the connection that stays
+\(`agent-repl-host--adopt-settled')."
   (agent-repl-host-unsubscribe ws)
-  (agent-repl-host-subscribe new ws ref)
+  (agent-repl-host-subscribe new ws ref))
+
+(defun agent-repl-host--reattach-finished (ws new trigger)
+  "Close WS\='s walk onto NEW, which TRIGGER started, and say so.
+Clears the walk and the detached mark and runs
+`agent-repl-host-reattached-functions'."
   (agent-repl-host--put ws :reattach nil)
   (agent-repl-host--put ws :detached nil)
-  (agent-repl--info ws "elisp.host.reattached ws=%s address=%S trigger=%s"
-                    ws (agent-repl-connect-connection-address new) trigger)
+  (agent-repl--info ws "elisp.host.reattached ws=%s address=%S trigger=%s conn=%s"
+                    ws (agent-repl-connect-connection-address new) trigger
+                    (agent-repl-host--conn-id new))
   (run-hook-with-args 'agent-repl-host-reattached-functions ws)
   (agent-repl-host--reselect-after-reattach ws))
+
+(defun agent-repl-host--retiring-conn-p (conn)
+  "Return non-nil when CONN is the link\='s primary and no successor stands on it.
+Every daemon of a handover serves one shared address, so an adopt goes out
+on the primary link, the OUTGOING daemon\='s connection, which the
+successor\='s promotion closes (`agent-repl-link--promote-successor').  A
+workspace recorded on it is recorded on a connection that is about to die."
+  (and conn
+       (eq conn (agent-repl-link-primary))
+       (not (eq conn (agent-repl-link-successor)))))
+
+(defun agent-repl-host--adopt-settled (ws new ref trigger)
+  "Settle WS\='s adopt onto NEW, which answered with REF, at TRIGGER.
+A HANDOVER MOVES WS\='S STREAM ONCE, ONTO THE CONNECTION THAT STAYS.  NEW
+is usually the outgoing daemon\='s primary connection, which the promotion
+closes seconds later: moving the stream there is a walk the promotion walks
+again, and a recorded `:conn' that dies later is a third.  So when NEW is
+retiring (`agent-repl-host--retiring-conn-p') the adopt ends the walk but
+leaves the stream where it stands, and marks WS `:stream-due', which the
+promotion answers with the one move onto the promoted connection
+\(`agent-repl-host--move-due-streams').  Any other NEW is the connection
+WS stays on, and the stream moves there now."
+  (if (agent-repl-host--retiring-conn-p new)
+      (progn
+        (agent-repl-host--put ws :stream-due ref)
+        (agent-repl--info ws "elisp.host.stream-move-deferred ws=%s conn=%s address=%S"
+                          ws (agent-repl-host--conn-id new)
+                          (agent-repl-connect-connection-address new))
+        (agent-repl-host--reattach-finished ws new trigger))
+    (agent-repl-host--reattached ws new ref trigger)))
+
+(defun agent-repl-host--move-due-streams (old new)
+  "Move every stream a settled adopt left on OLD onto NEW, the promoted connection.
+The one walk of a handover for each such workspace
+\(`agent-repl-host--adopt-settled'); answers the names moved, so the
+promotion walks none of them again.  A mark with no standing stream on OLD
+is an invariant breach, failed hard."
+  (let (moved)
+    (maphash
+     (lambda (ws entry)
+       (let ((ref (plist-get entry :stream-due)))
+         (when ref
+           (unless (eq (plist-get entry :conn) old)
+             (agent-repl--fatal ws "elisp.host.stream-due-off-old ws=%s recorded=%s old=%s"
+                                ws (agent-repl-host--conn-id (plist-get entry :conn))
+                                (agent-repl-host--conn-id old)))
+           (push ws moved))))
+     agent-repl-host--by-name)
+    (dolist (ws moved)
+      (let ((ref (plist-get (agent-repl-host--entry ws) :stream-due)))
+        (agent-repl-host--put ws :stream-due nil)
+        (agent-repl-host--move-stream ws new ref)
+        (agent-repl--info ws "elisp.host.stream-moved ws=%s from=%s conn=%s address=%S"
+                          ws (agent-repl-host--conn-id old) (agent-repl-host--conn-id new)
+                          (agent-repl-connect-connection-address new))))
+    moved))
 
 (defun agent-repl-host--reselect-after-reattach (ws)
   "Send WS\='s selection again when a handover refused it and WS now stands.
@@ -2469,8 +2559,9 @@ is recorded."
              (t
               (pcase (plist-get response :arm)
                 (:success
-                 (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
-                 (agent-repl-host--reattached ws new ref trigger)
+                 (agent-repl--info ws "elisp.host.adopted ws=%s address=%S conn=%s"
+                                   ws address (agent-repl-host--conn-id new))
+                 (agent-repl-host--adopt-settled ws new ref trigger)
                  (agent-repl-webhost-end-downtime ws)
                  (agent-repl-host--release-held ws "adopted"))
                 (:error
@@ -2865,6 +2956,7 @@ WARN, as it always was."
        (when (eq (plist-get entry :conn) conn)
          (setq affected (1+ affected))
          (agent-repl-host--put ws :stream nil)
+         (agent-repl-host--put ws :stream-due nil)
          (agent-repl-host--put ws :conn nil)))
      agent-repl-host--by-name)
     (if agent-repl-link-down-planned
@@ -2884,15 +2976,19 @@ this promotion is about to close.  Each one, and each one already
 detached, is walked onto NEW in one batched registration
 \(`agent-repl-host--reattach-all').  Runs from
 `agent-repl-link-promote-functions', BEFORE OLD is closed."
-  (let (left)
+  (let* ((moved (agent-repl-host--move-due-streams old new))
+         left)
     (maphash (lambda (ws entry)
-               (when (or (eq (plist-get entry :conn) old)
-                         (plist-get entry :detached))
+               (when (and (or (eq (plist-get entry :conn) old)
+                              (plist-get entry :detached))
+                          (not (member ws moved)))
                  (push ws left)))
              agent-repl-host--by-name)
     (agent-repl--info '(:agent-repl-central "link promotion spans every workspace")
-                      "elisp.host.link-promote left-behind=%d address=%S"
-                      (length left) (agent-repl-connect-connection-address new))
+                      "elisp.host.link-promote left-behind=%d moved=%d old=%s conn=%s address=%S"
+                      (length left) (length moved) (agent-repl-host--conn-id old)
+                      (agent-repl-host--conn-id new)
+                      (agent-repl-connect-connection-address new))
     (agent-repl-host--reattach-all (nreverse left) new "promotion")))
 
 ;; A TORN-DOWN WORKSPACE LEAVES NOTHING BEHIND HERE.  Every teardown of a
