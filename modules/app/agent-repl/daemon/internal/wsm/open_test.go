@@ -187,6 +187,60 @@ func TestAWriteRacingAPromotionSeesOneWholeHandle(t *testing.T) {
 	}
 }
 
+// TestPromotedIsClosedExactlyWhenTheHandleWrites pins the promotion latch: a
+// joining successor's cache keeper withholds its writes while read-only and
+// writes them when the latch closes (2026-11-21: four capped keep-alive runs
+// were never recorded, their end refused on the read-only handle with nothing
+// asking again).
+func TestPromotedIsClosedExactlyWhenTheHandleWrites(t *testing.T) {
+	readOnly := func(t *testing.T) DB {
+		ro, err := OpenReadOnly(context.Background(), writableStore(t), WithUnsyncedWrites())
+		if err != nil {
+			t.Fatalf("OpenReadOnly: %v", err)
+		}
+		t.Cleanup(func() { ro.Close() })
+		return ro
+	}
+	tests := []struct {
+		name     string
+		open     func(t *testing.T) DB
+		promotes int
+		want     bool
+	}{
+		{name: "a handle opened writing", open: func(t *testing.T) DB { s, _ := fileStore(t); return s }, want: true},
+		{name: "a read-only handle", open: readOnly, want: false},
+		{name: "a promoted handle", open: readOnly, promotes: 1, want: true},
+		{name: "a handle promoted twice", open: readOnly, promotes: 2, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			handle := tc.open(t)
+
+			// Act
+			for range tc.promotes {
+				if err := handle.Promote(context.Background()); err != nil {
+					t.Fatalf("Promote: %v", err)
+				}
+			}
+
+			// Assert
+			closed := false
+			select {
+			case <-handle.Promoted():
+				closed = true
+			default:
+			}
+			if closed != tc.want {
+				t.Fatalf("Promoted() closed = %v, want %v", closed, tc.want)
+			}
+			if closed == handle.ReadOnly() {
+				t.Fatalf("Promoted() closed = %v with ReadOnly() = %v, want the latch closed exactly when the handle writes", closed, handle.ReadOnly())
+			}
+		})
+	}
+}
+
 // TestCloseClosesTheHandleAPromotionRetired pins the other half: the
 // read-only handle a promotion retires lives exactly as long as the store,
 // so Close ends it.
