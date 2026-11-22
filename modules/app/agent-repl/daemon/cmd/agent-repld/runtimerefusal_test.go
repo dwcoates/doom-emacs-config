@@ -17,6 +17,7 @@ var runtimeRefusals = func() []describedRefusal {
 	reap := &agentreplv1.ReapWorktreesError{}
 	register := &agentreplv1.RegisterRepositoryError{}
 	eval := &agentreplv1.EvaluateInEditorError{}
+	logSites := &agentreplv1.ListLogSitesError{}
 	return []describedRefusal{
 		{name: "deploy hold", empty: hold, oneof: "cause",
 			cases: []refusalCase{
@@ -71,6 +72,13 @@ var runtimeRefusals = func() []describedRefusal {
 			},
 			describe: func(e proto.Message) (string, error) {
 				return describeEvalRefusal("ws", e.(*agentreplv1.EvaluateInEditorError))
+			}},
+		{name: "log sites", empty: logSites, oneof: "cause",
+			cases: []refusalCase{
+				{name: "unrecorded_window", err: armed(logSites, "unrecorded_window", nil), want: "the window lies before every log site row the daemon keeps"},
+			},
+			describe: func(e proto.Message) (string, error) {
+				return describeLogSitesRefusal(e.(*agentreplv1.ListLogSitesError))
 			}},
 	}
 }()

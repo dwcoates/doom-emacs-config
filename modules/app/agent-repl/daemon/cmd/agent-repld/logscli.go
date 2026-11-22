@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -58,9 +56,17 @@ func logsSites(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.ListLogSites(c.ctx, connect.NewRequest(req))
 	return answerDescribed(c, resp, err, func(r *agentreplv1.ListLogSitesResponse) (string, error) {
-		if r.GetError().GetUnrecordedWindow() != nil {
-			return "the window lies before every log site row the daemon keeps", nil
-		}
-		return "", fmt.Errorf("the ListLogSites refusal %v has no sentence", r.GetError())
+		return describeLogSitesRefusal(r.GetError())
 	})
+}
+
+// describeLogSitesRefusal says in one plain sentence why the sites that fired
+// in a window could not be listed. Every ListLogSitesError arm has its own
+// sentence.
+func describeLogSitesRefusal(e *agentreplv1.ListLogSitesError) (string, error) {
+	switch e.GetCause().(type) {
+	case *agentreplv1.ListLogSitesError_UnrecordedWindow:
+		return "the window lies before every log site row the daemon keeps", nil
+	}
+	return "", undescribed("listing the log sites", e)
 }
