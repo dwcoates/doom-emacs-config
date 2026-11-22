@@ -236,3 +236,28 @@ func TestStreamOpenersShareOpenStream(t *testing.T) {
 		t.Fatalf("%d stream openers build their own context, want only openStream's", handRolled)
 	}
 }
+
+func TestAnEndDeliversEveryPushMadeBeforeIt(t *testing.T) {
+	// Arrange: pushes queued on the stream when its end arrives; the stream's
+	// loop must deliver them all, in order, before it ends.
+	server, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+	stream, cancel := openRoster(t, server, client)
+	defer cancel()
+	var want []string
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("ws-%02d", i)
+		want = append(want, id)
+		if status, body := controlPost(t, baseURL, "/_fake/push", `{"stream":"roster","message":`+rosterNaming(id)+`}`); status != http.StatusOK {
+			t.Fatalf("/_fake/push = %d %s", status, body)
+		}
+	}
+
+	// Act
+	got := rosterPushes(t, baseURL, stream)
+
+	// Assert
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("roster pushes named %v current, want %v", got, want)
+	}
+}
