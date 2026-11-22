@@ -4,8 +4,10 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 )
@@ -99,6 +101,141 @@ func TestHandBackUnread(t *testing.T) {
 				}
 			case ReadFrom:
 				callReaches(t, client, c)
+			}
+		})
+	}
+}
+
+// exchangeBound bounds a loopback exchange; it guards against a hang and is
+// never a wait.
+const exchangeBound = 5 * time.Second
+
+// oneConn is a listener that accepts CONN once, then nothing until closed.
+type oneConn struct {
+	conn   net.Conn
+	given  bool
+	closed chan struct{}
+}
+
+func (l *oneConn) Accept() (net.Conn, error) {
+	if !l.given {
+		l.given = true
+		return l.conn, nil
+	}
+	<-l.closed
+	return nil, net.ErrClosed
+}
+
+func (l *oneConn) Close() error   { close(l.closed); return nil }
+func (l *oneConn) Addr() net.Addr { return l.conn.LocalAddr() }
+
+// serveUntilClosed serves CONN with a real http.Server until net/http has
+// closed it, which the server's ConnState hook tells.
+func serveUntilClosed(t *testing.T, conn net.Conn) {
+	t.Helper()
+	ended := make(chan struct{})
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("departing")) }),
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			if state == http.StateClosed {
+				close(ended)
+			}
+		},
+	}
+	l := &oneConn{conn: conn, closed: make(chan struct{})}
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(l) }()
+	<-ended
+	if err := srv.Close(); err != nil {
+		t.Fatalf("close the server: %v", err)
+	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve = %v, want its close", err)
+	}
+}
+
+func TestAHandedBackConnectionLeavesItsSocketToTheNextDaemon(t *testing.T) {
+	cases := []struct {
+		name string
+		// act does one thing on the handed-back connection C, or on NEXT,
+		// the next daemon's, and answers its error. whileGiving runs it
+		// while the holder is being given the connection: decided, and this
+		// daemon's descriptor not yet closed.
+		act         func(t *testing.T, c *sharedConn, next, client net.Conn) error
+		whileGiving bool
+		wantErr     func(error) bool
+	}{
+		{name: "net/http serving it here answers the client nothing", whileGiving: true, act: func(t *testing.T, c *sharedConn, _, _ net.Conn) error {
+			serveUntilClosed(t, c)
+			return nil
+		}, wantErr: func(err error) bool { return err == nil }},
+		{name: "a write here fails without a byte written", whileGiving: true, act: func(_ *testing.T, c *sharedConn, _, _ net.Conn) error {
+			n, err := c.Write([]byte("departing"))
+			if n != 0 {
+				return errors.New("wrote bytes")
+			}
+			return err
+		}, wantErr: func(err error) bool {
+			var op *net.OpError
+			return errors.As(err, &op) && op.Op == "write" && errors.Is(err, net.ErrClosed)
+		}},
+		{name: "the next daemon's descriptor reads the call after the original closed", act: func(_ *testing.T, _ *sharedConn, next, client net.Conn) error {
+			if _, err := client.Write([]byte("call")); err != nil {
+				return err
+			}
+			buf := make([]byte, 4)
+			if _, err := io.ReadFull(next, buf); err != nil {
+				return err
+			}
+			if string(buf) != "call" {
+				return errors.New("read " + string(buf))
+			}
+			return nil
+		}, wantErr: func(err error) bool { return err == nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			client, accepted := tcpPair(t)
+			c := newSharedConn(accepted)
+			if err := client.SetReadDeadline(time.Now().Add(exchangeBound)); err != nil {
+				t.Fatal(err)
+			}
+			var next net.Conn
+			var actErr error
+			give := func(f *os.File) error {
+				if err := keep(t, &next)(f); err != nil {
+					return err
+				}
+				if tc.whileGiving {
+					actErr = tc.act(t, c, next, client)
+				}
+				return nil
+			}
+
+			// Act
+			got, err := HandBackUnread(c, give)
+			if err != nil || got != HandedBack {
+				t.Fatalf("HandBackUnread = (%v, %v), want HandedBack", got, err)
+			}
+			if !tc.whileGiving {
+				actErr = tc.act(t, c, next, client)
+			}
+
+			// Assert: the client receives the next daemon's answer and not a
+			// byte before it.
+			if !tc.wantErr(actErr) {
+				t.Fatalf("act = %v", actErr)
+			}
+			if _, err := next.Write([]byte("answer")); err != nil {
+				t.Fatalf("the next daemon's answer: %v", err)
+			}
+			if err := next.Close(); err != nil {
+				t.Fatal(err)
+			}
+			received, err := io.ReadAll(client)
+			if err != nil || string(received) != "answer" {
+				t.Fatalf("the client received %q (%v), want only the next daemon's answer", received, err)
 			}
 		})
 	}
