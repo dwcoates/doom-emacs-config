@@ -167,8 +167,11 @@ describe("the side query's call sites", () => {
     // A revision's query is built for reviseResponse, and a parked
     // conversation's keep-alive query for beatParkedConversation; each asks
     // it as a side query (engine/revise-response.ts, engine/parked-keepalive.ts).
+    // The cold gate's summarizer is a side query too, but it builds a headless
+    // inference call (deps.createInference), not a query.
+    const inferred = source.split("deps.createInference(").length - 1;
     const asked =
-      source.split("askSideQuery(").length - 1 +
+      source.split("askSideQuery(").length - 1 - inferred +
       (source.split("reviseResponse(").length - 1) +
       (source.split("beatParkedConversation(").length - 1);
     // Assert: the live session builds ONE query of its own; every other is a side query's.
