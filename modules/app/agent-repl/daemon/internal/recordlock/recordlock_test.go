@@ -1,15 +1,12 @@
 package recordlock
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -17,12 +14,13 @@ import (
 	"time"
 
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/recordlock/locktest"
 )
 
 // A record lock's guarantees are about OTHER processes, so these cases run a
-// second one: this test binary re-executed as TestLockHelperProcess, which
-// takes what its mode names, prints one line, and holds until its stdin
-// closes.
+// second one (locktest): this test binary re-executed as
+// TestLockHelperProcess, which takes what its mode names, prints one line, and
+// holds until its stdin closes.
 
 const lockHelperEnv = "RECORDLOCK_HELPER"
 
@@ -34,122 +32,61 @@ const lockHelperEnv = "RECORDLOCK_HELPER"
 //	              descriptor, print "child <pid>", and EXIT at once
 //	probe PATH    print "holder <pid>" for PATH and exit
 func TestLockHelperProcess(t *testing.T) {
-	mode := os.Getenv(lockHelperEnv)
-	if mode == "" {
-		return
-	}
-	path := os.Getenv(lockHelperEnv + "_PATH")
-	fail := func(err error) {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(3)
-	}
-	switch mode {
-	case "hold":
-		if _, _, err := TryExclusive(path); err != nil {
-			fail(err)
-		}
-	case "shared":
-		f, err := OpenFile(path)
-		if err != nil {
-			fail(err)
-		}
-		if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, wholeFile(syscall.F_RDLCK)); err != nil {
-			fail(err)
-		}
-	case "forked":
-		rec, _, err := TryExclusive(path)
-		if err != nil {
-			fail(err)
-		}
-		// THE CHILD HOLDS A DESCRIPTOR OF THE LOCK'S OPEN FILE DESCRIPTION,
-		// as a child the daemon forked holds one until its exec, and its
-		// Darwin shadow past it. An flock would stay held through it after
-		// this process exits.
-		child := exec.Command("/bin/sleep", "300")
-		child.ExtraFiles = []*os.File{rec.f}
-		if err := child.Start(); err != nil {
-			fail(err)
-		}
-		fmt.Printf("child %d\n", child.Process.Pid)
-		os.Exit(0)
-	case "across-exec":
-		// THE LOCK OUTLIVES THE EXEC: the program exec'd in this process's
-		// place holds it, under this same pid, until it exits.
-		if err := HoldAcrossExec(path); err != nil {
-			fail(err)
-		}
-		fmt.Printf("ready %d\n", os.Getpid())
-		if err := syscall.Exec("/bin/cat", []string{"cat"}, os.Environ()); err != nil {
-			fail(err)
-		}
-	case "probe":
-		holder, err := HolderOf(path)
-		if err != nil {
-			fail(err)
-		}
-		fmt.Printf("holder %d\n", holder.PID)
-		os.Exit(0)
-	default:
-		fail(fmt.Errorf("unknown helper mode %q", mode))
-	}
-	fmt.Printf("ready %d\n", os.Getpid())
-	_, _ = io.Copy(io.Discard, os.Stdin)
-	os.Exit(0)
-}
-
-// lockHelper is a running TestLockHelperProcess and the line it printed.
-type lockHelper struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	line  string
-}
-
-// startLockHelper runs the helper in MODE on PATH and reads its first line.
-// A holding helper is let go at the end of the test.
-func startLockHelper(t *testing.T, mode, path string) *lockHelper {
-	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestLockHelperProcess$")
-	cmd.Env = append(os.Environ(), lockHelperEnv+"="+mode, lockHelperEnv+"_PATH="+path)
-	cmd.Stderr = os.Stderr
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatalf("helper stdin: %v", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("helper stdout: %v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start the helper: %v", err)
-	}
-	h := &lockHelper{cmd: cmd, stdin: stdin}
-	t.Cleanup(func() {
-		h.stdin.Close()
-		_ = h.cmd.Wait()
-	})
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	if err != nil {
-		t.Fatalf("the helper (%s) printed nothing: %v", mode, err)
-	}
-	h.line = strings.TrimSpace(line)
-	return h
-}
-
-// field answers the integer after WORD in the helper's line.
-func (h *lockHelper) field(t *testing.T, word string) int {
-	t.Helper()
-	parts := strings.Fields(h.line)
-	for i := 0; i+1 < len(parts); i++ {
-		if parts[i] == word {
-			n, err := strconv.Atoi(parts[i+1])
+	locktest.Run(lockHelperEnv, map[string]locktest.Mode{
+		"hold": func(path string) error {
+			_, _, err := TryExclusive(path)
+			return err
+		},
+		"shared": func(path string) error {
+			f, err := OpenFile(path)
 			if err != nil {
-				t.Fatalf("helper line %q: %v", h.line, err)
+				return err
 			}
-			return n
-		}
-	}
-	t.Fatalf("helper line %q names no %q", h.line, word)
-	return 0
+			return syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, wholeFile(syscall.F_RDLCK))
+		},
+		"forked": func(path string) error {
+			rec, _, err := TryExclusive(path)
+			if err != nil {
+				return err
+			}
+			// THE CHILD HOLDS A DESCRIPTOR OF THE LOCK'S OPEN FILE DESCRIPTION,
+			// as a child the daemon forked holds one until its exec, and its
+			// Darwin shadow past it. An flock would stay held through it after
+			// this process exits.
+			child := exec.Command("/bin/sleep", "300")
+			child.ExtraFiles = []*os.File{rec.f}
+			if err := child.Start(); err != nil {
+				return err
+			}
+			fmt.Printf("child %d\n", child.Process.Pid)
+			os.Exit(0)
+			return nil
+		},
+		"across-exec": func(path string) error {
+			// THE LOCK OUTLIVES THE EXEC: the program exec'd in this process's
+			// place holds it, under this same pid, until it exits.
+			if err := HoldAcrossExec(path); err != nil {
+				return err
+			}
+			fmt.Printf("ready %d\n", os.Getpid())
+			return syscall.Exec("/bin/cat", []string{"cat"}, os.Environ())
+		},
+		"probe": func(path string) error {
+			holder, err := HolderOf(path)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("holder %d\n", holder.PID)
+			os.Exit(0)
+			return nil
+		},
+	})
+}
+
+// startLockHelper runs TestLockHelperProcess in MODE on PATH.
+func startLockHelper(t *testing.T, mode, path string) *locktest.Process {
+	t.Helper()
+	return locktest.Start(t, "TestLockHelperProcess", lockHelperEnv, mode, path)
 }
 
 func lockPath(t *testing.T) string {
@@ -172,14 +109,14 @@ func TestALockIsFreeOnceItsHolderExitsWhileAChildHoldsItsDescriptor(t *testing.T
 	// descriptor, then exited; the child is still alive.
 	path := lockPath(t)
 	helper := startLockHelper(t, "forked", path)
-	child := helper.field(t, "child")
+	child := helper.Field(t, "child")
 	t.Cleanup(func() {
 		if p, err := os.FindProcess(child); err == nil {
 			_ = p.Kill()
 			_, _ = p.Wait()
 		}
 	})
-	if err := helper.cmd.Wait(); err != nil {
+	if err := helper.Cmd.Wait(); err != nil {
 		t.Fatalf("the holder's exit: %v", err)
 	}
 	if err := syscall.Kill(child, 0); err != nil {
@@ -206,7 +143,7 @@ func TestTryExclusive(t *testing.T) {
 	}{
 		{name: "a free lock is taken", hold: func(*testing.T, string) int { return 0 }},
 		{name: "a lock another process holds is refused naming it", wantHolder: true,
-			hold: func(t *testing.T, path string) int { return startLockHelper(t, "hold", path).field(t, "ready") }},
+			hold: func(t *testing.T, path string) int { return startLockHelper(t, "hold", path).Field(t, "ready") }},
 		{name: "a lock this process holds is refused naming this process", wantHolder: true,
 			hold: func(t *testing.T, path string) int { mustTake(t, path); return os.Getpid() }},
 		{name: "a lock released is free again",
@@ -280,7 +217,7 @@ func TestAskingAboutALockInTheHoldingProcessKeepsItHeld(t *testing.T) {
 			tt.ask(path)
 
 			// Assert: another process still sees it held by this one.
-			if got := startLockHelper(t, "probe", path).field(t, "holder"); got != os.Getpid() {
+			if got := startLockHelper(t, "probe", path).Field(t, "holder"); got != os.Getpid() {
 				t.Fatalf("after %s: held by %d, want this process (%d)", tt.name, got, os.Getpid())
 			}
 		})
@@ -296,7 +233,7 @@ func TestProbeShared(t *testing.T) {
 	}{
 		{name: "a free lock is not held", hold: func(*testing.T, string) int { return 0 }},
 		{name: "another process's exclusive lock is held, naming it", wantHeld: true,
-			hold: func(t *testing.T, path string) int { return startLockHelper(t, "hold", path).field(t, "ready") }},
+			hold: func(t *testing.T, path string) int { return startLockHelper(t, "hold", path).Field(t, "ready") }},
 		{name: "this process's lock is held, naming this process", wantHeld: true,
 			hold: func(t *testing.T, path string) int { mustTake(t, path); return os.Getpid() }},
 		{name: "another process's shared probe is not held",
@@ -670,12 +607,12 @@ func TestHoldAcrossExecIsHeldByTheExecdProgramUntilItExits(t *testing.T) {
 	// Arrange: a process takes the lock, then execs cat in its own place.
 	path := lockPath(t)
 	h := startLockHelper(t, "across-exec", path)
-	pid := h.field(t, "ready")
+	pid := h.Field(t, "ready")
 
 	// Act: the lock is read while cat runs, then cat is let go.
 	holder, err := HolderOf(path)
-	h.stdin.Close()
-	waitErr := h.cmd.Wait()
+	h.Stdin.Close()
+	waitErr := h.Cmd.Wait()
 
 	// Assert: the exec'd program held it under the same pid, and it was
 	// released when that program exited.
@@ -721,7 +658,7 @@ func TestTryExistingExclusive(t *testing.T) {
 			return 0
 		}},
 		{name: "a file another process holds is refused naming it", wantHolder: true,
-			arrange: func(t *testing.T, path string) int { return startLockHelper(t, "hold", path).field(t, "ready") }},
+			arrange: func(t *testing.T, path string) int { return startLockHelper(t, "hold", path).Field(t, "ready") }},
 		{name: "a file this process holds is refused naming this process", wantHolder: true,
 			arrange: func(t *testing.T, path string) int { mustTake(t, path); return os.Getpid() }},
 	}
@@ -792,7 +729,7 @@ func TestAHeldFileIsWrittenAndReadWithoutDroppingItsLock(t *testing.T) {
 	if werr != nil || rerr != nil || string(got) != "pid=7\n" {
 		t.Fatalf("Overwrite = %v, ReadAll = (%q, %v), want pid=7", werr, got, rerr)
 	}
-	if holder := startLockHelper(t, "probe", path).field(t, "holder"); holder != os.Getpid() {
+	if holder := startLockHelper(t, "probe", path).Field(t, "holder"); holder != os.Getpid() {
 		t.Fatalf("held by %d after the write and read, want this process (%d)", holder, os.Getpid())
 	}
 }

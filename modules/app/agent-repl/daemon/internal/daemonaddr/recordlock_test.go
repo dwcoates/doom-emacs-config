@@ -1,25 +1,22 @@
 package daemonaddr
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 
 	"agent-repld/internal/recordlock"
+	"agent-repld/internal/recordlock/locktest"
 )
 
 // The record locks' guarantees are about OTHER processes, so these cases run
-// a second one: this test binary re-executed as TestLockHelperProcess, which
-// takes what its mode names, prints "ready <pid>", and holds
-// until its stdin closes.
+// a second one (locktest): this test binary re-executed as
+// TestLockHelperProcess, which takes what its mode names, prints
+// "ready <pid>", and holds until its stdin closes.
 
 const lockHelperEnv = "DAEMONADDR_LOCK_HELPER"
 
@@ -31,121 +28,59 @@ const lockHelperEnv = "DAEMONADDR_LOCK_HELPER"
 //	life PATH     hold the life lock of instance "helper" beside the
 //	              daemon.addr PATH, and Release it when stdin closes
 func TestLockHelperProcess(t *testing.T) {
-	mode := os.Getenv(lockHelperEnv)
-	if mode == "" {
-		return
-	}
-	path := os.Getenv(lockHelperEnv + "_PATH")
-	fail := func(err error) {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(3)
-	}
-	switch mode {
-	case "serve":
-		lock, err := acquireBootLock(path)
-		if err != nil {
-			fail(err)
-		}
-		if err := lock.takeServing(); err != nil {
-			fail(err)
-		}
-	case "shared":
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
-		if err != nil {
-			fail(err)
-		}
-		if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &syscall.Flock_t{Type: syscall.F_RDLCK}); err != nil {
-			fail(err)
-		}
-	case "probe":
-		boot, err := recordlock.HolderOf(path)
-		if err != nil {
-			fail(err)
-		}
-		serving, err := recordlock.HolderOf(ServingPath(filepath.Join(filepath.Dir(path), "daemon.addr")))
-		if err != nil {
-			fail(err)
-		}
-		fmt.Printf("boot %d serving %d\n", boot.PID, serving.PID)
-		os.Exit(0)
-	case "life":
-		life, err := HoldLife(path, "helper")
-		if err != nil {
-			fail(err)
-		}
-		fmt.Printf("ready %d\n", os.Getpid())
-		_, _ = io.Copy(io.Discard, os.Stdin)
-		if err := life.Release(); err != nil {
-			fail(err)
-		}
-		os.Exit(0)
-	default:
-		fail(fmt.Errorf("unknown helper mode %q", mode))
-	}
-	fmt.Printf("ready %d\n", os.Getpid())
-	_, _ = io.Copy(io.Discard, os.Stdin)
-	os.Exit(0)
-}
-
-// lockHelper is a running TestLockHelperProcess and the line it printed.
-type lockHelper struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	line  string
-}
-
-// startLockHelper runs the helper in MODE on PATH and reads its first line.
-// A holding helper is let go at the end of the test.
-func startLockHelper(t *testing.T, mode, path string) *lockHelper {
-	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestLockHelperProcess$")
-	cmd.Env = append(os.Environ(), lockHelperEnv+"="+mode, lockHelperEnv+"_PATH="+path)
-	cmd.Stderr = os.Stderr
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatalf("helper stdin: %v", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("helper stdout: %v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start the helper: %v", err)
-	}
-	h := &lockHelper{cmd: cmd, stdin: stdin}
-	t.Cleanup(func() {
-		h.stdin.Close()
-		_ = h.cmd.Wait()
-	})
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	if err != nil {
-		t.Fatalf("the helper (%s) printed nothing: %v", mode, err)
-	}
-	h.line = strings.TrimSpace(line)
-	return h
-}
-
-// field answers the integer after WORD in the helper's line.
-func (h *lockHelper) field(t *testing.T, word string) int {
-	t.Helper()
-	parts := strings.Fields(h.line)
-	for i := 0; i+1 < len(parts); i++ {
-		if parts[i] == word {
-			n, err := strconv.Atoi(parts[i+1])
+	locktest.Run(lockHelperEnv, map[string]locktest.Mode{
+		"serve": func(path string) error {
+			lock, err := acquireBootLock(path)
 			if err != nil {
-				t.Fatalf("helper line %q: %v", h.line, err)
+				return err
 			}
-			return n
-		}
-	}
-	t.Fatalf("helper line %q names no %q", h.line, word)
-	return 0
+			return lock.takeServing()
+		},
+		"shared": func(path string) error {
+			f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+			if err != nil {
+				return err
+			}
+			return syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &syscall.Flock_t{Type: syscall.F_RDLCK})
+		},
+		"probe": func(path string) error {
+			boot, err := recordlock.HolderOf(path)
+			if err != nil {
+				return err
+			}
+			serving, err := recordlock.HolderOf(ServingPath(filepath.Join(filepath.Dir(path), "daemon.addr")))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("boot %d serving %d\n", boot.PID, serving.PID)
+			os.Exit(0)
+			return nil
+		},
+		"life": func(path string) error {
+			life, err := HoldLife(path, "helper")
+			if err != nil {
+				return err
+			}
+			locktest.Hold()
+			if err := life.Release(); err != nil {
+				return err
+			}
+			os.Exit(0)
+			return nil
+		},
+	})
+}
+
+// startLockHelper runs TestLockHelperProcess in MODE on PATH.
+func startLockHelper(t *testing.T, mode, path string) *locktest.Process {
+	t.Helper()
+	return locktest.Start(t, "TestLockHelperProcess", lockHelperEnv, mode, path)
 }
 
 func TestARefusedClaimNamesTheProcessHoldingIt(t *testing.T) {
 	// Arrange.
 	path := filepath.Join(t.TempDir(), LockName)
-	holder := startLockHelper(t, "serve", path).field(t, "ready")
+	holder := startLockHelper(t, "serve", path).Field(t, "ready")
 
 	// Act.
 	_, err := acquireBootLock(path)
@@ -160,7 +95,7 @@ func TestARefusedClaimNamesTheProcessHoldingIt(t *testing.T) {
 func TestAServingIncumbentsRefusalNamesTheServingLocksHolder(t *testing.T) {
 	// Arrange.
 	path := filepath.Join(t.TempDir(), LockName)
-	holder := startLockHelper(t, "serve", path).field(t, "ready")
+	holder := startLockHelper(t, "serve", path).Field(t, "ready")
 
 	// Act.
 	_, verdict, err := acquireBootLockWithin(path, ClaimWaitBound, BootOrdinary, nil)
@@ -220,7 +155,7 @@ func TestAskingAboutTheLocksInTheHoldingProcessKeepsThemHeld(t *testing.T) {
 
 			// Assert: another process still sees both held by this one.
 			probe := startLockHelper(t, "probe", path)
-			if boot, serving := probe.field(t, "boot"), probe.field(t, "serving"); boot != os.Getpid() || serving != os.Getpid() {
+			if boot, serving := probe.Field(t, "boot"), probe.Field(t, "serving"); boot != os.Getpid() || serving != os.Getpid() {
 				t.Fatalf("after %s: boot claim held by %d, serving lock by %d; want both by this process (%d)", tt.name, boot, serving, os.Getpid())
 			}
 		})
