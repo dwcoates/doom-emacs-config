@@ -358,6 +358,146 @@ func TestAwaitTurnEndAnswersACloseLoudly(t *testing.T) {
 	}
 }
 
+// TestACloseAnswersATurnWaitByWhetherTheWatcherHadTheTurn covers the two
+// answers a close gives a turn wait: ErrClosedBeforeTurn for a turn this
+// watcher never had in hand -- one held for a session still coming up, which
+// the session's next watcher may run (2026-11-21 21:38:14, the deploy
+// mediator's check escalated when an adopted inert shim's watcher closed
+// under its wait) -- and plain ErrWatcherClosed for every turn it took.
+func TestACloseAnswersATurnWaitByWhetherTheWatcherHadTheTurn(t *testing.T) {
+	tests := []struct {
+		name string
+		// start builds the watcher and puts it in the state the case names.
+		start func(t *testing.T) *harness
+		turn  ids.TurnID
+		// closeFirst closes the watcher before the wait is filed.
+		closeFirst bool
+		wantBefore bool
+	}{
+		{
+			name:       "a turn never in hand on a session-less shim's watcher",
+			start:      func(t *testing.T) *harness { return newHarnessAttachingPurely(t) },
+			turn:       "turn-held",
+			wantBefore: true,
+		},
+		{
+			name:       "a turn never in hand on a started session's watcher",
+			start:      func(t *testing.T) *harness { return newHarness(t, Session{Started: sessionStarted("")}) },
+			turn:       "turn-held",
+			wantBefore: true,
+		},
+		{
+			name:       "a turn never in hand, waited on after the close",
+			start:      func(t *testing.T) *harness { return newHarnessAttachingPurely(t) },
+			turn:       "turn-held",
+			closeFirst: true,
+			wantBefore: true,
+		},
+		{
+			name:  "the turn the session's facts name in flight",
+			start: func(t *testing.T) *harness { return newHarness(t, Session{Started: sessionStarted("turn-1")}) },
+			turn:  "turn-1",
+		},
+		{
+			name: "a turn going to the shim",
+			start: func(t *testing.T) *harness {
+				h := newHarness(t, Session{Started: sessionStarted("")})
+				h.w.OnTurnOpening("ws-1", "turn-2")
+				return h
+			},
+			turn: "turn-2",
+		},
+		{
+			name: "a turn joining the turn in flight",
+			start: func(t *testing.T) *harness {
+				h := newHarness(t, Session{Started: sessionStarted("")})
+				h.w.OnTurnOpening("ws-1", "turn-1")
+				if !h.w.OnTurnJoining("ws-1", "turn-2") {
+					t.Fatal("OnTurnJoining refused a join behind a turn of the daemon's")
+				}
+				return h
+			},
+			turn: "turn-2",
+		},
+		{
+			name: "a known turn no longer in flight",
+			start: func(t *testing.T) *harness {
+				h := newHarness(t, Session{Started: sessionStarted("")})
+				h.w.OnTurnOpening("ws-1", "turn-2")
+				h.w.OnTurnOpenFailed("ws-1", "turn-2")
+				return h
+			},
+			turn: "turn-2",
+		},
+		{
+			name: "a turn the adoption found open",
+			start: func(t *testing.T) *harness {
+				h := startHarness(t, Session{OpenAtAttach: openRows("turn-open")}, nil)
+				h.session = h.client.nextSessionOpen(t)
+				return h
+			},
+			turn: "turn-open",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := tt.start(t)
+			var answered <-chan turnEnd
+			if !tt.closeFirst {
+				ch, standing, answer := h.w.registerTurnWaiter(tt.turn)
+				if !standing {
+					t.Fatalf("the wait on %q did not stand (%+v)", tt.turn, answer)
+				}
+				answered = ch
+			}
+
+			// Act.
+			if err := h.w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			var got error
+			if tt.closeFirst {
+				_, got = h.w.AwaitTurnEnd(context.Background(), tt.turn)
+			} else {
+				got = (<-answered).err
+			}
+
+			// Assert.
+			if !errors.Is(got, ErrWatcherClosed) {
+				t.Fatalf("the turn wait after Close = %v, want ErrWatcherClosed", got)
+			}
+			if before := errors.Is(got, ErrClosedBeforeTurn); before != tt.wantBefore {
+				t.Fatalf("the turn wait after Close = %v; ErrClosedBeforeTurn %v, want %v", got, before, tt.wantBefore)
+			}
+		})
+	}
+}
+
+// TestACloseAnswersAFreeWaitPlainly covers the free waiter beside the turn
+// waiter: a freeness wait names no turn, so a close answers it with plain
+// ErrWatcherClosed, never ErrClosedBeforeTurn.
+func TestACloseAnswersAFreeWaitPlainly(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	ch, standing, err := h.w.registerFreeWaiter()
+	if !standing {
+		t.Fatalf("a turn is in flight but the wait did not stand (err %v)", err)
+	}
+
+	// Act.
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got := <-ch
+
+	// Assert.
+	if !errors.Is(got, ErrWatcherClosed) || errors.Is(got, ErrClosedBeforeTurn) {
+		t.Fatalf("the freeness waiter after Close = %v, want plain ErrWatcherClosed", got)
+	}
+}
+
 // TestClosedTurnMemoryIsBounded covers the eviction: the memory of ended turns
 // is a fixed window, not an unbounded ledger on a long-lived session.
 func TestClosedTurnMemoryIsBounded(t *testing.T) {

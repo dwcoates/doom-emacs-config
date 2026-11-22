@@ -3,6 +3,7 @@ package sessionwatcher
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -14,6 +15,16 @@ import (
 // so the wait is ANSWERED rather than left hanging on a state that can no
 // longer change.
 var ErrWatcherClosed = errors.New("sessionwatcher: the watcher closed while a wait was standing")
+
+// ErrClosedBeforeTurn is what a turn wait answers when the watcher closed
+// while it waited on a turn this watcher NEVER HAD IN HAND (hadTurnLocked): no
+// caller recorded the turn as going to the shim through it, and no stream or
+// session fact named it. Every path that sends a turn to the shim records it
+// here first, under the watcher's lock, so the close proves the turn was not
+// delivered through this watcher -- a turn held for a session still coming up
+// is one the NEXT watcher may run. It wraps ErrWatcherClosed, so a caller that
+// only asks whether the watcher closed still reads that.
+var ErrClosedBeforeTurn = fmt.Errorf("%w before the turn waited on reached it", ErrWatcherClosed)
 
 // closedTurnMemory is how many just-ended turns a watcher remembers so an
 // AwaitTurnEnd that arrives AFTER the terminal still gets its answer. The
@@ -160,7 +171,8 @@ func (w *watcher) registerFreeWaiter() (ch chan error, standing bool, err error)
 // AwaitTurnEnd blocks until the named turn ends and reports HOW it ended. A
 // turn that ended just before the call is answered from the watcher's memory
 // of recently closed turns rather than waiting for an edge that already
-// passed.
+// passed. A watcher that closes answers ErrClosedBeforeTurn for a turn it
+// never had in hand, ErrWatcherClosed otherwise (closedErrLocked).
 func (w *watcher) AwaitTurnEnd(ctx context.Context, turn ids.TurnID) (TurnClose, error) {
 	ch, standing, end := w.registerTurnWaiter(turn)
 	if !standing {
@@ -184,7 +196,7 @@ func (w *watcher) registerTurnWaiter(turn ids.TurnID) (ch chan turnEnd, standing
 		return nil, false, turnEnd{how: how}
 	}
 	if w.closed {
-		return nil, false, turnEnd{err: ErrWatcherClosed}
+		return nil, false, turnEnd{err: w.closedErrLocked(turn)}
 	}
 	ch = make(chan turnEnd, 1)
 	w.turnWaiters[turn] = append(w.turnWaiters[turn], ch)
@@ -319,20 +331,62 @@ func (w *watcher) signalFreenessLocked() {
 	w.freeWaiters = nil
 }
 
-// failWaitersLocked answers every standing wait with ErrWatcherClosed. A
-// closed watcher can no longer produce the edge the waiter is waiting for, so
-// the wait is ended loudly rather than left to the caller's context.
+// failWaitersLocked answers every standing wait with ErrWatcherClosed -- a
+// turn waiter on a turn this watcher never had in hand with
+// ErrClosedBeforeTurn (closedErrLocked). A closed watcher can no longer
+// produce the edge the waiter is waiting for, so the wait is ended loudly
+// rather than left to the caller's context.
 func (w *watcher) failWaitersLocked() {
 	for _, ch := range w.freeWaiters {
 		ch <- ErrWatcherClosed
 	}
 	w.freeWaiters = nil
 	for turn, waiters := range w.turnWaiters {
+		err := w.closedErrLocked(turn)
 		for _, ch := range waiters {
-			ch <- turnEnd{err: ErrWatcherClosed}
+			ch <- turnEnd{err: err}
 		}
 		delete(w.turnWaiters, turn)
 	}
+}
+
+// closedErrLocked is what a closed watcher answers a wait on TURN:
+// ErrClosedBeforeTurn when it never had the turn in hand, ErrWatcherClosed
+// otherwise.
+func (w *watcher) closedErrLocked(turn ids.TurnID) error {
+	if w.hadTurnLocked(turn) {
+		return ErrWatcherClosed
+	}
+	return ErrClosedBeforeTurn
+}
+
+// hadTurnLocked reports whether this watcher ever had TURN in hand: stood in
+// flight, waiting or joining behind the turn in flight, carried by a routed
+// prompt or a page (knownTurns, which every one of those writes), ended here
+// (closedTurns), or named open at the adoption (openAtAttach). It is the ONE
+// judgement ErrClosedBeforeTurn rests on, so every way a watcher takes a turn
+// answers here.
+func (w *watcher) hadTurnLocked(turn ids.TurnID) bool {
+	if w.turn != nil && *w.turn == turn {
+		return true
+	}
+	if w.adopted != nil && *w.adopted == turn {
+		return true
+	}
+	for _, entry := range w.waiting {
+		if entry.turn == turn {
+			return true
+		}
+	}
+	if w.turnKnownLocked(turn) {
+		return true
+	}
+	for _, open := range w.openAtAttach {
+		if open.ID == turn {
+			return true
+		}
+	}
+	return false
 }
 
 // dropFreeWaiter removes a waiter whose context ended, so an abandoned wait

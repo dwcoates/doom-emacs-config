@@ -599,13 +599,19 @@ type fakeWatcher struct {
 	// turnEnded answers AwaitTurnEnd: each call takes the next close sent on
 	// it.
 	turnEnded chan wsm.TurnClose
+	// turnErr answers AwaitTurnEnd with an error: each call takes the next
+	// error sent on it, or the next close on turnEnded, whichever comes.
+	turnErr chan error
 }
 
-// AwaitTurnEnd answers the next close the fixture sends on turnEnded.
+// AwaitTurnEnd answers the next close the fixture sends on turnEnded, or the
+// next error it sends on turnErr.
 func (w *fakeWatcher) AwaitTurnEnd(ctx context.Context, _ ids.TurnID) (wsm.TurnClose, error) {
 	select {
 	case close := <-w.turnEnded:
 		return close, nil
+	case err := <-w.turnErr:
+		return 0, err
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}

@@ -2199,18 +2199,26 @@ func TestConnStatesRecordsOnlyAConnectionThatClosedWithNoRequest(t *testing.T) {
 	tests := []struct {
 		name   string
 		states []http.ConnState
-		want   bool
+		// addressless makes the connection one with no remote address, as
+		// net.FileConn makes a handed-over one whose client reset.
+		addressless bool
+		want        bool
 	}{
 		{name: "closed with no request", states: []http.ConnState{http.StateNew, http.StateClosed}, want: true},
+		{name: "closed with no request and no remote address", states: []http.ConnState{http.StateNew, http.StateClosed}, addressless: true, want: true},
 		{name: "closed after a request", states: []http.ConnState{http.StateNew, http.StateActive, http.StateIdle, http.StateClosed}},
 		{name: "hijacked for h2c", states: []http.ConnState{http.StateNew, http.StateActive, http.StateHijacked}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			side, peer := net.Pipe()
-			defer side.Close()
+			pipe, peer := net.Pipe()
+			defer pipe.Close()
 			defer peer.Close()
+			var side net.Conn = pipe
+			if tt.addressless {
+				side = addresslessConn{pipe}
+			}
 			log := dlog.NewTestLogger()
 			conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, log: log}
 
@@ -2220,9 +2228,12 @@ func TestConnStatesRecordsOnlyAConnectionThatClosedWithNoRequest(t *testing.T) {
 			}
 
 			// Assert
-			_, got := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.server.conn_requestless"})
+			record, got := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.server.conn_requestless"})
 			if got != tt.want {
 				t.Fatalf("recorded = %v, want %v (records %v)", got, tt.want, log.Records())
+			}
+			if tt.addressless && record.Context["remote"] != "unknown" {
+				t.Fatalf("recorded remote %v, want unknown", record.Context["remote"])
 			}
 			if len(conns.byConn) != 0 || len(conns.born) != 0 {
 				t.Fatalf("still tracked %v / %v, want the closed connection forgotten", conns.byConn, conns.born)
@@ -2230,6 +2241,11 @@ func TestConnStatesRecordsOnlyAConnectionThatClosedWithNoRequest(t *testing.T) {
 		})
 	}
 }
+
+// addresslessConn is a connection with no remote address.
+type addresslessConn struct{ net.Conn }
+
+func (addresslessConn) RemoteAddr() net.Addr { return nil }
 
 func TestBeginShutdownReportsAFailedSharedStopAndStillDeparts(t *testing.T) {
 	// Arrange.
