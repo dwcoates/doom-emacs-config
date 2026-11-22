@@ -1674,6 +1674,11 @@ var sparingPaths = []standDownPath{
 	{name: "a settings visit's end", op: opVisit, trigger: "settings_visit",
 		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.VisitDown(ws, beatAfter) }},
+	{name: "a sync merge put in line", op: opMergeQueued, trigger: "merge_queued",
+		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
+		ask: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			h.mergeQueuedDown(ws, queuedAt(t, h, ws, instant))
+		}},
 }
 
 // recordWith answers the first record under OP whose message is MESSAGE.
@@ -1751,7 +1756,7 @@ func TestARemoteControlTurnOnBetweenTheAskAndTheActIsHonored(t *testing.T) {
 			// Arrange: the mode is off at the ask, and a turn-on holds the gate.
 			ran := make(chan struct{})
 			h := newHarness(t, func(d *Deps) {
-				d.Detach = func(run func(context.Context)) {
+				d.Detach = func(_ ids.WorkspaceID, run func(context.Context)) {
 					go func() {
 						defer close(ran)
 						run(context.Background())

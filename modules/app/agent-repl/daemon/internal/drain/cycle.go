@@ -102,10 +102,12 @@ const opMergeQueued = "daemon.drain.merge_queued_park"
 
 // mergeQueuedReason is a sync merge's stand-down reason.
 var mergeQueuedReason = standDownReason{
-	op:     opMergeQueued,
-	detail: "parked the moment its own branch's merge was put in line; the transcript was left as it stood",
-	done:   "parked a finished workspace whose merge waits in line",
-	life:   shimlife.StandDownMergeQueued,
+	op:      opMergeQueued,
+	detail:  "parked the moment its own branch's merge was put in line; the transcript was left as it stood",
+	done:    "parked a finished workspace whose merge waits in line",
+	life:    shimlife.StandDownMergeQueued,
+	trigger: "merge_queued",
+	remote:  remoteSpares,
 }
 
 // queuedMerge names the queue entry a sync merge's park is scoped to.
