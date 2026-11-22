@@ -984,7 +984,8 @@ message RosterRowMergeTurn {}
 //   - the row draws a MERGE INDICATOR: its status is `merging` or
 //     `merge_queued`, or it carries the `merge_turn` or `async_merging`
 //     marker;
-//   - the merge queue of the repository THAT merge is on is paused.
+//   - the merge queue of the repository THAT merge is on is paused, its
+//     deploy check's hold included (RosterMergeQueuePauserDeployCheck).
 //
 // A paused repository's rows with no merge on its queue never carry it, and a
 // row whose merge is on another repository's queue never carries it for this
@@ -1267,7 +1268,9 @@ message RosterRepoMergeQueue {
   // Every merge waiting behind the head, in the order it will run.
   repeated RosterMergeQueueWaiting waiting = 3;
   // PRESENT while the queue is paused: merges still join it, but nothing
-  // runs until it is resumed.
+  // runs until it is resumed, or, held for its deploy check
+  // (RosterMergeQueuePauserDeployCheck), until the deploy mediator approves
+  // a deploy.
   optional RosterMergeQueuePaused paused = 4;
   // Tag 5 (`remediating`, every merge out of line as one list with no cap)
   // is RETIRED (2026-11-11): a queue holds at most one merge fixing tests and
@@ -1549,17 +1552,29 @@ message RosterMergeQueueHeadClock {
 // The sidebar draws the repository's label in the error red and the queue's
 // merge glyphs in `render-colors.json#paused_merge_mark`'s ink while it
 // stands, says who paused it and when on the label's hover, and resumes the
-// queue on a click of the label (owner request, 2026-10-27).
+// queue on a click of the label (owner request, 2026-10-27). A queue held
+// only for its deploy check (`by` is `deploy_check`) is drawn the same, but a
+// resume cannot release that hold, so its toggle asks for a real pause, as a
+// running queue's does.
+//
+// A REAL PAUSE IS DRAWN OVER A DEPLOY CHECK'S HOLD: while the user, the host
+// or a workspace's agent paused a queue its deploy check also holds, this
+// message names that pause, and the check's hold is read from the
+// RosterMergeQueueMediation label beside the repository's name.
 message RosterMergeQueuePaused {
   // When the queue was paused, epoch ms. A paused head's clock stops here.
   // UNSET for a pause recorded before the daemon kept its instant
-  // (2026-10-27); the head's clock is then not drawn.
+  // (2026-10-27); the head's clock is then not drawn. For a deploy check's
+  // hold it is when the hold began: the first deploy of the chain whose check
+  // holds the queue, or the remediation finish's first finish when it began
+  // with no check owed, whichever came first.
   optional int64 paused_at_ms = 1;
   // Who paused the queue. UNSET for a pause recorded before the daemon kept
   // who asked (2026-10-27).
   optional RosterMergeQueuePauser by = 2;
   // TRUE for a hard stop (agentrepl.v1.UpdateMergeQueuePause.hard): the work
-  // the queue's merges were doing was stopped too.
+  // the queue's merges were doing was stopped too. Always FALSE for a deploy
+  // check's hold, which suspends merges at their step as a pause does.
   bool hard = 3;
 }
 
@@ -1576,6 +1591,9 @@ message RosterMergeQueuePauser {
     // merge's gate runs again from its start once the queue is resumed.
     // (Added 2026-11-15.)
     RosterMergeQueuePauserHost host = 3;
+    // The queue's deploy check holds it (owner ruling, 2026-11-22).
+    // (Added 2026-11-22.)
+    RosterMergeQueuePauserDeployCheck deploy_check = 4;
   }
 }
 // The user paused the queue. DELIBERATELY EMPTY: the arm is the fact.
@@ -1585,6 +1603,17 @@ message RosterMergeQueuePauserHost {
   // What the host could not do, drawn verbatim: the runner's own words.
   string cause = 1;
 }
+// The queue's deploy check holds it: PRESENT from a deploy's start until the
+// deploy mediator approves a deploy, the whole of a remediation's gate,
+// landing and deploy included, since a remediation never releases the queue;
+// its own deploy owes the next check, which only the mediator's approval
+// releases. The reason the queue is held is drawn by the
+// RosterMergeQueueMediation label beside the repository's name. Agent-repl's
+// own release of a check whose window holds no warning and no error, a
+// deploy that changed nothing, and the user's release of an escalation end it
+// too, unless a remediation finish stands. DELIBERATELY EMPTY: the arm is the
+// fact.
+message RosterMergeQueuePauserDeployCheck {}
 // A workspace's agent paused the queue.
 message RosterMergeQueuePauserWorkspace {
   // The workspace's name as it stood when it paused the queue, drawn
