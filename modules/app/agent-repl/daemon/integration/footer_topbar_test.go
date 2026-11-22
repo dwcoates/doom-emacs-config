@@ -78,14 +78,31 @@ func TestFooterStatusTreeFollowsIdleWorkingDone(t *testing.T) {
 		return v.GetStrip().GetStatus().GetIdle().GetReady() != nil
 	})
 
-	// Act: StartTurn should be visible as working.submitting before the fake
-	// even answers.
-	f.submit("do it", "k-tree", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	// Act: the fake does not answer StartTurn until the footer has been seen
+	// submitting, because the daemon moves it on to thinking the moment the
+	// answer lands and a reader that is slow to take pushes would never see
+	// the submitting view between them. The submission waits on that answer,
+	// so it is sent from a goroutine.
+	f.shim.Hang()
+	submitted := make(chan error, 1)
+	go func() {
+		_, err := f.d.Client().SubmitPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+			Workspace:      f.ws,
+			Said:           said("do it"),
+			IdempotencyKey: "k-tree",
+			Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+		}))
+		submitted <- err
+	}()
 
 	// Assert: submitting, then thinking, then done once the turn concludes.
 	awaitFooter(t, f, footer, "working.submitting on StartTurn", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWorking().GetSubmitting() != nil
 	})
+	f.shim.Unhang()
+	if err := <-submitted; err != nil {
+		t.Fatalf("SubmitPrompt(\"do it\") = error %v, want an answer", err)
+	}
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("think-1"),
 		Item:       &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{Result: &conversationv1.AgentThinking_Start{Start: &conversationv1.AgentThinkingStart{}}}},
