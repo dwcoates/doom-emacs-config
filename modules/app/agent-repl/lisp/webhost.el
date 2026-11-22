@@ -130,6 +130,13 @@ handed with every page the next replay loads, then cleared: each page
 measures how long it stood blank from it (`reload_blank').  Nil for the
 host's first load, which is the editor starting, not a reload.")
 
+(defvar agent-repl--webhost-downtime-started (make-hash-table :test #'equal)
+  "Workspace id -> when its shown page\='s host stream was taken, in epoch ms.
+Set when a daemon change takes the daemon of the workspace the user is
+viewing (`agent-repl-webhost-note-downtime'), handed with the next load of
+that workspace\='s page and then forgotten, so the page measures how long
+the workspace could not be used from it (`viewed_downtime').")
+
 (defvar agent-repl--webhost-sidebar-offset 0
   "How far below the host's window top the sidebar's window content starts,
 in pixels, as last measured (`agent-repl-sidebar-view-tell-offset').
@@ -695,6 +702,36 @@ instant, which the switch\='s select carries to the sidebar."
     (setq agent-repl--webhost-switch-started nil)
     (and noted (equal (car noted) ws) (cdr noted))))
 
+(defun agent-repl-webhost-note-downtime (ws)
+  "Note that a daemon change took WS\='s daemon now, when the user is viewing WS.
+The page measures how long WS could not be used from this instant to its
+conversation drawn (webapp/src/viewed-downtime.ts), so the instant rides the
+next load of WS\='s page (`agent-repl--webhost-take-downtime').  The FIRST
+instant of an episode stands: a later walk of the same outage keeps it.
+Nothing is noted for a workspace the user is not viewing."
+  (when (agent-repl-webhost-shown-p ws)
+    (let ((id (agent-repl--webhost-id ws)))
+      (unless (gethash id agent-repl--webhost-downtime-started)
+        (puthash id (agent-repl--now-unix-ms) agent-repl--webhost-downtime-started)
+        (agent-repl--info ws "elisp.webhost.downtime-noted ws=%s id=%s" ws id)))))
+
+(defun agent-repl--webhost-take-downtime (id)
+  "The downtime start noted for page ID in epoch ms, or nil; always cleared."
+  (prog1 (gethash id agent-repl--webhost-downtime-started)
+    (remhash id agent-repl--webhost-downtime-started)))
+
+(defun agent-repl--webhost-downtime-args (id)
+  "The trailing call arguments handing page ID its downtime start: (MS), or nil.
+Takes the instant (`agent-repl--webhost-take-downtime'), so a load that
+asks for no downtime sends the call as it always was."
+  (when-let ((started (agent-repl--webhost-take-downtime id)))
+    (list started)))
+
+(defun agent-repl-webhost-end-downtime (ws)
+  "Forget the downtime noted for WS: its outage ended with no page load to carry it."
+  (when-let ((id (agent-repl--webhost-id ws)))
+    (remhash id agent-repl--webhost-downtime-started)))
+
 (defun agent-repl-webhost-show (ws)
   "Show WS's page in the host.  Nothing is sent when it is already the one shown.
 A switch the user began to WS (`agent-repl-webhost-note-switch\=') rides the
@@ -750,9 +787,11 @@ NOT MOVE WITH A PAGE: they follow the link (`agent-repl-webhost-follow-daemon').
          (id (agent-repl--webhost-id ws))
          (started (agent-repl--now-unix-ms)))
     (if (equal (gethash id agent-repl--webhost-pages) url)
-        (agent-repl--webhost-call "reload" id started)
+        (apply #'agent-repl--webhost-call "reload" id started
+               (agent-repl--webhost-downtime-args id))
       (puthash id url agent-repl--webhost-pages)
-      (agent-repl--webhost-call "ensure" id url nil started))
+      (apply #'agent-repl--webhost-call "ensure" id url nil started
+               (agent-repl--webhost-downtime-args id)))
     (agent-repl--info ws "elisp.webhost.page-reloaded ws=%s id=%s" ws id)
     id))
 
@@ -945,7 +984,8 @@ Given a LANE, the host loads it once the pages before it in LANE have drawn.
 A replay after a reload hands the reload's start with the page
 \(`agent-repl--webhost-reload-started-ms')."
   (when-let ((url (gethash id agent-repl--webhost-pages)))
-    (agent-repl--webhost-call "ensure" id url lane agent-repl--webhost-reload-started-ms)
+    (apply #'agent-repl--webhost-call "ensure" id url lane agent-repl--webhost-reload-started-ms
+           (agent-repl--webhost-downtime-args id))
     (when-let ((entries (gethash id agent-repl--webhost-held-ingress)))
       (agent-repl--webhost-call "setHeldIngress" id entries))))
 
