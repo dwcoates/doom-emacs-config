@@ -493,6 +493,10 @@ type Verbs interface {
 	// CompactDeployCheck compacts a standing deploy check's conversation by
 	// Haiku now, answering whether it had one to compact.
 	CompactDeployCheck(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// OweDeployCheckCompaction owes a standing deploy check's compaction to
+	// its session's next start and ends the live session, starting none,
+	// answering whether it had a conversation to compact and ran no turn.
+	OweDeployCheckCompaction(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// DeployCheckContextTokens answers the tokens of context a deploy check's
 	// conversation holds now (topbar.Resolver.ContextTokens).
 	DeployCheckContextTokens(ws ids.WorkspaceID) int64

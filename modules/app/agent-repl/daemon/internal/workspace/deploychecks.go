@@ -121,43 +121,17 @@ func (v *verbs) SetDeployMediatorEffort(ctx context.Context, ws wsm.WorkspaceID)
 // CompactDeployCheck implements Verbs: compacts standing deploy check WS's
 // conversation by the cold gate's summarizer (Haiku) NOW, answering whether
 // it did (owner ruling, 2026-11-17): the compaction is owed to the session's
-// next start (wsm.OweCompaction), and the session is ended and started
-// again at once to carry it out, so no later check waits on it. A workspace
-// with no conversation has nothing to compact, and one running a turn (the
-// user's, in the fixer) is never cut: its next start compacts it.
+// next start and the live session ended (oweCompaction), and a session is
+// started again at once to carry it out, so no later check waits on it. A
+// workspace with no conversation has nothing to compact, and one running a
+// turn (the user's, in the fixer) is never cut: its next start compacts it.
+// The start runs the summarizer, about a minute on a long conversation, so
+// it is never asked beside a rollout that may hand WS to a successor
+// (OweDeployCheckCompaction).
 func (v *verbs) CompactDeployCheck(ctx context.Context, ws wsm.WorkspaceID) (bool, error) {
-	_, log, err := v.owned(ctx, "CompactDeployCheck", ws)
-	if err != nil {
+	log, ended, err := v.oweCompaction(ctx, "CompactDeployCheck", ws)
+	if err != nil || !ended {
 		return false, err
-	}
-	if _, err := v.deps.DB.OweCompaction(ctx, ws); err != nil {
-		log.Error(opDeployChecks, "the deploy check workspace's compaction could not be owed", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("compact the deploy check %s: owe the compaction: %w", ws, err)
-	}
-	owed, found, err := v.deps.DB.OwedStartWork(ctx, ws)
-	if err != nil {
-		log.Error(opDeployChecks, "could not read the deploy check workspace's owed start work", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("compact the deploy check %s: read the owed start work: %w", ws, err)
-	}
-	if !found || !owed.Compact {
-		log.Info(opDeployChecks, "the deploy check workspace has no conversation to compact", dlog.Context{"owed": found})
-		return false, nil
-	}
-	// A TURN RUNNING IS NEVER CUT FOR A COMPACTION: a turn the user started
-	// in the fixer keeps it, and the compaction stays owed to its next start.
-	open, err := v.deps.DB.OpenTurns(ctx, ws)
-	if err != nil {
-		log.Error(opDeployChecks, "could not read whether a turn runs in the deploy check workspace; it is not compacted now", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("compact the deploy check %s: read its open turns: %w", ws, err)
-	}
-	if len(open) > 0 {
-		log.Info(opDeployChecks, "a turn runs in the deploy check workspace; its compaction waits for its next start", dlog.Context{"open_turns": len(open)})
-		return false, nil
-	}
-	if v.deps.Sessions.Live(ws) {
-		if _, err := v.endSession(ctx, log, ws); err != nil {
-			return false, fmt.Errorf("compact the deploy check %s: end the session: %w", ws, err)
-		}
 	}
 	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
 		log.Error(opDeployChecks, "the deploy check workspace's session could not start to compact", dlog.Context{"cause": err.Error()})
@@ -165,6 +139,70 @@ func (v *verbs) CompactDeployCheck(ctx context.Context, ws wsm.WorkspaceID) (boo
 	}
 	log.Info(opDeployChecks, "compacted the deploy check workspace's conversation; its session runs on the summary", nil)
 	return true, nil
+}
+
+// OweDeployCheckCompaction implements Verbs: owes standing deploy check WS's
+// compaction to its session's next start and ends the live session, starting
+// none, answering whether the compaction stands owed with no session running
+// (2026-11-22). It is CompactDeployCheck without the start: a remediation's
+// deploy hands WS to a successor about 30s after it starts, which cut every
+// compacting start beside it (the summarizer takes about 70s on the
+// mediator's conversation) and logged three false errors, so the start is
+// left to the session's next bring-up, the successor's after a handover or
+// the next brief's when the deploy replaces no daemon. Nothing is in flight
+// for a handover to cut. A workspace with no conversation has nothing to
+// compact, and one running a turn is never cut: its next start compacts it.
+func (v *verbs) OweDeployCheckCompaction(ctx context.Context, ws wsm.WorkspaceID) (bool, error) {
+	log, ended, err := v.oweCompaction(ctx, "OweDeployCheckCompaction", ws)
+	if err != nil || !ended {
+		return false, err
+	}
+	log.Info(opDeployChecks, "owed the deploy check workspace's compaction to its next start; its session is ended", nil)
+	return true, nil
+}
+
+// oweCompaction is the part CompactDeployCheck and OweDeployCheckCompaction
+// share, so the two cannot drift: it owes WS's compaction to its session's
+// next start (wsm.OweCompaction) and ends the live session, answering WS's
+// logger and whether the compaction is owed with no session running. It
+// answers false, ending nothing, when WS has no conversation to compact or
+// runs a turn, which is never cut: the compaction stays owed to its next
+// start. VERB names the caller in the ownership check.
+func (v *verbs) oweCompaction(ctx context.Context, verb string, ws wsm.WorkspaceID) (dlog.Logger, bool, error) {
+	_, log, err := v.owned(ctx, verb, ws)
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := v.deps.DB.OweCompaction(ctx, ws); err != nil {
+		log.Error(opDeployChecks, "the deploy check workspace's compaction could not be owed", dlog.Context{"cause": err.Error()})
+		return nil, false, fmt.Errorf("compact the deploy check %s: owe the compaction: %w", ws, err)
+	}
+	owed, found, err := v.deps.DB.OwedStartWork(ctx, ws)
+	if err != nil {
+		log.Error(opDeployChecks, "could not read the deploy check workspace's owed start work", dlog.Context{"cause": err.Error()})
+		return nil, false, fmt.Errorf("compact the deploy check %s: read the owed start work: %w", ws, err)
+	}
+	if !found || !owed.Compact {
+		log.Info(opDeployChecks, "the deploy check workspace has no conversation to compact", dlog.Context{"owed": found})
+		return log, false, nil
+	}
+	// A TURN RUNNING IS NEVER CUT FOR A COMPACTION: a turn the user started
+	// in the fixer keeps it, and the compaction stays owed to its next start.
+	open, err := v.deps.DB.OpenTurns(ctx, ws)
+	if err != nil {
+		log.Error(opDeployChecks, "could not read whether a turn runs in the deploy check workspace; it is not compacted now", dlog.Context{"cause": err.Error()})
+		return nil, false, fmt.Errorf("compact the deploy check %s: read its open turns: %w", ws, err)
+	}
+	if len(open) > 0 {
+		log.Info(opDeployChecks, "a turn runs in the deploy check workspace; its compaction waits for its next start", dlog.Context{"open_turns": len(open)})
+		return log, false, nil
+	}
+	if v.deps.Sessions.Live(ws) {
+		if _, err := v.endSession(ctx, log, ws); err != nil {
+			return nil, false, fmt.Errorf("compact the deploy check %s: end the session: %w", ws, err)
+		}
+	}
+	return log, true, nil
 }
 
 // DeployCheckContextTokens implements Verbs: the context chip's figure for
