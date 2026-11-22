@@ -54,7 +54,7 @@ function usage(read: number, write1h: number, uncached: number, output = 10): Re
 function only(ledger: VendorSpendLedger): conversationv1.VendorSpend {
   const entries = ledger.snapshot();
   expect(entries).toHaveLength(1);
-  return entries[0]!;
+  return entries[0];
 }
 
 describe("contextBucketOf", () => {
@@ -95,11 +95,11 @@ describe("cacheOutcomeOf", () => {
 });
 
 describe("causeOfOrigin", () => {
-  const origins = conversationv1.PromptOriginSchema.values.filter((v) => v.number !== conversationv1.PromptOrigin.UNSPECIFIED);
+  const origins = conversationv1.PromptOriginSchema.values.filter((v) => v.name !== "PROMPT_ORIGIN_UNSPECIFIED");
 
   it.each(origins.map((v) => [v.name, v.number] as const))("finds a declared spend cause on %s", (_name, origin) => {
     // Act
-    const cause = causeOfOrigin(origin as conversationv1.PromptOrigin);
+    const cause = causeOfOrigin(origin);
     // Assert
     expect(cause).not.toBe(C.UNSPECIFIED);
     expect(cause).not.toBe(C.UNSTATED);
@@ -247,7 +247,7 @@ describe("VendorSpendLedger", () => {
     expect(only(ledger).cause).toBe(C.UNSTATED);
     const records = logRecordsSince(mark).filter((r) => r.level === "error");
     expect(records).toHaveLength(1);
-    expect(records[0]!.context).toMatchObject({ message_id: "m1", model: MODEL, chain: "main", agent: "MAIN" });
+    expect(records[0].context).toMatchObject({ message_id: "m1", model: MODEL, chain: "main", agent: "MAIN" });
   });
 
   it("records a call that names no model at ERROR", () => {

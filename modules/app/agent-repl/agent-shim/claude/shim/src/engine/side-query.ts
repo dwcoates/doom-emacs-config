@@ -78,7 +78,7 @@ export async function askSideQuery(
           continue;
         }
         if (message.type === "assistant") {
-          spend.ledger.countMessage(message as { message?: unknown; isApiErrorMessage?: unknown }, agent, spend.cause, spend.nowMs());
+          spend.ledger.countMessage(message, agent, spend.cause, spend.nowMs());
           continue;
         }
         if (message.type !== "result") continue;
