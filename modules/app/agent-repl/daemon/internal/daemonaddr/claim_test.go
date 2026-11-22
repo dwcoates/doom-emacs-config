@@ -1523,11 +1523,13 @@ func TestAClaimThatDepartedTakesNoServingLockWithALaterClaim(t *testing.T) {
 	}
 
 	// Act.
-	if err := successor.Publish(); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
+	err = successor.Publish()
 
-	// Assert.
+	// Assert: a departed claim's publish is refused (ErrDeparted), and it
+	// took no serving lock on the way to that refusal.
+	if !errors.Is(err, ErrDeparted) {
+		t.Fatalf("Publish after Depart = %v, want ErrDeparted", err)
+	}
 	requireServing(t, addrPath, false)
 }
 
