@@ -3496,6 +3496,8 @@ func (f *fakeLatencies) editorLatencies() []observedLatency {
 	return append([]observedLatency(nil), f.editor...)
 }
 
+func (f *fakeLatencies) ObserveAffected(restarttiming.Affected) {}
+
 func (f *fakeLatencies) ObserveRestart(o restarttiming.Observation) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

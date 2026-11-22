@@ -357,6 +357,9 @@ func OfBuildStep(step string, outcome Outcome, d time.Duration) Observation {
 // anything but its own short lock.
 type Recorder interface {
 	ObserveRestart(o Observation)
+	// ObserveAffected records how many workspaces or sessions one restart
+	// affected.
+	ObserveAffected(a Affected)
 }
 
 // BootTimer times one daemon process's boot phases, each from the process's
@@ -421,3 +424,54 @@ type NoWindows struct{}
 
 // OpenWindow implements Windows.
 func (NoWindows) OpenWindow(Restart, string, time.Duration, ...Watched) func() { return func() {} }
+
+// AffectedKind is what one restart's count of affected things counts, the
+// `phase` of agentrepl_restart_affected.
+type AffectedKind string
+
+// The affected kinds.
+const (
+	// AffectedHost is the workspaces whose Emacs host stream a restart
+	// expected back.
+	AffectedHost AffectedKind = "host"
+	// AffectedWeb is the workspaces whose webview stream a restart expected
+	// back.
+	AffectedWeb AffectedKind = "web"
+	// AffectedShim is the shim sessions a restart's bring-up started.
+	AffectedShim AffectedKind = "shim"
+)
+
+// Affected is how many workspaces or sessions ONE restart affected: a
+// restart is a daemon boot, a successor's takeover or a webapp reload, its
+// `cause`.
+type Affected struct {
+	kind  AffectedKind
+	cause ReconnectCause
+	count int
+}
+
+// OfAffected is count things of kind affected by one restart of cause.
+func OfAffected(kind AffectedKind, cause ReconnectCause, count int) Affected {
+	return Affected{kind: kind, cause: cause, count: count}
+}
+
+// Kind is what was counted.
+func (a Affected) Kind() AffectedKind { return a.kind }
+
+// Cause is the restart the count belongs to.
+func (a Affected) Cause() ReconnectCause { return a.cause }
+
+// Count is how many were affected.
+func (a Affected) Count() int { return a.count }
+
+// RestartCause is the restart cause a bring-up of via belongs to, and false
+// for a bring-up that is no restart (an editor opening its tabs).
+func (v StartVia) RestartCause() (ReconnectCause, bool) {
+	switch v {
+	case StartBoot:
+		return ReconnectCold, true
+	case StartTakeover:
+		return ReconnectSuccessor, true
+	}
+	return "", false
+}

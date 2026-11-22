@@ -600,3 +600,33 @@ func TestTheStandDownClassificationHasOneHome(t *testing.T) {
 		t.Fatalf("IsStandDown(err) called %d times in bringup, want the bring-up's own start to use it", got)
 	}
 }
+
+func TestRunRecordsHowManyShimsARestartStarted(t *testing.T) {
+	cases := []struct {
+		name string
+		via  restarttiming.StartVia
+		want []string
+	}{
+		{"a boot is cold", restarttiming.StartBoot, []string{"shim cold 2"}},
+		{"a takeover is a successor", restarttiming.StartTakeover, []string{"shim successor 2"}},
+		{"an editor's opening is no restart", restarttiming.StartVia("editor"), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a started workspace, a woken one and a failed one.
+			f := newFixture()
+			f.sessions.records["b"] = wsm.Session{Workspace: "b", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}
+			f.startErr["c"] = errors.New("arranged: the shim never answered")
+			deps := f.deps()
+			deps.Via = tc.via
+
+			// Act
+			Run(context.Background(), deps, workspaces("a", "b", "c"))
+
+			// Assert: started and woken count, a failed start does not.
+			if got := f.restarts.Affecteds(); !slices.Equal(got, tc.want) {
+				t.Fatalf("affected = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

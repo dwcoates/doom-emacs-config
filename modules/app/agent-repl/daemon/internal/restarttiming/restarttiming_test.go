@@ -108,3 +108,33 @@ func TestNoWindowsMeasuresNothingAndClosesQuietly(t *testing.T) {
 	closeWindow()
 	closeWindow()
 }
+
+func TestOfAffectedStatesWhatWasCounted(t *testing.T) {
+	// Act
+	a := restarttiming.OfAffected(restarttiming.AffectedShim, restarttiming.ReconnectSuccessor, 12)
+
+	// Assert
+	if a.Kind() != restarttiming.AffectedShim || a.Cause() != restarttiming.ReconnectSuccessor || a.Count() != 12 {
+		t.Fatalf("affected = %v %v %v, want shim successor 12", a.Kind(), a.Cause(), a.Count())
+	}
+}
+
+func TestAStartViaNamesItsRestartCause(t *testing.T) {
+	cases := []struct {
+		via    restarttiming.StartVia
+		want   restarttiming.ReconnectCause
+		wantOK bool
+	}{
+		{restarttiming.StartBoot, restarttiming.ReconnectCold, true},
+		{restarttiming.StartTakeover, restarttiming.ReconnectSuccessor, true},
+		{restarttiming.StartVia("editor"), "", false},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.via), func(t *testing.T) {
+			got, ok := tc.via.RestartCause()
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("RestartCause() = %q, %v, want %q, %v", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
