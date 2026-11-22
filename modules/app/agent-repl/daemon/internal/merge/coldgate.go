@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
@@ -39,6 +41,12 @@ import (
 //     for 40 minutes (2026-11-21). A stand that arrives while the answer
 //     runs is left to the answer's own record, and a stand on a merge that
 //     waits in line says at ERROR that the gate stands for the user.
+//   - A MERGE TURN NEVER MEETS A STANDING GATE (2026-11-22). Every turn the
+//     orchestrator hands a merge's workspace passes the gate first
+//     (passColdGate, from handOff): a pick or a repair brings the session
+//     up itself, and its submission once raced the queue's answer to the
+//     raise and lost. The turn joins the answer running, or makes the one
+//     answer itself; a failed one fails the turn, which ends the merge.
 //   - PASSING THE GATE BY AN ANSWER RESUMES IT THERE. Pay, clear and compact
 //     bring a session up, which retires the gate's record and with it the
 //     mark (wsm.ClearMergeColdGated); a merge the merges worked on meanwhile
@@ -137,13 +145,19 @@ func (o *orchestrator) applyColdGateEdge(ctx context.Context, edge coldGateEdge)
 	switch edge.kind {
 	case edgeRaised:
 		if o.coldGateRaised(ctx, edge.ws) {
-			o.compactQueuedColdGate(ctx, edge.ws)
+			o.compactQueuedColdGate(ctx, edge.ws, false)
 		}
 	case edgeStoodAfterFailedAnswer:
+		o.coldMu.Lock()
+		o.coldFailed[edge.ws] = true
+		o.coldMu.Unlock()
 		if o.coldGateRaised(ctx, edge.ws) {
 			o.leaveFailedColdGateStanding(ctx, edge.ws)
 		}
 	case edgeRetired:
+		o.coldMu.Lock()
+		delete(o.coldFailed, edge.ws)
+		o.coldMu.Unlock()
 		o.coldGateRetired(ctx, edge.ws)
 	case edgeHidden:
 		o.hiddenAtColdGate(ctx, edge.ws)
@@ -227,16 +241,17 @@ func (o *orchestrator) coldGateRaised(ctx context.Context, ws ids.WorkspaceID) b
 // compactQueuedColdGate answers the cold gate standing on WS, whose merge
 // waits in line skipped at it (answerQueuedColdGate). The answer runs off
 // the edge worker, so the edges behind it are not held for as long as it
-// takes.
-func (o *orchestrator) compactQueuedColdGate(ctx context.Context, ws ids.WorkspaceID) {
+// takes. FRESH is a requeue's own answer, which a failed earlier answer does
+// not spend.
+func (o *orchestrator) compactQueuedColdGate(ctx context.Context, ws ids.WorkspaceID, fresh bool) {
 	if !o.async {
-		o.answerQueuedColdGate(ctx, ws)
+		o.answerQueuedColdGate(ctx, ws, fresh)
 		return
 	}
 	o.live.Add(1)
 	inflight.Standing(func() {
 		defer o.live.Done()
-		o.answerQueuedColdGate(ctx, ws)
+		o.answerQueuedColdGate(ctx, ws, fresh)
 	})
 }
 
@@ -253,7 +268,7 @@ func (o *orchestrator) leaveFailedColdGateStanding(ctx context.Context, ws ids.W
 	// A stand that arrives while the queue's answer to this gate still runs
 	// is that answer's own failed re-open: the answer records it once.
 	o.coldMu.Lock()
-	answering := o.coldAnswering[ws]
+	_, answering := o.coldAnswering[ws]
 	o.coldMu.Unlock()
 	if answering {
 		o.log(ctx, ws).Debug(opColdGate, "the cold gate stood again while its answer runs; the answer records its failure", fields)
@@ -266,7 +281,8 @@ func (o *orchestrator) leaveFailedColdGateStanding(ctx context.Context, ws ids.W
 // on WS, whose merge waits in line skipped at it: the compaction pass-gate
 // makes (Deps.CompactColdGate), waited on until its re-open settles. The
 // session it brings up retires the gate, which resumes the merge
-// (ColdGateRetired).
+// (ColdGateRetired). FRESH is a requeue's answer (Requeue), which owns one
+// answer even though an earlier one failed.
 //
 // THE ANSWER IS SPENT WITH THE MERGE'S PLACE IN LINE (owner ruling,
 // 2026-11-21: a requeued merge's gate answer once retried a failed bring-up
@@ -276,14 +292,57 @@ func (o *orchestrator) leaveFailedColdGateStanding(ctx context.Context, ws ids.W
 //
 //   - WS IS CLAIMED for as long as its answer runs, compaction and re-open
 //     included (coldAnswering): a gate raised meanwhile, the failed
-//     re-open's own included, is not answered.
-//   - A FAILURE IS FINAL. It is recorded once at ERROR, and the merge leaves
-//     its queue as a failed merge (CauseColdGateAnswerFailed), its bubble and
-//     its requester told, BEFORE the claim is let go: every raise after it
-//     finds no merge in line to answer. The gate stands for the user, and
+//     re-open's own included, is not answered, and a merge turn that meets
+//     the gate waits on this same answer (passColdGate).
+//   - A FAILURE IS FINAL. It is recorded once at ERROR (settleColdAnswer),
+//     the gate is kept as failed (coldFailed) so no raise after it answers
+//     it again, and the merge leaves its queue as a failed merge
+//     (CauseColdGateAnswerFailed), its bubble and its requester told, BEFORE
+//     the claim is let go -- unless a merge turn waits on the answer, whose
+//     own failure path ends the merge. The gate stands for the user, and
 //     only a requeue puts the merge back in line, with one answer of its own.
-func (o *orchestrator) answerQueuedColdGate(ctx context.Context, ws ids.WorkspaceID) {
+func (o *orchestrator) answerQueuedColdGate(ctx context.Context, ws ids.WorkspaceID, fresh bool) {
 	log := o.log(ctx, ws)
+	fields := o.coldGateFields(ctx, ws)
+	o.coldMu.Lock()
+	if _, answering := o.coldAnswering[ws]; answering {
+		o.coldMu.Unlock()
+		log.Debug(opColdGate, "the cold gate of a queued merge's workspace is being answered already; the gate raised again is not answered twice", fields)
+		return
+	}
+	if fresh {
+		delete(o.coldFailed, ws)
+	} else if o.coldFailed[ws] {
+		o.coldMu.Unlock()
+		log.Debug(opColdGate, "the cold gate of a queued merge's workspace was answered once already and the answer failed; the gate raised again is not answered twice", fields)
+		return
+	}
+	a := &coldAnswer{done: make(chan struct{})}
+	o.coldAnswering[ws] = a
+	o.coldMu.Unlock()
+	o.settleColdAnswer(ctx, ws, a, fields, "the queue")
+}
+
+// coldAnswer is the one answer running to a workspace's cold gate, which
+// every merge turn meeting the gate waits on (passColdGate).
+type coldAnswer struct {
+	// done is closed once the answer settled; up and err are set before.
+	done chan struct{}
+	// waiters counts the merge turns still waiting on the answer, guarded
+	// by coldMu: a failure one of them waits on is ended by that turn's own
+	// failure path, never by the queue.
+	waiters int
+	// settled is whether the answer settled, guarded by coldMu.
+	settled bool
+	// up is whether the answer brought the session up.
+	up bool
+	// err is the answer's failure.
+	err error
+}
+
+// coldGateFields are the fields of every record of WS's gate's answer: the
+// workspace, its queue and its merge's ledger, where known.
+func (o *orchestrator) coldGateFields(ctx context.Context, ws ids.WorkspaceID) dlog.Context {
 	fields := dlog.Context{"workspace": string(ws)}
 	if repo, err := o.queueOf(ctx, ws); err == nil {
 		fields["repo"] = string(repo)
@@ -291,35 +350,133 @@ func (o *orchestrator) answerQueuedColdGate(ctx context.Context, ws ids.Workspac
 	o.mu.Lock()
 	fields["ledger"] = string(o.ledgerOf[ws])
 	o.mu.Unlock()
-	o.coldMu.Lock()
-	if o.coldAnswering[ws] {
-		o.coldMu.Unlock()
-		log.Debug(opColdGate, "the cold gate of a queued merge's workspace is being answered already; the gate raised again is not answered twice", fields)
-		return
-	}
-	o.coldAnswering[ws] = true
-	o.coldMu.Unlock()
-	defer func() {
-		o.coldMu.Lock()
-		delete(o.coldAnswering, ws)
-		o.coldMu.Unlock()
-	}()
+	return fields
+}
+
+// settleColdAnswer runs A, the claimed answer to WS's cold gate that ASKER
+// (the queue, or a merge turn's origin) made, to its settling: the
+// compaction pass-gate makes (Deps.CompactColdGate), never cut by the wait
+// of whoever asked, since a compaction still running is no failure. It
+// records how the answer ended, lets the claim go and tells every waiting
+// merge turn. A FAILURE no merge turn waits on takes the merge off its queue
+// as failed (CauseColdGateAnswerFailed); one a merge turn waits on is ended
+// by that turn's failure path (passColdGate).
+func (o *orchestrator) settleColdAnswer(ctx context.Context, ws ids.WorkspaceID, a *coldAnswer, fields dlog.Context, asker string) {
+	log := o.log(ctx, ws)
+	fields = withField(fields, "asker", asker)
 	// THE ATTEMPT ENDS WHEN ITS RE-OPEN SETTLES (Deps.CompactColdGate), never
 	// at a deadline of the queue's own: a compaction still running is no
 	// failure, and the claim stands for as long as it runs.
-	up, err := o.deps.CompactColdGate(ctx, ws)
-	if err == nil && up {
+	up, err := o.deps.CompactColdGate(context.WithoutCancel(ctx), ws)
+	o.coldMu.Lock()
+	a.up, a.err, a.settled = up, err, true
+	waited := a.waiters > 0
+	if o.coldAnswering[ws] == a {
+		delete(o.coldAnswering, ws)
+	}
+	if err != nil {
+		o.coldFailed[ws] = true
+	}
+	o.coldMu.Unlock()
+	close(a.done)
+	switch {
+	case err == nil && up:
 		log.Info(opColdGate, "the cold gate of a queued merge's workspace was answered by a compaction; the session is up, and the merge resumes at its place", fields)
-		return
-	}
-	if err == nil {
+	case err == nil:
 		log.Info(opColdGate, "the cold gate of a queued merge's workspace was not answered: no gate stood, or the answer's re-open was abandoned; the merge stays at its place", fields)
-		return
+	case waited:
+		log.Error(opColdGate, "the cold gate of a merge's workspace could not be answered by a compaction; the merge turn waiting on the answer fails the merge, and the gate stands for the user", withField(fields, "error", err.Error()))
+	default:
+		log.Error(opColdGate, "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge leaves its queue as failed, and the gate stands for the user", withField(fields, "error", err.Error()))
+		if err := o.dequeue(context.WithoutCancel(ctx), ws, CauseColdGateAnswerFailed); err != nil {
+			if _, refused := Refused(err); refused {
+				log.Info(opColdGate, "the merge whose cold gate could not be answered left its queue before the answer failed", withField(fields, "cause", err.Error()))
+				return
+			}
+			log.Error(opColdGate, "could not take the merge whose cold gate could not be answered off its queue; it stays skipped at its place", withField(fields, "error", err.Error()))
+		}
 	}
-	log.Error(opColdGate, "the cold gate of a queued merge's workspace could not be answered by a compaction; the merge leaves its queue as failed, and the gate stands for the user", withField(fields, "error", err.Error()))
-	if err := o.dequeue(ctx, ws, CauseColdGateAnswerFailed); err != nil {
-		log.Error(opColdGate, "could not take the merge whose cold gate could not be answered off its queue; it stays skipped at its place", withField(fields, "error", err.Error()))
+}
+
+// passColdGate passes the cold gate standing on WS before the merge turn
+// TURN of ORIGIN is handed to its prompt queue (handOff, bringTurnOn).
+//
+// A MERGE NEVER FAILS ON ITS OWN WORKSPACE'S COLD GATE (2026-11-22 11:32:58:
+// an async merge's pick brought its merge workspace up overnight-cold, the
+// bring-up parked at the gate, and the pick's submission was refused by the
+// gate's name while the queue's own answer to the raise was still starting,
+// so the merge failed and the answer that then succeeded passed a gate no
+// merge was left to use). So every merge turn the orchestrator submits reads
+// the gate once its session was asked up: a gate standing is answered by the
+// compaction the queue's answer makes, and the turn waits for it. THE GATE
+// HAS ONE ANSWER (coldAnswering): a turn that finds the queue's answer, or
+// another turn's, running waits on that one; a gate whose answer failed and
+// still stands (coldFailed) is not answered again, and the turn fails, which
+// ends the merge with the gate standing for the user, as the queue's own
+// failed answer does. A failed answer fails the turn the same way.
+//
+// A DEPLOY CHECK'S TURN IS PASSED OVER: its gate is answered at its raise by
+// the deploy checks' own answer (AnswerDeployCheckColdGate), and a second
+// answerer would break the gate's one answer.
+func (o *orchestrator) passColdGate(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, origin conversationv1.PromptOrigin) error {
+	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION || !o.deps.AtColdGate(ws) {
+		return nil
 	}
+	log := o.log(ctx, ws)
+	fields := withField(withField(o.coldGateFields(ctx, ws), "turn", string(turn)), "origin", origin.String())
+	o.coldMu.Lock()
+	a, joined := o.coldAnswering[ws]
+	if !joined && o.coldFailed[ws] {
+		o.coldMu.Unlock()
+		err := fmt.Errorf("merge: the cold gate standing on %s was answered once and the answer failed; it is not answered again, and stands for the user", ws)
+		log.Error(opColdGate, "a merge turn met its workspace's cold gate standing after its one answer failed; the gate is not answered again, and the merge fails with the gate standing for the user", withField(fields, "error", err.Error()))
+		return err
+	}
+	if !joined {
+		a = &coldAnswer{done: make(chan struct{})}
+		o.coldAnswering[ws] = a
+	}
+	a.waiters++
+	o.coldMu.Unlock()
+	if joined {
+		log.Info(opColdGate, "a merge turn met its workspace's cold gate while the gate's answer runs; the turn waits for that answer before it is submitted", fields)
+	} else {
+		log.Info(opColdGate, "a merge turn met its workspace's cold gate; the gate is answered by a compaction before the turn is submitted", fields)
+		answer := func() {
+			o.settleColdAnswer(context.WithoutCancel(ctx), ws, a, o.coldGateFields(ctx, ws), origin.String())
+		}
+		if o.async {
+			o.live.Add(1)
+			inflight.Standing(func() {
+				defer o.live.Done()
+				answer()
+			})
+		} else {
+			answer()
+		}
+	}
+	select {
+	case <-a.done:
+	case <-ctx.Done():
+		o.coldMu.Lock()
+		if !a.settled {
+			a.waiters--
+			o.coldMu.Unlock()
+			log.Info(opColdGate, "the merge turn's wait for its workspace's cold gate answer was withdrawn; the answer runs on", fields)
+			return fmt.Errorf("merge: the wait for the answer to the cold gate on %s ended: %w", ws, context.Cause(ctx))
+		}
+		o.coldMu.Unlock()
+	}
+	if a.err != nil {
+		return fmt.Errorf("merge: the cold gate standing on %s could not be answered by a compaction: %w", ws, a.err)
+	}
+	if !a.up && o.deps.AtColdGate(ws) {
+		err := fmt.Errorf("merge: the answer to the cold gate on %s brought no session up and the gate still stands", ws)
+		log.Error(opColdGate, "the answer to a merge's workspace cold gate settled with no session up and the gate still standing; the merge's turn is not submitted, and the merge fails", withField(fields, "error", err.Error()))
+		return err
+	}
+	log.Info(opColdGate, "the merge's workspace passed its cold gate; the merge's turn is submitted", withField(fields, "session_up", a.up))
+	return nil
 }
 
 // coldGateRetired resumes WS's merge where it stands in line once its gate was

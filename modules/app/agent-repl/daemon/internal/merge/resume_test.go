@@ -1270,3 +1270,30 @@ func TestAMergeResumedAtItsDeployWithNoRecordedLandingFailsHard(t *testing.T) {
 		t.Fatal("a merge with no recorded landing was stamped merged")
 	}
 }
+
+func TestAReattachedTurnStillHeldIsDeliveredPastAStandingColdGate(t *testing.T) {
+	// Arrange: the queue holds the merge's turn, and the bring-up parked at
+	// the workspace's cold gate.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.held["turn-held"] = wsm.HeldPrompt{Turn: "turn-held"}
+	h.db.mu.Unlock()
+	standAtColdGate(h, theWorkspace)
+
+	// Act
+	_, err := h.o.reattachTurn(context.Background(), theWorkspace, dlog.Context{}, "turn-held", "", fixOrigin)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("reattachTurn = %v, want the held turn delivered past the gate", err)
+	}
+	if got := compacted(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want the gate answered once before the delivery", got)
+	}
+	h.queue.mu.Lock()
+	asked := slices.Clone(h.queue.deliverAsked)
+	h.queue.mu.Unlock()
+	if !slices.Equal(asked, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("delivery asked for %v, want the merge's workspace once", asked)
+	}
+}

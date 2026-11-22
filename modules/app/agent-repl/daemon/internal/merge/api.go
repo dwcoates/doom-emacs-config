@@ -827,7 +827,9 @@ type Deps struct {
 	// AtColdGate reports whether the workspace's session is parked at its
 	// cold gate. A requeue of such a workspace's merge goes in line skipped
 	// (wsm.SetMergeColdGated), and its gate is answered by a compaction at
-	// once (CompactColdGate).
+	// once (CompactColdGate); every merge turn reads it before it is handed
+	// to its prompt queue, and passes a standing gate the same way
+	// (passColdGate).
 	AtColdGate func(ws ids.WorkspaceID) bool
 	// CompactColdGate answers the cold gate standing on the workspace by a
 	// compaction of its whole conversation with the gate's default

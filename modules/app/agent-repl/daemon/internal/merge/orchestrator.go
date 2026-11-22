@@ -171,10 +171,17 @@ type orchestrator struct {
 	coldMu       sync.Mutex
 	coldEdges    []coldGateEdge
 	coldApplying bool
-	// coldAnswering holds the workspaces whose queued merge's cold gate the
-	// queue is answering now (answerQueuedColdGate), guarded by coldMu: a
-	// gate raised while its answer runs is never answered a second time.
-	coldAnswering map[ids.WorkspaceID]bool
+	// coldAnswering holds the one answer running now to each workspace's
+	// cold gate, the queue's (answerQueuedColdGate) or a merge turn's
+	// (passColdGate), guarded by coldMu: a gate raised while its answer runs
+	// is never answered a second time, and a merge turn that meets it waits
+	// on that same answer.
+	coldAnswering map[ids.WorkspaceID]*coldAnswer
+	// coldFailed holds the workspaces whose cold gate an answer failed on and
+	// still stands, guarded by coldMu: neither the queue's raise nor a merge
+	// turn answers it again (ColdGateStoodAfterFailedAnswer). Only a requeue,
+	// which owns one answer of its own, or the gate's retirement clears it.
+	coldFailed map[ids.WorkspaceID]bool
 	// events serializes the queue's reported changes (subscriptions.go). It
 	// is its own lock, never taken with mu.
 	events *queueEvents
@@ -394,7 +401,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		kicked:             map[wsm.RepoKey]bool{},
 		syncing:            map[wsm.RepoKey]bool{},
 		displaces:          map[ids.WorkspaceID]bool{},
-		coldAnswering:      map[ids.WorkspaceID]bool{},
+		coldAnswering:      map[ids.WorkspaceID]*coldAnswer{},
+		coldFailed:         map[ids.WorkspaceID]bool{},
 		runsByWorkspace:    map[ids.WorkspaceID]*run{},
 		requested:          map[ids.WorkspaceID]*requestWait{},
 		requestingTurns:    map[ids.WorkspaceID]ids.TurnID{},
