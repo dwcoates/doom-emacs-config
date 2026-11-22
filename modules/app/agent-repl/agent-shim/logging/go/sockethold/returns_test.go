@@ -434,3 +434,102 @@ func TestTheProtocolsSpellingsArePinned(t *testing.T) {
 		})
 	}
 }
+
+func TestStoppingAnEndedStreamIsNoFailure(t *testing.T) {
+	// A STREAM ALREADY ENDED IS STOPPED: whether Next read the end first
+	// never changes Stop's answer (2026-11-22: a stream the holder had
+	// refused and closed failed the daemon's stop, and the boot claim was
+	// never yielded).
+	cases := []struct {
+		name string
+		// end ends the stream from the holder's side, and reads it with Next
+		// when the case says so.
+		end func(t *testing.T, holderEnd *net.UnixConn, r *Returned)
+	}{
+		{name: "after Next read the stream's EOF, nothing is sent", end: func(t *testing.T, holderEnd *net.UnixConn, r *Returned) {
+			if err := holderEnd.CloseWrite(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.Next(); !errors.Is(err, io.EOF) {
+				t.Fatalf("Next = %v, want io.EOF", err)
+			}
+		}},
+		{name: "after Next read a refusal, nothing is sent", end: func(t *testing.T, holderEnd *net.UnixConn, r *Returned) {
+			if _, err := holderEnd.Write([]byte(string(StatusRefused) + "no such socket\n")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.Next(); !errors.Is(err, ErrRefused) {
+				t.Fatalf("Next = %v, want ErrRefused", err)
+			}
+		}},
+		{name: "a holder end closed whose end Next never read", end: func(t *testing.T, holderEnd *net.UnixConn, _ *Returned) {
+			if err := holderEnd.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			holderEnd, clientEnd := unixPair(t)
+			r := &Returned{uc: clientEnd, name: "data"}
+			tc.end(t, holderEnd, r)
+
+			// Act
+			err := r.Stop()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Stop = %v, want nil: the stream had ended", err)
+			}
+			if !r.hasEnded() {
+				t.Fatal("the stream is not recorded ended")
+			}
+			r.Close()
+			if got, rerr := io.ReadAll(holderEnd); rerr == nil && len(got) != 0 {
+				t.Fatalf("the holder read %q after the end, want nothing sent", got)
+			}
+		})
+	}
+}
+
+func TestStoppingAStreamAnswersAWriteFailureThatIsNotTheHoldersEnd(t *testing.T) {
+	// Arrange: the stream's own end is closed, so the write fails with no
+	// sign of the holder.
+	_, clientEnd := unixPair(t)
+	r := &Returned{uc: clientEnd, name: "data"}
+	clientEnd.Close()
+
+	// Act
+	err := r.Stop()
+
+	// Assert
+	if err == nil || !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Stop = %v, want the write's failure", err)
+	}
+}
+
+func TestPeerGoneNamesOnlyTheErrnosOfAnEndGone(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a broken pipe", err: &net.OpError{Op: "write", Err: os.NewSyscallError("write", syscall.EPIPE)}, want: true},
+		{name: "not connected", err: &net.OpError{Op: "write", Err: os.NewSyscallError("write", syscall.ENOTCONN)}, want: true},
+		{name: "a reset", err: &net.OpError{Op: "write", Err: os.NewSyscallError("write", syscall.ECONNRESET)}, want: true},
+		{name: "a closed connection", err: net.ErrClosed},
+		{name: "a bad descriptor", err: syscall.EBADF},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := peerGone(tc.err)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("peerGone(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}

@@ -86,6 +86,11 @@ type Returned struct {
 	// receiptErr is the failure to tell the holder a connection was
 	// received, answered by the Next after the one that received it.
 	receiptErr error
+	// mu guards ended: Next and Stop run on different goroutines.
+	mu sync.Mutex
+	// ended is set once the stream has ended: Next answered an error (its
+	// io.EOF, a refusal, a failed read), or Stop found the holder's end gone.
+	ended bool
 }
 
 // Subscribe opens the accept stream of the held socket NAME at the holder
@@ -115,6 +120,29 @@ func Subscribe(ctx context.Context, control, name string) (*Returned, error) {
 // for a newer stream of the socket. A refusal (the holder holds no such
 // socket) answers ErrRefused.
 func (r *Returned) Next() (net.Conn, error) {
+	conn, err := r.next()
+	if err != nil {
+		r.end()
+	}
+	return conn, err
+}
+
+// end records that the stream has ended.
+func (r *Returned) end() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ended = true
+}
+
+// hasEnded reports whether the stream has ended.
+func (r *Returned) hasEnded() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ended
+}
+
+// next is Next, before the stream's end is recorded.
+func (r *Returned) next() (net.Conn, error) {
 	if r.receiptErr != nil {
 		return nil, r.receiptErr
 	}
@@ -161,11 +189,34 @@ func (r *Returned) Next() (net.Conn, error) {
 // answers what was already on its way, then io.EOF. The stream stays open
 // both ways until Close, so what Next receives after Stop is still told to
 // the holder.
+//
+// A STREAM ALREADY ENDED IS STOPPED: Stop exists to reach the stream's end,
+// so it answers nil, sending nothing, once Next has answered any error (its
+// io.EOF, a refusal), and nil when its own write finds the holder's end gone
+// (EPIPE, ENOTCONN, ECONNRESET): that errno IS the stream's end, whose cause
+// the stream's reader records when its Next reads it. Whether Next observed
+// the end before Stop ran never changes Stop's answer (2026-11-22: a stream
+// the holder had refused and closed long before failed the daemon's stop,
+// and the boot claim was never yielded). Every other write failure is
+// answered.
 func (r *Returned) Stop() error {
+	if r.hasEnded() {
+		return nil
+	}
 	if _, err := r.uc.Write([]byte{StreamStop}); err != nil {
+		if peerGone(err) {
+			r.end()
+			return nil
+		}
 		return fmt.Errorf("sockethold: end the accept stream of %q: %w", r.name, err)
 	}
 	return nil
+}
+
+// peerGone reports whether ERR is a write's finding that the other end of
+// its connection is gone.
+func peerGone(err error) bool {
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ENOTCONN) || errors.Is(err, syscall.ECONNRESET)
 }
 
 // Close releases the stream.

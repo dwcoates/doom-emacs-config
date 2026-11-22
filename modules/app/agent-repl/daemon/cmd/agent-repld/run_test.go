@@ -508,19 +508,20 @@ type spyLogger struct {
 
 type spyRecord struct {
 	level, operation, message string
+	context                   dlog.Context
 }
 
-func (s *spyLogger) Debug(operation, message string, _ dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelDebug, operation, message})
+func (s *spyLogger) Debug(operation, message string, ctx dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelDebug, operation, message, ctx})
 }
-func (s *spyLogger) Info(operation, message string, _ dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelInfo, operation, message})
+func (s *spyLogger) Info(operation, message string, ctx dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelInfo, operation, message, ctx})
 }
-func (s *spyLogger) Warn(operation, message string, _ dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelWarn, operation, message})
+func (s *spyLogger) Warn(operation, message string, ctx dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelWarn, operation, message, ctx})
 }
-func (s *spyLogger) Error(operation, message string, _ dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelError, operation, message})
+func (s *spyLogger) Error(operation, message string, ctx dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelError, operation, message, ctx})
 }
 func (s *spyLogger) With(dlog.Context) dlog.Logger { return s }
 
