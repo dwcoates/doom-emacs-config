@@ -1340,8 +1340,11 @@ func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 		ratelimittest.Allowed(ratelimittest.SevenDay()), 12, time.Now().Add(7*24*time.Hour).UnixMilli())))
 
 	// Assert
+	// The account's usage outlives a case, so a footer opened on the group's
+	// daemon may first draw the figure an earlier case moved it to: only the
+	// event's own figure is the driven view.
 	got := awaitFooter(t, f, footer, "the enduring usage line", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly() != nil
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall().GetUtilization() == 0.12
 	})
 	enduring := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring()
 	if weekly := enduring.GetUsage().GetWeekly().GetOverall(); weekly.GetUtilization() != 0.12 || weekly.GetNewsworthy() {

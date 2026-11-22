@@ -126,6 +126,10 @@ const (
 	// groupEditorSession is the daemon an Emacs stream connects to as a new
 	// editor: agent-repl's session is begun by the editor, one per daemon.
 	groupEditorSession daemonGroup = "the editor's session"
+	// groupDaemonStream is the daemon whose daemon-wide stream a case reads
+	// whole and then waits on for quiet: the barrier that wait takes is the
+	// daemon's, so no other case may be submitting on it.
+	groupDaemonStream daemonGroup = "a daemon-wide stream read for quiet"
 	// groupEditorStream is the daemon a case connects an Emacs stream to for
 	// what the stream draws, not for the session it begins: the first stream
 	// of a daemon begins its session, so a case that asserts the session

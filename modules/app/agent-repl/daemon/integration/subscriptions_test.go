@@ -423,8 +423,10 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 // sends that one standing and nothing else.
 func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
+	// Arrange: a daemon no other case submits on, because the check that no
+	// other frame follows asks the daemon for a barrier, which a submission in
+	// flight on the shared daemon refuses.
+	d := viewInGroup(t, groupDaemonStream)
 
 	// Act
 	s := d.WatchWebviewDaemonStream()
