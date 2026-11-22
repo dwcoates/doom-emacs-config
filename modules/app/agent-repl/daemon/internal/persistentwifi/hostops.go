@@ -56,6 +56,8 @@ type Host interface {
 	ReadEnergy(ctx context.Context) (string, error)
 	// LowPowerEnergy is the energy mode the quiet state sets.
 	LowPowerEnergy() string
+	// HighPowerEnergy is the energy mode the quiet state sets on AC power.
+	HighPowerEnergy() string
 	// SetEnergy sets the energy mode in use.
 	SetEnergy(ctx context.Context, mode string) error
 	// SleepDisplay puts the display to sleep, leaving its brightness alone.

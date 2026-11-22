@@ -57,8 +57,8 @@ func TestBudget(t *testing.T) {
 		cpus int
 		want int
 	}{
-		{name: "sixteen cores budget eight, for the powered target", cpus: 16, want: 8},
-		{name: "ten cores budget five", cpus: 10, want: 5},
+		{name: "sixteen cores budget eleven, for the closed-lid target", cpus: 16, want: 11},
+		{name: "ten cores budget seven", cpus: 10, want: 7},
 		{name: "two cores budget one", cpus: 2, want: 1},
 	}
 	for _, tc := range cases {
@@ -371,7 +371,7 @@ func TestPlanForGivesEachRunItsBudgetPoolAndGovernor(t *testing.T) {
 		wantErr    string
 	}{
 		{name: "an ordinary run shares the host's governed pool", numCPU: 16,
-			want: Plan{Budget: 16 * PoweredLimits.Target / 100, Dir: "/shared", Governed: true}},
+			want: Plan{Budget: 16 * ClosedLidLimits.Target / 100, Dir: "/shared", Governed: true}},
 		{name: "an ungoverned run holds the whole host from its own pool, ungoverned, a seat per UngovernedSeatCores cores", ungoverned: "1", numCPU: 16,
 			want: Plan{Budget: 8, Dir: "/own"}},
 		{name: "an ungoverned run on a host of one core is refused", ungoverned: "1", numCPU: 1,

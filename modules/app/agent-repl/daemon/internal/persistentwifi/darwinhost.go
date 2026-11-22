@@ -216,6 +216,8 @@ func (h *darwinHost) ReadEnergy(ctx context.Context) (string, error) {
 
 func (h *darwinHost) LowPowerEnergy() string { return energyModeLowPower }
 
+func (h *darwinHost) HighPowerEnergy() string { return energyModeHighPower }
+
 func (h *darwinHost) SetEnergy(ctx context.Context, mode string) error {
 	return pmsetWrite(ctx, h.runner, h.tools, "powermode", mode)
 }

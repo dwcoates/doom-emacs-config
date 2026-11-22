@@ -82,6 +82,9 @@ const inhibitorWhat = "sleep:handle-lid-switch"
 // powerSaver is power-profiles-daemon's low-power profile.
 const powerSaver = "power-saver"
 
+// performance is power-profiles-daemon's high-performance profile.
+const performance = "performance"
+
 // linuxHost is Linux's Host. Every short tool runs through the Runner; the
 // inhibitor, which runs until it is killed, is started through spawn and
 // ended through kill, so a test fakes both.
@@ -347,6 +350,8 @@ func (h *linuxHost) ReadEnergy(ctx context.Context) (string, error) {
 }
 
 func (h *linuxHost) LowPowerEnergy() string { return powerSaver }
+
+func (h *linuxHost) HighPowerEnergy() string { return performance }
 
 // SetEnergy: `powerprofilesctl set MODE`.
 func (h *linuxHost) SetEnergy(ctx context.Context, mode string) error {

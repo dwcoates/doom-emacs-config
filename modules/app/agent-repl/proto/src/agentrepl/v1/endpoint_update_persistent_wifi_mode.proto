@@ -135,8 +135,9 @@ message UpdatePersistentWifiModeHotspotFailed {
 // THE ENERGY MODE FOLLOWS THE LID-CLOSED QUIET STATE AND THE POWER SOURCE,
 // NOT THE SWITCH (owner rulings, 2026-11-13 and 2026-11-14). While the quiet
 // state stands on battery power, the energy mode in use is recorded and the
-// machine put in Low Power Mode; on AC power, or once the quiet state is
-// left, the recorded mode is restored. So the step acts only where the
+// machine put in Low Power Mode; on AC power it is put in High Power Mode
+// (owner ruling, 2026-11-21); once the quiet state is left, the recorded mode
+// is restored. So the step acts only where the
 // change itself moves the quiet state: turning on with the lid closed on
 // battery lowers, turning off while the quiet state stands restores, and
 // every other change leaves the energy mode as it is. A change of power
@@ -163,10 +164,15 @@ message UpdatePersistentWifiModeEnergyMode {
     // state standing, the machine already in the mode due,
     // a machine that names no energy mode, or no mode recorded to restore.
     UpdatePersistentWifiModeEnergyModeUnchanged unchanged = 5;
+    // Turning on with the lid closed on AC power: the energy mode in use was
+    // recorded and the machine was put in High Power Mode.
+    UpdatePersistentWifiModeEnergyModeHighPowerHeld high_power_held = 6;
   }
 }
 // Low Power Mode.
 message UpdatePersistentWifiModeEnergyModeLowPower {}
+// High Power Mode, held for the lid closed on AC power.
+message UpdatePersistentWifiModeEnergyModeHighPowerHeld {}
 // The recorded energy mode was restored.
 message UpdatePersistentWifiModeEnergyModeRestored {
   // The `pmset` powermode value restored, verbatim: "1" Low Power Mode, "2"

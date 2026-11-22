@@ -19,10 +19,11 @@ func TestDecideRestore(t *testing.T) {
 		{name: "a recorded Low Power Mode in use is forgotten", energy: "1", kept: "1", want: restoreAlready},
 		{name: "a mode the user chose since stands", energy: "0", kept: "2", want: restoreUserMoved},
 		{name: "the quiet state's Low Power Mode is restored", energy: "1", kept: "2", want: restoreWrite},
+		{name: "the quiet state's High Power Mode is restored", energy: "2", kept: "0", want: restoreWrite},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := decideRestore(tc.energy, tc.kept, energyModeLowPower); got != tc.want {
+			if got := decideRestore(tc.energy, tc.kept, energyModeLowPower, energyModeHighPower); got != tc.want {
 				t.Fatalf("decideRestore(%q, %q) = %v, want %v", tc.energy, tc.kept, got, tc.want)
 			}
 		})
@@ -221,7 +222,7 @@ func TestLeavingWithNoRecordRestoresNothing(t *testing.T) {
 		t.Fatalf("calls = %v, clears = %d, want nothing restored or cleared", h.r.ran(), h.energy.clears)
 	}
 	infos := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opEnergy,
-		Message: "the lid-closed quiet state was left with no energy mode recorded (Low Power Mode was never set: on AC power, or entered by an earlier build); nothing is restored"})
+		Message: "the lid-closed quiet state was left with no energy mode recorded (no mode was ever set: the quiet state was entered by an earlier build); nothing is restored"})
 	if len(infos) != 1 || infos[0].Context["trigger"] != "lid_open" {
 		t.Fatalf("energy INFO records = %+v, want the missing record noted once", h.records(dlog.LevelInfo, opEnergy))
 	}

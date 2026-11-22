@@ -234,7 +234,7 @@ func TestUnderAClosedLidLowPowerModeFollowsThePowerSource(t *testing.T) {
 		t.Fatalf("UpdatePersistentWifiMode(on) error = %v", err)
 	}
 
-	t.Run("a lid closed on AC power quiets the machine without Low Power Mode", func(t *testing.T) {
+	t.Run("a lid closed on AC power quiets the machine and holds High Power Mode, recording the user's mode", func(t *testing.T) {
 		// Act
 		d.Lid.Close()
 
@@ -245,8 +245,8 @@ func TestUnderAClosedLidLowPowerModeFollowsThePowerSource(t *testing.T) {
 			s := r.GetPersistentWifi()
 			return s.GetLidClosed() != nil && s.GetQuiet().GetDisplayAsleep() != nil
 		})
-		if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
-			t.Fatalf("energy mode = %s, recorded %q, want the user's %s untouched and nothing recorded", got, kept, harness.FakeEnergyMode)
+		if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != "2" || kept != harness.FakeEnergyMode {
+			t.Fatalf("energy mode = %s, recorded %q, want High Power Mode held with the user's %s recorded", got, kept, harness.FakeEnergyMode)
 		}
 	})
 
@@ -261,14 +261,14 @@ func TestUnderAClosedLidLowPowerModeFollowsThePowerSource(t *testing.T) {
 		}
 	})
 
-	t.Run("regaining AC power under the closed lid restores the recorded mode", func(t *testing.T) {
+	t.Run("regaining AC power under the closed lid raises High Power Mode and keeps the record", func(t *testing.T) {
 		// Act
 		d.PowerSource.PlugIn()
 
 		// Assert
-		awaitEnergyRecord(d, "the recorded energy mode was restored", "power_source_ac")
-		if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
-			t.Fatalf("energy mode = %s, recorded %q, want the user's %s restored and the record forgotten", got, kept, harness.FakeEnergyMode)
+		awaitEnergyRecord(d, "the lid-closed quiet state put the machine in High Power Mode", "power_source_ac")
+		if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != "2" || kept != harness.FakeEnergyMode {
+			t.Fatalf("energy mode = %s, recorded %q, want High Power Mode raised with the user's %s still recorded", got, kept, harness.FakeEnergyMode)
 		}
 	})
 }

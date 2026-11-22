@@ -52,3 +52,74 @@ func TestReadEnergyMode(t *testing.T) {
 		})
 	}
 }
+
+func TestParseLidClosed(t *testing.T) {
+	cases := []struct {
+		name, out string
+		want      bool
+	}{
+		{name: "a closed lid", out: `    | |   "AppleClamshellState" = Yes`, want: true},
+		{name: "an open lid", out: `    | |   "AppleClamshellState" = No`, want: false},
+		{name: "a machine naming no lid", out: ``, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ParseLidClosed(tc.out); got != tc.want {
+				t.Fatalf("ParseLidClosed(%q) = %v, want %v", tc.out, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseSleepDisabled(t *testing.T) {
+	cases := []struct {
+		name, out string
+		want      bool
+	}{
+		{name: "sleep disabled", out: "System-wide power settings:\n SleepDisabled\t\t1\n", want: true},
+		{name: "sleep enabled", out: "System-wide power settings:\n SleepDisabled\t\t0\n", want: false},
+		{name: "no line", out: "Currently in use:\n sleep 0\n", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ParseSleepDisabled(tc.out); got != tc.want {
+				t.Fatalf("ParseSleepDisabled(%q) = %v, want %v", tc.out, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadLidClosedAwake(t *testing.T) {
+	cases := []struct {
+		name         string
+		ioreg, pmset string
+		want         bool
+		wantErr      string
+	}{
+		{name: "a closed lid with sleep disabled", ioreg: `echo '"AppleClamshellState" = Yes'`, pmset: `printf ' SleepDisabled 1\n'`, want: true},
+		{name: "a closed lid with sleep enabled", ioreg: `echo '"AppleClamshellState" = Yes'`, pmset: `printf ' SleepDisabled 0\n'`, want: false},
+		{name: "an open lid never asks pmset", ioreg: `echo '"AppleClamshellState" = No'`, pmset: `exit 9`, want: false},
+		{name: "an ioreg that fails", ioreg: `echo broken; exit 2`, pmset: `true`, wantErr: "exit status 2: broken"},
+		{name: "a pmset that fails", ioreg: `echo '"AppleClamshellState" = Yes'`, pmset: `echo nope; exit 3`, wantErr: "exit status 3: nope"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			ioreg, pmset := fakePmset(t, tc.ioreg), fakePmset(t, tc.pmset)
+
+			// Act
+			got, err := readLidClosedAwake(ioreg, pmset, EnergyModeBound)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("readLidClosedAwake = %v, %v; want an error naming %q", got, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("readLidClosedAwake = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}

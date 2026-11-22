@@ -23,3 +23,25 @@ func ParseEnergyMode(out string) string {
 	}
 	return ""
 }
+
+// clamshellLine matches ioreg's AppleClamshellState property; Yes is a closed
+// lid.
+var clamshellLine = regexp.MustCompile(`(?m)"AppleClamshellState"\s*=\s*(Yes|No)\b`)
+
+// ParseLidClosed reads whether `ioreg -r -k AppleClamshellState`'s output
+// says the lid is closed; false for an open lid and for output naming none (a
+// machine without a lid).
+func ParseLidClosed(out string) bool {
+	m := clamshellLine.FindStringSubmatch(out)
+	return m != nil && m[1] == "Yes"
+}
+
+// sleepDisabledLine matches `pmset -g`'s SleepDisabled line.
+var sleepDisabledLine = regexp.MustCompile(`(?m)^\s*SleepDisabled\s+(\d+)\s*$`)
+
+// ParseSleepDisabled reads whether `pmset -g`'s output says system sleep is
+// disabled, which persistent wifi mode does.
+func ParseSleepDisabled(out string) bool {
+	m := sleepDisabledLine.FindStringSubmatch(out)
+	return m != nil && m[1] == "1"
+}

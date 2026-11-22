@@ -101,6 +101,7 @@ written inside BODY after the act."
 (ert-deftest agent-repl-test-pwifi-energy-mode-text-words-every-arm ()
   "Every energy mode outcome arm has its own words."
   (dolist (case '(((:arm :low-power :value nil) . "energy: low power")
+                  ((:arm :high-power-held :value nil) . "energy: high power held for the closed lid")
                   ((:arm :restored :value (:power-mode "2")) . "energy: restored high power")
                   ((:arm :unchanged :value nil) . "energy: unchanged")
                   ((:arm :failed :value (:detail "refused")) . "energy: failed (refused)")))

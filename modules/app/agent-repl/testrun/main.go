@@ -506,7 +506,9 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		unitsCPU := &cores.TestsCPU{Scan: unitMarked.Scan}
 		// The host's power, which sets the governor's limits (cores.Limits).
 		power := &hostpower.Host{}
-		readPower := func() (cores.HostPower, error) { return cores.ReadHostPower(power, power.EnergyMode) }
+		readPower := func() (cores.HostPower, error) {
+			return cores.ReadHostPower(power, power.EnergyMode, power.LidClosedAwake)
+		}
 		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Units: unitsCPU.ReadByMark, Power: readPower, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
 	}
 	// EACH TEST'S CPU (cputime): measured only for a run that pushes its

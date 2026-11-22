@@ -40,15 +40,15 @@ const DefaultDir = "/tmp/agent-repl-test-cores"
 const NestedEnv = "AGENT_REPL_TEST_CORE_SEATS_HELD"
 
 // Budget is the host's pool of core seats: the highest target the tests may
-// average (PoweredLimits) of numCPU rounded down, all a run may hold on an
+// average (ClosedLidLimits) of numCPU rounded down, all a run may hold on an
 // otherwise idle host. The pool is sized once for every run sharing it, so
 // it is sized for the highest target, and the governor holds back the seats
 // the limits in force leave. A host too small to budget a single core is
 // refused, never adjusted.
 func Budget(numCPU int) (int, error) {
-	n := numCPU * PoweredLimits.Target / 100
+	n := numCPU * ClosedLidLimits.Target / 100
 	if n < 1 {
-		return 0, fmt.Errorf("this host has %d cores; tests may hold %d%% of them, which is not one whole core", numCPU, PoweredLimits.Target)
+		return 0, fmt.Errorf("this host has %d cores; tests may hold %d%% of them, which is not one whole core", numCPU, ClosedLidLimits.Target)
 	}
 	return n, nil
 }
