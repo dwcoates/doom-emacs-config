@@ -2572,6 +2572,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    last row. It takes the leftover height between the drain banner and the
    docked footer; its children lay out in ordinary block flow. */
 #feed-scroll {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   min-height: 0;
@@ -10565,3 +10566,22 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 /* It reads in the grey every count in the merge sections reads in, never in
    the label's purple. */
 #ws-sidebar .repo.merged-section > .repo-head .sb-count[data-section-count] { color: var(--muted); }
+
+/* THE HOVERED ROW'S TIME AND AGE (src/feed/margin-stamp.ts; owner request,
+   2026-11-21): in the feed's right margin, level with the row, faded in and
+   out by opacity alone, never moved. The thinking bubble's text size, in the
+   sans face. */
+.feed-margin-stamp {
+  position: absolute;
+  right: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+  white-space: nowrap;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: calc(var(--small-prose-font-rem) * 1rem * var(--feed-text-scale));
+  color: var(--thinking-text);
+}
+.feed-margin-stamp[data-shown] {
+  opacity: 1;
+}

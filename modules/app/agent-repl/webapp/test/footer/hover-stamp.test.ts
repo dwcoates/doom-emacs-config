@@ -78,32 +78,32 @@ describe("drawHoverStampActivity", () => {
     expect(line?.firstChild?.textContent).toBe("Response");
   });
 
-  it("draws how long ago a settled response settled", () => {
+  it("draws no age for a settled response", () => {
     // Act
     const cell = drawHoverStampActivity(usage(330_000), createTicker(1000));
     // Assert
-    expect(cell.textContent).toBe("Response 2.1k tokens · 5m 30s ago");
+    expect(cell.textContent).toBe("Response 2.1k tokens");
   });
 
-  it("draws how long a settled response took, between its figure and its age", () => {
+  it("draws how long a settled response took, after its figure", () => {
     // Act
     const cell = drawHoverStampActivity(usage(330_000, 90_000), createTicker(1000));
     // Assert
-    expect(cell.textContent).toBe("Response 2.1k tokens, 1m 30s · 5m 30s ago");
+    expect(cell.textContent).toBe("Response 2.1k tokens, 1m 30s");
   });
 
-  it("draws how long ago a prompt was sent, after its label alone", () => {
+  it("draws a prompt as its label alone, with no age", () => {
     // Act
     const cell = drawHoverStampActivity(stamp("Prompt", NOW - 600_000), createTicker(1000));
     // Assert
-    expect([cell.textContent, cell.querySelector(".footer-hover-tokens")]).toEqual(["Prompt · 10m ago", null]);
+    expect([cell.textContent, cell.querySelector(".footer-hover-tokens")]).toEqual(["Prompt", null]);
   });
 
   it("draws how long a settled tool call took and how long ago it settled", () => {
     // Act
     const cell = drawHoverStampActivity(stamp("Tool call Bash", NOW - 120_000, NOW - 132_000), createTicker(1000));
     // Assert
-    expect(cell.textContent).toBe("Tool call Bash, 12s · 2m ago");
+    expect(cell.textContent).toBe("Tool call Bash, 12s");
   });
 
   it("draws a unit still under way with its span ticking up and no age", () => {
@@ -140,13 +140,11 @@ describe("drawHoverStampActivity", () => {
     expect([cell.textContent, cell.querySelector("[data-age]")]).toEqual(["Response 2.1k tokens", null]);
   });
 
-  it("keeps the age current on the shared clock", () => {
-    // Arrange
-    const cell = drawHoverStampActivity(usage(330_000), createTicker(1000));
+  it("never draws an age span, whatever it stamps", () => {
     // Act
-    vi.advanceTimersByTime(30_000);
+    const cell = drawHoverStampActivity(usage(330_000), createTicker(1000));
     // Assert
-    expect(cell.querySelector(".footer-activity-age")?.textContent).toBe(" · 6m ago");
+    expect(cell.querySelector(".footer-activity-age, [data-age]")).toBeNull();
   });
 
   it("records what it draws, naming the label and whether it runs", async () => {

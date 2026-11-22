@@ -2046,7 +2046,7 @@ describe("mountFooter: the hovered bubble's stamp stands in for the activity lin
     // Act
     footer.showHoverStamp(hoveredUsage("2.1k"));
     // Assert
-    expect([tierOf(host), host.querySelector(".footer-activity")?.textContent]).toEqual(["hover", "Response 2.1k tokens, 1m 30s · 30s ago"]);
+    expect([tierOf(host), host.querySelector(".footer-activity")?.textContent]).toEqual(["hover", "Response 2.1k tokens, 1m 30s"]);
   });
 
   it("gives the cell back to the daemon's line once the usage is withdrawn", async () => {
