@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"agent-repld/internal/dlog"
 )
@@ -131,6 +132,56 @@ func (s *store) DurableFeedRows(ctx context.Context, id WorkspaceID) ([]DurableF
 			out = append(out, row)
 		}
 		return rows.Err()
+	})
+	return out, err
+}
+
+// MatchDurableFeedRows loads the durable feed rows MATCH answers true for,
+// asked of each row's workspace and id alone, over the workspaces of SCOPE --
+// every workspace when SCOPE is empty -- in workspace and order-key order.
+// THE IDS ARE READ FIRST AND ONLY THE MATCHES' ROWS AFTER: the rows of every
+// workspace together run to gigabytes, and a caller after one kind of row
+// (the merge heads) reads only those.
+func (s *store) MatchDurableFeedRows(ctx context.Context, scope []WorkspaceID, match func(WorkspaceID, string) bool) ([]DurableFeedRow, error) {
+	var out []DurableFeedRow
+	fields := dlog.Context{"workspaces": len(scope)}
+	err := s.read(ctx, "daemon.wsm.match_durable_feed_rows", fields, func(ctx context.Context) error {
+		query, args := `SELECT workspace_id, row_id FROM durable_feed_rows`, []any{}
+		if len(scope) > 0 {
+			query += ` WHERE workspace_id IN (?` + strings.Repeat(`, ?`, len(scope)-1) + `)`
+			for _, ws := range scope {
+				args = append(args, ws)
+			}
+		}
+		rows, err := s.q(ctx).QueryContext(ctx, query+` ORDER BY workspace_id, order_key, row_id`, args...)
+		if err != nil {
+			return err
+		}
+		var matched []DurableFeedRow
+		for rows.Next() {
+			var row DurableFeedRow
+			if err := rows.Scan(&row.Workspace, &row.RowID); err != nil {
+				rows.Close()
+				return err
+			}
+			if match(row.Workspace, row.RowID) {
+				matched = append(matched, row)
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, row := range matched {
+			if err := s.q(ctx).QueryRowContext(ctx, `SELECT plane, order_key, row FROM durable_feed_rows WHERE workspace_id = ? AND row_id = ?`,
+				row.Workspace, row.RowID).Scan(&row.Plane, &row.OrderKey, &row.Row); err != nil {
+				return fmt.Errorf("wsm: read the durable feed row %s/%s: %w", row.Workspace, row.RowID, err)
+			}
+			out = append(out, row)
+		}
+		return nil
 	})
 	return out, err
 }

@@ -1204,6 +1204,10 @@ type DB interface {
 	DurableFeedRowRank(ctx context.Context, id WorkspaceID, rowID string) (int, string, bool, error)
 	// ClearDurableFeedRows drops every durable feed row of one workspace.
 	ClearDurableFeedRows(ctx context.Context, id WorkspaceID) error
+	// MatchDurableFeedRows loads the durable feed rows a match on their
+	// workspace and id selects, over a scope of workspaces or all of them
+	// (durablefeedrows.go).
+	MatchDurableFeedRows(ctx context.Context, scope []WorkspaceID, match func(WorkspaceID, string) bool) ([]DurableFeedRow, error)
 
 	// PutFeedTextScale persists the single daemon-global feed text zoom.
 	PutFeedTextScale(ctx context.Context, scale float64) error

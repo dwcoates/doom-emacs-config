@@ -53,6 +53,11 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 		return err
 	}
 	o.sweepOrphanedState(ctx)
+	// EVERY BUBBLE THE STORE HOLDS LIVE IS KNOWN before the queues are
+	// recovered, so the queues' publications end each one no queue holds.
+	if err := o.seedLiveBubbles(ctx, nil); err != nil {
+		return err
+	}
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
 		return err
@@ -97,6 +102,10 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	// queue row included: only a queue's change republishes them otherwise.
 	o.publishOffQueue(ctx)
 	o.kickOffQueueLanded()
+	// WITH NO QUEUE TO PUBLISH, the live bubbles are still ended here.
+	if err := o.endBubblesOffQueue(ctx, "recover"); err != nil {
+		return err
+	}
 	return o.offerOwedDrains(ctx, op, repos)
 }
 

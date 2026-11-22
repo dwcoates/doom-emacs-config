@@ -159,6 +159,11 @@ type fakeDB struct {
 	// undeployedErr fails the next record.
 	undeployed    []wsm.UndeployedLanding
 	undeployedErr error
+	// durable is every row the harness's feed published, as the resolver
+	// records it (fakeFeed.record), keyed by workspace and row id; matchErr
+	// fails every MatchDurableFeedRows.
+	durable  map[ids.WorkspaceID]map[string]wsm.DurableFeedRow
+	matchErr error
 
 	mu sync.Mutex
 
@@ -1994,6 +1999,49 @@ func (f *fakeDB) MergeQueue(_ context.Context, repo wsm.RepoKey) ([]wsm.MergeQue
 	return entries, nil
 }
 
+// putDurable records ROW as the resolver records a durable publication: its
+// pin key while pinned, a settled key once not.
+func (f *fakeDB) putDurable(ws ids.WorkspaceID, row *frontendv1.FeedRow, pinned bool) {
+	raw, err := proto.Marshal(row)
+	if err != nil {
+		panic(fmt.Sprintf("fakeDB: encoding a durable row: %v", err))
+	}
+	key := "2.settled"
+	if pinned {
+		key = "~pinned"
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.durable == nil {
+		f.durable = map[ids.WorkspaceID]map[string]wsm.DurableFeedRow{}
+	}
+	if f.durable[ws] == nil {
+		f.durable[ws] = map[string]wsm.DurableFeedRow{}
+	}
+	id := row.GetId().GetValue()
+	f.durable[ws][id] = wsm.DurableFeedRow{Workspace: ws, RowID: id, Plane: 2, OrderKey: key, Row: raw}
+}
+
+func (f *fakeDB) MatchDurableFeedRows(_ context.Context, scope []ids.WorkspaceID, match func(ids.WorkspaceID, string) bool) ([]wsm.DurableFeedRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.matchErr != nil {
+		return nil, f.matchErr
+	}
+	var out []wsm.DurableFeedRow
+	for ws, rows := range f.durable {
+		if len(scope) > 0 && !slices.Contains(scope, ws) {
+			continue
+		}
+		for id, row := range rows {
+			if match(ws, id) {
+				out = append(out, row)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeDB) AllMergeQueues(_ context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -3174,6 +3222,9 @@ type fakeFeed struct {
 	onUpsert func(row *frontendv1.FeedRow)
 	// folds is every merge fold the merge set on a bubble, in order.
 	folds []foldCall
+	// db, when set, records every publication as the resolver's durable
+	// record does, so the store holds what the feed drew.
+	db *fakeDB
 }
 
 // synthesized is one published row with the feed it landed on and when it was
@@ -3245,6 +3296,9 @@ func (f *fakeFeed) record(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.
 	f.mu.Lock()
 	f.rows = append(f.rows, synthesized{WS: ws, Feed: feed, Row: row, At: at, Pinned: pinned})
 	f.mu.Unlock()
+	if f.db != nil {
+		f.db.putDurable(ws, row, pinned)
+	}
 }
 
 // mirrorCall is one SetOutputMirror the merge made.
@@ -4098,7 +4152,7 @@ func newHarness(t *testing.T) *harness {
 	h.banners = &fakeBanners{told: func() int { return len(h.detached.sent()) }}
 	h.queue = &fakeQueue{db: h.db, fixing: func(promptqueue.Submission) { h.git.fixCommitted() }}
 	h.git = newFakeGit(h.next)
-	h.feed = &fakeFeed{seq: h.next}
+	h.feed = &fakeFeed{seq: h.next, db: h.db}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
 	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository, key: func() wsm.RepoKey { return scopedKey(h) }}
 	h.standing = newFakeStanding()

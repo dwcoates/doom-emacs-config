@@ -81,3 +81,19 @@ func retiredMergeLabelLine(v []byte) (*frontendv1.FeedMergeBranchLine, error) {
 	}
 	return line, nil
 }
+
+// DecodeDurableFeedRow decodes one stored durable row as a reader draws it:
+// a merge head's retired label carried onto its branch line first
+// (CarryRetiredMergeHeadLabel), so a head no layout step has reached yet is
+// read rather than refused. It answers the row and the bytes it decoded.
+func DecodeDurableFeedRow(stored []byte) (*frontendv1.FeedRow, []byte, error) {
+	raw, _, err := CarryRetiredMergeHeadLabel(stored)
+	if err != nil {
+		return nil, nil, err
+	}
+	row := &frontendv1.FeedRow{}
+	if err := proto.Unmarshal(raw, row); err != nil {
+		return nil, nil, err
+	}
+	return row, raw, nil
+}
