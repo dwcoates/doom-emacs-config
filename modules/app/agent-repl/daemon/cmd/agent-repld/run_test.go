@@ -487,24 +487,15 @@ type fakeWithdrawer struct {
 type withdrawOutcome struct {
 	withdrawn bool
 	err       error
-	// got, when set, is the whole Withdrawal answered, for a yielded claim's
-	// outcomes; withdrawn alone answers a non-yielded removal or not.
-	got *daemonaddr.Withdrawal
 }
 
-func (f *fakeWithdrawer) Withdraw() (daemonaddr.Withdrawal, error) {
+func (f *fakeWithdrawer) Withdraw() (bool, error) {
 	if f.calls >= len(f.outcomes) {
-		return daemonaddr.Withdrawal{Outcome: daemonaddr.WithdrawAbsent}, nil
+		return false, nil
 	}
 	o := f.outcomes[f.calls]
 	f.calls++
-	if o.got != nil {
-		return *o.got, o.err
-	}
-	if o.withdrawn {
-		return daemonaddr.Withdrawal{Outcome: daemonaddr.WithdrawRemoved}, o.err
-	}
-	return daemonaddr.Withdrawal{Outcome: daemonaddr.WithdrawNamesAnother}, o.err
+	return o.withdrawn, o.err
 }
 
 func (f *fakeWithdrawer) Address() string { return "127.0.0.1:0" }
@@ -517,20 +508,19 @@ type spyLogger struct {
 
 type spyRecord struct {
 	level, operation, message string
-	ctx                       dlog.Context
 }
 
-func (s *spyLogger) Debug(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelDebug, operation, message, ctx})
+func (s *spyLogger) Debug(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelDebug, operation, message})
 }
-func (s *spyLogger) Info(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelInfo, operation, message, ctx})
+func (s *spyLogger) Info(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelInfo, operation, message})
 }
-func (s *spyLogger) Warn(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelWarn, operation, message, ctx})
+func (s *spyLogger) Warn(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelWarn, operation, message})
 }
-func (s *spyLogger) Error(operation, message string, ctx dlog.Context) {
-	s.records = append(s.records, spyRecord{dlog.LevelError, operation, message, ctx})
+func (s *spyLogger) Error(operation, message string, _ dlog.Context) {
+	s.records = append(s.records, spyRecord{dlog.LevelError, operation, message})
 }
 func (s *spyLogger) With(dlog.Context) dlog.Logger { return s }
 
@@ -673,94 +663,6 @@ func TestAddrWithdrawalSurfacesAWithdrawError(t *testing.T) {
 				t.Fatalf("%s ERROR message = %q (present = %v), want the failure surfaced", tc.name, msg, ok)
 			}
 		})
-	}
-}
-
-// TestAddrWithdrawalRecordsAYieldedWithdrawal pins what a daemon that yielded
-// its boot claim says of each withdrawal outcome, with the path and pids.
-func TestAddrWithdrawalRecordsAYieldedWithdrawal(t *testing.T) {
-	const path = "/state/daemon.addr"
-	yielded := func(outcome daemonaddr.WithdrawOutcome) *daemonaddr.Withdrawal {
-		return &daemonaddr.Withdrawal{Outcome: outcome, Yielded: true, Path: path, PID: 101,
-			Named:  daemonaddr.Advertisement{Address: "127.0.0.1:41000", PID: 202, PIDKnown: true},
-			Holder: daemonaddr.Holder{PID: 303}}
-	}
-	tests := []struct {
-		name      string
-		act       func(*addrWithdrawal)
-		got       *daemonaddr.Withdrawal
-		wantLevel string
-		wantMsg   string
-		wantCtx   dlog.Context
-		wantEarly bool
-	}{
-		{name: "begin removing its own advertisement says so at INFO and marks the early withdrawal",
-			act: (*addrWithdrawal).begin, got: yielded(daemonaddr.WithdrawRemoved),
-			wantLevel: dlog.LevelInfo, wantMsg: "after a yield no successor took up",
-			wantCtx: dlog.Context{"path": path, "pid": 101}, wantEarly: true},
-		{name: "finish removing its own advertisement says so at INFO",
-			act: (*addrWithdrawal).finish, got: yielded(daemonaddr.WithdrawRemoved),
-			wantLevel: dlog.LevelInfo, wantMsg: "after a yield no successor took up",
-			wantCtx: dlog.Context{"path": path, "pid": 101}},
-		{name: "a claim held by another is left to its holder at INFO",
-			act: (*addrWithdrawal).begin, got: yielded(daemonaddr.WithdrawClaimHeld),
-			wantLevel: dlog.LevelInfo, wantMsg: "left to the boot claim's holder",
-			wantCtx: dlog.Context{"path": path, "pid": 101, "holder_pid": 303}},
-		{name: "a file naming another pid is left at INFO",
-			act: (*addrWithdrawal).finish, got: yielded(daemonaddr.WithdrawNamesAnother),
-			wantLevel: dlog.LevelInfo, wantMsg: "names another daemon's pid",
-			wantCtx: dlog.Context{"path": path, "pid": 101, "named_pid": 202}},
-		{name: "an absent file is said at DEBUG",
-			act: (*addrWithdrawal).finish, got: yielded(daemonaddr.WithdrawAbsent),
-			wantLevel: dlog.LevelDebug, wantMsg: "already gone",
-			wantCtx: dlog.Context{"path": path}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			log := &spyLogger{}
-			w := &addrWithdrawal{claim: &fakeWithdrawer{outcomes: []withdrawOutcome{{got: tt.got}}}, log: log}
-
-			// Act.
-			tt.act(w)
-
-			// Assert.
-			if len(log.records) != 1 {
-				t.Fatalf("records = %v, want exactly one", log.records)
-			}
-			r := log.records[0]
-			if r.level != tt.wantLevel || !strings.Contains(r.message, tt.wantMsg) {
-				t.Fatalf("record = %s %q, want %s containing %q", r.level, r.message, tt.wantLevel, tt.wantMsg)
-			}
-			for k, v := range tt.wantCtx {
-				if r.ctx[k] != v {
-					t.Fatalf("record context %s = %v, want %v (context %v)", k, r.ctx[k], v, r.ctx)
-				}
-			}
-			if w.early != tt.wantEarly {
-				t.Fatalf("early = %v, want %v", w.early, tt.wantEarly)
-			}
-		})
-	}
-}
-
-// TestAddrWithdrawalSurfacesAYieldedWithdrawErrorWithItsPath pins that a
-// yielded daemon's failed withdrawal is ERROR naming the path.
-func TestAddrWithdrawalSurfacesAYieldedWithdrawErrorWithItsPath(t *testing.T) {
-	// Arrange.
-	got := &daemonaddr.Withdrawal{Yielded: true, Path: "/state/daemon.addr", PID: 101}
-	log := &spyLogger{}
-	w := &addrWithdrawal{claim: &fakeWithdrawer{outcomes: []withdrawOutcome{{got: got, err: errors.New("take the boot lock: is a directory")}}}, log: log}
-
-	// Act.
-	w.begin()
-
-	// Assert.
-	if len(log.records) != 1 || log.records[0].level != dlog.LevelError {
-		t.Fatalf("records = %v, want one ERROR", log.records)
-	}
-	if ctx := log.records[0].ctx; ctx["path"] != "/state/daemon.addr" || !strings.Contains(fmt.Sprint(ctx["error"]), "is a directory") {
-		t.Fatalf("ERROR context = %v, want the path and the cause", ctx)
 	}
 }
 
@@ -1669,9 +1571,9 @@ func (o *orderingClaim) Depart() error {
 	return o.departErr
 }
 
-func (o *orderingClaim) Withdraw() (daemonaddr.Withdrawal, error) {
+func (o *orderingClaim) Withdraw() (bool, error) {
 	o.steps = append(o.steps, "withdraw")
-	return daemonaddr.Withdrawal{Outcome: daemonaddr.WithdrawRemoved}, nil
+	return true, nil
 }
 
 func (o *orderingClaim) Address() string { return "127.0.0.1:0" }

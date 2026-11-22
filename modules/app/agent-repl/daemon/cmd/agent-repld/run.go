@@ -1414,7 +1414,7 @@ func beginShutdown(claim departer, accept sharedStopper, withdrawal *addrWithdra
 // withdrawer is the slice of daemonaddr.Claim that addrWithdrawal needs: the
 // idempotent, address/pid-guarded removal and the address it names.
 type withdrawer interface {
-	Withdraw() (daemonaddr.Withdrawal, error)
+	Withdraw() (bool, error)
 	Address() string
 }
 
@@ -1431,107 +1431,57 @@ type withdrawer interface {
 // begin; the early flag keeps that no-op from being recorded as a successor
 // takeover. A "withdrew" record fires only when a call actually removed the
 // file, and a Withdraw error is always surfaced at ERROR.
-//
-// A daemon that YIELDED its boot claim re-takes it to withdraw
-// (daemonaddr's withdrawAfterYieldLocked), and each outcome of that is said
-// at INFO with the path and both pids (recordYielded).
 type addrWithdrawal struct {
 	claim withdrawer
 	log   dlog.Logger
 	early bool
 }
 
-// withdrawalContext is a withdrawal record's context.
-func (w *addrWithdrawal) withdrawalContext(got daemonaddr.Withdrawal) dlog.Context {
-	ctx := dlog.Context{"address": w.claim.Address()}
-	if got.Path != "" {
-		ctx["path"] = got.Path
-	}
-	if got.Yielded {
-		ctx["yielded"] = true
-		ctx["pid"] = got.PID
-		ctx["outcome"] = string(got.Outcome)
-		if got.Named.PIDKnown {
-			ctx["named_pid"] = got.Named.PID
-		}
-		if got.Outcome == daemonaddr.WithdrawClaimHeld {
-			ctx["holder_pid"] = got.Holder.PID
-		}
-	}
-	return ctx
-}
-
-// recordFailure says a failed withdrawal at ERROR, never swallowed.
-func (w *addrWithdrawal) recordFailure(got daemonaddr.Withdrawal, err error) {
-	w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Merge(w.withdrawalContext(got), dlog.Context{"error": err.Error()}))
-}
-
-// recordYielded says what a yielded daemon's withdrawal did when it removed
-// nothing.
-func (w *addrWithdrawal) recordYielded(got daemonaddr.Withdrawal) {
-	ctx := w.withdrawalContext(got)
-	switch got.Outcome {
-	case daemonaddr.WithdrawClaimHeld:
-		w.log.Info("daemon.cmd.exit", "daemon.addr was left to the boot claim's holder; this daemon yielded the claim and another process holds it", ctx)
-	case daemonaddr.WithdrawNamesAnother:
-		w.log.Info("daemon.cmd.exit", "daemon.addr names another daemon's pid; left it under the boot claim this yielded daemon re-took", ctx)
-	default:
-		w.log.Debug("daemon.cmd.exit", "daemon.addr was already gone when this yielded daemon re-took the boot claim", ctx)
-	}
-}
-
-// yieldedRemoval is the record of a yielded daemon removing its own
-// advertisement: no successor took the claim up, or one took it and let it go
-// without rewriting the file.
-const yieldedRemoval = "daemon.addr still named this daemon after a yield no successor took up; removed it under the re-taken boot claim"
-
 // begin withdraws the advertisement at the start of the shutdown sequence.
 func (w *addrWithdrawal) begin() {
-	got, err := w.claim.Withdraw()
+	withdrawn, err := w.claim.Withdraw()
 	if err != nil {
-		w.recordFailure(got, err)
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+			"error": err.Error(),
+		})
 		return
 	}
-	switch {
-	case got.Removed() && got.Yielded:
+	if withdrawn {
 		w.early = true
-		w.log.Info("daemon.cmd.exit", yieldedRemoval+" at the start of shutdown", w.withdrawalContext(got))
-	case got.Removed():
-		w.early = true
-		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", w.withdrawalContext(got))
-	case got.Yielded:
-		w.recordYielded(got)
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn at the start of shutdown, before the listener stopped accepting", dlog.Context{
+			"address": w.claim.Address(),
+		})
 	}
 }
 
 // finish is the deferred catch-all withdrawal, run on every exit.
 func (w *addrWithdrawal) finish() {
-	got, err := w.claim.Withdraw()
+	withdrawn, err := w.claim.Withdraw()
 	if err != nil {
-		w.recordFailure(got, err)
+		w.log.Error("daemon.cmd.exit", "daemon.addr could not be withdrawn", dlog.Context{
+			"error": err.Error(),
+		})
 		return
 	}
-	if got.Removed() {
-		msg := "daemon.addr was withdrawn"
-		if got.Yielded {
-			msg = yieldedRemoval
-		}
-		w.log.Info("daemon.cmd.exit", msg, w.withdrawalContext(got))
+	if withdrawn {
+		w.log.Info("daemon.cmd.exit", "daemon.addr was withdrawn", dlog.Context{
+			"address": w.claim.Address(),
+		})
 		return
 	}
 	if w.early {
 		// begin already took the file down at the start of shutdown; this
 		// catch-all had nothing left to do.
-		w.log.Debug("daemon.cmd.exit", "daemon.addr was already withdrawn at the start of shutdown", w.withdrawalContext(got))
-		return
-	}
-	if got.Yielded {
-		w.recordYielded(got)
+		w.log.Debug("daemon.cmd.exit", "daemon.addr was already withdrawn at the start of shutdown", dlog.Context{
+			"address": w.claim.Address(),
+		})
 		return
 	}
 	// The file names somebody else -- a successor that took over and published
 	// its own address -- or nothing at all.
-	w.log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", w.withdrawalContext(got))
+	w.log.Info("daemon.cmd.exit", "daemon.addr was left alone; it does not name this daemon", dlog.Context{
+		"address": w.claim.Address(),
+	})
 }
 
 // testBarrierEnv is set to "1" by the integration harness for every daemon it

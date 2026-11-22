@@ -41,12 +41,10 @@ type Claim interface {
 	// joining daemon calls it only once it owns every workspace.
 	Publish() error
 	// Withdraw removes the daemon.addr file WHILE IT STILL NAMES THIS CLAIM'S
-	// ADDRESS, and answers what it did (Withdrawal). Orderly exit calls it;
+	// ADDRESS, and answers whether it removed anything. Orderly exit calls it;
 	// it is idempotent, removing an absent file is success, and a successor's
-	// advertisement is left alone. A claim that yielded re-takes the boot
-	// claim non-blocking to withdraw, and removes the file only while it
-	// names this process's pid; a claim held by another is the holder's.
-	Withdraw() (Withdrawal, error)
+	// advertisement is left alone.
+	Withdraw() (bool, error)
 	// Verify reports whether what this claim OWNS ON DISK is still there: the
 	// state root it was bound in (the same directory, not one recreated at
 	// the same path), the daemon.lock whose kernel lock it holds (the same

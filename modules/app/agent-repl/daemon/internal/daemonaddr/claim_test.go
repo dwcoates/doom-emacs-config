@@ -278,8 +278,7 @@ func TestWithdrawRemovesTheAdvertisement(t *testing.T) {
 	}
 
 	// Act.
-	got, err := c.Withdraw()
-	withdrawn := got.Removed()
+	withdrawn, err := c.Withdraw()
 	if err != nil {
 		t.Fatalf("Withdraw: %v", err)
 	}
@@ -298,8 +297,7 @@ func TestWithdrawingAnAbsentAdvertisementIsSuccess(t *testing.T) {
 	c := mustBind(t, newAddrPath(t))
 
 	// Act.
-	got, err := c.Withdraw()
-	withdrawn := got.Removed()
+	withdrawn, err := c.Withdraw()
 
 	// Assert.
 	if err != nil {
@@ -326,8 +324,7 @@ func TestWithdrawLeavesASuccessorsAdvertisementAlone(t *testing.T) {
 	}
 
 	// Act.
-	got, err := incumbent.Withdraw()
-	withdrawn := got.Removed()
+	withdrawn, err := incumbent.Withdraw()
 
 	// Assert.
 	if err != nil {
@@ -457,10 +454,12 @@ func TestAnAdvertisementNamingThisProcessIsNoPredecessors(t *testing.T) {
 	}
 }
 
-// yieldedIncumbent binds, publishes and yields a claim on a fresh state root,
-// as an incumbent that finished its handover's transfer pass.
-func yieldedIncumbent(t *testing.T) (Claim, string) {
-	t.Helper()
+// TestAYieldedClaimNeverWithdrawsTheAdvertisement pins the handover's end
+// after a yield: the boot claim is the successor's, so it may publish at any
+// instant, and only the claim's holder may remove daemon.addr. The file left
+// naming the incumbent is exactly what a read-then-remove raced on.
+func TestAYieldedClaimNeverWithdrawsTheAdvertisement(t *testing.T) {
+	// Arrange: the incumbent published and yielded; the file still names it.
 	addrPath := newAddrPath(t)
 	incumbent := mustBind(t, addrPath)
 	if err := incumbent.Publish(); err != nil {
@@ -469,199 +468,19 @@ func yieldedIncumbent(t *testing.T) (Claim, string) {
 	if err := incumbent.Yield(); err != nil {
 		t.Fatalf("Yield: %v", err)
 	}
-	return incumbent, addrPath
-}
 
-// TestAYieldedClaimWithdrawsUnderTheReTakenBootClaim pins the yielded
-// incumbent's orderly exit (2026-11-21): it re-takes the boot claim
-// non-blocking and removes daemon.addr only while it names this process's
-// pid, so a successor shut down before it took the claim up no longer leaves
-// a file the next boot records as a death; a claim held by another is that
-// holder's, and the file is left.
-func TestAYieldedClaimWithdrawsUnderTheReTakenBootClaim(t *testing.T) {
-	ownPID := strconv.Itoa(os.Getpid())
-	tests := []struct {
-		name string
-		// arrange shapes the state root after the yield.
-		arrange     func(t *testing.T, addrPath string)
-		wantOutcome WithdrawOutcome
-		// wantFile is daemon.addr's content afterwards; "" means absent
-		// unless wantUntouched.
-		wantFile      string
-		wantUntouched bool
-		// wantClaimFree is whether the boot claim is free afterwards.
-		wantClaimFree bool
-	}{
-		{name: "nobody holds the claim and the file names this pid: removed",
-			arrange:     func(*testing.T, string) {},
-			wantOutcome: WithdrawRemoved, wantClaimFree: true},
-		{name: "a successor holds the claim: the file is untouched",
-			arrange: func(t *testing.T, addrPath string) {
-				successor, err := BindJoining(addrPath, 0)
-				if err != nil {
-					t.Fatalf("BindJoining: %v", err)
-				}
-				t.Cleanup(func() { successor.Close() })
-				if err := successor.AwaitBootClaim(context.Background()); err != nil {
-					t.Fatalf("the successor's AwaitBootClaim: %v", err)
-				}
-			},
-			wantOutcome: WithdrawClaimHeld, wantUntouched: true},
-		{name: "the claim is free and the file names another pid: left",
-			arrange: func(t *testing.T, addrPath string) {
-				if err := os.WriteFile(addrPath, []byte("127.0.0.1:41000\npid=1\n"), 0o644); err != nil {
-					t.Fatalf("write: %v", err)
-				}
-			},
-			wantOutcome: WithdrawNamesAnother, wantFile: "127.0.0.1:41000\npid=1\n", wantClaimFree: true},
-		{name: "the claim is free and a legacy file names no pid: left",
-			arrange: func(t *testing.T, addrPath string) {
-				if err := os.WriteFile(addrPath, []byte("127.0.0.1:41000\n"), 0o644); err != nil {
-					t.Fatalf("write: %v", err)
-				}
-			},
-			wantOutcome: WithdrawNamesAnother, wantFile: "127.0.0.1:41000\n", wantClaimFree: true},
-		{name: "the claim is free and the file is absent: no error",
-			arrange: func(t *testing.T, addrPath string) {
-				if err := os.Remove(addrPath); err != nil {
-					t.Fatalf("remove: %v", err)
-				}
-			},
-			wantOutcome: WithdrawAbsent, wantClaimFree: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			incumbent, addrPath := yieldedIncumbent(t)
-			tt.arrange(t, addrPath)
-			before, _ := os.ReadFile(addrPath)
-			want := tt.wantFile
-			if tt.wantUntouched {
-				want = string(before)
-			}
+	// Act.
+	withdrawn, err := incumbent.Withdraw()
 
-			// Act.
-			got, err := incumbent.Withdraw()
-
-			// Assert.
-			if err != nil {
-				t.Fatalf("Withdraw = %v, want success", err)
-			}
-			if got.Outcome != tt.wantOutcome || !got.Yielded || got.Path != addrPath || got.PID != os.Getpid() {
-				t.Fatalf("Withdraw = %+v, want outcome %s, yielded, at %s, by pid %s", got, tt.wantOutcome, addrPath, ownPID)
-			}
-			raw, rerr := os.ReadFile(addrPath)
-			switch {
-			case want == "" && !os.IsNotExist(rerr):
-				t.Fatalf("daemon.addr = %q (err %v), want it gone", raw, rerr)
-			case want != "" && string(raw) != want:
-				t.Fatalf("daemon.addr = %q (err %v), want %q", raw, rerr, want)
-			}
-			if free := ProbeBootClaim(addrPath) == nil; free != tt.wantClaimFree {
-				t.Fatalf("boot claim free afterwards = %v, want %v", free, tt.wantClaimFree)
-			}
-		})
-	}
-}
-
-// TestAYieldedWithdrawalLeavesTheNextBootNoPredecessor pins the end to end
-// claim of the fix: after the yielded incumbent's orderly exit nobody took
-// up, the next ordinary boot takes the claim at once and finds no
-// predecessor's advertisement.
-func TestAYieldedWithdrawalLeavesTheNextBootNoPredecessor(t *testing.T) {
-	// Arrange.
-	incumbent, addrPath := yieldedIncumbent(t)
-	if _, err := incumbent.Withdraw(); err != nil {
-		t.Fatalf("Withdraw: %v", err)
-	}
-
-	// Act: a refused-on-sight bind, so a claim still held fails the test.
-	next, _, err := BindWithin(addrPath, 0, 0, BootOrdinary)
+	// Assert.
 	if err != nil {
-		t.Fatalf("the next boot's BindWithin = %v, want the claim free", err)
+		t.Fatalf("Withdraw = %v, want success", err)
 	}
-	t.Cleanup(func() { next.Close() })
-	ad, standing, perr := PredecessorAdvertisement(addrPath, os.Getpid())
-
-	// Assert.
-	if perr != nil || standing {
-		t.Fatalf("PredecessorAdvertisement = (%+v, %v, %v), want no predecessor", ad, standing, perr)
+	if withdrawn {
+		t.Fatal("a yielded claim removed daemon.addr, want it left for the boot claim's holder")
 	}
-}
-
-// TestAYieldedWithdrawalWhoseLockCannotBeTakenSurfacesTheFailure pins that a
-// re-take refused for any reason but another holder is an error naming the
-// path, never read as a held claim, and the file is left.
-func TestAYieldedWithdrawalWhoseLockCannotBeTakenSurfacesTheFailure(t *testing.T) {
-	// Arrange: the lock file's path is a directory, which cannot be opened
-	// for writing.
-	incumbent, addrPath := yieldedIncumbent(t)
-	if err := os.Remove(LockPath(addrPath)); err != nil {
-		t.Fatalf("remove the lock file: %v", err)
-	}
-	if err := os.Mkdir(LockPath(addrPath), 0o700); err != nil {
-		t.Fatalf("Mkdir: %v", err)
-	}
-
-	// Act.
-	got, err := incumbent.Withdraw()
-
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), addrPath) || errors.Is(err, ErrClaimed) {
-		t.Fatalf("Withdraw = %+v, %v; want an I/O error naming %s", got, err, addrPath)
-	}
-	if _, serr := os.Stat(addrPath); serr != nil {
-		t.Fatalf("daemon.addr = %v, want it left", serr)
-	}
-}
-
-// TestAYieldedWithdrawalWhoseRemovalFailsSurfacesItAndReleasesTheClaim pins
-// that a failed removal is an error, and the re-taken claim is released all
-// the same.
-func TestAYieldedWithdrawalWhoseRemovalFailsSurfacesItAndReleasesTheClaim(t *testing.T) {
-	// Arrange: a state root that refuses unlinks, so the remove fails while
-	// the read and the lock (an existing file) still succeed.
-	incumbent, addrPath := yieldedIncumbent(t)
-	root := filepath.Dir(addrPath)
-	if err := os.Chmod(root, 0o555); err != nil {
-		t.Fatalf("chmod: %v", err)
-	}
-	t.Cleanup(func() { os.Chmod(root, 0o755) })
-
-	// Act.
-	_, err := incumbent.Withdraw()
-
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "remove") || !strings.Contains(err.Error(), addrPath) {
-		t.Fatalf("Withdraw = %v, want the removal's failure naming %s", err, addrPath)
-	}
-	if perr := ProbeBootClaim(addrPath); perr != nil {
-		t.Fatalf("ProbeBootClaim = %v, want the re-taken claim released", perr)
-	}
-}
-
-// TestAYieldedClaimClosedBeforeItWithdrawsReTakesNothing pins that Close ends
-// the claim's footprint: a withdrawal after it is an ordering defect,
-// surfaced, and creates no lock file.
-func TestAYieldedClaimClosedBeforeItWithdrawsReTakesNothing(t *testing.T) {
-	// Arrange.
-	incumbent, addrPath := yieldedIncumbent(t)
-	if err := incumbent.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if err := os.Remove(LockPath(addrPath)); err != nil {
-		t.Fatalf("remove the lock file: %v", err)
-	}
-
-	// Act.
-	_, err := incumbent.Withdraw()
-
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "closed") {
-		t.Fatalf("Withdraw after Close = %v, want the ordering defect surfaced", err)
-	}
-	if _, serr := os.Stat(LockPath(addrPath)); !os.IsNotExist(serr) {
-		t.Fatalf("stat the lock file = %v, want it never recreated", serr)
+	if got := readAddrFile(t, addrPath); got != incumbent.Address() {
+		t.Fatalf("daemon.addr = %q, want it untouched (%q)", got, incumbent.Address())
 	}
 }
 
@@ -1662,8 +1481,7 @@ func TestAnAdvertisedSharedAddressIsPublishedVerifiedAndWithdrawn(t *testing.T) 
 	publishErr := c.Publish()
 	raw, _ := os.ReadFile(addrPath)
 	verifyErr := c.Verify()
-	got, withdrawErr := c.Withdraw()
-	removed := got.Removed()
+	removed, withdrawErr := c.Withdraw()
 
 	// Assert: daemon.addr names the shared address, not this claim's own.
 	if publishErr != nil {
