@@ -19,10 +19,20 @@ import (
 // inode this one's flock does not conflict with.
 //
 // THE CHECK RUNS ON THE KERNEL'S REPORT OF A CHANGE, never on a cadence: the
-// watch follows the root, its parent (the root renamed or removed), the lock
-// and the address file, and every change it reports is verified at once. So
-// a loss is seen the instant it happens, and a root nobody touches costs no
-// check at all.
+// watch follows the root, its parent (the root renamed or removed) and the
+// address file, and every change it reports is verified at once. So a loss
+// is seen the instant it happens, and a root nobody touches costs no check
+// at all.
+//
+// THE WATCH NEVER OPENS A LOCK FILE. Closing ANY descriptor of a file drops
+// every record lock this process holds on it (recordlock's package comment),
+// and the watch closes and reopens what it follows at every change and at
+// its stop. Following daemon.lock dropped the boot claim while the daemon
+// still ran: at a handover the successor took the claim and published
+// before the incumbent exited, and the incumbent's exit then withdrew the
+// successor's advertisement (2026-11-22). The root's own watch reports
+// daemon.lock removed or replaced, a change of its entries, and Verify
+// checks the lock's inode at that change.
 
 // rootWatch stands the daemon down when what it owns on disk vanishes.
 type rootWatch struct {
@@ -35,10 +45,12 @@ type rootWatch struct {
 	standDown func(cause error)
 }
 
-// rootWatchPaths are what a serving daemon owns on disk and its root's
-// parent, whose change is the root renamed or removed.
+// rootWatchPaths are the root, its parent, whose change is the root renamed
+// or removed, and the address file. No lock file is among them: its watch's
+// descriptor closing would drop this daemon's record lock on it; the root's
+// watch reports one removed or replaced.
 func rootWatchPaths(root, addrPath string) []string {
-	return []string{filepath.Dir(root), root, daemonaddr.LockPath(addrPath), addrPath}
+	return []string{filepath.Dir(root), root, addrPath}
 }
 
 // run verifies once the watch is taken, then at every change it reports,
