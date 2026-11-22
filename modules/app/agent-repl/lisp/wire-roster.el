@@ -1703,10 +1703,11 @@ head, and its waiting clock
 
 (defun agent-repl-wire-decode-roster-merge-queue-pauser (value)
   "Decode VALUE as `RosterMergeQueuePauser', `(:arm ARM :value V)'.
-ARM is `:user' (V t), `:workspace' (V the workspace's name) or `:host'
-\(V what the host could not do)."
+ARM is `:user' (V t), `:workspace' (V the workspace's name), `:host'
+\(V what the host could not do) or `:deploy-check' (V t: the queue's
+deploy check holds it until the deploy mediator approves a deploy)."
   (let ((object (agent-repl-wire--object "RosterMergeQueuePauser" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueuePauser" object '(user workspace host))
+    (agent-repl-wire--check-keys "RosterMergeQueuePauser" object '(user workspace host deployCheck))
     (agent-repl-wire--decode-oneof
      "RosterMergeQueuePauser" 'asker object
      `((user :user ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueuePauserUser" v) t))
@@ -1719,7 +1720,9 @@ ARM is `:user' (V t), `:workspace' (V the workspace's name) or `:host'
              ,(lambda (v)
                 (let ((host (agent-repl-wire--object "RosterMergeQueuePauserHost" v)))
                   (agent-repl-wire--check-keys "RosterMergeQueuePauserHost" host '(cause))
-                  (agent-repl-wire--decode-string "RosterMergeQueuePauserHost" 'cause host))))))))
+                  (agent-repl-wire--decode-string "RosterMergeQueuePauserHost" 'cause host))))
+       (deployCheck :deploy-check
+                    ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueuePauserDeployCheck" v) t))))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-paused (value)
   "Decode VALUE as `RosterMergeQueuePaused'.
