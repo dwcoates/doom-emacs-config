@@ -43,6 +43,8 @@ package recordlock
 import (
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -206,6 +208,85 @@ func TryExclusive(path string) (*Record, Holder, error) {
 	return &Record{f: f, gate: gate, path: path}, Holder{}, nil
 }
 
+// ErrReplaced reports a lock file whose path named another file by the time
+// it was opened: the probe opened a file it did not mean to judge.
+var ErrReplaced = errors.New("the lock file was replaced while it was opened")
+
+// TryExistingExclusive is TryExclusive for a lock file that must already
+// exist: it NEVER creates the file. A file that is absent, or that went at
+// the instant it was opened, answers an error wrapping os.ErrNotExist, so a
+// caller judging a file's holder never judges a file it made itself.
+//
+// The gate is the one of the file PATH names when it is asked, taken before
+// any descriptor is opened, as TryExclusive's is. A path that names another
+// file once opened answers ErrReplaced; the descriptor of that other file is
+// closed only under that file's own gate, waited for off the caller, so the
+// close drops no other holder's lock in this process.
+func TryExistingExclusive(path string) (*Record, Holder, error) {
+	gatesMu.Lock()
+	info, err := os.Stat(path)
+	if err != nil {
+		gatesMu.Unlock()
+		return nil, Holder{}, err
+	}
+	gate, err := gateLocked(info, path)
+	gatesMu.Unlock()
+	if err != nil {
+		return nil, Holder{}, err
+	}
+	if !gate.TryLock() {
+		return nil, Holder{PID: os.Getpid()}, ErrWouldBlock
+	}
+	f, err := OpenExisting(path)
+	if err != nil {
+		gate.Unlock()
+		return nil, Holder{}, err
+	}
+	opened, err := f.Stat()
+	if err != nil {
+		// A descriptor that cannot be stated is open on no file, so closing
+		// it drops no lock.
+		f.Close()
+		gate.Unlock()
+		return nil, Holder{}, err
+	}
+	if !os.SameFile(info, opened) {
+		other, gerr := gateOfFile(f, path)
+		gate.Unlock()
+		if gerr != nil {
+			f.Close()
+			return nil, Holder{}, gerr
+		}
+		inflight.Go(func() {
+			other.Lock()
+			f.Close()
+			other.Unlock()
+		})
+		return nil, Holder{}, fmt.Errorf("%s: %w", path, ErrReplaced)
+	}
+	if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, wholeFile(syscall.F_WRLCK)); err != nil {
+		var holder Holder
+		if recordLocked(err) {
+			holder, _ = HolderOn(f)
+		}
+		f.Close()
+		gate.Unlock()
+		if recordLocked(err) {
+			return nil, holder, ErrWouldBlock
+		}
+		return nil, Holder{}, err
+	}
+	return &Record{f: f, gate: gate, path: path}, Holder{}, nil
+}
+
+// OpenExisting opens the lock file at PATH for reading and writing, NEVER
+// creating it: an absent file answers an error wrapping os.ErrNotExist. It is
+// the open of a caller that waits for a lock file another process made
+// (BlockExclusive) and must not put one back where its holder removed it.
+func OpenExisting(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_RDWR, 0)
+}
+
 // Hold takes the lock at PATH without blocking, for the length of some work,
 // creating its directory and file as needed. The bool is false when another
 // holder has it -- a legal answer the caller waits out or skips -- while an
@@ -289,6 +370,32 @@ func (r *Record) Stat() (os.FileInfo, error) {
 		return nil, fmt.Errorf("the lock %s is released", r.Path())
 	}
 	return r.f.Stat()
+}
+
+// ReadAll reads the held file's whole content through the held descriptor.
+// A second descriptor opened and closed to read it would drop the lock.
+func (r *Record) ReadAll() ([]byte, error) {
+	if r == nil || r.f == nil {
+		return nil, fmt.Errorf("the lock %s is released", r.Path())
+	}
+	return io.ReadAll(io.NewSectionReader(r.f, 0, math.MaxInt64))
+}
+
+// Overwrite replaces the held file's content with B through the held
+// descriptor: a truncate, then one write at offset zero. A reader that holds
+// the lock after this holder sees the content before or after, or, when this
+// holder died between the two, an empty file.
+func (r *Record) Overwrite(b []byte) error {
+	if r == nil || r.f == nil {
+		return fmt.Errorf("the lock %s is released", r.Path())
+	}
+	if err := r.f.Truncate(0); err != nil {
+		return fmt.Errorf("truncate %s: %w", r.path, err)
+	}
+	if _, err := r.f.WriteAt(b, 0); err != nil {
+		return fmt.Errorf("write %s: %w", r.path, err)
+	}
+	return nil
 }
 
 // Release releases the lock and closes its descriptor, then lets the next

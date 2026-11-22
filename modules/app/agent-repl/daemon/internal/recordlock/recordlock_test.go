@@ -703,3 +703,95 @@ func TestHoldAcrossExecThatCannotOpenItsFileSaysWhy(t *testing.T) {
 		t.Fatalf("HoldAcrossExec = %v, want the missing directory", err)
 	}
 }
+
+func TestTryExistingExclusive(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(t *testing.T, path string) int
+		wantAbsent bool
+		wantHolder bool
+	}{
+		{name: "an absent file is refused and never created", wantAbsent: true,
+			arrange: func(*testing.T, string) int { return 0 }},
+		{name: "a free file is taken", arrange: func(t *testing.T, path string) int {
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return 0
+		}},
+		{name: "a file another process holds is refused naming it", wantHolder: true,
+			arrange: func(t *testing.T, path string) int { return startLockHelper(t, "hold", path).field(t, "ready") }},
+		{name: "a file this process holds is refused naming this process", wantHolder: true,
+			arrange: func(t *testing.T, path string) int { mustTake(t, path); return os.Getpid() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := lockPath(t)
+			want := tt.arrange(t, path)
+
+			// Act
+			rec, holder, err := TryExistingExclusive(path)
+
+			// Assert
+			switch {
+			case tt.wantAbsent:
+				if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("TryExistingExclusive = %v, want os.ErrNotExist", err)
+				}
+				if _, serr := os.Stat(path); !os.IsNotExist(serr) {
+					t.Fatalf("the file exists after TryExistingExclusive: %v", serr)
+				}
+			case tt.wantHolder:
+				if !errors.Is(err, ErrWouldBlock) || holder.PID != want {
+					t.Fatalf("TryExistingExclusive = (%+v, %v), want ErrWouldBlock held by %d", holder, err, want)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("TryExistingExclusive = %v, want the lock taken", err)
+				}
+				rec.Release()
+			}
+		})
+	}
+}
+
+func TestOpenExistingNeverCreatesTheFile(t *testing.T) {
+	// Arrange
+	path := lockPath(t)
+
+	// Act
+	_, err := OpenExisting(path)
+
+	// Assert
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenExisting = %v, want os.ErrNotExist", err)
+	}
+	if _, serr := os.Stat(path); !os.IsNotExist(serr) {
+		t.Fatalf("the file exists after OpenExisting: %v", serr)
+	}
+}
+
+// TestAHeldFileIsWrittenAndReadWithoutDroppingItsLock pins that Overwrite and
+// ReadAll go through the held descriptor: a second descriptor opened and
+// closed would drop the lock, and the helper would then see no holder.
+func TestAHeldFileIsWrittenAndReadWithoutDroppingItsLock(t *testing.T) {
+	// Arrange
+	path := lockPath(t)
+	if err := os.WriteFile(path, []byte("an older, longer content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := mustTake(t, path)
+
+	// Act
+	werr := rec.Overwrite([]byte("pid=7\n"))
+	got, rerr := rec.ReadAll()
+
+	// Assert
+	if werr != nil || rerr != nil || string(got) != "pid=7\n" {
+		t.Fatalf("Overwrite = %v, ReadAll = (%q, %v), want pid=7", werr, got, rerr)
+	}
+	if holder := startLockHelper(t, "probe", path).field(t, "holder"); holder != os.Getpid() {
+		t.Fatalf("held by %d after the write and read, want this process (%d)", holder, os.Getpid())
+	}
+}
