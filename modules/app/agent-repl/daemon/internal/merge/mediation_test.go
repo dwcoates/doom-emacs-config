@@ -1702,3 +1702,68 @@ func TestARoundFailureWithARecordedMediatorThatCannotBeReopenedNotifiesTheUser(t
 		t.Fatalf("the escalation says %q, want it to name what failed and its cause", brief)
 	}
 }
+
+func TestAReleaseWhileTheMediatorsFinishStandsLeavesTheQueueHeldAndSaysSo(t *testing.T) {
+	approve := func(t *testing.T, h *harness) {
+		if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"}); err != nil {
+			t.Fatalf("DecideMediation: %v", err)
+		}
+	}
+	quiet := func(t *testing.T, h *harness) {
+		q, ok, err := h.o.checkedQueueOf(context.Background(), mediationKey(h))
+		if err != nil || !ok {
+			t.Fatalf("checkedQueueOf = (%v, %v)", ok, err)
+		}
+		h.o.releaseQuiet(context.Background(), q, *owedCheck(t, h), wsm.CheckWindow{Start: deployStarted, Through: h.now}, dlog.Context{})
+	}
+	tests := []struct {
+		name        string
+		release     func(*testing.T, *harness)
+		finish      bool
+		wantHeld    bool
+		wantMessage string
+	}{
+		{name: "an approval with a finish standing releases the check and the finish holds the queue", release: approve, finish: true, wantHeld: true,
+			wantMessage: "the mediator approved the deploy; the queue stays held for the deploy mediator's remediation finish under way, until the mediator approves its deploy"},
+		{name: "an approval with no finish standing releases the queue", release: approve,
+			wantMessage: "the mediator approved the deploy; the queue advances"},
+		{name: "a quiet check's release with a finish standing leaves the queue held", release: quiet, finish: true, wantHeld: true,
+			wantMessage: "the deploy is released and the mediator is not run; the queue stays held for the deploy mediator's remediation finish"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withMediator(t, h)
+			told(t, h, deployStarted, "turn-told")
+			if tt.finish {
+				standFinishAt(t, h, mediationKey(h), wsm.RemediationGating)
+			}
+			var kicked []wsm.RepoKey
+			h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+			// Act
+			tt.release(t, h)
+
+			// Assert
+			if owedCheck(t, h) != nil {
+				t.Fatalf("check %+v, want it released", owedCheck(t, h))
+			}
+			held, err := h.o.queueHeld(context.Background(), mediationKey(h))
+			if err != nil || held != tt.wantHeld {
+				t.Fatalf("queueHeld = (%v, %v), want %v", held, err, tt.wantHeld)
+			}
+			if len(kicked) == 0 {
+				t.Fatal("the queue was not kicked after the release")
+			}
+			want := logLike{level: "info", op: opMediation, text: tt.wantMessage}
+			if tt.wantHeld {
+				want.context = map[string]string{"held_by": heldByRemediationFinish}
+			}
+			if !loggedLike(h, want) {
+				t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)
+			}
+		})
+	}
+}

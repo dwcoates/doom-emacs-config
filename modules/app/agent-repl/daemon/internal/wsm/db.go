@@ -853,6 +853,9 @@ type DB interface {
 	RemediationFinishes(ctx context.Context) ([]RemediationFinish, error)
 	// EndRemediationFinish removes a workspace's remediation finish.
 	EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool, error)
+	// DeployCheckHoldOf answers, in one snapshot, a queue's owed check and
+	// its remediation finishes: what may hold it for its deploy mediator.
+	DeployCheckHoldOf(ctx context.Context, repo RepoKey) (DeployCheckHold, error)
 	// RecordRemediationLanded records what a remediation's landing made and
 	// moves its finish to deploying.
 	// PassRemediationGate moves WS's finish to its landing, recording the

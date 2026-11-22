@@ -15,6 +15,7 @@ func TestTheHoldsSplitTheHeadFromSpeculativeWork(t *testing.T) {
 		paused          bool
 		serves          bool
 		check           string
+		finish          wsm.RemediationStep
 		wantHead        bool
 		wantSpeculation bool
 	}{
@@ -23,6 +24,12 @@ func TestTheHoldsSplitTheHeadFromSpeculativeWork(t *testing.T) {
 		{name: "a queue a handover holds", wantHead: true, wantSpeculation: true},
 		{name: "a queue whose deploy's check is assessed holds only its head", serves: true, check: "owed", wantHead: true},
 		{name: "a queue whose deploy has a fix dispatched holds everything new", serves: true, check: "dispatched", wantHead: true, wantSpeculation: true},
+		{name: "a queue whose mediator's finish gates with no check owed holds everything new", serves: true, finish: wsm.RemediationGating, wantHead: true, wantSpeculation: true},
+		{name: "a queue whose mediator was sent back to fix holds everything new", serves: true, finish: wsm.RemediationFixing, wantHead: true, wantSpeculation: true},
+		{name: "a queue whose mediator's finish lands holds everything new", serves: true, finish: wsm.RemediationLanding, wantHead: true, wantSpeculation: true},
+		{name: "a queue whose mediator's finish starts its deploy holds everything new", serves: true, finish: wsm.RemediationDeploying, wantHead: true, wantSpeculation: true},
+		{name: "a finish whose deploy began holds nothing itself; its deploy's check does", serves: true, finish: wsm.RemediationDeployed},
+		{name: "a finish standing beside an assessed check holds everything new", serves: true, check: "owed", finish: wsm.RemediationGating, wantHead: true, wantSpeculation: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -40,6 +47,9 @@ func TestTheHoldsSplitTheHeadFromSpeculativeWork(t *testing.T) {
 				if _, err := h.db.DispatchMediation(ctx, h.repoKey(), epochPause, epochPause, aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if tt.finish != "" {
+				standFinishAt(t, h, h.repoKey(), tt.finish)
 			}
 
 			// Act
@@ -243,5 +253,53 @@ func TestAStandingMoveRecordsQueuesItCannotRead(t *testing.T) {
 	// Assert
 	if rec, ok := h.recordFor("error", opStanding); !ok || rec.Context["serves"] != false {
 		t.Fatalf("no error record of the unreadable queues: %+v", rec)
+	}
+}
+
+func TestQueueHeldAnswersAnUnreadableDeployCheckHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.deployCheckHoldErr = errors.New("db gone")
+	h.db.mu.Unlock()
+
+	// Act
+	head, err := h.o.queueHeld(context.Background(), h.repoKey())
+	_, specErr := h.o.speculationHeld(context.Background(), h.repoKey())
+
+	// Assert
+	if err == nil || specErr == nil {
+		t.Fatalf("queueHeld = (%v, %v), speculationHeld = %v; want the hold read's failure from both", head, err, specErr)
+	}
+}
+
+// standFinishAt records deploy mediator ws-fixer's finish of REPO standing
+// at STEP, walking it there through the store's own steps.
+func standFinishAt(t *testing.T, h *harness, repo wsm.RepoKey, step wsm.RemediationStep) {
+	t.Helper()
+	standFinish(t, h, repo, step, true)
+}
+
+// standFinish is standFinishAt for a finish that serves an escalated or
+// undispatched check (SERVESESCALATION) or a fix dispatched for one.
+func standFinish(t *testing.T, h *harness, repo wsm.RepoKey, step wsm.RemediationStep, servesEscalation bool) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: repo, StartedAt: epochPause, ServesEscalation: servesEscalation}); err != nil {
+		t.Fatal(err)
+	}
+	walk := map[wsm.RemediationStep][]wsm.RemediationStep{
+		wsm.RemediationGating:    nil,
+		wsm.RemediationFixing:    {wsm.RemediationFixing},
+		wsm.RemediationLanding:   {wsm.RemediationLanding},
+		wsm.RemediationDeploying: {wsm.RemediationLanding, wsm.RemediationDeploying},
+		wsm.RemediationDeployed:  {wsm.RemediationLanding, wsm.RemediationDeploying, wsm.RemediationDeployed},
+	}[step]
+	from := wsm.RemediationGating
+	for _, to := range walk {
+		if moved, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", from, to, epochPause); err != nil || !moved {
+			t.Fatalf("AdvanceRemediationFinish(%s -> %s) = (%v, %v)", from, to, moved, err)
+		}
+		from = to
 	}
 }

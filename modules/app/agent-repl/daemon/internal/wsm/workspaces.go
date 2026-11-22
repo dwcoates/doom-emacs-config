@@ -706,7 +706,7 @@ type Registry struct {
 // transaction.
 func (s *store) ReadRegistry(ctx context.Context) (Registry, error) {
 	var out Registry
-	err := s.snapshot(ctx, "daemon.wsm.read_registry", "the registry read", func(ctx context.Context, tx *sql.Tx) error {
+	err := s.snapshot(ctx, "daemon.wsm.read_registry", "the registry read", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
 		var read Registry
 		var err error
 		if read.Workspaces, err = listWorkspaces(ctx, tx); err != nil {

@@ -430,3 +430,88 @@ func TestTheBackfillMarksAnEarlierEscalationsFinish(t *testing.T) {
 		t.Fatalf("serves_escalation remedy %d, escalation %d; want only the escalation's finish marked", remedy, escalation)
 	}
 }
+
+func TestDeployCheckHoldOfReadsTheCheckAndTheQueuesFinishesTogether(t *testing.T) {
+	tests := []struct {
+		name         string
+		owe          bool
+		finishHere   bool
+		finishThere  bool
+		wantCheck    bool
+		wantFinishes []WorkspaceID
+	}{
+		{name: "a queue with neither reads nothing holding it"},
+		{name: "an owed check is read", owe: true, wantCheck: true},
+		{name: "a finish of the queue is read with no check owed", finishHere: true, wantFinishes: []WorkspaceID{"remedy"}},
+		{name: "a check and a finish are read together", owe: true, finishHere: true, wantCheck: true, wantFinishes: []WorkspaceID{"remedy"}},
+		{name: "another queue's finish is not this queue's", finishThere: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo, other := RepoKey(t.TempDir()), RepoKey(t.TempDir())
+			if tt.owe {
+				if _, err := s.OweMediation(ctx, repo, instant, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.finishHere {
+				beginFinish(t, s, repo, instant, nil)
+			}
+			if tt.finishThere {
+				if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: "elsewhere", Repo: other, StartedAt: instant}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got, err := s.DeployCheckHoldOf(ctx, repo)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("DeployCheckHoldOf: %v", err)
+			}
+			if (got.Mediation != nil) != tt.wantCheck || (got.Mediation != nil && !got.Mediation.OwedAt.Equal(instant)) {
+				t.Fatalf("mediation = %+v, want owed %v", got.Mediation, tt.wantCheck)
+			}
+			var finishes []WorkspaceID
+			for _, f := range got.Finishes {
+				finishes = append(finishes, f.Workspace)
+			}
+			if strings.Join(workspaceStrings(finishes), ",") != strings.Join(workspaceStrings(tt.wantFinishes), ",") {
+				t.Fatalf("finishes = %v, want %v", finishes, tt.wantFinishes)
+			}
+		})
+	}
+}
+
+func TestDeployCheckHoldOfAnswersAndRecordsAFailedRead(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	repo := RepoKey(t.TempDir())
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := s.DeployCheckHoldOf(context.Background(), repo)
+
+	// Assert
+	if err == nil {
+		t.Fatal("DeployCheckHoldOf on a closed store = nil error, want the read's failure")
+	}
+	if !loggedOperation(log, "daemon.wsm.deploy_check_hold_of", "error") {
+		t.Fatalf("records = %v, want the failed read at ERROR", log.Records())
+	}
+}
+
+// workspaceStrings spells WS as strings, for a comparison.
+func workspaceStrings(ws []WorkspaceID) []string {
+	out := make([]string, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, string(w))
+	}
+	return out
+}

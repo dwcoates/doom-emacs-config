@@ -320,7 +320,8 @@ type Orchestrator interface {
 	// finished, or a successor took over.
 	Mediate(ctx context.Context)
 	// DecideMediation is the chain's intake WS's decision on the deploy its
-	// chain owes a check of (mediation.go).
+	// chain owes a check of (mediation.go). An approval releases the check,
+	// and the queue too unless the mediator's own remediation finish stands.
 	DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error
 	// IgnoreRecords records KIND as a kind of log record the deploy checks
 	// leave out, on the word of deploy mediator WS; UnignoreRecords
@@ -330,7 +331,8 @@ type Orchestrator interface {
 	IgnoreRecords(ctx context.Context, ws ids.WorkspaceID, kind wsm.IgnoredRecordKind) error
 	UnignoreRecords(ctx context.Context, ws ids.WorkspaceID, operation, messageContains string) error
 	// ReleaseEscalation releases the hold a repository's escalation puts on
-	// its queue (remediationfinish.go).
+	// its queue (remediationfinish.go); a remediation finish of the mediator
+	// that stands holds it still.
 	ReleaseEscalation(ctx context.Context, scope RepositoryScope) error
 	// LandsDirectly answers whether WS's finish lands directly
 	// (FinishRemediation): a deploy remediation a fix is dispatched to, or a
@@ -338,7 +340,8 @@ type Orchestrator interface {
 	LandsDirectly(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// FinishRemediation runs remediation workspace WS's finish: the full
 	// gate, the direct landing and the deploy, each step recorded before it
-	// starts (remediationfinish.go).
+	// starts (remediationfinish.go). The finish holds the queue from its
+	// record until its deploy owes the next check.
 	FinishRemediation(ctx context.Context, ws ids.WorkspaceID, version *wsm.VersionIncrement) error
 	// FollowStanding holds every queue still while this daemon may not
 	// advance it (a handover in flight, or a successor not up yet), and
@@ -977,6 +980,7 @@ const (
 	HeadExitPaused                   = "paused"
 	HeadExitRestarted                = "restarted"
 	HeadExitHandover                 = "handover"
+	HeadExitDeployCheck              = "deploy_check"
 	HeadExitDaemonExit               = "daemon_exit"
 )
 
