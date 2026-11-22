@@ -225,6 +225,13 @@ func (r *impactRecorder) cutBoot(s *sharedCov) (float64, error) {
 	return cpu, os.RemoveAll(counters)
 }
 
+// Touch makes test current without opening a window on any daemon.
+func (r *impactRecorder) Touch(test string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.switchTo(test)
+}
+
 // OwnDaemon is the start of a daemon the test runs for itself: it answers
 // the GOCOVERDIR the daemon writes its counters under.
 func (r *impactRecorder) OwnDaemon(test string) (string, error) {
@@ -356,10 +363,25 @@ func recorder() *impactRecorder {
 
 // impactUseShared opens test t's window on the shared daemon d, when the run
 // records.
+//
+// ONLY A SUITE-OWNED DAEMON IS CUT THROUGH ITS ROUTE. A daemon a test started
+// for itself is stopped by that test's own cleanups, before the next test (or
+// the end of the process) closes the test's window, so asking its route then
+// is asking a daemon that is gone. Its counters are read from its own
+// GOCOVERDIR instead (OwnDaemon), and viewing it only makes the test current.
 func impactUseShared(t testing.TB, d *Daemon) {
 	if r := recorder(); r != nil {
-		r.UseShared(topLevel(t.Name()), d.Addr, httpWindowAPI{addr: d.Addr, client: d.HTTP()})
+		r.useDaemon(topLevel(t.Name()), d)
 	}
+}
+
+// useDaemon is impactUseShared on the recorder r.
+func (r *impactRecorder) useDaemon(test string, d *Daemon) {
+	if !d.suiteOwned {
+		r.Touch(test)
+		return
+	}
+	r.UseShared(test, d.Addr, httpWindowAPI{addr: d.Addr, client: d.HTTP()})
 }
 
 // impactOwnDaemonEnv answers the environment a daemon started for test t

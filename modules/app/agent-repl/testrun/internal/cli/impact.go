@@ -74,7 +74,7 @@ func recordImpact(d Deps, layout suites.Layout, results []run.Result, now time.T
 func impactMetrics(pass impact.PackagePass, rep impact.Report) testtimes.Impact {
 	m := testtimes.Impact{
 		Suite: pass.Suite, WouldSkip: rep.WouldSkip, WouldSkipCPU: rep.WouldSkipCPU, Misses: len(rep.Misses),
-		RecordsWritten: rep.RecordsWritten, OverheadCPU: rep.OverheadCPU,
+		RecordsWritten: rep.RecordsWritten, OverheadCPU: rep.OverheadCPU, Incomplete: rep.Incomplete,
 	}
 	for key, share := range rep.Breadth {
 		m.Breadth = append(m.Breadth, testtimes.ImpactBreadth{Test: key.Package + "." + key.Test, Share: share})

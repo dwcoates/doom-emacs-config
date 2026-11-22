@@ -319,3 +319,49 @@ func TestImpactRecorderKeepsOneTestsProblemsOutOfTheNextWindow(t *testing.T) {
 		t.Fatalf("windows A=%+v B=%+v, want only A incomplete", a, b)
 	}
 }
+
+func TestImpactRecorderTouchClosesTheLastTestsWindowWithoutOpeningOne(t *testing.T) {
+	// Arrange
+	f := newRecorderFixture(t, []string{"m/boot.go"}, []string{"m/a.go"})
+	f.r.UseShared("TestA", "d1", f.api)
+
+	// Act: the next test only views a daemon it started itself.
+	f.r.Touch("TestB")
+
+	// Assert: A's window closed, B opened none, and no route call was made for B.
+	if a := f.window("TestA"); a == nil {
+		t.Fatal("TestA's window was not closed when TestB took over")
+	}
+	if got := strings.Join(f.api.calls, ","); got != "meta,counters,clear,counters" {
+		t.Fatalf("route calls = %s, want none beyond A's own window", got)
+	}
+}
+
+func TestADaemonATestStartsItselfIsNotCutThroughItsRoute(t *testing.T) {
+	// Arrange: a view of a daemon the test owns, whose address answers nothing.
+	f := newRecorderFixture(t)
+	d := &Daemon{Addr: "127.0.0.1:1"}
+
+	// Act: no route call is attempted, so no connection is refused.
+	f.r.useDaemon("TestOwn", d)
+
+	// Assert
+	if _, cut := f.r.shared[d.Addr]; cut || f.r.current != "TestOwn" || len(f.fails) != 0 {
+		t.Fatalf("recorder = cut %v, current %q, problems %v, want the test current and no shared daemon cut", cut, f.r.current, f.fails)
+	}
+}
+
+func TestASuiteOwnedDaemonIsCutThroughItsRoute(t *testing.T) {
+	// Arrange: a suite-owned daemon whose address answers nothing, so the
+	// refused connection is the proof the route was asked.
+	f := newRecorderFixture(t)
+	d := &Daemon{Addr: "127.0.0.1:1", suiteOwned: true}
+
+	// Act
+	f.r.useDaemon("TestShared", d)
+
+	// Assert
+	if len(f.fails) == 0 || !strings.Contains(f.fails[0], "coverage window meta on 127.0.0.1:1") {
+		t.Fatalf("problems = %v, want the route asked of the suite-owned daemon", f.fails)
+	}
+}

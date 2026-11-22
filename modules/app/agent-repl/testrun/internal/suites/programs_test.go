@@ -334,8 +334,8 @@ func TestARecordedPackageRunsOneTestAtATimeAgainstTheImpactPrograms(t *testing.T
 		t.Fatalf("Programs = %v, want the impact build in place of the daemon: %v", u.Programs, want)
 	}
 	split := u.Splits[0]
-	if split.Slots != 1 {
-		t.Fatalf("Slots = %d, want a recorded chunk's one core", split.Slots)
+	if split.Slots != 2 {
+		t.Fatalf("Slots = %d, want the two cores a recorded chunk measured", split.Slots)
 	}
 	chunk := split.Chunk("daemon:p[integration]#00", []string{"TestA", "TestB"})
 	if !slices.Contains(chunk.Argv, "-test.parallel=1") {

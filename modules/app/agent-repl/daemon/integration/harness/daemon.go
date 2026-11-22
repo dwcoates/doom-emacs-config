@@ -485,6 +485,9 @@ type Opts struct {
 
 // Daemon is one running agent-repld process and the client dialed to it.
 type Daemon struct {
+	// suiteOwned is set for a daemon the suite started (harness.Suite()), which
+	// serves many tests and outlives them all.
+	suiteOwned bool
 	// StateDir is the daemon's state root.
 	StateDir string
 	// Addr is the loopback address it serves on, read from daemon.addr.
@@ -763,6 +766,10 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		required:           map[string]bool{},
 		daemonProc:         newDaemonProc(nil),
 	}
+	// A daemon the SUITE owns outlives every test, so a test's coverage window
+	// on it can always close; a test's own daemon is gone when the test ends
+	// (impact.go).
+	_, d.suiteOwned = t.(*SuiteTB)
 	if opts.DefaultSettings != "" {
 		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)
 	}

@@ -393,7 +393,7 @@ func TestEncodeLandsTheShadowModeImpactSeriesPerSuiteAndPerTest(t *testing.T) {
 
 	// Act
 	got := string(Encode(Report{Impact: []Impact{{
-		Suite: "daemon", WouldSkip: 412, WouldSkipCPU: 388.25, Misses: 1, RecordsWritten: 548, OverheadCPU: 31.5, Errors: 0,
+		Suite: "daemon", WouldSkip: 412, WouldSkipCPU: 388.25, Misses: 1, RecordsWritten: 548, OverheadCPU: 31.5, Incomplete: 3, Errors: 0,
 		Breadth: []ImpactBreadth{{Test: "integration.TestA", Share: 0.25}, {Test: `integration.TestB"x`, Share: 0.5}},
 	}}}, "merge_queue", at))
 
@@ -404,6 +404,7 @@ func TestEncodeLandsTheShadowModeImpactSeriesPerSuiteAndPerTest(t *testing.T) {
 		`agentrepl_test_impact_misses` + labels + ` 1 1700000000123` + "\n" +
 		`agentrepl_test_impact_records_written` + labels + ` 548 1700000000123` + "\n" +
 		`agentrepl_test_impact_overhead_cpu_seconds` + labels + ` 31.5 1700000000123` + "\n" +
+		`agentrepl_test_impact_incomplete` + labels + ` 3 1700000000123` + "\n" +
 		`agentrepl_test_impact_errors` + labels + ` 0 1700000000123` + "\n" +
 		`agentrepl_test_impact_record_breadth{suite="daemon",test="integration.TestA",trigger="merge_queue"} 0.25 1700000000123` + "\n" +
 		`agentrepl_test_impact_record_breadth{suite="daemon",test="integration.TestB\"x",trigger="merge_queue"} 0.5 1700000000123` + "\n"

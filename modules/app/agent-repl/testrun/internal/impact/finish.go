@@ -290,6 +290,7 @@ func (f Finisher) finishPass(p PackagePass, rep *Report) error {
 			rep.Incomplete++
 			d := Decision{Key: key, Reason: "its recording is incomplete: " + strings.Join(t.reach.Incomplete, "; ")}
 			f.logDecision(rep, d, t.Test)
+			f.Log.Errorf("impact: INCOMPLETE: %s was not recorded: %s", key, strings.Join(t.reach.Incomplete, "; "))
 			continue
 		}
 		deps := map[string]bool{}

@@ -370,6 +370,7 @@ var Suites = []Suite{
 			"internal/typecheck": {"webapp/package.json", "webapp/.gitignore", "agent-shim/claude/shim/package.json", "agent-shim/claude/shim/.gitignore"},
 		},
 		Never: map[string]string{
+			"internal/impact":  "its tests run the go command (go list, go env) over fixture modules, which a unit confined to its declared inputs cannot",
 			"internal/reuse":   "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
 			"roster":           "its scans walk the whole repository for test scripts and every path the roster names",
 			"internal/suites":  "its tests plan every roster suite against the real tree, running the go command and Emacs over it",

@@ -104,7 +104,7 @@ func TestImpactDataRefusesASuiteThatDeclaresNoInputs(t *testing.T) {
 func TestImpactMetricsCarryTheReportAndSortTheBreadth(t *testing.T) {
 	// Arrange
 	rep := impact.Report{
-		WouldSkip: 3, WouldSkipCPU: 9.5, Misses: []impact.Miss{{}}, RecordsWritten: 5, OverheadCPU: 1.25,
+		WouldSkip: 3, WouldSkipCPU: 9.5, Misses: []impact.Miss{{}}, RecordsWritten: 5, OverheadCPU: 1.25, Incomplete: 2,
 		Breadth: map[impact.TestKey]float64{
 			{Package: "integration", Test: "TestB"}: 0.5,
 			{Package: "integration", Test: "TestA"}: 0.25,
@@ -113,7 +113,7 @@ func TestImpactMetricsCarryTheReportAndSortTheBreadth(t *testing.T) {
 	// Act
 	m := impactMetrics(impact.PackagePass{Suite: "daemon"}, rep)
 	// Assert
-	if m.Suite != "daemon" || m.WouldSkip != 3 || m.WouldSkipCPU != 9.5 || m.Misses != 1 || m.RecordsWritten != 5 || m.OverheadCPU != 1.25 {
+	if m.Suite != "daemon" || m.WouldSkip != 3 || m.WouldSkipCPU != 9.5 || m.Misses != 1 || m.RecordsWritten != 5 || m.OverheadCPU != 1.25 || m.Incomplete != 2 {
 		t.Fatalf("metrics = %+v", m)
 	}
 	if len(m.Breadth) != 2 || m.Breadth[0].Test != "integration.TestA" || m.Breadth[1].Share != 0.5 {
@@ -170,7 +170,7 @@ func newImpactFixture(t *testing.T) *impactFixture {
 		},
 		Impact: &ImpactDeps{
 			Store: impact.Store{Dir: filepath.Join(t.TempDir(), "impact")},
-			List:  impact.ExecLister,
+			List:  f.list,
 			Toolchain: func() (map[string]string, error) {
 				return map[string]string{"go": "go1.24"}, nil
 			},
@@ -179,6 +179,23 @@ func newImpactFixture(t *testing.T) *impactFixture {
 		},
 	}
 	return f
+}
+
+// list answers the listings a real `go list` would for the fixture's module,
+// by hand: the cli's own tests never run the go command (their unit is
+// confined to its declared inputs).
+func (f *impactFixture) list(dir, tags string, test bool, patterns ...string) ([]impact.Pkg, error) {
+	d := filepath.Join(f.module, "daemon")
+	mod := &impact.PkgModule{Path: "fx", Dir: d, GoMod: filepath.Join(d, "go.mod")}
+	pkg := func(path, rel string, files ...string) impact.Pkg {
+		return impact.Pkg{ImportPath: path, Dir: filepath.Join(d, rel), GoFiles: files, Module: mod}
+	}
+	if test {
+		variant := pkg("fx/integration [fx/integration.test]", "integration", "one_test.go")
+		variant.ForTest = "fx/integration"
+		return []impact.Pkg{pkg("fx/integration/harness", "integration/harness", "h.go"), variant}, nil
+	}
+	return []impact.Pkg{pkg("fx/internal/a", "internal/a", "a.go"), pkg("fx/cmd/agent-repld", "cmd/agent-repld", "main.go")}, nil
 }
 
 // result is a recorded chunk's result whose harness wrote windows.
