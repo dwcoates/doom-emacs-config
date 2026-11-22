@@ -34,6 +34,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   AdoptionFailed,
   adoptAtBoot,
+  adoptInPlace,
   webPage,
   announceShutdown,
   isDeployHandover,
@@ -519,7 +520,9 @@ function lifecycleClient(script: {
         state.adoptCalls += 1;
         return (
           script.adopt?.() ??
-          create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE } } })
+          create(AdoptWebWorkspaceResponseSchema, {
+            result: { case: "success", value: { page: AGENT_PAGE, webappBuild: "testbuild" } },
+          })
         );
       },
     });
@@ -628,14 +631,56 @@ describe("startLifecycle: the handover", () => {
     vi.useRealTimers();
   });
 
+  // THE NOTICE IS SENT ON THE FIRST OPEN ALONE: a re-homed page reopens its
+  // web stream where the workspace is served now, which never carries it.
+  let sent = false;
+  beforeEach(() => {
+    sent = false;
+  });
   const transferred = async function* (): AsyncIterable<WatchWebWorkspaceResponseInit> {
+    if (sent) return;
+    sent = true;
     yield { push: { case: "transferred", value: { address: "127.0.0.1:8123" } } };
   };
 
-  it("draws the moved notice naming the successor", async () => {
+  /** An in-place adoption by a daemon serving BUILD. */
+  const adoptedOn = (build: string) => () =>
+    create(AdoptWebWorkspaceResponseSchema, {
+      result: { case: "success", value: { page: AGENT_PAGE, webappBuild: build } },
+    });
+
+  it("adopts the workspace in place, once", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client, state } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(host));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(state.adoptCalls).toBe(1);
+  });
+
+  it("re-homes every stream and draws no notice when the adopting daemon serves this page's build", async () => {
     // ARRANGE
     const host = document.createElement("div");
     const { client } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    let rehomed = 0;
+    ctx.onDaemonMoved(() => (rehomed += 1));
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(host));
+    await settle();
+    // ASSERT (before dispose: disposing takes the banner down by design)
+    expect([rehomed, host.textContent, ctx.isQuiesced()]).toEqual([1, "", false]);
+    handle.dispose();
+  });
+
+  it("draws the moved notice naming the successor when the adopting daemon serves another build", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({ web: transferred, adopt: adoptedOn("another-build") });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
     const handle = startLifecycle(ctx, lifecycleDeps(host));
@@ -643,6 +688,43 @@ describe("startLifecycle: the handover", () => {
     // ASSERT (before dispose: disposing takes the banner down by design)
     expect(host.textContent).toBe("workspace moved to 127.0.0.1:8123");
     handle.dispose();
+  });
+
+  it("records the other build at info", async () => {
+    // ARRANGE
+    const h = captureLogRecords();
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({ web: transferred, adopt: adoptedOn("another-build") });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(host));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    const record = recordFor(await forwardedRecords(h), "lifecycle.transferred-other-build");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ address: "127.0.0.1:8123" });
+  });
+
+  it("goes quiet when the in-place adoption is refused, recording it at error", async () => {
+    // ARRANGE
+    const h = captureLogRecords();
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      web: transferred,
+      adopt: () =>
+        create(AdoptWebWorkspaceResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(host));
+    await settle();
+    // ASSERT
+    expect(ctx.isQuiesced()).toBe(true);
+    handle.dispose();
+    const record = recordFor(await forwardedRecords(h), "lifecycle.adopt-in-place-failed");
+    expect(record.level.case).toBe("error");
+    expect(record.context).toMatchObject({ address: "127.0.0.1:8123" });
   });
 
   it("carries this page's own webapp build on the WatchWebWorkspace request", async () => {
@@ -654,14 +736,15 @@ describe("startLifecycle: the handover", () => {
     const handle = startLifecycle(ctx, lifecycleDeps(host));
     await settle();
     handle.dispose();
-    // ASSERT: read off the entry tag `beforeEach` above wrote into the document.
-    expect(state.webRequests).toEqual([{ webappBuild: "testbuild" }]);
+    // ASSERT: read off the entry tag `beforeEach` above wrote into the
+    // document, on the first open and on the re-homed one alike.
+    expect(state.webRequests).toEqual([{ webappBuild: "testbuild" }, { webappBuild: "testbuild" }]);
   });
 
-  it("quiesces the page, so nothing more is sent on this client", async () => {
+  it("quiesces the page on another build, so nothing more is sent on this client", async () => {
     // ARRANGE
     const host = document.createElement("div");
-    const { client } = lifecycleClient({ web: transferred });
+    const { client } = lifecycleClient({ web: transferred, adopt: adoptedOn("another-build") });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
     const handle = startLifecycle(ctx, lifecycleDeps(host));
@@ -990,17 +1073,34 @@ describe("workspaceMoved", () => {
     vi.useRealTimers();
   });
 
-  it("raises the same notice a transferred push does, for a refusal arm", async () => {
+  it("starts the same in-place adoption a transferred push does, for a refusal arm", async () => {
     // ARRANGE
     const host = document.createElement("div");
-    const { client } = lifecycleClient({});
+    const { client, state } = lifecycleClient({});
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     const handle = startLifecycle(ctx, lifecycleDeps(host));
     await settle();
     // ACT
     const handled = workspaceMoved("127.0.0.1:7");
-    // ASSERT (before dispose: disposing takes the banner down by design)
-    expect([handled, host.textContent]).toEqual([true, "workspace moved to 127.0.0.1:7"]);
+    await settle();
+    // ASSERT
+    expect([handled, state.adoptCalls, ctx.isQuiesced()]).toEqual([true, 1, false]);
+    handle.dispose();
+  });
+
+  it("starts one adoption for a move raised again while one is answered", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client, state } = lifecycleClient({});
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const handle = startLifecycle(ctx, lifecycleDeps(host));
+    await settle();
+    // ACT
+    workspaceMoved("127.0.0.1:7");
+    workspaceMoved("127.0.0.1:7");
+    await settle();
+    // ASSERT
+    expect(state.adoptCalls).toBe(1);
     handle.dispose();
   });
 
@@ -1014,6 +1114,37 @@ describe("workspaceMoved", () => {
 /** The two pages a daemon names. */
 const AGENT_PAGE = { kind: { case: "agent" as const, value: {} } };
 const THREAD_PAGE = { kind: { case: "thread" as const, value: {} } };
+
+describe("adoptInPlace", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const answering = (response: () => AdoptWebWorkspaceResponse) => {
+    const { client } = lifecycleClient({ adopt: response });
+    return lifecycleContext(client, new RecordingSink(), fakeTicker());
+  };
+
+  it.each([
+    ["an adoption on this page's build", { case: "success", value: { page: AGENT_PAGE, webappBuild: "testbuild" } }, "rehomed"],
+    ["an adoption on another build", { case: "success", value: { page: AGENT_PAGE, webappBuild: "other" } }, "other-build"],
+    ["a deferred transfer", { case: "error", value: { cause: { case: "transferDeferred", value: { page: AGENT_PAGE } } } }, "rehomed"],
+    ["no transfer left to join", { case: "error", value: { cause: { case: "noTransferAnnounced", value: { page: AGENT_PAGE } } } }, "rehomed"],
+  ])("answers %s as %s", async (_name, result, want) => {
+    const ctx = answering(() => create(AdoptWebWorkspaceResponseSchema, { result: result as never }));
+    await expect(adoptInPlace(ctx, "testbuild")).resolves.toBe(want);
+  });
+
+  it("throws a terminal refusal, as the boot does", async () => {
+    const ctx = answering(() =>
+      create(AdoptWebWorkspaceResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
+    );
+    await expect(adoptInPlace(ctx, "testbuild")).rejects.toBeInstanceOf(AdoptionFailed);
+  });
+});
 
 describe("webPage", () => {
   it.each([
@@ -1039,9 +1170,9 @@ describe("classifyAdoptionRefusal", () => {
       { case: "workspaceRefMismatch", value: { registryDir: "/x" } },
       "terminal",
     ],
-    ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }, "moved"],
+    ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }, "retry"],
     ["participantNotExpected", { case: "participantNotExpected", value: {} }, "retry"],
-    ["transferDeferred", { case: "transferDeferred", value: {} }, "deferred"],
+    ["transferDeferred", { case: "transferDeferred", value: { page: AGENT_PAGE } }, "deferred"],
   ];
   for (const [name, cause, kind] of table) {
     it(`treats ${name} as ${kind}`, () => {
@@ -1079,7 +1210,15 @@ describe("adoptAtBoot", () => {
   it("resolves adopted on success, naming the page", async () => {
     const { client } = lifecycleClient({});
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    await expect(adoptAtBoot(ctx)).resolves.toEqual({ outcome: "adopted", page: "agent" });
+    await expect(adoptAtBoot(ctx)).resolves.toEqual({ outcome: "adopted", page: "agent", webappBuild: "testbuild" });
+  });
+
+  it("refuses a success naming no webapp build", async () => {
+    const { client } = lifecycleClient({
+      adopt: () => create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE } } }),
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    await expect(adoptAtBoot(ctx)).rejects.toBeInstanceOf(MalformedView);
   });
 
   it("resolves no-transfer on the ordinary non-handover boot, naming the page", async () => {
@@ -1098,10 +1237,10 @@ describe("adoptAtBoot", () => {
     await expect(adoptAtBoot(ctx)).rejects.toBeInstanceOf(MalformedView);
   });
 
-  it("resolves deferred, calling the verb once, when the incumbent kept the workspace", async () => {
+  it("resolves deferred, naming the page and calling the verb once, when the incumbent kept the workspace", async () => {
     // ARRANGE
     const { client, state } = lifecycleClient({
-      adopt: () => refusal({ case: "transferDeferred", value: {} }),
+      adopt: () => refusal({ case: "transferDeferred", value: { page: THREAD_PAGE } }),
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
 
@@ -1109,49 +1248,31 @@ describe("adoptAtBoot", () => {
     const outcome = await adoptAtBoot(ctx);
 
     // ASSERT
-    expect(outcome).toBe("deferred");
+    expect(outcome).toEqual({ outcome: "deferred", page: "thread" });
     expect(state.adoptCalls).toBe(1);
   });
 
-  it("resolves moved, calling the verb once and reporting nothing, when the page booted on the daemon its workspace left", async () => {
+  it("retries a transferring_away answer until the successor adopts", async () => {
     // ARRANGE
-    const sink = new RecordingSink();
+    let calls = 0;
     const { client, state } = lifecycleClient({
-      adopt: () => refusal({ case: "transferringAway", value: { address: "127.0.0.1:2" } }),
-    });
-    const ctx = lifecycleContext(client, sink, fakeTicker());
-
-    // ACT
-    const outcome = await adoptAtBoot(ctx);
-
-    // ASSERT
-    expect(outcome).toBe("moved");
-    expect(state.adoptCalls).toBe(1);
-    expect(sink.reported).toEqual([]);
-  });
-
-  it("records a move at info, naming the successor's address", async () => {
-    // ARRANGE
-    const h = captureLogRecords();
-    const { client } = lifecycleClient({
-      adopt: () => refusal({ case: "transferringAway", value: { address: "127.0.0.1:2" } }),
+      adopt: () => {
+        calls += 1;
+        return calls === 1
+          ? refusal({ case: "transferringAway", value: { address: "127.0.0.1:2" } })
+          : create(AdoptWebWorkspaceResponseSchema, {
+              result: { case: "success", value: { page: AGENT_PAGE, webappBuild: "testbuild" } },
+            });
+      },
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-
     // ACT
-    await adoptAtBoot(ctx);
-
+    const promise = adoptAtBoot(ctx, { initialMs: 250, maxMs: 5000, budgetMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(0);
     // ASSERT
-    const record = recordFor(await forwardedRecords(h), "lifecycle.adopt-moved");
-    expect(record.level.case).toBe("info");
-    expect(record.context).toMatchObject({ address: "127.0.0.1:2" });
-  });
-
-  it("carries the successor's address on a move", () => {
-    const outcome = classifyAdoptionRefusal({
-      cause: { case: "transferringAway", value: { address: "127.0.0.1:2" } },
-    } as never);
-    expect(outcome).toEqual({ kind: "moved", address: "127.0.0.1:2" });
+    await expect(promise).resolves.toEqual({ outcome: "adopted", page: "agent", webappBuild: "testbuild" });
+    expect(state.adoptCalls).toBe(2);
   });
 
   it("calls the verb exactly once when it is answered at once", async () => {
@@ -1169,7 +1290,7 @@ describe("adoptAtBoot", () => {
         calls += 1;
         return calls < 3
           ? refusal({ case: "notYetAdopted", value: {} })
-          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE } } });
+          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE, webappBuild: "testbuild" } } });
       },
     });
     const ticker = fakeTicker();
@@ -1180,7 +1301,7 @@ describe("adoptAtBoot", () => {
     await vi.advanceTimersByTimeAsync(500);
     await vi.advanceTimersByTimeAsync(0);
     // ASSERT
-    await expect(promise).resolves.toEqual({ outcome: "adopted", page: "agent" });
+    await expect(promise).resolves.toEqual({ outcome: "adopted", page: "agent", webappBuild: "testbuild" });
     expect(calls).toBe(3);
   });
 
@@ -1192,7 +1313,7 @@ describe("adoptAtBoot", () => {
         calls += 1;
         return calls < 3
           ? refusal({ case: "participantNotExpected", value: {} })
-          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE } } });
+          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE, webappBuild: "testbuild" } } });
       },
     });
     const sink = new RecordingSink();
@@ -1203,7 +1324,7 @@ describe("adoptAtBoot", () => {
     await vi.advanceTimersByTimeAsync(500);
     await vi.advanceTimersByTimeAsync(0);
     // ASSERT
-    await expect(promise).resolves.toEqual({ outcome: "adopted", page: "agent" });
+    await expect(promise).resolves.toEqual({ outcome: "adopted", page: "agent", webappBuild: "testbuild" });
     expect([calls, sink.reported.length]).toEqual([3, 0]);
   });
 

@@ -12,22 +12,24 @@
  *     (handed to the overlay that draws it). R3 — every webview holds its
  *     OWN subscription, rather than learning about a restart second-hand.
  *
- * THE WEBAPP DOES NOT REDIAL (project lead, final). A successor on a different
- * loopback port is a DIFFERENT ORIGIN, so this page could not become a client
- * of it even if it wanted to: re-pointing the webview is Emacs's job, and it
- * does it by reloading the view at the new address. So `transferred` — and the
- * `transferring_away` refusal arm, which is the same fact arriving as an
- * answer — draws a standing "workspace moved to <address>" notice, quiesces the
- * context, and stops. No transport to a new address is created anywhere in this
- * module, and nothing retries: retrying is exactly the behavior that would keep
- * a released workspace's page talking to a daemon that has already let it go.
+ * THE PAGE MOVES ITSELF (owner ruling, 2026-11-22). Every daemon serves one
+ * shared address, and the daemon a page's calls reach forwards each workspace
+ * call and relays each page subscription to the daemon serving the workspace,
+ * so no handover reloads the page. `transferred` — and the `transferring_away`
+ * refusal arm, which is the same fact arriving as an answer — makes the page
+ * adopt its workspace in place (`adoptInPlace`, the boot's own adoption loop):
+ * on a daemon serving this page's webapp build it re-homes every stream
+ * (`AppContext.rehome`), and on one serving another it draws the standing
+ * "workspace moved" notice and quiesces, because that daemon's frames carry
+ * fields this build has no descriptor for; the deploy's one host reload then
+ * brings the page onto that build.
  *
- * ADOPTION HAPPENS ONCE, AT BOOT, ON THE FRESH PAGE — `adoptAtBoot`, before any
- * view stream opens. `no_transfer_announced` is the ORDINARY answer for a page
- * that booted without a handover, so it is a debug line and never an alarm;
- * `not_yet_adopted` is the successor still finishing its rendezvous and is
- * retried with backoff; every other arm is a boot failure, because a page that
- * cannot be adopted cannot honestly show a workspace.
+ * ADOPTION RUNS AT BOOT, before any view stream opens (`adoptAtBoot`), and
+ * again in place at every handover. `no_transfer_announced` is the ORDINARY
+ * answer for a page that booted without a handover, so it is a debug line and
+ * never an alarm; `not_yet_adopted` is the successor still finishing its
+ * rendezvous and is retried with backoff; every other arm is a boot failure,
+ * because a page that cannot be adopted cannot honestly show a workspace.
  *
  * THE BANNER IS ONE HOST WITH THREE STANDING NOTICES, in precedence order:
  * moved (terminal — nothing follows it), restarting (an announced outage), and
@@ -70,7 +72,7 @@ import type { NewsDigestHandle } from "../news-digest/news-digest.js";
 import { formatElapsed } from "../duration.js";
 import { bindLogContext, log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { isMalformedView } from "../rpc/malformed.js";
+import { isMalformedView, MalformedView } from "../rpc/malformed.js";
 import { registerWorkspaceMoved } from "../rpc/moved.js";
 import { msOf, requireCase, requireMessage, unreachableArm, unreachablePushArm } from "../rpc/strict.js";
 import type { RevealRelay } from "./reveal-relay.js";
@@ -165,16 +167,54 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
     deps.deployPulseHost.toggleAttribute("data-deploying", deploying);
   });
 
-  const onMoved = (address: string): void => {
+  // THE PAGE MOVES ITSELF (owner ruling, 2026-11-22): no handover reloads
+  // it. `moving` holds while one move is being answered, so the push and every
+  // refusal that says the same thing start one adoption between them.
+  let moving = false;
+  const goQuiet = (address: string): void => {
     // THE TERMINAL STATE. The notice goes up first, so the reader has the
     // successor's address in front of them before every stream on the page
     // stops; quiescing after it means nothing can redraw over it.
-    log.info(`the workspace moved to ${address}; going quiet`, {
+    banner.showMoved(address);
+    ctx.quiesce();
+  };
+  const onMoved = (address: string): void => {
+    if (moving) {
+      log.debug(`the workspace moved to ${address}; this page is already moving`, {
+        operation: "lifecycle.transferred-again",
+        context: { address },
+      });
+      return;
+    }
+    moving = true;
+    log.info(`the workspace moved to ${address}; adopting it in place`, {
       operation: "lifecycle.transferred",
       context: { address },
     });
-    banner.showMoved(address);
-    ctx.quiesce();
+    void adoptInPlace(ctx, webappBuild).then(
+      (outcome) => {
+        moving = false;
+        if (outcome === "rehomed") {
+          ctx.rehome();
+          return;
+        }
+        log.info(`the daemon serving this workspace runs another webapp; going quiet until the host reloads`, {
+          operation: "lifecycle.transferred-other-build",
+          context: { address },
+        });
+        goQuiet(address);
+      },
+      (err: unknown) => {
+        // `adoptAtBoot` recorded and reported the refusal it threw; a page
+        // whose workspace could not be adopted cannot honestly show it.
+        moving = false;
+        log.error(`this page could not adopt its workspace in place: ${String(err)}`, {
+          operation: "lifecycle.adopt-in-place-failed",
+          context: { address },
+        });
+        goQuiet(address);
+      },
+    );
   };
   const unregisterMoved = registerWorkspaceMoved(onMoved);
 
@@ -654,7 +694,7 @@ export class AdoptionFailed extends Error {
 export async function adoptAtBoot(
   ctx: AppContext,
   backoff: AdoptBackoff = {},
-): Promise<AdoptedPage | "deferred" | "moved"> {
+): Promise<AdoptedPage> {
   const initialMs = backoff.initialMs ?? ADOPT_INITIAL_MS;
   const maxMs = backoff.maxMs ?? ADOPT_MAX_MS;
   const budgetMs = backoff.budgetMs ?? ADOPT_BUDGET_MS;
@@ -687,8 +727,12 @@ export async function adoptAtBoot(
     const result = requireCase(response.result, "AdoptWebWorkspaceResponse.result");
     if (result.case === "success") {
       const page = webPage(result.value.page, "AdoptWebWorkspaceSuccess.page");
-      log.info("this workspace was adopted", { operation: "lifecycle.adopted", context: { page } });
-      return { outcome: "adopted", page };
+      const webappBuild = result.value.webappBuild;
+      if (webappBuild === "") {
+        throw new MalformedView("AdoptWebWorkspaceSuccess.webapp_build", "REQUIRED and empty");
+      }
+      log.info("this workspace was adopted", { operation: "lifecycle.adopted", context: { page, webapp_build: webappBuild } });
+      return { outcome: "adopted", page, webappBuild };
     }
     if (result.case !== "error") {
       const other: { case: string } = result;
@@ -703,25 +747,14 @@ export async function adoptAtBoot(
       return { outcome: "no-transfer", page: outcome.page };
     }
     if (outcome.kind === "deferred") {
-      // THE INCUMBENT KEPT THIS WORKSPACE until it is free, and Emacs puts the
-      // page back on it. Nothing here is wrong and nothing will change by
-      // waiting, so the page stops without a failure and without a retry.
-      log.info("the incumbent kept this workspace until it is free; this page stops and is reloaded onto it", {
+      // THE INCUMBENT KEPT THIS WORKSPACE until it is free, and serves it
+      // meanwhile, so the page goes on to mount its body there. Nothing here
+      // is wrong and nothing will change by waiting, so nothing is retried.
+      log.info("the incumbent kept this workspace until it is free; this page goes on there", {
         operation: "lifecycle.adopt-deferred",
+        context: { page: outcome.page },
       });
-      return "deferred";
-    }
-    if (outcome.kind === "moved") {
-      // THIS PAGE BOOTED AGAINST THE DAEMON ITS WORKSPACE LEFT. The web host
-      // replays every page at the address Emacs last gave it, and a handover
-      // re-points each page only as its own transfer arrives, so a page can
-      // boot on the departing daemon in between. Emacs is already moving it,
-      // so the page stops without a failure, as a deferred transfer does.
-      log.info(`this workspace moved to ${outcome.address}; this page stops and is reloaded there`, {
-        operation: "lifecycle.adopt-moved",
-        context: { address: outcome.address },
-      });
-      return "moved";
+      return { outcome: "deferred", page: outcome.page };
     }
     if (outcome.kind === "terminal") {
       log.error(`this page cannot be adopted: ${outcome.detail}`, {
@@ -747,14 +780,41 @@ export async function adoptAtBoot(
   }
 }
 
+/**
+ * Answer a handover IN PLACE: adopt the workspace where it is served now,
+ * through the one adoption loop the boot runs, and say whether the page can
+ * reopen its subscriptions there.
+ *
+ * `rehomed` is every answer that leaves the workspace showable on this build:
+ * an adoption by a daemon serving BUILD, the incumbent keeping the workspace
+ * (`deferred`), or no transfer left to join (the rendezvous completed without
+ * this page). `other-build` is an adoption by a daemon serving another
+ * webapp, whose frames this page has no descriptor for: the page goes quiet
+ * and the deploy's host reload brings it onto that build. A refusal throws, as
+ * the boot's does.
+ */
+export async function adoptInPlace(
+  ctx: AppContext,
+  build: string,
+  backoff: AdoptBackoff = {},
+): Promise<"rehomed" | "other-build"> {
+  const adopted = await adoptAtBoot(ctx, backoff);
+  if (adopted.outcome !== "adopted") return "rehomed";
+  return adopted.webappBuild === build ? "rehomed" : "other-build";
+}
+
 /** Which body a workspace page mounts below its topbar: a feed, or a chat. */
 export type WebPage = "agent" | "thread";
 
 /** A page that goes on to mount its body, and which body that is. */
-export interface AdoptedPage {
-  outcome: "adopted" | "no-transfer";
-  page: WebPage;
-}
+export type AdoptedPage =
+  | {
+      outcome: "adopted";
+      page: WebPage;
+      /** The webapp build the adopting daemon serves (AdoptWebWorkspaceSuccess.webapp_build). */
+      webappBuild: string;
+    }
+  | { outcome: "no-transfer" | "deferred"; page: WebPage };
 
 /** The page the daemon named (WebWorkspacePage), as the boot switches on it. */
 export function webPage(page: WebWorkspacePage | undefined, path: string): WebPage {
@@ -774,8 +834,7 @@ export function webPage(page: WebWorkspacePage | undefined, path: string): WebPa
 /** What the adoption loop does about one refusal. */
 export type AdoptionOutcome =
   | { kind: "no-transfer"; page: WebPage }
-  | { kind: "deferred" }
-  | { kind: "moved"; address: string }
+  | { kind: "deferred"; page: WebPage }
   | { kind: "retry"; arm: string }
   | { kind: "terminal"; arm: string; detail: string };
 
@@ -797,7 +856,7 @@ export function classifyAdoptionRefusal(error: AdoptWebWorkspaceError): Adoption
     // The successor refused a mid-work adoption and the incumbent took the
     // workspace back: not a rendezvous under way, so never retried.
     case "transferDeferred":
-      return { kind: "deferred" };
+      return { kind: "deferred", page: webPage(arm.value.page, "AdoptWebWorkspaceTransferDeferred.page") };
     case "unknownWorkspace":
       return {
         kind: "terminal",
@@ -810,10 +869,11 @@ export function classifyAdoptionRefusal(error: AdoptWebWorkspaceError): Adoption
         arm: arm.case,
         detail: `the registry holds ${arm.value.registryDir} for this workspace id`,
       };
-    // The page booted on the daemon that handed the workspace away: Emacs
-    // re-points it at the successor, so the boot stops rather than fails.
+    // The call reached the daemon that handed the workspace away before it
+    // forwards there: the successor is still taking the workspace up, so the
+    // adoption waits for it rather than giving up.
     case "transferringAway":
-      return { kind: "moved", address: arm.value.address };
+      return { kind: "retry", arm: arm.case };
     // THIS PAGE IS NOT PART OF THE TRANSFER: it was not open when the handover
     // was announced (Emacs loaded it mid-handover, re-pointing it at the
     // successor). Nothing is wrong with it; it waits for the rendezvous the

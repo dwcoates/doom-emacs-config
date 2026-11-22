@@ -938,19 +938,13 @@ describe("AdoptWebWorkspace's refusals", () => {
    * backoff and its budget are covered under fake timers in
    * test/lifecycle/lifecycle.test.ts.
    */
-  // `transferringAway` at boot is not terminal either: the page booted on the
-  // daemon its workspace left, and Emacs is reloading it onto the successor,
-  // so the boot stops quietly (lifecycle.ts, `adoptAtBoot`'s "moved").
+  // `transferringAway` at boot is not terminal either: the call reached the
+  // daemon its workspace left before that daemon forwards there, so the boot
+  // retries it as it retries `notYetAdopted` (lifecycle.ts, `classifyAdoptionRefusal`;
+  // covered under fake timers in test/lifecycle/lifecycle.test.ts).
   const TERMINAL_ARMS = CROSS_CUTTING_ARMS.filter(
     (arm) => arm !== "notYetAdopted" && arm !== "transferringAway",
   );
-
-  it("stops the boot on the transferringAway arm without filing any failure", async () => {
-    // Arrange / Act
-    harness = await startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", "transferringAway") });
-    // Assert
-    expect(chipFailureArms()).toEqual([]);
-  });
 
   it.each(TERMINAL_ARMS)("reports the %s arm as a client-local failure", async (arm) => {
     // Arrange / Act

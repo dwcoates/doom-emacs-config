@@ -98,9 +98,9 @@ export interface StreamContext {
   onQuiesced(fn: () => void): () => void;
   /**
    * Run FN every time the daemon this context's client dials MOVES (the web
-   * view host's `setDaemon`), synchronously as it moves. Answers the
-   * unsubscribe. A workspace page's daemon is its own origin, which never
-   * moves, so its context never calls FN.
+   * view host's `setDaemon`), synchronously as it moves, and every time a
+   * workspace page adopts its workspace in place after a handover
+   * (`AppContext.rehome`). Answers the unsubscribe.
    */
   onDaemonMoved(fn: () => void): () => void;
   /**
@@ -395,16 +395,33 @@ export function watchStream<Res extends Message>(
       if (cancelled) return;
       // A CLOSE THAT NAMES THE SUCCESSOR IS THE HANDOVER, not an outage
       // (2026-11-16: every stream of a page closed `transferring_away` and was
-      // filed as daemon_unreachable). It raises the page's move notice, which
-      // quiesces the page and cancels every stream, so nothing reopens here.
+      // filed as daemon_unreachable). It raises the page's move, and the
+      // stream waits for the move's end: the page adopting the workspace in
+      // place re-homes it (a daemon move, above), and the page going quiet
+      // cancels it. The lifecycle ends every move one way or the other, its
+      // adoption under its own budget, so the wait is bounded by that.
       const successor = end.kind === "transport_failure" ? successorOf(end.error) : undefined;
       if (successor !== undefined) {
-        log.info(`the ${opts.name} stream closed because the workspace moved to ${successor}`, {
+        log.info(`the ${opts.name} stream closed because the workspace moved to ${successor}; waiting for the page to move`, {
           operation: "rpc.stream-ended-moved",
           context: { rpc: opts.name, address: successor },
         });
         workspaceMoved(successor);
-        return;
+        if (!daemonMoved) {
+          await new Promise<void>((resolve) => {
+            wakeFromBackoff = () => {
+              wakeFromBackoff = null;
+              resolve();
+            };
+          });
+        }
+        if (cancelled) return;
+        log.info(`the ${opts.name} stream is reopening where the workspace moved`, {
+          operation: "rpc.stream-moved-reopen",
+          context: { rpc: opts.name },
+        });
+        backoffMs = initialMs;
+        continue;
       }
       // THE DAEMON MOVED UNDER THE RUN: however it ended, it was this end that
       // ended it, to dial the daemon now named. Nothing is filed and it

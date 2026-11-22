@@ -1766,7 +1766,7 @@ export function createFakeDaemon(): FakeDaemon {
       adoptWebWorkspace(request) {
         record("adoptWebWorkspace", request);
         return answerFor("adoptWebWorkspace", AdoptWebWorkspaceResponseSchema, {
-          result: { case: "success", value: { page: { kind: { case: "agent", value: {} } } } },
+          result: { case: "success", value: { page: { kind: { case: "agent", value: {} } }, webappBuild: FAKE_DAEMON_WEBAPP_BUILD } },
         });
       },
 

@@ -12,10 +12,12 @@
  * during it — shortened by however long the announcement took to arrive, since
  * the daemon minted it before the socket died.
  */
+import { create } from "@bufbuild/protobuf";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { WatchDaemonResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
 import { DrainReasonSchema } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
+import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { REFUSAL_FACTS, ROOT_FEED, type RpcName } from "./fake-daemon";
@@ -57,105 +59,97 @@ describe("arm coverage", () => {
   });
 });
 
+/** Script the in-place adoption's answer: a daemon serving BUILD adopted the workspace. */
+const adoptedOn = (h: Harness, build: string): void => {
+  h.fake.answer(
+    "adoptWebWorkspace",
+    create(AdoptWebWorkspaceResponseSchema, {
+      result: { case: "success", value: { page: { kind: { case: "agent", value: {} } }, webappBuild: build } },
+    }),
+  );
+};
+
 describe("the transfer", () => {
   /**
-   * THE WEBAPP NEVER REDIALS (project lead, final — see the CONFIRMED SEQUENCE
-   * block in docs/overhaul/reports/webapp-briefs/lifecycle.md). This block used
-   * to assert the opposite: a second transport built at the announced address,
-   * `AdoptWebWorkspace` called THERE, and every view stream re-opened on the
-   * successor. That whole path is retired. A successor on another loopback port
-   * is a DIFFERENT ORIGIN, so re-pointing the view is Emacs's job; this page
-   * draws "workspace moved to <address>", goes quiet, cancels every stream, and
-   * stops. Adoption happens ONCE, at boot, on the daemon the page was addressed
-   * to — which is why the old daemon's adoption log reads 1 here and not 0.
+   * THE PAGE MOVES ITSELF (owner ruling, 2026-11-22). No handover reloads the
+   * page: it adopts its workspace in place, through whichever daemon its one
+   * origin reaches (which forwards the call to the successor), and reopens
+   * every stream there when that daemon serves this page's webapp build. On
+   * another build it draws "workspace moved to <address>" and goes quiet, for
+   * the deploy's host reload. Nothing is ever sent to the successor's own
+   * address.
    */
-  const transfer = async (): Promise<{ second: Awaited<ReturnType<Harness["startSecondDaemon"]>> }> => {
+  const transfer = async (
+    adoptingBuild?: string,
+  ): Promise<{ second: Awaited<ReturnType<Harness["startSecondDaemon"]>> }> => {
     harness = await startHarness();
     await harness.fake.awaitStream("watchWebWorkspace");
+    await harness.fake.awaitStream("watchFooter");
+    if (adoptingBuild !== undefined) adoptedOn(harness, adoptingBuild);
     const second = await harness.startSecondDaemon();
     harness.fake.transfer(WORKSPACE_ID, second.baseUrl);
     await harness.settle();
     return { second };
   };
 
-  it("draws the page-wide moved notice", async () => {
+  it("adopts the workspace in place, once at boot and once for the transfer", async () => {
+    // Arrange / Act
+    await transfer();
+    // Assert
+    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(2);
+  });
+
+  it("echoes the workspace on the in-place adoption", async () => {
+    // Arrange / Act
+    await transfer();
+    // Assert
+    const requests = harness.fake.calls<{ workspace?: { id: string } }>("adoptWebWorkspace");
+    expect(requests[1]?.workspace?.id).toBe(WORKSPACE_ID);
+  });
+
+  it("stays live on its own build", async () => {
+    // Arrange / Act
+    await transfer();
+    // Assert
+    expect(harness.ctx.isQuiesced()).toBe(false);
+    expect(harness.$("[data-moved]")).toBeNull();
+  });
+
+  it("reopens its view streams where the workspace is served now", async () => {
+    // Arrange / Act
+    await transfer();
+    // Assert
+    expect(harness.fake.liveStreams("watchFooter", WORKSPACE_ID)).toBe(1);
+  });
+
+  it("sends nothing at all to the successor's own address", async () => {
     // Arrange / Act
     const { second } = await transfer();
-    // Assert
-    expect(harness.$(`[data-moved="${second.baseUrl}"]`)).not.toBeNull();
-  });
-
-  it("names the successor's address in the notice", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    // Assert
-    expect(harness.$('[data-component="drain-banner"]')?.textContent).toContain(second.baseUrl);
-  });
-
-  it("goes quiet", async () => {
-    // Arrange / Act
-    await transfer();
-    // Assert
-    expect(harness.ctx.isQuiesced()).toBe(true);
-  });
-
-  it("cancels the view streams on the old daemon", async () => {
-    // Arrange / Act
-    await transfer();
-    // Assert
-    expect(harness.fake.liveStreams("watchFooter", WORKSPACE_ID)).toBe(0);
-  });
-
-  it("cancels the roster stream on the old daemon", async () => {
-    // Arrange / Act
-    await transfer();
-    // Assert
-    expect(harness.fake.liveStreams("watchWorkspaceRoster")).toBe(0);
-  });
-
-  it("cancels its own web-link stream on the old daemon", async () => {
-    // Arrange / Act
-    await transfer();
-    // Assert
-    expect(harness.fake.liveStreams("watchWebWorkspace", WORKSPACE_ID)).toBe(0);
-  });
-
-  it("sends nothing at all to the successor", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    // Assert: no transport to the new address is ever created.
+    // Assert: every call goes to the page's one origin.
     expect(second.log()).toHaveLength(0);
-  });
-
-  it("does not adopt on the successor", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    // Assert
-    expect(second.calls("adoptWebWorkspace")).toHaveLength(0);
-  });
-
-  it("adopted once at boot, on the daemon the page was addressed to", async () => {
-    // Arrange / Act
-    await transfer();
-    // Assert
-    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(1);
-  });
-
-  it("echoed the workspace on the boot adoption", async () => {
-    // Arrange / Act
-    await transfer();
-    // Assert
-    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("adoptWebWorkspace");
-    expect(request.workspace?.id).toBe(WORKSPACE_ID);
   });
 
   it("reports no failure for a transfer, which is orderly", async () => {
     // Arrange / Act
     await transfer();
     await harness.tick(5_000);
-    // Assert: the streams stopped because the page cancelled them, and a
-    // cancel is never a transport failure.
+    // Assert
     expect(harness.failureArms()).not.toContain("daemonUnreachable");
+  });
+
+  it("draws the moved notice and goes quiet when the adopting daemon serves another build", async () => {
+    // Arrange / Act
+    const { second } = await transfer("another-build");
+    // Assert
+    expect(harness.$(`[data-moved="${second.baseUrl}"]`)).not.toBeNull();
+    expect(harness.ctx.isQuiesced()).toBe(true);
+  });
+
+  it("cancels its view streams when the adopting daemon serves another build", async () => {
+    // Arrange / Act
+    await transfer("another-build");
+    // Assert
+    expect(harness.fake.liveStreams("watchFooter", WORKSPACE_ID)).toBe(0);
   });
 });
 
@@ -567,11 +561,16 @@ const MOVE_SITES: MoveSite[] = [
   },
 ];
 
-describe.each(MOVE_SITES)("$name refused as transferring_away", (site) => {
-  /** Boot, refuse this rpc with the move arm, and click its control. */
+describe.each(MOVE_SITES)("$name refused as transferring_away, adopted on another build", (site) => {
+  /**
+   * Boot, refuse this rpc with the move arm, and click its control. The
+   * refusal starts the same in-place adoption the push does, answered here by
+   * a daemon on another build, so the page goes quiet.
+   */
   const refuseAsMoved = async (): Promise<void> => {
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
+    adoptedOn(harness, "another-build");
     harness.fake.refuse(site.rpc, "transferringAway");
     site.arrange?.(harness);
     await harness.settle();
@@ -652,8 +651,42 @@ describe.each(MOVE_SITES)("$name refused as transferring_away", (site) => {
     const attempts = harness.fake.calls("watchFooter").length;
     // Act
     await harness.tick(30_000);
-    // Assert: the webapp never redials a successor.
+    // Assert: a quiet page opens nothing until the host reloads it.
     expect(harness.fake.calls("watchFooter").length).toBe(attempts);
+  });
+});
+
+describe("a transferring_away refusal adopted on this page's own build", () => {
+  const refuseAsMoved = async (): Promise<void> => {
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFooter");
+    harness.fake.refuse("closeWorkspace", "transferringAway");
+    harness.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] }));
+    await harness.settle();
+    await harness.click('[data-roster-row="ws-1"] [data-verb="close"]');
+    await harness.settle();
+  };
+
+  it("adopts the workspace in place", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(2);
+  });
+
+  it("stays live and draws no moved notice", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.ctx.isQuiesced()).toBe(false);
+    expect(harness.$("[data-moved]")).toBeNull();
+  });
+
+  it("keeps its view streams open", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.fake.liveStreams("watchFooter", WORKSPACE_ID)).toBe(1);
   });
 });
 
@@ -665,7 +698,7 @@ describe.each(MOVE_SITES)("$name refused as transferring_away", (site) => {
  * after the workspace moved would keep drawing rows from a daemon this page has
  * been told it no longer belongs to.
  */
-describe("the transfer with a bubble expanded", () => {
+describe("the transfer with a bubble expanded, adopted on another build", () => {
   const transferWithBubble = async (): Promise<void> => {
     harness = await startHarness({
       arrange: (fake) => {
@@ -679,6 +712,7 @@ describe("the transfer with a bubble expanded", () => {
     });
     await harness.click('[data-feed-row="bubble"] [data-expand]');
     await harness.fake.awaitStream("watchFeed", 2);
+    adoptedOn(harness, "another-build");
     const second = await harness.startSecondDaemon();
     harness.fake.transfer(WORKSPACE_ID, second.baseUrl);
     await harness.settle();
