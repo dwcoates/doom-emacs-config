@@ -1117,6 +1117,133 @@ It answers every item loaded without loading anything."
                      '((:module "a" :file "/m/lisp/a.el" :sha "aa" :outcome failed
                         :message "Boom in a" :error "(error \"Boom in a\")")))))))
 
+;;;; ---- The finish is the loaded build's ----
+
+(defconst agent-repl-test-eb--reload-finish-keys
+  '(:root :build :outcomes :defaults-snapshot :started :kinds)
+  "The keys `agent-repl--elisp-reload-finish''s docstring promises.")
+
+(defconst agent-repl-test-eb--hot-load-finish-keys
+  '(:outcomes :defaults-snapshot :kinds)
+  "The keys `agent-repl--elisp-hot-load-finish''s docstring promises.")
+
+(defmacro agent-repl-test-eb--with-finish-replaced-by-load (finish result &rest body)
+  "Run BODY with a load stub that redefines FINISH to record its argument in RESULT.
+RESULT is a variable bound to a cons whose car receives the argument; the
+redefined finish answers `new-finish'.  FINISH is restored afterwards."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function ,finish) (symbol-function ,finish))
+             ((symbol-function 'agent-repl--elisp-reload-load-file)
+              (lambda (file)
+                (push file agent-repl-test-eb--loaded)
+                (fset ,finish (lambda (plist) (setcar ,result plist) 'new-finish)))))
+     ,@body))
+
+(defun agent-repl-test-eb--missing-keys (plist keys)
+  "Return the KEYS PLIST does not hold."
+  (seq-remove (lambda (key) (plist-member plist key)) keys))
+
+(ert-deftest agent-repl-test-eb-reload-runs-the-loaded-builds-finish ()
+  "The finish a reload runs is the one its loads defined, handed one plist of the documented keys."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (let ((result (list nil)))
+        (agent-repl-test-eb--with-finish-replaced-by-load 'agent-repl--elisp-reload-finish result
+          ;; Act
+          (let ((answer (agent-repl--elisp-reload-run root "b1")))
+            ;; Assert
+            (should (equal (list answer
+                                 (agent-repl-test-eb--missing-keys (car result) agent-repl-test-eb--reload-finish-keys)
+                                 (plist-get (car result) :build)
+                                 (mapcar (lambda (o) (plist-get o :module)) (plist-get (car result) :outcomes)))
+                           '(new-finish nil "b1" ("core" "status"))))))))))
+
+(ert-deftest agent-repl-test-eb-hot-load-runs-the-loaded-builds-finish ()
+  "The finish a hot load runs is the one its loads defined, handed one plist of the documented keys."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((result (list nil)))
+      (agent-repl-test-eb--with-finish-replaced-by-load 'agent-repl--elisp-hot-load-finish result
+        ;; Act
+        (let ((answer (agent-repl-elisp-hot-load '("/m/lisp/a.el"))))
+          ;; Assert
+          (should (equal (list answer
+                               (agent-repl-test-eb--missing-keys (car result) agent-repl-test-eb--hot-load-finish-keys)
+                               (mapcar (lambda (o) (plist-get o :file)) (plist-get (car result) :outcomes)))
+                         '(new-finish nil ("/m/lisp/a.el")))))))))
+
+;;;; ---- A symbol whose kind the load changed ----
+
+(defmacro agent-repl-test-eb--with-kind-change (before after &rest body)
+  "Run BODY with `agent-repl-test-eb--shape' defined as BEFORE, each load defining it as AFTER.
+BEFORE and AFTER are definitions for `fset'; the symbol is unbound afterwards."
+  (declare (indent 2))
+  `(unwind-protect
+       (progn
+         (fset 'agent-repl-test-eb--shape ,before)
+         (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                    (lambda (file)
+                      (push file agent-repl-test-eb--loaded)
+                      (fset 'agent-repl-test-eb--shape ,after))))
+           ,@body))
+     (fmakunbound 'agent-repl-test-eb--shape)))
+
+(defconst agent-repl-test-eb--a-function (lambda () 'function)
+  "A definition whose kind is `function'.")
+
+(defconst agent-repl-test-eb--a-macro (cons 'macro (lambda () ''macro))
+  "A definition whose kind is `macro'.")
+
+(ert-deftest agent-repl-test-eb-reload-names-a-function-that-became-a-macro ()
+  "A function the reload turned into a macro is named in one ERROR."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (agent-repl-test-eb--with-kind-change agent-repl-test-eb--a-function agent-repl-test-eb--a-macro
+        ;; Act
+        (agent-repl--elisp-reload-run root "any")
+        ;; Assert
+        (should (equal (agent-repl-test-eb--logged :error "elisp.elisp-build.reload-kind-changed")
+                       '((:error . "elisp.elisp-build.reload-kind-changed count=1 symbols=(agent-repl-test-eb--shape)"))))))))
+
+(ert-deftest agent-repl-test-eb-reload-names-a-macro-that-became-a-function ()
+  "A macro the reload turned into a function is named in one ERROR."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (agent-repl-test-eb--with-kind-change agent-repl-test-eb--a-macro agent-repl-test-eb--a-function
+        ;; Act
+        (agent-repl--elisp-reload-run root "any")
+        ;; Assert
+        (should (equal (agent-repl-test-eb--logged :error "elisp.elisp-build.reload-kind-changed")
+                       '((:error . "elisp.elisp-build.reload-kind-changed count=1 symbols=(agent-repl-test-eb--shape)"))))))))
+
+(ert-deftest agent-repl-test-eb-reload-with-no-kind-change-records-none ()
+  "A reload whose loads redefine a function as a function writes no kind-change record."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core"))
+      (agent-repl-test-eb--with-kind-change agent-repl-test-eb--a-function (lambda () 'redefined)
+        ;; Act
+        (agent-repl--elisp-reload-run root "any")
+        ;; Assert
+        (should-not (agent-repl-test-eb--logged :error "elisp.elisp-build.reload-kind-changed"))))))
+
+(ert-deftest agent-repl-test-eb-hot-load-names-a-kind-change ()
+  "A function a hot load turned into a macro is named in one ERROR."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-kind-change agent-repl-test-eb--a-function agent-repl-test-eb--a-macro
+      ;; Act
+      (agent-repl-elisp-hot-load '("/m/lisp/a.el"))
+      ;; Assert
+      (should (equal (agent-repl-test-eb--logged :error "elisp.elisp-build.reload-kind-changed")
+                     '((:error . "elisp.elisp-build.reload-kind-changed count=1 symbols=(agent-repl-test-eb--shape)")))))))
+
 (ert-deftest agent-repl-test-eb-load-files-uses-the-wrapper-captured-before-the-first-load ()
   "A load that redefines the load wrapper does not change what the loop loads with."
   (agent-repl-test-eb--with-harness

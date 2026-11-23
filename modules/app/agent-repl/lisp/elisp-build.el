@@ -213,7 +213,16 @@ default, in SNAPSHOT order."
 ;; \(each file, its hash, the load wrapper's function object), the loop runs
 ;; only Emacs primitives and that captured object and answers each file's
 ;; outcome as plain data, and everything after the last load is reached by a
-;; call by name, so it is the code of the build just loaded.
+;; call by name, so it is the code of the build just loaded: ONE call, to
+;; `agent-repl--elisp-reload-finish' (a hot load's
+;; `agent-repl--elisp-hot-load-finish'), with ONE plist whose keys are only
+;; ever added, since the build calling it is always the one before.
+;;
+;; A CLOSURE MADE BEFORE THE LOAD STILL CALLS BY THE OLD KIND.  A timer, a
+;; process filter or a hook closure that calls a symbol the load turned from
+;; a function into a macro (or back) fails until it is made again, so the
+;; finish names every such symbol at ERROR
+;; \(`agent-repl--elisp-report-kind-changes'); it repairs nothing.
 
 (defun agent-repl--elisp-normalize-root (root)
   "Return ROOT as an absolute directory name, for comparing module roots."
@@ -263,19 +272,76 @@ item's :skip, and for `failed' MESSAGE the error's message and ERROR its
                              outcomes))))
     (nreverse outcomes)))
 
+(defun agent-repl--elisp-function-kind (symbol)
+  "Return SYMBOL's kind as a caller sees it: `macro' or `function'."
+  (if (macrop symbol) 'macro 'function))
+
+(defun agent-repl--elisp-function-kinds ()
+  "Return (SYMBOL . KIND) for every fbound agent-repl symbol.
+KIND is `agent-repl--elisp-function-kind''s answer.  Taken before a load,
+so the build loaded after it can be compared with
+`agent-repl--elisp-report-kind-changes'."
+  (let (kinds)
+    (mapatoms (lambda (symbol)
+                (when (and (fboundp symbol)
+                           (string-prefix-p "agent-repl" (symbol-name symbol)))
+                  (push (cons symbol (agent-repl--elisp-function-kind symbol)) kinds))))
+    kinds))
+
+(defun agent-repl--elisp-report-kind-changes (kinds)
+  "Name at ERROR every symbol of KINDS whose kind the load changed.
+KINDS is `agent-repl--elisp-function-kinds''s answer from before the load.
+A symbol that went from function to macro or from macro to function is
+called wrongly by every closure, timer and process filter made before the
+load that calls it, until that caller is made again, so the change is
+loud.  Nothing is repaired.  Returns the changed symbols, in name order."
+  (let (changed)
+    (dolist (entry kinds)
+      (let ((symbol (car entry)))
+        (when (and (fboundp symbol)
+                   (not (eq (cdr entry) (agent-repl--elisp-function-kind symbol))))
+          (push symbol changed))))
+    (setq changed (sort changed #'string<))
+    (when changed
+      (agent-repl--error agent-repl--elisp-build-log-scope
+                         "elisp.elisp-build.reload-kind-changed count={count} symbols={symbols}"
+                         :count (length changed) :symbols (prin1-to-string changed)))
+    changed))
+
 (defun agent-repl-elisp-hot-load (files)
   "Load the elisp sources FILES in order, applying the defaults they changed.
 The runtime\='s `hot-reload' verb asks this, as a deploy\='s reload loads
-the whole set, through the same loop (`agent-repl--elisp-load-files'): a
-default one of FILES changed reaches the running editor.  Each file is
-recorded once every file has been tried; a file that fails to load is an
-ERROR, the files after it still load, and the hot load then signals, so
-the verb fails loudly.  Returns t."
+the whole set, through the same loop (`agent-repl--elisp-load-files'), and
+everything after the last load is `agent-repl--elisp-hot-load-finish', the
+loaded build's: a default one of FILES changed reaches the running editor.
+A file that fails to load signals, so the verb fails loudly.  Returns t."
   (let* ((plan (mapcar (lambda (file) (list :file file)) files))
          (snapshot (agent-repl--elisp-defaults-snapshot))
-         (outcomes (agent-repl--elisp-load-files plan))
-         (failed nil))
-    (dolist (outcome outcomes)
+         (kinds (agent-repl--elisp-function-kinds))
+         (outcomes (agent-repl--elisp-load-files plan)))
+    ;; Called BY NAME after the last load, so the definition that runs is
+    ;; the one just loaded.
+    (agent-repl--elisp-hot-load-finish
+     (list :outcomes outcomes :defaults-snapshot snapshot :kinds kinds))))
+
+(defun agent-repl--elisp-hot-load-finish (result)
+  "Finish a hot load whose files are loaded, from RESULT; return t or signal.
+A REPLACED BUILD CALLS THIS IN THE NEW ONE, as it calls
+`agent-repl--elisp-reload-finish': RESULT is ONE plist, and its keys are
+only ever added, never removed or renamed, since the caller is the build
+before this one:
+
+  :outcomes           `agent-repl--elisp-load-files''s answer;
+  :defaults-snapshot  `agent-repl--elisp-defaults-snapshot' from before
+                      the first load;
+  :kinds              `agent-repl--elisp-function-kinds' from before the
+                      first load.
+
+Each file is recorded at INFO, a file that failed at ERROR as well; a
+symbol whose kind changed is named at ERROR; the changed defaults are
+applied; then a failed file signals, naming each that failed."
+  (let ((failed nil))
+    (dolist (outcome (plist-get result :outcomes))
       (agent-repl--info agent-repl--elisp-build-log-scope
                         "elisp.elisp-build.hot-load file={file}" :file (prin1-to-string (plist-get outcome :file)))
       (pcase-exhaustive (plist-get outcome :outcome)
@@ -285,7 +351,8 @@ the verb fails loudly.  Returns t."
                             "elisp.elisp-build.hot-load-failed file={file} error={error}"
                             :file (prin1-to-string (plist-get outcome :file)) :error (plist-get outcome :error))
          (push outcome failed))))
-    (agent-repl--elisp-defaults-apply snapshot)
+    (agent-repl--elisp-report-kind-changes (plist-get result :kinds))
+    (agent-repl--elisp-defaults-apply (plist-get result :defaults-snapshot))
     (when failed
       (error "agent-repl: hot load: %d file(s) failed to load: %s"
              (length failed)
@@ -479,7 +546,11 @@ recomputed from the bytes just loaded, so the next WatchDaemon reports the
 new build; a recomputed build that differs from BUILD means the files moved
 between the deploy and the load, and is an ERROR.  Returns non-nil when
 every module loaded and the loaded build is BUILD, nil otherwise; every
-failure is already recorded at ERROR."
+failure is already recorded at ERROR.
+
+Only reading config.el runs here before the loads; everything after the
+last load is `agent-repl--elisp-reload-finish', called by name, so it is
+the code of the build just loaded."
   (let ((config (expand-file-name "config.el" root))
         (modules nil))
     (agent-repl--info agent-repl--elisp-build-log-scope
@@ -499,48 +570,87 @@ failure is already recorded at ERROR."
        (message "agent-repl: elisp reload FAILED -- %s could not be read: %s"
                 config (error-message-string err))))
     (when modules
+      ;; FROM HERE TO THE LAST LOAD NOTHING OF AGENT-REPL'S IS CALLED BY NAME
+      ;; (see "Loading a build's files"): what the finish needs from before
+      ;; the loads is taken now, and the finish is called by name after
+      ;; them, so it is the build just loaded.
       (let* ((plan (agent-repl--elisp-reload-plan root modules))
              (snapshot (agent-repl--elisp-defaults-snapshot))
+             (kinds (agent-repl--elisp-function-kinds))
              (started (agent-repl--now))
-             (outcomes (agent-repl--elisp-load-files plan))
-             (recorded (agent-repl--elisp-reload-record-outcomes outcomes))
-             (entries (car recorded))
-             (failures (cdr recorded)))
-        (agent-repl--elisp-defaults-apply snapshot)
-        (setq agent-repl--elisp-module-builds entries)
-        (agent-repl--elisp-reload-report-heartbeat (agent-repl--assert-heartbeat-armed))
-        ;; The load replaced every compiled function with its interpreted
-        ;; source; bytecode.el compiles them again, never ahead of input.
-        (agent-repl-bytecode-schedule root (mapcar #'car entries))
-        ;; THE EDITOR RAN NOTHING ELSE from the first load to here, so this
-        ;; span is how long the reload held the person up (`elisp_reload').
-        (agent-repl-latency-report-editor
-         :elisp-reload (max 0.0 (- (agent-repl--now) started)))
-        (when failures
-          (agent-repl--error agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.reload-module-failures count={count} failures={failures}"
-                             :count (length failures) :failures (prin1-to-string failures))
-          (message "agent-repl: elisp reload: %d module(s) failed to load: %s"
-                   (length failures)
-                   (mapconcat #'car failures ", ")))
-        ;; A module that failed to load still needs the functions its last
-        ;; good load defined, which its new `load-history' entry may not name.
-        (if failures
-            (agent-repl--info agent-repl--elisp-build-log-scope
-                              "elisp.elisp-build.retire-skipped failed={failed} reason={reason}"
-                              :failed (length failures) :reason "a module failed to load, so its functions may still be needed")
-          (agent-repl--elisp-reload-report-retired (agent-repl--elisp-retire-undefined)))
-        (let ((loaded-build (agent-repl-elisp-build-of entries)))
-          (unless (string= loaded-build build)
-            (agent-repl--error agent-repl--elisp-build-log-scope
-                               "elisp.elisp-build.reload-build-mismatch pushed={pushed} loaded={loaded} reason={reason}"
-                               :pushed (prin1-to-string build) :loaded (prin1-to-string loaded-build)
-                               :reason "the files changed between the deploy and the load"))
-          (agent-repl--info agent-repl--elisp-build-log-scope
-                            "elisp.elisp-build.reload-complete modules={modules} recorded={recorded} failed={failed} build={build}"
-                            :modules (length modules) :recorded (length entries) :failed (length failures)
-                            :build (prin1-to-string loaded-build))
-          (and (null failures) (string= loaded-build build)))))))
+             (outcomes (agent-repl--elisp-load-files plan)))
+        (agent-repl--elisp-reload-finish
+         (list :root root :build build :outcomes outcomes
+               :defaults-snapshot snapshot :started started :kinds kinds))))))
+
+(defun agent-repl--elisp-reload-finish (result)
+  "Finish a reload whose modules are loaded, from RESULT; return its success.
+THE ONE FUNCTION A REPLACED BUILD CALLS IN THE NEW ONE.  The replaced
+build's `agent-repl--elisp-reload-run' calls it by name after the last
+load, so the definition that runs is the one just loaded, and it is
+handed what was taken before the first load.  So RESULT is ONE plist,
+and its keys are only ever ADDED, never removed or renamed: the caller is
+always the build before this one.  Its keys:
+
+  :root               the module root the modules were loaded from;
+  :build              the build the daemon pushed;
+  :outcomes           `agent-repl--elisp-load-files''s answer for the
+                      reload's plan, one per module config.el names;
+  :defaults-snapshot  `agent-repl--elisp-defaults-snapshot' from before
+                      the first load;
+  :started            `agent-repl--now' just before the first load;
+  :kinds              `agent-repl--elisp-function-kinds' from before the
+                      first load.
+
+Records each module's outcome, names every symbol whose kind changed,
+applies the changed defaults, recomputes the recorded module builds, runs
+the heartbeat assertion, schedules the compile, reports the reload's span,
+reports the failures, retires what the new build no longer defines (or
+records why not), and compares the loaded build with the pushed one.
+Returns non-nil when every module loaded and the loaded build is the
+pushed one, nil otherwise; every failure is already recorded at ERROR."
+  (let* ((root (plist-get result :root))
+         (build (plist-get result :build))
+         (outcomes (plist-get result :outcomes))
+         (recorded (agent-repl--elisp-reload-record-outcomes outcomes))
+         (entries (car recorded))
+         (failures (cdr recorded)))
+    (agent-repl--elisp-report-kind-changes (plist-get result :kinds))
+    (agent-repl--elisp-defaults-apply (plist-get result :defaults-snapshot))
+    (setq agent-repl--elisp-module-builds entries)
+    (agent-repl--elisp-reload-report-heartbeat (agent-repl--assert-heartbeat-armed))
+    ;; The load replaced every compiled function with its interpreted
+    ;; source; bytecode.el compiles them again, never ahead of input.
+    (agent-repl-bytecode-schedule root (mapcar #'car entries))
+    ;; THE EDITOR RAN NOTHING ELSE from the first load to here, so this
+    ;; span is how long the reload held the person up (`elisp_reload').
+    (agent-repl-latency-report-editor
+     :elisp-reload (max 0.0 (- (agent-repl--now) (plist-get result :started))))
+    (when failures
+      (agent-repl--error agent-repl--elisp-build-log-scope
+                         "elisp.elisp-build.reload-module-failures count={count} failures={failures}"
+                         :count (length failures) :failures (prin1-to-string failures))
+      (message "agent-repl: elisp reload: %d module(s) failed to load: %s"
+               (length failures)
+               (mapconcat #'car failures ", ")))
+    ;; A module that failed to load still needs the functions its last
+    ;; good load defined, which its new `load-history' entry may not name.
+    (if failures
+        (agent-repl--info agent-repl--elisp-build-log-scope
+                          "elisp.elisp-build.retire-skipped failed={failed} reason={reason}"
+                          :failed (length failures) :reason "a module failed to load, so its functions may still be needed")
+      (agent-repl--elisp-reload-report-retired (agent-repl--elisp-retire-undefined)))
+    (let ((loaded-build (agent-repl-elisp-build-of entries)))
+      (unless (string= loaded-build build)
+        (agent-repl--error agent-repl--elisp-build-log-scope
+                           "elisp.elisp-build.reload-build-mismatch pushed={pushed} loaded={loaded} reason={reason}"
+                           :pushed (prin1-to-string build) :loaded (prin1-to-string loaded-build)
+                           :reason "the files changed between the deploy and the load"))
+      (agent-repl--info agent-repl--elisp-build-log-scope
+                        "elisp.elisp-build.reload-complete modules={modules} recorded={recorded} failed={failed} build={build}"
+                        :modules (length outcomes) :recorded (length entries) :failed (length failures)
+                        :build (prin1-to-string loaded-build))
+      (and (null failures) (string= loaded-build build)))))
 
 (defun agent-repl-elisp-reload-if-stale (root)
   "Hot-load the module set from ROOT when this Emacs runs older elisp.

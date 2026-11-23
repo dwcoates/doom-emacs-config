@@ -400,7 +400,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("elisp-build.el" agent-repl--elisp-reload-run
      "agent-repl: elisp reload FAILED -- %s could not be read: %s"
      "tells the user the reload loaded nothing and why")
-    ("elisp-build.el" agent-repl--elisp-reload-run
+    ("elisp-build.el" agent-repl--elisp-reload-finish
      "agent-repl: elisp reload: %d module(s) failed to load: %s"
      "tells the user which modules the reload could not load")
     ("emoji.el" agent-repl-install-commit-emoji-hook
