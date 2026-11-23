@@ -41,9 +41,18 @@ fi
 export GOFLAGS=-mod=mod GOPROXY=off GOTOOLCHAIN=local GOWORK=off
 
 # esbuild comes from the shim's installed dependencies, which the fixtures'
-# packages link to as the real ones link into the shared store.
-"$THIS_DIR/ensure-deps.sh" "$MODULE_DIR/agent-shim/claude/shim" >/dev/null
-NODE_MODULES="$MODULE_DIR/agent-shim/claude/shim/node_modules"
+# packages link to as the real ones link into the shared store. A healthy
+# store entry is read as it stands: only a host without one repairs it
+# (ensure-deps), because that repair waits on the store's lock while other
+# suites install, a wait this harness's own time limit does not allow for.
+# shellcheck source=lib-node-store.sh
+. "$THIS_DIR/lib-node-store.sh"
+SHIM_DIR="$MODULE_DIR/agent-shim/claude/shim"
+NODE_MODULES="$(node_store_entry_for "$SHIM_DIR")/node_modules"
+if [ ! -d "$NODE_MODULES/esbuild" ]; then
+    "$THIS_DIR/ensure-deps.sh" "$SHIM_DIR" >/dev/null
+    NODE_MODULES="$SHIM_DIR/node_modules"
+fi
 
 # write ROOT PATH CONTENT — write a fixture file, making its directory.
 write() {

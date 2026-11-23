@@ -1268,7 +1268,7 @@ t_daemon_build_removes_a_stale_snapshot_when_there_is_no_config() {
 
 # The stamp is what makes the skip possible, so a build must leave one behind.
 t_build_records_the_source_tree_stamp() {
-    local root recorded expected paths; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    local root recorded expected; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
     run_script "$root" daemon >/dev/null
     recorded="$(cat "$root/daemon/bin/.source-tree" 2>/dev/null || echo MISSING)"
