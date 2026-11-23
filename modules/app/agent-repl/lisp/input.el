@@ -1494,11 +1494,11 @@ nil (no figure stands) is a dash, never a zero."
    (t (format "%.1fM" (/ tokens 1000000.0)))))
 
 (defconst agent-repl--input-pressure-percent-stops
-  '((40 . 140) (70 . 60) (90 . 30) (90 . 0))
+  '((15 . 140) (30 . 60) (50 . 30) (75 . 0))
   "Where a pressure percentage's hues sit, as (PERCENT . HUE) stops.
 The webapp's `PRESSURE_PERCENT_STOPS' (webapp/src/pressure-color.ts), the
-rule the topbar's context chip is colored by: green below 40, yellow by
-70, orange by 90, a hard step to red at 90.  The two tables are one rule
+rule the topbar's context chip is colored by: green below 15, yellow at
+30, orange at 50, red at 75.  The two tables are one rule
 and change together.")
 
 (defun agent-repl--input-pressure-hue (percent)

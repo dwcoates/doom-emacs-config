@@ -45,8 +45,8 @@ describe("drawTopbarContextChip", () => {
 
   it.each([
     ["green well inside the window", 0.1, 10],
-    ["between green and yellow past 40%", 0.55, 55],
-    ["red at 90% and above", 0.93, 93],
+    ["between yellow and orange at 40%", 0.4, 40],
+    ["red at 75% and above", 0.78, 78],
   ])("paints the figure %s, by the footer's own rule", (_name, fill, percent) => {
     // ARRANGE
     const { tc } = topbarContext();

@@ -4420,14 +4420,14 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
                    (concat agent-repl--input-rollback-header "\na\nb")))))
 
 (ert-deftest agent-repl-test-input-pressure-hue-follows-the-chip-stops ()
-  "The hue is green below 40, blends to yellow by 70 and orange by 90, red at 90."
-  (dolist (case '((0 140) (39 140) (40 140) (55 100.0) (70 60) (80 45.0)
-                  (89 31.5) (90 0) (100 0)))
+  "The hue is green below 15, yellow at 30, orange at 50, red at 75."
+  (dolist (case '((0 140) (14 140) (15 140) (30 60) (40 45.0) (50 30)
+                  (62.5 15.0) (75 0) (100 0)))
     (should (= (agent-repl--input-pressure-hue (car case)) (cadr case)))))
 
 (ert-deftest agent-repl-test-input-window-fill-color-is-the-chip-hsl ()
   "A fill's color is its whole percent's hue at 80% saturation, 45% lightness."
-  (dolist (case '((0.0 "#16ce54") (0.7 "#cece16") (0.9 "#ce1616")))
+  (dolist (case '((0.0 "#16ce54") (0.3 "#cece16") (0.75 "#ce1616")))
     (should (equal (agent-repl--input-window-fill-color (car case)) (cadr case)))))
 
 (ert-deftest agent-repl-test-input-window-fill-color-refuses-an-out-of-range-fill ()
