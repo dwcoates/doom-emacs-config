@@ -2009,6 +2009,99 @@ as if it were understood."
         (should-not (eq (agent-repl-link-successor) stale))
         (should (agent-repl-connect-connection-at-p (agent-repl-link-successor) "127.0.0.1:9100"))))))
 
+(defmacro agent-repl-test-link--with-signalling-redial (&rest body)
+  "Run BODY with `agent-repl-link--redial-after-reload' signalling \"redial broke\"."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl-link--redial-after-reload)
+              (lambda (_conn _build) (error "redial broke"))))
+     ,@body))
+
+(ert-deftest agent-repl-test-link-a-signalling-redial-releases-a-pending-primary ()
+  "A redial that signals on a pending primary refuses the dial into the reconnect loop."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      (agent-repl-test-link--close conn '(:ended))
+      (agent-repl-test-link--with-signalling-redial
+        ;; Act
+        (should-error (agent-repl-link--after-reload conn "fresh"))
+        ;; Assert
+        (should (null (gethash conn agent-repl-link--verdicts)))
+        (should (null agent-repl-link--pending))
+        (should (eq (cdar agent-repl-test-link--timers) #'agent-repl-link--reconnect-tick))
+        (should (agent-repl-test-link--logged-p
+                 :error "elisp.link.reload-redial-signalled address=\"127.0.0.1:9001\" build=\"fresh\" error=\"redial broke\""))))))
+
+(ert-deftest agent-repl-test-link-a-signalling-redial-of-a-successor-takes-an-ended-link-down ()
+  "A pending successor whose primary ended is dropped, and the link goes down into the reconnect loop."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-down-functions (agent-repl-test-link--record-hook :down))
+    (agent-repl-test-link--end-before-acceptance)
+    (let ((stale agent-repl-link--pending-successor))
+      (agent-repl-test-link--verdict-stale stale)
+      (agent-repl-test-link--close stale '(:ended))
+      (agent-repl-test-link--with-signalling-redial
+        ;; Act
+        (should-error (agent-repl-link--after-reload stale "fresh"))
+        ;; Assert
+        (should (null (gethash stale agent-repl-link--verdicts)))
+        (should (null agent-repl-link--pending-successor))
+        (should (null (agent-repl-link-primary)))
+        (should (= (seq-count (lambda (entry) (eq (car entry) :down)) agent-repl-test-link--hooks) 1))
+        (should (seq-some (lambda (timer) (eq (cdr timer) #'agent-repl-link--reconnect-tick))
+                          agent-repl-test-link--timers))
+        (should (agent-repl-test-link--logged-p
+                 :error "elisp.link.reload-redial-signalled address=\"127.0.0.1:9100\" build=\"fresh\" error=\"redial broke\""))))))
+
+(ert-deftest agent-repl-test-link-a-signalling-redial-of-a-superseded-dial-schedules-nothing ()
+  "A dial no longer held is not refused again: the signal is an ERROR and propagates."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      (agent-repl-link-teardown)
+      (let ((timers agent-repl-test-link--timers))
+        (agent-repl-test-link--with-signalling-redial
+          ;; Act
+          (should-error (agent-repl-link--after-reload conn "fresh"))
+          ;; Assert
+          (should (null (gethash conn agent-repl-link--verdicts)))
+          (should (eq agent-repl-test-link--timers timers))
+          (should (agent-repl-test-link--logged-p
+                   :error "elisp.link.reload-redial-signalled address=\"127.0.0.1:9001\" build=\"fresh\" error=\"redial broke\"")))))))
+
+(ert-deftest agent-repl-test-link-after-reload-redials-as-the-redial-does ()
+  "A redial that does not signal dials the role again and records no signal."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      (setq agent-repl-test-link--elisp-build "fresh")
+      ;; Act
+      (agent-repl-link--after-reload conn "fresh")
+      ;; Assert
+      (should agent-repl-link--pending)
+      (should-not (eq agent-repl-link--pending conn))
+      (should (null (gethash conn agent-repl-link--verdicts)))
+      (should-not (agent-repl-test-link--logged-p :error "elisp.link.reload-redial-signalled")))))
+
+(ert-deftest agent-repl-test-link-a-stale-verdicts-reload-ends-through-after-reload ()
+  "The on-done handed to the reload releases the dial when the redial signals."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      (let ((on-done (cadr (car agent-repl-test-link--reloads))))
+        (agent-repl-test-link--with-signalling-redial
+          ;; Act
+          (should-error (funcall on-done t))
+          ;; Assert
+          (should (null (gethash conn agent-repl-link--verdicts)))
+          (should (null agent-repl-link--pending))
+          (should (agent-repl-test-link--logged-p :error "elisp.link.reload-redial-signalled")))))))
+
 (ert-deftest agent-repl-test-link-a-verdict-on-an-accepted-link-is-a-breach ()
   "The daemon gives a stream one verdict: a second is an ERROR and signals."
   (agent-repl-test-link--with-harness
