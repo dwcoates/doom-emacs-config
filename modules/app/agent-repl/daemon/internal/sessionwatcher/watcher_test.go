@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -1740,6 +1741,86 @@ func TestShellStreamEndingAfterTheTerminalIsNotReopened(t *testing.T) {
 
 	// Assert.
 	h.client.NoBashOpen(t)
+}
+
+// TestAShellStreamEndingMidRunIsRecordedAtTheLevelItsCauseMeans covers what
+// a still-registered shell's stream ending records: the store's failure
+// cutting it (the shim's own unavailable answer, which the shim records as
+// its own fault) is INFO, any other early end a WARN, and both count toward
+// shellReopenLimit, so a store-cut stream at the limit still severs.
+func TestAShellStreamEndingMidRunIsRecordedAtTheLevelItsCauseMeans(t *testing.T) {
+	const operation = "daemon.sessionwatcher.watch_bash"
+	storeCut := fmt.Errorf("%w: %w", shimclient.ErrStoreUnreachable,
+		connect.NewError(connect.CodeUnavailable, errors.New("WatchBash(w-1): the store is unreachable")))
+	tests := []struct {
+		name string
+		err  error
+		// reopens is the shell watch's re-open count before its stream ends.
+		reopens     int
+		wantLevel   string
+		absentLevel string
+		wantReopen  bool
+	}{
+		{
+			name:        "the store's failure cut it, so INFO and re-opened",
+			err:         storeCut,
+			reopens:     0,
+			wantLevel:   "info",
+			absentLevel: "warn",
+			wantReopen:  true,
+		},
+		{
+			name:        "it ended plainly, so WARN and re-opened",
+			err:         io.EOF,
+			reopens:     0,
+			wantLevel:   "warn",
+			absentLevel: "info",
+			wantReopen:  true,
+		},
+		{
+			name:        "the store's failure cut it at the limit, so it severs",
+			err:         storeCut,
+			reopens:     shellReopenLimit,
+			wantLevel:   "error",
+			absentLevel: "info",
+			wantReopen:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+			first := h.client.NextBashOpen(t)
+			entry := h.shellWatchFor("w-1")
+			h.quiet()
+			h.routeNow(func(*watcher) { entry.reopens = tt.reopens })
+
+			// Act.
+			first.Stream.Fail(tt.err)
+
+			// Assert.
+			if tt.wantReopen {
+				if second := h.client.NextBashOpen(t); second.Work.GetValue() != "w-1" {
+					t.Fatalf("re-opened watch = %q, want w-1", second.Work.GetValue())
+				}
+				h.w.mu.Lock()
+				got := entry.reopens
+				h.w.mu.Unlock()
+				if got != tt.reopens+1 {
+					t.Fatalf("reopens = %d, want %d", got, tt.reopens+1)
+				}
+			} else {
+				h.rec.until(t, "sidebar.OnLink")
+				h.client.NoBashOpen(t)
+			}
+			if !h.hasRecord(tt.wantLevel, operation) {
+				t.Fatalf("no %s record on %s: %+v", tt.wantLevel, operation, h.log.Records())
+			}
+			if h.hasRecord(tt.absentLevel, operation) {
+				t.Fatalf("the stream's end was ALSO recorded at %s on %s: %+v", tt.absentLevel, operation, h.log.Records())
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
