@@ -1637,3 +1637,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-23 feed-blank-census (landed in queue bypass mode): shim: the skill watch proves itself live and reports what changed before it was; webapp: the page census states the feed's geometry and warns feed.blank-view
 - 2026-11-23 feed-blank-census (landed in queue bypass mode): shim: the skill watch's liveness bound is three times the 1.3s a deploy's shim replacements were measured at
 - 2026-11-23 deploy-mediator: shim: the skill watch's liveness bound is now 10.6s, three times the 3.5s a deploy's shim replacements measured, after the 4s bound fired during the 20:09Z deploy
+- 2026-11-23 deploy-mediator: shim: the teardown no longer closes the skill watch's platform watches, which blocked its event loop for up to 6s and made KillSession miss the daemon's stand-down bound
