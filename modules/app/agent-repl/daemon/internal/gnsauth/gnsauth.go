@@ -4,7 +4,8 @@
 //
 // WHAT IT NOTICES. A GNS call answering that its credential is invalid or
 // expired (IsRejection) is the signal. Two things raise it: the daemon's own
-// gns calls, observed through ObserveRunner, and a standing probe (Watch) that
+// gns calls, every refused one shown to Observe by gnsclient (the daemon's one
+// way to gns), and a standing probe (Watch) that
 // asks the server whether the credential still works, because the plugins that
 // poll GNS in the background (gns-sockets) log the rejection where no agent
 // reads it. A failure that is not a rejection, such as the network being
@@ -329,20 +330,4 @@ func (r *Renewer) gns(ctx context.Context, bound time.Duration, args ...string) 
 		return output, fmt.Errorf("gns exited %d: %s", code, outputtext.LastLine(output))
 	}
 	return output, nil
-}
-
-// ObserveRunner is a Runner that tells r about every gns call GNS refuses.
-func ObserveRunner(inner Runner, r *Renewer) Runner { return observed{inner: inner, r: r} }
-
-type observed struct {
-	inner Runner
-	r     *Renewer
-}
-
-func (o observed) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
-	output, code, err := o.inner.Run(ctx, dir, argv)
-	if err == nil && code != 0 && len(argv) > 0 && argv[0] == "gns" {
-		o.r.Observe(output)
-	}
-	return output, code, err
 }

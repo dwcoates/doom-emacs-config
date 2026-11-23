@@ -360,3 +360,117 @@ func TestListReactedRefusesSlacksRefusal(t *testing.T) {
 		t.Fatalf("ListReacted = %v; want Slack's refusal recorded", err)
 	}
 }
+
+func TestListMyChannelsReadsEveryChannelInSlacksOrder(t *testing.T) {
+	// Arrange
+	bin, dir := fakeGNS(t, `{"channels": [
+		{"id": "C1", "name": "general", "purpose": "news"},
+		{"id": "C2", "name": "team", "is_private": true},
+		{"id": "C3", "name": "old", "is_archived": true}
+	], "count": 3}`, "", 0, "")
+	c, _ := newClient(t, bin, 0)
+
+	// Act
+	got, err := c.ListMyChannels(context.Background())
+
+	// Assert
+	want := []Channel{{ID: "C1", Name: "general", Purpose: "news"}, {ID: "C2", Name: "team", IsPrivate: true}, {ID: "C3", Name: "old", IsArchived: true}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListMyChannels = %+v, %v", got, err)
+	}
+	if args := argsOf(t, dir); !reflect.DeepEqual(args, []string{"slack", "channel", "list-mine", "--all", "--json"}) {
+		t.Fatalf("ran gns %v", args)
+	}
+}
+
+func TestListMyChannelsRefusesAnAnswerWithNoChannelsList(t *testing.T) {
+	// Arrange
+	bin, _ := fakeGNS(t, `{"count": 0}`, "", 0, "")
+	c, log := newClient(t, bin, 0)
+
+	// Act
+	_, err := c.ListMyChannels(context.Background())
+
+	// Assert
+	var f *Failure
+	if !errors.As(err, &f) || !strings.Contains(f.Message, "no `channels` list") || !failedRecord(log, "gns slack channel list-mine --all --json") {
+		t.Fatalf("ListMyChannels = %v; want the missing list recorded", err)
+	}
+}
+
+func TestListMyChannelsRunsUnderItsOwnBound(t *testing.T) {
+	// Arrange: the one-shot bound is far longer, so only the channels bound
+	// can end the call.
+	bin, _ := fakeGNS(t, "", "", 0, "exec tail -f /dev/null")
+	log := dlog.NewTestLogger()
+	c, err := New(Config{Binary: bin, Log: log, Bound: time.Hour, ChannelsBound: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err = c.ListMyChannels(context.Background())
+
+	// Assert
+	var f *Failure
+	if !errors.As(err, &f) || !strings.Contains(f.Message, "did not answer within 50ms (healthy calls answer within 15.4s)") {
+		t.Fatalf("ListMyChannels = %v; want the channels bound named", err)
+	}
+}
+
+// observedClient is a client whose observer records every output it is shown.
+func observedClient(t *testing.T, bin string) (Client, *[]string) {
+	t.Helper()
+	var shown []string
+	c, err := New(Config{Binary: bin, Log: dlog.NewTestLogger(), Observe: func(output string) bool {
+		shown = append(shown, output)
+		return false
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, &shown
+}
+
+func TestTheObserverIsShownEveryCallGnsRefused(t *testing.T) {
+	tests := []struct {
+		name   string
+		stdout string
+		stderr string
+		code   int
+		want   []string
+	}{
+		{name: "a refused call shows its combined output", stdout: "Visit: x\n", stderr: "Error: credential is invalid or expired", code: 1,
+			want: []string{"Visit: x\nError: credential is invalid or expired"}},
+		{name: "an answered call shows nothing", stdout: `{"ok":true}`, code: 0, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			bin, _ := fakeGNS(t, tt.stdout, tt.stderr, tt.code, "")
+			c, shown := observedClient(t, bin)
+
+			// Act
+			_ = c.SubscribeChannel(context.Background(), "C1")
+
+			// Assert
+			if !reflect.DeepEqual(*shown, tt.want) {
+				t.Fatalf("observer shown %q, want %q", *shown, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheObserverIsShownAFailedStreamsErrors(t *testing.T) {
+	// Arrange
+	bin, _ := fakeGNS(t, pipeLines, "Error: credential is invalid or expired", 1, "")
+	c, shown := observedClient(t, bin)
+
+	// Act
+	_, _ = c.Stream(context.Background(), "p", 0, "1.1", func(PipeMessage) {})
+
+	// Assert
+	if !reflect.DeepEqual(*shown, []string{"Error: credential is invalid or expired"}) {
+		t.Fatalf("observer shown %q, want the stream's errors", *shown)
+	}
+}

@@ -47,6 +47,12 @@ func Binary() string { return gnsBinary }
 // record; 25s is just under three times that.
 const CallBound = 25 * time.Second
 
+// ChannelsBound bounds the one slow one-shot call, the user's channel list.
+// Measured 2026-11-19: `gns slack channel list-mine --all --json` answered
+// 520 channels in 13.0s, 15.4s and 13.1s on a healthy host, so 40s is between
+// two and three times the healthy read.
+const ChannelsBound = 40 * time.Second
+
 // Failure is a `gns` call that did not answer what was asked.
 type Failure struct {
 	// Call is the call, `gns` and its arguments.
@@ -132,6 +138,20 @@ type Client interface {
 	Search(ctx context.Context, query string, page int) (SearchPage, error)
 	// ListReacted reads the messages USERID reacted to, most recent first.
 	ListReacted(ctx context.Context, userID string) ([]ReactedMessage, error)
+	// ListMyChannels reads every channel the login's user is a member of,
+	// every page, in Slack's order, under ChannelsBound.
+	ListMyChannels(ctx context.Context) ([]Channel, error)
+}
+
+// Channel is one channel `gns slack channel list-mine` answers.
+type Channel struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	IsPrivate  bool   `json:"is_private"`
+	IsArchived bool   `json:"is_archived"`
+	IsIM       bool   `json:"is_im"`
+	IsMPIM     bool   `json:"is_mpim"`
+	Purpose    string `json:"purpose"`
 }
 
 // Config is a client's collaborators.
@@ -143,6 +163,14 @@ type Config struct {
 	// Bound bounds every one-shot call; zero is CallBound. Only a test of the
 	// bound itself sets it.
 	Bound time.Duration
+	// ChannelsBound bounds ListMyChannels; zero is ChannelsBound. Only a test
+	// of the bound itself sets it.
+	ChannelsBound time.Duration
+	// Observe is shown the combined output of every call gns exits non-zero
+	// on (gnsauth.Renewer.Observe, which renews a refused sign-in); nil when
+	// nothing keeps the sign-in alive (a daemon with its vendors mocked, or
+	// with no browser to sign in through).
+	Observe func(output string) bool
 }
 
 // New builds a client.
@@ -155,6 +183,9 @@ func New(cfg Config) (Client, error) {
 	}
 	if cfg.Bound == 0 {
 		cfg.Bound = CallBound
+	}
+	if cfg.ChannelsBound == 0 {
+		cfg.ChannelsBound = ChannelsBound
 	}
 	return &client{cfg: cfg}, nil
 }
@@ -174,7 +205,12 @@ const op = "daemon.gnsclient.call"
 // run runs `gns ARGS` under CallBound, with STDIN as its input when set, and
 // answers its stdout.
 func (c *client) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.Bound)
+	return c.runBounded(ctx, c.cfg.Bound, "9s", stdin, args...)
+}
+
+// runBounded is run under BOUND, a call whose healthy answer takes HEALTHY.
+func (c *client) runBounded(ctx context.Context, bound time.Duration, healthy string, stdin []byte, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	cmd := childproc.CommandContext(ctx, childproc.Stable, c.cfg.Binary, args...)
 	if stdin != nil {
@@ -187,11 +223,12 @@ func (c *client) run(ctx context.Context, stdin []byte, args ...string) ([]byte,
 	case captureErr != nil:
 		return nil, c.failed(call, "could not capture gns's output: "+captureErr.Error())
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return nil, c.failed(call, fmt.Sprintf("gns did not answer within %s (healthy calls answer within 9s)", c.cfg.Bound))
+		return nil, c.failed(call, fmt.Sprintf("gns did not answer within %s (healthy calls answer within %s)", bound, healthy))
 	case ctx.Err() != nil:
 		// The daemon stopped the call: no fact about Slack.
 		return nil, ctx.Err()
 	case runErr != nil:
+		c.refused(stdout + stderr)
 		detail := strings.TrimSpace(stderr)
 		if detail == "" {
 			detail = runErr.Error()
@@ -199,6 +236,14 @@ func (c *client) run(ctx context.Context, stdin []byte, args ...string) ([]byte,
 		return nil, c.failed(call, detail)
 	}
 	return []byte(stdout), nil
+}
+
+// refused shows OUTPUT, a call gns exited non-zero on, to the observer, when
+// one is set.
+func (c *client) refused(output string) {
+	if c.cfg.Observe != nil {
+		c.cfg.Observe(output)
+	}
 }
 
 // failed records and answers a failure of CALL.
@@ -332,6 +377,9 @@ func (c *client) Stream(ctx context.Context, pipe string, after int64, threadTS 
 		return last, c.failed(call, "could not read its output: "+scanErr.Error())
 	}
 	if waitErr != nil {
+		// The stream's output went to its reader; its errors are what is left
+		// to show.
+		c.refused(stderr)
 		detail := strings.TrimSpace(stderr)
 		if detail == "" {
 			detail = waitErr.Error()
@@ -527,4 +575,23 @@ func (c *client) ListReacted(ctx context.Context, userID string) ([]ReactedMessa
 		}
 	}
 	return res, nil
+}
+
+func (c *client) ListMyChannels(ctx context.Context) ([]Channel, error) {
+	args := []string{"slack", "channel", "list-mine", "--all", "--json"}
+	out, err := c.runBounded(ctx, c.cfg.ChannelsBound, "15.4s", nil, args...)
+	if err != nil {
+		return nil, err
+	}
+	call := "gns " + strings.Join(args, " ")
+	var answer struct {
+		Channels *[]Channel `json:"channels"`
+	}
+	if err := c.decode(call, out, &answer); err != nil {
+		return nil, err
+	}
+	if answer.Channels == nil {
+		return nil, c.failed(call, "its answer holds no `channels` list")
+	}
+	return *answer.Channels, nil
 }

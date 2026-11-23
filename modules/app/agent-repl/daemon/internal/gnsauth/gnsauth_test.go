@@ -458,45 +458,6 @@ func TestObserveIgnoresOutputThatIsNotARefusal(t *testing.T) {
 	}
 }
 
-func TestObserveRunnerRaisesOnlyAGnsCallGnsRefused(t *testing.T) {
-	cases := []struct {
-		name string
-		argv []string
-		out  string
-		code int
-		err  error
-		want int
-	}{
-		{"a refused gns call", []string{"gns", "slack", "channel"}, rejection, 1, nil, 1},
-		{"a gns call that worked", []string{"gns", "slack", "channel"}, rejection, 0, nil, 0},
-		{"a gns call that failed otherwise", []string{"gns", "slack"}, "no such host", 1, nil, 0},
-		{"another program saying the same words", []string{"other", "x"}, rejection, 1, nil, 0},
-		{"a gns call that could not run", []string{"gns", "slack"}, rejection, 1, errors.New("spawn"), 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: renewals fail at the start so each is one counted start.
-			f := newFixture(t, func(string) (string, int, error) { return "boom", 3, nil })
-			inner := &fakeRunner{handler: func(string) (string, int, error) { return tc.out, tc.code, tc.err }}
-			wrapped := ObserveRunner(inner, f.r)
-
-			// Act.
-			out, code, err := wrapped.Run(context.Background(), "/tmp", tc.argv)
-			if tc.want == 1 {
-				f.awaitOutcome(t, 1)
-			}
-
-			// Assert: the answer is passed through, and the renewal ran or did not.
-			if out != tc.out || code != tc.code || !errors.Is(err, tc.err) {
-				t.Fatalf("Run() = (%q, %d, %v), want the inner answer unchanged", out, code, err)
-			}
-			if got := f.run.count("gns auth login --env production --device"); got != tc.want {
-				t.Fatalf("sign-ins started = %d, want %d", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestWatchProbesAtOnceThenOnEveryBeat(t *testing.T) {
 	// Arrange.
 	f := newFixture(t, func(string) (string, int, error) { return "ok", 0, nil })

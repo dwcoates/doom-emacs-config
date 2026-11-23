@@ -95,6 +95,11 @@ func (g *fakeGNS) ListReacted(context.Context, string) ([]gnsclient.ReactedMessa
 	return g.reacted, nil
 }
 
+// ListMyChannels is never the watcher's: the channel list is slackchannels'.
+func (g *fakeGNS) ListMyChannels(context.Context) ([]gnsclient.Channel, error) {
+	panic("slackwatch listed the user's channels")
+}
+
 // submitted is one prompt the fake prompt handler took.
 type submitted struct {
 	ws       ids.WorkspaceID

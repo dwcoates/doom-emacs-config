@@ -26,6 +26,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gnsclient"
 	"agent-repld/internal/inflight"
 )
 
@@ -38,10 +39,9 @@ const opRead = "daemon.slackchannels.read"
 // hour at most.
 const MaxAge = time.Hour
 
-// ReadBound bounds one read. Measured 2026-11-19: `gns slack channel
-// list-mine --all --json` answered 520 channels in 13.0s, 15.4s and 13.1s on
-// a healthy host, so 40s is between two and three times the healthy read.
-const ReadBound = 40 * time.Second
+// ReadBound bounds one read: gns's own bound on the channel list
+// (gnsclient.ChannelsBound), where it is measured.
+const ReadBound = gnsclient.ChannelsBound
 
 // Reader reads every channel the user is a member of, once. It honors ctx,
 // which carries ReadBound.
