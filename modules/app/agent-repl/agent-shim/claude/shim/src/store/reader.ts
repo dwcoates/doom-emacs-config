@@ -402,6 +402,21 @@ export function readFailure(failure: TypedReadFailure): PersistenceError {
   }
 }
 
+/** What one `WatchBashRun` call served before the store closed it cleanly. */
+interface BashRunServed {
+  rows: number;
+  /** Whether any row served was the run's terminal. */
+  terminal: boolean;
+}
+
+/**
+ * Whether a shell run's frame is its TERMINAL, the row after which the store
+ * closes the run's watch: the same rule as the store's `db.BashRowIsTerminal`.
+ */
+function isBashTerminal(frame: conversationv1.AgentBash): boolean {
+  return frame.result.case === "success" || frame.result.case === "failure";
+}
+
 /** A thrown transport error, as the kind the engine switches on. */
 export function transportFailure(error: unknown): PersistenceError {
   if (error instanceof PersistenceError) return error;
@@ -1635,9 +1650,9 @@ export function createReader(options: ReaderOptions): Reader {
           // the open repeats nothing (2026-11-16: a WatchBash open met the
           // store's 43ms restart window and was refused as not_found).
           for (let attempt = 1; ; attempt += 1) {
+            let served: BashRunServed;
             try {
-              yield* followBashRun();
-              return;
+              served = yield* followBashRun();
             } catch (error) {
               if (opened || !isRetryableRead(error) || attempt >= policy.maxAttempts) throw error;
               const backoff = policy.backoffMs[Math.min(attempt - 1, policy.backoffMs.length - 1)] ?? 0;
@@ -1646,14 +1661,33 @@ export function createReader(options: ReaderOptions): Reader {
                 "the store could not be reached to follow a shell run; replaying the open on the read retry schedule",
               );
               await sleep(backoff);
+              continue;
             }
+            // A CLEAN CLOSE MEANS THE TERMINAL WAS SENT: the store ends a run's
+            // watch cleanly only after its terminal, and a shutdown ends it
+            // Unavailable. A clean close short of the terminal is that contract
+            // broken, so it is no ordinary end of the run and is not replayed.
+            // (A consumer that stops early never reaches here: its `return`
+            // unwinds this generator at the `yield*`.)
+            if (!served.terminal) {
+              LOGGER.error(
+                { run: runValue, rows_served: served.rows },
+                "the store closed a shell run's watch before its terminal",
+              );
+              throw new PersistenceError(
+                "store_unavailable",
+                `the store closed shell run ${JSON.stringify(runValue)}'s watch before its terminal after ${served.rows} row(s)`,
+              );
+            }
+            return;
           }
         },
       };
 
       // ONE CALL PER ATTEMPT, each with its own cancellation.
-      async function* followBashRun(): AsyncGenerator<conversationv1.AgentBash> {
+      async function* followBashRun(): AsyncGenerator<conversationv1.AgentBash, BashRunServed> {
           const abort = new AbortController();
+          const served: BashRunServed = { rows: 0, terminal: false };
           try {
             // A RUN THIS SHIM HOLDS LIVE IS WAITED ON; ANY OTHER IS REFUSED.
             // A live run's rows can all be the sidecar's, written once it reads
@@ -1677,8 +1711,13 @@ export function createReader(options: ReaderOptions): Reader {
                   "the store pushed a bash row with no frame",
                 );
               }
+              served.rows += 1;
+              // STICKY: the replay serves rows first inserted after the
+              // terminal (a late delta), so the terminal need not be last.
+              if (isBashTerminal(frame)) served.terminal = true;
               yield frame;
             }
+            return served;
           } catch (error) {
             if (isNotFound(error)) {
               // A REFUSED OPEN means the store holds no row for this run. It is
