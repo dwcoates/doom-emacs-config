@@ -359,10 +359,12 @@ type pushCall struct {
 	Address string
 }
 
-// fakePusher captures the transferred and reload_webapp pushes.
+// fakePusher captures the transferred and reload_webapp pushes, and records
+// the end of the page streams on the harness's shared order.
 type fakePusher struct {
 	mu    sync.Mutex
 	calls []pushCall
+	order *steps
 }
 
 func (p *fakePusher) PushTransferred(ws ids.WorkspaceID, address string) {
@@ -381,6 +383,13 @@ func (p *fakePusher) PushReloadWebapp(ws ids.WorkspaceID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls = append(p.calls, pushCall{WS: ws, Kind: "reload_webapp"})
+}
+
+func (p *fakePusher) EndPageStreams() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, pushCall{Kind: "end_page_streams"})
+	p.order.record("end_page_streams")
 }
 
 func (p *fakePusher) Calls() []pushCall {
@@ -1342,7 +1351,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		clock:          newFakeClock(instant),
 		spawner:        &fakeSpawner{address: "127.0.0.1:7788"},
 		announcer:      &fakeAnnouncer{},
-		pusher:         &fakePusher{},
+		pusher:         &fakePusher{order: order},
 		participants:   newFakeParticipants(),
 		freeness:       freeness,
 		fleet:          newFakeFleet(order),

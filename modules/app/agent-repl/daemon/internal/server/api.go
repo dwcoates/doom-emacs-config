@@ -500,6 +500,10 @@ type server struct {
 	// (PageAttachment.sequence): never reissued, so a call left over from a
 	// page's earlier attachment is told apart from its current one's.
 	pageSeq uint64
+	// pagesHandedOff is set once the successor accepts on the shared address
+	// (EndPageStreams): every page stream here is ended for it, and one that
+	// attaches after is ended at once.
+	pagesHandedOff bool
 	// pagePresence counts what holds each page id connected to this daemon:
 	// its own stream here (attachPage), and every relayed subscription
 	// another daemon runs here for it (holdRelayedPage). The opens are told
