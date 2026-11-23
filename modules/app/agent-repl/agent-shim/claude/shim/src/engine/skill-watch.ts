@@ -42,6 +42,18 @@
  * change. It is not re-armed here: the change gets this shim replaced, and the
  * replacement arms a watch of its own, where a re-arm loop on a failure that
  * persists (no descriptors left) would spin.
+ *
+ * THE TEARDOWN ABANDONS THE WATCH, IT DOES NOT CLOSE IT (measured 2026-11-23,
+ * node 24.2 on macOS at a load average of 9). Each `FSWatcher.close()` of a
+ * directory watch makes libuv rebuild its one FSEvents stream and wait for that
+ * stream's thread, with the event loop blocked: closing 29 watches took 2914ms
+ * and closing 35 took 6032ms (one close up to 1061ms), against 1ms to arm them.
+ * The teardown runs inside KillSession and before the process exits, so those
+ * closes made KillSession miss the daemon's bound. Every teardown ends the
+ * process, and the exit releases every watch (35 open watches, under 20ms), so
+ * `abandon` only stops the reporting and the probe and leaves the platform
+ * watches to the exit. The closes made while the session lives (a re-arm, a
+ * skill gone) stay: that process goes on and must release what it replaced.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -193,8 +205,12 @@ export function skillDirsOf(configDir: string, cwd: string): string[] {
 export class SkillSetWatch {
   private readonly roots: RootWatch[];
   private started = false;
-  /** Ends the liveness probe while it waits; undefined once it has settled. */
-  private endProbe: (() => void) | undefined;
+  /**
+   * Ends the liveness probe while it waits, closing its platform watch only
+   * when RELEASE says to; undefined once it has settled.
+   */
+  private endProbe: ((release: boolean) => void) | undefined;
+  private abandoned = false;
 
   constructor(
     roots: readonly string[],
@@ -212,10 +228,17 @@ export class SkillSetWatch {
     this.awaitLive(this.roots.map((root) => root.inventory()));
   }
 
-  /** End every watch. */
-  close(): void {
-    this.endProbe?.();
-    for (const root of this.roots) root.close();
+  /**
+   * End the reporting for good, for the teardown that precedes the process's
+   * exit: nothing is reported after it, the probe stops and its directory is
+   * removed, and no platform watch is closed, since the exit releases them all
+   * (see the file header). A second call does nothing.
+   */
+  abandon(): void {
+    if (this.abandoned) return;
+    this.abandoned = true;
+    this.endProbe?.(false);
+    for (const root of this.roots) root.abandon();
   }
 
   /**
@@ -246,11 +269,11 @@ export class SkillSetWatch {
       }
     };
     const stops: (() => void)[] = [];
-    const settle = (): void => {
+    const settle = (release = true): void => {
       if (this.endProbe === undefined) return;
       this.endProbe = undefined;
       for (const stop of stops) stop();
-      watch?.close();
+      if (release) watch?.close();
       probe.remove();
     };
     this.endProbe = settle;
@@ -409,11 +432,9 @@ class RootWatch {
     }
   }
 
-  close(): void {
+  /** Stop reporting for good, closing no platform watch (see SkillSetWatch.abandon). */
+  abandon(): void {
     this.closed = true;
-    this.anchor?.close();
-    this.anchor = undefined;
-    this.closeSkills();
   }
 
   private onAppeared(): void {

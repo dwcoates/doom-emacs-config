@@ -27,6 +27,8 @@ export class FakeSkillWatchFs implements SkillWatchFs {
    * event reports.
    */
   readonly onWatchBegins = new Map<string, () => void>();
+  /** How many watches were closed, each counted once however often it is closed. */
+  closes = 0;
 
   mkdir(dir: string): void {
     const parts = dir.split("/").filter(Boolean);
@@ -73,8 +75,11 @@ export class FakeSkillWatchFs implements SkillWatchFs {
     const list = this.watches.get(dir) ?? [];
     list.push(entry);
     this.watches.set(dir, list);
+    let closed = false;
     return {
       close: () => {
+        if (!closed) this.closes += 1;
+        closed = true;
         const now = this.watches.get(dir) ?? [];
         this.watches.set(
           dir,

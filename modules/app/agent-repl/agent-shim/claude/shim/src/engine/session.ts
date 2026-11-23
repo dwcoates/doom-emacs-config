@@ -8558,7 +8558,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     await concludeWatchers();
     await concludeBashWatchers();
-    skillWatch.close();
+    // ABANDONED, NOT CLOSED (measured 2026-11-23, node 24.2 on macOS): each
+    // platform watch's close blocked the event loop while libuv rebuilt its
+    // FSEvents stream, 2914ms for 29 watches and 6032ms for 35, so this
+    // KillSession missed the daemon's bound and the shim was SIGKILLed. Every
+    // teardown ends the process, and the exit releases every watch in under
+    // 20ms, so the teardown only stops the watch reporting (skill-watch.ts).
+    skillWatch.abandon();
     pushes.standDown();
     await releaseLock?.();
     releaseLock = undefined;

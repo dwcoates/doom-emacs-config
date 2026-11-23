@@ -18121,16 +18121,32 @@ describe("the vendor's skill set", () => {
     expect(fsys.watching(`${h.cwd}/.claude/skills`)).toBe(true);
   });
 
-  it("ends the watch when the session stands down", async () => {
+  it("closes no platform watch when KillSession tears the session down", async () => {
+    // Arrange.
+    const { h, fsys } = withSkills();
+    await started(h);
+    const closes = fsys.closes;
+
+    // Act.
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert.
+    expect(fsys.closes).toBe(closes);
+  });
+
+  it("states nothing for a change after KillSession tears the session down", async () => {
     // Arrange.
     const { h, fsys, skills } = withSkills();
     await started(h);
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+    const pushed = vi.spyOn(h.engine.pushes, "push");
 
     // Act.
-    await h.engine.standDown("SIGTERM");
+    fsys.mkdir(`${skills}/after-teardown`);
+    fsys.fire(skills, "after-teardown");
 
     // Assert.
-    expect(fsys.watching(skills)).toBe(false);
+    expect(statedStale(pushed)).toEqual([]);
   });
 });
 

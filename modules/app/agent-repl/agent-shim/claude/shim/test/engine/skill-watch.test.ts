@@ -234,24 +234,117 @@ describe("SkillSetWatch", () => {
     expect(fsys.watches.get(ROOT)?.length).toBe(1);
   });
 
-  it("closes every watch it holds", () => {
+  it("closes the anchor it replaces when re-armed", () => {
+    // Arrange
     const { fsys, watch } = arrange();
     watch.start();
+    const closes = fsys.closes;
 
-    watch.close();
+    // Act: the directory goes, so its watch is replaced by one on the ancestor.
+    fsys.remove(ROOT);
+    fsys.fire(ROOT, null);
 
-    expect([fsys.watching(ROOT), fsys.watching(`${SHARED}/alpha`)]).toEqual([false, false]);
+    // Assert
+    expect([fsys.closes > closes, fsys.watching(ROOT)]).toEqual([true, false]);
   });
 
-  it("reports nothing after it is closed", () => {
+  it("closes a removed skill's watch while it lives", () => {
+    // Arrange
+    const { fsys, watch } = arrange();
+    watch.start();
+    const closes = fsys.closes;
+
+    // Act
+    fsys.remove(`${ROOT}/alpha`);
+    fsys.fire(ROOT, "alpha");
+
+    // Assert
+    expect(fsys.closes).toBe(closes + 1);
+  });
+
+  it("closes no platform watch when abandoned", () => {
+    // Arrange
+    const { fsys, watch } = arrange();
+    watch.start();
+    const closes = fsys.closes;
+
+    // Act
+    watch.abandon();
+
+    // Assert
+    expect(fsys.closes).toBe(closes);
+  });
+
+  it("reports nothing from a root after it is abandoned", () => {
+    // Arrange
     const { fsys, changes, watch } = arrange();
     watch.start();
-    const held = [...(fsys.watches.get(ROOT) ?? [])];
-    watch.close();
+    watch.abandon();
 
-    for (const w of held) w.onEvent("late");
+    // Act
+    fsys.fire(ROOT, "late");
 
+    // Assert
     expect(changes).toEqual([]);
+  });
+
+  it("reports nothing from a skill's directory after it is abandoned", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrange();
+    watch.start();
+    watch.abandon();
+
+    // Act
+    fsys.fire(`${SHARED}/alpha`, "SKILL.md");
+
+    // Assert
+    expect(changes).toEqual([]);
+  });
+
+  it("reports nothing from an ancestor after it is abandoned", () => {
+    // Arrange
+    const fsys = new FakeFs();
+    fsys.mkdir(CWD);
+    const changes: string[] = [];
+    const watch = new SkillSetWatch([`${CWD}/.claude/skills`], fsys, (changed) => changes.push(changed));
+    watch.start();
+    watch.abandon();
+    fsys.mkdir(`${CWD}/.claude/skills`);
+
+    // Act
+    fsys.fire(CWD, ".claude");
+
+    // Assert
+    expect(changes).toEqual([]);
+  });
+
+  it("reports nothing from a failed watch after it is abandoned", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrange();
+    watch.start();
+    watch.abandon();
+
+    // Act
+    const records = logRecordsDuring(() => {
+      for (const w of fsys.watches.get(ROOT) ?? []) w.onError(new Error("watch broke"));
+    });
+
+    // Assert
+    expect([changes, records.some((r) => r.level === "error")]).toEqual([[], false]);
+  });
+
+  it("does nothing when abandoned a second time", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrange();
+    watch.start();
+    watch.abandon();
+    const closes = fsys.closes;
+
+    // Act
+    const records = logRecordsDuring(() => watch.abandon());
+
+    // Assert
+    expect([changes, fsys.closes, records]).toEqual([[], closes, []]);
   });
 });
 
@@ -445,17 +538,86 @@ describe("SkillSetWatch coming live", () => {
     ]);
   });
 
-  it("reports nothing once closed while coming live", () => {
+  it("closes no platform watch when abandoned while coming live", () => {
+    // Arrange
+    const { fsys, watch } = arrangeInGap();
+    watch.start();
+    const closes = fsys.closes;
+
+    // Act
+    watch.abandon();
+
+    // Assert
+    expect(fsys.closes).toBe(closes);
+  });
+
+  it("removes its probe directory when abandoned while coming live", () => {
+    // Arrange
+    const { fsys, watch } = arrangeInGap();
+    watch.start();
+
+    // Act
+    watch.abandon();
+
+    // Assert
+    expect(fsys.probe).toBeUndefined();
+  });
+
+  it("stops probing when abandoned while coming live", () => {
+    // Arrange
+    const { fsys, watch } = arrangeInGap();
+    watch.start();
+    watch.abandon();
+    const written = fsys.probesWritten;
+
+    // Act
+    fsys.tick(PROBE_EVERY_MS * 5);
+
+    // Assert
+    expect(fsys.probesWritten).toBe(written);
+  });
+
+  it("reports and records nothing when its bound passes after it is abandoned while coming live", () => {
     // Arrange
     const { fsys, changes, watch } = arrangeInGap();
     watch.start();
-    watch.close();
+    watch.abandon();
 
     // Act
-    fsys.tick(LIVE_BOUND_MS * 2);
+    const records = logRecordsDuring(() => fsys.tick(LIVE_BOUND_MS * 2));
 
     // Assert
-    expect([changes, fsys.probe]).toEqual([[], undefined]);
+    expect([changes, records]).toEqual([[], []]);
+  });
+
+  it("reports and records nothing when its probe is seen after it is abandoned while coming live", () => {
+    // Arrange: a change lands in the gap, so a catch-up would report it.
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    fsys.mkdir(`${SHARED}/beta`);
+    fsys.link(`${ROOT}/beta`, `${SHARED}/beta`);
+    watch.abandon();
+
+    // Act
+    const records = logRecordsDuring(() => fsys.fire("/tmp/agent-repl-skill-probe-1", "probe-1"));
+
+    // Assert
+    expect([changes, records]).toEqual([[], []]);
+  });
+
+  it("records nothing when its probe's watch fails after it is abandoned while coming live", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    watch.abandon();
+
+    // Act
+    const records = logRecordsDuring(() => {
+      for (const w of fsys.watches.get("/tmp/agent-repl-skill-probe-1") ?? []) w.onError(new Error("probe watch broke"));
+    });
+
+    // Assert
+    expect([changes, records]).toEqual([[], []]);
   });
 });
 
