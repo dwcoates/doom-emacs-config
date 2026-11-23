@@ -54,13 +54,17 @@ func TestAProductionSpanRunsFromTheLastReadToTheLanding(t *testing.T) {
 		// lastSpan is how long before the landing the previous production
 		// span ended; zero for none.
 		lastSpan time.Duration
+		// priorDeploy is how long before the landing the deploy before it
+		// began; zero for none.
+		priorDeploy time.Duration
 		// wantSince is how long before the landing the span starts; zero
 		// for no span owed.
 		wantSince time.Duration
 	}{
 		{name: "a span starts where the last deploy check read to", read: time.Hour, wantSince: time.Hour},
 		{name: "a span starts where the previous span ended when that is later", read: 2 * time.Hour, lastSpan: 30 * time.Minute, wantSince: 30 * time.Minute},
-		{name: "a repository never checked owes no span"},
+		{name: "a repository no check read starts at the deploy before", priorDeploy: 90 * time.Minute, wantSince: 90 * time.Minute},
+		{name: "a repository with no earlier deploy owes no span"},
 		{name: "a landing that began before the last read owes no span", read: -time.Minute},
 	}
 	for _, tc := range cases {
@@ -72,6 +76,11 @@ func TestAProductionSpanRunsFromTheLastReadToTheLanding(t *testing.T) {
 			landing := instant.Add(3 * time.Hour)
 			if tc.read != 0 {
 				readThrough(t, s, key, landing.Add(-tc.read))
+			}
+			if tc.priorDeploy != 0 {
+				if _, err := s.db().ExecContext(ctx, `INSERT INTO log_site_deploys (started_at) VALUES (?)`, nanos(landing.Add(-tc.priorDeploy))); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if tc.lastSpan != 0 {
 				if _, owed, err := s.OweProductionCheck(ctx, repo, landing.Add(-tc.lastSpan), ""); err != nil || !owed {

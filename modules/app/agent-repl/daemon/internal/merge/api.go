@@ -324,6 +324,14 @@ type Orchestrator interface {
 	// chain owes a check of (mediation.go). An approval releases the check,
 	// and the queue too unless the mediator's own remediation finish stands.
 	DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error
+	// DecideProduction is production mediator WS's decision on the span it
+	// was told (production.go): nothing to do, or the children it
+	// dispatches, made and recorded whole or not at all. It answers the
+	// children made, in the request's order.
+	DecideProduction(ctx context.Context, ws ids.WorkspaceID, d ProductionDecisionRequest) ([]wsm.Workspace, error)
+	// FoldProduction folds production mediator WS's open child FOLDED into
+	// its open child SURVIVING (production.go).
+	FoldProduction(ctx context.Context, ws, folded, surviving ids.WorkspaceID) error
 	// IgnoreRecords records KIND as a kind of log record the deploy checks
 	// leave out, on the word of deploy mediator WS; UnignoreRecords
 	// withdraws the kind of OPERATION whose message holds MESSAGECONTAINS.
@@ -887,6 +895,12 @@ type Deps struct {
 	// DeployChecks makes, reopens and closes the deploy checks' workspaces
 	// (workspace.Verbs). REQUIRED.
 	DeployChecks DeployCheckWorkspaces
+	// LogSites answers the log sites that fired in a window, for the
+	// production checks' site files (production.go). REQUIRED.
+	LogSites LogSiteTally
+	// ProductionChildren makes, undoes and closes the production mediator's
+	// children (workspace.Verbs). REQUIRED.
+	ProductionChildren ProductionChildren
 	// ReadLogs reads the warnings and errors every system logged in a span,
 	// for the intake's facts (intakefacts.go). REQUIRED.
 	ReadLogs LogReader
@@ -985,6 +999,13 @@ type Meter interface {
 	// ObserveMediatorCompaction records one compaction of a deploy
 	// mediator, by how it ended (the MediatorCompaction constants).
 	ObserveMediatorCompaction(outcome string, took time.Duration)
+	// ObserveProductionCheck records one production check decided, by how
+	// it ended (ProductionCheckNothingToDo, ProductionCheckDispatched,
+	// ProductionCheckUnanswered), with the children it dispatched.
+	ObserveProductionCheck(outcome string, children int)
+	// ObserveProductionChild records one production child's event
+	// (ProductionChildFolded, ProductionChildLanded, ProductionChildClosed).
+	ObserveProductionChild(event string)
 	// CountMediatorRun records one deploy mediator run, by how it ended (the
 	// MediatorRun constants).
 	CountMediatorRun(outcome string)

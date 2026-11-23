@@ -218,6 +218,14 @@ type checkedQueue struct {
 // checks its deploys. A repository with no lifecycle config checks none; one
 // whose config cannot be read is recorded under OP and passed over.
 func (o *orchestrator) checkedQueues(ctx context.Context, op string) ([]checkedQueue, error) {
+	return o.queuesWhere(ctx, op, func(cfg *repoconfigv1.LifecycleConfig) bool { return cfg.GetDeployChecks() != nil })
+}
+
+// queuesWhere answers every registered repository whose lifecycle config
+// CHECKS says yes to, with the config as it was read. A repository with no
+// lifecycle config is passed over; one whose config cannot be read is
+// recorded under OP and passed over.
+func (o *orchestrator) queuesWhere(ctx context.Context, op string, checks func(*repoconfigv1.LifecycleConfig) bool) ([]checkedQueue, error) {
 	queues, err := o.registeredQueues(ctx, op)
 	if err != nil {
 		return nil, err
@@ -234,7 +242,7 @@ func (o *orchestrator) checkedQueues(ctx context.Context, op string) ([]checkedQ
 				dlog.Context{"repository": q.repository.Dir, "error": err.Error()})
 			continue
 		}
-		if cfg.GetDeployChecks() != nil {
+		if checks(cfg) {
 			out = append(out, checkedQueue{registeredQueue: q, config: cfg})
 		}
 	}
@@ -304,6 +312,12 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 		}
 		o.republishMediation(ctx, q.key)
 	}
+	// THE PRODUCTION SPAN THE LANDING CLOSED IS OWED BESIDE ITS DEPLOY CHECK:
+	// the deploy check reads the landing from its start, the production
+	// check the span that ended there (owner ruling, 2026-11-23).
+	if err := o.oweProductionChecks(ctx, at); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -339,6 +353,9 @@ func (o *orchestrator) NoteDeployEnding(ctx context.Context, at time.Time, endin
 		if recorded {
 			o.deps.Log.Global().Info(opMediation, "recorded how the deploy ended on its check", fields)
 		}
+	}
+	if err := o.noteProductionEnding(ctx, at, ending); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
@@ -439,6 +456,9 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 	}
 	o.releaseUnchecked(ctx, queues)
 	o.resumeRemediationFinishes(ctx)
+	// THE PRODUCTION CHECKS RUN BESIDE THE DEPLOY CHECKS and hold nothing, so
+	// a deploy check that ends this pass early never stops them.
+	defer o.productionPass(ctx)
 	for _, q := range queues {
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
@@ -640,6 +660,7 @@ func (o *orchestrator) endChain(ctx context.Context, repo wsm.RepoKey, m wsm.Med
 // round from running (2026-11-14: a replaced round's claim on the queue
 // left a deploy's check untold for twenty minutes).
 type checkClaim struct {
+	role wsm.MediatorRole
 	repo wsm.RepoKey
 	owed int64
 }
@@ -647,9 +668,16 @@ type checkClaim struct {
 // claimMediation reports whether this caller runs the round of the check
 // REPO owes at OWED: none runs for it already.
 func (o *orchestrator) claimMediation(repo wsm.RepoKey, owed time.Time) bool {
+	return o.claimRound(deployRole, repo, owed)
+}
+
+// claimRound reports whether this caller runs role R's round of the check of
+// REPO identified by OWED, claiming it when no round runs; releaseRound gives
+// the claim up.
+func (o *orchestrator) claimRound(r mediatorRole, repo wsm.RepoKey, owed time.Time) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	claim := checkClaim{repo: repo, owed: owed.UnixNano()}
+	claim := checkClaim{role: r.role, repo: repo, owed: owed.UnixNano()}
 	if o.mediating[claim] {
 		return false
 	}
@@ -657,16 +685,19 @@ func (o *orchestrator) claimMediation(repo wsm.RepoKey, owed time.Time) bool {
 	return true
 }
 
+// releaseRound gives up role R's claim on the round of REPO's check OWED.
+func (o *orchestrator) releaseRound(r mediatorRole, repo wsm.RepoKey, owed time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.mediating, checkClaim{role: r.role, repo: repo, owed: owed.UnixNano()})
+}
+
 // intakeRound tells Q's mediator of check M, when it was not told yet, and
 // awaits the turn it was told in; then settles a check that turn decided
 // nothing about (intakeTurnEnded). A check the mediator dispatched a fix
 // for is watched instead (watchFixer): its fix's deploy owes the next.
 func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Mediation) {
-	defer func() {
-		o.mu.Lock()
-		delete(o.mediating, checkClaim{repo: q.key, owed: m.OwedAt.UnixNano()})
-		o.mu.Unlock()
-	}()
+	defer o.releaseRound(deployRole, q.key, m.OwedAt)
 	fields := dlog.Context{"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano),
 		"chain_started": m.ChainStartedAt.UTC().Format(time.RFC3339Nano), "chain_redeploys": m.ChainRedeploys}
 	// EVERY ROUND STATES THE CHAIN IT CHECKS, so a daemon that booted on a

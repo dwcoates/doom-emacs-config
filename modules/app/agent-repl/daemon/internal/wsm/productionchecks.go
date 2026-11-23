@@ -192,8 +192,9 @@ var ErrNotFoldable = errors.New("wsm: the workspace is not an open production ch
 // as Mediation.LandingStartedAt reads it), installing VERSION. The span
 // starts where the repository's last deploy check read to, or where the last
 // production span ended when that is later, so no two checks read the same
-// record. It answers the check owed and true, or false when the span is
-// empty (overlapping landings) or the repository has no read to start from.
+// record; at the deploy before this one when nothing read the repository. It
+// answers the check owed and true, or false when the span is empty
+// (overlapping landings) or no earlier deploy is known to start from.
 func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, at time.Time, version string) (ProductionCheck, bool, error) {
 	const op = "daemon.wsm.owe_production_check"
 	fields := dlog.Context{"repo": string(repo), "deploy_at": nanos(at)}
@@ -225,6 +226,13 @@ func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, at time.Ti
 		since := through
 		if lastUntil.Valid && (!since.Valid || lastUntil.Int64 > since.Int64) {
 			since = lastUntil
+		}
+		// A REPOSITORY NO CHECK HAS READ starts at the deploy before this
+		// one: with no deploy check, no landing is read twice.
+		if !since.Valid {
+			if err := tx.QueryRowContext(ctx, `SELECT MAX(started_at) FROM log_site_deploys WHERE started_at > 0 AND started_at < ?`, nanos(at)).Scan(&since); err != nil {
+				return err
+			}
 		}
 		if !since.Valid || since.Int64 >= nanos(landing) {
 			return nil

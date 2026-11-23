@@ -86,7 +86,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 	pages := newPageTelemetry()
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
-	}, version, lat, spend, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.remediations, mrg.remediationGates, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.heads, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, mrg.mediatorTurnTokens, mrg.mediatorCompactions, mrg.mediatorRuns, cache.lateness, cache.lapses, cache.coldIdle, cache.runBeats, cache.runTokens, life.starts, life.standDowns, life.gateAnswers,
+	}, version, lat, spend, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.remediations, mrg.remediationGates, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.heads, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, mrg.mediatorTurnTokens, mrg.mediatorCompactions, mrg.mediatorRuns, mrg.productionChecks, mrg.productionChildren, cache.lateness, cache.lapses, cache.coldIdle, cache.runBeats, cache.runTokens, life.starts, life.standDowns, life.gateAnswers,
 		quiet.quiet, quiet.freezes, quiet.thaws, quiet.skipped, prompts.submitted,
 		visibility.visible, visibility.changes, visibility.read, idleBeforePark, pages.loads, pages.unloads)
 	if err != nil {

@@ -628,7 +628,7 @@ func TestMediatorStandingAnswersTheRecordedMediatorsStanding(t *testing.T) {
 			h.standing.standingErr = tt.standingErr
 
 			// Act
-			mediator, standing, err := h.o.mediatorStanding(context.Background(), mediationKey(h))
+			mediator, standing, err := h.o.mediatorStanding(context.Background(), deployRole, mediationKey(h))
 
 			// Assert
 			if mediator != tt.wantMediator || (err != nil) != tt.wantErr || (!tt.wantErr && standing != tt.wantStanding) {
@@ -740,7 +740,7 @@ func TestAHiddenMediatorHandedAwayBeforeItIsShownIsNoError(t *testing.T) {
 	h.checks.resumeErr = fmt.Errorf("resume: %w", &standingRefused{standing: TransferringAway})
 
 	// Act
-	h.o.keepMediatorShown(context.Background(), queueOf(t, h))
+	h.o.keepMediatorShown(context.Background(), deployRole, queueOf(t, h))
 
 	// Assert
 	if rec, errored := h.recordFor("error", opMediation); errored {

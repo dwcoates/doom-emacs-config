@@ -449,6 +449,10 @@ type Verbs interface {
 	// SetMediatorAgent puts a standing mediator on AGENT's model and effort
 	// before a brief (deploychecks.go).
 	SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, agent *repoconfigv1.MediatorAgent) error
+	// CreateProductionChild makes a child of production mediator MEDIATOR:
+	// a one-shot landing on the main branch at the front of the queue, on
+	// opus, named NAME and commissioned with PROMPT (productionchildren.go).
+	CreateProductionChild(ctx context.Context, repoDir string, mediator ids.WorkspaceID, name, prompt string) (wsm.Workspace, error)
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
 	// live, making the fork it still owes: what a hand-off that finds the
 	// merge workspace a restart left behind needs before its pick can run.

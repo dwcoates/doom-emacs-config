@@ -2007,7 +2007,7 @@ func TestAQueueWithNoRecordedMediatorIsNotGated(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if made := checkWorkspacesMade(h); !slices.Equal(made, []string{mediatorName}) || len(intakeTellings(h)) != 1 {
+	if made := checkWorkspacesMade(h); !slices.Equal(made, []string{deployRole.name}) || len(intakeTellings(h)) != 1 {
 		t.Fatalf("made %v, told %d; want the mediator made and told", made, len(intakeTellings(h)))
 	}
 }

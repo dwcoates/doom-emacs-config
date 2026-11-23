@@ -61,6 +61,13 @@ const (
 	// hot reload to the approval or the finish that ended the run, by how
 	// it ended.
 	MediatorRunsName = "agentrepl_deploy_mediator_runs_total"
+	// ProductionChecksName counts the production checks decided, by how
+	// each ended: nothing_to_do, dispatched or unanswered.
+	ProductionChecksName = "agentrepl_production_checks_total"
+	// ProductionChildrenName counts the production mediator's children by
+	// event: dispatched (each child a dispatch made), folded, landed and
+	// closed.
+	ProductionChildrenName = "agentrepl_production_children_total"
 )
 
 // turnTokenBuckets double from a one-line turn to a turn that read a whole
@@ -86,6 +93,7 @@ type merges struct {
 	noticesSuppressed                                                         *prometheus.CounterVec
 	mediatorTurnTokens, mediatorCompactions                                   *prometheus.HistogramVec
 	mediatorRuns                                                              *prometheus.CounterVec
+	productionChecks, productionChildren                                      *prometheus.CounterVec
 }
 
 func newMerges() merges {
@@ -141,6 +149,12 @@ func newMerges() merges {
 		mediatorRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: MediatorRunsName, Help: "Deploy mediator runs, from a deploy's hot reload to the approval or finish that ended it, by how it ended.",
 		}, []string{"outcome"}),
+		productionChecks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: ProductionChecksName, Help: "Production checks decided, by how each ended.",
+		}, []string{"outcome"}),
+		productionChildren: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: ProductionChildrenName, Help: "The production mediator's children, by event: dispatched, folded, landed, closed.",
+		}, []string{"event"}),
 	}
 }
 
@@ -263,6 +277,28 @@ func (s *Surface) CountMediatorRun(outcome string) {
 		return
 	}
 	s.merges.mediatorRuns.WithLabelValues(outcome).Inc()
+}
+
+// ObserveProductionCheck implements merge.Meter: one production check
+// decided, by OUTCOME, and each of the CHILDREN it dispatched. The off
+// surface records nothing.
+func (s *Surface) ObserveProductionCheck(outcome string, children int) {
+	if s == nil {
+		return
+	}
+	s.merges.productionChecks.WithLabelValues(outcome).Inc()
+	if children > 0 {
+		s.merges.productionChildren.WithLabelValues("dispatched").Add(float64(children))
+	}
+}
+
+// ObserveProductionChild implements merge.Meter: one production child's
+// EVENT. The off surface records nothing.
+func (s *Surface) ObserveProductionChild(event string) {
+	if s == nil {
+		return
+	}
+	s.merges.productionChildren.WithLabelValues(event).Inc()
 }
 
 // The notices the daemon sends workspaces (briefprompt.Meter).

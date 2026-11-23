@@ -422,6 +422,34 @@ func (d deployChecks) SetMediatorAgent(ctx context.Context, ws ids.WorkspaceID, 
 	return verbs.SetMediatorAgent(ctx, ws, agent)
 }
 
+// productionChildren is the merge queue's reach into the production
+// mediator's children (merge.Deps.ProductionChildren), read out of the verbs.
+type productionChildren struct{ f *verbsForwarder }
+
+func (p productionChildren) CreateChild(ctx context.Context, repoDir string, mediator ids.WorkspaceID, name, prompt string) (wsm.Workspace, error) {
+	verbs, err := p.f.bound("the production mediator dispatched a child")
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return verbs.CreateProductionChild(ctx, repoDir, mediator, name, prompt)
+}
+
+func (p productionChildren) Undo(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := p.f.bound("a refused production dispatch undid a child")
+	if err != nil {
+		return err
+	}
+	return verbs.Nuke(ctx, ws)
+}
+
+func (p productionChildren) Close(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := p.f.bound("the production mediator closed a folded child")
+	if err != nil {
+		return err
+	}
+	return verbs.Close(ctx, ws, wsm.CloseByDaemon)
+}
+
 func (d deployChecks) Reopen(ctx context.Context, ws ids.WorkspaceID) error {
 	verbs, err := d.f.bound("the merge queue restored a deploy remediation")
 	if err != nil {
