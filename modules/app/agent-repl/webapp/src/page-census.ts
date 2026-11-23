@@ -22,6 +22,7 @@ import { createLogger } from "./log.js";
 import { pageSize } from "./page-size.js";
 import { every, pageAfter, type After } from "./every.js";
 import { animatedParts } from "./animation-delays.js";
+import { blankView, feedGeometry } from "./feed-geometry.js";
 
 const log = createLogger("webapp.page-census");
 
@@ -78,12 +79,19 @@ export function installPageCensus(doc: Document, after: After = pageAfter): () =
   return every(after, CENSUS_EVERY_MS, () => {
     const { dom_nodes, feed_rows, ...size } = pageSize(doc);
     const { animations, ...named } = animationCensus(doc);
+    const geometry = feedGeometry(doc);
     log.info(
       "the page holds {dom_nodes} elements, {feed_rows} feed rows and {animations} animations",
       {
         operation: "page.census",
-        context: { ...size, ...named, visibility: doc.visibilityState },
+        context: { ...size, ...named, visibility: doc.visibilityState, feed_geometry: geometry },
       }, { dom_nodes, feed_rows, animations },
     );
+    if (geometry !== null && blankView(geometry)) {
+      log.warn("the feed holds {root_rows} rows and none of them is in its view", {
+        operation: "feed.blank-view",
+        context: { feed_geometry: geometry, visibility: doc.visibilityState },
+      }, { root_rows: geometry.root_rows });
+    }
   });
 }
