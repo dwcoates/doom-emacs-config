@@ -277,8 +277,8 @@ func (*ProductionMediationNothingToDo) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_production_mediation_proto_rawDescGZIP(), []int{2}
 }
 
-// The children to create. Every child is created before any is started, and
-// a refusal creates none.
+// The children to create, all in this one call. A refusal at any child
+// undoes every child already made, so a dispatch stands whole or not at all.
 type ProductionMediationDispatch struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED, at least one. Findings the mediator judges likely related go

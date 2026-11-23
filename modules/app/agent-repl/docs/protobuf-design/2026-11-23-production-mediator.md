@@ -105,7 +105,8 @@ Autonomous mode uses the default order: concerns first, top-down by containment.
 - **Why a finding's sites may be empty.** A performance regression read from the metrics store has no log site. So evidence is required and sites are not.
 - **Consequences.**
   - `agentrepl.v1.CreateWorkspaceError.requested_by_production_mediator` (tag 64) refuses a direct create by the production mediator, so every child it makes goes through a dispatch and is recorded with its sites.
-  - The daemon creates every child of a dispatch before starting any. A refusal undoes the ones already made, so a dispatch is all or nothing.
+  - The daemon makes the children of a dispatch one after another, each commissioned with every sibling's name, which the daemon fixes before the first is made. A refusal at any child undoes the ones already made, so a dispatch is all or nothing.
+  - Correction (2026-11-23): this entry first said every child is created before any starts. A child's session starts with its create, because its commission is its first prompt, so that claim was wrong. The cause was writing the record before reading how a create starts a session. The guarantee that holds is whole-or-nothing, through the undo.
   - `daemon/internal/server/productionmediation.go` answers Unimplemented until the daemon side is built on this branch. The branch does not land until that is replaced.
 
 ## Obviated-declaration sweep
