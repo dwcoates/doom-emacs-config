@@ -202,8 +202,72 @@ func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out Detach
 	}
 	o.log(ctx, ws).Debug("daemon.merge.ended", "a merge left the queue for good; handing it back and raising its resolved banner", dlog.Context{
 		"workspace": string(ws), "outcome": out.Kind.String()})
-	o.tellThenRaise(ws, out, func() { o.handBack(ctx, ws, out) })
+	o.tellThenRaise(ws, out, func() { o.settle(ctx, ws, out) })
 }
+
+// settle is EVERY ENDED MERGE'S ACCOUNT TO ITS WORKSPACES, and the one path
+// that reaches them: it hands the outcome back (handBack) and then closes an
+// async merge's hidden merge workspace when the end is terminal
+// (closeEnded). ended and a merge never put in line (publishAbandonedWith)
+// both settle through it, and nothing else hands a merge's end back, so no
+// terminal end can leave its merge workspace open and hidden (2026-11-23:
+// 22 such records found, each a failed, dropped or refused merge's).
+func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+	record, async := o.handBack(ctx, ws, out)
+	if async {
+		o.closeEnded(ctx, record, out)
+	}
+}
+
+// closeEnded closes RECORD, the merge workspace of an async merge that ended
+// as OUT, when that end is terminal and the workspace is still hidden: its
+// merge is over, and a hidden workspace nobody can see would otherwise stand
+// open forever. It is called once per end, from settle alone, and records
+// what it did under opCloseEnded, whichever way it went:
+//
+//   - A LANDING closed it already, in its own teardown (stampClosed, which
+//     stamps merged_at in the same step), before the terminal was published.
+//   - AN EVICTION IS NO END OF ITS MERGE: its request stands off the queue to
+//     be requeued as itself, so its workspace stays until a requeue, or a
+//     discard, which closes it (Discard). A merge put back in line at its
+//     cold gate never reaches here at all (abandonTerminal).
+//   - A workspace the user revealed is the user's, and stays open.
+//
+// Every other end (a failure, a dequeue, a merge dropped behind one that did
+// not land, given up, or hidden at its cold gate) closes it, with the daemon
+// as its closer. Closing ends its request off the queue in the same write
+// (wsm.markClosedInTx), and keeps its worktree and branch, which the
+// handback names.
+func (o *orchestrator) closeEnded(ctx context.Context, record wsm.Workspace, out DetachedOutcome) {
+	log := o.log(ctx, record.ID)
+	fields := dlog.Context{"workspace": string(record.ID), "name": record.Name, "outcome": out.Kind.String(), "cause": string(out.Cause)}
+	switch {
+	case out.Kind == DetachedLanded:
+		log.Debug(opCloseEnded, "the landed merge's workspace was closed by its landing", withField(fields, "closed", record.Closed))
+	case out.Cause == CauseUserDrop:
+		log.Info(opCloseEnded, "the evicted merge may still be requeued; its merge workspace stays until it is requeued or discarded", fields)
+	case record.Closed:
+		log.Info(opCloseEnded, "the ended merge's workspace is closed already", fields)
+	case !record.MergeHidden():
+		log.Info(opCloseEnded, "the ended merge's workspace was revealed to the user, and stays open for them", fields)
+	default:
+		if err := o.deps.DB.MarkClosed(ctx, record.ID, wsm.Closure{At: o.deps.Now(), By: wsm.CloseByDaemon}); err != nil {
+			log.Error(opCloseEnded, "could not close the hidden workspace of a merge that ended without landing; it stays open and hidden", withField(fields, "error", err.Error()))
+			return
+		}
+		log.Info(opCloseEnded, "closed the hidden workspace of a merge that ended without landing", fields)
+		// THE ROSTER'S DURABLE HALF MOVED, as a landing's close moves it
+		// (stampClosed): nothing else republishes it.
+		if o.deps.PublishRegistry != nil {
+			if err := o.deps.PublishRegistry(ctx); err != nil {
+				log.Error(opCloseEnded, "could not republish the roster after closing an ended merge's workspace", withField(fields, "error", err.Error()))
+			}
+		}
+	}
+}
+
+// opCloseEnded is every record of closeEnded.
+const opCloseEnded = "daemon.merge.close_ended"
 
 // tellThenRaise is EVERY RESOLUTION'S ORDER: TELL reports the outcome to the
 // workspaces it is handed back to, and the resolved desktop banner and its
@@ -246,17 +310,21 @@ func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
 //
 // THE HANDBACK'S OWN FAILURE IS RECORDED BY ITS OWNER (DetachedMerges.HandBack);
 // the merge's terminal stands either way, so it is only noted here.
-func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+//
+// IT ANSWERS the merge workspace's record and true for an async merge whose
+// record it read, which settle closes by; false for a sync merge, or a record
+// that could not be read (recorded here at ERROR: neither told nor closed).
+func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) (wsm.Workspace, bool) {
 	requester, async := o.requesterOf(ws)
 	if !async {
 		o.handBackInPlace(ctx, ws, out)
-		return
+		return wsm.Workspace{}, false
 	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
-		o.log(ctx, ws).Error("daemon.merge.detached", "could not read the merge workspace whose merge ended; its requester is not told", dlog.Context{
+		o.log(ctx, ws).Error("daemon.merge.detached", "could not read the merge workspace whose merge ended; its requester is not told, and it is not closed", dlog.Context{
 			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "error": err.Error()})
-		return
+		return wsm.Workspace{}, false
 	}
 	// THE MERGE IS NAMED BY ITS MERGE WORKSPACE, whose name the requesting
 	// agent chose for what it merges.
@@ -265,6 +333,7 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 		o.log(ctx, ws).Debug("daemon.merge.detached", "the handback of an async merge failed; its owner recorded why", dlog.Context{
 			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "error": err.Error()})
 	}
+	return record, true
 }
 
 // handBackInPlace reports a SYNC merge that did not land to its own
@@ -501,9 +570,10 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
 	}
 	// THE RUN LEAVES ITS LINE BEFORE ITS CHAIN (leaveLine). The exit keeps
-	// the request off the queue unless the merge landed (wsm.leaveQueueInTx),
-	// and closes nothing: an async merge's merge workspace stays open under
-	// its name until the merge is requeued or discarded. A RUN TAKEN OFF
+	// the request off the queue unless the merge landed or its workspace is
+	// closed (wsm.leaveQueueInTx): the terminal above already closed an async
+	// merge's hidden merge workspace on every end but an eviction (settle), so
+	// only an evicted one stands off the queue to be requeued. A RUN TAKEN OFF
 	// AT ITS WORKSPACE'S COLD GATE leaves it only to stand at its own place
 	// again, waiting and skipped, under a new bubble (coldgate.go).
 	requeued := out.abandoned.requeues()
@@ -1244,7 +1314,7 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 	} else {
 		// A MERGE NEVER PUT IN LINE never raised its queued banner, so it
 		// leaves no resolved one either: it was never in the queue.
-		o.handBack(ctx, ws, out)
+		o.settle(ctx, ws, out)
 	}
 	// The surfaces come AFTER the terminal, in the teardown's own order: the
 	// footer leaves its merging state and the roster sheds every merge arm

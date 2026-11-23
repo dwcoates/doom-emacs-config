@@ -2661,14 +2661,19 @@ func TestALandingClosesTheWorkspaceOnlyWhenItsOwnedPullRequestsHaveMerged(t *tes
 	}
 }
 
-func TestAReleasedRunningMergeKeepsItsRequestOffTheQueueAndItsWorkspaceOpen(t *testing.T) {
+// An eviction is no end of a merge: its request stands off the queue and its
+// workspace stays open. A dequeue of an async merge IS its end (2026-11-23),
+// which closes its hidden merge workspace and with it the request.
+func TestAReleasedRunningMergeKeepsItsRequestOffTheQueueAndItsWorkspaceOpenUnlessItEnded(t *testing.T) {
 	tests := []struct {
 		name       string
 		resolution resolution
 		merge      bool
+		wantClosed bool
 	}{
 		{name: "an evicted merge workspace", resolution: resolutions[0], merge: true},
-		{name: "a dequeued merge workspace", resolution: resolutions[1], merge: true},
+		{name: "a dequeued merge workspace", resolution: resolutions[1], merge: true, wantClosed: true},
+		{name: "a dequeued merge of a workspace's own branch", resolution: resolutions[1]},
 		{name: "an evicted merge of a workspace's own branch", resolution: resolutions[0]},
 	}
 	for _, tt := range tests {
@@ -2680,18 +2685,19 @@ func TestAReleasedRunningMergeKeepsItsRequestOffTheQueueAndItsWorkspaceOpen(t *t
 				}
 			})
 
-			// Assert: off the queue, its request kept, nothing closed.
+			// Assert: off the queue, its request kept and its workspace open,
+			// or both closed when the release ended an async merge.
 			if _, ok := h.entryOf(theWorkspace); ok {
 				t.Fatal("the ended merge is still queued")
 			}
-			if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); !kept {
-				t.Fatal("the released merge's request was not kept off the queue")
+			if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); kept == tt.wantClosed {
+				t.Fatalf("the released merge's request kept = %v, want %v", kept, !tt.wantClosed)
 			}
 			h.db.mu.Lock()
 			closed := h.db.closed[theWorkspace]
 			h.db.mu.Unlock()
-			if closed {
-				t.Fatal("the release closed the merge's workspace")
+			if closed != tt.wantClosed {
+				t.Fatalf("the merge's workspace closed = %v, want %v", closed, tt.wantClosed)
 			}
 		})
 	}
@@ -2844,5 +2850,262 @@ func TestEveryLandedTeardownGoesThroughRetireLandedWorktree(t *testing.T) {
 	// Assert
 	if !slices.Equal(sites, []string{"terminal.go"}) {
 		t.Fatalf("forced session stops at %v, want only retireLandedWorktree's", sites)
+	}
+}
+
+// closesOf answers how many closes WS was handed and the last one's record.
+func closesOf(h *harness, ws ids.WorkspaceID) (int, wsm.Closure) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	return h.db.closeCalls[ws], h.db.closures[ws]
+}
+
+func TestSettleClosesAnEndedAsyncMergesHiddenWorkspaceByItsEnd(t *testing.T) {
+	tests := []struct {
+		name      string
+		out       DetachedOutcome
+		arrange   func(ws *wsm.Workspace)
+		wantClose bool
+		wantMsg   string
+	}{
+		{name: "a failure closes it", out: DetachedOutcome{Kind: DetachedFailed, Summary: "it failed"}, wantClose: true,
+			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
+		{name: "a dequeue closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDequeue}, wantClose: true,
+			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
+		{name: "a drop behind a merge that did not land closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAheadDidNotLand}, wantClose: true,
+			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
+		{name: "a give-up closes it", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAgentGaveUp}, wantClose: true,
+			wantMsg: "closed the hidden workspace of a merge that ended without landing"},
+		{name: "an eviction keeps it for a requeue", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDrop},
+			wantMsg: "the evicted merge may still be requeued; its merge workspace stays until it is requeued or discarded"},
+		{name: "a landing leaves it to the landing's own close", out: DetachedOutcome{Kind: DetachedLanded},
+			wantMsg: "the landed merge's workspace was closed by its landing"},
+		{name: "a workspace closed already is not closed again", out: DetachedOutcome{Kind: DetachedFailed},
+			arrange: func(ws *wsm.Workspace) { ws.Closed = true },
+			wantMsg: "the ended merge's workspace is closed already"},
+		{name: "a workspace the user revealed stays open", out: DetachedOutcome{Kind: DetachedFailed},
+			arrange: func(ws *wsm.Workspace) { ws.MergeRevealed = true },
+			wantMsg: "the ended merge's workspace was revealed to the user, and stays open for them"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+			if tt.arrange != nil {
+				h.db.mu.Lock()
+				ws := h.db.workspaces[theMergeWorkspace]
+				tt.arrange(&ws)
+				h.db.workspaces[theMergeWorkspace] = ws
+				h.db.mu.Unlock()
+			}
+			publishesBefore := h.publishes()
+
+			// Act
+			h.o.settle(context.Background(), theMergeWorkspace, tt.out)
+
+			// Assert: told once, closed once or not at all, and recorded.
+			if sent := h.detached.sent(); len(sent) != 1 {
+				t.Fatalf("handbacks = %+v, want the end told once", sent)
+			}
+			calls, closure := closesOf(h, theMergeWorkspace)
+			if tt.wantClose && (calls != 1 || closure.By != wsm.CloseByDaemon || closure.At.IsZero()) {
+				t.Fatalf("closes = %d (%+v), want one by the daemon", calls, closure)
+			}
+			if !tt.wantClose && calls != 0 {
+				t.Fatalf("closes = %d, want none", calls)
+			}
+			if tt.wantClose && h.publishes() != publishesBefore+1 {
+				t.Fatalf("roster republished %d times, want once", h.publishes()-publishesBefore)
+			}
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: opCloseEnded, Message: tt.wantMsg})
+			if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["outcome"] != tt.out.Kind.String() {
+				t.Fatalf("close record = %+v, %v; want %q naming the workspace and the outcome", record, ok, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestSettleOfASyncMergeClosesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.o.settle(context.Background(), theWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "it failed"})
+
+	// Assert
+	if calls, _ := closesOf(h, theWorkspace); calls != 0 {
+		t.Fatalf("closes = %d, want none: a sync merge's own workspace stays open", calls)
+	}
+	if _, ok := h.recordFor(dlog.LevelInfo, opCloseEnded); ok {
+		t.Fatal("a sync merge's end was judged for a merge workspace close")
+	}
+}
+
+func TestACloseOfAnEndedMergeWorkspaceThatFailsIsAnErrorAndLeavesItOpen(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	h.db.markClosedErr = errors.New("store down")
+	publishesBefore := h.publishes()
+
+	// Act
+	h.o.settle(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "it failed"})
+
+	// Assert
+	h.db.mu.Lock()
+	closed := h.db.closed[theMergeWorkspace]
+	h.db.mu.Unlock()
+	if closed {
+		t.Fatal("the failed close marked the workspace closed")
+	}
+	record, ok := h.recordFor(dlog.LevelError, opCloseEnded)
+	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["error"] != "store down" {
+		t.Fatalf("error record = %+v, %v; want one naming the workspace and the cause", record, ok)
+	}
+	if h.publishes() != publishesBefore {
+		t.Fatal("the roster was republished for a close that did not happen")
+	}
+}
+
+func TestSettleOfAMergeWorkspaceWhoseRecordWillNotReadClosesNothing(t *testing.T) {
+	// Arrange: the origin is read, then the record goes.
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	h.o.originOf(theMergeWorkspace)
+	h.db.mu.Lock()
+	delete(h.db.workspaces, theMergeWorkspace)
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.settle(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "it failed"})
+
+	// Assert
+	if calls, _ := closesOf(h, theMergeWorkspace); calls != 0 {
+		t.Fatalf("closes = %d, want none without the record", calls)
+	}
+	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.detached"); !ok {
+		t.Fatal("the unreadable record was not recorded at ERROR")
+	}
+}
+
+// Every terminal end of an async merge, reached the way the queue reaches it,
+// closes its hidden merge workspace exactly once (2026-11-23: 22 records left
+// open and hidden by a failed pick, a fault, a drop behind a merge that did
+// not land and a refused repair).
+func TestEveryTerminalEndOfAnAsyncMergeClosesItsMergeWorkspaceOnce(t *testing.T) {
+	tests := []struct {
+		name   string
+		end    func(t *testing.T, h *harness)
+		wantBy wsm.CloseCause
+	}{
+		{name: "a run that failed", wantBy: wsm.CloseByDaemon, end: func(t *testing.T, h *harness) {
+			h.emacsRepo()
+			h.landsCleanly("abc123def4567")
+			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+			h.runner.runs = nil
+			h.gateBroken(1)
+			if err := requestDetached(t, h, RequestedByUser); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			_ = h.admit(context.Background())
+		}},
+		{name: "a pick that failed", wantBy: wsm.CloseByDaemon, end: func(t *testing.T, h *harness) {
+			h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+			requestPick(t, h)
+			runThePick(t, h, context.Background(), false)
+		}},
+		{name: "a pick whose cold gate could not be answered", wantBy: wsm.CloseByDaemon, end: func(t *testing.T, h *harness) {
+			requestPick(t, h)
+			standAtColdGate(h, theMergeWorkspace)
+			h.compactGateErr = errors.New("the summarizer is down")
+			runThePick(t, h, context.Background(), false)
+		}},
+		{name: "a drop behind a merge that did not land", wantBy: wsm.CloseByDaemon, end: func(t *testing.T, h *harness) {
+			requestHeldPick(t, h)
+			aheadLeaves(t, h, causeFailed)
+			if _, err := h.o.pumpOnce(context.Background(), h.repoKey()); err != nil {
+				t.Fatalf("pumpOnce: %v", err)
+			}
+		}},
+		{name: "a dequeue", wantBy: wsm.CloseByDaemon, end: func(t *testing.T, h *harness) {
+			if err := requestDetached(t, h, RequestedByUser); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			if err := h.o.dequeue(context.Background(), theMergeWorkspace, CauseUserDequeue); err != nil {
+				t.Fatalf("dequeue: %v", err)
+			}
+		}},
+		{name: "a landing", wantBy: wsm.CloseByMerge, end: func(t *testing.T, h *harness) {
+			h.emacsRepo()
+			landedAsync(t, h)
+		}},
+		{name: "an eviction then a discard", wantBy: wsm.CloseByUser, end: func(t *testing.T, h *harness) {
+			if err := requestDetached(t, h, RequestedByUser); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
+				t.Fatalf("Evict: %v", err)
+			}
+			if calls, _ := closesOf(h, theMergeWorkspace); calls != 0 {
+				t.Fatalf("the eviction closed the merge workspace %d times, want none before its discard", calls)
+			}
+			if _, err := h.o.Discard(context.Background(), theMergeWorkspace, func(ctx context.Context) error {
+				return h.db.MarkClosed(ctx, theMergeWorkspace, wsm.Closure{At: time.Now(), By: wsm.CloseByUser})
+			}); err != nil {
+				t.Fatalf("Discard: %v", err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := pickHarness(t)
+
+			// Act
+			tt.end(t, h)
+
+			// Assert: closed exactly once, by its end's closer, and no
+			// request left standing off the queue for a workspace now closed.
+			calls, closure := closesOf(h, theMergeWorkspace)
+			if calls != 1 || closure.By != tt.wantBy {
+				t.Fatalf("closes = %d (%+v), want one by %q", calls, closure, tt.wantBy)
+			}
+			if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theMergeWorkspace); kept {
+				t.Fatal("the closed merge workspace kept a request off the queue")
+			}
+		})
+	}
+}
+
+// THE END OF A MERGE REACHES ITS WORKSPACES THROUGH ONE PATH: settle alone
+// hands an end back and closes the merge workspace, and only ended and a merge
+// never put in line settle. A site that handed an end back its own way would
+// bypass the close (2026-11-23).
+func TestEveryEndOfAMergeIsSettledThroughOnePath(t *testing.T) {
+	tests := []struct {
+		needle string
+		want   []string
+	}{
+		{needle: "o.settle(", want: []string{"terminal.go:ended", "terminal.go:publishAbandonedWith"}},
+		{needle: "o.handBack(", want: []string{"terminal.go:settle"}},
+		{needle: "o.closeEnded(", want: []string{"terminal.go:settle"}},
+		// A finish withdrawn before it was in line is a sync merge's, in its
+		// own workspace: there is no merge workspace to close.
+		{needle: "o.handBackInPlace(", want: []string{"finish.go:withdrawFinished", "terminal.go:handBack"}},
+		// A merge never forked has no merge workspace to close (dropDetached).
+		{needle: "Detached.HandBack(", want: []string{"request.go:dropDetached", "terminal.go:handBack", "terminal.go:handBackInPlace"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.needle, func(t *testing.T) {
+			// Arrange, Act
+			got := callersOf(t, tt.needle)
+
+			// Assert
+			slices.Sort(got)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("callers of %s = %v, want %v", tt.needle, got, tt.want)
+			}
+		})
 	}
 }
