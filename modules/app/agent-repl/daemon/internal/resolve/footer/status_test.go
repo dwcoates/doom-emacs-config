@@ -1052,6 +1052,42 @@ func TestADeadLinkThatOnceConnectedIsDead(t *testing.T) {
 	}
 }
 
+// A SHIM A RELAUNCH STOOD DOWN IS NO FAULT: the session carries on in the
+// replacement, so the stand-down's dead link draws the idle rung, and a dead
+// link once the relaunch has ended is dead again.
+func TestARelaunchsStoodDownShimIsNoFault(t *testing.T) {
+	cases := []struct {
+		name      string
+		replacing []bool
+		wantDead  bool
+	}{
+		{name: "the stood-down link of a relaunch under way is idle", replacing: []bool{true}, wantDead: false},
+		{name: "a dead link after the relaunch ended is dead", replacing: []bool{true, false}, wantDead: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			for _, on := range tc.replacing[:1] {
+				h.r.SetReplacing(testWS, on)
+			}
+
+			// Act
+			h.r.OnLink(testWS, shimclient.LinkDead)
+			for _, on := range tc.replacing[1:] {
+				h.r.SetReplacing(testWS, on)
+			}
+
+			// Assert
+			status := h.view(t).GetStrip().GetStatus()
+			if dead := status.GetAgentReplFault().GetDead() != nil; dead != tc.wantDead || (!tc.wantDead && status.GetIdle() == nil) {
+				t.Fatalf("status = %v, want dead=%v (idle otherwise)", status, tc.wantDead)
+			}
+		})
+	}
+}
+
 func TestAMediatorStandingByWhileItsFixRunsIsDrawnAtItsStepNotDead(t *testing.T) {
 	tests := []struct {
 		name string

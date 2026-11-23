@@ -1285,6 +1285,8 @@ type harness struct {
 	startHold func(ws ids.WorkspaceID)
 	// marker records every bring-up marker edge, in order.
 	marker []markerEdge
+	// replacing records every Replacing edge, in order.
+	replacing []markerEdge
 	// servingSettled receives once per ServingSettled call.
 	servingSettled chan struct{}
 }
@@ -1485,6 +1487,12 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 			return h.startErr[ws]
 		},
 		ServingSettled: func(context.Context) { h.servingSettled <- struct{}{} },
+		Replacing: func(ws ids.WorkspaceID, replacing bool) {
+			order.record(fmt.Sprintf("replacing:%v", replacing))
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.replacing = append(h.replacing, markerEdge{ws: ws, up: replacing})
+		},
 		BringingUp: func(ws ids.WorkspaceID, up bool) {
 			order.record(fmt.Sprintf("bringing_up:%v", up))
 			h.mu.Lock()

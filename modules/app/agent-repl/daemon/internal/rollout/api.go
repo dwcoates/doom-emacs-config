@@ -411,6 +411,12 @@ type Deps struct {
 	// as starting rather than idle and usable while nothing is behind it.
 	// Required.
 	BringingUp func(ws ids.WorkspaceID, underWay bool)
+	// Replacing raises or lowers the fact that a relaunch is replacing the
+	// workspace's shim (footer and sidebar SetReplacing): raised before the
+	// old shim's stand-down, lowered once the relaunch has ended, however it
+	// ended, so the stand-down's dead link is never drawn as a fault.
+	// Required.
+	Replacing func(ws ids.WorkspaceID, replacing bool)
 	// ServingSettled is told once this daemon owns every workspace it serves
 	// and the sessions it started are up: at a fresh boot's settle
 	// (SettleBoot) and once a successor's takeover settled. What a previous
@@ -918,6 +924,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.BringingUp == nil {
 		return nil, errors.New("rollout: the bring-up marker is required; a workspace whose session is starting must not read as usable")
+	}
+	if deps.Replacing == nil {
+		return nil, errors.New("rollout: the replacement fact is required; a relaunch's stand-down must not read as a dead session")
 	}
 	if deps.Reconnects == nil {
 		return nil, errors.New("rollout: a reconnect tracker is required; a handover's returning streams are timed")

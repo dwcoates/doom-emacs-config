@@ -463,6 +463,9 @@ type wsState struct {
 	// bringingUp reports a bring-up of the session under way (SetBringingUp),
 	// which on a route never seen is the bring-up window too.
 	bringingUp bool
+	// replacing reports a relaunch replacing the session's shim
+	// (SetReplacing): the dead link of its stand-down is no fault.
+	replacing bool
 	// updating reports a final response being rewritten from words highlighted
 	// in it (SetUpdating): the `updating` status, on the thinking rung.
 	updating bool

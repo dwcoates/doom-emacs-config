@@ -626,7 +626,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// seen (ladder.AwaitingBringUp), which the roster then projects; telling
 	// them from one closure keeps the two from standing on different facts.
 	bringingUp := onBothStatusSurfaces(footerResolver.SetBringingUp, sidebarResolver.SetBringingUp)
-
+	// A RELAUNCH'S REPLACEMENT IS ONE FACT ON BOTH SURFACES too: the footer
+	// draws no fault for the stood-down link, and the roster, which projects
+	// the footer, keeps the session live.
+	replacing := onBothStatusSurfaces(footerResolver.SetReplacing, sidebarResolver.SetReplacing)
 	faultSurfaces := newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults)
 	// THE NETWORK'S STATE HANGS OFF THE SAME DOOR: a shim's network fault
 	// opening and closing is what says the network is down and restored
@@ -1469,6 +1472,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		LockProbe:               fleet.ProbeLock,
 		StartSession:            fleet.Start,
 		BringingUp:              bringingUp,
+		Replacing:               replacing,
 		// THE FOLDS' STAND-DOWNS ARE DERIVED AGAIN once this daemon owns what
 		// it serves: their waits lived in the previous daemon's memory alone.
 		// The drain controller is built after this one, so it is read at the

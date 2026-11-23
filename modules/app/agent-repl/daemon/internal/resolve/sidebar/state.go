@@ -146,6 +146,9 @@ type wsState struct {
 	// bringingUp reports a bring-up of this workspace's session under way
 	// (SetBringingUp). It is what holds the row's availability at `pending`.
 	bringingUp bool
+	// replacing reports a relaunch replacing the session's shim
+	// (SetReplacing), whose stand-down's dead link leaves the session live.
+	replacing bool
 	// opening reports an OpenTabs in flight that names this workspace and has
 	// not answered it `opened` yet (SetOpening). It draws the `inactive` arm
 	// with the row's `opening` marker
@@ -437,7 +440,7 @@ func (s *wsState) live(session *wsm.Session) bool {
 	if session != nil && session.Terminal != nil {
 		return false
 	}
-	if s.linkSeen && s.link == shimclient.LinkDead {
+	if s.linkSeen && s.link == shimclient.LinkDead && !s.replacing {
 		return false
 	}
 	return s.started || s.linkSeen || session != nil

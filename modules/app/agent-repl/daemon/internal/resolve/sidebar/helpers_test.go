@@ -226,6 +226,12 @@ func (f *fanned) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 	f.Resolver.SetBringingUp(ws, bringingUp)
 }
 
+func (f *fanned) SetReplacing(ws ids.WorkspaceID, replacing bool) {
+	f.bindFooter(ws)
+	f.footer.SetReplacing(ws, replacing)
+	f.Resolver.SetReplacing(ws, replacing)
+}
+
 func (f *fanned) SetTurn(ws ids.WorkspaceID, turn *sidebar.TurnStarted) {
 	f.bindFooter(ws)
 	f.footer.SetTurn(ws, turn)

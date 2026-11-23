@@ -126,6 +126,27 @@ func TestRowIsDeadWhenAConnectedShimIsGone(t *testing.T) {
 	}
 }
 
+// A RELAUNCH'S STAND-DOWN CHANGES NO ROW'S STATUS: the row stays ready from
+// the stood-down link until the replacement links.
+func TestARowKeepsItsStatusAcrossARelaunchsReplacement(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	before := statusName(onlyRow(t, r))
+
+	// Act.
+	r.SetReplacing(theWS, true)
+	r.OnLink(theWS, shimclient.LinkDead)
+	during := statusName(onlyRow(t, r))
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.SetReplacing(theWS, false)
+	after := statusName(onlyRow(t, r))
+
+	// Assert.
+	if before != "ready" || during != "ready" || after != "ready" {
+		t.Fatalf("status %q -> %q -> %q, want ready throughout", before, during, after)
+	}
+}
+
 func TestRowIsStartFailedWhenTheShimNeverConnected(t *testing.T) {
 	// Arrange.
 	r := arrange(t)

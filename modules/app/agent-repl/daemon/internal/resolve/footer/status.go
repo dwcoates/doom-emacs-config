@@ -162,6 +162,17 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 	if s.coldGate.Standing && s.link == shimclient.LinkDead {
 		return r.agentReplByFault(s, log)
 	}
+	// A SHIM A RELAUNCH STOOD DOWN IS NO FAULT (2026-11-23): the relaunch
+	// replaces it at once and the session carries on in the replacement, so
+	// its dead link is this daemon's own planned step. At a deploy every
+	// stale shim's stand-down drew `dead` until its replacement linked, and
+	// the roster published each workspace dead and back. Only a RECORDED
+	// fault (a failed resume's) claims the rung while the relaunch stands.
+	if s.replacing && s.link == shimclient.LinkDead {
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch: a relaunch is replacing the stood-down shim",
+			dlog.Context{"function": "status", "branch": "a relaunch is replacing the stood-down shim"})
+		return r.agentReplByFault(s, log)
+	}
 	arm := &frontendv1.FooterStatusAgentReplFault{}
 	switch {
 	case s.link == shimclient.LinkDialing:
