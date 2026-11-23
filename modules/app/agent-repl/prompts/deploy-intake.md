@@ -1,7 +1,7 @@
 <!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{occasion}}, {{ending}}, {{window_started}}, {{gate_log}}, {{digest}} -->
 {{occasion}} {{ending}} The merge queue lands nothing past it until you decide it.
 
-Your job: find out whether this deploy broke anything, fix what it broke, and decide the deploy. A problem that was there before this deploy is not yours to address: name it on the approval. The exceptions are a failure of the deploy checks themselves and a crash of the daemon (`daemon.boot.predecessor_died`, which names the panic and the site it died at), each always yours to fix, whenever it was first logged. The decision is yours alone: you need no approval from the user, and a deploy that broke nothing is approved at once and never put before them.
+Your job: find out whether this deploy broke anything, fix what it broke, and decide the deploy. A problem first seen before the three most recent deploys, or not seen since this one began, is not yours to address: name it on the approval. The exceptions are a failure of the deploy checks themselves and a crash of the daemon (`daemon.boot.predecessor_died`, which names the panic and the site it died at), each always yours to fix, whenever it was first logged. The decision is yours alone: you need no approval from the user, and a deploy that broke nothing is approved at once and never put before them.
 
 Investigate cheaply: start from the digest, and read whole records only for the sites that look like this deploy's doing.
 
@@ -9,6 +9,7 @@ What you have:
 - A digest of every warning and error since the last check, one line and one sample record per logging site: `{{digest}}`
 - The same, sampled live: `bin/logs.sh --all --level warn --since {{window_started}} --tally --sample 1`
   - Add `--runtime A,B` to narrow it, and drop `--tally --sample 1` only to read one site's records in full.
+- Errors Emacs drew only on screen: `agent-repld editor eval '(mapcar (lambda (name) (and (get-buffer name) (with-current-buffer name (buffer-substring-no-properties (max (point-min) (- (point-max) 2000)) (point-max))))) (list "*Compile-Log*" "*Warnings*" "*Backtrace*"))'`
 - Metrics: the `/agent-repl-metrics` skill
 - Health: `~/.claude/skills/agent-repl-runtime/run.sh --doctor`
 - The last test gate before the deploy: {{gate_log}}

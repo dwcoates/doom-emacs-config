@@ -799,7 +799,8 @@ func TestTheDeployEscalationBriefSaysItsFinishLandsDirectly(t *testing.T) {
 func TestTheDeployIntakeBriefMakesAFailureOfTheChecksTheMediators(t *testing.T) {
 	// Arrange
 	want := []string{
-		"A problem that was there before this deploy is not yours to address: name it on the approval.",
+		"A problem first seen before the three most recent deploys, or not seen since this one began, is not yours to address: name it on the approval.",
+		"- Errors Emacs drew only on screen: `agent-repld editor eval ",
 		"The exceptions are a failure of the deploy checks themselves and a crash of the daemon (`daemon.boot.predecessor_died`, which names the panic and the site it died at), each always yours to fix, whenever it was first logged.",
 	}
 
