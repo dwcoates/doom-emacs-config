@@ -4047,11 +4047,14 @@ func TestAStrayAgentWatchOpensUnexpected(t *testing.T) {
 
 // refuseAnnouncedShell announces a shell the shim refuses to watch and waits
 // for the refusal to be ruled on.
-func refuseAnnouncedShell(t *testing.T, h *harness) {
+// It answers the events the announcement's routing read, which may already
+// hold the refusal.
+func refuseAnnouncedShell(t *testing.T, h *harness) []event {
 	t.Helper()
 	h.client.SetBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "the store holds no rows for shell run w-1"))
-	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+	seen := h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
 	h.client.AwaitRefusedOpen(t, "WatchBash")
+	return seen
 }
 
 // TestARefusedExpectedShellIsReportedAsABrokenContract pins the report: the
@@ -4062,8 +4065,8 @@ func TestARefusedExpectedShellIsReportedAsABrokenContract(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	refuseAnnouncedShell(t, h)
-	refusal := h.awaitRefusal(t)
+	seen := refuseAnnouncedShell(t, h)
+	refusal := h.awaitRefusalAfter(t, seen)
 
 	// Assert.
 	if refusal.Operation != "watch_bash" || refusal.Handle != "w-1" {
