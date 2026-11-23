@@ -23,6 +23,30 @@ message OpenFeedRequest {
   // client was shown — a subagent bubble row's own FeedId, which addresses
   // the feed within it. Only served ids open; a client never constructs one.
   optional frontend.v1.FeedId feed = 2;
+  // WHAT THE READER ALREADY HOLDS of this feed, when it opens it again (a
+  // page reattaching after a handover, a tail that ended and reopens). SET:
+  // the answer carries only what is newer than what is held
+  // (OpenFeedSuccess.resumed), so a reader holding the feed as it stands is
+  // sent no row and draws nothing. UNSET: a first open, answered with the
+  // whole newest page.
+  optional FeedResume resume = 3;
+}
+
+// The rows a reader holds of one feed, each at the revision it holds it, so
+// the open answers only the rows that changed or are new since.
+message FeedResume {
+  // Every row the reader holds and drew, in any order. A row the reader
+  // holds that is absent here is sent as though it were new.
+  repeated FeedResumeHeldRow held = 1;
+}
+
+// One row a reader holds, and the publication of it the reader drew.
+message FeedResumeHeldRow {
+  // The row, as the daemon served it.
+  frontend.v1.FeedId id = 1;
+  // The revision the reader drew, echoed exactly as the row carried it
+  // (frontend.v1.FeedRow.revision).
+  frontend.v1.FeedRowRevision revision = 2;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -51,6 +75,23 @@ message OpenFeedSuccess {
   // no held section. Every later change of it arrives as a WatchFeed
   // held-section frame.
   optional frontend.v1.FeedHeld held = 3;
+  // SET exactly when the request carried `resume`: `page` then carries only
+  // the rows of the feed's newest page the reader does not hold at their
+  // revision (new rows, and rows that changed since), not the whole page, and
+  // the reader places them among the rows it holds rather than replacing
+  // them. An empty `page.rows` means nothing is newer. UNSET on a first open,
+  // whose `page` is the whole newest page.
+  optional OpenFeedResumed resumed = 4;
+}
+
+// How a resumed open's answer stands against what the reader holds.
+message OpenFeedResumed {
+  // Every row of the feed's newest page as the daemon serves it now, oldest
+  // to newest, the ones `page` leaves out included. A row the reader holds
+  // that sorts at or after the oldest of these and is not named here has left
+  // the feed, and the reader drops it. Rows older than the oldest named stand
+  // as the reader holds them.
+  repeated frontend.v1.FeedId standing = 1;
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).

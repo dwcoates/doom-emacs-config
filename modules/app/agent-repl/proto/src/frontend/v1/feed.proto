@@ -384,6 +384,22 @@ message FeedRow {
   // detached), a merge, and a deploy mediator's fix gate. UNSET on every
   // other kind, whose bubble shows nothing in the footer when hovered.
   optional FeedHoverStamp hover = 25;
+  // THE ROW AS PUBLISHED, IN ONE VALUE: the daemon's digest of every other
+  // field of this row, stated on every publication. Two publications of one
+  // row carry equal revisions exactly when they are equal rows, whichever
+  // daemon published them, so a reader that hands back the revision it holds
+  // (agentrepl.v1.FeedResume) is sent the row again only when it changed.
+  // REQUIRED on every row a page or a push carries but a removal, which
+  // states no content. Opaque: echoed, never parsed or compared for order.
+  optional FeedRowRevision revision = 26;
+}
+
+// The digest a FeedRow's publication carries (FeedRow.revision): minted by
+// the daemon over the row's content, held by the reader beside the row it
+// drew, and echoed back unchanged when the reader resumes the feed.
+message FeedRowRevision {
+  // The opaque digest. Equal values are equal rows; nothing else is implied.
+  string digest = 1;
 }
 
 // WHAT A HOVERED BUBBLE SHOWS IN THE FOOTER'S ACTIVITY CELL, in place of the
