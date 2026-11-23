@@ -50,23 +50,23 @@ func (c *cliCall) modeFlag(text string) (*agentreplv1.SlackThreadMode, bool) {
 }
 
 // slackThreadArgs parses a thread command's WS and -thread, and dials.
-func (c *cliCall) slackThreadArgs(fs *flag.FlagSet, stateDir *string, thread *string, args []string) (*workspacev1.WorkspaceRef, bool) {
-	ws, rest, ok := c.workspaceArg(fs, stateDir, args)
+func (c *cliCall) slackThreadArgs(fs *flag.FlagSet, stateDir *string, thread *string, args []string) (string, *workspacev1.WorkspaceRef, bool) {
+	named, ws, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
-		return nil, false
+		return "", nil, false
 	}
 	if len(rest) != 0 {
 		c.usageFailed("unexpected arguments %v", rest)
-		return nil, false
+		return "", nil, false
 	}
-	return ws, c.threadOf(*thread)
+	return named, ws, c.threadOf(*thread)
 }
 
 func workspaceSlackSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	thread := slackThreadFlag(fs)
 	modeText := fs.String("mode", "", "what the workspace may do in the thread: "+slackModes)
-	ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
+	named, ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
 	if !ok {
 		return exitFailure
 	}
@@ -75,25 +75,29 @@ func workspaceSlackSubscribe(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.SubscribeSlackThread(c.ctx, connect.NewRequest(&agentreplv1.SubscribeSlackThreadRequest{Subscriber: ws, ThreadUrl: *thread, Mode: mode}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubscribeSlackThreadResponse) (string, error) {
+		return describeSlackSubscribeRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceSlackUnsubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	thread := slackThreadFlag(fs)
-	ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
+	named, ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
 	if !ok {
 		return exitFailure
 	}
 	resp, err := c.client.UnsubscribeSlackThread(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribeSlackThreadRequest{Subscriber: ws, ThreadUrl: *thread}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UnsubscribeSlackThreadResponse) (string, error) {
+		return describeSlackUnsubscribeRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceSlackMode(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	thread := slackThreadFlag(fs)
 	modeText := fs.String("mode", "", "the new mode: "+slackModes)
-	ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
+	named, ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
 	if !ok {
 		return exitFailure
 	}
@@ -102,24 +106,28 @@ func workspaceSlackMode(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.SetSlackThreadMode(c.ctx, connect.NewRequest(&agentreplv1.SetSlackThreadModeRequest{Subscriber: ws, ThreadUrl: *thread, Mode: mode}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SetSlackThreadModeResponse) (string, error) {
+		return describeSlackModeRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceSlackSubscriptions(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ws, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ws, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
 	resp, err := c.client.ListSlackThreadSubscriptions(c.ctx, connect.NewRequest(&agentreplv1.ListSlackThreadSubscriptionsRequest{Subscriber: ws}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ListSlackThreadSubscriptionsResponse) (string, error) {
+		return describeSlackSubscriptionsRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceSlackTail(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	thread := slackThreadFlag(fs)
 	limit := fs.Uint("limit", 0, "at most how many of the newest messages (1 to 200; the daemon's default when unset)")
-	ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
+	named, ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
 	if !ok {
 		return exitFailure
 	}
@@ -129,7 +137,9 @@ func workspaceSlackTail(c *cliCall, args []string) int {
 		req.Limit = &n
 	}
 	resp, err := c.client.ReadSlackThread(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ReadSlackThreadResponse) (string, error) {
+		return describeSlackReadRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceSlackPost(c *cliCall, args []string) int {
@@ -137,7 +147,7 @@ func workspaceSlackPost(c *cliCall, args []string) int {
 	thread := slackThreadFlag(fs)
 	text := fs.String("text", "", "the post, opening with one emoji shortcode and a space (`:white_check_mark: tests pass`)")
 	force := fs.Bool("force", false, "the user explicitly approved this post: it goes through listen mode and the post limit")
-	ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
+	named, ws, ok := c.slackThreadArgs(fs, stateDir, thread, args)
 	if !ok {
 		return exitFailure
 	}
@@ -145,7 +155,9 @@ func workspaceSlackPost(c *cliCall, args []string) int {
 		return c.usageFailed("-text is the post")
 	}
 	resp, err := c.client.PostToSlackThread(c.ctx, connect.NewRequest(&agentreplv1.PostToSlackThreadRequest{Poster: ws, ThreadUrl: *thread, Text: *text, Force: *force}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.PostToSlackThreadResponse) (string, error) {
+		return describeSlackPostRefusal(named, msg.GetError())
+	})
 }
 
 func slackStatus(c *cliCall, args []string) int {
@@ -153,14 +165,29 @@ func slackStatus(c *cliCall, args []string) int {
 	if rest, ok := c.parse(fs, args); !ok || len(rest) != 0 || !c.dial(*stateDir) {
 		return exitFailure
 	}
+	// THE STATUS HAS NO REFUSAL (GetSlackStatusError is deliberately empty),
+	// so it is answered as the daemon's health is: printed, never described.
 	resp, err := c.client.GetSlackStatus(c.ctx, connect.NewRequest(&agentreplv1.GetSlackStatusRequest{}))
-	return answer(c, resp, err)
+	if err != nil {
+		c.failed("the daemon failed the call: %v", err)
+		return exitFailure
+	}
+	if !c.print(resp.Msg) {
+		return exitFailure
+	}
+	if resp.Msg.GetError() != nil {
+		c.failed("bug: the daemon refused the Slack status, which has no refusal")
+		return exitRefused
+	}
+	return exitSuccess
 }
 
 // updateSlackReactions sends one settings change.
 func (c *cliCall) updateSlackReactions(req *agentreplv1.UpdateSlackReactionSettingsRequest) int {
 	resp, err := c.client.UpdateSlackReactionSettings(c.ctx, connect.NewRequest(req))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.UpdateSlackReactionSettingsResponse) (string, error) {
+		return describeSlackReactionsRefusal(msg.GetError())
+	})
 }
 
 // oneSlackPositional parses ARGS to the one positional the command names, and
