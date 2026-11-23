@@ -43,6 +43,7 @@ import (
 	"agent-repld/internal/gather"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/gnsauth"
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/handover"
 	"agent-repld/internal/headless"
@@ -682,8 +683,34 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE USER'S SLACK CHANNELS, as the Emacs composer completes them after a
 	// `#`. Read through the GNS CLI on the first ask and hourly after, never
 	// at boot, through the one script runner.
+	//
+	// THE GNS SIGN-IN IS KEPT ALIVE (gnsauth): a gns call GNS refuses starts a
+	// device-code sign-in whose page opens in the WORK account's Chrome
+	// profile, and a standing probe notices a credential that expires while
+	// nothing of the daemon's own is calling gns. Without a browser there is
+	// nowhere to open the page, so the renewer is not built and says so.
+	gnsRun := gnsauth.Runner(scripts)
+	var gnsRenewer *gnsauth.Renewer
+	if browser == nil {
+		log.Warn(opGNSAuth, "the GNS sign-in is not kept alive: the daemon has no browser to open its page in", dlog.Context{
+			"branch": "no-browser",
+		})
+	} else {
+		gnsRenewer, err = gnsauth.New(gnsauth.Deps{
+			Run: scripts, Dir: home, Open: browser,
+			WorkEmail: func(ctx context.Context) (string, error) {
+				work, err := accounts.Read(ctx, p.Opts.multiRepoConfigDir)
+				return work.Email, err
+			},
+			Clock: clock.System{}, Life: ctx, Log: log, Env: gnsEnv,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("agent-repld: build the GNS sign-in renewer: %w", err)
+		}
+		gnsRun = gnsauth.ObserveRunner(scripts, gnsRenewer)
+	}
 	slackChannels, err := slackchannels.New(slackchannels.Deps{
-		Read: slackchannels.GNSReader(scripts, home),
+		Read: slackchannels.GNSReader(gnsRun, home),
 		Now:  time.Now,
 		Life: ctx,
 		Log:  log,
@@ -2025,6 +2052,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return coldBacklog.Run(ctx, coldbacklog.DefaultEvery)
 		}},
 		{Name: "news_digest", Run: digest.Run},
+		{Name: "gns_auth", Run: func(ctx context.Context) error {
+			if gnsRenewer == nil {
+				// Built without a browser (opGNSAuth says so at boot): idle
+				// until the serving lifetime ends.
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			return gnsRenewer.Watch(ctx)
+		}},
 		{Name: "chess_boards", Run: func(ctx context.Context) error {
 			chessBoards.Run(ctx, feedResolver.RefreshChessBoards)
 			return nil
@@ -2958,3 +2994,10 @@ func serviceLogsDir(getenv func(string) string, home string) string {
 	}
 	return filepath.Join(home, ".cache", "agent-repl", "log")
 }
+
+// opGNSAuth is the operation of the records about the GNS sign-in renewer's
+// composition.
+const opGNSAuth = "daemon.gnsauth.compose"
+
+// gnsEnv is the GNS environment the daemon keeps signed in.
+const gnsEnv = "production"
