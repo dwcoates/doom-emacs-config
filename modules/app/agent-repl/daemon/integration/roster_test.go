@@ -395,6 +395,9 @@ func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
 	roster := d.WatchRoster()
 	harness.Register(t, d, worktreeOf(t, repo, "a"))
 	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	// b's session is started: a workspace with no session yet is visible under
+	// a fold, and this test folds an idle one.
+	harness.OpenAndStart(t, d, b)
 	first := awaitRoster(t, d, roster, "two tabs", func(r *frontendv1.RosterPush) bool { return len(tabBarIDs(r)) == 2 })
 	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
 		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetWorkspaces().GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "later"}}}).GetCreated()
