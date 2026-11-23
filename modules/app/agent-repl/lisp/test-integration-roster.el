@@ -191,16 +191,11 @@ The spine is copied for the reason `--row-missing' documents."
 (defun agent-repl-itest-roster--push-invalid-carries-raw (daemon needle)
   "Return non-nil when a push-invalid ERROR log entry's context mentions NEEDLE.
 Fanout §4: an invalid push is logged \"with the raw JSON in context\" —
-the elisp side records the pre-decode payload (`context.arguments', per
-`agent-repl--log-record') so the diagnosis has the body that failed, not
-only the fact that something did."
-  (seq-some
-   (lambda (entry)
-     (let* ((context (alist-get 'context entry))
-            (arguments (alist-get 'arguments context)))
-       (seq-some (lambda (arg) (and (stringp arg) (string-match-p (regexp-quote needle) arg)))
-                 arguments)))
-   (agent-repl-itest--log-entries daemon "elisp.rpc.push-invalid" "error")))
+the elisp side records the pre-decode payload as one of the record's named
+`context' values (`agent-repl--log-record') so the diagnosis has the body
+that failed, not only the fact that something did."
+  (seq-some (lambda (value) (string-match-p (regexp-quote needle) value))
+            (agent-repl-itest--logged-context-strings daemon "elisp.rpc.push-invalid" "error")))
 
 (defmacro agent-repl-itest-roster--with-real-select (&rest body)
   "Run BODY with a REAL `agent-repl--ws-switch' able to drive a real Select.

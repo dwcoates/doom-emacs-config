@@ -267,13 +267,9 @@ A malformed final line is skipped, exactly like
 LEVEL is the entry's level, \"info\" when nil.  The context holds each of
 the record's named values under its own name, so any string value naming
 ARM-STRING answers."
-  (seq-some
-   (lambda (entry)
-     (seq-some (lambda (field)
-                 (and (stringp (cdr field))
-                      (string-match-p (regexp-quote arm-string) (cdr field))))
-               (agent-repl-itest--body-field entry 'context)))
-   (agent-repl-itest-composer--log-entries daemon operation (or level "info"))))
+  (seq-some (lambda (value) (string-match-p (regexp-quote arm-string) value))
+            (agent-repl-itest--context-strings
+             (agent-repl-itest-composer--log-entries daemon operation (or level "info")))))
 
 ;;;; ---- The three REQUIRED request facts ----
 

@@ -799,6 +799,21 @@ or \"error\")."
           (or (null level) (equal (alist-get 'level record) level))))
    (agent-repl-itest--log-records daemon)))
 
+(defun agent-repl-itest--context-strings (records)
+  "Return every string value the contexts of log RECORDS hold, in order.
+A record carries each of its named values in its `context' under the
+value's own name (`agent-repl--log-record'), so this is every dynamic value
+the records wrote as text.  THE ONE reader of a record's values every
+integration suite uses."
+  (seq-mapcat (lambda (record)
+                (seq-filter #'stringp (mapcar #'cdr (alist-get 'context record))))
+              records))
+
+(defun agent-repl-itest--logged-context-strings (daemon operation &optional level)
+  "Return every string context value of DAEMON's OPERATION records at LEVEL."
+  (agent-repl-itest--context-strings
+   (agent-repl-itest--log-entries daemon operation level)))
+
 (defun agent-repl-itest--logged-p (daemon operation &optional level)
   "Return non-nil when DAEMON's run logged OPERATION (at LEVEL)."
   (consp (agent-repl-itest--log-entries daemon operation level)))
