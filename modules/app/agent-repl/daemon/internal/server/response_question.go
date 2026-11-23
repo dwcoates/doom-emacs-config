@@ -255,7 +255,7 @@ func (s *server) submitQuestion(
 }
 
 // questionStaysHere reports whether a question asked in SUBJECT is answered
-// by SUBJECT itself, never by an intake workspace or any other: the deploy
+// by SUBJECT itself, never by an intake workspace or any other: a standing
 // mediator and the holder of its repository's queue bypass mode are standing
 // workspaces that act on their own repository directly, so the question
 // reaches the one the person is looking at.
@@ -265,7 +265,7 @@ func (s *server) questionStaysHere(ctx context.Context, subject resolved) (bool,
 		subject.Log.Error(opResponseQuestion, "could not read the workspace's row to route its question", dlog.WithCause(dlog.Context{"workspace": string(subject.Record.ID)}, err))
 		return false, fmt.Errorf("route a question of %s: %w", subject.Record.ID, err)
 	}
-	if record.DeployMediator {
+	if record.IsMediator() {
 		return true, nil
 	}
 	standing, err := s.deps.DB.QueueBypass(ctx, subject.Record.ID)

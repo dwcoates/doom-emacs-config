@@ -876,6 +876,30 @@ type DB interface {
 	// MediatorRepoOf answers the queue whose deploy mediator WS is, and
 	// whether it is one (deploystanding.go).
 	MediatorRepoOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error)
+	// StandingMediatorOf, StandingMediatorRepoOf, RecordStandingMediator and
+	// MarkStandingMediatorBriefed are the four above for a mediator in any
+	// role (deploystanding.go).
+	StandingMediatorOf(ctx context.Context, role MediatorRole, repo RepoKey) (DeployMediator, bool, error)
+	StandingMediatorRepoOf(ctx context.Context, role MediatorRole, ws WorkspaceID) (RepoKey, bool, error)
+	RecordStandingMediator(ctx context.Context, role MediatorRole, repo RepoKey, ws WorkspaceID) error
+	MarkStandingMediatorBriefed(ctx context.Context, role MediatorRole, repo RepoKey) error
+	// The production checks (productionchecks.go): a span owed and due, the
+	// check to decide and the span before it, its prompt and resumption, its
+	// decision with the children it dispatched, and each child's sites,
+	// fold and ending.
+	OweProductionCheck(ctx context.Context, repo RepoKey, landing time.Time, version string) (ProductionCheck, bool, error)
+	MarkProductionChecksDue(ctx context.Context, repo RepoKey, at time.Time) (int, error)
+	ProductionCheckOf(ctx context.Context, repo RepoKey) (*ProductionCheck, error)
+	PreviousProductionSpan(ctx context.Context, repo RepoKey, until time.Time) (ProductionCheck, bool, error)
+	MarkProductionCheckPrompted(ctx context.Context, repo RepoKey, until, at time.Time, turn TurnID) (bool, error)
+	MarkProductionCheckResumed(ctx context.Context, repo RepoKey, until time.Time, turn TurnID) (bool, error)
+	DecideProductionCheck(ctx context.Context, repo RepoKey, until, at time.Time, decision ProductionDecision, summary string, children []ProductionChild) error
+	OwnedSites(ctx context.Context, repo RepoKey) (map[string]WorkspaceID, error)
+	FixedSites(ctx context.Context, repo RepoKey) ([]FixedSite, error)
+	ProductionChildOf(ctx context.Context, ws WorkspaceID) (ProductionChild, bool, error)
+	ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]ProductionChild, error)
+	FoldProductionChild(ctx context.Context, folded, surviving WorkspaceID, at time.Time) error
+	EndProductionChild(ctx context.Context, ws WorkspaceID, how ProductionChildEnding, at time.Time) (bool, error)
 	// RecordMediationEnding records how the checked deploy ended on its check.
 	RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error)
 	// OweCompaction records that a workspace's next start compacts its conversation.

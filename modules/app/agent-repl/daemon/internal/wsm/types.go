@@ -160,11 +160,12 @@ type Workspace struct {
 	// as the roster last derived it: what every per-workspace allocation is
 	// gated on.
 	Visibility Visibility
-	// DeployMediator reports whether the workspace is its repository's deploy
-	// mediator (deploy_mediators): it runs and is kept warm like any open
-	// workspace, hidden or not (owner ruling, 2026-11-17), so a deploy's check
-	// never waits on a cold cache.
-	DeployMediator bool
+	// Mediator is the standing mediator the workspace is, if any: its
+	// repository's deploy mediator (deploy_mediators) or production mediator
+	// (production_mediators). A mediator runs and is kept warm like any open
+	// workspace, hidden or not (owner ruling, 2026-11-17), so a check never
+	// waits on a cold cache.
+	Mediator MediatorRole
 	// EmojiAck reports that the Slack emoji-ack reaction system created the
 	// workspace (its recorded originator, workspace_originators). READ-ONLY,
 	// derived in the shared select list, so the record and the originator can
@@ -1739,3 +1740,23 @@ func (e MergeQueueEntry) AheadFailed() bool {
 func (e MergeQueueEntry) AheadLanded() bool {
 	return e.WaitsOnLeft == MergeLeftLanded
 }
+
+// MediatorRole is which of its repository's standing mediators a workspace
+// is. The zero value is a workspace that is neither.
+type MediatorRole string
+
+// The mediator roles.
+const (
+	// NotMediator is a workspace that is no standing mediator.
+	NotMediator MediatorRole = ""
+	// MediatorDeploy is the repository's deploy mediator, which checks each
+	// landing and holds the queue until it decides.
+	MediatorDeploy MediatorRole = "deploy"
+	// MediatorProduction is the repository's production mediator, which
+	// reviews the span between landings and dispatches children.
+	MediatorProduction MediatorRole = "production"
+)
+
+// IsMediator reports whether the workspace is one of its repository's
+// standing mediators.
+func (w Workspace) IsMediator() bool { return w.Mediator != NotMediator }

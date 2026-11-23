@@ -62,8 +62,15 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
 	mergeTurnStartedColumn + `, ` +
 	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, visibility, ` +
-	`EXISTS (SELECT 1 FROM deploy_mediators WHERE deploy_mediators.workspace_id = workspaces.id), ` +
+	mediatorRoleColumn + `, ` +
 	emojiAckColumn
+
+// mediatorRoleColumn derives Mediator: the standing mediator the workspace is
+// recorded as, spelled as a MediatorRole.
+const mediatorRoleColumn = `CASE ` +
+	`WHEN EXISTS (SELECT 1 FROM deploy_mediators WHERE deploy_mediators.workspace_id = workspaces.id) THEN 'deploy' ` +
+	`WHEN EXISTS (SELECT 1 FROM production_mediators WHERE production_mediators.workspace_id = workspaces.id) THEN 'production' ` +
+	`ELSE '' END`
 
 // emojiAckColumn derives EmojiAck: whether the workspace's recorded originator
 // (workspace_originators, keyed by its primary key) is the Slack emoji-ack
@@ -136,7 +143,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.DeployMediator, &ws.EmojiAck); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)

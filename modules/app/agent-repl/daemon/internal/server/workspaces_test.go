@@ -3766,7 +3766,7 @@ func mediatorHarness(t *testing.T) *harness {
 	h := newHarness(t)
 	ws := h.DB.workspaces[testWorkspaceID]
 	ws.Repo = "repo-1"
-	ws.DeployMediator = true
+	ws.Mediator = wsm.MediatorDeploy
 	h.DB.workspaces[testWorkspaceID] = ws
 	return h
 }
@@ -3830,7 +3830,7 @@ func TestCreateWorkspaceFailsWhenTheRequestersStandingCannotBeRead(t *testing.T)
 	log := &recordingLogger{}
 	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
 	ws := h.DB.workspaces[testWorkspaceID]
-	ws.DeployMediator = true
+	ws.Mediator = wsm.MediatorDeploy
 	h.DB.workspaces[testWorkspaceID] = ws
 	h.DB.workspaceErrs = map[ids.WorkspaceID]error{testWorkspaceID: errors.New("database is locked")}
 	req := standardCreate(registeredRepoRef(h), "")

@@ -342,7 +342,7 @@ func TestTheStandingFixerStaysOpenAfterItsFixDeploys(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	h.db.mu.Lock()
-	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository, DeployMediator: true}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository, Mediator: wsm.MediatorDeploy}
 	h.db.mu.Unlock()
 
 	// Act

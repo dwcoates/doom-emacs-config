@@ -345,7 +345,9 @@ func TestAnswerDeployCheckColdGateAnswersOnlyAStandingDeployChecksGate(t *testin
 			// Arrange
 			f := newFixture(t)
 			record := f.workspace("w1", t.TempDir())
-			record.DeployMediator = tt.standing
+			if tt.standing {
+				record.Mediator = wsm.MediatorDeploy
+			}
 			f.db.workspaces[record.ID] = record
 			if tt.gate {
 				f.cards.coldGate = &ServedColdGate{VendorSessionID: "v-1"}

@@ -132,12 +132,12 @@ func (c *controller) recordStale(ctx context.Context, ws wsm.Workspace, fields d
 // visibility and standing in the roster.
 func takeoverFacts(ws wsm.Workspace, facts bringup.WasUp, rule takeoverRule) dlog.Context {
 	ctx := dlog.Merge(facts.Context(), dlog.Context{
-		"workspace":       string(ws.ID),
-		"rule":            string(rule),
-		"visibility":      ws.Visibility.String(),
-		"hidden":          ws.Hidden,
-		"current":         ws.Current,
-		"deploy_mediator": ws.DeployMediator,
+		"workspace":  string(ws.ID),
+		"rule":       string(rule),
+		"visibility": ws.Visibility.String(),
+		"hidden":     ws.Hidden,
+		"current":    ws.Current,
+		"mediator":   string(ws.Mediator),
 	})
 	if ws.Priority != nil {
 		ctx["priority"] = int(*ws.Priority)

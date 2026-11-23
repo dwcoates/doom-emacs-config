@@ -89,7 +89,7 @@ func (ws Workspace) InMergedBand() bool {
 // visibility: the selection, a queued merge, a deploy mediator, and every
 // workspace that is neither hidden nor a hidden merge workspace.
 func (ws Workspace) KeptWarm(mergeQueued bool) bool {
-	if ws.Current || mergeQueued || ws.DeployMediator {
+	if ws.Current || mergeQueued || ws.IsMediator() {
 		return true
 	}
 	return !ws.MergeHidden() && !ws.InHiddenSection()
@@ -146,7 +146,7 @@ func (ws Workspace) LetsCacheLapse() bool {
 // always has its session. The rest of this rule adds the workspaces that run
 // while nobody can see them.
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
-	if ws.Visibility.Visible() || mergeQueued || ws.DeployMediator {
+	if ws.Visibility.Visible() || mergeQueued || ws.IsMediator() {
 		return true
 	}
 	if ws.MergeHidden() {
@@ -164,7 +164,7 @@ func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 // the user is not looking at it. The session's start and the keeper's cadence
 // read it, and LetsCacheLapse is it or a close.
 func (ws Workspace) KeepaliveHeld() bool {
-	return ws.InHiddenSection() && !ws.Current && !ws.DeployMediator
+	return ws.InHiddenSection() && !ws.Current && !ws.IsMediator()
 }
 
 // isTopPriority reports whether P is P0.5 or P1, the priorities whose open

@@ -460,7 +460,7 @@ var directQuestionCases = []struct {
 }{
 	{name: "the deploy mediator", arrange: func(h *harness) {
 		ws := h.DB.workspaces[testWorkspaceID]
-		ws.DeployMediator = true
+		ws.Mediator = wsm.MediatorDeploy
 		h.DB.workspaces[testWorkspaceID] = ws
 	}},
 	{name: "the holder of the queue bypass mode", arrange: func(h *harness) {

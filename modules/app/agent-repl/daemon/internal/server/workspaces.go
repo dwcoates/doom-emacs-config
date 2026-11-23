@@ -323,7 +323,7 @@ func (s *server) refuseDeployMediatorCreate(ctx context.Context, rpc string, res
 		return nil, false
 	case err != nil:
 		return failResolution(s.log, rpc, fmt.Errorf("read the requester %s's deploy-mediator standing: %w", *id, err)), true
-	case !record.DeployMediator:
+	case record.Mediator != wsm.MediatorDeploy:
 		return nil, false
 	}
 	return s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmRequestedByDeployMediator, Info: true,

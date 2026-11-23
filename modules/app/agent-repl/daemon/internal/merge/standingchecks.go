@@ -22,7 +22,7 @@ import (
 // start and the session ended (compactMediatorAfterRemediation); after a
 // quiet check, only past QuietCheckCompactionTokens, it is compacted at once
 // (compactMediator). It stays open and warm
-// (wsm.Workspace.DeployMediator). The daemon makes it only for a queue
+// (wsm.Workspace.Mediator). The daemon makes it only for a queue
 // that has none, and reopens it when the user closed it.
 
 // mediatorName is the slug a made mediator takes; the workspace verbs make

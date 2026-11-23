@@ -121,17 +121,36 @@ ALTER TABLE merge_queue_repos DROP COLUMN deploy_quiet_checks;
 ALTER TABLE merge_queue_repos DROP COLUMN deploy_compaction_armed;
 `
 
-// DeployMediator is a queue's deploy mediator.
+// DeployMediator is a queue's standing mediator in one role: its deploy
+// mediator, or its production mediator.
 type DeployMediator struct {
 	Workspace WorkspaceID
 	// Briefed is whether the mediator was prompted in its role yet.
 	Briefed bool
 }
 
+// mediatorTable is the table each role's standing mediators are recorded in.
+// A role with no table is a defect, refused loudly.
+func mediatorTable(role MediatorRole) string {
+	switch role {
+	case MediatorDeploy:
+		return "deploy_mediators"
+	case MediatorProduction:
+		return "production_mediators"
+	}
+	panic(fmt.Sprintf("wsm: the mediator role %q has no table", role))
+}
+
 // DeployMediatorOf answers REPO's deploy mediator, and whether it has one.
 func (s *store) DeployMediatorOf(ctx context.Context, repo RepoKey) (DeployMediator, bool, error) {
+	return s.StandingMediatorOf(ctx, MediatorDeploy, repo)
+}
+
+// StandingMediatorOf answers REPO's mediator in ROLE, and whether it has one.
+func (s *store) StandingMediatorOf(ctx context.Context, role MediatorRole, repo RepoKey) (DeployMediator, bool, error) {
 	const op = "daemon.wsm.deploy_mediator_of"
-	repo, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
+	fields := dlog.Context{"repo": string(repo), "role": string(role)}
+	repo, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
 		return DeployMediator{}, false, err
 	}
@@ -139,9 +158,9 @@ func (s *store) DeployMediatorOf(ctx context.Context, repo RepoKey) (DeployMedia
 		out   DeployMediator
 		found bool
 	)
-	err = s.read(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context) error {
+	err = s.read(ctx, op, fields, func(ctx context.Context) error {
 		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT workspace_id, briefed FROM deploy_mediators WHERE repo_key = ?`, string(repo)).Scan(&out.Workspace, &out.Briefed)
+			`SELECT workspace_id, briefed FROM `+mediatorTable(role)+` WHERE repo_key = ?`, string(repo)).Scan(&out.Workspace, &out.Briefed)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -157,13 +176,19 @@ func (s *store) DeployMediatorOf(ctx context.Context, repo RepoKey) (DeployMedia
 // MediatorRepoOf answers the queue whose deploy mediator WS is, and whether
 // it is one.
 func (s *store) MediatorRepoOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error) {
+	return s.StandingMediatorRepoOf(ctx, MediatorDeploy, ws)
+}
+
+// StandingMediatorRepoOf answers the queue whose mediator in ROLE WS is, and
+// whether it is one.
+func (s *store) StandingMediatorRepoOf(ctx context.Context, role MediatorRole, ws WorkspaceID) (RepoKey, bool, error) {
 	const op = "daemon.wsm.mediator_repo_of"
 	var (
 		repo  string
 		found bool
 	)
-	err := s.read(ctx, op, dlog.Context{"workspace": string(ws)}, func(ctx context.Context) error {
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT repo_key FROM deploy_mediators WHERE workspace_id = ?`, string(ws)).Scan(&repo)
+	err := s.read(ctx, op, dlog.Context{"workspace": string(ws), "role": string(role)}, func(ctx context.Context) error {
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT repo_key FROM `+mediatorTable(role)+` WHERE workspace_id = ?`, string(ws)).Scan(&repo)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -179,20 +204,26 @@ func (s *store) MediatorRepoOf(ctx context.Context, ws WorkspaceID) (RepoKey, bo
 // RecordDeployMediator makes WS REPO's deploy mediator, unbriefed, replacing
 // any mediator the queue had.
 func (s *store) RecordDeployMediator(ctx context.Context, repo RepoKey, ws WorkspaceID) error {
+	return s.RecordStandingMediator(ctx, MediatorDeploy, repo, ws)
+}
+
+// RecordStandingMediator makes WS REPO's mediator in ROLE, unbriefed,
+// replacing any mediator the queue had in that role.
+func (s *store) RecordStandingMediator(ctx context.Context, role MediatorRole, repo RepoKey, ws WorkspaceID) error {
 	const op = "daemon.wsm.record_deploy_mediator"
-	fields := dlog.Context{"repo": string(repo), "workspace": string(ws)}
+	fields := dlog.Context{"repo": string(repo), "workspace": string(ws), "role": string(role)}
 	repo, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
 		return err
 	}
 	if repo == "" || ws == "" {
-		err := errors.New("wsm: a deploy mediator names its queue and its workspace")
-		s.log.Error(op, "refused a deploy mediator that names no queue or workspace", withError(fields, err))
+		err := errors.New("wsm: a standing mediator names its queue and its workspace")
+		s.log.Error(op, "refused a standing mediator that names no queue or workspace", withError(fields, err))
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO deploy_mediators (repo_key, workspace_id, briefed) VALUES (?, ?, 0)
+			`INSERT INTO `+mediatorTable(role)+` (repo_key, workspace_id, briefed) VALUES (?, ?, 0)
 			 ON CONFLICT(repo_key) DO UPDATE SET workspace_id = excluded.workspace_id, briefed = 0`,
 			string(repo), string(ws))
 		return err
@@ -203,20 +234,27 @@ func (s *store) RecordDeployMediator(ctx context.Context, repo RepoKey, ws Works
 // role. A queue with no mediator is refused: only a mediator the daemon
 // recorded is briefed.
 func (s *store) MarkMediatorBriefed(ctx context.Context, repo RepoKey) error {
+	return s.MarkStandingMediatorBriefed(ctx, MediatorDeploy, repo)
+}
+
+// MarkStandingMediatorBriefed records that REPO's mediator in ROLE was
+// briefed. A queue with no mediator in ROLE is refused.
+func (s *store) MarkStandingMediatorBriefed(ctx context.Context, role MediatorRole, repo RepoKey) error {
 	const op = "daemon.wsm.mark_mediator_briefed"
-	repo, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
+	fields := dlog.Context{"repo": string(repo), "role": string(role)}
+	repo, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
 		return err
 	}
-	return s.write(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE deploy_mediators SET briefed = 1 WHERE repo_key = ?`, string(repo))
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE `+mediatorTable(role)+` SET briefed = 1 WHERE repo_key = ?`, string(repo))
 		if err != nil {
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil {
 			return err
 		} else if n != 1 {
-			return fmt.Errorf("wsm: queue %s has no deploy mediator to mark briefed", repo)
+			return fmt.Errorf("wsm: queue %s has no %s mediator to mark briefed", repo, role)
 		}
 		return nil
 	})

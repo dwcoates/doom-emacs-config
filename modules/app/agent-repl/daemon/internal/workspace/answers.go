@@ -271,7 +271,7 @@ func (v *verbs) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	}
 	// A STANDING DEPLOY CHECK STAYS WHERE IT IS: it runs and is kept warm
 	// hidden or not (wsm.Workspace.Runs), so the hidden intake is never shown.
-	if record.InHiddenSection() && !record.DeployMediator {
+	if record.InHiddenSection() && !record.IsMediator() {
 		if err := v.recordHidden(ctx, log, ws, false); err != nil {
 			// recordHidden recorded the failure at ERROR as its owner.
 			v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, logsite.Msg("the workspace could not be shown; the answer is refused"), err)

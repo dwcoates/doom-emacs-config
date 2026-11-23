@@ -4825,14 +4825,25 @@ func TestParkedKeepaliveSurfacesAnUnreadableStanding(t *testing.T) {
 	}
 }
 
-func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
+func TestAStandingMediatorsSessionLandsAsItsRole(t *testing.T) {
 	cases := []struct {
-		name         string
-		standing     bool
-		wantMediator bool
+		name string
+		role wsm.MediatorRole
+		// want names the landing arm the session runs under.
+		want func(*shimv1.SessionProfileAgentLanding) bool
 	}{
-		{name: "the repository's deploy mediator, by its standing", standing: true, wantMediator: true},
-		{name: "any other workspace lands through the queue"},
+		{
+			name: "the repository's deploy mediator, by its standing", role: wsm.MediatorDeploy,
+			want: func(l *shimv1.SessionProfileAgentLanding) bool { return l.GetDeployMediator() != nil },
+		},
+		{
+			name: "the repository's production mediator, by its standing", role: wsm.MediatorProduction,
+			want: func(l *shimv1.SessionProfileAgentLanding) bool { return l.GetProductionMediator() != nil },
+		},
+		{
+			name: "any other workspace lands through the queue",
+			want: func(l *shimv1.SessionProfileAgentLanding) bool { return l.GetThroughQueue() != nil },
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4840,7 +4851,7 @@ func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
 			f := newFleetFixture(t)
 			ws := resumable(f)
 			record := f.db.workspaces[ws]
-			record.DeployMediator = tc.standing
+			record.Mediator = tc.role
 			f.db.workspaces[ws] = record
 
 			// Act
@@ -4850,11 +4861,8 @@ func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sessionProfile: %v", err)
 			}
-			if mediator := got.GetAgent().GetLanding().GetDeployMediator() != nil; mediator != tc.wantMediator {
-				t.Fatalf("deploy mediator landing = %v, want %v", mediator, tc.wantMediator)
-			}
-			if !tc.wantMediator && got.GetAgent().GetLanding().GetThroughQueue() == nil {
-				t.Fatalf("landing = %v, want through the queue", got.GetAgent().GetLanding())
+			if landing := got.GetAgent().GetLanding(); !tc.want(landing) {
+				t.Fatalf("landing = %v, want the %q role's", landing, tc.role)
 			}
 		})
 	}

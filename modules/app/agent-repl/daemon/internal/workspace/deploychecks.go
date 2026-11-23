@@ -227,7 +227,7 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 	// check is passed over before any ownership is asked: a handover raises
 	// gates again on workspaces this daemon has not adopted yet (2026-11-17
 	// 13:24: five not_yet_adopted ERRORs, none a deploy check).
-	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.DeployMediator {
+	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.IsMediator() {
 		return err
 	}
 	_, err := v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,
