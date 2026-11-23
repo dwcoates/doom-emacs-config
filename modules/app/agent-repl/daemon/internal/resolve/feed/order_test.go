@@ -607,6 +607,49 @@ func TestSettlingAPinnedRowPlacesItAfterTheNewestPlacedRow(t *testing.T) {
 	}
 }
 
+func TestSettlingAPinnedRowRestatedWithItsPinKeyIsNoOrderChange(t *testing.T) {
+	// Arrange
+	r, log := daemonOver(t, newFakeDurableRows())
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+	restated := cloneRow(t, feedRows(r, rootFeed())[0])
+	pinKey := restated.GetOrder().GetKey()
+	restated.GetActivity().GetMerge().GetHead().GetBranchLine().GetSource().Text = "abandoned"
+
+	// Act
+	r.UpsertDurable(testWorkspace, rootFeed(), restated)
+
+	// Assert
+	if hasRecordIn(log, "error", "daemon.feed.order_changed") {
+		t.Fatalf("records = %+v, want no order change for a row restated with its pin key %q", log.Records(), pinKey)
+	}
+	if !hasRecordIn(log, "info", "daemon.feed.row_settled") {
+		t.Fatalf("records = %+v, want the settle recorded at info", log.Records())
+	}
+	if order := feedRows(r, rootFeed())[0].GetOrder(); order.GetPinned() != nil || isPinKey(order.GetKey()) {
+		t.Fatalf("order = %+v, want the row settled on an unpinned key", order)
+	}
+}
+
+func TestSettlingAPinnedRowRestatedWithAnotherKeyIsAnOrderChange(t *testing.T) {
+	// Arrange
+	r, log := daemonOver(t, newFakeDurableRows())
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+	restated := cloneRow(t, feedRows(r, rootFeed())[0])
+	restated.Order = &frontendv1.FeedRowOrder{Key: "2-not-its-key"}
+	restated.GetActivity().GetMerge().GetHead().GetBranchLine().GetSource().Text = "abandoned"
+
+	// Act
+	r.UpsertDurable(testWorkspace, rootFeed(), restated)
+
+	// Assert
+	if !hasRecordIn(log, "error", "daemon.feed.order_changed") {
+		t.Fatalf("records = %+v, want the foreign key recorded at ERROR", log.Records())
+	}
+	if order := feedRows(r, rootFeed())[0].GetOrder(); order.GetPinned() != nil || isPinKey(order.GetKey()) || order.GetKey() == "2-not-its-key" {
+		t.Fatalf("order = %+v, want the row settled on its own unpinned key", order)
+	}
+}
+
 func TestARowPlacedAfterASettledRowLandsBelowIt(t *testing.T) {
 	// Arrange
 	r, _ := daemonOver(t, newFakeDurableRows())
