@@ -55,7 +55,10 @@ read them at the symbol you are implementing. Nothing here ever changes a
 - **`WatchBashRun` is the one stream with a NATURAL END.** A book never ends —
   an agent can always say more — but a shell run concludes, and its conclusion
   is a row the store recognizes, so the stream closes after it. The caller needs
-  no cancellation protocol and no timeout to know it has the whole run.
+  no cancellation protocol and no timeout to know it has the whole run. A clean
+  close therefore MEANS the terminal was sent: a shutdown mid-run ends the watch
+  `CodeUnavailable` (site `store_shutting_down`), and the caller re-opens to
+  replay the run.
 - A watch over the **Connect protocol is half-duplex**: the client's
   `WatchAgentSession` call does not return until the server writes response
   headers, which it does on its first frame. So **acceptance is silent** — a
@@ -1096,7 +1099,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
 `unknown_bash_run`, `store_refused_request`, `upsert_changes_identity`,
 `keepalive_retired`, `bash_tail_over_cap`,
 `page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `unknown_agent`,
-`session_empty`, `write_class_unset`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
+`session_empty`, `write_class_unset`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`, `store_shutting_down`,
 `listen_occupied`, `place_not_positive`, `through_not_positive`, `position_unset`,
 `run_id_empty`, `lost_over_settled`.
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -200,6 +201,53 @@ func TestWatchBashRunEndsAfterALiveTerminalRow(t *testing.T) {
 	}
 	if err := stream.Err(); err != nil {
 		t.Fatalf("stream error = %v, want a clean natural end", err)
+	}
+}
+
+func TestWatchBashRunEndsUnavailableWhenTheStoreShutsDownBeforeTheTerminal(t *testing.T) {
+	tests := []struct {
+		name     string
+		replay   BashRunReplay
+		await    bool
+		wantRows int
+	}{
+		{name: "a watch waiting for its first row", replay: BashRunReplay{PinSeq: 4}, await: true, wantRows: 0},
+		{name: "a watch that served rows but no terminal", replay: BashRunReplay{Rows: []BashRowWritten{
+			{RunID: "run-1", Row: bashRow("run-1", false).Row, WriteSeq: 1},
+		}, PinSeq: 1}, wantRows: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange. A clean close means the terminal was sent, so a shutdown
+			// mid-run must not close cleanly: the caller re-opens to replay it.
+			store := newFakeStore()
+			store.bashRun = tc.replay
+			h := newHarness(t, store, 0)
+			stream := startBashWatchRequest(h, context.Background(), &storev1.WatchBashRunRequest{
+				Run: &conversationv1.AgentActivityId{Value: "run-1"}, AwaitFirstRow: tc.await,
+			}).open(t)
+			for i := 0; i < tc.wantRows; i++ {
+				if !stream.Receive() {
+					t.Fatalf("row %d was not delivered: %v", i, stream.Err())
+				}
+			}
+
+			// Act. 1s: same in-process fake-Store basis as the package's other
+			// shutdown bounds.
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+			if err := h.server.Shutdown(shutdownCtx); err != nil {
+				t.Fatalf("Shutdown = %v, want nil", err)
+			}
+
+			// Assert.
+			if stream.Receive() {
+				t.Fatalf("the stream delivered a row after shutdown: %v", stream.Msg())
+			}
+			if code := connect.CodeOf(stream.Err()); code != connect.CodeUnavailable {
+				t.Fatalf("code = %v, want %v (error: %v)", code, connect.CodeUnavailable, stream.Err())
+			}
+		})
 	}
 }
 
