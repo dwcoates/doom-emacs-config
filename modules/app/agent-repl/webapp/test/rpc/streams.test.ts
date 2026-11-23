@@ -1471,14 +1471,30 @@ describe("watchStream: a close that names the successor", () => {
 
     // Act.
     const handle = open(contextFor(client, sink), () => {});
-    await advance(BACKOFF.initialMs * 4);
+    await settle();
     handle.cancel();
     unregister();
 
     // Assert.
     expect(moved).toEqual(["127.0.0.1:65338"]);
     expect(sink.reported).not.toContain("daemonUnreachable");
-    expect(state.openCount).toBe(1);
+  });
+
+  it("reopens where the workspace is served once its backoff has passed", async () => {
+    // Arrange.
+    const unregister = registerWorkspaceMoved(() => undefined);
+    const { client, state } = scriptedClient([handedOver("127.0.0.1:65338")]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    const beforeBackoff = state.openCount;
+
+    // Act.
+    await advance(BACKOFF.initialMs * 2);
+    handle.cancel();
+    unregister();
+
+    // Assert: no reopen inside the backoff, one after it.
+    expect([beforeBackoff, state.openCount]).toEqual([1, 2]);
   });
 
   it("still files daemonUnreachable for a close that names no successor", async () => {

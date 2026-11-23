@@ -17,12 +17,17 @@
  * call and relays each page subscription to the daemon serving the workspace,
  * so no handover reloads the page. `transferred` — and the `transferring_away`
  * refusal arm, which is the same fact arriving as an answer — makes the page
- * adopt its workspace in place (`adoptInPlace`, the boot's own adoption loop):
- * on a daemon serving this page's webapp build it re-homes every stream
- * (`AppContext.rehome`), and on one serving another it draws the standing
- * "workspace moved" notice and quiesces, because that daemon's frames carry
- * fields this build has no descriptor for; the deploy's one host reload then
- * brings the page onto that build.
+ * adopt its workspace in place (`adoptInPlace`, the boot's own adoption loop),
+ * which is the web half of the successor's rendezvous. On a daemon serving this
+ * page's webapp build the page then KEEPS EVERY STREAM where it stands: the
+ * incumbent ends the page's stream once the successor accepts on the shared
+ * address (the handover's promotion), and the page attaches once, there, and
+ * resumes its feed (docs/protobuf-design/feed-resume.md). Re-homing at the
+ * adoption instead moved every stream twice, and redrew the feed twice. On a
+ * daemon serving another build it draws the standing "workspace moved" notice
+ * and quiesces, because that daemon's frames carry fields this build has no
+ * descriptor for; the deploy's one host reload then brings the page onto that
+ * build.
  *
  * ADOPTION RUNS AT BOOT, before any view stream opens (`adoptAtBoot`), and
  * again in place at every handover. `no_transfer_announced` is the ORDINARY
@@ -197,7 +202,10 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
       (outcome) => {
         moving = false;
         if (outcome === "rehomed") {
-          ctx.rehome();
+          log.info("the workspace is adopted where it is served now; this page keeps its streams until its daemon hands them on", {
+            operation: "lifecycle.adopted-in-place",
+            context: { address },
+          });
           return;
         }
         log.info("the daemon serving this workspace runs another webapp; going quiet until the host reloads", {

@@ -19,10 +19,12 @@
  * ITSELF", owner ruling 2026-11-22): no handover reloads a page. On the
  * `transferred` push the mounted page adopts its workspace IN PLACE, through
  * the one shared address every daemon serves (the incumbent forwards the call
- * to the successor), and on its own webapp build re-homes every stream there
- * (`AppContext.rehome`). So the contract's promises to THIS end are:
+ * to the successor), and keeps every stream where it stands until the
+ * incumbent ends the page's stream at the promotion; the page then attaches
+ * once, at the successor (docs/protobuf-design/feed-resume.md). So the
+ * contract's promises to THIS end are:
  *
- *  1. the page re-homes: every standing stream is told to reopen;
+ *  1. the page attaches again, and no stream is moved by the adoption;
  *  2. it never goes quiet and never draws the moved notice;
  *  3. its views are drawn again, from the successor, with no failure filed.
  *
@@ -61,7 +63,7 @@ afterAll(async () => {
 });
 
 it(
-  "adopts its workspace in place and re-homes every stream when its daemon hands the workspace over, never going quiet",
+  "adopts its workspace in place and attaches again at the successor when its daemon hands the workspace over, never going quiet",
   async () => {
     // Arrange — THE RENDEZVOUS. The page is mounted and every stream the six
     // mounts opened is standing (that is what `bootLayer` returning means),
@@ -70,9 +72,13 @@ it(
     await awaitDrawn(app, "the footer, so the page's streams are standing", () =>
       textOf(app.$(".footer-status")) !== "",
     );
-    let rehomed = 0;
+    let reattached = 0;
+    app.ctx.streams.onAttached(() => {
+      reattached += 1;
+    });
+    let moved = 0;
     app.ctx.onDaemonMoved(() => {
-      rehomed += 1;
+      moved += 1;
     });
     await app.ctx.client.clientLog({
       source: { case: "workspace", value: app.ctx.workspace },
@@ -84,9 +90,11 @@ it(
     // host half on the successor. The page's own `transferred` handling is the
     // web half. Nothing here drives it.
 
-    // Assert (1) — the page re-homed. The budget is the handover's, not a
-    // turn's: two real process lifecycles.
-    await awaitDrawn(app, "the page re-homing its streams", () => rehomed > 0, HANDOVER_BUDGET_MS);
+    // Assert (1) — the page attached again, at the promotion, and the
+    // adoption moved no stream. The budget is the handover's, not a turn's:
+    // two real process lifecycles.
+    await awaitDrawn(app, "the page attaching at the successor", () => reattached > 0, HANDOVER_BUDGET_MS);
+    expect(moved).toBe(0);
 
     // Assert (2) — never quiet, never the moved notice.
     expect(app.ctx.isQuiesced()).toBe(false);
@@ -95,11 +103,11 @@ it(
     // Assert (3) — its views drawn again from the successor, nothing filed.
     await awaitDrawn(
       app,
-      "the re-homed page's footer status",
+      "the reattached page's footer status",
       () => textOf(app.$(".footer-status")) !== "",
       HANDOVER_BUDGET_MS,
     );
-    expect(app.feedContainer(), "the re-homed page drew no root feed").not.toBeNull();
+    expect(app.feedContainer(), "the reattached page drew no root feed").not.toBeNull();
     expect(app.failureArms()).toHaveLength(0);
   },
   HANDOVER_TEST_MS,

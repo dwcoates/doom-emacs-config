@@ -53,6 +53,23 @@
  * named can settle, and can never subscribe at a daemon the page holds no
  * stream on. The run the move ended then ends late, and its own end detaches
  * nothing, since the generation it opened for is already gone.
+ *
+ * A PLANNED ENDING ENDS EVERY SUBSCRIPTION AS PLANNED. The daemon ends a page
+ * with `ending` when it stands down and when its successor takes the shared
+ * address over (the handover's promotion), after each subscription's last
+ * frame and with no `ended` frame for any of them. So each subscription's
+ * stream is ended with a `PlannedReopen`, which reopens it under the next
+ * attachment filing nothing; a bare close would read as a stream that
+ * stopped on its own, which files `daemon_unreachable` at ERROR for every
+ * subscription on every handover.
+ *
+ * A PAGE NOBODY SEES DOES NOT ATTACH AGAIN. The page's first attach is
+ * unconditional, so a tab Emacs preloads still draws. But once the page's
+ * stream has ended, a page that is not seen (page-seen.ts) is DORMANT: it
+ * opens no stream, and every subscription and feed open waits (`awake`),
+ * until a reader sees it. It keeps what it drew, and catches up when it is
+ * shown, by its feed's resume. So a handover costs a page nobody is looking
+ * at nothing, rather than an attach, seven subscriptions and a feed open.
  */
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
@@ -65,6 +82,7 @@ import { PlannedReopen } from "./planned-reopen.js";
 import { codeFromString } from "@connectrpc/connect/protocol-connect";
 import { createListeners } from "../listeners.js";
 import { createLogger } from "../log.js";
+import type { PageSeen } from "../page-seen.js";
 import { SUCCESSOR_HEADER } from "./moved.js";
 import {
   SubscribePageRequestSchema,
@@ -134,6 +152,25 @@ export interface PageStreams {
    * handover). Answers the unsubscribe.
    */
   onAttached(fn: () => void): () => void;
+  /**
+   * Resolve once the page may talk to the daemon: at once unless the page is
+   * DORMANT (its stream ended while no reader saw it), and otherwise when a
+   * reader first sees it, or when SIGNAL aborts. Every call a page makes on
+   * its own initiative after its stream ended (a feed's reopen) waits here, so
+   * a page nobody sees asks the daemon nothing.
+   */
+  awake(signal: AbortSignal): Promise<void>;
+}
+
+/** What a page's stream states of itself and reads its readers' sight from. */
+export interface PageStreamsOptions {
+  /** What one of Emacs's own web views states of itself (WatchPageRequest.webhost). */
+  webhost?: WebhostPageInit;
+  /**
+   * Whether a reader can see the page now. Unset for a document a reader
+   * always sees (the web view host), which reattaches at once.
+   */
+  seen?: PageSeen;
 }
 
 export interface PageStreamsHandle extends PageStreams {
@@ -258,13 +295,31 @@ export type WebhostPageInit = MessageInitShape<typeof WebhostPageSchema>;
  * webapp build it was loaded from and the host's reload generation
  * (agentrepl.v1.WebhostPage).
  */
-export function startPageStreams(ctx: PageStreamContext, page: string, webhost?: WebhostPageInit): PageStreamsHandle {
+export function startPageStreams(ctx: PageStreamContext, page: string, options: PageStreamsOptions = {}): PageStreamsHandle {
+  const { webhost, seen } = options;
   const subscriptions = new Map<string, FrameQueue<PageFrame>>();
   const attachedListeners = createListeners();
+  const wakeListeners = createListeners();
   let attachment = newAttachment();
   /** The generation the page's current run was opened for; its end detaches only that one. */
   let runAttachment = attachment;
   let nextId = 0;
+  /** Whether the current run read the daemon's planned ending. Reset per run. */
+  let endingRead = false;
+  /** Whether the page's stream has ended once, after which it reattaches only while seen. */
+  let endedOnce = false;
+  /** Whether the page's stream ended while no reader saw it, until one does. */
+  let dormant = false;
+  const unsubscribeFromSeen =
+    seen?.onChange((isSeen) => {
+      if (!isSeen || !dormant) return;
+      dormant = false;
+      log.info("a reader sees the page; it attaches again and catches up", {
+        operation: "rpc.page-woken",
+        context: { page },
+      });
+      wakeListeners.notify();
+    }) ?? ((): void => undefined);
 
   // THE PAGE'S OWN STREAM IS AN ORDINARY STANDING STREAM, so it gets the
   // ordinary machinery: an ending it did not ask for is a transport failure,
@@ -274,19 +329,30 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
   const stream: StreamHandle = watchStream<WatchPageResponse>(ctx, {
     name: "WatchPage",
     schema: WatchPageResponseSchema,
-    open: (client, signal) => {
-      runAttachment = attachment;
-      return client.watchPage(webhost === undefined ? { page } : { page, webhost }, { signal });
-    },
+    open: (client, signal) => openRun(client, signal),
     // THE DAEMON'S PLANNED EXIT ENDS THE PAGE WITH `ending`, after every
     // subscription on it has sent its own last frame: the page reopens on the
     // daemon that serves next without filing the unreachable failure.
-    plannedEnding: (response) => response.frame.case === "ending",
+    plannedEnding: (response) => {
+      if (response.frame.case !== "ending") return false;
+      endingRead = true;
+      return true;
+    },
     onPush: (response) => routeFrame(response),
-    onEnd: () => {
+    onEnd: (end) => {
+      endedOnce = true;
+      // DORMANT FIRST, so a subscription reopening from the end below already
+      // finds the page asleep.
+      if (end.kind !== "cancelled" && seen !== undefined && !seen.isSeen()) {
+        dormant = true;
+        log.info("the page's stream ended while no reader sees it; it stays quiet until one does", {
+          operation: "rpc.page-dormant",
+          context: { page, planned: endingRead },
+        });
+      }
       // A run a daemon move ended has had its generation detached already
       // (below); detaching again would end the generation the move began.
-      if (runAttachment === attachment) detach();
+      if (runAttachment === attachment) detach(endingRead);
     },
   });
   // SUBSCRIBED AFTER THE STREAM, and it does not matter: the detach is
@@ -297,21 +363,49 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
       operation: "rpc.page-daemon-moved",
       context: { page, subscriptions: subscriptions.size },
     });
-    detach();
+    detach(false);
   });
 
   return {
     page,
     watch,
+    awake,
     onAttached(fn: () => void): () => void {
       return attachedListeners.add(fn);
     },
     cancel(): void {
       unsubscribeFromMove();
+      unsubscribeFromSeen();
       stream.cancel();
-      detach();
+      detach(false);
+      wakeListeners.notify();
     },
   };
+
+  /**
+   * One run of the page's stream. Every run after the stream first ended
+   * waits for the page to be awake, so a page nobody sees opens nothing.
+   */
+  async function* openRun(client: PageStreamContext["client"], signal: AbortSignal): AsyncGenerator<WatchPageResponse> {
+    if (endedOnce) await awake(signal);
+    if (signal.aborted) return;
+    endingRead = false;
+    runAttachment = attachment;
+    yield* client.watchPage(webhost === undefined ? { page } : { page, webhost }, { signal });
+  }
+
+  function awake(signal: AbortSignal): Promise<void> {
+    if (!dormant || signal.aborted) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const done = (): void => {
+        unsubscribe();
+        signal.removeEventListener("abort", done);
+        resolve();
+      };
+      const unsubscribe = wakeListeners.add(done);
+      signal.addEventListener("abort", done, { once: true });
+    });
+  }
 
   /** Draw one frame off the page's stream onto the subscription it addresses. */
   function routeFrame(response: WatchPageResponse): void {
@@ -474,11 +568,15 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
   /**
    * The page's stream ended: every subscription on it ends with it, and the
    * next `watch()` waits on the NEXT generation's attachment rather than on a
-   * promise that has already settled.
+   * promise that has already settled. PLANNED is a stream the daemon ended
+   * with its `ending`: each subscription then reopens as planned.
    */
-  function detach(): void {
+  function detach(planned: boolean): void {
     attachment.reject(new PageDetached(page));
-    for (const [, queue] of subscriptions) queue.close();
+    for (const [, queue] of subscriptions) {
+      if (planned) queue.fail(new PlannedReopen("the page's daemon ended its stream as planned"));
+      else queue.close();
+    }
     subscriptions.clear();
     attachment = newAttachment();
   }
@@ -534,7 +632,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
           context: { page, subscription: id, kind, current: generation === attachment },
         });
         if (generation === attachment) {
-          detach();
+          detach(true);
           stream.reopen();
         }
         throw new PlannedReopen("the page's attachment is over");

@@ -10,7 +10,7 @@
  * has to be asserted rather than the symptom.
  */
 import { successorOf } from "../../src/rpc/moved.js";
-import { fakePageSeen } from "../page-seen-fake.js";
+import { fakePageSeen, type FakePageSeen } from "../page-seen-fake.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +47,7 @@ import { startPageStreams, type PageStreamsHandle } from "../../src/rpc/page-str
 import { createDaemonOrigin, type DaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { watchStream } from "../../src/rpc/streams.js";
 import { filesUnder } from "../files-under.js";
+import { captureLogRecords, forwardedRecords } from "../log-capture.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 
@@ -296,6 +297,7 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
 function contextFor(
   client: ReturnType<typeof createAgentReplClient>,
   failures: FailureSink,
+  seen: FakePageSeen = fakePageSeen(),
 ): AppContext {
   return createAppContext({
     webappBuild: "test-webapp-build",
@@ -303,7 +305,7 @@ function contextFor(
     workspace: WORKSPACE,
     ticker: createTicker(1000),
     failures,
-    seen: fakePageSeen(),
+    seen,
     composerEnabled: false,
     page: "page-1",
   });
@@ -694,7 +696,7 @@ describe("the page's one standing stream", () => {
     await settle();
 
     // Act.
-    const handle = startPageStreams(ctx, "webhost-1", { webappBuild: "Web1" });
+    const handle = startPageStreams(ctx, "webhost-1", { webhost: { webappBuild: "Web1" } });
     await settle();
 
     // Assert.
@@ -712,7 +714,7 @@ describe("the page's one standing stream", () => {
     await settle();
 
     // Act.
-    const handle = startPageStreams(ctx, "webhost-1", { webappBuild: "Web1", reloadGeneration: 4 });
+    const handle = startPageStreams(ctx, "webhost-1", { webhost: { webappBuild: "Web1", reloadGeneration: 4 } });
     await settle();
 
     // Assert.
@@ -1655,6 +1657,245 @@ describe("the page mux and the client's link verdict", () => {
     expect(standingClientFailure()?.activity).toBe(
       `UnsubscribePage ${subscription} could not be delivered`,
     );
+    ctx.quiesce();
+  });
+});
+
+describe("a planned ending of the page's stream", () => {
+  /** Hold a footer subscription on CTX's page, counting how its stream ends. */
+  function holdFooter(ctx: AppContext): { ends: () => number; cancel: () => void } {
+    let ends = 0;
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (_client, signal) => ctx.streams.watch("footer", { workspace: WORKSPACE }, signal),
+      onPush: () => undefined,
+      onEnd: () => {
+        ends += 1;
+      },
+    });
+    return { ends: () => ends, cancel: () => handle.cancel() };
+  }
+
+  it("reopens every subscription on it filing nothing", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const sink = new RecordingSink();
+    const ctx = contextFor(client, sink);
+    await settle();
+    daemon.send(attached());
+    await settle();
+    const footer = holdFooter(ctx);
+    await settle();
+
+    // Act: the daemon hands the page on with its planned ending.
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+    daemon.send(attached(2n));
+    await settle();
+
+    // Assert: the subscription ended once and was made again under the next
+    // attachment, and nothing was filed.
+    expect(footer.ends()).toBe(1);
+    expect(daemon.subscribes.map((req) => req.attachment?.sequence)).toEqual([1n, 2n]);
+    expect(sink.reported).toEqual([]);
+    footer.cancel();
+    ctx.quiesce();
+  });
+
+  it("records no transport failure for a subscription it ended", async () => {
+    // Arrange.
+    const h = captureLogRecords();
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+    const footer = holdFooter(ctx);
+    await settle();
+
+    // Act.
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+
+    // Assert.
+    const records = await forwardedRecords(h);
+    expect(records.map((r) => r.operation)).toContain("rpc.stream-ended-planned-reopen");
+    expect(records.filter((r) => r.level.case === "error").map((r) => r.operation)).toEqual([]);
+    footer.cancel();
+    ctx.quiesce();
+  });
+});
+
+describe("a page nobody sees", () => {
+  it("attaches at boot though it is not seen", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+
+    // Act.
+    const ctx = contextFor(client, new RecordingSink(), fakePageSeen(false));
+    await settle();
+
+    // Assert: a preloaded tab still loads.
+    expect(daemon.streamOpens.filter((name) => name === "WatchPage")).toHaveLength(1);
+    ctx.quiesce();
+  });
+
+  it("opens no stream and subscribes nothing after its stream ends", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const seen = fakePageSeen(false);
+    const ctx = contextFor(client, new RecordingSink(), seen);
+    await settle();
+    daemon.send(attached());
+    await settle();
+    const controller = new AbortController();
+    void (async () => {
+      for (;;) {
+        try {
+          for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+            // Nothing to draw.
+          }
+        } catch {
+          // The page detached; ask again, as a component's stream would.
+        }
+        if (controller.signal.aborted) return;
+        await ctx.streams.awake(controller.signal);
+        if (controller.signal.aborted) return;
+      }
+    })();
+    await settle();
+    const subscribedBefore = daemon.subscribes.length;
+
+    // Act: a handover ends the page's stream, and time passes.
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+
+    // Assert.
+    expect(daemon.streamOpens.filter((name) => name === "WatchPage")).toHaveLength(1);
+    expect(daemon.subscribes.length).toBe(subscribedBefore);
+    controller.abort();
+    ctx.quiesce();
+  });
+
+  it("holds every awake() until a reader sees it", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const seen = fakePageSeen(false);
+    const ctx = contextFor(client, new RecordingSink(), seen);
+    await settle();
+    daemon.send(attached());
+    await settle();
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+    let woke = false;
+    void ctx.streams.awake(new AbortController().signal).then(() => {
+      woke = true;
+    });
+    await settle();
+    const heldWhileHidden = woke;
+
+    // Act.
+    seen.set(true);
+    await settle();
+
+    // Assert.
+    expect([heldWhileHidden, woke]).toEqual([false, true]);
+    ctx.quiesce();
+  });
+
+  it("attaches again once a reader sees it", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const seen = fakePageSeen(false);
+    const ctx = contextFor(client, new RecordingSink(), seen);
+    await settle();
+    daemon.send(attached());
+    await settle();
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+
+    // Act.
+    seen.set(true);
+    await settle();
+
+    // Assert.
+    expect(daemon.streamOpens.filter((name) => name === "WatchPage")).toHaveLength(2);
+    ctx.quiesce();
+  });
+
+  it("resolves awake() at once on a page that is seen", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+    let woke = false;
+
+    // Act.
+    void ctx.streams.awake(new AbortController().signal).then(() => {
+      woke = true;
+    });
+    await settle();
+
+    // Assert.
+    expect(woke).toBe(true);
+    ctx.quiesce();
+  });
+
+  it("resolves awake() when its signal aborts", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink(), fakePageSeen(false));
+    await settle();
+    daemon.send(attached());
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+    const controller = new AbortController();
+    let woke = false;
+    void ctx.streams.awake(controller.signal).then(() => {
+      woke = true;
+    });
+
+    // Act.
+    controller.abort();
+    await settle();
+
+    // Assert.
+    expect(woke).toBe(true);
+    ctx.quiesce();
+  });
+
+  it("records that it went quiet and that it woke", async () => {
+    // Arrange.
+    const h = captureLogRecords();
+    const { client, daemon } = fakeDaemon();
+    const seen = fakePageSeen(false);
+    const ctx = contextFor(client, new RecordingSink(), seen);
+    await settle();
+    daemon.send(attached());
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+
+    // Act.
+    seen.set(true);
+    await settle();
+
+    // Assert.
+    const ops = (await forwardedRecords(h)).map((r) => r.operation);
+    expect([ops.includes("rpc.page-dormant"), ops.includes("rpc.page-woken")]).toEqual([true, true]);
     ctx.quiesce();
   });
 });
