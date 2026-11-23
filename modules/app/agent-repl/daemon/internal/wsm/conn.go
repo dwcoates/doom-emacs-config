@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ratewindow"
 )
 
 // THE STATE DATABASE HAS ONE CONNECTION (SetMaxOpenConns(1)), and every read
@@ -150,10 +151,9 @@ type connUse struct {
 	// goes.
 	holds []connHold
 	next  int
-	// lastPressure is when the last pressure record was written, and
-	// suppressed how many waits past budget it has absorbed since.
-	lastPressure time.Time
-	suppressed   int
+	// pressure admits one pressure record per connPressureEvery, and counts
+	// the waits past budget it absorbed since.
+	pressure ratewindow.Window
 }
 
 // connHold is one operation's hold of the connection.
@@ -183,18 +183,16 @@ func (u *connUse) note(log dlog.Logger, op, caller string, fields dlog.Context, 
 		u.holds = make([]connHold, connHoldsKept)
 	}
 	if waited >= connWaitBudget {
-		if released.Sub(u.lastPressure) < connPressureEvery {
-			u.suppressed++
-		} else {
+		u.pressure.Every = connPressureEvery
+		if admitted, suppressed := u.pressure.Admit(released); admitted {
 			holders, count, total := u.holdersBetween(asked, taken)
 			log.Info(opConnPressure, "an operation waited past its budget for the state database's one connection; the operations named held it meanwhile",
 				dlog.Merge(fields, dlog.Context{
 					"operation": op, "caller": caller, "waited_ms": waited.Milliseconds(), "budget_ms": connWaitBudget.Milliseconds(),
 					"holds_meanwhile": count, "held_meanwhile_ms": total.Milliseconds(), "holders": holders,
 					"callers":                      u.callersBetween(asked, taken),
-					"waits_past_budget_since_last": u.suppressed,
+					"waits_past_budget_since_last": suppressed,
 				}))
-			u.lastPressure, u.suppressed = released, 0
 		}
 	}
 	u.holds[u.next] = connHold{op: op, caller: caller, released: released, held: held}

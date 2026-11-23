@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/ratewindow"
 )
 
 // lockHoldBudget is how long one hold of the resolver's mutex may last before
@@ -68,25 +69,25 @@ type holdReport struct {
 	now func() time.Time
 
 	mu sync.Mutex
-	// last is when the last record was written; suppressed counts the long
-	// holds since then that wrote none, and longest is the longest of them.
-	last       time.Time
-	suppressed int
-	longest    time.Duration
+	// window admits one record per lockHoldEvery; longest is the longest of
+	// the long holds it turned away since the last.
+	window  ratewindow.Window
+	longest time.Duration
 }
 
 // held accounts one hold of HELD taken at the program counter BY.
 func (h *holdReport) held(held time.Duration, by uintptr) {
 	at := h.now()
 	h.mu.Lock()
-	if !h.last.IsZero() && at.Sub(h.last) < lockHoldEvery {
-		h.suppressed++
+	h.window.Every = lockHoldEvery
+	admitted, suppressed := h.window.Admit(at)
+	if !admitted {
 		h.longest = max(h.longest, held)
 		h.mu.Unlock()
 		return
 	}
-	suppressed, longest := h.suppressed, h.longest
-	h.last, h.suppressed, h.longest = at, 0, 0
+	longest := h.longest
+	h.longest = 0
 	h.mu.Unlock()
 	h.log.Info(opLockHeld, "the resolver's one mutex was held past its budget; every workspace's feed waited behind the hold", dlog.Context{
 		"held_ms": held.Milliseconds(), "budget_ms": lockHoldBudget.Milliseconds(), "by": functionAt(by),
