@@ -176,12 +176,43 @@ TEMPLATE's literal text, each placeholder spelled `%s' as the format
 string it replaced spelled it, lowercased, with every run of other
 characters made one `-', under the `agent-repl.' prefix -- so a site's
 operation is the one its format string had."
-  (let* ((source (mapconcat (lambda (part) (if (consp part) "%s" part))
-                            (agent-repl-log-site-parse template) ""))
-         (normalized (replace-regexp-in-string
-                      "[^[:alnum:]]+" "-" (downcase source))))
+  (agent-repl-log-site--operation-of
+   (mapconcat (lambda (part) (if (consp part) "%s" part))
+              (agent-repl-log-site-parse template) "")))
+
+(defun agent-repl-log-site--operation-of (source)
+  "Return the operation name SOURCE, a format string's text, normalizes to.
+SOURCE lowercased, every run of other characters made one `-', under the
+`agent-repl.' prefix.  The one normalization every operation goes through."
+  (let ((normalized (replace-regexp-in-string
+                     "[^[:alnum:]]+" "-" (downcase source))))
     (setq normalized (replace-regexp-in-string "\\`-+\\|-+\\'" "" normalized))
     (concat "agent-repl." (if (string-empty-p normalized) "log" normalized))))
+
+(defun agent-repl-log-site-record-operation (site values)
+  "Return the operation SITE's record of VALUES carries.
+THE SLUG NAMES WHAT THE RECORD IS ABOUT: a placeholder in the template's
+leading slug, its text before the first space (`elisp.verbs.{op}-refused'),
+is spelled with its value, as the format string the slug was built into
+spelled it, so a reader asks for one verb's records by its operation.  Every
+other placeholder is spelled `%s', so a site whose slug names no placeholder
+records its one static operation (`agent-repl-log-site-operation')."
+  (let ((in-slug t) (dynamic nil) (pieces nil)
+        (names (agent-repl-log-site-names site))
+        (printed (agent-repl-log-site-printed site)))
+    (dolist (part (agent-repl-log-site-parts site))
+      (cond
+       ((not (consp part))
+        (push part pieces)
+        (when (string-match-p "[[:space:]]" part) (setq in-slug nil)))
+       (in-slug
+        (let ((i (cl-position (car part) names :test #'equal)))
+          (setq dynamic t)
+          (push (agent-repl-log-site-text (nth i values) (aref printed i)) pieces)))
+       (t (push "%s" pieces))))
+    (if dynamic
+        (agent-repl-log-site--operation-of (apply #'concat (nreverse pieces)))
+      (agent-repl-log-site-operation site))))
 
 (defun agent-repl-log-site-make (function template names printed)
   "Return the site of a call in FUNCTION writing TEMPLATE with NAMES.

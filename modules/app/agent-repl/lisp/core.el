@@ -1899,7 +1899,7 @@ is: the line must still say which workspace it is about."
                   (cons "level" level)
                   (cons "verbosity" verbosity)
                   (cons "operation" (if site-p
-                                        (agent-repl-log-site-operation site)
+                                        (agent-repl-log-site-record-operation site values)
                                       "agent-repl.log"))
                   (cons "message" message)
                   (cons "site" (if site-p (agent-repl-log-site-key-of site) ""))
@@ -2818,8 +2818,10 @@ formatted message and the display text are not built."
                                "elisp.core.log-central-fallback workspace={workspace} class={class} operation={operation} level={level} written={written} reason={reason}"
                                :workspace (prin1-to-string unroutable)
                                :class class
-                               :operation (agent-repl--log-operation
-                                           (agent-repl--log-site-template-of site))
+                               :operation (if (agent-repl-log-site-p site)
+                                              (agent-repl-log-site-record-operation site values)
+                                            (agent-repl--log-operation
+                                             (agent-repl--log-site-template-of site)))
                                :level level
                                :written (if (and agent-repl-log-to-file
                                                  (agent-repl--log-record-persists-p

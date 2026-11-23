@@ -62,6 +62,46 @@
     (should (equal (agent-repl-log-site-operation site)
                    "agent-repl.elisp-x-opened-ws-s-n-s"))))
 
+;;;; ---- A record's operation ----
+
+(ert-deftest agent-repl-test-log-site-record-operation-of-a-static-slug-is-the-sites ()
+  "A slug naming no placeholder records the site's one static operation."
+  ;; Arrange
+  (let ((site (agent-repl-test-log-site--site
+               '(agent-repl--info nil "elisp.x.opened ws={ws} n={n}" :ws w :n 1))))
+    ;; Act / Assert
+    (should (equal (agent-repl-log-site-record-operation site '("alpha" 3))
+                   (agent-repl-log-site-operation site)))))
+
+(ert-deftest agent-repl-test-log-site-record-operation-spells-a-slug-placeholder-with-its-value ()
+  "A placeholder in the leading slug is spelled with its value, the rest %s."
+  ;; Arrange
+  (let ((site (agent-repl-test-log-site--site
+               '(agent-repl--warn nil "elisp.verbs.{op}-refused ws={ws}" :op op :ws w))))
+    ;; Act / Assert
+    (should (equal (agent-repl-log-site-record-operation site '("finish" "alpha"))
+                   "agent-repl.elisp-verbs-finish-refused-ws-s"))))
+
+(ert-deftest agent-repl-test-log-site-record-operation-spells-a-printed-slug-value-as-printed ()
+  "A slug placeholder whose value is printed is spelled as `prin1' prints it."
+  ;; Arrange
+  (let ((site (agent-repl-test-log-site--site
+               '(agent-repl--info nil "elisp.host.{trigger}-registered" :trigger (prin1-to-string tr)))))
+    ;; Act / Assert
+    (should (equal (agent-repl-log-site-record-operation site '(link-up))
+                   "agent-repl.elisp-host-link-up-registered"))))
+
+(ert-deftest agent-repl-test-log-site-record-operation-is-what-a-record-carries ()
+  "A written record's operation is its record operation, not the static one."
+  ;; Arrange
+  (let* ((message (agent-repl--log-msg "elisp.verbs.{op}-refused ws={ws}" :op "finish" :ws "alpha"))
+         ;; Act
+         (record (json-parse-string
+                  (agent-repl--log-record nil "warn" "normal" (car message) (cdr message))
+                  :object-type 'alist)))
+    ;; Assert
+    (should (equal (alist-get 'operation record) "agent-repl.elisp-verbs-finish-refused-ws-s"))))
+
 ;;;; ---- Rendering ----
 
 (ert-deftest agent-repl-test-log-site-render-fills-each-placeholder ()
