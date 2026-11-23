@@ -22,7 +22,9 @@ import { createControl, type Control } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { COMPOSER_READY_BUDGET_MS, press, send, settleUntil } from "./drive";
+import { COMPOSER_READY_BUDGET_MS, LAYER_LOG_SCOPE, layerRecord, press, send, settleUntil } from "./drive";
+import { siteKey } from "../../../agent-shim/logging/ts/logsite.js";
+import { WEBAPP_LOG_RUNTIME } from "../../src/log.js";
 
 const HOST = '[data-component="composer"]';
 
@@ -285,5 +287,43 @@ describe("settleUntil", () => {
 
     // Assert: a second loop is a second place for the budget's clock to drift.
     expect(loops).toEqual([]);
+  });
+});
+
+describe("layerRecord", () => {
+  it("keys the record by its message in the layer's scope, as every webapp record is keyed", () => {
+    // Act
+    const record = layerRecord("webapp.test.marker", "the page is mounted");
+    // Assert
+    expect(record).toMatchObject({
+      level: { case: "info" },
+      operation: "webapp.test.marker",
+      site: siteKey(WEBAPP_LOG_RUNTIME, LAYER_LOG_SCOPE, "the page is mounted"),
+      template: "the page is mounted",
+      message: "the page is mounted",
+      context: {},
+    });
+  });
+
+  it("carries the context it is given", () => {
+    // Act
+    const record = layerRecord("webapp.test.marker", "the phase finished", { p50_ms: 3 });
+    // Assert
+    expect(record.context).toEqual({ p50_ms: 3 });
+  });
+
+  it("refuses a message that names a placeholder", () => {
+    // Act / Assert
+    expect(() => layerRecord("webapp.test.marker", "the {phase} finished")).toThrow(/names a placeholder/);
+  });
+
+  it("is how every layer file writes a ClientLog record of its own", () => {
+    // Arrange: every layer source file.
+    const dir = resolve(__dirname);
+    const files = readdirSync(dir).filter((name) => name.endsWith(".ts") && name !== "drive.test.ts");
+    // Act: a clientLog call whose record is an object literal is hand-rolled.
+    const handRolled = files.filter((name) => /clientLog\(\{[\s\S]*?record:\s*\{/.test(readFileSync(resolve(dir, name), "utf8")));
+    // Assert
+    expect(handRolled).toEqual([]);
   });
 });
