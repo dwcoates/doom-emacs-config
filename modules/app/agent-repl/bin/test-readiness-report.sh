@@ -73,12 +73,41 @@ command -v python3 >/dev/null 2>&1 || {
 
 # shellcheck source=lib-harness-report.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
+# shellcheck source=lib-source-set-stubs.sh
+. "$THIS_DIR/lib-source-set-stubs.sh"
 
 # --- fixture ----------------------------------------------------------------
 
 # git_c ROOT ARGS... — git (the fake) run in the fixture ROOT.
 git_c() {
     git -C "$1" "${@:2}"
+}
+
+# system_source_file DIR — the file the fixture edits to change system DIR's
+# build input.
+system_source_file() {
+    case "$1" in
+        proto)                       printf 'proto/gen/go/proto.go' ;;
+        daemon)                      printf 'daemon/cmd/agent-repld/main.go' ;;
+        webapp)                      printf 'webapp/src/main.ts' ;;
+        agent-shim/claude/shim)      printf 'agent-shim/claude/shim/src/main.ts' ;;
+        launcher)                    printf 'launcher/Sources/Zettel/main.swift' ;;
+        agent-shim/claude/shim-sidecar|agent-shim/shim-store|agent-shim/shim-lock|zettel)
+                                     printf '%s/main.go' "$1" ;;
+    esac
+}
+
+# go_module_dir DIR — the directory holding DIR's go.mod.
+go_module_dir() { printf '%s' "$1"; }
+
+# relpath_to FROM_DIR TO — the relative path from module FROM_DIR to TO.
+relpath_to() {
+    local up="" rest="$1"
+    while [ -n "$rest" ]; do
+        up="../$up"
+        case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+    done
+    printf '%s%s' "$up" "$2"
 }
 
 # make_repo ROOT — a scratch git repo whose top level IS the module root, with
@@ -97,16 +126,32 @@ make_repo() {
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
     cp "$THIS_DIR/lib-stat.sh" "$root/bin/lib-stat.sh"
+    cp "$THIS_DIR/source-files.mjs" "$root/bin/source-files.mjs"
 
     # Mirror the real repo, where every build output is ignored. Without this a
     # fixture commit would SWEEP THE STAMPS INTO THE HISTORY, and a later revert
     # would delete the very stamps the test just wrote.
     printf 'bin/\ndist/\nhome/\nstubs/\nout.json\nerr.txt\n' > "$root/.gitignore"
     git_c "$root" init -q
+    # Every system gets one real source file in its build's source set (the
+    # file touch_system edits) and, for a Go system, the go.mod whose
+    # `replace` lines say which modules it compiles from, as the real ones do.
     for d in proto agent-shim/shim-store \
              agent-shim/claude/shim agent-shim/claude/shim-sidecar \
              agent-shim/shim-lock zettel launcher webapp daemon; do
-        echo "rev0" > "$root/$d/file.txt"
+        f="$(system_source_file "$d")"
+        mkdir -p "$(dirname "$root/$f")"
+        echo "rev0" > "$root/$f"
+        if [ "$d" = launcher ]; then
+            mkdir -p "$root/launcher/Bundle"
+            : > "$root/launcher/Package.swift"; : > "$root/launcher/Package.resolved"; : > "$root/launcher/Bundle/Info.plist"
+        fi
+        case "$d" in
+            daemon|agent-shim/shim-store|agent-shim/claude/shim-sidecar|zettel)
+                printf 'module m\nreplace agentrepl/proto => %s\n' "$(relpath_to "$d" proto/gen/go)" > "$root/$(go_module_dir "$d")/go.mod"
+                # Only the daemon compiles the test runner's roster in.
+                [ "$d" != daemon ] || printf 'replace agentrepl/testrun => %s\n' "$(relpath_to "$d" testrun)" >> "$root/daemon/go.mod" ;;
+        esac
         git_c "$root" add -A
         n=$((n + 1))
         GIT_AUTHOR_DATE="@$((1700000000 + n * 3600)) +0000" \
@@ -125,7 +170,7 @@ make_repo() {
 touch_system() {
     local root="$1" dir="$2" msg="$3" ts
     ts=$(( $(git_c "$root" log -1 --format=%ct) + 3600 ))
-    echo "$msg" >> "$root/$dir/file.txt"
+    echo "$msg" >> "$root/$(system_source_file "$dir")"
     git_c "$root" add -A
     GIT_AUTHOR_DATE="@$ts +0000" GIT_COMMITTER_DATE="@$ts +0000" \
         git_c "$root" commit -qm "$msg"
@@ -153,6 +198,7 @@ EOF
 echo "${FAKE_PROC_ETIME:-10:00}"
 EOF
     chmod +x "$bindir/pgrep" "$bindir/ps"
+    stub_go_list_main "$bindir"
 }
 
 run_report() { # ROOT -> stdout on $OUT, exit status in $RC
@@ -216,10 +262,8 @@ tree_stamp_path() {
 # revision the fixture is standing at RIGHT NOW. This is the stamp the verdict
 # turns on, and it is the same file build-frontend.sh writes and reads.
 stamp_tree() {
-    local paths
-    paths="$(deploy_stamp_system_paths "$2" "")"
-    # shellcheck disable=SC2086
-    write_source_tree "$(tree_stamp_path "$1" "$2")" "$(source_tree_id "$1" $paths)"
+    write_source_tree "$(tree_stamp_path "$1" "$2")" \
+                      "$(PATH="$1/stubs:$PATH" deploy_stamp_source_id "$2" "$1" "")"
 }
 
 # --- 1. a missing stamp reports unknown, never a guess ----------------------
@@ -329,23 +373,22 @@ t_unknown_deployed_revision_errors_per_system() {
     rm -rf "$root"
 }
 
-# --- 7. proto is in every Go/TS system's pathspec ---------------------------
-t_proto_commit_stales_every_system() {
+# --- 7. a proto commit stales the systems that compile from it ---------------
+t_proto_commit_stales_the_systems_that_compile_from_it() {
     local root; root="$(new_root)"
     touch_system "$root" proto "proto regeneration"
     run_report "$root"
     local want; want="$(head_sha "$root")"
-    # shim-lock is excluded by NAME, not by oversight: its go.mod requires only
-    # agentrepl/logging, it speaks no wire at all, and so a proto regeneration
-    # genuinely cannot stale it. Listing proto among its paths to make this
-    # assertion uniform would report it behind over a change it never reads.
-    # The launcher (macOS) is excluded the same way: its build reads only
-    # the Swift bindings (proto/gen/swift), never the rest of proto/.
-    if [ "$(jq_get "$OUT" "len(set(s['source_sha'] for s in d['systems'] if s['name'] not in ('shim-lock', 'launcher'))) == 1")" = "True" ] \
-       && [ "$(jq_get "$OUT" 'sysmap["shim"]["source_sha"]')" = "$want" ]; then
-        pass "a proto commit becomes the source revision of every Go/TS system"
+    # The fixture's go.mod files say who compiles the generated Go: the daemon,
+    # the store, the sidecar and zettel `replace` it. Every other system's
+    # build reads none of it (the shim-lock speaks no wire, the launcher reads
+    # only proto/gen/swift, the shim and the webapp import none of it here), so
+    # a proto regeneration genuinely cannot stale them.
+    if [ "$(jq_get "$OUT" "sorted(s['name'] for s in d['systems'] if s['source_sha'] == '$want')")" \
+         = "['daemon', 'shim-claude-sidecar', 'shim-store', 'zettel']" ]; then
+        pass "a proto commit becomes the source revision of exactly the systems that compile from it"
     else
-        fail "a proto commit becomes the source revision of every Go/TS system" \
+        fail "a proto commit becomes the source revision of exactly the systems that compile from it" \
              "want=$want out: $(cat "$OUT")"
     fi
     rm -rf "$root"
@@ -353,22 +396,20 @@ t_proto_commit_stales_every_system() {
 
 # --- 7a. the runner's roster is a daemon build input ------------------------
 # The daemon compiles testrun/roster in (the merge gate's suite selection), so
-# a roster commit stales the daemon; the rest of testrun/ is no system's input.
+# a roster commit stales the daemon and no other system. That the rest of
+# testrun/ is no system's input is the package-level closure `go list` makes,
+# pinned against real modules by test-lib-deploy-stamp.sh.
 t_runner_roster_commit_stales_only_the_daemon() {
     local root before; root="$(new_root)"
     before="$(head_sha "$root")"
-    mkdir -p "$root/testrun/roster" "$root/testrun/internal"
+    mkdir -p "$root/testrun/roster"
     echo "package roster" > "$root/testrun/roster/roster.go"
     git_c "$root" add testrun/roster
     git_c "$root" commit -qm "roster change"
     local roster; roster="$(head_sha "$root")"
-    echo "package sched" > "$root/testrun/internal/sched.go"
-    git_c "$root" add testrun/internal
-    git_c "$root" commit -qm "runner-only change"
     run_report "$root"
     if [ "$(jq_get "$OUT" 'sysmap["daemon"]["source_sha"]')" = "$roster" ] \
-       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$roster' for s in d['systems'] if s['name'] != 'daemon')")" = "False" ] \
-       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$(head_sha "$root")' for s in d['systems'])")" = "False" ]; then
+       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$roster' for s in d['systems'] if s['name'] != 'daemon')")" = "False" ]; then
         pass "a roster commit is the daemon's source revision and no other system's"
     else
         fail "a roster commit is the daemon's source revision and no other system's" \
@@ -700,7 +741,7 @@ t_dirty_tree_is_flagged_but_still_ready() {
     local root; root="$(new_root)"
     stamp "$root/webapp/dist/.built-sha" "$(head_sha "$root")"
     stamp_tree "$root" webapp
-    echo "uncommitted" >> "$root/webapp/file.txt"
+    echo "uncommitted" >> "$root/webapp/src/main.ts"
     run_report "$root"
     if [ "$(jq_get "$OUT" 'sysmap["webapp"]["source_dirty"]')" = "True" ] \
        && [ "$(jq_get "$OUT" 'sysmap["webapp"]["ready"]')" = "True" ]; then
@@ -856,7 +897,7 @@ readiness_group_build_distance() {
 }
 
 readiness_group_inputs() {
-    t_proto_commit_stales_every_system
+    t_proto_commit_stales_the_systems_that_compile_from_it
     t_runner_roster_commit_stales_only_the_daemon
     t_proto_review_artifact_commit_stales_nothing
 }

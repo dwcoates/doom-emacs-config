@@ -946,6 +946,9 @@ func (r *repo) setSpecs(args []string, _ bool) error {
 	r.specs = nil
 	for _, s := range args {
 		neg := ""
+		// The fake matches every pathspec literally, so the literal magic
+		// the real git needs for a name with glob characters changes nothing.
+		s = strings.TrimPrefix(s, ":(literal)")
 		if strings.HasPrefix(s, ":(exclude)") {
 			neg, s = ":(exclude)", strings.TrimPrefix(s, ":(exclude)")
 		}

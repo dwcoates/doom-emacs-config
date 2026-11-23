@@ -2481,7 +2481,10 @@ deploy. The store's and the sidecar's own build reports (pid plus content
 hash, under `~/.cache/agent-repl/run/`) are what a deploy judges them by. None
 of these have timestamps, rotations, workspace attribution, severity, or
 `AGENT_REPL_LOG_LEVEL` behavior; use `bin/readiness-report.sh` to compare them
-with the source tree and running artifacts.
+with the source tree and running artifacts. A `.source-tree` stamp is the id of
+the files the artifact's build reads (`bin/lib-deploy-stamp.sh`, the one table
+`build-frontend.sh` and `readiness-report.sh` both read), so a change to code a
+target does not compile from never makes its stamp stale.
 
 ### Resetting the record store
 

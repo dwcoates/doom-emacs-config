@@ -51,10 +51,16 @@
 #
 # Staleness rule (per artifact): rebuild iff the artifact is missing, or the
 # SOURCE REVISION it was built from is not the source revision standing here
-# now. "Source revision" is the hash of the git index entries for that
-# system's pathspec — the same pathspec readiness-report.sh attributes to the
-# system, taken from the one table in lib-deploy-stamp.sh — and a working tree
-# that is dirty anywhere under it always reads as stale.
+# now. "Source revision" is the hash of the git index entries for the FILES
+# THAT ARTIFACT'S BUILD READS, as the build's own tool lists them (`go list
+# -deps` for Go, esbuild's import graph for the shim and webapp, SwiftPM's
+# source list for the launcher), plus its manifest and lockfile. The one table
+# is in lib-deploy-stamp.sh, and readiness-report.sh reads the same one. A
+# target's id changes if and only if a file its build reads changed, so a
+# change to code a target does not compile from (another service's source, a
+# generated binding it does not import, a test of a Go package) never rebuilds
+# it. A working tree that is dirty in any of those files always reads as
+# stale.
 #
 # It is NOT an mtime comparison any more. That rule shipped two ways to call a
 # stale artifact fresh and on 2026-09-09 a real deploy hit both: the hand-listed
@@ -402,17 +408,28 @@ require_bin() {
     fi
 }
 
-# system_source_id NAME — echo the source-tree id of NAME's pathspec, or return
-# 1 when it cannot be determined (no git, no checkout, a pathspec matching
-# nothing). The pathspec table is shared with readiness-report.sh; see
-# lib-deploy-stamp.sh.
+# SOURCE_ID_CACHE — one file per target, holding the source-tree id computed
+# for it in THIS run. Computing an id runs the target's build tool over its
+# inputs (`go list`, an esbuild graph, SwiftPM), so a run computes each once
+# and every later question about the target (the stale check, the stamp, the
+# outcome line) reads the same answer. A file, not a variable, because the
+# stamp and the outcome line ask from command substitutions.
+SOURCE_ID_CACHE="$(mktemp -d "${TMPDIR:-/tmp}/build-frontend-ids.XXXXXX")"
+trap 'rm -rf "$SOURCE_ID_CACHE"' EXIT
+
+# system_source_id NAME — echo the source-tree id of the files NAME's build
+# reads, or return 1 when it cannot be determined (no git, no checkout, a
+# source set the build tool cannot list). The source sets are shared with
+# readiness-report.sh; see lib-deploy-stamp.sh.
 system_source_id() {
-    local paths
-    paths="$(deploy_stamp_system_paths "$1" "$REL_ROOT")" || return 1
-    # Deliberately unquoted: the table carries a space-separated pathspec list
-    # and each element must reach git as its own argument.
-    # shellcheck disable=SC2086
-    source_tree_id "$WORKTREE_ROOT" $paths
+    local id cache="$SOURCE_ID_CACHE/$1"
+    if [ -s "$cache" ]; then
+        cat "$cache"
+        return 0
+    fi
+    id="$(deploy_stamp_source_id "$1" "$WORKTREE_ROOT" "$REL_ROOT")" || return 1
+    printf '%s\n' "$id" > "$cache"
+    printf '%s\n' "$id"
 }
 
 # source_is_stale NAME ARTIFACT STAMP — return 0 (stale, needs build) and 1
@@ -827,7 +844,7 @@ snapshot_lifecycle_config() {
 # logging module live OUTSIDE the module being built, and a checkout missing either produces a build failure
 # that reads as a compiler problem. Failing here names the missing directory
 # instead. It is a pre-flight assertion, not the staleness rule: staleness is
-# the source-tree id, which covers these same trees through the shared pathspec.
+# the source-tree id, which covers the files this build compiles from.
 require_go_source_dirs() {
     local dir="$1" source_dir
     for source_dir in "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" "$PROTO_HELPERS_DIR"; do
@@ -927,6 +944,9 @@ build_proto() {
     fi
     echo "[build-frontend] proto: generating..."
     make -C "$PROTO_DIR" all
+    # Generation rewrote tracked files that other targets' ids cover: no id
+    # computed before it describes the tree now.
+    rm -f "$SOURCE_ID_CACHE"/*
     stamp_source_tree proto "$PROTO_TREE_STAMP"
     echo "[build-frontend] proto: done"
 }

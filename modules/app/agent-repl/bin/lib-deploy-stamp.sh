@@ -223,6 +223,99 @@ deploy_stamp_prefix() {
     if [ -n "$2" ]; then printf '%s/%s' "$2" "$1"; else printf '%s' "$1"; fi
 }
 
+# DEPLOY_STAMP_LIFECYCLE_CONFIG is the repository's deploy config, relative to
+# the repository root as every pathspec here is.
+DEPLOY_STAMP_LIFECYCLE_CONFIG=".agent-repl/lifecycle.yaml"
+
+# DEPLOY_STAMP_DIR — where this library and source-files.mjs live.
+DEPLOY_STAMP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# THE SOURCE SET IS THE FILES THE BUILD READS. A target's set used to be a
+# hand-kept list of directories, every Go target's with the whole proto/ tree
+# in it. Landing one new field in one .proto therefore changed the id of every
+# target, including those that compile none of the generated code that
+# changed, and a deploy rebuilt all of them (2026-11-23: zettel, the sidecar
+# and the test service rebuilt for a change only the store compiles from).
+# Each target's set is now derived from the build tool's own account of its
+# inputs, so it is exact by construction and cannot drift from the build as a
+# hand-kept list does:
+#
+#   Go          `go list -deps` of the package the build compiles: every file of
+#               every in-checkout package it imports (sources, cgo and
+#               assembly files, embedded files, files a build constraint
+#               excludes here), plus each contributing module's go.mod and the
+#               main module's go.sum. Test files are not in a package's build
+#               files, so a test edit changes nothing.
+#   shim        esbuild's import graph from the bundle's entry and from
+#   webapp      the build's own config, plus the manifest and lockfile.
+#               The webapp's graph also covers its src/ and test/ trees: its
+#               build typechecks them first (source-files.mjs).
+#   launcher    SwiftPM's own source list for its non-test targets
+#               (`swift package describe`), resolved through the symlink to
+#               the generated Swift bindings, plus Package.swift,
+#               Package.resolved, the bundle's Info.plist and the build script.
+#   proto       the whole proto/ tree minus review artifacts: the generator's
+#               inputs are the schemas, the Makefile and a lockfile, and its
+#               outputs are in the tree so a hand edit reads as dirty.
+#
+# Computing a set costs a fraction of the build it can save (measured
+# 2026-11-23 on the repository: `go list` 0.04s (shim-lock) to 0.19s (daemon),
+# the shim's graph 0.11s, the webapp's 0.3s warm, `swift package describe`
+# 1.2s against a launcher build of 8-10s).
+
+# deploy_stamp_go_list_format — the `go list -f` template that prints every
+# file a package's build reads, one absolute path a line.
+deploy_stamp_go_list_format() {
+    local field format='{{if not .Standard}}{{$d := .Dir}}'
+    for field in GoFiles CgoFiles CFiles CXXFiles MFiles HFiles FFiles SFiles SwigFiles SwigCXXFiles SysoFiles EmbedFiles IgnoredGoFiles IgnoredOtherFiles; do
+        format="$format{{range .$field}}{{\$d}}/{{.}}{{\"\\n\"}}{{end}}"
+    done
+    format="$format{{with .Module}}{{.GoMod}}{{\"\\n\"}}{{if .Main}}{{.Dir}}/go.sum{{\"\\n\"}}{{end}}{{end}}{{end}}"
+    printf '%s' "$format"
+}
+
+# deploy_stamp_relativize REPO — read absolute paths on stdin and print those
+# inside REPO, repo-relative, sorted and unique. Both spellings of REPO count
+# (logical and physical): a tool run from a symlinked directory names files by
+# whichever one it was started under. Paths outside it (the module cache,
+# the toolchain) are not the checkout's sources and are dropped.
+deploy_stamp_relativize() {
+    local repo="$1" physical
+    physical="$(cd "$repo" && pwd -P)"
+    awk -v a="$repo/" -v b="$physical/" '
+        index($0, a) == 1 { print substr($0, length(a) + 1); next }
+        index($0, b) == 1 { print substr($0, length(b) + 1) }
+    ' | sort -u
+}
+
+# deploy_stamp_go_files REPO MODULE_DIR PACKAGE — the repo-relative files a
+# `go build PACKAGE` in MODULE_DIR reads. Returns 1 (printing nothing) when
+# `go list` fails, which callers treat as "source set unknown".
+deploy_stamp_go_files() {
+    local repo="$1" dir="$2" package="$3" listing
+    command -v go >/dev/null 2>&1 || return 1
+    listing="$(cd "$dir" && go list -deps -f "$(deploy_stamp_go_list_format)" "$package" 2>/dev/null)" || return 1
+    printf '%s\n' "$listing" | deploy_stamp_relativize "$repo"
+}
+
+# deploy_stamp_js_files REPO PACKAGE_DIR ARGS... — the repo-relative files an
+# esbuild-graph target reads (source-files.mjs esbuild).
+deploy_stamp_js_files() {
+    local repo="$1" dir="$2"; shift 2
+    command -v node >/dev/null 2>&1 || return 1
+    node "$DEPLOY_STAMP_DIR/source-files.mjs" esbuild --repo "$repo" --package "$dir" "$@" 2>/dev/null
+}
+
+# deploy_stamp_swift_files REPO PACKAGE_DIR ARGS... — the repo-relative files
+# a SwiftPM package's build reads.
+deploy_stamp_swift_files() {
+    local repo="$1" dir="$2"; shift 2
+    command -v swift >/dev/null 2>&1 || return 1
+    command -v node >/dev/null 2>&1 || return 1
+    (cd "$dir" && swift package describe --type json 2>/dev/null) \
+        | node "$DEPLOY_STAMP_DIR/source-files.mjs" swift --repo "$repo" --package "$dir" "$@" 2>/dev/null
+}
+
 # deploy_stamp_proto_paths REL_ROOT — the proto tree as a BUILD input: the
 # schemas minus the review artifacts that live beside them. figma-idl-draft/
 # and the sketch are design documents no build reads, so a commit touching only
@@ -235,46 +328,78 @@ deploy_stamp_proto_paths() {
         ":(exclude)$(deploy_stamp_prefix proto/SKETCH-figma-idl.md "$1")"
 }
 
-# deploy_stamp_system_paths NAME REL_ROOT — the repo-relative pathspec that IS
-# the system's source set, space separated. No path in this repo contains a
-# space, and keeping them in one string is what lets bash 3.2 (still /bin/bash
-# on macOS, no associative arrays) carry a per-system table.
+# deploy_stamp_system_files NAME REPO REL_ROOT — the repo-relative files NAME's
+# build reads, one a line, or return 1 when they cannot be determined.
 #
 # THIS TABLE IS THE SINGLE DEFINITION. build-frontend.sh decides staleness from
 # it and readiness-report.sh decides readiness from it; a second copy anywhere
-# reopens the drift this file exists to close.
-# DEPLOY_STAMP_LIFECYCLE_CONFIG is the repository's deploy config, relative to
-# the repository root as every pathspec here is.
-DEPLOY_STAMP_LIFECYCLE_CONFIG=".agent-repl/lifecycle.yaml"
-
-deploy_stamp_system_paths() {
-    local rel="$2"
-    case "$1" in
+# reopens the drift this file exists to close. NAME `proto` is the one pathspec
+# (deploy_stamp_load_pathspec), not a file list.
+deploy_stamp_system_files() {
+    local name="$1" repo="$2" rel="$3" mod files
+    mod="$repo"
+    [ -z "$rel" ] || mod="$repo/$rel"
+    case "$name" in
         # The daemon compiles the test runner's roster in (the merge gate's
-        # suite selection), so the roster package and its go.mod are inputs.
-        # Its build also snapshots the repository's own deploy config beside
-        # the binary (build-frontend.sh build_daemon), so the config is an
-        # input: a daemon acts on the config its own build carries.
-        daemon)              printf '%s %s %s %s %s %s' "$(deploy_stamp_prefix daemon "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_prefix testrun/roster "$rel")" "$(deploy_stamp_prefix testrun/go.mod "$rel")" "$DEPLOY_STAMP_LIFECYCLE_CONFIG" ;;
-        shim)                printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/claude/shim "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
-        webapp)              printf '%s %s %s' "$(deploy_stamp_prefix webapp "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
-        shim-store)          printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/shim-store "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
-        shim-claude-sidecar) printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/claude/shim-sidecar "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
-        # No proto: shim-lock speaks no wire at all. Its whole contract is argv,
-        # one stdout line, stdin's EOF and an exit code.
-        shim-lock)           printf '%s %s' "$(deploy_stamp_prefix agent-shim/shim-lock "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
-        # No proto: the holder's whole contract is its one-line control request.
-        sockethold)          printf '%s %s' "$(deploy_stamp_prefix agent-shim/sockethold "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
-        zettel)              printf '%s %s %s' "$(deploy_stamp_prefix zettel "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
-        # The bindings' own source set (build-frontend.sh build_proto). No
-        # deployed artifact answers to it, so readiness-report.sh never asks.
-        proto)               printf '%s' "$(deploy_stamp_proto_paths "$rel")" ;;
-        agent-repl-tests)    printf '%s %s %s' "$(deploy_stamp_prefix testservice "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
-        # The launcher compiles its own package and the Swift bindings, and
-        # its build script and icon belong to it.
-        launcher)            printf '%s %s %s' "$(deploy_stamp_prefix launcher "$rel")" "$(deploy_stamp_prefix proto/gen/swift "$rel")" "$(deploy_stamp_prefix bin/build-launcher.sh "$rel")" ;;
+        # suite selection): the closure takes it in. Its build also snapshots
+        # the repository's own deploy config beside the binary
+        # (build-frontend.sh build_daemon), so the config is an input: a
+        # daemon acts on the config its own build carries.
+        daemon)              files="$(deploy_stamp_go_files "$repo" "$mod/daemon" ./cmd/agent-repld)" || return 1
+                             printf '%s\n%s\n' "$files" "$DEPLOY_STAMP_LIFECYCLE_CONFIG" ;;
+        shim)                deploy_stamp_js_files "$repo" "$mod/agent-shim/claude/shim" \
+                                 --entry src/main.ts --entry build.mjs \
+                                 --extra package.json --extra package-lock.json --extra tsconfig.json ;;
+        webapp)              deploy_stamp_js_files "$repo" "$mod/webapp" \
+                                 --html index.html --entry vite.config.ts --entry-dir src --entry-dir test \
+                                 --extra index.html --extra package.json --extra package-lock.json --extra tsconfig.json ;;
+        shim-store)          deploy_stamp_go_files "$repo" "$mod/agent-shim/shim-store" . ;;
+        shim-claude-sidecar) deploy_stamp_go_files "$repo" "$mod/agent-shim/claude/shim-sidecar" . ;;
+        shim-lock)           deploy_stamp_go_files "$repo" "$mod/agent-shim/shim-lock" . ;;
+        sockethold)          deploy_stamp_go_files "$repo" "$mod/agent-shim/sockethold" . ;;
+        zettel)              deploy_stamp_go_files "$repo" "$mod/zettel" . ;;
+        agent-repl-tests)    deploy_stamp_go_files "$repo" "$mod/testservice" . ;;
+        # Its build script and bundle plist belong to it; the bindings it
+        # links come out of the package's own source list.
+        launcher)            files="$(deploy_stamp_swift_files "$repo" "$mod/launcher" \
+                                 --extra Package.swift --extra Package.resolved --extra Bundle/Info.plist)" || return 1
+                             printf '%s\n%s\n' "$files" "$(deploy_stamp_prefix bin/build-launcher.sh "$rel")" ;;
         *) return 1 ;;
     esac
+}
+
+# DEPLOY_STAMP_PATHSPEC — the pathspec deploy_stamp_load_pathspec loaded, one
+# array element per path. An array and not a string: a source file's name is
+# whatever the build tool lists, and a space or a glob character in it must
+# reach git as one literal path.
+DEPLOY_STAMP_PATHSPEC=()
+
+# deploy_stamp_load_pathspec NAME REPO REL_ROOT — set DEPLOY_STAMP_PATHSPEC to
+# NAME's source set: its files (deploy_stamp_system_files), each as a literal
+# path, or for `proto` the generator's directory. Returns 1, leaving it empty,
+# when the set cannot be determined, and callers MUST treat that as stale,
+# never fresh: a set that silently matches nothing is how a build talks itself
+# out of work it owes.
+deploy_stamp_load_pathspec() {
+    local name="$1" repo="$2" rel="$3" files file
+    DEPLOY_STAMP_PATHSPEC=()
+    if [ "$name" = proto ]; then
+        # shellcheck disable=SC2207
+        DEPLOY_STAMP_PATHSPEC=($(deploy_stamp_proto_paths "$rel"))
+        return 0
+    fi
+    files="$(deploy_stamp_system_files "$name" "$repo" "$rel")" || return 1
+    while IFS= read -r file; do
+        [ -z "$file" ] || DEPLOY_STAMP_PATHSPEC+=(":(literal)$file")
+    done <<< "$files"
+    [ "${#DEPLOY_STAMP_PATHSPEC[@]}" -gt 0 ]
+}
+
+# deploy_stamp_source_id NAME REPO REL_ROOT — the source-tree id of the files
+# NAME's build reads, or return 1 when they cannot be determined.
+deploy_stamp_source_id() {
+    deploy_stamp_load_pathspec "$1" "$2" "$3" || return 1
+    source_tree_id "$2" "${DEPLOY_STAMP_PATHSPEC[@]}"
 }
 
 # source_tree_id REPO_ROOT PATHSPEC... — echo a stable id for the CONTENT of
