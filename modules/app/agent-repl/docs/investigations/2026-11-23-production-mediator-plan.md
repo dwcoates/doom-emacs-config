@@ -2,8 +2,8 @@
 
 A sibling of the deploy mediator
 (`docs/investigations/2026-11-14-deploy-intake-plan.md`), built on the same
-engine and configured differently. It is written for review before it is
-built. The log-site keys it rests on landed on master on 2026-11-23
+engine and configured differently. It was built on 2026-11-23; "Built" below
+records where the build departs from the design. The log-site keys it rests on landed on master on 2026-11-23
 (`merge(master): log-site-keys`).
 
 ## What the owner asked for
@@ -210,3 +210,18 @@ how long each check took. `CATALOG.md` gains each one.
 
 Each step lands through the merge queue with the tests for what it adds or
 changes.
+
+## Built (2026-11-23)
+
+- The contract record is `docs/protobuf-design/2026-11-23-production-mediator.md`.
+- The store keeps each role's mediator in its own table (`deploy_mediators`, `production_mediators`). `wsm.Workspace.Mediator` reads the role from them.
+- A production span is owed when its landing's deploy begins (`wsm.OweProductionCheck`), and its landing start is read in the same write. The deploy's end makes it due, and a crash drops it so the span runs on.
+- A repository that no check has read starts its span at the deploy before. With no deploy check, no landing is read twice.
+- A child's sites are released by the production pass that finds its workspace closed. A child closed with its merge landed records its sites fixed. Each landing's deploy runs that pass, so a child that lands is ended at its own deploy.
+- Children are made one after another, each commissioned with every sibling's name, which the daemon fixes before the first is made. A refusal at any child undoes the ones made.
+- `agentrepl.v1.ClientLogRecord.site` stays a string. The contract record says why.
+
+### Landing order
+
+The keys `production_checks` and `agent` in `.agent-repl/lifecycle.yaml` land after the build that knows them is serving, never with it. The running daemon refuses unknown keys, and it reads the file while the landing that would replace it deploys. So the code lands first, and the config lands in a second merge (`production-mediator-config`) once that deploy has finished.
+
