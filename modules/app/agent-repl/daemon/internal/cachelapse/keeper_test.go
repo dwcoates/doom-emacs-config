@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -750,6 +751,27 @@ func TestRecordLogsAWriteThatFails(t *testing.T) {
 	}
 	if _, armed := h.keeper.deadlines[theWorkspace]; armed {
 		t.Fatal("a projection that was not recorded was armed")
+	}
+}
+
+func TestRecordForAWorkspaceForgottenMeanwhileIsRecordedAtInfoAndForgotten(t *testing.T) {
+	// Arrange
+	h := newHarness(t, hidden())
+	h.db.setErr = fmt.Errorf("wsm: workspace %s: %w", theWorkspace, wsm.ErrNotFound)
+	h.keeper.deadlines[theWorkspace] = lapseAt
+
+	// Act
+	h.keeper.record(context.Background(), theWorkspace, stated(lapseAt, nil))
+
+	// Assert
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opProjection}); ok {
+		t.Fatalf("records = %+v, want no error for a forgotten workspace's projection", h.log.Records())
+	}
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "a cache lapse arrived for a workspace that is no longer registered; it is dropped"}) {
+		t.Fatalf("records = %+v, want the info record", h.log.Records())
+	}
+	if _, armed := h.keeper.deadlines[theWorkspace]; armed {
+		t.Fatal("a forgotten workspace's deadline stands")
 	}
 }
 

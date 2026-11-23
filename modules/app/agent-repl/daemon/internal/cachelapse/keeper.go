@@ -754,6 +754,14 @@ func (k *Keeper) store(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID,
 		if leaving(ctx, log, opProjection, "recording the cache lapse", err) {
 			return false
 		}
+		if errors.Is(err, wsm.ErrNotFound) {
+			// A WORKSPACE FORGOTTEN WHILE ITS SHIM STATES A PROJECTION owes
+			// nothing: the same rule as an owing decision or a run end for a
+			// row that is gone (reconcile, lapse), recorded at INFO.
+			log.Info(opProjection, "a cache lapse arrived for a workspace that is no longer registered; it is dropped", fields)
+			k.forget(ws)
+			return false
+		}
 		log.Error(opProjection, "could not record the workspace's cache lapse", dlog.WithCause(fields, err))
 		return false
 	}
