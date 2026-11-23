@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 
-	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
@@ -102,8 +101,10 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 			sessionless = append(sessionless, ws)
 		}
 	}
-	c.bringUpSessionless(sessionless, fields)
-	c.standDownWithheldInert(lifetime, sessionless, fields)
+	left, ok := c.bringUpSessionless(sessionless, dlog.Merge(fields, dlog.Context{"source": "orphans", "lock": sessionlock.StateFree.String()}))
+	if ok {
+		c.standDownWithheldInert(lifetime, left, fields)
+	}
 	if len(orphans) == 0 {
 		c.log.Debug(opOrphans, "no shim was left running unadopted", fields)
 		return
@@ -141,21 +142,12 @@ func (c *controller) recoverOrphan(ctx context.Context, ws ids.WorkspaceID, fiel
 }
 
 // standDownWithheldInert stands down, off the caller's goroutine, the inert
-// survivor of every one of PENDING the takeover does not bring up
-// (bringup.OnlyWasUp's left: its shim was not up when the last daemon
-// stopped), whose lock reads free while a shim still listens. No bring-up
-// reaches such a shim, so without this it would run on served by no daemon at
-// all (2026-10-23: three shims parked since 17:50).
-func (c *controller) standDownWithheldInert(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) {
-	if len(pending) == 0 {
-		return
-	}
-	_, withheld, err := bringup.OnlyWasUp(ctx, c.deps.DB, pending)
-	if err != nil {
-		c.log.Error(opOrphans, "could not tell which session-less workspaces' shims were up; no inert survivor is stood down",
-			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
-		return
-	}
+// survivor of every one of WITHHELD, the workspaces the takeover does not
+// bring up (bringUpSessionless's left: its shim was not up when the last
+// daemon stopped), whose lock reads free while a shim still
+// listens. No bring-up reaches such a shim, so without this it would run on
+// served by no daemon at all (2026-10-23: three shims parked since 17:50).
+func (c *controller) standDownWithheldInert(ctx context.Context, withheld []wsm.Workspace, fields dlog.Context) {
 	for _, ws := range withheld {
 		c.stragglerAdoptions.Add(1)
 		inflight.Go(func() {

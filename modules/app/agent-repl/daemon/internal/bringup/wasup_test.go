@@ -3,9 +3,12 @@ package bringup
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
+	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 )
 
@@ -86,5 +89,100 @@ func TestOnlyWasUpSplitsNothingWhenTheColdGatesCannotBeRead(t *testing.T) {
 	// Assert
 	if err == nil || up != nil || left != nil {
 		t.Fatalf("OnlyWasUp = %v, %v, %v; want the failure and nothing split", up, left, err)
+	}
+}
+
+func TestWasUpFactsStatesWhatTheRecordsSay(t *testing.T) {
+	at := time.Date(2026, 11, 23, 15, 27, 51, 0, time.UTC)
+	parked := &wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: "keepalive_cycle", At: at}
+	cases := []struct {
+		name   string
+		lister fakeSessionList
+		want   WasUp
+		wantUp bool
+	}{
+		{name: "a live session", lister: fakeSessionList{sessions: []wsm.Session{{Workspace: "ws", VendorSessionID: "v"}}},
+			want: WasUp{Recorded: true, Conversation: true, Live: true}, wantUp: true},
+		{name: "a parked session", lister: fakeSessionList{sessions: []wsm.Session{{Workspace: "ws", VendorSessionID: "v", Terminal: parked}}},
+			want: WasUp{Recorded: true, Conversation: true, Terminal: parked}},
+		{name: "a session created and never started", lister: fakeSessionList{sessions: []wsm.Session{{Workspace: "ws"}}},
+			want: WasUp{Recorded: true}},
+		{name: "no session record", lister: fakeSessionList{}, want: WasUp{}},
+		{name: "a recorded cold gate", lister: fakeSessionList{gated: []wsm.WorkspaceID{"ws"}},
+			want: WasUp{ColdGate: true}, wantUp: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			facts, err := WasUpFacts(context.Background(), tc.lister, []wsm.Workspace{{ID: "ws"}})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("WasUpFacts: %v", err)
+			}
+			if got := facts["ws"]; !reflect.DeepEqual(got, tc.want) || got.Up() != tc.wantUp {
+				t.Fatalf("facts = %+v (up %v), want %+v (up %v)", got, got.Up(), tc.want, tc.wantUp)
+			}
+		})
+	}
+}
+
+func TestWasUpFactsAnswersOnlyThePendingWorkspaces(t *testing.T) {
+	// Arrange
+	lister := fakeSessionList{sessions: []wsm.Session{{Workspace: "other", VendorSessionID: "v"}}, gated: []wsm.WorkspaceID{"other"}}
+
+	// Act
+	facts, err := WasUpFacts(context.Background(), lister, []wsm.Workspace{{ID: "ws"}})
+
+	// Assert
+	if err != nil || len(facts) != 1 || facts["ws"] != (WasUp{}) {
+		t.Fatalf("facts = %v, %v; want only the pending workspace, with nothing recorded", facts, err)
+	}
+}
+
+func TestWasUpFactsFailsWhenARecordCannotBeRead(t *testing.T) {
+	cases := []struct {
+		name   string
+		lister fakeSessionList
+	}{
+		{name: "the sessions", lister: fakeSessionList{err: errors.New("locked")}},
+		{name: "the cold gates", lister: fakeSessionList{gateErr: errors.New("locked")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			facts, err := WasUpFacts(context.Background(), tc.lister, []wsm.Workspace{{ID: "ws"}})
+
+			// Assert
+			if err == nil || facts != nil {
+				t.Fatalf("WasUpFacts = %v, %v; want the failure and no facts", facts, err)
+			}
+		})
+	}
+}
+
+func TestWasUpContextStatesEveryFact(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts WasUp
+		want  dlog.Context
+	}{
+		{name: "a live session", facts: WasUp{Recorded: true, Conversation: true, Live: true},
+			want: dlog.Context{"was_up": true, "cold_gate": false, "recorded": true, "conversation": true, "live": true}},
+		{name: "a parked session names its terminal", facts: WasUp{Recorded: true, Conversation: true,
+			Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: "keepalive_cycle", At: time.Date(2026, 11, 23, 15, 27, 51, 0, time.UTC)}},
+			want: dlog.Context{"was_up": false, "cold_gate": false, "recorded": true, "conversation": true, "live": false,
+				"terminal": wsm.TerminalParked, "terminal_detail": "keepalive_cycle", "terminal_at": "2026-11-23T15:27:51Z"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.facts.Context()
+
+			// Assert
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("context = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
