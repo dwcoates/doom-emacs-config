@@ -3,6 +3,7 @@ package topbar
 import (
 	"agent-repld/internal/wsm"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1406,6 +1407,23 @@ func TestAMenuRowCarriesItsPullRequestsBadge(t *testing.T) {
 		if !proto.Equal(items[i].GetBadge(), want[i]) {
 			t.Errorf("item %d badge = %v, want %v", i, items[i].GetBadge(), want[i])
 		}
+	}
+}
+
+func TestAMenuRowSaysWhetherItsLinkIsSubscribed(t *testing.T) {
+	// Arrange
+	followed := Link{Label: "The pull request", URL: "https://github.com/o/r/pull/1", Owned: true, Subscribed: true}
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSummary(testWS, "Title")
+
+	// Act
+	h.r.SetLinks(testWS, []Link{followed, docLink})
+
+	// Assert: the followed row is subscribed, the doc's is not.
+	items := h.view(t).GetTitle().GetLinks().GetMenu().GetItems()
+	if got := []bool{items[0].GetSubscribed(), items[1].GetSubscribed()}; !slices.Equal(got, []bool{true, false}) {
+		t.Fatalf("subscribed = %v, want [true false]", got)
 	}
 }
 

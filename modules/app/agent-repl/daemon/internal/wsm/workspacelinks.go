@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gnsurl"
+	"agent-repld/internal/slacklink"
 )
 
 // workspaceLinksDDL is the layout-85 addition: every link an agent stored for
@@ -67,6 +68,18 @@ type WorkspaceLink struct {
 	// (agentrepl.v1.WorkspaceLinkOwned.announces), empty when it announces
 	// nothing.
 	Announces string
+	// SlackSubscribed is true when the url names a Slack thread the
+	// workspace subscribes to (slackthreads.go): the subscription was taken
+	// by the link itself or by any other link to the same thread.
+	SlackSubscribed bool
+}
+
+// Subscribed reports whether the workspace is told about the link's updates
+// through agent-repl: a pull request it follows and has not stopped
+// following, or a Slack thread it subscribes to. The ONE rule the summary's
+// menu draws its "subscribed" badge by (frontend.v1.TopbarTitleLinkMenuItem.subscribed).
+func (l WorkspaceLink) Subscribed() bool {
+	return (l.Follow != nil && l.Follow.Ended == nil) || l.SlackSubscribed
 }
 
 // LinkSet is one store or relabel of a link (SetWorkspaceLink).
@@ -540,7 +553,12 @@ func linksOf(ctx context.Context, q querier, id WorkspaceID) ([]WorkspaceLink, e
 	if err != nil {
 		return nil, err
 	}
+	slackThreads, err := slackThreadsOf(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
 	for i := range links {
+		links[i].SlackSubscribed = slackThreadSubscribed(slackThreads, links[i].URL)
 		pr := links[i].PullRequest
 		if pr == nil {
 			continue
@@ -555,6 +573,20 @@ func linksOf(ctx context.Context, q querier, id WorkspaceID) ([]WorkspaceLink, e
 		}
 	}
 	return links, nil
+}
+
+// slackThreadSubscribed reports whether SUBS hold a subscription to the
+// Slack thread URL names (FindSlackThreadSubscription). A url that is no
+// Slack message link names no thread, so it is never subscribed.
+func slackThreadSubscribed(subs []SlackThreadSubscription, url string) bool {
+	thread, err := slacklink.ParseThread(url)
+	if err != nil {
+		// Not a Slack message link: most links are not, and none of them
+		// names a thread to subscribe to.
+		return false
+	}
+	_, found := FindSlackThreadSubscription(subs, thread)
+	return found
 }
 
 // hasRepeat reports whether any url appears twice.

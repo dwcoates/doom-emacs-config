@@ -644,6 +644,58 @@ func TestAddWorkspaceLinkIfAbsent(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLinksSayWhetherTheirSlackThreadIsSubscribed(t *testing.T) {
+	const (
+		threadLink = "https://chesscom.slack.com/archives/C0439CR3S3A/p1784225803782699"
+		replyLink  = "https://chesscom.slack.com/archives/C0439CR3S3A/p1784225900000001?thread_ts=1784225803.782699"
+		otherLink  = "https://chesscom.slack.com/archives/C0439CR3S3A/p1784229999000000"
+	)
+	tests := []struct {
+		name string
+		url  string
+		// subscriber is whose subscription stands: "self", "other" or "".
+		subscriber string
+		ended      bool
+		want       bool
+	}{
+		{name: "the thread's own link", url: threadLink, subscriber: "self", want: true},
+		{name: "a reply's link into the thread", url: replyLink, subscriber: "self", want: true},
+		{name: "another thread in the channel", url: otherLink, subscriber: "self"},
+		{name: "a link that names no Slack thread", url: "https://example.com/doc", subscriber: "self"},
+		{name: "another workspace's subscription", url: threadLink, subscriber: "other"},
+		{name: "no subscription", url: threadLink},
+		{name: "an ended subscription", url: threadLink, subscriber: "self", ended: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			other := testWorkspaceNamed(t, s, "other")
+			switch tt.subscriber {
+			case "self":
+				mustSubscribeSlack(t, s, slackSub(ws.ID, SlackThreadModeListen))
+			case "other":
+				mustSubscribeSlack(t, s, slackSub(other.ID, SlackThreadModeListen))
+			}
+			if tt.ended {
+				if _, err := s.UnsubscribeSlackThread(context.Background(), ws.ID, slackKey); err != nil {
+					t.Fatal(err)
+				}
+			}
+			applyLinkSteps(t, s, ws.ID, []linkStep{setLink(tt.url, "the thread")})
+
+			// Act
+			links, err := s.WorkspaceLinks(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil || len(links) != 1 || links[0].SlackSubscribed != tt.want {
+				t.Fatalf("WorkspaceLinks = %+v, %v; want SlackSubscribed %v", links, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestAnAutoAddedLinkIsPromotedByAnOwnedSet(t *testing.T) {
 	// Arrange.
 	s, _ := testStore(t)
@@ -701,6 +753,32 @@ func TestAddWorkspaceLinkIfAbsentRefusals(t *testing.T) {
 			// Assert.
 			if added || err == nil || (tt.notFound && !errors.Is(err, ErrNotFound)) {
 				t.Fatalf("AddWorkspaceLinkIfAbsent = %v, %v; want a refusal and nothing stored", added, err)
+			}
+		})
+	}
+}
+
+func TestWorkspaceLinkSubscribed(t *testing.T) {
+	key := PullRequestKey{Owner: "o", Repo: "r", Number: 1}
+	tests := []struct {
+		name string
+		link WorkspaceLink
+		want bool
+	}{
+		{name: "a pull request followed", link: WorkspaceLink{PullRequest: &key, Follow: &PullRequestSubscription{}}, want: true},
+		{name: "a pull request whose follow ended", link: WorkspaceLink{PullRequest: &key, Follow: &PullRequestSubscription{Ended: &PullRequestEnd{Merged: true}}}},
+		{name: "a pull request not followed", link: WorkspaceLink{PullRequest: &key}},
+		{name: "a Slack thread subscribed", link: WorkspaceLink{SlackSubscribed: true}, want: true},
+		{name: "any other link", link: WorkspaceLink{URL: "https://example.com"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.link.Subscribed()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Subscribed = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -1814,6 +1814,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		NewNonce: slackNonce,
 		Serves:   rolloutController.ServesIntake,
 		Intakes:  slackIntakes{createIntake: verbsRef.createIntakeVia, repositories: p.DB.ListRepositories},
+		Links:    slackLinks{verbs: verbsRef},
 		Notices:  p.Metrics,
 		Clock:    clock.System{},
 		Log:      log,

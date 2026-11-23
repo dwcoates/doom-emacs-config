@@ -421,4 +421,8 @@ type Link struct {
 	// pull-request watcher last read it; empty for any other url and for a
 	// pull request not yet read. A menu row draws it as its badge.
 	State wsm.PullRequestState
+	// Subscribed is whether the workspace is told about the link's updates
+	// (wsm.WorkspaceLink.Subscribed). A menu row draws it as its
+	// "subscribed" badge.
+	Subscribed bool
 }
