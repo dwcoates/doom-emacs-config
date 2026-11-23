@@ -258,11 +258,21 @@ func (o *orchestrator) closeEnded(ctx context.Context, record wsm.Workspace, out
 		log.Info(opCloseEnded, "closed the hidden workspace of a merge that ended without landing", fields)
 		// THE ROSTER'S DURABLE HALF MOVED, as a landing's close moves it
 		// (stampClosed): nothing else republishes it.
-		if o.deps.PublishRegistry != nil {
-			if err := o.deps.PublishRegistry(ctx); err != nil {
-				log.Error(opCloseEnded, "could not republish the roster after closing an ended merge's workspace", withField(fields, "error", err.Error()))
-			}
-		}
+		o.republishRoster(ctx, log, opCloseEnded, logsite.Msg("could not republish the roster after closing an ended merge's workspace"), fields)
+	}
+}
+
+// republishRoster republishes the roster's DURABLE half (Deps.PublishRegistry)
+// after a write it is composed from (a close, merged_at, a one-shot mark),
+// which nothing else republishes. A failure is recorded under OP at ERROR as
+// FAILED, with FIELDS and the error; the write it follows stands. With no
+// roster wired it does nothing.
+func (o *orchestrator) republishRoster(ctx context.Context, log dlog.Logger, op string, failed logsite.Message, fields dlog.Context) {
+	if o.deps.PublishRegistry == nil {
+		return
+	}
+	if err := o.deps.PublishRegistry(ctx); err != nil {
+		log.Log(dlog.LevelError, op, failed, withField(fields, "error", err.Error()))
 	}
 }
 
@@ -412,12 +422,7 @@ func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, lande
 	closes := closings[0]
 	// THE ROSTER'S DURABLE HALF MOVED: merged_at and closed are what put the
 	// row under `recently_merged`, and nothing else republishes them.
-	if r.o.deps.PublishRegistry != nil {
-		if err := r.o.deps.PublishRegistry(ctx); err != nil {
-			log.Error(op, "could not republish the roster after the landing",
-				dlog.Context{"workspace": string(closes), "error": err.Error()})
-		}
-	}
+	r.o.republishRoster(ctx, log, op, logsite.Msg("could not republish the roster after the landing"), dlog.Context{"workspace": string(closes)})
 }
 
 // awaitsOwnedPullRequests reports whether WS owns pull requests that have not

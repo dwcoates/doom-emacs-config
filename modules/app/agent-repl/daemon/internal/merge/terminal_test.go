@@ -3109,3 +3109,60 @@ func TestEveryEndOfAMergeIsSettledThroughOnePath(t *testing.T) {
 		})
 	}
 }
+
+func TestRepublishRoster(t *testing.T) {
+	tests := []struct {
+		name          string
+		wired         bool
+		publishErr    error
+		wantPublishes int
+		wantError     bool
+	}{
+		{name: "a wired roster is republished", wired: true, wantPublishes: 1},
+		{name: "a failed republish is an error naming its cause", wired: true, publishErr: errors.New("roster down"), wantPublishes: 1, wantError: true},
+		{name: "no roster wired republishes nothing", wired: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			calls := 0
+			h.o.deps.PublishRegistry = nil
+			if tt.wired {
+				h.o.deps.PublishRegistry = func(context.Context) error {
+					calls++
+					return tt.publishErr
+				}
+			}
+
+			// Act
+			h.o.republishRoster(context.Background(), h.o.deps.Log.Global(), "daemon.merge.test",
+				logsite.Msg("could not republish the roster in a test"), dlog.Context{"workspace": string(theWorkspace)})
+
+			// Assert
+			if calls != tt.wantPublishes {
+				t.Fatalf("republishes = %d, want %d", calls, tt.wantPublishes)
+			}
+			record, failed := h.recordFor(dlog.LevelError, "daemon.merge.test")
+			if failed != tt.wantError {
+				t.Fatalf("error recorded = %v, want %v", failed, tt.wantError)
+			}
+			if failed && (record.Message != "could not republish the roster in a test" ||
+				record.Context["workspace"] != string(theWorkspace) || record.Context["error"] != "roster down") {
+				t.Fatalf("error record = %+v, want the message, the fields and the cause", record)
+			}
+		})
+	}
+}
+
+// THE ROSTER IS REPUBLISHED THROUGH ONE HELPER: a site that called the
+// registry itself would word and guard its failure its own way.
+func TestTheRosterIsRepublishedOnlyThroughRepublishRoster(t *testing.T) {
+	// Arrange, Act
+	got := callersOf(t, "deps.PublishRegistry(")
+
+	// Assert
+	if want := []string{"terminal.go:republishRoster"}; !slices.Equal(got, want) {
+		t.Fatalf("callers of deps.PublishRegistry( = %v, want %v", got, want)
+	}
+}

@@ -880,9 +880,7 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 			return fmt.Errorf("merge: tear down the landed remediation: %w", err)
 		}
 	}
-	if err := o.deps.PublishRegistry(ctx); err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "could not republish the roster after the remediation closed", withField(fields, "error", err.Error()))
-	}
+	o.republishRoster(ctx, o.deps.Log.Global(), opRemediationFinish, logsite.Msg("could not republish the roster after the remediation closed"), fields)
 	o.deps.Log.Global().Info(opRemediationFinish, "closed the landed remediation and removed its worktree", withField(fields, "worktree", record.Dir))
 	return nil
 }

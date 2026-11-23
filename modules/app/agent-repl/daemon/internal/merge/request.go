@@ -879,14 +879,7 @@ func (o *orchestrator) dropDetached(ctx context.Context, requester ids.Workspace
 // next refreshes the registry. The request already stands, so a failed
 // republish is recorded and the request is not undone.
 func (o *orchestrator) publishOneShot(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
-	const op = "daemon.merge.enqueue"
-	if o.deps.PublishRegistry == nil {
-		return
-	}
-	if err := o.deps.PublishRegistry(ctx); err != nil {
-		log.Error(op, "could not republish the roster after marking the requester a one-shot",
-			dlog.Context{"workspace": string(ws), "error": err.Error()})
-	}
+	o.republishRoster(ctx, log, "daemon.merge.enqueue", logsite.Msg("could not republish the roster after marking the requester a one-shot"), dlog.Context{"workspace": string(ws)})
 }
 
 // placeBehind resolves the merge REQ is placed behind, by the name the queue
