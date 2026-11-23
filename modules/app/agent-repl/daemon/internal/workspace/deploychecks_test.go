@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -234,6 +235,9 @@ func TestTheDeployCheckCompactionVerbsShareOneFront(t *testing.T) {
 				// Assert
 				if err != nil || got != tt.want || len(f.fleet.stopped) != tt.wantStops || len(f.fleet.started) != wantStarts {
 					t.Fatalf("%s = (%v, %v), stops %d, starts %d; want (%v), %d stops, %d starts", verb.name, got, err, len(f.fleet.stopped), len(f.fleet.started), tt.want, tt.wantStops, wantStarts)
+				}
+				if wantStarts == 1 && !slices.Equal(f.fleet.startCauses, []shimlife.StartCause{shimlife.StartCompaction}) {
+					t.Fatalf("start causes = %v, want the compaction's", f.fleet.startCauses)
 				}
 				if owed := f.db.owedWork[ws]; owed.Compact != tt.wantOwed {
 					t.Fatalf("owed start work %+v, want a compaction owed %v", owed, tt.wantOwed)

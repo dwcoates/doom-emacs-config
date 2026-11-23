@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -2832,6 +2833,9 @@ func TestRetireLandedWorktreeTearsDownALandedWorkspace(t *testing.T) {
 			h.git.mu.Unlock()
 			if removed != tt.wantRemoved || !slices.Equal(h.stoppedSessions, []ids.WorkspaceID{"ws-landed"}) || !h.stopForces[0] {
 				t.Fatalf("removed %v, stopped %v forced %v; want removed %v after one forced stop", removed, h.stoppedSessions, h.stopForces, tt.wantRemoved)
+			}
+			if !slices.Equal(h.stopReasons, []shimlife.StandDownReason{shimlife.StandDownLanded}) {
+				t.Fatalf("stand-down reasons = %v, want the landing's", h.stopReasons)
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.teardown", Message: tt.wantMessage}); !ok {
 				t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)

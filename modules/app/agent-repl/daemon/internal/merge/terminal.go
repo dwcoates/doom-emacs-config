@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/landedbranch"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -721,7 +722,7 @@ func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger
 	// was gone (2026-10-25, settings-page-land).
 	release := o.deps.HoldStarts(ws)
 	defer release()
-	if err := o.deps.StopSession(ctx, ws, true); err != nil {
+	if err := o.deps.StopSession(shimlife.WithStandDown(ctx, shimlife.StandDownLanded), ws, true); err != nil {
 		log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
 			"workspace": string(ws), "worktree": dir, "force": true, "error": err.Error()})
 		return err

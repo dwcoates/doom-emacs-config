@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -136,7 +137,7 @@ func (v *verbs) CompactDeployCheck(ctx context.Context, ws wsm.WorkspaceID) (boo
 	if err != nil || !ended {
 		return false, err
 	}
-	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+	if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartCompaction), ws); err != nil {
 		log.Error(opDeployChecks, "the deploy check workspace's session could not start to compact", dlog.Context{"cause": err.Error()})
 		return false, fmt.Errorf("compact the deploy check %s: start the compacting session: %w", ws, err)
 	}

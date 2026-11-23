@@ -43,6 +43,13 @@ const (
 	// workspace with no shim: the pick is applied once the shim is up, and
 	// the shim is stood down on the switch away unless a prompt ran meanwhile.
 	StartSettings StartCause = "settings"
+	// StartCompaction is a deploy check's session started at once to carry
+	// out the compaction owed to it (workspace.verbs.CompactDeployCheck).
+	StartCompaction StartCause = "compaction"
+	// StartSwap is a workspace swapped onto a conversation with no vendor
+	// session of its own yet, its session started fresh on it (queue bypass
+	// mode's switch, workspace.verbs.swapConversation, not a rebind).
+	StartSwap StartCause = "swap"
 	// StartUnstated is a start no caller stated a cause for: a wiring gap,
 	// which the fleet records at INFO so it is seen.
 	StartUnstated StartCause = "unstated"
@@ -81,6 +88,9 @@ const (
 	// StandDownMergeQueued is a finished workspace parked the moment its own
 	// branch's merge was put in line, so it waits for the merge with no shim.
 	StandDownMergeQueued StandDownReason = "merge_queued"
+	// StandDownLanded is a workspace whose work landed, stood down before its
+	// worktree is retired (merge.orchestrator.retireLandedWorktree).
+	StandDownLanded StandDownReason = "landed"
 	// StandDownReplaced is a held shim replaced by a fresh one inside a start
 	// (it runs another account's root).
 	StandDownReplaced StandDownReason = "replaced"

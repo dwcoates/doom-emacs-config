@@ -25,6 +25,9 @@ shim still draws its whole conversation.
 | Turning remote control on for a workspace with no shim | `UpdateRemoteControlMode` (`remote-control.md`) |
 | The restart verb, which starts one at once when none is up | `workspace.verbs.Restart` (`startForRestart`) |
 | A rebind to another transcript | `workspace.Fleet.StartRebound` |
+| A swap onto a conversation with no vendor session yet (queue bypass mode's switch) | `workspace.verbs.swapConversation`, cause `swap` |
+| A deploy check's owed compaction, carried out at once | `workspace.verbs.CompactDeployCheck`, cause `compaction` |
+| A merge's prompt or repair, and a merge workspace's hand-off | `merge.orchestrator.ensureSession`, `workspace.verbs.StartMergeWorkspace`, cause `merge` |
 | A model, permission-mode or effort pick on a workspace with no shim | `promptqueue` settings revival (`SubmitSessionAct`, `ReviveForSettings`) |
 | A boot or a handover, only for a shim that was up when the last daemon stopped | `bringup.OnlyWasUp`, in `boot` and `rollout` |
 

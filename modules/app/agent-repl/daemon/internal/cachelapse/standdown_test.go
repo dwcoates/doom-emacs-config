@@ -604,7 +604,7 @@ func TestAnIdleParkWhoseGraceRunsIntoTheRestoreLeadIsLeftToTheBeat(t *testing.T)
 
 func TestASessionRestoredForItsBeatIsNotParkedBeforeTheBeat(t *testing.T) {
 	// Arrange: idle two hours, its beat 30 seconds off, inside the restore lead.
-	h := newHarness(t, visible()).idleFor(2*time.Hour).keptAliveAgo(KeepaliveInterval - 30*time.Second)
+	h := newHarness(t, visible()).idleFor(2 * time.Hour).keptAliveAgo(KeepaliveInterval - 30*time.Second)
 
 	// Act
 	h.reconcile("a session came up")

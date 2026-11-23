@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -60,6 +61,9 @@ func TestSwitchConversationBindsTheConversationTheSwitchCallsFor(t *testing.T) {
 			}
 			if got := slices.Contains(f.fleet.rebound, ids.WorkspaceID("w1")); got != tc.wantRebound {
 				t.Fatalf("started as a rebind = %v, want %v", got, tc.wantRebound)
+			}
+			if !tc.wantRebound && !slices.Equal(f.fleet.startCauses, []shimlife.StartCause{shimlife.StartSwap}) {
+				t.Fatalf("start causes = %v, want the fresh swap's", f.fleet.startCauses)
 			}
 		})
 	}

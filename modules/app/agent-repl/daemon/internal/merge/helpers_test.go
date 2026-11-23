@@ -35,6 +35,7 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/testcases"
 	"agent-repld/internal/wsm"
 )
@@ -3813,8 +3814,11 @@ type harness struct {
 	// the harness's sequence.
 	startHolds []startHold
 	stopForces []bool
-	stopAt     int
-	stopErr    error
+	// stopReasons are the stand-down reasons the stops' contexts stated, ""
+	// for a stop that stated none.
+	stopReasons []shimlife.StandDownReason
+	stopAt      int
+	stopErr     error
 	// occupancyReleases counts the occupancy guards dropped.
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
@@ -4306,11 +4310,13 @@ func (h *harness) deps() Deps {
 				h.mu.Unlock()
 			}
 		},
-		StopSession: func(_ context.Context, ws ids.WorkspaceID, force bool) error {
+		StopSession: func(ctx context.Context, ws ids.WorkspaceID, force bool) error {
 			at := h.next()
+			reason, _ := shimlife.StandDownOf(ctx)
 			h.mu.Lock()
 			h.stoppedSessions = append(h.stoppedSessions, ws)
 			h.stopForces = append(h.stopForces, force)
+			h.stopReasons = append(h.stopReasons, reason)
 			if h.stopAt == 0 {
 				h.stopAt = at
 			}
