@@ -52,8 +52,12 @@
  * closes made KillSession miss the daemon's bound. Every teardown ends the
  * process, and the exit releases every watch (35 open watches, under 20ms), so
  * `abandon` only stops the reporting and the probe and leaves the platform
- * watches to the exit. The closes made while the session lives (a re-arm, a
- * skill gone) stay: that process goes on and must release what it replaced.
+ * watches to the exit. For the same reason the probe's own watch is never
+ * closed, not even when the probe is seen: it is one `persistent: false` handle
+ * on a directory that is then removed, it reports nothing once the probe has
+ * settled, and the exit releases it. The closes made while the session lives
+ * (a re-arm, a skill gone) stay: that process goes on and must release what it
+ * replaced.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -205,11 +209,8 @@ export function skillDirsOf(configDir: string, cwd: string): string[] {
 export class SkillSetWatch {
   private readonly roots: RootWatch[];
   private started = false;
-  /**
-   * Ends the liveness probe while it waits, closing its platform watch only
-   * when RELEASE says to; undefined once it has settled.
-   */
-  private endProbe: ((release: boolean) => void) | undefined;
+  /** Ends the liveness probe while it waits; undefined once it has settled. */
+  private endProbe: (() => void) | undefined;
   private abandoned = false;
 
   constructor(
@@ -237,7 +238,7 @@ export class SkillSetWatch {
   abandon(): void {
     if (this.abandoned) return;
     this.abandoned = true;
-    this.endProbe?.(false);
+    this.endProbe?.();
     for (const root of this.roots) root.abandon();
   }
 
@@ -251,7 +252,6 @@ export class SkillSetWatch {
   private awaitLive(before: readonly Inventory[]): void {
     const startedAt = this.fsys.now();
     let probe: ProbeDir;
-    let watch: DirWatch | undefined;
     try {
       probe = this.fsys.probeDir();
     } catch (err) {
@@ -269,16 +269,15 @@ export class SkillSetWatch {
       }
     };
     const stops: (() => void)[] = [];
-    const settle = (release = true): void => {
+    const settle = (): void => {
       if (this.endProbe === undefined) return;
       this.endProbe = undefined;
       for (const stop of stops) stop();
-      if (release) watch?.close();
       probe.remove();
     };
     this.endProbe = settle;
     try {
-      watch = this.fsys.watchDir(
+      this.fsys.watchDir(
         probe.dir,
         () => {
           if (this.endProbe === undefined) return;

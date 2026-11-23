@@ -443,7 +443,62 @@ describe("SkillSetWatch coming live", () => {
     watch.start();
 
     // Assert
-    expect([fsys.probe, fsys.watching("/tmp/agent-repl-skill-probe-1")]).toEqual([undefined, false]);
+    expect(fsys.probe).toBeUndefined();
+  });
+
+  it("closes no platform watch when its probe is seen and the watch comes live", () => {
+    // Arrange
+    const { fsys, watch } = arrange();
+    const before = fsys.closes;
+
+    // Act
+    watch.start();
+
+    // Assert
+    expect(fsys.closes).toBe(before);
+  });
+
+  it("closes no platform watch when its bound passes with no probe seen", () => {
+    // Arrange
+    const { fsys, watch } = arrangeInGap();
+    watch.start();
+    const before = fsys.closes;
+
+    // Act
+    logRecordsDuring(() => fsys.tick(LIVE_BOUND_MS));
+
+    // Assert
+    expect(fsys.closes).toBe(before);
+  });
+
+  it("closes no platform watch when its probe's watch fails", () => {
+    // Arrange
+    const { fsys, watch } = arrangeInGap();
+    watch.start();
+    const before = fsys.closes;
+
+    // Act
+    logRecordsDuring(() => {
+      for (const w of fsys.watches.get("/tmp/agent-repl-skill-probe-1") ?? []) w.onError(new Error("probe watch broke"));
+    });
+
+    // Assert
+    expect(fsys.closes).toBe(before);
+  });
+
+  it("reports nothing and records no second live record on an event of its probe's watch after it came live", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    fsys.goLive();
+    fsys.tick(PROBE_EVERY_MS);
+    changes.length = 0;
+
+    // Act
+    const records = logRecordsDuring(() => fsys.fire("/tmp/agent-repl-skill-probe-1", "probe-1"));
+
+    // Assert
+    expect([changes, records]).toEqual([[], []]);
   });
 
   it("stops probing once live", () => {
