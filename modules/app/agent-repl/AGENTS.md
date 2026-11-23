@@ -3557,7 +3557,9 @@ holding the parked conversation's Remote Control bridge, so a prompt typed on
 claude.ai reaches it and answers the gate pay (owner ruling, 2026-11-02;
 `docs/developer/remote-control.md`, "A parked workspace").
 A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
-daemon stopped (`bringup.OnlyWasUp`), hidden or not: the session record states
+daemon stopped (`bringup.OnlyWasUp`), plus every workspace with a recorded cold
+gate, whose start only raises the gate from its record and spawns nothing, so a
+gate shows the moment the daemon serves and not at the next prompt, hidden or not: the session record states
 each workspace's shim at every park and unpark, and nothing else decides.
 Emacs's re-announcement starts nothing.
 
