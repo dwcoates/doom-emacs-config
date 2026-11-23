@@ -1716,7 +1716,7 @@ t_in_place_launcher_stamps_the_installed_app() {
 t_out_logs_a_built_target_with_its_source_tree() {
     local root log; root="$(new_staging_root)"; STAGING_ROOT="$root"
     log="$(run_script "$root" --out "$root/staging" store)"
-    if printf '%s\n' "$log" | grep -qxF "[build-frontend] outcome target=shim-store source_tree=$(fake_source_tree shim-store) outcome=built"; then
+    if grep -qxF "[build-frontend] outcome target=shim-store source_tree=$(fake_source_tree shim-store) outcome=built" <<<"$log"; then
         pass "reuse: a built target's outcome line names the target and its source tree"
     else
         fail "reuse: a built target's outcome line names the target and its source tree" "log: $log"

@@ -472,7 +472,7 @@ go_binary_current() {
     [ -n "$toolchain" ] || return 1
     info="$(go version -m "$binary" 2>/dev/null)" || return 1
     [ "$(printf '%s\n' "$info" | sed -n '1s/^[^:]*: //p')" = "$toolchain" ] || return 1
-    [ -z "$ldflags" ] || printf '%s\n' "$info" | grep -qF -- "$ldflags"
+    [ -z "$ldflags" ] || grep -qF -- "$ldflags" <<<"$info"
 }
 
 # go_binary_current_for LDFLAGS BINARY — go_binary_current with the arguments in
