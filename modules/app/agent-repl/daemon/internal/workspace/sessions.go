@@ -3368,6 +3368,12 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		StartedAt:         previous.StartedAt,
 		LastEngagementAt:  now,
 	}
+	// A KEEP-ALIVE'S RESTORE IS RECORDED AS ONE, so every view tells a
+	// session up only for its keep-alive (dormant, wsm.Session.Dormant) from
+	// one up for work; any other bring-up's record clears it.
+	if cause, _ := shimlife.StartOf(ctx); cause == shimlife.StartKeepalive {
+		next.KeepaliveRestoredAt = &now
+	}
 	f.noteSDKVersion(log, started.GetRuntime().GetSdkVersion())
 	if next.StartedAt.IsZero() {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: next.StartedAt.IsZero()", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})

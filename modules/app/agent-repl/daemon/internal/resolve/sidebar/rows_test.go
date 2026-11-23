@@ -2404,44 +2404,50 @@ func TestContextHeatUnchangedPublishesNothing(t *testing.T) {
 	}
 }
 
-// ---- The PARKED marker: no shim runs the session ---------------------------
+// ---- The DORMANT marker: the session runs no work ------------------------
 //
-// PRESENT exactly while the session record carries a park
-// (wsm.Session.Parked), which the editor reads to unload the page of a parked
-// workspace off screen.
+// PRESENT exactly while the session is dormant (wsm.Session.Dormant), which
+// the editor reads to hold no page of a dormant workspace off screen.
 
-func TestParkedMarkerFollowsTheSessionsPark(t *testing.T) {
+func TestDormantMarkerFollowsTheSession(t *testing.T) {
+	restored := epoch.Add(time.Minute)
+	before, after := epoch, epoch.Add(2*time.Minute)
 	cases := []struct {
-		name     string
-		terminal *wsm.SessionTerminal
-		want     bool
+		name        string
+		session     wsm.Session
+		turnStarted *time.Time
+		want        bool
 	}{
-		{name: "a live session", terminal: nil, want: false},
-		{name: "a parked session", terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}, want: true},
-		{name: "a killed session", terminal: &wsm.SessionTerminal{Kind: "killed", At: epoch}, want: false},
+		{name: "a live session", session: wsm.Session{Workspace: theWS}, want: false},
+		{name: "a parked session", session: wsm.Session{Workspace: theWS, Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}, want: true},
+		{name: "a killed session", session: wsm.Session{Workspace: theWS, Terminal: &wsm.SessionTerminal{Kind: "killed", At: epoch}}, want: false},
+		{name: "a keep-alive's restore with no turn since", session: wsm.Session{Workspace: theWS, KeepaliveRestoredAt: &restored}, turnStarted: &before, want: true},
+		{name: "a keep-alive's restore a turn has started since", session: wsm.Session{Workspace: theWS, KeepaliveRestoredAt: &restored}, turnStarted: &after, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			r := arrange(t)
+			rec := workspace(string(theWS), "one")
+			rec.LastTurnStartedAt = tc.turnStarted
 
 			// Act.
 			r.SetRegistry(sidebar.Registry{
 				View:         wsm.DefaultSidebarView,
-				Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
+				Workspaces:   []wsm.Workspace{rec},
 				Repositories: []wsm.Repository{repo},
-				Sessions:     []wsm.Session{{Workspace: theWS, Terminal: tc.terminal}},
+				Sessions:     []wsm.Session{tc.session},
 			})
 
 			// Assert: presence is the fact.
-			if got := onlyRow(t, r).GetParked() != nil; got != tc.want {
-				t.Fatalf("parked present = %v, want %v", got, tc.want)
+			if got := onlyRow(t, r).GetDormant() != nil; got != tc.want {
+				t.Fatalf("dormant present = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestAWorkspaceWithNoSessionIsNotMarkedParked(t *testing.T) {
+func TestAWorkspaceWithNoSessionIsNotMarkedDormant(t *testing.T) {
 	// Arrange.
 	r := arrange(t)
 
@@ -2449,7 +2455,7 @@ func TestAWorkspaceWithNoSessionIsNotMarkedParked(t *testing.T) {
 	row := onlyRow(t, r)
 
 	// Assert.
-	if got := row.GetParked(); got != nil {
-		t.Fatalf("parked = %v, want none for a workspace with no session", got)
+	if got := row.GetDormant(); got != nil {
+		t.Fatalf("dormant = %v, want none for a workspace with no session", got)
 	}
 }

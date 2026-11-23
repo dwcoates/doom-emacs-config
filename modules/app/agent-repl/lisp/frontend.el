@@ -130,6 +130,7 @@
 (declare-function agent-repl-sidebar-view-hide "sidebar-view" ())
 (declare-function agent-repl-webhost-xwidget "webhost" ())
 (declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
+(declare-function agent-repl-page-unload-load "page-unload" (ws why))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
@@ -942,8 +943,8 @@ browser header-line, and arms the copy chords, and is told the input
 window's background its page's gate wears.
 
 Either way the host is asked to hold WS's page
-\(`agent-repl-webhost-ensure-page') when it is wanted
-\(`agent-repl-page-unload-wanted-p': unless cold-gated or parked), which is
+\(`agent-repl-page-unload-load') when it is wanted
+\(`agent-repl-page-unload-wanted-p': unless cold-gated or dormant), which is
 idempotent: a page already held at WS's URL is left alone, so this is safe
 on every open and show.  A slot that is not wanted is made with no page.
 
@@ -972,12 +973,12 @@ webview window resolves against the worktree the REPL is attached to."
                     (agent-repl--ws-put ws :frontend-buffer buf)
                     (agent-repl--info ws "elisp.frontend.slot-mounted ws={ws} buffer={buffer}" :ws ws :buffer name)
                     buf)))))
-    ;; A PAGE IS LOADED FOR EVERY WORKSPACE HELD HERE, which the daemon
-    ;; calls visible (owner ruling, 2026-11-21), but a cold-gated one: its
-    ;; slot is made with no page, and its show holds the page back
+    ;; A PAGE IS LOADED FOR A WORKSPACE HELD HERE, which the daemon calls
+    ;; visible, only while it is wanted: a cold-gated or dormant one's slot
+    ;; is made with no page, and its show loads it or holds it back
     ;; (`agent-repl-page-unload-note-shown').
     (when (agent-repl-page-unload-wanted-p ws)
-      (agent-repl-webhost-ensure-page ws))
+      (agent-repl-page-unload-load ws 'slot))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
 

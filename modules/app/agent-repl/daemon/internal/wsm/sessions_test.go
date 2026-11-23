@@ -849,3 +849,39 @@ func TestOwedWorkIsSpelledOnlyByOwedField(t *testing.T) {
 		t.Fatalf("files spelling owed work by hand = %v, want every one through wsm.OwedField", offenders)
 	}
 }
+
+func TestPutSessionRoundTripsTheKeepaliveRestore(t *testing.T) {
+	tests := []struct {
+		name     string
+		restored *time.Time
+	}{
+		{name: "a keep-alive's restore", restored: &instant},
+		{name: "a bring-up for work", restored: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			session := Session{
+				Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+				Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+				KeepaliveRestoredAt: tt.restored,
+			}
+
+			// Act
+			if err := s.PutSession(context.Background(), session); err != nil {
+				t.Fatalf("PutSession: %v", err)
+			}
+			got, _, err := s.Session(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Session: %v", err)
+			}
+			if (got.KeepaliveRestoredAt == nil) != (tt.restored == nil) || (tt.restored != nil && !got.KeepaliveRestoredAt.Equal(*tt.restored)) {
+				t.Fatalf("keep-alive restore = %v, want %v", got.KeepaliveRestoredAt, tt.restored)
+			}
+		})
+	}
+}

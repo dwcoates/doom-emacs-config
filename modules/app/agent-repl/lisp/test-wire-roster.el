@@ -76,7 +76,7 @@ See `agent-repl-test-wire-roster--row-json'."
                    :view-dwell nil
                    :idle-async-unread nil
                    :reviving nil
-                   :parked nil
+                   :dormant nil
                    :detached-live nil
                    :one-shot nil
                    :opening nil
@@ -394,22 +394,22 @@ See `agent-repl-test-wire-roster--row-json'."
                          :reviving)
               t)))
 
-(ert-deftest agent-repl-test-wire-roster-row-decodes-the-parked-marker ()
-  "A row carrying `parked' decodes it as PRESENT."
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-dormant-marker ()
+  "A row carrying `dormant' decodes it as PRESENT."
   (should (eq (plist-get (agent-repl-test-wire-roster--decode
                           #'agent-repl-wire-decode-roster-row
                           (agent-repl-test-wire-roster--row
-                           "\"ready\":{}" "\"parked\":{}"))
-                         :parked)
+                           "\"ready\":{}" "\"dormant\":{}"))
+                         :dormant)
               t)))
 
-(ert-deftest agent-repl-test-wire-roster-row-parked-carries-no-payload ()
-  "`RosterRowParked' is EMPTY: a field inside it is an unknown field."
+(ert-deftest agent-repl-test-wire-roster-row-dormant-carries-no-payload ()
+  "`RosterRowDormant' is EMPTY: a field inside it is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row
                   (agent-repl-test-wire-roster--row
-                   "\"ready\":{}" "\"parked\":{\"x\":1}"))
-                 '("RosterRowParked" x "unknown field"))))
+                   "\"ready\":{}" "\"dormant\":{\"x\":1}"))
+                 '("RosterRowDormant" x "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-reviving-carries-no-payload ()
   "`RosterRowReviving' is EMPTY: a field inside it is an unknown field."

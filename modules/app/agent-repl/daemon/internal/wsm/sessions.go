@@ -19,15 +19,20 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 		started    int64
 		engagement int64
 		pid        sql.NullInt64
+		restored   sql.NullInt64
 		kind       sql.NullString
 		detail     sql.NullString
 		at         sql.NullInt64
 	)
-	if err := row.Scan(&s.Workspace, &s.HostSessionID, &s.VendorSessionID, &s.ConfigDir, &s.SelectedConfigDir, &s.Model, &s.PermissionMode, &started, &engagement, &pid, &kind, &detail, &at); err != nil {
+	if err := row.Scan(&s.Workspace, &s.HostSessionID, &s.VendorSessionID, &s.ConfigDir, &s.SelectedConfigDir, &s.Model, &s.PermissionMode, &started, &engagement, &pid, &restored, &kind, &detail, &at); err != nil {
 		return Session{}, err
 	}
 	s.StartedAt = fromNanos(started)
 	s.LastEngagementAt = fromNanos(engagement)
+	if restored.Valid {
+		at := fromNanos(restored.Int64)
+		s.KeepaliveRestoredAt = &at
+	}
 	if pid.Valid {
 		if pid.Int64 <= 0 {
 			return Session{}, &DecodeError{Table: "sessions", Row: string(s.Workspace), Field: "shim_pid", Err: errors.New("a recorded shim pid is positive")}
@@ -197,9 +202,13 @@ func putSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 		tKind, tDetail any
 		tAt            any
 		pid            any
+		restored       any
 	)
 	if sess.Terminal != nil {
 		tKind, tDetail, tAt = sess.Terminal.Kind, sess.Terminal.Detail, nanos(sess.Terminal.At)
+	}
+	if sess.KeepaliveRestoredAt != nil {
+		restored = nanos(*sess.KeepaliveRestoredAt)
 	}
 	if sess.ShimPID != nil {
 		if *sess.ShimPID <= 0 {
@@ -208,18 +217,19 @@ func putSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 		pid = int64(*sess.ShimPID)
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, keepalive_restored_at, terminal_kind, terminal_detail, terminal_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(workspace_id) DO UPDATE SET
 		   host_session_id = excluded.host_session_id,
 		   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir,
 		   selected_config_dir = excluded.selected_config_dir, model = excluded.model,
 		   permission_mode = excluded.permission_mode, started_at = excluded.started_at,
 		   last_engagement_at = excluded.last_engagement_at, shim_pid = excluded.shim_pid,
+		   keepalive_restored_at = excluded.keepalive_restored_at,
 		   terminal_kind = excluded.terminal_kind,
 		   terminal_detail = excluded.terminal_detail, terminal_at = excluded.terminal_at`,
 		sess.Workspace, sess.HostSessionID, sess.VendorSessionID, sess.ConfigDir, sess.SelectedConfigDir, sess.Model, sess.PermissionMode,
-		nanos(sess.StartedAt), nanos(sess.LastEngagementAt), pid, tKind, tDetail, tAt)
+		nanos(sess.StartedAt), nanos(sess.LastEngagementAt), pid, restored, tKind, tDetail, tAt)
 	return err
 }
 
@@ -250,7 +260,7 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 
 // sessionSelectColumns is the one column list every session read scans, in
 // scanSession's order, so the single and the bulk read cannot drift apart.
-const sessionSelectColumns = `workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at`
+const sessionSelectColumns = `workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, keepalive_restored_at, terminal_kind, terminal_detail, terminal_at`
 
 // Sessions loads every workspace's session in ONE read, ordered by workspace.
 //

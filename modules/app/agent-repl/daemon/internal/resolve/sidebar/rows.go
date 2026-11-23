@@ -192,11 +192,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if s.reviving {
 		out.Reviving = &frontendv1.RosterRowReviving{}
 	}
-	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowParked` states it: set
-	// while no shim runs the session, so the editor unloads the page of a
-	// parked workspace off screen.
-	if parked(session) {
-		out.Parked = &frontendv1.RosterRowParked{}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowDormant` states it: set
+	// while the session runs no work, so the editor holds no page of a
+	// dormant workspace off screen.
+	if session != nil && session.Dormant(rec.LastTurnStartedAt, runningTurnStart(clock) != nil) {
+		out.Dormant = &frontendv1.RosterRowDormant{}
 	}
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowDetachedLive` states it:
 	// set exactly while detached work counts as live (asyncLive), on any arm.

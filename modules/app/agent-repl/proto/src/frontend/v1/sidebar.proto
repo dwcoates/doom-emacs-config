@@ -832,17 +832,20 @@ message RosterRowIdleAsyncUnread {
 // text while it stands.
 message RosterRowReviving {}
 
-// NO SHIM RUNS THE WORKSPACE'S SESSION: it is parked (wsm.Session.Parked),
-// whatever parked it. Empty: presence is the fact.
+// THE WORKSPACE'S SESSION RUNS NO WORK (wsm.Session.Dormant): it is parked,
+// whatever parked it, or a keep-alive's restore brought it up for its beat
+// and no turn has started since. Empty: presence is the fact.
 //
-// WHAT IT GATES (owner ruling, 2026-11-23): the editor holds a visible
-// workspace's page only while its session runs on a shim or the user is
-// looking at it. So a park unloads the page of a workspace off screen, a
-// switch to a parked workspace loads its page with no shim started (a prompt
-// alone starts one), and a switch away from it unloads the page again. It
-// says nothing of the status: a parked session is drawn as the idle session
-// it stands in for.
-message RosterRowParked {}
+// WHAT IT GATES (owner rulings, 2026-11-23): the editor holds a visible
+// workspace's page while it is not dormant, or while the user is looking at
+// it, and loads a page at no other time. So a park unloads the page of a
+// workspace off screen; a switch to a dormant workspace loads its page with no
+// shim started (a prompt alone starts one), and a switch away unloads it
+// again; a session coming up for work (a prompt, a merge, a cold gate's
+// answer) loads its page; and a keep-alive's restore, which the beat's own
+// stand-down parks again, loads none. It says nothing of the status: a
+// dormant session is drawn as the idle session it stands in for.
+message RosterRowDormant {}
 
 // DETACHED WORK RUNS in this workspace: a subagent, a background shell, or
 // any other work that outlives the main thread's turn. PRESENT exactly while
@@ -907,7 +910,7 @@ message RosterRowOpenOwnedPullRequest {}
 //
 // WHAT IT GATES: the editor holds a perspective, a composer and a host stream
 // (WatchHostWorkspace) for exactly the workspaces that are not `not_visible`,
-// and loads no page of any other (RosterRowParked says which of theirs it
+// and loads no page of any other (RosterRowDormant says which of theirs it
 // holds); the daemon serves a web stream
 // (WatchWebWorkspace) for them alone, reloads only their pages in a deploy,
 // and starts their sessions at boot (beside the ones a merge queue, a deploy
@@ -2552,9 +2555,9 @@ message RosterRow {
   // The row's CONTEXT HEAT: present while the workspace's context holds at
   // least 400,000 tokens. See RosterRowContextHeat.
   optional RosterRowContextHeat context_heat = 79;
-  // The row's PARKED marker: present while no shim runs the workspace's
-  // session. See RosterRowParked, which carries its whole contract.
-  optional RosterRowParked parked = 80;
+  // The row's DORMANT marker: present while the workspace's session runs no
+  // work. See RosterRowDormant, which carries its whole contract.
+  optional RosterRowDormant dormant = 80;
 
   // The row's display name.
   RosterRowName name = 2;

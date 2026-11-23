@@ -1338,13 +1338,13 @@ Every row the roster lists, held here or not."
   (let ((id (plist-get (agent-repl--ws-get ws :ref) :id)))
     (and id (agent-repl-roster-row-of-id id))))
 
-(defun agent-repl-roster-row-parked-p (row)
-  "Return non-nil when no shim runs ROW\='s session (frontend.v1.RosterRowParked)."
-  (plist-get row :parked))
+(defun agent-repl-roster-row-dormant-p (row)
+  "Return non-nil when ROW\='s session runs no work (frontend.v1.RosterRowDormant)."
+  (plist-get row :dormant))
 
-(defun agent-repl-roster-parked-p (ws)
-  "Return non-nil when no shim runs WS\='s session, nil before its first push."
-  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-parked-p))
+(defun agent-repl-roster-dormant-p (ws)
+  "Return non-nil when WS\='s session runs no work, nil before its first push."
+  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-dormant-p))
 
 (defun agent-repl-roster-status-for-ws (ws)
   "Return WS's roster status arm keyword, or nil before its first push."

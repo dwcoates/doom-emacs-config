@@ -5133,3 +5133,35 @@ func TestAStandDownClosesTheShimsOwnVerdict(t *testing.T) {
 func fakeSpawn(pid int) ids.ProcessIdentity {
 	return ids.ProcessIdentity{PID: pid, StartUnixMicros: 1795284061244774}
 }
+
+func TestABringUpRecordsWhetherAKeepalivesRestoreMadeIt(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause shimlife.StartCause
+		want  bool
+	}{
+		{name: "a keep-alive's restore", cause: shimlife.StartKeepalive, want: true},
+		{name: "a prompt", cause: shimlife.StartPrompt, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+
+			// Act.
+			if err := f.fleet.Start(shimlife.WithStart(context.Background(), tt.cause), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			session, found, err := f.db.Session(context.Background(), ws.ID)
+			if err != nil || !found {
+				t.Fatalf("Session = (%v, %v)", found, err)
+			}
+			if got := session.KeepaliveRestoredAt != nil; got != tt.want {
+				t.Fatalf("recorded as a keep-alive's restore = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

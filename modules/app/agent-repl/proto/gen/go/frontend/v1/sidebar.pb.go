@@ -3720,36 +3720,39 @@ func (*RosterRowReviving) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{58}
 }
 
-// NO SHIM RUNS THE WORKSPACE'S SESSION: it is parked (wsm.Session.Parked),
-// whatever parked it. Empty: presence is the fact.
+// THE WORKSPACE'S SESSION RUNS NO WORK (wsm.Session.Dormant): it is parked,
+// whatever parked it, or a keep-alive's restore brought it up for its beat
+// and no turn has started since. Empty: presence is the fact.
 //
-// WHAT IT GATES (owner ruling, 2026-11-23): the editor holds a visible
-// workspace's page only while its session runs on a shim or the user is
-// looking at it. So a park unloads the page of a workspace off screen, a
-// switch to a parked workspace loads its page with no shim started (a prompt
-// alone starts one), and a switch away from it unloads the page again. It
-// says nothing of the status: a parked session is drawn as the idle session
-// it stands in for.
-type RosterRowParked struct {
+// WHAT IT GATES (owner rulings, 2026-11-23): the editor holds a visible
+// workspace's page while it is not dormant, or while the user is looking at
+// it, and loads a page at no other time. So a park unloads the page of a
+// workspace off screen; a switch to a dormant workspace loads its page with no
+// shim started (a prompt alone starts one), and a switch away unloads it
+// again; a session coming up for work (a prompt, a merge, a cold gate's
+// answer) loads its page; and a keep-alive's restore, which the beat's own
+// stand-down parks again, loads none. It says nothing of the status: a
+// dormant session is drawn as the idle session it stands in for.
+type RosterRowDormant struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterRowParked) Reset() {
-	*x = RosterRowParked{}
+func (x *RosterRowDormant) Reset() {
+	*x = RosterRowDormant{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterRowParked) String() string {
+func (x *RosterRowDormant) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterRowParked) ProtoMessage() {}
+func (*RosterRowDormant) ProtoMessage() {}
 
-func (x *RosterRowParked) ProtoReflect() protoreflect.Message {
+func (x *RosterRowDormant) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3761,8 +3764,8 @@ func (x *RosterRowParked) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterRowParked.ProtoReflect.Descriptor instead.
-func (*RosterRowParked) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterRowDormant.ProtoReflect.Descriptor instead.
+func (*RosterRowDormant) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{59}
 }
 
@@ -3928,7 +3931,7 @@ func (*RosterRowOpenOwnedPullRequest) Descriptor() ([]byte, []int) {
 //
 // WHAT IT GATES: the editor holds a perspective, a composer and a host stream
 // (WatchHostWorkspace) for exactly the workspaces that are not `not_visible`,
-// and loads no page of any other (RosterRowParked says which of theirs it
+// and loads no page of any other (RosterRowDormant says which of theirs it
 // holds); the daemon serves a web stream
 // (WatchWebWorkspace) for them alone, reloads only their pages in a deploy,
 // and starts their sessions at boot (beside the ones a merge queue, a deploy
@@ -10806,9 +10809,9 @@ type RosterRow struct {
 	// The row's CONTEXT HEAT: present while the workspace's context holds at
 	// least 400,000 tokens. See RosterRowContextHeat.
 	ContextHeat *RosterRowContextHeat `protobuf:"bytes,79,opt,name=context_heat,json=contextHeat,proto3,oneof" json:"context_heat,omitempty"`
-	// The row's PARKED marker: present while no shim runs the workspace's
-	// session. See RosterRowParked, which carries its whole contract.
-	Parked *RosterRowParked `protobuf:"bytes,80,opt,name=parked,proto3,oneof" json:"parked,omitempty"`
+	// The row's DORMANT marker: present while the workspace's session runs no
+	// work. See RosterRowDormant, which carries its whole contract.
+	Dormant *RosterRowDormant `protobuf:"bytes,80,opt,name=dormant,proto3,oneof" json:"dormant,omitempty"`
 	// The row's display name.
 	Name *RosterRowName `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// The repository the workspace belongs to, on every list's rows: a hidden,
@@ -11070,9 +11073,9 @@ func (x *RosterRow) GetContextHeat() *RosterRowContextHeat {
 	return nil
 }
 
-func (x *RosterRow) GetParked() *RosterRowParked {
+func (x *RosterRow) GetDormant() *RosterRowDormant {
 	if x != nil {
-		return x.Parked
+		return x.Dormant
 	}
 	return nil
 }
@@ -14794,8 +14797,8 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"turnFailedB\n" +
 	"\n" +
 	"\bturn_end\"\x13\n" +
-	"\x11RosterRowReviving\"\x11\n" +
-	"\x0fRosterRowParked\"\x17\n" +
+	"\x11RosterRowReviving\"\x12\n" +
+	"\x10RosterRowDormant\"\x17\n" +
 	"\x15RosterRowDetachedLive\"-\n" +
 	"\x10RosterRowOneShotJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x05armedR\x06failed\"\x1f\n" +
 	"\x1dRosterRowOpenOwnedPullRequest\"\x95\x02\n" +
@@ -15139,7 +15142,7 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"workspaces\x18\x01 \x01(\rR\n" +
 	"workspaces\"!\n" +
 	"\vRosterLabel\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x8c%\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\x90%\n" +
 	"\tRosterRow\x12=\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1f.frontend.v1.RosterRowWorkspaceR\tworkspace\x12B\n" +
 	"\tattention\x18  \x01(\v2\x1f.frontend.v1.RosterRowAttentionH\x01R\tattention\x88\x01\x01\x129\n" +
@@ -15167,8 +15170,8 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\n" +
 	"visibility\x18N \x01(\v2 .frontend.v1.RosterRowVisibilityR\n" +
 	"visibility\x12I\n" +
-	"\fcontext_heat\x18O \x01(\v2!.frontend.v1.RosterRowContextHeatH\x12R\vcontextHeat\x88\x01\x01\x129\n" +
-	"\x06parked\x18P \x01(\v2\x1c.frontend.v1.RosterRowParkedH\x13R\x06parked\x88\x01\x01\x12.\n" +
+	"\fcontext_heat\x18O \x01(\v2!.frontend.v1.RosterRowContextHeatH\x12R\vcontextHeat\x88\x01\x01\x12<\n" +
+	"\adormant\x18P \x01(\v2\x1d.frontend.v1.RosterRowDormantH\x13R\adormant\x88\x01\x01\x12.\n" +
 	"\x04name\x18\x02 \x01(\v2\x1a.frontend.v1.RosterRowNameR\x04name\x12@\n" +
 	"\n" +
 	"repository\x18I \x01(\v2 .frontend.v1.RosterRowRepositoryR\n" +
@@ -15239,8 +15242,9 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\r_merge_pausedB\r\n" +
 	"\v_merge_turnB\x1a\n" +
 	"\x18_open_owned_pull_requestB\x0f\n" +
-	"\r_context_heatB\t\n" +
-	"\a_parkedJ\x04\b!\x10\"J\x04\bM\x10NJ\x04\b\x13\x10\x14J\x04\b\x16\x10\x17J\x04\b9\x10:J\x04\b<\x10=J\x04\b?\x10@J\x04\b\x1c\x10\x1dJ\x04\b:\x10;R\bpriorityR\x04heldR\x0fmerge_enqueuingR\x0emerge_conflictR\rmerge_waitingR\bchildrenR\x0fmerge_workspace\"`\n" +
+	"\r_context_heatB\n" +
+	"\n" +
+	"\b_dormantJ\x04\b!\x10\"J\x04\bM\x10NJ\x04\b\x13\x10\x14J\x04\b\x16\x10\x17J\x04\b9\x10:J\x04\b<\x10=J\x04\b?\x10@J\x04\b\x1c\x10\x1dJ\x04\b:\x10;R\bpriorityR\x04heldR\x0fmerge_enqueuingR\x0emerge_conflictR\rmerge_waitingR\bchildrenR\x0fmerge_workspace\"`\n" +
 	"\x12RosterRowWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspaceJ\x04\b\x02\x10\x03R\n" +
 	"repository\")\n" +
@@ -15427,7 +15431,7 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterRowViewDwell)(nil),                  // 56: frontend.v1.RosterRowViewDwell
 	(*RosterRowIdleAsyncUnread)(nil),            // 57: frontend.v1.RosterRowIdleAsyncUnread
 	(*RosterRowReviving)(nil),                   // 58: frontend.v1.RosterRowReviving
-	(*RosterRowParked)(nil),                     // 59: frontend.v1.RosterRowParked
+	(*RosterRowDormant)(nil),                    // 59: frontend.v1.RosterRowDormant
 	(*RosterRowDetachedLive)(nil),               // 60: frontend.v1.RosterRowDetachedLive
 	(*RosterRowOneShot)(nil),                    // 61: frontend.v1.RosterRowOneShot
 	(*RosterRowOpenOwnedPullRequest)(nil),       // 62: frontend.v1.RosterRowOpenOwnedPullRequest
@@ -15834,7 +15838,7 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	62,  // 225: frontend.v1.RosterRow.open_owned_pull_request:type_name -> frontend.v1.RosterRowOpenOwnedPullRequest
 	63,  // 226: frontend.v1.RosterRow.visibility:type_name -> frontend.v1.RosterRowVisibility
 	67,  // 227: frontend.v1.RosterRow.context_heat:type_name -> frontend.v1.RosterRowContextHeat
-	59,  // 228: frontend.v1.RosterRow.parked:type_name -> frontend.v1.RosterRowParked
+	59,  // 228: frontend.v1.RosterRow.dormant:type_name -> frontend.v1.RosterRowDormant
 	171, // 229: frontend.v1.RosterRow.name:type_name -> frontend.v1.RosterRowName
 	170, // 230: frontend.v1.RosterRow.repository:type_name -> frontend.v1.RosterRowRepository
 	198, // 231: frontend.v1.RosterRow.submitting:type_name -> frontend.v1.RosterRowStatusSubmitting
