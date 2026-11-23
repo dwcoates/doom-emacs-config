@@ -566,9 +566,13 @@ There is no startup run on a new Emacs's WatchDaemon stream any more: the
 editor asks with `OpenTabs`, and each workspace is answered `opened` as soon as
 it opens, never in registry order (`ARCHITECTURE.md`, "The editor opens
 workspaces with OpenTabs"). Every bring-up (the boot's, a takeover's, an
-open's) starts only workspaces `bringup.OnlyVisible` keeps: never one the user
-hid or whose repository section is collapsed. Collapsing stands the session
-down through the idle sweep's own gate and park (`drain/withheld.go`);
+open's) starts only workspaces `bringup.OnlyVisible` keeps: those the persisted
+visibility (`wsm.Workspace.Visibility`) calls visible, widened by a queued
+merge, the deploy mediator and a fold's spared one-shots (`wsm.Workspace.Runs`).
+What visible means is `frontend.v1.RosterRowVisibility`'s alone: an open
+workspace no fold covers, or one that is working or unviewed, the parent of a
+visible one, and the selected one. A fold that makes a workspace not visible
+stands the session down through the idle sweep's own gate and park (`drain/withheld.go`);
 a turn in flight defers it to the free edge that turn's end raises, and a
 workspace expanded again meanwhile is not stood down. A fold never stands down
 a one-shot or a workspace with a merge pending (`wsm.Workspace.FoldSpare`):
