@@ -919,7 +919,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		CycleDown: func(ws ids.WorkspaceID, beat time.Time, done func(drain.CycleOutcome)) {
 			drainController.CycleDownThen(ws, beat, done)
 		},
-		ColdDown:  func(ws ids.WorkspaceID, since time.Time) { drainController.ColdDown(ws, since) },
+		// THE PROJECTED GATE IS RAISED BY THE FLEET, late-bound as its
+		// neighbours are.
+		RaiseGate: func(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (bool, error) {
+			return fleet.RaiseProjectedGate(ctx, ws, cold)
+		},
+		ColdDown:  func(ws ids.WorkspaceID, since time.Time, atGate bool) { drainController.ColdDown(ws, since, atGate) },
 		VisitDown: func(ws ids.WorkspaceID, since time.Time) { drainController.VisitDown(ws, since) },
 		// A RESTORE IS THE FLEET'S OWN DETACHED START, which the session's
 		// bring-up retires the park's terminal under; the views' park is

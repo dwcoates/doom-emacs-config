@@ -1670,7 +1670,7 @@ var sparingPaths = []standDownPath{
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.CycleDown(ws, beatAfter) }},
 	{name: "a cold cache's park", op: opCold, trigger: "cold_park",
 		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
-		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.ColdDown(ws, beatAfter) }},
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.ColdDown(ws, beatAfter, false) }},
 	{name: "a settings visit's end", op: opVisit, trigger: "settings_visit",
 		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.VisitDown(ws, beatAfter) }},

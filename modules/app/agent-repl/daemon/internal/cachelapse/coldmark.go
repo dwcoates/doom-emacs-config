@@ -65,10 +65,11 @@ func (k *Keeper) markCold(ctx context.Context, ws ids.WorkspaceID, why string) e
 // idle sweep's cutoff (2026-11-14: 76 of 87 live sessions, cold after a
 // Wi-Fi outage lapsed their beats, stayed live all night). The drain parks it
 // under the keep-alive cycle's rules, never under a turn. It is THE ONE ask of
-// the cold park (TestColdParkAsksHaveOneHome).
-func (k *Keeper) parkCold(ws ids.WorkspaceID, since time.Time, why string) {
+// the cold park (TestColdParkAsksHaveOneHome). ATGATE is a cold gate standing
+// over the session, which the drain parks for the workspace in view too.
+func (k *Keeper) parkCold(ws ids.WorkspaceID, since time.Time, why string, atGate bool) {
 	k.deps.Log.Global().Info(opColdMark, "the cache is known cold; its session is parked", dlog.Context{
-		"workspace": string(ws), "why": why, "since": since,
+		"workspace": string(ws), "why": why, "since": since, "at_gate": atGate,
 	})
-	k.deps.ColdDown(ws, since)
+	k.deps.ColdDown(ws, since, atGate)
 }

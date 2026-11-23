@@ -502,14 +502,26 @@ export function sessionCold(
  * when the cache lapses, and the cold gate's verdict on a resume after it. The
  * verdict is the floor's, the same rule {@link judgeCold} applies to a lapse,
  * so a hidden workspace is struck through exactly when showing it will ask.
+ * A gated verdict carries every fact the gate will state once the lapse comes
+ * (the last request and the lifetime that lapsed), so the daemon raises the
+ * gate at the lapse with no shim started.
  */
-export function sessionCacheLapse(lapsesAtMs: number, contextTokens: number): conversationv1.SessionCacheLapse {
+export function sessionCacheLapse(
+  lapsesAtMs: number,
+  contextTokens: number,
+  lastRequestAtMs: number,
+  cacheTtlMs: number,
+): conversationv1.SessionCacheLapse {
   return create(conversationv1.SessionCacheLapseSchema, {
     lapsesAtMs: BigInt(lapsesAtMs),
     afterLapse: coldGateAsks(contextTokens)
       ? {
           case: "gated",
-          value: create(conversationv1.SessionCacheLapseGatedSchema, { contextTokens: BigInt(contextTokens) }),
+          value: create(conversationv1.SessionCacheLapseGatedSchema, {
+            contextTokens: BigInt(contextTokens),
+            lastRequestAtMs: BigInt(lastRequestAtMs),
+            cacheTtlMs: BigInt(cacheTtlMs),
+          }),
         }
       : { case: "ungated", value: create(conversationv1.SessionCacheLapseUngatedSchema, {}) },
   });

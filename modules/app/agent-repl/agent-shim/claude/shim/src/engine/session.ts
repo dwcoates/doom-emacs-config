@@ -6054,10 +6054,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // it judges.
     cadence = new KeepaliveCadence(
       () => void keepaliveBeat(),
-      (lapsesAtMs, contextTokens) =>
+      (lapsesAtMs, contextTokens, lastRequestAtMs, cacheTtlMs) =>
         void pushes.push(
           create(conversationv1.SessionUpdateSchema, {
-            update: { case: "cacheLapse", value: sessionCacheLapse(lapsesAtMs, contextTokens) },
+            update: { case: "cacheLapse", value: sessionCacheLapse(lapsesAtMs, contextTokens, lastRequestAtMs, cacheTtlMs) },
           }),
         ),
       () => live.all(),

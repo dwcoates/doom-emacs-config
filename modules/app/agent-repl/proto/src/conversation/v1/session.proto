@@ -576,6 +576,15 @@ message SessionCacheLapseGated {
   // Tokens the context held at the last request — what the cold read
   // re-reads, as SessionCold.context_tokens will state it.
   uint64 context_tokens = 1;
+  // When the conversation's last request was made, in unix millis: the
+  // gate's own last_request_at_ms (SessionCold.last_request_at_ms) once the
+  // lapse comes. The daemon raises the gate from this projection when
+  // lapses_at_ms passes, with no shim started, so every fact the gate states
+  // is carried here.
+  int64 last_request_at_ms = 2;
+  // The lifetime that lapses, in millis (SessionColdLapsed.cache_ttl_ms); zero
+  // when the transcript stated no tier, which is a cache that bought none.
+  int64 cache_ttl_ms = 3;
 }
 
 // The cold gate will not ask. DELIBERATELY EMPTY: the arm is the verdict.

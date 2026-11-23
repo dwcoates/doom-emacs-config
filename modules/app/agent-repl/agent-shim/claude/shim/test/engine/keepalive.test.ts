@@ -523,6 +523,8 @@ function cadenceAt(nowMs: number): {
   readonly clock: { now: number };
   readonly beats: () => number;
   readonly lapses: Array<{ readonly lapsesAtMs: number; readonly contextTokens: number }>;
+  /** Every projection's last request and lifetime, in the order of {@link lapses}. */
+  readonly anchors: Array<{ readonly lastRequestAtMs: number; readonly cacheTtlMs: number }>;
   /** The session's live detached work, as the cadence reads it: edit it, then tell the cadence. */
   readonly detached: DetachedWorkItem[];
 } {
@@ -531,15 +533,19 @@ function cadenceAt(nowMs: number): {
   const clock = { now: nowMs };
   let beats = 0;
   const lapses: Array<{ readonly lapsesAtMs: number; readonly contextTokens: number }> = [];
+  const anchors: Array<{ readonly lastRequestAtMs: number; readonly cacheTtlMs: number }> = [];
   const cadence = new KeepaliveCadence(
     () => beats++,
-    (lapsesAtMs, contextTokens) => lapses.push({ lapsesAtMs, contextTokens }),
+    (lapsesAtMs, contextTokens, lastRequestAtMs, cacheTtlMs) => {
+      lapses.push({ lapsesAtMs, contextTokens });
+      anchors.push({ lastRequestAtMs, cacheTtlMs });
+    },
     () => detached,
     () => clock.now,
     KEEPALIVE_INTERVAL_MS,
     scheduler,
   );
-  return { cadence, scheduler, clock, beats: () => beats, lapses, detached };
+  return { cadence, scheduler, clock, beats: () => beats, lapses, anchors, detached };
 }
 
 /** The 1-hour cache the conversation's last request bought at {@link TURN_AT}. */
@@ -1049,6 +1055,18 @@ describe("the cadence held while the workspace is hidden", () => {
 
     // Assert
     expect(lapses).toEqual([{ lapsesAtMs: TURN_AT + CACHE_TTL_1H_MS, contextTokens: 120_000 }]);
+  });
+
+  it("projects the anchor's last request and tier for the gate the lapse will raise", () => {
+    // Arrange
+    const { cadence, anchors } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+
+    // Act
+    cadence.hold();
+
+    // Assert
+    expect(anchors).toEqual([{ lastRequestAtMs: TURN_AT, cacheTtlMs: CACHE_TTL_1H_MS }]);
   });
 
   it("projects the anchor itself as the lapse when no tier is stated", () => {

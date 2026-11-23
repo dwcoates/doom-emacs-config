@@ -68,6 +68,12 @@ var visitReason = standDownReason{
 // cold, under the keep-alive cycle's rules, a merge-queued workspace
 // included; the next prompt revives the park.
 
+// A COLD GATE'S SESSION IS PARKED WHETHER OR NOT THE USER IS LOOKING (owner
+// ruling, 2026-11-23): the daemon raises a gate from the shim's projection the
+// moment the cache lapses, over a session that may still run on its shim, and
+// the gate's answer spawns the shim it resumes through, which refuses while
+// another runs the conversation. The park is otherwise a cold park's.
+
 // opCold is the operation a cold cache's stand-down records under.
 const opCold = "daemon.drain.cold_park"
 
@@ -79,6 +85,17 @@ var coldReason = standDownReason{
 	life:    shimlife.StandDownCacheCold,
 	trigger: "cold_park",
 	remote:  remoteSpares,
+}
+
+// coldGateReason is the stand-down of a session a cold gate stands over.
+var coldGateReason = standDownReason{
+	op:      opCold,
+	detail:  "parked the moment its cold gate was raised; the transcript was left as it stood",
+	done:    logsite.Msg("parked an idle session whose cold gate was raised"),
+	life:    shimlife.StandDownColdGate,
+	trigger: "cold_gate_park",
+	remote:  remoteSpares,
+	atGate:  true,
 }
 
 // A FINISHED WORKSPACE IS PARKED THE MOMENT ITS SYNC MERGE IS IN LINE (owner
@@ -181,9 +198,14 @@ func (c *controller) VisitDown(ws ids.WorkspaceID, since time.Time) {
 }
 
 // ColdDown asks for the stand-down of WS's session, its cache having been
-// known cold at SINCE. It returns at once.
-func (c *controller) ColdDown(ws ids.WorkspaceID, since time.Time) {
-	c.askDown(ws, since, coldReason, nil)
+// known cold at SINCE. ATGATE is a cold gate standing over the session, which
+// is parked for the workspace in view too. It returns at once.
+func (c *controller) ColdDown(ws ids.WorkspaceID, since time.Time, atGate bool) {
+	reason := coldReason
+	if atGate {
+		reason = coldGateReason
+	}
+	c.askDown(ws, since, reason, nil)
 }
 
 // MergeQueuedDown asks for the park of WS's session, its own branch's merge
@@ -307,7 +329,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	log := c.workspaceLog(record)
 	// A FINISHED WORKSPACE IN VIEW IS PARKED ALL THE SAME: its feed is held,
 	// and the merge's prompts revive the park.
-	if record.Current && merge == nil {
+	if record.Current && merge == nil && !reason.atGate {
 		log.Info(op, "the user is looking at the workspace; its session is kept up", fields)
 		return withheldSettled, CycleOutcome{Why: "the user is looking at the workspace; its session is kept up"}
 	}

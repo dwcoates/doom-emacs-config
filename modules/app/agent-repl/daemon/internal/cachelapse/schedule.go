@@ -485,7 +485,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			k.beats[ws] = now.Add(BeatRetry)
 			return
 		}
-		k.parkCold(ws, now, "the shim judged the cache lapsed")
+		k.parkCold(ws, now, "the shim judged the cache lapsed", false)
 	default:
 		observe(BeatOutcomeUnnamedJudgment)
 		log.Error(opDrive, "the shim answered the keep-alive with a judgment this daemon does not name", dlog.Merge(fields, dlog.Context{

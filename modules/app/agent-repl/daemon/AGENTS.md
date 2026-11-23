@@ -1913,6 +1913,29 @@ resume it refuses cold:
   prompt and the gate, and the pay's resume promotes the bridge. Any other
   answer stands the bridge's shim down and resumes on a new one.
 
+## The cold gate is raised the moment the cache lapses, not at the next prompt
+
+Owner ruling, 2026-11-23 (`internal/cachelapse/projectedgate.go`, `wsm`
+`projected_cold_gate`). A start's judgment raises the gate, and a start comes
+with a prompt, so a workspace whose cache had lapsed looked ordinary until a
+prompt was sent. Now:
+
+- **The shim states the expected gate.** After every request that moves the
+  cache it states when the cache lapses if no keep-alive follows, and, for a
+  gated verdict, the facts the gate will carry (`conversation.v1.SessionCacheLapseGated`:
+  context tokens, last request, lifetime).
+- **The daemon persists it for every workspace** (`wsm.ProjectedColdGate`) and
+  arms its instant. A restated projection replaces it; an ungated one, or a
+  shim build that states no last request, retires it. Boot re-arms the rows.
+- **At the instant the daemon raises the gate itself** (`Fleet.RaiseProjectedGate`),
+  with no shim started, over a visible workspace with no gate standing, no turn
+  and a recorded conversation; the requested model is the session's. The sidebar,
+  footer and composer dock draw it as any gate. A hidden or closed workspace
+  keeps its lapse (`Keeper.lapse`); a declined raise waits for the next projection.
+- **The session is parked at the gate whether or not the user is looking**
+  (`drain.Controller.ColdDown` with `atGate`), because the answer's resume
+  refuses while a shim still runs the conversation.
+
 ## A prompt waits at the cold gate, and nothing that waits on a session is left unheld
 
 Owner rulings, 2026-10-10 (`internal/promptqueue/sessionhold.go`; design

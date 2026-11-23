@@ -2485,6 +2485,15 @@ type SessionCacheLapseGated struct {
 	// Tokens the context held at the last request — what the cold read
 	// re-reads, as SessionCold.context_tokens will state it.
 	ContextTokens uint64 `protobuf:"varint,1,opt,name=context_tokens,json=contextTokens,proto3" json:"context_tokens,omitempty"`
+	// When the conversation's last request was made, in unix millis: the
+	// gate's own last_request_at_ms (SessionCold.last_request_at_ms) once the
+	// lapse comes. The daemon raises the gate from this projection when
+	// lapses_at_ms passes, with no shim started, so every fact the gate states
+	// is carried here.
+	LastRequestAtMs int64 `protobuf:"varint,2,opt,name=last_request_at_ms,json=lastRequestAtMs,proto3" json:"last_request_at_ms,omitempty"`
+	// The lifetime that lapses, in millis (SessionColdLapsed.cache_ttl_ms); zero
+	// when the transcript stated no tier, which is a cache that bought none.
+	CacheTtlMs    int64 `protobuf:"varint,3,opt,name=cache_ttl_ms,json=cacheTtlMs,proto3" json:"cache_ttl_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2522,6 +2531,20 @@ func (*SessionCacheLapseGated) Descriptor() ([]byte, []int) {
 func (x *SessionCacheLapseGated) GetContextTokens() uint64 {
 	if x != nil {
 		return x.ContextTokens
+	}
+	return 0
+}
+
+func (x *SessionCacheLapseGated) GetLastRequestAtMs() int64 {
+	if x != nil {
+		return x.LastRequestAtMs
+	}
+	return 0
+}
+
+func (x *SessionCacheLapseGated) GetCacheTtlMs() int64 {
+	if x != nil {
+		return x.CacheTtlMs
 	}
 	return 0
 }
@@ -8360,9 +8383,12 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"lapsesAtMs\x12?\n" +
 	"\x05gated\x18\x02 \x01(\v2'.conversation.v1.SessionCacheLapseGatedH\x00R\x05gated\x12E\n" +
 	"\aungated\x18\x03 \x01(\v2).conversation.v1.SessionCacheLapseUngatedH\x00R\aungatedB\r\n" +
-	"\vafter_lapse\"?\n" +
+	"\vafter_lapse\"\x8e\x01\n" +
 	"\x16SessionCacheLapseGated\x12%\n" +
-	"\x0econtext_tokens\x18\x01 \x01(\x04R\rcontextTokens\"\x1a\n" +
+	"\x0econtext_tokens\x18\x01 \x01(\x04R\rcontextTokens\x12+\n" +
+	"\x12last_request_at_ms\x18\x02 \x01(\x03R\x0flastRequestAtMs\x12 \n" +
+	"\fcache_ttl_ms\x18\x03 \x01(\x03R\n" +
+	"cacheTtlMs\"\x1a\n" +
 	"\x18SessionCacheLapseUngated\"0\n" +
 	"\x16SessionKeepaliveFailed\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"\\\n" +
