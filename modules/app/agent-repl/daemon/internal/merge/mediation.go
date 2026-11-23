@@ -933,6 +933,39 @@ func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.Wo
 	return turn, nil
 }
 
+// turnFailure is the step of submitMarkedTurn that failed.
+type turnFailure int
+
+const (
+	turnNotFailed turnFailure = iota
+	// turnMarkFailed is the turn's record that failed: nothing was submitted.
+	turnMarkFailed
+	// turnSubmitFailed is the brief's submission that failed, after the
+	// turn was recorded: the next round submits it under the recorded turn.
+	turnSubmitFailed
+)
+
+// submitMarkedTurn is EVERY CHECK TURN'S ONE START: it mints a turn, records
+// it with MARK before anything is queued, so a round cut between the two
+// finds the turn and submits it then (bringTurnOn), and submits BRIEF to WS
+// under ORIGIN. It answers the turn, whether MARK recorded it (false when the
+// check moved on, and nothing was submitted), and the step that failed with
+// its error, for the caller to record.
+func (o *orchestrator) submitMarkedTurn(ctx context.Context, ws ids.WorkspaceID, brief string, origin conversationv1.PromptOrigin, mark func(ids.TurnID) (bool, error)) (ids.TurnID, bool, turnFailure, error) {
+	turn := wsm.NewTurnID()
+	marked, err := mark(turn)
+	if err != nil {
+		return turn, false, turnMarkFailed, err
+	}
+	if !marked {
+		return turn, false, turnNotFailed, nil
+	}
+	if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, origin); err != nil {
+		return turn, true, turnSubmitFailed, err
+	}
+	return turn, true, turnNotFailed, nil
+}
+
 // submitCheckPrompt puts TEXT in WS's prompt queue as TURN, behind any turn
 // it is running.
 func (o *orchestrator) submitCheckPrompt(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (promptqueue.Disposition, error) {
@@ -1024,18 +1057,18 @@ func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.
 		o.roundFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
 		return
 	}
-	turn := wsm.NewTurnID()
+	turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION, func(turn ids.TurnID) (bool, error) {
+		return o.deps.DB.MarkMediationResumed(ctx, q.key, m.OwedAt, turn)
+	})
 	fields = withField(fields, "turn", string(turn))
-	marked, err := o.deps.DB.MarkMediationResumed(ctx, q.key, m.OwedAt, turn)
-	if err != nil {
+	switch {
+	case failed == turnMarkFailed:
 		o.roundFailed(ctx, q, m, "could not record that the undecided deploy mediator is resumed", err, fields)
 		return
-	}
-	if !marked {
+	case !marked:
 		o.deps.Log.Global().Info(opMediation, "the check was decided, dispatched or replaced before its undecided intake was resumed; this round ends", fields)
 		return
-	}
-	if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
+	case failed == turnSubmitFailed:
 		o.roundFailed(ctx, q, m, "the undecided deploy mediator's resuming brief could not be submitted", err, fields)
 		return
 	}

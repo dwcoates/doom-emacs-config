@@ -275,17 +275,17 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 	fields = withField(fields, "mediator", string(ws))
 	var closed wsm.TurnClose
 	if !c.Prompted() {
-		turn := wsm.NewTurnID()
-		marked, err := o.deps.DB.MarkProductionCheckPrompted(ctx, q.key, c.Until, o.deps.Now(), turn)
-		if err != nil {
+		turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+			return o.deps.DB.MarkProductionCheckPrompted(ctx, q.key, c.Until, o.deps.Now(), turn)
+		})
+		switch {
+		case failed == turnMarkFailed:
 			o.deps.Log.Global().Error(opProduction, "could not record that the production mediator is told of the span; the span stays due", withField(fields, "error", err.Error()))
 			return
-		}
-		if !marked {
+		case !marked:
 			o.deps.Log.Global().Info(opProduction, "the production check was decided before its mediator was told; this round ends", fields)
 			return
-		}
-		if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION); err != nil {
+		case failed == turnSubmitFailed:
 			o.deps.Log.Global().Error(opProduction, "the production mediator's brief could not be submitted; the next pass submits it under the turn recorded", withField(fields, "error", err.Error()))
 			return
 		}
@@ -376,18 +376,18 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 		o.deps.Log.Global().Error(opProduction, "the undecided production mediator's resuming brief could not be composed; the span stays due", withField(fields, "error", err.Error()))
 		return
 	}
-	turn := wsm.NewTurnID()
+	turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+		return o.deps.DB.MarkProductionCheckResumed(ctx, q.key, c.Until, turn)
+	})
 	fields = withField(fields, "turn", string(turn))
-	marked, err := o.deps.DB.MarkProductionCheckResumed(ctx, q.key, c.Until, turn)
-	if err != nil {
+	switch {
+	case failed == turnMarkFailed:
 		o.deps.Log.Global().Error(opProduction, "could not record that the undecided production mediator is resumed; the span stays due", withField(fields, "error", err.Error()))
 		return
-	}
-	if !marked {
+	case !marked:
 		o.deps.Log.Global().Info(opProduction, "the production check was decided before its undecided mediator was resumed; this round ends", fields)
 		return
-	}
-	if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION); err != nil {
+	case failed == turnSubmitFailed:
 		o.deps.Log.Global().Error(opProduction, "the undecided production mediator's resuming brief could not be submitted; the next pass submits it", withField(fields, "error", err.Error()))
 		return
 	}

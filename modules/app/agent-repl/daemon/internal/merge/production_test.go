@@ -2,7 +2,10 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -505,5 +508,70 @@ func TestAProductionSiteFileIsOneOfTheQueuesLogs(t *testing.T) {
 	// Assert
 	if !IsLog(strings.TrimPrefix(path, "/state/merge-logs/")) {
 		t.Fatalf("%s is no queue log, want it pruned with the rest", path)
+	}
+}
+
+func TestSubmitMarkedTurnRecordsTheTurnBeforeItSubmitsTheBrief(t *testing.T) {
+	cases := []struct {
+		name        string
+		marked      bool
+		markErr     error
+		submitErr   bool
+		wantFailure turnFailure
+		wantSubmits int
+	}{
+		{name: "a recorded turn is submitted", marked: true, wantSubmits: 1},
+		{name: "a turn the check no longer takes submits nothing", marked: false},
+		{name: "a record that fails submits nothing", markErr: errors.New("database is locked"), wantFailure: turnMarkFailed},
+		{name: "a refused submission is the submit's failure", marked: true, submitErr: true, wantFailure: turnSubmitFailed, wantSubmits: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := production(t)
+			if tc.submitErr {
+				h.queue.err = errors.New("the queue is closed")
+			}
+			var recorded ids.TurnID
+
+			// Act
+			turn, marked, failed, err := h.o.submitMarkedTurn(context.Background(), "ws-fixer", "brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+				recorded = turn
+				return tc.marked, tc.markErr
+			})
+
+			// Assert
+			if failed != tc.wantFailure || (err != nil) != (tc.wantFailure != turnNotFailed) || marked != (tc.marked && tc.markErr == nil) || turn != recorded {
+				t.Fatalf("submitMarkedTurn = (%q, %v, %v, %v), recorded %q", turn, marked, failed, err, recorded)
+			}
+			if got := len(submissionsTo(h, "ws-fixer", "brief")); got != tc.wantSubmits {
+				t.Fatalf("submissions %d, want %d", got, tc.wantSubmits)
+			}
+		})
+	}
+}
+
+func TestEveryCheckTurnMarkGoesThroughSubmitMarkedTurn(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marks := regexp.MustCompile(`DB\.(MarkMediationResumed|MarkProductionCheckPrompted|MarkProductionCheckResumed)\(`)
+	// Act, Assert: each such record is made inside submitMarkedTurn's mark.
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, at := range marks.FindAllIndex(body, -1) {
+			before := string(body[max(0, at[0]-300):at[0]])
+			if !strings.Contains(before, "submitMarkedTurn(") {
+				t.Fatalf("%s records a check turn outside submitMarkedTurn: %s", file, body[at[0]:at[1]])
+			}
+		}
 	}
 }
