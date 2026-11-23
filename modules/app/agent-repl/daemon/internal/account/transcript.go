@@ -59,7 +59,7 @@ func (r *resolver) FindTranscript(ctx context.Context, workspaceDir, vendorSessi
 	}
 	if vendorSessionID == "" {
 		err := errors.New("account: FindTranscript requires a vendor session id")
-		r.log.Error("daemon.account.find_transcript", "transcript lookup rejected", dlog.Context{
+		r.log.Error("daemon.account.find_transcript", "transcript lookup rejected: no vendor session id", dlog.Context{
 			"workspace_dir": workspaceDir,
 			"branch":        "empty-session-id",
 			"error":         err.Error(),
@@ -68,7 +68,7 @@ func (r *resolver) FindTranscript(ctx context.Context, workspaceDir, vendorSessi
 	}
 	if workspaceDir == "" {
 		err := errors.New("account: FindTranscript requires a workspace dir")
-		r.log.Error("daemon.account.find_transcript", "transcript lookup rejected", dlog.Context{
+		r.log.Error("daemon.account.find_transcript", "transcript lookup rejected: no workspace dir", dlog.Context{
 			"vendor_session_id": vendorSessionID,
 			"branch":            "empty-workspace-dir",
 			"error":             err.Error(),
@@ -356,23 +356,21 @@ func (r *resolver) lastRecordTimestamp(path string) time.Time {
 // conversation is exactly the state that makes a resume ambiguous.
 func (r *resolver) MoveTranscript(ctx context.Context, transcriptPath, toConfigDir, workspaceDir string) error {
 	return r.transfer(ctx, transferSpec{
-		operation:  "daemon.account.move_transcript",
-		source:     transcriptPath,
-		destRoot:   toConfigDir,
-		destCWD:    workspaceDir,
-		removeSrc:  true,
-		verbMoving: "moving",
+		operation: "daemon.account.move_transcript",
+		source:    transcriptPath,
+		destRoot:  toConfigDir,
+		destCWD:   workspaceDir,
+		removeSrc: true,
 	})
 }
 
 // transferSpec is one transcript transfer's inputs.
 type transferSpec struct {
-	operation  string
-	source     string
-	destRoot   string
-	destCWD    string
-	removeSrc  bool
-	verbMoving string
+	operation string
+	source    string
+	destRoot  string
+	destCWD   string
+	removeSrc bool
 }
 
 // transfer carries a transcript, and its sidecar directory when one exists,
@@ -448,12 +446,12 @@ func (r *resolver) transfer(ctx context.Context, spec transferSpec) error {
 	}
 
 	if err := spec.carryTranscript(dest); err != nil {
-		r.log.Error(spec.operation, "transcript "+spec.verbMoving+" failed", withBranch(logCtx, "transfer-error", err))
+		r.log.Error(spec.operation, "transcript moving failed", withBranch(logCtx, "transfer-error", err))
 		return err
 	}
 	if haveSidecar {
 		if err := spec.carrySidecar(srcSidecar, destSidecar); err != nil {
-			r.log.Error(spec.operation, "transcript sidecar "+spec.verbMoving+" failed", withBranch(logCtx, "sidecar-transfer-error", err))
+			r.log.Error(spec.operation, "transcript sidecar moving failed", withBranch(logCtx, "sidecar-transfer-error", err))
 			return err
 		}
 	}

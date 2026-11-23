@@ -64,7 +64,7 @@ import { placeChildren } from "./children.js";
 import { decorativeElement, queryAll } from "../dom.js";
 import { disposeKeyedRows, drawKeyedEntries, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
 import { repoEntries, repoSectionRegions, sectionOpenRows, sectionSubsections, unsectionedRows, type PathedOpenRow } from "./entries.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
 import {
@@ -127,6 +127,8 @@ import { formatAge } from "../duration.js";
 import { paintRecencyGutters, recencyGutters } from "./recency-gutters.js";
 import { paintTabNumbers, tabNumbers } from "./tab-numbers.js";
 import { drawRosterOpenCount, openCountText } from "./open-count.js";
+
+const log = createLogger("webapp.sidebar.roster");
 
 /**
  * Every roster stream as of one push, drawn through RAIL's one roster drawer

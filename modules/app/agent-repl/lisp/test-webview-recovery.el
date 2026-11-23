@@ -44,7 +44,7 @@
 (defmacro agent-repl-test-wr--logging (logged &rest body)
   "Run BODY collecting every INFO record's text into LOGGED, newest first."
   (declare (indent 1))
-  `(cl-letf (((symbol-function 'agent-repl--info)
+  `(cl-letf (((symbol-function 'agent-repl--emit-info)
               (agent-repl-test--record-into ,logged)))
      ,@body))
 
@@ -134,7 +134,7 @@
       (let (warned)
         (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                    (lambda (_ws) (error "mount blew up")))
-                  ((symbol-function 'agent-repl--warn)
+                  ((symbol-function 'agent-repl--emit-warn)
                    (agent-repl-test--record-into warned)))
           ;; Act
           (agent-repl-webview-precreate-all))

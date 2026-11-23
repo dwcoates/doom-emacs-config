@@ -22,7 +22,7 @@ import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { bindLog } from "../log.js";
 
-const LOGGER = bindLog({ component: "shim-agent-repl-mcp", operation: "shim.sdk.agent_repl_mcp" });
+const LOGGER = bindLog("shim.sdk.agent-repl-mcp", { component: "shim-agent-repl-mcp", operation: "shim.sdk.agent_repl_mcp" });
 
 /** The server's name, the middle segment of every one of its qualified tool names. */
 export const AGENT_REPL_MCP_SERVER = "agent-repl";

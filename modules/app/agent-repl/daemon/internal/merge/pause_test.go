@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 func TestAPausedQueueAdmitsNothing(t *testing.T) {
@@ -536,7 +537,7 @@ func TestRefuseNoopPauseNamesTheArmAndReasonOfTheAskedForState(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			refused := h.o.refuseNoopPause("daemon.merge.test", tt.paused, "the message", "not", "already")
+			refused := h.o.refuseNoopPause("daemon.merge.test", tt.paused, logsite.Msg("the message"), "not", "already")
 
 			// Assert: the arm and reason follow the asked-for state, and one INFO
 			// record names the arm and no WARN record is written.

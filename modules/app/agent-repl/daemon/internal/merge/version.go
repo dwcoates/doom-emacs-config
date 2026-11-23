@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
@@ -138,7 +139,7 @@ func (r *run) tagVersion(ctx context.Context, commit, base string) (*landedVersi
 	target := r.subject.targetDir
 	fields := dlog.Context{"workspace": string(r.ws), "target": target, "commit": commit, "base": base, "part": increment.Part.String()}
 	log := r.o.log(ctx, r.ws)
-	fault := func(message string, err error) (*landedVersion, error) {
+	fault := func(message logsite.Message, err error) (*landedVersion, error) {
 		if err != nil && r.stopping(err) {
 			log.Info(op, "the daemon is exiting before the landed merge was tagged; the next boot tags it", withField(fields, "error", err.Error()))
 			return nil, err
@@ -146,14 +147,14 @@ func (r *run) tagVersion(ctx context.Context, commit, base string) (*landedVersi
 		if err != nil {
 			fields["error"] = err.Error()
 		}
-		log.Error(op, message, fields)
+		log.Log(dlog.LevelError, op, message, fields)
 		return nil, nil
 	}
 	// THE STEP FINISHED BEFORE A RESTART when the merge commit already carries
 	// a version tag: only the queue tags a merge commit.
 	at, err := r.git.TagsAt(ctx, target, commit)
 	if err != nil {
-		return fault("could not read the tags on the landed merge commit; it is drawn without a version", err)
+		return fault(logsite.Msg("could not read the tags on the landed merge commit; it is drawn without a version"), err)
 	}
 	if v, ok := semver.Highest(at); ok {
 		log.Info(op, "the landed merge commit already carries its version tag", withField(fields, "version", v.String()))
@@ -161,16 +162,16 @@ func (r *run) tagVersion(ctx context.Context, commit, base string) (*landedVersi
 	}
 	reachable, err := r.git.TagsMerged(ctx, target, base)
 	if err != nil {
-		return fault("could not read the version tags reachable from the tip the merge landed on; it is drawn without a version", err)
+		return fault(logsite.Msg("could not read the version tags reachable from the tip the merge landed on; it is drawn without a version"), err)
 	}
 	previous, ok := semver.Highest(reachable)
 	if !ok {
-		return fault("no version tag is reachable from the tip the merge landed on, so there is no version to increment; tag master by hand", nil)
+		return fault(logsite.Msg("no version tag is reachable from the tip the merge landed on, so there is no version to increment; tag master by hand"), nil)
 	}
 	next := previous.Next(increment.Part)
 	fields["previous"], fields["version"] = previous.String(), next.String()
 	if err := r.git.CreateAnnotatedTag(ctx, target, next.String(), commit, increment.ChangelogLine); err != nil {
-		return fault("could not create the landed merge's version tag; it is drawn without a version", err)
+		return fault(logsite.Msg("could not create the landed merge's version tag; it is drawn without a version"), err)
 	}
 	log.Info(op, "tagged the landed merge with its version", fields)
 	return &landedVersion{tag: next.String(), part: increment.Part}, nil

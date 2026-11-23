@@ -38,12 +38,14 @@ import type {
   FeedSkillFailed,
   FeedSkillInvocation,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { renderMarkdown } from "../../markdown.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { foldTitle } from "../title-fold.js";
+
+const log = createLogger("webapp.feed.cards.skill");
 
 const PATH = "FeedSkill";
 

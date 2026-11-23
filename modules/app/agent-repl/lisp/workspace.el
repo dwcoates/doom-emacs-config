@@ -56,22 +56,19 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
-(declare-function agent-repl--do-log "core")
-(declare-function agent-repl--error "core")
-(declare-function agent-repl--fatal "core")
 (declare-function agent-repl--git-string-quiet "core")
-(declare-function agent-repl--info "core")
 (declare-function agent-repl--now "core" ())
 (declare-function agent-repl--kill-cause-str "core")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--pseudo-workspace-name-p "core")
 (declare-function agent-repl-roster-selection-recency-order "roster" (names))
 (declare-function agent-repl-roster-last-selected-ms "roster" (ws))
-(declare-function agent-repl--warn "core")
 (declare-function agent-repl--ws-dir "status")
 (declare-function agent-repl--ws-log-routable-p "core")
 
@@ -244,8 +241,8 @@ future workspace reusing WS establish a fresh runtime-owned target."
     (when stale
       ;; Emit before forgetting so this lifecycle record remains in the
       ;; existing workspace-owned history rather than recreating a target.
-      (agent-repl--log ws "ws-forget-emacs-log-target: ws=%s reason=%s targets=%d"
-                       ws reason (length stale))
+      (agent-repl--log ws "ws-forget-emacs-log-target: ws={ws} reason={reason} targets={targets}"
+                       :ws ws :reason reason :targets (length stale))
       (dolist (key stale)
         (remhash key agent-repl--workspace-log-targets)))))
 
@@ -264,8 +261,8 @@ of buffers, processes, or environment structs."
   (agent-repl--ws-require-known ws "ws-plist")
   (let ((plist (gethash ws agent-repl--workspaces)))
     (agent-repl--log-verbose
-     ws "ws-plist: ws=%s key-count=%s tombstoned=%s"
-     ws (/ (length plist) 2) (if (plist-get plist :killed-at) "t" "nil"))
+     ws "ws-plist: ws={ws} key-count={key_count} tombstoned={tombstoned}"
+     :ws ws :key_count (/ (length plist) 2) :tombstoned (if (plist-get plist :killed-at) "t" "nil"))
     (copy-sequence plist)))
 
 (defun agent-repl--ws-rename-state (old-ws new-ws new-project-dir)
@@ -283,41 +280,41 @@ then removed, and NEW-WS takes OLD-WS's place in
 violations signal `user-error'."
   (unless (and (stringp old-ws) (not (string-empty-p old-ws)))
     (agent-repl--log old-ws
-                     "ws-rename-state: REJECT old-ws=%S new-ws=%S reason=invalid-old-name"
-                     old-ws new-ws)
+                     "ws-rename-state: REJECT old-ws={old_ws} new-ws={new_ws} reason=invalid-old-name"
+                     :old_ws (prin1-to-string old-ws) :new_ws (prin1-to-string new-ws))
     (user-error "agent-repl: ws-rename-state: invalid old workspace name %S"
                 old-ws))
   (unless (and (stringp new-ws) (not (string-empty-p new-ws)))
     (agent-repl--log old-ws
-                     "ws-rename-state: REJECT old-ws=%S new-ws=%S reason=invalid-new-name"
-                     old-ws new-ws)
+                     "ws-rename-state: REJECT old-ws={old_ws} new-ws={new_ws} reason=invalid-new-name"
+                     :old_ws (prin1-to-string old-ws) :new_ws (prin1-to-string new-ws))
     (user-error "agent-repl: ws-rename-state: invalid new workspace name %S"
                 new-ws))
   (when (equal old-ws new-ws)
     (agent-repl--log old-ws
-                     "ws-rename-state: REJECT old-ws=%s new-ws=%s reason=identical-names"
-                     old-ws new-ws)
+                     "ws-rename-state: REJECT old-ws={old_ws} new-ws={new_ws} reason=identical-names"
+                     :old_ws old-ws :new_ws new-ws)
     (user-error "agent-repl: ws-rename-state: workspace names are identical: %s"
                 old-ws))
   (agent-repl--ws-require-known old-ws "ws-rename-state")
   (unless (agent-repl--ws-live-p old-ws)
     (agent-repl--log old-ws
-                     "ws-rename-state: REJECT old-ws=%s new-ws=%s reason=tombstoned"
-                     old-ws new-ws)
+                     "ws-rename-state: REJECT old-ws={old_ws} new-ws={new_ws} reason=tombstoned"
+                     :old_ws old-ws :new_ws new-ws)
     (user-error "agent-repl: ws-rename-state: workspace %S is tombstoned"
                 old-ws))
   (when (agent-repl--ws-known-p new-ws)
     (agent-repl--log old-ws
-                     "ws-rename-state: REJECT old-ws=%s new-ws=%s reason=target-registered target-live=%s"
-                     old-ws new-ws
-                     (if (agent-repl--ws-live-p new-ws) "t" "nil"))
+                     "ws-rename-state: REJECT old-ws={old_ws} new-ws={new_ws} reason=target-registered target-live={target_live}"
+                     :old_ws old-ws :new_ws new-ws
+                     :target_live (if (agent-repl--ws-live-p new-ws) "t" "nil"))
     (user-error "agent-repl: ws-rename-state: target workspace %S is already registered"
                 new-ws))
   (unless (and (stringp new-project-dir)
                (not (string-empty-p new-project-dir)))
     (agent-repl--log old-ws
-                     "ws-rename-state: REJECT old-ws=%s new-ws=%s new-project-dir=%S reason=invalid-project-dir"
-                     old-ws new-ws new-project-dir)
+                     "ws-rename-state: REJECT old-ws={old_ws} new-ws={new_ws} new-project-dir={new_project_dir} reason=invalid-project-dir"
+                     :old_ws old-ws :new_ws new-ws :new_project_dir (prin1-to-string new-project-dir))
     (user-error "agent-repl: ws-rename-state: invalid project directory %S"
                 new-project-dir))
   (let* ((canonical-dir (agent-repl--path-canonical new-project-dir))
@@ -327,9 +324,9 @@ violations signal `user-error'."
                                 :project-dir canonical-dir)
                      :ws-dir-hash nil)))
     (agent-repl--log old-ws
-                     "ws-rename-state: MOVE old-ws=%s new-ws=%s old-project-dir=%S new-project-dir=%s key-count=%d"
-                     old-ws new-ws (plist-get old-plist :project-dir)
-                     canonical-dir (/ (length new-plist) 2))
+                     "ws-rename-state: MOVE old-ws={old_ws} new-ws={new_ws} old-project-dir={old_project_dir} new-project-dir={new_project_dir} key-count={key_count}"
+                     :old_ws old-ws :new_ws new-ws :old_project_dir (prin1-to-string (plist-get old-plist :project-dir))
+                     :new_project_dir canonical-dir :key_count (/ (length new-plist) 2))
     ;; No Lisp call that can signal sits between these primitive hash
     ;; mutations, so observers cannot run against a half-moved entry.
     (puthash new-ws new-plist agent-repl--workspaces)
@@ -366,15 +363,15 @@ arguments signal `user-error' before any workspace is mutated."
   (unless (and (stringp old-source-dir)
                (not (string-empty-p old-source-dir)))
     (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
-                     "ws-rewrite-source-back-refs: REJECT old-source-dir=%S new-source-dir=%S reason=invalid-old-dir"
-                     old-source-dir new-source-dir)
+                     "ws-rewrite-source-back-refs: REJECT old-source-dir={old_source_dir} new-source-dir={new_source_dir} reason=invalid-old-dir"
+                     :old_source_dir (prin1-to-string old-source-dir) :new_source_dir (prin1-to-string new-source-dir))
     (user-error "agent-repl: ws-rewrite-source-back-refs: invalid old source directory %S"
                 old-source-dir))
   (unless (and (stringp new-source-dir)
                (not (string-empty-p new-source-dir)))
     (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
-                     "ws-rewrite-source-back-refs: REJECT old-source-dir=%S new-source-dir=%S reason=invalid-new-dir"
-                     old-source-dir new-source-dir)
+                     "ws-rewrite-source-back-refs: REJECT old-source-dir={old_source_dir} new-source-dir={new_source_dir} reason=invalid-new-dir"
+                     :old_source_dir (prin1-to-string old-source-dir) :new_source_dir (prin1-to-string new-source-dir))
     (user-error "agent-repl: ws-rewrite-source-back-refs: invalid new source directory %S"
                 new-source-dir))
   (let ((canonical-old (agent-repl--path-canonical old-source-dir))
@@ -382,8 +379,8 @@ arguments signal `user-error' before any workspace is mutated."
         (rewritten 0))
     (when (string= canonical-old canonical-new)
       (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
-                       "ws-rewrite-source-back-refs: REJECT old-source-dir=%s new-source-dir=%s reason=identical-canonical-dirs"
-                       canonical-old canonical-new)
+                       "ws-rewrite-source-back-refs: REJECT old-source-dir={old_source_dir} new-source-dir={new_source_dir} reason=identical-canonical-dirs"
+                       :old_source_dir canonical-old :new_source_dir canonical-new)
       (user-error "agent-repl: ws-rewrite-source-back-refs: source directories are identical: %s"
                   canonical-old))
     (maphash
@@ -393,28 +390,28 @@ arguments signal `user-error' before any workspace is mutated."
           ((null source-dir)
            (agent-repl--log
             ws
-            "ws-rewrite-source-back-refs: SKIP ws=%s source-dir=nil old-source-dir=%s reason=no-source"
-            ws canonical-old))
+            "ws-rewrite-source-back-refs: SKIP ws={ws} source-dir=nil old-source-dir={old_source_dir} reason=no-source"
+            :ws ws :old_source_dir canonical-old))
           ((not (string=
                  (agent-repl--path-canonical source-dir)
                  canonical-old))
            (agent-repl--log
             ws
-            "ws-rewrite-source-back-refs: SKIP ws=%s source-dir=%s old-source-dir=%s reason=different-source"
-            ws source-dir canonical-old))
+            "ws-rewrite-source-back-refs: SKIP ws={ws} source-dir={source_dir} old-source-dir={old_source_dir} reason=different-source"
+            :ws ws :source_dir source-dir :old_source_dir canonical-old))
           (t
            (agent-repl--ws-put ws :source-ws-dir canonical-new)
            (agent-repl--ws-put ws :source-ws-name nil)
            (cl-incf rewritten)
            (agent-repl--log
             ws
-            "ws-rewrite-source-back-refs: REWROTE ws=%s source-dir=%s -> %s source-ws-name-cleared=t tombstoned=%s"
-            ws source-dir canonical-new
-            (if (plist-get plist :killed-at) "t" "nil"))))))
+            "ws-rewrite-source-back-refs: REWROTE ws={ws} source-dir={source_dir} -> {canonical_new} source-ws-name-cleared=t tombstoned={tombstoned}"
+            :ws ws :source_dir source-dir :canonical_new canonical-new
+            :tombstoned (if (plist-get plist :killed-at) "t" "nil"))))))
      agent-repl--workspaces)
     (agent-repl--log '(:agent-repl-central "workspace registry operations can span workspaces")
-                     "ws-rewrite-source-back-refs: DONE old-source-dir=%s new-source-dir=%s rewritten=%d"
-                     canonical-old canonical-new rewritten)
+                     "ws-rewrite-source-back-refs: DONE old-source-dir={old_source_dir} new-source-dir={new_source_dir} rewritten={rewritten}"
+                     :old_source_dir canonical-old :new_source_dir canonical-new :rewritten rewritten)
     rewritten))
 
 (defun agent-repl--ws-caller-trace (skip)
@@ -447,7 +444,7 @@ first, joined with ` <- ', or \"<no-trace>\"."
   "Set KEY to VAL in workspace WS's plist in `agent-repl--workspaces'.
 Internally uses plist-put (which returns a new list) threaded into puthash.
 
-Emits an unconditional log line (via `agent-repl--do-log', bypassing
+Emits an unconditional log line (at info, bypassing
 `agent-repl-debug') when this call CREATES a fresh hash entry whose
 plist will lack `:project-dir' — the non-workspace stub shape (a plain
 persp such as Doom's default \"main\" auto-vivified by a persp hook).
@@ -480,11 +477,12 @@ REFUSED — see the body."
       ;; signal: `agent-repl--ws-current-log-name' documents how a signalling
       ;; persp hook takes `doom-init-ui-hook' down with it, and a rejected
       ;; registration must not be able to do that.
-      (agent-repl--do-log
-       nil
-       "ws-put: REFUSED :project-dir on persp-mode pseudo-perspective ws=%s val=%S — a built-in perspective owns no workspace directory, and one that did would shadow the real workspace at that path in every dir-keyed lookup and every durable log sink. caller-trace=%s"
-       (list ws val (or (ignore-errors (agent-repl--ws-caller-trace '(agent-repl--ws-put)))
-                        "<trace-failed>")))
+      (agent-repl--info
+       '(:agent-repl-central "a built-in perspective owns no workspace sink")
+       "ws-put: REFUSED :project-dir on persp-mode pseudo-perspective ws={ws} val={val} — a built-in perspective owns no workspace directory, and one that did would shadow the real workspace at that path in every dir-keyed lookup and every durable log sink. caller-trace={caller_trace}"
+       :ws ws :val (prin1-to-string val)
+       :caller_trace (or (ignore-errors (agent-repl--ws-caller-trace '(agent-repl--ws-put)))
+                         "<trace-failed>"))
     (agent-repl--ws-put-1 ws key val)))
 
 (defun agent-repl--ws-put-1 (ws key val)
@@ -508,17 +506,17 @@ REFUSED — see the body."
     (when stub-create
       (let ((trace (or (ignore-errors (agent-repl--ws-caller-trace '(agent-repl--ws-put)))
                        "<trace-failed>")))
-        ;; Emitted with a nil workspace ON PURPOSE.  This record's whole
+        ;; Emitted to the central sink ON PURPOSE.  This record's whole
         ;; subject is that WS owns no `:project-dir', which is exactly the
         ;; state that gives WS no durable log sink; attributing the record to
         ;; WS would ask the ladder to route it somewhere that does not exist,
         ;; and `--note-unroutable-log-workspace' would warn about the very
         ;; condition this line already reports.  The global sink is the
         ;; correct destination, and the name is carried in the message text.
-        (agent-repl--do-log
-         nil
-         "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (non-workspace stub; filtered out of workspace renders). caller-trace=%s"
-         (list ws key val trace))))))
+        (agent-repl--info
+         '(:agent-repl-central "a stub entry owns no :project-dir, so no workspace sink")
+         "ws-put: STUB-CREATE ws={ws} key={key} val={val} — entry created without :project-dir (non-workspace stub; filtered out of workspace renders). caller-trace={caller_trace}"
+         :ws ws :key key :val (prin1-to-string val) :caller_trace trace)))))
 
 (defconst agent-repl--ws-runtime-keys
   '(:agent-state :repl-state :input-buffer
@@ -605,8 +603,8 @@ set rather than the live-only view from `agent-repl--live-ws-names'."
   (let ((names (hash-table-keys agent-repl--workspaces)))
     (agent-repl--log-verbose
      '(:agent-repl-central "workspace registry operations can span workspaces")
-     "ws-registered-names: count=%d names=%S"
-     (length names) names)
+     "ws-registered-names: count={count} names={names}"
+     :count (length names) :names (prin1-to-string names))
     names))
 
 (defun agent-repl--ws-project-pollable-p (ws)
@@ -689,8 +687,8 @@ log line preserves the pre-existing diagnostic shape."
       (agent-repl--ws-put ws :killed-at (current-time)))
     ;; Keep this as the operation's final normal log.  Consumers use it as
     ;; the canonical completed-tombstone record after setter advice settles.
-    (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
-                     ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))
+    (agent-repl--log ws "ws-del: ws={ws} had-entry={had_entry} (tombstone) kill-cause={kill_cause}"
+                     :ws ws :had_entry (if had-entry "t" "nil") :kill_cause (agent-repl--kill-cause-str))
     ;; FORGETTING IS THE LAST ACT OF THE TEARDOWN, after every record this
     ;; teardown writes.  Forgetting first left the hook's records, the
     ;; runtime-key clears and the closing `ws-del' line above with no owned
@@ -721,13 +719,13 @@ name the daemon now gives another workspace
 once its workspace is forgotten or nuked, so the identity it held there is
 one nothing can revive."
   (unless (agent-repl--ws-known-p ws)
-    (agent-repl--log ws "ws-forget: REJECT ws=%S reason=unregistered" ws)
+    (agent-repl--log ws "ws-forget: REJECT ws={ws} reason=unregistered" :ws (prin1-to-string ws))
     (error "agent-repl: ws-forget: workspace %S is not registered" ws))
   (unless (agent-repl--ws-tombstoned-p ws)
-    (agent-repl--log ws "ws-forget: REJECT ws=%S reason=live" ws)
+    (agent-repl--log ws "ws-forget: REJECT ws={ws} reason=live" :ws (prin1-to-string ws))
     (error "agent-repl: ws-forget: refusing to forget live workspace %S" ws))
   (remhash ws agent-repl--workspaces)
-  (agent-repl--log ws "ws-forget: ws=%s removed=t" ws))
+  (agent-repl--log ws "ws-forget: ws={ws} removed=t" :ws ws))
 
 ;;;; ---- Membership predicates -------------------------------------------
 
@@ -753,8 +751,8 @@ contractually refuse to operate on an unknown ws (per the AGENTS.md
 no-silent-fallback rule).  Returns nil on success."
   (unless (agent-repl--ws-known-p ws)
     (agent-repl--log '(:agent-repl-central "workspace registration has no durable sink yet")
-                     "ws-require-known: REJECT ws=%S context=%s reason=unregistered"
-                     ws context)
+                     "ws-require-known: REJECT ws={ws} context={context} reason=unregistered"
+                     :ws (prin1-to-string ws) :context context)
     (user-error "agent-repl: %s: workspace %S is not registered" context ws)))
 
 (defun agent-repl--ws-revive (ws)
@@ -784,15 +782,15 @@ answer nil, so a caller may call this unconditionally before it opens."
     ;; the candidate name in the record body and route it explicitly to the
     ;; process-wide sink.
     (agent-repl--log '(:agent-repl-central "workspace registration has no durable sink yet")
-                     "ws-revive: SKIP ws=%s reason=unknown" ws)
+                     "ws-revive: SKIP ws={ws} reason=unknown" :ws ws)
     nil)
    ((null (agent-repl--ws-get ws :killed-at))
-    (agent-repl--log ws "ws-revive: SKIP ws=%s reason=already-live" ws)
+    (agent-repl--log ws "ws-revive: SKIP ws={ws} reason=already-live" :ws ws)
     nil)
    (t
     (agent-repl--ws-put ws :killed-at nil)
-    (agent-repl--info ws "ws-revive: REVIVED ws=%s last-killed-at-kept=%s"
-                      ws (if (agent-repl--ws-get ws :last-killed-at) "t" "nil"))
+    (agent-repl--info ws "ws-revive: REVIVED ws={ws} last-killed-at-kept={last_killed_at_kept}"
+                      :ws ws :last_killed_at_kept (if (agent-repl--ws-get ws :last-killed-at) "t" "nil"))
     t)))
 
 (defun agent-repl--ws-tombstoned-p (ws)
@@ -1000,13 +998,13 @@ rendered in their registration order so a pre-roster boot still draws."
         (progn
           (agent-repl--log-verbose
            '(:agent-repl-central "tab rendering spans every workspace")
-           "ws-tabline-names: no roster order yet count=%d" (length known))
+           "ws-tabline-names: no roster order yet count={count}" :count (length known))
           known)
       (let ((names (cl-remove-if-not (lambda (name) (member name known)) order)))
         (agent-repl--log-verbose
          '(:agent-repl-central "tab rendering spans every workspace")
-         "ws-tabline-names: roster-order=%d rendered=%d"
-         (length order) (length names))
+         "ws-tabline-names: roster-order={roster_order} rendered={rendered}"
+         :roster_order (length order) :rendered (length names))
         names))))
 
 (defun agent-repl--ws-by-ref-id (id)
@@ -1201,8 +1199,8 @@ user as a completed teardown."
   (when (agent-repl--ws-merge-unfinished-p ws)
     (let ((state (agent-repl-status-tab-state ws)))
       (agent-repl--log ws
-                        "kill-one-workspace: REFUSED ws=%s state=%s — merge not finished"
-                        ws state)
+                        "kill-one-workspace: REFUSED ws={ws} state={state} — merge not finished"
+                        :ws ws :state state)
       (user-error
        "Cannot tear down workspace '%s': its merge is still %s"
        ws (substring (symbol-name state) 1)))))
@@ -1261,10 +1259,10 @@ Doom's `+workspace/kill': see `agent-repl--ws-land-then-kill' for why."
   ;; teardown leaves the workspace standing, and a standing workspace has
   ;; ordered no departure.
   (agent-repl--log-note-workspace-departing ws)
-  (agent-repl--log ws "kill-one-workspace: ENTRY ws=%s preserve-entry=%s kill-cause=%s cache=%S"
-                    ws (if preserve-entry "t" "nil")
-                    (agent-repl--kill-cause-str)
-                    (if (boundp 'persp-names-cache) persp-names-cache "(unbound)"))
+  (agent-repl--log ws "kill-one-workspace: ENTRY ws={ws} preserve-entry={preserve_entry} kill-cause={kill_cause} cache={cache}"
+                    :ws ws :preserve_entry (if preserve-entry "t" "nil")
+                    :kill_cause (agent-repl--kill-cause-str)
+                    :cache (prin1-to-string (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
   ;; Stamp the kill timestamp before the pre-teardown state-save so the
   ;; on-disk state.el reflects this kill.  The project picker
   ;; (`agent-repl-switch-to-project') reads `:last-killed-at' to sort
@@ -1279,14 +1277,14 @@ Doom's `+workspace/kill': see `agent-repl--ws-land-then-kill' for why."
   ;; condition-case so a save error doesn't abort the kill itself.
   (condition-case err
       (agent-repl--state-save ws)
-    (error (agent-repl--warn ws "kill-one-workspace: pre-teardown state-save error: %S" err)))
+    (error (agent-repl--warn ws "kill-one-workspace: pre-teardown state-save error: {error}" :error (prin1-to-string err))))
   (unwind-protect
       (progn
-        (agent-repl--log ws "kill-one-workspace: calling frontend kill-fn ws=%s" ws)
+        (agent-repl--log ws "kill-one-workspace: calling frontend kill-fn ws={ws}" :ws ws)
         (condition-case err
             (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
-          (error (agent-repl--warn ws "kill-one-workspace: frontend kill-fn error: %S" err)))
-        (agent-repl--log ws "kill-one-workspace: frontend kill-fn returned ws=%s" ws))
+          (error (agent-repl--warn ws "kill-one-workspace: frontend kill-fn error: {error}" :error (prin1-to-string err))))
+        (agent-repl--log ws "kill-one-workspace: frontend kill-fn returned ws={ws}" :ws ws))
     ;; Cleanup: always remove the hashmap entry regardless of any error
     ;; in the steps above (unless PRESERVE-ENTRY was requested).
     ;; Persisted state.el is intentionally NOT touched here — see the
@@ -1296,7 +1294,7 @@ Doom's `+workspace/kill': see `agent-repl--ws-land-then-kill' for why."
       (agent-repl--log ws "kill-one-workspace: ws-del decision=tombstone")
       (condition-case err
           (agent-repl--ws-del ws)
-        (error (agent-repl--warn ws "kill-one-workspace: ws-del error: %S" err))))
+        (error (agent-repl--warn ws "kill-one-workspace: ws-del error: {error}" :error (prin1-to-string err)))))
     ;; NO RESTORE-BATCH BOOKKEEPING.  This used to drop WS from
     ;; `agent-repl--restored-workspaces' so a follow-up
     ;; `kill-restored-workspaces' would not re-tear-down a stale name.
@@ -1309,11 +1307,11 @@ Doom's `+workspace/kill': see `agent-repl--ws-land-then-kill' for why."
     ;; hashmap; this sweep catches file buffers, magit buffers, auxiliary shells,
     ;; or anything else the user opened while inside the workspace so
     ;; nothing is orphaned after the persp goes away.
-    (agent-repl--log ws "kill-one-workspace: calling kill-workspace-buffers ws=%s" ws)
+    (agent-repl--log ws "kill-one-workspace: calling kill-workspace-buffers ws={ws}" :ws ws)
     (condition-case err
         (agent-repl--kill-workspace-buffers ws)
-      (error (agent-repl--warn ws "kill-one-workspace: kill-workspace-buffers error: %S" err)))
-    (agent-repl--log ws "kill-one-workspace: kill-workspace-buffers returned ws=%s" ws)
+      (error (agent-repl--warn ws "kill-one-workspace: kill-workspace-buffers error: {error}" :error (prin1-to-string err))))
+    (agent-repl--log ws "kill-one-workspace: kill-workspace-buffers returned ws={ws}" :ws ws)
     ;; Land, then kill the persp workspace -- last, so all internal state
     ;; is already cleaned up before the UI workspace disappears.  The one
     ;; teardown order lives in `agent-repl--ws-land-then-kill': when WS is
@@ -1322,13 +1320,13 @@ Doom's `+workspace/kill': see `agent-repl--ws-land-then-kill' for why."
     ;; killed, so the kill can never reach the landing workspace's windows.
     (condition-case err
         (agent-repl--ws-land-then-kill ws)
-      (error (agent-repl--warn ws "kill-one-workspace: land-then-kill error: %S" err)))
+      (error (agent-repl--warn ws "kill-one-workspace: land-then-kill error: {error}" :error (prin1-to-string err))))
     ;; The workspace is now gone from both the hash (tombstoned, unless
     ;; PRESERVE-ENTRY) and the tab bar, so its sidebar row is gone too.
     ;; Repaint immediately rather than letting the row outlive its tab
     ;; until the 1Hz signature tick notices.
     (agent-repl--ws-repaint-sidebar ws "kill-one-workspace")
-    (agent-repl--log ws "kill-one-workspace: DONE ws=%s all-cleanup-complete" ws)))
+    (agent-repl--log ws "kill-one-workspace: DONE ws={ws} all-cleanup-complete" :ws ws)))
 
 (defun agent-repl--reorder-workspace-to-front (ws)
   "Move workspace WS to the front of `persp-names-cache' (visible portion).
@@ -1352,14 +1350,14 @@ whose cherry-pick silently failed pre-restart surfaces as the leftmost
 tab on the next session, demanding the user's attention instead of
 passing for an already-merged workspace."
   (let ((cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
-    (agent-repl--log ws "reorder-workspace-to-front: ENTRY ws=%s cache=%S"
-                      ws cache-snapshot)
+    (agent-repl--log ws "reorder-workspace-to-front: ENTRY ws={ws} cache={cache}"
+                      :ws ws :cache (prin1-to-string cache-snapshot))
     (cond
      ((not (boundp 'persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-to-front: BAIL ws=%s reason=cache-unbound" ws))
+      (agent-repl--log ws "reorder-workspace-to-front: BAIL ws={ws} reason=cache-unbound" :ws ws))
      ((not (member ws persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-to-front: BAIL ws=%s reason=not-in-cache cache=%S"
-                        ws persp-names-cache))
+      (agent-repl--log ws "reorder-workspace-to-front: BAIL ws={ws} reason=not-in-cache cache={cache}"
+                        :ws ws :cache (prin1-to-string persp-names-cache)))
      (t
       (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
              (canonical-ws (car (member ws persp-names-cache)))
@@ -1371,8 +1369,8 @@ passing for an already-merged workspace."
              (new-cache (if (and nil-name (member nil-name persp-names-cache))
                             (cons nil-name new-visible)
                           new-visible)))
-        (agent-repl--log ws "reorder-workspace-to-front: APPLY ws=%s canonical-eq-input=%s new-cache=%S"
-                          ws (if (eq canonical-ws ws) "t" "nil") new-cache)
+        (agent-repl--log ws "reorder-workspace-to-front: APPLY ws={ws} canonical-eq-input={canonical_eq_input} new-cache={new_cache}"
+                          :ws ws :canonical_eq_input (if (eq canonical-ws ws) "t" "nil") :new_cache (prin1-to-string new-cache))
         (agent-repl--ws-update-names-cache new-cache))))))
 
 ;;;; ---- persp-mode identity / navigation boundary -----------------------
@@ -1530,8 +1528,8 @@ already succeeded must not be turned into a failure by the unwind."
         (if (agent-repl--ws-log-routable-p orig-persp)
             orig-persp
           '(:agent-repl-central "a foreign perspective has no workspace sink"))
-        "restore-focus: switch back to %s failed err=%S"
-                         orig-persp err))))
+        "restore-focus: switch back to {orig_persp} failed err={err}"
+                         :orig_persp orig-persp :err (prin1-to-string err)))))
   (when (and (window-live-p orig-window)
              (not (eq orig-window (selected-window))))
     (select-window orig-window 'norecord))
@@ -1582,10 +1580,10 @@ inheriting the previous workspace's window configuration."
                    all))
          (any-native (< (length foreign) (length all))))
     (if (null foreign)
-        (agent-repl--log ws "clean-frame-foreign-windows: ws=%s no foreign windows total=%d"
-                         ws (length all))
-      (agent-repl--log ws "clean-frame-foreign-windows: ws=%s removing=%d total=%d"
-                       ws (length foreign) (length all))
+        (agent-repl--log ws "clean-frame-foreign-windows: ws={ws} no foreign windows total={total}"
+                         :ws ws :total (length all))
+      (agent-repl--log ws "clean-frame-foreign-windows: ws={ws} removing={removing} total={total}"
+                       :ws ws :removing (length foreign) :total (length all))
       (dolist (win foreign)
         (set-window-parameter win 'no-delete-other-windows nil)
         (set-window-dedicated-p win nil))
@@ -1646,8 +1644,8 @@ state it acts on only needs to run once."
             (cl-remove key agent-repl--minibuffer-held :key #'car :test #'equal)))
     (setq agent-repl--minibuffer-held
           (append agent-repl--minibuffer-held (list (list key scope label fn))))
-    (agent-repl--info scope "elisp.workspace.minibuffer-held label=%s key=%S held=%d depth=%d"
-                      label key (length agent-repl--minibuffer-held) (minibuffer-depth))
+    (agent-repl--info scope "elisp.workspace.minibuffer-held label={label} key={key} held={held} depth={depth}"
+                      :label label :key (prin1-to-string key) :held (length agent-repl--minibuffer-held) :depth (minibuffer-depth))
     :held))
 
 (defun agent-repl--minibuffer-release-arm ()
@@ -1668,19 +1666,19 @@ is recorded at ERROR and the first one is re-signalled after the rest ran."
   (setq agent-repl--minibuffer-release-armed nil)
   (if (agent-repl--minibuffer-active-p)
       (agent-repl--info '(:agent-repl-central "the minibuffer hold spans every workspace")
-                        "elisp.workspace.minibuffer-release decision=still-active held=%d depth=%d"
-                        (length agent-repl--minibuffer-held) (minibuffer-depth))
+                        "elisp.workspace.minibuffer-release decision=still-active held={held} depth={depth}"
+                        :held (length agent-repl--minibuffer-held) :depth (minibuffer-depth))
     (let ((held agent-repl--minibuffer-held)
           (failure nil))
       (setq agent-repl--minibuffer-held nil)
       (dolist (entry held)
         (pcase-let ((`(,key ,scope ,label ,fn) entry))
-          (agent-repl--info scope "elisp.workspace.minibuffer-released label=%s key=%S" label key)
+          (agent-repl--info scope "elisp.workspace.minibuffer-released label={label} key={key}" :label label :key (prin1-to-string key))
           (condition-case err
               (funcall fn t)
             (error
-             (agent-repl--error scope "elisp.workspace.minibuffer-release-failed label=%s key=%S err=%S"
-                                label key err)
+             (agent-repl--error scope "elisp.workspace.minibuffer-release-failed label={label} key={key} err={err}"
+                                :label label :key (prin1-to-string key) :err (prin1-to-string err))
              (unless failure (setq failure err))))))
       (when failure
         (signal (car failure) (cdr failure))))))
@@ -1727,7 +1725,7 @@ leaves nothing to build into and is recorded rather than switched to."
    (lambda (released)
      (if (and released (not (member ws (agent-repl--ws-all-names))))
          (agent-repl--info '(:agent-repl-central "a closed workspace owns no sink")
-                           "elisp.workspace.background-build-dropped ws=%s reason=workspace-gone" ws)
+                           "elisp.workspace.background-build-dropped ws={ws} reason=workspace-gone" :ws ws)
        (let ((agent-repl--eager-open-in-progress t))
          (agent-repl--with-preserved-focus
            (unless (equal ws (agent-repl--ws-current-name))
@@ -1747,17 +1745,17 @@ never turn a teardown into an error."
   (if (not (fboundp 'agent-repl--sidebar-push))
       (progn
         (agent-repl--log ws
-                         "ws-repaint-sidebar: skip ws=%s reason=%s (sidebar not loaded)"
-                         ws reason)
+                         "ws-repaint-sidebar: skip ws={ws} reason={reason} (sidebar not loaded)"
+                         :ws ws :reason reason)
         nil)
-    (agent-repl--log ws "ws-repaint-sidebar: pushing ws=%s reason=%s" ws reason)
+    (agent-repl--log ws "ws-repaint-sidebar: pushing ws={ws} reason={reason}" :ws ws :reason reason)
     (condition-case err
         ;; Forced past the sidebar's signature gate: the removal this repaint
         ;; exists for is a perspective membership change, and the membership
         ;; cache the signature reads may not have caught up with the kill yet.
         (agent-repl--sidebar-push t)
-      (error (agent-repl--warn ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
-                               ws reason err)))))
+      (error (agent-repl--warn ws "ws-repaint-sidebar: push error ws={ws} reason={reason} err={err}"
+                               :ws ws :reason reason :err (prin1-to-string err))))))
 
 (defun agent-repl--ws-main-name ()
   "Return the name of Doom's main workspace, or nil.
@@ -1849,26 +1847,26 @@ directly or wrapping it themselves with `fboundp'."
   (cond
    ((not (fboundp 'persp-rename))
     (agent-repl--log new-ws
-                     "ws-rename-persp: SKIP old-ws=%s new-ws=%s reason=persp-rename-unbound"
-                     old-ws new-ws)
+                     "ws-rename-persp: SKIP old-ws={old_ws} new-ws={new_ws} reason=persp-rename-unbound"
+                     :old_ws old-ws :new_ws new-ws)
     t)
    (t
     (let ((persp (agent-repl--ws-resolve-persp old-ws)))
       (if (not persp)
           (progn
             (agent-repl--log new-ws
-                             "ws-rename-persp: SKIP old-ws=%s new-ws=%s reason=no-live-persp"
-                             old-ws new-ws)
+                             "ws-rename-persp: SKIP old-ws={old_ws} new-ws={new_ws} reason=no-live-persp"
+                             :old_ws old-ws :new_ws new-ws)
             t)
         (if (persp-rename new-ws persp)
             (progn
               (agent-repl--log new-ws
-                               "ws-rename-persp: RENAMED old-ws=%s new-ws=%s persp=%S"
-                               old-ws new-ws persp)
+                               "ws-rename-persp: RENAMED old-ws={old_ws} new-ws={new_ws} persp={persp}"
+                               :old_ws old-ws :new_ws new-ws :persp (prin1-to-string persp))
               t)
           (agent-repl--log new-ws
-                           "ws-rename-persp: FAILED old-ws=%s new-ws=%s persp=%S"
-                           old-ws new-ws persp)
+                           "ws-rename-persp: FAILED old-ws={old_ws} new-ws={new_ws} persp={persp}"
+                           :old_ws old-ws :new_ws new-ws :persp (prin1-to-string persp))
           nil))))))
 
 (defun agent-repl--ws-frame-ordered-names ()
@@ -2025,8 +2023,8 @@ source is filtered to workspaces this module actually owns."
                        ((member target (agent-repl--selection-history)) "history")
                        ((agent-repl-roster-last-selected-ms target) "roster")
                        (t "tab-order"))))
-    (agent-repl--info ws "elisp.workspace.teardown-landing-target: ws=%s target=%s source=%s history=%S"
-                      ws target source (agent-repl--selection-history))
+    (agent-repl--info ws "elisp.workspace.teardown-landing-target: ws={ws} target={target} source={source} history={history}"
+                      :ws ws :target target :source source :history (prin1-to-string (agent-repl--selection-history)))
     target))
 
 (defun agent-repl--land-before-teardown (ws)
@@ -2059,7 +2057,7 @@ not read as one that did, and the caller must not go on to kill the
 workspace the user is still standing on."
   (if (not (agent-repl--ws-system-available-p))
       (progn
-        (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s decision=skip reason=no-workspace-system" ws)
+        (agent-repl--info ws "elisp.workspace.teardown-landing: ws={ws} decision=skip reason=no-workspace-system" :ws ws)
         nil)
     (let ((current (agent-repl--ws-current-name))
           (survivors (agent-repl--ws-all-names)))
@@ -2068,23 +2066,23 @@ workspace the user is still standing on."
                (not (agent-repl--pseudo-workspace-name-p current))
                (member current survivors))
           (progn
-            (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s decision=not-owed current=%s"
-                              ws current)
+            (agent-repl--info ws "elisp.workspace.teardown-landing: ws={ws} decision=not-owed current={current}"
+                              :ws ws :current current)
             nil)
         (let ((target (agent-repl--teardown-landing-target ws)))
           (if (null target)
               (progn
                 (agent-repl--warn
-                 ws "teardown-landing: NO surviving workspace to land in (ws=%s current=%s survivors=%S)"
-                 ws current survivors)
+                 ws "teardown-landing: NO surviving workspace to land in (ws={ws} current={current} survivors={survivors})"
+                 :ws ws :current current :survivors (prin1-to-string survivors))
                 nil)
-            (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s decision=land current=%s target=%s"
-                              ws current target)
+            (agent-repl--info ws "elisp.workspace.teardown-landing: ws={ws} decision=land current={current} target={target}"
+                              :ws ws :current current :target target)
             ;; Leaving a workspace being torn down is Emacs's move, whoever
             ;; asked for the teardown (a sidebar row or an agent may have).
             (let ((agent-repl-host-automatic-switch t))
               (agent-repl--ws-switch target))
-            (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s landed=%s" ws target)
+            (agent-repl--info ws "elisp.workspace.teardown-landing: ws={ws} landed={landed}" :ws ws :landed target)
             target))))))
 
 (defun agent-repl--ws-persp-kill-refusal (ws)
@@ -2119,7 +2117,7 @@ kill a workspace the system will not kill asked for something it cannot
 have, and a silent skip would read as a completed teardown.  See
 `agent-repl--ws-persp-kill-refusal' for the refusals."
   (when-let ((reason (agent-repl--ws-persp-kill-refusal ws)))
-    (agent-repl--info ws "elisp.workspace.teardown-refused: ws=%s reason=%s" ws reason)
+    (agent-repl--info ws "elisp.workspace.teardown-refused: ws={ws} reason={reason}" :ws ws :reason reason)
     (user-error "Can't close workspace '%s': %s" ws reason)))
 
 (defun agent-repl--ws-persp-exists-p (ws)
@@ -2162,13 +2160,13 @@ when the perspective was killed."
     (agent-repl--land-before-teardown ws)
     (if (not exists)
         (progn
-          (agent-repl--info ws "elisp.workspace.teardown-kill: ws=%s decision=skip reason=not-a-workspace" ws)
+          (agent-repl--info ws "elisp.workspace.teardown-kill: ws={ws} decision=skip reason=not-a-workspace" :ws ws)
           nil)
-      (agent-repl--info ws "elisp.workspace.teardown-kill: ws=%s decision=kill current=%s"
-                        ws (agent-repl--ws-current-name))
+      (agent-repl--info ws "elisp.workspace.teardown-kill: ws={ws} decision=kill current={current}"
+                        :ws ws :current (agent-repl--ws-current-name))
       (agent-repl--ws-persp-kill ws)
-      (agent-repl--info ws "elisp.workspace.teardown-kill: ws=%s killed still-listed=%s"
-                        ws (if (agent-repl--ws-persp-exists-p ws) "t" "nil"))
+      (agent-repl--info ws "elisp.workspace.teardown-kill: ws={ws} killed still-listed={still_listed}"
+                        :ws ws :still_listed (if (agent-repl--ws-persp-exists-p ws) "t" "nil"))
       t)))
 
 (defun agent-repl--arm-landing-panels (target)
@@ -2194,7 +2192,7 @@ frame.  A teardown landing does NOT arm (`agent-repl--land-before-teardown'):
 the arrival re-shows panels by default, and arming would override an
 explicit close in a workspace the teardown was not about."
   (when target
-    (agent-repl--log target "arm-landing-panels: ws=%s" target)
+    (agent-repl--log target "arm-landing-panels: ws={ws}" :ws target)
     (agent-repl--ws-put target :pending-show-panels t)))
 
 (defun agent-repl--ws-shared-unowned-buffer-p (buf ws)
@@ -2253,17 +2251,17 @@ in `agent-repl--kill-workspace-buffers'.
 No-op when persp-mode is not loaded or WS has no live persp."
   (when-let* ((persp (agent-repl--ws-resolve-persp ws))
               (bufs (agent-repl--ws-buffers persp)))
-    (agent-repl--log ws "ws-retire-persp-windows: ws=%s buffers=%d" ws (length bufs))
+    (agent-repl--log ws "ws-retire-persp-windows: ws={ws} buffers={buffers}" :ws ws :buffers (length bufs))
     (dolist (buf bufs)
       (when (buffer-live-p buf)
         (cond
          ((agent-repl--foreign-owned-buffer-p buf ws)
-          (agent-repl--log ws "ws-retire-persp-windows: SKIP foreign buf=%s owner=%s"
-                           (agent-repl--safe-buffer-name buf)
-                           (agent-repl--buffer-owner buf)))
+          (agent-repl--log ws "ws-retire-persp-windows: SKIP foreign buf={buf} owner={owner}"
+                           :buf (agent-repl--safe-buffer-name buf)
+                           :owner (agent-repl--buffer-owner buf)))
          ((agent-repl--ws-shared-unowned-buffer-p buf ws)
-          (agent-repl--log ws "ws-retire-persp-windows: SKIP shared buf=%s"
-                           (agent-repl--safe-buffer-name buf)))
+          (agent-repl--log ws "ws-retire-persp-windows: SKIP shared buf={buf}"
+                           :buf (agent-repl--safe-buffer-name buf)))
          (t (agent-repl-window--delete-buffer-windows buf :ws ws)))))))
 
 (defun agent-repl--ws-persp-kill (ws)
@@ -2392,16 +2390,16 @@ is moved to a real workspace first so the kill does not strand it."
         (setq agent-repl--pseudo-perspectives-deferred t)
         (agent-repl--info
          '(:agent-repl-central "workspace numbering spans the whole session")
-         "elisp.workspace.pseudo-delete-deferred current=%s reason=startup-choosing"
-         (agent-repl--ws-current-name)))
+         "elisp.workspace.pseudo-delete-deferred current={current} reason=startup-choosing"
+         :current (agent-repl--ws-current-name)))
        (t
         (setq agent-repl--pseudo-perspectives-deleted t)
         (let ((current (agent-repl--ws-current-name)))
           (when (and current (agent-repl--pseudo-workspace-name-p current))
             (agent-repl--info
              '(:agent-repl-central "workspace numbering spans the whole session")
-             "elisp.workspace.pseudo-delete-vacate current=%s target=%s"
-             current (car reals))
+             "elisp.workspace.pseudo-delete-vacate current={current} target={target}"
+             :current current :target (car reals))
             ;; Retiring the placeholder is Emacs's move, not the user's.
             (let ((agent-repl-host-automatic-switch t))
               (agent-repl--ws-switch (car reals)))))
@@ -2410,12 +2408,12 @@ is moved to a real workspace first so the kill does not strand it."
               (progn
                 (agent-repl--info
                  '(:agent-repl-central "workspace numbering spans the whole session")
-                 "elisp.workspace.pseudo-delete ws=%s" pseudo)
+                 "elisp.workspace.pseudo-delete ws={ws}" :ws pseudo)
                 (agent-repl--ws-persp-kill pseudo))
             (agent-repl--info
              '(:agent-repl-central "workspace numbering spans the whole session")
-             "elisp.workspace.pseudo-delete-skip-nil ws=%s (persp-nil is not killable)"
-             pseudo))))))))
+             "elisp.workspace.pseudo-delete-skip-nil ws={ws} (persp-nil is not killable)"
+             :ws pseudo))))))))
 
 (declare-function agent-repl-open-tabs-choosing-p "open-tabs" ())
 
@@ -2526,8 +2524,8 @@ installed: it is a persp-mode this boundary was not written against."
   (if (fboundp 'persp-delete-other-windows)
       (advice-add 'persp-delete-other-windows :before fn)
     (agent-repl--error '(:agent-repl-central "persp-mode's window restore is process-wide")
-                       "elisp.workspace.before-collapse-unavailable: persp-delete-other-windows is not defined; %S not installed"
-                       fn)))
+                       "elisp.workspace.before-collapse-unavailable: persp-delete-other-windows is not defined; {fn} not installed"
+                       :fn (prin1-to-string fn))))
 
 (defun agent-repl--ws-add-before-collapse-hook (fn)
   "Run FN just before persp-mode collapses the frame to restore a window conf.
@@ -2576,14 +2574,14 @@ magit status when it has none."
   (let ((ws (agent-repl--ws-name-for-dir dir)))
     (cond
      (ws
-      (agent-repl--log ws "ws-switch-project-display: ws=%s dir=%s branch=workspace-panel-owns-display"
-                       ws dir))
+      (agent-repl--log ws "ws-switch-project-display: ws={ws} dir={dir} branch=workspace-panel-owns-display"
+                       :ws ws :dir dir))
      ((doom-real-buffer-list)
       (agent-repl--log '(:agent-repl-central "a plain project is not an agent workspace")
-                       "ws-switch-project-display: dir=%s branch=has-real-buffers" dir))
+                       "ws-switch-project-display: dir={dir} branch=has-real-buffers" :dir dir))
      (t
       (agent-repl--log '(:agent-repl-central "a plain project is not an agent workspace")
-                       "ws-switch-project-display: dir=%s branch=magit-status" dir)
+                       "ws-switch-project-display: dir={dir} branch=magit-status" :dir dir)
       (agent-repl--magit-status-same-window dir)))))
 
 (defun agent-repl--ws-doom-project-name (orig &optional dir)
@@ -2700,7 +2698,7 @@ perspective activation funnels through, so the project picker
        ((null name))
        ((equal name agent-repl--recency-walk-landing)
         (agent-repl--move-visit-to name "recency-walk")
-        (agent-repl--info name "elisp.workspace.history-kept ws=%s reason=recency-walk" name))
+        (agent-repl--info name "elisp.workspace.history-kept ws={ws} reason=recency-walk" :ws name))
        (t
         (agent-repl--end-recency-walk name "activation")
         (agent-repl--stamp-workspace-viewed name)
@@ -2756,8 +2754,8 @@ alike.  LOG-WS is the
 record's sink; REASON names what made it a visit."
   (setq agent-repl--workspace-history
         (agent-repl--history-with-visit agent-repl--workspace-history visit))
-  (agent-repl--info log-ws "elisp.workspace.visit-recorded ws=%s dwell=%.1fs reason=%s"
-                    (plist-get visit :name) (agent-repl--visit-dwell visit) reason))
+  (agent-repl--info log-ws "elisp.workspace.visit-recorded ws={ws} dwell={dwell}s reason={reason}"
+                    :ws (plist-get visit :name) :dwell (format "%.1f" (agent-repl--visit-dwell visit)) :reason reason))
 
 (defun agent-repl--end-visit (log-ws reason)
   "End the visit the frame stands in, recording it when it lasted long enough.
@@ -2777,8 +2775,8 @@ running."
       (if recorded
           (agent-repl--record-visit log-ws visit reason)
         (agent-repl--info log-ws
-                          "elisp.workspace.visit-dropped ws=%s dwell=%.1fs min=%ds reason=%s"
-                          name dwell agent-repl-visit-dwell-seconds reason)))))
+                          "elisp.workspace.visit-dropped ws={ws} dwell={dwell}s min={min}s reason={reason}"
+                          :ws name :dwell (format "%.1f" dwell) :min agent-repl-visit-dwell-seconds :reason reason)))))
 
 (defun agent-repl--note-visit-prompted (ws)
   "Record the visit the frame stands in at once, because WS was prompted in it.
@@ -2823,11 +2821,11 @@ INFO."
     (cond
      ((agent-repl--record-standing-visit name "link-followed"))
      ((not (equal (plist-get ended :name) name))
-      (agent-repl--info name "elisp.workspace.visit-kept ws=%s visit=none current=%s last-ended=%s"
-                        name (or (plist-get agent-repl--current-visit :name) "none")
-                        (or (plist-get ended :name) "none")))
+      (agent-repl--info name "elisp.workspace.visit-kept ws={ws} visit=none current={current} last-ended={last_ended}"
+                        :ws name :current (or (plist-get agent-repl--current-visit :name) "none")
+                        :last_ended (or (plist-get ended :name) "none")))
      ((plist-get agent-repl--last-ended-visit :recorded)
-      (agent-repl--info name "elisp.workspace.visit-kept ws=%s visit=ended already-recorded=t" name))
+      (agent-repl--info name "elisp.workspace.visit-kept ws={ws} visit=ended already-recorded=t" :ws name))
      (t
       (agent-repl--record-visit name ended "link-followed-late")
       (setq agent-repl--last-ended-visit (list :visit ended :recorded t))))))
@@ -2858,7 +2856,7 @@ without waiting for the user to switch there first."
     (setq agent-repl--current-visit
           (plist-put (copy-sequence agent-repl--current-visit) :ahead
                      (cons name (plist-get agent-repl--current-visit :ahead)))))
-  (agent-repl--info name "elisp.workspace.history-created ws=%s" name))
+  (agent-repl--info name "elisp.workspace.history-created ws={ws}" :ws name))
 
 (defun agent-repl--end-recency-walk (log-ws reason)
   "End the frame's recency walk, if any, recording its landing as a visit.
@@ -2891,10 +2889,10 @@ each then does with the visit standing is its own.  LOG-WS is the
 record's sink; REASON names what ended the walk.  A walk must be running."
   (let ((landing agent-repl--recency-walk-landing))
     (unless landing
-      (agent-repl--fatal log-ws "elisp.workspace.recency-walk-clear-without-walk reason=%s" reason))
+      (agent-repl--fatal log-ws "elisp.workspace.recency-walk-clear-without-walk reason={reason}" :reason reason))
     (setq agent-repl--recency-walk-landing nil)
-    (agent-repl--info log-ws "elisp.workspace.recency-walk-ended landing=%s reason=%s"
-                      landing reason)
+    (agent-repl--info log-ws "elisp.workspace.recency-walk-ended landing={landing} reason={reason}"
+                      :landing landing :reason reason)
     (agent-repl--stamp-workspace-viewed landing)
     landing))
 
@@ -2941,9 +2939,9 @@ the persp before-deactivation hook below."
 Registered on `persp-before-kill-functions'
 \(`agent-repl--ws-add-before-kill-hook')."
   (agent-repl--info agent-repl--ws-persp-kill-scope
-                    "elisp.workspace.persp-kill: ws=%s command=%s callers=%s"
-                    (agent-repl--ws-persp-name persp) this-command
-                    (agent-repl--ws-caller-trace
+                    "elisp.workspace.persp-kill: ws={ws} command={command} callers={callers}"
+                    :ws (agent-repl--ws-persp-name persp) :command this-command
+                    :callers (agent-repl--ws-caller-trace
                      '(agent-repl--ws-record-persp-kill run-hook-with-args))))
 
 (agent-repl--ws-add-before-kill-hook #'agent-repl--ws-record-persp-kill)

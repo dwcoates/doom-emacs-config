@@ -23,8 +23,10 @@
  * and named in the sentence. Reading them is strict: an arm that should carry a
  * string and does not is a MALFORMED VIEW, never a sentence with a hole in it.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { MalformedView } from "./malformed.js";
+
+const log = createLogger("webapp.rpc.refusal");
 
 /** The arms this file speaks for, in the generated (lowerCamel) spelling. */
 export const CROSS_CUTTING_REFUSAL_ARMS: readonly string[] = [
@@ -116,6 +118,6 @@ export function noteRefusedArm(
 ): string | null {
   if (result.case !== "error") return null;
   const cause = (result.value as { cause?: { case?: string } } | undefined)?.cause?.case ?? "unset";
-  log.info(`${rpc} was refused: ${cause}`, { operation, context: { rpc, arm: cause } });
+  log.info("{rpc} was refused: {arm}", { operation }, { rpc, arm: cause });
   return cause;
 }

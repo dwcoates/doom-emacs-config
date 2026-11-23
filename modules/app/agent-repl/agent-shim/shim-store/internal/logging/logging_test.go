@@ -13,6 +13,7 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/logsite"
 )
 
 type failingWriter struct{ err error }
@@ -38,7 +39,7 @@ func TestLogFormatsBoundAndRecordContext(t *testing.T) {
 	log.clock = func() time.Time { return at }
 	log.pid = func() int { return 84 }
 
-	log.Log(Fields{VendorSessionID: "vendor-session", Producer: "sidecar", Operation: "write-batch"}, "accepted=%d", 2)
+	log.Log(Fields{VendorSessionID: "vendor-session", Producer: "sidecar", Operation: "write-batch"}, "accepted={accepted}", Values{"accepted": 2})
 
 	var got record
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -81,7 +82,7 @@ func TestLogMarshalsCorrelationAndTerminalAttributionExactly(t *testing.T) {
 		TerminalReason: "completed",
 		ErrorCause:     "connection reset",
 		Operation:      "store.watch",
-	}, "replay finished")
+	}, "replay finished", nil)
 
 	var got map[string]any
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -95,6 +96,8 @@ func TestLogMarshalsCorrelationAndTerminalAttributionExactly(t *testing.T) {
 		"verbosity":             "normal",
 		"operation":             "store.watch",
 		"message":               "replay finished",
+		"site":                  logsite.Key(Runtime, "agentrepl/shim-store/internal/logging.TestLogMarshalsCorrelationAndTerminalAttributionExactly", "replay finished"),
+		"template":              "replay finished",
 		"agent_repl_session_id": "agent-1",
 		"request_id":            "request-1",
 		"context": map[string]any{
@@ -116,7 +119,7 @@ func TestLogMarshalsCorrelationAndTerminalAttributionExactly(t *testing.T) {
 
 func TestLogOmitsEmptyCorrelationAndTerminalAttribution(t *testing.T) {
 	var file, stderr bytes.Buffer
-	New(&file, &stderr, false).Log(Fields{Operation: "store.watch"}, "replay finished")
+	New(&file, &stderr, false).Log(Fields{Operation: "store.watch"}, "replay finished", nil)
 
 	var got map[string]any
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -140,7 +143,7 @@ func TestLogMarshalsAggregateAgentAttribution(t *testing.T) {
 		Operation:    "store.rpc.write-batch",
 		AgentIDs:     []string{"agent-a", "agent-b"},
 		BookAgentIDs: []string{"book-a", "book-b"},
-	}, "accepted")
+	}, "accepted", nil)
 
 	// Assert.
 	var got map[string]any
@@ -163,7 +166,7 @@ func TestLogMarshalsZeroDeliveredForTerminalRecordExactly(t *testing.T) {
 	log.clock = func() time.Time { return at }
 	log.pid = func() int { return 84 }
 
-	log.Log(Fields{TerminalOwner: "subscriber", TerminalReason: "exhausted", Operation: "store.watch"}, "replay finished")
+	log.Log(Fields{TerminalOwner: "subscriber", TerminalReason: "exhausted", Operation: "store.watch"}, "replay finished", nil)
 
 	var got map[string]any
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -177,6 +180,8 @@ func TestLogMarshalsZeroDeliveredForTerminalRecordExactly(t *testing.T) {
 		"verbosity": "normal",
 		"operation": "store.watch",
 		"message":   "replay finished",
+		"site":      logsite.Key(Runtime, "agentrepl/shim-store/internal/logging.TestLogMarshalsZeroDeliveredForTerminalRecordExactly", "replay finished"),
+		"template":  "replay finished",
 		"context": map[string]any{
 			"delivered":       float64(0),
 			"terminal_owner":  "subscriber",
@@ -201,13 +206,13 @@ func assertJSONExactly(t *testing.T, got, want map[string]any) {
 func TestLogVerboseRequiresEnabledModeForBothSinks(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false)
-	log.LogVerbose(Fields{Operation: "tail"}, "queued=%d", 4)
+	log.LogVerbose(Fields{Operation: "tail"}, "queued={queued}", Values{"queued": 4})
 	if file.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("disabled verbose mutated sinks: file=%q stderr=%q", file.String(), stderr.String())
 	}
 
 	enabled := New(&file, &stderr, true)
-	enabled.LogVerbose(Fields{Operation: "tail"}, "queued=%d", 4)
+	enabled.LogVerbose(Fields{Operation: "tail"}, "queued={queued}", Values{"queued": 4})
 	var verboseRecord record
 	if err := json.Unmarshal(file.Bytes(), &verboseRecord); err != nil {
 		t.Fatalf("persistent verbose record is not JSON: %v", err)
@@ -241,9 +246,9 @@ func TestLogLevelFiltersPersistentAndInteractiveSinksTogether(t *testing.T) {
 
 			// Act.
 			if tt.record.Level == "" && tt.record.Operation == "tail" {
-				log.LogVerbose(tt.record, "record")
+				log.LogVerbose(tt.record, "record", nil)
 			} else {
-				log.Log(tt.record, "record")
+				log.Log(tt.record, "record", nil)
 			}
 
 			// Assert.
@@ -261,25 +266,25 @@ func TestLogRejectsMissingOperationAndInvalidLevel(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false)
 	got := capturePanic(t, func() {
-		log.Log(Fields{}, "record")
+		log.Log(Fields{}, "record", nil)
 	})
 	if !strings.Contains(fmt.Sprint(got), "operation is required") {
 		t.Fatalf("panic = %v, want missing operation", got)
 	}
 	got = capturePanic(t, func() {
-		log.Log(Fields{Operation: "write", Level: "fatal"}, "record")
+		log.Log(Fields{Operation: "write", Level: "fatal"}, "record", nil)
 	})
 	if !strings.Contains(fmt.Sprint(got), "invalid level") {
 		t.Fatalf("panic = %v, want invalid level", got)
 	}
 	got = capturePanic(t, func() {
-		log.LogVerbose(Fields{}, "record")
+		log.LogVerbose(Fields{}, "record", nil)
 	})
 	if !strings.Contains(fmt.Sprint(got), "operation is required") {
 		t.Fatalf("disabled verbose panic = %v, want missing operation", got)
 	}
 	got = capturePanic(t, func() {
-		log.LogVerbose(Fields{Operation: "write", Level: "fatal"}, "record")
+		log.LogVerbose(Fields{Operation: "write", Level: "fatal"}, "record", nil)
 	})
 	if !strings.Contains(fmt.Sprint(got), "invalid level") {
 		t.Fatalf("disabled verbose panic = %v, want invalid level", got)
@@ -293,7 +298,7 @@ func TestLogFailsLoudlyWhenPersistentSinkCannotWrite(t *testing.T) {
 	err := errors.New("disk full")
 	var stderr bytes.Buffer
 	got := capturePanic(t, func() {
-		New(failingWriter{err}, &stderr, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+		New(failingWriter{err}, &stderr, false).Log(Fields{Operation: "write", Level: "error"}, "critical", nil)
 	})
 	var emergency record
 	if err := json.Unmarshal(stderr.Bytes(), &emergency); err != nil {
@@ -311,7 +316,7 @@ func TestLogFailsLoudlyWhenStderrCannotWrite(t *testing.T) {
 	var file bytes.Buffer
 	err := errors.New("terminal closed")
 	got := capturePanic(t, func() {
-		New(&file, failingWriter{err}, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+		New(&file, failingWriter{err}, false).Log(Fields{Operation: "write", Level: "error"}, "critical", nil)
 	})
 	if !strings.Contains(file.String(), "critical") {
 		t.Fatalf("persistent record missing before stderr failure: %q", file.String())
@@ -325,7 +330,7 @@ func TestLogReportsBothSinkFailures(t *testing.T) {
 	fileErr := errors.New("disk full")
 	stderrErr := errors.New("terminal closed")
 	got := capturePanic(t, func() {
-		New(failingWriter{fileErr}, failingWriter{stderrErr}, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+		New(failingWriter{fileErr}, failingWriter{stderrErr}, false).Log(Fields{Operation: "write", Level: "error"}, "critical", nil)
 	})
 	message := fmt.Sprint(got)
 	if !strings.Contains(message, "disk full") || !strings.Contains(message, "terminal closed") {
@@ -338,12 +343,12 @@ func TestLogCompletesShortPersistentWritesAcrossBoundLoggers(t *testing.T) {
 	var stderr bytes.Buffer
 	log := New(file, &stderr, false)
 	bound := log.With(Fields{Component: "db"})
-	log.Log(Fields{Operation: "write", Level: "error"}, "critical")
+	log.Log(Fields{Operation: "write", Level: "error"}, "critical", nil)
 	if file.writes <= 1 {
 		t.Fatalf("persistent writes = %d, want multiple writes", file.writes)
 	}
 	firstWrites := file.writes
-	bound.Log(Fields{Operation: "write", Level: "error"}, "later critical")
+	bound.Log(Fields{Operation: "write", Level: "error"}, "later critical", nil)
 	if file.writes <= firstWrites {
 		t.Fatalf("bound logger did not complete another record: writes=%d", file.writes)
 	}
@@ -352,7 +357,7 @@ func TestLogCompletesShortPersistentWritesAcrossBoundLoggers(t *testing.T) {
 func TestLogCompletesShortTerminalWrite(t *testing.T) {
 	var file bytes.Buffer
 	stderr := &shortWriter{}
-	New(&file, stderr, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+	New(&file, stderr, false).Log(Fields{Operation: "write", Level: "error"}, "critical", nil)
 	if stderr.writes <= 1 {
 		t.Fatalf("terminal writes = %d, want multiple writes", stderr.writes)
 	}
@@ -379,8 +384,8 @@ func TestLoggerRejectsMissingDependencies(t *testing.T) {
 	assertPanics("nil stderr", func() { New(io.Discard, nil, false) })
 	var logger *Logger
 	assertPanics("nil With", func() { logger.With(Fields{}) })
-	assertPanics("nil Log", func() { logger.Log(Fields{}, "record") })
-	assertPanics("nil LogVerbose", func() { logger.LogVerbose(Fields{}, "record") })
+	assertPanics("nil Log", func() { logger.Log(Fields{}, "record", nil) })
+	assertPanics("nil LogVerbose", func() { logger.LogVerbose(Fields{}, "record", nil) })
 }
 
 func capturePanic(t *testing.T, call func()) any {
@@ -407,7 +412,7 @@ func TestLogTimestampUsesCanonicalFixedWidthLayout(t *testing.T) {
 	log.clock = func() time.Time { return time.Date(2026, 7, 28, 12, 34, 56, 0, time.UTC) }
 
 	// Act
-	log.Log(Fields{Operation: "ingest"}, "accepted")
+	log.Log(Fields{Operation: "ingest"}, "accepted", nil)
 
 	// Assert
 	var got record
@@ -427,7 +432,7 @@ func TestLogTimestampUsesLocalZoneRatherThanUTC(t *testing.T) {
 	log.clock = func() time.Time { return at }
 
 	// Act
-	log.Log(Fields{Operation: "ingest"}, "accepted")
+	log.Log(Fields{Operation: "ingest"}, "accepted", nil)
 
 	// Assert
 	var got record
@@ -485,7 +490,7 @@ func TestStatementFamilyEmitsTheQueryTimingGroup(t *testing.T) {
 			log := New(&file, &stderr, false)
 
 			// Act.
-			log.Log(tc.fields, "slow")
+			log.Log(tc.fields, "slow", nil)
 
 			// Assert.
 			var got record
@@ -508,7 +513,7 @@ func TestNoStatementFamilyOmitsTheQueryTimingGroup(t *testing.T) {
 	log := New(&file, &stderr, false)
 
 	// Act.
-	log.Log(Fields{Operation: "open", Table: "event"}, "ready")
+	log.Log(Fields{Operation: "open", Table: "event"}, "ready", nil)
 
 	// Assert.
 	var got record
@@ -531,7 +536,7 @@ func TestDurableOnlyWithholdsAnOrdinaryRecordFromTheTerminal(t *testing.T) {
 	log := NewDurableOnly(&file, &stderr, false)
 
 	// Act.
-	log.Log(Fields{Operation: "write-batch"}, "accepted=%d", 2)
+	log.Log(Fields{Operation: "write-batch"}, "accepted={accepted}", Values{"accepted": 2})
 
 	// Assert: durably recorded, and not mirrored.
 	if !strings.Contains(file.String(), `"operation":"write-batch"`) {
@@ -552,7 +557,7 @@ func TestDurableOnlyStillNarratesASinkFailureToTheTerminal(t *testing.T) {
 	// Act.
 	capturePanic(t, func() {
 		NewDurableOnly(failingWriter{errors.New("disk full")}, &stderr, false).
-			Log(Fields{Operation: "write", Level: "error"}, "critical")
+			Log(Fields{Operation: "write", Level: "error"}, "critical", nil)
 	})
 
 	// Assert.
@@ -593,7 +598,7 @@ func TestTheWindowIsEmittedOnlyWhenItWasMeasured(t *testing.T) {
 			log := New(&file, &stderr, false)
 
 			// Act
-			log.Log(test.fields, "a record")
+			log.Log(test.fields, "a record", nil)
 
 			// Assert
 			var got record
@@ -616,7 +621,7 @@ func TestLogMarshalsAPinnedWALsState(t *testing.T) {
 	log.Log(Fields{Operation: "store.db.wal-pin", WAL: &WALState{
 		Frames: 47506, Backfilled: 0, ReadMarks: []uint32{0, 47481, 0xffffffff},
 		PinnedFor: 90 * time.Second, ReadPoolOpen: 2, ReadPoolInUse: 0, ReadPoolIdle: 2,
-	}}, "pinned")
+	}}, "pinned", nil)
 
 	var got record
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -639,7 +644,7 @@ func TestLogOmitsWALStateWhenNoneIsGiven(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false)
 
-	log.Log(Fields{Operation: "store.db.wal-checkpoint"}, "checkpointed")
+	log.Log(Fields{Operation: "store.db.wal-checkpoint"}, "checkpointed", nil)
 
 	var got record
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -654,7 +659,7 @@ func TestWithKeepsABoundWALStateWhenARecordAddsNone(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false).With(Fields{WAL: &WALState{Frames: 7}})
 
-	log.Log(Fields{Operation: "store.db.wal-pin"}, "pinned")
+	log.Log(Fields{Operation: "store.db.wal-pin"}, "pinned", nil)
 
 	var got record
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -703,7 +708,7 @@ func TestLevelWindowAdmitsDebugBeforeItEnds(t *testing.T) {
 	log := debugWindowLogger(t, clock, &file)
 
 	// Act.
-	log.LogVerbose(Fields{Operation: "tail"}, "inside")
+	log.LogVerbose(Fields{Operation: "tail"}, "inside", nil)
 
 	// Assert.
 	records := decodeRecords(t, file.String())
@@ -720,7 +725,7 @@ func TestLevelWindowRecordsItsEndAtInfo(t *testing.T) {
 	clock.at = time.Unix(1000300, 0)
 
 	// Act.
-	log.LogVerbose(Fields{Operation: "tail"}, "after")
+	log.LogVerbose(Fields{Operation: "tail"}, "after", nil)
 
 	// Assert.
 	records := decodeRecords(t, file.String())
@@ -740,11 +745,11 @@ func TestLevelWindowEndIsSharedByEveryLoggerCopy(t *testing.T) {
 	log := debugWindowLogger(t, clock, &file)
 	child := log.With(Fields{Component: "db"})
 	clock.at = time.Unix(1000300, 0)
-	log.Log(Fields{Operation: "serve"}, "ends the window")
+	log.Log(Fields{Operation: "serve"}, "ends the window", nil)
 	file.Reset()
 
 	// Act.
-	child.LogVerbose(Fields{Operation: "tail"}, "after")
+	child.LogVerbose(Fields{Operation: "tail"}, "after", nil)
 
 	// Assert.
 	if file.Len() != 0 {
@@ -799,10 +804,197 @@ func TestLevelWindowRaisesEveryWithCopy(t *testing.T) {
 	if _, err := copied.LevelWindow().Open(sharedlogging.LevelDebug, time.Minute); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	log.LogVerbose(Fields{Operation: "tail"}, "record")
+	log.LogVerbose(Fields{Operation: "tail"}, "record", nil)
 
 	// Assert.
 	if file.Len() == 0 {
 		t.Fatal("a debug record was dropped while the shared window held debug")
+	}
+}
+
+// forwardedNote is a helper's message, made here so its records are keyed by
+// this function rather than by the test that logs it.
+func forwardedNote() logsite.Message { return logsite.Msg("a forwarded note about {subject}") }
+
+func TestEveryRecordNamesItsSiteAndTemplate(t *testing.T) {
+	const testFunction = "agentrepl/shim-store/internal/logging.TestEveryRecordNamesItsSiteAndTemplate"
+	tests := []struct {
+		name         string
+		log          func(l *Logger)
+		wantFunction string
+		wantTemplate string
+		wantMessage  string
+	}{
+		{
+			name: "Log is keyed by its caller and renders its values",
+			log: func(l *Logger) {
+				l.Log(Fields{Operation: "store.test"}, "accepted {count} rows", Values{"count": 2})
+			},
+			wantFunction: testFunction, wantTemplate: "accepted {count} rows", wantMessage: "accepted 2 rows",
+		},
+		{
+			name: "LogVerbose is keyed by its caller",
+			log: func(l *Logger) {
+				l.LogVerbose(Fields{Operation: "store.test"}, "traced {step}", Values{"step": "open"})
+			},
+			wantFunction: testFunction, wantTemplate: "traced {step}", wantMessage: "traced open",
+		},
+		{
+			name: "a placeholder takes a typed field's key",
+			log: func(l *Logger) {
+				l.With(Fields{Path: "/tmp/a.jsonl"}).Log(Fields{Operation: "store.test"}, "reading {path}", nil)
+			},
+			wantFunction: testFunction, wantTemplate: "reading {path}", wantMessage: "reading /tmp/a.jsonl",
+		},
+		{
+			name:         "a doubled brace renders as one literal brace",
+			log:          func(l *Logger) { l.Log(Fields{Operation: "store.test"}, "a {{literal}} brace", nil) },
+			wantFunction: testFunction, wantTemplate: "a {{literal}} brace", wantMessage: "a {literal} brace",
+		},
+		{
+			name: "a forwarded message is keyed by the function that made it",
+			log: func(l *Logger) {
+				l.LogMessage(Fields{Operation: "store.test"}, forwardedNote(), Values{"subject": "x"})
+			},
+			wantFunction: "agentrepl/shim-store/internal/logging.forwardedNote", wantTemplate: "a forwarded note about {subject}", wantMessage: "a forwarded note about x",
+		},
+		{
+			name: "a forwarded verbose message is keyed by the function that made it",
+			log: func(l *Logger) {
+				l.LogVerboseMessage(Fields{Operation: "store.test"}, forwardedNote(), Values{"subject": "y"})
+			},
+			wantFunction: "agentrepl/shim-store/internal/logging.forwardedNote", wantTemplate: "a forwarded note about {subject}", wantMessage: "a forwarded note about y",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var file, stderr bytes.Buffer
+			log := NewAtLevel(&file, &stderr, sharedlogging.LevelDebug)
+
+			// Act
+			tt.log(log)
+
+			// Assert
+			var got record
+			if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+				t.Fatalf("record is not JSON: %v\n%s", err, file.String())
+			}
+			if want := logsite.Key(Runtime, tt.wantFunction, tt.wantTemplate); got.Site != want {
+				t.Errorf("site = %q, want %q (the key of %s, %q)", got.Site, want, tt.wantFunction, tt.wantTemplate)
+			}
+			if got.Template != tt.wantTemplate || got.Message != tt.wantMessage {
+				t.Errorf("template, message = %q, %q, want %q, %q", got.Template, got.Message, tt.wantTemplate, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestAValueLandsInTheRecordsContext(t *testing.T) {
+	// Arrange
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+
+	// Act
+	log.Log(Fields{Operation: "store.test", Path: "/typed"}, "moved {path} after {elapsed}", Values{"path": "/named", "elapsed": "2s"})
+
+	// Assert
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("record is not JSON: %v", err)
+	}
+	if got.Context["elapsed"] != "2s" || got.Context["path"] != "/named" || got.Message != "moved /named after 2s" {
+		t.Fatalf("record = %#v, want each value in context, a value replacing the typed key", got)
+	}
+}
+
+func TestSiteAndTemplateFollowTheMessage(t *testing.T) {
+	// Arrange
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+
+	// Act
+	log.Log(Fields{Operation: "store.test"}, "said", nil)
+
+	// Assert
+	want := fmt.Sprintf(`"message":"said","site":%q,"template":"said"`, logsite.Key(Runtime, "agentrepl/shim-store/internal/logging.TestSiteAndTemplateFollowTheMessage", "said"))
+	if !strings.Contains(file.String(), want) {
+		t.Fatalf("record = %s, want %s", file.String(), want)
+	}
+}
+
+func TestAnUnrenderableRecordPanics(t *testing.T) {
+	tests := []struct {
+		name string
+		log  func(l *Logger)
+	}{
+		{name: "a placeholder no value fills", log: func(l *Logger) {
+			l.Log(Fields{Operation: "store.test"}, "lost {gone}", Values{"here": 1})
+		}},
+		{name: "a template whose braces do not parse", log: func(l *Logger) {
+			l.Log(Fields{Operation: "store.test"}, "unclosed {", nil)
+		}},
+		{name: "a forwarded message no Msg made", log: func(l *Logger) {
+			l.LogMessage(Fields{Operation: "store.test"}, logsite.Message{}, nil)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var file, stderr bytes.Buffer
+			log := New(&file, &stderr, false)
+
+			// Act
+			capturePanic(t, func() { tt.log(log) })
+
+			// Assert
+			if file.Len() != 0 {
+				t.Errorf("file got %q, want nothing", file.String())
+			}
+		})
+	}
+}
+
+func TestTheSinkFailureRecordNamesItsSite(t *testing.T) {
+	// Arrange
+	var stderr bytes.Buffer
+
+	// Act
+	capturePanic(t, func() {
+		NewDurableOnly(failingWriter{errors.New("disk full")}, &stderr, false).
+			Log(Fields{Operation: "write", Level: "error"}, "critical", nil)
+	})
+
+	// Assert
+	var emergency record
+	if err := json.Unmarshal(stderr.Bytes(), &emergency); err != nil {
+		t.Fatalf("emergency stderr is not JSON: %v: %q", err, stderr.String())
+	}
+	const template = "persistent log sink write failed"
+	if want := logsite.Key(Runtime, "agentrepl/shim-store/internal/logging.(*Logger).write", template); emergency.Site != want || emergency.Template != template {
+		t.Fatalf("emergency record = %#v, want site %q and template %q", emergency, want, template)
+	}
+}
+
+func TestTheLevelWindowsRecordsAreKeyedWhereTheirNotesAreWritten(t *testing.T) {
+	// Arrange
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+	sel, err := sharedlogging.SelectLevel("debug", "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	log.NoteLevelSelection(sel)
+
+	// Assert
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("record is not JSON: %v\n%s", err, file.String())
+	}
+	template := "log level {requested_level} ignored without {until_environment}; starting at info"
+	if want := logsite.Key(Runtime, "agentrepl/logging.Selection.Note", template); got.Site != want || got.Template != template {
+		t.Fatalf("record = %#v, want site %q and template %q", got, want, template)
 	}
 }

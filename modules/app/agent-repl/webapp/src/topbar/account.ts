@@ -25,7 +25,7 @@ import type {
   TopbarAccountOption,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { whileInFlight } from "../feed/cards/controls.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import {
@@ -39,6 +39,8 @@ import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { TopbarContext } from "./context.js";
 import { asAnchor } from "./strip.js";
+
+const log = createLogger("webapp.topbar.account");
 
 /** The reveal's name in the strip's one reveal layer. */
 export const ACCOUNT_REVEAL = "account";
@@ -155,10 +157,10 @@ export async function pickAccount(
   button: HTMLElement,
   row: Control,
 ): Promise<void> {
-  log.info(`the reader chose the account root ${option.configDir}`, {
+  log.info("the reader chose the account root {config_dir}", {
     operation: "topbar.account-picked",
-    context: { config_dir: option.configDir, current: option.current },
-  });
+    context: { current: option.current },
+  }, { config_dir: option.configDir });
   // CLEARED BEFORE THE CALL, never after: a refusal from the previous pick
   // standing beside the control the reader just clicked again reads as the
   // answer to the NEW click.

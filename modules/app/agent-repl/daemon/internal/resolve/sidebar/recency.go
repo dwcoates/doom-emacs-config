@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -31,7 +32,7 @@ func (r RecencyReach) equal(other RecencyReach) bool {
 // AttachRecencyReach stands a stream's empty reach; see Resolver.
 func (r *resolver) AttachRecencyReach() (release func()) {
 	var generation uint64
-	r.mutate("daemon.sidebar.attach_recency_reach", "an Emacs stream attached its recency reach, empty until its first report",
+	r.mutate("daemon.sidebar.attach_recency_reach", logsite.Msg("an Emacs stream attached its recency reach, empty until its first report"),
 		dlog.Context{}, r.log.Global(), func() {
 			var superseded bool
 			generation, superseded = r.state.recency.Attach(RecencyReach{})
@@ -44,7 +45,7 @@ func (r *resolver) AttachRecencyReach() (release func()) {
 // releaseRecencyReach ends one stream's reach, unless a later stream already
 // superseded it, in which case nothing is drawn differently.
 func (r *resolver) releaseRecencyReach(generation uint64) {
-	r.mutateIf("daemon.sidebar.release_recency_reach", "the Emacs stream ended; no row carries a recency gutter",
+	r.mutateIf("daemon.sidebar.release_recency_reach", logsite.Msg("the Emacs stream ended; no row carries a recency gutter"),
 		dlog.Context{"generation": generation}, r.log.Global(), func() bool {
 			if !r.state.recency.Release(generation) {
 				r.log.Global().Debug("daemon.sidebar.release_recency_reach",
@@ -62,7 +63,7 @@ func (r *resolver) ReportRecencyReach(reach RecencyReach) error {
 		panic("sidebar: ReportRecencyReach was handed no reach; an empty report is an empty map")
 	}
 	attached := false
-	r.mutateIf("daemon.sidebar.report_recency_reach", "the roster took Emacs's recency reach",
+	r.mutateIf("daemon.sidebar.report_recency_reach", logsite.Msg("the roster took Emacs's recency reach"),
 		dlog.Context{"reaches": len(reach)}, r.log.Global(), func() bool {
 			held, standing := r.state.recency.Get()
 			if !standing {

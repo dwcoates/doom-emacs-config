@@ -40,10 +40,9 @@ When non-nil the stub feeds this string to the filter and then runs the
 sentinel BEFORE returning, which is what makes the synchronous entry
 points testable without waiting on anything.")
 
-(defun agent-repl-test-connect--record-log (level fmt args)
-  "Push a `(LEVEL . TEXT)' entry built from FMT and ARGS onto the log capture."
-  (push (cons level (condition-case nil (apply #'format fmt args)
-                      (error (format "%S %S" fmt args))))
+(defun agent-repl-test-connect--record-log (level site values)
+  "Push a `(LEVEL . TEXT)' entry rendered from SITE and VALUES onto the log capture."
+  (push (cons level (agent-repl-log-site-render site values))
         agent-repl-test-connect--logs))
 
 (defun agent-repl-test-connect--logs-matching (level regexp)
@@ -118,16 +117,16 @@ abort before its own assertions ran."
      (unwind-protect
          (cl-letf (((symbol-function 'agent-repl-connect--open-socket)
                     #'agent-repl-test-connect--dial-stub)
-                   ((symbol-function 'agent-repl--log)
+                   ((symbol-function 'agent-repl--emit-log)
                     (lambda (_ws fmt &rest args)
                       (agent-repl-test-connect--record-log 'debug fmt args)))
-                   ((symbol-function 'agent-repl--info)
+                   ((symbol-function 'agent-repl--emit-info)
                     (lambda (_ws fmt &rest args)
                       (agent-repl-test-connect--record-log 'info fmt args)))
-                   ((symbol-function 'agent-repl--warn)
+                   ((symbol-function 'agent-repl--emit-warn)
                     (lambda (_ws fmt &rest args)
                       (agent-repl-test-connect--record-log 'warn fmt args)))
-                   ((symbol-function 'agent-repl--error)
+                   ((symbol-function 'agent-repl--emit-error)
                     (lambda (_ws fmt &rest args)
                       (agent-repl-test-connect--record-log 'error fmt args))))
            ,@body)

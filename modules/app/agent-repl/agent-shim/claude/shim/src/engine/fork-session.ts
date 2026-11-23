@@ -32,7 +32,7 @@ import { workspaceLockKey } from "../locks.js";
 import { createAgentIdentityStore } from "./identity.js";
 import { transcriptPath } from "./vendor-paths.js";
 
-const LOGGER = bindLog({ component: "shim-engine-fork-session", operation: "shim.engine.fork_session" });
+const LOGGER = bindLog("shim.engine.fork-session", { component: "shim-engine-fork-session", operation: "shim.engine.fork_session" });
 
 /** What the vendor's fork is asked for. */
 export interface VendorForkSpec {

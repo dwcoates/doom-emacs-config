@@ -1,6 +1,7 @@
 package promptqueue
 
 import (
+	"agentrepl/logging/logsite"
 	"context"
 	"fmt"
 
@@ -97,7 +98,7 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 		// A HIBERNATED SESSION IS IDLE, NOT DEAD: the prompt revives it, as
 		// any submission does, and the revived session's coming up delivers it.
 		if q.deps.Revive == nil {
-			refusalLevel(ctx, log, log.Warn)(opArrival, "the workspace has no session to deliver to", nil)
+			log.Log(refusalLevel(ctx, dlog.LevelWarn), opArrival, logsite.Msg("the workspace has no session to deliver to"), nil)
 			return Disposition{}, noSession(causeNoRevival)
 		}
 		disposition, err := q.awaitArrival(ctx, sub, wsm.WaitSession, "the workspace has no shim; its session is revived", log)
@@ -119,7 +120,7 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 	}
 	watcher, ok := q.deps.Watcher(sub.WS)
 	if !ok {
-		refusalLevel(ctx, log, log.Warn)(opArrival, "the workspace has no session watcher", nil)
+		log.Log(refusalLevel(ctx, dlog.LevelWarn), opArrival, logsite.Msg("the workspace has no session watcher"), nil)
 		return Disposition{}, noSession(causeNoWatcher)
 	}
 	running := watcher.TurnInFlight()
@@ -178,7 +179,7 @@ func (q *queue) joinArrivalLocked(ctx context.Context, d *delivery, sub Submissi
 		return Disposition{Delivered: true}, nil
 	case joinSendRecorded:
 		q.closeRecorded(ctx, sub.WS, sub.Turn, err, opArrival,
-			"the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; nothing joins", log)
+			logsite.Msg("the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; nothing joins"), log)
 		q.endArrivalWait(ctx, sub, "the vendor already recorded it", log)
 		return Disposition{Delivered: true}, nil
 	case joinSendAskOpen:

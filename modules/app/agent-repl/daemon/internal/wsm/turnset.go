@@ -31,13 +31,13 @@ func (s *store) recordTurnSet(ctx context.Context, set turnSet, id WorkspaceID, 
 	fields := dlog.Context{"workspace": string(id), "turns": len(turns)}
 	if len(turns) == 0 {
 		err := fmt.Errorf("wsm: %s names at least one turn", set.what)
-		s.log.Error(set.recordOp, fmt.Sprintf("refused %s that named no turn", set.what), withError(fields, err))
+		s.log.With(withError(fields, err)).Error(set.recordOp, "refused {what} that named no turn", dlog.Context{"what": set.what})
 		return err
 	}
 	for _, turn := range turns {
 		if turn == "" {
 			err := errors.New("wsm: a recorded turn needs its id")
-			s.log.Error(set.recordOp, fmt.Sprintf("refused %s naming an empty turn", set.what), withError(fields, err))
+			s.log.With(withError(fields, err)).Error(set.recordOp, "refused {what} naming an empty turn", dlog.Context{"what": set.what})
 			return err
 		}
 	}

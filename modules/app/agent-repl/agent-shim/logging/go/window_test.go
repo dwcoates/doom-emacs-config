@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"agentrepl/logging/logsite"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -145,10 +146,29 @@ func TestSelectionNoteStatesEveryIgnoredLevel(t *testing.T) {
 			message, ok := sel.Note()
 
 			// Assert
-			if !ok || message == "" {
-				t.Errorf("outcome %s wrote no note", sel.Outcome)
+			if !ok || message.IsZero() {
+				t.Fatalf("outcome %s wrote no note", sel.Outcome)
+			}
+			if _, err := logsite.RenderFields(message.Template(), sel.Context()); err != nil {
+				t.Errorf("outcome %s's note does not render from its own context: %v", sel.Outcome, err)
 			}
 		})
+	}
+}
+
+func TestExpiryMessageRendersFromItsContext(t *testing.T) {
+	// Arrange
+	e := Expiry{From: LevelDebug, Until: time.Unix(1000300, 0).UTC()}
+
+	// Act
+	text, err := logsite.RenderFields(e.Message().Template(), e.Context())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the revert's message does not render from its context: %v", err)
+	}
+	if want := "log level debug window ended at 1970-01-12T13:51:40Z; reverted to info"; text != want {
+		t.Errorf("rendered %q, want %q", text, want)
 	}
 }
 

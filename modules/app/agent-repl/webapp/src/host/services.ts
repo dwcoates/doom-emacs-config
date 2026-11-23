@@ -15,7 +15,7 @@
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { bootFailed } from "../failure/sink.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
 import { createRosterIntake, rosterPushOf } from "../sidebar/roster-streams.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
@@ -24,6 +24,8 @@ import type { Host } from "./host.js";
 import { createWebhostGate, type WebhostGate } from "./gate.js";
 import { createWebhostLoadButton, type WebhostLoadButton } from "./load-button.js";
 import { errorCause } from "../error-cause.js";
+
+const log = createLogger("webapp.host.services");
 
 /** What the start may have injected, for a suite that drives it. */
 export interface WebhostServicesDeps extends WebhostDocumentDeps {
@@ -132,10 +134,10 @@ export function startWebhostServices(
     };
   } catch (err) {
     const cause = errorCause(err);
-    log.error(`the webhost's services failed to start: ${cause}`, {
+    log.error("the webhost's services failed to start: {cause}", {
       operation: "webhost.services-start-failed",
-      context: { cause },
-    });
+      context: {},
+    }, { cause });
     failures.report(bootFailed(cause));
   }
   return {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -46,7 +47,7 @@ const (
 
 // rewriteRetiredShapeRows is layout 77's row rewrite.
 func rewriteRetiredShapeRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
-	return rewriteDurableRows(ctx, tx, log, "carried the stored rows' retired fields onto today's shapes",
+	return rewriteDurableRows(ctx, tx, log, logsite.Msg("carried the stored rows' retired fields onto today's shapes"),
 		func(raw []byte) ([]byte, bool, error) { return rewriteRetiredShapes(log, raw) })
 }
 

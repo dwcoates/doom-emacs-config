@@ -212,7 +212,7 @@ func TestOpenLoggerCreatesTheDurableSink(t *testing.T) {
 		t.Fatalf("openLogger = %v, want nil", err)
 	}
 	defer closeLog()
-	log.Log(logging.Fields{Operation: "test"}, "hello")
+	log.Log(logging.Fields{Operation: "test"}, "hello", nil)
 
 	// Assert.
 	body, err := os.ReadFile(logPath)
@@ -440,7 +440,7 @@ func TestOpenLoggerStartsALeftoverDebugLevelAtInfo(t *testing.T) {
 		t.Fatalf("openLogger = %v, want nil", err)
 	}
 	defer closeLog()
-	log.LogVerbose(logging.Fields{Operation: "tail"}, "dropped")
+	log.LogVerbose(logging.Fields{Operation: "tail"}, "dropped", nil)
 
 	// Assert.
 	body, err := os.ReadFile(logPath)
@@ -540,8 +540,8 @@ func TestOpenLoggerWritesAWarningOnlyToTheWarningsFile(t *testing.T) {
 	}
 
 	// Act.
-	log.Log(logging.Fields{Operation: "test.warning", Level: "warn"}, "a warning")
-	log.Log(logging.Fields{Operation: "test.info"}, "an info record")
+	log.Log(logging.Fields{Operation: "test.warning", Level: "warn"}, "a warning", nil)
+	log.Log(logging.Fields{Operation: "test.info"}, "an info record", nil)
 	closeLog()
 
 	// Assert.

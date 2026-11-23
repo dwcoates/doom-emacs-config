@@ -22,12 +22,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'seq)
 
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--error "core")
 (declare-function agent-repl-serial-create "core")
 (declare-function agent-repl-serial-send-to-newest "core" (serial report scope label send))
 (declare-function agent-repl--ws-current-name "workspace")
@@ -93,8 +94,8 @@ a name with no ref is a broken invariant: it is recorded and signalled."
                   (let ((ref (agent-repl-host-ref name)))
                     (unless ref
                       (agent-repl--error agent-repl--recency-reach-log-scope
-                                         "elisp.recency-reach.unregistered ws=%s arm=%s presses=%d"
-                                         name arm presses)
+                                         "elisp.recency-reach.unregistered ws={ws} arm={arm} presses={presses}"
+                                         :ws name :arm arm :presses presses)
                       (error "agent-repl: the recency walk reaches %s, which has no daemon ref" name))
                     (list :workspace ref
                           :direction (list :arm arm :value (list :presses presses)))))
@@ -131,10 +132,10 @@ answers the next daemon reports again (`agent-repl--recency-reach-on-link')."
     (if (equal reaches agent-repl--recency-reach-reported)
         (progn
           (agent-repl--log agent-repl--recency-reach-log-scope
-                           "elisp.recency-reach.report unchanged reaches=%d" (length reaches))
+                           "elisp.recency-reach.report unchanged reaches={reaches}" :reaches (length reaches))
           (funcall done))
       (agent-repl--info agent-repl--recency-reach-log-scope
-                        "elisp.recency-reach.report send reaches=%S" reaches)
+                        "elisp.recency-reach.report send reaches={reaches}" :reaches (prin1-to-string reaches))
       (agent-repl-rpc-report-recency-reach
        conn (agent-repl--recency-reach-request reaches)
        :on-response (lambda (response) (agent-repl--recency-reach-answered reaches response done))
@@ -146,24 +147,24 @@ answers the next daemon reports again (`agent-repl--recency-reach-on-link')."
     (:success
      (setq agent-repl--recency-reach-reported reaches)
      (agent-repl--log agent-repl--recency-reach-log-scope
-                      "elisp.recency-reach.report taken reaches=%d" (length reaches)))
+                      "elisp.recency-reach.report taken reaches={reaches}" :reaches (length reaches)))
     (:error
      ;; NO EMACS STREAM STANDS on that daemon: the link is between streams,
      ;; and the link edge that answers the stream reports again.
      (agent-repl--info agent-repl--recency-reach-log-scope
-                       "elisp.recency-reach.report refused reaches=%d cause=%S"
-                       (length reaches) (plist-get (plist-get response :value) :cause)))
+                       "elisp.recency-reach.report refused reaches={reaches} cause={cause}"
+                       :reaches (length reaches) :cause (prin1-to-string (plist-get (plist-get response :value) :cause))))
     (arm
      (agent-repl--error agent-repl--recency-reach-log-scope
-                        "elisp.recency-reach.report unknown-arm reaches=%d arm=%S"
-                        (length reaches) arm)))
+                        "elisp.recency-reach.report unknown-arm reaches={reaches} arm={arm}"
+                        :reaches (length reaches) :arm (prin1-to-string arm))))
   (funcall done))
 
 (defun agent-repl--recency-reach-failed (reaches detail done)
   "Record a report of REACHES that failed in transport with DETAIL; then DONE."
   (agent-repl--error agent-repl--recency-reach-log-scope
-                     "elisp.recency-reach.report failed reaches=%d detail=%S"
-                     (length reaches) detail)
+                     "elisp.recency-reach.report failed reaches={reaches} detail={detail}"
+                     :reaches (length reaches) :detail (prin1-to-string detail))
   (funcall done))
 
 (defun agent-repl--recency-reach-changed (&rest _)

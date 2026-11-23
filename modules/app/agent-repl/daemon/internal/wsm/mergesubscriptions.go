@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // This file is the durable half of MERGE QUEUE SUBSCRIPTIONS
@@ -119,7 +120,7 @@ func (s *store) SubscribeMergeQueue(ctx context.Context, sub MergeQueueSubscript
 // UnsubscribeMergeQueue ends SUBSCRIBER's subscription in scope REPO, and
 // answers whether one stood there. It ends nothing in any other scope.
 func (s *store) UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error) {
-	return s.endSubscription(ctx, "daemon.wsm.unsubscribe_merge_queue", "refused a merge queue unsubscribe whose scope cannot be normalized",
+	return s.endSubscription(ctx, "daemon.wsm.unsubscribe_merge_queue", logsite.Msg("refused a merge queue unsubscribe whose scope cannot be normalized"),
 		dlog.Context{"subscriber": string(subscriber), "repo": string(repo)}, subscriber, repo, "")
 }
 
@@ -127,7 +128,7 @@ func (s *store) UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceI
 // subscription in its scope, only while it still holds SUB's SubscribedAt. It answers whether it ended one. A subscription the
 // subscriber took again since SUB was read is not SUB, and stands.
 func (s *store) EndMergeQueueSubscription(ctx context.Context, sub MergeQueueSubscription) (bool, error) {
-	return s.endSubscription(ctx, "daemon.wsm.end_merge_queue_subscription", "refused to end a merge queue subscription whose scope cannot be normalized",
+	return s.endSubscription(ctx, "daemon.wsm.end_merge_queue_subscription", logsite.Msg("refused to end a merge queue subscription whose scope cannot be normalized"),
 		dlog.Context{"subscriber": string(sub.Subscriber), "repo": string(sub.Repo)},
 		sub.Subscriber, sub.Repo, ` AND subscribed_at = ?`, nanos(sub.SubscribedAt))
 }
@@ -136,10 +137,10 @@ func (s *store) EndMergeQueueSubscription(ctx context.Context, sub MergeQueueSub
 // the extra WHERE clause MATCH and its ARGS, and answers whether it deleted
 // one. Every end of a single subscription goes through it, so each normalizes
 // its scope and records its refusal the same way.
-func (s *store) endSubscription(ctx context.Context, op, refused string, fields dlog.Context, subscriber WorkspaceID, repo RepoKey, match string, args ...any) (bool, error) {
+func (s *store) endSubscription(ctx context.Context, op string, refused logsite.Message, fields dlog.Context, subscriber WorkspaceID, repo RepoKey, match string, args ...any) (bool, error) {
 	key, err := subscriptionScope(repo)
 	if err != nil {
-		s.log.Error(op, refused, withError(fields, err))
+		s.log.Log(dlog.LevelError, op, refused, withError(fields, err))
 		return false, err
 	}
 	var ended bool

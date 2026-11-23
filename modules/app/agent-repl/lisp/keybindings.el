@@ -22,6 +22,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; `agent-repl--config-file' is defined by config.el at the module root,
 ;; which is the loader rather than a lisp/ source.
 (defvar agent-repl--config-file)
@@ -35,7 +39,6 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--live-ws-names "workspace")
-(declare-function agent-repl--log "core")
 (declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--ws-current-log-name "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
@@ -54,11 +57,11 @@ interactive picker."
          (current (agent-repl--ws-current-name))
          (default (and current (member current known) current)))
     (unless known
-      (agent-repl--log current "elisp.keybindings.read-workspace-none prompt=%S" prompt)
+      (agent-repl--log current "elisp.keybindings.read-workspace-none prompt={prompt}" :prompt (prin1-to-string prompt))
       (user-error "No agent-repl workspaces registered"))
     (let ((selected (completing-read prompt known nil t nil nil default)))
-      (agent-repl--log selected "elisp.keybindings.read-workspace selected=%S known=%d"
-                       selected (length known))
+      (agent-repl--log selected "elisp.keybindings.read-workspace selected={selected} known={known}"
+                       :selected (prin1-to-string selected) :known (length known))
       selected)))
 
 ;; SPC b R -- revert the buffer from disk then eval it as Elisp (fast
@@ -67,7 +70,7 @@ interactive picker."
   "Revert the current buffer from disk, then evaluate it as Elisp."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name)
-                   "elisp.keybindings.revert-and-eval buffer=%s" (buffer-name))
+                   "elisp.keybindings.revert-and-eval buffer={buffer}" :buffer (buffer-name))
   (revert-buffer :ignore-auto :noconfirm)
   (eval-buffer))
 
@@ -90,7 +93,7 @@ the module."
   (interactive)
   (let ((file (agent-repl--reload-config-file)))
     (agent-repl--log (agent-repl--ws-current-log-name)
-                     "elisp.keybindings.reload-config file=%s" file)
+                     "elisp.keybindings.reload-config file={file}" :file file)
     (load-file file)
     (message "[agent-repl] Reloaded %s" file)))
 

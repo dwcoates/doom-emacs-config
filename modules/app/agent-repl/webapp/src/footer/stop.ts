@@ -37,7 +37,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { frameUndecodable } from "../failure/sink.js";
 import { interruptErrorSentence, logInterruptRefusal } from "../interrupt-error.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -46,6 +46,8 @@ import { callUnary } from "../rpc/unary.js";
 import { INTERRUPT_OUTCOME_MS } from "../feed/stop-control.js";
 import { stopTicking, tick } from "../feed/ticking.js";
 import { decorativeElement, queryAll } from "../dom.js";
+
+const log = createLogger("webapp.footer.stop");
 
 /** The stop glyph: a filled square, the one shape a stop control has. */
 export const STOP_GLYPH = "■";
@@ -193,10 +195,10 @@ async function issue(
   confirmed: boolean,
 ): Promise<void> {
   clearAnswer(wrapper);
-  log.info(`interrupting: ${spec.target}`, {
+  log.info("interrupting: {target}", {
     operation: spec.operation,
-    context: { target: spec.target, confirm_agents: confirmed },
-  });
+    context: { confirm_agents: confirmed },
+  }, { target: spec.target });
   try {
     const response = await callUnary(
       ctx,
@@ -215,19 +217,19 @@ async function issue(
     // owns the daemon_unreachable window. BOTH draw at the control, because a
     // stop that silently did nothing is the one reading this must never leave.
     if (isMalformedView(err)) {
-      log.error(`the Interrupt answer could not be read: ${err.detail}`, {
+      log.error("the Interrupt answer could not be read: {detail}", {
         operation: `${spec.operation}-undecodable`,
         context: { target: spec.target, path: err.path, cause: err.detail },
-      });
+      }, { detail: err.detail });
       ctx.failures.report(frameUndecodable(err.detail, err.path));
       drawRefusal(wrapper, "malformed", "the daemon's answer could not be read");
       return;
     }
     drawRefusal(wrapper, "transport", "the daemon could not be reached");
-    log.error(`Interrupt failed at the transport: ${String(err)}`, {
+    log.error("Interrupt failed at the transport: {err}", {
       operation: `${spec.operation}-failed`,
       context: { target: spec.target, cause: err },
-    });
+    }, { err: String(err) });
   } finally {
     // Whatever the control now carries, the footer redraws around it.
     spec.onAnswerChanged();
@@ -319,10 +321,10 @@ function drawOutcome(
   spec: ControlSpec,
 ): void {
   const note = drawInterruptSuccess(success, "InterruptSuccess");
-  log.info(`the stop answered ${note.getAttribute("data-stop-outcome") ?? ""}`, {
+  log.info("the stop answered {outcome_text}", {
     operation: `${spec.operation}-answered`,
     context: { target: spec.target, outcome: note.getAttribute("data-stop-outcome") },
-  });
+  }, { outcome_text: note.getAttribute("data-stop-outcome") ?? "" });
   wrapper.appendChild(note);
   // THE CONTROL NOW OUTLIVES A REDRAW, so the answer needs an end of its own:
   // it is a statement about a click, not standing state, and the same span the

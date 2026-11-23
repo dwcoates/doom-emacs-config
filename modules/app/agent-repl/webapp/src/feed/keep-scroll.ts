@@ -20,10 +20,12 @@
  * The response bubble does not come here: it updates itself in place
  * (cards/response.ts), since it streams far more often than anything else.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { placeChildren, queryAll } from "../dom.js";
 import { HAS_MORE_CLASS } from "./bubble-more.js";
 import { DISCARD_ATTRIBUTE, TICKING_ATTRIBUTE, stopTicking } from "./ticking.js";
+
+const log = createLogger("webapp.feed.keep-scroll");
 
 /** The live registries' own markers: the kept element's stand, whatever the draw says. */
 const KEPT_ATTRIBUTES: ReadonlySet<string> = new Set([TICKING_ATTRIBUTE, DISCARD_ATTRIBUTE]);

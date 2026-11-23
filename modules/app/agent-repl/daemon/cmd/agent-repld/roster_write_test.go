@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agentrepl/logging/logsite"
 )
 
 // recordedWrite is one call rosterWrite's write was given.
@@ -33,7 +34,7 @@ func TestRosterWrite(t *testing.T) {
 			// Arrange
 			log := dlog.NewTestLogger()
 			var writes []recordedWrite
-			sink := rosterWrite(log, "daemon.cmd.test_write", "could not keep the test value durable",
+			sink := rosterWrite(log, "daemon.cmd.test_write", logsite.Msg("could not keep the test value durable"),
 				func(_ context.Context, ws ids.WorkspaceID, v int) error {
 					writes = append(writes, recordedWrite{ws: ws, v: v})
 					return tt.err

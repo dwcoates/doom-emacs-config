@@ -42,7 +42,10 @@ import { bindLog } from "../log.js";
 import { promptText, userRecordText, type PromptRecord } from "../convert/transcript-prompt.js";
 import { isKeepalivePrompt } from "./keepalive.js";
 
-const LOGGER = bindLog({ component: "shim-engine-rollback", operation: "shim.engine.rollback" });
+const LOGGER = bindLog("shim.engine.rollback", { component: "shim-engine-rollback", operation: "shim.engine.rollback" });
+
+/** One site for a broken chain, whichever way it breaks (its detail says which). */
+const BROKEN_CHAIN = LOGGER.message("the vendor transcript's chain is broken");
 
 /**
  * The vendor's words when `resumeDropsTurn`'s guard refuses a truncating resume
@@ -349,12 +352,12 @@ function walkChain(file: string, byUuid: ReadonlyMap<string, ChainRecord>, start
     const record = byUuid.get(at);
     if (record === undefined) {
       const detail = `the chain names ${at}, which the transcript does not hold`;
-      LOGGER.error({ file, head: start ?? "", missing: at, detail }, "the vendor transcript's chain is broken");
+      LOGGER.error({ file, head: start ?? "", missing: at, detail }, BROKEN_CHAIN);
       return { kind: "unreadable", detail };
     }
     if (seen.has(at)) {
       const detail = `the chain loops back to ${at}`;
-      LOGGER.error({ file, head: start ?? "", detail }, "the vendor transcript's chain is broken");
+      LOGGER.error({ file, head: start ?? "", detail }, BROKEN_CHAIN);
       return { kind: "unreadable", detail };
     }
     seen.add(at);

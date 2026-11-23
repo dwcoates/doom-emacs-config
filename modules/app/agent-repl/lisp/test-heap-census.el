@@ -46,18 +46,16 @@ bytes and 2,976 buffer bytes; the `heap' entry is the allocator's own.")
                 (lambda () agent-repl-test-heap-census--gc-counts))
                ((symbol-function 'float-time)
                 (lambda (&optional _time) agent-repl-test-heap-census--now))
-               ((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args)
-                  (push (list 'info (apply #'format fmt args)) agent-repl-test-heap-census--records)))
-               ((symbol-function 'agent-repl--warn)
-                (lambda (_ws fmt &rest args)
-                  (push (list 'warn (apply #'format fmt args)) agent-repl-test-heap-census--records))))
+               ((symbol-function 'agent-repl--emit-info)
+                (agent-repl-test--record-leveled-into agent-repl-test-heap-census--records 'info))
+               ((symbol-function 'agent-repl--emit-warn)
+                (agent-repl-test--record-leveled-into agent-repl-test-heap-census--records 'warn)))
        ,@body)))
 
 (defun agent-repl-test-heap-census--census-records ()
   "Every census record written, newest first."
   (cl-remove-if-not (lambda (r) (and (eq (car r) 'info)
-                                     (string-prefix-p "elisp.heap-census: " (cadr r))))
+                                     (string-prefix-p "elisp.heap-census: " (cdr r))))
                     agent-repl-test-heap-census--records))
 
 ;;; The live bytes
@@ -169,7 +167,7 @@ bytes and 2,976 buffer bytes; the `heap' entry is the allocator's own.")
     ;; Act
     (should (agent-repl-heap-census-take))
     ;; Assert
-    (let ((text (cadr (car (agent-repl-test-heap-census--census-records)))))
+    (let ((text (cdr (car (agent-repl-test-heap-census--census-records)))))
       (should (string-match-p "live_bytes=31808 " text))
       (should (string-match-p "by_kind=((conses \\. 16000)" text)))))
 
@@ -180,7 +178,7 @@ bytes and 2,976 buffer bytes; the `heap' entry is the allocator's own.")
       ;; Act
       (agent-repl-heap-census-take)
       ;; Assert
-      (let ((text (cadr (car (agent-repl-test-heap-census--census-records)))))
+      (let ((text (cdr (car (agent-repl-test-heap-census--census-records)))))
         (should (string-match-p "gc_cons_threshold=800000 gc_cons_percentage=0.1 " text))
         (should (string-match-p (format "gcs_done=%d " gcs-done) text))))))
 
@@ -189,7 +187,7 @@ bytes and 2,976 buffer bytes; the `heap' entry is the allocator's own.")
     ;; Act
     (agent-repl-heap-census-take)
     ;; Assert
-    (let ((text (cadr (car (agent-repl-test-heap-census--census-records)))))
+    (let ((text (cdr (car (agent-repl-test-heap-census--census-records)))))
       (should (string-match-p (format "buffers=%d buffer_bytes=" (length (buffer-list))) text))
       (should (string-match-p "largest_buffers=((" text))
       (should (string-match-p "largest_variables=((agent-repl" text)))))
@@ -202,7 +200,7 @@ bytes and 2,976 buffer bytes; the `heap' entry is the allocator's own.")
       (agent-repl-heap-census-take)
       ;; Assert
       (should (string-match-p "rss_kb=148000 "
-                              (cadr (car (agent-repl-test-heap-census--census-records))))))))
+                              (cdr (car (agent-repl-test-heap-census--census-records))))))))
 
 (ert-deftest agent-repl-heap-census-test-an-inhibited-collection-is-a-warning-and-no-census ()
   (agent-repl-test-heap-census--with
@@ -213,7 +211,7 @@ bytes and 2,976 buffer bytes; the `heap' entry is the allocator's own.")
     ;; Assert
     (should-not (agent-repl-test-heap-census--census-records))
     (should (cl-some (lambda (r) (and (eq (car r) 'warn)
-                                      (string-prefix-p "elisp.heap-census.gc-inhibited:" (cadr r))))
+                                      (string-prefix-p "elisp.heap-census.gc-inhibited:" (cdr r))))
                      agent-repl-test-heap-census--records))))
 
 ;;; The idle cadence
@@ -258,7 +256,7 @@ bytes and 2,976 buffer bytes; the `heap' entry is the allocator's own.")
         ;; Assert
         (should (equal armed (list (list agent-repl-heap-census-idle-seconds t
                                          #'agent-repl-heap-census--on-idle))))
-        (should (cl-some (lambda (r) (string-prefix-p "elisp.heap-census.scheduled:" (cadr r)))
+        (should (cl-some (lambda (r) (string-prefix-p "elisp.heap-census.scheduled:" (cdr r)))
                          agent-repl-test-heap-census--records))))))
 
 (ert-deftest agent-repl-heap-census-test-rescheduling-cancels-the-earlier-timer ()

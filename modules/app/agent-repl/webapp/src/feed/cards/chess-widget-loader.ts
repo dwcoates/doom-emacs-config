@@ -12,8 +12,10 @@
  * `/chess-widget/<stamp>/` route, so the import needs no CORS and a rebuilt
  * widget is a new URL, never a stale cached module.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { queryAll } from "../../dom.js";
+
+const log = createLogger("webapp.feed.cards.chess-widget-loader");
 
 /** The widget's handle, as the card uses it (the widget's `CeeWebWidgetHandle`). */
 export interface ChessWidgetHandle {

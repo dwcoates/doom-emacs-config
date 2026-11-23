@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -30,7 +31,7 @@ const retiredTextTag protowire.Number = 1
 // IT IS ADDITIVE: the build before this step already reads and writes only
 // `prose`, so a rewritten row is the shape it draws.
 func rewriteParsedProseRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
-	return rewriteDurableRows(ctx, tx, log, "re-encoded the stored rows whose text blocks were raw text as parsed prose",
+	return rewriteDurableRows(ctx, tx, log, logsite.Msg("re-encoded the stored rows whose text blocks were raw text as parsed prose"),
 		func(raw []byte) ([]byte, bool, error) { return rewriteRetiredTextBlocks(log, raw) })
 }
 

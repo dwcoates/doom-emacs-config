@@ -3,6 +3,7 @@ package footer
 import (
 	"time"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/deployprogress"
@@ -65,13 +66,14 @@ func (r *resolver) SetDeployProgress(progress *deployprogress.Progress) {
 	}
 	if progress != nil && progress.Phase == deployprogress.Updated {
 		r.log.Global().Info(opDeployProgress, "the deploy finished; the footer took its line down and announced it on every strip", ctx)
-		r.mutateAll(opDeployProgress, "the footer announced a finished deploy on every strip", ctx,
+		r.mutateAll(opDeployProgress, logsite.Msg("the footer announced a finished deploy on every strip"), ctx,
 			func(s *wsState) { r.raiseUpdated(s.id, s, updateNotes(progress.Notes[s.id])) },
 			func() { r.deploy = nil })
 		return
 	}
-	r.log.Global().Info(opDeployProgress, "the footer took a deploy's progress onto every strip", ctx)
-	r.mutateAll(opDeployProgress, "the footer took a deploy's progress onto every strip", ctx,
+	said := logsite.Msg("the footer took a deploy's progress onto every strip")
+	r.log.Global().Log(dlog.LevelInfo, opDeployProgress, said, ctx)
+	r.mutateAll(opDeployProgress, said, ctx,
 		func(*wsState) {}, func() { r.standDeployLocked(progress) })
 }
 

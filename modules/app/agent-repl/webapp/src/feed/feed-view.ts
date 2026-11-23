@@ -42,7 +42,7 @@ import {
   drawWalkControl,
 } from "./walk-control.js";
 import type { Control } from "../control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createListeners } from "../listeners.js";
 import { SELECTED_ROW_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import type { SelectionVisibility } from "./selection-visibility.js";
@@ -131,6 +131,8 @@ import { childrenMatching, queryAll } from "../dom.js";
 import { entryLines, flashEntryOncePainted } from "./entries.js";
 import { FEED_ROW_ATTRIBUTE, feedRowId } from "./row-id.js";
 import { applyRevealedNode } from "./revealed-node.js";
+
+const log = createLogger("webapp.feed.feed-view");
 
 /** A peer message wears the question control every bubble does, at its top right (it has no copy control). */
 const drawPeerMessageWithQuestion = withCardQuestion((msg: FeedPeerMessage, rc: RowContext) =>
@@ -491,10 +493,10 @@ export function createFeedController(
   function applyPage(page: FeedPage, placement: "replace" | "prepend"): void {
     const result = requireCase(page.result, "FeedPage.result");
     let keptOpen: readonly string[] = [];
-    log.debug(`applying a ${placement} page as ${result.case}`, {
+    log.debug("applying a {placement} page as {case}", {
       operation: "feed.apply-page",
-      context: { feed: feedName(), placement, arm: result.case },
-    });
+      context: { feed: feedName(), arm: result.case },
+    }, { placement, case: result.case });
     switch (result.case) {
       case "success": {
         // EVERY ROW'S KEY IS READ BEFORE ANYTHING CHANGES: a page with one row
@@ -593,10 +595,10 @@ export function createFeedController(
     for (const id of ids) {
       const bubble = states.get(id)?.bubble ?? null;
       if (bubble === null || bubble.isExpanded()) continue;
-      log.info(`a page replace rebuilt the open merge bubble ${id}; it is opened again`, {
+      log.info("a page replace rebuilt the open merge bubble {id}; it is opened again", {
         operation: "feed.merge-bubble-kept-open",
         context: { feed: feedName(), row: id },
-      });
+      }, { id });
       void bubble.expand();
     }
   }
@@ -629,10 +631,10 @@ export function createFeedController(
       default:
         unreachableArm("FeedPageError.kind", armName(kind));
     }
-    log.error(`a feed page could not be served: ${headline.text}`, {
+    log.error("a feed page could not be served: {text}", {
       operation: "feed.page-error",
       context: { feed: feedName(), arm: kind.case },
-    });
+    }, { text: headline.text });
     replaceTicking(errorSlot, [el]);
   }
 
@@ -656,10 +658,10 @@ export function createFeedController(
     // could move the content under a reader (owner rule, 2026-09-23: the user
     // owns the scroll).
     if (held !== undefined && equals(FeedRowSchema, held.row, row)) {
-      log.debug(`feed row ${id} was re-pushed unchanged; nothing is redrawn`, {
+      log.debug("feed row {id} was re-pushed unchanged; nothing is redrawn", {
         operation: "feed.row-unchanged",
         context: { feed: feedName(), row: id },
-      });
+      }, { id });
       return;
     }
     if (held !== undefined) {
@@ -679,10 +681,10 @@ export function createFeedController(
     id: string,
     key: string,
   ): void {
-    log.debug(`replacing feed row ${id}`, {
+    log.debug("replacing feed row {id}", {
       operation: "feed.row-replaced",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
-    });
+    }, { id });
     if (settlesPinned(held, row, key)) settle(held, id, key);
     else keepKey(held, id, key);
     updateHeld(held, row);
@@ -699,7 +701,7 @@ export function createFeedController(
     const index = positionOf(key, id);
     if (index === 0 && order.length > 0 && walkEdge === "hasMore") {
       log.info(
-        `feed row ${id} sorts before every loaded row; it is unloaded history, left to the walk`,
+        "feed row {id} sorts before every loaded row; it is unloaded history, left to the walk",
         {
           operation: "feed.row-placed",
           context: {
@@ -709,26 +711,20 @@ export function createFeedController(
             outcome: "unloadedHistory",
             oldest: keyAt(0),
           },
-        },
+        }, { id },
       );
       return;
     }
     const atTail = index === order.length;
-    log.info(
-      atTail
-        ? `feed row ${id} appended at the tail`
-        : `feed row ${id} inserted at position ${index.toString()} of ${order.length.toString()}`,
-      {
-        operation: "feed.row-placed",
-        context: {
-          feed: feedName(),
-          row: id,
-          key,
-          outcome: atTail ? "appended" : "inserted",
-          position: index,
-        },
-      },
-    );
+    const placed = { feed: feedName(), key, outcome: atTail ? "appended" : "inserted", position: index };
+    if (atTail) log.info("feed row {row} appended at the tail", { operation: "feed.row-placed", context: placed }, { row: id });
+    else {
+      log.info(
+        "feed row {row} inserted at position {position_text} of {rows}",
+        { operation: "feed.row-placed", context: placed },
+        { row: id, position_text: index.toString(), rows: order.length },
+      );
+    }
     const below = atTail ? null : sampleSuccessor(index);
     insertAt(row, id, key, index, "push");
     truncateAtSeparation(row, id);
@@ -760,10 +756,10 @@ export function createFeedController(
       return;
     }
     const index = positionOf(key, id);
-    log.debug(`page row ${id} placed at position ${index.toString()}`, {
+    log.debug("page row {id} placed at position {index}", {
       operation: "feed.page-row-placed",
       context: { feed: feedName(), row: id, key, position: index },
-    });
+    }, { id, index });
     insertAt(row, id, key, index, "page");
   }
 
@@ -773,18 +769,18 @@ export function createFeedController(
     keys: readonly string[],
   ): void {
     log.info(
-      `placed a ${placement} page of ${keys.length.toString()} rows by their keys`,
+      "placed a {placement} page of {length} rows by their keys",
       {
         operation: "feed.page-placed",
         context: {
           feed: feedName(),
-          placement,
+          
           rows: keys.length,
           first_key: keys[0] ?? "none",
           last_key: keys[keys.length - 1] ?? "none",
           held: order.length,
         },
-      },
+      }, { placement, length: keys.length },
     );
   }
 
@@ -811,7 +807,7 @@ export function createFeedController(
     if (from >= 0) order.splice(from, 1);
     const index = positionOf(key, id);
     fileAt(id, index);
-    log.info(`feed row ${id} settled from the feed's bottom at its key`, {
+    log.info("feed row {id} settled from the feed's bottom at its key", {
       operation: "feed.row-settled",
       context: {
         feed: feedName(),
@@ -820,7 +816,7 @@ export function createFeedController(
         key,
         position: index,
       },
-    });
+    }, { id });
     held.key = key;
   }
 
@@ -832,7 +828,7 @@ export function createFeedController(
   function keepKey(held: RowState, id: string, key: string): void {
     if (held.key === key) return;
     log.error(
-      `feed row ${id} was re-pushed with a different order key; it stays where it was placed`,
+      "feed row {id} was re-pushed with a different order key; it stays where it was placed",
       {
         operation: "feed.row-order-changed",
         context: {
@@ -841,7 +837,7 @@ export function createFeedController(
           placed_key: held.key,
           pushed_key: key,
         },
-      },
+      }, { id },
     );
   }
 
@@ -862,11 +858,11 @@ export function createFeedController(
     }
     if (lo > 0 && keyAt(lo - 1) === key) {
       log.error(
-        `feed row ${id} carries an order key another row of this feed already holds`,
+        "feed row {id} carries an order key another row of this feed already holds",
         {
           operation: "feed.row-order-duplicate",
           context: { feed: feedName(), row: id, key, holder: order[lo - 1] },
-        },
+        }, { id },
       );
     }
     return lo;
@@ -932,11 +928,11 @@ export function createFeedController(
     }
     const grown = below.element.getBoundingClientRect().top - below.top;
     log.debug(
-      `a late row grew ${grown.toString()}px above the reader; the view shifts by it`,
+      "a late row grew {grown}px above the reader; the view shifts by it",
       {
         operation: "feed.insert-kept-place",
-        context: { feed: feedName(), row: below.id, grown },
-      },
+        context: { feed: feedName(), row: below.id },
+      }, { grown },
     );
     opts.scroll.tail.prependCompensation(grown);
   }
@@ -956,11 +952,11 @@ export function createFeedController(
     placed = true;
     if (opts.scroll === undefined) return;
     log.debug(
-      `a ${first ? "first" : "replaced"} page landed the feed at its tail`,
+      "a {page} page landed the feed at its tail",
       {
         operation: "feed.replace-parked",
         context: { feed: feedName(), rows: order.length, first },
-      },
+      }, { page: first ? "first" : "replaced" },
     );
     if (first) opts.scroll.tail.initialPlacement();
     else opts.scroll.tail.replaceRestore();
@@ -979,10 +975,10 @@ export function createFeedController(
    */
   function parkOnRollback(id: string): void {
     if (opts.scroll === undefined) return;
-    log.debug(`a rolled-back row ${id} was removed; the feed parks at its tail`, {
+    log.debug("a rolled-back row {id} was removed; the feed parks at its tail", {
       operation: "feed.rollback-parked",
       context: { feed: feedName(), row: id },
-    });
+    }, { id });
     opts.scroll.tail.rolledBack();
   }
 
@@ -1002,10 +998,10 @@ export function createFeedController(
    */
   function parkOnSentPrompt(id: string): void {
     if (opts.scroll === undefined) return;
-    log.debug(`a newly sent prompt ${id} parked the feed at its tail`, {
+    log.debug("a newly sent prompt {id} parked the feed at its tail", {
       operation: "feed.sent-prompt-parked",
       context: { feed: feedName(), row: id },
-    });
+    }, { id });
     opts.scroll.tail.promptSent();
     const state = states.get(id);
     // A placed row is always drawn (`drawBody`), so a sent prompt with no body
@@ -1062,11 +1058,11 @@ export function createFeedController(
     }
     const grown = above.element.getBoundingClientRect().top - above.top;
     log.debug(
-      `a prepend grew ${grown}px above the reader; the view shifts by it`,
+      "a prepend grew {grown}px above the reader; the view shifts by it",
       {
         operation: "feed.prepend-kept-place",
-        context: { feed: feedName(), row: above.id, grown },
-      },
+        context: { feed: feedName(), row: above.id },
+      }, { grown },
     );
     opts.scroll.tail.prependCompensation(grown);
   }
@@ -1334,10 +1330,10 @@ export function createFeedController(
   function remove(id: string): void {
     const at = order.indexOf(id);
     if (at < 0) {
-      log.debug(`a removal named a row this feed does not hold: ${id}`, {
+      log.debug("a removal named a row this feed does not hold: {id}", {
         operation: "feed.row-removed-absent",
         context: { feed: feedName(), row: id },
-      });
+      }, { id });
       return;
     }
     const state = states.get(id);
@@ -1346,10 +1342,10 @@ export function createFeedController(
       states.delete(id);
     }
     order.splice(at, 1);
-    log.info(`removed feed row ${id}`, {
+    log.info("removed feed row {id}", {
       operation: "feed.row-removed",
       context: { feed: feedName(), row: id },
-    });
+    }, { id });
   }
 
   /**
@@ -1382,11 +1378,11 @@ export function createFeedController(
     if (at <= 0) return;
     const dropped = dropRowsBefore(at);
     log.info(
-      `dropped ${dropped.toString()} rows above the newest separation`,
+      "dropped {dropped} rows above the newest separation",
       {
         operation: "feed.truncated-at-separation",
-        context: { feed: feedName(), row: id, dropped },
-      },
+        context: { feed: feedName(), row: id },
+      }, { dropped },
     );
   }
 
@@ -1454,10 +1450,10 @@ export function createFeedController(
     const at = order.findIndex((id) => heldState(id).key >= cut);
     const dropped = dropRowsBefore(at < 0 ? order.length : at);
     if (dropped > 0) applyEdge(page.value);
-    log.info(`a hidden page freed ${dropped.toString()} rows older than its newest daemon page`, {
+    log.info("a hidden page freed {dropped} rows older than its newest daemon page", {
       operation: "feed.unshown-trim",
-      context: { feed: feedName(), cut, dropped, kept: order.length },
-    });
+      context: { feed: feedName(), cut, kept: order.length },
+    }, { dropped });
     if (dropped > 0) announce();
   }
 
@@ -1833,7 +1829,7 @@ export function createFeedController(
 
   /** Record and report ROW's malformed view ERR, through the feed's one channel. */
   function reportMalformed(err: MalformedView, row: FeedRow): void {
-    log.error(`a feed row could not be drawn: ${err.message}`, {
+    log.error("a feed row could not be drawn: {message}", {
       operation: "feed.row-malformed",
       context: {
         feed: feedName(),
@@ -1841,7 +1837,7 @@ export function createFeedController(
         path: err.path,
         detail: err.detail,
       },
-    });
+    }, { message: err.message });
     opts.ctx.failures.report(frameUndecodable(err.detail, err.path));
   }
 
@@ -1960,10 +1956,10 @@ export function createFeedController(
       case "error":
         // A transport failure is logged by callUnary; a refusal the daemon
         // answered is logged here, once, by the layer that asked.
-        log.info(`GetFeedPage was refused: ${result.value.cause.case ?? "unset"}`, {
+        log.info("GetFeedPage was refused: {cause}", {
           operation: "feed.page-refused",
           context: { feed: feedName(), arm: result.value.cause.case ?? "unset" },
-        });
+        }, { cause: result.value.cause.case ?? "unset" });
         refused("error", "older pages are not available");
         return null;
       default:
@@ -2128,7 +2124,7 @@ export function createFeedController(
       if (isMalformedView(err)) throw err;
       const connectError = ConnectError.from(err);
       log.error(
-        `LoadFeedThrough failed at the transport: ${connectError.message}`,
+        "LoadFeedThrough failed at the transport: {message}",
         {
           operation: "feed.load-through-transport-failure",
           context: {
@@ -2137,7 +2133,7 @@ export function createFeedController(
             code: connectError.code,
             cause: connectError.rawMessage,
           },
-        },
+        }, { message: connectError.message },
       );
       reportClientFailure(
         "unary_transport",

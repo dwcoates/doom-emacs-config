@@ -18,13 +18,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--agent-panel-buffer-p "core")
 (declare-function agent-repl--buffer-owner "core")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
 
 (require 'cl-lib)
 
@@ -42,16 +44,16 @@ composer or the webview) so it is skipped by `next-buffer',
     ;; cheap outside an explicitly requested diagnostic session.
     (agent-repl--log-verbose
      ws
-     "prevent-select: candidate buffer=%S live=%s panel=%s bury-or-kill=%S skip=%s"
-     (and live-p (buffer-name buffer)) live-p panel-p bury-or-kill panel-p)
+     "prevent-select: candidate buffer={buffer} live={live} panel={panel} bury-or-kill={bury_or_kill} skip={skip}"
+     :buffer (prin1-to-string (and live-p (buffer-name buffer))) :live live-p :panel panel-p :bury_or_kill (prin1-to-string bury-or-kill) :skip panel-p)
     panel-p))
 
 (setq switch-to-prev-buffer-skip
       #'agent-repl--prev-buffer-skip-agent-panel)
 
 (agent-repl--log '(:agent-repl-central "host-wide buffer selection policy is process-wide")
-                  "prevent-select: installed switch-to-prev-buffer-skip predicate=%S"
-                  switch-to-prev-buffer-skip)
+                  "prevent-select: installed switch-to-prev-buffer-skip predicate={predicate}"
+                  :predicate (prin1-to-string switch-to-prev-buffer-skip))
 
 (provide 'prevent-select)
 

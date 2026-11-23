@@ -80,7 +80,7 @@ import { columnHeader, COLUMNS_ROW_CLASS } from "../columns.js";
 import { liveElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { stopTicking } from "../feed/ticking.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { MERGE_GLYPH } from "../merge-glyph.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -94,6 +94,8 @@ import {
   orderedAllowances,
   type FooterActivity,
 } from "./activity.js";
+
+const log = createLogger("webapp.footer.expanded");
 
 /** The selectable panels, named by the strip element that opens each. */
 export type FooterPanel =
@@ -315,16 +317,16 @@ export function drawFooterExpanded(
     drawSection(name, content, previous);
   const path = "FooterExpanded";
   if (!panelHasEntries(u, shown, deps.stops)) {
-    log.error(`the expanded footer was asked to draw the empty ${shown} panel`, {
+    log.error("the expanded footer was asked to draw the empty {shown} panel", {
       operation: "footer.expanded.empty-panel",
       context: { panel: shown },
-    });
+    }, { shown });
     throw new Error(`footer: the ${shown} panel has no entries to draw`);
   }
-  log.debug(`drawing the expanded footer panel: ${shown}`, {
+  log.debug("drawing the expanded footer panel: {shown}", {
     operation: "footer.expanded",
     context: { panel: shown },
-  });
+  }, { shown });
 
   switch (shown) {
     case "tokens":
@@ -1190,16 +1192,16 @@ async function jump_(click: JumpClick, deps: ExpandedDeps): Promise<void> {
   } catch (err) {
     failed = true;
     if (isMalformedView(err)) {
-      log.error(`the daemon's answer could not be read: ${err.message}`, {
+      log.error("the daemon's answer could not be read: {message}", {
         operation: "footer.expanded.jump-undecodable",
         context: { work_id: click.work, kind: click.panel, feed_id: entry.value, path: err.path, cause: err.detail },
-      });
+      }, { message: err.message });
       deps.ctx.failures.report(frameUndecodable(err.detail, err.path));
     } else {
-      log.error(`selecting a footer row's entry failed: ${String(err)}`, {
+      log.error("selecting a footer row's entry failed: {err}", {
         operation: "footer.expanded.jump-failed",
         context: { work_id: click.work, kind: click.panel, feed_id: entry.value, cause: String(err) },
-      });
+      }, { err: String(err) });
     }
   }
   if (reached) {

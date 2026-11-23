@@ -17,9 +17,11 @@
  * fires on an ancestor for a move into its descendant), and leaving both
  * leaves the panel, which closes both.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { placeBeside } from "../placement.js";
 import { clampBeside, type Rect, type RevealPlacement, type Viewport } from "../topbar/clamp.js";
+
+const log = createLogger("webapp.sidebar.detail-more");
 
 /** The class of a row panel's "details" entry. */
 export const DETAILS_ENTRY_CLASS = "detail-more";

@@ -3,6 +3,7 @@ package footer
 import (
 	"strings"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -50,7 +51,7 @@ func (r *resolver) OnWorkspaceRecord(rec dlog.WorkspaceRecord) {
 			dlog.Context{"workspace_id": rec.WorkspaceID, "level": rec.Level, "operation": rec.Operation})
 		return
 	}
-	r.mutateLine(ws, "daemon.footer.daemon_record", "the footer took a daemon warning or error about the workspace",
+	r.mutateLine(ws, "daemon.footer.daemon_record", logsite.Msg("the footer took a daemon warning or error about the workspace"),
 		dlog.Context{"level": rec.Level, "operation": rec.Operation}, func(s *wsState) {
 			t := &frontendv1.FooterActivityTransient{}
 			if rec.Level == dlog.LevelError {

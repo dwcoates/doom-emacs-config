@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -947,7 +948,7 @@ func TestRecordFailedLevelsByTheCause(t *testing.T) {
 			fields := dlog.Context{"workspace": "ws-1"}
 
 			// Act.
-			recordFailed(h.logs.Global(), "daemon.merge.test", "failed", "cut", fields, tt.err)
+			recordFailed(h.logs.Global(), "daemon.merge.test", logsite.Msg("failed"), logsite.Msg("cut"), fields, tt.err)
 
 			// Assert.
 			rec, ok := h.recordFor(tt.wantLevel, "daemon.merge.test")

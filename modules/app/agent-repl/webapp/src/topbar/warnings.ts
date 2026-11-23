@@ -44,11 +44,13 @@ import type {
 import { formatTickedAge } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 import type { LocalFailure } from "../failure/local.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TopbarContext, WarningChipContext } from "./context.js";
 import { asAnchor } from "./strip.js";
 import { countNoun } from "../count-noun.js";
+
+const log = createLogger("webapp.topbar.warnings");
 
 /**
  * Make the heading the warnings' control, or leave it as it is when nothing is

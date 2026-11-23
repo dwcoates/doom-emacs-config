@@ -17,11 +17,12 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "core" (ws key))
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-rpc-get-workspace-status "rpc" (conn request &rest keys))
@@ -39,8 +40,8 @@ Asked now when a link stands, else once the link is up."
     (if conn
         (agent-repl-stale-sink--ask conn ws dir)
       (agent-repl--info agent-repl--global-log-scope
-                       "elisp.stale-sink.waiting workspace=%S registered-dir=%s; no daemon to ask yet, so it is asked once the link is up"
-                       ws dir)
+                       "elisp.stale-sink.waiting workspace={workspace} registered-dir={registered_dir}; no daemon to ask yet, so it is asked once the link is up"
+                       :workspace (prin1-to-string ws) :registered_dir dir)
       (push (cons ws dir) agent-repl-stale-sink--waiting))))
 
 (defun agent-repl-stale-sink-flush (conn)
@@ -58,8 +59,8 @@ Asked now when a link stands, else once the link is up."
         ;; and a workspace Emacs holds no ref for was never one the daemon
         ;; told it of.
         (agent-repl--info agent-repl--global-log-scope
-                         "elisp.stale-sink.no-ref workspace=%S registered-dir=%s; the daemon never named this workspace, so it is not asked and nothing is warned"
-                         ws dir)
+                         "elisp.stale-sink.no-ref workspace={workspace} registered-dir={registered_dir}; the daemon never named this workspace, so it is not asked and nothing is warned"
+                         :workspace (prin1-to-string ws) :registered_dir dir)
       (agent-repl-rpc-get-workspace-status
        conn (list :workspace ref)
        :on-response (lambda (response) (agent-repl-stale-sink--answered ws dir response))
@@ -73,30 +74,30 @@ Asked now when a link stands, else once the link is up."
        (if (eq (plist-get standing :arm) :open)
            (agent-repl-stale-sink--warn ws dir)
          (agent-repl--info agent-repl--global-log-scope
-                          "elisp.stale-sink.departed workspace=%S registered-dir=%s; the daemon says it is closed, so its gone directory is its departure"
-                          ws dir))))
+                          "elisp.stale-sink.departed workspace={workspace} registered-dir={registered_dir}; the daemon says it is closed, so its gone directory is its departure"
+                          :workspace (prin1-to-string ws) :registered_dir dir))))
     (:error
      (pcase (plist-get (plist-get response :value) :arm)
        (:unknown-workspace
         (agent-repl--info agent-repl--global-log-scope
-                         "elisp.stale-sink.departed workspace=%S registered-dir=%s; the daemon no longer knows it, so its gone directory is its departure"
-                         ws dir))
+                         "elisp.stale-sink.departed workspace={workspace} registered-dir={registered_dir}; the daemon no longer knows it, so its gone directory is its departure"
+                         :workspace (prin1-to-string ws) :registered_dir dir))
        (arm
         (agent-repl--error agent-repl--global-log-scope
-                         "elisp.stale-sink.refused workspace=%S registered-dir=%s arm=%S; the daemon refused the status ask, so the gone directory is unexplained"
-                         ws dir arm))))))
+                         "elisp.stale-sink.refused workspace={workspace} registered-dir={registered_dir} arm={arm}; the daemon refused the status ask, so the gone directory is unexplained"
+                         :workspace (prin1-to-string ws) :registered_dir dir :arm (prin1-to-string arm)))))))
 
 (defun agent-repl-stale-sink--failed (ws dir detail)
   "Record that the status ask about WS, registered at DIR, failed with DETAIL."
   (agent-repl--error agent-repl--global-log-scope
-                   "elisp.stale-sink.ask-failed workspace=%S registered-dir=%s detail=%S; the gone directory is unexplained"
-                   ws dir detail))
+                   "elisp.stale-sink.ask-failed workspace={workspace} registered-dir={registered_dir} detail={detail}; the gone directory is unexplained"
+                   :workspace (prin1-to-string ws) :registered_dir dir :detail (prin1-to-string detail)))
 
 (defun agent-repl-stale-sink--warn (ws dir)
   "Warn that WS is open but its registered DIR is gone."
   (agent-repl--warn agent-repl--global-log-scope
-                   "elisp.stale-sink.open-without-directory workspace=%S registered-dir=%s; the daemon says it is open, but its directory is gone"
-                   ws dir)
+                   "elisp.stale-sink.open-without-directory workspace={workspace} registered-dir={registered_dir}; the daemon says it is open, but its directory is gone"
+                   :workspace (prin1-to-string ws) :registered_dir dir)
   (display-warning
    'agent-repl
    (format "workspace %S is open, but its directory %s is gone; its records are written centrally"

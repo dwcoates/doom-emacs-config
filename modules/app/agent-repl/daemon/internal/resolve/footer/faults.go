@@ -4,6 +4,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agentrepl/logging/logsite"
 )
 
 // THE FOOTER'S FAULT CELL. The owner's ruling of 2026-09-13 is that every
@@ -33,11 +34,11 @@ func (r *resolver) OpenFault(ws ids.WorkspaceID, fault Fault) {
 	}
 	if ws == "" {
 		r.mutateAll("daemon.footer.open_fault",
-			"the footer took a daemon-scoped fault onto every strip", ctx,
+			logsite.Msg("the footer took a daemon-scoped fault onto every strip"), ctx,
 			func(*wsState) {}, func() { r.daemonFaults = appendFault(r.daemonFaults, fault) })
 		return
 	}
-	r.mutate(ws, "daemon.footer.open_fault", "the footer took a standing fault", ctx,
+	r.mutate(ws, "daemon.footer.open_fault", logsite.Msg("the footer took a standing fault"), ctx,
 		func(s *wsState) { s.faults = appendFault(s.faults, fault) })
 }
 
@@ -46,11 +47,11 @@ func (r *resolver) OpenFault(ws ids.WorkspaceID, fault Fault) {
 func (r *resolver) announceFault(ws ids.WorkspaceID, fault Fault, ctx dlog.Context) {
 	if ws == "" {
 		r.mutateAll("daemon.footer.open_fault",
-			"the footer announced a non-escalating daemon-scoped fault on every strip", ctx,
+			logsite.Msg("the footer announced a non-escalating daemon-scoped fault on every strip"), ctx,
 			func(s *wsState) { r.raiseFault(s.id, s, fault) }, func() {})
 		return
 	}
-	r.mutate(ws, "daemon.footer.open_fault", "the footer announced a non-escalating fault", ctx,
+	r.mutate(ws, "daemon.footer.open_fault", logsite.Msg("the footer announced a non-escalating fault"), ctx,
 		func(s *wsState) { r.raiseFault(ws, s, fault) })
 }
 
@@ -59,11 +60,11 @@ func (r *resolver) CloseFault(ws ids.WorkspaceID, id string) {
 	ctx := dlog.Context{"fault": id}
 	if ws == "" {
 		r.mutateAll("daemon.footer.close_fault",
-			"the footer retracted a daemon-scoped fault from every strip", ctx,
+			logsite.Msg("the footer retracted a daemon-scoped fault from every strip"), ctx,
 			func(*wsState) {}, func() { r.daemonFaults = removeFault(r.daemonFaults, id) })
 		return
 	}
-	r.mutate(ws, "daemon.footer.close_fault", "the footer retracted a standing fault", ctx,
+	r.mutate(ws, "daemon.footer.close_fault", logsite.Msg("the footer retracted a standing fault"), ctx,
 		func(s *wsState) { s.faults = removeFault(s.faults, id) })
 }
 

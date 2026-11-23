@@ -302,18 +302,18 @@ a scenario names which pids are alive rather than depending on the host.")
                ;; area, and the scenarios below assert exactly that.  Both
                ;; end at `agent-repl--emit-message', whose `message' is
                ;; stubbed above, so nothing is printed either way.
-               ((symbol-function 'agent-repl--log)
+               ((symbol-function 'agent-repl--emit-log)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :log (apply #'format fmt args)) agent-repl-test-daemon--logs)))
-               ((symbol-function 'agent-repl--info)
+                  (push (cons :log (agent-repl-log-site-render fmt args)) agent-repl-test-daemon--logs)))
+               ((symbol-function 'agent-repl--emit-info)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :info (apply #'format fmt args)) agent-repl-test-daemon--logs)))
-               ((symbol-function 'agent-repl--warn)
+                  (push (cons :info (agent-repl-log-site-render fmt args)) agent-repl-test-daemon--logs)))
+               ((symbol-function 'agent-repl--emit-warn)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :warn (apply #'format fmt args)) agent-repl-test-daemon--logs)))
-               ((symbol-function 'agent-repl--error)
+                  (push (cons :warn (agent-repl-log-site-render fmt args)) agent-repl-test-daemon--logs)))
+               ((symbol-function 'agent-repl--emit-error)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :error (apply #'format fmt args)) agent-repl-test-daemon--logs))))
+                  (push (cons :error (agent-repl-log-site-render fmt args)) agent-repl-test-daemon--logs))))
        (unwind-protect
            (agent-repl-test--recording-popups ,@body)
          (when (and agent-repl-test-daemon--addr-file

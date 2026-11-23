@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/goroutinedump"
 	"agent-repld/internal/inflight"
+	"agentrepl/logging/logsite"
 )
 
 // recordGoroutineDump puts a goroutine dump into the run log at ERROR.
@@ -17,14 +18,14 @@ import (
 // would have named the blocking call in pid 31984's ten-hour accept wedge —
 // went nowhere. The run log is the daemon's narrative and it is the only place
 // a later diagnosis can read.
-func recordGoroutineDump(log dlog.Logger, operation, message string, context dlog.Context) {
+func recordGoroutineDump(log dlog.Logger, operation string, message logsite.Message, context dlog.Context) {
 	dump, count := goroutinedump.Render()
 	if context == nil {
 		context = dlog.Context{}
 	}
 	context["goroutines"] = count
 	context["goroutine_dump"] = dump
-	log.Error(operation, message, context)
+	log.Log(dlog.LevelError, operation, message, context)
 }
 
 // armGoroutineDump takes SIGQUIT over from the runtime so the dump lands in the
@@ -43,7 +44,7 @@ func armGoroutineDump(log dlog.Logger) func() {
 		if _, ok := <-quit; !ok {
 			return
 		}
-		recordGoroutineDump(log, "daemon.cmd.sigquit", "SIGQUIT: dumping every goroutine before exiting", dlog.Context{
+		recordGoroutineDump(log, "daemon.cmd.sigquit", logsite.Msg("SIGQUIT: dumping every goroutine before exiting"), dlog.Context{
 			"pid": os.Getpid(),
 		})
 		os.Exit(exitFailure)

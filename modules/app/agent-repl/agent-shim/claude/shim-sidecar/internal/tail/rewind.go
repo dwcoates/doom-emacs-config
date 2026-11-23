@@ -38,7 +38,7 @@ func (t *Tailer) RewindToTurnStart(window int64, isTurnStart func(map[string]any
 		panic("tail: RewindToTurnStart requires a turn-start predicate")
 	}
 	if t.offset <= 0 {
-		bound.LogVerbose("no rewind: the file is already read from its start")
+		bound.LogVerbose("no rewind: the file is already read from its start", nil)
 		return false
 	}
 	if window <= 0 {
@@ -53,7 +53,7 @@ func (t *Tailer) RewindToTurnStart(window int64, isTurnStart func(map[string]any
 		// A file that cannot be read here is not a reason to guess a position:
 		// the cursor stays where the store put it and the ordinary poll path
 		// reports the read failure with its own context.
-		bound.With(logging.Context{Level: "warn"}).Log("no rewind: reading the rewind window failed: %v", err)
+		bound.With(logging.Context{Level: "warn"}).Log("no rewind: reading the rewind window failed: {cause}", logging.Values{"cause": err.Error()})
 		return false
 	}
 	target, ok := lastTurnStart(buf, start, start > 0, isTurnStart)
@@ -66,12 +66,11 @@ func (t *Tailer) RewindToTurnStart(window int64, isTurnStart func(map[string]any
 		// once per file at boot and flooded a cold re-scan's strict harvest at
 		// warn for a decision that was correct.
 		bound.LogVerbose(
-			"no rewind: no turn start within the %d-byte window ending at offset %d; resuming at the store's cursor", len(buf), t.offset)
+			"no rewind: no turn start within the {buf_length}-byte window ending at offset {cursor_offset}; resuming at the store's cursor", logging.Values{"buf_length": len(buf), "cursor_offset": t.offset})
 		return false
 	}
 	t.log.With(logging.Context{Operation: "boot-rewind", Path: t.path, FileID: t.fileID, Offset: logging.Off(target)}).Log(
-		"rewound the restored cursor from offset %d to the in-progress turn's first record at offset %d; its records re-emit with identical write_ids",
-		t.offset, target)
+		"rewound the restored cursor from offset {cursor_offset} to the in-progress turn's first record at offset {target}; its records re-emit with identical write_ids", logging.Values{"cursor_offset": t.offset, "target": target})
 	t.offset = target
 	// Every carried byte belongs to a line at or after the old offset, so it is
 	// re-read whole by the rewound position.

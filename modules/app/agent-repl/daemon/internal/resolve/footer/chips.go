@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -26,7 +27,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	}
 	unit := act.GetActivityId().GetValue()
 	arm := activityArm(act)
-	r.mutate(ws, "daemon.footer.on_activity", "the footer took an activity frame",
+	r.mutate(ws, "daemon.footer.on_activity", logsite.Msg("the footer took an activity frame"),
 		dlog.Context{"arm": arm, "activity_id": unit}, func(s *wsState) {
 			s.sawActivity = true
 			frame := r.classify(ws, s, act)
@@ -87,7 +88,7 @@ func activityArm(act *conversationv1.AgentActivity) string {
 func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversationv1.AgentId, label, unit string, act *conversationv1.AgentActivity) {
 	switch item := act.GetItem().(type) {
 	case *conversationv1.AgentActivity_Response:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Response"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_Response", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Response"})
 		r.applyResponse(s, unit, item.Response)
 		// THE REFUSAL'S ONLY WITNESS, read as the feed reads it, so the turn
 		// fault's line says "refused" exactly when the feed's row does.
@@ -95,35 +96,35 @@ func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversa
 			s.turnRefused = true
 		}
 	case *conversationv1.AgentActivity_Hook:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Hook"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_Hook", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Hook"})
 		if start := item.Hook.GetStart(); start != nil {
 			r.raiseHook(ws, s, label, start.GetHookName())
 		}
 	case *conversationv1.AgentActivity_Subagent:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Subagent"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_Subagent", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Subagent"})
 		r.applySubagent(s, agent, unit, item.Subagent)
 	case *conversationv1.AgentActivity_Bash:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Bash"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_Bash", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Bash"})
 		r.applyBash(s, unit, item.Bash)
 	case *conversationv1.AgentActivity_TaskAct:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_TaskAct"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_TaskAct", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_TaskAct"})
 		if subject, moved := r.applyTaskAct(ws, s, item.TaskAct); moved {
 			r.raiseTask(ws, s, label, subject)
 		}
 	case *conversationv1.AgentActivity_Monitor:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Monitor"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_Monitor", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Monitor"})
 		r.applyMonitor(s, unit, item.Monitor)
 	case *conversationv1.AgentActivity_Cron:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Cron"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_Cron", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Cron"})
 		r.applyCron(s, item.Cron)
 	case *conversationv1.AgentActivity_ScheduleWakeup:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_ScheduleWakeup"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_ScheduleWakeup", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_ScheduleWakeup"})
 		r.applyWakeup(s, item.ScheduleWakeup)
 	case *conversationv1.AgentActivity_ContextInjected:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_ContextInjected"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_ContextInjected", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_ContextInjected"})
 		r.applyInjection(ws, s, label, item.ContextInjected)
 	case *conversationv1.AgentActivity_PushNotification:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_PushNotification"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentActivity_PushNotification", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_PushNotification"})
 		if start := item.PushNotification.GetStart(); start != nil {
 			r.standNotification(ws, s, start.GetMessage())
 		}
@@ -331,15 +332,15 @@ func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversatio
 	}
 	switch status := state.GetStatus().(type) {
 	case *conversationv1.AgentTaskState_Running:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Running"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentTaskState_Running", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Running"})
 		row.status = taskRunning
 		row.activeForm = status.Running.GetActiveForm()
 	case *conversationv1.AgentTaskState_Completed:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Completed"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentTaskState_Completed", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Completed"})
 		row.status = taskCompleted
 		row.activeForm = ""
 	case *conversationv1.AgentTaskState_Pending:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Pending"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentTaskState_Pending", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentTaskState_Pending"})
 		row.status = taskPending
 		row.activeForm = ""
 	}
@@ -435,10 +436,10 @@ func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, label string, 
 	now := r.opts.clock.Now()
 	switch item := injected.GetInjected().(type) {
 	case *conversationv1.AgentContextInjected_Memory:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentContextInjected_Memory"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentContextInjected_Memory", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentContextInjected_Memory"})
 		s.loading = &loadingState{kind: loadingMemory, line: item.Memory.GetPath(), at: now}
 	case *conversationv1.AgentContextInjected_Skills:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentContextInjected_Skills"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case *conversationv1.AgentContextInjected_Skills", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentContextInjected_Skills"})
 		skills := item.Skills.GetSkills()
 		withContent := 0
 		for _, skill := range skills {
@@ -448,19 +449,19 @@ func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, label string, 
 		}
 		switch {
 		case withContent == 1 && len(skills) == 1:
-			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case withContent == 1 && len(skills) == 1"})
+			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case withContent == 1 && len(skills) == 1", dlog.Context{"function": "chips", "branch": "case withContent == 1 && len(skills) == 1"})
 			s.loading = &loadingState{kind: loadingInvoked, line: skills[0].GetName(), at: now}
 		case withContent > 0:
-			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case withContent > 0"})
+			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: case withContent > 0", dlog.Context{"function": "chips", "branch": "case withContent > 0"})
 			s.loading = &loadingState{
 				kind: loadingDiscovered, line: plural(len(skills), "skill"), at: now}
 		default:
-			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "default"})
+			r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: default", dlog.Context{"function": "chips", "branch": "default"})
 			s.loading = &loadingState{
 				kind: loadingListing, line: plural(len(skills), "skill"), at: now}
 		}
 	default:
-		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "default"})
+		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch: default (skills listed, none with content)", dlog.Context{"function": "chips", "branch": "default"})
 		return
 	}
 	r.raiseContextInjected(ws, s, label, s.loading.line)
@@ -471,7 +472,7 @@ func (r *resolver) applyInjection(ws ids.WorkspaceID, s *wsState, label string, 
 // TURN is the main thread's: it settles the token accounting, ends the clock,
 // and may raise the momentary interrupted status or a standing block.
 func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
-	r.mutate(ws, "daemon.footer.on_agent_terminal", "the footer took an agent terminal",
+	r.mutate(ws, "daemon.footer.on_agent_terminal", logsite.Msg("the footer took an agent terminal"),
 		dlog.Context{"turn": turn != nil, "failed": failure != nil}, func(s *wsState) {
 			r.retireAgent(s, agent)
 			if turn == nil {
@@ -596,7 +597,7 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 	// without one before any view takes it (resolveDetachedLocked).
 	protoarm.Must(work.GetKind().ProtoReflect(), "kind", "daemon.footer.on_detached_work")
 	id := work.GetWork().GetValue()
-	r.mutate(ws, "daemon.footer.on_detached_work", "the footer took a detached-work announcement",
+	r.mutate(ws, "daemon.footer.on_detached_work", logsite.Msg("the footer took a detached-work announcement"),
 		dlog.Context{"work_id": id, "adopted": agent == nil}, func(s *wsState) {
 			if agent == nil {
 				markAdopted(s, id, work)
@@ -745,7 +746,7 @@ func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedW
 		return
 	}
 	id := work.GetValue()
-	r.mutate(ws, "daemon.footer.on_subagent", "the footer took a detached subagent frame",
+	r.mutate(ws, "daemon.footer.on_subagent", logsite.Msg("the footer took a detached subagent frame"),
 		dlog.Context{"work_id": id}, func(s *wsState) {
 			switch item := sub.GetResult().(type) {
 			case *conversationv1.AgentSubagent_Start:
@@ -842,7 +843,7 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 		return
 	}
 	id := work.GetValue()
-	r.mutate(ws, "daemon.footer.on_bash", "the footer took a detached shell frame",
+	r.mutate(ws, "daemon.footer.on_bash", logsite.Msg("the footer took a detached shell frame"),
 		dlog.Context{"work_id": id}, func(s *wsState) {
 			switch item := bash.GetResult().(type) {
 			case *conversationv1.AgentBash_Start:
@@ -1117,7 +1118,7 @@ func (r *resolver) OnEntryPlaced(ws ids.WorkspaceID, unit string, row *frontendv
 			dlog.Context{"unit": unit, "row": row.GetValue()})
 		return
 	}
-	r.mutate(ws, "daemon.footer.on_entry_placed", "the footer took the feed's placement of a detached-work entry",
+	r.mutate(ws, "daemon.footer.on_entry_placed", logsite.Msg("the footer took the feed's placement of a detached-work entry"),
 		dlog.Context{"unit": unit, "row": row.GetValue()}, func(s *wsState) {
 			s.entries[unit] = row
 		})

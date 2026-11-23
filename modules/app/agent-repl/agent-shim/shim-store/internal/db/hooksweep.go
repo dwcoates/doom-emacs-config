@@ -101,14 +101,14 @@ func (d *DB) SweepHookLines(ctx context.Context) (HookSweepResult, error) {
 	}
 	elapsed := d.mono().Sub(started)
 	if result.Dropped == 0 {
-		d.log.LogVerbose(base, "hook sweep found no stored hook record scanned=%d duration_ms=%d",
-			result.Scanned, elapsed.Milliseconds())
+		d.log.LogVerbose(base, "hook sweep found no stored hook record scanned={scanned} duration_ms={duration_ms}",
+			logging.Values{"scanned": result.Scanned, "duration_ms": elapsed.Milliseconds()})
 		return result, nil
 	}
 	// A SWEEP THAT DROPPED SOMETHING IS A STATE CHANGE, so it is a normal-level
 	// record; one that dropped nothing is the steady state and is verbose.
-	d.log.Log(base, "hook sweep dropped %d stored hook records; their rows keep only their identity scanned=%d batches=%d duration_ms=%d",
-		result.Dropped, result.Scanned, result.Batches, elapsed.Milliseconds())
+	d.log.Log(base, "hook sweep dropped {dropped} stored hook records; their rows keep only their identity scanned={scanned} batches={batches} duration_ms={duration_ms}",
+		logging.Values{"dropped": result.Dropped, "scanned": result.Scanned, "batches": result.Batches, "duration_ms": elapsed.Milliseconds()})
 	return result, nil
 }
 
@@ -194,6 +194,6 @@ func (d *DB) dropHookLines(ctx context.Context, base logging.Fields, hooks []hoo
 	}
 	verbose := base
 	verbose.Position = encodePointer(hooks[len(hooks)-1].position).GetValue()
-	d.log.LogVerbose(verbose, "hook sweep transaction committed dropped=%d", dropped)
+	d.log.LogVerbose(verbose, "hook sweep transaction committed dropped={dropped}", logging.Values{"dropped": dropped})
 	return dropped, nil
 }

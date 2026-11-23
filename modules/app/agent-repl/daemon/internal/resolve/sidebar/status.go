@@ -241,7 +241,7 @@ func idleArm(s *wsState, session *wsm.Session, status *frontendv1.FooterStatus, 
 	awaited := status.GetBackground().GetAwaiting()
 	switch {
 	case noSessionArm(s, session) != "":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "no session was ever created"})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: no session was ever created", dlog.Context{"function": "status", "branch": "no session was ever created"})
 		return "none"
 	case s.asyncLive() || awaited != nil:
 		if s.resultUnreadNow() {
@@ -249,16 +249,16 @@ func idleArm(s *wsState, session *wsm.Session, status *frontendv1.FooterStatus, 
 				"the workspace is in the background, so the row is idle_async at once though the last turn's result is unread",
 				dlog.Context{"held": s.turnEndArm()})
 		}
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: the workspace is in the background", dlog.Context{
 			"function": "status", "branch": "the workspace is in the background",
 			"async_live": s.asyncLive(), "awaiting": awaited.GetAwaitedName(),
 		})
 		return "idle_async"
 	case s.resultUnreadNow():
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case s.resultUnreadNow()", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
 		return s.turnEndArm()
 	case s.turnEverRan && !s.endAnswered:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turnEverRan", "close": int(s.lastClose)})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case s.turnEverRan", dlog.Context{"function": "status", "branch": "case s.turnEverRan", "close": int(s.lastClose)})
 		return s.turnEndArm()
 	default:
 		log.Debug("daemon.sidebar.status", "the session is live and idle", nil)
@@ -365,103 +365,103 @@ func mergePausedMarker(state *rosterState, ws ids.WorkspaceID, arm string, ownMe
 func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	switch arm {
 	case "submitting":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"submitting\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"submitting\"", dlog.Context{"function": "status", "branch": "case \"submitting\""})
 		row.Status = &frontendv1.RosterRow_Submitting{Submitting: &frontendv1.RosterRowStatusSubmitting{}}
 	case "thinking":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"thinking\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"thinking\"", dlog.Context{"function": "status", "branch": "case \"thinking\""})
 		row.Status = &frontendv1.RosterRow_Thinking{Thinking: &frontendv1.RosterRowStatusThinking{}}
 	case "clearing":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"clearing\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"clearing\"", dlog.Context{"function": "status", "branch": "case \"clearing\""})
 		row.Status = &frontendv1.RosterRow_Clearing{Clearing: &frontendv1.RosterRowStatusClearing{}}
 	case "compacting":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"compacting\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"compacting\"", dlog.Context{"function": "status", "branch": "case \"compacting\""})
 		row.Status = &frontendv1.RosterRow_Compacting{Compacting: &frontendv1.RosterRowStatusCompacting{}}
 	case "permission":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"permission\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"permission\"", dlog.Context{"function": "status", "branch": "case \"permission\""})
 		row.Status = &frontendv1.RosterRow_Permission{Permission: &frontendv1.RosterRowStatusPermission{}}
 	case "question":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"question\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"question\"", dlog.Context{"function": "status", "branch": "case \"question\""})
 		row.Status = &frontendv1.RosterRow_Question{Question: &frontendv1.RosterRowStatusQuestion{}}
 	case "done":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"done\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"done\"", dlog.Context{"function": "status", "branch": "case \"done\""})
 		row.Status = &frontendv1.RosterRow_Done{Done: &frontendv1.RosterRowStatusDone{}}
 	case "interrupted":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"interrupted\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"interrupted\"", dlog.Context{"function": "status", "branch": "case \"interrupted\""})
 		row.Status = &frontendv1.RosterRow_Interrupted{Interrupted: &frontendv1.RosterRowStatusInterrupted{}}
 	case "turn_failed":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"turn_failed\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"turn_failed\"", dlog.Context{"function": "status", "branch": "case \"turn_failed\""})
 		row.Status = &frontendv1.RosterRow_TurnFailed{TurnFailed: &frontendv1.RosterRowStatusTurnFailed{}}
 	case "ready":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"ready\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"ready\"", dlog.Context{"function": "status", "branch": "case \"ready\""})
 		row.Status = &frontendv1.RosterRow_Ready{Ready: &frontendv1.RosterRowStatusReady{}}
 	case "idle_async":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"idle_async\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"idle_async\"", dlog.Context{"function": "status", "branch": "case \"idle_async\""})
 		row.Status = &frontendv1.RosterRow_IdleAsync{IdleAsync: &frontendv1.RosterRowStatusIdleAsync{}}
 	case "vendor_blocked":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"vendor_blocked\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"vendor_blocked\"", dlog.Context{"function": "status", "branch": "case \"vendor_blocked\""})
 		row.Status = &frontendv1.RosterRow_VendorBlocked{VendorBlocked: &frontendv1.RosterRowStatusVendorBlocked{}}
 	case "vendor_fault":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"vendor_fault\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"vendor_fault\"", dlog.Context{"function": "status", "branch": "case \"vendor_fault\""})
 		row.Status = &frontendv1.RosterRow_VendorFault{VendorFault: &frontendv1.RosterRowStatusVendorFault{}}
 	case "network_fault":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"network_fault\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"network_fault\"", dlog.Context{"function": "status", "branch": "case \"network_fault\""})
 		row.Status = &frontendv1.RosterRow_NetworkFault{NetworkFault: &frontendv1.RosterRowStatusNetworkFault{}}
 	case "api_retrying":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"api_retrying\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"api_retrying\"", dlog.Context{"function": "status", "branch": "case \"api_retrying\""})
 		row.Status = &frontendv1.RosterRow_ApiRetrying{ApiRetrying: &frontendv1.RosterRowStatusApiRetrying{}}
 	case "init":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"init\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"init\"", dlog.Context{"function": "status", "branch": "case \"init\""})
 		row.Status = &frontendv1.RosterRow_Init{Init: &frontendv1.RosterRowStatusInit{}}
 	case "severed":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"severed\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"severed\"", dlog.Context{"function": "status", "branch": "case \"severed\""})
 		row.Status = &frontendv1.RosterRow_Severed{Severed: &frontendv1.RosterRowStatusSevered{}}
 	case "start_failed":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"start_failed\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"start_failed\"", dlog.Context{"function": "status", "branch": "case \"start_failed\""})
 		row.Status = &frontendv1.RosterRow_StartFailed{StartFailed: &frontendv1.RosterRowStatusStartFailed{}}
 	case "degraded":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"degraded\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"degraded\"", dlog.Context{"function": "status", "branch": "case \"degraded\""})
 		row.Status = &frontendv1.RosterRow_Degraded{Degraded: &frontendv1.RosterRowStatusDegraded{}}
 	case "turn_died":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"turn_died\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"turn_died\"", dlog.Context{"function": "status", "branch": "case \"turn_died\""})
 		row.Status = &frontendv1.RosterRow_TurnDied{TurnDied: &frontendv1.RosterRowStatusTurnDied{}}
 	case "dead":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"dead\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"dead\"", dlog.Context{"function": "status", "branch": "case \"dead\""})
 		row.Status = &frontendv1.RosterRow_Dead{Dead: &frontendv1.RosterRowStatusDead{}}
 	case "merging":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merging\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"merging\"", dlog.Context{"function": "status", "branch": "case \"merging\""})
 		row.Status = &frontendv1.RosterRow_Merging{Merging: &frontendv1.RosterRowStatusMerging{}}
 	case "merge_queued":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_queued\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"merge_queued\"", dlog.Context{"function": "status", "branch": "case \"merge_queued\""})
 		row.Status = &frontendv1.RosterRow_MergeQueued{MergeQueued: &frontendv1.RosterRowStatusMergeQueued{}}
 	case "merge_failed":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_failed\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"merge_failed\"", dlog.Context{"function": "status", "branch": "case \"merge_failed\""})
 		row.Status = &frontendv1.RosterRow_MergeFailed{MergeFailed: &frontendv1.RosterRowStatusMergeFailed{}}
 	case "merged":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merged\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"merged\"", dlog.Context{"function": "status", "branch": "case \"merged\""})
 		row.Status = &frontendv1.RosterRow_Merged{Merged: &frontendv1.RosterRowStatusMerged{}}
 	case "none":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"none\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"none\"", dlog.Context{"function": "status", "branch": "case \"none\""})
 		row.Status = &frontendv1.RosterRow_None{None: &frontendv1.RosterRowStatusNone{}}
 	case "closing":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"closing\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"closing\"", dlog.Context{"function": "status", "branch": "case \"closing\""})
 		row.Status = &frontendv1.RosterRow_Closing{Closing: &frontendv1.RosterRowStatusClosing{}}
 	case "daemon_impaired":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"daemon_impaired\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"daemon_impaired\"", dlog.Context{"function": "status", "branch": "case \"daemon_impaired\""})
 		row.Status = &frontendv1.RosterRow_DaemonImpaired{DaemonImpaired: &frontendv1.RosterRowStatusDaemonImpaired{}}
 	case "vendor_silent":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"vendor_silent\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"vendor_silent\"", dlog.Context{"function": "status", "branch": "case \"vendor_silent\""})
 		row.Status = &frontendv1.RosterRow_VendorSilent{VendorSilent: &frontendv1.RosterRowStatusVendorSilent{}}
 	case "waiting":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"waiting\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"waiting\"", dlog.Context{"function": "status", "branch": "case \"waiting\""})
 		row.Status = &frontendv1.RosterRow_Waiting{Waiting: &frontendv1.RosterRowStatusWaiting{}}
 	case "cold_gate":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"cold_gate\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"cold_gate\"", dlog.Context{"function": "status", "branch": "case \"cold_gate\""})
 		row.Status = &frontendv1.RosterRow_ColdGate{ColdGate: &frontendv1.RosterRowStatusColdGate{}}
 	case "inactive":
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"inactive\""})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: case \"inactive\"", dlog.Context{"function": "status", "branch": "case \"inactive\""})
 		row.Status = &frontendv1.RosterRow_Inactive{Inactive: &frontendv1.RosterRowStatusInactive{}}
 	default:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "default"})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch: default", dlog.Context{"function": "status", "branch": "default"})
 		log.Error("daemon.sidebar.set_status", "the roster resolved a status name with no arm behind it",
 			dlog.Context{
 				"arm":                 arm,

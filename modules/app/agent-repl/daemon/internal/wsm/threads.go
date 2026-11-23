@@ -10,6 +10,7 @@ import (
 	"time"
 
 	zettelv1 "agentrepl/proto/zettel/v1"
+
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"

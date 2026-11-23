@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"agentrepl/logging/logsite"
 )
 
 func TestTestLoggerCapturesEveryLevel(t *testing.T) {
@@ -349,4 +351,34 @@ func TestTestLoggerAwaitCountRefusesANonPositiveCount(t *testing.T) {
 
 	// Act
 	_, _ = NewTestLogger().AwaitCount(context.Background(), RecordQuery{}, 0)
+}
+
+func TestTestLoggerRecordCarriesSiteAndTemplate(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(*TestLogger)
+	}{
+		{name: "a capture's own record", emit: func(l *TestLogger) {
+			l.Log(LevelInfo, "daemon.test.sited", logsite.Msg("{n} sited"), Context{"n": 1})
+		}},
+		{name: "a derived logger's record", emit: func(l *TestLogger) {
+			l.With(Context{"n": 1}).Log(LevelInfo, "daemon.test.sited", logsite.Msg("{n} sited"), nil)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := NewTestLogger()
+
+			// Act.
+			tc.emit(log)
+
+			// Assert.
+			records := log.Records()
+			want := logsite.Key(RuntimeDaemon, "agent-repld/internal/dlog.TestTestLoggerRecordCarriesSiteAndTemplate", "{n} sited")
+			if len(records) != 1 || records[0].Site != want || records[0].Template != "{n} sited" || records[0].Message != "1 sited" {
+				t.Fatalf("records = %+v, want one keyed %s with its template and rendered message", records, want)
+			}
+		})
+	}
 }

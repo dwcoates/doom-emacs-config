@@ -742,9 +742,9 @@ func TestEndStandingStreamLogsUnderTheContractedOperation(t *testing.T) {
 		})
 
 	// Assert.
-	if len(log.records) != 1 || log.records[0].Operation != "daemon.server.stream_ending" ||
-		log.records[0].Context["rpc"] != "WatchDaemon" {
-		t.Fatalf("records = %+v, want one daemon.server.stream_ending record naming the rpc", log.records)
+	if len(log.records()) != 1 || log.records()[0].Operation != "daemon.server.stream_ending" ||
+		log.records()[0].Context["rpc"] != "WatchDaemon" {
+		t.Fatalf("records = %+v, want one daemon.server.stream_ending record naming the rpc", log.records())
 	}
 }
 
@@ -1610,41 +1610,36 @@ func TestAnEmacsStreamStatingNoProcessMeasuresNoEmacs(t *testing.T) {
 	}
 }
 
-// participantRecords is a logger that also hands every participant record to
-// a channel, so a test can wait on an edge the server records but, for a
+// participantRecords is a logger whose participant records a test waits on
+// in order, so a test can wait on an edge the server records but, for a
 // moving workspace, does not publish.
 type participantRecords struct {
 	recordingLogger
-	edges chan logRecord
+	// read counts the participant records awaitEdge has passed over.
+	read int
 }
-
-func (l *participantRecords) Info(op, msg string, c dlog.Context) {
-	l.recordingLogger.Info(op, msg, c)
-	if op == "daemon.server.participants" {
-		l.edges <- logRecord{Level: "INFO", Operation: op, Message: msg, Context: c}
-	}
-}
-
-func (l *participantRecords) With(dlog.Context) dlog.Logger { return l }
 
 // awaitEdge waits for the next participant record of STREAM.
 func (l *participantRecords) awaitEdge(t *testing.T, stream string) logRecord {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	for {
-		select {
-		case rec := <-l.edges:
-			if rec.Context["stream"] == stream {
-				return rec
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("no participant record for the %s stream", stream)
+		recs, err := l.AwaitCount(ctx, dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.server.participants"}, l.read+1)
+		if err != nil {
+			t.Fatalf("no participant record for the %s stream: %v", stream, err)
+		}
+		rec := recs[l.read]
+		l.read++
+		if rec.Context["stream"] == stream {
+			return logRecord{Level: "INFO", Operation: rec.Operation, Message: rec.Message, Context: rec.Context}
 		}
 	}
 }
 
 func movingHarness(t *testing.T) (*harness, *participantRecords) {
 	t.Helper()
-	log := &participantRecords{edges: make(chan logRecord, 64)}
+	log := &participantRecords{}
 	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
 	return h, log
 }

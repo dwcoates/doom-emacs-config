@@ -168,14 +168,12 @@ func (s *sidecar) beginHeal(target discover.Target, identity string, tailer *tai
 	if heal.resumed {
 		tailer.Restore(cursor)
 		s.rewindOnce(target, identity, tailer, now)
-		bound.Log("resuming this transcript's re-derivation under conversion version %d at offset %d; bytes up to offset %d were converted by an older conversion",
-			convert.ConversionVersion, cursor.GetOffset(), heal.through)
+		bound.Log("resuming this transcript's re-derivation under conversion version {converter_version} at offset {cursor_offset}; bytes up to offset {heal_through} were converted by an older conversion", logging.Values{"converter_version": convert.ConversionVersion, "cursor_offset": cursor.GetOffset(), "heal_through": heal.through})
 		return
 	}
 	tailer.Restore(&storev1.CursorState{FileId: identity, Path: target.Path, Offset: 0})
 	s.rewound[identity] = true
-	bound.Log("re-deriving this transcript from its start under conversion version %d: its rows were produced by conversion version %d up to offset %d, and every row a record no longer converts to is retired",
-		convert.ConversionVersion, heal.from, heal.through)
+	bound.Log("re-deriving this transcript from its start under conversion version {converter_version}: its rows were produced by conversion version {heal_from} up to offset {heal_through}, and every row a record no longer converts to is retired", logging.Values{"converter_version": convert.ConversionVersion, "heal_from": heal.from, "heal_through": heal.through})
 }
 
 // noteHealProgress records one durable batch of a re-derivation, and ends the
@@ -187,8 +185,7 @@ func (s *sidecar) noteHealProgress(path string, w *watched, result tail.PollResu
 	offset := result.Next.GetOffset()
 	bound := s.log.With(logging.Context{Operation: "conversion-heal", Path: path, FileID: result.Next.GetFileId(), Offset: logging.Off(offset)})
 	if offset < w.heal.through {
-		bound.LogVerbose("re-derived through offset %d of %d (batch %d, %d retirement candidate(s) named)",
-			offset, w.heal.through, w.heal.batches, retired)
+		bound.LogVerbose("re-derived through offset {offset} of {through} (batch {batches}, {retired} retirement candidate(s) named)", logging.Values{"offset": offset, "through": w.heal.through, "batches": w.heal.batches, "retired": retired})
 		return
 	}
 	s.endHeal(path, w, result.Next.GetFileId(), offset, "reached where the older conversion stopped")
@@ -198,8 +195,7 @@ func (s *sidecar) noteHealProgress(path string, w *watched, result tail.PollResu
 // ordinary reading.
 func (s *sidecar) endHeal(path string, w *watched, fileID string, offset int64, why string) {
 	s.log.With(logging.Context{Operation: "conversion-heal", Path: path, FileID: fileID, Offset: logging.Off(offset)}).Log(
-		"re-derivation under conversion version %d is complete (%s): %d batch(es), %d retirement candidate(s) named, %d legacy book-conflict entrie(s) kept by the store; the file is read like any other from here",
-		convert.ConversionVersion, why, w.heal.batches, w.heal.retirements, w.heal.skips)
+		"re-derivation under conversion version {converter_version} is complete ({why}): {batches} batch(es), {retirements} retirement candidate(s) named, {skips} legacy book-conflict entrie(s) kept by the store; the file is read like any other from here", logging.Values{"converter_version": convert.ConversionVersion, "why": why, "batches": w.heal.batches, "retirements": w.heal.retirements, "skips": w.heal.skips})
 	w.heal = nil
 }
 
@@ -222,7 +218,7 @@ func (s *sidecar) healShort(path string, w *watched, result tail.PollResult) (ab
 		}
 		s.log.With(logging.Context{
 			Operation: "store-write", Path: path, Offset: logging.Off(offset), Level: "error",
-		}).Log("the end of a re-derivation that stopped short was not committed: %v", err)
+		}).Log("the end of a re-derivation that stopped short was not committed: {cause}", logging.Values{"cause": err.Error()})
 		return true
 	}
 	w.tailer.Commit(result)
@@ -259,7 +255,7 @@ func (s *sidecar) healStep() {
 		for {
 			if read > 0 && !s.now().Before(deadline) {
 				s.log.With(logging.Context{Operation: "conversion-heal", Repeat: logging.Repeat(read)}).LogVerbose(
-					"this tick's %s heal budget is spent after %d batch(es); %d file(s) are still being re-derived", budget, read, len(s.healOrder()))
+					"this tick's {budget} heal budget is spent after {read} batch(es); {heal_order_length} file(s) are still being re-derived", logging.Values{"budget": budget.String(), "read": read, "heal_order_length": len(s.healOrder())})
 				return
 			}
 			w, watching := s.watchers[path]

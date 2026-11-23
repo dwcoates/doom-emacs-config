@@ -9,6 +9,8 @@
  */
 import { writeSync } from "node:fs";
 import { vi } from "vitest";
+import { renderTemplate } from "../../../logging/ts/logsite.js";
+import type { LogFields, LogMessage, ShimLogMethod } from "../src/log.js";
 
 /** A persisted log record, as the canonical logger writes one. */
 export interface LogRecord {
@@ -66,4 +68,19 @@ export function untilLogged(before: number, check: (records: LogRecord[]) => boo
       return written;
     });
   });
+}
+
+/**
+ * A stand-in log method for a test that hands its subject a logger: it
+ * renders each call's template from its named values, as the canonical
+ * logger does, and gives RECORD the fields, the rendered message and the
+ * template.
+ */
+export function recordingLogMethod(
+  record: (fields: LogFields, message: string, template: string) => void,
+): ShimLogMethod {
+  return (fields: LogFields, said: string | LogMessage, ...values: [Readonly<Record<string, unknown>>?]): void => {
+    if (typeof said === "string") record(fields, renderTemplate(said, values[0] ?? {}), said);
+    else record(fields, renderTemplate(said.template, said.values), said.template);
+  };
 }

@@ -4,6 +4,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // THE ROSTER IS RESOLVED ONCE PER BATCH OF CHANGES, NOT ONCE PER CHANGE.
@@ -36,7 +37,7 @@ import (
 // mutation is one queued change to the roster.
 type mutation struct {
 	operation string
-	message   string
+	message   logsite.Message
 	ctx       dlog.Context
 	// log is the change's sink. A workspace-scoped change (scoped) has it
 	// resolved under the lock, from the registry the batch is applied to.

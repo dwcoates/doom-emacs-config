@@ -22,12 +22,14 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HARNESS_EPOCH_MS, bootColdOnce, sharedMount, startHarness, type Harness } from "./harness";
-import { log } from "../../src/log";
+import { createLogger } from "../../src/log";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { realSetImmediate } from "../real-clock";
 import { ROOT_FEED } from "./fake-daemon";
 import { PERMISSION_POSED_AT_MS, WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit, userPromptRow } from "./fixtures";
+
+const log = createLogger("webapp.test.integration.harness");
 
 let harness: Harness | undefined;
 let restoreFetch: (() => void) | undefined;

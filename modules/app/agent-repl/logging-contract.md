@@ -263,7 +263,10 @@ Required fields:
 - `level`: `debug`, `info`, `warn`, or `error`
 - `verbosity`: `normal` or `verbose`
 - `operation`: stable machine-readable operation name
-- `message`: concise human-readable description
+- `message`: concise human-readable description: the call's template
+  rendered from its named values
+- `site`: the key of the log call that wrote the record ("Log sites" below)
+- `template`: the call's unrendered message, the site's summary
 - `context`: JSON object containing operation-specific structured evidence
 
 Process runtimes include `pid`. The browser webapp includes `connection_id`
@@ -321,6 +324,114 @@ network blip, a third-party endpoint's error) carries `"transient": true` in
 record so marked out of the window they judge a deploy by, so a passing outage
 never holds a merge queue; a record that evidently is transient and carries no
 mark is a logging defect.
+
+## Log sites
+
+Every log call is a SITE, and every record names the site that wrote it, so
+the records one call writes can be counted together whatever values each
+carries, and a window's sites can be compared with another's (the
+`agentrepl.v1.ListLogSites` rpc, `agent-repld logs sites`).
+
+### The helper takes a literal template and named values
+
+Every runtime has ONE logging helper, and every log call, at every level,
+passes it a TEMPLATE and the template's named values:
+
+```go
+log.Warn("daemon.shimclient.dial", "timed out connecting to shim {shim} after {elapsed}",
+	dlog.Context{"shim": id, "elapsed": d})
+```
+
+- A placeholder is `{name}`, a lowercase identifier (`[a-z_][a-z0-9_]*`). A
+  literal brace is written doubled, `{{` or `}}`.
+- The helper renders `message` from the template, and records each named
+  value as a `context` field under its placeholder's name, so the text and
+  the fields can never disagree and every identifier stays in a field.
+- THE TEMPLATE IS A STRING LITERAL, never a value built at run time (a
+  formatted string, a concatenation with a variable, a variable). The
+  template is the site's summary and part of its key, so a template built at
+  run time would make every record its own site, and no window could be
+  compared with another. Every dynamic value goes in a named field.
+- Each runtime enforces the literal where its compiler can:
+  - Go: the template parameter has an unexported type, so an untyped string
+    constant converts implicitly while a `fmt.Sprintf` result or a `string`
+    variable does not compile, and no other package can convert one. A
+    helper that logs a message its caller wrote takes a `logsite.Message`,
+    which only `logsite.Msg("<literal>")` makes, at the caller.
+  - TypeScript: the template's type parameter is `string extends T ? never
+    : T`, which refuses a plain `string`, and the placeholder names are read
+    from the literal type, so a missing or extra named value is a type error.
+  - Emacs Lisp: the helpers are macros that signal an error at expansion
+    (byte-compile) time for a non-literal template or mismatched names.
+- A placeholder with no named value, or a template whose braces do not
+  parse, is a defect of the call: the helper fails loudly. Every runtime's
+  static scan test enumerates every call in source and fails on it first.
+- An Emacs record's `operation` is derived from its template, which leads
+  with the slug (`elisp.<module>.<operation>`). A placeholder inside that
+  leading slug, its text before the first space (`elisp.verbs.{op}-refused`),
+  is spelled with its value, so a reader asks for one verb's records by
+  their operation. Every other placeholder is spelled `%s`. The site and
+  its key stay those of the template. Go and TypeScript records name their
+  operation explicitly.
+
+### How a site's key is derived
+
+A site's key is the first 12 hex characters of the sha256 of the record's
+runtime, the function the call is written in, and the template, joined by
+NUL bytes. Every runtime derives it identically, and each pins the same
+value in its tests (`Key("daemon", "pkg.F", "hello {name}")` is
+`074892b7d933`).
+
+- Go: the function is the call's enclosing named function or method, as the
+  runtime spells its frame (`pkg.(*T).M`), resolved once per call site and
+  cached by program counter. A closure is keyed by the function it is
+  written in, a generic by its uninstantiated name, and a package variable's
+  initializer by the package's `init` (`agentrepl/logging/logsite`).
+- TypeScript: no caller is recoverable at run time (the webapp is minified),
+  so each module builds its logger with a static scope name, which stands
+  for the function; a test requires every scope to be unique.
+- Emacs Lisp: the macro takes the enclosing function at expansion time, so
+  the key is a constant of the compiled code.
+- Two calls in one function writing one template are one site. Each
+  runtime's scan test fails on that, and on two sites whose keys collide.
+
+### A key changes only when its template or function does
+
+Nothing dynamic takes part in a key, so a site keeps its key across every
+commit that leaves its template and its function alone. Rewording a template,
+or renaming or moving its function, gives the site a NEW key, detaching it
+from its history: the production checks then see it as a site that never
+fired before. Change a template only when it is really necessary.
+
+### Sites are tallied per deploy, independently of the logs
+
+The daemon tallies every record of every sink into (deploy, site, level,
+hour) rows in its store, crediting each record to the deploy serving when it
+was written. `ListLogSites` answers a window of time from those rows, not
+from the logs (`daemon/internal/logsites`, `daemon/internal/wsm/logsites.go`).
+
+- ONE PASS reads every JSONL log under the state root's `logs/` directory
+  and the cache root's `log/` directory from each file's own cursor, to the
+  end of its last whole line. A warnings twin (`*.warn.log`) and a
+  service's raw `.out.log` and `.err.log` are never read.
+- It runs before every removal of log files the daemon makes (the hourly
+  retention pass, a discarded workspace's logs), so every file the daemon
+  removes was read to its end; at each deploy's start; and before every
+  window is answered, so an answer is current to the moment it is asked.
+- A file's cursor is keyed by its device, inode and birth instant, so a
+  rotation's rename keeps it; a chunk's rows and the cursor's advance commit
+  together only while the cursor stands where the chunk was read, so two
+  daemons never count the same bytes.
+- A pass credits only records written before the instant it read the
+  deploys at; a later record waits for the next pass, so no record is
+  credited to a deploy that did not serve it.
+- A record that names no site (one written before its runtime keyed its
+  sites) is counted apart and credited to no site.
+- The files Emacs, the store and the sidecar remove themselves are read by
+  the hourly pass well before their three-day retention, and before their
+  cap rotation drops a generation: the busiest sink measured (`daemon.run.log`,
+  2026-11-21) took over twelve hours to roll through its five generations.
+- The store keeps the rows of the three most recent deploys.
 
 ## Operation queries
 

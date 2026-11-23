@@ -35,7 +35,9 @@
 (require 'cl-lib)
 (declare-function warn! "doom-lib")
 (declare-function error! "doom-lib")
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--emit-log "agent-repl-log-site" (ws site &rest values))
+(declare-function agent-repl--emit-log-record "agent-repl-core"
+                  (ws level verbosity site values &rest keys))
 (declare-function agent-repl-connect-read-daemon-addr "agent-repl-connect" ())
 (declare-function agent-repl-connect-open "agent-repl-connect" (address))
 (declare-function agent-repl-connect-close "agent-repl-connect" (conn))
@@ -47,14 +49,32 @@
 Short on purpose: the doctor is a diagnostic, and a daemon that cannot
 answer this quickly is a finding rather than something to wait on.")
 
-(defun agent-repl--doctor-log (fmt &rest args)
-  "Record a doctor lifecycle event described by FMT and ARGS.
+;; Every log call is a site (logging-contract.md "Log sites"): the log macros
+;; are lisp/log-site.el's, so it is loaded HERE, before the first of them
+;; expands, as config.el loads it.
+(eval-and-compile
+  (load (expand-file-name "lisp/log-site"
+                          (file-name-directory
+                           (or load-file-name buffer-file-name
+                               (bound-and-true-p byte-compile-current-file))))
+        nil 'nomessage))
+
+(defun agent-repl--doctor-emit (message)
+  "Record the doctor's MESSAGE, (SITE . VALUES), at debug, centrally.
 `doom doctor' loads this file independently of the full agent-repl module,
-so the core logger is not guaranteed to be initialized yet.  When it is
-available, route every event through it with nil WS: doctor is host-wide,
-not owned by a workspace."
-  (when (fboundp 'agent-repl--log)
-    (apply #'agent-repl--log nil fmt args)))
+so the core logger is not guaranteed to be initialized yet; when it is,
+every event goes through it, centrally: the doctor is host-wide, owned by
+no workspace."
+  (when (fboundp 'agent-repl--emit-log-record)
+    (apply #'agent-repl--emit-log
+           '(:agent-repl-central "the doctor is host-wide, owned by no workspace")
+           message)))
+
+(defmacro agent-repl--doctor-log (template &rest named)
+  "Record a doctor lifecycle event: TEMPLATE, a literal, with NAMED values.
+A log site like every other (`agent-repl--log-msg'), recorded through
+`agent-repl--doctor-emit'."
+  `(agent-repl--doctor-emit (agent-repl--log-msg ,template ,@named)))
 
 ;; doctor.el stays at the module root (that is where `doom doctor' looks for
 ;; it), but the sources it loads live in the `lisp/' subdirectory.  The
@@ -63,8 +83,9 @@ not owned by a workspace."
       (sources '("core.el" "wire-common.el" "wire-verbs.el"
                  "connect.el" "rpc.el" "daemon.el")))
   (agent-repl--doctor-log
-   "doctor: start dir=%s sources=%S logger-available=%s"
-   dir sources (fboundp 'agent-repl--log))
+   "doctor: start dir={dir} sources={sources} logger-available={logger_available}"
+   :dir dir :sources (prin1-to-string sources)
+   :logger_available (if (fboundp 'agent-repl--emit-log-record) "t" "nil"))
   (dolist (file sources)
     (let ((path (expand-file-name file dir)))
       (if (file-exists-p path)
@@ -72,13 +93,14 @@ not owned by a workspace."
               (progn
                 (load path nil t)
                 (agent-repl--doctor-log
-                 "doctor: source=%s path=%s outcome=loaded" file path))
+                 "doctor: source={source} path={path} outcome=loaded" :source file :path path))
             (error
              (agent-repl--doctor-log
-              "doctor: source=%s path=%s outcome=failed error=%S" file path err)
+              "doctor: source={source} path={path} outcome=failed error={error}"
+              :source file :path path :error (prin1-to-string err))
              (signal (car err) (cdr err))))
         (agent-repl--doctor-log
-         "doctor: source=%s path=%s outcome=skipped reason=missing" file path)))))
+         "doctor: source={source} path={path} outcome=skipped reason=missing" :source file :path path)))))
 
 ;;;; ---- The daemon probe ----
 
@@ -94,7 +116,7 @@ healthy daemon is not one."
                        (agent-repl-connect-read-daemon-addr)
                      (error
                       (agent-repl--doctor-log
-                       "doctor: daemon-probe addr-unreadable error=%S" err)
+                       "doctor: daemon-probe addr-unreadable error={error}" :error (prin1-to-string err))
                       :unreadable))))
       (cond
        ((eq address :unreadable)
@@ -122,7 +144,7 @@ healthy daemon is not one."
                     (:success
                      (pcase (plist-get verdict :arm)
                        (:healthy
-                        (agent-repl--doctor-log "doctor: daemon-probe healthy address=%s" address)
+                        (agent-repl--doctor-log "doctor: daemon-probe healthy address={address}" :address address)
                         nil)
                        (:unhealthy
                         (let ((faults (plist-get (plist-get verdict :value) :faults)))
@@ -145,7 +167,8 @@ healthy daemon is not one."
              ;; address.
              (when conn (ignore-errors (agent-repl-connect-close conn)))
              (agent-repl--doctor-log
-              "doctor: daemon-probe no-answer address=%s error=%S" address err)
+              "doctor: daemon-probe no-answer address={address} error={error}"
+              :address address :error (prin1-to-string err))
              (list (cons 'warn (format "agent-repl: no daemon answering at %s (stale daemon.addr)"
                                        address)))))))))))
 
@@ -198,7 +221,8 @@ is named in `agent-repl-spotlight-excluded-roots'."
          (output (cdr result)))
     (if (not (eql exit 0))
         (progn
-          (agent-repl--doctor-log "doctor: spotlight workspace-list exit=%S output=%S" exit output)
+          (agent-repl--doctor-log "doctor: spotlight workspace-list exit={exit} output={output}"
+                                  :exit (prin1-to-string exit) :output (prin1-to-string output))
           (list (cons 'warn (format "agent-repl: the Spotlight check could not list the workspaces (exit %S): %s"
                                     exit (string-trim output)))))
       (let ((indexed (cl-remove-if
@@ -207,7 +231,7 @@ is named in `agent-repl-spotlight-excluded-roots'."
                             (member root (mapcar (lambda (r) (directory-file-name (expand-file-name r)))
                                                  agent-repl-spotlight-excluded-roots))))
                       (agent-repl--doctor-worktree-roots output))))
-        (agent-repl--doctor-log "doctor: spotlight indexed-roots=%S" indexed)
+        (agent-repl--doctor-log "doctor: spotlight indexed-roots={indexed}" :indexed (prin1-to-string indexed))
         (mapcar (lambda (root)
                   (cons 'warn (format "agent-repl: Spotlight indexes the agent worktrees in %s. Add that folder in System Settings > Spotlight > Search Privacy, then add it to `agent-repl-spotlight-excluded-roots'."
                                       root)))
@@ -248,16 +272,19 @@ than checking anything itself.  A runner that refuses the manifests (exit
   (let* ((result (agent-repl--doctor-run-requirements))
          (exit (car result))
          (output (cdr result)))
-    (agent-repl--doctor-log "doctor: requirements exit=%S output-bytes=%d" exit (length output))
+    (agent-repl--doctor-log "doctor: requirements exit={exit} output-bytes={output_bytes}"
+                            :exit (prin1-to-string exit) :output_bytes (length output))
     (if (not (memq exit '(0 1)))
         (progn
-          (agent-repl--doctor-log "doctor: requirements refused exit=%S output=%S" exit output)
+          (agent-repl--doctor-log "doctor: requirements refused exit={exit} output={output}"
+                                  :exit (prin1-to-string exit) :output (prin1-to-string output))
           (list (cons 'error (format "agent-repl: bin/requirements.sh check could not run (exit %S): %s"
                                      exit (string-trim output)))))
       (let ((report (condition-case err
                         (json-parse-string output)
                       (json-parse-error
-                       (agent-repl--doctor-log "doctor: requirements unparseable error=%S output=%S" err output)
+                       (agent-repl--doctor-log "doctor: requirements unparseable error={error} output={output}"
+                                               :error (prin1-to-string err) :output (prin1-to-string output))
                        :unparseable))))
         (if (eq report :unparseable)
             (list (cons 'error (format "agent-repl: bin/requirements.sh check answered no report (exit %S): %s"
@@ -266,7 +293,8 @@ than checking anything itself.  A runner that refuses the manifests (exit
                                             (unless (equal (gethash "status" entry) "ok")
                                               (agent-repl--doctor-requirement-issue entry)))
                                           report))))
-            (agent-repl--doctor-log "doctor: requirements entries=%d unmet=%d" (length report) (length issues))
+            (agent-repl--doctor-log "doctor: requirements entries={entries} unmet={unmet}"
+                                    :entries (length report) :unmet (length issues))
             issues))))))
 
 ;;;; ---- Aggregation ----
@@ -288,32 +316,37 @@ probed the real host's tools from inside a unit test.")
                      (condition-case err
                          (let ((result (funcall provider)))
                            (agent-repl--doctor-log
-                            "doctor: provider=%s outcome=called issue-count=%d issues=%S"
-                            provider (length result) result)
+                            "doctor: provider={provider} outcome=called issue-count={issue_count} issues={issues}"
+                            :provider provider :issue_count (length result) :issues (prin1-to-string result))
                            result)
                        (error
                         (agent-repl--doctor-log
-                         "doctor: provider=%s outcome=failed error=%S" provider err)
+                         "doctor: provider={provider} outcome=failed error={error}"
+                         :provider provider :error (prin1-to-string err))
                         (signal (car err) (cdr err))))
                    (agent-repl--doctor-log
-                    "doctor: provider=%s outcome=skipped reason=unbound" provider)
+                    "doctor: provider={provider} outcome=skipped reason=unbound" :provider provider)
                    nil))
                '(agent-repl--widget-doctor-issues
                  agent-repl--doctor-requirements-issues
                  agent-repl--doctor-spotlight-issues
                  agent-repl--doctor-daemon-issues)))))
   (agent-repl--doctor-log
-   "doctor: aggregation issue-count=%d issues=%S" (length issues) issues)
+   "doctor: aggregation issue-count={issue_count} issues={issues}"
+   :issue_count (length issues) :issues (prin1-to-string issues))
   (dolist (issue issues)
     (pcase (car issue)
       ('error (if (fboundp 'error!)
                   (progn
                     (agent-repl--doctor-log
-                     "doctor: issue-level=error dispatch=error! message=%S" (cdr issue))
+                     "doctor: issue-level=error dispatch=error! message={message}"
+                     :message (prin1-to-string (cdr issue)))
                     (error! "%s" (cdr issue)))
                 (agent-repl--doctor-log
-                 "doctor: issue-level=error dispatch=warn! message=%S" (cdr issue))
+                 "doctor: issue-level=error dispatch=warn! message={message}"
+                 :message (prin1-to-string (cdr issue)))
                 (warn! "FATAL: %s" (cdr issue))))
       (_      (agent-repl--doctor-log
-               "doctor: issue-level=%S dispatch=warn! message=%S" (car issue) (cdr issue))
+               "doctor: issue-level={level} dispatch=warn! message={message}"
+               :level (prin1-to-string (car issue)) :message (prin1-to-string (cdr issue)))
               (warn! "%s" (cdr issue)))))))

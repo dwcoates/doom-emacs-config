@@ -23,8 +23,10 @@
  * holds none. Only a ROOT-feed card docks: a sub-feed's rows belong to their
  * bubble.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { pageMutationObserver, queryAll } from "../dom.js";
+
+const log = createLogger("webapp.feed.card-dock");
 
 /** How one kind of standing card docks. */
 export interface CardDockSpec {
@@ -119,7 +121,7 @@ export function installCardDock(feed: HTMLElement, dock: HTMLElement, spec: Card
       card.remove();
     }
     if (slot !== card) slot.remove();
-    log.info(`the ${spec.noun} undocks`, { operation: `${spec.operation}.undocked`, context: { why } });
+    log.info("the {noun} undocks", { operation: `${spec.operation}.undocked`, context: { why } }, { noun: spec.noun });
   };
 
   const dockCard = (card: HTMLElement, row: HTMLElement): Docked | null => {

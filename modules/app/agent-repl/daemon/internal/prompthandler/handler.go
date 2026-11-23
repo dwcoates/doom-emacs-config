@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -323,9 +324,9 @@ type owedNote[T any] struct {
 	closes bool
 	// The records: the take that failed, the note that could not be
 	// composed, the restore that failed, and the note delivered. An empty
-	// failure record is the take's owner's: it records its own failures,
+	// (zero) failure record is the take's owner's: it records its own failures,
 	// so they are recorded once.
-	takeFailed, composeFailed, restoreFailed, told string
+	takeFailed, composeFailed, restoreFailed, told logsite.Message
 }
 
 // openWithOwed opens SAID with NOTE when it is owed, or closes it with NOTE
@@ -340,8 +341,8 @@ func openWithOwed[T any](ctx context.Context, ws ids.WorkspaceID, said *conversa
 	}
 	owed, found, err := note.take(ctx, ws)
 	if err != nil {
-		if note.takeFailed != "" {
-			log.Error(note.op, note.takeFailed, dlog.Context{"cause": err.Error()})
+		if !note.takeFailed.IsZero() {
+			log.Log(dlog.LevelError, note.op, note.takeFailed, dlog.Context{"cause": err.Error()})
 		}
 		return nil, none, fmt.Errorf("take what %q's next prompt owes (%s): %w", ws, note.op, err)
 	}
@@ -349,17 +350,17 @@ func openWithOwed[T any](ctx context.Context, ws ids.WorkspaceID, said *conversa
 		return said, none, nil
 	}
 	restore = func() {
-		if err := note.restore(context.WithoutCancel(ctx), ws, owed); err != nil && note.restoreFailed != "" {
-			log.Error(note.op, note.restoreFailed, dlog.WithCause(note.fields(owed), err))
+		if err := note.restore(context.WithoutCancel(ctx), ws, owed); err != nil && !note.restoreFailed.IsZero() {
+			log.Log(dlog.LevelError, note.op, note.restoreFailed, dlog.WithCause(note.fields(owed), err))
 		}
 	}
 	text, err := note.compose(owed)
 	if err != nil {
-		log.Error(note.op, note.composeFailed, dlog.WithCause(note.fields(owed), err))
+		log.Log(dlog.LevelError, note.op, note.composeFailed, dlog.WithCause(note.fields(owed), err))
 		restore()
 		return nil, none, fmt.Errorf("compose what %q's next prompt owes (%s): %w", ws, note.op, err)
 	}
-	log.Info(note.op, note.told, note.fields(owed))
+	log.Log(dlog.LevelInfo, note.op, note.told, note.fields(owed))
 	return withNote(said, text, !note.closes), restore, nil
 }
 
@@ -389,7 +390,7 @@ func (h *handler) closeWithOwedPlacement(ctx context.Context, ws ids.WorkspaceID
 		compose: func(owed owedPlacement) (string, error) { return owed.note, nil },
 		fields:  func(owed owedPlacement) dlog.Context { return dlog.Context{"note_chars": len(owed.note)} },
 		closes:  true,
-		told:    "the prompt closes with the note asking the agent to file the workspace into a subsection",
+		told:    logsite.Msg("the prompt closes with the note asking the agent to file the workspace into a subsection"),
 	}, log)
 }
 
@@ -407,10 +408,10 @@ func (h *handler) openWithContextSummary(ctx context.Context, ws ids.WorkspaceID
 		fields: func(summary string) dlog.Context {
 			return dlog.Context{"summary_chars": len(summary), "brief": BriefContextSummary}
 		},
-		takeFailed:    "could not take the context summary the workspace's next prompt owes; the prompt was not forwarded",
-		composeFailed: "could not compose the note carrying the context summary; the prompt was not forwarded",
-		restoreFailed: "could not put back the context summary of a prompt the queue refused; it is lost",
-		told:          "the prompt opens with the context summary the queue-bypass switch carried",
+		takeFailed:    logsite.Msg("could not take the context summary the workspace's next prompt owes; the prompt was not forwarded"),
+		composeFailed: logsite.Msg("could not compose the note carrying the context summary; the prompt was not forwarded"),
+		restoreFailed: logsite.Msg("could not put back the context summary of a prompt the queue refused; it is lost"),
+		told:          logsite.Msg("the prompt opens with the context summary the queue-bypass switch carried"),
 	}, log)
 }
 
@@ -434,10 +435,10 @@ func (h *handler) openWithOwedRevisions(ctx context.Context, ws ids.WorkspaceID,
 			}
 			return dlog.Context{"units": units, "brief": BriefRevisionsTold}
 		},
-		takeFailed:    "could not take the revisions the workspace's next prompt owes its agent; the prompt was not forwarded",
-		composeFailed: "could not compose the note telling the agent of its revised responses; the prompt was not forwarded",
-		restoreFailed: "could not put back the revisions of a prompt the queue refused; the agent will not be told of them",
-		told:          "the prompt opens by telling the agent what its revised responses now say",
+		takeFailed:    logsite.Msg("could not take the revisions the workspace's next prompt owes its agent; the prompt was not forwarded"),
+		composeFailed: logsite.Msg("could not compose the note telling the agent of its revised responses; the prompt was not forwarded"),
+		restoreFailed: logsite.Msg("could not put back the revisions of a prompt the queue refused; the agent will not be told of them"),
+		told:          logsite.Msg("the prompt opens by telling the agent what its revised responses now say"),
 	}, log)
 }
 
@@ -451,10 +452,10 @@ func (h *handler) openWithOwedRename(ctx context.Context, ws ids.WorkspaceID, sa
 		restore:       h.deps.DB.RestoreOwedRename,
 		compose:       func(name string) (string, error) { return renameNote(h.deps.PromptsDir, name) },
 		fields:        func(name string) dlog.Context { return dlog.Context{"name": name, "brief": BriefRenameTold} },
-		takeFailed:    "could not take the name the workspace's next prompt owes its agent; the prompt was not forwarded",
-		composeFailed: "could not compose the note telling the agent the workspace's new name; the prompt was not forwarded",
-		restoreFailed: "could not put back the name of a prompt the queue refused; the agent will not be told it",
-		told:          "the prompt opens by telling the agent the workspace's new name",
+		takeFailed:    logsite.Msg("could not take the name the workspace's next prompt owes its agent; the prompt was not forwarded"),
+		composeFailed: logsite.Msg("could not compose the note telling the agent the workspace's new name; the prompt was not forwarded"),
+		restoreFailed: logsite.Msg("could not put back the name of a prompt the queue refused; the agent will not be told it"),
+		told:          logsite.Msg("the prompt opens by telling the agent the workspace's new name"),
 	}, log)
 }
 

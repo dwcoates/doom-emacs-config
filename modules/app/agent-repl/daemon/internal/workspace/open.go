@@ -404,7 +404,7 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		return nil, fmt.Errorf("open %q: restore %q from %q: %w", record.ID, record.Dir, record.Branch, err)
 	}
 	log = v.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(record.ID)})
-	log.Info(opOpen, "the workspace's directory was gone; "+restored, dlog.Context{
+	log.Info(opOpen, "the workspace's directory was gone; {restored}", dlog.Context{"restored": restored,
 		"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch, "repository": repoDir,
 	})
 	v.reportPreserved(ctx, log, record, repoDir)
@@ -479,12 +479,12 @@ func (v *verbs) advanceToParent(ctx context.Context, log dlog.Logger, record wsm
 	fields := dlog.Context{"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch}
 	stays := func(why string) error {
 		fields["why"] = why
-		log.Info(op, "the "+subject+" stays at its branch's tip", fields)
+		log.With(fields).Info(op, "the {subject} stays at its branch's tip", dlog.Context{"subject": subject})
 		return nil
 	}
 	fail := func(what string, err error) error {
 		fields["cause"] = err.Error()
-		log.Error(op, "could not advance the "+subject+" to its parent's tip: "+what, fields)
+		log.With(fields).Error(op, "could not advance the {subject} to its parent's tip: {what}", dlog.Context{"subject": subject, "what": what})
 		return fmt.Errorf("%s %q: advance the %s to %q: %s: %w", verb, record.ID, subject, record.ParentBranch, what, err)
 	}
 	kept, failed, err := v.parentHoldsAll(ctx, record)
@@ -497,7 +497,7 @@ func (v *verbs) advanceToParent(ctx context.Context, log dlog.Logger, record wsm
 	if err := v.deps.Git.FastForward(ctx, record.Dir, record.ParentBranch); err != nil {
 		return fail("fast-forward", err)
 	}
-	log.Info(op, "advanced the "+subject+" to its parent's tip", fields)
+	log.With(fields).Info(op, "advanced the {subject} to its parent's tip", dlog.Context{"subject": subject})
 	return nil
 }
 

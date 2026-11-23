@@ -20,7 +20,7 @@ func (c *Converter) systemLine(record map[string]any, at Attribution, following 
 	switch subtype {
 	case "":
 		c.log.With(at.ctxWarn("convert-line")).
-			Log("system line carries no %q field; stored as unknown residue", "subtype")
+			Log("system line carries no \"subtype\" field; stored as unknown residue", nil)
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "subtype", record)}
 	case "compact_boundary":
 		return []*storev1.StoreEntry{c.contextCompacted(record, at, env, agent, following)}
@@ -30,14 +30,14 @@ func (c *Converter) systemLine(record map[string]any, at Attribution, following 
 		// The expanded local-command envelope: CLI machinery, never a feed row.
 		// A `/clear` inside one is recognized on the USER record that carries it.
 		c.log.With(at.ctxFor("withhold")).
-			LogVerbose("system/local_command withheld as vendor_specific")
+			LogVerbose("system/local_command withheld as vendor_specific", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "system/local_command", record)}
 	default:
 		// Informational, turn_duration, stop_hook_summary, away_summary,
 		// scheduled_task_fire, the model-refusal notices, agents_killed: the
 		// harness narrating its own bookkeeping. UNDERSTOOD and not carried.
 		c.log.With(at.ctxFor("withhold")).
-			LogVerbose("system/%s withheld as vendor_specific", subtype)
+			LogVerbose("system/{subtype} withheld as vendor_specific", logging.Values{"subtype": subtype})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "system/"+subtype, record)}
 	}
 }
@@ -82,7 +82,7 @@ func (c *Converter) apiError(record map[string]any, at Attribution, env envelope
 	// default-level log. `info` is the level that states an event without
 	// accusing this process of causing it.
 	c.log.With(at.ctxFor("api-error")).With(logging.Context{UpsertKey: SessionKey("api_error", env.uuid)}).
-		Log("vendor api_error recorded mid-turn: %s", message)
+		Log("vendor api_error recorded mid-turn: {message}", logging.Values{"message": message})
 
 	frame := updateFrame(agent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_ApiError{ApiError: failed},

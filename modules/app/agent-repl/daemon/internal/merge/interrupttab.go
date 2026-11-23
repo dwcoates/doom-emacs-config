@@ -6,6 +6,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agentrepl/logging/logsite"
 )
 
 // This file is the merge-tab interrupt (agentrepl.v1.InterruptRequest
@@ -39,7 +40,7 @@ func (o *orchestrator) InterruptTab(ctx context.Context, requester ids.Workspace
 	ws, live := o.liveAgenticTab(requester, tab)
 	if !live {
 		refusal := refuse(ArmNotMergeTab, requester, "the row is no live agentic tab of a merge drawn in this workspace's feed")
-		logRefusal(log, op, "refused a merge-tab interrupt naming no live agentic tab", fields, refusal)
+		logRefusal(log, op, logsite.Msg("refused a merge-tab interrupt naming no live agentic tab"), fields, refusal)
 		return false, refusal
 	}
 	fields["merging_workspace"] = string(ws)

@@ -15,6 +15,9 @@ import { fullTextOf } from "../../src/bubble/text-reveal.js";
 import { RESPONSE_PROSE_CLASS } from "../../src/feed/cards/response.js";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
 import { expect } from "vitest";
+import type { JsonObject } from "@bufbuild/protobuf";
+import { siteKey } from "../../../agent-shim/logging/ts/logsite.js";
+import { WEBAPP_LOG_RUNTIME } from "../../src/log.js";
 
 import type { MountedApp } from "../integration/harness";
 import { startAgainstRealDaemon } from "./real-daemon";
@@ -496,4 +499,27 @@ export async function awaitTitleTypedOut(app: MountedApp, row: HTMLElement): Pro
 /** The trimmed text of an element, for a verbatim assertion. */
 export function textOf(element: Element | null | undefined): string {
   return element?.textContent?.trim() ?? "";
+}
+
+/** The scope every record a layer test writes itself is keyed in. */
+export const LAYER_LOG_SCOPE = "webapp.test.webapp-layer";
+
+/**
+ * A ClientLog record a layer test writes itself, at INFO under OPERATION:
+ * MESSAGE is its literal template (it names no placeholder), keyed in
+ * `LAYER_LOG_SCOPE` as every webapp record is keyed, so the daemon takes it
+ * as it takes the webapp's own.
+ */
+export function layerRecord(operation: string, message: string, context: JsonObject = {}) {
+  if (message.includes("{") || message.includes("}")) {
+    throw new Error(`layerRecord: ${JSON.stringify(message)} names a placeholder; a layer test's record is a literal`);
+  }
+  return {
+    level: { case: "info" as const, value: {} },
+    operation,
+    site: siteKey(WEBAPP_LOG_RUNTIME, LAYER_LOG_SCOPE, message),
+    template: message,
+    message,
+    context,
+  };
 }

@@ -23,8 +23,10 @@
 import { ReportedLatencyKind } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
 import type { RosterCurrentWorkspace } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { recordWallLatency } from "../wall-latency.js";
+
+const log = createLogger("webapp.sidebar.selection-paint");
 
 /** The clock and frames a selection's paint is timed with. */
 export interface SelectionPaintEnv {

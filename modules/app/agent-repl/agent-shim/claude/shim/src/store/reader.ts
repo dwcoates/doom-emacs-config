@@ -51,7 +51,7 @@ const sleepUnref = (ms: number): Promise<void> =>
     timer.unref?.();
   });
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.store.reader", {
   component: "shim-store-reader",
   operation: "shim.store.reader",
 });

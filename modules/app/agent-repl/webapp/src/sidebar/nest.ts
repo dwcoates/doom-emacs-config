@@ -22,12 +22,14 @@ import {
   type SetWorkspaceParentResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_parent_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { parentNotOpenSentence } from "../rpc/family-refusal.js";
 import { unreachableArm } from "../rpc/strict.js";
 import { sendHeld, successRevision } from "./arrange.js";
 import type { SidebarContext } from "./context.js";
 import type { CauseOf } from "./verbs.js";
+
+const log = createLogger("webapp.sidebar.nest");
 
 /** SetWorkspaceParent making WORKSPACE a child of PARENT, its landing kept. */
 export function buildNestRequest(workspace: WorkspaceRef, parent: WorkspaceRef): SetWorkspaceParentRequest {

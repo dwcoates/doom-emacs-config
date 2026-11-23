@@ -12,6 +12,11 @@
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-resolve-persp "workspace")
 
+;; Every log call in this file is a log-site macro (log-site.el), so the
+;; macros must exist when this file is expanded: config.el loads log-site.el
+;; before this file, and a standalone compile requires it here.
+(require 'log-site)
+
 ;; Special variables owned by other sources in this module, declared here
 ;; so the byte-compiler binds and reads them dynamically rather than
 ;; lexically.
@@ -123,10 +128,10 @@ than absorbed."
     (push timer agent-repl--timers)
     ;; Guard: owner files can arm before `agent-repl--log' exists on an
     ;; unusual load order; the registration itself must not depend on it.
-    (when (fboundp 'agent-repl--log)
-      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "register-timer: key=%s replaced=%s timer=%S keyed-count=%d total-count=%d"
-                       key (if replaced "t" "nil") timer
-                       (length agent-repl--keyed-timers) (length agent-repl--timers)))
+    (when (fboundp 'agent-repl--emit-log-record)
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "register-timer: key={key} replaced={replaced} timer={timer} keyed-count={keyed_count} total-count={total_count}"
+                       :key key :replaced (if replaced "t" "nil") :timer (prin1-to-string timer)
+                       :keyed_count (length agent-repl--keyed-timers) :total_count (length agent-repl--timers)))
     timer))
 
 (defun agent-repl--cancel-timer-key (key)
@@ -143,9 +148,9 @@ Returns non-nil when a timer was actually cancelled."
     ;; Only a cancel that cancelled something is an event: asking to cancel a
     ;; key that holds no timer is how every caller makes sure, and recording
     ;; each of those asks was hundreds of records a switch.
-    (when (and cancelled (fboundp 'agent-repl--log))
-      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-timer-key: key=%s cancelled=t keyed-count=%d"
-                       key (length agent-repl--keyed-timers)))
+    (when (and cancelled (fboundp 'agent-repl--emit-log-record))
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-timer-key: key={key} cancelled=t keyed-count={keyed_count}"
+                       :key key :keyed_count (length agent-repl--keyed-timers)))
     cancelled))
 
 (defun agent-repl--cancel-all-timers ()
@@ -165,9 +170,9 @@ no unregistered chain to leave armed across a reload."
     (setq agent-repl--keyed-timers nil)
     ;; Guard: this function is called at load time (line below), before
     ;; agent-repl--log is defined.  Only log when logging is available.
-    (when (fboundp 'agent-repl--log)
-      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-all-timers: cancelled=%d keyed-cleared=%d"
-                       count keyed-count))))
+    (when (fboundp 'agent-repl--emit-log-record)
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-all-timers: cancelled={cancelled} keyed-cleared={keyed_cleared}"
+                       :cancelled count :keyed_cleared keyed-count))))
 
 (agent-repl--cancel-all-timers)
 
@@ -218,10 +223,10 @@ answers the next daemon reports again.  An owed report is recorded as
 `elisp.LABEL owed reason=in-flight'."
   (let ((conn (agent-repl-link-newest)))
     (if (null conn)
-        (agent-repl--log scope "elisp.%s skipped reason=no-link" label)
+        (agent-repl--log scope "elisp.{label} skipped reason=no-link" :label label)
       (when (eq (agent-repl-serial-send serial report (lambda (done) (funcall send conn done)))
                 :owed)
-        (agent-repl--log scope "elisp.%s owed reason=in-flight" label)))))
+        (agent-repl--log scope "elisp.{label} owed reason=in-flight" :label label)))))
 
 ;;;; ---- One-shot settle latch ----
 ;;
@@ -490,8 +495,8 @@ swallowed, and does not abort the remaining migrations."
               ;; only, never the echo area); the failure line stays a LOUD bare
               ;; `message', which is already the channel `agent-repl--warn'
               ;; would have used.
-              (if (fboundp 'agent-repl--log)
-                  (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "migrate-legacy-state: moved %s -> %s" old new)
+              (if (fboundp 'agent-repl--emit-log-record)
+                  (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "migrate-legacy-state: moved {old} -> {new}" :old old :new new)
                 (let ((inhibit-message t))
                   (message "[agent-repl] migrated state %s -> %s" old new))))
           (error
@@ -527,7 +532,7 @@ what you want is a smaller LOG FILE, this is the wrong knob — set
 (defcustom agent-repl-log-to-file t
   "Master kill-switch for file-writing of agent-repl log lines.
 When non-nil (the default), every call to `agent-repl--log',
-`agent-repl--info', `agent-repl--warn', `agent-repl--do-log',
+`agent-repl--info', `agent-repl--warn',
 `agent-repl--error', or `agent-repl--fatal' appends its JSONL record to
 the workspace's canonical
 sink, or to `agent-repl-log-file-name' when the call is genuinely
@@ -800,13 +805,13 @@ set to obtain a prefix."
     (if (and new (not (string-empty-p new)))
         (progn
           (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                            "workspace-prefix: source=AGENT_WORKSPACE_PREFIX value=%S"
-                            new)
+                            "workspace-prefix: source=AGENT_WORKSPACE_PREFIX value={value}"
+                            :value (prin1-to-string new))
           new)
       (let ((result (or legacy "")))
         (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                          "workspace-prefix: source=CLAUDE_WORKSPACE_PREFIX value=%S"
-                          result)
+                          "workspace-prefix: source=CLAUDE_WORKSPACE_PREFIX value={value}"
+                          :value (prin1-to-string result))
         result))))
 
 ;;; Kill-cause attribution
@@ -939,7 +944,7 @@ the first time it happens, then coerces the value so the caller doesn't crash.
 Note: callers using this to build a format string for `apply #\\='message'
 should be aware that the returned string embeds the workspace metadata
 literally, so any `%' characters in metadata will be interpreted as
-format directives.  `agent-repl--do-log' avoids this by passing
+format directives.  `agent-repl--build-log-text' avoids this by passing
 metadata as an argument rather than splicing it into the format."
   (let ((safe-fmt (if (stringp fmt)
                       fmt
@@ -1071,18 +1076,13 @@ different runtimes lexically comparable.")
   "Return TIME, or the current time, in `agent-repl--log-timestamp-format'."
   (format-time-string agent-repl--log-timestamp-format time))
 
-(defun agent-repl--log-operation (fmt)
-  "Return the stable operation name represented by FMT.
-The public logging APIs retain their format-string signatures, so the format
-template itself is normalized into a deterministic machine-readable name.
-Runtime values in ARGS never participate in the operation name."
-  (let* ((source (if (stringp fmt) fmt (format "%S" fmt)))
-         (normalized (replace-regexp-in-string
-                      "[^[:alnum:]]+" "-" (downcase source))))
-    (setq normalized (replace-regexp-in-string "\\`-+\\|-+\\'" "" normalized))
-    (concat "agent-repl." (if (string-empty-p normalized)
-                                "log"
-                              normalized))))
+(defun agent-repl--log-operation (template)
+  "Return the stable operation name of a site writing TEMPLATE.
+The site carries it, derived at expansion
+\(`agent-repl-log-site-operation-name'):
+TEMPLATE's text with each placeholder spelled `%s', normalized into a
+deterministic machine-readable name.  Values never take part in it."
+  (agent-repl-log-site-operation-name template))
 
 (defvar agent-repl--log-dir-truenames (make-hash-table :test #'equal)
   "Each workspace directory's canonical spelling, keyed by the registered spelling.
@@ -1336,7 +1336,7 @@ and logging its own resolution would recurse through the same boundary."
 
 (defconst agent-repl--central-log-format-prefixes
   '(("Loading Agent-Repl" . "module bootstrap precedes every workspace")
-    ("%s.el loaded" . "module loading is process-wide")
+    ("{module}.el loaded" . "module loading is process-wide")
     ("FAILED to load" . "module loading is process-wide")
     ("early-git-string:" . "module version discovery is process-wide")
     ("version command:" . "the loaded module version is process-wide")
@@ -1423,7 +1423,7 @@ and logging its own resolution would recurse through the same boundary."
     ("ws-switch-project-display:" . "project display can precede activation")
     ("ws-tabline-names:" . "tab rendering spans every workspace")
     ("window--ensure-layout:" . "the record reports that no workspace exists")
-    ("%s error:" . "module loader error reporting is process-wide"))
+    ("{label} error" . "module loader error reporting is process-wide"))
   "Reasoned allowlist of format prefixes that may use the central log sink.
 Explicit or dynamically bound workspace scope always wins.  A nil-workspace
 site not covered here must resolve through its buffer or current workspace;
@@ -1456,16 +1456,6 @@ otherwise the record is a routing invariant violation.")
                      ((file-directory-p dir) dir)
                      (t (format "%s [MISSING]" dir))))
        :error))))
-
-(defconst agent-repl--central-log-fallback-format
-  "elisp.core.log-central-fallback workspace=%S class=%s operation=%s level=%s written=%s reason=%s"
-  "Format of the once-per-workspace record announcing a central fallback.
-THE RECORD NAMES THE CALLER THAT MET THE FALLBACK: OPERATION is the
-operation of the record that fell back, LEVEL its level, and WRITTEN
-whether that record itself is persisted beside this one -- a debug record
-under an info file level is not, and without its operation nothing said
-which site was still logging for the workspace (2026-11-14,
-`filtered-workspace-recency-sort').")
 
 (defvar agent-repl--departed-log-workspaces (make-hash-table :test #'equal)
   "Names of workspaces whose departure THIS EDITOR ordered.
@@ -1847,9 +1837,45 @@ A nil WS adds nothing.  The session identifiers come from
         (puthash field value record))))
   record)
 
-(defun agent-repl--log-record (ws level verbosity fmt args
-                                  &optional pseudo-ws operation-fmt unroutable-ws)
-  "Serialize WS / LEVEL / VERBOSITY / FMT / ARGS as one JSONL record.
+(defun agent-repl--log-site-message (site values &optional tag)
+  "Return SITE's message rendered from VALUES, headed by TAG when non-nil.
+A SITE that is not a site is a caller bug (a hand-made `apply' of an
+emitter): a backtrace is captured to *agent-repl-log-bug* the first time,
+and the message says what was passed rather than signalling out of a log
+call."
+  (if (agent-repl-log-site-p site)
+      (concat tag (agent-repl-log-site-render site values))
+    (agent-repl--log-format-capture-bug site)
+    (format "[BUG non-site=%S values=%S]" site values)))
+
+(defun agent-repl--log-site-template-of (site)
+  "Return SITE's template, or its printed form when SITE is not a site."
+  (if (agent-repl-log-site-p site)
+      (agent-repl-log-site-template site)
+    (format "%S" site)))
+
+(defun agent-repl--log-check-values (site values)
+  "Signal when VALUES are not one per SITE's names, as rendering would.
+The log macros match names to placeholders at expansion, so only a
+hand-made `apply' of an emitter can pass the wrong count; a dropped record
+is never rendered, so this keeps the check on every call at any level."
+  (when (and (agent-repl-log-site-p site)
+             (/= (length values) (length (agent-repl-log-site-names site))))
+    (error "agent-repl log site %s (%S) takes %d value(s), got %d"
+           (agent-repl-log-site-key-of site) (agent-repl-log-site-template site)
+           (length (agent-repl-log-site-names site)) (length values)))
+  nil)
+
+(defun agent-repl--log-record (ws level verbosity site values
+                                  &optional pseudo-ws tag unroutable-ws)
+  "Serialize WS / LEVEL / VERBOSITY / SITE / VALUES as one JSONL record.
+SITE is the log call's site (log-site.el) and VALUES its named values, in
+SITE's name order.  The record's `message' is SITE's template rendered from
+VALUES, headed by TAG (the severity display tag `WARNING: ' / `ERROR: ', or
+nil), `site' and `template' name the call, and `context' holds each named
+value under its name, as rendered -- so the text and the fields cannot
+disagree.  `operation' is the site's own, untouched by TAG.
+
 PSEUDO-WS, when non-nil, is the persp-mode pseudo-perspective the caller
 attributed this record to (see `agent-repl--pseudo-workspace-name-p').  Such a
 name owns no durable sink, so WS is nil and the record lands globally; the name
@@ -1861,33 +1887,23 @@ record to which is NOT a registered sink and not a pseudo perspective — an
 invariant violation the routing-error record beside this one reports.  The
 record still lands globally rather than being dropped, and the name is
 preserved as `unroutable_workspace' for the same reason `pseudo_workspace'
-is: the line must still say which workspace it is about.
-
-OPERATION-FMT, when non-nil, is the format string the stable `operation'
-name is derived from, INSTEAD of FMT.  The severity rungs
-(`agent-repl--warn', `agent-repl--error') prepend a display tag to FMT so
-the recorded message reads \"WARNING: ...\"; deriving `operation' from that
-tagged string would fold the severity into the operation name and give the
-same logical operation two names depending on which rung logged it.
-logging-contract.md reserves `level' for severity and requires `operation'
-to be stable, so the BARE format string travels here separately."
-  (let* ((message (if (stringp fmt)
-                      (apply #'format fmt args)
-                    (agent-repl--log-format-capture-bug fmt)
-                    (format "[BUG non-string-fmt=%S]" fmt)))
-         (context (agent-repl--json-object
-                   (cons "format" (if (stringp fmt) fmt (format "%S" fmt)))
-                   (cons "arguments" (vconcat (mapcar #'prin1-to-string args))))
-                   )
+is: the line must still say which workspace it is about."
+  (let* ((site-p (agent-repl-log-site-p site))
+         (message (agent-repl--log-site-message site values tag))
+         (context (apply #'agent-repl--json-object
+                         (and site-p (agent-repl-log-site-context-pairs site values))))
          (record (agent-repl--json-object
                   (cons "timestamp" (agent-repl--log-rfc3339-timestamp))
                   (cons "runtime" "emacs")
                   (cons "pid" (emacs-pid))
                   (cons "level" level)
                   (cons "verbosity" verbosity)
-                  (cons "operation" (agent-repl--log-operation
-                                     (or operation-fmt fmt)))
+                  (cons "operation" (if site-p
+                                        (agent-repl-log-site-record-operation site values)
+                                      "agent-repl.log"))
                   (cons "message" message)
+                  (cons "site" (if site-p (agent-repl-log-site-key-of site) ""))
+                  (cons "template" (agent-repl--log-site-template-of site))
                   (cons "context" context))))
     (agent-repl--log-add-workspace-identity record ws)
     (when-let ((request-id (agent-repl--log-context-request-id-checked)))
@@ -1907,13 +1923,13 @@ to be stable, so the BARE format string travels here separately."
 ;; the caller that wrote it is found and fixed rather than silently clipped.
 (defcustom agent-repl-log-record-max-bytes (* 64 1024)
   "Maximum bytes of one serialized Emacs log record.
-A record past it is written with its message and arguments cut, raised to
+A record past it is written with its message and named values cut, raised to
 ERROR, and its full size recorded as `context.oversize_bytes'."
   :type 'integer
   :group 'agent-repl)
 
 (defconst agent-repl--log-oversize-excerpt-chars 2048
-  "Characters of an oversized record's message and of each argument kept.")
+  "Characters of an oversized record's message and of each named value kept.")
 
 (defun agent-repl--log-excerpt (text &optional chars)
   "Answer TEXT cut to CHARS characters, marked with how many were left out.
@@ -1928,9 +1944,10 @@ so one marker says the same thing wherever it is read."
 (defun agent-repl--log-record-bounded (record)
   "Serialize RECORD, cutting it when it passes `agent-repl-log-record-max-bytes'.
 A record within the bound is serialized as is.  One past it has its message
-and each argument cut (`agent-repl--log-excerpt'), its level raised to
-\"error\", and `oversize_bytes' set in its context to the full size.  A cut
-record still past the bound is an invariant breach and signals."
+and each named value in its context cut (`agent-repl--log-excerpt'), its
+level raised to \"error\", and `oversize_bytes' set in its context to the
+full size.  A cut record still past the bound is an invariant breach and
+signals."
   (let* ((line (json-serialize record))
          (bytes (string-bytes line)))
     (if (<= bytes agent-repl-log-record-max-bytes)
@@ -1938,12 +1955,14 @@ record still past the bound is an invariant breach and signals."
       (let ((context (gethash "context" record)))
         (puthash "level" "error" record)
         (puthash "message" (agent-repl--log-excerpt (gethash "message" record)) record)
-        (puthash "arguments" (vconcat (mapcar #'agent-repl--log-excerpt (gethash "arguments" context)))
+        (maphash (lambda (name value)
+                   (when (stringp value)
+                     (puthash name (agent-repl--log-excerpt value) context)))
                  context)
         (puthash "oversize_bytes" bytes context)
         (let ((cut (json-serialize record)))
           (when (> (string-bytes cut) agent-repl-log-record-max-bytes)
-            (error "agent-repl log record still %d bytes after cutting its message and arguments (operation %s)"
+            (error "agent-repl log record still %d bytes after cutting its message and values (operation %s)"
                    (string-bytes cut) (gethash "operation" record)))
           cut)))))
 
@@ -2101,18 +2120,18 @@ newer durable one can tell from the log which is which."
         (if (agent-repl--ws-log-routable-p ws)
             (agent-repl--info
              ws
-             "elisp.core.sink-opened: sink=%s target=%s target_origin=%s id_scheme=%s"
-             "emacs.log"
-             (plist-get entry :target)
-             (plist-get entry :origin)
-             (plist-get entry :id-scheme))
+             "elisp.core.sink-opened: sink={sink} target={target} target_origin={target_origin} id_scheme={id_scheme}"
+             :sink "emacs.log"
+             :target (plist-get entry :target)
+             :target_origin (plist-get entry :origin)
+             :id_scheme (plist-get entry :id-scheme))
           (agent-repl--info
            '(:agent-repl-central "the sink-open decision outlived its workspace, which ended before it was recorded")
-           "elisp.core.sink-opened-after-workspace-ended: workspace=%S sink=%s target=%s target_origin=%s id_scheme=%s"
-           ws "emacs.log"
-           (plist-get entry :target)
-           (plist-get entry :origin)
-           (plist-get entry :id-scheme)))))))
+           "elisp.core.sink-opened-after-workspace-ended: workspace={workspace} sink={sink} target={target} target_origin={target_origin} id_scheme={id_scheme}"
+           :workspace (prin1-to-string ws) :sink "emacs.log"
+           :target (plist-get entry :target)
+           :target_origin (plist-get entry :origin)
+           :id_scheme (plist-get entry :id-scheme)))))))
 
 (defun agent-repl--note-sink-opened (ws target origin identity)
   "Queue the INFO record for WS's sink open of TARGET with ORIGIN.
@@ -2339,12 +2358,11 @@ Returns a plist of the counts it records."
                    (setq failed (1+ failed))
                    (agent-repl--warn
                     '(:agent-repl-central "the log retention sweep spans workspaces")
-                    "elisp.core.log-sweep-delete-failed: path=%s error=%S" path err)))))))))))
+                    "elisp.core.log-sweep-delete-failed: path={path} error={error}" :path path :error (prin1-to-string err))))))))))))
     (agent-repl--info
      '(:agent-repl-central "the log retention sweep spans workspaces")
-     (concat "elisp.core.log-sweep: retention_seconds=%d examined=%d deleted=%d "
-             "kept_young=%d failed=%d remaining=%d")
-     agent-repl-log-retention-seconds examined deleted kept-young failed remaining)
+     "elisp.core.log-sweep: retention_seconds={retention_seconds} examined={examined} deleted={deleted} kept_young={kept_young} failed={failed} remaining={remaining}"
+     :retention_seconds agent-repl-log-retention-seconds :examined examined :deleted deleted :kept_young kept-young :failed failed :remaining remaining)
     (list :examined examined :deleted deleted :kept-young kept-young
           :failed failed :remaining remaining)))
 
@@ -2365,11 +2383,11 @@ never leaves two sweeps running."
                         #'agent-repl--sweep-expired-log-files))
   (agent-repl--info
    '(:agent-repl-central "the log retention sweep spans workspaces")
-   "elisp.core.log-sweep-scheduled: idle=%s interval=%s max_files=%s retention_seconds=%s"
-   agent-repl-log-sweep-idle-seconds
-   agent-repl-log-sweep-interval-seconds
-   agent-repl-log-sweep-max-files
-   agent-repl-log-retention-seconds)
+   "elisp.core.log-sweep-scheduled: idle={idle} interval={interval} max_files={max_files} retention_seconds={retention_seconds}"
+   :idle agent-repl-log-sweep-idle-seconds
+   :interval agent-repl-log-sweep-interval-seconds
+   :max_files agent-repl-log-sweep-max-files
+   :retention_seconds agent-repl-log-retention-seconds)
   agent-repl--log-sweep-timer)
 
 
@@ -2420,7 +2438,7 @@ asked and the token is left, so the next push asks."
        conn
        (lambda (dirs)
          (agent-repl--log '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
-                          "elisp.core.merged-log-dirs: token=%s dirs=%d" token (length dirs))
+                          "elisp.core.merged-log-dirs: token={token} dirs={dirs}" :token token :dirs (length dirs))
          (agent-repl--retire-dangling-emacs-log-links-in dirs))
        (lambda (failure)
          (when (equal agent-repl--merged-log-links-token token)
@@ -2428,7 +2446,7 @@ asked and the token is left, so the next push asks."
          ;; The failure itself was recorded at ERROR by the roster; this
          ;; says only what the retention does about it.
          (agent-repl--info '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
-                           "elisp.core.merged-log-dirs-retry-next-push: token=%s failure=%S" token failure))))))
+                           "elisp.core.merged-log-dirs-retry-next-push: token={token} failure={failure}" :token token :failure (prin1-to-string failure)))))))
 
 (defun agent-repl--retire-dangling-emacs-log-links (roster)
   "Remove every roster workspace's canonical `emacs.log' link that names no file.
@@ -2463,13 +2481,13 @@ Each directory is checked once per runtime
                 (delete-file canonical)
                 (agent-repl--info
                  '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
-                 "elisp.core.log-link-retired: dir=%s link=%s gone_target=%s"
-                 dir canonical dest))
+                 "elisp.core.log-link-retired: dir={dir} link={link} gone_target={gone_target}"
+                 :dir dir :link canonical :gone_target dest))
             (file-error
              (agent-repl--warn
               '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
-              "elisp.core.log-link-retire-failed: dir=%s link=%s error=%S"
-              dir canonical err))))))))
+              "elisp.core.log-link-retire-failed: dir={dir} link={link} error={error}"
+              :dir dir :link canonical :error (prin1-to-string err)))))))))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl--retire-dangling-emacs-log-links)
 
@@ -2581,32 +2599,14 @@ generations."
          (message "[agent-repl] LOG SINK FAILURE path=%s error=%S" path err)
          (error "agent-repl log sink failure for %s: %S" path err))))))
 
-(defun agent-repl--log-check-format (fmt args)
-  "Signal when string FMT does not accept ARGS, as building the record would.
-A dropped workspace-scoped record is never built, but a format whose
-arguments do not match is a call-site bug that building it used to surface
-on every call, at any level.  This keeps that coverage for the one cost of
-formatting the message; only the central fast path skips it, by the owner's
-ruling."
-  (when (stringp fmt)
-    (apply #'format fmt args))
-  nil)
-
-(defun agent-repl--build-log-text (ws fmt args)
-  "Build the formatted log line for WS / FMT / ARGS.
-Shared by `agent-repl--do-log' and its message-gated wrappers so the
-file-write path and the message-emit path always agree on the exact
-text.  Handles the non-string-FMT bug-capture in one place."
-  (if (stringp fmt)
-      (let ((msg  (apply #'format fmt args))
-            (ts   (format-time-string "%H:%M:%S.%3N"))
-            (meta (agent-repl--format-ws-metadata ws)))
-        (format "%s [agent-repl] %s%s" ts msg meta))
-    (agent-repl--log-format-capture-bug fmt)
-    (format "%s [agent-repl] [BUG non-string-fmt=%S]%s"
-            (format-time-string "%H:%M:%S.%3N")
-            fmt
-            (agent-repl--format-ws-metadata ws))))
+(defun agent-repl--build-log-text (ws message)
+  "Build the displayed log line for WS from the record's rendered MESSAGE.
+Shared by every display path of `agent-repl--emit-log-record' so the
+*Messages* line and the signalled text always agree."
+  (format "%s [agent-repl] %s%s"
+          (format-time-string "%H:%M:%S.%3N")
+          message
+          (agent-repl--format-ws-metadata ws)))
 
 (defconst agent-repl--workspace-log-buffer-suffix "-log"
   "Suffix used for the workspace-owned live log buffer.")
@@ -2701,8 +2701,8 @@ is cleared before the record is written, so that record cannot end it again."
       (setq agent-repl-log-file-level 'info
             agent-repl--log-level-expires-at nil)
       (agent-repl--info agent-repl--log-level-window-scope
-                        "elisp.core.log-level-window: log level %s window ended at %s; reverted to info outcome=window_ended"
-                        from (format-time-string "%FT%T%z" (seconds-to-time until))))))
+                        "elisp.core.log-level-window: log level {from} window ended at {until}; reverted to info outcome=window_ended"
+                        :from from :until (format-time-string "%FT%T%z" (seconds-to-time until))))))
 
 (defun agent-repl--note-log-level-selection (selection)
   "Record at info that SELECTION started at `info' though another level was asked.
@@ -2710,9 +2710,9 @@ Silent for the default and for an honored window."
   (pcase (plist-get selection :outcome)
     ((and outcome (or 'no_expiry 'expired 'beyond_window))
      (agent-repl--info agent-repl--log-level-window-scope
-                       "elisp.core.log-level-window: log level %S ignored; starting at info outcome=%s requested-until=%S"
-                       (plist-get selection :requested) outcome
-                       (plist-get selection :requested-until)))))
+                       "elisp.core.log-level-window: log level {requested} ignored; starting at info outcome={outcome} requested-until={requested_until}"
+                       :requested (prin1-to-string (plist-get selection :requested)) :outcome outcome
+                       :requested_until (prin1-to-string (plist-get selection :requested-until))))))
 
 (defun agent-repl--set-log-level-window (level)
   "Make LEVEL the durable level: a window of the longest length unless `info'.
@@ -2743,11 +2743,13 @@ anywhere else (the runtime-owned target) is not this fact."
                           (expand-file-name file)))))
 
 (cl-defun agent-repl--emit-log-record
-    (ws level verbosity fmt args &key operation-fmt message-mode fatal)
+    (ws level verbosity site values &key tag message-mode fatal)
   "Build, route, persist, and present one log record.
-Every logging rung calls this function directly.  MESSAGE-MODE is nil,
-`quiet', or `echo'.  FATAL signals after persistence.  OPERATION-FMT preserves
-the untagged operation template used by warning and error wrappers.
+Every logging rung's emitter (log-site.el) calls this function directly.
+SITE is the log call's site and VALUES its named values.  MESSAGE-MODE is
+nil, `quiet', `echo' or `backend'.  FATAL signals after persistence.  TAG
+heads the recorded and displayed message (`WARNING: ', `ERROR: '); the
+site's template, key and operation are untouched by it.
 
 A ROUTING FAILURE IS NOT THE CALLER'S ERROR TO HANDLE.  Logging is called
 from everywhere, including from the middle of loops whose remaining
@@ -2793,10 +2795,11 @@ checked (`agent-repl--log-check-identity'); only the JSON record, the
 formatted message and the display text are not built."
   (when (and (not fatal)
              (not message-mode)
-             (stringp fmt)
+             (agent-repl-log-site-p site)
              (not (and agent-repl-log-to-file
                        (agent-repl--log-record-persists-p level verbosity)))
-             (eq (agent-repl--log-scope-candidate ws (or operation-fmt fmt))
+             (eq (agent-repl--log-scope-candidate
+                  ws (agent-repl-log-site-template site))
                  agent-repl--global-log-scope))
     (cl-return-from agent-repl--emit-log-record nil))
   (cl-flet
@@ -2811,21 +2814,28 @@ formatted message and the display text are not built."
            (when (and agent-repl-log-to-file
                       (agent-repl--log-record-persists-p fallback-level "normal"))
              (agent-repl--do-log-to-file
-              (agent-repl--log-record nil fallback-level "normal"
-                                      agent-repl--central-log-fallback-format
-                                      (list unroutable class
-                                            (agent-repl--log-operation (or operation-fmt fmt))
-                                            level
-                                            (if (and agent-repl-log-to-file
-                                                     (agent-repl--log-record-persists-p
-                                                      level verbosity))
-                                                "t"
-                                              "nil")
-                                            reason)
-                                      nil nil unroutable)
+              (let ((fallback (agent-repl--log-msg
+                               "elisp.core.log-central-fallback workspace={workspace} class={class} operation={operation} level={level} written={written} reason={reason}"
+                               :workspace (prin1-to-string unroutable)
+                               :class class
+                               :operation (if (agent-repl-log-site-p site)
+                                              (agent-repl-log-site-record-operation site values)
+                                            (agent-repl--log-operation
+                                             (agent-repl--log-site-template-of site)))
+                               :level level
+                               :written (if (and agent-repl-log-to-file
+                                                 (agent-repl--log-record-persists-p
+                                                  level verbosity))
+                                            "t"
+                                          "nil")
+                               :reason reason)))
+                (agent-repl--log-record nil fallback-level "normal"
+                                        (car fallback) (cdr fallback)
+                                        nil nil unroutable))
               fallback-level nil)))))
     (let* ((agent-repl--log-dir-confirmed (list :confirmed))
-           (routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
+           (template (agent-repl--log-site-template-of site))
+           (routing (agent-repl--resolve-log-workspace ws template))
            (routing-error (plist-get routing :routing-error))
            (sink-ws (plist-get routing :workspace))
            (pseudo-ws (plist-get routing :pseudo))
@@ -2841,14 +2851,17 @@ formatted message and the display text are not built."
       (if routing-error
           (let* ((offender (plist-get routing :offender))
 		 (reason (plist-get routing :reason))
-		 (route-fmt "elisp.core.log-routing-error workspace=%S reason=%s original-operation=%s")
-		 (route-args (list offender reason
-                                   (agent-repl--log-operation (or operation-fmt fmt))))
+		 (route (agent-repl--log-msg
+                         "elisp.core.log-routing-error workspace={workspace} reason={reason} original-operation={original_operation}"
+                         :workspace (prin1-to-string offender)
+                         :reason reason
+                         :original_operation (agent-repl--log-operation template)))
 		 (record (agent-repl--log-record nil "error" "normal"
-						 route-fmt route-args))
-		 (original (agent-repl--log-record nil level verbosity fmt args
-                                                   nil operation-fmt offender))
-		 (text (agent-repl--build-log-text nil fmt args)))
+						 (car route) (cdr route)))
+		 (original (agent-repl--log-record nil level verbosity site values
+                                                   nil tag offender))
+		 (text (agent-repl--build-log-text
+                        nil (agent-repl--log-site-message site values tag))))
             (when agent-repl-log-to-file
               (agent-repl--do-log-to-file record "error" nil))
             (agent-repl--note-unroutable-log-workspace offender)
@@ -2861,7 +2874,7 @@ formatted message and the display text are not built."
 		('echo (agent-repl--emit-message text t))
 		('backend
 		 (agent-repl--emit-message
-                  (concat "agent-repl: " (apply #'format fmt args)) t))))
+                  (concat "agent-repl: " (agent-repl--log-site-message site values)) t))))
             (when fatal
               (error "%s" text))
             original)
@@ -2889,9 +2902,9 @@ formatted message and the display text are not built."
               (if (not build)
                   (progn
                     (agent-repl--log-check-identity sink-ws)
-                    (agent-repl--log-check-format fmt args))
-		(setq record (agent-repl--log-record sink-ws level verbosity fmt args
-                                                     pseudo-ws operation-fmt unroutable-ws))
+                    (agent-repl--log-check-values site values))
+		(setq record (agent-repl--log-record sink-ws level verbosity site values
+                                                     pseudo-ws tag unroutable-ws))
 		(when to-file
                   (agent-repl--do-log-to-file record level sink-ws)))
             (error
@@ -2904,15 +2917,16 @@ formatted message and the display text are not built."
              (if (not build)
                  (progn
                    (agent-repl--log-check-identity nil)
-                   (agent-repl--log-check-format fmt args))
-               (setq record (agent-repl--log-record nil level verbosity fmt args
-                                                    nil operation-fmt sink-ws))
+                   (agent-repl--log-check-values site values))
+               (setq record (agent-repl--log-record nil level verbosity site values
+                                                    nil tag sink-ws))
                (when to-file
                  (agent-repl--do-log-to-file record level nil)))
              (setq sink-ws nil
                    to-buffer nil)))
           (let ((text (and (or message-mode fatal)
-                           (agent-repl--build-log-text sink-ws fmt args))))
+                           (agent-repl--build-log-text
+                            sink-ws (agent-repl--log-site-message site values tag)))))
             (when to-buffer
               (agent-repl--append-workspace-log sink-ws record))
             (unless fatal
@@ -2921,7 +2935,7 @@ formatted message and the display text are not built."
 		('echo (agent-repl--emit-message text t))
 		('backend
 		 (agent-repl--emit-message
-                  (concat "agent-repl: " (apply #'format fmt args)) t))))
+                  (concat "agent-repl: " (agent-repl--log-site-message site values)) t))))
             (when fatal
               (error "%s" text))
             record))))))
@@ -2977,60 +2991,6 @@ agent-repl's quiet sink from its loud one."
   (let ((inhibit-message (not echo)))
     (message "%s" text)))
 
-(defun agent-repl--do-log-level (ws fmt args level &optional error-p operation-fmt)
-  "Persist and emit WS / FMT / ARGS at LEVEL without changing public APIs.
-OPERATION-FMT, when non-nil, is the untagged format string the persisted
-record's stable `operation' name is derived from, while FMT — which may
-carry a severity display tag — still supplies the recorded and displayed
-message."
-  (agent-repl--emit-log-record ws level "normal" fmt args
-                               :operation-fmt operation-fmt
-                               :message-mode 'quiet
-                               :fatal error-p))
-
-(defun agent-repl--do-log (ws fmt args &optional error-p)
-  "Unconditional log entry: ALWAYS write to file AND emit to message/error.
-WS is the workspace name for context (or nil).  When ERROR-P is non-nil,
-signals the formatted line via `error' instead of `message' — the
-file-write still happens first so the line is captured before unwinding.
-
-Only the ERROR-P path reaches the echo area / modeline: a signalled
-`error' is a genuine fatal condition the user must act on immediately, so
-Emacs displays it regardless of `inhibit-message'.  The non-error path is
-captured unconditionally to the log file AND *Messages* but emitted
-QUIETLY (never the echo area), so warnings and background diagnostics no
-longer flash in the modeline — they stay durable and greppable on the
-quiet channels without interrupting the user.  This reserves the modeline
-as a signal for fatal errors alone.
-
-This is the entry point for log calls that MUST be captured regardless
-of `agent-repl-debug'.  Debug-gated callers (`agent-repl--log',
-`agent-repl--log-verbose') use the file-write path directly and emit
-quietly; `agent-repl--info' is the equivalent ungated quiet-notice level."
-  (agent-repl--emit-log-record ws (if error-p "error" "info") "normal" fmt args
-                               :message-mode 'quiet
-                               :fatal error-p))
-
-(defun agent-repl--log (ws fmt &rest args)
-  "Log a timestamped message for WS, always to file, conditionally to *Messages*.
-File write happens whenever `agent-repl-log-to-file' is non-nil (the
-default) — REGARDLESS of `agent-repl-debug'.  The `message' call only
-fires when `agent-repl-debug' is non-nil, and even then it is emitted
-quietly (into *Messages* only, never the echo area), so turning debug
-logging on never turns the modeline into a firehose.
-FMT and ARGS use the same format conventions as `message'."
-  (agent-repl--emit-log-record ws "debug" "normal" fmt args
-                               :message-mode (and agent-repl-debug 'quiet)))
-
-(defun agent-repl--log-verbose (ws fmt &rest args)
-  "Persist a high-frequency message and show it only in verbose mode.
-`agent-repl-debug' affects terminal and *Messages* visibility only.  The
-JSONL record carries level `debug' and persists whenever the durable level
-switch admits debug records."
-  (agent-repl--emit-log-record ws "debug" "verbose" fmt args
-                               :message-mode (and (eq agent-repl-debug 'verbose)
-                                                  'quiet)))
-
 ;;;; Decisions, recorded when they change.
 ;;
 ;; A HOT PATH RE-DECIDES THE SAME THING ON EVERY PASS: every roster push walks
@@ -3045,53 +3005,14 @@ switch admits debug records."
 (defvar agent-repl--log-decisions (make-hash-table :test 'equal)
   "KEY -> the decision last recorded under KEY (`agent-repl--log-decision').")
 
-(defun agent-repl--log-decision (key decision ws fmt &rest args)
-  "Record FMT and ARGS for WS at DEBUG when DECISION differs from KEY's last.
+(defun agent-repl--log-decision-claim (key decision)
+  "Claim KEY's DECISION for recording: non-nil when it differs from KEY's last.
 KEY names what is decided (a symbol and its subject, compared with `equal');
-DECISION is the outcome.  Answers non-nil when the record was written."
+DECISION is the outcome.  The `agent-repl--log-decision' macro records only
+a claimed decision."
   (unless (equal (gethash key agent-repl--log-decisions :undecided) decision)
     (puthash key decision agent-repl--log-decisions)
-    (apply #'agent-repl--log ws fmt args)
     t))
-
-(defun agent-repl--info (ws fmt &rest args)
-  "Log an informational line for WS to the QUIET sink, ungated by debug.
-The line ALWAYS reaches the log file and the *Messages* buffer, but it
-never reaches the echo area / modeline.  This is the level for background
-and lifecycle chatter that is valuable to have on the record but that the
-user must not be interrupted by: module loads, worktree creation progress,
-snapshot-load steps, sentinel bookkeeping, agent start/finish notices.
-
-Use `agent-repl--warn' instead to tag a recorded line with `WARNING:'
-severity (still quiet), or `agent-repl--error' for the `error' rung — a
-contract breach or a failed operation, recorded at the level the logging
-contract reserves for them.  `agent-repl--fatal' is the abort."
-  (agent-repl--emit-log-record ws "info" "normal" fmt args :message-mode 'quiet))
-
-(defun agent-repl--warn (ws fmt &rest args)
-  "Log a WARNING for WS to the QUIET sink: the log file and *Messages'.
-A `WARNING: ' severity tag is prepended, so call sites pass the bare
-message (no literal \"WARNING:\" prefix of their own).
-
-A warning is NOT fatal, so it does not reach the echo area / modeline:
-the line is recorded on the durable, greppable channels (log file plus
-*Messages*) for the user or a watching agent to find, but it never
-interrupts.  Reserve `agent-repl--error' for the `error' rung — a broken
-contract or a failed operation, which is worse but no louder — and
-`agent-repl--fatal' for a condition the caller must not continue past.
-This level still carries
-the `WARNING: ' severity that a plain `agent-repl--info' notice lacks:
-use it for failed writes, dropped state, broken invariants, and degraded
-functionality that are worth flagging in the log but are not fatal."
-  (if (stringp fmt)
-      (agent-repl--emit-log-record ws "warn" "normal" (concat "WARNING: " fmt) args
-                                   :operation-fmt fmt :message-mode 'quiet)
-    ;; A non-string FMT is a caller bug.  Hand it through untouched rather
-    ;; than `concat'-ing it (which would raise a wrong-type-argument here and
-    ;; bury the real culprit): `agent-repl--build-log-text' already captures a
-    ;; backtrace to *agent-repl-log-bug* for exactly this case, and ARGS is
-    ;; preserved so nothing about the offending call is lost.
-    (agent-repl--emit-log-record ws "warn" "normal" fmt args :message-mode 'quiet)))
 
 (defconst agent-repl--warn-once-capacity 4096
   "Maximum process-local warning fingerprints retained by `agent-repl--warn-once'.")
@@ -3102,18 +3023,18 @@ functionality that are worth flagging in the log but are not fatal."
 (defvar agent-repl--warn-once-order nil
   "FIFO order for `agent-repl--warn-once-fingerprints'.")
 
-(defun agent-repl--warn-once (ws fingerprint fmt &rest args)
-  "Log a warning once for stable causal FINGERPRINT and return whether emitted.
-WS, FMT, and ARGS have the same identity-complete logging contract as
-`agent-repl--warn'.  FINGERPRINT must be a nonempty stable string naming the
-causal diagnostic identity.  The process-local FIFO cache is bounded by
+(defun agent-repl--warn-once-claim (ws fingerprint)
+  "Claim FINGERPRINT for one warning about WS: non-nil when not yet emitted.
+FINGERPRINT must be a nonempty stable string naming the causal diagnostic
+identity.  The process-local FIFO cache is bounded by
 `agent-repl--warn-once-capacity'; eviction makes a later observation eligible
-to emit again rather than allowing unbounded diagnostic state."
+to emit again rather than allowing unbounded diagnostic state.  The
+`agent-repl--warn-once' macro emits only a claimed warning."
   (unless (and (stringp fingerprint) (not (string-empty-p fingerprint)))
-    (agent-repl--log ws "warn-once: rejected fingerprint=%S reason=empty-or-nonstring" fingerprint)
+    (agent-repl--log ws "warn-once: rejected fingerprint={fingerprint} reason=empty-or-nonstring"
+                     :fingerprint (prin1-to-string fingerprint))
     (error "agent-repl--warn-once: fingerprint must be a nonempty string"))
-  (if (gethash fingerprint agent-repl--warn-once-fingerprints)
-      nil
+  (unless (gethash fingerprint agent-repl--warn-once-fingerprints)
     (when (= (hash-table-count agent-repl--warn-once-fingerprints)
              agent-repl--warn-once-capacity)
       (remhash (car agent-repl--warn-once-order) agent-repl--warn-once-fingerprints)
@@ -3121,12 +3042,6 @@ to emit again rather than allowing unbounded diagnostic state."
     (puthash fingerprint t agent-repl--warn-once-fingerprints)
     (setq agent-repl--warn-once-order
           (append agent-repl--warn-once-order (list fingerprint)))
-    (if (stringp fmt)
-        (agent-repl--emit-log-record ws "warn" "normal"
-                                     (concat "WARNING: " fmt) args
-                                     :operation-fmt fmt :message-mode 'quiet)
-      (agent-repl--emit-log-record ws "warn" "normal" fmt args
-                                   :message-mode 'quiet))
     t))
 
 (defvar agent-repl--log-transition-states (make-hash-table :test 'equal)
@@ -3160,17 +3075,17 @@ off will not shrink one — that is `agent-repl-set-log-file-level'."
                  ('verbose "ON (verbose)")
                  (_ (agent-repl--fatal
                      '(:agent-repl-central "process-wide logging and utility state")
-                     "elisp.core.toggle-debug: agent-repl-debug has unexpected value=%S"
-                     agent-repl-debug)))))
+                     "elisp.core.toggle-debug: agent-repl-debug has unexpected value={value}"
+                     :value (prin1-to-string agent-repl-debug))))))
     ;; Emitted through `message' unconditionally: this is synchronous feedback
     ;; from a command the user just ran, and it must be visible in exactly the
     ;; case where the ladder has just been turned OFF.
     (message "[agent-repl] debug logging: %s" label)
-    (if agent-repl-debug
-        (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-debug: visibility=%s" label)
-      ;; The turn-OFF record cannot ride `--info' honestly once visibility is
-      ;; gone from *Messages*, but the durable sink still wants the boundary.
-      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-debug: visibility=%s" label))))
+    ;; The turn-OFF record cannot ride `--info' honestly once visibility is
+    ;; gone from *Messages*, but the durable sink still wants the boundary.
+    (agent-repl--log-at (if agent-repl-debug 'info 'debug)
+                        '(:agent-repl-central "process-wide logging and utility state")
+                        "elisp.core.toggle-debug: visibility={visibility}" :visibility label)))
 
 (defun agent-repl-set-log-file-level (level)
   "Set `agent-repl-log-file-level' to LEVEL.
@@ -3189,7 +3104,7 @@ being flooded and back up before a reproduction is captured."
   (unless (memq level '(debug info warn error))
     (agent-repl--error
      '(:agent-repl-central "process-wide logging and utility state")
-     "elisp.core.set-log-file-level: rejected level=%S reason=not-a-log-level" level)
+     "elisp.core.set-log-file-level: rejected level={level} reason=not-a-log-level" :level (prin1-to-string level))
     (error "agent-repl: %S is not a log level; expected one of debug info warn error"
            level))
   ;; A level other than info is a window: it reverts to info by itself
@@ -3198,7 +3113,7 @@ being flooded and back up before a reproduction is captured."
   ;; Announced through the durable sink as well as the echo area: the record
   ;; saying the threshold moved is itself the boundary a later reader needs to
   ;; explain why the surrounding volume changed.
-  (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.set-log-file-level: durable log level now %s" level)
+  (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.set-log-file-level: durable log level now {level}" :level level)
   (message "[agent-repl] durable log level: %s" level)
   level)
 
@@ -3214,8 +3129,8 @@ Affects the FILE only.  The per-workspace log buffers follow
   (agent-repl--set-log-level-window
    (if (eq agent-repl-log-file-level 'debug) 'info 'debug))
   (let ((on (eq agent-repl-log-file-level 'debug)))
-    (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-verbose-to-disk: verbose-to-file=%s"
-                      (if on "ON" "OFF"))
+    (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-verbose-to-disk: verbose-to-file={verbose_to_file}"
+                      :verbose_to_file (if on "ON" "OFF"))
     (message "[agent-repl] verbose logging to disk: %s%s"
              (if on "ON" "OFF")
              (if on "" " (warnings and errors still recorded)"))
@@ -3384,13 +3299,19 @@ propagates exactly as it did before."
     `(let ((inhibit-quit t))
        (let ((,result (progn ,@body)))
          (when quit-flag
-           (agent-repl--log
-            '(:agent-repl-central "process-wide logging and utility state")
-            "deferred-quit: C-g arrived inside %s — deferred, handing it off"
-            ,context)
+           (agent-repl--deferred-quit-arrived ,context)
            (agent-repl--deferred-quit-hand-off ,context)
            (agent-repl--deferred-quit-arm-audit ,context))
          ,result))))
+
+(defun agent-repl--deferred-quit-arrived (context)
+  "Record that a quit arrived inside CONTEXT and is being handed off.
+A function, not part of `agent-repl--with-deferred-quit''s expansion, so
+the record is one site wherever the macro is used."
+  (agent-repl--log
+   '(:agent-repl-central "process-wide logging and utility state")
+   "deferred-quit: C-g arrived inside {context} — deferred, handing it off"
+   :context context))
 
 (defun agent-repl--deferred-quit-char ()
   "Return the terminal's quit character, as `read-event' would yield it.
@@ -3425,13 +3346,13 @@ cannot itself be interrupted.  It never signals."
         (push quit-char unread-command-events)
         (agent-repl--log
          '(:agent-repl-central "process-wide logging and utility state")
-         "deferred-quit: requeued the quit deferred out of %s as key %s for the standing minibuffer"
-         context (single-key-description quit-char))
+         "deferred-quit: requeued the quit deferred out of {context} as key {key} for the standing minibuffer"
+         :context context :key (single-key-description quit-char))
         'requeued)
     (agent-repl--log
      '(:agent-repl-central "process-wide logging and utility state")
-     "deferred-quit: the quit deferred out of %s is still armed for the command loop (minibuffer=none)"
-     context)
+     "deferred-quit: the quit deferred out of {context} is still armed for the command loop (minibuffer=none)"
+     :context context)
     'armed))
 
 (defun agent-repl--deferred-quit-arm-audit (context)
@@ -3468,8 +3389,8 @@ raising it here."
       (agent-repl--deferred-quit-hand-off context)
     (agent-repl--log
      '(:agent-repl-central "process-wide logging and utility state")
-     "deferred-quit: the quit deferred out of %s was honoured before the audit ran"
-     context)))
+     "deferred-quit: the quit deferred out of {context} was honoured before the audit ran"
+     :context context)))
 
 ;;;; ---- User-facing copy: how long ago ----
 
@@ -3669,9 +3590,9 @@ workspace, global otherwise.  Returns the echoed text."
          (text (if (string-prefix-p agent-repl--user-message-prefix copy)
                    copy
                  (concat agent-repl--user-message-prefix copy))))
-    (agent-repl--log ws "user-message: %s" text)
+    (agent-repl--log ws "user-message: {text}" :text text)
     (when (and (stringp detail) (not (string-empty-p detail)))
-      (agent-repl--log ws "user-message-detail: %s" detail))
+      (agent-repl--log ws "user-message-detail: {detail}" :detail detail))
     (agent-repl--emit-message text t)
     text))
 
@@ -3739,26 +3660,6 @@ is a freeze rather than merely a slow call."
                                 agent-repl--backend-output-tail-limit))))
      (t joined))))
 
-(defun agent-repl--backend-phase (ws fmt &rest args)
-  "Record a backend-initiation phase transition and ECHO it to the user.
-
-This is the ONE background flow the ladder commentary above exempts from
-its no-`message' rule, and the exemption is narrow: artifact builds,
-launchd kickstarts, the daemon spawn and the runtime bounce.  The build
-step is a synchronous `call-process' that blocks the frame outright, so a
-user with no line at all cannot tell a rebuild from a hang — and a bounce
-that fails silently looks exactly like a bounce that never started.
-
-Only PHASE TRANSITIONS and outcomes come through here.  The subprocess
-spew itself stays on `agent-repl--log', where the runbooks mine it; a
-failure echo carries at most `agent-repl--backend-output-tail' of it plus
-a pointer at the log file.
-
-FMT and ARGS keep the ladder's format-string signature, so the persisted
-`operation' name stays derived from the template and never from a runtime
-value."
-  (agent-repl--emit-log-record ws "info" "normal" fmt args :message-mode 'backend))
-
 (defun agent-repl--minibuffer-busy-p ()
   "Return non-nil when the user is currently working in the minibuffer.
 
@@ -3771,22 +3672,6 @@ interrupting for -- so callers route it to the quiet sink instead of
 dropping it."
   (or (> (minibuffer-depth) 0)
       (and (minibufferp) t)))
-
-(defun agent-repl--phase-echo (ws fmt &rest args)
-  "Record a high-level startup phase for WS and echo it when the user is free.
-
-The same one-call contract as `agent-repl--backend-phase' -- the log
-record and the echo-area line are produced by a single call, never by a
-log call plus a bare `message' -- with the minibuffer guard
-`agent-repl--minibuffer-busy-p' describes: a phase reached while the user
-is typing is recorded QUIETLY and never echoed.
-
-Only high-level, once-per-transition phases belong here: the daemon
-build, spawn, link-up and outcome, and the workspace bring-up count.
-Anything finer-grained is log chatter and belongs on `agent-repl--info'."
-  (agent-repl--emit-log-record
-   ws "info" "normal" fmt args
-   :message-mode (if (agent-repl--minibuffer-busy-p) 'quiet 'backend)))
 
 (defun agent-repl--call-recording-error (ws operation fn)
   "Call FN; record an error it signals for WS under OPERATION, then re-signal it.
@@ -3801,57 +3686,9 @@ so the failure stays as loud as it was.  Answers FN\='s value."
   (condition-case err
       (funcall fn)
     (error
-     (agent-repl--error ws "%s-failed ws=%s cause=%S" operation ws err)
+     (agent-repl--error ws "{operation}-failed ws={ws} cause={cause}"
+                       :operation operation :ws ws :cause (prin1-to-string err))
      (signal (car err) (cdr err)))))
-
-(defun agent-repl--fatal (ws fmt &rest args)
-  "Record a fatal condition for WS and then SIGNAL it.
-WS is the workspace name for context (or nil).  FMT and ARGS are formatted
-the same way `agent-repl--log' formats them, and the resulting line is
-written to the durable sink BEFORE the `error' is signalled so the failure
-is captured regardless of whether debug logging is on.  Fires regardless
-of `agent-repl-debug'.
-
-This is the ABORT, not a log level: a signalled `error' is the one thing
-Emacs always displays, so it is also the only path to the loud sink (see
-the severity-gate commentary above).  Reach for it where the caller must
-not continue — a refusal, a broken precondition, an unusable input.  When
-the branch only needs to RECORD that something failed and carry on, that
-is `agent-repl--error' one line below."
-  (agent-repl--emit-log-record ws "error" "normal" fmt args
-                               :message-mode 'quiet :fatal t))
-
-(defun agent-repl--error (ws fmt &rest args)
-  "Log an ERROR for WS to the QUIET sink: the log file and *Messages*.
-An `ERROR: \' severity tag is prepended, so call sites pass the bare
-message (no literal \"ERROR:\" prefix of their own).
-
-This is the top rung of the ladder and it is a LOGGING level, exactly like
-`agent-repl--warn' one rung below it: the JSONL record carries
-`level: \"error\"' (the spelling logging-contract.md reserves for a broken
-invariant or a failed operation), it is persisted whenever it clears
-`agent-repl-log-file-level', and it is emitted quietly so it never flashes
-in the modeline.
-
-It does NOT signal.  Recording that something failed and ABORTING the
-caller are separate acts, and conflating them makes the error level
-unusable for the every-logical-branch instrumentation it exists for: a
-branch that logs its own failure and then returns a failure to its caller
-must be able to say so without unwinding the stack underneath itself.
-
-A caller that must abort uses `agent-repl--fatal' (one line above), which
-records at this same level and then signals; a refusal that already has
-its own `error' / `user-error' keeps it and calls this to put the reason
-on the record first."
-  (if (stringp fmt)
-      (agent-repl--emit-log-record ws "error" "normal" (concat "ERROR: " fmt) args
-                                   :operation-fmt fmt :message-mode 'quiet)
-    ;; A non-string FMT is a caller bug.  Hand it through untouched rather
-    ;; than `concat'-ing it (which would raise a wrong-type-argument here and
-    ;; bury the real culprit): `agent-repl--build-log-text' already captures a
-    ;; backtrace to *agent-repl-log-bug* for exactly this case, and ARGS is
-    ;; preserved so nothing about the offending call is lost.
-    (agent-repl--emit-log-record ws "error" "normal" fmt args :message-mode 'quiet)))
 
 (defun agent-repl--assert-main-thread (what)
   "Signal an error when called off the main thread; no-op (nil) on main.
@@ -3868,11 +3705,10 @@ then-synchronous frontend HTTP call).  Signaling here converts
 the would-be hard deadlock into an ordinary error that the caller's
 failure handling surfaces."
   (unless (eq (current-thread) main-thread)
-    (agent-repl--do-log
-     nil
-     "assert-main-thread: REFUSING %s off the main thread (thread=%s) — ns_select_1 worker-thread trap, see AGENTS.md"
-     (list what (thread-name (current-thread)))
-     t)))
+    (agent-repl--fatal
+     '(:agent-repl-central "the main-thread guard runs below any workspace's attribution")
+     "assert-main-thread: REFUSING {what} off the main thread (thread={thread}) — ns_select_1 worker-thread trap, see AGENTS.md"
+     :what what :thread (thread-name (current-thread)))))
 
 ;;; Git and workspace identity
 
@@ -3917,8 +3753,8 @@ dead PROC.  Returns non-nil when a deletion was performed or scheduled."
     (if (eq (current-thread) main-thread)
         (progn (delete-process proc) t)
       (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                       "kill-process-safely: deferring delete-process %s to main thread"
-                       (ignore-errors (process-name proc)))
+                       "kill-process-safely: deferring delete-process {process} to main thread"
+                       :process (ignore-errors (process-name proc)))
       (agent-repl--defer-to-main-thread
        (lambda () (when (process-live-p proc) (delete-process proc))))
       t)))
@@ -3938,8 +3774,8 @@ LOG-TAG and LOG-WS, when both non-nil, name the completion log line."
     (let ((status (if timed-out 'timeout (process-exit-status proc))))
       (when (and log-tag log-ws)
         (agent-repl--log log-ws
-                         "%s: process exited status=%S elapsed=%.1fs (main-thread wait)"
-                         log-tag status (- (float-time) started-at)))
+                         "{log_tag}: process exited status={status} elapsed={elapsed}s (main-thread wait)"
+                         :log_tag log-tag :status (prin1-to-string status) :elapsed (format "%.1f" (- (float-time) started-at))))
       status)))
 
 (defun agent-repl--wait-for-process-exit--worker (proc timeout-seconds log-tag log-ws)
@@ -3995,8 +3831,8 @@ line."
       (when (timerp timeout-timer) (cancel-timer timeout-timer)))
     (when (and log-tag log-ws)
       (agent-repl--log log-ws
-                       "%s: process exited status=%S elapsed=%.1fs (worker-thread wait)"
-                       log-tag status (- (float-time) started-at)))
+                       "{log_tag}: process exited status={status} elapsed={elapsed}s (worker-thread wait)"
+                       :log_tag log-tag :status (prin1-to-string status) :elapsed (format "%.1f" (- (float-time) started-at))))
     status))
 
 (defun agent-repl--wait-for-process-exit (proc timeout-seconds &optional log-tag log-ws)
@@ -4072,8 +3908,8 @@ explode."
                        :noquery t))))
           (agent-repl--log-verbose
            '(:agent-repl-central "process-wide logging and utility state")
-           "capture-process-output: spawned program=%s args=%S suppress-stderr=%s timeout=%s"
-           program args suppress-stderr timeout)
+           "capture-process-output: spawned program={program} args={args} suppress-stderr={suppress_stderr} timeout={timeout}"
+           :program program :args (prin1-to-string args) :suppress_stderr suppress-stderr :timeout timeout)
           (set-process-query-on-exit-flag proc nil)
           ;; Install a no-op sentinel BEFORE waiting.  Left alone, the
           ;; process keeps Emacs's `internal-default-process-sentinel',
@@ -4096,8 +3932,8 @@ explode."
               ;; (the per-call cherry-pick-base stalls were invisible
               ;; until this line existed).
               (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                                "capture-process-output: TIMEOUT after %ss %s %S"
-                                timeout program args)
+                                "capture-process-output: TIMEOUT after {timeout}s {program} {args}"
+                                :timeout timeout :program program :args (prin1-to-string args))
               "")
              (t
               (with-current-buffer stdout-buf
@@ -4106,8 +3942,8 @@ explode."
                                 (point-min) (point-max)))))
                   (agent-repl--log-verbose
                    '(:agent-repl-central "process-wide logging and utility state")
-                   "capture-process-output: completed program=%s args=%S status=%S output-length=%d"
-                   program args status (length output))
+                   "capture-process-output: completed program={program} args={args} status={status} output-length={output_length}"
+                   :program program :args (prin1-to-string args) :status (prin1-to-string status) :output_length (length output))
                   output))))))
       ;; Buffer cleanup MUST be thread-safe: on the timeout path the
       ;; child can still be alive (its `delete-process' was deferred to
@@ -4184,8 +4020,8 @@ Tests\")."
                         buf
                         command))))
     (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                      "async-command: spawned label=%s dir=%s command=%S input-length=%s"
-                      label default-directory command (and input (length input)))
+                      "async-command: spawned label={label} dir={dir} command={command} input-length={input_length}"
+                      :label label :dir default-directory :command (prin1-to-string command) :input_length (and input (length input)))
     (set-process-query-on-exit-flag proc nil)
     (set-process-sentinel
      proc
@@ -4206,8 +4042,8 @@ from the external spawn boundary, so its pure Elisp behavior is directly
 testable with process fixtures."
   (if (process-live-p process)
       (agent-repl--log-verbose '(:agent-repl-central "process-wide logging and utility state")
-                                "async-command: nonterminal-sentinel label=%s event=%S"
-                                label event)
+                                "async-command: nonterminal-sentinel label={label} event={event}"
+                                :label label :event (prin1-to-string event))
     (let* ((buffer (process-buffer process))
            (output (when (buffer-live-p buffer)
                      (with-current-buffer buffer
@@ -4223,8 +4059,8 @@ testable with process fixtures."
         ;; defines `agent-repl--kill-buffer-safely' before a caller can spawn.
         (agent-repl--kill-buffer-safely buffer))
       (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                        "async-command: completed label=%s status=%s ok=%s event=%S output-length=%d"
-                        label status ok event (length safe-output))
+                        "async-command: completed label={label} status={status} ok={ok} event={event} output-length={output_length}"
+                        :label label :status status :ok ok :event (prin1-to-string event) :output_length (length safe-output))
       (funcall callback ok safe-output))))
 
 (defun agent-repl--async-gh (label dir args callback)
@@ -4360,8 +4196,8 @@ Lazily computes and caches the value on first invocation."
     (unless agent-repl-git-branch
       (setq agent-repl-git-branch
             (agent-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")))
-    (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "print-git-branch: cache-hit=%s branch=%S"
-                      cache-hit agent-repl-git-branch))
+    (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "print-git-branch: cache-hit={cache_hit} branch={branch}"
+                      :cache_hit cache-hit :branch (prin1-to-string agent-repl-git-branch)))
   (message "agent-repl loaded on branch: %s" agent-repl-git-branch))
 
 (defvar agent-repl--path-canonical-cache nil
@@ -4410,7 +4246,7 @@ expected to only invoke this from contexts where a workspace is active."
          (hash (when root
                (substring (md5 (agent-repl--path-canonical root))
                           0 agent-repl-workspace-dir-hash-length))))
-    (agent-repl--log-verbose ws "workspace-dir-hash: ws=%s root=%s hash=%s" ws root hash)
+    (agent-repl--log-verbose ws "workspace-dir-hash: ws={ws} root={root} hash={hash}" :ws ws :root root :hash hash)
     hash))
 
 ;;; Workspace state management
@@ -4554,15 +4390,15 @@ to delete the input panel as orphaned."
          (safe (agent-repl--sanitize-ws-name ws-name)))
     (when (or (null safe) (string-empty-p safe))
       (agent-repl--log ws-name
-                        "buffer-name: FAILED suffix=%S ws=%S sanitized=%S reason=empty-workspace-name"
-                        suffix ws-name safe)
+                        "buffer-name: FAILED suffix={suffix} ws={ws} sanitized={sanitized} reason=empty-workspace-name"
+                        :suffix (prin1-to-string suffix) :ws (prin1-to-string ws-name) :sanitized (prin1-to-string safe))
       (error "agent-repl--buffer-name: empty workspace name (ws=%S, +workspace-current-name=%S, sanitized=%S)"
              ws (agent-repl--ws-current-name) safe))
     (let ((name (format agent-repl-panel-buffer-name-format (or suffix "") safe)))
       ;; Silent when the log sink is resolving its own buffer: instrumenting
       ;; that path makes every workspace-scoped record emit a second record.
       (unless agent-repl--log-sink-reentrant
-        (agent-repl--log-verbose ws-name "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name))
+        (agent-repl--log-verbose ws-name "buffer-name: suffix={suffix} ws={ws} name={name}" :suffix suffix :ws ws-name :name name))
       name)))
 
 (defun agent-repl--input-buffer-name (ws title)
@@ -4701,9 +4537,11 @@ color and the one it replaced.  The caller stores the returned record in
 its own buffer-local variable: each painter owns its remaps alone."
   (if (equal (car painted) color)
       painted
-    ;; EVENT heads the format itself, so it names the record's operation.
-    (agent-repl--log scope (concat event " buffer=%s color=%s from=%S")
-                     (buffer-name) color (car painted))
+    ;; EVENT heads the message as a named value: the template stays one
+    ;; literal, so every paint is one site, told apart by its `event' field.
+    (agent-repl--log scope "{event} buffer={buffer} color={color} from={from}"
+                     :event event :buffer (buffer-name) :color color
+                     :from (prin1-to-string (car painted)))
     (mapc #'face-remap-remove-relative (cdr painted))
     (cons color (funcall paint color))))
 
@@ -4819,25 +4657,25 @@ log line."
           (push key unavailable)
           (agent-repl--warn
            '(:agent-repl-central "process-wide logging and utility state")
-           "assert-heartbeat-armed: key=%s outcome=unavailable arm-fn=%s reason=owner-not-loaded"
-           key arm-fn))
+           "assert-heartbeat-armed: key={key} outcome=unavailable arm-fn={arm_fn} reason=owner-not-loaded"
+           :key key :arm_fn arm-fn))
          (t
           (agent-repl--info
            '(:agent-repl-central "process-wide logging and utility state")
-           "assert-heartbeat-armed: key=%s outcome=stranded arm-fn=%s action=re-arming"
-           key arm-fn)
+           "assert-heartbeat-armed: key={key} outcome=stranded arm-fn={arm_fn} action=re-arming"
+           :key key :arm_fn arm-fn)
           (funcall arm-fn)
           (if (agent-repl--timer-armed-p key)
               (progn
                 (push key rearmed)
                 (agent-repl--info
                  '(:agent-repl-central "process-wide logging and utility state")
-                 "assert-heartbeat-armed: key=%s outcome=rearmed arm-fn=%s" key arm-fn))
+                 "assert-heartbeat-armed: key={key} outcome=rearmed arm-fn={arm_fn}" :key key :arm_fn arm-fn))
             (push key failed)
             (agent-repl--warn
              '(:agent-repl-central "process-wide logging and utility state")
-             "assert-heartbeat-armed: key=%s outcome=rearm-failed arm-fn=%s"
-             key arm-fn))))))
+             "assert-heartbeat-armed: key={key} outcome=rearm-failed arm-fn={arm_fn}"
+             :key key :arm_fn arm-fn))))))
     (let ((result (list :armed (nreverse armed)
                         :rearmed (nreverse rearmed)
                         :failed (nreverse failed)
@@ -4845,11 +4683,11 @@ log line."
                         :paused (nreverse paused))))
       (agent-repl--log-verbose
        '(:agent-repl-central "process-wide logging and utility state")
-       "assert-heartbeat-armed: armed=%d rearmed=%d failed=%d unavailable=%d"
-       (length (plist-get result :armed))
-       (length (plist-get result :rearmed))
-       (length (plist-get result :failed))
-       (length (plist-get result :unavailable)))
+       "assert-heartbeat-armed: armed={armed} rearmed={rearmed} failed={failed} unavailable={unavailable}"
+       :armed (length (plist-get result :armed))
+       :rearmed (length (plist-get result :rearmed))
+       :failed (length (plist-get result :failed))
+       :unavailable (length (plist-get result :unavailable)))
       result)))
 
 (defun agent-repl--heartbeat-arm-functions-available-p ()
@@ -4890,9 +4728,9 @@ Returns `:checked' with the assertion result consed on, or `:deferred'."
                                #'agent-repl--assert-heartbeat-armed))
     (agent-repl--log
      '(:agent-repl-central "process-wide logging and utility state")
-     "assert-heartbeat-armed: outcome=deferred reason=owners-not-loaded delay=%s timer=%S"
-     agent-repl-heartbeat-assert-defer-delay
-     agent-repl--heartbeat-assert-deferral-timer)
+     "assert-heartbeat-armed: outcome=deferred reason=owners-not-loaded delay={delay} timer={timer}"
+     :delay agent-repl-heartbeat-assert-defer-delay
+     :timer (prin1-to-string agent-repl--heartbeat-assert-deferral-timer))
     :deferred))
 
 ;;;; ---- Feed text zoom keys ------------------------------------------------

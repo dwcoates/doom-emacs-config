@@ -28,7 +28,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { clone, create } from "@bufbuild/protobuf";
-import { bindLog, clearRequestId, onLogSinkPoisoned, setClaudeSessionId, setRequestId } from "../log.js";
+import { bindLog, clearRequestId, onLogSinkPoisoned, renderMessage, setClaudeSessionId, setRequestId, type LogMessage } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 import {
   acquireSessionLock,
@@ -262,7 +262,7 @@ import { saidContent, saidContentShape, type SaidContent } from "./said-content.
 import { transcriptPath } from "./vendor-paths.js";
 import { spawningCallOfMessage } from "../convert/fold-context.js";
 
-const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engine.session" });
+const LOGGER = bindLog("shim.engine.session", { component: "shim-engine-session", operation: "shim.engine.session" });
 
 /** How the engine asks for a query; the factory behind it is real or fake. */
 export interface QuerySpec {
@@ -1888,7 +1888,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function pushColdCompactionPhase(
     which: conversationv1.SessionCompactionPhase,
-    said: string,
+    said: LogMessage,
   ): void {
     narrateCompactionPhase(which, coldCompactionFigures ?? {}, said, coldCompactionRequestedModel);
   }
@@ -1901,13 +1901,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function narrateCompactionPhase(
     which: conversationv1.SessionCompactionPhase,
     figures: Partial<CompactionFigures> & { error?: string },
-    said: string,
+    said: LogMessage,
     requestedModel: string,
     context: Record<string, string> = {},
   ): void {
     pushes.push(compactionProgressUpdate(which, figures));
-    LOGGER.info(
-      {
+    LOGGER.info({
         ...context,
         phase: conversationv1.SessionCompactionPhase[which],
         // THE MODEL THE REQUEST NAMED, on every phase: `summarizer_model` is
@@ -3917,12 +3916,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // takes in this turn now, while nobody waits on it.
       transcriptIndexOf(identity.vendorSessionId).refresh();
     }
+    // ONE RECORD CLOSES EVERY TURN, keep-alive or not, which its keepalive
+    // field tells apart.
+    const closed = (): void => LOGGER.info({ turn_id: ended.id.value, keepalive: ended.keepalive }, "closed a turn");
     if (ended.keepalive) {
       // A KEEP-ALIVE'S END IS NOBODY'S TURN END. Nothing is pushed for it: the
       // context usage it moved, the title it cannot have changed and the
       // account usage it spent all belong to housekeeping no surface shows, and
       // the next real turn's own end restates every one of them.
-      LOGGER.info({ turn_id: ended.id.value, keepalive: true }, "closed a turn");
+      closed();
       return;
     }
     await pushContextUsage();
@@ -3937,7 +3939,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // Awaited, not fired and forgotten: an unawaited probe would race the next
     // turn's own close.
     await reprobeSessionFacts();
-    LOGGER.info({ turn_id: ended.id.value, keepalive: false }, "closed a turn");
+    closed();
   }
 
   /** A model change that waited for the turn to end lands now, and its caller is answered. */
@@ -4734,8 +4736,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // pretending otherwise would hide a dead query -- the caller's own loss
       // path takes it from here.
       LOGGER.error(
-        { cause: err instanceof Error ? err.message : String(err), replacing },
-        `the plain resume that was to replace ${replacing} ALSO failed; the session's own loss path owns this now`,
+        { cause: err instanceof Error ? err.message : String(err) },
+        "the plain resume that was to replace {replacing} ALSO failed; the session's own loss path owns this now", { replacing },
       );
       return false;
     }
@@ -5788,7 +5790,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         coldCompacted = true;
         pushColdCompactionPhase(
           conversationv1.SessionCompactionPhase.RESUMING,
-          "the cold gate's compaction is done; resuming the session from its summary",
+          LOGGER.message("the cold gate's compaction is done; resuming the session from its summary"),
         );
       }
       if (remedy.kind === "cleared") {
@@ -6140,7 +6142,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (coldCompacted) {
       pushColdCompactionPhase(
         conversationv1.SessionCompactionPhase.STARTED,
-        "the session resumed from the cold gate's compaction is up",
+        LOGGER.message("the session resumed from the cold gate's compaction is up"),
       );
     }
     // THE START REACHED THE VENDOR, so whatever outage an earlier attempt saw
@@ -6286,7 +6288,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const detail = started
         ? "this shim already started its session; a summary is asked before the start"
         : "this shim holds a parked conversation's bridge, whose vendor process holds the conversation open";
-      LOGGER.info(context, `refused SummarizeConversation: ${detail}`);
+      LOGGER.info(context, "refused SummarizeConversation: {detail}", { detail });
       return summarizeConversationRefused({ kind: "alreadyStarted" }, detail);
     }
     if (use.case === "carry") {
@@ -6337,7 +6339,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const phase = (
       which: conversationv1.SessionCompactionPhase,
       figures: Partial<CompactionFigures> & { error?: string },
-      said: string,
+      said: LogMessage,
     ): void => narrateCompactionPhase(which, figures, said, model, { vendor_session_id: vendorSessionId });
     /**
      * A compaction that did not complete, said once to both surfaces, with
@@ -6352,7 +6354,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       phase(
         conversationv1.SessionCompactionPhase.FAILED,
         { tokensBefore: facts.contextTokens, error },
-        "the cold gate's compaction did not complete",
+        LOGGER.message("the cold gate's compaction did not complete"),
       );
       LOGGER.debug(
         { vendor_session_id: vendorSessionId, retry, api_failure: apiFailure?.kind.case ?? "" },
@@ -6369,7 +6371,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     phase(
       conversationv1.SessionCompactionPhase.SUMMARIZING,
       { tokensBefore: facts.contextTokens },
-      "the cold gate is summarizing the conversation on a headless inference call",
+      LOGGER.message("the cold gate is summarizing the conversation on a headless inference call"),
     );
     const asked = await summarize(vendorSessionId, model, scope);
     if (!asked.ok) {
@@ -6428,7 +6430,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       phase(
         conversationv1.SessionCompactionPhase.SUMMARIZED,
         coldCompactionFigures,
-        "the cold gate's summary came back and the compaction boundary was appended to the transcript",
+        LOGGER.message("the cold gate's summary came back and the compaction boundary was appended to the transcript"),
       );
       return { ok: true, summary, tokensAfter: outputTokens };
     } catch (err) {
@@ -7296,7 +7298,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // the query a send would go onto.
     const busy = mainAgentBusy();
     if (busy !== undefined) {
-      LOGGER.logVerbose({ outcome: "skipped_busy", busy }, `keep-alive beat skipped: ${busy}`);
+      LOGGER.logVerbose({ outcome: "skipped_busy" }, "keep-alive beat skipped: {busy}", { busy });
       return { kind: "busy", detail: busy };
     }
     // A keep-alive turn's id NEVER reaches the wire: TurnIds are daemon-minted
@@ -7706,7 +7708,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           asked_vendor_session_id: source.case === "resume" ? source.value.vendorSessionId : "",
           remediation: source.case === "resume" ? (source.value.coldRemediation?.remediation.case ?? "") : "",
         },
-        "refused StartSession: " + detail,
+        "refused StartSession: {detail}", { detail },
       );
       return startSessionRefused({ kind: "alreadyStarted" }, detail);
     }
@@ -8506,7 +8508,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         await withBudget(
           stopVendorWork(active, snapshot, () => endTurnsForTeardown(reason)),
           watcherConclusionBudgetMs,
-          "the vendor did not answer the teardown's interrupt and per-task stops within its budget; the stopped shell runs are closed and the stand-down goes on",
+          LOGGER.message("the vendor did not answer the teardown's interrupt and per-task stops within its budget; the stopped shell runs are closed and the stand-down goes on"),
         );
         // A LATE INTERRUPT ASKS NOTHING MORE: the stand-down has moved on and
         // the query is about to be closed under it.
@@ -8538,7 +8540,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       await withBudget(
         ending.catch(() => undefined),
         watcherConclusionBudgetMs,
-        "the vendor message loop did not end within its budget after the query was closed; standing down without it",
+        LOGGER.message("the vendor message loop did not end within its budget after the query was closed; standing down without it"),
         () => loopParkFields(endingPark, deps.nowMs()),
       );
     }
@@ -8689,7 +8691,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         withBudget(
           entry.ended,
           watcherConclusionBudgetMs,
-          `the WatchBash stream on ${entry.work.value} did not end within its conclusion budget`,
+          LOGGER.message("the WatchBash stream on {work_id} did not end within its conclusion budget", { work_id: entry.work.value }),
         ),
       ),
     );
@@ -8729,7 +8731,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         await withBudget(
           entry.ended,
           watcherConclusionBudgetMs,
-          `the WatchAgent tail on ${entry.agent.value} did not end within its conclusion budget`,
+          LOGGER.message("the WatchAgent tail on {agent_id} did not end within its conclusion budget", { agent_id: entry.agent.value }),
           // WHERE THE TAIL STOOD says which side held it: served short of the
           // head is a consumer not reading, served through it is one that
           // read everything and did not let the stream end (2026-11-13: 13
@@ -8834,7 +8836,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function withBudget(
     work: Promise<void>,
     budgetMs: number,
-    complaint: string,
+    complaint: LogMessage,
     overrun: () => Record<string, unknown> = () => ({}),
   ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -8845,7 +8847,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       const outcome = await Promise.race([work.then(() => "ended" as const), expiry]);
       if (outcome === "expired") {
-        LOGGER.error({ ...overrun(), budget_ms: budgetMs, detail: complaint }, complaint);
+        LOGGER.error({ ...overrun(), budget_ms: budgetMs, detail: renderMessage(complaint) }, complaint);
       }
     } finally {
       if (timer !== undefined) clearTimeout(timer);

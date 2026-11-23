@@ -38,6 +38,10 @@ Compact query modes (--sample composes with --tally; the rest are exclusive of e
 Harvest:
   --harvest FROM TO  count every warn/error and sink finding across --all in the inclusive RFC3339 window
 
+Which log sites fired in a window, counted per site from the daemon's per-deploy
+tally rather than from these files (so past their retention too), is
+`agent-repld logs sites -since WHEN [-until WHEN] [-level LEVEL]`
+(logging-contract.md "Log sites").
 Every selected log includes its current file and rotation generations .1 through .5.
 Malformed JSONL is an error naming the file and line; it is never skipped.
 Absent or unreadable sinks and workspace sinks that are not symlinks are findings.

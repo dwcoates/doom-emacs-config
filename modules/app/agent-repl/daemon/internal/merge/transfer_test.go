@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // heldInGateForTransfer runs the harness's merge into its test gate and
@@ -545,7 +546,7 @@ func TestATakeBackWhoseHeldAbandonmentFailsAnswersTheFailure(t *testing.T) {
 }
 
 func TestAwaitOwnEnd(t *testing.T) {
-	says := ownEnd{refusal: "merge: %s outlived %s", late: "the run outlived the bound", ended: "the run ended"}
+	says := ownEnd{refusal: "merge: %s outlived %s", late: logsite.Msg("the run outlived the bound"), ended: logsite.Msg("the run ended")}
 	tests := []struct {
 		name    string
 		ended   bool
@@ -553,8 +554,8 @@ func TestAwaitOwnEnd(t *testing.T) {
 		level   string
 		message string
 	}{
-		{name: "a run that ends is forgotten", ended: true, level: "info", message: says.ended},
-		{name: "a run that outlives the bound refuses the suspension", wantErr: true, level: "error", message: says.late},
+		{name: "a run that ends is forgotten", ended: true, level: "info", message: says.ended.Template()},
+		{name: "a run that outlives the bound refuses the suspension", wantErr: true, level: "error", message: says.late.Template()},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -697,7 +698,7 @@ func TestCutSuspendedCutsTheRunWithItsSuspensionsCause(t *testing.T) {
 	if err := cause(); !errors.Is(err, errPaused) {
 		t.Fatalf("the run was cut with %v, want the pause's cause", err)
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: suspendPause.op, Message: suspendPause.moved}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: suspendPause.op, Message: suspendPause.moved.Template()}); !ok {
 		t.Fatalf("no record of the move: %v", h.logs.Records())
 	}
 	if _, stepped := fields["step"]; !stepped {

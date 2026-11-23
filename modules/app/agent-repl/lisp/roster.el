@@ -49,13 +49,12 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
-(declare-function agent-repl--log "core" (ws format-string &rest args))
-(declare-function agent-repl--log-decision "core" (key decision ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws format-string &rest args))
-(declare-function agent-repl--warn "core" (ws format-string &rest args))
-(declare-function agent-repl--error "core" (ws format-string &rest args))
 (declare-function agent-repl--next-log-request-id "core" ())
 (declare-function agent-repl--with-log-context "core"
                   (workspace request-id function))
@@ -602,7 +601,7 @@ FMT and ARGS say why.  The record names the page; the signal carries the
 same sentence, so a caller surfaces the very cause the log holds."
   (let ((cause (apply #'format fmt args)))
     (agent-repl--error agent-repl-roster--merged-scope
-                       "elisp.roster.merged-page-failed: page=%d cause=%s" page cause)
+                       "elisp.roster.merged-page-failed: page={page} cause={cause}" :page page :cause cause)
     (signal 'agent-repl-roster-merged-error (list page cause))))
 
 (defun agent-repl-roster--merged-page (response page)
@@ -697,14 +696,15 @@ is never offered as the list."
             walked (agent-repl-roster--merged-walk-sync conn max-pages))
       (unless (nth 2 walked)
         (agent-repl--info agent-repl-roster--merged-scope
-                          "elisp.roster.merged-set-moved: attempt=%d" attempt)))
+                          "elisp.roster.merged-set-moved: attempt={attempt}" :attempt attempt)))
     (unless (nth 2 walked)
       (agent-repl-roster--merged-fail
        0 "the merged set changed under %d reads" attempt))
     (let ((entries (agent-repl-roster--merged-entries-of (nth 1 walked))))
       (agent-repl--log agent-repl-roster--merged-scope
-                       "elisp.roster.merged-listed: rows=%d entries=%d max-pages=%S revision=%s"
-                       (length (nth 1 walked)) (length entries) max-pages (nth 0 walked))
+                       "elisp.roster.merged-listed: rows={rows} entries={entries} max-pages={max_pages} revision={revision}"
+                       :rows (length (nth 1 walked)) :entries (length entries)
+                       :max_pages (prin1-to-string max-pages) :revision (nth 0 walked))
       entries)))
 
 (defun agent-repl-roster-merged-entries (conn on-entries on-failure)
@@ -737,7 +737,7 @@ reader running off a push, where a blocking walk would stall the editor."
                         (progn
                           (setq attempt (1+ attempt))
                           (agent-repl--info agent-repl-roster--merged-scope
-                                            "elisp.roster.merged-set-moved: attempt=%d" (1- attempt))
+                                            "elisp.roster.merged-set-moved: attempt={attempt}" :attempt (1- attempt))
                           (step 0 nil nil))
                       (fail 0 "the merged set changed under %d reads" attempt)))
                    ((nth 2 read)
@@ -746,9 +746,9 @@ reader running off a push, where a blocking walk would stall the editor."
                     (let ((entries (agent-repl-roster--merged-entries-of
                                     (append rows (nth 1 read)))))
                       (agent-repl--log agent-repl-roster--merged-scope
-                                       "elisp.roster.merged-listed: rows=%d entries=%d max-pages=nil revision=%s"
-                                       (+ (length rows) (length (nth 1 read)))
-                                       (length entries) (nth 0 read))
+                                       "elisp.roster.merged-listed: rows={rows} entries={entries} max-pages=nil revision={revision}"
+                                       :rows (+ (length rows) (length (nth 1 read)))
+                                       :entries (length entries) :revision (nth 0 read))
                       (funcall on-entries entries)))))))
             :on-failure
             (lambda (detail) (fail page "transport %S" detail)))))
@@ -843,9 +843,9 @@ Once per push over every closed row, which is why it is DEBUG."
                                     (agent-repl-roster-row-name row)
                                     '(:agent-repl-central
                                       "a closed row the roster gives no tab owns no workspace sink")
-                                    "elisp.roster.no-tab: id=%s name=%s reason=closed"
-                                    (agent-repl-roster-row-id row)
-                                    (agent-repl-roster-row-name row)))))
+                                    "elisp.roster.no-tab: id={id} name={name} reason=closed"
+                                    :id (agent-repl-roster-row-id row)
+                                    :name (agent-repl-roster-row-name row)))))
     (mapcar (lambda (entry)
               (let ((row (plist-get entry :row)))
                 (list :id (agent-repl-roster-row-id row)
@@ -975,8 +975,8 @@ this file's verb — so the tab's whole birth is a perspective plus the
     ;; on screen (`agent-repl--tabbar-target-rows'), and no later write
     ;; repins the frame.
     (agent-repl--ws-put name :thread (and (plist-get desired :thread) t))
-    (agent-repl--info name "elisp.roster.tab-open: ws=%s id=%s dir=%s rehold=%s"
-                      name (plist-get desired :id) dir (and rehold t))
+    (agent-repl--info name "elisp.roster.tab-open: ws={ws} id={id} dir={dir} rehold={rehold}"
+                      :ws name :id (plist-get desired :id) :dir dir :rehold (and rehold t))
     (agent-repl-roster--subscribe-host name ref)
     ;; A WORKSPACE THAT BECAME OPEN WITH THIS EDITOR WATCHING is the most
     ;; recent one in the selection history, so `s-]' reaches it at once.  The
@@ -1003,11 +1003,11 @@ this file's verb — so the tab's whole birth is a perspective plus the
     (if conn
         (progn
           (agent-repl-host-subscribe conn name ref)
-          (agent-repl--log name "elisp.roster.host-subscribe: ws=%s id=%s"
-                           name (plist-get ref :id)))
+          (agent-repl--log name "elisp.roster.host-subscribe: ws={ws} id={id}"
+                           :ws name :id (plist-get ref :id)))
       (agent-repl--info name
-                        "elisp.roster.host-subscribe: skipped ws=%s reason=no-primary-link"
-                        name))))
+                        "elisp.roster.host-subscribe: skipped ws={ws} reason=no-primary-link"
+                        :ws name))))
 
 (defun agent-repl-roster--rename-tab (old new ref)
   "Rename the tab OLD to NEW, keeping every fact keyed on the ref id.
@@ -1035,8 +1035,8 @@ second tab."
     (agent-repl--frontend-rename-webview new)
     ;; So is the composer's: its identity segment is the workspace name.
     (agent-repl-host--apply-naming new)
-    (agent-repl--info new "elisp.roster.tab-rename: old=%s new=%s id=%s"
-                      old new (plist-get ref :id))
+    (agent-repl--info new "elisp.roster.tab-rename: old={old} new={new} id={id}"
+                      :old old :new new :id (plist-get ref :id))
     new))
 
 (defun agent-repl-roster--rename-state (old new dir)
@@ -1051,8 +1051,8 @@ as nil, so the caller applies the rename or leaves it alone entire."
       (progn (agent-repl--ws-rename-state old new dir) t)
     (user-error
      (agent-repl--error old
-                        "elisp.roster.tab-rename-refused: old=%s new=%s dir=%S error=%s"
-                        old new dir (error-message-string err))
+                        "elisp.roster.tab-rename-refused: old={old} new={new} dir={dir} error={error}"
+                        :old old :new new :dir (prin1-to-string dir) :error (error-message-string err))
      nil)))
 
 (defun agent-repl-roster--tear-down-tab (name &optional released)
@@ -1104,16 +1104,16 @@ the tab is gone."
   (condition-case err
       (agent-repl--input-save-unsent name)
     (error
-     (agent-repl--error name "elisp.roster.tab-teardown-save-failed: ws=%s error=%s"
-                        name (error-message-string err))))
+     (agent-repl--error name "elisp.roster.tab-teardown-save-failed: ws={ws} error={error}"
+                        :ws name :error (error-message-string err))))
   (condition-case err
       (agent-repl--ws-land-then-kill name)
     (error
-     (agent-repl--error name "elisp.roster.tab-teardown-persp-kill-failed: ws=%s error=%s"
-                        name (error-message-string err))))
+     (agent-repl--error name "elisp.roster.tab-teardown-persp-kill-failed: ws={ws} error={error}"
+                        :ws name :error (error-message-string err))))
   (agent-repl--ws-del name)
   (agent-repl--ws-put name :released (and released t))
-  (agent-repl--info name "elisp.roster.tab-teardown: ws=%s released=%s" name (and released t)))
+  (agent-repl--info name "elisp.roster.tab-teardown: ws={ws} released={released}" :ws name :released (and released t)))
 
 (defun agent-repl-roster--listed-open-ids (roster)
   "Return the ids ROSTER lists open, held here or not, as a hash set.
@@ -1135,17 +1135,18 @@ leaves it alone rather than tearing down something it does not own."
   (cl-remove-if-not (lambda (name) (agent-repl--ws-get name :ref))
                     (agent-repl--live-ws-names)))
 
-(defun agent-repl-roster--log-row-failure (ws fmt &rest args)
-  "Record a per-row reconcile failure for WS at ERROR.
+(defun agent-repl-roster--log-row-failure (ws message)
+  "Record a per-row reconcile failure for WS at ERROR, as log MESSAGE.
+MESSAGE is the caller's (`agent-repl--log-msg'), so the site is its own.
 A row whose reconcile failed is exactly the row whose workspace may own no
 durable sink — a worktree deleted underneath us is the commonest way to get
 here — so the scope is screened through `agent-repl--ws-log-name' and falls
 back to the central sink, with the name kept in the message text."
-  (apply #'agent-repl--error
+  (apply #'agent-repl--emit-error
          (or (and ws (agent-repl--ws-log-name ws))
              '(:agent-repl-central
                "a roster row whose reconcile failed may own no workspace sink"))
-         fmt args))
+         message))
 
 (defun agent-repl-roster--purge-foreign-tombstone (name id)
   "Purge the tombstone under NAME when it is not the workspace ID's.
@@ -1162,8 +1163,8 @@ coming back, which the open revives, and is left alone."
     (let ((tombstone-id (plist-get (agent-repl--ws-get name :ref) :id)))
       (unless (equal tombstone-id id)
         (agent-repl--info name
-                          "elisp.roster.tombstone-purged: ws=%s tombstone-id=%s row-id=%s"
-                          name tombstone-id id)
+                          "elisp.roster.tombstone-purged: ws={ws} tombstone-id={tombstone_id} row-id={row_id}"
+                          :ws name :tombstone_id tombstone-id :row_id id)
         (agent-repl--ws-forget name)))))
 
 (defun agent-repl-roster--reconcile-row (want wanted-ids)
@@ -1192,7 +1193,7 @@ and every other row is still opened and ordered."
                 ((equal existing name)
                  (agent-repl--ws-put name :ref (plist-get want :ref))
                  (agent-repl--log-decision (list 'roster-tab-kept id) name
-                                           name "elisp.roster.tab-kept: ws=%s id=%s" name id)
+                                           name "elisp.roster.tab-kept: ws={ws} id={id}" :ws name :id id)
                  name)
                 (t
                  (agent-repl-roster--rename-tab existing name (plist-get want :ref)))))))
@@ -1204,8 +1205,8 @@ and every other row is still opened and ordered."
       (error
        (agent-repl-roster--log-row-failure
         (or existing name)
-        "elisp.roster.row-reconcile-failed: ws=%s id=%s error=%s"
-        name id (error-message-string err))
+        (agent-repl--log-msg "elisp.roster.row-reconcile-failed: ws={ws} id={id} error={error}"
+        :ws name :id id :error (error-message-string err)))
        nil))))
 
 (defun agent-repl-roster--note-bringup (opened total finished)
@@ -1219,8 +1220,8 @@ must never take down the reconciliation it is reporting on."
       (error
        (agent-repl--warn
         '(:agent-repl-central "roster reconciliation spans every workspace")
-        "elisp.roster.bringup-handler-failed fn=%s error=%s"
-        fn (error-message-string err))))))
+        "elisp.roster.bringup-handler-failed fn={fn} error={error}"
+        :fn fn :error (error-message-string err))))))
 
 (defvar agent-repl-roster--walking nil
   "Non-nil while a roster walk asks for its opens.
@@ -1288,8 +1289,8 @@ A row that fails to reconcile is contained rather than fatal; see
               (agent-repl-roster--tear-down-tab name (gethash id listed-open))
             (error
              (agent-repl-roster--log-row-failure
-              name "elisp.roster.row-teardown-failed: ws=%s error=%s"
-              name (error-message-string err)))))))
+              name (agent-repl--log-msg "elisp.roster.row-teardown-failed: ws={ws} error={error}"
+              :ws name :error (error-message-string err))))))))
     (setq agent-repl-roster--walked (nreverse names)
           agent-repl-roster--walked-hidden hidden
           agent-repl-roster--tab-numbers (nreverse numbers))
@@ -1311,10 +1312,10 @@ A row that fails to reconcile is contained rather than fatal; see
     ;; lifecycle a person asks about, at the level its siblings in this file
     ;; already use.
     (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
-                      "elisp.roster.reconcile: tabs=%d order=%S hidden=%S"
-                      (length agent-repl-roster--tab-order)
-                      agent-repl-roster--tab-order
-                      agent-repl-roster--hidden-tabs)
+                      "elisp.roster.reconcile: tabs={tabs} order={order} hidden={hidden}"
+                      :tabs (length agent-repl-roster--tab-order)
+                      :order (prin1-to-string agent-repl-roster--tab-order)
+                      :hidden (prin1-to-string agent-repl-roster--hidden-tabs))
     ;; LAST, after the order is set, so a handler that reads the tab bar
     ;; sees the one this pass produced rather than the previous pass's.
     (when (> opened 0)
@@ -1458,7 +1459,7 @@ only once the daemon answers it open (open-tabs.el)."
   "Re-derive the tab order after a tab was answered open, and redraw the bar."
   (agent-repl-roster--filter-order)
   (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
-                    "elisp.roster.order-refreshed: order=%S" agent-repl-roster--tab-order)
+                    "elisp.roster.order-refreshed: order={order}" :order (prin1-to-string agent-repl-roster--tab-order))
   (force-mode-line-update t)
   (when (and (bound-and-true-p tab-bar-mode)
              (fboundp 'agent-repl--force-tab-bar-redraw))
@@ -1655,8 +1656,8 @@ A roster with no `current' decides nothing and says so at DEBUG."
                        "elisp.roster.current: none")
       nil)
      ((bound-and-true-p agent-repl-host-reselect-pending)
-      (agent-repl--info scope "elisp.roster.current: relink-pending id=%s dir=%s"
-                        id agent-repl-host-reselect-pending)
+      (agent-repl--info scope "elisp.roster.current: relink-pending id={id} dir={dir}"
+                        :id id :dir agent-repl-host-reselect-pending)
       nil)
      ;; A VIEW WHOSE STREAM HAS ENDED DECIDES NOTHING.  The roster is the
      ;; selection's one source only while the stream that served the view
@@ -1665,28 +1666,29 @@ A roster with no `current' decides nothing and says so at DEBUG."
      ;; off the user's own choice (2026-10-07).  The next daemon's roster
      ;; states the selection afresh after the link-up re-asserts it.
      ((null agent-repl-roster--stream)
-      (agent-repl--info scope "elisp.roster.current: stream-ended id=%s; a view from a daemon that is gone is not followed"
-                        id)
+      (agent-repl--info scope "elisp.roster.current: stream-ended id={id}; a view from a daemon that is gone is not followed"
+                        :id id)
       nil)
      ;; NOR DOES ONE THE STANDING STREAM HAS NOT SERVED: a re-subscription
      ;; keeps the last daemon's view until the new stream's first accepted
      ;; push replaces it, and that push follows the selection itself.
      ((not (agent-repl-roster--held-revision))
-      (agent-repl--info scope "elisp.roster.current: unserved id=%s; a view the standing stream has not served is not followed"
-                        id)
+      (agent-repl--info scope "elisp.roster.current: unserved id={id}; a view the standing stream has not served is not followed"
+                        :id id)
       nil)
      ((and pending (not (equal id pending-id)))
-      (agent-repl--info scope "elisp.roster.current: deferred id=%s ws=%s requested=%s"
-                        id (or name "none") pending-id)
+      (agent-repl--info scope "elisp.roster.current: deferred id={id} ws={ws} requested={requested}"
+                        :id id :ws (or name "none") :requested pending-id)
       nil)
      ((null name)
-      (agent-repl--info scope "elisp.roster.current: no tab yet id=%s" id)
+      (agent-repl--info scope "elisp.roster.current: no tab yet id={id}" :id id)
       nil)
      ((equal name shown)
-      (if (equal id agent-repl-roster--judged-current)
-          (agent-repl--log name "elisp.roster.current: already shown ws=%s" name)
+      ;; Judged once at INFO, then at DEBUG: one site, its level the news.
+      (let ((judged (equal id agent-repl-roster--judged-current)))
         (setq agent-repl-roster--judged-current id)
-        (agent-repl--info name "elisp.roster.current: already shown ws=%s" name))
+        (agent-repl--log-at (if judged 'debug 'info)
+                            name "elisp.roster.current: already shown ws={ws}" :ws name))
       nil)
      (t
       ;; A MINIBUFFER HOLDS THE FOLLOW: moving the frame selects the
@@ -1706,15 +1708,15 @@ A roster with no `current' decides nothing and says so at DEBUG."
 The `followed\' decision of `agent-repl-roster-apply-current\', recorded at
 INFO with the push\='s timing.  Returns NAME."
   (setq agent-repl-roster--judged-current id)
-  (agent-repl--info name "elisp.roster.current: followed ws=%s id=%s from=%s pushed-at=%s since-push-ms=%s since-request-ms=%s"
-                    name id shown
-                    (if agent-repl-roster--pushed-at
+  (agent-repl--info name "elisp.roster.current: followed ws={ws} id={id} from={from} pushed-at={pushed_at} since-push-ms={since_push_ms} since-request-ms={since_request_ms}"
+                    :ws name :id id :from shown
+                    :pushed_at (if agent-repl-roster--pushed-at
                         (format-time-string "%T.%3N" agent-repl-roster--pushed-at)
                       "none")
-                    (agent-repl-roster--ms-since agent-repl-roster--pushed-at)
+                    :since_push_ms (agent-repl-roster--ms-since agent-repl-roster--pushed-at)
                     ;; Only a request for THIS workspace is the switch's origin;
                     ;; a sidebar click has no Emacs request behind it.
-                    (agent-repl-roster--ms-since
+                    :since_request_ms (agent-repl-roster--ms-since
                      (and (equal (car agent-repl-host-last-request) name)
                           (cdr agent-repl-host-last-request))))
   (agent-repl-roster-move-frame name)
@@ -1796,17 +1798,17 @@ Returns the workspaces whose rows crossed the edge."
          (if (agent-repl-roster--finish-edge-p previous current)
              (if ws
                  (progn
-                   (agent-repl--info ws "elisp.roster.finish-edge: ws=%s from=%s to=%s"
-                                     ws previous current)
+                   (agent-repl--info ws "elisp.roster.finish-edge: ws={ws} from={from} to={to}"
+                                     :ws ws :from previous :to current)
                    (push ws fired)
                    (run-hook-with-args 'agent-repl-roster-finish-functions ws))
-               (agent-repl--log scope "elisp.roster.finish-edge: no tab id=%s from=%s to=%s"
-                                id previous current))
+               (agent-repl--log scope "elisp.roster.finish-edge: no tab id={id} from={from} to={to}"
+                                :id id :from previous :to current))
            ;; A row whose arm did not move is no change, and every push walks
            ;; every row: only a row that moved is recorded.
            (unless (equal previous current)
-             (agent-repl--log scope "elisp.roster.status: id=%s from=%s to=%s edge=nil"
-                              id previous current))))))
+             (agent-repl--log scope "elisp.roster.status: id={id} from={from} to={to} edge=nil"
+                              :id id :from previous :to current))))))
     (nreverse fired)))
 
 (defun agent-repl-roster--record-drawn-statuses (entries)
@@ -1829,8 +1831,8 @@ of the comparison."
            (current (plist-get transition :current)))
        (unless (eq previous current)
          (agent-repl--info (plist-get transition :scope)
-                           "elisp.roster.drawn-status: id=%s from=%s to=%s"
-                           (plist-get transition :id) previous current))))))
+                           "elisp.roster.drawn-status: id={id} from={from} to={to}"
+                           :id (plist-get transition :id) :from previous :to current))))))
 
 (defun agent-repl-roster--run-status-changes (entries)
   "Run `agent-repl-roster-status-change-functions' per changed arm in ENTRIES.
@@ -1869,8 +1871,8 @@ Returns the workspaces whose marker cleared."
           (let ((ws (agent-repl--ws-by-ref-id id)))
             (if (not ws)
                 (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
-                                 "elisp.roster.viewed-cleared: no tab id=%s" id)
-              (agent-repl--log ws "elisp.roster.viewed-cleared: ws=%s id=%s" ws id)
+                                 "elisp.roster.viewed-cleared: no tab id={id}" :id id)
+              (agent-repl--log ws "elisp.roster.viewed-cleared: ws={ws} id={id}" :ws ws :id id)
               (push ws cleared)
               (run-hook-with-args 'agent-repl-roster-viewed-cleared-functions ws))))))
     (nreverse cleared)))
@@ -1891,8 +1893,8 @@ Returns the workspaces whose marker cleared."
 Only when WS is NOT the selected tab: a user standing in the workspace
 already has the footer's activity line telling them."
   (if (agent-repl--current-ws-p ws)
-      (agent-repl--log ws "elisp.roster.echo: skipped ws=%s reason=selected" ws)
-    (agent-repl--log ws "elisp.roster.echo: ws=%s" ws)
+      (agent-repl--log ws "elisp.roster.echo: skipped ws={ws} reason=selected" :ws ws)
+    (agent-repl--log ws "elisp.roster.echo: ws={ws}" :ws ws)
     (message "Agent finished in workspace: %s" ws)))
 
 (defun agent-repl-roster-refresh-magit (ws)
@@ -1940,13 +1942,13 @@ Answers t when indexed."
     (if (<= revision held)
         (progn
           (agent-repl--log '(:agent-repl-central "roster reconciliation spans every workspace")
-                           "elisp.roster.answer-row-kept: id=%s revision=%d held=%d"
-                           (agent-repl-roster-row-id row) revision held)
+                           "elisp.roster.answer-row-kept: id={id} revision={revision} held={held}"
+                           :id (agent-repl-roster-row-id row) :revision revision :held held)
           nil)
       (puthash (agent-repl-roster-row-id row) row agent-repl-roster--rows-by-id)
       (agent-repl--info '(:agent-repl-central "roster reconciliation spans every workspace")
-                        "elisp.roster.answer-row-indexed: id=%s revision=%d held=%d"
-                        (agent-repl-roster-row-id row) revision held)
+                        "elisp.roster.answer-row-indexed: id={id} revision={revision} held={held}"
+                        :id (agent-repl-roster-row-id row) :revision revision :held held)
       t)))
 
 (defun agent-repl-roster--record-statuses (entries)
@@ -1976,15 +1978,15 @@ order, or nil when the push was dropped."
      (duplicate
       (agent-repl--error '(:agent-repl-central
                            "duplicate roster identity is ambiguous across workspaces")
-                         "elisp.roster.push: dropped reason=duplicate-ref-id id=%s rows=%d"
-                         duplicate (length entries))
+                         "elisp.roster.push: dropped reason=duplicate-ref-id id={id} rows={rows}"
+                         :id duplicate :rows (length entries))
       nil)
      (misnumbered
       (agent-repl--error '(:agent-repl-central
                            "a tab numbered out of its place would number one workspace two ways")
-                         "elisp.roster.push: dropped reason=misnumbered-tab id=%s number=%s"
-                         (agent-repl-roster-row-id (plist-get misnumbered :row))
-                         (agent-repl-roster-tab-number (plist-get misnumbered :tab)))
+                         "elisp.roster.push: dropped reason=misnumbered-tab id={id} number={number}"
+                         :id (agent-repl-roster-row-id (plist-get misnumbered :row))
+                         :number (agent-repl-roster-tab-number (plist-get misnumbered :tab)))
       nil)
      (t
       (agent-repl-roster--index entries)
@@ -2007,8 +2009,8 @@ order, or nil when the push was dropped."
         (agent-repl-roster--record-viewed entries)
         (run-hook-with-args 'agent-repl-roster-update-functions roster)
         (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
-                         "elisp.roster.push: applied rows=%d tabs=%d"
-                         (length entries) (length order))
+                         "elisp.roster.push: applied rows={rows} tabs={tabs}"
+                         :rows (length entries) :tabs (length order))
         order)))))
 
 (defun agent-repl-roster--assemble (streams)
@@ -2046,8 +2048,8 @@ Returns what `agent-repl-roster-apply' returns, or nil when refused."
         (progn
           (agent-repl--error '(:agent-repl-central
                                "a subscription's first roster push must carry every stream")
-                             "elisp.roster.push: refused reason=first-push-incomplete missing=%S revision=%s"
-                             missing (plist-get push :revision))
+                             "elisp.roster.push: refused reason=first-push-incomplete missing={missing} revision={revision}"
+                             :missing (prin1-to-string missing) :revision (plist-get push :revision))
           nil)
       (let ((streams (list :stream stream :revision (plist-get push :revision))))
         (dolist (key agent-repl-roster-stream-keys)
@@ -2055,10 +2057,9 @@ Returns what `agent-repl-roster-apply' returns, or nil when refused."
                                                    (plist-get held key)))))
         (setq agent-repl-roster--streams streams)
         (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
-                         "elisp.roster.push: streams revision=%s carried=%S"
-                         (plist-get push :revision)
-                         (seq-filter (lambda (key) (plist-get push key))
-                                     agent-repl-roster-stream-keys))
+                         "elisp.roster.push: streams revision={revision} carried={carried}"
+                         :revision (plist-get push :revision) :carried (prin1-to-string (seq-filter (lambda (key) (plist-get push key))
+                                     agent-repl-roster-stream-keys)))
         (agent-repl-roster-apply (agent-repl-roster--assemble streams) stream)))))
 
 (defvar agent-repl-roster--ending-stream nil
@@ -2085,7 +2086,7 @@ breach, recorded at ERROR and not applied."
                        "elisp.roster.stream-ending"))
     (arm
      (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
-                        "elisp.roster.unknown-push arm=%S push=%S" arm push))))
+                        "elisp.roster.unknown-push arm={arm} push={push}" :arm (prin1-to-string arm) :push (prin1-to-string push)))))
 
 (defvar agent-repl-roster--accepted nil
   "The roster stream whose subscription the daemon ACCEPTED, or nil.
@@ -2110,7 +2111,7 @@ the caller did not name the stream."
   (cond
    ((and stream (not (eq stream agent-repl-roster--stream)))
     (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
-                     "elisp.roster.stale-stream-close: reason=%S" reason))
+                     "elisp.roster.stale-stream-close: reason={reason}" :reason (prin1-to-string reason)))
    (t
     (let ((closing (or stream agent-repl-roster--stream))
           (departing agent-repl-roster--stream-conn))
@@ -2132,7 +2133,7 @@ the caller did not name the stream."
                                     "elisp.roster.stream-close: reason=ended-without-cancel — a standing stream the producer ended")
                 (agent-repl-roster--follow-live-daemon stream))
         (_ (agent-repl--error '(:agent-repl-central "the roster stream spans workspaces")
-                               "elisp.roster.stream-close: reason=%S" reason)
+                               "elisp.roster.stream-close: reason={reason}" :reason (prin1-to-string reason))
            (agent-repl-roster--follow-live-daemon stream)))))))
 
 (defun agent-repl-roster--follow-live-daemon (lost &optional planned-on)
@@ -2164,17 +2165,17 @@ daemon that had just said it was leaving: `elisp.connect.dial-failed',
                         "elisp.roster.resubscribe-awaiting-link"))
      ((not (and lost (eq lost agent-repl-roster--accepted)))
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                        "elisp.roster.resubscribe-awaiting-link-edge reason=never-accepted address=%S"
-                        (agent-repl-connect-connection-address live)))
+                        "elisp.roster.resubscribe-awaiting-link-edge reason=never-accepted address={address}"
+                        :address (prin1-to-string (agent-repl-connect-connection-address live))))
      ((and (fboundp 'agent-repl-link-departing-p)
            (agent-repl-link-departing-p live planned-on))
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                        "elisp.roster.resubscribe-awaiting-link-edge reason=daemon-departing address=%S"
-                        (agent-repl-connect-connection-address live)))
+                        "elisp.roster.resubscribe-awaiting-link-edge reason=daemon-departing address={address}"
+                        :address (prin1-to-string (agent-repl-connect-connection-address live))))
      (t
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                        "elisp.roster.resubscribed-on-loss address=%S"
-                        (agent-repl-connect-connection-address live))
+                        "elisp.roster.resubscribed-on-loss address={address}"
+                        :address (prin1-to-string (agent-repl-connect-connection-address live)))
       (agent-repl-roster-subscribe live)))))
 
 ;;;; ---- The subscription -------------------------------------------------
@@ -2200,9 +2201,9 @@ deliver the tabs."
            (lambda ()
              (setq agent-repl-roster--accepted stream)
              (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                               "elisp.roster.subscribed method=%S address=%S"
-                               "WatchWorkspaceRoster"
-                               (agent-repl-connect-connection-address conn)))))
+                               "elisp.roster.subscribed method={method} address={address}"
+                               :method (prin1-to-string "WatchWorkspaceRoster")
+                               :address (prin1-to-string (agent-repl-connect-connection-address conn))))))
     (setq agent-repl-roster--stream stream
           agent-repl-roster--stream-conn conn))
   (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
@@ -2224,8 +2225,8 @@ the tab bar on a reconnect would be a worse lie than a stale paint."
   (setq agent-repl-roster--stream nil
         agent-repl-roster--stream-conn nil)
   (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                    "elisp.roster.link-down: stream forgotten view-kept=%s"
-                    (if agent-repl-roster-view "t" "nil")))
+                    "elisp.roster.link-down: stream forgotten view-kept={view_kept}"
+                    :view_kept (if agent-repl-roster-view "t" "nil")))
 
 (defun agent-repl-roster-on-link-handover (_old new)
   "Move the roster onto NEW, the successor daemon, the moment it is ACCEPTED.
@@ -2242,8 +2243,8 @@ retired -- each push was refused whole, and no workspace loaded.  The
 successor is the daemon the deploy reloaded this Emacs for, and both
 read the one registry, so its roster is the one this Emacs can read."
   (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                    "elisp.roster.resubscribed-on-handover address=%S"
-                    (agent-repl-connect-connection-address new))
+                    "elisp.roster.resubscribed-on-handover address={address}"
+                    :address (prin1-to-string (agent-repl-connect-connection-address new)))
   (agent-repl-roster-subscribe new))
 
 (defun agent-repl-roster-on-link-promote (_old new)
@@ -2257,11 +2258,11 @@ reconciling.  A roster already moved onto NEW at the handover
 \=(`agent-repl-roster-on-link-handover') is left standing."
   (if (and agent-repl-roster--stream (eq agent-repl-roster--stream-conn new))
       (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                        "elisp.roster.promotion-kept-stream address=%S"
-                        (agent-repl-connect-connection-address new))
+                        "elisp.roster.promotion-kept-stream address={address}"
+                        :address (prin1-to-string (agent-repl-connect-connection-address new)))
     (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                      "elisp.roster.resubscribed-on-promotion address=%S"
-                      (agent-repl-connect-connection-address new))
+                      "elisp.roster.resubscribed-on-promotion address={address}"
+                      :address (prin1-to-string (agent-repl-connect-connection-address new)))
     (agent-repl-roster-subscribe new)))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-roster-on-link-up)

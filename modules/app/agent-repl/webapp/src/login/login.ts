@@ -27,7 +27,7 @@ import { CloseLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/end
 import { OpenLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_login_pb";
 import type { LoginTerminalOutput } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
 import { controlPlaneFailed } from "../failure/sink.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -39,6 +39,8 @@ import {
 } from "../rpc/refuse.js";
 import { connectLoginLink, type LoginLink } from "./link.js";
 import { xtermFactory, type LoginTerminalView, type TerminalFactory } from "./terminal.js";
+
+const log = createLogger("webapp.login.login");
 
 /** What every mount answers with. */
 export interface Handle {
@@ -312,10 +314,10 @@ export async function pump(
   } catch (err) {
     if (controller.signal.aborted) return;
     const cause = err instanceof Error ? err.message : String(err);
-    log.error(`the login terminal stream failed: ${cause}`, {
+    log.error("the login terminal stream failed: {cause}", {
       operation: "login.stream-failed",
-      context: { cause },
-    });
+      context: {},
+    }, { cause });
     ctx.failures.report(controlPlaneFailed("login terminal", cause));
     hide();
     return;

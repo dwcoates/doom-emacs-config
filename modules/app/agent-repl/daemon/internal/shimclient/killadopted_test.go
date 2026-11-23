@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/procgroup"
+	"agentrepl/logging/logsite"
 )
 
 // A shim this daemon ADOPTED is not its child, so none of the in-process fakes
@@ -495,7 +496,7 @@ func TestAdoptedAlreadyGoneRecordsTheObservationAndAnInferredExit(t *testing.T) 
 	log := c.log.(*dlog.TestLogger)
 
 	// Act
-	err := c.adoptedAlreadyGone(KillAttribution{Actor: "merge"}, 4242, dlog.Context{"pid": 4242}, "gone already", "adopted shim: gone")
+	err := c.adoptedAlreadyGone(KillAttribution{Actor: "merge"}, 4242, dlog.Context{"pid": 4242}, logsite.Msg("gone already"), "adopted shim: gone")
 
 	// Assert
 	if err != nil {

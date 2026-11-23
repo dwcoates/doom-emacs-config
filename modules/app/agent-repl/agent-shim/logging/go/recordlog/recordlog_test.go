@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/logsite"
 )
 
 func fixedClock() time.Time { return time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC) }
@@ -245,5 +246,139 @@ func TestOpenWritesAWarningOnlyToTheWarningsFile(t *testing.T) {
 	}
 	if !strings.Contains(string(warnings), "tests.warning") || !strings.Contains(string(warnings), "tests.error") || strings.Contains(string(warnings), "tests.info") {
 		t.Fatalf("warnings = %q, want the warning and the error alone", warnings)
+	}
+}
+
+// forwardedNote is a helper's message, made here so its records are keyed by
+// this function rather than by the test that logs it.
+func forwardedNote() logsite.Message { return logsite.Msg("a forwarded note about {subject}") }
+
+func TestEveryRecordNamesItsSiteAndTemplate(t *testing.T) {
+	const testFunction = "agentrepl/logging/recordlog.TestEveryRecordNamesItsSiteAndTemplate"
+	tests := []struct {
+		name         string
+		log          func(l *Logger)
+		wantFunction string
+		wantTemplate string
+		wantMessage  string
+	}{
+		{
+			name:         "a level method is keyed by its caller",
+			log:          func(l *Logger) { l.Info("zettel.test", "served {node}", Context{"node": "n1"}) },
+			wantFunction: testFunction, wantTemplate: "served {node}", wantMessage: "served n1",
+		},
+		{
+			name:         "a placeholder takes a base field",
+			log:          func(l *Logger) { l.With(Context{"thread": "t1"}).Warn("zettel.test", "thread {thread} is slow", nil) },
+			wantFunction: testFunction, wantTemplate: "thread {thread} is slow", wantMessage: "thread t1 is slow",
+		},
+		{
+			name:         "a doubled brace renders as one literal brace",
+			log:          func(l *Logger) { l.Debug("zettel.test", "a {{literal}} brace", nil) },
+			wantFunction: testFunction, wantTemplate: "a {{literal}} brace", wantMessage: "a {literal} brace",
+		},
+		{
+			name:         "a forwarded message is keyed by the function that made it",
+			log:          func(l *Logger) { l.Log("error", "zettel.test", forwardedNote(), Context{"subject": "x"}) },
+			wantFunction: "agentrepl/logging/recordlog.forwardedNote", wantTemplate: "a forwarded note about {subject}", wantMessage: "a forwarded note about x",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var sink bytes.Buffer
+			log := New("zettel", &sink, &bytes.Buffer{}, sharedlogging.FixedWindow(sharedlogging.LevelDebug), fixedClock)
+
+			// Act
+			tt.log(log)
+
+			// Assert
+			rec := decode(t, strings.TrimSpace(sink.String()))
+			if want := logsite.Key("zettel", tt.wantFunction, tt.wantTemplate); rec["site"] != want {
+				t.Errorf("site = %v, want %q (the key of %s, %q)", rec["site"], want, tt.wantFunction, tt.wantTemplate)
+			}
+			if rec["template"] != tt.wantTemplate {
+				t.Errorf("template = %v, want %q", rec["template"], tt.wantTemplate)
+			}
+			if rec["message"] != tt.wantMessage {
+				t.Errorf("message = %v, want %q", rec["message"], tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestTheSiteFollowsTheRecordsRuntime(t *testing.T) {
+	// Arrange
+	var sink bytes.Buffer
+	log := New("tests", &sink, &bytes.Buffer{}, sharedlogging.FixedWindow(sharedlogging.LevelDebug), fixedClock)
+
+	// Act
+	log.Info("tests.test", "said", nil)
+
+	// Assert
+	want := logsite.Key("tests", "agentrepl/logging/recordlog.TestTheSiteFollowsTheRecordsRuntime", "said")
+	if rec := decode(t, strings.TrimSpace(sink.String())); rec["site"] != want {
+		t.Fatalf("site = %v, want %q", rec["site"], want)
+	}
+}
+
+func TestAnUnrenderableRecordPanics(t *testing.T) {
+	tests := []struct {
+		name string
+		log  func(l *Logger)
+	}{
+		{name: "a placeholder no field fills", log: func(l *Logger) { l.Error("zettel.test", "lost {gone}", Context{"here": 1}) }},
+		{name: "a template whose braces do not parse", log: func(l *Logger) { l.Error("zettel.test", "unclosed {", nil) }},
+		{name: "a forwarded message no Msg made", log: func(l *Logger) { l.Log("info", "zettel.test", logsite.Message{}, nil) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var sink bytes.Buffer
+			log := New("zettel", &sink, &bytes.Buffer{}, sharedlogging.FixedWindow(sharedlogging.LevelDebug), fixedClock)
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("the record was written instead of panicking")
+				}
+				if sink.Len() != 0 {
+					t.Errorf("sink got %q, want nothing", sink.String())
+				}
+			}()
+
+			// Act
+			tt.log(log)
+		})
+	}
+}
+
+func TestTheLevelWindowsNotesAreKeyedWhereTheyAreWritten(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "log", "tests.log")
+	getenv := func(name string) string {
+		if name == "AGENT_REPL_LOG_LEVEL" {
+			return "debug"
+		}
+		return ""
+	}
+
+	// Act
+	_, closeFile, err := Open("tests", path, &bytes.Buffer{}, getenv, fixedClock)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := closeFile(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := decode(t, strings.TrimSpace(string(body)))
+	template := "log level {requested_level} ignored without {until_environment}; starting at info"
+	if want := logsite.Key("tests", "agentrepl/logging.Selection.Note", template); rec["site"] != want || rec["template"] != template {
+		t.Fatalf("record = %v, want site %q and template %q", rec, want, template)
 	}
 }

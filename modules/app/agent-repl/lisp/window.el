@@ -37,18 +37,17 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--frontend-dispatch-show "frontends")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
-(declare-function agent-repl--warn "core")
-(declare-function agent-repl--fatal "core")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-log-scope "workspace" (ws))
-(declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
 (declare-function agent-repl-webhost-set-gate-dock "webhost" (ws pixels))
 (declare-function agent-repl-sidebar-view-show "sidebar-view" ())
@@ -109,19 +108,19 @@ one it has nowhere to go."
        (let ((buf (agent-repl--ws-get resolved-ws :frontend-buffer)))
          (agent-repl--log-verbose
           log-ws
-          "window--panel-buffer: ws=%s kind=%S key=:frontend-buffer buffer=%S live=%s"
-          resolved-ws kind buf (and buf (buffer-live-p buf)))
+          "window--panel-buffer: ws={ws} kind={kind} key=:frontend-buffer buffer={buffer} live={live}"
+          :ws resolved-ws :kind (prin1-to-string kind) :buffer (prin1-to-string buf) :live (and buf (buffer-live-p buf)))
          buf))
       (:input
        (let ((buf (agent-repl--ws-get resolved-ws :input-buffer)))
          (agent-repl--log-verbose
           log-ws
-          "window--panel-buffer: ws=%s kind=%S key=:input-buffer buffer=%S live=%s"
-          resolved-ws kind buf (and buf (buffer-live-p buf)))
+          "window--panel-buffer: ws={ws} kind={kind} key=:input-buffer buffer={buffer} live={live}"
+          :ws resolved-ws :kind (prin1-to-string kind) :buffer (prin1-to-string buf) :live (and buf (buffer-live-p buf)))
          buf))
       (_
        (agent-repl--log log-ws
-                         "window--panel-buffer: ws=%s unknown kind=%S" resolved-ws kind)
+                         "window--panel-buffer: ws={ws} unknown kind={kind}" :ws resolved-ws :kind (prin1-to-string kind))
        (error "agent-repl-window--panel-buffer: unknown KIND %S" kind)))))
 
 (defun agent-repl-window--panel-window (kind &optional ws frame)
@@ -139,8 +138,8 @@ rather than tripping `get-buffer-window' with a dead buffer."
          (win (and live (get-buffer-window buf frame))))
     (agent-repl--log-verbose
      (agent-repl--ws-log-scope resolved-ws)
-     "window--panel-window: ws=%s kind=%S buffer=%S live=%s frame=%S found=%S"
-     resolved-ws kind buf live frame win)
+     "window--panel-window: ws={ws} kind={kind} buffer={buffer} live={live} frame={frame} found={found}"
+     :ws resolved-ws :kind (prin1-to-string kind) :buffer (prin1-to-string buf) :live live :frame (prin1-to-string frame) :found (prin1-to-string win))
     win))
 
 ;;;; --- Side-window awareness ---------------------------------------------
@@ -157,8 +156,8 @@ frame-level side-window UI elements."
          (live (window-live-p win))
          (side (and live (window-parameter win 'window-side))))
     (agent-repl--log-verbose resolved-ws
-                             "window--side-window-p: window=%S live=%s side=%S"
-                             win live side)
+                             "window--side-window-p: window={window} live={live} side={side}"
+                             :window (prin1-to-string win) :live live :side (prin1-to-string side))
     side))
 
 ;;;; --- Saving and restoring a layout -------------------------------------
@@ -203,8 +202,8 @@ for the record only."
   ;; CONFIG is opaque to everything but `set-window-configuration'.
   (let ((frame (selected-frame)))
     (agent-repl--log (agent-repl--ws-log-scope (or ws (agent-repl--ws-current-name)))
-                     "window--restore-configuration: frame=%S windows=%d selected=%S"
-                     frame (length (window-list frame 'nomini)) (selected-window)))
+                     "window--restore-configuration: frame={frame} windows={windows} selected={selected}"
+                     :frame (prin1-to-string frame) :windows (length (window-list frame 'nomini)) :selected (prin1-to-string (selected-window))))
   t)
 
 ;;;; --- Per-window hardening ----------------------------------------------
@@ -264,9 +263,9 @@ Each keyword is independent and may be omitted:
   (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
          (live (window-live-p win)))
     (agent-repl--log resolved-ws
-                     "window--harden: window=%S live=%s dedicate=%S size-fix=%S delete-protect=%S preserve-size=%S no-other-window=%S fringes=%S"
-                     win live dedicate size-fix delete-protect preserve-size
-                     no-other-window fringes)
+                     "window--harden: window={window} live={live} dedicate={dedicate} size-fix={size_fix} delete-protect={delete_protect} preserve-size={preserve_size} no-other-window={no_other_window} fringes={fringes}"
+                     :window (prin1-to-string win) :live live :dedicate (prin1-to-string dedicate) :size_fix (prin1-to-string size-fix) :delete_protect (prin1-to-string delete-protect) :preserve_size (prin1-to-string preserve-size)
+                     :no_other_window (prin1-to-string no-other-window) :fringes (prin1-to-string fringes))
     (when (and live dedicate)
       (set-window-dedicated-p win t))
     (when (and live size-fix)
@@ -279,39 +278,39 @@ Each keyword is independent and may be omitted:
       (cond
        ((eq preserve-size 'width)
         (agent-repl--log-verbose resolved-ws
-                                 "window--harden: preserve-size=width window=%S" win)
+                                 "window--harden: preserve-size=width window={window}" :window (prin1-to-string win))
         (window-preserve-size win t t))
        ((eq preserve-size 'height)
         (agent-repl--log-verbose resolved-ws
-                                 "window--harden: preserve-size=height window=%S" win)
+                                 "window--harden: preserve-size=height window={window}" :window (prin1-to-string win))
         (window-preserve-size win nil t))
        ((eq preserve-size t)
         (agent-repl--log-verbose resolved-ws
-                                 "window--harden: preserve-size=both window=%S" win)
+                                 "window--harden: preserve-size=both window={window}" :window (prin1-to-string win))
         (window-preserve-size win t t)
         (window-preserve-size win nil t))
        (t
         (agent-repl--log-verbose resolved-ws
-                                 "window--harden: preserve-size=unrecognized value=%S window=%S"
-                                 preserve-size win))))
+                                 "window--harden: preserve-size=unrecognized value={value} window={window}"
+                                 :value (prin1-to-string preserve-size) :window (prin1-to-string win)))))
     (when (and live fringes)
       (cond
        ((integerp fringes)
         (agent-repl--log-verbose resolved-ws
-                                 "window--harden: fringes=uniform value=%S window=%S"
-                                 fringes win)
+                                 "window--harden: fringes=uniform value={value} window={window}"
+                                 :value (prin1-to-string fringes) :window (prin1-to-string win))
         (set-window-fringes win fringes fringes nil))
        ((and (consp fringes)
              (integerp (car fringes))
              (integerp (cdr fringes)))
         (agent-repl--log-verbose resolved-ws
-                                 "window--harden: fringes=asymmetric left=%S right=%S window=%S"
-                                 (car fringes) (cdr fringes) win)
+                                 "window--harden: fringes=asymmetric left={left} right={right} window={window}"
+                                 :left (prin1-to-string (car fringes)) :right (prin1-to-string (cdr fringes)) :window (prin1-to-string win))
         (set-window-fringes win (car fringes) (cdr fringes) nil))
        (t
         (agent-repl--log-verbose resolved-ws
-                                 "window--harden: fringes=unrecognized value=%S window=%S"
-                                 fringes win))))))
+                                 "window--harden: fringes=unrecognized value={value} window={window}"
+                                 :value (prin1-to-string fringes) :window (prin1-to-string win)))))))
 
 ;;;; --- The composer's fixed height ----------------------------------------
 ;;
@@ -371,8 +370,8 @@ frame — including a remount, a layout repair, and a restored workspace
     (if (and (consp cached) (eql (car cached) key) (integerp (cdr cached)))
         (progn
           (agent-repl--log log-ws
-                           "window--input-height: source=frame-cache frame=%S frame-height=%s lines=%s"
-                           frame key (cdr cached))
+                           "window--input-height: source=frame-cache frame={frame} frame-height={frame_height} lines={lines}"
+                           :frame (prin1-to-string frame) :frame_height key :lines (cdr cached))
           (cdr cached))
       (let* ((base (window-total-height (frame-root-window frame)))
              (lines (max agent-repl-window--input-height-minimum
@@ -381,10 +380,10 @@ frame — including a remount, a layout repair, and a restored workspace
         (set-frame-parameter frame agent-repl-window--input-height-parameter
                              (cons key lines))
         (agent-repl--log log-ws
-                         "window--input-height: source=computed frame=%S frame-height=%s main-area-height=%s fraction=%S offset=%s floor=%s lines=%s"
-                         frame key base agent-repl-input-height-fraction
-                         agent-repl-input-height-line-offset
-                         agent-repl-window--input-height-minimum lines)
+                         "window--input-height: source=computed frame={frame} frame-height={frame_height} main-area-height={main_area_height} fraction={fraction} offset={offset} floor={floor} lines={lines}"
+                         :frame (prin1-to-string frame) :frame_height key :main_area_height base :fraction (prin1-to-string agent-repl-input-height-fraction)
+                         :offset agent-repl-input-height-line-offset
+                         :floor agent-repl-window--input-height-minimum :lines lines)
         lines))))
 
 (defun agent-repl-window--apply-height (win lines &optional ws)
@@ -404,18 +403,18 @@ and never the request."
     (let ((actual (window-total-height win)))
       (if (= actual lines)
           (agent-repl--log log-ws
-                           "window--apply-height: outcome=already-exact window=%S lines=%s"
-                           win lines)
+                           "window--apply-height: outcome=already-exact window={window} lines={lines}"
+                           :window (prin1-to-string win) :lines lines)
         (condition-case err
             (progn
               (window-resize win (- lines actual) nil t)
               (agent-repl--log log-ws
-                               "window--apply-height: outcome=resized window=%S from=%s to=%s actual=%s"
-                               win actual lines (window-total-height win)))
+                               "window--apply-height: outcome=resized window={window} from={from} to={to} actual={actual}"
+                               :window (prin1-to-string win) :from actual :to lines :actual (window-total-height win)))
           (error
            (agent-repl--log log-ws
-                            "window--apply-height: outcome=refused window=%S from=%s requested=%s actual=%s err=%S"
-                            win actual lines (window-total-height win) err))))
+                            "window--apply-height: outcome=refused window={window} from={from} requested={requested} actual={actual} err={err}"
+                            :window (prin1-to-string win) :from actual :requested lines :actual (window-total-height win) :err (prin1-to-string err)))))
       (window-total-height win))))
 
 (defun agent-repl-window--ensure-input-height (ws input-win)
@@ -505,23 +504,23 @@ rather than silently leaving a retired buffer on screen."
   (cond
    ((not (window-live-p win)) nil)
    ((window-minibuffer-p win)
-    (agent-repl--log-verbose ws "window--delete-or-neutralize: skip-minibuffer window=%S" win)
+    (agent-repl--log-verbose ws "window--delete-or-neutralize: skip-minibuffer window={window}" :window (prin1-to-string win))
     nil)
    (t
     (agent-repl-window--unharden win)
     (if (agent-repl-window--deletable-p win)
         (progn
-          (agent-repl--log ws "window--delete-or-neutralize: deleting window=%S buffer=%s"
-                           win (agent-repl--safe-buffer-name (window-buffer win)))
+          (agent-repl--log ws "window--delete-or-neutralize: deleting window={window} buffer={buffer}"
+                           :window (prin1-to-string win) :buffer (agent-repl--safe-buffer-name (window-buffer win)))
           (delete-window win)
           'deleted)
       (let ((fb (or fallback
                     (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))))
         (agent-repl--log ws
-                         "window--delete-or-neutralize: window=%S undeletable (deletable-p=%S) — switching buffer=%s to fallback=%s"
-                         win (window-deletable-p win)
-                         (agent-repl--safe-buffer-name (window-buffer win))
-                         (agent-repl--safe-buffer-name fb))
+                         "window--delete-or-neutralize: window={window} undeletable (deletable-p={deletable_p}) — switching buffer={buffer} to fallback={fallback}"
+                         :window (prin1-to-string win) :deletable_p (prin1-to-string (window-deletable-p win))
+                         :buffer (agent-repl--safe-buffer-name (window-buffer win))
+                         :fallback (agent-repl--safe-buffer-name fb))
         (unless (and fb (buffer-live-p fb))
           ;; No buffer to neutralize the window with: fail loudly rather than
           ;; leave a retired workspace's panel displayed.
@@ -582,16 +581,17 @@ opted into specificity)."
     (unless (and (stringp caller) (not (string-empty-p caller))
                  (stringp predicate-name) (not (string-empty-p predicate-name)))
       (agent-repl--fatal resolved-ws
-                         "window--delete-where: unnamed sweep caller=%S predicate=%S"
-                         caller predicate-name))
+                         "window--delete-where: unnamed sweep caller={caller} predicate={predicate}"
+                         :caller (prin1-to-string caller) :predicate (prin1-to-string predicate-name)))
     (agent-repl--log resolved-ws
-                     "window--delete-where: begin caller=%s predicate=%s frame=%S skip-side-windows=%S windows=%d"
-                     caller predicate-name frame skip-side-windows (length windows))
+                     "window--delete-where: begin caller={caller} predicate={predicate} frame={frame} skip-side-windows={skip_side_windows} windows={windows}"
+                     :caller caller :predicate predicate-name :frame (prin1-to-string frame)
+                     :skip_side_windows (prin1-to-string skip-side-windows) :windows (length windows))
     (dolist (win windows)
       (cond
        ((not (window-live-p win))
         (agent-repl--log-verbose resolved-ws
-                                 "window--delete-where: skip-dead window=%S" win))
+                                 "window--delete-where: skip-dead window={window}" :window (prin1-to-string win)))
        ;; Never sweep the minibuffer window.  `window-list' includes it
        ;; whenever a minibuffer is active, and this sweep can run
        ;; mid-minibuffer — the debounced `on-window-change' idle timer fires
@@ -602,23 +602,23 @@ opted into specificity)."
        ;; each one to filter it.
        ((window-minibuffer-p win)
         (agent-repl--log-verbose resolved-ws
-                                 "window--delete-where: skip-minibuffer window=%S" win))
+                                 "window--delete-where: skip-minibuffer window={window}" :window (prin1-to-string win)))
        ((and skip-side-windows
              (agent-repl-window--side-window-p win resolved-ws))
         (agent-repl--log-verbose resolved-ws
-                                 "window--delete-where: skip-side window=%S" win))
+                                 "window--delete-where: skip-side window={window}" :window (prin1-to-string win)))
        ((not (funcall predicate win))
         (agent-repl--log-verbose resolved-ws
-                                 "window--delete-where: predicate=false window=%S" win))
+                                 "window--delete-where: predicate=false window={window}" :window (prin1-to-string win)))
        (t
         (agent-repl--log-verbose resolved-ws
-                                 "window--delete-where: predicate=true deleting window=%S" win)
+                                 "window--delete-where: predicate=true deleting window={window}" :window (prin1-to-string win))
         (condition-case err
             (progn
               (delete-window win)
               (push win deleted)
               (agent-repl--log resolved-ws
-                               "window--delete-where: deleted caller=%s window=%S" caller win))
+                               "window--delete-where: deleted caller={caller} window={window}" :caller caller :window (prin1-to-string win)))
           (error
            ;; Three structural delete-window errors are benign here —
            ;; they fire when prior iterations have already collapsed the
@@ -631,17 +631,17 @@ opted into specificity)."
            ;; is still surfaced.
            (if (agent-repl-window--benign-undeletable-error-p err resolved-ws)
                (agent-repl--log resolved-ws
-                                "window--delete-where: skip-undeletable caller=%s predicate=%s window=%s error=%S"
-                                caller predicate-name win err)
+                                "window--delete-where: skip-undeletable caller={caller} predicate={predicate} window={window} error={error}"
+                                :caller caller :predicate predicate-name :window win :error (prin1-to-string err))
              (agent-repl--warn resolved-ws
-                               "window--delete-where: could not delete caller=%s predicate=%s window=%s buffer=%s error=%S"
-                               caller predicate-name win
-                               (agent-repl--safe-buffer-name (window-buffer win))
-                               err)))))))
+                               "window--delete-where: could not delete caller={caller} predicate={predicate} window={window} buffer={buffer} error={error}"
+                               :caller caller :predicate predicate-name :window win
+                               :buffer (agent-repl--safe-buffer-name (window-buffer win))
+                               :error (prin1-to-string err))))))))
     (setq deleted (nreverse deleted))
     (agent-repl--log resolved-ws
-                     "window--delete-where: complete caller=%s deleted-count=%d deleted=%S"
-                     caller (length deleted) deleted)
+                     "window--delete-where: complete caller={caller} deleted-count={deleted_count} deleted={deleted}"
+                     :caller caller :deleted_count (length deleted) :deleted (prin1-to-string deleted))
     deleted))
 
 (defun agent-repl-window--benign-undeletable-error-p (err &optional ws)
@@ -658,8 +658,8 @@ for diagnostics."
                   (string-prefix-p "Attempt to delete sole side window of frame" (cadr err))
                   (string-prefix-p "Attempt to delete sole ordinary window of frame" (cadr err))))))
     (agent-repl--log-verbose ws
-                             "window--benign-undeletable-error-p: err=%S benign=%s"
-                             err benign)
+                             "window--benign-undeletable-error-p: err={err} benign={benign}"
+                             :err (prin1-to-string err) :benign benign)
     benign))
 
 (cl-defun agent-repl-window--delete-buffer-windows
@@ -697,29 +697,29 @@ window is not in that list, because it is still a live window."
          (windows (and live (get-buffer-window-list buf nil all-frames)))
          (deleted '()))
     (agent-repl--log resolved-ws
-                     "window--delete-buffer-windows: begin buffer=%S live=%s all-frames=%S candidates=%d"
-                     buf live all-frames (length windows))
+                     "window--delete-buffer-windows: begin buffer={buffer} live={live} all-frames={all_frames} candidates={candidates}"
+                     :buffer (prin1-to-string buf) :live live :all_frames (prin1-to-string all-frames) :candidates (length windows))
     (when live
       (dolist (win windows)
         (if (not (window-live-p win))
             (agent-repl--log-verbose resolved-ws
-                                     "window--delete-buffer-windows: skip-dead window=%S" win)
+                                     "window--delete-buffer-windows: skip-dead window={window}" :window (prin1-to-string win))
           (agent-repl--log-verbose resolved-ws
-                                   "window--delete-buffer-windows: retiring window=%S" win)
+                                   "window--delete-buffer-windows: retiring window={window}" :window (prin1-to-string win))
           (condition-case err
               (when (eq (agent-repl-window--delete-or-neutralize win nil resolved-ws)
                         'deleted)
                 (push win deleted)
                 (agent-repl--log resolved-ws
-                                 "window--delete-buffer-windows: deleted window=%S" win))
+                                 "window--delete-buffer-windows: deleted window={window}" :window (prin1-to-string win)))
             (error
              (agent-repl--warn resolved-ws
-                               "window--delete-buffer-windows: could not retire %s: %S"
-                               win err))))))
+                               "window--delete-buffer-windows: could not retire {win}: {err}"
+                               :win win :err (prin1-to-string err)))))))
     (setq deleted (nreverse deleted))
     (agent-repl--log resolved-ws
-                     "window--delete-buffer-windows: complete deleted-count=%d deleted=%S"
-                     (length deleted) deleted)
+                     "window--delete-buffer-windows: complete deleted-count={deleted_count} deleted={deleted}"
+                     :deleted_count (length deleted) :deleted (prin1-to-string deleted))
     deleted))
 
 ;;;; --- Layout reconciliation -----------------------------------------------
@@ -743,8 +743,8 @@ eligibility checks cannot drift."
     ;; includes persp-mode's own "main"/"none" placeholders that own no
     ;; durable sink — an unscreened record for one is unroutable.
     (agent-repl--log-verbose (agent-repl--ws-log-scope ws)
-                             "window--panels-restorable-p: ws=%s view-buffer=%S live=%s"
-                             ws view-buf restorable)
+                             "window--panels-restorable-p: ws={ws} view-buffer={view_buffer} live={live}"
+                             :ws ws :view_buffer (prin1-to-string view-buf) :live restorable)
     restorable))
 
 ;;;; --- The gate hides the input window ---------------------------------------
@@ -777,8 +777,8 @@ feed's own ground (owner request, 2026-10-28), so no color is told, and
 keeps the slot for its reloads, whether or not WS's page is loaded."
   (let ((pixels (agent-repl-window--gate-dock-pixels ws)))
     (if (agent-repl-webhost-set-gate-dock ws pixels)
-        (agent-repl--info ws "elisp.gate.dock-slot ws=%s pixels=%d" ws pixels)
-      (agent-repl--info ws "elisp.gate.dock-slot-held ws=%s reason=no-host" ws))
+        (agent-repl--info ws "elisp.gate.dock-slot ws={ws} pixels={pixels}" :ws ws :pixels pixels)
+      (agent-repl--info ws "elisp.gate.dock-slot-held ws={ws} reason=no-host" :ws ws))
     pixels))
 
 (defvar agent-repl-window--gates-applied (make-hash-table :test 'equal)
@@ -800,9 +800,9 @@ other workspace takes the right layout when it is next shown."
       (if gate
           (puthash ws gate agent-repl-window--gates-applied)
         (remhash ws agent-repl-window--gates-applied))
-      (agent-repl--info ws "elisp.gate.%s ws=%s kind=%S"
-                        (if gate "standing" "cleared") ws
-                        (plist-get (or gate applied) :arm))
+      (agent-repl--info ws "elisp.gate.{state} ws={ws} kind={kind}"
+                        :state (if gate "standing" "cleared") :ws ws
+                        :kind (prin1-to-string (plist-get (or gate applied) :arm)))
       (when (equal ws (agent-repl--ws-current-name))
         (agent-repl-window--ensure-layout)))))
 
@@ -814,7 +814,7 @@ panels stayed (a `delete-window' on it, a restored configuration saved
 without it) gets it back.  Non-nil when it was shown; nil when there is no
 view on screen or the sidebar already stands."
   (when (and view-win (not (agent-repl-sidebar-view-window)))
-    (agent-repl--log ws "window--ensure-layout: ws=%s the sidebar's window is missing beside the panels; showing it" ws)
+    (agent-repl--log ws "window--ensure-layout: ws={ws} the sidebar's window is missing beside the panels; showing it" :ws ws)
     (agent-repl-sidebar-view-show)
     t))
 
@@ -894,8 +894,8 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
               (progn
                 (agent-repl--log-verbose
                  ws
-                 "window--ensure-layout: noop reason=panel-pair-complete view-window=%S input-window=%S"
-                 view-win input-win)
+                 "window--ensure-layout: noop reason=panel-pair-complete view-window={view_window} input-window={input_window}"
+                 :view_window (prin1-to-string view-win) :input_window (prin1-to-string input-win))
                 nil)))
          ;; A STANDING GATE's target is the view alone: the input window is
          ;; hidden while the webview docks the banner.  Neither window is a
@@ -905,26 +905,26 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
               (progn
                 (agent-repl--log-verbose
                  ws
-                 "window--ensure-layout: noop reason=gate-layout-complete view-window=%S"
-                 view-win)
+                 "window--ensure-layout: noop reason=gate-layout-complete view-window={view_window}"
+                 :view_window (prin1-to-string view-win))
                 nil)))
          ((not (agent-repl-window--panels-restorable-p ws))
           (agent-repl--log ws
-                           "window--ensure-layout: ws=%s input window present but view buffer dead — leaving for the next explicit show"
-                           ws)
+                           "window--ensure-layout: ws={ws} input window present but view buffer dead — leaving for the next explicit show"
+                           :ws ws)
           nil)
          (t
           (agent-repl--log ws
-                           "window--ensure-layout: ws=%s missing=%s gate-hides-input=%s — remounting panels through the frontend"
-                           ws (cond ((not view-win) "view")
+                           "window--ensure-layout: ws={ws} missing={missing} gate-hides-input={gate_hides_input} — remounting panels through the frontend"
+                           :ws ws :missing (cond ((not view-win) "view")
                                     (hidden "nothing (the input stands over a gate)")
                                     (t "input"))
-                           hidden)
+                           :gate_hides_input hidden)
           (let ((agent-repl-window--ensure-layout-in-progress t))
             (agent-repl--frontend-dispatch-show ws))
           (agent-repl--log ws
-                           "window--ensure-layout: repair-dispatched view-window=%S input-window=%S"
-                           view-win input-win)
+                           "window--ensure-layout: repair-dispatched view-window={view_window} input-window={input_window}"
+                           :view_window (prin1-to-string view-win) :input_window (prin1-to-string input-win))
           t)))))))
 
 ;;;; --- Focus when the panels stand alone ---------------------------------
@@ -974,8 +974,8 @@ when it moved focus, nil otherwise."
         (cond
          (foreign
           (agent-repl--log-verbose
-           ws "window--focus-input: noop reason=foreign-windows count=%d"
-           (length foreign))
+           ws "window--focus-input: noop reason=foreign-windows count={count}"
+           :count (length foreign))
           nil)
          ((not seen)
           (agent-repl--log-verbose
@@ -983,18 +983,18 @@ when it moved focus, nil otherwise."
           nil)
          ((not input-win)
           (agent-repl--log
-           ws "window--focus-input: ws=%s panels alone but no input window (gate or view only)"
-           ws)
+           ws "window--focus-input: ws={ws} panels alone but no input window (gate or view only)"
+           :ws ws)
           nil)
          ((eq (frame-selected-window frame) input-win)
           (agent-repl--log-verbose
-           ws "window--focus-input: noop reason=input-already-selected window=%S"
-           input-win)
+           ws "window--focus-input: noop reason=input-already-selected window={window}"
+           :window (prin1-to-string input-win))
           nil)
          (t
           (agent-repl--log
-           ws "window--focus-input: ws=%s panels alone after a window closed — selecting input window=%S from=%S"
-           ws input-win (frame-selected-window frame))
+           ws "window--focus-input: ws={ws} panels alone after a window closed — selecting input window={window} from={from}"
+           :ws ws :window (prin1-to-string input-win) :from (prin1-to-string (frame-selected-window frame)))
           (if (eq frame (selected-frame))
               (select-window input-win)
             (set-frame-selected-window frame input-win))

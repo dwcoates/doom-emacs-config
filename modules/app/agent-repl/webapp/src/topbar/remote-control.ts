@@ -26,12 +26,14 @@
 import { createControl, type Control } from "../control.js";
 import { UpdateRemoteControlModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_remote_control_mode_pb";
 import type { TopbarRemoteControl } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { sendChipToggle } from "./chip-toggle.js";
 import type { TopbarContext } from "./context.js";
 import { drawDiscGlyph, type DiscGlyph } from "./disc-glyph.js";
+
+const log = createLogger("webapp.topbar.remote-control");
 
 /**
  * The phone glyph: a smartphone's outline and its home dot, stroked in the

@@ -10,8 +10,10 @@ import type { ClientLogRequest } from "../../proto/gen/ts/agentrepl/v1/endpoint_
 import { codeBlockHtml } from "../src/code-block.js";
 import { installForwardingLogger, installTextAffordances, startPageRuntime } from "../src/document-runtime.js";
 import { clientLogRecorder } from "./rpc/client-log-recorder.js";
-import { setLogger, log, resetLoggingForTests, type ForwardingLogger } from "../src/log.js";
+import { setLogger, createLogger, resetLoggingForTests, type ForwardingLogger } from "../src/log.js";
 import { pageEnding } from "../src/page-teardown.js";
+
+const log = createLogger("webapp.test.document-runtime");
 
 /** Install a forwarding logger as SOURCE at THRESHOLD, log at LEVEL, and answer what reached the daemon. */
 async function forwardOne(threshold: "info" | "warn", level: "info" | "warn"): Promise<ClientLogRequest[]> {

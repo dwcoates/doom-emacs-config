@@ -46,12 +46,14 @@ import type {
 import { renderExternalLink } from "../link.js";
 import { drawLinkBadge } from "./link-badge.js";
 import { drawLinkIcon } from "./link-icon.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { toneClass, topbarTone } from "../vocab.js";
 import { drawNamePrefix } from "../name-prefix.js";
 import type { TopbarContext } from "./context.js";
+
+const log = createLogger("webapp.topbar.strip");
 
 /** Mark an element as a reveal's anchor, so the layer's outside-click spares it. */
 export function asAnchor(element: HTMLElement, name: string): HTMLElement {

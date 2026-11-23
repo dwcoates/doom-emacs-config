@@ -44,14 +44,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'subr-x)
 (require 'cl-lib)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-refill-keymap "agent-repl-core" (map fill))
 (declare-function agent-repl--save-pre-panel-layout "agent-repl-panels" (ws site))
-(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--sanitize-ws-name "agent-repl-core" (name))
 (declare-function agent-repl--frontend-main-area-window "agent-repl-frontend" ())
 
@@ -197,8 +198,8 @@ reporting on."
       (error
        (agent-repl--warn
         '(:agent-repl-central "the pending-open set spans every workspace")
-        "open-progress: change handler failed fn=%s error=%s"
-        fn (error-message-string err))))))
+        "open-progress: change handler failed fn={fn} error={error}"
+        :fn fn :error (error-message-string err))))))
 
 (defun agent-repl-open-progress-opening-workspaces ()
   "Return the workspace names whose open is in flight and NOT yet painted.
@@ -312,7 +313,7 @@ place rather than shuffling the frame a second time."
       ;; mounting into its window later keeps that one.
       (agent-repl--save-pre-panel-layout ws "open-progress")
       (set-window-buffer win buf)
-      (agent-repl--log ws "open-progress: shown window=%s buffer=%s" win (buffer-name buf)))
+      (agent-repl--log ws "open-progress: shown window={window} buffer={buffer}" :window win :buffer (buffer-name buf)))
     win))
 
 ;;;; ---- Lifecycle --------------------------------------------------------
@@ -336,8 +337,8 @@ asynchronous is even attempted."
   (let ((standing (agent-repl--open-progress-entry ws)))
     (if standing
         (progn
-          (agent-repl--log ws "open-progress: REFUSED second placeholder phase=%s"
-                           (plist-get standing :phase))
+          (agent-repl--log ws "open-progress: REFUSED second placeholder phase={phase}"
+                           :phase (plist-get standing :phase))
           (when-let ((buf (plist-get standing :buffer)))
             (when (buffer-live-p buf) (agent-repl--open-progress-show ws buf)))
           nil)
@@ -355,7 +356,7 @@ asynchronous is even attempted."
                  agent-repl--open-progress)
         (agent-repl--open-progress-render ws)
         (agent-repl--open-progress-show ws buf)
-        (agent-repl--log ws "open-progress: STARTED buffer=%s" (buffer-name buf))
+        (agent-repl--log ws "open-progress: STARTED buffer={buffer}" :buffer (buffer-name buf))
         (agent-repl--open-progress-changed)
         ;; Forced, because the caller has synchronous work left (xwidget
         ;; validation, the daemon ensure's first leg) before its command
@@ -375,20 +376,20 @@ BACKWARDS.  Returns the new phase, or nil when nothing moved."
            (to (agent-repl--open-progress-stage-index phase)))
       (cond
        ((memq current agent-repl--open-progress-terminal-phases)
-        (agent-repl--log-verbose ws "open-progress: note dropped phase=%s reason=already-terminal" phase)
+        (agent-repl--log-verbose ws "open-progress: note dropped phase={phase} reason=already-terminal" :phase phase)
         nil)
        ((null to)
-        (agent-repl--log ws "open-progress: note REFUSED unknown phase=%s" phase)
+        (agent-repl--log ws "open-progress: note REFUSED unknown phase={phase}" :phase phase)
         nil)
        ((and from (<= to from))
-        (agent-repl--log-verbose ws "open-progress: note dropped phase=%s reason=not-an-advance current=%s"
-                                 phase current)
+        (agent-repl--log-verbose ws "open-progress: note dropped phase={phase} reason=not-an-advance current={current}"
+                                 :phase phase :current current)
         nil)
        (t
         (puthash ws (plist-put (plist-put entry :phase phase) :detail detail)
                  agent-repl--open-progress)
         (agent-repl--open-progress-render ws)
-        (agent-repl--log ws "open-progress: phase %s -> %s" current phase)
+        (agent-repl--log ws "open-progress: phase {current} -> {phase}" :current current :phase phase)
         (agent-repl--open-progress-changed)
         phase)))))
 
@@ -403,7 +404,7 @@ the buffer, or nil when WS had no pending open."
                                       :detail detail)
                            :timer nil)
              agent-repl--open-progress)
-    (agent-repl--warn ws "open-progress: FAILED detail=%s" detail)
+    (agent-repl--warn ws "open-progress: FAILED detail={detail}" :detail detail)
     (prog1 (agent-repl--open-progress-render ws)
       (agent-repl--open-progress-changed))))
 
@@ -430,15 +431,15 @@ waiting.  A placeholder already resolved is left exactly as it is."
   (when-let ((entry (agent-repl--open-progress-entry ws)))
     (let ((phase (plist-get entry :phase)))
       (if (memq phase agent-repl--open-progress-terminal-phases)
-          (agent-repl--log-verbose ws "open-progress: escalation skipped phase=%s" phase)
+          (agent-repl--log-verbose ws "open-progress: escalation skipped phase={phase}" :phase phase)
         (puthash ws (plist-put
                      (plist-put
                       (plist-put entry :phase :timed-out)
                       :detail (agent-repl--open-progress-stall-diagnosis phase))
                      :timer nil)
                  agent-repl--open-progress)
-        (agent-repl--warn ws "open-progress: ESCALATED after %ss stage=%s"
-                          agent-repl-open-progress-escalate-seconds phase)
+        (agent-repl--warn ws "open-progress: ESCALATED after {open_progress_escalate_seconds}s stage={stage}"
+                          :open_progress_escalate_seconds agent-repl-open-progress-escalate-seconds :stage phase)
         (agent-repl--open-progress-render ws)
         (agent-repl--open-progress-changed)))))
 
@@ -452,8 +453,8 @@ non-nil when a placeholder was actually torn down."
     (remhash ws agent-repl--open-progress)
     (let ((buf (plist-get entry :buffer)))
       (when (buffer-live-p buf) (kill-buffer buf)))
-    (agent-repl--log ws "open-progress: FINISHED elapsed=%.3fs"
-                     (- (float-time) (plist-get entry :started)))
+    (agent-repl--log ws "open-progress: FINISHED elapsed={elapsed}s"
+                     :elapsed (format "%.3f" (- (float-time) (plist-get entry :started))))
     (agent-repl--open-progress-changed)
     t))
 
@@ -481,8 +482,8 @@ Returns non-nil when a placeholder was actually torn down."
     (remhash ws agent-repl--open-progress)
     (let ((buf (plist-get entry :buffer)))
       (when (buffer-live-p buf) (kill-buffer buf)))
-    (agent-repl--log ws "open-progress: ABANDONED phase=%s reason=workspace-deleted"
-                     (plist-get entry :phase))
+    (agent-repl--log ws "open-progress: ABANDONED phase={phase} reason=workspace-deleted"
+                     :phase (plist-get entry :phase))
     (agent-repl--open-progress-changed)
     t))
 

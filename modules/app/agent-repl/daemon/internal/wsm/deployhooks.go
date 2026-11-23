@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
@@ -238,7 +239,7 @@ const (
 // share their field numbers (state: live 1, settled 2), so the arm's bytes are
 // carried over as they are. Every other row is left byte for byte as it was.
 func rewriteRetiredMergeTabs(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
-	return rewriteDurableRows(ctx, tx, log, "re-encoded the stored merge tabs of retired prompt kinds as prompt hooks' tabs", rewriteRetiredMergeTab)
+	return rewriteDurableRows(ctx, tx, log, logsite.Msg("re-encoded the stored merge tabs of retired prompt kinds as prompt hooks' tabs"), rewriteRetiredMergeTab)
 }
 
 // rewriteRetiredMergeTab re-encodes one stored frontend.v1.FeedRow whose merge

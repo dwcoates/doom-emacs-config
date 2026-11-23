@@ -4,7 +4,7 @@ import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js"
 import { createRowHover } from "../../src/sidebar/row-hover.js";
 import type { RowHover } from "../../src/sidebar/context.js";
 import { HOVER_SUSPENDED_CLASS, installTransients, type Transients } from "../../src/sidebar/transients.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { createListeners } from "../../src/listeners.js";
 import { FOCUS_LEFT_BLUR, FOCUS_LEFT_EMACS, FOCUS_LEFT_HIDDEN } from "../../src/focus-left.js";
 import { DISMISS_PAGE_PRESS } from "../../src/host/sidebar-popups.js";
@@ -92,7 +92,7 @@ describe("the rail's transients", () => {
 
     it("records that it let go of nothing", () => {
       // ARRANGE
-      const debug = vi.spyOn(log, "debug");
+      const debug = spyLog("debug");
       onCopy = true;
       // ACT
       leave();
@@ -142,7 +142,7 @@ describe("the rail's transients", () => {
 
     it("logs the dismissal with why", () => {
       // ARRANGE
-      const debug = vi.spyOn(log, "debug");
+      const debug = spyLog("debug");
       // ACT
       leave();
       // ASSERT
@@ -281,7 +281,7 @@ describe("the rail's transients", () => {
     it("logs the lift with what lifted it", () => {
       // ARRANGE
       leave();
-      const debug = vi.spyOn(log, "debug");
+      const debug = spyLog("debug");
       // ACT
       move(10, 10);
       // ASSERT

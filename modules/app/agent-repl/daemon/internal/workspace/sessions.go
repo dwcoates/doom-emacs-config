@@ -1041,7 +1041,7 @@ func (src source) withRecord(record wsm.Workspace) source {
 // workspace with no client at all.
 func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string, session wsm.Session, exists bool) (source, error) {
 	if !exists {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!exists"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: !exists", dlog.Context{"function": "workspace", "condition": "!exists"})
 		// NO SESSION RECORD IS THE ONE BRANCH THAT MAY ADOPT. Owner ruling
 		// 2026-09-15: when the workspace has never recorded a session of its
 		// own, an existing on-disk transcript — a conversation begun in the
@@ -1054,7 +1054,7 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 		return f.adoptOrFresh(ctx, log, ws, dir), nil
 	}
 	if session.Terminal != nil && session.Terminal.Kind == "deleted" {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "session.Terminal != nil && session.Terminal.Kind == \"deleted\""})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: session.Terminal != nil && session.Terminal.Kind == \"deleted\"", dlog.Context{"function": "workspace", "condition": "session.Terminal != nil && session.Terminal.Kind == \"deleted\""})
 		return source{}, fmt.Errorf("the session was deleted: %s", session.Terminal.Detail)
 	}
 	if session.VendorSessionID == "" {
@@ -1069,7 +1069,7 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 			log.Debug(opBringUp, "the workspace owes a fork of its parent; the bring-up makes it", dlog.Context{"parent": string(pending.Parent)})
 			return source{Fork: &pending}, nil
 		}
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "session.VendorSessionID == \"\""})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: session.VendorSessionID == \"\"", dlog.Context{"function": "workspace", "condition": "session.VendorSessionID == \"\""})
 		return source{Fresh: true}, nil
 	}
 	if _, err := f.deps.Accounts.FindTranscript(ctx, dir, session.VendorSessionID); err != nil {
@@ -2446,7 +2446,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		}
 		return client, pathSpawned, nil
 	default:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "default"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: default", dlog.Context{"function": "workspace", "branch": "default"})
 		log.Error(opBringUp, "the workspace lock probe could not tell", dlog.Context{
 			"lock": lockPath, "cause": errText(err),
 		})
@@ -2492,7 +2492,7 @@ func (f *Fleet) noteStartFailed(ctx context.Context, log dlog.Logger, ws ids.Wor
 	}
 	var death *shimclient.BringUpDeathError
 	if errors.As(cause, &death) {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "errors.As(cause, &death)"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: errors.As(cause, &death)", dlog.Context{"function": "workspace", "condition": "errors.As(cause, &death)"})
 		fault.Evidence["exit_code"] = strconv.Itoa(death.Exit.Code)
 		fault.Evidence["stderr_tail"] = death.Exit.Stderr
 	}
@@ -2573,7 +2573,7 @@ func (f *Fleet) portAcrossAccounts(
 		"recorded_config_dir": session.ConfigDir, "routed_config_dir": routed, "fresh": src.Fresh,
 	})
 	if src.Fresh {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: src.Fresh", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
 		return nil
 	}
 	transcript, err := f.deps.Accounts.FindTranscript(ctx, dir, src.VendorSessionID)
@@ -2822,7 +2822,7 @@ const summarizeExpected = 95 * time.Second
 func (f *Fleet) startSessionRequest(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, src source, session wsm.Session, configDir string) (*shimv1.StartSessionRequest, error) {
 	req := &shimv1.StartSessionRequest{WorkspaceName: src.WorkspaceName}
 	if src.Fresh {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: src.Fresh", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
 		loginDefault, err := loginDefaultModel(ctx, f.deps.DB, f.deps.Accounts, configDir)
 		if err != nil {
 			log.Error(opBringUp, "the login's default model could not be read; the session was not started", dlog.Context{
@@ -2974,7 +2974,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			return nil, nil
 		}
 		if failure.GetConversationOwned() != nil {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetConversationOwned() != nil"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: failure.GetConversationOwned() != nil", dlog.Context{"function": "workspace", "condition": "failure.GetConversationOwned() != nil"})
 			// ANOTHER SHIM HOLDS THIS CONVERSATION. It took the workspace
 			// kernel lock first, which is exactly what that lock is for: two
 			// vendor processes on one conversation is the state it prevents.
@@ -2985,7 +2985,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 				false, false, failure.GetDetail())
 		}
 		if unavailable := failure.GetLockHolderUnavailable(); unavailable != nil {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetLockHolderUnavailable() != nil"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: failure.GetLockHolderUnavailable() != nil", dlog.Context{"function": "workspace", "condition": "failure.GetLockHolderUnavailable() != nil"})
 			// THE SHIM'S OWN LOCK HELPER FAILED. No claim was completed, so
 			// nobody is known to own the conversation: saying "another shim
 			// holds it" here would send the reader hunting for a process that
@@ -3006,7 +3006,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 				true, false, fmt.Sprintf("the lock helper %s %s", holder.GetBinary(), how))
 		}
 		if failure.GetUnknownSession() != nil {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetUnknownSession() != nil"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: failure.GetUnknownSession() != nil", dlog.Context{"function": "workspace", "condition": "failure.GetUnknownSession() != nil"})
 			// THE RESUME NAMED A CONVERSATION THE SHIM HAS NO TRANSCRIPT FOR.
 			// The classifier is what keeps a never-turned session off this
 			// path; reaching it anyway is a real vanished transcript, and it
@@ -3018,11 +3018,11 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 				false, false, failure.GetDetail())
 		}
 		if vendor := failure.GetVendorStartFailed(); vendor != nil {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetVendorStartFailed() != nil"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: failure.GetVendorStartFailed() != nil", dlog.Context{"function": "workspace", "condition": "failure.GetVendorStartFailed() != nil"})
 			return nil, vendorStartLabel(log, ws, vendor, failure.GetDetail(), false)
 		}
 		if failure.GetAlreadyStarted() != nil {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetAlreadyStarted() != nil"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: failure.GetAlreadyStarted() != nil", dlog.Context{"function": "workspace", "condition": "failure.GetAlreadyStarted() != nil"})
 			// THE SHIM ALREADY SERVES A SESSION. One shim serves exactly one,
 			// so this is a StartSession the daemon should never have sent: the
 			// bring-up dialed a shim that is already live. It is a NAMED state
@@ -3370,7 +3370,7 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	}
 	f.noteSDKVersion(log, started.GetRuntime().GetSdkVersion())
 	if next.StartedAt.IsZero() {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: next.StartedAt.IsZero()", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})
 		next.StartedAt = now
 	}
 	if err := f.deps.DB.PutSession(ctx, next); err != nil {
@@ -3622,7 +3622,7 @@ func (f *Fleet) CloseWatchers() {
 // identity leaves the logger unstamped rather than writing an empty field.
 func stampSession(log dlog.Logger, hostSessionID string) dlog.Logger {
 	if hostSessionID == "" {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "hostSessionID == \"\""})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: hostSessionID == \"\"", dlog.Context{"function": "workspace", "condition": "hostSessionID == \"\""})
 		return log
 	}
 	return log.With(dlog.Context{dlog.KeyAgentReplSessionID: hostSessionID})

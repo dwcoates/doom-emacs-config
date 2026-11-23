@@ -126,7 +126,7 @@ func runWithLogger(socketPath, readSocketPath, holderPath, dbPath, pprofAddr, me
 	}
 	defer func() {
 		if closeErr := pprofSurface.Close(); closeErr != nil {
-			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: %v", closeErr)
+			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: {cause}", logging.Values{"cause": closeErr.Error()})
 		}
 	}()
 	// THE METRICS SURFACE opens beside it and advertises at once: launchd
@@ -252,9 +252,9 @@ func runWithLogger(socketPath, readSocketPath, holderPath, dbPath, pprofAddr, me
 	var first error
 	select {
 	case sig := <-sigc:
-		log.Log(logging.Fields{Operation: "store.shutdown"}, "received signal=%s", sig)
+		log.Log(logging.Fields{Operation: "store.shutdown"}, "received signal={signal}", logging.Values{"signal": sig.String()})
 	case first = <-errc:
-		log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "one of the store's servers stopped; stopping the other: %v", first)
+		log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "one of the store's servers stopped; stopping the other: {cause}", logging.Values{"cause": first.Error()})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
@@ -310,15 +310,15 @@ func openPprofSurface(addr string, log *logging.Logger) (*pprofsurface.Surface, 
 	}
 	if surface == nil {
 		log.LogVerbose(logging.Fields{Operation: "store.pprof.disabled", Level: "debug"},
-			"Go profiling surface is off env=%s flag=--pprof", pprofsurface.EnvAddr)
+			"Go profiling surface is off env={env} flag=--pprof", logging.Values{"env": pprofsurface.EnvAddr})
 		return nil, nil
 	}
 	log.Log(logging.Fields{Operation: "store.pprof.enabled", Level: "warn", Socket: surface.Address()},
-		"Go profiling surface is LISTENING; it exposes goroutine stacks, the command line and heap contents network=%s address=%s url=%s env=%s",
-		surface.Network(), surface.Address(), surface.URL(), pprofsurface.EnvAddr)
+		"Go profiling surface is LISTENING; it exposes goroutine stacks, the command line and heap contents network={network} address={address} url={url} env={env}",
+		logging.Values{"network": surface.Network(), "address": surface.Address(), "url": surface.URL(), "env": pprofsurface.EnvAddr})
 	go func() {
 		if serveErr := surface.Serve(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			log.Log(logging.Fields{Operation: "store.pprof.serve", Level: "error"}, "pprof surface serve ended: %v", serveErr)
+			log.Log(logging.Fields{Operation: "store.pprof.serve", Level: "error"}, "pprof surface serve ended: {cause}", logging.Values{"cause": serveErr.Error()})
 		}
 	}()
 	return surface, nil
@@ -334,18 +334,18 @@ func openPprofSurface(addr string, log *logging.Logger) (*pprofsurface.Surface, 
 func holdPprofForDiagnosis(surface *pprofsurface.Surface, log *logging.Logger) {
 	if surface == nil {
 		log.LogVerbose(logging.Fields{Operation: "store.pprof.hold", Level: "debug"},
-			"the boot failed with no profiling surface to hold open")
+			"the boot failed with no profiling surface to hold open", nil)
 		return
 	}
 	log.Log(logging.Fields{Operation: "store.pprof.hold", Level: "warn", Socket: surface.Address()},
-		"the boot failed; holding the profiling surface open so it can be profiled url=%s grace_ms=%d", surface.URL(), pprofBootFailureGrace.Milliseconds())
+		"the boot failed; holding the profiling surface open so it can be profiled url={url} grace_ms={grace_ms}", logging.Values{"url": surface.URL(), "grace_ms": pprofBootFailureGrace.Milliseconds()})
 	select {
 	case <-surface.Served():
 		log.Log(logging.Fields{Operation: "store.pprof.hold", Level: "warn", Socket: surface.Address()},
-			"the failed boot was profiled; exiting")
+			"the failed boot was profiled; exiting", nil)
 	case <-time.After(pprofBootFailureGrace):
 		log.Log(logging.Fields{Operation: "store.pprof.hold", Level: "warn", Socket: surface.Address()},
-			"nobody profiled the failed boot within the grace; exiting grace_ms=%d", pprofBootFailureGrace.Milliseconds())
+			"nobody profiled the failed boot within the grace; exiting grace_ms={grace_ms}", logging.Values{"grace_ms": pprofBootFailureGrace.Milliseconds()})
 	}
 }
 
@@ -380,14 +380,14 @@ func envStr(name, def string) string {
 // this trace exists to narrate the crash, not to turn it into a normal exit.
 func logProcessExit(log *logging.Logger, err *error) {
 	if r := recover(); r != nil {
-		log.Log(logging.Fields{Operation: "exit", Level: "error"}, "shim-store exiting: panic: %v", r)
+		log.Log(logging.Fields{Operation: "exit", Level: "error"}, "shim-store exiting: panic: {panic}", logging.Values{"panic": fmt.Sprint(r)})
 		panic(r)
 	}
 	if *err != nil {
-		log.Log(logging.Fields{Operation: "exit", Level: "error"}, "shim-store exiting: %v", *err)
+		log.Log(logging.Fields{Operation: "exit", Level: "error"}, "shim-store exiting: {cause}", logging.Values{"cause": (*err).Error()})
 		return
 	}
-	log.Log(logging.Fields{Operation: "exit"}, "shim-store exiting cleanly")
+	log.Log(logging.Fields{Operation: "exit"}, "shim-store exiting cleanly", nil)
 }
 
 // openLogger creates shim-store's only persistent diagnostic sink. Directory
@@ -433,15 +433,15 @@ func reportLogExpiry(log *logging.Logger, logPath string) func(sharedlogging.Exp
 	return func(result sharedlogging.ExpireResult, err error) {
 		if err != nil {
 			log.Log(logging.Fields{Operation: "store.log.retention_failed", Level: "error", Path: logPath, ErrorCause: err.Error()},
-				"the store's log could not be aged by the %s retention: %v", sharedlogging.DefaultRetention, err)
+				"the store's log could not be aged by the {retention} retention: {cause}", logging.Values{"retention": sharedlogging.DefaultRetention.String(), "cause": err.Error()})
 			return
 		}
 		if !result.Changed() {
 			return
 		}
 		log.Log(logging.Fields{Operation: "store.log.retention", Path: logPath},
-			"aged the store's log by the %s retention: rolled_current=%t removed=%d %v",
-			sharedlogging.DefaultRetention, result.RolledCurrent, len(result.Removed), result.Removed)
+			"aged the store's log by the {retention} retention: rolled_current={rolled_current} removed={removed} {removed_files}",
+			logging.Values{"retention": sharedlogging.DefaultRetention.String(), "rolled_current": result.RolledCurrent, "removed": len(result.Removed), "removed_files": result.Removed})
 	}
 }
 

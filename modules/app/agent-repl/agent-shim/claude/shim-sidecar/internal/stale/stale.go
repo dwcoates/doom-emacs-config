@@ -186,8 +186,7 @@ func New(opt Options, log *logging.Bound) *Tracker {
 		opt.WorkflowSilence = DefaultWorkflowSilence
 	}
 	log.With(logging.Context{Operation: "stale-new"}).LogVerbose(
-		"constructing lost tracker grace=%s shell_silence=%s agent_silence=%s workflow_silence=%s",
-		opt.Grace, opt.ShellSilence, opt.AgentSilence, opt.WorkflowSilence)
+		"constructing lost tracker grace={grace} shell_silence={shell_silence} agent_silence={agent_silence} workflow_silence={workflow_silence}", logging.Values{"grace": opt.Grace.String(), "shell_silence": opt.ShellSilence.String(), "agent_silence": opt.AgentSilence.String(), "workflow_silence": opt.WorkflowSilence.String()})
 	return &Tracker{open: map[string]*entry{}, settled: map[string]struct{}{}, opt: opt, log: log}
 }
 
@@ -234,14 +233,14 @@ func (t *Tracker) Observe(work Work, nowMs int64) {
 		if work.RunActivityID != "" {
 			existing.work.RunActivityID = work.RunActivityID
 		}
-		t.bound(existing.work).LogVerbose("re-observed an already tracked run")
+		t.bound(existing.work).LogVerbose("re-observed an already tracked run", nil)
 		return
 	}
 	if work.LastActivityMs == 0 {
 		work.LastActivityMs = nowMs
 	}
 	t.open[work.Path] = &entry{work: work}
-	t.bound(work).Log("tracking detached run kind=%s last_activity_ms=%d", work.Kind, work.LastActivityMs)
+	t.bound(work).Log("tracking detached run kind={work_kind} last_activity_ms={work_last_activity_ms}", logging.Values{"work_kind": work.Kind.String(), "work_last_activity_ms": work.LastActivityMs})
 }
 
 // Activity records that the file grew, which is the only evidence of liveness a
@@ -257,7 +256,7 @@ func (t *Tracker) Activity(path string, nowMs int64) {
 	existing.work.LastActivityMs = nowMs
 	if existing.vanishedAtMs != 0 {
 		existing.vanishedAtMs = 0
-		t.bound(existing.work).Log("the vanished file is back and growing; its grace clock is cleared")
+		t.bound(existing.work).Log("the vanished file is back and growing; its grace clock is cleared", nil)
 	}
 }
 
@@ -282,11 +281,11 @@ func (t *Tracker) MarkVanished(path string, nowMs int64, benignEnd string) {
 	existing.benignEnd = benignEnd
 	if benignEnd != "" {
 		t.bound(existing.work).With(logging.Context{Reason: benignEnd}).Log(
-			"the run's file vanished with nothing outstanding (%s), which is an ordinary end rather than a loss; the grace window of %s still decides the conclusion", benignEnd, t.opt.Grace)
+			"the run's file vanished with nothing outstanding ({benign_end}), which is an ordinary end rather than a loss; the grace window of {grace} still decides the conclusion", logging.Values{"benign_end": benignEnd, "grace": t.opt.Grace.String()})
 		return
 	}
 	t.bound(existing.work).With(logging.Context{Level: "warn"}).Log(
-		"the run's file vanished; the grace window of %s decides whether that is a rename race or a LOST run", t.opt.Grace)
+		"the run's file vanished; the grace window of {grace} decides whether that is a rename race or a LOST run", logging.Values{"grace": t.opt.Grace.String()})
 }
 
 // Settle records that a run ended on evidence — its own terminator, a
@@ -304,10 +303,10 @@ func (t *Tracker) Settle(path string) bool {
 	t.retireLocked(path)
 	if !ok {
 		t.log.With(logging.Context{Operation: "lost-policy", Path: path}).LogVerbose(
-			"run recorded as settled; it was not being tracked, and it never will be")
+			"run recorded as settled; it was not being tracked, and it never will be", nil)
 		return false
 	}
-	t.bound(existing.work).Log("run settled by a terminal read from its own file; it can no longer be concluded LOST")
+	t.bound(existing.work).Log("run settled by a terminal read from its own file; it can no longer be concluded LOST", nil)
 	return true
 }
 
@@ -326,7 +325,7 @@ func (t *Tracker) SettledByRecord(work Work, endedAtMs int64) {
 		panic("stale: a tracked run cannot be settled by the record; the store is asked before a run is observed: " + work.Path)
 	}
 	t.retireLocked(work.Path)
-	t.bound(work).Log("run already settled per the store (ended_at_ms=%d); it is not tracked and can never be concluded LOST", endedAtMs)
+	t.bound(work).Log("run already settled per the store (ended_at_ms={ended_at_ms}); it is not tracked and can never be concluded LOST", logging.Values{"ended_at_ms": endedAtMs})
 }
 
 // Settled reports whether a path's run has settled in this process.
@@ -369,7 +368,7 @@ func (t *Tracker) Sweep(bootMs, nowMs int64, unseen func(path string) bool) []Lo
 		// sweep's boot arm is inert too, rather than leaving it unstated.
 		t.bootUnknownSaid = true
 		t.log.With(logging.Context{Operation: "lost-policy"}).LogVerbose(
-			"boot time unavailable: the sweep's swept_up arm is inert and a pre-boot run can only be concluded by its silence")
+			"boot time unavailable: the sweep's swept_up arm is inert and a pre-boot run can only be concluded by its silence", nil)
 	}
 	var out []Lost
 	for path, existing := range t.open {
@@ -378,7 +377,7 @@ func (t *Tracker) Sweep(bootMs, nowMs int64, unseen func(path string) bool) []Lo
 			continue
 		}
 		if reason == ReasonWentSilent && unseen(path) {
-			t.bound(existing.work).LogVerbose("quiet past its silence window, but the reader has not seen all its bytes yet; not silent")
+			t.bound(existing.work).LogVerbose("quiet past its silence window, but the reader has not seen all its bytes yet; not silent", nil)
 			continue
 		}
 		delete(t.open, path)
@@ -419,7 +418,7 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []Lost {
 		// "running" forever in every reader downstream. That is a real loss, so
 		// it is stated rather than passed over.
 		t.log.With(logging.Context{Operation: "boot-sweep", Level: "warn"}).Log(
-			"boot time unavailable: runs that predate the reboot cannot be swept and stay open")
+			"boot time unavailable: runs that predate the reboot cannot be swept and stay open", nil)
 		return nil
 	}
 	t.mu.Lock()
@@ -459,8 +458,7 @@ func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 			}
 			c.add(lost.LastActivityMs)
 			t.bound(lost.Work).With(logging.Context{Level: "debug", Reason: string(lost.Reason)}).LogVerbose(
-				"run concluded LOST during startup catch-up reason=%s: it was already stale before this sidecar started, so it is summarized rather than stated on its own (last_activity_ms=%d observed_at_ms=%d)",
-				lost.Reason, lost.LastActivityMs, nowMs)
+				"run concluded LOST during startup catch-up reason={lost_reason}: it was already stale before this sidecar started, so it is summarized rather than stated on its own (last_activity_ms={lost_last_activity_ms} observed_at_ms={now_ms})", logging.Values{"lost_reason": string(lost.Reason), "lost_last_activity_ms": lost.LastActivityMs, "now_ms": nowMs})
 			continue
 		}
 		if lost.BenignEnd != "" {
@@ -478,8 +476,7 @@ func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 			// record earlier, on the `file-vanished` record that carries it in
 			// `reason`.
 			t.bound(lost.Work).With(logging.Context{Reason: string(lost.Reason)}).Log(
-				"run concluded LOST reason=%s: its file vanished with nothing outstanding (%s), which is an ordinary end rather than a loss (last_activity_ms=%d observed_at_ms=%d)",
-				lost.Reason, lost.BenignEnd, lost.LastActivityMs, nowMs)
+				"run concluded LOST reason={lost_reason}: its file vanished with nothing outstanding ({lost_benign_end}), which is an ordinary end rather than a loss (last_activity_ms={lost_last_activity_ms} observed_at_ms={now_ms})", logging.Values{"lost_reason": string(lost.Reason), "lost_benign_end": lost.BenignEnd, "lost_last_activity_ms": lost.LastActivityMs, "now_ms": nowMs})
 			continue
 		}
 		if lost.Reason == ReasonWentSilent {
@@ -507,13 +504,11 @@ func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
 			// one is an unlink under the reader, which is a real anomaly about
 			// the file plane rather than an inference about a process.
 			t.bound(lost.Work).With(logging.Context{Reason: string(lost.Reason)}).Log(
-				"run concluded LOST reason=%s: it stopped writing for longer than its silence window, which is not a claim that it failed and not a fault to act on — a detached run that is quiet and alive looks exactly like this from the file plane (last_activity_ms=%d observed_at_ms=%d)",
-				lost.Reason, lost.LastActivityMs, nowMs)
+				"run concluded LOST reason={lost_reason}: it stopped writing for longer than its silence window, which is not a claim that it failed and not a fault to act on — a detached run that is quiet and alive looks exactly like this from the file plane (last_activity_ms={lost_last_activity_ms} observed_at_ms={now_ms})", logging.Values{"lost_reason": string(lost.Reason), "lost_last_activity_ms": lost.LastActivityMs, "now_ms": nowMs})
 			continue
 		}
 		t.bound(lost.Work).With(logging.Context{Level: "warn"}).Log(
-			"run concluded LOST reason=%s: we stopped seeing it, which is not a claim that it failed (last_activity_ms=%d observed_at_ms=%d)",
-			lost.Reason, lost.LastActivityMs, nowMs)
+			"run concluded LOST reason={lost_reason}: we stopped seeing it, which is not a claim that it failed (last_activity_ms={lost_last_activity_ms} observed_at_ms={now_ms})", logging.Values{"lost_reason": string(lost.Reason), "lost_last_activity_ms": lost.LastActivityMs, "now_ms": nowMs})
 	}
 	t.summarizeCatchup(catchup, nowMs)
 	return out
@@ -554,8 +549,7 @@ func (t *Tracker) summarizeCatchup(catchup map[Reason]*catchupCount, nowMs int64
 		t.log.With(logging.Context{
 			Operation: "catchup-summary", Level: "info",
 			Reason: string(reason), Repeat: logging.Repeat(c.count),
-		}).Log("startup catch-up concluded %d pre-existing run(s) LOST reason=%s; the oldest last grew %s ago — these predate this sidecar and are summarized here, not stated one by one",
-			c.count, reason, age)
+		}).Log("startup catch-up concluded {count} pre-existing run(s) LOST reason={reason}; the oldest last grew {age} ago — these predate this sidecar and are summarized here, not stated one by one", logging.Values{"count": c.count, "reason": string(reason), "age": age.String()})
 	}
 }
 

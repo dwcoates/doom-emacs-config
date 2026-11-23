@@ -4,7 +4,9 @@
 // Every test starts on production's logger again (setup.ts, page-state.ts).
 import { describe, expect, it } from "vitest";
 import { installPageLogger } from "./webkit/page-log";
-import { log } from "../src/log.js";
+import { createLogger } from "../src/log.js";
+
+const log = createLogger("webapp.test.page-log");
 
 describe("installPageLogger", () => {
   it("keeps every record as `level operation`, in order", () => {

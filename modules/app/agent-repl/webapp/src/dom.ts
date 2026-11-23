@@ -14,7 +14,9 @@
  * runs against a real DOM and against a plain object in a test alike.
  */
 
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.dom");
 
 /** The SVG namespace every drawn glyph's elements are created in. */
 export const SVG_NS = "http://www.w3.org/2000/svg";
@@ -243,10 +245,10 @@ export function childrenMatching<E extends Element = Element>(parent: Element, s
 /** Refuse a `:scope` selector, which `matches` would silently misread. */
 function refuseScope(helper: string, selector: string): void {
   if (!selector.includes(":scope")) return;
-  log.error(`${helper} was handed a :scope selector, which matches() reads as the tested element`, {
+  log.error("{helper} was handed a :scope selector, which matches() reads as the tested element", {
     operation: "dom.query-scope-refused",
-    context: { helper, selector },
-  });
+    context: { selector },
+  }, { helper });
   throw new Error(`${helper}: ":scope" selectors are refused (${selector})`);
 }
 

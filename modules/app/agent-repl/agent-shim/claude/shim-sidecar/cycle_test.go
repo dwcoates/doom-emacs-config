@@ -1389,7 +1389,7 @@ func TestTheBootRewindIsOncePerIdentityNotPerPath(t *testing.T) {
 	h.sc.rescan()
 
 	// Assert.
-	if got := strings.Count(h.logText(), "rewound the restored cursor"); got != 1 {
+	if got := strings.Count(h.logText(), `"message":"rewound the restored cursor`); got != 1 {
 		t.Fatalf("rewind ran %d times across a rename, want once per file per boot", got)
 	}
 }
@@ -1758,7 +1758,7 @@ func TestTheCatchupWindowClosesAfterTheFirstDrainedPass(t *testing.T) {
 
 	// Act.
 	h.sc.endCatchupOnFirstDrainedPass()
-	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("a live rewind")
+	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("a live rewind", nil)
 
 	// Assert.
 	if !strings.Contains(h.logText(), `"level":"info","verbosity":"normal","operation":"boot-rewind"`) {
@@ -1775,7 +1775,7 @@ func TestTheCatchupWindowStaysOpenWithoutADrainedPass(t *testing.T) {
 
 	// Act.
 	h.sc.endCatchupOnFirstDrainedPass()
-	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("still backlog")
+	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("still backlog", nil)
 
 	// Assert.
 	if !strings.Contains(h.logText(), `"level":"debug"`) {
@@ -1789,7 +1789,7 @@ func TestASecondDrainedPassDoesNotRestateTheSummaries(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, nil)
 	h.sc.log.BeginCatchup(catchupOperations...)
-	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("backlog")
+	h.sc.log.With(logging.Context{Operation: "boot-rewind"}).Log("backlog", nil)
 	h.sc.drainedPass = true
 	h.sc.endCatchupOnFirstDrainedPass()
 	before := strings.Count(h.logText(), `"operation":"catchup-summary"`)

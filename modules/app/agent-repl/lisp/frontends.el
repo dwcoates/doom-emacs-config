@@ -39,16 +39,16 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
-(declare-function agent-repl--warn "core")
 
 (require 'cl-lib)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--log-decision "agent-repl-core" (key decision ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--note-panels-shown "agent-repl-panels" (ws))
@@ -146,20 +146,20 @@ Signals when FRONTEND is not an `agent-repl-frontend' struct or a
 required slot is missing — a partially-defined frontend is a bug, not
 a configuration to cope with."
   (unless (agent-repl-frontend-p frontend)
-    (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: rejected non-frontend value=%S" frontend)
+    (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: rejected non-frontend value={value}" :value (prin1-to-string frontend))
     (error "agent-repl-register-frontend: not a frontend struct: %S" frontend))
   (dolist (slot '(name open-fn boot-fn kill-fn running-p-fn
                   supported-backends supported-envs))
     (unless (funcall (intern (format "agent-repl-frontend-%s" slot)) frontend)
-      (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: rejected frontend=%S missing-slot=%s"
-                       (agent-repl-frontend-name frontend) slot)
+      (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: rejected frontend={frontend} missing-slot={missing_slot}"
+                       :frontend (prin1-to-string (agent-repl-frontend-name frontend)) :missing_slot slot)
       (error "agent-repl-register-frontend: frontend %S is missing slot %s"
              (agent-repl-frontend-name frontend) slot)))
   (puthash (agent-repl-frontend-name frontend) frontend agent-repl--frontends)
-  (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: frontend=%s backends=%S envs=%S"
-                   (agent-repl-frontend-name frontend)
-                   (agent-repl-frontend-supported-backends frontend)
-                   (agent-repl-frontend-supported-envs frontend)))
+  (agent-repl--log '(:agent-repl-central "frontend registration is process-wide") "frontend-register: frontend={frontend} backends={backends} envs={envs}"
+                   :frontend (agent-repl-frontend-name frontend)
+                   :backends (prin1-to-string (agent-repl-frontend-supported-backends frontend))
+                   :envs (prin1-to-string (agent-repl-frontend-supported-envs frontend))))
 
 (defun agent-repl-frontend-get (name &optional ws)
   "Return the registered frontend named NAME (a symbol).
@@ -171,9 +171,9 @@ silently fall back to a different presentation."
     (if frontend
         (progn
           (agent-repl--log-decision (list 'frontend-get scope name) t
-                                    scope "frontend-get: frontend=%s found=t" name)
+                                    scope "frontend-get: frontend={frontend} found=t" :frontend name)
           frontend)
-      (agent-repl--log scope "frontend-get: frontend=%s found=nil -> error" name)
+      (agent-repl--log scope "frontend-get: frontend={frontend} found=nil -> error" :frontend name)
       (error "agent-repl-frontend-get: no frontend registered under `%s'" name))))
 
 (defun agent-repl--frontend-names ()
@@ -217,9 +217,9 @@ workspace has actually declared one."
     (agent-repl--log-decision
      (list 'frontend-supports ws (agent-repl-frontend-name fe))
      (list backend env supported)
-     ws "frontend-supports: frontend=%s backend=%s backend-supported=%s env=%s env-unhydrated=%s env-supported=%s supported=%s"
-     (agent-repl-frontend-name fe) backend backend-supported env env-unhydrated
-     env-supported supported)
+     ws "frontend-supports: frontend={frontend} backend={backend} backend-supported={backend_supported} env={env} env-unhydrated={env_unhydrated} env-supported={env_supported} supported={supported}"
+     :frontend (agent-repl-frontend-name fe) :backend backend :backend_supported backend-supported :env env :env_unhydrated env-unhydrated
+     :env_supported env-supported :supported supported)
     supported))
 
 (defun agent-repl--frontend-default-for-ws (ws)
@@ -242,20 +242,20 @@ signals."
         (let ((resolved (agent-repl-frontend-name default)))
           (agent-repl--log-decision
            (list 'default-for-ws ws) (list backend env agent-repl-default-frontend resolved)
-           ws "default-for-ws: backend=%s env=%s default=%s default-supported=t resolved=%s"
-           backend env agent-repl-default-frontend resolved)
+           ws "default-for-ws: backend={backend} env={env} default={default} default-supported=t resolved={resolved}"
+           :backend backend :env env :default agent-repl-default-frontend :resolved resolved)
           resolved)
       (let ((capable (seq-find (lambda (name)
                                  (agent-repl--frontend-supports-ws-p
                                   (agent-repl-frontend-get name ws) backend env ws))
                                (agent-repl--frontend-names))))
         (unless capable
-          (agent-repl--log ws "default-for-ws: backend=%s env=%s default=%s default-supported=nil capable=nil -> error"
-                           backend env agent-repl-default-frontend)
+          (agent-repl--log ws "default-for-ws: backend={backend} env={env} default={default} default-supported=nil capable=nil -> error"
+                           :backend backend :env env :default agent-repl-default-frontend)
           (error "agent-repl: no registered frontend can drive backend `%s' in env `%s' (ws=%s)"
                  backend env ws))
-        (agent-repl--log ws "default-for-ws: backend=%s env=%s default=%s default-supported=nil resolved=%s"
-                         backend env agent-repl-default-frontend capable)
+        (agent-repl--log ws "default-for-ws: backend={backend} env={env} default={default} default-supported=nil resolved={resolved}"
+                         :backend backend :env env :default agent-repl-default-frontend :resolved capable)
         capable))))
 
 (defun agent-repl--ws-frontend-name (ws)
@@ -279,7 +279,7 @@ if it is ever changed, instead of being pinned to whatever it happened
 to open under once."
   (agent-repl--ws-put ws :frontend name)
   (agent-repl--ws-put ws :frontend-explicit t)
-  (agent-repl--log ws "ws-choose-frontend: frontend=%s explicit=t" name))
+  (agent-repl--log ws "ws-choose-frontend: frontend={frontend} explicit=t" :frontend name))
 
 (defun agent-repl--ws-frontend (ws)
   "Return the resolved frontend struct for workspace WS.
@@ -292,7 +292,7 @@ registered."
   (let* ((frontend (agent-repl--ws-frontend-name ws))
          (gui-p (eq frontend 'gui)))
     (agent-repl--log-decision (list 'ws-gui-frontend-p ws) frontend
-                              ws "ws-gui-frontend-p: frontend=%s gui-p=%s" frontend gui-p)
+                              ws "ws-gui-frontend-p: frontend={frontend} gui-p={gui_p}" :frontend frontend :gui_p gui-p)
     gui-p))
 
 (defun agent-repl--frontend-validate-pair (frontend-name backend-name &optional env ws)
@@ -304,24 +304,24 @@ environment would be gated on.
 Returns t when the combination is valid."
   (let ((fe (agent-repl-frontend-get frontend-name ws)))
     (unless (memq backend-name (agent-repl-frontend-supported-backends fe))
-      (agent-repl--log ws "frontend-validate-pair: frontend=%s backend=%s env=%s backend-supported=nil supported-backends=%S -> reject"
-                       frontend-name backend-name env
-                       (agent-repl-frontend-supported-backends fe))
+      (agent-repl--log ws "frontend-validate-pair: frontend={frontend} backend={backend} env={env} backend-supported=nil supported-backends={supported_backends} -> reject"
+                       :frontend frontend-name :backend backend-name :env env
+                       :supported_backends (prin1-to-string (agent-repl-frontend-supported-backends fe)))
       (user-error "agent-repl: the %s frontend cannot drive the %s backend (supported: %s)"
                   frontend-name backend-name
                   (mapconcat #'symbol-name
                              (agent-repl-frontend-supported-backends fe) ", ")))
     (when (and env (not (memq env (agent-repl-frontend-supported-envs fe))))
-      (agent-repl--log ws "frontend-validate-pair: frontend=%s backend=%s env=%s backend-supported=t env-supported=nil supported-envs=%S -> reject"
-                       frontend-name backend-name env
-                       (agent-repl-frontend-supported-envs fe))
+      (agent-repl--log ws "frontend-validate-pair: frontend={frontend} backend={backend} env={env} backend-supported=t env-supported=nil supported-envs={supported_envs} -> reject"
+                       :frontend frontend-name :backend backend-name :env env
+                       :supported_envs (prin1-to-string (agent-repl-frontend-supported-envs fe)))
       (user-error "agent-repl: the %s frontend cannot run a %s session (supported: %s)"
                   frontend-name env
                   (mapconcat #'symbol-name
                              (agent-repl-frontend-supported-envs fe) ", ")))
-    (agent-repl--log ws "frontend-validate-pair: frontend=%s backend=%s env=%s backend-supported=t env-supported=%s -> accept"
-                     frontend-name backend-name env
-                     (or (null env) (memq env (agent-repl-frontend-supported-envs fe))))
+    (agent-repl--log ws "frontend-validate-pair: frontend={frontend} backend={backend} env={env} backend-supported=t env-supported={env_supported} -> accept"
+                     :frontend frontend-name :backend backend-name :env env
+                     :env_supported (or (null env) (memq env (agent-repl-frontend-supported-envs fe))))
     t))
 
 (defun agent-repl--frontend-validate-for-ws (frontend-name ws)
@@ -349,12 +349,12 @@ would report a stop that provably did nothing."
          (cancel-fn (agent-repl-frontend-cancel-detached-fn fe)))
     (if (not cancel-fn)
         (progn
-          (agent-repl--warn ws "frontend-dispatch-cancel-detached: frontend=%s has NO cancel capability; detached agents are unreachable from here"
-                            frontend)
+          (agent-repl--warn ws "frontend-dispatch-cancel-detached: frontend={frontend} has NO cancel capability; detached agents are unreachable from here"
+                            :frontend frontend)
           nil)
       (let ((result (funcall cancel-fn ws)))
-        (agent-repl--log ws "frontend-dispatch-cancel-detached: frontend=%s result=%S"
-                         frontend result)
+        (agent-repl--log ws "frontend-dispatch-cancel-detached: frontend={frontend} result={result}"
+                         :frontend frontend :result (prin1-to-string result))
         result))))
 
 (defun agent-repl--frontend-dispatch-view (ws operation accessor)
@@ -364,8 +364,8 @@ capability to invoke.  OPERATION is the diagnostic name (`show' or `hide')."
   (let* ((fe (agent-repl--ws-frontend ws))
          (frontend (agent-repl-frontend-name fe))
          (result (funcall (funcall accessor fe) ws)))
-    (agent-repl--log ws "frontend-dispatch-%s: frontend=%s result=%S"
-                     operation frontend result)
+    (agent-repl--log ws "frontend-dispatch-{operation}: frontend={frontend} result={result}"
+                     :operation operation :frontend frontend :result (prin1-to-string result))
     result))
 
 (defun agent-repl--frontend-dispatch-show (ws)

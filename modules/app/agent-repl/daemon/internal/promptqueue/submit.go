@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/bringup"
@@ -39,6 +40,7 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 // then the shim, then — when a turn is already running — the classifier and a
 // hold. A hold is an answer here, never a failure.
 func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error) {
+	heldUntilServing := logsite.Msg("the workspace's session does not serve yet; the prompt is held until it comes up")
 	log, err := q.logger(ctx, sub.WS)
 	if err != nil {
 		return Disposition{}, err
@@ -120,7 +122,7 @@ func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error)
 	// 2026-10-27), and the answer, not a revival, is what serves it.
 	if sub.Target == nil {
 		if kind, why, waiting := q.sessionWait(sub.WS); waiting && kind == wsm.HoldColdGate {
-			log.Info(opSubmit, "the workspace's session does not serve yet; the prompt is held until it comes up",
+			log.Log(dlog.LevelInfo, opSubmit, heldUntilServing,
 				dlog.Context{"hold": kind.String(), "why": why})
 			return q.hold(ctx, sub, "", &leaseHold{kind: kind}, log)
 		}
@@ -131,7 +133,7 @@ func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error)
 		// exactly as mounting the frontend is; only a workspace that will not
 		// come back refuses.
 		if q.deps.Revive == nil {
-			refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session to submit to", dlog.Context{"cause": causeNoRevival})
+			log.Log(refusalLevel(ctx, dlog.LevelWarn), opSubmit, logsite.Msg("the workspace has no session to submit to"), dlog.Context{"cause": causeNoRevival})
 			return Disposition{}, noSession(causeNoRevival)
 		}
 		return q.holdForRevival(ctx, sub, log)
@@ -149,7 +151,7 @@ func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error)
 	// (ReleaseReconnectHolds).
 	if sub.Target == nil {
 		if kind, why, waiting := q.sessionWait(sub.WS); waiting {
-			log.Info(opSubmit, "the workspace's session does not serve yet; the prompt is held until it comes up",
+			log.Log(dlog.LevelInfo, opSubmit, heldUntilServing,
 				dlog.Context{"hold": kind.String(), "why": why})
 			return q.hold(ctx, sub, "", &leaseHold{kind: kind}, log)
 		}
@@ -179,7 +181,7 @@ func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error)
 
 	watcher, ok := q.deps.Watcher(sub.WS)
 	if !ok {
-		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session watcher", dlog.Context{"cause": causeNoWatcher})
+		log.Log(refusalLevel(ctx, dlog.LevelWarn), opSubmit, logsite.Msg("the workspace has no session watcher"), dlog.Context{"cause": causeNoWatcher})
 		return Disposition{}, noSession(causeNoWatcher)
 	}
 	if running := watcher.TurnInFlight(); running != nil {
@@ -236,7 +238,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 		return disposition, true, err
 
 	case wsm.PolicyHold:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.PolicyHold"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case wsm.PolicyHold", dlog.Context{"function": "queue", "branch": "case wsm.PolicyHold"})
 		kind, scheduleID, err := q.holdForLease(ctx, lease, log)
 		if err != nil {
 			return Disposition{}, true, err
@@ -254,7 +256,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 		return disposition, true, err
 
 	default:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "default"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: default", dlog.Context{"function": "queue", "branch": "default"})
 		log.Error(opSubmit, "the lease carries a policy the queue does not know", fields)
 		return Disposition{}, true, fmt.Errorf("lease policy %d on %q is unknown", lease.Policy, sub.WS)
 	}
@@ -264,7 +266,7 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 // both the held path (applyLeasePolicy) and the arrival path (arrival.go)
 // answer with.
 func (q *queue) refuseMerging(ctx context.Context, lease wsm.Lease, sub Submission, log dlog.Logger) (Disposition, error) {
-	refusalLevel(ctx, log, log.Warn)(opSubmit, "the submission is refused: a merge is in flight",
+	log.Log(refusalLevel(ctx, dlog.LevelWarn), opSubmit, logsite.Msg("the submission is refused: a merge is in flight"),
 		dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
 	q.noteDrainRefusal(lease.Holder, sub.WS)
 	return Disposition{RefusedArm: ArmMerging}, ErrMerging
@@ -287,7 +289,7 @@ type leaseHold struct {
 func (q *queue) holdForLease(ctx context.Context, lease wsm.Lease, log dlog.Logger) (wsm.HoldKind, string, error) {
 	switch lease.Holder {
 	case wsm.HolderDrain:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderDrain"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case wsm.HolderDrain", dlog.Context{"function": "queue", "branch": "case wsm.HolderDrain"})
 		schedule, err := q.deps.DB.DrainSchedule(ctx)
 		if err != nil {
 			log.Error(opHold, "could not read the drain schedule the hold waits on",
@@ -300,16 +302,16 @@ func (q *queue) holdForLease(ctx context.Context, lease wsm.Lease, log dlog.Logg
 		}
 		return wsm.HoldShutdown, drain.ScheduleID(*schedule), nil
 	case wsm.HolderRestart:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderRestart"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case wsm.HolderRestart", dlog.Context{"function": "queue", "branch": "case wsm.HolderRestart"})
 		return wsm.HoldBuildRefresh, "", nil
 	case wsm.HolderHibernate:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderHibernate"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case wsm.HolderHibernate", dlog.Context{"function": "queue", "branch": "case wsm.HolderHibernate"})
 		return wsm.HoldReconnect, "", nil
 	case wsm.HolderMerge:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "case wsm.HolderMerge"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: case wsm.HolderMerge", dlog.Context{"function": "queue", "branch": "case wsm.HolderMerge"})
 		return wsm.HoldMerge, "", nil
 	default:
-		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch", dlog.Context{"function": "queue", "branch": "default"})
+		log.Debug("daemon.promptqueue.disposition_decision", "selected a prompt disposition branch: default", dlog.Context{"function": "queue", "branch": "default"})
 		log.Error(opHold, "a holding lease names a holder with no hold kind",
 			dlog.Context{"holder": holderName(lease.Holder)})
 		return 0, "", fmt.Errorf("lease holder %d projects no hold kind", lease.Holder)
@@ -428,8 +430,8 @@ func (q *queue) refuseAtColdGate(ctx context.Context, ws ids.WorkspaceID, op, wh
 	if !gated {
 		return nil
 	}
-	refusalLevel(ctx, log, log.Info)(op, "the session is parked at its cold gate, so "+what+" is refused by the gate's own name",
-		dlog.Context{"detail": detail})
+	log.Log(refusalLevel(ctx, dlog.LevelInfo), op, logsite.Msg("the session is parked at its cold gate, so {what} is refused by the gate's own name"),
+		dlog.Context{"what": what, "detail": detail})
 	return &ColdGateRefusal{Detail: detail}
 }
 
@@ -500,6 +502,7 @@ const (
 // the first one's bring-up is still running joins its outcome rather than
 // spawning a second bring-up, and its own hold is released by the same sweep.
 func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, cause revivalCause, log dlog.Logger) {
+	revivalChanged := logsite.Msg("the workspace revival state changed")
 	s := q.state(ws)
 	q.mu.Lock()
 	if s.reviving {
@@ -510,7 +513,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 	beforeReviving := s.reviving
 	s.reviving = true
 	q.mu.Unlock()
-	log.Debug("daemon.promptqueue.state_transition", "the workspace revival state changed", dlog.Context{
+	log.Log(dlog.LevelDebug, "daemon.promptqueue.state_transition", revivalChanged, dlog.Context{
 		"state": "reviving", "before": beforeReviving, "after": true,
 	})
 	log.Info(opSubmit, "started the background session revival", dlog.Context{"relaunch": cause == revivalRelaunch, "settings": cause == revivalSettings})
@@ -532,7 +535,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 			before := s.reviving
 			s.reviving = false
 			q.mu.Unlock()
-			log.Debug("daemon.promptqueue.state_transition", "the workspace revival state changed", dlog.Context{
+			log.Log(dlog.LevelDebug, "daemon.promptqueue.state_transition", revivalChanged, dlog.Context{
 				"state": "reviving", "before": before, "after": false,
 			})
 		}()
@@ -826,11 +829,11 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 	// held under the hold that names why, and the session coming up releases it.
 	if kind, why, waiting := q.sessionWait(ws); waiting {
 		moved := q.holdForSession(ctx, ws, kind, opSubmit, log)
-		message := "the session does not serve yet; the prompts waiting on it stay held until it comes up"
+		message := logsite.Msg("the session does not serve yet; the prompts waiting on it stay held until it comes up")
 		if kind == wsm.HoldColdGate {
-			message = "the session is parked at its cold gate; the prompts waiting on it are held until the gate is answered, which a prompt never does"
+			message = logsite.Msg("the session is parked at its cold gate; the prompts waiting on it are held until the gate is answered, which a prompt never does")
 		}
-		log.Info(opSubmit, message, dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
+		log.Log(dlog.LevelInfo, opSubmit, message, dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
 		q.reportResume(ws, ResumeNotNow, "the session does not serve: "+why)
 		return
 	}
@@ -1013,7 +1016,7 @@ func (q *queue) ReviveForSettings(ctx context.Context, ws ids.WorkspaceID) error
 		return nil
 	}
 	if q.deps.Revive == nil {
-		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no shim and no revival is wired for a settings pick", dlog.Context{"cause": causeNoRevival})
+		log.Log(refusalLevel(ctx, dlog.LevelWarn), opSubmit, logsite.Msg("the workspace has no shim and no revival is wired for a settings pick"), dlog.Context{"cause": causeNoRevival})
 		return noSession(causeNoRevival)
 	}
 	q.reviveInBackground(context.WithoutCancel(ctx), ws, revivalSettings, log)

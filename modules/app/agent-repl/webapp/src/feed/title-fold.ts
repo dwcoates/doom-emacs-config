@@ -36,7 +36,7 @@
  * as the final step of its draw.
  */
 import { pageResizeObserver, queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { RowContext } from "./cards/context.js";
 import { revealTitle } from "./title-reveal.js";
 import {
@@ -46,6 +46,8 @@ import {
   installHasMore,
   refreshHasMore,
 } from "./bubble-more.js";
+
+const log = createLogger("webapp.feed.title-fold");
 
 export { TITLE_FOLD_CLASS, TITLE_FOLD_OPEN_SELECTOR, TITLE_FOLD_STANDALONE_CLASS };
 

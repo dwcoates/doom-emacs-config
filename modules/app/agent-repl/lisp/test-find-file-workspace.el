@@ -580,7 +580,7 @@ Every table the routing keeps is fresh, and the frame's windows return after."
             (lambda (_root) (error "the workspace could not be created")))
            (persp-names-cache nil)
            (warnings nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings)))
         ;; Act
         (switch-to-buffer buf)

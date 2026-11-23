@@ -213,12 +213,12 @@ func (d *Deployer) restoreKept(in installer, k kept, fields dlog.Context) error 
 		if err := in.dir(k.backup, k.live); err != nil {
 			return err
 		}
-		d.log.Info(opRollback, "restored the previous artifact", fields)
+		d.log.Info(opRollback, "restored the previous artifact tree", fields)
 	default:
 		if err := in.copyInto(k.backup, k.live); err != nil {
 			return err
 		}
-		d.log.Info(opRollback, "restored the previous artifact", fields)
+		d.log.Info(opRollback, "restored the previous artifact file", fields)
 	}
 	return nil
 }
@@ -308,9 +308,9 @@ func treeFiles(root string) (map[string]struct{}, error) {
 func (d *Deployer) rollbackRestart(ctx context.Context, component Component, what string,
 	restart func(context.Context) error, fail func(Component, string, error)) {
 	if err := restart(ctx); err != nil {
-		d.log.Error(opRollback, "could not restart "+what+" onto the restored build", dlog.WithCause(nil, err))
+		d.log.Error(opRollback, "could not restart {what} onto the restored build", dlog.Context{"what": what, "cause": err.Error()})
 		fail(component, "restart "+what, err)
 		return
 	}
-	d.log.Info(opRollback, "restarted "+what+" onto the restored build", nil)
+	d.log.Info(opRollback, "restarted {what} onto the restored build", dlog.Context{"what": what})
 }

@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -219,7 +220,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 	fields["changes"] = len(sentences)
 	turn, failure, err := s.submit(ctx, prompts, sub, e, sentences, status)
 	if err != nil {
-		log.Error(op, failure, dlog.WithCause(fields, err))
+		log.Log(dlog.LevelError, op, failure, dlog.WithCause(fields, err))
 	} else {
 		log.Info(op, "told a subscriber about the followed workspace's edge", dlog.Merge(fields, dlog.Context{"turn": string(turn)}))
 		// A PARENT'S ONE UPDATE IS SPENT ONCE TOLD: it follows nothing of the
@@ -240,18 +241,18 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 // submit composes the notice of SENTENCES, the latest being E's, about the
 // workspace standing STATUS, and submits it to SUBSCRIBER, answering the turn
 // it was submitted as, or the record a failure is written with and why.
-func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, e edge, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, string, error) {
+func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, e edge, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, logsite.Message, error) {
 	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
 		Submit(ctx, prompts, sub.Subscriber, BriefNotice, NoticeValues(e.event, e.detail, sentences, status, sub.ParentFollows), "workspace-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
-		return "", "could not compose a workspace notice; the subscriber is not told of the edge", err
+		return "", logsite.Msg("could not compose a workspace notice; the subscriber is not told of the edge"), err
 	case briefprompt.StepMint:
-		return "", "could not mint a workspace notice's idempotency key; the subscriber is not told", err
+		return "", logsite.Msg("could not mint a workspace notice's idempotency key; the subscriber is not told"), err
 	case briefprompt.StepSubmit:
-		return "", "could not submit a workspace notice to its subscriber", err
+		return "", logsite.Msg("could not submit a workspace notice to its subscriber"), err
 	}
-	return turn, "", nil
+	return turn, logsite.Message{}, nil
 }
 
 // carried answers the sentences SUBSCRIBER's untold notice about FOLLOWED said

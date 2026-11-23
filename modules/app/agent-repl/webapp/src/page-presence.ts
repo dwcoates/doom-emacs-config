@@ -18,11 +18,13 @@
  * laid out reports several sizes in one frame, and only the settled one is a
  * fact about the switch.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { pagePresence, type Presence } from "./presence.js";
 import { nextFrame } from "./frame.js";
 import { pageSize } from "./page-size.js";
 import { viewportOf } from "./placement.js";
+
+const log = createLogger("webapp.page-presence");
 
 /** What the presence log needs from its environment, injectable for tests. */
 export interface PagePresenceEnv {
@@ -72,25 +74,25 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
     const started = now();
     frame(() => {
       frame(() => {
-        log.info(`the page painted ${Math.round(now() - started)}ms after ${cause}`, {
+        log.info("the page painted {elapsed_ms}ms after {cause}", {
           operation: "page.repaint",
           context: {
-            cause,
+            
             paint_ms: Math.round(now() - started),
             ...viewportOf(win),
             ...pageSize(doc),
           },
-        });
+        }, { elapsed_ms: Math.round(now() - started), cause });
       });
     });
   };
 
   const onVisibility = (): void => {
     const state = doc.visibilityState;
-    log.info(`the page became ${state}`, {
+    log.info("the page became {state}", {
       operation: "page.visibility",
-      context: { state, since_last_ms: sinceLast() },
-    });
+      context: { since_last_ms: sinceLast() },
+    }, { state });
     if (state === "visible") measureRepaint("visible");
   };
 
@@ -117,7 +119,7 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
       if (next.width === size.width && next.height === size.height) return;
       const before = size;
       size = next;
-      log.info(`the page resized from ${before.width}x${before.height} to ${next.width}x${next.height}`, {
+      log.info("the page resized from {width_text}x{height_text} to {width_2}x{height_2}", {
         operation: "page.resize",
         context: {
           before_width: before.width,
@@ -127,7 +129,7 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
           since_last_ms: sinceLast(),
           visibility: doc.visibilityState,
         },
-      });
+      }, { width_text: before.width, height_text: before.height, width_2: next.width, height_2: next.height });
       measureRepaint("resize");
     });
   };

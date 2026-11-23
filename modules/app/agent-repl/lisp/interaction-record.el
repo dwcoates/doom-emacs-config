@@ -79,15 +79,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
-(declare-function agent-repl--fatal "core")
 (declare-function agent-repl--global-state-file "core")
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--log "core")
 (declare-function agent-repl--log-rfc3339-timestamp "core")
-(declare-function agent-repl--warn "core")
 
 (require 'cl-lib)
 (require 'subr-x)
@@ -150,7 +150,7 @@ Tracked separately so the hot path never calls `length'.")
     (setq agent-repl--interaction-record-events nil
           agent-repl--interaction-record-count 0
           agent-repl--interaction-record-started-at nil)
-    (agent-repl--log '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: reset dropped=%d" dropped)
+    (agent-repl--log '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: reset dropped={dropped}" :dropped dropped)
     dropped))
 
 (defun agent-repl--interaction-record-trim ()
@@ -167,9 +167,8 @@ Returns the number of events dropped (0 when under capacity)."
             (nbutlast agent-repl--interaction-record-events drop))
       (setq agent-repl--interaction-record-count target)
       (agent-repl--warn '(:agent-repl-central "interaction capture and replay span workspaces")
-                        (concat "interaction-record: dropped oldest events "
-                                "dropped=%d retained=%d capacity=%d")
-                        drop target agent-repl-interaction-record-capacity)
+                        "interaction-record: dropped oldest events dropped={dropped} retained={retained} capacity={capacity}"
+                        :dropped drop :retained target :capacity agent-repl-interaction-record-capacity)
       drop)))
 
 (defun agent-repl--interaction-record-capture ()
@@ -191,8 +190,8 @@ would destroy the very interaction the recording exists to preserve."
         (agent-repl--interaction-record-trim))
     (error
      (agent-repl--warn '(:agent-repl-central "interaction capture and replay span workspaces")
-                       "interaction-record: capture failed command=%S err=%S"
-                       this-command err)
+                       "interaction-record: capture failed command={command} err={err}"
+                       :command (prin1-to-string this-command) :err (prin1-to-string err))
      nil)))
 
 ;;;###autoload
@@ -212,12 +211,12 @@ capture but KEEPS the events, so
         (setq agent-repl--interaction-record-started-at (float-time))
         (add-hook 'pre-command-hook #'agent-repl--interaction-record-capture)
         (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces")
-                          "interaction-record: recording ENABLED started-at=%s capacity=%d"
-                          (agent-repl--log-rfc3339-timestamp)
-                          agent-repl-interaction-record-capacity))
+                          "interaction-record: recording ENABLED started-at={started_at} capacity={capacity}"
+                          :started_at (agent-repl--log-rfc3339-timestamp)
+                          :capacity agent-repl-interaction-record-capacity))
     (remove-hook 'pre-command-hook #'agent-repl--interaction-record-capture)
-    (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: recording DISABLED events=%d"
-                      agent-repl--interaction-record-count)))
+    (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: recording DISABLED events={events}"
+                      :events agent-repl--interaction-record-count)))
 
 (defun agent-repl--interaction-record-enable-from-env ()
   "Enable recording when `agent-repl-interaction-record-env' is set non-empty.
@@ -228,12 +227,12 @@ agent uses to hand a live recording session to the user:
   (let ((value (getenv agent-repl-interaction-record-env)))
     (if (and value (not (string-empty-p value)))
         (progn
-          (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: enabling from env %s=%S"
-                            agent-repl-interaction-record-env value)
+          (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: enabling from env {interaction_record_env}={value}"
+                            :interaction_record_env agent-repl-interaction-record-env :value (prin1-to-string value))
           (agent-repl-interaction-record-mode 1)
           t)
-      (agent-repl--log '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: env %s unset or empty value=%S"
-                       agent-repl-interaction-record-env value)
+      (agent-repl--log '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-record: env {interaction_record_env} unset or empty value={value}"
+                       :interaction_record_env agent-repl-interaction-record-env :value (prin1-to-string value))
       nil)))
 
 ;;;; ---- Saving ----
@@ -304,10 +303,8 @@ never performed."
     (unless events
       (agent-repl--fatal
        '(:agent-repl-central "interaction capture and replay span workspaces")
-       (concat "interaction-record: refusing to save an EMPTY recording "
-               "(mode=%s) — enable `agent-repl-interaction-record-mode' "
-               "and perform the interaction first")
-       (if agent-repl-interaction-record-mode "on" "off")))
+       "interaction-record: refusing to save an EMPTY recording (mode={mode}) — enable `agent-repl-interaction-record-mode' and perform the interaction first"
+       :mode (if agent-repl-interaction-record-mode "on" "off")))
     (let* ((path (expand-file-name
                   (or file (agent-repl--interaction-record-default-file))))
            (text (agent-repl--interaction-record-serialize events)))
@@ -315,10 +312,10 @@ never performed."
       (with-temp-file path
         (insert text))
       (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces")
-                        "interaction-record: saved file=%S events=%d span=%.3fs"
-                        path (length events)
-                        (- (plist-get (car (last events)) :time)
-                           (plist-get (car events) :time)))
+                        "interaction-record: saved file={file} events={events} span={span}s"
+                        :file (prin1-to-string path) :events (length events)
+                        :span (format "%.3f" (- (plist-get (car (last events)) :time)
+                           (plist-get (car events) :time))))
       path)))
 
 ;;;; ---- Replay ----
@@ -357,20 +354,20 @@ Signals when FILE is missing, holds no recording, or carries an
 unknown schema version."
   (let ((path (expand-file-name file)))
     (unless (file-readable-p path)
-      (agent-repl--fatal '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: unreadable recording file=%S" path))
+      (agent-repl--fatal '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: unreadable recording file={file}" :file (prin1-to-string path)))
     (let ((agent-repl-interaction-recording nil))
       (load path nil t t)
       (let ((recording agent-repl-interaction-recording))
         (unless (plist-member recording :events)
           (agent-repl--fatal
            '(:agent-repl-central "interaction capture and replay span workspaces")
-           "interaction-replay: file carries no recording file=%S" path))
+           "interaction-replay: file carries no recording file={file}" :file (prin1-to-string path)))
         (let ((version (plist-get recording :version)))
           (unless (equal version agent-repl-interaction-record-format-version)
             (agent-repl--fatal
              '(:agent-repl-central "interaction capture and replay span workspaces")
-             "interaction-replay: unsupported recording version=%S supported=%S file=%S"
-             version agent-repl-interaction-record-format-version path)))
+             "interaction-replay: unsupported recording version={version} supported={supported} file={file}"
+             :version (prin1-to-string version) :supported (prin1-to-string agent-repl-interaction-record-format-version) :file (prin1-to-string path))))
         recording))))
 
 (defun agent-repl--interaction-replay-new-id ()
@@ -385,21 +382,20 @@ would hide every subsequent one."
   (condition-case err
       (progn
         (agent-repl--log '(:agent-repl-central "interaction capture and replay span workspaces")
-                         "interaction-replay: event replay_id=%s index=%s keys=%S command=%S"
-                         replay-id (plist-get event :index)
-                         (plist-get event :key-description)
-                         (plist-get event :command))
+                         "interaction-replay: event replay_id={replay_id} index={index} keys={keys} command={command}"
+                         :replay_id replay-id :index (plist-get event :index)
+                         :keys (prin1-to-string (plist-get event :key-description))
+                         :command (prin1-to-string (plist-get event :command)))
         (funcall agent-repl-interaction-replay-execute-function
                  (plist-get event :keys)))
     (error
      (setq agent-repl--interaction-replay-failures
            (1+ agent-repl--interaction-replay-failures))
      (agent-repl--warn '(:agent-repl-central "interaction capture and replay span workspaces")
-                       (concat "interaction-replay: event FAILED replay_id=%s "
-                               "index=%s command=%S keys=%S err=%S")
-                       replay-id (plist-get event :index)
-                       (plist-get event :command)
-                       (plist-get event :key-description) err))))
+                       "interaction-replay: event FAILED replay_id={replay_id} index={index} command={command} keys={keys} err={err}"
+                       :replay_id replay-id :index (plist-get event :index)
+                       :command (prin1-to-string (plist-get event :command))
+                       :keys (prin1-to-string (plist-get event :key-description)) :err (prin1-to-string err)))))
 
 (defun agent-repl--interaction-replay-finish (replay-id event-count)
   "Close out REPLAY-ID after EVENT-COUNT events and log the window's end."
@@ -407,8 +403,8 @@ would hide every subsequent one."
     (setq agent-repl--interaction-replay-id nil
           agent-repl--interaction-replay-timers nil)
     (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces")
-                      "interaction-replay: end replay_id=%s events=%d failures=%d"
-                      replay-id event-count failures)
+                      "interaction-replay: end replay_id={replay_id} events={events} failures={failures}"
+                      :replay_id replay-id :events event-count :failures failures)
     failures))
 
 ;;;###autoload
@@ -432,33 +428,31 @@ bounds the replay window."
   (when agent-repl-interaction-record-mode
     (agent-repl--fatal
      '(:agent-repl-central "interaction capture and replay span workspaces")
-     (concat "interaction-replay: refusing to replay while recording is ACTIVE "
-             "— disable `agent-repl-interaction-record-mode' first")))
+     "interaction-replay: refusing to replay while recording is ACTIVE — disable `agent-repl-interaction-record-mode' first"))
   (when agent-repl--interaction-replay-id
     (agent-repl--fatal
      '(:agent-repl-central "interaction capture and replay span workspaces")
-     "interaction-replay: refusing, replay already in flight replay_id=%s"
-     agent-repl--interaction-replay-id))
+     "interaction-replay: refusing, replay already in flight replay_id={replay_id}"
+     :replay_id agent-repl--interaction-replay-id))
   (let* ((scale (or speed 1.0)))
     (unless (and (numberp scale) (> scale 0))
-      (agent-repl--fatal '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: SPEED must be a positive number, got %S"
-                         speed))
+      (agent-repl--fatal '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: SPEED must be a positive number, got {speed}"
+                         :speed (prin1-to-string speed)))
     (let* ((recording (agent-repl--interaction-replay-load file))
            (events (plist-get recording :events))
            (count (length events))
            (replay-id (agent-repl--interaction-replay-new-id))
            (last-delay 0.0))
       (unless events
-        (agent-repl--fatal '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: recording has no events file=%S" file))
+        (agent-repl--fatal '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: recording has no events file={file}" :file (prin1-to-string file)))
       (setq agent-repl--interaction-replay-id replay-id
             agent-repl--interaction-replay-timers nil
             agent-repl--interaction-replay-failures 0)
       (agent-repl--info
        '(:agent-repl-central "interaction capture and replay span workspaces")
-       (concat "interaction-replay: begin replay_id=%s file=%S events=%d "
-               "speed=%s recorded-at=%S")
-       replay-id (expand-file-name file) count scale
-       (plist-get recording :recorded-at))
+       "interaction-replay: begin replay_id={replay_id} file={file} events={events} speed={speed} recorded-at={recorded_at}"
+       :replay_id replay-id :file (prin1-to-string (expand-file-name file)) :events count :speed scale
+       :recorded_at (prin1-to-string (plist-get recording :recorded-at)))
       (dolist (event events)
         (let ((delay (/ (or (plist-get event :offset) 0.0) scale)))
           (setq last-delay (max last-delay delay))
@@ -486,8 +480,8 @@ Returns nil when no replay is in flight."
         (cancel-timer timer)))
     (setq agent-repl--interaction-replay-timers nil
           agent-repl--interaction-replay-id nil)
-    (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: aborted replay_id=%S cancelled=%d"
-                      replay-id pending)
+    (agent-repl--info '(:agent-repl-central "interaction capture and replay span workspaces") "interaction-replay: aborted replay_id={replay_id} cancelled={cancelled}"
+                      :replay_id (prin1-to-string replay-id) :cancelled pending)
     replay-id))
 
 ;; Startup enablement.  Gated on interactive use: the batch ERT suite

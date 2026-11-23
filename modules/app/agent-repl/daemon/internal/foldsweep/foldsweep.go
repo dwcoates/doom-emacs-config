@@ -127,16 +127,16 @@ func (s *Sweeper) Sweep(ctx context.Context) error {
 	folded := 0
 	for _, c := range s.candidates(ctx, arr) {
 		if reason := spareReason(c, arr.Workspaces, prompted, opened[c.opened.Kind][c.target], now); reason != "" {
-			s.log.Debug(opSweep, "the "+c.what+" is left unfolded", dlog.Context{"target": c.target, "reason": reason})
+			s.log.Debug(opSweep, "the {what} is left unfolded", dlog.Context{"what": c.what, "target": c.target, "reason": reason})
 			continue
 		}
 		if err := c.fold(ctx); err != nil {
-			s.log.Error(opSweep, "could not fold the idle "+c.what, dlog.WithCause(dlog.Context{"target": c.target}, err))
+			s.log.Error(opSweep, "could not fold the idle {what}", dlog.Context{"what": c.what, "target": c.target, "cause": err.Error()})
 			failures = append(failures, fmt.Errorf("fold %s %q: %w", c.what, c.target, err))
 			continue
 		}
 		folded++
-		s.log.Info(opSweep, "folded the idle "+c.what, dlog.Context{"target": c.target, "idle_after": IdleAfter.String()})
+		s.log.Info(opSweep, "folded the idle {what}", dlog.Context{"what": c.what, "target": c.target, "idle_after": IdleAfter.String()})
 	}
 	s.log.Info(opSweep, "swept the sidebar before the deploy builds", dlog.Context{"folded": folded, "failed": len(failures)})
 	return errors.Join(failures...)

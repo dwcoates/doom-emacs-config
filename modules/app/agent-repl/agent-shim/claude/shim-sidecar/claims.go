@@ -90,15 +90,15 @@ func (s *sidecar) claimHeldShells() {
 			Path: s.unclaimedShells[taskID],
 		})
 		if owner == "" {
-			bound.LogVerbose("the shim claimed this spool, but its launching call is not on record in any book yet; it stays held")
+			bound.LogVerbose("the shim claimed this spool, but its launching call is not on record in any book yet; it stays held", nil)
 			continue
 		}
 		at, ok := s.attributedBooks[owner]
 		if !ok {
-			bound.LogVerbose("the shim claimed this spool for book %s, whose transcript this reader has not attributed yet; it stays held", owner)
+			bound.LogVerbose("the shim claimed this spool for book {owner}, whose transcript this reader has not attributed yet; it stays held", logging.Values{"owner": owner})
 			continue
 		}
-		bound.Log("the shim's claim names this held spool's run; it is claimed as that run's spawn")
+		bound.Log("the shim's claim names this held spool's run; it is claimed as that run's spawn", nil)
 		// No launch instant: a claimed spool exists and is read, so its run is
 		// concluded from it, never as a pre-boot run with no spool.
 		s.TaskSpawned(taskID, run, owner, "", false, at.workspaceDir, at.workspaceID, at.claudeSessionID, handler.LaunchSite{})

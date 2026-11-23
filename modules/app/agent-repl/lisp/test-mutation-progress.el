@@ -130,7 +130,7 @@ is NOT terminal: its creation arrives later on the same op."
   (agent-repl-test-mp--reset)
   (agent-repl-mutation-progress-register "op-u" :on-stage #'ignore)
   (let (errors)
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into errors)))
       ;; Act.
       (agent-repl-mutation-progress--dispatch-steps
@@ -237,8 +237,8 @@ is NOT terminal: its creation arrives later on the same op."
   (agent-repl-test-mp--reset)
   (let (errors)
     (agent-repl-mutation-progress-register "op-o3" :on-stage #'ignore)
-    (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest _args) (push fmt errors))))
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
+               (lambda (_ws fmt &rest _args) (push (agent-repl-log-site-template fmt) errors))))
       ;; Act.
       (agent-repl-mutation-progress-handle
        (agent-repl-test-mp--open-progress "op-o3" nil)))
@@ -250,7 +250,7 @@ is NOT terminal: its creation arrives later on the same op."
 (defun agent-repl-test-mp--echoed (thunk)
   "Return the sentences `agent-repl--backend-phase' echoed while THUNK ran."
   (let (said)
-    (cl-letf (((symbol-function 'agent-repl--backend-phase)
+    (cl-letf (((symbol-function 'agent-repl--emit-backend-phase)
                (agent-repl-test--record-into said)))
       (funcall thunk))
     (nreverse said)))
@@ -274,24 +274,24 @@ is NOT terminal: its creation arrives later on the same op."
     (should (equal said '("workspace created: fix-the-login-test")))))
 
 (ert-deftest agent-repl-test-mp-report-passes-details-as-format-arguments ()
-  "The TEMPLATE reaches the log unchanged, so no runtime value can become
-part of an operation name."
+  "The phase's TEMPLATE reaches the log as its site's template, each hole a
+named value, so no runtime value can become part of an operation name."
   ;; Arrange.
   (let (templates)
-    (cl-letf (((symbol-function 'agent-repl--backend-phase)
-               (lambda (_ws fmt &rest _args) (push fmt templates))))
+    (cl-letf (((symbol-function 'agent-repl--emit-backend-phase)
+               (lambda (_ws fmt &rest _args) (push (agent-repl-log-site-template fmt) templates))))
       ;; Act.
       (agent-repl-workspace-progress-report :create :completed "minted"))
     ;; Assert.
-    (should (equal templates '("workspace created: %s")))))
+    (should (equal templates '("workspace created: {detail_1}")))))
 
 (ert-deftest agent-repl-test-mp-report-records-a-failure-at-error ()
   "A failed phase is in the durable record at the level a failure deserves."
   ;; Arrange.
   (let (errors)
-    (cl-letf (((symbol-function 'agent-repl--backend-phase) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest _args) (push fmt errors))))
+    (cl-letf (((symbol-function 'agent-repl--emit-backend-phase) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--emit-error)
+               (lambda (_ws fmt &rest _args) (push (agent-repl-log-site-template fmt) errors))))
       ;; Act.
       (agent-repl-workspace-progress-report :create :failed "the worktree add failed"))
     ;; Assert.
@@ -301,10 +301,10 @@ part of an operation name."
   "A phase with no template is reported as the caller bug it is, not invented."
   ;; Arrange.
   (let (errors said)
-    (cl-letf (((symbol-function 'agent-repl--backend-phase)
-               (lambda (_ws fmt &rest _args) (push fmt said)))
-              ((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest _args) (push fmt errors))))
+    (cl-letf (((symbol-function 'agent-repl--emit-backend-phase)
+               (lambda (_ws fmt &rest _args) (push (agent-repl-log-site-template fmt) said)))
+              ((symbol-function 'agent-repl--emit-error)
+               (lambda (_ws fmt &rest _args) (push (agent-repl-log-site-template fmt) errors))))
       ;; Act / Assert.
       (should-not (agent-repl-workspace-progress-report :open :teleporting))
       (should errors)
@@ -313,8 +313,8 @@ part of an operation name."
 (ert-deftest agent-repl-test-mp-report-refuses-an-unknown-kind ()
   "A kind with no phases is refused for the same reason an unknown phase is."
   ;; Arrange.
-  (cl-letf (((symbol-function 'agent-repl--backend-phase) (lambda (&rest _) nil))
-            ((symbol-function 'agent-repl--error) (lambda (&rest _) nil)))
+  (cl-letf (((symbol-function 'agent-repl--emit-backend-phase) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--emit-error) (lambda (&rest _) nil)))
     ;; Act / Assert.
     (should-not (agent-repl-workspace-progress-report :teleport :requested))))
 

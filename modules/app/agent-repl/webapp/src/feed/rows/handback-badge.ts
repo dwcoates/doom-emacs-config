@@ -9,7 +9,9 @@
  * or card, just a little badge"). What was handed back is read where it lives,
  * in the subagent's card or the merge's bubble, and never drawn twice.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
+
+const log = createLogger("webapp.feed.rows.handback-badge");
 
 /** Where one kind of handback badge is hooked and recorded. */
 export interface HandbackBadgeKind {
@@ -23,10 +25,10 @@ export interface HandbackBadgeKind {
 
 /** A handback badge: LABEL, the daemon's words, drawn verbatim in the shared pill. */
 export function drawHandbackBadge(label: string, kind: HandbackBadgeKind): HTMLElement {
-  log.info(`drawing ${kind.describe} badge`, {
+  log.info("drawing {describe} badge", {
     operation: kind.operation,
     context: { label },
-  });
+  }, { describe: kind.describe });
   const el = document.createElement("div");
   el.className = `badge ${kind.className}`;
   el.textContent = label;

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -162,7 +163,7 @@ func (r *resolver) republishSuperseded(s *wsState, addr feedid.Feed, id string) 
 	}
 	r.restateRow(s, placement{feed: addr}, existing, !f.nonDurable[id], unclonable{
 		operation: "daemon.feed.superseded_row_unclonable",
-		message:   "a thinking row whose superseded flag changed could not be cloned; it was not re-pushed",
+		message:   logsite.Msg("a thinking row whose superseded flag changed could not be cloned; it was not re-pushed"),
 		context:   dlog.Context{"feed": f.key, "row": id},
 	}, func(*frontendv1.FeedRow) {})
 }

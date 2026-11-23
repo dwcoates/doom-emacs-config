@@ -21,9 +21,11 @@
  * conversation slot shows, and a tab held for a page that will never draw
  * would never open.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { pagePresence } from "../presence.js";
 import { nextFrame } from "../frame.js";
+
+const log = createLogger("webapp.feed.conversation-drawn");
 
 /** The attribute Emacs reads. */
 export const CONVERSATION_DRAWN_ATTRIBUTE = "data-conversation-drawn";

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -163,13 +164,13 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 		text := selection.GetQuestion().GetText()
 		question, ok := asked[text]
 		if !ok {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: !ok", dlog.Context{"function": "workspace", "condition": "!ok"})
 			return refuse(log, "AnswerQuestion", ArmUnservedAnswer,
 				fmt.Sprintf("question %q was never served in this batch", text), false)
 		}
 		single := question.GetSingleSelect() != nil
 		if single && len(selection.GetChosen()) > 1 {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "single && len(selection.GetChosen()) > 1"})
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: single && len(selection.GetChosen()) > 1", dlog.Context{"function": "workspace", "condition": "single && len(selection.GetChosen()) > 1"})
 			return refuse(log, "AnswerQuestion", ArmMultiPickOnSingleSelect,
 				fmt.Sprintf("question %q is single-select but %d choices were made", text, len(selection.GetChosen())), false)
 		}
@@ -182,7 +183,7 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 		}
 		for _, chosen := range selection.GetChosen() {
 			if !labels[chosen.GetLabel().GetLabel()] {
-				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!labels[chosen.GetLabel().GetLabel()]"})
+				log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: !labels[chosen.GetLabel().GetLabel()]", dlog.Context{"function": "workspace", "condition": "!labels[chosen.GetLabel().GetLabel()]"})
 				return refuse(log, "AnswerQuestion", ArmUnservedAnswer,
 					fmt.Sprintf("question %q never offered the choice %q", text, chosen.GetLabel().GetLabel()), false)
 			}
@@ -265,7 +266,7 @@ func (v *verbs) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	// written refuses the answer while its held prompts are still unsettled.
 	if err := v.deps.CacheLapses.ColdGateAnswered(ctx, ws); err != nil {
 		// The keeper recorded the failure at ERROR as its owner.
-		v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the cache could not be marked cold", err)
+		v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, logsite.Msg("the cache could not be marked cold; the answer is refused"), err)
 		return fmt.Errorf("mark the cache of the workspace whose cold gate was answered, %q, cold: %w", ws, err)
 	}
 	// A STANDING DEPLOY CHECK STAYS WHERE IT IS: it runs and is kept warm
@@ -273,7 +274,7 @@ func (v *verbs) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	if record.InHiddenSection() && !record.DeployMediator {
 		if err := v.recordHidden(ctx, log, ws, false); err != nil {
 			// recordHidden recorded the failure at ERROR as its owner.
-			v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the workspace could not be shown", err)
+			v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, logsite.Msg("the workspace could not be shown; the answer is refused"), err)
 			return fmt.Errorf("show the workspace whose cold gate was answered, %q: %w", ws, err)
 		}
 		log.Info(opColdGate, "the answered gate's workspace was hidden; it is shown again", dlog.Context{"choice": choice})
@@ -281,13 +282,13 @@ func (v *verbs) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	if err := v.deps.Queue.ColdGateAnswered(ctx, ws, coldGateFate(answer)); err != nil {
 		// The queue recorded the failure at ERROR as its owner; what is the
 		// verb's own is that the gate stands again, unspent.
-		v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the prompts held at the cold gate could not be settled", err)
+		v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, logsite.Msg("the prompts held at the cold gate could not be settled; the answer is refused"), err)
 		return fmt.Errorf("settle the prompts held at the cold gate of %q: %w", ws, err)
 	}
 	v.deps.Feed.RetireRow(ws, rootFeed(), coldGateRowID(ws, served.VendorSessionID))
 
 	v.spendingColdGate(ws, choice, footer.CompactionRequestLine(choice, served.Detail))
-	log.Info(opColdGate, "answering the cold gate: "+choice, dlog.Context{"choice": choice})
+	log.Info(opColdGate, "answering the cold gate: {choice}", dlog.Context{"choice": choice})
 
 	// THE RE-OPEN IS A SESSION BRING-UP, not a bare shim call, so it goes
 	// through the fleet's one start path: the remediated resume must leave the
@@ -324,11 +325,11 @@ func (v *verbs) PassColdGate(ctx context.Context, ws ids.WorkspaceID) error {
 
 // reraiseRefusedColdGate stands a spent gate again when its answer is
 // refused before the re-open starts. The step that failed recorded its own
-// failure at ERROR; WHY names it for this record.
-func (v *verbs) reraiseRefusedColdGate(log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice, why string, cause error) {
+// failure at ERROR; WHY is this record's whole sentence, the caller's own.
+func (v *verbs) reraiseRefusedColdGate(log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice string, why logsite.Message, cause error) {
 	v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerRefused)
 	stood := v.deps.Cards.ReraiseColdGate(ws, vendorSessionID)
-	log.Info(opColdGate, why+"; the answer is refused", dlog.Context{
+	log.Log(dlog.LevelInfo, opColdGate, why, dlog.Context{
 		"choice": choice, "gate_stands_again": stood, "cause": cause.Error(),
 	})
 	if !stood {
@@ -419,21 +420,21 @@ func (v *verbs) spendingColdGate(ws ids.WorkspaceID, choice, line string) {
 func coldRemediation(log dlog.Logger, served ServedColdGate, answer *agentreplv1.AnswerColdGateRequest) (*conversationv1.SessionColdRemediation, error) {
 	switch choice := answer.GetChoice().(type) {
 	case *agentreplv1.AnswerColdGateRequest_Pay:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "pay"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: pay", dlog.Context{"function": "workspace", "branch": "pay"})
 		return payRemediation(), nil
 	case *agentreplv1.AnswerColdGateRequest_Clear:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "clear"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: clear", dlog.Context{"function": "workspace", "branch": "clear"})
 		return &conversationv1.SessionColdRemediation{
 			Remediation: &conversationv1.SessionColdRemediation_Clear{Clear: &conversationv1.SessionColdClear{}},
 		}, nil
 	case *agentreplv1.AnswerColdGateRequest_Compact:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "compact"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: compact", dlog.Context{"function": "workspace", "branch": "compact"})
 		return compactRemediation(log, served, choice.Compact)
 	case *agentreplv1.AnswerColdGateRequest_CompactAndResume:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "compact_and_resume"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: compact_and_resume", dlog.Context{"function": "workspace", "branch": "compact_and_resume"})
 		return compactRemediation(log, served, choice.CompactAndResume)
 	default:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "default"})
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch: default", dlog.Context{"function": "workspace", "branch": "default"})
 		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation, "the answer names no choice", false)
 	}
 }
@@ -447,12 +448,12 @@ func compactRemediation(log dlog.Logger, served ServedColdGate, compact *agentre
 	}
 	model, scope := compact.GetModel(), compact.GetScope()
 	if !servedModel(served.Compact.Models, model) {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedModel(served.Compact.Models, model)"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: !servedModel(served.Compact.Models, model)", dlog.Context{"function": "workspace", "condition": "!servedModel(served.Compact.Models, model)"})
 		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
 			fmt.Sprintf("the compact menu never offered the model %q", model.GetName()), false)
 	}
 	if !servedScope(served.Compact.Scopes, scope) {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!servedScope(served.Compact.Scopes, scope)"})
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch: !servedScope(served.Compact.Scopes, scope)", dlog.Context{"function": "workspace", "condition": "!servedScope(served.Compact.Scopes, scope)"})
 		return nil, refuse(log, "AnswerColdGate", ArmUnservedRemediation,
 			fmt.Sprintf("the compact menu never offered the scope %s", scope), false)
 	}

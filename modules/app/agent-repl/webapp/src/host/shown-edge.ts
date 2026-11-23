@@ -7,9 +7,11 @@
  * its sidebar watching the roster's `current` (sidebar/selection-edge.ts); a
  * page in the webhost draws no sidebar, so this is its one edge.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { Presence } from "../presence.js";
 import { nextFrame } from "../frame.js";
+
+const log = createLogger("webapp.host.shown-edge");
 
 /** The clock and frame scheduler the shown frame is timed with. */
 export interface ShownEdgeTiming {

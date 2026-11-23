@@ -1379,14 +1379,10 @@ ACCEPTED, so the scenario has to stand a real dual attach."
        (agent-repl-link-teardown))))
 
 (defun agent-repl-itest-verbs--log-arguments (daemon operation level)
-  "Return every logged format ARGUMENT string for OPERATION at LEVEL on DAEMON.
-`agent-repl--log-record' records each format argument as
-`prin1-to-string' under `context.arguments', which is where fanout §0
-puts dynamic values."
-  (apply #'append
-         (mapcar (lambda (record)
-                   (alist-get 'arguments (alist-get 'context record)))
-                 (agent-repl-itest--log-entries daemon operation level))))
+  "Return every logged value string for OPERATION at LEVEL on DAEMON.
+`agent-repl--log-record' records each named value under its own name in
+the record's `context', which is where fanout §0 puts dynamic values."
+  (agent-repl-itest--logged-context-strings daemon operation level))
 
 (ert-deftest agent-repl-itest-verbs-verb-lands-on-the-primary-after-a-transfer ()
   "After a workspace transfers, its verb lands on the primary link.

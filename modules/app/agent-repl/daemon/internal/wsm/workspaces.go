@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/tempdirs"
+	"agentrepl/logging/logsite"
 )
 
 // normalizeDir is the ONE spelling of a worktree directory this store keys on:
@@ -967,7 +968,7 @@ func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects)
 func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) error {
 	const op = "daemon.wsm.reopen"
 	fields := dlog.Context{"workspace": string(id), "instance": string(serving)}
-	if err := s.requireInstance(op, fields, serving, "refused a re-open with no instance to serve it"); err != nil {
+	if err := s.requireInstance(op, fields, serving, logsite.Msg("refused a re-open with no instance to serve it")); err != nil {
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {

@@ -2,6 +2,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 ;; Cross-file forward declarations.  These sources load in the dependency
@@ -28,11 +32,8 @@
 (declare-function agent-repl--history-record-initial-prompt "history" (ws said))
 (declare-function agent-repl-host-state "host" (ws))
 (declare-function agent-repl--input-restore-unsent "input" (ws))
-(declare-function agent-repl--info "core")
 (declare-function agent-repl--call-recording-error "core" (ws operation fn))
 (declare-function agent-repl--kill-cause-str "core")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--magit-status-same-window "magit")
 (declare-function agent-repl--open-initial-buffers "worktree")
 (declare-function agent-repl--pseudo-workspace-name-p "core")
@@ -41,7 +42,6 @@
 (declare-function agent-repl--sanitize-ws-name "core")
 (declare-function agent-repl--send-to-agent "commands")
 (declare-function agent-repl--state-save "history")
-(declare-function agent-repl--warn "core")
 (declare-function agent-repl--with-log-context "core" (workspace request-id function))
 (declare-function agent-repl--ws-buffers "workspace")
 (declare-function agent-repl--ws-current-log-name "workspace")
@@ -192,7 +192,7 @@ window is selected so the user can start typing immediately."
          (result (and buf (buffer-live-p buf) (get-buffer-window buf))))
     (agent-repl--log-verbose
      '(:agent-repl-context "panel visibility can be checked outside a workspace")
-     "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
+     "ws-buffer-visible-p: key={key} result={result}" :key key :result (if result "visible" "hidden"))
     result))
 
 (defun agent-repl--input-visible-p ()
@@ -212,7 +212,7 @@ While a gate hides the current workspace's input window
                      (agent-repl--view-visible-p))))
     (agent-repl--log-verbose
      '(:agent-repl-context "panel visibility can be checked outside a workspace")
-     "panels-visible-p: result=%s" (if result "visible" "hidden"))
+     "panels-visible-p: result={result}" :result (if result "visible" "hidden"))
     result))
 
 (defun agent-repl--panels-any-visible-p ()
@@ -227,7 +227,7 @@ second closed — the two-press-to-close bug."
                     (agent-repl--view-visible-p))))
     (agent-repl--log-verbose
      '(:agent-repl-context "panel visibility can be checked outside a workspace")
-     "panels-any-visible-p: result=%s" (if result "visible" "hidden"))
+     "panels-any-visible-p: result={result}" :result (if result "visible" "hidden"))
     result))
 
 ;;;; Panel-open default and the explicit-close preference
@@ -257,7 +257,7 @@ stops treating WS as panels-open until the panels are shown again.  No-op
 for a nil WS."
   (when ws
     (agent-repl--ws-put ws :panels-closed-by-user t)
-    (agent-repl--log ws "note-panels-closed-by-user: ws=%s" ws)))
+    (agent-repl--log ws "note-panels-closed-by-user: ws={ws}" :ws ws)))
 
 (defun agent-repl--note-panels-shown (ws)
   "Clear WS's explicit-close preference because its panels are being shown.
@@ -266,7 +266,7 @@ Restores the panels-open default so a later switch re-shows them
 not marked closed, so it is cheap to call from every show path."
   (when (and ws (agent-repl--ws-get ws :panels-closed-by-user))
     (agent-repl--ws-put ws :panels-closed-by-user nil)
-    (agent-repl--log ws "note-panels-shown: ws=%s cleared explicit-close" ws)))
+    (agent-repl--log ws "note-panels-shown: ws={ws} cleared explicit-close" :ws ws)))
 
 ;;;; Panel display and hide
 
@@ -287,7 +287,7 @@ caller is doing a per-frame teardown."
   "Close windows displaying any of BUFS."
   (agent-repl--log
    '(:agent-repl-context "panel cleanup can run outside a workspace")
-   "close-buffer-windows %s" (mapcar #'agent-repl--safe-buffer-name bufs))
+   "close-buffer-windows {buffers}" :buffers (mapcar #'agent-repl--safe-buffer-name bufs))
   (dolist (buf bufs)
     (when (and buf (buffer-live-p buf))
       (agent-repl--close-buffer-window buf))))
@@ -320,26 +320,26 @@ the alignment on every resolve — not only at creation — self-heals a
 buffer that was created (or session-restored) against the wrong dir."
   (let ((buf (or (let ((buf (agent-repl--ws-get ws :input-buffer)))
                    (when (buffer-live-p buf)
-                     (agent-repl--log ws "ensure-input-buffer: ws=%s branch=recorded-live buffer=%s"
-                                       ws (buffer-name buf))
+                     (agent-repl--log ws "ensure-input-buffer: ws={ws} branch=recorded-live buffer={buffer}"
+                                       :ws ws :buffer (buffer-name buf))
                      buf))
                  (let ((named (get-buffer (agent-repl--buffer-name "-input" ws))))
                    (when (buffer-live-p named)
-                     (agent-repl--log ws "ensure-input-buffer: ws=%s adopting live named buffer %s"
-                                       ws (buffer-name named))
+                     (agent-repl--log ws "ensure-input-buffer: ws={ws} adopting live named buffer {named}"
+                                       :ws ws :named (buffer-name named))
                      (agent-repl--ws-put ws :input-buffer named)
                      named))
                  (progn
-                   (agent-repl--log ws "ensure-input-buffer: ws=%s branch=recreate recorded=%s named=%s"
-                                     ws
-                                     (agent-repl--safe-buffer-name (agent-repl--ws-get ws :input-buffer))
-                                     (agent-repl--buffer-name "-input" ws))
+                   (agent-repl--log ws "ensure-input-buffer: ws={ws} branch=recreate recorded={recorded} named={named}"
+                                     :ws ws
+                                     :recorded (agent-repl--safe-buffer-name (agent-repl--ws-get ws :input-buffer))
+                                     :named (agent-repl--buffer-name "-input" ws))
                    (agent-repl--initialize-input-buffer ws)
                    (agent-repl--ws-get ws :input-buffer)))))
     (agent-repl--align-buffer-to-ws-dir buf ws)
-    (agent-repl--log ws "ensure-input-buffer: ws=%s complete buffer=%s project-dir=%s"
-                      ws (agent-repl--safe-buffer-name buf)
-                      (agent-repl--ws-get ws :project-dir))
+    (agent-repl--log ws "ensure-input-buffer: ws={ws} complete buffer={buffer} project-dir={project_dir}"
+                      :ws ws :buffer (agent-repl--safe-buffer-name buf)
+                      :project_dir (agent-repl--ws-get ws :project-dir))
     buf))
 
 (defun agent-repl--drain-pending-show-panels (ws)
@@ -363,9 +363,9 @@ old headless birth path armed it too; it went with
       ;; The no-op branch is the one a persp placeholder reaches (it owns no
       ;; pending flags), so its record is screened for routability.
       (agent-repl--log-verbose (agent-repl--ws-log-name ws)
-                                "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)
-    (agent-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending draining frontend=%s"
-                      ws (agent-repl--ws-frontend-name ws))
+                                "drain-pending-show-panels: ws={ws} branch=no-pending no-op" :ws ws)
+    (agent-repl--log ws "drain-pending-show-panels: ws={ws} branch=had-pending draining frontend={frontend}"
+                      :ws ws :frontend (agent-repl--ws-frontend-name ws))
     (agent-repl--ws-put ws :pending-show-panels nil)
     (agent-repl--frontend-dispatch-show ws)))
 
@@ -385,8 +385,8 @@ still displays magit as before."
   (if (agent-repl--ws-get ws :pending-magit)
       (let ((path (agent-repl--ws-get ws :project-dir))
             (windowless (and (agent-repl--ws-get ws :pending-show-panels) t)))
-        (agent-repl--log ws "drain-pending-magit: ws=%s branch=had-pending path=%s windowless=%s draining"
-                          ws path windowless)
+        (agent-repl--log ws "drain-pending-magit: ws={ws} branch=had-pending path={path} windowless={windowless} draining"
+                          :ws ws :path path :windowless windowless)
         (agent-repl--ws-put ws :pending-magit nil)
         (if path
             (progn
@@ -394,12 +394,12 @@ still displays magit as before."
                   (save-window-excursion (agent-repl--magit-status-same-window path))
                 (agent-repl--magit-status-same-window path))
               (agent-repl--remove-doom-dashboard))
-          (agent-repl--log ws "drain-pending-magit: ws=%s branch=missing-project-dir request-cleared=t"
-                            ws)))
+          (agent-repl--log ws "drain-pending-magit: ws={ws} branch=missing-project-dir request-cleared=t"
+                            :ws ws)))
     ;; See `--drain-pending-show-panels': the no-pending branch is the persp
     ;; placeholder's branch, so it is screened for routability.
     (agent-repl--log-verbose (agent-repl--ws-log-name ws)
-                              "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
+                              "drain-pending-magit: ws={ws} branch=no-pending no-op" :ws ws)))
 
 (defun agent-repl--drain-pending-initial-buffers (ws)
   "Open configured initial buffers for WS if `:pending-initial-buffers' is set.
@@ -409,16 +409,16 @@ the current perspective, preventing the opened buffers from leaking into
 the caller's workspace."
   (if (agent-repl--ws-get ws :pending-initial-buffers)
       (let ((path (agent-repl--ws-get ws :project-dir)))
-        (agent-repl--log ws "drain-pending-initial-buffers: ws=%s branch=had-pending path=%s draining" ws path)
+        (agent-repl--log ws "drain-pending-initial-buffers: ws={ws} branch=had-pending path={path} draining" :ws ws :path path)
         (agent-repl--ws-put ws :pending-initial-buffers nil)
         (if path
             (agent-repl--open-initial-buffers ws path)
-          (agent-repl--log ws "drain-pending-initial-buffers: ws=%s branch=missing-project-dir request-cleared=t"
-                            ws)))
+          (agent-repl--log ws "drain-pending-initial-buffers: ws={ws} branch=missing-project-dir request-cleared=t"
+                            :ws ws)))
     ;; See `--drain-pending-show-panels': the no-pending branch is the persp
     ;; placeholder's branch, so it is screened for routability.
     (agent-repl--log-verbose (agent-repl--ws-log-name ws)
-                              "drain-pending-initial-buffers: ws=%s branch=no-pending no-op" ws)))
+                              "drain-pending-initial-buffers: ws={ws} branch=no-pending no-op" :ws ws)))
 
 (defun agent-repl--input-enter-command-state ()
   "Put evil into normal (command) state in the just-selected input window.
@@ -454,18 +454,18 @@ reached a sink, so the landing was invisible afterwards."
   (let ((log-ws (agent-repl--ws-log-name ws)))
     (cond
      ((not agent-repl-autoselect-input-on-workspace-switch)
-      (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=disabled" ws))
+      (agent-repl--info log-ws "maybe-autoselect-input: ws={ws} branch=disabled" :ws ws))
      ;; A GATE HIDES THE INPUT WINDOW, and then the docked banner in the
      ;; webview is where the user lands; the predicate is the gate's owner's.
      ((and (fboundp 'agent-repl-input-hidden-p) (agent-repl-input-hidden-p ws))
-      (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=input-hidden" ws))
+      (agent-repl--info log-ws "maybe-autoselect-input: ws={ws} branch=input-hidden" :ws ws))
      (t
       (if-let ((win (agent-repl-window--panel-window :input ws)))
           (progn
-            (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
+            (agent-repl--info log-ws "maybe-autoselect-input: ws={ws} branch=select input-win={input_win}" :ws ws :input_win win)
             (select-window win)
             (agent-repl--input-enter-command-state))
-        (agent-repl--info log-ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))))))
+        (agent-repl--info log-ws "maybe-autoselect-input: ws={ws} branch=no-input-window" :ws ws))))))
 
 (defun agent-repl--stale-panel-windows ()
   "Return a list of windows showing agent panel buffers from a different workspace.
@@ -504,8 +504,8 @@ NOT killed and remain attached to their home workspace.  No-op for nil
 or dead buffers."
   (dolist (buf buffers)
     (when (buffer-live-p buf)
-      (agent-repl--log ws "detach-foreign-panel-buffers: removing %s from ws=%s buffer list"
-                        (buffer-name buf) ws)
+      (agent-repl--log ws "detach-foreign-panel-buffers: removing {buf} from ws={ws} buffer list"
+                        :buf (buffer-name buf) :ws ws)
       (agent-repl--ws-remove-buffer buf))))
 
 (defun agent-repl--safe-delete-window (win &optional fallback)
@@ -550,9 +550,9 @@ No-op when WS has no live webview to reclaim the frame with
 left as-is."
   (if (agent-repl-window--panels-restorable-p ws)
       (progn
-        (agent-repl--log ws "reclaim-frame-fullscreen: showing gui view for ws=%s" ws)
+        (agent-repl--log ws "reclaim-frame-fullscreen: showing gui view for ws={ws}" :ws ws)
         (agent-repl--frontend-dispatch-show ws))
-    (agent-repl--log ws "reclaim-frame-fullscreen: no live view for ws=%s, skipping" ws)))
+    (agent-repl--log ws "reclaim-frame-fullscreen: no live view for ws={ws}, skipping" :ws ws)))
 
 (defvar agent-repl--panels-restore-awaiting-view nil
   "Workspaces whose panel restore found no live view buffer to remount.
@@ -582,10 +582,10 @@ now finds a live view."
           (delete ws agent-repl--panels-restore-awaiting-view))
     (if (equal ws (agent-repl--ws-current-name))
         (progn
-          (agent-repl--info ws "elisp.panels.restore-on-view-created ws=%s" ws)
+          (agent-repl--info ws "elisp.panels.restore-on-view-created ws={ws}" :ws ws)
           (agent-repl--ensure-own-panels-on-persp-switch ws)
           (agent-repl--maybe-autoselect-input ws))
-      (agent-repl--log ws "elisp.panels.restore-on-view-created: skipped ws=%s reason=not-current" ws))))
+      (agent-repl--log ws "elisp.panels.restore-on-view-created: skipped ws={ws} reason=not-current" :ws ws))))
 
 (defun agent-repl--panels-mount-awaited-view (ws)
   "Make WS\='s view for the switch to WS, and run the restore that awaited it.
@@ -642,13 +642,13 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
   (let* ((stale (agent-repl--stale-panel-windows))
          (foreign-bufs (agent-repl--stale-window-buffers stale))
          (log-ws (agent-repl--ws-log-name ws)))
-    (agent-repl--log log-ws "ensure-own-panels: ws=%s stale=%d panels-visible=%s windows=%d"
-                      ws (length stale)
-                      (agent-repl--panels-visible-p) (length (window-list)))
+    (agent-repl--log log-ws "ensure-own-panels: ws={ws} stale={stale} panels-visible={panels_visible} windows={windows}"
+                      :ws ws :stale (length stale)
+                      :panels_visible (agent-repl--panels-visible-p) :windows (length (window-list)))
     (when stale
-      (agent-repl--log log-ws "ensure-own-panels: ws=%s closing %d stale panel windows: %S"
-                        ws (length stale)
-                        (mapcar (lambda (w) (buffer-name (window-buffer w))) stale))
+      (agent-repl--log log-ws "ensure-own-panels: ws={ws} closing {stale_count} stale panel windows: {windows}"
+                        :ws ws :stale_count (length stale)
+                        :windows (prin1-to-string (mapcar (lambda (w) (buffer-name (window-buffer w))) stale)))
       (dolist (win stale)
         ;; Sole-window-safe deletion: a stale window that is the frame's
         ;; only window cannot be `delete-window'-ed (it signals "Attempt to
@@ -685,9 +685,9 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
                  ;; (`agent-repl--ensure-input-buffer').
                  ((not (agent-repl-window--panels-restorable-p ws)) 'no-live-view)
                  (t 'default-open-now-missing))))
-      (agent-repl--info log-ws "elisp.panels.restore-decision: ws=%s decision=%s reason=%s"
-                        ws (if (eq reason 'default-open-now-missing) "re-show" "no-show")
-                        reason)
+      (agent-repl--info log-ws "elisp.panels.restore-decision: ws={ws} decision={decision} reason={reason}"
+                        :ws ws :decision (if (eq reason 'default-open-now-missing) "re-show" "no-show")
+                        :reason reason)
       ;; THE WEBVIEW'S PRESENCE ON THIS SWITCH, at INFO: whether the view
       ;; buffer is shown, at what size, and whether its xwidget view is the
       ;; SAME one as at the last switch or a fresh one (a fresh WKWebView
@@ -707,15 +707,15 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
            (lambda ()
              (let ((presence (agent-repl-frontend--view-presence ws view-buffer)))
                (agent-repl--info log-ws
-                                 "elisp.panels.webview-on-switch: ws=%s command=%S from-window=%S window=%S windows=%s size=%sx%s xwidgets=%s view=%s selected=%s"
-                                 ws (plist-get trigger :command)
-                                 (plist-get trigger :webview-window)
-                                 (plist-get presence :window)
-                                 (plist-get presence :windows)
-                                 (plist-get presence :width) (plist-get presence :height)
-                                 (plist-get presence :xwidgets)
-                                 (plist-get presence :view)
-                                 (plist-get presence :selected)))))))
+                                 "elisp.panels.webview-on-switch: ws={ws} command={command} from-window={from_window} window={window} windows={windows} size={size}x{height} xwidgets={xwidgets} view={view} selected={selected}"
+                                 :ws ws :command (prin1-to-string (plist-get trigger :command))
+                                 :from_window (prin1-to-string (plist-get trigger :webview-window))
+                                 :window (prin1-to-string (plist-get presence :window))
+                                 :windows (plist-get presence :windows)
+                                 :size (plist-get presence :width) :height (plist-get presence :height)
+                                 :xwidgets (plist-get presence :xwidgets)
+                                 :view (plist-get presence :view)
+                                 :selected (plist-get presence :selected)))))))
       (agent-repl--panels-note-restore-outcome ws reason)
       (when (eq reason 'default-open-now-missing)
         (agent-repl--frontend-dispatch-show ws))
@@ -729,8 +729,8 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       ;; PLACEHOLDER ("main", "none") is no registered workspace and owns no
       ;; view, so only a live workspace is mounted.
       (when (and (eq reason 'no-live-view) (agent-repl--ws-live-p ws))
-        (agent-repl--info log-ws "elisp.panels.mount-on-switch ws=%s withheld=%s"
-                          ws (and (fboundp 'agent-repl-open-tabs-hidden-p)
+        (agent-repl--info log-ws "elisp.panels.mount-on-switch ws={ws} withheld={withheld}"
+                          :ws ws :withheld (and (fboundp 'agent-repl-open-tabs-hidden-p)
                                   (agent-repl-open-tabs-hidden-p ws)
                                   t))
         (agent-repl--panels-mount-awaited-view ws)))
@@ -738,7 +738,7 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
     ;; replacing every visible window with the input+view panels — when a
     ;; foreign workspace's panels were just purged.
     (when stale
-      (agent-repl--log log-ws "ensure-own-panels: ws=%s reclaiming frame stale=%s" ws (and stale t))
+      (agent-repl--log log-ws "ensure-own-panels: ws={ws} reclaiming frame stale={stale}" :ws ws :stale (and stale t))
       (agent-repl--reclaim-frame-fullscreen ws))))
 
 (defun agent-repl--on-workspace-switch (&optional ws)
@@ -776,7 +776,7 @@ not be routed at all.
     (agent-repl--with-log-context
      scope nil
      (lambda ()
-       (agent-repl--log-verbose log-ws "workspace-switch ws=%s" ws)
+       (agent-repl--log-verbose log-ws "workspace-switch ws={ws}" :ws ws)
        ;; Purge stale panel windows from other workspaces and restore own
        ;; panels if they were visible before this workspace was deactivated.
        ;; Must run BEFORE autoselect so it sees the correct panel windows.
@@ -806,7 +806,7 @@ not be routed at all.
          ;; Screened through `--ws-log-name' like every other record on this
          ;; path: persp-mode hands it its own placeholders too, and those own
          ;; no durable sink to route a workspace-attributed record to.
-         (agent-repl--info log-ws "elisp.panels.switch: complete ws=%s" ws))))))
+         (agent-repl--info log-ws "elisp.panels.switch: complete ws={ws}" :ws ws))))))
 
 ;; Save window state for current workspace before switching away,
 ;; so the panel-visibility paint can inspect the saved config.
@@ -879,8 +879,8 @@ its deactivation is a genuinely global-scope event."
     (agent-repl--with-log-context
      scope nil
      (lambda ()
-       (agent-repl--log log-ws "before-persp-deactivate: entry ws=%s cache=%S"
-                         ws (or (agent-repl--ws-names-cache) "(unbound)"))
+       (agent-repl--log log-ws "before-persp-deactivate: entry ws={ws} cache={cache}"
+                         :ws ws :cache (prin1-to-string (or (agent-repl--ws-names-cache) "(unbound)")))
        ;; Record whether panels are visible BEFORE redirecting/saving so
        ;; the activated hook can restore them if persp-mode drops them.
        (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
@@ -935,10 +935,10 @@ re-attach described above."
      ((null win)
       (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: none on the frame"))
      ((eq win (selected-window))
-      (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: window=%S already selected" win))
+      (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: window={window} already selected" :window (prin1-to-string win)))
      (t
-      (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: window=%S selected over=%S"
-                       win (selected-window))
+      (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: window={window} selected over={over}"
+                       :window (prin1-to-string win) :over (prin1-to-string (selected-window)))
       (select-window win 'norecord)))))
 
 (when (modulep! :ui workspaces)
@@ -986,8 +986,8 @@ Returns the generation WS\='s pass carries."
     (setq agent-repl--switch-activation-timer
           (run-at-time 0 nil #'agent-repl--run-switch-activation ws generation))
     (agent-repl--log-verbose (agent-repl--ws-log-scope ws)
-                             "elisp.panels.switch-activation-scheduled ws=%s generation=%d"
-                             ws generation)
+                             "elisp.panels.switch-activation-scheduled ws={ws} generation={generation}"
+                             :ws ws :generation generation)
     generation))
 
 (defun agent-repl--supersede-switch-activation (ws)
@@ -1001,8 +1001,8 @@ that pass must not run either."
     (cancel-timer agent-repl--switch-activation-timer)
     (setq agent-repl--switch-activation-timer nil))
   (agent-repl--log-verbose '(:agent-repl-central "a foreign perspective has no agent workspace")
-                           "elisp.panels.switch-activation-superseded-by-foreign ws=%s generation=%d"
-                           ws agent-repl--switch-activation-generation))
+                           "elisp.panels.switch-activation-superseded-by-foreign ws={ws} generation={generation}"
+                           :ws ws :generation agent-repl--switch-activation-generation))
 
 (defun agent-repl--run-switch-activation (ws generation)
   "Run WS\='s deferred switch pass if GENERATION is still the newest.
@@ -1015,12 +1015,12 @@ which activation it was."
         (newest agent-repl--switch-activation-generation))
     (if (/= generation newest)
         (agent-repl--info log-ws
-                          "elisp.panels.switch-activation-superseded ws=%s generation=%d newest=%d"
-                          ws generation newest)
+                          "elisp.panels.switch-activation-superseded ws={ws} generation={generation} newest={newest}"
+                          :ws ws :generation generation :newest newest)
       (setq agent-repl--switch-activation-timer nil)
-      (agent-repl--info log-ws "elisp.panels.switch-activation-won ws=%s generation=%d waited-ms=%s"
-                        ws generation
-                        (if agent-repl--switch-activation-scheduled-at
+      (agent-repl--info log-ws "elisp.panels.switch-activation-won ws={ws} generation={generation} waited-ms={waited_ms}"
+                        :ws ws :generation generation
+                        :waited_ms (if agent-repl--switch-activation-scheduled-at
                             (round (* 1000 (- (float-time) agent-repl--switch-activation-scheduled-at)))
                           "unknown"))
       (agent-repl--call-recording-error
@@ -1050,8 +1050,8 @@ Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
   (agent-repl--capture-switch-trigger)
   (agent-repl--log '(:agent-repl-context "perspective activation can name no agent workspace")
-                   "after-persp-activated: entry cache=%S"
-                    (or (agent-repl--ws-names-cache) "(unbound)"))
+                   "after-persp-activated: entry cache={cache}"
+                    :cache (prin1-to-string (or (agent-repl--ws-names-cache) "(unbound)")))
   ;; Suppressed during `agent-repl--eager-open-panels': its transient
   ;; switch-in/build/switch-back would otherwise schedule a deferred
   ;; `--on-workspace-switch' for the background workspace that fires after
@@ -1067,8 +1067,8 @@ events (kill, switch, add) are traceable."
     ;; list.  Scheduling `--on-workspace-switch' for it would feed its name
     ;; into the logging ladder with no sink it will ever own; see
     ;; `agent-repl--foreign-perspective-p'.
-    (agent-repl--log-verbose '(:agent-repl-central "a foreign perspective has no agent workspace") "after-persp-activated: skipped foreign perspective ws=%s"
-                              (agent-repl--ws-current-name))
+    (agent-repl--log-verbose '(:agent-repl-central "a foreign perspective has no agent workspace") "after-persp-activated: skipped foreign perspective ws={ws}"
+                              :ws (agent-repl--ws-current-name))
     (agent-repl--supersede-switch-activation (agent-repl--ws-current-name)))
    (t
     (agent-repl--gate-layout-before-redisplay (agent-repl--ws-current-name))
@@ -1087,7 +1087,7 @@ first redisplay already shows the gate's layout; the deferred pass then
 finds it complete.  Answers non-nil when it laid WS out."
   (when (and ws (agent-repl-input-hidden-p ws)
              (window-live-p (agent-repl-window--panel-window :input ws)))
-    (agent-repl--info ws "elisp.panels.gate-layout-before-redisplay ws=%s" ws)
+    (agent-repl--info ws "elisp.panels.gate-layout-before-redisplay ws={ws}" :ws ws)
     (agent-repl-window--ensure-layout)))
 
 (when (modulep! :ui workspaces)
@@ -1099,9 +1099,9 @@ finds it complete.  Answers non-nil when it laid WS out."
   (let* ((ws (agent-repl--ws-current-name))
          (input-buf (agent-repl--ws-get ws :input-buffer))
          (frontend-buf (agent-repl--ws-get ws :frontend-buffer)))
-    (agent-repl--log ws "hide-panels: ws=%s input=%s frontend=%s"
-                      ws (agent-repl--safe-buffer-name input-buf)
-                      (agent-repl--safe-buffer-name frontend-buf))
+    (agent-repl--log ws "hide-panels: ws={ws} input={input} frontend={frontend}"
+                      :ws ws :input (agent-repl--safe-buffer-name input-buf)
+                      :frontend (agent-repl--safe-buffer-name frontend-buf))
     (agent-repl--close-buffer-windows input-buf frontend-buf)))
 
 (defun agent-repl--close-view (ws direct-teardown)
@@ -1118,9 +1118,9 @@ leaving a ws-less close somewhere safe to land rather than erroring on
 a frontend that cannot be resolved."
   (if (and ws (agent-repl--ws-gui-frontend-p ws))
       (progn
-        (agent-repl--log ws "close-view: ws=%s branch=frontend-dispatch" ws)
+        (agent-repl--log ws "close-view: ws={ws} branch=frontend-dispatch" :ws ws)
         (agent-repl--frontend-dispatch-hide ws))
-    (agent-repl--log ws "close-view: ws=%s branch=direct-teardown" ws)
+    (agent-repl--log ws "close-view: ws={ws} branch=direct-teardown" :ws ws)
     (funcall direct-teardown)))
 
 (defun agent-repl--on-simple-close (&optional ws)
@@ -1136,8 +1136,8 @@ The teardown is frontend-dispatched rather than hard-wired to a single
 mechanism, so a gui workspace closes its actual view AND records that it
 did."
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (agent-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
-                      this-command last-command)
+    (agent-repl--log ws "on-simple-close: CALLED this-command={this_command} last-command={last_command}"
+                      :this_command this-command :last_command last-command)
     (when ws
       ;; NO LIFECYCLE STATE IS WRITTEN.  Panel visibility is a LOCAL
       ;; presentation fact, and it reaches the tab through the bracket-only
@@ -1149,7 +1149,7 @@ did."
       ;; not fight the user by re-showing panels they just dismissed on the
       ;; next switch.
       (agent-repl--note-panels-closed-by-user ws)
-      (agent-repl--log ws "elisp.panels.simple-close: ws=%s panels=hidden" ws))
+      (agent-repl--log ws "elisp.panels.simple-close: ws={ws} panels=hidden" :ws ws))
     (agent-repl--close-view ws (lambda ()
                                   (agent-repl--restore-fullscreen-config ws)
                                   (agent-repl--hide-panels)))))
@@ -1223,11 +1223,11 @@ visible — the input panel's live partner is the webview."
                             (and (not loading)
                                  (not webview-window))))))
       (agent-repl--log-verbose '(:agent-repl-context "panel restoration can run outside a workspace")
-                                "orphaned-panel-p: name=%s id=%s input=%s partner=%s one-window=%s partner-visible=%s loading=%s webview-visible=%s result=%s"
-                                name id is-input partner one-window
-                                (and partner-window t) (and loading t)
-                                (and webview-window t)
-                                (and result t))
+                                "orphaned-panel-p: name={name} id={id} input={input} partner={partner} one-window={one_window} partner-visible={partner_visible} loading={loading} webview-visible={webview_visible} result={result}"
+                                :name name :id id :input is-input :partner partner :one_window one-window
+                                :partner_visible (and partner-window t) :loading (and loading t)
+                                :webview_visible (and webview-window t)
+                                :result (and result t))
       result)))
 
 (defun agent-repl--own-panel-p (name)
@@ -1269,8 +1269,8 @@ the sweeper."
          (own (and orphaned (agent-repl--own-panel-p name)))
          (result (and orphaned (not own))))
     (agent-repl--log-verbose '(:agent-repl-context "panel restoration can run outside a workspace")
-                              "sweepable-panel-p: name=%s orphaned=%s own=%s result=%s"
-                              name (and orphaned t) (and own t) (and result t))
+                              "sweepable-panel-p: name={name} orphaned={orphaned} own={own} result={result}"
+                              :name name :orphaned (and orphaned t) :own (and own t) :result (and result t))
     result))
 
 (defun agent-repl--sync-panels ()
@@ -1292,10 +1292,10 @@ deletion that follows."
                    for name = (buffer-name (window-buffer win))
                    when (agent-repl--sweepable-panel-p name)
                    collect name)))
-    (agent-repl--log-verbose ws "sync-panels: entry windows=%d"
-                              (length (window-list)))
+    (agent-repl--log-verbose ws "sync-panels: entry windows={windows}"
+                              :windows (length (window-list)))
     (dolist (name orphan-names)
-      (agent-repl--log ws "sync-panels closing orphaned %s" name))
+      (agent-repl--log ws "sync-panels closing orphaned {name}" :name name))
     (let ((deleted
            (agent-repl-window--delete-where
             (lambda (win)
@@ -1303,8 +1303,8 @@ deletion that follows."
                (buffer-name (window-buffer win))))
             :caller "sync-panels"
             :predicate-name "another workspace's orphaned panel")))
-      (agent-repl--log-verbose ws "sync-panels: closed %d orphans"
-                                (length deleted)))))
+      (agent-repl--log-verbose ws "sync-panels: closed {deleted_count} orphans"
+                                :deleted_count (length deleted)))))
 
 (defvar agent-repl--sync-timer nil
   "Timer for debounced window-change handler.")
@@ -1389,8 +1389,8 @@ already showing it, WINDOW and the calling command."
           (agent-repl--info
            (or (agent-repl--buffer-owner buf)
                '(:agent-repl-context "a frontend buffer can be shown outside its workspace"))
-           "elisp.panels.frontend-second-window: buffer=%s showing=%S target=%S command=%S"
-           (buffer-name buf) showing target this-command))))))
+           "elisp.panels.frontend-second-window: buffer={buffer} showing={showing} target={target} command={command}"
+           :buffer (buffer-name buf) :showing (prin1-to-string showing) :target (prin1-to-string target) :command (prin1-to-string this-command)))))))
 
 (advice-add 'set-window-buffer :before #'agent-repl--panels-note-frontend-second-window)
 
@@ -1405,8 +1405,8 @@ Errors if the buffer is already initialized (already in
   ;; directory must not retain a half-initialized composer after history
   ;; hydration correctly rejects that workspace.
   (let ((project-dir (agent-repl--ws-dir ws)))
-    (agent-repl--log ws "initialize-input-buffer: ws=%s project-dir=%s precondition=validated"
-                      ws project-dir)
+    (agent-repl--log ws "initialize-input-buffer: ws={ws} project-dir={project_dir} precondition=validated"
+                      :ws ws :project_dir project-dir)
     (let ((input-buf (agent-repl--create-buffer ws "-input")))
       (agent-repl--ws-put ws :input-buffer input-buf)
       ;; TITLES NAME THE BUFFERS (fanout §7), and the daemon may already
@@ -1419,8 +1419,8 @@ Errors if the buffer is already initialized (already in
       (agent-repl-host--apply-naming ws)
       (with-current-buffer input-buf
         (when (eq major-mode 'agent-repl-input-mode)
-          (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s branch=already-initialized"
-                            ws (buffer-name input-buf))
+          (agent-repl--log ws "initialize-input-buffer: ws={ws} buffer={buffer} branch=already-initialized"
+                            :ws ws :buffer (buffer-name input-buf))
           (error "agent-repl--initialize-input-buffer: already initialized ws=%s" ws))
         (agent-repl-input-mode)
         ;; Spellchecking starts BEFORE the composer is filled, so the
@@ -1430,8 +1430,8 @@ Errors if the buffer is already initialized (already in
         ;; A PROMPT'S ENTRIES ARE MARKED as they are typed, by the grammar
         ;; the daemon reads them with (prompt-entries.el).
         (agent-repl-prompt-entries-enable ws)
-        (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s mode=enabled history=restore"
-                          ws (buffer-name input-buf))
+        (agent-repl--log ws "initialize-input-buffer: ws={ws} buffer={buffer} mode=enabled history=restore"
+                          :ws ws :buffer (buffer-name input-buf))
         (agent-repl--history-restore ws))
       ;; THE PROMPT THE WORKSPACE WAS CREATED WITH is in its history: the
       ;; host view may have stated it before the composer existed, and the
@@ -1463,8 +1463,8 @@ side-window skip explicit and parameter-independent."
                    (lambda (win) (not (eq win selected)))
                    :caller "clear-main-area-for-panels"
                    :predicate-name "every window but the selected one")))
-    (agent-repl--log ws "clear-main-area-for-panels: ws=%s selected=%s deleted-count=%d"
-                      ws selected (length deleted))
+    (agent-repl--log ws "clear-main-area-for-panels: ws={ws} selected={selected} deleted-count={deleted_count}"
+                      :ws ws :selected selected :deleted_count (length deleted))
     deleted))
 
 (defun agent-repl--hide-and-preserve-status ()
@@ -1510,23 +1510,23 @@ gesture over a fact that is seconds away."
   (let ((ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))))
     (cond
      ((null ref)
-      (agent-repl--info ws "elisp.panels.host-subscribe: skipped ws=%s reason=no-ref-yet" ws)
+      (agent-repl--info ws "elisp.panels.host-subscribe: skipped ws={ws} reason=no-ref-yet" :ws ws)
       nil)
      ;; THE STREAM, NOT ITS FIRST PUSH, SAYS WHETHER WS IS SUBSCRIBED: the
      ;; roster's tab-open subscribes a moment before the panels arrive, and
      ;; asking for the snapshot instead opened a second stream in that gap.
      ((and (fboundp 'agent-repl-host-stream) (agent-repl-host-stream ws))
-      (agent-repl--log ws "elisp.panels.host-subscribe: ws=%s already-subscribed" ws)
+      (agent-repl--log ws "elisp.panels.host-subscribe: ws={ws} already-subscribed" :ws ws)
       t)
      (t
       (let ((conn (or (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))
                       (and (fboundp 'agent-repl-link-primary) (agent-repl-link-primary)))))
         (if (null conn)
             (progn
-              (agent-repl--info ws "elisp.panels.host-subscribe: skipped ws=%s reason=no-link" ws)
+              (agent-repl--info ws "elisp.panels.host-subscribe: skipped ws={ws} reason=no-link" :ws ws)
               nil)
           (agent-repl-host-subscribe conn ws ref)
-          (agent-repl--info ws "elisp.panels.host-subscribe: subscribed ws=%s" ws)
+          (agent-repl--info ws "elisp.panels.host-subscribe: subscribed ws={ws}" :ws ws)
           t))))))
 
 (cl-defun agent-repl--toggle (close-fn &key always-close)
@@ -1543,8 +1543,8 @@ launches the agent."
   (let* ((ws (agent-repl--ws-current-name))
          (selection (when (use-region-p)
                      (buffer-substring-no-properties (region-beginning) (region-end)))))
-    (agent-repl--log ws "agent-repl selection=%s always-close=%s"
-                      (if selection "yes" "no") (if always-close "yes" "no"))
+    (agent-repl--log ws "agent-repl selection={selection} always-close={always_close}"
+                      :selection (if selection "yes" "no") :always_close (if always-close "yes" "no"))
     (cond
      (selection
       (agent-repl--log ws "toggle: branch=send-selection")
@@ -1664,7 +1664,7 @@ an arrival nobody claimed reads `arrived\='.  No-op for a nil ID."
     (puthash id reason agent-repl--panels-arrival-reasons)
     (agent-repl--log '(:agent-repl-central
                       "a workspace that has not arrived owns no sink")
-                     "elisp.panels.arrival-reason-noted id=%s reason=%s" id reason)))
+                     "elisp.panels.arrival-reason-noted id={id} reason={reason}" :id id :reason reason)))
 
 (defun agent-repl--panels-take-arrival-reason (id)
   "Return and forget the reason recorded for ref ID, or \"arrived\"."
@@ -1702,17 +1702,17 @@ perspective, and the caller\='s focus restored afterwards."
     (cond
      ((and (not agent-repl--panels-arrivals-armed)
            (equal reason "arrived"))
-      (agent-repl--log ws "elisp.panels.open-on-arrival: skipped ws=%s reason=startup-restore" ws))
+      (agent-repl--log ws "elisp.panels.open-on-arrival: skipped ws={ws} reason=startup-restore" :ws ws))
      ((not (agent-repl--ws-live-p ws))
-      (agent-repl--log ws "elisp.panels.open-on-arrival: skipped ws=%s reason=not-live" ws))
+      (agent-repl--log ws "elisp.panels.open-on-arrival: skipped ws={ws} reason=not-live" :ws ws))
      (t
       (agent-repl--call-in-background-workspace
        ws
        (lambda ()
          (if (agent-repl--panels-any-visible-p)
-             (agent-repl--log ws "elisp.panels.open-on-arrival: ws=%s branch=already-open" ws)
+             (agent-repl--log ws "elisp.panels.open-on-arrival: ws={ws} branch=already-open" :ws ws)
            (agent-repl--panels-show-or-open ws))
-         (agent-repl--info ws "elisp.panels.opened-on-arrival ws=%s reason=%s" ws reason)))))))
+         (agent-repl--info ws "elisp.panels.opened-on-arrival ws={ws} reason={reason}" :ws ws :reason reason)))))))
 
 (defun agent-repl--settle-placeholder (ws outcome)
   "Tear WS's placeholder down unless OUTCOME says the open is still in flight.
@@ -1728,7 +1728,7 @@ placeholder nobody resolves, and the escalation timer would eventually
 paint a warning over a workspace that opened perfectly."
   (if (eq outcome :pending)
       outcome
-    (agent-repl--log ws "toggle: settling placeholder outcome=%S" outcome)
+    (agent-repl--log ws "toggle: settling placeholder outcome={outcome}" :outcome (prin1-to-string outcome))
     (agent-repl--open-progress-finish ws)
     outcome))
 
@@ -1758,15 +1758,15 @@ push-to-back.  Bound to `SPC o c'."
   (if (process-live-p proc)
       (progn
         (agent-repl--log '(:agent-repl-context "process cleanup can run after workspace teardown")
-                         "sigkill-if-alive: branch=signal proc=%s" proc)
+                         "sigkill-if-alive: branch=signal proc={proc}" :proc proc)
         (signal-process proc 'SIGKILL))
     (agent-repl--log-verbose '(:agent-repl-context "process cleanup can run after workspace teardown")
-                              "sigkill-if-alive: branch=already-dead proc=%s" proc)))
+                              "sigkill-if-alive: branch=already-dead proc={proc}" :proc proc)))
 
 (defun agent-repl--schedule-sigkill (proc)
   "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
   (agent-repl--log '(:agent-repl-context "process cleanup can run after workspace teardown")
-                   "schedule-sigkill: scheduling for proc=%s" proc)
+                   "schedule-sigkill: scheduling for proc={proc}" :proc proc)
   (run-at-time agent-repl-sigkill-delay nil #'agent-repl--sigkill-if-alive proc))
 
 (defun agent-repl--kill-workspace-buffers (ws)
@@ -1791,25 +1791,25 @@ workspace."
     (when-let ((persp (agent-repl--ws-resolve-persp ws)))
       (let ((bufs (agent-repl--ws-buffers persp))
             (kill-buffer-query-functions nil))
-        (agent-repl--log ws "kill-workspace-buffers: count=%d" (length bufs))
+        (agent-repl--log ws "kill-workspace-buffers: count={count}" :count (length bufs))
         (dolist (buf bufs)
           (condition-case err
               (cond
                ((agent-repl--foreign-owned-buffer-p buf ws)
-                (agent-repl--log ws "kill-workspace-buffers: SKIP foreign buf=%s owner=%s"
-                                  (agent-repl--safe-buffer-name buf)
-                                  (agent-repl--buffer-owner buf)))
+                (agent-repl--log ws "kill-workspace-buffers: SKIP foreign buf={buf} owner={owner}"
+                                  :buf (agent-repl--safe-buffer-name buf)
+                                  :owner (agent-repl--buffer-owner buf)))
                ((agent-repl--ws-shared-unowned-buffer-p buf ws)
-                (agent-repl--log ws "kill-workspace-buffers: SKIP shared buf=%s"
-                                  (agent-repl--safe-buffer-name buf)))
+                (agent-repl--log ws "kill-workspace-buffers: SKIP shared buf={buf}"
+                                  :buf (agent-repl--safe-buffer-name buf)))
                (t
                 (let* ((buf-name (agent-repl--safe-buffer-name buf))
                        (live (buffer-live-p buf))
                        (proc (and live (get-buffer-process buf)))
                        (t-buf (float-time)))
-                  (agent-repl--log ws "kill-workspace-buffers: buf=%s live=%s proc=%s"
-                                    buf-name (if live "t" "nil")
-                                    (if proc (process-name proc) "nil"))
+                  (agent-repl--log ws "kill-workspace-buffers: buf={buf} live={live} proc={proc}"
+                                    :buf buf-name :live (if live "t" "nil")
+                                    :proc (if proc (process-name proc) "nil"))
                   (when live
                     (when proc
                       (set-process-query-on-exit-flag proc nil)
@@ -1818,12 +1818,12 @@ workspace."
                     (with-current-buffer buf
                       (set-buffer-modified-p nil))
                     (kill-buffer buf))
-                  (agent-repl--log ws "kill-workspace-buffers: buf=%s done elapsed=%.3fs"
-                                    buf-name (- (float-time) t-buf)))))
+                  (agent-repl--log ws "kill-workspace-buffers: buf={buf} done elapsed={elapsed}s"
+                                    :buf buf-name :elapsed (format "%.3f" (- (float-time) t-buf))))))
             (error
-             (agent-repl--warn ws "kill-workspace-buffers: error on %s: %S"
-                               (agent-repl--safe-buffer-name buf) err))))
-        (agent-repl--log ws "kill-workspace-buffers: dolist done count=%d" (length bufs))))))
+             (agent-repl--warn ws "kill-workspace-buffers: error on {buffer}: {err}"
+                               :buffer (agent-repl--safe-buffer-name buf) :err (prin1-to-string err)))))
+        (agent-repl--log ws "kill-workspace-buffers: dolist done count={count}" :count (length bufs))))))
 
 ;;;; User commands
 
@@ -1835,7 +1835,7 @@ Frontend-blind: dispatches the workspace's registered frontend's
   (let ((ws (agent-repl--ws-current-name))
         (agent-repl--kill-cause (or agent-repl--kill-cause
                                     "interactive agent-repl-kill command")))
-    (agent-repl--log ws "kill: ws=%s kill-cause=%s" ws (agent-repl--kill-cause-str))
+    (agent-repl--log ws "kill: ws={ws} kill-cause={kill_cause}" :ws ws :kill_cause (agent-repl--kill-cause-str))
     (unless ws (error "agent-repl-kill: no active workspace"))
     (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)))
 
@@ -1876,10 +1876,10 @@ If the agent isn't running, start it (same as `agent-repl')."
       (let ((win (agent-repl--webview-window ws)))
         (if win
             (progn
-              (agent-repl--log ws "focus-input branch=jump-back win=%s" win)
+              (agent-repl--log ws "focus-input branch=jump-back win={win}" :win win)
               (select-window win))
-          (agent-repl--log ws "focus-input branch=jump-back-nowhere webview=%s"
-                           (agent-repl--safe-buffer-name
+          (agent-repl--log ws "focus-input branch=jump-back-nowhere webview={webview}"
+                           :webview (agent-repl--safe-buffer-name
                             (agent-repl--ws-get ws :frontend-buffer))))))
      ;; No composer buffer yet — bring the workspace's panels up.  The
      ;; question here is editor-local ("are this workspace's panels
@@ -1931,7 +1931,7 @@ and Emacs filled the window with the webview -- which the layout
 reconciler then remounted the composer beside, so a close undid itself."
   (cond
    ((agent-repl--panels-cover-frame-p ws)
-    (agent-repl--log ws "%s: kept-fullscreen-layout reason=panels-cover-frame" site))
+    (agent-repl--log ws "{site}: kept-fullscreen-layout reason=panels-cover-frame" :site site))
    ;; The placeholder takes ONE window, so the user's other windows still
    ;; stand beside it and the frame is not "covered" -- but the layout the
    ;; placeholder saved is exactly the frame under it.  Saving again here
@@ -1939,10 +1939,10 @@ reconciler then remounted the composer beside, so a close undid itself."
    ((let ((placeholder (agent-repl--panels-open-placeholder ws)))
       (and placeholder (get-buffer-window placeholder)
            (window-configuration-p (agent-repl--ws-get ws :fullscreen-config))))
-    (agent-repl--log ws "%s: kept-fullscreen-layout reason=placeholder-saved-it" site))
+    (agent-repl--log ws "{site}: kept-fullscreen-layout reason=placeholder-saved-it" :site site))
    (t
     (agent-repl--ws-put ws :fullscreen-config (agent-repl-window--save-configuration))
-    (agent-repl--log ws "%s: saved-fullscreen-layout" site))))
+    (agent-repl--log ws "{site}: saved-fullscreen-layout" :site site))))
 
 (defun agent-repl--panels-cover-frame-p (ws)
   "Return non-nil when WS's own panels are all this frame's main area holds.
@@ -2015,7 +2015,7 @@ frame with no `:fullscreen-config' has no layout to restore to."
     (if (agent-repl--fullscreen-config-stale-p ws)
         (progn
           (agent-repl--ws-put ws :fullscreen-config nil)
-          (agent-repl--log ws "restore-fullscreen-config: dropped stale config ws=%s" ws)
+          (agent-repl--log ws "restore-fullscreen-config: dropped stale config ws={ws}" :ws ws)
           nil)
       (agent-repl-window--restore-configuration saved ws)
       (agent-repl--ws-put ws :fullscreen-config nil)

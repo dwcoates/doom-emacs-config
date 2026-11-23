@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -245,8 +246,8 @@ func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation str
 		// flight, and a roster nobody is left to receive is no loss. Every
 		// other refusal keeps its ERROR. The precedent is the state client's
 		// own read, which has always answered a cancellation at info.
-		ctxend.Log(err, log.Info, log.Error, operation, "the roster read ended when its context was cancelled",
-			"could not read the workspaces, repositories and subsections for the roster", dlog.Context{"cause": err.Error()})
+		ctxend.Log(err, log, dlog.LevelInfo, operation, logsite.Msg("the roster read ended when its context was cancelled"),
+			logsite.Msg("could not read the workspaces, repositories and subsections for the roster"), dlog.Context{"cause": err.Error()})
 		return sidebar.Registry{}, fmt.Errorf("read the arrangement: %w", err)
 	}
 	tasks, err := v.deps.DB.Tasks(ctx)
@@ -331,12 +332,12 @@ func (v *verbs) queueBrief(ctx context.Context, log dlog.Logger, op, whose, what
 	fields := dlog.Context{"turn": string(submission.Turn)}
 	disposition, err := v.deps.Queue.Submit(ctx, submission)
 	if err != nil {
-		log.Error(op, whose+" queue did not accept "+what, dlog.WithCause(fields, err))
+		log.With(dlog.WithCause(fields, err)).Error(op, "{whose} queue did not accept {what}", dlog.Context{"whose": whose, "what": what})
 		return promptqueue.Disposition{}, fmt.Errorf("submit %s: %w", what, err)
 	}
 	if disposition.RefusedArm != "" {
 		fields["refused_arm"] = disposition.RefusedArm
-		log.Error(op, whose+" queue refused "+what, fields)
+		log.With(fields).Error(op, "{whose} queue refused {what}", dlog.Context{"whose": whose, "what": what})
 		return promptqueue.Disposition{}, fmt.Errorf("submit %s: the queue refused it: %s", what, disposition.RefusedArm)
 	}
 	return disposition, nil

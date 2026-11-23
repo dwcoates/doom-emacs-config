@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -23,7 +24,7 @@ func TestRestateRowPublishesTheEditedSnapshotAndLeavesTheStoredRowAlone(t *testi
 
 	// Act.
 	pushed := h.resolver.restateRow(s, placement{feed: feedid.Feed{Root: true}}, stored, true, unclonable{
-		operation: "test.unclonable", message: "unused", context: dlog.Context{},
+		operation: "test.unclonable", message: logsite.Msg("unused"), context: dlog.Context{},
 	}, func(row *frontendv1.FeedRow) {
 		row.GetActivity().GetResponse().FinalAnswer = true
 	})
@@ -72,7 +73,7 @@ func TestSnapshotRowAnswersACopyAnEditLeavesTheStoredRowAlone(t *testing.T) {
 	s := h.resolver.state(testWorkspace)
 
 	// Act
-	snapshot, ok := h.resolver.snapshotRow(s, stored, unclonable{operation: "test.unclonable", message: "unused", context: dlog.Context{}})
+	snapshot, ok := h.resolver.snapshotRow(s, stored, unclonable{operation: "test.unclonable", message: logsite.Msg("unused"), context: dlog.Context{}})
 	h.resolver.mu.Unlock()
 	snapshot.Id = &frontendv1.FeedId{Value: "edited"}
 

@@ -16,7 +16,9 @@
  */
 import { ConnectError } from "@connectrpc/connect";
 
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.rpc.moved");
 
 let moveHandler: ((address: string) => void) | null = null;
 
@@ -43,10 +45,10 @@ export function registerWorkspaceMoved(handler: (address: string) => void): () =
  */
 export function workspaceMoved(address: string): boolean {
   if (moveHandler === null) {
-    log.warn(`the workspace moved to ${address} but no lifecycle is mounted to say so`, {
+    log.warn("the workspace moved to {address} but no lifecycle is mounted to say so", {
       operation: "lifecycle.move-unhandled",
-      context: { address },
-    });
+      context: {},
+    }, { address });
     return false;
   }
   moveHandler(address);

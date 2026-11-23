@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"agentrepl/logging/profiling"
@@ -49,8 +48,8 @@ func TestAFailedProfilingEventCarriesItsCause(t *testing.T) {
 	recordProfilingEvent(log, profiling.Event{Kind: profiling.Failed, Err: errors.New("boom")})
 
 	// Assert
-	if records := decodeSidecarPprofRecords(t, durable); !strings.Contains(records[0].Message, "cause=boom") {
-		t.Fatalf("message = %q, want the cause", records[0].Message)
+	if records := decodeSidecarPprofRecords(t, durable); records[0].Context["cause"] != "boom" {
+		t.Fatalf("context = %v, want the cause", records[0].Context)
 	}
 }
 

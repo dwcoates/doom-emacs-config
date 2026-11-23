@@ -77,7 +77,7 @@ import {
   statusWordWaves,
 } from "../breathing.js";
 import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -88,6 +88,8 @@ import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.
 import type { StopControls } from "./stop.js";
 import { countNoun } from "../count-noun.js";
 import { decorativeElement } from "../dom.js";
+
+const log = createLogger("webapp.footer.strip");
 
 /** The label the clock cell shows between turns. The baseline strip's own. */
 export const IDLE_CLOCK_LABEL = "--";
@@ -256,10 +258,10 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
   const parts = statusParts(status, path);
   const activityPath = `${path}.${status.case}.activity`;
   const activity = requireMessage(parts.activity, activityPath);
-  log.debug(`drawing the footer status: ${status.case}`, {
+  log.debug("drawing the footer status: {case}", {
     operation: "footer.strip.status",
     context: { status: status.case, substatus: parts.substatus?.case },
-  });
+  }, { case: status.case });
 
   if (parts.substatusRequired) requireCase(parts.substatus ?? {}, `${path}.${status.case}.substatus`);
   const step =

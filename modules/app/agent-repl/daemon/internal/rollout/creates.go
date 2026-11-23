@@ -46,5 +46,5 @@ func (c *controller) closeCreates(ctx context.Context, successor string, fields 
 // still serving.
 func (c *controller) reopenCreates(why string, fields dlog.Context) {
 	c.deps.Creates.Reopen()
-	c.log.Info(opHandover, "reopened the create gate: "+why, fields)
+	c.log.With(fields).Info(opHandover, "reopened the create gate: {why}", dlog.Context{"why": why})
 }

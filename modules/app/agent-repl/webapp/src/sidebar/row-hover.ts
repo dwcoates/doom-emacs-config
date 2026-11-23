@@ -30,12 +30,14 @@
  * row WebKit re-hovers) nor the focus WebKit hands back to the line it left
  * reopens one.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createKeyedTimers } from "../timers.js";
 import type { Dropdowns } from "./dropdowns.js";
 import { paintRowDetail } from "./row.js";
 import type { DrawnRow, HoverPart, RowHover } from "./context.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
+
+const log = createLogger("webapp.sidebar.row-hover");
 
 /**
  * The detail panel opens on HOVER. There is no chevron (owner ruling,

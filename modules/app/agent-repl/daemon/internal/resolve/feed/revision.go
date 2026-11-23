@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -138,7 +139,7 @@ func (r *resolver) restateRevised(s *wsState, fold *proseState, unit string, rev
 	}
 	return r.restateRow(s, placement{feed: fold.feed}, existing, true, unclonable{
 		operation: "daemon.feed.response_revision_unclonable",
-		message:   "the revised response's row could not be cloned to restate it",
+		message:   logsite.Msg("the revised response's row could not be cloned to restate it"),
 		context:   dlog.Context{"unit": unit, "row": fold.row.GetValue()},
 	}, func(clone *frontendv1.FeedRow) {
 		bubble := clone.GetActivity().GetResponse()

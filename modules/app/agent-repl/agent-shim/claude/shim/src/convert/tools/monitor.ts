@@ -30,7 +30,7 @@ import { conversationv1 } from "../../proto.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { bool, failureOf, obj, str, uint } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.monitor", {
   component: "shim-convert-monitor",
   operation: "shim.convert.tools.monitor",
 });

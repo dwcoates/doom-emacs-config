@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // The build cache rule's reasons.
@@ -135,14 +136,14 @@ func (s *Sweeper) sweepBuildCache(ctx context.Context, now time.Time, report *Re
 	report.Kept[KeepRecentlyUsedBuildCache] += kept
 	report.Failures += failures
 	fields["entries"], fields["bytes"], fields["kept"], fields["failures"] = entries, bytes, kept, failures
-	message := "trimmed the Go build cache of the entries nothing used inside the window"
+	message := logsite.Msg("trimmed the Go build cache of the entries nothing used inside the window")
 	switch {
 	case stopped:
-		message = "the Go build cache trim stopped with the daemon"
+		message = logsite.Msg("the Go build cache trim stopped with the daemon")
 	case report.DryRun:
-		message = "would trim the Go build cache of the entries nothing used inside the window"
+		message = logsite.Msg("would trim the Go build cache of the entries nothing used inside the window")
 	}
-	s.deps.Log.Info(opBuildCache, message, fields)
+	s.deps.Log.Log(dlog.LevelInfo, opBuildCache, message, fields)
 }
 
 // trimmedSubdir is what one cache subdirectory's trim did.

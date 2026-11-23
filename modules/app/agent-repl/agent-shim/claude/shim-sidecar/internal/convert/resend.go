@@ -132,11 +132,11 @@ func (c *Converter) followPromptBranch(facts keepaliveFacts, at Attribution) []*
 	c.promptSet = nil
 	if member == set.drawn {
 		c.log.With(at.ctxFor("prompt-resend")).With(logging.Context{UpsertKey: PromptKey(set.turn)}).
-			LogVerbose("the prompt row's version got the answer; %d version(s) share its parent", len(set.said))
+			LogVerbose("the prompt row's version got the answer; {set_said_length} version(s) share its parent", logging.Values{"set_said_length": len(set.said)})
 		return nil
 	}
 	c.log.With(at.ctxFor("prompt-resend")).With(logging.Context{UpsertKey: PromptKey(set.turn)}).
-		Log("an earlier version of a re-sent prompt got the answer; its row is re-written with that version's words (%d version(s) share its parent)", len(set.said))
+		Log("an earlier version of a re-sent prompt got the answer; its row is re-written with that version's words ({set_said_length} version(s) share its parent)", logging.Values{"set_said_length": len(set.said)})
 	prompt := &conversationv1.AgentPrompt{
 		Id:     &conversationv1.TurnId{Value: set.turn},
 		Agent:  agentID(set.agent),

@@ -3,6 +3,7 @@ package footer
 import (
 	"strings"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -129,7 +130,7 @@ func (r *resolver) endSilence(ws ids.WorkspaceID, s *wsState, cause string) {
 // was last heard.
 func (r *resolver) vendorSilenceElapsed(ws ids.WorkspaceID) {
 	r.mutate(ws, "daemon.footer.vendor_silence",
-		"the vendor-silence threshold passed; the footer republished its working step",
+		logsite.Msg("the vendor-silence threshold passed; the footer republished its working step"),
 		nil, func(s *wsState) {
 			s.silence = nil
 			if s.turn != nil && r.vendorSilent(s) {

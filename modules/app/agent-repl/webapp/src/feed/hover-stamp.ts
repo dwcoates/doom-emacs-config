@@ -18,12 +18,14 @@
 import type { FeedHoverStamp, FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FocusLeft } from "../focus-left.js";
 import { heatColor } from "../heat.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createPointerRest } from "../pointer-rest.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
 import { createListeners } from "../listeners.js";
+
+const log = createLogger("webapp.feed.hover-stamp");
 
 /** A hover stamp's token figure, read. */
 export interface HoverTokens {
@@ -142,10 +144,9 @@ export function installHoverStamp(host: HTMLElement, show: ShowHoverStamp, focus
     const stamp = row === null ? null : hoverStampOf(row);
     if (stamp === shown) return;
     shown = stamp;
-    log.debug(stamp === null ? "the footer no longer shows a hovered bubble's stamp" : "the footer shows the hovered bubble's stamp", {
-      operation: "feed.hover-stamp",
-      context: { row: rowOf(row), label: stamp?.label ?? null, tokens: stamp?.tokens?.text ?? null },
-    });
+    const context = { row: rowOf(row), label: stamp?.label ?? null, tokens: stamp?.tokens?.text ?? null };
+    if (stamp === null) log.debug("the footer no longer shows a hovered bubble's stamp", { operation: "feed.hover-stamp", context });
+    else log.debug("the footer shows the hovered bubble's stamp", { operation: "feed.hover-stamp", context });
     show(stamp, stamp === null ? null : row);
   };
   const onOver = (event: MouseEvent): void => {

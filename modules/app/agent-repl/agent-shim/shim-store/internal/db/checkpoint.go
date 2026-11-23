@@ -259,7 +259,7 @@ func (d *DB) observeWAL() {
 // instead of silently going without a reading.
 func (d *DB) recordWALProbeFailure(err error) {
 	d.log.Log(logging.Fields{Operation: CheckpointOperation, DatabasePath: d.path, Level: "error", ErrorCause: err.Error()},
-		"reading the WAL-index header failed, so the checkpoint job cannot tell how far the WAL has grown: %v", err)
+		"reading the WAL-index header failed, so the checkpoint job cannot tell how far the WAL has grown: {cause}", logging.Values{"cause": err.Error()})
 	d.walMu.Lock()
 	d.wal.lastErr = err
 	d.walMu.Unlock()
@@ -315,7 +315,8 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 	if before.pending() <= 0 {
 		result.Skipped = true
 		result.WALFrames, result.Checkpointed = int64(before.frames), int64(before.backfilled)
-		d.log.LogVerbose(base, "nothing to checkpoint trigger=%s wal_frames=%d checkpointed=%d", trigger, before.frames, before.backfilled)
+		d.log.LogVerbose(base, "nothing to checkpoint trigger={trigger} wal_frames={wal_frames} checkpointed={checkpointed}",
+			logging.Values{"trigger": string(trigger), "wal_frames": before.frames, "checkpointed": before.backfilled})
 		return result, nil
 	}
 
@@ -354,9 +355,6 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 	d.observeQuery(StatementWALCheckpoint, "", fields, started, copied)
 	fields.Duration = d.mono().Sub(started)
 	fields.Exec = fields.Duration - lockWait
-	message := "WAL checkpointed trigger=%s mode=PASSIVE wal_frames=%d checkpointed=%d copied=%d busy=%d duration_ms=%d lock_wait_ms=%d exec_ms=%d"
-	args := []any{trigger, result.WALFrames, result.Checkpointed, copied, busy,
-		fields.Duration.Milliseconds(), lockWait.Milliseconds(), fields.Exec.Milliseconds()}
 	if copied <= 0 {
 		// A reader pinned every waiting frame, so nothing moved. One such run
 		// is narration, not an event: the next trigger tries again. The read
@@ -364,10 +362,14 @@ func (d *DB) Checkpoint(ctx context.Context, trigger CheckpointTrigger) (result 
 		// the pin outlasts DefaultPinWarnAfter the job's record can say which
 		// snapshot holds it (RunCheckpoints, walPinWatch).
 		result.ReadMarks = after.readMarks[:]
-		d.log.LogVerbose(fields, message, args...)
+		d.log.LogVerbose(fields, "WAL checkpointed, nothing copied trigger={trigger} mode=PASSIVE wal_frames={wal_frames} checkpointed={checkpointed} copied={copied} busy={busy} duration_ms={duration_ms} lock_wait_ms={lock_wait_ms} exec_ms={exec_ms}",
+			logging.Values{"trigger": string(trigger), "wal_frames": result.WALFrames, "checkpointed": result.Checkpointed, "copied": copied, "busy": busy,
+				"duration_ms": fields.Duration.Milliseconds(), "lock_wait_ms": lockWait.Milliseconds(), "exec_ms": fields.Exec.Milliseconds()})
 		return result, nil
 	}
-	d.log.Log(fields, message, args...)
+	d.log.Log(fields, "WAL checkpointed trigger={trigger} mode=PASSIVE wal_frames={wal_frames} checkpointed={checkpointed} copied={copied} busy={busy} duration_ms={duration_ms} lock_wait_ms={lock_wait_ms} exec_ms={exec_ms}",
+		logging.Values{"trigger": string(trigger), "wal_frames": result.WALFrames, "checkpointed": result.Checkpointed, "copied": copied, "busy": busy,
+			"duration_ms": fields.Duration.Milliseconds(), "lock_wait_ms": lockWait.Milliseconds(), "exec_ms": fields.Exec.Milliseconds()})
 	return result, nil
 }
 
@@ -602,11 +604,11 @@ func (d *DB) reportWALPin(pin *walPinWatch, result CheckpointResult, warnAfter t
 	}
 	if event == walPinOutlasted {
 		fields.Level = "warn"
-		d.log.Log(fields, "a reader has pinned the WAL for at least %s: every checkpoint copies nothing while %d frames wait, so the WAL grows until that snapshot ends wal_frames=%d backfilled=%d read_marks=%v read_pool_in_use=%d",
-			held.Round(time.Second), result.WALFrames-result.Checkpointed, result.WALFrames, result.Checkpointed, result.ReadMarks, stats.InUse)
+		d.log.Log(fields, "a reader has pinned the WAL for at least {held}: every checkpoint copies nothing while {waiting} frames wait, so the WAL grows until that snapshot ends wal_frames={wal_frames} backfilled={backfilled} read_marks={read_marks} read_pool_in_use={read_pool_in_use}",
+			logging.Values{"held": held.Round(time.Second).String(), "waiting": result.WALFrames - result.Checkpointed, "wal_frames": result.WALFrames, "backfilled": result.Checkpointed, "read_marks": result.ReadMarks, "read_pool_in_use": stats.InUse})
 		return
 	}
 	fields.Level = "info"
-	d.log.Log(fields, "the WAL pin ended after at least %s wal_frames=%d backfilled=%d",
-		held.Round(time.Second), result.WALFrames, result.Checkpointed)
+	d.log.Log(fields, "the WAL pin ended after at least {held} wal_frames={wal_frames} backfilled={backfilled}",
+		logging.Values{"held": held.Round(time.Second).String(), "wal_frames": result.WALFrames, "backfilled": result.Checkpointed})
 }

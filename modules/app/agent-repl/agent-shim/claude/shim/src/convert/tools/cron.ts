@@ -22,7 +22,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, settle, str, strOr } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-cron", operation: "shim.convert.tools.cron" });
+const LOGGER = bindLog("shim.convert.tools.cron", { component: "shim-convert-cron", operation: "shim.convert.tools.cron" });
 
 /** The vendor's three spellings of this unit's three acts. */
 const CREATE = "CronCreate";

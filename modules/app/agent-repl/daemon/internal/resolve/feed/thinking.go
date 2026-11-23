@@ -58,7 +58,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 		// content-bearing Update (or a Success carrying the whole) is what first
 		// emits the row. A withheld block therefore draws nothing at all, with
 		// no retire required.
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawThinking", "branch": "case *conversationv1.AgentThinking_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentThinking_Start", dlog.Context{"function": "drawThinking", "branch": "case *conversationv1.AgentThinking_Start"})
 		fold.markdown = ""
 		fold.settled = false
 		resetPacing(fold)
@@ -146,7 +146,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 			Prose: &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},
 		}}
 	default:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawThinking", "branch": "default"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: default", dlog.Context{"function": "drawThinking", "branch": "default"})
 		return nil, errNotARow
 	}
 

@@ -97,7 +97,7 @@ func (d *DB) applyRetirement(ctx context.Context, tx *sql.Tx, fields logging.Fie
 	switch err := tx.QueryRowContext(ctx, retireProbeSQL, retirement.GetUpsertKey()).
 		Scan(&row.position, &row.writeSeq, &row.plane, &row.book, &row.kind, &row.frame); {
 	case errors.Is(err, sql.ErrNoRows):
-		d.log.LogVerbose(fields, "retirement names no row; nothing to retire retirements_index=%d", index)
+		d.log.LogVerbose(fields, "retirement names no row; nothing to retire retirements_index={retirements_index}", logging.Values{"retirements_index": index})
 		return nil
 	case err != nil:
 		return d.refuse(fields, storagef(err, "reading row %q to retire it", retirement.GetUpsertKey()))
@@ -107,15 +107,15 @@ func (d *DB) applyRetirement(ctx context.Context, tx *sql.Tx, fields logging.Fie
 		fields.BookAgentID = row.book.String
 	}
 	if row.kind == kindRetired {
-		d.log.LogVerbose(fields, "row is already retired retirements_index=%d", index)
+		d.log.LogVerbose(fields, "row is already retired retirements_index={retirements_index}", logging.Values{"retirements_index": index})
 		return nil
 	}
 	if row.kind != kindPageLine {
-		d.log.LogVerbose(fields, "row is not a page line (kind=%s); only a page line is retired retirements_index=%d", row.kind, index)
+		d.log.LogVerbose(fields, "row is not a page line (kind={kind}); only a page line is retired retirements_index={retirements_index}", logging.Values{"kind": row.kind, "retirements_index": index})
 		return nil
 	}
 	if row.plane != planeFile {
-		d.log.LogVerbose(fields, "row was last written by the stream plane; the file plane's re-derivation leaves it retirements_index=%d", index)
+		d.log.LogVerbose(fields, "row was last written by the stream plane; the file plane's re-derivation leaves it retirements_index={retirements_index}", logging.Values{"retirements_index": index})
 		return nil
 	}
 	stored := &storev1.StoreEntry{}
@@ -123,8 +123,8 @@ func (d *DB) applyRetirement(ctx context.Context, tx *sql.Tx, fields logging.Fie
 		return d.refuse(fields, storagef(err, "the stored frame of row %q cannot be decoded to read its conversion version", retirement.GetUpsertKey()))
 	}
 	if stored.GetConversionVersion() >= retirement.GetConversionVersion() {
-		d.log.LogVerbose(fields, "row was produced by conversion_version=%d, not below the re-read's %d; it is left retirements_index=%d",
-			stored.GetConversionVersion(), retirement.GetConversionVersion(), index)
+		d.log.LogVerbose(fields, "row was produced by conversion_version={stored_conversion_version}, not below the re-read's {reread_conversion_version}; it is left retirements_index={retirements_index}",
+			logging.Values{"stored_conversion_version": stored.GetConversionVersion(), "reread_conversion_version": retirement.GetConversionVersion(), "retirements_index": index})
 		return nil
 	}
 	line := stored.GetAgentUpdate().GetServeableFrame()
@@ -134,8 +134,8 @@ func (d *DB) applyRetirement(ctx context.Context, tx *sql.Tx, fields logging.Fie
 	if what, ok := retirable(line); !ok {
 		failed := fields
 		failed.Level = "error"
-		d.log.Log(failed, "a retirement named a row whose %s drove the store's lifecycle tables, which retiring the line alone would leave disagreeing with the books; the row is left and the producer's conversion must not name it retirements_index=%d",
-			what, index)
+		d.log.Log(failed, "a retirement named a row whose {what} drove the store's lifecycle tables, which retiring the line alone would leave disagreeing with the books; the row is left and the producer's conversion must not name it retirements_index={retirements_index}",
+			logging.Values{"what": what, "retirements_index": index})
 		return nil
 	}
 
@@ -159,8 +159,8 @@ func (d *DB) applyRetirement(ctx context.Context, tx *sql.Tx, fields logging.Fie
 	info := fields
 	info.Level = "info"
 	info.WriteSeq = seq
-	d.log.Log(info, "retired a page line conversion %d produced and conversion %d no longer does; no page serves it and its watchers are told retirements_index=%d",
-		stored.GetConversionVersion(), retirement.GetConversionVersion(), index)
+	d.log.Log(info, "retired a page line conversion {stored_conversion_version} produced and conversion {reread_conversion_version} no longer does; no page serves it and its watchers are told retirements_index={retirements_index}",
+		logging.Values{"stored_conversion_version": stored.GetConversionVersion(), "reread_conversion_version": retirement.GetConversionVersion(), "retirements_index": index})
 	return nil
 }
 

@@ -57,7 +57,7 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		// (the spawn cannot be announced), and one with no vendor agent id is
 		// warn (its spool cannot be attributed).
 		c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
-			LogVerbose("subagent spawn failed")
+			LogVerbose("subagent spawn failed", nil)
 		return item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: f},
 		}})
@@ -69,17 +69,17 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 	if boolean(result["isAsync"]) {
 		if created == "" {
 			c.log.With(at.ctxError("subagent")).With(logging.Context{ActivityID: call.activityID}).
-				Log("async subagent launch carries no spawning-call id; the spawn has no identity and cannot be announced")
+				Log("async subagent launch carries no spawning-call id; the spawn has no identity and cannot be announced", nil)
 			return nil
 		}
 		if vendorAgentID == "" {
 			// The identity is safe (it is this call), but nothing will attribute
 			// the agent's own a* spool without the vendor's locator.
 			c.log.With(at.ctxWarn("subagent")).With(logging.Context{ActivityID: call.activityID}).
-				Log("async subagent launch names no vendor agent id; its transcript spool cannot be attributed to this spawn")
+				Log("async subagent launch names no vendor agent id; its transcript spool cannot be attributed to this spawn", nil)
 		}
 		c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
-			Log("async subagent launch announced; its own stream carries it from here")
+			Log("async subagent launch announced; its own stream carries it from here", nil)
 		return item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
 				CreatedAgentId:       agentID(created),
@@ -93,7 +93,7 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 	}
 
 	c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
-		LogVerbose("subagent spawn settled")
+		LogVerbose("subagent spawn settled", nil)
 
 	success := &conversationv1.AgentSubagentSuccess{
 		// THE SAME IDENTITY THE START STATES. A sidecar delivery is exactly the

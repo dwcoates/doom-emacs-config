@@ -244,8 +244,8 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, 
 				// because a reader of the refusal alone would conclude nothing
 				// moved. The cursor did not advance, so the re-read replays them
 				// into the ledger's absorption.
-				d.log.LogVerbose(base, "bulk batch failed after %d committed transaction(s) written=%d absorbed=%d; the cursor advance did not commit and the leading entries will be absorbed on the re-read",
-					transaction-1, result.Written, result.Absorbed)
+				d.log.LogVerbose(base, "bulk batch failed after {committed} committed transaction(s) written={written} absorbed={absorbed}; the cursor advance did not commit and the leading entries will be absorbed on the re-read",
+					logging.Values{"committed": transaction - 1, "written": result.Written, "absorbed": result.Absorbed})
 			}
 			return result, err
 		}
@@ -310,7 +310,8 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: base.Producer, WriteClass: class.String(), Transaction: "BEGIN IMMEDIATE",
-	}, "starting transaction %d entries_remaining=%d shapes=%d cursor_advance=%t", transaction, len(routes), len(shapes), cursor != nil)
+	}, "starting transaction {transaction} entries_remaining={entries_remaining} shapes={shapes} cursor_advance={cursor_advance}",
+		logging.Values{"transaction": transaction, "entries_remaining": len(routes), "shapes": len(shapes), "cursor_advance": cursor != nil})
 
 	tx, release, err := d.beginWrite(ctx, class)
 	lockWait = d.mono().Sub(started)
@@ -397,8 +398,8 @@ func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class Wr
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: base.Producer, WriteClass: class.String(), Transaction: "BEGIN IMMEDIATE",
-	}, "transaction %d committed written=%d absorbed=%d restamped=%d retired=%d skipped=%d lines=%d shapes=%d locators=%d claims=%d cursor_advance=%t final=%t",
-		transaction, result.Written, result.Absorbed, result.Restamped, result.Retired, len(result.Skipped), len(result.Lines), result.Shapes, result.Locators, result.Claims, final && cursor != nil, final)
+	}, "transaction {transaction} committed written={written} absorbed={absorbed} restamped={restamped} retired={retired} skipped={skipped} lines={lines} shapes={shapes} locators={locators} claims={claims} cursor_advance={cursor_advance} final={final}",
+		logging.Values{"transaction": transaction, "written": result.Written, "absorbed": result.Absorbed, "restamped": result.Restamped, "retired": result.Retired, "skipped": len(result.Skipped), "lines": len(result.Lines), "shapes": result.Shapes, "locators": result.Locators, "claims": result.Claims, "cursor_advance": final && cursor != nil, "final": final})
 	return result, consumed, nil
 }
 
@@ -426,7 +427,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 	}
 	if absorbed {
 		result.Absorbed++
-		d.log.LogVerbose(fields, "write absorbed: this write_id already landed entries_index=%d", r.index)
+		d.log.LogVerbose(fields, "write absorbed: this write_id already landed entries_index={entries_index}", logging.Values{"entries_index": r.index})
 		return nil
 	}
 
@@ -440,12 +441,12 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 			failed := fields
 			failed.Level = "error"
 			failed.ErrorCause = unplaced.Detail
-			d.log.Log(failed, "entry not stored: it is owner_unknown and no stored row holds its upsert_key, so it names no book entries_index=%d", r.index)
+			d.log.Log(failed, "entry not stored: it is owner_unknown and no stored row holds its upsert_key, so it names no book entries_index={entries_index}", logging.Values{"entries_index": r.index})
 			return nil
 		}
 		r = placed
 		fields.BookAgentID = r.book.String
-		d.log.LogVerbose(fields, "owner_unknown entry placed in the book that holds its upsert_key entries_index=%d", r.index)
+		d.log.LogVerbose(fields, "owner_unknown entry placed in the book that holds its upsert_key entries_index={entries_index}", logging.Values{"entries_index": r.index})
 	}
 
 	skip, retiredFrom, prior, err := d.applyIdentityPolicy(ctx, tx, fields, &r)
@@ -466,8 +467,8 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		// cold re-scan's strict harvest. The skip is still reported to the
 		// caller; only the store's own severity drops.
 		result.Skipped = append(result.Skipped, *skip)
-		d.log.LogVerbose(fields, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
-			skip.FromBook, skip.ToBook, r.index)
+		d.log.LogVerbose(fields, "entry skipped: upsert_key already names a row under book \"{from_book}\"; the stored row is kept and this entry (book \"{to_book}\") is not applied — re-ingesting already-stored content is idempotent entries_index={entries_index}",
+			logging.Values{"from_book": skip.FromBook, "to_book": skip.ToBook, "entries_index": r.index})
 		return nil
 	}
 
@@ -485,7 +486,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		result.Absorbed++
 		info := fields
 		info.Level = "info"
-		d.log.Log(info, "stream-plane bash terminal not applied: the row already holds the file plane's terminal, which outranks it entries_index=%d", r.index)
+		d.log.Log(info, "stream-plane bash terminal not applied: the row already holds the file plane's terminal, which outranks it entries_index={entries_index}", logging.Values{"entries_index": r.index})
 		return nil
 	}
 
@@ -513,7 +514,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		// lost, and the warning says why nothing serves it yet.
 		warn := fields
 		warn.Level = "warn"
-		d.log.Log(warn, "workflow ingestion not implemented this wave — the entry is stored as never-served residue and the workflow table is untouched entries_index=%d", r.index)
+		d.log.Log(warn, "workflow ingestion not implemented this wave — the entry is stored as never-served residue and the workflow table is untouched entries_index={entries_index}", logging.Values{"entries_index": r.index})
 	}
 
 	if err := d.landRow(ctx, tx, fields, r, cursor, nextSeq, now, result, retiredFrom, true); err != nil {
@@ -586,8 +587,8 @@ func (d *DB) landRow(ctx context.Context, tx *sql.Tx, fields logging.Fields, r r
 		if retiredFrom == kindRetired {
 			what = "a page line the file plane's re-derivation retired"
 		}
-		d.log.Log(info, "%s was superseded by a real record old_kind=%s new_kind=%s entries_index=%d",
-			what, retiredFrom, r.kind, r.index)
+		d.log.Log(info, "{what} was superseded by a real record old_kind={old_kind} new_kind={new_kind} entries_index={entries_index}",
+			logging.Values{"what": what, "old_kind": retiredFrom, "new_kind": r.kind, "entries_index": r.index})
 	}
 	if applied {
 		result.Written++
@@ -611,7 +612,7 @@ func (d *DB) landRow(ctx context.Context, tx *sql.Tx, fields logging.Fields, r r
 	verbose := fields
 	verbose.Position = encodePointer(position).GetValue()
 	verbose.WriteSeq = seq
-	d.log.LogVerbose(verbose, "entry written kind=%s entries_index=%d", r.kind, r.index)
+	d.log.LogVerbose(verbose, "entry written kind={kind} entries_index={entries_index}", logging.Values{"kind": r.kind, "entries_index": r.index})
 	return nil
 }
 
@@ -647,7 +648,7 @@ func (d *DB) refuse(fields logging.Fields, err error) error {
 		if site := RefusalSite(err); site != "" {
 			fields.RefusalSite = site
 		}
-		d.log.LogVerbose(fields, "refused: %v", err)
+		d.log.LogVerbose(fields, "refused as a caller's error: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
 	// A CALLER THAT HUNG UP IS NOT A STORAGE FAILURE. Every statement here runs
@@ -667,11 +668,11 @@ func (d *DB) refuse(fields logging.Fields, err error) error {
 	// from one that never arrived.
 	if isContextError(err) {
 		fields.Level = "info"
-		d.log.Log(fields, "abandoned: the caller's context ended before the statement finished: %v", err)
+		d.log.Log(fields, "abandoned: the caller's context ended before the statement finished: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
 	fields.Level = "error"
-	d.log.Log(fields, "refused: %v", err)
+	d.log.Log(fields, "refused: {cause}", logging.Values{"cause": err.Error()})
 	return err
 }
 
@@ -923,8 +924,8 @@ func (d *DB) restamp(ctx context.Context, tx *sql.Tx, fields logging.Fields, r r
 	verbose := fields
 	verbose.Position = encodePointer(prior.position).GetValue()
 	verbose.WriteSeq = prior.writeSeq
-	d.log.LogVerbose(verbose, "entry restamped: the row already holds this content; it takes conversion_version=%d and nothing a reader observes changes entries_index=%d",
-		r.entry.GetConversionVersion(), r.index)
+	d.log.LogVerbose(verbose, "entry restamped: the row already holds this content; it takes conversion_version={conversion_version} and nothing a reader observes changes entries_index={entries_index}",
+		logging.Values{"conversion_version": r.entry.GetConversionVersion(), "entries_index": r.index})
 	return nil
 }
 
@@ -964,8 +965,8 @@ func (d *DB) carryStoredStamps(fields logging.Fields, r *routed, stored []byte) 
 		incoming := r.entry.GetTurn()
 		if incoming.GetValue() != kept.GetValue() {
 			if incoming != nil {
-				d.log.LogVerbose(fields, "row keeps its first turn: stored_turn=%q write_turn=%q entries_index=%d",
-					kept.GetValue(), incoming.GetValue(), r.index)
+				d.log.LogVerbose(fields, "row keeps its first turn: stored_turn=\"{stored_turn}\" write_turn=\"{write_turn}\" entries_index={entries_index}",
+					logging.Values{"stored_turn": kept.GetValue(), "write_turn": incoming.GetValue(), "entries_index": r.index})
 			}
 			r.entry.Turn = kept
 			rewritten = true
@@ -975,8 +976,8 @@ func (d *DB) carryStoredStamps(fields logging.Fields, r *routed, stored []byte) 
 		incoming := r.entry.GetPlace()
 		if !proto.Equal(incoming, kept) {
 			if incoming != nil {
-				d.log.LogVerbose(fields, "row keeps its first stated place: stored_place=%d.%d write_place=%d.%d entries_index=%d",
-					kept.GetAtMs(), kept.GetOrdinal(), incoming.GetAtMs(), incoming.GetOrdinal(), r.index)
+				d.log.LogVerbose(fields, "row keeps its first stated place: stored_place={stored_at_ms}.{stored_ordinal} write_place={write_at_ms}.{write_ordinal} entries_index={entries_index}",
+					logging.Values{"stored_at_ms": kept.GetAtMs(), "stored_ordinal": kept.GetOrdinal(), "write_at_ms": incoming.GetAtMs(), "write_ordinal": incoming.GetOrdinal(), "entries_index": r.index})
 			}
 			r.entry.Place = kept
 			rewritten = true
@@ -1120,7 +1121,8 @@ func (d *DB) upsertCursor(ctx context.Context, tx *sql.Tx, c *storev1.CursorStat
 	offset := c.GetOffset()
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "cursor", FileID: c.GetFileId(), Path: c.GetPath(), Offset: &offset,
-	}, "cursor advanced conversion_version=%d healing=%t", c.GetConversion().GetVersion(), through.Valid)
+	}, "cursor advanced conversion_version={conversion_version} healing={healing}",
+		logging.Values{"conversion_version": c.GetConversion().GetVersion(), "healing": through.Valid})
 	return nil
 }
 

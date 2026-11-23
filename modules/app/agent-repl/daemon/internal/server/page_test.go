@@ -319,7 +319,7 @@ func TestSubscribePageAnswersPageGoneForAnAttachmentThatIsOver(t *testing.T) {
 				}
 			}
 			if !recorded {
-				t.Fatalf("no page_gone record names %q; got %v", tc.why, log.records)
+				t.Fatalf("no page_gone record names %q; got %v", tc.why, log.records())
 			}
 		})
 	}

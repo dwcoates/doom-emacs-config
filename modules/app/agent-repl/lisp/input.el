@@ -68,6 +68,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
@@ -82,16 +86,10 @@
 (declare-function agent-repl-prompt-entries-opening "prompt-entries" (label))
 (declare-function agent-repl--frontend-webview-buffer-name "frontend" (ws))
 (declare-function evil-normal-state "evil-states" (&optional arg))
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--user-message "agent-repl-core" (ws fmt args &key detail))
-(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-count-noun "agent-repl-core" (n one &optional many))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-refill-keymap "core" (map fill))
-(declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--with-log-context "agent-repl-core"
                   (workspace request-id function))
@@ -244,9 +242,9 @@ already in force.  Each owner file adds its painter at load.")
 The `:set' of `agent-repl-input-background', so it is the one place a
 change of the ground takes effect."
   (agent-repl--info agent-repl--input-ground-log-scope
-                    "elisp.input.ground-set symbol=%s color=%s from=%S painters=%S"
-                    symbol value (and (boundp symbol) (default-value symbol))
-                    agent-repl-input-background-painters)
+                    "elisp.input.ground-set symbol={symbol} color={color} from={from} painters={painters}"
+                    :symbol symbol :color value :from (prin1-to-string (and (boundp symbol) (default-value symbol)))
+                    :painters (prin1-to-string agent-repl-input-background-painters))
   (set-default symbol value)
   (run-hooks 'agent-repl-input-background-painters))
 
@@ -345,8 +343,8 @@ its text is inset by a stretch of ground on every screen line."
                            `(space :width (,(- agent-repl-input-text-inset
                                                agent-repl-input-border-width))))))
     (agent-repl--log agent-repl--input-border-log-scope
-                     "elisp.input.border buffer=%s color=%s width=%d"
-                     (buffer-name) color agent-repl-input-border-width)
+                     "elisp.input.border buffer={buffer} color={color} width={width}"
+                     :buffer (buffer-name) :color color :width agent-repl-input-border-width)
     (setq-local header-line-format agent-repl--input-border-line-format
                 mode-line-format agent-repl--input-border-line-format
                 line-prefix inset
@@ -423,7 +421,7 @@ draws no mode line.")
 A new line is told to the page as an editor notice; a cleared one tells
 nothing, since the transient it raised lapses on its own."
   (let ((buf (agent-repl--input-buffer ws)))
-    (agent-repl--log ws "elisp.input.waiting ws=%s text=%S buffer=%s" ws text (and buf t))
+    (agent-repl--log ws "elisp.input.waiting ws={ws} text={text} buffer={buffer}" :ws ws :text (prin1-to-string text) :buffer (and buf t))
     (when buf
       (with-current-buffer buf
         (setq agent-repl-input-waiting text)))
@@ -534,9 +532,9 @@ as words and each image is attached in its place, as a pasted one is."
           (agent-repl-input-attach-image (plist-get part :path)
                                          (plist-get part :media-type))))
       (goto-char (point-max))
-      (agent-repl--log ws "elisp.input.filled ws=%s turn-blocks=%d parts=%d"
-                       ws (length (plist-get (plist-get said :content) :blocks))
-                       (length parts)))))
+      (agent-repl--log ws "elisp.input.filled ws={ws} turn-blocks={turn_blocks} parts={parts}"
+                       :ws ws :turn_blocks (length (plist-get (plist-get said :content) :blocks))
+                       :parts (length parts)))))
 
 (defun agent-repl-discard-input ()
   "Save current input to history, clear the buffer, and enter insert state.
@@ -548,7 +546,7 @@ edit's CANCEL: the held prompt keeps its content and the queue resumes
   (interactive)
   (let ((ws (agent-repl--ws-current-name))
         (input-len (buffer-size)))
-    (agent-repl--log ws "elisp.input.discard ws=%s input-len=%d" ws input-len)
+    (agent-repl--log ws "elisp.input.discard ws={ws} input-len={input_len}" :ws ws :input_len input-len)
     (when (agent-repl-held-edit-active-p ws)
       (agent-repl-held-edit-cancel ws))
     (agent-repl--input-save-to-history ws t)
@@ -574,16 +572,16 @@ Returns `saved', `empty' or `no-composer'."
   (let ((buf (agent-repl--input-buffer ws)))
     (cond
      ((null buf)
-      (agent-repl--log-verbose ws "elisp.input.save-unsent ws=%s outcome=no-composer" ws)
+      (agent-repl--log-verbose ws "elisp.input.save-unsent ws={ws} outcome=no-composer" :ws ws)
       'no-composer)
      ((string-empty-p (string-trim (with-current-buffer buf (buffer-string))))
-      (agent-repl--log ws "elisp.input.save-unsent ws=%s outcome=empty" ws)
+      (agent-repl--log ws "elisp.input.save-unsent ws={ws} outcome=empty" :ws ws)
       'empty)
      (t
       (with-current-buffer buf
         (agent-repl--input-save-to-history ws t))
-      (agent-repl--info ws "elisp.input.save-unsent ws=%s outcome=saved input-len=%d"
-                        ws (buffer-size buf))
+      (agent-repl--info ws "elisp.input.save-unsent ws={ws} outcome=saved input-len={input_len}"
+                        :ws ws :input_len (buffer-size buf))
       'saved))))
 
 (defun agent-repl-input-save-all-on-shutdown ()
@@ -594,7 +592,7 @@ or the shutdown."
     (condition-case err
         (agent-repl--input-save-unsent ws)
       (error
-       (agent-repl--error ws "elisp.input.shutdown-save-failed ws=%s err=%S" ws err)))))
+       (agent-repl--error ws "elisp.input.shutdown-save-failed ws={ws} err={err}" :ws ws :err (prin1-to-string err))))))
 
 (defun agent-repl--input-restore-unsent (ws)
   "Put WS's unsent history head into its composer, never over standing text.
@@ -603,23 +601,23 @@ Run once the composer's history is restored.  Returns `restored',
   (let ((buf (agent-repl--input-buffer ws)))
     (if (null buf)
         (progn
-          (agent-repl--warn ws "elisp.input.restore-unsent ws=%s outcome=no-composer" ws)
+          (agent-repl--warn ws "elisp.input.restore-unsent ws={ws} outcome=no-composer" :ws ws)
           'no-composer)
       (with-current-buffer buf
         (let ((unsent (agent-repl--history-unsent-head)))
           (cond
            ((null unsent)
-            (agent-repl--log ws "elisp.input.restore-unsent ws=%s outcome=none" ws)
+            (agent-repl--log ws "elisp.input.restore-unsent ws={ws} outcome=none" :ws ws)
             'none)
            ((> (buffer-size) 0)
-            (agent-repl--info ws "elisp.input.restore-unsent ws=%s outcome=occupied standing-len=%d unsent-len=%d"
-                              ws (buffer-size) (length unsent))
+            (agent-repl--info ws "elisp.input.restore-unsent ws={ws} outcome=occupied standing-len={standing_len} unsent-len={unsent_len}"
+                              :ws ws :standing_len (buffer-size) :unsent_len (length unsent))
             'occupied)
            (t
             (let ((agent-repl--history-navigating t))
               (insert unsent))
-            (agent-repl--info ws "elisp.input.restore-unsent ws=%s outcome=restored input-len=%d"
-                              ws (length unsent))
+            (agent-repl--info ws "elisp.input.restore-unsent ws={ws} outcome=restored input-len={input_len}"
+                              :ws ws :input_len (length unsent))
             'restored)))))))
 
 ;;;; ---- The composer notice ---------------------------------------------
@@ -638,8 +636,8 @@ Run once the composer's history is restored.  Returns `restored',
 Recorded at INFO with whether the host took it: a workspace with no page in
 the host yet has nowhere to draw it."
   (if (agent-repl-webhost-show-editor-notice ws text)
-      (agent-repl--info ws "elisp.input.notice ws=%s text=%S outcome=sent" ws text)
-    (agent-repl--info ws "elisp.input.notice ws=%s text=%S outcome=no-page" ws text)))
+      (agent-repl--info ws "elisp.input.notice ws={ws} text={text} outcome=sent" :ws ws :text (prin1-to-string text))
+    (agent-repl--info ws "elisp.input.notice ws={ws} text={text} outcome=no-page" :ws ws :text (prin1-to-string text))))
 
 (defun agent-repl--input-flash (ws text)
   "Show TEXT as WS\='s composer notice: a transient footer line on its page."
@@ -716,7 +714,7 @@ signalled as a `user-error'."
                              (mapcar (lambda (image) (plist-get image :path))
                                      (agent-repl--input-parts-images parts)))))
     (when missing
-      (agent-repl--info ws "elisp.input.send-refused-missing-images ws=%s paths=%S" ws missing)
+      (agent-repl--info ws "elisp.input.send-refused-missing-images ws={ws} paths={paths}" :ws ws :paths (prin1-to-string missing))
       (user-error "agent-repl: %s no longer available (%s); delete %s to send"
                   (if (cdr missing) "these images are" "this image is")
                   (mapconcat #'file-name-nondirectory missing ", ")
@@ -812,8 +810,8 @@ daemon quotes the selected bubble ahead of it."
   (let* ((ws (agent-repl--ws-current-name))
          (kind (agent-repl-host-selection ws))
          (resend (and (eq kind :prompt) (agent-repl--input-resend ws))))
-    (agent-repl--info ws "elisp.input.selection-return ws=%s kind=%S resend=%S"
-                      ws kind (and resend (plist-get (plist-get resend :edit) :arm)))
+    (agent-repl--info ws "elisp.input.selection-return ws={ws} kind={kind} resend={resend}"
+                      :ws ws :kind (prin1-to-string kind) :resend (prin1-to-string (and resend (plist-get (plist-get resend :edit) :arm))))
     (cond
      (resend (agent-repl--input-rollback ws :keep-files nil resend))
      ((eq kind :prompt) (agent-repl-rollback-keep-files))
@@ -837,12 +835,12 @@ point right after it.  A workspace with no composer has nothing to open
 an entry in: recorded, and nothing changes."
   (let ((buf (agent-repl--input-buffer ws)))
     (if (null buf)
-        (agent-repl--warn ws "elisp.input.compose-entry-no-composer ws=%s label=%s" ws label)
+        (agent-repl--warn ws "elisp.input.compose-entry-no-composer ws={ws} label={label}" :ws ws :label label)
       (with-current-buffer buf
         (goto-char (point-max))
         (unless (bolp) (insert "\n"))
         (insert (agent-repl-prompt-entries-opening label)))
-      (agent-repl--info ws "elisp.input.compose-entry ws=%s label=%s" ws label)
+      (agent-repl--info ws "elisp.input.compose-entry ws={ws} label={label}" :ws ws :label label)
       (let ((win (agent-repl-input-focus-for-reply ws)))
         (when win
           (set-window-point win (with-current-buffer buf (point-max))))))))
@@ -871,8 +869,8 @@ Turns `agent-repl-input-selection-mode' on or off in WS's composer.
 A workspace with no composer has nothing to follow."
   (let ((buf (agent-repl--input-buffer ws))
         (active (agent-repl--input-selection-active-p ws)))
-    (agent-repl--log ws "elisp.input.selection-changed ws=%s active=%s composer=%s"
-                     ws (and active t) (and buf t))
+    (agent-repl--log ws "elisp.input.selection-changed ws={ws} active={active} composer={composer}"
+                     :ws ws :active (and active t) :composer (and buf t))
     (when buf
       (with-current-buffer buf
         (agent-repl-input-selection-mode (if active 1 -1))
@@ -888,12 +886,12 @@ alone.  Returns the composer window when it took the keyboard, else nil."
   (let ((win (agent-repl-window--panel-window :input ws)))
     (if (not win)
         (progn
-          (agent-repl--info ws "elisp.input.focus-for-reply ws=%s outcome=no-composer-window" ws)
+          (agent-repl--info ws "elisp.input.focus-for-reply ws={ws} outcome=no-composer-window" :ws ws)
           nil)
       (select-window win)
       (with-current-buffer (window-buffer win)
         (when (fboundp 'evil-insert-state) (evil-insert-state)))
-      (agent-repl--info ws "elisp.input.focus-for-reply ws=%s outcome=focused window=%S" ws win)
+      (agent-repl--info ws "elisp.input.focus-for-reply ws={ws} outcome=focused window={window}" :ws ws :window (prin1-to-string win))
       win)))
 
 ;;;; ---- A highlight in a response sets the draft aside ----
@@ -919,16 +917,16 @@ at INFO."
   (let ((buf (agent-repl--input-buffer ws)))
     (cond
      ((null buf)
-      (agent-repl--info ws "elisp.input.text-highlighted ws=%s outcome=no-composer" ws))
+      (agent-repl--info ws "elisp.input.text-highlighted ws={ws} outcome=no-composer" :ws ws))
      ((buffer-local-value 'agent-repl--input-highlight-draft buf)
-      (agent-repl--info ws "elisp.input.text-highlighted ws=%s outcome=draft-already-aside" ws))
+      (agent-repl--info ws "elisp.input.text-highlighted ws={ws} outcome=draft-already-aside" :ws ws))
      (t
       (with-current-buffer buf
         (setq agent-repl--input-highlight-draft (agent-repl--input-set-aside ws))
-        (agent-repl--info ws "elisp.input.text-highlighted ws=%s outcome=%s draft-len=%d entry=%s"
-                          ws (if agent-repl--input-highlight-draft 'set-aside 'empty)
-                          (length (plist-get agent-repl--input-highlight-draft :text))
-                          (and (plist-get agent-repl--input-highlight-draft :entry) t)))))))
+        (agent-repl--info ws "elisp.input.text-highlighted ws={ws} outcome={outcome} draft-len={draft_len} entry={entry}"
+                          :ws ws :outcome (if agent-repl--input-highlight-draft 'set-aside 'empty)
+                          :draft_len (length (plist-get agent-repl--input-highlight-draft :text))
+                          :entry (and (plist-get agent-repl--input-highlight-draft :entry) t)))))))
 
 (defun agent-repl--input-restore-highlight-draft (ws)
   "Put WS's draft a highlight set aside back in its composer, after a send.
@@ -944,8 +942,8 @@ or nil when nothing was set aside or WS has no composer."
         (setq agent-repl--input-highlight-draft nil)
         (if (not (string-empty-p (buffer-string)))
             (progn
-              (agent-repl--info ws "elisp.input.highlight-draft ws=%s outcome=composer-busy composer-len=%d"
-                                ws (buffer-size))
+              (agent-repl--info ws "elisp.input.highlight-draft ws={ws} outcome=composer-busy composer-len={composer_len}"
+                                :ws ws :composer_len (buffer-size))
               'composer-busy)
           (insert (plist-get draft :text))
           (dolist (win (get-buffer-window-list buf nil t))
@@ -957,8 +955,8 @@ or nil when nothing was set aside or WS has no composer."
                 (setq agent-repl--history-discard-entry nil))
               (agent-repl--history-reset)
               (agent-repl--history-save ws))
-            (agent-repl--info ws "elisp.input.highlight-draft ws=%s outcome=restored draft-len=%d entry-removed=%s"
-                              ws (buffer-size) (and entry t)))
+            (agent-repl--info ws "elisp.input.highlight-draft ws={ws} outcome=restored draft-len={draft_len} entry-removed={entry_removed}"
+                              :ws ws :draft_len (buffer-size) :entry_removed (and entry t)))
           'restored)))))
 
 ;;;; ---- A question about a final response ----
@@ -1021,10 +1019,10 @@ CHANGE is the host push's arm: `:asked', `:moved', `:withdrawn' or `:taken'
 follow: recorded, and nothing changes.  An arm this function does not know
 is a broken decoder, and is fatal."
   (unless (memq change '(:asked :moved :withdrawn :taken))
-    (agent-repl--fatal ws "elisp.input.response-question-unknown-change ws=%s change=%S" ws change))
+    (agent-repl--fatal ws "elisp.input.response-question-unknown-change ws={ws} change={change}" :ws ws :change (prin1-to-string change)))
   (let ((buf (agent-repl--input-buffer ws)))
     (if (null buf)
-        (agent-repl--warn ws "elisp.input.response-question-no-composer ws=%s change=%S" ws change)
+        (agent-repl--warn ws "elisp.input.response-question-no-composer ws={ws} change={change}" :ws ws :change (prin1-to-string change))
       (with-current-buffer buf
         (pcase change
           (:asked
@@ -1044,8 +1042,8 @@ is a broken decoder, and is fatal."
           (:taken
            (setq agent-repl--input-question-draft nil
                  agent-repl--input-question-standing nil))))
-      (agent-repl--info ws "elisp.input.response-question ws=%s change=%S composer-len=%d"
-                        ws change (with-current-buffer buf (buffer-size)))
+      (agent-repl--info ws "elisp.input.response-question ws={ws} change={change} composer-len={composer_len}"
+                        :ws ws :change (prin1-to-string change) :composer_len (with-current-buffer buf (buffer-size)))
       (unless (eq change :taken)
         (let ((win (agent-repl-input-focus-for-reply ws)))
           (when win
@@ -1058,28 +1056,32 @@ is logged at WARN as `elisp.input.OP-no-ref' / `-no-conn' carrying DETAIL
 under DETAIL-NAME, and the composer flashes under PREFIX.  THE ONE GUARD
 every composer verb sends behind."
   (let ((ref (agent-repl-host-ref ws))
-        (conn (agent-repl-host-conn-or-primary ws))
-        (shown (concat detail-name "=%S")))
+        (conn (agent-repl-host-conn-or-primary ws)))
     (cond
      ((null ref)
-      (agent-repl--warn ws (concat "elisp.input." op "-no-ref ws=%s " shown) ws detail)
+      (agent-repl--warn ws "elisp.input.{op}-no-ref ws={ws} {detail_name}={detail}"
+                        :op op :ws ws :detail_name detail-name
+                        :detail (prin1-to-string detail))
       (agent-repl--input-flash ws (format "%s: workspace not ready" prefix))
       nil)
      ((null conn)
-      (agent-repl--warn ws (concat "elisp.input." op "-no-conn ws=%s " shown) ws detail)
+      (agent-repl--warn ws "elisp.input.{op}-no-conn ws={ws} {detail_name}={detail}"
+                        :op op :ws ws :detail_name detail-name
+                        :detail (prin1-to-string detail))
       (agent-repl--input-flash ws (format "%s: no daemon connection" prefix))
       nil)
      (t (cons ref conn)))))
 
-(defun agent-repl--input-report-refusal (ws slug cause flash warn-format &rest warn-args)
+(defun agent-repl--input-report-refusal (ws slug cause flash warning)
   "Report a composer verb's refusal CAUSE for WS and flash FLASH.
 A handover arm is routed to host.el's handover walk under
 `SLUG-handover-refusal' (logged at INFO there) instead of logged as a
-refusal; any other is logged at WARN with WARN-FORMAT and WARN-ARGS.  The
+refusal; any other is logged at WARN as WARNING, a log message the caller
+words (`agent-repl--log-msg'), so its site is the caller's.  The
 flash stands either way, because the verb did not happen.  THE ONE
 REFUSAL REPORT every composer verb shares."
   (unless (agent-repl-host-route-handover ws cause (concat slug "-handover-refusal"))
-    (apply #'agent-repl--warn ws warn-format warn-args))
+    (apply #'agent-repl--emit-warn ws warning))
   (agent-repl--input-flash ws flash))
 
 (cl-defun agent-repl--input-call (ws &key op prefix detail-name detail rpc request
@@ -1099,9 +1101,10 @@ alike:
 Every record is the operation `elisp.input.OP...' and carries DETAIL
 under DETAIL-NAME, so a log line names what was asked."
   (when-let* ((endpoints (agent-repl--input-endpoints ws op prefix detail-name detail)))
-    (let ((slug (concat "elisp.input." op))
-          (shown (concat detail-name "=%S")))
-      (agent-repl--info ws (concat slug " ws=%s " shown) ws detail)
+    (let ((slug (concat "elisp.input." op)))
+      (agent-repl--info ws "elisp.input.{op} ws={ws} {detail_name}={detail}"
+                        :op op :ws ws :detail_name detail-name
+                        :detail (prin1-to-string detail))
       (funcall
        rpc (cdr endpoints) (funcall request (car endpoints))
        :on-response
@@ -1112,13 +1115,19 @@ under DETAIL-NAME, so a log line names what was asked."
             (let ((cause (plist-get (plist-get response :value) :cause)))
               (agent-repl--input-report-refusal
                ws slug cause (format "%s: %s" prefix (funcall on-refused cause))
-               (concat slug "-refused ws=%s " shown " cause=%S") ws detail cause)))
+               (agent-repl--log-msg
+                "elisp.input.{op}-refused ws={ws} {detail_name}={detail} cause={cause}"
+                :op op :ws ws :detail_name detail-name
+                :detail (prin1-to-string detail) :cause (prin1-to-string cause)))))
            (other
-            (agent-repl--error ws (concat slug "-unknown-arm ws=%s arm=%S") ws other))))
+            (agent-repl--error ws "elisp.input.{op}-unknown-arm ws={ws} arm={arm}"
+                               :op op :ws ws :arm (prin1-to-string other)))))
        :on-failure
        (lambda (failure)
-         (agent-repl--warn ws (concat slug "-failure ws=%s " shown " detail=%S")
-                           ws detail failure)
+         (agent-repl--warn ws "elisp.input.{op}-failure ws={ws} {detail_name}={detail} detail={failure}"
+                           :op op :ws ws :detail_name detail-name
+                           :detail (prin1-to-string detail)
+                           :failure (prin1-to-string failure))
          (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix)))))))
 
 (defun agent-repl--input-open-feed-image (ws image)
@@ -1140,7 +1149,7 @@ feed's rows (`OpenFeedImage'); THE ONE SEND of a composer image click (see
                                                                   :value)))))
      :on-success
      (lambda (_value)
-       (agent-repl--info ws "elisp.input.open-feed-image-answered ws=%s path=%s" ws path))
+       (agent-repl--info ws "elisp.input.open-feed-image-answered ws={ws} path={path}" :ws ws :path path))
      :on-refused
      (lambda (cause)
        (pcase (plist-get cause :arm)
@@ -1165,8 +1174,8 @@ its kind says so."
      :on-success
      (lambda (value)
        (let ((outcome (plist-get value :outcome)))
-         (agent-repl--info ws "elisp.input.select-feed-row-answered ws=%s move=%S outcome=%S"
-                           ws move (plist-get outcome :arm))
+         (agent-repl--info ws "elisp.input.select-feed-row-answered ws={ws} move={move} outcome={outcome}"
+                           :ws ws :move (prin1-to-string move) :outcome (prin1-to-string (plist-get outcome :arm)))
          ;; A step that lands on NOTHING means there is no row of its kind:
          ;; say so rather than leave the gesture silent.
          (when (eq (plist-get outcome :arm) :nothing-selectable)
@@ -1283,11 +1292,12 @@ rollback did not happen and the key must be pressed again."
   (agent-repl--input-report-refusal
    ws (format "elisp.input.rollback-%s" verb) cause
    (agent-repl--input-rollback-refusal-text cause)
-   "elisp.input.rollback-refused ws=%s verb=%s cause=%S" ws verb cause))
+   (agent-repl--log-msg "elisp.input.rollback-refused ws={ws} verb={verb} cause={cause}"
+                        :ws ws :verb verb :cause (prin1-to-string cause))))
 
 (defun agent-repl--input-rollback-failed (ws verb detail)
   "Log and flash WS's VERB transport failure DETAIL."
-  (agent-repl--warn ws "elisp.input.rollback-failure ws=%s verb=%s detail=%S" ws verb detail)
+  (agent-repl--warn ws "elisp.input.rollback-failure ws={ws} verb={verb} detail={detail}" :ws ws :verb verb :detail (prin1-to-string detail))
   (agent-repl--input-flash ws "rollback: the daemon did not answer"))
 
 (defun agent-repl--input-rollback-done (ws success &optional resend snapshot)
@@ -1308,8 +1318,8 @@ request carried a resend, so the answer must."
   (let ((answer (plist-get success :resend))
         (raw (plist-get resend :raw))
         (origin (plist-get resend :origin)))
-    (agent-repl--info ws "elisp.input.rollback-resent ws=%s key=%s arm=%S"
-                      ws (plist-get resend :key) (plist-get answer :arm))
+    (agent-repl--info ws "elisp.input.rollback-resent ws={ws} key={key} arm={arm}"
+                      :ws ws :key (plist-get resend :key) :arm (prin1-to-string (plist-get answer :arm)))
     (pcase (plist-get answer :arm)
       (:success
        (agent-repl--input-on-success ws raw origin (plist-get answer :value) t)
@@ -1319,8 +1329,8 @@ request carried a resend, so the answer must."
                                    (plist-get resend :key) snapshot))
       (other
        (agent-repl--input-restore ws snapshot)
-       (agent-repl--error ws "elisp.input.rollback-resend-unanswered ws=%s key=%s arm=%S"
-                          ws (plist-get resend :key) other)))))
+       (agent-repl--error ws "elisp.input.rollback-resend-unanswered ws={ws} key={key} arm={arm}"
+                          :ws ws :key (plist-get resend :key) :arm (prin1-to-string other))))))
 
 (defun agent-repl--input-refilled (ws success)
   "Refill WS's composer from the RollBack SUCCESS and say it is done.
@@ -1335,19 +1345,19 @@ logged at WARN and flashed, never silently lost."
          (restored (plist-get success :files-restored))
          (buf (agent-repl--input-buffer ws)))
     (if (null buf)
-        (agent-repl--warn ws "elisp.input.rollback-no-composer ws=%s" ws)
+        (agent-repl--warn ws "elisp.input.rollback-no-composer ws={ws}" :ws ws)
       (with-current-buffer buf
         (agent-repl--input-save-to-history ws))
       (agent-repl--input-fill-said ws buf said parts))
     (when (> dropped 0)
-      (agent-repl--warn ws "elisp.input.rollback-attachments-dropped ws=%s count=%d" ws dropped)
+      (agent-repl--warn ws "elisp.input.rollback-attachments-dropped ws={ws} count={count}" :ws ws :count dropped)
       (agent-repl--input-flash
        ws (format "rollback: %s could not be attached and %s dropped"
                   (agent-repl-count-noun dropped "image" "images")
                   (if (= dropped 1) "was" "were"))))
-    (agent-repl--info ws "elisp.input.rollback-done ws=%s images=%d dropped=%d files-restored=%S"
-                      ws (length (agent-repl--input-parts-images parts)) dropped
-                      (and restored (plist-get restored :files)))
+    (agent-repl--info ws "elisp.input.rollback-done ws={ws} images={images} dropped={dropped} files-restored={files_restored}"
+                      :ws ws :images (length (agent-repl--input-parts-images parts)) :dropped dropped
+                      :files_restored (prin1-to-string (and restored (plist-get restored :files))))
     (message "%s" (if restored
                       (format "rollback: done, %s restored"
                               (agent-repl-count-noun
@@ -1375,8 +1385,8 @@ is refused or fails, since nothing was sent."
           (agent-repl--input-restore ws snapshot)
           (agent-repl--input-rollback-refused
            ws "roll-back" (plist-get (plist-get response :value) :cause)))
-         (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=roll-back arm=%S"
-                                   ws other))))
+         (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws={ws} verb=roll-back arm={arm}"
+                                   :ws ws :arm (prin1-to-string other)))))
      :on-failure
      (lambda (detail)
        (agent-repl--input-restore ws snapshot)
@@ -1402,8 +1412,8 @@ that asked for it."
                           ws (list :files files :prompt prompt))))
     (let ((ref (car endpoints))
           (conn (cdr endpoints)))
-      (agent-repl--info ws "elisp.input.rollback-plan ws=%s files=%S prompt=%S"
-                        ws files (plist-get prompt :value))
+      (agent-repl--info ws "elisp.input.rollback-plan ws={ws} files={files} prompt={prompt}"
+                        :ws ws :files (prin1-to-string files) :prompt (prin1-to-string (plist-get prompt :value)))
       (let ((response
              (condition-case err
                  (agent-repl-rpc-plan-rollback-sync
@@ -1418,24 +1428,24 @@ that asked for it."
              (let ((outcome (plist-get (plist-get response :value) :outcome)))
                (pcase (plist-get outcome :arm)
                  (:nothing-to-roll-back
-                  (agent-repl--info ws "elisp.input.rollback-nothing ws=%s" ws)
+                  (agent-repl--info ws "elisp.input.rollback-nothing ws={ws}" :ws ws)
                   (agent-repl--input-flash ws "rollback: no prompt to roll back to"))
                  (:plan
                   (let ((plan (plist-get outcome :value)))
                     (if (y-or-n-p (agent-repl--input-rollback-confirmation plan resend))
                         (progn
-                          (agent-repl--info ws "elisp.input.rollback-confirmed ws=%s resend=%S"
-                                            ws (and resend (plist-get (plist-get resend :edit) :arm)))
+                          (agent-repl--info ws "elisp.input.rollback-confirmed ws={ws} resend={resend}"
+                                            :ws ws :resend (prin1-to-string (and resend (plist-get (plist-get resend :edit) :arm))))
                           (agent-repl--input-rollback-perform ws conn ref (plist-get plan :token) resend))
-                      (agent-repl--info ws "elisp.input.rollback-declined ws=%s" ws)
+                      (agent-repl--info ws "elisp.input.rollback-declined ws={ws}" :ws ws)
                       (message "rollback: cancelled"))))
                  (other
-                  (agent-repl--error ws "elisp.input.rollback-unknown-outcome ws=%s outcome=%S"
-                                     ws other)))))
+                  (agent-repl--error ws "elisp.input.rollback-unknown-outcome ws={ws} outcome={outcome}"
+                                     :ws ws :outcome (prin1-to-string other))))))
             (:error (agent-repl--input-rollback-refused
                      ws "plan" (plist-get (plist-get response :value) :cause)))
-            (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=plan arm=%S"
-                                      ws other))))))))
+            (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws={ws} verb=plan arm={arm}"
+                                      :ws ws :arm (prin1-to-string other)))))))))
 
 ;;;; ---- The stop key's second press (`C-c C-k' with nothing running) -----
 ;;
@@ -1465,14 +1475,14 @@ the reader cancelling the rollback: it is recorded and said, never raised."
   (pcase (plist-get offer :arm)
     (:immediate
      (when-let* ((endpoints (agent-repl--input-rollback-endpoints ws (list :offer :immediate))))
-       (agent-repl--info ws "elisp.input.rollback-immediate ws=%s" ws)
+       (agent-repl--info ws "elisp.input.rollback-immediate ws={ws}" :ws ws)
        (agent-repl--input-rollback-perform
         ws (cdr endpoints) (car endpoints) (plist-get (plist-get offer :value) :token))))
     (:choose
-     (agent-repl--info ws "elisp.input.rollback-choose ws=%s" ws)
+     (agent-repl--info ws "elisp.input.rollback-choose ws={ws}" :ws ws)
      (agent-repl--input-rollback-choose ws))
     (other
-     (agent-repl--error ws "elisp.input.rollback-unknown-offer ws=%s offer=%S" ws other))))
+     (agent-repl--error ws "elisp.input.rollback-unknown-offer ws={ws} offer={offer}" :ws ws :offer (prin1-to-string other)))))
 
 (defun agent-repl--input-rollback-tokens-text (tokens)
   "Return TOKENS, a context size, as the picker's short column text.
@@ -1598,17 +1608,17 @@ the pick and confirmed as any other."
         (pcase (plist-get response :arm)
           (:success
            (let ((entries (plist-get (plist-get response :value) :prompts)))
-             (agent-repl--info ws "elisp.input.rollback-listed ws=%s prompts=%d" ws (length entries))
+             (agent-repl--info ws "elisp.input.rollback-listed ws={ws} prompts={prompts}" :ws ws :prompts (length entries))
              (if (null entries)
                  (agent-repl--input-flash ws "rollback: no prompt to roll back to")
                (let ((entry (agent-repl--input-rollback-read-entry entries)))
-                 (agent-repl--info ws "elisp.input.rollback-chosen ws=%s prompt=%S"
-                                   ws (plist-get (plist-get entry :prompt) :value))
+                 (agent-repl--info ws "elisp.input.rollback-chosen ws={ws} prompt={prompt}"
+                                   :ws ws :prompt (prin1-to-string (plist-get (plist-get entry :prompt) :value)))
                  (agent-repl--input-rollback ws :keep-files (plist-get entry :prompt))))))
           (:error (agent-repl--input-rollback-refused
                    ws "list" (plist-get (plist-get response :value) :cause)))
-          (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=list arm=%S"
-                                    ws other)))))))
+          (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws={ws} verb=list arm={arm}"
+                                    :ws ws :arm (prin1-to-string other))))))))
 
 (defun agent-repl-rollback-keep-files ()
   "Roll the conversation back to before the selected prompt, keeping files.
@@ -1642,18 +1652,18 @@ silently dropped."
   (let* ((ws (agent-repl--ws-current-name))
          (conn (agent-repl-host-conn-or-primary ws)))
     (if (null conn)
-        (agent-repl--warn ws "elisp.input.feed-text-scale-no-conn dir=%S" direction)
-      (agent-repl--info ws "elisp.input.feed-text-scale dir=%S" direction)
+        (agent-repl--warn ws "elisp.input.feed-text-scale-no-conn dir={dir}" :dir (prin1-to-string direction))
+      (agent-repl--info ws "elisp.input.feed-text-scale dir={dir}" :dir (prin1-to-string direction))
       (agent-repl-rpc-adjust-feed-text-scale
        conn (list :direction direction)
        :on-response
        (lambda (response)
-         (agent-repl--info ws "elisp.input.feed-text-scaled dir=%S scale=%s"
-                           direction (plist-get response :scale)))
+         (agent-repl--info ws "elisp.input.feed-text-scaled dir={dir} scale={scale}"
+                           :dir (prin1-to-string direction) :scale (plist-get response :scale)))
        :on-failure
        (lambda (detail)
-         (agent-repl--warn ws "elisp.input.feed-text-scale-failure dir=%S detail=%S"
-                           direction detail))))))
+         (agent-repl--warn ws "elisp.input.feed-text-scale-failure dir={dir} detail={detail}"
+                           :dir (prin1-to-string direction) :detail (prin1-to-string detail)))))))
 
 (defun agent-repl-feed-text-scale-increase ()
   "Zoom the webapp FEED text IN one small step (daemon-owned, persisted).
@@ -1704,7 +1714,7 @@ when present and `keyboard-quit' otherwise."
   "Send `SelectFeedRow' CLEAR for WS.
 The daemon ends the selection and pushes it: the webapp returns to the
 feed bottom and the host watch tells Emacs nothing is selected."
-  (agent-repl--info ws "elisp.input.selection-clear ws=%s" ws)
+  (agent-repl--info ws "elisp.input.selection-clear ws={ws}" :ws ws)
   (agent-repl--input-select-feed-row ws (list :arm :clear :value nil)))
 
 (defun agent-repl-input-selection-escape ()
@@ -1733,7 +1743,7 @@ state machine -- there is no separate counter to fall out of sync."
         ;; A USER'S ACT, NOT A FAULT: the first escape over a selection is
         ;; the armed half of a deliberate two-key clear, so its record is
         ;; INFO (once per keypress, and it must survive the info threshold).
-        (agent-repl--info ws "elisp.input.selection-escape-armed ws=%s" ws)
+        (agent-repl--info ws "elisp.input.selection-escape-armed ws={ws}" :ws ws)
         (message "%s" agent-repl--input-selection-escape-warning)))))
 
 ;;;; ---- Input preparation and the metaprompt ----------------------------
@@ -1775,8 +1785,8 @@ slash command runs a skill or built-in that owns its own behavior."
          (numeral-p (not (null (string-match-p "^[0-9]+$" trimmed))))
          (result (or slash-command-p exempt-p numeral-p)))
     (agent-repl--log-verbose ws
-                             "elisp.input.skip-metaprompt raw-len=%d slash-command=%s exempt=%s numeral=%s result=%s"
-                             (length raw) slash-command-p exempt-p numeral-p result)
+                             "elisp.input.skip-metaprompt raw-len={raw_len} slash-command={slash_command} exempt={exempt} numeral={numeral} result={result}"
+                             :raw_len (length raw) :slash_command slash-command-p :exempt exempt-p :numeral numeral-p :result result)
     result))
 
 (defvar agent-repl-send-posthooks nil
@@ -1798,10 +1808,10 @@ overhaul removed.  The hook stays as the extension point it always was.")
     (dolist (hook agent-repl-send-posthooks)
       (when (string-match-p (car hook) trimmed)
         (cl-incf matched-count)
-        (agent-repl--log ws "elisp.input.posthook-matched pattern=%s" (car hook))
+        (agent-repl--log ws "elisp.input.posthook-matched pattern={pattern}" :pattern (car hook))
         (funcall (cdr hook) ws raw)))
-    (agent-repl--log ws "elisp.input.posthook-scan raw-len=%d hook-count=%d matched-count=%d"
-                     (length raw) (length agent-repl-send-posthooks) matched-count)))
+    (agent-repl--log ws "elisp.input.posthook-scan raw-len={raw_len} hook-count={hook_count} matched-count={matched_count}"
+                     :raw_len (length raw) :hook_count (length agent-repl-send-posthooks) :matched_count matched-count)))
 
 (defun agent-repl--should-prepend-metaprompt-p (raw force &optional ws)
   "Return non-nil if the read-directive should be prepended to RAW.
@@ -1815,8 +1825,8 @@ rather than as anything injected into a prompt."
          (skip-p (and enabled-p force-p (agent-repl--skip-metaprompt-p raw ws) t))
          (result (and enabled-p force-p (not skip-p) t)))
     (agent-repl--log-verbose ws
-                             "elisp.input.should-prepend enabled=%s prompt-len=%d force=%s skip=%s result=%s"
-                             enabled-p (length raw) force-p skip-p result)
+                             "elisp.input.should-prepend enabled={enabled} prompt-len={prompt_len} force={force} skip={skip} result={result}"
+                             :enabled enabled-p :prompt_len (length raw) :force force-p :skip skip-p :result result)
     result))
 
 (defun agent-repl--metaprompt-file-for (ws)
@@ -1831,15 +1841,15 @@ that copy; otherwise fall back to the canonical file."
          (in-ws (and root
                      (expand-file-name "modules/app/agent-repl/metaprompt.md" root)))
          (worktree-copy-p (and in-ws (file-exists-p in-ws))))
-    (agent-repl--log ws "elisp.input.metaprompt-file root-present=%s worktree-copy=%s"
-                     (not (null root)) (not (null worktree-copy-p)))
+    (agent-repl--log ws "elisp.input.metaprompt-file root-present={root_present} worktree-copy={worktree_copy}"
+                     :root_present (not (null root)) :worktree_copy (not (null worktree-copy-p)))
     (if worktree-copy-p in-ws agent-repl-metaprompt-file)))
 
 (defun agent-repl--command-prefix-for (ws)
   "Read-directive string for WS, pointing at WS's own metaprompt copy."
   (let ((file (agent-repl--metaprompt-file-for ws)))
-    (agent-repl--log ws "elisp.input.command-prefix selected=%s"
-                     (if (equal file agent-repl-metaprompt-file) "canonical" "workspace"))
+    (agent-repl--log ws "elisp.input.command-prefix selected={selected}"
+                     :selected (if (equal file agent-repl-metaprompt-file) "canonical" "workspace"))
     (if (equal file agent-repl-metaprompt-file)
         agent-repl--command-prefix
       (format agent-repl-command-prefix-template file))))
@@ -1856,8 +1866,8 @@ so a prompt carries no workspace tag of its own.  THE ONE FRAMING both
 `agent-repl--prepare-input' (words) and `agent-repl--prepare-input-parts'
 \(words and images) apply."
   (let ((prepend-p (agent-repl--should-prepend-metaprompt-p raw force-metaprompt ws)))
-    (agent-repl--log ws "elisp.input.prepare raw-len=%d force=%s prepend=%s"
-                     (length raw) force-metaprompt prepend-p)
+    (agent-repl--log ws "elisp.input.prepare raw-len={raw_len} force={force} prepend={prepend}"
+                     :raw_len (length raw) :force force-metaprompt :prepend prepend-p)
     (if prepend-p
         (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n")
       "")))
@@ -1921,16 +1931,16 @@ user keeps every word they wrote."
          (refusal (cdr (assq gate agent-repl--input-gate-refusals))))
     (cond
      (refusal
-      (agent-repl--warn ws "elisp.input.gate-refused ws=%s gate=%S" ws gate)
+      (agent-repl--warn ws "elisp.input.gate-refused ws={ws} gate={gate}" :ws ws :gate (prin1-to-string gate))
       (user-error "%s" refusal))
      ((eq gate :unknown)
       ;; No host push has arrived yet.  The daemon is the authority and
       ;; answers with its own refusal arms, so this SENDS rather than
       ;; guessing a state Emacs does not hold.
-      (agent-repl--info ws "elisp.input.gate-unknown-sends ws=%s" ws)
+      (agent-repl--info ws "elisp.input.gate-unknown-sends ws={ws}" :ws ws)
       gate)
      (t
-      (agent-repl--log ws "elisp.input.gate-open ws=%s gate=%S" ws gate)
+      (agent-repl--log ws "elisp.input.gate-open ws={ws} gate={gate}" :ws ws :gate (prin1-to-string gate))
       gate))))
 
 ;;;; ---- The submission --------------------------------------------------
@@ -2037,8 +2047,8 @@ integration scenarios read an empty composer after a refusal.)"
         (agent-repl--history-reset)
         (erase-buffer)))
     (agent-repl--history-save ws)
-    (agent-repl--log ws "elisp.input.optimistic-clear ws=%s raw-len=%d buffer=%s"
-                     ws (length raw) (and buf t))
+    (agent-repl--log ws "elisp.input.optimistic-clear ws={ws} raw-len={raw_len} buffer={buffer}"
+                     :ws ws :raw_len (length raw) :buffer (and buf t))
     snapshot))
 
 (defun agent-repl--input-restore (ws snapshot)
@@ -2058,9 +2068,9 @@ nothing to restore into."
   (let ((buf (plist-get snapshot :buffer)))
     (cond
      ((null snapshot)
-      (agent-repl--log-verbose ws "elisp.input.restore-skipped ws=%s reason=no-snapshot" ws))
+      (agent-repl--log-verbose ws "elisp.input.restore-skipped ws={ws} reason=no-snapshot" :ws ws))
      ((not (buffer-live-p buf))
-      (agent-repl--log ws "elisp.input.restore-skipped ws=%s reason=buffer-dead" ws))
+      (agent-repl--log ws "elisp.input.restore-skipped ws={ws} reason=buffer-dead" :ws ws))
      (t
       (with-current-buffer buf
         (let ((agent-repl--history-navigating t)
@@ -2072,9 +2082,9 @@ nothing to restore into."
         (setq agent-repl--history-index (plist-get snapshot :history-index))
         (setq agent-repl--history-discard-entry (plist-get snapshot :discard-entry)))
       (agent-repl--history-save ws)
-      (agent-repl--log ws "elisp.input.restored ws=%s text-len=%d images=%d"
-                       ws (length (plist-get snapshot :text))
-                       (length (agent-repl-input-attachments ws)))))))
+      (agent-repl--log ws "elisp.input.restored ws={ws} text-len={text_len} images={images}"
+                       :ws ws :text_len (length (plist-get snapshot :text))
+                       :images (length (agent-repl-input-attachments ws)))))))
 
 (defun agent-repl--input-accepted (ws raw arm &optional from-buffer)
   "Finish an ACCEPTED submission for WS: keep the record, clear what was sent.
@@ -2108,16 +2118,16 @@ navigation state.  The draft's images stay in it too: a caller-composed
 prompt never carried them."
   (if from-buffer
       (progn
-        (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d from-buffer=t (optimistic clear already applied at dispatch)"
-                         ws arm (length raw))
+        (agent-repl--log ws "elisp.input.accepted ws={ws} arm={arm} raw-len={raw_len} from-buffer=t (optimistic clear already applied at dispatch)"
+                         :ws ws :arm (prin1-to-string arm) :raw_len (length raw))
         (agent-repl--input-restore-highlight-draft ws))
     (let ((buf (agent-repl--input-buffer ws)))
       (when buf
         (with-current-buffer buf
           (agent-repl--history-push raw)))
       (agent-repl--history-save ws)
-      (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d buffer=%s from-buffer=nil"
-                       ws arm (length raw) (and buf t)))))
+      (agent-repl--log ws "elisp.input.accepted ws={ws} arm={arm} raw-len={raw_len} buffer={buffer} from-buffer=nil"
+                       :ws ws :arm (prin1-to-string arm) :raw_len (length raw) :buffer (and buf t)))))
 
 (defun agent-repl--input-on-success (ws raw origin success &optional from-buffer)
   "Handle a `SubmitPromptSuccess' for WS.  ORIGIN and RAW name the send.
@@ -2126,8 +2136,8 @@ composer, which is the only thing that entitles an acceptance to erase
 it."
   (pcase (plist-get success :arm)
     (:turn
-     (agent-repl--info ws "elisp.input.turn-minted ws=%s origin=%S turn=%S"
-                       ws origin (plist-get (plist-get success :value) :turn))
+     (agent-repl--info ws "elisp.input.turn-minted ws={ws} origin={origin} turn={turn}"
+                       :ws ws :origin (prin1-to-string origin) :turn (prin1-to-string (plist-get (plist-get success :value) :turn)))
      (agent-repl--input-accepted ws raw :turn from-buffer)
      (when from-buffer
        (agent-repl--input-remember-sent-turn ws (plist-get (plist-get success :value) :turn)))
@@ -2135,25 +2145,25 @@ it."
     ((and (or :command-panel :command-refused :command-acted) arm)
      ;; Answered, nothing to await.  The webapp draws the panel or the
      ;; refusal card; Emacs's whole reaction is to stop waiting.
-     (agent-repl--info ws "elisp.input.command-answered ws=%s origin=%S arm=%S value=%S"
-                       ws origin arm (plist-get success :value))
+     (agent-repl--info ws "elisp.input.command-answered ws={ws} origin={origin} arm={arm} value={value}"
+                       :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm) :value (prin1-to-string (plist-get success :value)))
      (agent-repl--input-accepted ws raw arm from-buffer))
     (:ask-answered
      ;; The send answered the ask standing on the feed: no turn was
      ;; minted, so nothing is awaited and no send posthook runs.  The
      ;; card's re-push in the webapp is the visible effect.
-     (agent-repl--info ws "elisp.input.ask-answered ws=%s origin=%S raw-len=%d"
-                       ws origin (length raw))
+     (agent-repl--info ws "elisp.input.ask-answered ws={ws} origin={origin} raw-len={raw_len}"
+                       :ws ws :origin (prin1-to-string origin) :raw_len (length raw))
      (agent-repl--input-accepted ws raw :ask-answered from-buffer))
     (:response-revising
      ;; The send asked about words highlighted in a final response: the
      ;; daemon revises that response in place and mints no turn, so
      ;; nothing is awaited and no send posthook runs.  The bubble's
      ;; redraw in the webapp is the visible effect.
-     (agent-repl--info ws "elisp.input.response-revising ws=%s origin=%S row=%S raw-len=%d"
-                       ws origin
-                       (plist-get (plist-get (plist-get success :value) :row) :value)
-                       (length raw))
+     (agent-repl--info ws "elisp.input.response-revising ws={ws} origin={origin} row={row} raw-len={raw_len}"
+                       :ws ws :origin (prin1-to-string origin)
+                       :row (prin1-to-string (plist-get (plist-get (plist-get success :value) :row) :value))
+                       :raw_len (length raw))
      (agent-repl--input-accepted ws raw :response-revising from-buffer))
     (:question-sent
      ;; The send was the question about a card: the daemon handed it,
@@ -2162,13 +2172,13 @@ it."
      ;; Nothing is awaited here.
      (let* ((value (plist-get success :value))
             (recipient (plist-get value :recipient)))
-       (agent-repl--info ws "elisp.input.question-sent ws=%s origin=%S row=%S recipient=%S raw-len=%d"
-                         ws origin (plist-get (plist-get value :row) :value)
-                         recipient (length raw))
+       (agent-repl--info ws "elisp.input.question-sent ws={ws} origin={origin} row={row} recipient={recipient} raw-len={raw_len}"
+                         :ws ws :origin (prin1-to-string origin) :row (prin1-to-string (plist-get (plist-get value :row) :value))
+                         :recipient (prin1-to-string recipient) :raw_len (length raw))
        (message "[agent-repl] Asked %s…" recipient))
      (agent-repl--input-accepted ws raw :question-sent from-buffer))
     (arm
-     (agent-repl--error ws "elisp.input.unknown-success-arm ws=%s arm=%S" ws arm))))
+     (agent-repl--error ws "elisp.input.unknown-success-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm)))))
 
 (defconst agent-repl--input-handover-arms '(:transferring-away :not-yet-adopted)
   "Refusal arms that are HANDOVER SIGNALS rather than user-facing failures.
@@ -2192,8 +2202,8 @@ The composer KEEPS its text: nothing here says the prompt landed, and the
 user is left able to see exactly what they wrote.  DELIVERY is the
 attempt's own `SubmitPromptDelivery' keyword (nil for the ordinary one),
 held with it so the re-drive asks for the same delivery."
-  (agent-repl--info ws "elisp.input.handover-refusal ws=%s origin=%S arm=%S key=%s delivery=%S"
-                    ws origin (plist-get arm :arm) key delivery)
+  (agent-repl--info ws "elisp.input.handover-refusal ws={ws} origin={origin} arm={arm} key={key} delivery={delivery}"
+                    :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string (plist-get arm :arm)) :key key :delivery (prin1-to-string delivery))
   (agent-repl-host-handle-refusal ws arm)
   (agent-repl--input-hold ws said origin raw key delivery))
 
@@ -2214,8 +2224,8 @@ about a standing condition, not a fault, so it is recorded at INFO; the
 prompt is written to the held-prompt ingress under KEY with its deferred
 delivery, and the daemon's ingress re-drives it until the condition
 clears."
-  (agent-repl--info ws "elisp.input.deferred-held ws=%s origin=%S arm=%S key=%s"
-                    ws origin arm key)
+  (agent-repl--info ws "elisp.input.deferred-held ws={ws} origin={origin} arm={arm} key={key}"
+                    :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm) :key key)
   (when (agent-repl--input-hold ws said origin raw key :deferred)
     (agent-repl--input-flash ws "deferred -- held until the daemon can take it")))
 
@@ -2237,10 +2247,10 @@ recorded at ERROR rather than drawn as a plain refusal."
          (label (cdr (assq kind agent-repl--input-bubble-refusal-labels))))
     (if (null label)
         (progn
-          (agent-repl--error ws "elisp.input.bubble-refused-unknown-kind ws=%s kind=%S" ws kind)
+          (agent-repl--error ws "elisp.input.bubble-refused-unknown-kind ws={ws} kind={kind}" :ws ws :kind (prin1-to-string kind))
           (message "agent-repl: the prompt was refused for this agent (%S)" kind))
-      (agent-repl--warn ws "elisp.input.bubble-refused ws=%s origin=%S kind=%S detail=%s"
-                        ws origin kind detail)
+      (agent-repl--warn ws "elisp.input.bubble-refused ws={ws} origin={origin} kind={kind} detail={detail}"
+                        :ws ws :origin (prin1-to-string origin) :kind (prin1-to-string kind) :detail detail)
       (agent-repl--input-flash ws (format "refused: %s" label))
       (message "agent-repl: refused -- %s%s" label
                (if (string-empty-p detail) "" (format " (%s)" detail))))))
@@ -2340,7 +2350,7 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
         (agent-repl--input-on-deferred-refusal ws said origin raw arm key)
       (pcase arm
         (:merging
-         (agent-repl--warn ws "elisp.input.refused-merging ws=%s origin=%S" ws origin)
+         (agent-repl--warn ws "elisp.input.refused-merging ws={ws} origin={origin}" :ws ws :origin (prin1-to-string origin))
          (agent-repl--input-flash ws "refused: merge in flight")
          (message "agent-repl: refused -- a merge is in flight for this workspace"))
         (:duplicate-submission
@@ -2349,8 +2359,8 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; resend: this is an ANSWER about identity, not a transport
          ;; failure, so the prompt is NOT queued.  The text and its
          ;; images stay put so the user can see what they wrote.
-         (agent-repl--warn ws "elisp.input.duplicate-submission ws=%s origin=%S arm=%S key=%s"
-                           ws origin arm key)
+         (agent-repl--warn ws "elisp.input.duplicate-submission ws={ws} origin={origin} arm={arm} key={key}"
+                           :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm) :key key)
          (agent-repl--input-flash ws "already submitted")
          (message "agent-repl: this submission's key was already accepted; the earlier submission stands"))
         (:cold-gate
@@ -2363,8 +2373,8 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; -- the same sentence the gate card and the footer carry -- is
          ;; echoed verbatim; it is never switched on.
          (let ((detail (agent-repl--input-refusal-detail reason)))
-           (agent-repl--warn ws "elisp.input.refused-cold-gate ws=%s origin=%S arm=%S detail=%s"
-                             ws origin arm detail)
+           (agent-repl--warn ws "elisp.input.refused-cold-gate ws={ws} origin={origin} arm={arm} detail={detail}"
+                             :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm) :detail detail)
            (agent-repl--input-say-refusal ws agent-repl--input-cold-gate-flash detail)))
         ((or :model-not-in-catalog :model-refused)
          ;; A `/model' ACT WAS REFUSED: the model is not in this session's
@@ -2377,8 +2387,8 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; not queued (a re-drive meets the same refusal), and the refusal's
          ;; own sentence is shown verbatim.
          (let ((detail (agent-repl--input-refusal-detail reason)))
-           (agent-repl--info ws "elisp.input.refused-model ws=%s origin=%S arm=%S detail=%s"
-                             ws origin arm detail)
+           (agent-repl--info ws "elisp.input.refused-model ws={ws} origin={origin} arm={arm} detail={detail}"
+                             :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm) :detail detail)
            (agent-repl--input-flash ws "model change refused")
            (message "agent-repl: model change refused%s"
                     (if (string-empty-p detail) "" (format " -- %s" detail)))))
@@ -2389,21 +2399,21 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; that moved on, recorded at INFO, not queued (a re-drive would
          ;; reach the session as a prompt the user never meant), and the
          ;; text stays so the user decides what to do with it.
-         (agent-repl--info ws "elisp.input.refused-ask-not-standing ws=%s origin=%S arm=%S" ws origin arm)
+         (agent-repl--info ws "elisp.input.refused-ask-not-standing ws={ws} origin={origin} arm={arm}" :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm))
          (agent-repl--input-say-refusal ws agent-repl--input-ask-not-standing-flash))
         (:ask-session-ended
          ;; The send was routed as a standing ask's TYPED ANSWER and the
          ;; session that posed the ask is gone: the daemon settled the card
          ;; abandoned.  An answer about a dead ask, recorded at INFO and not
          ;; queued; the text stays, and the next send is an ordinary prompt.
-         (agent-repl--info ws "elisp.input.refused-ask-session-ended ws=%s origin=%S arm=%S" ws origin arm)
+         (agent-repl--info ws "elisp.input.refused-ask-session-ended ws={ws} origin={origin} arm={arm}" :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm))
          (agent-repl--input-say-refusal ws agent-repl--input-ask-session-ended-flash))
         (:thread-awaiting-first-answer
          ;; A CHAT THREAD'S FIRST QUESTION IS STILL BEING ANSWERED: there is
          ;; no answer yet for this one to be asked of.  An ordinary answer,
          ;; recorded at INFO and not queued (a re-drive would meet the same
          ;; refusal until the answer lands); the text stays in the composer.
-         (agent-repl--info ws "elisp.input.refused-thread-awaiting-first-answer ws=%s origin=%S arm=%S" ws origin arm)
+         (agent-repl--info ws "elisp.input.refused-thread-awaiting-first-answer ws={ws} origin={origin} arm={arm}" :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm))
          (agent-repl--input-say-refusal ws agent-repl--input-thread-awaiting-first-answer-flash))
         (:no-session
          ;; The workspace has NO SESSION AND THE DAEMON COULD NOT BRING ONE
@@ -2414,8 +2424,8 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; resubmit once a session is up.  The daemon's `detail' says why
          ;; it could not, echoed verbatim; it is never switched on.
          (let ((detail (agent-repl--input-refusal-detail reason)))
-           (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S detail=%s"
-                             ws origin arm detail)
+           (agent-repl--warn ws "elisp.input.refused-no-session ws={ws} origin={origin} arm={arm} detail={detail}"
+                             :ws ws :origin (prin1-to-string origin) :arm (prin1-to-string arm) :detail detail)
            (agent-repl--input-say-refusal ws agent-repl--input-no-session-flash detail)))
         (:bubble-refused
          ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
@@ -2428,7 +2438,7 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
         ((pred (lambda (a) (memq a agent-repl--input-handover-arms)))
          (agent-repl--input-on-handover-refusal ws said origin raw reason key delivery))
         (_
-         (agent-repl--error ws "elisp.input.unknown-error-arm ws=%s arm=%S" ws arm)
+         (agent-repl--error ws "elisp.input.unknown-error-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm))
          (message "agent-repl: submission refused (%S)" arm))))))
 
 (defun agent-repl--input-on-failure (ws said origin raw detail key &optional delivery)
@@ -2445,8 +2455,8 @@ KEY is THIS attempt\='s idempotency key and rides into the entry: the
 re-drive is a RETRY of this submission, not a second turn, so the daemon
 answers an attempt that did land as a duplicate and delivers it once.
 DELIVERY rides with it, so a deferred prompt is re-driven deferred."
-  (agent-repl--error ws "elisp.input.transport-failure ws=%s origin=%S key=%s detail=%S"
-                     ws origin key detail)
+  (agent-repl--error ws "elisp.input.transport-failure ws={ws} origin={origin} key={key} detail={detail}"
+                     :ws ws :origin (prin1-to-string origin) :key key :detail (prin1-to-string detail))
   (when (agent-repl--input-hold ws said origin raw key delivery)
     (agent-repl--input-flash ws "send failed -- held until the daemon is back")
     (message "agent-repl: the daemon did not answer; the prompt is held")))
@@ -2465,8 +2475,8 @@ still holds, so the words are never lost silently."
   (condition-case err
       (agent-repl-held-ingress-write ws said origin key delivery)
     (error
-     (agent-repl--error ws "elisp.input.hold-failed ws=%s origin=%S key=%s cause=%S"
-                        ws origin key err)
+     (agent-repl--error ws "elisp.input.hold-failed ws={ws} origin={origin} key={key} cause={cause}"
+                        :ws ws :origin (prin1-to-string origin) :key key :cause (prin1-to-string err))
      (message "agent-repl: the prompt could not be saved for the daemon (%s); it is in the input history: %s"
               (error-message-string err) raw)
      nil)))
@@ -2505,15 +2515,15 @@ value Emacs constructs from a path."
        (when first-attempt
          (agent-repl--input-dismiss-digest ws))
        (unless ref
-         (agent-repl--fatal ws "elisp.input.submit-no-ref ws=%s origin=%S" ws origin))
+         (agent-repl--fatal ws "elisp.input.submit-no-ref ws={ws} origin={origin}" :ws ws :origin (prin1-to-string origin)))
        (unless conn
-         (agent-repl--warn ws "elisp.input.submit-no-conn ws=%s origin=%S" ws origin)
+         (agent-repl--warn ws "elisp.input.submit-no-conn ws={ws} origin={origin}" :ws ws :origin (prin1-to-string origin))
          (agent-repl--input-on-failure
           ws said origin raw (list :kind :transport :message "no daemon connection") key delivery)
          (cl-return-from agent-repl--input-submit key))
-       (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d selection=%S delivery=%S"
-                         ws origin key (length (plist-get (plist-get said :content) :blocks))
-                         (agent-repl-host-selection ws) delivery)
+       (agent-repl--info ws "elisp.input.submit ws={ws} origin={origin} key={key} blocks={blocks} selection={selection} delivery={delivery}"
+                         :ws ws :origin (prin1-to-string origin) :key key :blocks (length (plist-get (plist-get said :content) :blocks))
+                         :selection (prin1-to-string (agent-repl-host-selection ws)) :delivery (prin1-to-string delivery))
        (agent-repl-rpc-submit-prompt
         conn
         ;; No reply target rides the request: the daemon applies its own
@@ -2536,8 +2546,8 @@ value Emacs constructs from a path."
                (:error (agent-repl--input-on-error
                         ws said origin raw (plist-get response :value) key snapshot delivery))
                (arm
-                (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S"
-                                   ws arm))))))
+                (agent-repl--error ws "elisp.input.unknown-response-arm ws={ws} arm={arm}"
+                                   :ws ws :arm (prin1-to-string arm)))))))
         :on-failure
         (lambda (detail)
           (agent-repl--with-log-context
@@ -2556,11 +2566,11 @@ images in the order they stand (`agent-repl--input-parts')."
     (if buf
         (with-current-buffer buf
           (let ((parts (agent-repl--input-parts)))
-            (agent-repl--log-verbose ws "elisp.input.read ws=%s parts=%d images=%d"
-                                     ws (length parts)
-                                     (length (agent-repl--input-parts-images parts)))
+            (agent-repl--log-verbose ws "elisp.input.read ws={ws} parts={parts} images={images}"
+                                     :ws ws :parts (length parts)
+                                     :images (length (agent-repl--input-parts-images parts)))
             parts))
-      (agent-repl--log-verbose ws "elisp.input.read-no-buffer ws=%s" ws)
+      (agent-repl--log-verbose ws "elisp.input.read-no-buffer ws={ws}" :ws ws)
       nil)))
 
 (defun agent-repl--read-input-buffer (ws)
@@ -2597,13 +2607,13 @@ sent as content.
 Returns the submission's idempotency key, or nil when nothing was sent."
   (interactive (list :user-sent))
   (unless (memq origin agent-repl--input-origins)
-    (agent-repl--fatal ws "elisp.input.invalid-origin origin=%S" origin))
+    (agent-repl--fatal ws "elisp.input.invalid-origin origin={origin}" :origin (prin1-to-string origin)))
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (unless ws
-      (agent-repl--fatal '(:agent-repl-central "the record reports that no workspace exists") "elisp.input.no-workspace origin=%S prompt-supplied=%s"
-                         origin (not (null prompt))))
-    (agent-repl--info ws "elisp.input.send ws=%s origin=%S force-metaprompt=%s from-buffer=%s delivery=%S"
-                      ws origin force-metaprompt (null prompt) delivery)
+      (agent-repl--fatal '(:agent-repl-central "the record reports that no workspace exists") "elisp.input.no-workspace origin={origin} prompt-supplied={prompt_supplied}"
+                         :origin (prin1-to-string origin) :prompt_supplied (not (null prompt))))
+    (agent-repl--info ws "elisp.input.send ws={ws} origin={origin} force-metaprompt={force_metaprompt} from-buffer={from_buffer} delivery={delivery}"
+                      :ws ws :origin (prin1-to-string origin) :force_metaprompt force-metaprompt :from_buffer (null prompt) :delivery (prin1-to-string delivery))
     (agent-repl--input-check-gate ws)
     (let* ((parts (if prompt (list prompt) (agent-repl--read-input-parts ws)))
            (raw (agent-repl--input-parts-text parts))
@@ -2611,8 +2621,8 @@ Returns the submission's idempotency key, or nil when nothing was sent."
            (empty-p (and (string-empty-p (string-trim raw)) (null images))))
       (if empty-p
           (progn
-            (agent-repl--info ws "elisp.input.send-empty ws=%s origin=%S -- nothing to send"
-                              ws origin)
+            (agent-repl--info ws "elisp.input.send-empty ws={ws} origin={origin} -- nothing to send"
+                              :ws ws :origin (prin1-to-string origin))
             ;; RET IN AN EMPTY COMPOSER RETRIES A FAILED TURN NOW (owner
             ;; ruling, 2026-10-20): the shim makes its scheduled retry at
             ;; once, with nothing sent as content.  With no retry scheduled
@@ -2630,7 +2640,7 @@ Returns the submission's idempotency key, or nil when nothing was sent."
           ;; recorded exactly as a send clears and records them.
           (if (and from-buffer (agent-repl-held-edit-active-p ws))
               (progn
-                (agent-repl--info ws "elisp.input.send-commits-held-edit ws=%s origin=%S" ws origin)
+                (agent-repl--info ws "elisp.input.send-commits-held-edit ws={ws} origin={origin}" :ws ws :origin (prin1-to-string origin))
                 (agent-repl-held-edit-commit
                  ws said (agent-repl--input-optimistic-clear ws raw))
                 nil)
@@ -2688,8 +2698,8 @@ NOTHING CALLS THIS AUTOMATICALLY.  The directive is meta-wrapped so the
 daemon strips it from the drawn row; RAW is empty because no user text
 sits behind a harness re-read."
   (if (not agent-repl-command-prefix)
-      (agent-repl--log ws "elisp.input.metaprompt-read-disabled ws=%s" ws)
-    (agent-repl--log ws "elisp.input.metaprompt-read ws=%s" ws)
+      (agent-repl--log ws "elisp.input.metaprompt-read-disabled ws={ws}" :ws ws)
+    (agent-repl--log ws "elisp.input.metaprompt-read ws={ws}" :ws ws)
     (agent-repl--input-check-gate ws)
     (agent-repl--input-submit
      ws
@@ -2700,12 +2710,12 @@ sits behind a harness re-read."
   "Append TEXT to the end of the current workspace's input buffer."
   (let* ((ws (agent-repl--ws-current-name))
          (buf (agent-repl--input-buffer ws)))
-    (agent-repl--log ws "elisp.input.append len=%d buffer=%s" (length text) (and buf t))
+    (agent-repl--log ws "elisp.input.append len={len} buffer={buffer}" :len (length text) :buffer (and buf t))
     (if buf
         (with-current-buffer buf
           (goto-char (point-max))
           (insert text))
-      (agent-repl--warn ws "elisp.input.append-no-buffer ws=%s -- text not appended" ws))))
+      (agent-repl--warn ws "elisp.input.append-no-buffer ws={ws} -- text not appended" :ws ws))))
 
 (defun agent-repl-send-with-postfix ()
   "Append `agent-repl-send-postfix' to the composer, then submit."
@@ -2718,12 +2728,12 @@ sits behind a harness re-read."
   "Prepend TEXT to the start of the current workspace's input buffer."
   (let* ((ws (agent-repl--ws-current-name))
          (buf (agent-repl--input-buffer ws)))
-    (agent-repl--log ws "elisp.input.prepend len=%d buffer=%s" (length text) (and buf t))
+    (agent-repl--log ws "elisp.input.prepend len={len} buffer={buffer}" :len (length text) :buffer (and buf t))
     (if buf
         (with-current-buffer buf
           (goto-char (point-min))
           (insert text))
-      (agent-repl--warn ws "elisp.input.prepend-no-buffer ws=%s -- text not prepended" ws))))
+      (agent-repl--warn ws "elisp.input.prepend-no-buffer ws={ws} -- text not prepended" :ws ws))))
 
 (defun agent-repl-send-with-prefix ()
   "Prepend `agent-repl-send-prefix' to the composer, then submit."
@@ -2851,7 +2861,7 @@ the feed; the success says nothing more."
        :detail-name "choice" :detail choice
        :rpc rpc :request request
        :on-success (lambda (_value)
-                     (agent-repl--info ws "elisp.input.%s-answered ws=%s choice=%S" op ws choice))
+                     (agent-repl--info ws "elisp.input.{op}-answered ws={ws} choice={choice}" :op op :ws ws :choice (prin1-to-string choice)))
        :on-refused #'agent-repl--input-answer-refusal-text))))
 
 (defun agent-repl-input-digit ()
@@ -2899,7 +2909,7 @@ Each cause says why and what happens next, never one sentence for all."
     (:session-refused "the session refused that prompt into the running turn; it goes when that turn ends")
     (arm
      (agent-repl--error '(:agent-repl-central "wording a refusal's cause, which names no workspace")
-                        "elisp.input.release-refused-unknown-cause cause=%S" arm)
+                        "elisp.input.release-refused-unknown-cause cause={cause}" :cause (prin1-to-string arm))
      (error "agent-repl: a release refused for an unknown cause %S" arm))))
 
 ;; `C-RET' IS "SEND NOW" (owner request, 2026-11-19): with words in the
@@ -2917,9 +2927,9 @@ where it is and is not sent.  The daemon answers `already delivered' or
          (turn (gethash ws agent-repl--input-last-sent-turns)))
     (if (null turn)
         (progn
-          (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-sent" ws)
+          (agent-repl--info ws "elisp.input.send-held-now ws={ws} outcome=nothing-sent" :ws ws)
           (message "agent-repl: no prompt sent from this composer to send now"))
-      (agent-repl--info ws "elisp.input.send-held-now ws=%s turn=%s" ws (plist-get turn :value))
+      (agent-repl--info ws "elisp.input.send-held-now ws={ws} turn={turn}" :ws ws :turn (plist-get turn :value))
       (agent-repl-verbs--send
        #'agent-repl-rpc-update-held-prompt (agent-repl-verbs--conn ws)
        (list :workspace (agent-repl-host-ref ws) :turn turn
@@ -2927,13 +2937,13 @@ where it is and is not sent.  The daemon answers `already delivered' or
        :ws ws :op "release-held-prompt"
        :on-success
        (lambda (_)
-         (agent-repl--info ws "elisp.input.send-held-now-acked ws=%s turn=%s"
-                           ws (plist-get turn :value)))
+         (agent-repl--info ws "elisp.input.send-held-now-acked ws={ws} turn={turn}"
+                           :ws ws :turn (plist-get turn :value)))
        :on-error
        (lambda (value)
          (unless (memq (plist-get (plist-get value :cause) :arm) agent-repl--input-handover-arms)
-           (agent-repl--info ws "elisp.input.send-held-now-refused ws=%s turn=%s cause=%S"
-                             ws (plist-get turn :value) (plist-get value :cause))
+           (agent-repl--info ws "elisp.input.send-held-now-refused ws={ws} turn={turn} cause={cause}"
+                             :ws ws :turn (plist-get turn :value) :cause (prin1-to-string (plist-get value :cause)))
            (message "agent-repl: send now: %s" (agent-repl--input-release-refusal-text value))
            t))))))
 

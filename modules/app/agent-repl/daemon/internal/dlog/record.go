@@ -1,6 +1,7 @@
 package dlog
 
 import (
+	"agentrepl/logging/logsite"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -83,13 +84,18 @@ var reservedKeys = []string{
 // order logging-contract.md lists them; a reader diffing two records from two
 // runtimes sees the same shape in the same order.
 type record struct {
-	Timestamp string  `json:"timestamp"`
-	Runtime   string  `json:"runtime"`
-	Level     string  `json:"level"`
-	Verbosity string  `json:"verbosity"`
-	Operation string  `json:"operation"`
-	Message   string  `json:"message"`
-	Context   Context `json:"context"`
+	Timestamp string `json:"timestamp"`
+	Runtime   string `json:"runtime"`
+	Level     string `json:"level"`
+	Verbosity string `json:"verbosity"`
+	Operation string `json:"operation"`
+	Message   string `json:"message"`
+	// Site is the key of the log call that wrote the record, and Template
+	// the call's unrendered message, which is the site's summary
+	// (logging-contract.md "Log sites").
+	Site     string  `json:"site"`
+	Template string  `json:"template"`
+	Context  Context `json:"context"`
 	// PID is required of every OS-process runtime and is omitted only where
 	// the contract says it must be: a record FORWARDED from another runtime
 	// carries that runtime's own identity (the browser webapp sends
@@ -156,6 +162,22 @@ func stringify(v any) string {
 		return s
 	}
 	return fmt.Sprint(v)
+}
+
+// newKeyedRecord builds the record of the log call written as TEMPLATE in
+// FUNCTION: its message rendered from the merged context CTX (mustRender),
+// and its site keyed and its template stamped.
+func newKeyedRecord(at time.Time, runtime, level, operation, template, function string, ctx Context, pid int) record {
+	rec := newRecord(at, runtime, level, operation, logsite.MustRender(operation, template, ctx), ctx, pid)
+	rec.Site, rec.Template = logsite.Key(runtime, function, template), template
+	return rec
+}
+
+// newSiteRecord builds the record of MESSAGE, a template this package writes
+// for a record it builds by hand (its sinks' own failures), keyed by the
+// function that made it.
+func newSiteRecord(at time.Time, runtime, level, operation string, message logsite.Message, ctx Context, pid int) record {
+	return newKeyedRecord(at, runtime, level, operation, message.Template(), message.Forwarded(), ctx, pid)
 }
 
 // newRecord builds a record from an already-merged context.

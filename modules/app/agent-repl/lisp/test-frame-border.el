@@ -27,7 +27,7 @@ into another."
   `(let ((frame (selected-frame))
          (logs nil)
          (agent-repl-input-background "#121212"))
-     (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+     (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
        (unwind-protect
            (progn ,@body)
          (set-frame-parameter frame agent-repl--frame-border-panels nil)

@@ -13,8 +13,10 @@
  *
  * Only a ROOT-feed ask docks: a sub-feed's asks belong to their bubble.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { installCardDock, type CardDock } from "./card-dock.js";
+
+const log = createLogger("webapp.feed.ask-tray");
 
 /** The class a docked ask card wears. */
 export const DOCKED_ASK_CLASS = "ask-docked";

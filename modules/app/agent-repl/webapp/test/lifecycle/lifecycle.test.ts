@@ -53,10 +53,12 @@ import {
 } from "../../src/lifecycle/lifecycle.js";
 import type { PromptEcho } from "../../src/prompt-echo.js";
 import { WebWorkspaceSessionIdentitySchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
-import { log } from "../../src/log.js";
+import { createLogger } from "../../src/log.js";
 import { captureLogRecords, forwardedRecords, recordFor } from "../log-capture.js";
 import { WebappBuildUnknown } from "../../src/webapp-build.js";
 import { recordingFailures, type RecordingFailures } from "../failure-sink.js";
+
+const log = createLogger("webapp.test.lifecycle.lifecycle");
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;

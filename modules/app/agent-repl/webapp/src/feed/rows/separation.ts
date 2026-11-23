@@ -17,7 +17,7 @@
  * A COMPACTION'S SUMMARY HAS NO FOLD: its bubble is always drawn under the
  * bar (owner ruling, 2026-10-02), in its collapsed bubble form.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { armButtonRole } from "../../control.js";
 import { guardMalformed } from "../../rpc/guard.js";
 import { MalformedView } from "../../rpc/malformed.js";
@@ -44,6 +44,8 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
+
+const log = createLogger("webapp.feed.rows.separation");
 
 const PATH = "FeedSessionSeparation";
 
@@ -108,10 +110,10 @@ export function drawFeedSessionSeparation(
   rc: RowContext,
 ): HTMLElement {
   const kind = requireCase(msg.kind, `${PATH}.kind`);
-  log.info(`drawing a separation row as ${kind.case}`, {
+  log.info("drawing a separation row as {case}", {
     operation: "feed.draw-separation",
     context: { arm: kind.case, has_tokens: msg.tokens !== undefined },
-  });
+  }, { case: kind.case });
 
   const el = document.createElement("div");
   el.className = "separation";

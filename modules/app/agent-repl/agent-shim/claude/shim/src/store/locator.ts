@@ -34,7 +34,7 @@ import { PersistenceError } from "./persistence.js";
 import { answeredLookup, lookupRefused, sendLookup } from "./answered-lookup.js";
 import type { ReadRetryOptions } from "./retry.js";
 
-const LOGGER = bindLog({ component: "shim-store-locator", operation: "shim.store.locator" });
+const LOGGER = bindLog("shim.store.locator", { component: "shim-store-locator", operation: "shim.store.locator" });
 
 /** What the store said about one vendor task locator. THE KIND IS THE ANSWER. */
 export type VendorTaskAnswer =

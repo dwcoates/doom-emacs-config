@@ -31,7 +31,7 @@
  * naming why and who holds the seats, by workspace name, and ticking how long
  * it has waited (`drawFeedMergeTestsRunSeatWait`), so the tab is never empty.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { childrenMatching, decorativeElement, placeChildren, placeOptional, repaintMark } from "../../dom.js";
 import { requireCase, requireMessage } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
@@ -56,6 +56,8 @@ import type { AppContext } from "../../rpc/context.js";
 import type { Ticker } from "../../clock.js";
 import { liveElapsedClock } from "../../elapsed-clock.js";
 import { formatBytes } from "../../sidebar/memory.js";
+
+const log = createLogger("webapp.feed.merge.tests-tab");
 
 const PATH = "FeedMergeTestSuite";
 
@@ -251,10 +253,10 @@ const SUITE_NAME_ATTRIBUTE = "data-suite";
 /** One suite: its name, its state glyph, its painted output. */
 export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
   const state = requireCase(suite.state, `${PATH}.state`);
-  log.debug(`drawing a merge test suite as ${state.case}`, {
+  log.debug("drawing a merge test suite as {case}", {
     operation: "merge.draw-suite",
     context: { suite: suite.name, arm: state.case },
-  });
+  }, { case: state.case });
 
   const el = document.createElement("div");
   el.className = "merge-suite";

@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // THE STANDING DEPLOY MEDIATOR (owner rulings, 2026-11-17). A repository
@@ -102,14 +103,14 @@ func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, fields
 	}
 	fields = withField(fields, "mediator", string(mediator.ws))
 	if err := o.deps.DeployChecks.Refresh(ctx, mediator.ws); err != nil {
-		o.mediationFailed(ctx, fields, "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed"), err)
 		return standing{}, fmt.Errorf("merge: refresh the deploy mediator %s: %w", mediator.ws, err)
 	}
 	// THE MEDIATOR IS RECORDED BEFORE ITS EFFORT IS PICKED, and so before
 	// the brief's delivery brings its session up at the pick: the session's
 	// landing reads the record.
 	if err := o.deps.DeployChecks.SetDeployMediatorEffort(ctx, mediator.ws); err != nil {
-		o.mediationFailed(ctx, fields, "the deploy mediator's effort could not be set; it is not briefed", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("the deploy mediator's effort could not be set; it is not briefed"), err)
 		return standing{}, fmt.Errorf("merge: set the deploy mediator %s's effort: %w", mediator.ws, err)
 	}
 	if err := o.show(ctx, mediator, fields); err != nil {
@@ -135,7 +136,7 @@ func (o *orchestrator) showMediator(ctx context.Context, q checkedQueue, fields 
 // show puts MEDIATOR in sight for its brief, recording a failure at ERROR.
 func (o *orchestrator) show(ctx context.Context, mediator standing, fields dlog.Context) error {
 	if err := o.deps.DeployChecks.Resume(ctx, mediator.ws); err != nil {
-		o.mediationFailed(ctx, fields, "the deploy mediator could not be shown for its brief; it is not briefed", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("the deploy mediator could not be shown for its brief; it is not briefed"), err)
 		return fmt.Errorf("merge: show the deploy mediator %s: %w", mediator.ws, err)
 	}
 	return nil
@@ -159,7 +160,7 @@ func (o *orchestrator) keepMediatorShown(ctx context.Context, q checkedQueue) {
 	fields = withField(fields, "mediator", string(mediator))
 	record, err := o.deps.DB.Workspace(ctx, mediator)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to keep it shown", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator's workspace to keep it shown", withField(fields, "error", err.Error()))
 		return
 	}
 	if !record.Hidden {

@@ -9,8 +9,10 @@
  * once, so the two documents answer in one shape, and drain the calls Emacs
  * queued before they started in one way (`runQueuedCalls`).
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { errorCause } from "../error-cause.js";
+
+const log = createLogger("webapp.host.answers");
 
 /**
  * One note a document made for Emacs to record, at the level it deserves:

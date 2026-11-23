@@ -48,7 +48,7 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		// consumed as a terminal before its own drop.
 		c.rememberCall(id, openCall{name: name, input: input, startedAt: env.timestampMs, activityID: id, agentID: agent})
 		c.log.With(at.ctxFor("exempt-drop")).With(logging.Context{ActivityID: id}).
-			LogVerbose("tool call name=%q is in the exempt set; dropped entirely", name)
+			LogVerbose("tool call name=\"{name}\" is in the exempt set; dropped entirely", logging.Values{"name": name})
 		return nil, reasonExempt
 	}
 
@@ -60,7 +60,7 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		// is still remembered so its result is dropped as this same unit rather
 		// than filed as an orphan settle.
 		c.log.With(at.ctxFor("stream-owned-drop")).With(logging.Context{ActivityID: id}).
-			LogVerbose("tool call name=%q is authored by the stream plane; not converted here", name)
+			LogVerbose("tool call name=\"{name}\" is authored by the stream plane; not converted here", logging.Values{"name": name})
 		return nil, reasonStreamOwned
 	}
 
@@ -78,12 +78,12 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		// — today only the subagent spawn, whose created_agent_id is not knowable
 		// until the launch answers. The unit appears at its settle instead.
 		c.log.With(at.ctxFor("deferred-announce")).With(logging.Context{ActivityID: id}).
-			LogVerbose("tool call name=%q announces at its result, not at its call", name)
+			LogVerbose("tool call name=\"{name}\" announces at its result, not at its call", logging.Values{"name": name})
 		return nil, reasonDeferredAnnounce
 	}
 
 	c.log.With(at.ctxFor("tool-call")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
-		LogVerbose("tool call name=%q announced", name)
+		LogVerbose("tool call name=\"{name}\" announced", logging.Values{"name": name})
 	activity.ActivityId = activityID(id)
 	return []*storev1.StoreEntry{c.activityEntry(at, env, agent, id, index, activity)}, ""
 }
@@ -101,7 +101,7 @@ func (c *Converter) rememberCall(id string, call openCall) {
 // server's tool never reaches here (mcp.go).
 func (c *Converter) unmodeledCall(name, id string, index int, input map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("unmodeled-call")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
-		Log("tool call name=%q has no modeled schema; carried as AgentUnmodeled", name)
+		Log("tool call name=\"{name}\" has no modeled schema; carried as AgentUnmodeled", logging.Values{"name": name})
 	return c.activityEntry(at, env, agent, id, index, &conversationv1.AgentActivity{
 		ActivityId: activityID(id),
 		Item: &conversationv1.AgentActivity_Unmodeled{Unmodeled: &conversationv1.AgentUnmodeled{

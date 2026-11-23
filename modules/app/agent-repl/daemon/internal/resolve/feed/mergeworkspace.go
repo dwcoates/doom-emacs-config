@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
@@ -44,7 +45,7 @@ func (r *resolver) MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, remove
 		durable := !f.nonDurable[id]
 		restated := r.restateRow(s, at, stored, durable, unclonable{
 			operation: "daemon.feed.merge_workspace_removed_unclonable",
-			message:   "a merge bubble row could not be cloned; its switch still offers the removed merge workspace",
+			message:   logsite.Msg("a merge bubble row could not be cloned; its switch still offers the removed merge workspace"),
 			context:   dlog.Context{"row": id, "merge_workspace": string(mergeWS)},
 		}, func(row *frontendv1.FeedRow) { markSwitchRemoved(row, removedAtMS) })
 		if !restated {

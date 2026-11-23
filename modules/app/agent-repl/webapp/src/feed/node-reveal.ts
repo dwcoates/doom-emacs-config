@@ -13,9 +13,11 @@
  * Its callers: the composer's reveal (composer-entry.ts) and the revealed-node
  * selection's centering (feed-view.ts).
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { bubbleNodeRevealed, centerOffset, elementsSpan, nearestEdgeOffset, type VerticalSpan } from "../scroll.js";
 import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
+
+const log = createLogger("webapp.feed.node-reveal");
 
 /** The bubble scroll boxes around LINE, innermost first. */
 function bubbleBoxesAround(line: HTMLElement): HTMLElement[] {
@@ -53,10 +55,10 @@ export function revealInBubbles(lines: readonly HTMLElement[], what: string, pla
     if (Math.abs(offset) < 1) continue;
     const before = box.scrollTop;
     bubbleNodeRevealed(box, offset);
-    log.debug(`brought ${what} into view inside its bubble`, {
+    log.debug("brought {what} into view inside its bubble", {
       operation: "feed.node-reveal.bubble-scrolled",
-      context: { what, placement, from: before, to: box.scrollTop },
-    });
+      context: { placement, from: before, to: box.scrollTop },
+    }, { what });
   }
   let visible = elementsSpan(lines) as VerticalSpan;
   for (const box of boxes) {

@@ -33,7 +33,10 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 
-const LOGGER = bindLog({ component: "shim-engine-pushes", operation: "shim.engine.pushes" });
+const LOGGER = bindLog("shim.engine.pushes", { component: "shim-engine-pushes", operation: "shim.engine.pushes" });
+
+/** One site for a recorded fault, at error the first time and at debug on each repeat. */
+const RECORDED_FAULT = LOGGER.message("recorded a session fault");
 
 /**
  * How many undelivered facts one subscriber may hold.
@@ -362,14 +365,13 @@ export class SessionPushes {
         // A FAULT OF SOMETHING OUTSIDE AGENT-REPL IS MARKED TRANSIENT
         // (transientFault), so the daemon's deploy checks leave its record
         // out: it is still an error to whoever reads this session's log.
-        LOGGER.error(
-          { component: fault.component, kind, detail: fault.detail, ...(transientFault(fault) ? { transient: true } : {}) },
-          "recorded a session fault",
+        LOGGER.error({ component: fault.component, kind, detail: fault.detail, ...(transientFault(fault) ? { transient: true } : {}) },
+          RECORDED_FAULT,
         );
       }
     } else {
       this.faults[index] = fault;
-      LOGGER.debug({ component: fault.component, kind, detail: fault.detail, repeats }, "recorded a session fault");
+      LOGGER.debug({ component: fault.component, kind, detail: fault.detail, repeats }, RECORDED_FAULT);
     }
     this.push(this.diagnostics());
   }

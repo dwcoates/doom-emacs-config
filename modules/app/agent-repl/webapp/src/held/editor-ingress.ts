@@ -9,8 +9,10 @@
  * its root feed is out of reach of the daemon (held/section.ts).
  */
 import type { UserSaid } from "../../../proto/gen/ts/conversation/v1/user_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createListeners } from "../listeners.js";
+
+const log = createLogger("webapp.held.editor-ingress");
 
 /** One prompt the editor wrote to the ingress for this workspace. */
 export interface EditorIngressEntry {

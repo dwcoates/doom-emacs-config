@@ -33,9 +33,11 @@
  * once, and a page turning unseen mid-reveal shows the rest whole.
  */
 import type { Ticker } from "./clock.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import type { PageSeen } from "./page-seen.js";
 import { advanceReveal, type RevealPace } from "./reveal-pace.js";
+
+const log = createLogger("webapp.type-out");
 
 /** One surface's part in the loop. */
 export interface TypeOutSurface {

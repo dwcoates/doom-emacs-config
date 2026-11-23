@@ -19,8 +19,10 @@
  *
  * There is at most one footer, so there is at most one publisher.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createListeners } from "../listeners.js";
+
+const log = createLogger("webapp.footer.progress");
 
 /** The line the last push carried, or null when it carried no compaction. */
 let standing: string | null = null;
@@ -37,12 +39,8 @@ const listeners = createListeners<[string | null]>();
 export function publishCompactionProgress(text: string | null): void {
   if (standing === text) return;
   standing = text;
-  log.debug(
-    text === null
-      ? "the footer's compaction line is gone"
-      : `the footer's compaction line is now: ${text}`,
-    { operation: "footer.compaction-progress", context: { text: text ?? undefined } },
-  );
+  if (text === null) log.debug("the footer's compaction line is gone", { operation: "footer.compaction-progress" });
+  else log.debug("the footer's compaction line is now: {text}", { operation: "footer.compaction-progress" }, { text });
   listeners.notify(standing);
 }
 

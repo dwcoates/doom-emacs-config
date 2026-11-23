@@ -20,10 +20,12 @@
  * after the start), the page's part is the reload to the draw.
  */
 import { ReportedLatencyKind } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import type { Presence } from "./presence.js";
 import type { SwitchLatencyEnv } from "./switch-latency.js";
 import { recordWallLatency, type RecordLatency } from "./wall-latency.js";
+
+const log = createLogger("webapp.viewed-downtime");
 
 /** Measure the downtime that preceded the load PRESENCE describes; answers the stop. */
 export function watchViewedDowntime(presence: Presence, env: SwitchLatencyEnv, record: RecordLatency): () => void {

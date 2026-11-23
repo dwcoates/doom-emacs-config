@@ -161,8 +161,8 @@ func (d *DB) LiveWork(ctx context.Context, session string) (*storev1.GetLiveWork
 	rowsRead := int64(len(agents) + len(detached) + len(asks))
 	d.observeQuery(StatementLiveWork, "agent", base, started, rowsRead)
 	d.traceStatement(ctx, StatementLiveWork, "agent", base, rowsRead)
-	d.log.LogVerbose(base, "live work read agents=%d workflows=%d detached=%d asks=%d",
-		len(success.LiveAgents), len(success.LiveWorkflows), len(success.LiveDetachedRuns), len(success.OpenAsks))
+	d.log.LogVerbose(base, "live work read agents={agents} workflows={workflows} detached={detached} asks={asks}",
+		logging.Values{"agents": len(success.LiveAgents), "workflows": len(success.LiveWorkflows), "detached": len(success.LiveDetachedRuns), "asks": len(success.OpenAsks)})
 	return success, nil
 }
 
@@ -192,14 +192,14 @@ func (d *DB) liveWorkGaps(ctx context.Context, base logging.Fields) error {
 		return d.refuse(base, storagef(err, "scanning live work no session's lineage reaches"))
 	}
 	if len(gaps) == 0 {
-		d.log.LogVerbose(base, "every open obligation in the record is reachable from some session's lineage")
+		d.log.LogVerbose(base, "every open obligation in the record is reachable from some session's lineage", nil)
 		return nil
 	}
 	fields := base
 	fields.Operation = "store.db.live-work.unscoped"
 	fields.Level = "error"
-	d.log.Log(fields, "invariant gap: %d open obligation(s) name no owner any session's lineage reaches, so no session is asked to resolve them: %s",
-		len(gaps), strings.Join(gaps, ", "))
+	d.log.Log(fields, "invariant gap: {gaps} open obligation(s) name no owner any session's lineage reaches, so no session is asked to resolve them: {obligations}",
+		logging.Values{"gaps": len(gaps), "obligations": strings.Join(gaps, ", ")})
 	return nil
 }
 
@@ -251,7 +251,7 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 	}
 	d.observeQuery(StatementListCursors, "cursor", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementListCursors, "cursor", base, int64(len(out)))
-	d.log.LogVerbose(base, "cursors read cursors=%d one_file=%t", len(out), fileID != nil)
+	d.log.LogVerbose(base, "cursors read cursors={cursors} one_file={one_file}", logging.Values{"cursors": len(out), "one_file": fileID != nil})
 	return out, nil
 }
 

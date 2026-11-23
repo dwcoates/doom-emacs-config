@@ -62,8 +62,10 @@
 
 import { codeBlockHtml, type CodeBlockOptions } from "./code-block.js";
 import { escapeHtml } from "./highlight.js";
-import { log } from "./log.js";
+import { createLogger, type LogMessage } from "./log.js";
 import type { ProseTree, ProseTreeCode } from "../../proto/gen/ts/frontend/v1/prose_pb";
+
+const log = createLogger("webapp.metaprompt-tree");
 
 /**
  * The class of the inline box every double-width character of a tree line is
@@ -310,10 +312,10 @@ function measuredWidths(measure: TreeMeasure, items: readonly TreeMeasureItem[])
 
 /** The tree's measure broke its contract: record it once, and fail. */
 function measureBroke(message: string, context: Record<string, unknown>): never {
-  log.error(`a metaprompt tree's measure broke its contract: ${message}`, {
+  log.error("a metaprompt tree's measure broke its contract: {message}", {
     operation: "metaprompt-tree.measure",
     context,
-  });
+  }, { message });
   throw new Error(`metaprompt tree measure: ${message}`);
 }
 
@@ -902,7 +904,7 @@ export type TreeRow =
 
 /** A tree the daemon served that breaks the guarantees ProseTree documents. */
 function malformedTree(message: string, context: Record<string, unknown>): never {
-  log.error(`a served tree is malformed: ${message}`, { operation: "metaprompt-tree.malformed", context });
+  log.error("a served tree is malformed: {message}", { operation: "metaprompt-tree.malformed", context }, { message });
   throw new Error(`metaprompt tree: ${message}`);
 }
 
@@ -1014,7 +1016,7 @@ export function formatTree(
 export type InlineMarkup = (escaped: string) => string;
 
 /** A callback the renderer surfaces a wrap issue through (the caller logs it). */
-export type TreeIssue = (message: string, context: Record<string, unknown>) => void;
+export type TreeIssue = (message: LogMessage, context: Record<string, unknown>) => void;
 
 /**
  * The measure a tree wraps by, asked for only when a tree is actually drawn
@@ -1102,7 +1104,7 @@ export function renderTreeHtml(
     } catch (err) {
       if (!(err instanceof TreeOverflowError)) throw err;
       if (!unwrapped && onIssue) {
-        onIssue("a metaprompt tree could not be wrapped to the column limit and is rendered as it arrived", {
+        onIssue(log.message("a metaprompt tree could not be wrapped to the column limit and is rendered as it arrived"), {
           operation: "feed.cards.response.tree-unwrappable",
           width,
           error: err.message,
@@ -1118,7 +1120,7 @@ export function renderTreeHtml(
     parts.push(lines.map((l, i) => renderLine(l, node, geometry, bodyWidths[i])).join(""));
   }
   if (onIssue && overflowCount > 0) {
-    onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
+    onIssue(log.message("a metaprompt tree holds words wider than the column limit; served wider, never truncated"), {
       operation: "feed.cards.response.tree-overflow",
       width,
       overflows: overflowCount,

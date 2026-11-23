@@ -47,7 +47,7 @@ import { monitorEndedFor } from "./tools/monitor.js";
 import type { CallRegistry, PendingCall } from "./tool-calls.js";
 import { agentActivity, taskUnitEntry, type TaskUnitTarget } from "./entries.js";
 
-const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.convert.detached" });
+const LOGGER = bindLog("shim.convert.detached", { component: "shim-convert-detached", operation: "shim.convert.detached" });
 
 /** Why a unit left the turn. */
 export type DetachCause = "requested" | "by_user" | "timed_out" | "vendor_moved";

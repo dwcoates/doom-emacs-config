@@ -78,7 +78,7 @@ func (h *declaredResidueHandler) Handle(frames []tail.Frame, ctx *tail.Context) 
 		h.log.With(logging.Context{
 			Operation: "declared-residue", Path: ctx.Path, TaskID: ctx.TaskID,
 			FileID: ctx.FileID, Offset: logging.Off(frame.Offset),
-		}).LogVerbose("ingested %d byte(s) as declared residue kind=%s", len(frame.Raw), h.kind)
+		}).LogVerbose("ingested {frame_raw_length} byte(s) as declared residue kind={kind}", logging.Values{"frame_raw_length": len(frame.Raw), "kind": h.kind})
 	}
 	return out
 }

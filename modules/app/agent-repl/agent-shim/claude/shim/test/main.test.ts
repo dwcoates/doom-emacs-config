@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backgroundTimerWait } from "../src/engine/measurements.js";
-import { logRecordsDuring } from "./log-records.js";
+import { logRecordsDuring, recordingLogMethod } from "./log-records.js";
 import { keepGeneratedProtosAcrossResets } from "./stateless-modules.js";
 import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
 import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
@@ -1258,12 +1258,12 @@ describe("main", () => {
 
     const recordLifecycle =
       (level: "debug" | "info" | "warn" | "error") =>
-      (fields: Record<string, unknown>, message: string): void => {
-        const record = { fields: { level, ...fields }, message };
-        lifecycle.push(record);
-        const outcome = typeof fields["outcome"] === "string" ? fields["outcome"] : "";
-        waiters.get(outcome)?.(record);
-      };
+        recordingLogMethod((fields, message) => {
+          const record = { fields: { level, ...fields }, message };
+          lifecycle.push(record);
+          const outcome = typeof fields["outcome"] === "string" ? fields["outcome"] : "";
+          waiters.get(outcome)?.(record);
+        });
     // MAIN'S COLLABORATORS, HANDED IN (MainDeps), never mocked into a fresh
     // module graph: re-importing main.js per case cost 1.5s idle and timed
     // cases out under a loaded run.
@@ -1275,6 +1275,9 @@ describe("main", () => {
         warn: recordLifecycle("warn"),
         error: recordLifecycle("error"),
         logVerbose: recordLifecycle("debug"),
+        message: (): never => {
+          throw new Error("main writes no helper's message through its lifecycle logger");
+        },
         with: (): never => {
           throw new Error("main must not rebind its lifecycle logger");
         },

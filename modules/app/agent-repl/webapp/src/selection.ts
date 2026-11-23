@@ -8,7 +8,9 @@
  * source scan (test/selection.test.ts) fails any module that reads a
  * selection's text through `getSelection()` itself.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.selection");
 
 /** Anything that owns a selection: a `Window` or a `Document`. */
 export type SelectionSource = Pick<Window | Document, "getSelection">;

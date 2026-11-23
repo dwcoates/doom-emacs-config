@@ -15,10 +15,10 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 
+	"agentrepl/logging/logsite"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/handler"
@@ -65,7 +65,7 @@ func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string
 		s.log.With(logging.Context{
 			Operation: "record-spawn", TaskID: taskID, ActivityID: toolUseID,
 			AgentID: ownerAgentID, Path: outputPath, Level: "error",
-		}).Log("spawn observation rejected: workspace directory, workspace id, and transcript session are all required")
+		}).Log("spawn observation rejected: workspace directory, workspace id, and transcript session are all required", nil)
 		return
 	}
 	normalizedOutput := discover.Normalize(outputPath)
@@ -114,12 +114,12 @@ func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string
 func (s *sidecar) TaskStopped(taskID string) {
 	if taskID == "" {
 		s.log.With(logging.Context{Operation: "task-stopped", Level: "error"}).
-			Log("task stop reported with no task id; it names no run and cannot be attributed")
+			Log("task stop reported with no task id; it names no run and cannot be attributed", nil)
 		return
 	}
 	s.stopped[taskID] = s.now().UnixMilli()
 	s.log.With(logging.Context{Operation: "task-stopped", TaskID: taskID}).
-		Log("task stop recorded; the run's terminal is minted by its spool's reader")
+		Log("task stop recorded; the run's terminal is minted by its spool's reader", nil)
 	s.applyStop(taskID)
 }
 
@@ -130,7 +130,7 @@ func (s *sidecar) TaskStopped(taskID string) {
 func (s *sidecar) TaskConcluded(taskID string) {
 	if taskID == "" {
 		s.log.With(logging.Context{Operation: "task-concluded", Level: "error"}).
-			Log("run conclusion reported with no task id; it names no run and cannot be attributed")
+			Log("run conclusion reported with no task id; it names no run and cannot be attributed", nil)
 		return
 	}
 	s.concluded[taskID] = struct{}{}
@@ -149,7 +149,7 @@ func (s *sidecar) applyConclusion(taskID string) {
 	}
 	s.settleRun(path)
 	s.log.With(logging.Context{Operation: "run-concluded", TaskID: taskID, Path: path}).
-		Log("the run was settled by its transcript; it can no longer be concluded LOST")
+		Log("the run was settled by its transcript; it can no longer be concluded LOST", nil)
 }
 
 // applyStop mints and writes the cancelled terminal for a stopped task, if its
@@ -167,7 +167,7 @@ func (s *sidecar) applyStop(taskID string) {
 	path, watched := s.spoolForTask(taskID)
 	if !watched {
 		s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID}).
-			LogVerbose("the stopped task's spool is not being read yet; the stop is held until it is claimed")
+			LogVerbose("the stopped task's spool is not being read yet; the stop is held until it is claimed", nil)
 		return
 	}
 	bound := s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID, Path: path})
@@ -176,7 +176,7 @@ func (s *sidecar) applyStop(taskID string) {
 	// afterwards would overwrite how it actually ended.
 	if !s.tracking(path) {
 		delete(s.stopped, taskID)
-		bound.LogVerbose("the stopped task's run had already ended; the stop adds nothing to its terminal")
+		bound.LogVerbose("the stopped task's run had already ended; the stop adds nothing to its terminal", nil)
 		return
 	}
 	// A STOP WAITING ON ITS SPAWNING CALL IS HELD, NOT REFUSED. The terminal is
@@ -192,14 +192,13 @@ func (s *sidecar) applyStop(taskID string) {
 	// one per distinct b* run) while leaving the run open anyway.
 	run := s.owners.activityFor(taskID)
 	if run == "" {
-		bound.LogVerbose("the stopped task's spawning call is not known yet; the stop is held until a launch names it")
+		bound.LogVerbose("the stopped task's spawning call is not known yet; the stop is held until a launch names it", nil)
 		return
 	}
 	sink, ok := s.watchers[path].tailer.Handler().(cancelTerminalSink)
 	if !ok {
 		bound.With(logging.Context{Level: "error"}).Log(
-			"no terminal for the stopped run: the %s converter implements no CancelTerminal, so a run a person stopped stays open in every reader downstream",
-			s.watchers[path].target.Kind)
+			"no terminal for the stopped run: the {kind} converter implements no CancelTerminal, so a run a person stopped stays open in every reader downstream", logging.Values{"kind": s.watchers[path].target.Kind.String()})
 		return
 	}
 	s.commitInferredTerminal(bound, inferredTerminal{
@@ -247,7 +246,7 @@ func (s *sidecar) commitInferredTerminal(bound *logging.Bound, t inferredTermina
 			return
 		}
 		bound.With(logging.Context{Level: "error"}).Log(
-			"the %s was not committed; the %s stays pending and is %s: %v", t.what, t.fact, t.retry, err)
+			"the {what} was not committed; the {fact} stays pending and is {retry}: {cause}", logging.Values{"what": t.what, "fact": t.fact, "retry": t.retry, "cause": err.Error()})
 		return
 	}
 	s.warnUnexpectedSkips(t.what, skips)
@@ -255,7 +254,7 @@ func (s *sidecar) commitInferredTerminal(bound *logging.Bound, t inferredTermina
 	if t.path != "" {
 		s.settleRun(t.path)
 	}
-	bound.With(logging.Context{ActivityID: t.run}).Log("%s minted and committed entries=%d", t.what, len(entries))
+	bound.With(logging.Context{ActivityID: t.run}).Log("{what} minted and committed entries={entries_length}", logging.Values{"what": t.what, "entries_length": len(entries)})
 }
 
 // spoolForTask answers the watched file that IS a task's run.
@@ -352,17 +351,17 @@ func (o *ownerIndex) observe(obs observation) {
 		ClaudeSessionID: obs.claudeSessionID,
 	})
 	if obs.taskID == "" || obs.activityID == "" {
-		bound.With(logging.Context{Level: "error"}).Log("spawn observation rejected: it names no task or no spawning call")
+		bound.With(logging.Context{Level: "error"}).Log("spawn observation rejected: it names no task or no spawning call", nil)
 		return
 	}
 	if prior, ok := o.byTask[obs.taskID]; ok {
 		if prior.activityID != obs.activityID {
 			o.conflicts[obs.taskID] = true
 			bound.With(logging.Context{Operation: "record-spawn-conflict", Level: "error"}).Log(
-				"CONFLICTING spawn observation: task already claimed by call %s; it resolves to nothing rather than to a guess", prior.activityID)
+				"CONFLICTING spawn observation: task already claimed by call {prior_activity_id}; it resolves to nothing rather than to a guess", logging.Values{"prior_activity_id": prior.activityID})
 			return
 		}
-		bound.LogVerbose("spawn observation re-reported by the same call")
+		bound.LogVerbose("spawn observation re-reported by the same call", nil)
 		return
 	}
 	o.byTask[obs.taskID] = obs
@@ -372,7 +371,7 @@ func (o *ownerIndex) observe(obs observation) {
 	if obs.outputPath != "" {
 		o.byOutput[obs.outputPath] = obs.taskID
 	}
-	bound.Log("spawn recorded: the task's output belongs to this call")
+	bound.Log("spawn recorded: the task's output belongs to this call", nil)
 }
 
 // resolve returns the spawn that owns a spool, and whether it is known.
@@ -384,7 +383,7 @@ func (o *ownerIndex) observe(obs observation) {
 func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	bound := o.log.With(logging.Context{Operation: "resolve-spool-owner", Path: target.Path, TaskID: target.TaskID})
 	if o.conflicts[target.TaskID] {
-		o.refuse(bound, target.Path, "resolve-spool-owner-conflicted", "owner resolution refused: two calls claim this task")
+		o.refuse(bound, target.Path, "resolve-spool-owner-conflicted", logsite.Msg("owner resolution refused: two calls claim this task"), nil)
 		return observation{}, false
 	}
 	// An exact output path is the strongest evidence: the vendor named this
@@ -392,34 +391,45 @@ func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	if taskID, ok := o.byOutput[target.Path]; ok {
 		if taskID != target.TaskID {
 			o.refuse(bound, target.Path, "resolve-spool-owner-path-mismatch",
-				fmt.Sprintf("owner resolution refused: this exact output path is recorded for task %s", taskID))
+				logsite.Msg("owner resolution refused: this exact output path is recorded for task {recorded_task_id}"), logging.Values{"recorded_task_id": taskID})
 			return observation{}, false
 		}
-		bound.LogVerbose("owner resolved by exact output path")
+		bound.LogVerbose("owner resolved by exact output path", nil)
 		return o.byTask[taskID], true
 	}
 	if obs, ok := o.byTask[target.TaskID]; ok {
 		if obs.outputPath != "" && obs.outputPath != target.Path {
 			o.refuse(bound, target.Path, "resolve-spool-owner-path-mismatch",
-				fmt.Sprintf("owner resolution refused: the task's authoritative output path is %s", obs.outputPath))
+				logsite.Msg("owner resolution refused: the task's authoritative output path is {output_path}"), logging.Values{"output_path": obs.outputPath})
 			return observation{}, false
 		}
-		bound.LogVerbose("owner resolved by task id")
+		bound.LogVerbose("owner resolved by task id", nil)
 		return obs, true
 	}
-	bound.LogVerbose("owner unknown: no spawn has been observed for this task yet")
+	bound.LogVerbose("owner unknown: no spawn has been observed for this task yet", nil)
 	return observation{}, false
 }
 
 // refuse states a refusal at ERROR the first time it is true of a path, and
 // verbosely on every rescan that finds it true again.
-func (o *ownerIndex) refuse(bound *logging.Bound, path, operation, message string) {
+func (o *ownerIndex) refuse(bound *logging.Bound, path, operation string, message logsite.Message, values logging.Values) {
 	if o.refused[path] == operation {
-		bound.With(logging.Context{Operation: operation}).LogVerbose("%s; already stated for this spool", message)
+		bound.With(logging.Context{Operation: operation}).LogVerboseMessage(message, withAlreadyStated(values))
 		return
 	}
 	o.refused[path] = operation
-	bound.With(logging.Context{Operation: operation, Level: "error"}).Log("%s", message)
+	bound.With(logging.Context{Operation: operation, Level: "error"}).LogMessage(message, values)
+}
+
+// withAlreadyStated is VALUES plus the fact that the refusal was stated before
+// for this spool, which a repeat's record carries as context where the printf
+// form appended it to the sentence.
+func withAlreadyStated(values logging.Values) logging.Values {
+	out := logging.Values{"already_stated": true}
+	for k, v := range values {
+		out[k] = v
+	}
+	return out
 }
 
 // repoint moves a task's authoritative output path to where its file now is.
@@ -457,7 +467,7 @@ func (s *sidecar) followRename(target discover.Target) {
 	identity, err := tail.Identity(target.Path)
 	if err != nil {
 		s.log.With(logging.Context{Operation: "spool-rename", Path: target.Path, TaskID: target.TaskID}).
-			LogVerbose("whether this spool is the claimed run's renamed file could not be read: %v", err)
+			LogVerbose("whether this spool is the claimed run's renamed file could not be read: {cause}", logging.Values{"cause": err.Error()})
 		return
 	}
 	if identity != old.tailer.FileID() {
@@ -466,7 +476,7 @@ func (s *sidecar) followRename(target discover.Target) {
 	s.owners.repoint(target.TaskID, target.Path)
 	s.log.With(logging.Context{
 		Operation: "spool-rename", Path: target.Path, TaskID: target.TaskID, FileID: identity, ActivityID: obs.activityID,
-	}).Log("the claimed run's spool was renamed from %s; it is the same file, so the run is read at its new path", obs.outputPath)
+	}).Log("the claimed run's spool was renamed from {output_path}; it is the same file, so the run is read at its new path", logging.Values{"output_path": obs.outputPath})
 }
 
 // agentFor returns the agent whose book a task's spawn happened in, when it is
@@ -536,12 +546,12 @@ type shellNotice struct {
 func (s *sidecar) ShellConcluded(taskID, status string, atMs int64) {
 	if taskID == "" {
 		s.log.With(logging.Context{Operation: "shell-concluded", Level: "error"}).
-			Log("shell run conclusion reported with no task id; it names no run and cannot be attributed")
+			Log("shell run conclusion reported with no task id; it names no run and cannot be attributed", nil)
 		return
 	}
 	s.notified[taskID] = shellNotice{status: status, atMs: atMs}
 	s.log.With(logging.Context{Operation: "shell-concluded", TaskID: taskID}).
-		Log("the shell run's task notification was recorded (status=%s); its terminal is written once its spool is read to its end", status)
+		Log("the shell run's task notification was recorded (status={status}); its terminal is written once its spool is read to its end", logging.Values{"status": status})
 	s.applyNotifiedUnread(taskID)
 }
 
@@ -558,19 +568,18 @@ func (s *sidecar) applyNotified(taskID, path string) {
 		// ended the run: that is its one terminal, and the notification's
 		// weaker account adds nothing.
 		delete(s.notified, taskID)
-		bound.LogVerbose("the run had already ended when its spool was read to the end; the notification adds nothing to its terminal")
+		bound.LogVerbose("the run had already ended when its spool was read to the end; the notification adds nothing to its terminal", nil)
 		return
 	}
 	run := s.owners.activityFor(taskID)
 	if run == "" {
-		bound.LogVerbose("the notified run's spawning call is not known yet; the notification is held until a launch names it")
+		bound.LogVerbose("the notified run's spawning call is not known yet; the notification is held until a launch names it", nil)
 		return
 	}
 	sink, ok := s.watchers[path].tailer.Handler().(notifiedTerminalSink)
 	if !ok {
 		bound.With(logging.Context{Level: "error"}).Log(
-			"no terminal for the notified run: the %s converter implements no NotifiedTerminal, so the run stays open until it is concluded LOST",
-			s.watchers[path].target.Kind)
+			"no terminal for the notified run: the {kind} converter implements no NotifiedTerminal, so the run stays open until it is concluded LOST", logging.Values{"kind": s.watchers[path].target.Kind.String()})
 		return
 	}
 	s.commitNotified(bound, taskID, path, run, sink.NotifiedTerminal(taskID, run, s.owners.agentFor(taskID), notice.status, notice.atMs))
@@ -588,23 +597,23 @@ func (s *sidecar) applyNotifiedUnread(taskID string) {
 	}
 	bound := s.log.With(logging.Context{Operation: "notified-terminal", TaskID: taskID})
 	if path, watched := s.spoolForTask(taskID); watched {
-		bound.With(logging.Context{Path: path}).LogVerbose("the notified run's spool is being read; its terminal is written at the spool's end")
+		bound.With(logging.Context{Path: path}).LogVerbose("the notified run's spool is being read; its terminal is written at the spool's end", nil)
 		return
 	}
 	run := s.owners.activityFor(taskID)
 	if run == "" {
-		bound.LogVerbose("the notified run's spawning call is not known yet; the notification is held until a launch names it")
+		bound.LogVerbose("the notified run's spawning call is not known yet; the notification is held until a launch names it", nil)
 		return
 	}
 	if output := s.owners.outputFor(taskID); output != "" {
 		_, err := os.Stat(output)
 		if err == nil {
-			bound.With(logging.Context{Path: output}).LogVerbose("the notified run's spool exists and is claimed on the next rescan; its terminal is written at the spool's end")
+			bound.With(logging.Context{Path: output}).LogVerbose("the notified run's spool exists and is claimed on the next rescan; its terminal is written at the spool's end", nil)
 			return
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			bound.With(logging.Context{Path: output, Level: "warn"}).Log(
-				"whether the notified run's spool exists could not be established; the notification is held and checked again when the spool is claimed: %v", err)
+				"whether the notified run's spool exists could not be established; the notification is held and checked again when the spool is claimed: {cause}", logging.Values{"cause": err.Error()})
 			return
 		}
 	}

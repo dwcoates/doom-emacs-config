@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -836,7 +837,7 @@ func TestSweepFailed(t *testing.T) {
 			log := logs.Global()
 
 			// Act
-			sweepFailed(tc.ctx, log, log.Error, "the step failed", dlog.Context{"merge_workspace": "m1"}, errors.New("boom"))
+			sweepFailed(tc.ctx, log, dlog.LevelError, logsite.Msg("the step failed"), dlog.Context{"merge_workspace": "m1"}, errors.New("boom"))
 
 			// Assert
 			records := logs.Records()

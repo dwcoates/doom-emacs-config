@@ -166,7 +166,7 @@ func New(socket string, log *logging.Bound) *Client {
 	}
 	httpClient := &http.Client{Transport: transport}
 	log.With(logging.Context{Operation: "storeclient-new", StoreSocket: socket}).
-		LogVerbose("constructing store connect client producer=%s", Producer)
+		LogVerbose("constructing store connect client producer={producer}", logging.Values{"producer": Producer})
 	return &Client{
 		socket: socket,
 		http:   httpClient,
@@ -186,7 +186,7 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 	bound := c.log.With(logging.Context{
 		Operation: "storeclient-cursors", StoreSocket: c.socket, RPC: rpcGetSidecarCursors, FileID: fileID,
 	})
-	bound.LogVerbose("cursor recovery requested")
+	bound.LogVerbose("cursor recovery requested", nil)
 	request := &storev1.GetSidecarCursorsRequest{}
 	if fileID != "" {
 		request.FileId = &fileID
@@ -212,25 +212,25 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 		// `cursorFor` are the layers that know a shutdown is in progress and
 		// state the one INFO record for it.
 		if errors.Is(err, context.Canceled) {
-			bound.LogVerbose("cursor recovery abandoned: the caller cancelled the request, so no position was recovered and nothing was read")
+			bound.LogVerbose("cursor recovery abandoned: the caller cancelled the request, so no position was recovered and nothing was read", nil)
 			return nil, fmt.Errorf("storeclient: %s: %w", rpcGetSidecarCursors, err)
 		}
-		bound.With(logging.Context{Level: "error"}).Log("cursor recovery transport failure: %v", err)
+		bound.With(logging.Context{Level: "error"}).Log("cursor recovery transport failure: {cause}", logging.Values{"cause": err.Error()})
 		return nil, fmt.Errorf("storeclient: %s: %w", rpcGetSidecarCursors, err)
 	}
 	switch result := response.Msg.GetResult().(type) {
 	case *storev1.GetSidecarCursorsResponse_Success:
 		cursors := result.Success.GetCursors()
-		bound.LogVerbose("cursor recovery succeeded cursors=%d", len(cursors))
+		bound.LogVerbose("cursor recovery succeeded cursors={cursors_length}", logging.Values{"cursors_length": len(cursors)})
 		return cursors, nil
 	case *storev1.GetSidecarCursorsResponse_Failure:
 		refusal := &RefusalError{RPC: rpcGetSidecarCursors, Detail: result.Failure.GetDetail()}
-		bound.With(logging.Context{Level: "error"}).Log("cursor recovery refused: %s", refusal.Detail)
+		bound.With(logging.Context{Level: "error"}).Log("cursor recovery refused: {refusal_detail}", logging.Values{"refusal_detail": refusal.Detail})
 		return nil, refusal
 	default:
 		// An unset oneof is illegal on this contract: it is neither an answer
 		// nor a refusal, so it is raised rather than read as an empty success.
-		bound.With(logging.Context{Level: "error"}).Log("cursor recovery answer carries neither success nor failure")
+		bound.With(logging.Context{Level: "error"}).Log("cursor recovery answer carries neither success nor failure", nil)
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetSidecarCursors)
 	}
 }
@@ -244,10 +244,10 @@ func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorS
 // store not answering, recorded once here at ERROR.
 func callFailure(bound *logging.Bound, rpc, what, abandoned string, err error) error {
 	if errors.Is(err, context.Canceled) {
-		bound.LogVerbose("%s abandoned: the caller cancelled the request, %s", what, abandoned)
+		bound.LogVerbose("{what} abandoned: the caller cancelled the request, {abandoned}", logging.Values{"what": what, "abandoned": abandoned})
 		return fmt.Errorf("storeclient: %s: %w", rpc, err)
 	}
-	bound.With(logging.Context{Level: "error"}).Log("%s transport failure: %v", what, err)
+	bound.With(logging.Context{Level: "error"}).Log("{what} transport failure: {cause}", logging.Values{"what": what, "cause": err.Error()})
 	return fmt.Errorf("storeclient: %s: %w", rpc, err)
 }
 
@@ -262,7 +262,7 @@ func (c *Client) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]
 	bound := c.log.With(logging.Context{
 		Operation: "storeclient-shell-run-claims", StoreSocket: c.socket, RPC: rpcGetShellRunClaims,
 	})
-	bound.LogVerbose("shell run claims requested for %d spool(s)", len(vendorTaskIDs))
+	bound.LogVerbose("shell run claims requested for {vendor_task_ids_length} spool(s)", logging.Values{"vendor_task_ids_length": len(vendorTaskIDs)})
 	response, err := c.rpc.GetShellRunClaims(ctx, connect.NewRequest(&storev1.GetShellRunClaimsRequest{VendorTaskIds: vendorTaskIDs}))
 	if err != nil {
 		return nil, callFailure(bound, rpcGetShellRunClaims, "shell run claims", "so no spool was claimed", err)
@@ -270,7 +270,7 @@ func (c *Client) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]
 	switch result := response.Msg.GetResult().(type) {
 	case *storev1.GetShellRunClaimsResponse_Success:
 		claims := result.Success.GetClaims()
-		bound.LogVerbose("shell run claims answered claims=%d", len(claims))
+		bound.LogVerbose("shell run claims answered claims={claims_length}", logging.Values{"claims_length": len(claims)})
 		return claims, nil
 	case *storev1.GetShellRunClaimsResponse_Failure:
 		refusal := &RefusalError{RPC: rpcGetShellRunClaims, Detail: result.Failure.GetDetail()}
@@ -280,10 +280,10 @@ func (c *Client) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]
 		case *storev1.GetShellRunClaimsFailure_StorageFailure:
 			refusal.Kind = RefusalStorageFailure
 		}
-		bound.With(logging.Context{Level: "error"}).Log("shell run claims refused: %s", refusal.Detail)
+		bound.With(logging.Context{Level: "error"}).Log("shell run claims refused: {refusal_detail}", logging.Values{"refusal_detail": refusal.Detail})
 		return nil, refusal
 	default:
-		bound.With(logging.Context{Level: "error"}).Log("shell run claims answer carries neither success nor failure")
+		bound.With(logging.Context{Level: "error"}).Log("shell run claims answer carries neither success nor failure", nil)
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetShellRunClaims)
 	}
 }
@@ -299,7 +299,7 @@ func (c *Client) RunSettlements(ctx context.Context, runIDs []string) ([]*storev
 	bound := c.log.With(logging.Context{
 		Operation: "storeclient-run-settlements", StoreSocket: c.socket, RPC: rpcGetRunSettlements,
 	})
-	bound.LogVerbose("run settlements requested for %d run(s)", len(runIDs))
+	bound.LogVerbose("run settlements requested for {run_ids_length} run(s)", logging.Values{"run_ids_length": len(runIDs)})
 	response, err := c.rpc.GetRunSettlements(ctx, connect.NewRequest(&storev1.GetRunSettlementsRequest{RunIds: runIDs}))
 	if err != nil {
 		return nil, callFailure(bound, rpcGetRunSettlements, "run settlements", "so no run was tracked", err)
@@ -307,7 +307,7 @@ func (c *Client) RunSettlements(ctx context.Context, runIDs []string) ([]*storev
 	switch result := response.Msg.GetResult().(type) {
 	case *storev1.GetRunSettlementsResponse_Success:
 		settled := result.Success.GetSettled()
-		bound.LogVerbose("run settlements answered settled=%d", len(settled))
+		bound.LogVerbose("run settlements answered settled={settled_length}", logging.Values{"settled_length": len(settled)})
 		return settled, nil
 	case *storev1.GetRunSettlementsResponse_Failure:
 		refusal := &RefusalError{RPC: rpcGetRunSettlements, Detail: result.Failure.GetDetail()}
@@ -317,10 +317,10 @@ func (c *Client) RunSettlements(ctx context.Context, runIDs []string) ([]*storev
 		case *storev1.GetRunSettlementsFailure_StorageFailure:
 			refusal.Kind = RefusalStorageFailure
 		}
-		bound.With(logging.Context{Level: "error"}).Log("run settlements refused: %s", refusal.Detail)
+		bound.With(logging.Context{Level: "error"}).Log("run settlements refused: {refusal_detail}", logging.Values{"refusal_detail": refusal.Detail})
 		return nil, refusal
 	default:
-		bound.With(logging.Context{Level: "error"}).Log("run settlements answer carries neither success nor failure")
+		bound.With(logging.Context{Level: "error"}).Log("run settlements answer carries neither success nor failure", nil)
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetRunSettlements)
 	}
 }
@@ -336,7 +336,7 @@ func (c *Client) LiveShellRunsAnnouncedBefore(ctx context.Context, beforeMs int6
 	bound := c.log.With(logging.Context{
 		Operation: "storeclient-live-shell-runs", StoreSocket: c.socket, RPC: rpcGetLiveShellRuns,
 	})
-	bound.LogVerbose("live shell runs announced before %d requested", beforeMs)
+	bound.LogVerbose("live shell runs announced before {before_ms} requested", logging.Values{"before_ms": beforeMs})
 	response, err := c.rpc.GetLiveShellRunsAnnouncedBefore(ctx, connect.NewRequest(&storev1.GetLiveShellRunsAnnouncedBeforeRequest{AnnouncedBeforeMs: beforeMs}))
 	if err != nil {
 		return nil, callFailure(bound, rpcGetLiveShellRuns, "live shell runs", "so no run from before the boot was concluded", err)
@@ -344,7 +344,7 @@ func (c *Client) LiveShellRunsAnnouncedBefore(ctx context.Context, beforeMs int6
 	switch result := response.Msg.GetResult().(type) {
 	case *storev1.GetLiveShellRunsAnnouncedBeforeResponse_Success:
 		runs := result.Success.GetRuns()
-		bound.LogVerbose("live shell runs answered runs=%d", len(runs))
+		bound.LogVerbose("live shell runs answered runs={runs_length}", logging.Values{"runs_length": len(runs)})
 		return runs, nil
 	case *storev1.GetLiveShellRunsAnnouncedBeforeResponse_Failure:
 		refusal := &RefusalError{RPC: rpcGetLiveShellRuns, Detail: result.Failure.GetDetail()}
@@ -354,10 +354,10 @@ func (c *Client) LiveShellRunsAnnouncedBefore(ctx context.Context, beforeMs int6
 		case *storev1.GetLiveShellRunsAnnouncedBeforeFailure_StorageFailure:
 			refusal.Kind = RefusalStorageFailure
 		}
-		bound.With(logging.Context{Level: "error"}).Log("live shell runs refused: %s", refusal.Detail)
+		bound.With(logging.Context{Level: "error"}).Log("live shell runs refused: {refusal_detail}", logging.Values{"refusal_detail": refusal.Detail})
 		return nil, refusal
 	default:
-		bound.With(logging.Context{Level: "error"}).Log("live shell runs answer carries neither success nor failure")
+		bound.With(logging.Context{Level: "error"}).Log("live shell runs answer carries neither success nor failure", nil)
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetLiveShellRuns)
 	}
 }
@@ -388,7 +388,7 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch, shap
 			FileID: cursor.GetFileId(), Path: cursor.GetPath(), Offset: logging.Off(cursor.GetOffset()),
 		})
 	}
-	bound.LogVerbose("write requested entries=%d shapes=%d cursor_advance=%t", len(batch.GetEntries()), len(shapes), batch.GetCursorAdvance() != nil)
+	bound.LogVerbose("write requested entries={batch_entries_length} shapes={shapes_length} cursor_advance={batch_advances_cursor}", logging.Values{"batch_entries_length": len(batch.GetEntries()), "shapes_length": len(shapes), "batch_advances_cursor": batch.GetCursorAdvance() != nil})
 	response, err := c.rpc.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
 		Producer: Producer,
 		// EVERY SIDECAR WRITE IS BULK: it copies what the vendor already wrote
@@ -427,16 +427,16 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch, shap
 		// `shutdown` record for it. Two records for one fact is what the
 		// exactly-once rule forbids.
 		if errors.Is(err, context.Canceled) {
-			bound.LogVerbose("write abandoned for %d entrie(s): the caller ended the request, so this producer never learned whether the store committed it and its own cursor did not advance", len(batch.GetEntries()))
+			bound.LogVerbose("write abandoned for {batch_entries_length} entrie(s): the caller ended the request, so this producer never learned whether the store committed it and its own cursor did not advance", logging.Values{"batch_entries_length": len(batch.GetEntries())})
 			return nil, fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
 		}
-		bound.With(logging.Context{Level: "error"}).Log("write transport failure for %d entrie(s): %v", len(batch.GetEntries()), err)
+		bound.With(logging.Context{Level: "error"}).Log("write transport failure for {batch_entries_length} entrie(s): {cause}", logging.Values{"batch_entries_length": len(batch.GetEntries()), "cause": err.Error()})
 		return nil, fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
 	}
 	switch result := response.Msg.GetResult().(type) {
 	case *storev1.WriteBatchResponse_Success:
 		skipped := skippedFrom(result.Success.GetSkipped())
-		bound.LogVerbose("write durable entries=%d skipped=%d", len(batch.GetEntries()), len(skipped))
+		bound.LogVerbose("write durable entries={batch_entries_length} skipped={skipped_length}", logging.Values{"batch_entries_length": len(batch.GetEntries()), "skipped_length": len(skipped)})
 		return skipped, nil
 	case *storev1.WriteBatchResponse_Failure:
 		refusal := writeRefusal(result.Failure)
@@ -448,8 +448,7 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch, shap
 			// kind so the sidecar still tries rather than parking a file on a
 			// verdict the store never actually gave.
 			bound.With(logging.Context{Level: "error"}).Log(
-				"write refused with NO failure kind, which this contract forbids; treating it as %s so recovery still runs: %s",
-				RefusalStorageFailure, refusal.Detail)
+				"write refused with NO failure kind, which this contract forbids; treating it as {storage_failure_kind} so recovery still runs: {refusal_detail}", logging.Values{"storage_failure_kind": string(RefusalStorageFailure), "refusal_detail": refusal.Detail})
 			refusal.Kind = RefusalStorageFailure
 			return nil, refusal
 		}
@@ -460,10 +459,10 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch, shap
 			Level: "error", RefusalKind: string(refusal.Kind),
 			RefusalSite: rpcWriteBatch, Field: refusal.Field,
 		}).Log(
-			"write refused as %s for %d entrie(s), nothing committed: %s", refusal.Kind, len(batch.GetEntries()), refusal.Detail)
+			"write refused as {refusal_kind} for {batch_entries_length} entrie(s), nothing committed: {refusal_detail}", logging.Values{"refusal_kind": string(refusal.Kind), "batch_entries_length": len(batch.GetEntries()), "refusal_detail": refusal.Detail})
 		return nil, refusal
 	default:
-		bound.With(logging.Context{Level: "error"}).Log("write answer carries neither success nor failure; the batch's durability is unknown")
+		bound.With(logging.Context{Level: "error"}).Log("write answer carries neither success nor failure; the batch's durability is unknown", nil)
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcWriteBatch)
 	}
 }
@@ -502,6 +501,6 @@ func writeRefusal(failure *storev1.WriteBatchFailure) *RefusalError {
 // Close releases pooled connections to the store socket. There is no session to
 // tear down: the client holds no store-side state.
 func (c *Client) Close() {
-	c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket}).LogVerbose("releasing pooled store connections")
+	c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket}).LogVerbose("releasing pooled store connections", nil)
 	c.http.CloseIdleConnections()
 }

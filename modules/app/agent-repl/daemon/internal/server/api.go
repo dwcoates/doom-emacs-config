@@ -295,6 +295,10 @@ type Deps struct {
 	// mounted on chessboard.BundleRoute beneath the webapp's origin so the
 	// webapp imports the widget same-origin (chessboard.Boards). REQUIRED.
 	ChessWidgetBundle http.Handler
+	// LogSites answers the log sites that fired in a window
+	// (logsites.Tallier.Window), for ListLogSites. REQUIRED, like every
+	// dependency.
+	LogSites LogSites
 	// Log is the server's logger.
 	Log dlog.Surfaces
 }
@@ -716,6 +720,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the chess boards")
 	case deps.ChessWidgetBundle == nil:
 		return nil, missing("the chess widget bundle")
+	case deps.LogSites == nil:
+		return nil, missing("the log site tally")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	case deps.SessionFacts == nil:
@@ -1305,7 +1311,7 @@ func UnlandedArm(log dlog.Logger, rpc, arm, reason string, notFound bool) *conne
 		code = connect.CodeNotFound
 	}
 	if log != nil {
-		log.Warn(opUnlandedArm, message, dlog.Context{
+		log.Warn(opUnlandedArm, "intended arm: {rpc}Error.{arm}: {reason}", dlog.Context{
 			"rpc": rpc, "arm": arm, "reason": reason, "not_found": notFound,
 		})
 	}
@@ -1341,7 +1347,7 @@ func transportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool, 
 		ctx["address"] = address
 	}
 	if log != nil {
-		log.Info(opTransportClosed, message, ctx)
+		log.With(ctx).Info(opTransportClosed, "{rpc} closed the stream: {cause}: {reason}", dlog.Context{"rpc": rpc, "cause": cause, "reason": reason})
 	}
 	err := connect.NewError(code, fmt.Errorf("%s", message))
 	if address != "" {

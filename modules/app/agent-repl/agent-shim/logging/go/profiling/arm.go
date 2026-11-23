@@ -1,8 +1,8 @@
 package profiling
 
 import (
+	"agentrepl/logging/logsite"
 	"fmt"
-	"strings"
 )
 
 // Arm starts RUNTIME's runtime profiling the way every Go runtime does: it
@@ -52,11 +52,14 @@ type Field struct {
 
 // Description is how every Go runtime records an event: its operation, which
 // the runtime prefixes with its own namespace when its logger asks for one,
-// its level, its message and its fields.
+// its level, its message and its fields. The message is a log site's
+// template (logging-contract.md "Log sites"), made here once per kind, so
+// every runtime forwards it to its logger and the record is keyed by
+// Describe; each placeholder it names is one of the fields.
 type Description struct {
 	Operation string
 	Level     string
-	Message   string
+	Message   logsite.Message
 	Fields    []Field
 }
 
@@ -64,50 +67,34 @@ type Description struct {
 // transitions at info, a failure at error.
 func Describe(runtime string, e Event) Description {
 	session := Field{"session", e.Session}
+	process := Field{"process", runtime}
 	switch e.Kind {
 	case Started:
-		return Description{"profiling.started", "info", "runtime profiling started into the open session",
+		return Description{"profiling.started", "info", logsite.Msg("runtime profiling started into the open session"),
 			[]Field{session, {"files", e.Files}}}
 	case Stopped:
-		return Description{"profiling.stopped", "info", "runtime profiling stopped and wrote its profiles",
+		return Description{"profiling.stopped", "info", logsite.Msg("runtime profiling stopped and wrote its profiles"),
 			[]Field{session, {"reason", e.Reason}, {"files", e.Files}}}
 	case LevelOpened:
-		return Description{"profiling.level_opened", "info", "the profiling session raised the " + runtime + "'s log level for its window",
-			[]Field{session, {"level", e.Level}, {"until", e.Until.Unix()}}}
+		return Description{"profiling.level_opened", "info", logsite.Msg("the profiling session raised the {process}'s log level for its window"),
+			[]Field{session, process, {"level", e.Level}, {"until", e.Until.Unix()}}}
 	case LevelClosed:
-		return Description{"profiling.level_closed", "info", "the profiling session's log level window closed; the " + runtime + " is back at info",
-			[]Field{session, {"level", e.Level}, {"reason", e.Reason}, {"until", e.Until.Unix()}}}
+		return Description{"profiling.level_closed", "info", logsite.Msg("the profiling session's log level window closed; the {process} is back at info"),
+			[]Field{session, process, {"level", e.Level}, {"reason", e.Reason}, {"until", e.Until.Unix()}}}
 	case ExitStarted:
-		return Description{"profiling.exit_started", "info", "the " + runtime + " profiles its whole life and writes the profile when it stops",
-			[]Field{{"files", e.Files}}}
+		return Description{"profiling.exit_started", "info", logsite.Msg("the {process} profiles its whole life and writes the profile {files} when it stops"),
+			[]Field{process, {"files", e.Files}}}
 	case ExitStopped:
-		return Description{"profiling.exit_stopped", "info", "the " + runtime + " stopped and wrote its whole-life profile",
-			[]Field{{"reason", e.Reason}, {"files", e.Files}}}
+		return Description{"profiling.exit_stopped", "info", logsite.Msg("the {process} stopped and wrote its whole-life profile {files}"),
+			[]Field{process, {"reason", e.Reason}, {"files", e.Files}}}
 	case Failed:
-		return Description{"profiling.failed", "error", "runtime profiling could not do what the session asked",
+		return Description{"profiling.failed", "error", logsite.Msg("runtime profiling could not do what the session asked"),
 			[]Field{session, {"reason", e.Reason}, {"cause", fmt.Sprint(e.Err)}}}
 	}
 	panic(fmt.Sprintf("profiling: an event of unknown kind %q", e.Kind))
 }
 
-// Text is the description as one line, for a logger whose context is its
-// message: the message, then each field as key=value (files joined by
-// commas).
-func (d Description) Text() string {
-	var b strings.Builder
-	b.WriteString(d.Message)
-	for _, f := range d.Fields {
-		value := f.Value
-		if files, ok := value.([]string); ok {
-			value = strings.Join(files, ",")
-		}
-		fmt.Fprintf(&b, " %s=%v", f.Key, value)
-	}
-	return b.String()
-}
-
-// Context is the description's fields as a map, for a logger with
-// structured context.
+// Context is the description's fields as a map, the record's named values.
 func (d Description) Context() map[string]any {
 	ctx := make(map[string]any, len(d.Fields))
 	for _, f := range d.Fields {

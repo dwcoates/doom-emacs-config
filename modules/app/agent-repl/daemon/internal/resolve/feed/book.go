@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/ctxend"
@@ -361,9 +362,9 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 		// A READ CUT BY ITS REQUEST'S END is abandoned, never broken (a
 		// reader that left, a handover moving the workspace): it is recorded
 		// at INFO, and the cause is kept so every caller sees it as a cut.
-		ctxend.Log(err, log.Info, log.Error, "daemon.feed.history_load_failed",
-			"a page a reader's request needed was not read: the request ended first",
-			"a page a reader's request needed could not be read",
+		ctxend.Log(err, log, dlog.LevelInfo, "daemon.feed.history_load_failed",
+			logsite.Msg("a page a reader's request needed was not read: the request ended first"),
+			logsite.Msg("a page a reader's request needed could not be read"),
 			dlog.Context{"agent": plan.target.GetValue(), "newest": plan.newest, "cause": err.Error()})
 		return loaded{}, fmt.Errorf("%w: %w", ErrHistoryUnavailable, err)
 	}
@@ -532,7 +533,7 @@ func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId)
 	if !ok || !f.book.awaitingSource {
 		return
 	}
-	r.kickWaitingFeed(s, f, addr, "a watch opened for a feed a reader holds without its history; its newest page is loaded for it")
+	r.kickWaitingFeed(s, f, addr, logsite.Msg("a watch opened for a feed a reader holds without its history; its newest page is loaded for it"))
 }
 
 // SourceUp loads the newest page of every feed of WS a reader opened while no
@@ -554,7 +555,7 @@ func (r *resolver) SourceUp(ws ids.WorkspaceID) {
 			continue
 		}
 		waiting++
-		r.kickWaitingFeed(s, f, s.feedAddrs[key], "a history source came up for a feed a reader holds without its history; its newest page is loaded for it")
+		r.kickWaitingFeed(s, f, s.feedAddrs[key], logsite.Msg("a history source came up for a feed a reader holds without its history; its newest page is loaded for it"))
 	}
 	r.logger(ws).Debug("daemon.feed.source_up",
 		"a history source came up for the workspace",
@@ -586,10 +587,10 @@ func (r *resolver) NoteFreshBook(ws ids.WorkspaceID) {
 // pushes it to them. The load runs OFF the caller's goroutine: the caller may
 // be the session watcher or the fleet, and the read reaches back into the
 // fleet (HistorySource). Called with r.mu held.
-func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, why string) {
+func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, why logsite.Message) {
 	f.book.awaitingSource = false
 	agent, _ := bookTarget(addr)
-	r.logger(s.id).Info("daemon.feed.history_kick", why,
+	r.logger(s.id).Log(dlog.LevelInfo, "daemon.feed.history_kick", why,
 		dlog.Context{"feed": f.key, "agent": agent.GetValue()})
 	ws := s.id
 	inflight.ForWorkspace(string(ws)).Go(func() {

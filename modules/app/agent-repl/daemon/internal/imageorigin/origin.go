@@ -140,7 +140,7 @@ func (o *Origin) Handler() http.Handler {
 		if err != nil {
 			o.log.Error(op, "a registered image could not be opened",
 				dlog.Context{"id": id, "path": found.path, "cause": err.Error()})
-			http.Error(w, "the registered image is not readable", http.StatusNotFound)
+			unreadableImage(w)
 			return
 		}
 		defer file.Close()
@@ -148,7 +148,7 @@ func (o *Origin) Handler() http.Handler {
 		if err != nil {
 			o.log.Error(op, "a registered image could not be stat'd",
 				dlog.Context{"id": id, "path": found.path, "cause": err.Error()})
-			http.Error(w, "the registered image is not readable", http.StatusNotFound)
+			unreadableImage(w)
 			return
 		}
 		// The media type is the RECORD's, so it is set before ServeContent
@@ -158,4 +158,10 @@ func (o *Origin) Handler() http.Handler {
 			dlog.Context{"id": id, "path": found.path, "media_type": found.mediaType, "bytes": info.Size()})
 		http.ServeContent(w, r, "", info.ModTime(), file)
 	})
+}
+
+// unreadableImage answers a registered image the origin could not open or
+// read: the one refusal both failures send, its cause already recorded.
+func unreadableImage(w http.ResponseWriter) {
+	http.Error(w, "the registered image is not readable", http.StatusNotFound)
 }

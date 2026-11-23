@@ -17,8 +17,8 @@ import { bindLog, emergencyStderr } from "./log.js";
 export const MAIN_LIFECYCLE_OPERATION = "shim.main.lifecycle";
 export const MAIN_FATAL_OPERATION = "shim.main.fatal";
 
-export const MAIN_LIFECYCLE_LOGGER = bindLog({ component: "shim-main", operation: MAIN_LIFECYCLE_OPERATION });
-const FATAL_LOGGER = bindLog({ component: "shim-main", operation: MAIN_FATAL_OPERATION });
+export const MAIN_LIFECYCLE_LOGGER = bindLog("shim.main.lifecycle", { component: "shim-main", operation: MAIN_LIFECYCLE_OPERATION });
+const FATAL_LOGGER = bindLog("shim.main.fatal", { component: "shim-main", operation: MAIN_FATAL_OPERATION });
 
 function fatalCause(err: unknown): string {
   if (err instanceof Error) return err.name.length === 0 ? "Error" : err.name;
@@ -27,7 +27,7 @@ function fatalCause(err: unknown): string {
 
 /** Log an unrecoverable entrypoint failure before ending the process. */
 export function reportFatal(err: unknown): void {
-  const message = `fatal: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`;
+  const failure = err instanceof Error ? (err.stack ?? err.message) : String(err);
   try {
     FATAL_LOGGER.error(
       {
@@ -36,12 +36,14 @@ export function reportFatal(err: unknown): void {
         cause_type: fatalCause(err),
         exit_outcome: "process_exit_1",
       },
-      message,
+      "fatal: {failure}",
+      { failure },
     );
   } catch (logErr) {
     // Reached only before the logger is configured, or when its sink failed.
-    emergencyStderr(
-      `${message}; logger failure: ${logErr instanceof Error ? logErr.message : String(logErr)}`,
-    );
+    emergencyStderr("fatal: {failure}; logger failure: {logger_failure}", {
+      failure,
+      logger_failure: logErr instanceof Error ? logErr.message : String(logErr),
+    });
   }
 }

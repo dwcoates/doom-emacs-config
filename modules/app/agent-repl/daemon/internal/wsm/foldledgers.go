@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
@@ -71,7 +72,7 @@ func foldExtraMergeLedgers(ctx context.Context, tx *sql.Tx, log dlog.Logger) err
 		return err
 	}
 	log.Info("daemon.wsm.migrate", "folded each queued merge's extra ledgers into its entry's", dlog.Context{"folded": len(folds)})
-	return dropDurableRows(ctx, tx, log, "dropped the bubbles of the folded ledgers", func(raw []byte) (bool, error) {
+	return dropDurableRows(ctx, tx, log, logsite.Msg("dropped the bubbles of the folded ledgers"), func(raw []byte) (bool, error) {
 		return isFoldedBubbleRow(raw, gone)
 	})
 }

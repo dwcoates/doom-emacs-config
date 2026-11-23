@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"agentrepl/logging/logsite"
 )
 
 // UntilEnvironment names the Unix second a non-info AGENT_REPL_LOG_LEVEL
@@ -83,26 +85,32 @@ func SelectLevel(level, until string, now time.Time) (Selection, error) {
 // Note is the info record a runtime writes when it started at info although
 // another level was asked for, or ok=false when it started where it was asked
 // to: the default, or an honored window (whose volume states it).
-func (s Selection) Note() (message string, ok bool) {
+//
+// The note is a logsite.Message, keyed here where its templates are written,
+// and its values are Context's fields.
+func (s Selection) Note() (message logsite.Message, ok bool) {
 	switch s.Outcome {
 	case OutcomeNoExpiry:
-		return fmt.Sprintf("log level %q ignored without %s; starting at info", s.Requested, UntilEnvironment), true
+		return logsite.Msg("log level {requested_level} ignored without {until_environment}; starting at info"), true
 	case OutcomeExpired:
-		return fmt.Sprintf("log level %q ignored: its window ended at %s; starting at info", s.Requested, s.RequestedUntil), true
+		return logsite.Msg("log level {requested_level} ignored: its window ended at {requested_until}; starting at info"), true
 	case OutcomeBeyondWindow:
-		return fmt.Sprintf("log level %q ignored: its window ends at %s, more than %s away; starting at info", s.Requested, s.RequestedUntil, WindowMax), true
+		return logsite.Msg("log level {requested_level} ignored: its window ends at {requested_until}, more than {window_max} away; starting at info"), true
 	default:
-		return "", false
+		return logsite.Message{}, false
 	}
 }
 
-// Context is the structured evidence of the startup note.
+// Context is the structured evidence of the startup note, holding every
+// value its template names.
 func (s Selection) Context() map[string]any {
 	ctx := map[string]any{
-		"requested_level": s.Requested,
-		"requested_until": s.RequestedUntil,
-		"effective_level": s.Level.String(),
-		"outcome":         string(s.Outcome),
+		"requested_level":   s.Requested,
+		"requested_until":   s.RequestedUntil,
+		"effective_level":   s.Level.String(),
+		"outcome":           string(s.Outcome),
+		"until_environment": UntilEnvironment,
+		"window_max":        WindowMax.String(),
 	}
 	if !s.Until.IsZero() {
 		ctx["until"] = s.Until.Unix()
@@ -135,15 +143,18 @@ type Expiry struct {
 	Until time.Time
 }
 
-// Message is the info record text for the revert.
-func (e Expiry) Message() string {
-	return fmt.Sprintf("log level %s window ended at %s; reverted to info", e.From, e.Until.Format(time.RFC3339))
+// Message is the info record of the revert, keyed here; its values are
+// Context's fields.
+func (e Expiry) Message() logsite.Message {
+	return logsite.Msg("log level {from_level} window ended at {ended_at}; reverted to info")
 }
 
-// Context is the structured evidence of the revert.
+// Context is the structured evidence of the revert, holding every value its
+// template names.
 func (e Expiry) Context() map[string]any {
 	return map[string]any{
 		"from_level":      e.From.String(),
+		"ended_at":        e.Until.Format(time.RFC3339),
 		"until":           e.Until.Unix(),
 		"effective_level": LevelInfo.String(),
 		"outcome":         string(OutcomeWindowEnded),

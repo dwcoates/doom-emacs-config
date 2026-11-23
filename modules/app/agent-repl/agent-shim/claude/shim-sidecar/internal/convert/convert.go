@@ -238,7 +238,7 @@ type Converter struct {
 
 // New builds a Converter with no observer installed.
 func New(log *logging.Bound) *Converter {
-	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter producer=%s", Producer)
+	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter producer={producer}", logging.Values{"producer": Producer})
 	return &Converter{
 		log:            log,
 		observer:       noopObserver{},
@@ -259,7 +259,7 @@ func (c *Converter) SetObserver(o Observer) {
 	if o == nil {
 		panic("convert: SetObserver requires an observer; pass the no-op explicitly to opt out")
 	}
-	c.log.With(logging.Context{Operation: "convert-observer"}).LogVerbose("owner-resolution observer installed")
+	c.log.With(logging.Context{Operation: "convert-observer"}).LogVerbose("owner-resolution observer installed", nil)
 	c.observer = o
 }
 
@@ -313,8 +313,7 @@ func (c *Converter) Line(record map[string]any, at Attribution, following []map[
 	if inheritedByFork(record) {
 		// IT ANNOUNCES NO ROW, so it carries no upsert_key: nothing was stored.
 		c.log.With(at.ctxFor("fork-inherited-skip")).LogVerbose(
-			"a record the vendor's fork copied from the parent is never stored in the fork's book; converted to %d entrie(s), stored none",
-			len(entries))
+			"a record the vendor's fork copied from the parent is never stored in the fork's book; converted to {entries_length} entrie(s), stored none", logging.Values{"entries_length": len(entries)})
 		return nil
 	}
 	if !keepalive {
@@ -322,8 +321,7 @@ func (c *Converter) Line(record map[string]any, at Attribution, following []map[
 	}
 	// IT ANNOUNCES NO ROW, so it carries no upsert_key: nothing was stored.
 	c.log.With(at.ctxFor("keepalive-skip")).LogVerbose(
-		"a keep-alive turn's %s record is never stored; converted to %d entrie(s), stored none",
-		str(record["type"]), len(entries))
+		"a keep-alive turn's {record_type} record is never stored; converted to {entries_length} entrie(s), stored none", logging.Values{"record_type": str(record["type"]), "entries_length": len(entries)})
 	return nil
 }
 
@@ -340,14 +338,14 @@ func (c *Converter) lineEntries(record map[string]any, at Attribution, following
 	c.noteForeignSpawn(record, at)
 	kind := str(record["type"])
 	c.log.With(at.ctxFor("convert-line")).
-		LogVerbose("converting line type=%q", kind)
+		LogVerbose("converting line type=\"{kind}\"", logging.Values{"kind": kind})
 
 	switch kind {
 	case "":
 		// It PARSED, so it is not unparsed; we simply cannot say what it is,
 		// which is exactly what the unknown arm means.
 		c.log.With(at.ctxWarn("convert-line")).
-			Log("transcript line carries no %q field; stored as unknown residue with no path to a page", "type")
+			Log("transcript line carries no \"type\" field; stored as unknown residue with no path to a page", nil)
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "type", record)}
 	case "user":
 		return c.userLine(record, at)
@@ -363,7 +361,7 @@ func (c *Converter) lineEntries(record map[string]any, at Attribution, following
 			// what each one is and have decided not to carry it, which is a
 			// different situation from not knowing.
 			c.log.With(at.ctxFor("withhold")).
-				LogVerbose("line type=%q withheld as vendor_specific", kind)
+				LogVerbose("line type=\"{kind}\" withheld as vendor_specific", logging.Values{"kind": kind})
 			return []*storev1.StoreEntry{VendorSpecificEntry(at, kind, record)}
 		}
 		// BENIGN FORWARD-COMPAT — debug, not warn. A line whose type is present
@@ -375,7 +373,7 @@ func (c *Converter) lineEntries(record map[string]any, at Attribution, following
 		// its type discriminator entirely stays warn above — that is malformed,
 		// not merely unmodelled.)
 		c.log.With(at.ctxFor("convert-line")).
-			LogVerbose("transcript line type=%q is not modeled; stored as unknown residue", kind)
+			LogVerbose("transcript line type=\"{kind}\" is not modeled; stored as unknown residue", logging.Values{"kind": kind})
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }

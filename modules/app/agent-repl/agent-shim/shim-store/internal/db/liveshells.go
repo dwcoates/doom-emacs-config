@@ -75,6 +75,6 @@ func (d *DB) LiveShellRunsAnnouncedBefore(ctx context.Context, beforeMs int64) (
 	}
 	d.observeQuery(StatementLiveShellRuns, "detached_work", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementLiveShellRuns, "detached_work", base, int64(len(out)))
-	d.log.LogVerbose(base, "answered %d live shell run(s) announced before %d", len(out), beforeMs)
+	d.log.LogVerbose(base, "answered {runs} live shell run(s) announced before {before_ms}", logging.Values{"runs": len(out), "before_ms": beforeMs})
 	return out, nil
 }

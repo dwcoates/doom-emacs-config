@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/landedbranch"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // opLandedBranch is the landed-branch pass's operation.
@@ -80,7 +81,7 @@ func (s *repoSweep) sweepLandedBranches(ctx context.Context) {
 		} else if landing.Into != s.defaultBranch {
 			present, err := s.r.deps.Git.RefExists(ctx, s.repo.Dir, landing.Into)
 			if err != nil {
-				s.fail(ctx, opLandedBranch, "could not probe the branch a landed branch landed into; the branch is kept",
+				s.fail(ctx, opLandedBranch, logsite.Msg("could not probe the branch a landed branch landed into; the branch is kept"),
 					dlog.Context{"repo": s.repo.Dir, "branch": branch, "into": landing.Into,
 						"workspace": string(ws.ID), "repo_id": string(s.repo.ID)}, err)
 				continue

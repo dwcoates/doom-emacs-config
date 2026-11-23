@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"testing"
 	"time"
+
+	"agentrepl/logging/logsite"
 )
 
 // vocabTimestampPattern is the cross-language timestamp contract from
@@ -215,5 +217,54 @@ func TestRecordLeavesANilIdentifierEmptyRatherThanRenderingIt(t *testing.T) {
 	}
 	if _, still := rec.Context[KeyRequestID]; still {
 		t.Fatal("a reserved key stayed inside context")
+	}
+}
+
+func TestAKeyedRecordStampsItsSiteAndTemplate(t *testing.T) {
+	tests := []struct {
+		name        string
+		template    string
+		ctx         Context
+		wantMessage string
+	}{
+		{name: "a plain template", template: "the queue moved", wantMessage: "the queue moved"},
+		{name: "a placeholder filled from the context", template: "{rows} rows", ctx: Context{"rows": 2}, wantMessage: "2 rows"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			rec := newKeyedRecord(time.Now(), RuntimeDaemon, LevelInfo, "daemon.dlog.test", tc.template, "pkg.F", tc.ctx, 42)
+
+			// Assert.
+			if want := logsite.Key(RuntimeDaemon, "pkg.F", tc.template); rec.Site != want || rec.Template != tc.template || rec.Message != tc.wantMessage {
+				t.Fatalf("record = %+v, want site %s, template %q, message %q", rec, want, tc.template, tc.wantMessage)
+			}
+		})
+	}
+}
+
+func TestASiteRecordIsKeyedByTheFunctionThatMadeItsMessage(t *testing.T) {
+	// Act.
+	rec := newSiteRecord(time.Now(), RuntimeDaemon, LevelError, "daemon.dlog.test", logsite.Msg("a sink failed"), nil, 42)
+
+	// Assert.
+	if want := logsite.Key(RuntimeDaemon, "agent-repld/internal/dlog.TestASiteRecordIsKeyedByTheFunctionThatMadeItsMessage", "a sink failed"); rec.Site != want {
+		t.Fatalf("site = %s, want %s", rec.Site, want)
+	}
+}
+
+func TestARecordMarshalsItsSiteAndTemplate(t *testing.T) {
+	// Arrange.
+	rec := newKeyedRecord(time.Now(), RuntimeDaemon, LevelInfo, "daemon.dlog.test", "{n} rows", "pkg.F", Context{"n": 1}, 42)
+
+	// Act.
+	var got map[string]any
+	if err := json.Unmarshal(rec.marshal(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Assert.
+	if got["site"] != rec.Site || got["template"] != "{n} rows" || got["message"] != "1 rows" {
+		t.Fatalf("record = %v, want its site, template and rendered message", got)
 	}
 }

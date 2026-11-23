@@ -27,12 +27,14 @@ import type {
   FooterMergeStepSuite,
   FooterStatusActivityMergeStep,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { toneClass } from "../vocab.js";
 import { textLine } from "./parts.js";
 import { activityDatumClass } from "./tones.js";
 import { pluralNoun } from "../count-noun.js";
+
+const log = createLogger("webapp.footer.merge-step");
 
 /** The glyph each suite edge is drawn with. */
 export const SUITE_EDGE_GLYPHS = {
@@ -47,10 +49,10 @@ export function drawFooterStatusActivityMergeStep(
   path: string,
 ): HTMLElement {
   const step = requireCase(u.step, `${path}.step`);
-  log.debug(`drawing the merge step line: ${step.case}`, {
+  log.debug("drawing the merge step line: {case}", {
     operation: "footer.strip.merge-step",
     context: { step: step.case },
-  });
+  }, { case: step.case });
   const line = drawStep(step, `${path}.step`);
   line.classList.add("footer-activity-merge-step");
   line.setAttribute("data-step", step.case);

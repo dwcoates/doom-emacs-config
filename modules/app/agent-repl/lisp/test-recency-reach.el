@@ -84,7 +84,7 @@
   "A reached tab with no ref is a broken invariant: recorded at error and signalled."
   (let ((records nil))
     (cl-letf (((symbol-function 'agent-repl-host-ref) #'ignore)
-              ((symbol-function 'agent-repl--error)
+              ((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-leveled-into records 'error)))
       (should-error (agent-repl--recency-reach-request '(("a" :older 1))))
       (should (seq-some (lambda (r) (string-match-p "recency-reach.unregistered ws=a arm=:older presses=1" (cdr r)))
@@ -120,9 +120,9 @@ with its callbacks in `answers', and every log record into `records' as
                 (lambda (c request &rest keys)
                   (push (cons c request) calls)
                   (push keys answers)))
-               ((symbol-function 'agent-repl--log) (agent-repl-test--record-leveled-into records 'debug))
-               ((symbol-function 'agent-repl--info) (agent-repl-test--record-leveled-into records 'info))
-               ((symbol-function 'agent-repl--error) (agent-repl-test--record-leveled-into records 'error)))
+               ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-leveled-into records 'debug))
+               ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-leveled-into records 'info))
+               ((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-leveled-into records 'error)))
        ,@body)))
 
 (defun agent-repl-test-recency-reach--recorded-p (records level pattern)

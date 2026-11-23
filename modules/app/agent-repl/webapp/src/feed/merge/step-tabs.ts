@@ -21,7 +21,7 @@
  */
 import { armButtonRole } from "../../control.js";
 import { renderMergeCommitLink } from "../../link.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { guardMalformed } from "../../rpc/guard.js";
 import type { RowContext } from "../renderers.js";
 import { openAndJumpToWorkspace, type JumpSite } from "./jump.js";
@@ -42,6 +42,8 @@ import type {
   FeedMergeUpdatingMainStep,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
+
+const log = createLogger("webapp.feed.merge.step-tabs");
 
 /**
  * The rebasing tab's own heading, above its commits' strip: its progress, then

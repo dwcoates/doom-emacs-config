@@ -26,7 +26,7 @@ no case leaks into another."
          (logs nil)
          (agent-repl-input-background "#121212"))
      (cl-letf (((symbol-function 'agent-repl--dividers-shows-panels-p) (lambda (_frame) shows))
-               ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+               ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
        (dolist (face agent-repl--dividers-faces)
          (set-face-attribute face frame :foreground "#686868"))
        (unwind-protect
@@ -352,7 +352,7 @@ since a batch frame draws no fringes; `logs' collects every log line."
            (let ((win (selected-window)))
              (cl-letf (((symbol-function 'set-window-fringes)
                         (lambda (window left right &rest _) (push (list window left right) fringed)))
-                       ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+                       ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
                ,@body)))
        (kill-buffer buf))))
 

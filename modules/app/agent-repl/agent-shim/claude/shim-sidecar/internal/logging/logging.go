@@ -13,6 +13,11 @@
 // workspace's sidecar.log. A forwarding failure is stated once per daemon
 // address and outage window in the global sink and does not fail the file-plane
 // operation that produced the diagnostic.
+//
+// EVERY RECORD NAMES ITS SITE (logging-contract.md "Log sites"): the key of
+// the log call that wrote it (logsite.Key over the runtime "sidecar", the
+// function the call is written in and its template) and the template itself,
+// right after the message; a forwarded record carries both to the daemon.
 package logging
 
 import (
@@ -25,7 +30,30 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/logsite"
 )
+
+// Runtime is the runtime every sidecar record names, and part of every site
+// key.
+const Runtime = "sidecar"
+
+// template is a log message's template: a string constant, never a value
+// built at run time. It is unexported so no other package can convert a
+// run-time string to it; an untyped string constant converts implicitly.
+//
+// The template is the call's site summary and part of its key, so a dynamic
+// value goes in the call's Values under a name, and the template names it as
+// {name}: "size {size} < offset {offset}" with Values{"size": n, "offset":
+// o}. A literal brace is written {{ or }}.
+type template string
+
+// Values are a record's named values: the values its template's
+// placeholders take, each landing in the record's context under its name. A
+// placeholder is filled from the record's whole context (the bound Context's
+// keys and Values), but the call's own Values literal must hold every
+// placeholder the template names, which the static scan test proves. A Values
+// key replaces a bound key of the same name.
+type Values map[string]any
 
 // ErrForwardTargetNotThere marks a forwarding failure whose target daemon is
 // PROVABLY GONE — its advertised pid died, or daemon.addr no longer names the
@@ -206,6 +234,8 @@ type record struct {
 	Verbosity       string         `json:"verbosity"`
 	Operation       string         `json:"operation"`
 	Message         string         `json:"message"`
+	Site            string         `json:"site"`
+	Template        string         `json:"template"`
 	WorkspaceDir    string         `json:"workspace_dir,omitempty"`
 	WorkspaceID     string         `json:"workspace_id,omitempty"`
 	ClaudeSessionID string         `json:"claude_session_id,omitempty"`
@@ -217,12 +247,16 @@ type record struct {
 // Workspace identity stays explicit so the forwarding implementation cannot
 // accidentally bury the daemon's address in arbitrary context.
 type ForwardRecord struct {
-	Timestamp       string
-	PID             int
-	Level           string
-	Verbose         bool
-	Operation       string
-	Message         string
+	Timestamp string
+	PID       int
+	Level     string
+	Verbose   bool
+	Operation string
+	Message   string
+	// Site and Template are the record's log site: the key of the call that
+	// wrote it and the call's template (logging-contract.md "Log sites").
+	Site            string
+	Template        string
 	WorkspaceDir    string
 	WorkspaceID     string
 	ClaudeSessionID string
@@ -421,7 +455,7 @@ func (l *Logger) With(ctx Context) *Bound {
 // when anything other than info was asked for.
 func (b *Bound) NoteLevelSelection(sel sharedlogging.Selection) {
 	if message, ok := sel.Note(); ok {
-		b.logger.write(false, mergeContext(b.context, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: sel.Context()}), "%s", message)
+		b.logger.writeMessage(false, mergeContext(b.context, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: sel.Context()}), message, nil)
 	}
 }
 
@@ -487,9 +521,9 @@ func (l *Logger) CloseWithin(d time.Duration) (pending int, drained bool) {
 	pending = len(l.forwardQueue)
 	l.forwardMu.Unlock()
 	address, _ := l.forwarder.Ready()
-	l.write(false, Context{Operation: "shutdown-drain"},
-		"the log forwarding queue did not drain within %s; abandoning it with %d record(s) still queued for the daemon at %s and exiting",
-		d, pending, addrOrUnresolved(address))
+	l.writeMessage(false, Context{Operation: "shutdown-drain"},
+		logsite.Msg("the log forwarding queue did not drain within {drain}; abandoning it with {pending} record(s) still queued for the daemon at {daemon_address} and exiting"),
+		Values{"drain": d.String(), "pending": pending, "daemon_address": addrOrUnresolved(address)})
 	return pending, false
 }
 
@@ -541,21 +575,39 @@ func (b *Bound) RegisterFile(ctx Context) {
 	b.logger.mu.Unlock()
 }
 
-// Log records a normal diagnostic to the persistent log and stderr.
-func (b *Bound) Log(format string, args ...any) {
+// Log records a normal diagnostic to the persistent log and stderr: MESSAGE,
+// a constant template, rendered from the record's named values.
+func (b *Bound) Log(message template, values Values) {
 	if b == nil {
 		panic("sidecar logging: Log called on nil Bound logger")
 	}
-	b.logger.write(false, b.context, format, args...)
+	b.logger.write(false, b.context, string(message), logsite.Caller(), values)
 }
 
 // LogVerbose records a debug-level verbose diagnostic. AGENT_REPL_LOG_LEVEL
 // decides whether the record reaches either sink.
-func (b *Bound) LogVerbose(format string, args ...any) {
+func (b *Bound) LogVerbose(message template, values Values) {
 	if b == nil {
 		panic("sidecar logging: LogVerbose called on nil Bound logger")
 	}
-	b.logger.write(true, b.context, format, args...)
+	b.logger.write(true, b.context, string(message), logsite.Caller(), values)
+}
+
+// LogMessage is Log of a message a helper forwards on its caller's behalf,
+// keyed by the function that made it with logsite.Msg.
+func (b *Bound) LogMessage(message logsite.Message, values Values) {
+	if b == nil {
+		panic("sidecar logging: LogMessage called on nil Bound logger")
+	}
+	b.logger.writeMessage(false, b.context, message, values)
+}
+
+// LogVerboseMessage is LogVerbose of a forwarded message.
+func (b *Bound) LogVerboseMessage(message logsite.Message, values Values) {
+	if b == nil {
+		panic("sidecar logging: LogVerboseMessage called on nil Bound logger")
+	}
+	b.logger.writeMessage(true, b.context, message, values)
 }
 
 // BeginCatchup opens the startup catch-up window over the named operations.
@@ -608,10 +660,10 @@ func (l *Logger) EndCatchup() {
 		if count == 0 {
 			continue
 		}
-		l.write(false, Context{
+		l.writeMessage(false, Context{
 			Operation: "catchup-summary", Level: "info",
 			Reason: operation, Repeat: Repeat(count),
-		}, "startup catch-up stated %d %s record(s) at debug; steady state states each one", count, operation)
+		}, logsite.Msg("startup catch-up stated {repeat_count} {reason} record(s) at debug; steady state states each one"), nil)
 	}
 }
 
@@ -700,7 +752,17 @@ func contextMap(ctx Context) map[string]any {
 	return out
 }
 
-func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
+// writeMessage writes MESSAGE, a template made by logsite.Msg, keyed by the
+// function that made it: this package's own records, and a forwarded one.
+func (l *Logger) writeMessage(verbose bool, ctx Context, message logsite.Message, values Values) {
+	l.write(verbose, ctx, message.Template(), message.Forwarded(), values)
+}
+
+// write records the call written as TEMPLATE in FUNCTION. A template naming
+// a value the record does not hold, or one whose braces do not parse, is a
+// defect of the call, which the static scan test (logsite_scan_test.go)
+// exists to catch: it panics.
+func (l *Logger) write(verbose bool, ctx Context, template, function string, values Values) {
 	if l == nil {
 		panic("sidecar logging: write called on nil Logger")
 	}
@@ -734,11 +796,16 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	allowed, ended := l.threshold.Allows(level)
 	if ended != nil {
 		// The window is info now, so this record cannot end it again.
-		l.write(false, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, "%s", ended.Message())
+		l.writeMessage(false, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, ended.Message(), nil)
 	}
 	if !allowed {
 		return
 	}
+	context := contextMap(ctx)
+	for key, value := range values {
+		context[key] = value
+	}
+	message := logsite.MustRender(ctx.Operation, template, context)
 	verbosity := "normal"
 	if verbose {
 		verbosity = "verbose"
@@ -746,17 +813,19 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	now := l.now().Local()
 	rec := record{
 		Timestamp:       sharedlogging.Timestamp(now),
-		Runtime:         "sidecar",
+		Runtime:         Runtime,
 		PID:             l.pid(),
 		Level:           level,
 		Verbosity:       verbosity,
 		Operation:       ctx.Operation,
-		Message:         fmt.Sprintf(format, args...),
+		Message:         message,
+		Site:            logsite.Key(Runtime, function, template),
+		Template:        template,
 		WorkspaceDir:    ctx.WorkspaceDir,
 		WorkspaceID:     ctx.WorkspaceID,
 		ClaudeSessionID: ctx.ClaudeSessionID,
 		RequestID:       ctx.RequestID,
-		Context:         contextMap(ctx),
+		Context:         context,
 	}
 	if l.forwarder != nil && ctx.WorkspaceDir != "" && !ctx.SinkEmergency {
 		forwardContext := cloneMap(rec.Context)
@@ -765,6 +834,7 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 		l.enqueueForward(ForwardRecord{
 			Timestamp: rec.Timestamp, PID: rec.PID, Level: rec.Level,
 			Verbose: verbose, Operation: rec.Operation, Message: rec.Message,
+			Site: rec.Site, Template: rec.Template,
 			WorkspaceDir: rec.WorkspaceDir, WorkspaceID: rec.WorkspaceID,
 			ClaudeSessionID: rec.ClaudeSessionID, Context: forwardContext,
 		})
@@ -839,14 +909,14 @@ func (l *Logger) forwardLoop() {
 				// WARN, and never a deadline wait against a dir that will never
 				// appear.
 				l.reportForwardTransient(now, address, attempts, target, err,
-					"a file-scoped diagnostic named a workspace absent from the daemon's roster; it could not be attributed and was written to the global sink unattributed")
+					logsite.Msg("a file-scoped diagnostic named a workspace absent from the daemon's roster; it could not be attributed and was written to the global sink unattributed"))
 			case errors.Is(err, ErrForwardTargetNotThere):
 				// The daemon THIS RECORD targeted is provably gone — its
 				// advertised pid died, or daemon.addr now names someone else —
 				// mirroring the address-advertisement pid invariant: an absent
 				// advertiser costs no WARN, even after it was once seen serving.
 				l.reportForwardTransient(now, address, attempts, target, err,
-					"a file-scoped diagnostic could not be forwarded because the daemon that would have received it is no longer there (it exited or was replaced); it was written to the global sink")
+					logsite.Msg("a file-scoped diagnostic could not be forwarded because the daemon that would have received it is no longer there (it exited or was replaced); it was written to the global sink"))
 			case errors.Is(err, ErrForwardTargetBooting):
 				// The ADDRESS this record targeted has never once been seen
 				// accepting — via Ready or a prior successful Forward — even
@@ -856,7 +926,7 @@ func (l *Logger) forwardLoop() {
 				// daemon address can have been seen serving earlier without that
 				// telling us anything about whether THIS address has come up.
 				l.reportForwardTransient(now, address, attempts, target, err,
-					"a file-scoped diagnostic was not forwarded because the daemon at this address has never been seen accepting connections; it was written to the global sink")
+					logsite.Msg("a file-scoped diagnostic was not forwarded because the daemon at this address has never been seen accepting connections; it was written to the global sink"))
 			case !seenServing:
 				// A daemon that never began serving during the ladder is a
 				// STARTUP TRANSIENT, not an outage: the record forwarded before
@@ -864,7 +934,7 @@ func (l *Logger) forwardLoop() {
 				// a boot does not manufacture a WARN, and add the distinguishing
 				// record rather than demoting the failure path.
 				l.reportForwardTransient(now, address, attempts, target, err,
-					"a file-scoped diagnostic was not forwarded because the daemon has not begun serving; it was written to the global sink")
+					logsite.Msg("a file-scoped diagnostic was not forwarded because the daemon has not begun serving; it was written to the global sink"))
 			default:
 				// A daemon that WAS serving, whose advertised pid is still
 				// alive, and that still failed the forward is a genuine outage,
@@ -998,9 +1068,10 @@ func (l *Logger) writeUndelivered(now time.Time, address string, attempts int, r
 		verbosity = "verbose"
 	}
 	l.writeGlobal(record{
-		Timestamp: rec.Timestamp, Runtime: "sidecar", PID: rec.PID,
+		Timestamp: rec.Timestamp, Runtime: Runtime, PID: rec.PID,
 		Level: rec.Level, Verbosity: verbosity, Operation: rec.Operation,
-		Message: rec.Message, WorkspaceDir: rec.WorkspaceDir, WorkspaceID: rec.WorkspaceID,
+		Message: rec.Message, Site: rec.Site, Template: rec.Template,
+		WorkspaceDir: rec.WorkspaceDir, WorkspaceID: rec.WorkspaceID,
 		ClaudeSessionID: rec.ClaudeSessionID, Context: context,
 	}, now, rec.Operation)
 }
@@ -1025,10 +1096,11 @@ func (l *Logger) reportForwardFailure(now time.Time, address string, attempts in
 	l.lastForwardFailure = address
 	l.mu.Unlock()
 
+	message := logsite.Msg("a file-scoped diagnostic could not be forwarded to the daemon; it was retried and then written to the global sink")
 	l.writeGlobal(record{
-		Timestamp: sharedlogging.Timestamp(now), Runtime: "sidecar", PID: l.pid(),
+		Timestamp: sharedlogging.Timestamp(now), Runtime: Runtime, PID: l.pid(),
 		Level: "warn", Verbosity: "normal", Operation: "sidecar.logging.forward-failure",
-		Message: "a file-scoped diagnostic could not be forwarded to the daemon; it was retried and then written to the global sink",
+		Message: message.Template(), Site: logsite.Key(Runtime, message.Function(), message.Template()), Template: message.Template(),
 		Context: map[string]any{
 			"daemon_address": address, "error": cause.Error(), "attempt": attempts,
 			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,
@@ -1049,10 +1121,10 @@ func (l *Logger) reportForwardFailure(now time.Time, address string, attempts in
 // withheld unless the durable threshold admits DEBUG, so production INFO logs
 // stay silent through either window while the undelivered record itself is
 // still persisted.
-func (l *Logger) reportForwardTransient(now time.Time, address string, attempts int, target record, cause error, message string) {
+func (l *Logger) reportForwardTransient(now time.Time, address string, attempts int, target record, cause error, message logsite.Message) {
 	allowed, ended := l.threshold.Allows("debug")
 	if ended != nil {
-		l.write(false, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, "%s", ended.Message())
+		l.writeMessage(false, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, ended.Message(), nil)
 	}
 	if !allowed {
 		return
@@ -1067,9 +1139,9 @@ func (l *Logger) reportForwardTransient(now time.Time, address string, attempts 
 	l.mu.Unlock()
 
 	l.writeGlobal(record{
-		Timestamp: sharedlogging.Timestamp(now), Runtime: "sidecar", PID: l.pid(),
+		Timestamp: sharedlogging.Timestamp(now), Runtime: Runtime, PID: l.pid(),
 		Level: "debug", Verbosity: "normal", Operation: "sidecar.logging.forward-deferred",
-		Message: message,
+		Message: message.Template(), Site: logsite.Key(Runtime, message.Forwarded(), message.Template()), Template: message.Template(),
 		Context: map[string]any{
 			"daemon_address": address, "error": cause.Error(), "attempt": attempts,
 			"target_operation": target.Operation, "target_workspace_dir": target.WorkspaceDir,
@@ -1109,14 +1181,17 @@ func cloneMap(in map[string]any) map[string]any {
 // reportSinkFailure narrates the loss of the canonical sink through the only
 // channel left, the terminal. Caller holds mu.
 func (l *Logger) reportSinkFailure(now time.Time, operation string, cause error) {
+	message := logsite.Msg("persistent log sink write failed")
 	emergency, encodeErr := json.Marshal(record{
 		Timestamp: sharedlogging.Timestamp(now),
-		Runtime:   "sidecar",
+		Runtime:   Runtime,
 		PID:       l.pid(),
 		Level:     "error",
 		Verbosity: "normal",
 		Operation: "sidecar.logging.sink-failure",
-		Message:   "persistent log sink write failed",
+		Message:   message.Template(),
+		Site:      logsite.Key(Runtime, message.Function(), message.Template()),
+		Template:  message.Template(),
 		Context:   map[string]any{"error": cause.Error(), "target_operation": operation},
 	})
 	if encodeErr != nil {

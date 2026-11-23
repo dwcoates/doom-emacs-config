@@ -30,28 +30,48 @@
 
 (defvar agent-repl--global-log-scope)
 
-(defun agent-repl--boot-info (fmt &rest args)
-  "Emit a bootstrap-phase notice for FMT and ARGS to the QUIET sink.
-Delegates to `agent-repl--info' once core.el has defined it.  Before then,
-falls back to a `message' quieted with `inhibit-message', so the line still
-lands in *Messages* but never flashes in the echo area."
-  (if (fboundp 'agent-repl--info)
-      (apply #'agent-repl--info agent-repl--global-log-scope fmt args)
-    (let ((inhibit-message t))
-      (apply #'message (concat "[agent-repl] " fmt) args))))
+;; Every log call is a log-site macro (lisp/log-site.el), and every form
+;; below this one is expanded as it loads, so log-site.el is loaded HERE,
+;; by hand, before the first of them.  It is pure definitions (no state, no
+;; logging), and it loads again as the first module below so the elisp build
+;; records it like every other source.
+(eval-and-compile
+  (load (expand-file-name "lisp/log-site"
+                          (file-name-directory
+                           (or load-file-name buffer-file-name
+                               (bound-and-true-p byte-compile-current-file))))
+        nil 'nomessage))
 
-(defun agent-repl--boot-warn (fmt &rest args)
-  "Emit a bootstrap-phase WARNING for FMT and ARGS.
-Delegates to `agent-repl--warn' once core.el has defined it — post-core
-that is the QUIET sink (log file + *Messages*, no modeline flash), so a
-delegated boot-warning does not interrupt.  Before core.el exists,
-`agent-repl--warn' is unbound and this falls back to a bare `message'
-that DOES reach the echo area: core.el is the one module whose load
-failure leaves the ladder undefined, and a broken logging system is a
-genuine fatal condition the user must see immediately."
-  (if (fboundp 'agent-repl--warn)
-      (apply #'agent-repl--warn agent-repl--global-log-scope fmt args)
-    (apply #'message (concat "[agent-repl] WARNING: " fmt) args)))
+(defun agent-repl--boot-emit (warn message)
+  "Emit log MESSAGE, (SITE . VALUES), as a bootstrap notice or, with WARN, warning.
+Delegates to the ladder's emitters once core.el has defined the record
+builder.  Before then, a notice falls back to a `message' quieted with
+`inhibit-message', so the line still lands in *Messages* but never flashes
+in the echo area, and a warning to a bare `message' that DOES reach it:
+core.el is the one module whose load failure leaves the ladder undefined,
+and a broken logging system is a genuine fatal condition the user must see
+immediately."
+  (if (fboundp 'agent-repl--emit-log-record)
+      (apply (if warn #'agent-repl--emit-warn #'agent-repl--emit-info)
+             agent-repl--global-log-scope message)
+    (let ((text (agent-repl-log-site-render (car message) (cdr message))))
+      (if warn
+          (message "[agent-repl] WARNING: %s" text)
+        (let ((inhibit-message t))
+          (message "[agent-repl] %s" text))))))
+
+(defmacro agent-repl--boot-info (template &rest named)
+  "Emit a bootstrap-phase notice of TEMPLATE and NAMED to the QUIET sink.
+A log-site macro like `agent-repl--info' (TEMPLATE a literal with {name}
+placeholders, NAMED their :name VALUE pairs; logging-contract.md \"Log
+sites\"), delivered through `agent-repl--boot-emit'."
+  `(agent-repl--boot-emit nil (agent-repl--log-msg ,template ,@named)))
+
+(defmacro agent-repl--boot-warn (template &rest named)
+  "Emit a bootstrap-phase WARNING of TEMPLATE and NAMED.
+A log-site macro like `agent-repl--warn', delivered through
+`agent-repl--boot-emit': quiet once core.el is loaded, loud before."
+  `(agent-repl--boot-emit t (agent-repl--log-msg ,template ,@named)))
 
 (agent-repl--boot-info "Loading Agent-Repl package...")
 
@@ -113,8 +133,8 @@ and is reported on the loader's own path."
     (if sha
         (setq agent-repl--elisp-module-builds
               (append agent-repl--elisp-module-builds (list (cons module sha))))
-      (agent-repl--boot-info "elisp-build: %s.el is absent under %s; it records nothing"
-                             module root))))
+      (agent-repl--boot-info "elisp-build: {module}.el is absent under {root}; it records nothing"
+                             :module module :root root))))
 
 (defmacro agent-repl--load-module (file)
   "Load FILE with `load', recording any error for collective reporting.
@@ -138,10 +158,19 @@ loaded."
        (let ((root (file-name-directory (or load-file-name buffer-file-name))))
          (agent-repl--elisp-record-module-build root ,file)
          (load (expand-file-name (concat "lisp/" ,file) root) nil 'nomessage)
-         (agent-repl--boot-info "%s.el loaded." ,file))
+         (agent-repl--module-loaded ,file))
      (error
       (push (cons ,file err) agent-repl--load-errors)
-      (agent-repl--boot-warn "FAILED to load %s.el: %S" ,file err))))
+      (agent-repl--module-load-failed ,file err))))
+
+(defun agent-repl--module-loaded (module)
+  "Record that MODULE loaded.  One site for every module's load line."
+  (agent-repl--boot-info "{module}.el loaded." :module module))
+
+(defun agent-repl--module-load-failed (module err)
+  "Record that MODULE failed to load with ERR.  One site for every module."
+  (agent-repl--boot-warn "FAILED to load {module}.el: {error}"
+                         :module module :error (prin1-to-string err)))
 
 (defun agent-repl--early-git-string (&rest args)
   "Run `git ARGS' synchronously and return its trimmed stdout.
@@ -157,13 +186,13 @@ available.  Same role, separately defined.  Registered in
 test-time runtime guards see it and tests cannot accidentally shell
 out to real `git'."
   (with-temp-buffer
-    (agent-repl--boot-info "early-git-string: invoking args=%S" args)
+    (agent-repl--boot-info "early-git-string: invoking args={args}" :args (prin1-to-string args))
     (let* ((exit-code (apply #'call-process "git" nil t nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
            (stdout (string-trim (buffer-string)))
            (success-p (zerop exit-code)))
       (agent-repl--boot-info
-       "early-git-string: args=%S exit=%d success=%s stdout=%S"
-       args exit-code success-p stdout)
+       "early-git-string: args={args} exit={exit} success={success} stdout={stdout}"
+       :args (prin1-to-string args) :exit exit-code :success success-p :stdout (prin1-to-string stdout))
       (if success-p stdout ""))))
 
 ;; ---- Loaded-version SHA ----
@@ -220,8 +249,8 @@ appeared."
   (unless agent-repl--version-computed
     (setq agent-repl--version-computed t
           agent-repl--version (agent-repl--compute-version))
-    (agent-repl--boot-info "version: computed config-file=%S sha=%S"
-                           agent-repl--config-file agent-repl--version))
+    (agent-repl--boot-info "version: computed config-file={config_file} sha={sha}"
+                           :config_file (prin1-to-string agent-repl--config-file) :sha (prin1-to-string agent-repl--version)))
   agent-repl--version)
 
 (defun agent-repl-version ()
@@ -231,11 +260,12 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
   (interactive)
   (let ((version (or (agent-repl--version-string) "unknown")))
     (agent-repl--log '(:agent-repl-central "the loaded module version is process-wide")
-                     "version command: cached-sha=%S display=%S"
-                     agent-repl--version version)
+                     "version command: cached-sha={cached_sha} display={display}"
+                     :cached_sha (prin1-to-string agent-repl--version) :display (prin1-to-string version))
     (message "agent-repl version: %s" version)
     version))
 
+(agent-repl--load-module "log-site")
 (agent-repl--load-module "core")
 ;; WHY: the wire-*.el codec is the protojson layer every agentrepl.v1 caller
 ;; sits on, so it loads directly after core.el — its only dependency is
@@ -534,9 +564,9 @@ signal `void-function' when it runs."
   (if (fboundp fn)
       (progn
         (add-hook hook fn depth)
-        (agent-repl--boot-info "lifecycle: registered %s on %s" what hook))
-    (agent-repl--boot-warn "lifecycle: %s NOT registered on %s: `%s' is undefined, its module failed to load"
-                           what hook fn)))
+        (agent-repl--boot-info "lifecycle: registered {what} on {hook}" :what what :hook hook))
+    (agent-repl--boot-warn "lifecycle: {what} NOT registered on {hook}: `{fn}' is undefined, its module failed to load"
+                           :what what :hook hook :fn fn)))
 
 (defun agent-repl--register-lifecycle-hooks (batch)
   "Register agent-repl's lifecycle hooks, whatever modules failed to load.
@@ -568,7 +598,7 @@ idle, at most every half hour (heap-census.el), armed from the startup
 hook like the retention sweep, so nothing runs before the first
 redisplay."
   (if batch
-      (agent-repl--boot-info "lifecycle: nothing registered batch=%s" batch)
+      (agent-repl--boot-info "lifecycle: nothing registered batch={batch}" :batch batch)
     (if (and (boundp 'agent-repl-frontend-auto-start)
              (not (symbol-value 'agent-repl-frontend-auto-start)))
         (agent-repl--boot-info "lifecycle: daemon ensure NOT registered auto-start=nil")
@@ -590,9 +620,9 @@ The `error' that follows is the FATAL report a failed load always made;
 it is signalled only after the lifecycle hooks are registered
 \(`agent-repl--register-lifecycle-hooks'), so it costs the rest of the
 load, never the daemon."
-  (agent-repl--boot-warn "Loaded with %d ERROR(S):" (length errors))
+  (agent-repl--boot-warn "Loaded with {count} ERROR(S):" :count (length errors))
   (dolist (pair (reverse errors))
-    (agent-repl--boot-warn "  %s.el: %S" (car pair) (cdr pair)))
+    (agent-repl--boot-warn "  {module}.el: {cause}" :module (car pair) :cause (prin1-to-string (cdr pair))))
   (error "[agent-repl] FATAL: %d module(s) failed to load — see messages above"
          (length errors)))
 
@@ -623,7 +653,7 @@ load, never the daemon."
   ;; stub functions by redefining them, and a compile landing mid-suite
   ;; would race those stubs.
   (if noninteractive
-      (agent-repl--boot-info "bytecode: compile NOT scheduled batch=%s" noninteractive)
+      (agent-repl--boot-info "bytecode: compile NOT scheduled batch={batch}" :batch noninteractive)
     (agent-repl-bytecode-schedule
      (file-name-directory (or load-file-name buffer-file-name))
      (mapcar #'car agent-repl--elisp-module-builds))))

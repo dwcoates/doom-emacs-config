@@ -4,26 +4,80 @@ import { writeSync } from "node:fs";
 import { logTimestamp } from "../../../logging/ts/timestamp.js";
 import {
   expiryContext,
-  expiryMessage,
   LevelWindow,
   selectionContext,
   selectionNote,
   selectLevel,
   UNTIL_ENV,
+  WINDOW_SECONDS,
+  type LevelExpiry,
   type LevelSelection,
 } from "../../../logging/ts/level-window.js";
 import { isWarningsLevel } from "../../../logging/ts/warnings.js";
+import {
+  renderSite,
+  renderTemplate,
+  SiteTable,
+  type Literal,
+  type LogSite,
+  type LogValuesArg,
+} from "../../../logging/ts/logsite.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
 
+/** The runtime every shim site key is derived under. */
+export const SHIM_LOG_RUNTIME = "shim";
+
+/**
+ * One log method: FIELDS (the record's context evidence), then TEMPLATE, then
+ * the template's named values.
+ *
+ * TEMPLATE MUST BE A STRING LITERAL, and the compiler refuses anything else:
+ * the template is the site's summary and part of its key (the logger's scope,
+ * the template and the runtime, hashed), so a message built at run time would
+ * make every record its own site, and rewording a template gives its site a
+ * new key. A dynamic value goes in VALUES under a name the template writes as
+ * `{name}` (a literal brace is `{{` or `}}`); a missing or an extra value is a
+ * type error. Each value is rendered into the message and recorded in the
+ * record's context under its name. See logging-contract.md "Log sites".
+ */
+export interface ShimLogMethod {
+  <T extends string>(fields: LogFields, template: Literal<T>, ...values: LogValuesArg<T>): void;
+  /** Write MESSAGE, made by a caller's logger (`ShimLogger.message`), keyed under the caller's scope. */
+  (fields: LogFields, message: LogMessage): void;
+}
+
+/**
+ * A log message a helper writes ON ITS CALLER'S BEHALF: the caller's literal
+ * template and its named values, made with the CALLER's logger
+ * (`ShimLogger.message`) where the caller writes it. So the template is still
+ * a literal at a call the static scan reads, and the record is keyed by the
+ * caller's scope, never by the helper's, whichever logger writes it
+ * (`ShimLogger.log`) and at whichever level.
+ */
+export interface LogMessage {
+  readonly template: string;
+  readonly values: Readonly<Record<string, unknown>>;
+  /** The sites of the scope the message was written in. */
+  readonly sites: SiteTable;
+}
+
+/** MESSAGE's template rendered from its values: the text its record's message carries. */
+export function renderMessage(message: LogMessage): string {
+  return renderTemplate(message.template, message.values);
+}
+
 export interface ShimLogger {
-  debug(fields: LogFields, message: string): void;
-  info(fields: LogFields, message: string): void;
-  warn(fields: LogFields, message: string): void;
-  error(fields: LogFields, message: string): void;
+  /** The message written as TEMPLATE in this logger's scope, for a helper to write (LogMessage). */
+  message<T extends string>(template: Literal<T>, ...values: LogValuesArg<T>): LogMessage;
+  readonly debug: ShimLogMethod;
+  readonly info: ShimLogMethod;
+  readonly warn: ShimLogMethod;
+  readonly error: ShimLogMethod;
   /** A debug-level record whose verbose class only affects stderr mirroring. */
-  logVerbose(fields: LogFields, message: string): void;
+  readonly logVerbose: ShimLogMethod;
+  /** A logger of the same scope with FIELDS bound beside this one's. */
   with(fields: LogFields): ShimLogger;
 }
 
@@ -105,6 +159,11 @@ interface ShimLogRecord {
   level: LogLevel;
   verbosity: "normal" | "verbose";
   operation: string;
+  /** The call's site key (logsite.ts `siteKey`). */
+  site: string;
+  /** The call's unrendered template, the site's summary. */
+  template: string;
+  /** TEMPLATE rendered from the call's named values. */
   message: string;
   context: Record<string, unknown>;
   pid: number;
@@ -125,6 +184,10 @@ const RESERVED_FIELDS = new Set([
 const LOG_LEVEL_ENV = "AGENT_REPL_LOG_LEVEL";
 /** The operation of every level window record: the startup decision and a window that ended. */
 const LEVEL_WINDOW_OPERATION = "shim.logging.level-window";
+/** The sites this module's own records are written at. */
+const LOGGING_SITES = new SiteTable(SHIM_LOG_RUNTIME, "shim.logging");
+/** No named values: what a template without placeholders is rendered from. */
+const NO_VALUES: Readonly<Record<string, unknown>> = Object.freeze({});
 
 function requireString(fields: LogFields, field: string): string {
   const value = fields[field];
@@ -182,8 +245,49 @@ export function configureLog(config: ShimLogConfiguration): void {
   // as an 'error' event, not as a throw from write(). Without this listener it
   // is an uncaught exception and the shim dies mid-turn.
   process.stderr.on("error", (err: Error) => retireStderrMirror(err));
-  const note = selectionNote(selection);
-  if (note !== null) emit("info", "normal", { operation: LEVEL_WINDOW_OPERATION, ...selectionContext(selection) }, note);
+  noteLevelSelection(selection);
+}
+
+/**
+ * Record a startup level decision that did not hold the level asked for, as
+ * `selectionNote` words it (the shared level-window text), one site per
+ * outcome; a default or an honored window records nothing here.
+ */
+function noteLevelSelection(selection: LevelSelection): void {
+  if (selectionNote(selection) === null) return;
+  const fields = { operation: LEVEL_WINDOW_OPERATION, ...selectionContext(selection) };
+  // Quoted, as `selectionNote` quotes it: the value came from the environment.
+  const requested = JSON.stringify(selection.requested ?? "");
+  const until = selection.requestedUntil ?? "";
+  switch (selection.outcome) {
+    case "no_expiry":
+      internal("info", fields, "log level {requested} ignored without AGENT_REPL_LOG_LEVEL_UNTIL; starting at info", { requested });
+      return;
+    case "expired":
+      internal("info", fields, "log level {requested} ignored: its window ended at {until_text}; starting at info", { requested, until_text: until });
+      return;
+    case "beyond_window":
+      internal("info", fields, "log level {requested} ignored: its window ends at {until_text}, more than {window_seconds}s away; starting at info", { requested, until_text: until, window_seconds: WINDOW_SECONDS });
+      return;
+    case "default":
+    case "honored":
+      return;
+  }
+}
+
+/** Record that a level window ended, as `expiryMessage` words it. */
+function noteLevelExpiry(ended: LevelExpiry): void {
+  internal(
+    "info",
+    { operation: LEVEL_WINDOW_OPERATION, ...expiryContext(ended) },
+    "log level {from} window ended at {until_text}; reverted to info",
+    { from: ended.from, until_text: new Date(ended.untilMs).toISOString() },
+  );
+}
+
+/** Write one of this module's own records, at a "shim.logging" site. */
+function internal<T extends string>(level: LogLevel, fields: LogFields, template: Literal<T>, ...values: LogValuesArg<T>): void {
+  emit(level, "normal", LOGGING_SITES, fields, template, values[0] ?? NO_VALUES);
 }
 
 /**
@@ -193,7 +297,7 @@ export function configureLog(config: ShimLogConfiguration): void {
  */
 function levelEnabled(runtime: RuntimeContext, level: LogLevel): boolean {
   const { allowed, ended } = runtime.window.allows(level);
-  if (ended !== null) emit("info", "normal", { operation: LEVEL_WINDOW_OPERATION, ...expiryContext(ended) }, expiryMessage(ended));
+  if (ended !== null) noteLevelExpiry(ended);
   return allowed;
 }
 
@@ -227,7 +331,7 @@ function retireStderrMirror(cause: Error): void {
   const record = buildRecord("info", "normal", {
     operation: "shim.logging.stderr-mirror",
     cause: cause.message,
-  }, "stderr mirror RETIRED — the daemon that owned this pipe is gone; this shim keeps running and keeps logging durably, because a shim outlives its daemon by design");
+  }, LOGGING_SITES.site("stderr mirror RETIRED — the daemon that owned this pipe is gone; this shim keeps running and keeps logging durably, because a shim outlives its daemon by design"), NO_VALUES);
   try {
     writeDurable(runtime, "info", Buffer.from(`${JSON.stringify(record)}\n`, "utf8"));
   } catch (err) {
@@ -311,11 +415,13 @@ function buildRecord(
   level: LogLevel,
   verbosity: ShimLogRecord["verbosity"],
   fields: LogFields,
-  message: string,
+  site: LogSite,
+  values: Readonly<Record<string, unknown>>,
 ): ShimLogRecord {
   const runtime = requireContext();
   requireMethodLevel(fields);
   const operation = requireString(fields, "operation");
+  const message = renderSite(site, values);
   // NOTHING IS LOST BY THE MOVE. `workspace_id` now carries the fleet's own
   // identity, so the shim's md5 prefix -- the only thing that joins a record to
   // the workspace lock FILE on disk -- travels beside it as its own key.
@@ -323,9 +429,17 @@ function buildRecord(
   for (const [key, value] of Object.entries(fields)) {
     if (!RESERVED_FIELDS.has(key) && value !== undefined) context[key] = jsonSafe(value);
   }
+  // Each named value is recorded under its placeholder's name. A name the
+  // fields already state would leave the record two answers for one key.
+  for (const [name, value] of Object.entries(values)) {
+    if (RESERVED_FIELDS.has(name) || Object.hasOwn(fields, name)) {
+      throw new Error(`shim log template ${JSON.stringify(site.template)} names {${name}}, which the record's fields already state`);
+    }
+    context[name] = jsonSafe(value);
+  }
   const record: ShimLogRecord = {
     timestamp: logTimestamp(), runtime: "shim", level, verbosity,
-    operation, message, context, pid: process.pid,
+    operation, site: site.key, template: site.template, message, context, pid: process.pid,
     workspace_dir: runtime.workspace_dir, workspace_id: runtime.workspace_id,
     agent_repl_session_id: runtime.agent_repl_session_id,
     ...(runtime.claude_session_id === undefined ? {} : { claude_session_id: runtime.claude_session_id }),
@@ -336,9 +450,16 @@ function buildRecord(
   return record;
 }
 
-/** The only pre-logger/sink-failure escape hatch. It must never persist. */
-export function emergencyStderr(message: string): void {
+/**
+ * The only pre-logger/sink-failure escape hatch. It must never persist. Its
+ * TEMPLATE is a literal like every log call's (ShimLogMethod), keyed under
+ * the "shim.logging" scope.
+ */
+export function emergencyStderr<T extends string>(template: Literal<T>, ...values: LogValuesArg<T>): void {
   const runtime = runtimeContext;
+  const site = LOGGING_SITES.site(template);
+  const named: Readonly<Record<string, unknown>> = values[0] ?? NO_VALUES;
+  const message = renderSite(site, named);
   // NOT GATED ON THE MIRROR. The mirror is retired for ROUTINE records, which
   // are a convenience copy of what fd 3 already holds; an emergency is the
   // opposite case -- fd 3 is exactly what has failed, so this is the only
@@ -355,8 +476,10 @@ export function emergencyStderr(message: string): void {
     level: "error",
     verbosity: "normal",
     operation: "shim.logging.emergency",
+    site: site.key,
+    template: site.template,
     message,
-    context: {},
+    context: Object.fromEntries(Object.entries(named).map(([name, value]) => [name, jsonSafe(value)])),
     pid: process.pid,
     ...(runtime === undefined ? {} : {
       workspace_dir: runtime.workspace_dir,
@@ -407,7 +530,7 @@ export function onLogSinkPoisoned(listener: (cause: Error) => void): () => void 
 function poisonSink(runtime: RuntimeContext, failure: Error): void {
   if (runtime.poisoned !== undefined) return;
   runtime.poisoned = failure;
-  emergencyStderr(`shim log sink is POISONED and records are being lost: ${failure.message}`);
+  emergencyStderr("shim log sink is POISONED and records are being lost: {failure}", { failure: failure.message });
   for (const listener of poisonListeners) listener(failure);
 }
 
@@ -431,9 +554,8 @@ export function noteSlowWrite(sink: string, bytes: number, blockedMs: number, fi
   if (blockedMs < SLOW_SYNC_WRITE_MS || reportingSlowWrite) return;
   reportingSlowWrite = true;
   try {
-    emit(
+    internal(
       "info",
-      "normal",
       { component: "shim-logging", operation: "shim.logging.slow-write", ...fields, sink, bytes, blocked_ms: Math.round(blockedMs) },
       "a synchronous write held the shim's event loop",
     );
@@ -442,9 +564,16 @@ export function noteSlowWrite(sink: string, bytes: number, blockedMs: number, fi
   }
 }
 
-function emit(level: LogLevel, verbosity: ShimLogRecord["verbosity"], fields: LogFields, message: string): void {
+function emit(
+  level: LogLevel,
+  verbosity: ShimLogRecord["verbosity"],
+  sites: SiteTable,
+  fields: LogFields,
+  template: string,
+  values: Readonly<Record<string, unknown>>,
+): void {
   // Construct and serialize completely before either sink is touched: invalid records emit nowhere.
-  const record = buildRecord(level, verbosity, fields, message);
+  const record = buildRecord(level, verbosity, fields, sites.site(template), values);
   const runtime = requireContext();
   if (!levelEnabled(runtime, level)) return;
   const bytes = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
@@ -492,15 +621,39 @@ function writeDurable(runtime: RuntimeContext, level: LogLevel, bytes: Buffer): 
   }
 }
 
+/** A logger of one static scope, with its bound fields. */
 class BoundShimLogger implements ShimLogger {
-  constructor(private readonly fields: LogFields) {}
-  debug(fields: LogFields, message: string): void { emit("debug", "normal", { ...this.fields, ...fields }, message); }
-  info(fields: LogFields, message: string): void { emit("info", "normal", { ...this.fields, ...fields }, message); }
-  warn(fields: LogFields, message: string): void { emit("warn", "normal", { ...this.fields, ...fields }, message); }
-  error(fields: LogFields, message: string): void { emit("error", "normal", { ...this.fields, ...fields }, message); }
-  logVerbose(fields: LogFields, message: string): void { emit("debug", "verbose", { ...this.fields, ...fields }, message); }
-  with(fields: LogFields): ShimLogger { return new BoundShimLogger({ ...this.fields, ...fields }); }
+  constructor(
+    private readonly sites: SiteTable,
+    private readonly fields: LogFields,
+  ) {}
+  private method(level: LogLevel, verbosity: ShimLogRecord["verbosity"]): ShimLogMethod {
+    return (fields: LogFields, said: string | LogMessage, ...values: [Readonly<Record<string, unknown>>?]): void => {
+      const bound = { ...this.fields, ...fields };
+      if (typeof said === "string") emit(level, verbosity, this.sites, bound, said, values[0] ?? NO_VALUES);
+      else emit(level, verbosity, said.sites, bound, said.template, said.values);
+    };
+  }
+  readonly debug = this.method("debug", "normal");
+  readonly info = this.method("info", "normal");
+  readonly warn = this.method("warn", "normal");
+  readonly error = this.method("error", "normal");
+  readonly logVerbose = this.method("debug", "verbose");
+  message<T extends string>(template: Literal<T>, ...values: LogValuesArg<T>): LogMessage {
+    return { template, values: values[0] ?? NO_VALUES, sites: this.sites };
+  }
+  with(fields: LogFields): ShimLogger { return new BoundShimLogger(this.sites, { ...this.fields, ...fields }); }
 }
 
-/** Bind component and stable-operation context without mutating global state. */
-export function bindLog(fields: LogFields): ShimLogger { return new BoundShimLogger({ ...fields }); }
+/**
+ * The logger of SCOPE, with FIELDS (component and stable-operation context)
+ * bound, without mutating global state.
+ *
+ * SCOPE IS A STRING LITERAL, one per logger in the whole shim (a test holds
+ * them unique): it stands in for the function a Go call is keyed by, since
+ * a TypeScript call has no caller to read at run time, so it is part of every
+ * site key the logger's calls derive. Renaming it re-keys every one of them.
+ */
+export function bindLog<S extends string>(scope: Literal<S>, fields: LogFields): ShimLogger {
+  return new BoundShimLogger(new SiteTable(SHIM_LOG_RUNTIME, scope), { ...fields });
+}

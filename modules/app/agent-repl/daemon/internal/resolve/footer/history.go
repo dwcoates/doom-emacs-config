@@ -3,6 +3,7 @@ package footer
 import (
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -29,7 +30,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	if !pageCarriesAConversation(page) {
 		return
 	}
-	r.mutate(ws, "daemon.footer.history_page", "the replayed history page says a turn has already run",
+	r.mutate(ws, "daemon.footer.history_page", logsite.Msg("the replayed history page says a turn has already run"),
 		dlog.Context{"agent_id": agent.GetValue(), "entries": len(page.GetEntries())}, func(s *wsState) {
 			s.turnEverRan = true
 			r.restoreLastTurn(ws, s, agent, page)

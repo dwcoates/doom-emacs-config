@@ -30,12 +30,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--global-state-file "core" (relative))
 (declare-function agent-repl--when-minibuffer-free "workspace" (scope label key fn))
 (declare-function agent-repl-verbs--read-required-prompt "verbs" (prompt-text refusal &optional history-file))
@@ -78,14 +79,14 @@ frame follows once its workspace is open."
     (unless conn
       (agent-repl--warn agent-repl-threads--log-scope "elisp.threads.create-unsent reason=no-daemon")
       (user-error "agent-repl: no daemon is connected to start the thread"))
-    (agent-repl--info agent-repl-threads--log-scope "elisp.threads.create chars=%d" (length question))
+    (agent-repl--info agent-repl-threads--log-scope "elisp.threads.create chars={chars}" :chars (length question))
     (message "[agent-repl] Starting a thread…")
     (agent-repl-rpc-create-thread
      conn (list :question question)
      :on-response #'agent-repl-threads--created
      :on-failure
      (lambda (failure)
-       (agent-repl--error agent-repl-threads--log-scope "elisp.threads.create-failed failure=%S" failure)
+       (agent-repl--error agent-repl-threads--log-scope "elisp.threads.create-failed failure={failure}" :failure (prin1-to-string failure))
        (message "[agent-repl] The thread was not started: the daemon could not be reached")))))
 
 (defun agent-repl-threads--created (response)
@@ -94,17 +95,17 @@ frame follows once its workspace is open."
     (:success
      (let* ((ref (plist-get (plist-get response :value) :thread))
             (name (file-name-nondirectory (directory-file-name (plist-get ref :dir)))))
-       (agent-repl--info agent-repl-threads--log-scope "elisp.threads.created id=%s name=%s"
-                         (plist-get ref :id) name)
+       (agent-repl--info agent-repl-threads--log-scope "elisp.threads.created id={id} name={name}"
+                         :id (plist-get ref :id) :name name)
        (message "[agent-repl] Thread %s started" name)))
     (:error
      (let* ((cause (plist-get (plist-get response :value) :cause))
             (detail (plist-get (plist-get cause :value) :detail)))
-       (agent-repl--warn agent-repl-threads--log-scope "elisp.threads.create-refused arm=%S detail=%s"
-                         (plist-get cause :arm) detail)
+       (agent-repl--warn agent-repl-threads--log-scope "elisp.threads.create-refused arm={arm} detail={detail}"
+                         :arm (prin1-to-string (plist-get cause :arm)) :detail detail)
        (message "[agent-repl] The thread was not started: %s" detail)))
     (arm
-     (agent-repl--error agent-repl-threads--log-scope "elisp.threads.create-unknown-arm arm=%S" arm)
+     (agent-repl--error agent-repl-threads--log-scope "elisp.threads.create-unknown-arm arm={arm}" :arm (prin1-to-string arm))
      (message "[agent-repl] The daemon answered the new thread with %S" arm))))
 
 (defun agent-repl-thread-requested ()
@@ -136,7 +137,7 @@ With no open thread the press is refused before the question is read."
                      (format "Ask %s: " thread) "a question to a thread must not be blank"
                      (agent-repl-threads--history-file))))
       (agent-repl--info agent-repl-threads--log-scope
-                        "elisp.threads.background-send thread=%s chars=%d" thread (length question))
+                        "elisp.threads.background-send thread={thread} chars={chars}" :thread thread :chars (length question))
       (agent-repl--send :command-thread-background question thread)
       (message "[agent-repl] Asked %s" thread))))
 
@@ -149,8 +150,8 @@ A thread is visible only while it is the selection
 workspace here yet: the switch is requested by its ref, and the roster
 push that marks it selected opens it
 \(`agent-repl-host-request-switch-ref')."
-  (agent-repl--info agent-repl-threads--log-scope "elisp.threads.open id=%s name=%s trigger=%s"
-                    (plist-get (plist-get row :thread) :id) (plist-get row :name) trigger)
+  (agent-repl--info agent-repl-threads--log-scope "elisp.threads.open id={id} name={name} trigger={trigger}"
+                    :id (plist-get (plist-get row :thread) :id) :name (plist-get row :name) :trigger trigger)
   (agent-repl-host-request-switch-ref (plist-get row :thread) trigger))
 
 (defun agent-repl-thread-recent ()
@@ -204,7 +205,7 @@ push that marks it selected opens it
 Both run once `find-file' has finished with the buffer, which a mode
 function cannot kill from inside it."
   (let ((buffer (current-buffer)))
-    (agent-repl--info agent-repl-threads--log-scope "elisp.threads.launched file=%s" buffer-file-name)
+    (agent-repl--info agent-repl-threads--log-scope "elisp.threads.launched file={file}" :file buffer-file-name)
     (run-at-time 0 nil (lambda ()
                          (when (buffer-live-p buffer) (kill-buffer buffer))
                          (agent-repl-thread-recent-when-ready)))))

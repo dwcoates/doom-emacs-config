@@ -82,11 +82,11 @@ A ref id names the workspace of the same name."
            (agent-repl-test-open-tabs--noted-at-show nil)
            (agent-repl-test-open-tabs--buffer (generate-new-buffer " *open-tabs-page*")))
        (unwind-protect
-           (cl-letf (((symbol-function 'agent-repl--phase-echo)
+           (cl-letf (((symbol-function 'agent-repl--emit-phase-echo)
                       (lambda (_ws fmt &rest args)
                         (setq agent-repl-test-open-tabs--lines
                               (append agent-repl-test-open-tabs--lines
-                                      (list (apply #'format fmt args))))))
+                                      (list (agent-repl-log-site-render fmt args))))))
                      ((symbol-function 'agent-repl--ws-by-ref-id) #'identity)
                      ((symbol-function 'agent-repl--ws-get)
                       (lambda (ws key)
@@ -325,7 +325,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   (agent-repl-test-open-tabs--with
     (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                (lambda (_ws) (error "the host would not start")))
-              ((symbol-function 'agent-repl--error) #'ignore))
+              ((symbol-function 'agent-repl--emit-error) #'ignore))
       ;; Act
       (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")))
     ;; Assert
@@ -337,7 +337,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (let (errors)
       (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                  (lambda (_ws) (error "the host would not start")))
-                ((symbol-function 'agent-repl--error)
+                ((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")))
@@ -350,7 +350,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                (lambda (ws) (if (equal ws "a") (error "the host would not start")
                               (push ws agent-repl-test-open-tabs--paged))))
-              ((symbol-function 'agent-repl--error) #'ignore))
+              ((symbol-function 'agent-repl--emit-error) #'ignore))
       ;; Act
       (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
                                        (agent-repl-test-open-tabs--row "b")))
@@ -472,7 +472,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A held row is collapsed only when hidden: a folded one off the bar is a broken contract."
   (agent-repl-test-open-tabs--with
     (let (fatals)
-      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+      (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
         (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
@@ -678,7 +678,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A refusal is recorded at ERROR."
   (agent-repl-test-open-tabs--with
     (let (errors)
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -709,7 +709,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A handover refusal is the rollout's ordering, so nothing is recorded at ERROR."
   (agent-repl-test-open-tabs--with
     (let (errors)
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -722,7 +722,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
   "A handover refusal is recorded at INFO with its cause."
   (agent-repl-test-open-tabs--with
     (let (infos)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -881,7 +881,7 @@ named daemon, so no walk is started."
       ;; Arrange
       (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
       (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-open-tabs--on-reattached "a"))
@@ -1185,7 +1185,7 @@ leaves the tab open."
   "The landing is recorded at INFO with the source that decided it."
   (agent-repl-test-open-tabs--with
     (let (infos)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Arrange
         (agent-repl-test-open-tabs--selected-before "b")
@@ -1200,7 +1200,7 @@ leaves the tab open."
   "With no selection before the restart, the landing record names `first-drawn'."
   (agent-repl-test-open-tabs--with
     (let (infos)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -1471,7 +1471,7 @@ leaves the tab open."
   "A frame arm this build does not know is recorded at ERROR."
   (agent-repl-test-open-tabs--with
     (let (errors)
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))

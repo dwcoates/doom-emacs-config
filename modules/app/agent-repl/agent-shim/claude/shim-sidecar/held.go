@@ -90,8 +90,7 @@ func (s *sidecar) flushCatchupSummaries(nowMs int64) {
 		s.log.With(logging.Context{
 			Operation: "catchup-summary", Level: "info",
 			Reason: "workspace_unattributed", Repeat: logging.Repeat(s.catchupWorkspaces.count),
-		}).Log("startup catch-up held %d pre-existing transcript(s) without workspace attribution; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
-			s.catchupWorkspaces.count, age)
+		}).Log("startup catch-up held {count} pre-existing transcript(s) without workspace attribution; the oldest was last written {age} ago — these predate this sidecar and are summarized here, not stated one by one", logging.Values{"count": s.catchupWorkspaces.count, "age": age.String()})
 		s.catchupWorkspaces.reset()
 	}
 	if s.catchupSpools.count > 0 {
@@ -99,8 +98,7 @@ func (s *sidecar) flushCatchupSummaries(nowMs int64) {
 		s.log.With(logging.Context{
 			Operation: "catchup-summary", Level: "info",
 			Reason: reasonSpoolUnclaimed, Repeat: logging.Repeat(s.catchupSpools.count),
-		}).Log("startup catch-up left %d pre-existing unclaimed spool(s) unread; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
-			s.catchupSpools.count, age)
+		}).Log("startup catch-up left {count} pre-existing unclaimed spool(s) unread; the oldest was last written {age} ago — these predate this sidecar and are summarized here, not stated one by one", logging.Values{"count": s.catchupSpools.count, "age": age.String()})
 		s.catchupSpools.reset()
 	}
 	if s.catchupBookConflicts.count > 0 {
@@ -108,8 +106,7 @@ func (s *sidecar) flushCatchupSummaries(nowMs int64) {
 		s.log.With(logging.Context{
 			Operation: "catchup-summary", Level: "info",
 			Reason: "legacy_book_conflict", Repeat: logging.Repeat(s.catchupBookConflicts.count),
-		}).Log("startup catch-up skipped %d pre-existing record(s) the store already holds under a different book; the oldest was last written %s ago — re-ingesting already-stored content is idempotent, so these are kept as-is and summarized here, not stated one by one",
-			s.catchupBookConflicts.count, age)
+		}).Log("startup catch-up skipped {count} pre-existing record(s) the store already holds under a different book; the oldest was last written {age} ago — re-ingesting already-stored content is idempotent, so these are kept as-is and summarized here, not stated one by one", logging.Values{"count": s.catchupBookConflicts.count, "age": age.String()})
 		s.catchupBookConflicts.reset()
 	}
 }
@@ -174,12 +171,12 @@ func (h *heldSpools) hold(path string, now time.Time) (lapsedNow bool) {
 	if !seen {
 		h.firstSeen[path] = now
 		h.log.With(logging.Context{Operation: "hold-spool", Path: path}).
-			Log("spool held: no spawning call has claimed it yet, so it is re-checked every rescan and not read")
+			Log("spool held: no spawning call has claimed it yet, so it is re-checked every rescan and not read", nil)
 		return false
 	}
 	if now.Sub(first) < h.window || h.lapsed[path] {
 		h.log.With(logging.Context{Operation: "hold-spool", Path: path}).
-			LogVerbose("spool still held after %s", now.Sub(first))
+			LogVerbose("spool still held after {held_for}", logging.Values{"held_for": now.Sub(first).String()})
 		return false
 	}
 	h.lapsed[path] = true
@@ -193,18 +190,18 @@ func (h *heldSpools) release(path string) {
 	}
 	delete(h.firstSeen, path)
 	delete(h.lapsed, path)
-	h.log.With(logging.Context{Operation: "hold-spool", Path: path}).Log("spool released: its spawning call was observed")
+	h.log.With(logging.Context{Operation: "hold-spool", Path: path}).Log("spool released: its spawning call was observed", nil)
 }
 
 // skip states, once per path, that a spool is never read and why.
 func (h *heldSpools) skip(target discover.Target, reason, why string) {
 	bound := h.log.With(logging.Context{Operation: "spool-skip", Path: target.Path, TaskID: target.TaskID, Reason: reason})
 	if h.skipped[target.Path] {
-		bound.LogVerbose("spool still not read; the decision was already stated for this path")
+		bound.LogVerbose("spool still not read; the decision was already stated for this path", nil)
 		return
 	}
 	h.skipped[target.Path] = true
-	bound.Log("spool not read: %s", why)
+	bound.Log("spool not read: {why}", logging.Values{"why": why})
 }
 
 // unrenderedSpool answers whether a spool is never read whoever claims it, and
@@ -222,7 +219,7 @@ func (s *sidecar) unrenderedSpool(target discover.Target) (reason, why string, s
 			}
 			s.log.With(logging.Context{
 				Operation: "spool-skip", Path: target.Path, TaskID: target.TaskID, Level: "warn",
-			}).Log("not reading this agent spool yet: whether it is a link to the agent's own transcript could not be established, and reading a link would copy that transcript twice: %v", err)
+			}).Log("not reading this agent spool yet: whether it is a link to the agent's own transcript could not be established, and reading a link would copy that transcript twice: {cause}", logging.Values{"cause": err.Error()})
 			return "", "", false, false
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -268,13 +265,13 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 		if target.WorkspaceDir == "" || target.WorkspaceID == "" || target.ClaudeSessionID == "" {
 			s.log.With(logging.Context{
 				Operation: "resolve-spool-workspace", Path: target.Path, TaskID: target.TaskID, Level: "error",
-			}).Log("spool owner carries no complete workspace/session attribution; the spool is not watched")
+			}).Log("spool owner carries no complete workspace/session attribution; the spool is not watched", nil)
 			return discover.Target{}, false
 		}
 		s.log.With(logging.Context{
 			Operation: "spool-claim", Path: target.Path, TaskID: target.TaskID, ActivityID: obs.activityID,
 			WorkspaceDir: target.WorkspaceDir, WorkspaceID: target.WorkspaceID, ClaudeSessionID: target.ClaudeSessionID,
-		}).Log("spool claimed by its spawning call: it is read as %s for the rows that call's run renders", target.Kind)
+		}).Log("spool claimed by its spawning call: it is read as {target_kind} for the rows that call's run renders", logging.Values{"target_kind": target.Kind.String()})
 		return target, true
 	}
 	s.noteUnclaimedShell(target)
@@ -292,14 +289,14 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 		// stated per file.
 		s.catchupSpools.add(mtimeMs)
 		s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Reason: reasonSpoolUnclaimed, Level: "debug"}).
-			LogVerbose("spool unclaimed after %s during startup catch-up: nothing renders it, so it is not read; it is summarized rather than stated on its own", s.held.window)
+			LogVerbose("spool unclaimed after {window} during startup catch-up: nothing renders it, so it is not read; it is summarized rather than stated on its own", logging.Values{"window": s.held.window.String()})
 		return discover.Target{}, false
 	}
 	// A spool that appeared while the sidecar was already running and then
 	// aged out unclaimed is a newly-arising condition, stated per file. It is
 	// INFO, not WARN: not reading what nothing renders is the rule working.
 	s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Reason: reasonSpoolUnclaimed, Level: "info"}).
-		Log("spool unclaimed after %s: nothing renders it, so it is not read; it stays held and is read from its start if a spawning call claims it later", s.held.window)
+		Log("spool unclaimed after {window}: nothing renders it, so it is not read; it stays held and is read from its start if a spawning call claims it later", logging.Values{"window": s.held.window.String()})
 	return discover.Target{}, false
 }
 
@@ -345,7 +342,7 @@ func (s *sidecar) awaitFirstCWD(key string, target discover.Target, err error) b
 	if since, pending := s.firstCWDPending[key]; pending {
 		if now.Sub(since) < FirstCWDWindow {
 			ctx.Level = "debug"
-			s.log.With(ctx).LogVerbose("transcript still held until its first cwd-bearing record is written, %s after it was first seen: %v", now.Sub(since), err)
+			s.log.With(ctx).LogVerbose("transcript still held until its first cwd-bearing record is written, {held_for} after it was first seen: {cause}", logging.Values{"held_for": now.Sub(since).String(), "cause": err.Error()})
 			return true
 		}
 		delete(s.firstCWDPending, key)
@@ -356,7 +353,7 @@ func (s *sidecar) awaitFirstCWD(key string, target discover.Target, err error) b
 	}
 	s.firstCWDPending[key] = now
 	ctx.Level = "info"
-	s.log.With(ctx).Log("transcript held until its first cwd-bearing record is written; the vendor writes a cwd-less queue line first, so it is re-read every rescan and warned only if it still has no cwd after %s: %v", FirstCWDWindow, err)
+	s.log.With(ctx).Log("transcript held until its first cwd-bearing record is written; the vendor writes a cwd-less queue line first, so it is re-read every rescan and warned only if it still has no cwd after {first_cwd_window}: {cause}", logging.Values{"first_cwd_window": FirstCWDWindow.String(), "cause": err.Error()})
 	return true
 }
 
@@ -379,7 +376,7 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 				// re-checks the transcript every pass, so restating it here is
 				// exactly the per-pass flood this leveling exists to prevent.
 				ctx.Level = "debug"
-				s.log.With(ctx).LogVerbose("transcript still held without workspace attribution: %v", err)
+				s.log.With(ctx).LogVerbose("transcript still held without workspace attribution: {cause}", logging.Values{"cause": err.Error()})
 				return discover.Target{}, false
 			}
 			firstFailure := s.workspaceFailures[key] == ""
@@ -393,7 +390,7 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 				// while the sidecar runs steady-state warns per item.
 				s.catchupWorkspaces.add(mtimeMs)
 				ctx.Level = "debug"
-				s.log.With(ctx).LogVerbose("transcript held without workspace attribution during startup catch-up; it is summarized rather than stated on its own: %v", err)
+				s.log.With(ctx).LogVerbose("transcript held without workspace attribution during startup catch-up; it is summarized rather than stated on its own: {cause}", logging.Values{"cause": err.Error()})
 				return discover.Target{}, false
 			}
 			if errors.Is(err, fs.ErrNotExist) {
@@ -413,10 +410,10 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 				// directory was removed at 14:37.
 				ctx.Level = "info"
 				ctx.Reason = reasonTranscriptVanished
-				s.log.With(ctx).Log("the transcript was gone before its first byte could be read, so there is no workspace to attribute and nothing was skipped: %v", err)
+				s.log.With(ctx).Log("the transcript was gone before its first byte could be read, so there is no workspace to attribute and nothing was skipped: {cause}", logging.Values{"cause": err.Error()})
 				return discover.Target{}, false
 			}
-			s.log.With(ctx).Log("transcript held: workspace attribution is required before any bytes are read: %v", err)
+			s.log.With(ctx).Log("transcript held: workspace attribution is required before any bytes are read: {cause}", logging.Values{"cause": err.Error()})
 			return discover.Target{}, false
 		}
 		dir, id := attribution.Dir, attribution.ID
@@ -431,12 +428,12 @@ func (s *sidecar) resolveTranscriptWorkspace(target discover.Target) (discover.T
 				Operation: "resolve-transcript-workspace", Path: target.Path,
 				WorkspaceDir: dir, WorkspaceID: id, ClaudeSessionID: target.SessionID,
 				Reason: reasonFirstCWDFallback, Level: "info",
-			}).Log("no cwd in the transcript encodes to the project folder it lives in, so it is attributed to its first cwd")
+			}).Log("no cwd in the transcript encodes to the project folder it lives in, so it is attributed to its first cwd", nil)
 		} else {
 			s.log.With(logging.Context{
 				Operation: "resolve-transcript-workspace", Path: target.Path,
 				WorkspaceDir: dir, WorkspaceID: id, ClaudeSessionID: target.SessionID,
-			}).LogVerbose("workspace attribution resolved from the main transcript")
+			}).LogVerbose("workspace attribution resolved from the main transcript", nil)
 		}
 	}
 	if workspace.dir == "" || workspace.id == "" {

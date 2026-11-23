@@ -11,6 +11,9 @@ import { FeedIdSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawStopControl, INTERRUPT_OUTCOME_MS, type StopSite } from "../../src/feed/stop-control.js";
 import { harness, rowContext, subagentRow, type Harness } from "./harness.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { createLogger } from "../../src/log.js";
+
+const log = createLogger("webapp.test.feed.stop-control");
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -25,7 +28,7 @@ const SITE: StopSite = {
   prefix: "test-stop",
   operation: "feed.test-stop",
   refusedOperation: "feed.test-stop-refused",
-  describe: "stopping the test's work",
+  describe: log.message("stopping the test's work"),
   malformedOperation: "feed.test-stop-malformed",
   request: (workspace, target) =>
     create(InterruptRequestSchema, { workspace, target: { case: "detached", value: target } }),

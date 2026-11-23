@@ -23,10 +23,12 @@ import {
   SendLoginInputResponseSchema,
   type SendLoginInputResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_send_login_input_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { assertNoUnknownFields } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+
+const log = createLogger("webapp.login.link");
 
 export interface LoginLink {
   /** The pty's output, until the `closed` frame. SIGNAL ends it early. */
@@ -61,10 +63,10 @@ export function connectLoginLink(ctx: AppContext): LoginLink {
     },
 
     sendResize(rows: number, cols: number): Promise<SendLoginInputResponse> {
-      log.debug(`reporting the login terminal geometry ${rows}x${cols}`, {
+      log.debug("reporting the login terminal geometry {rows}x{cols}", {
         operation: "login.resize",
-        context: { rows, cols },
-      });
+        context: {},
+      }, { rows, cols });
       return callUnary(
         ctx,
         "SendLoginInput",

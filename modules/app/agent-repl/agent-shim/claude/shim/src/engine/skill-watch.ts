@@ -35,7 +35,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { bindLog } from "../log.js";
 
-const LOGGER = bindLog({ component: "shim-skill-watch", operation: "shim.engine.skill_watch" });
+const LOGGER = bindLog("shim.engine.skill-watch", { component: "shim-skill-watch", operation: "shim.engine.skill_watch" });
 
 /** The file of a skill that names and describes it in the catalog. */
 export const SKILL_FILE = "SKILL.md";

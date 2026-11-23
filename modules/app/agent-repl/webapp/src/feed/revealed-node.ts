@@ -11,9 +11,11 @@
  * node.
  */
 import type { FeedSelection } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { standingBox, type BoxedNode } from "./subtree-box.js";
+
+const log = createLogger("webapp.feed.revealed-node");
 
 /** The class every line of the revealed node's box wears. */
 export const REVEALED_NODE_CLASS = "mp-line-revealed";

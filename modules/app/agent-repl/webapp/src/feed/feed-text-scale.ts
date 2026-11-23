@@ -36,11 +36,13 @@
  * budget while the glide runs; and whatever drew to the scale is told again
  * when the glide ends, to wrap to the size it settled at.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { perDocument } from "../per-document.js";
 import { pagePresence, type Presence } from "../presence.js";
 import { pageRestyleTurns, type RestyleTurns } from "../host/restyle-turn.js";
 import { createListeners } from "../listeners.js";
+
+const log = createLogger("webapp.feed.feed-text-scale");
 
 /** The custom property every feed font-size multiplies into. */
 export const FEED_TEXT_SCALE_PROPERTY = "--feed-text-scale";

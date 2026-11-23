@@ -12,9 +12,11 @@
  * before the import (document.ts `startWebhostRuntime`), and every stage of
  * the boot and its failure is recorded through them.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { startWebhostRuntime, type WebhostDocument, type WebhostRuntime } from "./document.js";
 import { errorCause } from "../error-cause.js";
+
+const log = createLogger("webapp.host.boot");
 
 /** What the boot may have injected, for a suite that drives it. */
 export interface BootWebhostDeps {
@@ -49,10 +51,10 @@ export async function bootWebhostDocument<Code, Started>(
     code = await load();
   } catch (err) {
     const cause = errorCause(err);
-    log.error(`the document's code failed to import: ${cause}`, {
+    log.error("the document's code failed to import: {cause}", {
       operation: "webhost.boot-import-failed",
-      context: { cause },
-    });
+      context: {},
+    }, { cause });
     throw err;
   }
   log.info("the document's code imported; starting it", {
@@ -63,10 +65,10 @@ export async function bootWebhostDocument<Code, Started>(
     return start(code, runtime);
   } catch (err) {
     const cause = errorCause(err);
-    log.error(`the document failed to start: ${cause}`, {
+    log.error("the document failed to start: {cause}", {
       operation: "webhost.boot-failed",
-      context: { cause },
-    });
+      context: {},
+    }, { cause });
     throw err;
   }
 }

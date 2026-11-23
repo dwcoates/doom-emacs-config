@@ -64,7 +64,7 @@ const (
 func (c *Converter) BashTail(at Attribution, run, text string, bytesOmitted, linesOmitted uint64) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("bash-tail")).With(logging.Context{
 		ActivityID: run, UpsertKey: BashTailKey(run), Offset: logging.Off(at.Offset),
-	}).LogVerbose("spool tail bytes=%d bytes_omitted=%d lines_omitted=%d", len(text), bytesOmitted, linesOmitted)
+	}).LogVerbose("spool tail bytes={text_length} bytes_omitted={bytes_omitted} lines_omitted={lines_omitted}", logging.Values{"text_length": len(text), "bytes_omitted": bytesOmitted, "lines_omitted": linesOmitted})
 	return BashRun(at, "bash_tail", BashTailKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{
 			Text:         text,
@@ -83,7 +83,7 @@ func (c *Converter) BashTail(at Attribution, run, text string, bytesOmitted, lin
 // staleness sweep eventually — and wrongly — calls it LOST.
 func (c *Converter) BashExited(at Attribution, run, output string, omitted uint64, code int) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("bash-exit")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
-		Log("EXIT=%d observed on disk; the run ends on evidence rather than on a silence timeout", code)
+		Log("EXIT={code} observed on disk; the run ends on evidence rather than on a silence timeout", logging.Values{"code": code})
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
@@ -106,7 +106,7 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 // person's decision.
 func (c *Converter) BashKilled(at Attribution, run, output string, omitted uint64) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("bash-killed")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
-		Log("[killed] observed on disk; the run ends on evidence rather than on a silence timeout, with no status the shell reported")
+		Log("[killed] observed on disk; the run ends on evidence rather than on a silence timeout, with no status the shell reported", nil)
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
@@ -131,11 +131,10 @@ func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64,
 	bound := c.log.With(lostCtx(at, "bash-lost", catchup, reason)).With(logging.Context{
 		ActivityID: run, UpsertKey: BashTerminalKey(run), Reason: string(reason),
 	})
-	line := "the detached run is LOST (%s); it resolves interrupted with cause=lost naming that arm, output_observed=%t"
 	if catchup {
-		bound.LogVerbose(line, reason, observed)
+		bound.LogVerbose("the detached run is LOST ({reason}); it resolves interrupted with cause=lost naming that arm, output_observed={observed}", logging.Values{"reason": string(reason), "observed": observed})
 	} else {
-		bound.Log(line, reason, observed)
+		bound.Log("the detached run is LOST ({reason}); it resolves interrupted with cause=lost naming that arm, output_observed={observed} (a live observation, not catch-up)", logging.Values{"reason": string(reason), "observed": observed})
 	}
 	return BashLostEntry(at, run, output, omitted, reason, observed)
 }
@@ -209,7 +208,7 @@ func BashLostEntry(at Attribution, run, output string, omitted uint64, reason Lo
 // stopped.
 func (c *Converter) BashCancelled(at Attribution, run, output string, omitted uint64, settledAtMs int64, observed bool) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("bash-cancelled")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
-		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user, output_observed=%t carrying %d byte(s)", observed, len(output))
+		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user, output_observed={observed} carrying {output_length} byte(s)", logging.Values{"observed": observed, "output_length": len(output)})
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			// NO START IS RESTATED: this is the detached run's own terminal,
@@ -255,8 +254,7 @@ func (c *Converter) BashNotified(at Attribution, run, output string, omitted uin
 		}}
 	}
 	c.log.With(at.ctxFor("bash-notified")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
-		Log("the vendor's task notification (status=%q) ended the detached run and its spool carried no terminator; it resolves %s with no exit status, output_observed=%t carrying %d byte(s)",
-			status, arm, observed, len(output))
+		Log("the vendor's task notification (status=\"{status}\") ended the detached run and its spool carried no terminator; it resolves {arm} with no exit status, output_observed={observed} carrying {output_length} byte(s)", logging.Values{"status": status, "arm": arm, "observed": observed, "output_length": len(output)})
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: success},
 	})
@@ -307,7 +305,7 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		// DOES name a task but whose launch this stream never opened stays warn
 		// below — that is a pointier "expected-but-absent launch" signal.)
 		c.log.With(at.ctxFor("task-stop")).
-			LogVerbose("TaskStop result names no task; the stop cannot be attributed and the record is classified as vendor_specific residue")
+			LogVerbose("TaskStop result names no task; the stop cannot be attributed and the record is classified as vendor_specific residue", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unattributed", result)}
 	}
 
@@ -348,18 +346,18 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 			switch owner, foreign := c.foreignSpawns[taskID]; {
 			case foreign:
 				c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID}).
-					LogVerbose("TaskStop names an agent task session %s launched, so its launch was written to that session's transcript and never to this one; the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue", owner)
+					LogVerbose("TaskStop names an agent task session {owner} launched, so its launch was written to that session's transcript and never to this one; the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue", logging.Values{"owner": owner})
 			case c.resumedMidFile():
 				c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, Offset: logging.Off(c.joinedOffset)}).
-					LogVerbose("TaskStop names an agent task whose launch lies before this reader joined the file, so the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue")
+					LogVerbose("TaskStop names an agent task whose launch lies before this reader joined the file, so the spawn unit it settles cannot be identified here and the record is classified as vendor_specific residue", nil)
 			default:
 				c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
-					Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is classified as vendor_specific residue")
+					Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is classified as vendor_specific residue", nil)
 			}
 			return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unlaunched", result)}
 		}
 		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: run, UpsertKey: ActivityKey(run)}).
-			Log("TaskStop consumed as the CANCELLED terminal of an agent task")
+			Log("TaskStop consumed as the CANCELLED terminal of an agent task", nil)
 		c.observer.TaskConcluded(taskID)
 		activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
@@ -382,7 +380,7 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		// it does for a LOST conclusion. Reporting is the whole conversion: the
 		// TaskStop call is dropped either way, so this record produces no entry.
 		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID}).
-			Log("TaskStop reported to owner resolution as the CANCELLED terminal of a shell run; the spool's reader mints it with the output it holds")
+			Log("TaskStop reported to owner resolution as the CANCELLED terminal of a shell run; the spool's reader mints it with the output it holds", nil)
 		c.observer.TaskStopped(taskID)
 		return nil
 	}
@@ -458,11 +456,10 @@ func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason 
 	bound := c.log.With(lostCtx(at, "subagent-lost", catchup, reason)).With(logging.Context{
 		ActivityID: run, UpsertKey: ActivityKey(run), BookAgentID: ownerAgent, Reason: string(reason),
 	})
-	line := "the backgrounded subagent is LOST (%s); its spawn unit settles failed with cause=lost naming that arm"
 	if catchup {
-		bound.LogVerbose(line, reason)
+		bound.LogVerbose("the backgrounded subagent is LOST ({reason}); its spawn unit settles failed with cause=lost naming that arm", logging.Values{"reason": string(reason)})
 	} else {
-		bound.Log(line, reason)
+		bound.Log("the backgrounded subagent is LOST ({reason}); its spawn unit settles failed with cause=lost naming that arm (a live observation, not catch-up)", logging.Values{"reason": string(reason)})
 	}
 	return SubagentLostEntry(at, run, ownerAgent, reason, c.spawnPrompt(run))
 }

@@ -12,7 +12,9 @@
  * and not reported (the daemon refuses negative durations).
  */
 import { ReportedLatencyKind } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.wall-latency");
 
 /** Where a latency goes once measured (latency-report.ts `record`). */
 export type RecordLatency = (kind: ReportedLatencyKind, seconds: number) => void;

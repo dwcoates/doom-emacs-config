@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // This file is the merge queue's half of SUBSCRIPTIONS
@@ -453,8 +454,8 @@ func (d queueEventsDB) reported(ctx context.Context, repo wsm.RepoKey, leaves bo
 	fields := dlog.Context{"repo": string(repo), "change": w.kind.String(), "workspace": string(w.subject), "cause": w.cause}
 	if beforeErr != nil {
 		d.o.events.mu.Unlock()
-		recordFailed(d.o.deps.Log.Global(), opQueueEvents, "could not read the merge queue before a merge left it; its subscribers are not told of the change",
-			"the merge queue's read before a merge left it ended when its context was cancelled; its subscribers are not told, and the next notice carries its effect",
+		recordFailed(d.o.deps.Log.Global(), opQueueEvents, logsite.Msg("could not read the merge queue before a merge left it; its subscribers are not told of the change"),
+			logsite.Msg("the merge queue's read before a merge left it ended when its context was cancelled; its subscribers are not told, and the next notice carries its effect"),
 			fields, beforeErr)
 		return nil
 	}
@@ -465,8 +466,8 @@ func (d queueEventsDB) reported(ctx context.Context, repo wsm.RepoKey, leaves bo
 	}
 	d.o.events.mu.Unlock()
 	if err != nil {
-		recordFailed(d.o.deps.Log.Global(), opQueueEvents, "could not read the merge queue after its change; its subscribers are not told of the change",
-			"the merge queue's read after its change ended when its context was cancelled; its subscribers are not told, and the next notice carries its effect",
+		recordFailed(d.o.deps.Log.Global(), opQueueEvents, logsite.Msg("could not read the merge queue after its change; its subscribers are not told of the change"),
+			logsite.Msg("the merge queue's read after its change ended when its context was cancelled; its subscribers are not told, and the next notice carries its effect"),
 			fields, err)
 		return nil
 	}

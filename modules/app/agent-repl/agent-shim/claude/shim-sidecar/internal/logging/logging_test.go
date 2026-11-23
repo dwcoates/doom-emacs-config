@@ -13,6 +13,7 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/logsite"
 )
 
 func TestMain(m *testing.M) {
@@ -129,7 +130,7 @@ func TestLogWritesBothSinks(t *testing.T) {
 	l, stderr, file := sinks(t, false)
 
 	// Act.
-	l.With(Context{Operation: "cycle"}).Log("hello")
+	l.With(Context{Operation: "cycle"}).Log("hello", nil)
 
 	// Assert.
 	if file.String() != stderr.String() {
@@ -145,7 +146,7 @@ func TestVerboseSuppressedWhenDisabled(t *testing.T) {
 	l, stderr, file := sinks(t, false)
 
 	// Act.
-	l.With(Context{Operation: "cycle"}).LogVerbose("chatter")
+	l.With(Context{Operation: "cycle"}).LogVerbose("chatter", nil)
 
 	// Assert.
 	if file.Len() != 0 || stderr.Len() != 0 {
@@ -158,7 +159,7 @@ func TestVerboseEmittedWhenEnabled(t *testing.T) {
 	l, _, file := sinks(t, true)
 
 	// Act.
-	l.With(Context{Operation: "cycle"}).LogVerbose("chatter")
+	l.With(Context{Operation: "cycle"}).LogVerbose("chatter", nil)
 
 	// Assert.
 	got := decode(t, file.String())
@@ -174,7 +175,7 @@ func TestWorkspaceAttributionIsPromotedOnTheRecord(t *testing.T) {
 	// Act.
 	l.With(Context{
 		Operation: "watch", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef", ClaudeSessionID: "session-1",
-	}).Log("watching")
+	}).Log("watching", nil)
 
 	// Assert.
 	got := decode(t, file.String())
@@ -196,7 +197,7 @@ func TestRegisteredFileSuppliesWorkspaceAttributionToPathOnlyRecords(t *testing.
 	})
 
 	// Act.
-	bound.With(Context{Operation: "poll", Path: "/tmp/session.jsonl"}).Log("polling")
+	bound.With(Context{Operation: "poll", Path: "/tmp/session.jsonl"}).Log("polling", nil)
 
 	// Assert.
 	got := decode(t, file.String())
@@ -214,7 +215,7 @@ func TestFileScopedRecordIsForwarded(t *testing.T) {
 	l.With(Context{
 		Operation: "watch", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1", Path: "/work/repo/session.jsonl",
-	}).Log("watching")
+	}).Log("watching", nil)
 	l.Close()
 
 	// Assert.
@@ -245,7 +246,7 @@ func TestFileScopedForwardingDoesNotBlockLogging(t *testing.T) {
 		l.With(Context{
 			Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 			ClaudeSessionID: "session-1",
-		}).Log("polling")
+		}).Log("polling", nil)
 		close(logged)
 	}()
 
@@ -272,7 +273,7 @@ func TestGlobalRecordIsNotForwarded(t *testing.T) {
 	l, _, global := forwardingSinks(t, false, forwarder)
 
 	// Act.
-	l.With(Context{Operation: "start"}).Log("sidecar starting")
+	l.With(Context{Operation: "start"}).Log("sidecar starting", nil)
 	l.Close()
 
 	// Assert.
@@ -291,9 +292,9 @@ func TestForwardFailureIsRecordedOnceAndLoggingContinues(t *testing.T) {
 	file := Context{WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef", ClaudeSessionID: "session-1"}
 
 	// Act.
-	l.With(mergeContext(file, Context{Operation: "poll"})).Log("polling")
-	l.With(mergeContext(file, Context{Operation: "commit"})).Log("committing")
-	l.With(Context{Operation: "rescan"}).Log("rescan complete")
+	l.With(mergeContext(file, Context{Operation: "poll"})).Log("polling", nil)
+	l.With(mergeContext(file, Context{Operation: "commit"})).Log("committing", nil)
+	l.With(Context{Operation: "rescan"}).Log("rescan complete", nil)
 	l.Close()
 
 	// Assert: both records climbed the whole ladder, and the outage is stated
@@ -323,9 +324,9 @@ func TestForwardFailureIsRecordedAgainAfterRecovery(t *testing.T) {
 	file := Context{Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef", ClaudeSessionID: "session-1"}
 
 	// Act.
-	l.With(file).Log("first outage")
-	l.With(file).Log("recovered")
-	l.With(file).Log("second outage")
+	l.With(file).Log("first outage", nil)
+	l.With(file).Log("recovered", nil)
+	l.With(file).Log("second outage", nil)
 	l.Close()
 
 	// Assert.
@@ -356,7 +357,7 @@ func TestABootingDaemonIsRetriedUntilItAnswers(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert: it was delivered, so nothing was recorded as a failure.
@@ -387,7 +388,7 @@ func TestATargetGoneAfterSeenServingIsTransientNotAWarn(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert: no WARN was manufactured, but the transient is narrated at DEBUG
@@ -429,7 +430,7 @@ func TestATargetBootingIsTransientNotAWarn(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert: no WARN was manufactured, but the transient is narrated at DEBUG
@@ -468,7 +469,7 @@ func TestAnUnresolvableWorkspaceIsForwardedUnattributedAtDebug(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/tmp", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert: no WARN outage was manufactured, the transient is narrated at
@@ -504,7 +505,7 @@ func TestTheForwardFailureRecordCarriesItsAttemptCount(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert.
@@ -533,7 +534,7 @@ func TestAnUndeliverableRecordIsKeptInTheGlobalSink(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert.
@@ -563,7 +564,7 @@ func TestForwardedRecordCarriesItsTimestampAndVerboseClass(t *testing.T) {
 	l.With(Context{
 		Operation: "tail-pickup", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).LogVerbose("picked up one frame")
+	}).LogVerbose("picked up one frame", nil)
 	l.Close()
 
 	// Assert.
@@ -589,7 +590,7 @@ func TestFilteredRecordStillRejectsIncompleteWorkspaceAttribution(t *testing.T) 
 	}()
 
 	// Act.
-	l.With(Context{Operation: "watch", WorkspaceDir: "/work/repo"}).LogVerbose("watching")
+	l.With(Context{Operation: "watch", WorkspaceDir: "/work/repo"}).LogVerbose("watching", nil)
 }
 
 func TestCorrelationKeysRendered(t *testing.T) {
@@ -605,7 +606,7 @@ func TestCorrelationKeysRendered(t *testing.T) {
 	}
 
 	// Act.
-	l.With(ctx).Log("wrote")
+	l.With(ctx).Log("wrote", nil)
 
 	// Assert.
 	got := decode(t, file.String()).Context
@@ -632,7 +633,7 @@ func TestRetiredAddressingKeysAbsent(t *testing.T) {
 	l, _, file := sinks(t, false)
 
 	// Act.
-	l.With(Context{Operation: "cycle", AgentID: "agent-1"}).Log("no session ordinals here")
+	l.With(Context{Operation: "cycle", AgentID: "agent-1"}).Log("no session ordinals here", nil)
 
 	// Assert.
 	for _, retired := range []string{"claude_session_id", "seq", "from_seq", "replay_from_seq", "agent_repl_session_id"} {
@@ -647,7 +648,7 @@ func TestUnsetOffsetOmitted(t *testing.T) {
 	l, _, file := sinks(t, false)
 
 	// Act.
-	l.With(Context{Operation: "cycle", Path: "/tmp/t.jsonl"}).Log("no offset known")
+	l.With(Context{Operation: "cycle", Path: "/tmp/t.jsonl"}).Log("no offset known", nil)
 
 	// Assert.
 	if _, ok := decode(t, file.String()).Context["offset"]; ok {
@@ -660,7 +661,7 @@ func TestZeroOffsetRendered(t *testing.T) {
 	l, _, file := sinks(t, false)
 
 	// Act.
-	l.With(Context{Operation: "cycle", Offset: Off(0)}).Log("start of file")
+	l.With(Context{Operation: "cycle", Offset: Off(0)}).Log("start of file", nil)
 
 	// Assert.
 	if got := decode(t, file.String()).Context["offset"]; got != float64(0) {
@@ -674,7 +675,7 @@ func TestWithOverridesEarlierValues(t *testing.T) {
 	base := l.With(Context{Operation: "cycle", Component: "root", AgentID: "agent-1"})
 
 	// Act.
-	base.With(Context{Operation: "poll", Component: "tail"}).Log("bound")
+	base.With(Context{Operation: "poll", Component: "tail"}).Log("bound", nil)
 
 	// Assert.
 	got := decode(t, file.String())
@@ -694,7 +695,7 @@ func TestMissingOperationPanics(t *testing.T) {
 	}()
 
 	// Act.
-	l.With(Context{}).Log("nameless")
+	l.With(Context{}).Log("nameless", nil)
 }
 
 func TestInvalidLevelPanics(t *testing.T) {
@@ -708,7 +709,7 @@ func TestInvalidLevelPanics(t *testing.T) {
 	}()
 
 	// Act.
-	l.With(Context{Operation: "cycle", Level: "catastrophe"}).Log("bad level")
+	l.With(Context{Operation: "cycle", Level: "catastrophe"}).Log("bad level", nil)
 }
 
 // failingWriter fails every write, standing in for a full or unlinked log file.
@@ -733,7 +734,7 @@ func TestSinkFailurePanicsAfterTerminalReport(t *testing.T) {
 	}()
 
 	// Act.
-	l.With(Context{Operation: "cycle"}).Log("doomed")
+	l.With(Context{Operation: "cycle"}).Log("doomed", nil)
 }
 
 func TestSinkEmergencySkipsPersistentSink(t *testing.T) {
@@ -744,7 +745,7 @@ func TestSinkEmergencySkipsPersistentSink(t *testing.T) {
 	l.pid = func() int { return 4242 }
 
 	// Act.
-	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable")
+	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable", nil)
 
 	// Assert.
 	if got := decode(t, stderr.String()).Operation; got != "store-write" {
@@ -762,7 +763,7 @@ func TestARecoveryRecordCarriesItsAttemptAndArmedBackoff(t *testing.T) {
 	log.With(Context{
 		Operation: "recover-cursors", Level: "warn",
 		Attempt: Attempt(3), BackoffMs: BackoffMs(1500 * time.Millisecond),
-	}).Log("recovery attempt failed")
+	}).Log("recovery attempt failed", nil)
 
 	// Assert.
 	ctx := decodeOneContext(t, &sink)
@@ -781,7 +782,7 @@ func TestARecordThatArmsNoBackoffOmitsTheKeyEntirely(t *testing.T) {
 	log := New(io.Discard, &sink).With(Context{Component: "sidecar"})
 
 	// Act.
-	log.With(Context{Operation: "recover-cursors"}).Log("cursors recovered")
+	log.With(Context{Operation: "recover-cursors"}).Log("cursors recovered", nil)
 
 	// Assert.
 	ctx := decodeOneContext(t, &sink)
@@ -820,7 +821,7 @@ func TestDurableOnlyWithholdsAnOrdinaryRecordFromTheTerminal(t *testing.T) {
 	l.pid = func() int { return 4242 }
 
 	// Act.
-	l.With(Context{Operation: "cycle"}).Log("an ordinary lifecycle record")
+	l.With(Context{Operation: "cycle"}).Log("an ordinary lifecycle record", nil)
 
 	// Assert: durably recorded, and not mirrored.
 	if got := decode(t, file.String()).Operation; got != "cycle" {
@@ -842,7 +843,7 @@ func TestDurableOnlyStillNarratesAnEmergencyToTheTerminal(t *testing.T) {
 	l.pid = func() int { return 4242 }
 
 	// Act.
-	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable")
+	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable", nil)
 
 	// Assert.
 	if got := decode(t, stderr.String()).Operation; got != "store-write" {
@@ -864,7 +865,7 @@ func TestANotYetServingDaemonThatBecomesReachableIsNotWarned(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert: it forwarded exactly once, only after the daemon was live, and
@@ -892,7 +893,7 @@ func TestADaemonThatNeverBeginsServingIsNotWarned(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert: it never forwarded prematurely, and the transient is DEBUG, not a
@@ -927,7 +928,7 @@ func TestTheStartupTransientNarrationIsWithheldBelowDebug(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert.
@@ -950,7 +951,7 @@ func TestAStartupTransientStillPersistsItsRecord(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert.
@@ -984,7 +985,7 @@ func TestAServingDaemonThatBecomesUnreachableIsWarned(t *testing.T) {
 	l.With(Context{
 		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
 		ClaudeSessionID: "session-1",
-	}).Log("polling")
+	}).Log("polling", nil)
 	l.Close()
 
 	// Assert.
@@ -1026,7 +1027,7 @@ func TestCatchupWindowStatesEachCorpusWalkOperationAtDebug(t *testing.T) {
 			l, file := catchupSubject(t)
 
 			// Act.
-			l.With(Context{Operation: operation}).Log("one backlog item")
+			l.With(Context{Operation: operation}).Log("one backlog item", nil)
 
 			// Assert.
 			got := decode(t, file.String())
@@ -1043,7 +1044,7 @@ func TestCatchupWindowStillWritesTheDemotedRecord(t *testing.T) {
 	l, file := catchupSubject(t)
 
 	// Act.
-	l.With(Context{Operation: "boot-rewind", Path: "/corpus/a.jsonl"}).Log("rewound to the turn start")
+	l.With(Context{Operation: "boot-rewind", Path: "/corpus/a.jsonl"}).Log("rewound to the turn start", nil)
 
 	// Assert.
 	got := decode(t, file.String())
@@ -1059,7 +1060,7 @@ func TestCatchupWindowLeavesAnUnregisteredOperationAtInfo(t *testing.T) {
 	l, file := catchupSubject(t)
 
 	// Act.
-	l.With(Context{Operation: "start"}).Log("sidecar starting")
+	l.With(Context{Operation: "start"}).Log("sidecar starting", nil)
 
 	// Assert.
 	if got := decode(t, file.String()).Level; got != "info" {
@@ -1074,7 +1075,7 @@ func TestCatchupWindowKeepsAWarningAtWarn(t *testing.T) {
 	l, file := catchupSubject(t)
 
 	// Act.
-	l.With(Context{Operation: "launch", Level: "warn"}).Log("a spawning call named no task")
+	l.With(Context{Operation: "launch", Level: "warn"}).Log("a spawning call named no task", nil)
 
 	// Assert.
 	if got := decode(t, file.String()).Level; got != "warn" {
@@ -1098,7 +1099,7 @@ func TestEndCatchupStatesOneSummaryCarryingTheCount(t *testing.T) {
 			// Arrange.
 			l, file := catchupSubject(t)
 			for i := 0; i < test.items; i++ {
-				l.With(Context{Operation: test.operation}).Log("one backlog item")
+				l.With(Context{Operation: test.operation}).Log("one backlog item", nil)
 			}
 			file.Reset()
 
@@ -1125,7 +1126,7 @@ func TestEndCatchupStatesOneSummaryCarryingTheCount(t *testing.T) {
 func TestEndCatchupStatesNothingForAnOperationThatDemotedNothing(t *testing.T) {
 	// Arrange.
 	l, file := catchupSubject(t)
-	l.With(Context{Operation: "boot-rewind"}).Log("one backlog item")
+	l.With(Context{Operation: "boot-rewind"}).Log("one backlog item", nil)
 	file.Reset()
 
 	// Act.
@@ -1142,12 +1143,12 @@ func TestEndCatchupStatesNothingForAnOperationThatDemotedNothing(t *testing.T) {
 func TestAfterCatchupEndsTheSameOperationIsInfoAgain(t *testing.T) {
 	// Arrange.
 	l, file := catchupSubject(t)
-	l.With(Context{Operation: "tail-pickup"}).Log("backlog")
+	l.With(Context{Operation: "tail-pickup"}).Log("backlog", nil)
 	l.EndCatchup()
 	file.Reset()
 
 	// Act.
-	l.With(Context{Operation: "tail-pickup"}).Log("picked up 1 record(s)")
+	l.With(Context{Operation: "tail-pickup"}).Log("picked up 1 record(s)", nil)
 
 	// Assert.
 	if got := decode(t, file.String()).Level; got != "info" {
@@ -1183,9 +1184,9 @@ func TestCloseWithinAbandonsAStuckDrainAndStatesWhatItWaitedOn(t *testing.T) {
 	forwarder := &blockingForwarder{started: make(chan struct{}), release: make(chan struct{})}
 	l, _, global := forwardingSinks(t, false, forwarder)
 	scoped := Context{Operation: "tail-pickup", WorkspaceDir: "/w", WorkspaceID: "w1"}
-	l.With(scoped).Log("first")
+	l.With(scoped).Log("first", nil)
 	<-forwarder.started
-	l.With(scoped).Log("second")
+	l.With(scoped).Log("second", nil)
 	global.Reset()
 
 	// Act.
@@ -1214,7 +1215,7 @@ func TestCloseWithinDrainsAHealthyQueueSilently(t *testing.T) {
 	// Arrange.
 	forwarder := &recordingForwarder{address: "127.0.0.1:8123"}
 	l, _, global := forwardingSinks(t, false, forwarder)
-	l.With(Context{Operation: "tail-pickup", WorkspaceDir: "/w", WorkspaceID: "w1"}).Log("first")
+	l.With(Context{Operation: "tail-pickup", WorkspaceDir: "/w", WorkspaceID: "w1"}).Log("first", nil)
 	global.Reset()
 
 	// Act.
@@ -1267,7 +1268,7 @@ func TestLevelWindowAdmitsDebugBeforeItEnds(t *testing.T) {
 	l, file := debugWindowLogger(t, clock)
 
 	// Act.
-	l.With(Context{Operation: "tail"}).LogVerbose("inside")
+	l.With(Context{Operation: "tail"}).LogVerbose("inside", nil)
 
 	// Assert.
 	records := windowRecords(t, file.String())
@@ -1283,7 +1284,7 @@ func TestLevelWindowRecordsItsEndAtInfo(t *testing.T) {
 	clock.at = time.Unix(1000300, 0)
 
 	// Act.
-	l.With(Context{Operation: "tail"}).LogVerbose("after")
+	l.With(Context{Operation: "tail"}).LogVerbose("after", nil)
 
 	// Assert.
 	records := windowRecords(t, file.String())
@@ -1342,10 +1343,245 @@ func TestLevelWindowRaisesEveryBoundCopy(t *testing.T) {
 	if _, err := bound.LevelWindow().Open(sharedlogging.LevelDebug, time.Minute); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	l.With(Context{Operation: "other"}).LogVerbose("chatter")
+	l.With(Context{Operation: "other"}).LogVerbose("chatter", nil)
 
 	// Assert.
 	if file.Len() == 0 {
 		t.Fatal("a debug record was dropped while the shared window held debug")
+	}
+}
+
+// forwardedNote is a helper's message, made here so its records are keyed by
+// this function rather than by the test that logs it.
+func forwardedNote() logsite.Message { return logsite.Msg("a forwarded note about {subject}") }
+
+func TestEveryRecordNamesItsSiteAndTemplate(t *testing.T) {
+	const testFunction = "agentrepl/shim-claude-sidecar/internal/logging.TestEveryRecordNamesItsSiteAndTemplate"
+	tests := []struct {
+		name         string
+		log          func(b *Bound)
+		wantFunction string
+		wantTemplate string
+		wantMessage  string
+	}{
+		{
+			name:         "Log is keyed by its caller and renders its values",
+			log:          func(b *Bound) { b.Log("read {count} records", Values{"count": 3}) },
+			wantFunction: testFunction, wantTemplate: "read {count} records", wantMessage: "read 3 records",
+		},
+		{
+			name:         "LogVerbose is keyed by its caller",
+			log:          func(b *Bound) { b.LogVerbose("traced {step}", Values{"step": "open"}) },
+			wantFunction: testFunction, wantTemplate: "traced {step}", wantMessage: "traced open",
+		},
+		{
+			name:         "a placeholder takes a bound context key",
+			log:          func(b *Bound) { b.With(Context{Path: "/tmp/a.jsonl"}).Log("reading {path}", nil) },
+			wantFunction: testFunction, wantTemplate: "reading {path}", wantMessage: "reading /tmp/a.jsonl",
+		},
+		{
+			name:         "a doubled brace renders as one literal brace",
+			log:          func(b *Bound) { b.Log("a {{literal}} brace", nil) },
+			wantFunction: testFunction, wantTemplate: "a {{literal}} brace", wantMessage: "a {literal} brace",
+		},
+		{
+			name:         "a forwarded message is keyed by the function that made it",
+			log:          func(b *Bound) { b.LogMessage(forwardedNote(), Values{"subject": "x"}) },
+			wantFunction: "agentrepl/shim-claude-sidecar/internal/logging.forwardedNote", wantTemplate: "a forwarded note about {subject}", wantMessage: "a forwarded note about x",
+		},
+		{
+			name:         "a forwarded verbose message is keyed by the function that made it",
+			log:          func(b *Bound) { b.LogVerboseMessage(forwardedNote(), Values{"subject": "y"}) },
+			wantFunction: "agentrepl/shim-claude-sidecar/internal/logging.forwardedNote", wantTemplate: "a forwarded note about {subject}", wantMessage: "a forwarded note about y",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			l, _, file := sinks(t, true)
+
+			// Act
+			tt.log(l.With(Context{Operation: "test"}))
+
+			// Assert
+			got := decode(t, strings.TrimSpace(file.String()))
+			if want := logsite.Key(Runtime, tt.wantFunction, tt.wantTemplate); got.Site != want {
+				t.Errorf("site = %q, want %q (the key of %s, %q)", got.Site, want, tt.wantFunction, tt.wantTemplate)
+			}
+			if got.Template != tt.wantTemplate || got.Message != tt.wantMessage {
+				t.Errorf("template, message = %q, %q, want %q, %q", got.Template, got.Message, tt.wantTemplate, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestAValueLandsInTheRecordsContext(t *testing.T) {
+	// Arrange
+	l, _, file := sinks(t, false)
+
+	// Act
+	l.With(Context{Operation: "test", Path: "/typed"}).Log("moved {path} after {elapsed}", Values{"path": "/named", "elapsed": "2s"})
+
+	// Assert
+	got := decode(t, strings.TrimSpace(file.String()))
+	if got.Context["elapsed"] != "2s" || got.Context["path"] != "/named" || got.Message != "moved /named after 2s" {
+		t.Fatalf("record = %#v, want each value in context, a value replacing the bound key", got)
+	}
+}
+
+func TestSiteAndTemplateFollowTheMessage(t *testing.T) {
+	// Arrange
+	l, _, file := sinks(t, false)
+
+	// Act
+	l.With(Context{Operation: "test"}).Log("said", nil)
+
+	// Assert
+	want := fmt.Sprintf(`"message":"said","site":%q,"template":"said"`, logsite.Key(Runtime, "agentrepl/shim-claude-sidecar/internal/logging.TestSiteAndTemplateFollowTheMessage", "said"))
+	if !strings.Contains(file.String(), want) {
+		t.Fatalf("record = %s, want %s", file.String(), want)
+	}
+}
+
+func TestAnUnrenderableRecordPanics(t *testing.T) {
+	tests := []struct {
+		name string
+		log  func(b *Bound)
+	}{
+		{name: "a placeholder no value fills", log: func(b *Bound) { b.Log("lost {gone}", Values{"here": 1}) }},
+		{name: "a template whose braces do not parse", log: func(b *Bound) { b.Log("unclosed {", nil) }},
+		{name: "a forwarded message no Msg made", log: func(b *Bound) { b.LogMessage(logsite.Message{}, nil) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			l, _, file := sinks(t, false)
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("the record was written instead of panicking")
+				}
+				if file.Len() != 0 {
+					t.Errorf("file got %q, want nothing", file.String())
+				}
+			}()
+
+			// Act
+			tt.log(l.With(Context{Operation: "test"}))
+		})
+	}
+}
+
+func TestAForwardedRecordCarriesItsSiteAndTemplate(t *testing.T) {
+	// Arrange
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123"}
+	l, _, _ := forwardingSinks(t, false, forwarder)
+
+	// Act
+	l.With(Context{
+		Operation: "watch", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("watching {count} files", Values{"count": 2})
+	l.Close()
+
+	// Assert
+	records := forwarder.Records()
+	if len(records) != 1 {
+		t.Fatalf("forwarded records = %d, want 1", len(records))
+	}
+	const template = "watching {count} files"
+	want := logsite.Key(Runtime, "agentrepl/shim-claude-sidecar/internal/logging.TestAForwardedRecordCarriesItsSiteAndTemplate", template)
+	if got := records[0]; got.Site != want || got.Template != template || got.Message != "watching 2 files" {
+		t.Fatalf("forwarded record = %+v, want site %q, template %q", got, want, template)
+	}
+}
+
+func TestAnUndeliveredRecordKeepsItsSiteAndTemplate(t *testing.T) {
+	// Arrange
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", err: errors.New("connection refused")}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling {count} files", Values{"count": 1})
+	l.Close()
+
+	// Assert
+	const template = "polling {count} files"
+	want := logsite.Key(Runtime, "agentrepl/shim-claude-sidecar/internal/logging.TestAnUndeliveredRecordKeepsItsSiteAndTemplate", template)
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if got := decode(t, line); got.Operation == "poll" {
+			if got.Site != want || got.Template != template {
+				t.Fatalf("kept record = %+v, want site %q, template %q", got, want, template)
+			}
+			return
+		}
+	}
+	t.Fatalf("the undelivered record is not in the global sink: %q", global.String())
+}
+
+func TestTheForwardFailureRecordNamesItsSite(t *testing.T) {
+	// Arrange
+	forwarder := &recordingForwarder{address: "127.0.0.1:8123", err: errors.New("connection refused")}
+	l, _, global := forwardingSinks(t, false, forwarder)
+
+	// Act
+	l.With(Context{
+		Operation: "poll", WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		ClaudeSessionID: "session-1",
+	}).Log("polling", nil)
+	l.Close()
+
+	// Assert
+	const template = "a file-scoped diagnostic could not be forwarded to the daemon; it was retried and then written to the global sink"
+	want := logsite.Key(Runtime, "agentrepl/shim-claude-sidecar/internal/logging.(*Logger).reportForwardFailure", template)
+	for _, line := range strings.Split(strings.TrimSpace(global.String()), "\n") {
+		if got := decode(t, line); got.Operation == "sidecar.logging.forward-failure" {
+			if got.Site != want || got.Template != template {
+				t.Fatalf("failure record = %+v, want site %q, template %q", got, want, template)
+			}
+			return
+		}
+	}
+	t.Fatalf("no forward-failure record in the global sink: %q", global.String())
+}
+
+func TestTheSinkFailureRecordNamesItsSite(t *testing.T) {
+	// Arrange
+	stderr := &bytes.Buffer{}
+	l := NewAtLevel(stderr, failingWriter{}, sharedlogging.LevelInfo)
+
+	// Act
+	func() {
+		defer func() { _ = recover() }()
+		l.With(Context{Operation: "test"}).Log("lost", nil)
+	}()
+
+	// Assert
+	const template = "persistent log sink write failed"
+	want := logsite.Key(Runtime, "agentrepl/shim-claude-sidecar/internal/logging.(*Logger).reportSinkFailure", template)
+	if got := decode(t, strings.TrimSpace(stderr.String())); got.Site != want || got.Template != template {
+		t.Fatalf("emergency record = %+v, want site %q, template %q", got, want, template)
+	}
+}
+
+func TestTheLevelWindowsRecordsAreKeyedWhereTheirNotesAreWritten(t *testing.T) {
+	// Arrange
+	l, _, file := sinks(t, false)
+	sel, err := sharedlogging.SelectLevel("debug", "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	l.With(Context{}).NoteLevelSelection(sel)
+
+	// Assert
+	template := "log level {requested_level} ignored without {until_environment}; starting at info"
+	want := logsite.Key(Runtime, "agentrepl/logging.Selection.Note", template)
+	if got := decode(t, strings.TrimSpace(file.String())); got.Site != want || got.Template != template {
+		t.Fatalf("record = %+v, want site %q, template %q", got, want, template)
 	}
 }

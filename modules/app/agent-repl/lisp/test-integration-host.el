@@ -167,10 +167,8 @@ registered on."
 entries.  `agent-repl-rpc--stream' logs the offending push's RAW parsed JSON
 alist in its context (fanout §4: \"with the raw JSON in context\"); the
 harness records that as `prin1-to-string' of each format argument under
-`context.arguments' (core.el's `agent-repl--log-record')."
-  (apply #'append
-         (mapcar (lambda (record) (alist-get 'arguments (alist-get 'context record)))
-                 (agent-repl-itest--log-entries daemon "elisp.rpc.push-invalid" "error"))))
+one of its named `context' values (core.el's `agent-repl--log-record')."
+  (agent-repl-itest--logged-context-strings daemon "elisp.rpc.push-invalid" "error"))
 
 (defun agent-repl-itest-host--dired-buffer-for (dir)
   "Return a live dired buffer visiting DIR, or nil.
@@ -185,6 +183,36 @@ to find rather than assuming any particular buffer name."
             (buffer-list)))
 
 ;;;; ---- Scenario 3: the host stream ----
+
+;;;; ---- Reading a record's values ----
+
+(ert-deftest agent-repl-itest-host-context-strings-reads-every-string-value-in-order ()
+  "The shared reader answers each record's string context values, in order."
+  ;; Arrange
+  (let ((records '(((context . ((ws . "alpha") (rows . 3) (arm . ":refused"))))
+                   ((context . ((path . "/x")))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-itest--context-strings records) '("alpha" ":refused" "/x")))))
+
+(ert-deftest agent-repl-itest-host-context-strings-of-no-context-is-empty ()
+  "A record with no context contributes nothing."
+  ;; Act / Assert
+  (should-not (agent-repl-itest--context-strings '(((message . "m"))))))
+
+(ert-deftest agent-repl-itest-host-every-suite-reads-values-through-the-shared-reader ()
+  "No integration suite reads the retired `arguments' list of a record's context."
+  ;; Arrange
+  (let ((dir agent-repl-itest--lisp-dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-integration-.*\\.el\\'"))
+      (with-temp-buffer
+        (insert-file-contents file)
+        ;; Spelled in two halves, so this test's own source never matches.
+        (when (re-search-forward (concat "(alist-get '" "arguments") nil t)
+          (push (file-name-nondirectory file) hand-rolled))))
+    ;; Assert
+    (should-not hand-rolled)))
 
 (ert-deftest agent-repl-itest-host-subscribes-once-per-open-workspace ()
   "One WatchHostWorkspace subscription exists per OPEN workspace.
@@ -1402,12 +1430,8 @@ NOT handover signals must still be reported with the fields they carry —
       (agent-repl-host-select agent-repl-itest-host--ws)
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.host.select-refused" "error")
-      (let ((arguments (apply #'append
-                              (mapcar (lambda (record)
-                                        (alist-get 'arguments
-                                                   (alist-get 'context record)))
-                                      (agent-repl-itest--log-entries
-                                       daemon "elisp.host.select-refused" "error")))))
+      (let ((arguments (agent-repl-itest--logged-context-strings
+                        daemon "elisp.host.select-refused" "error")))
         (should (seq-some (lambda (s) (string-match-p ":workspace-ref-mismatch" s))
                           arguments))
         (should (seq-some (lambda (s) (string-match-p "/x" s)) arguments))))))
@@ -1549,14 +1573,11 @@ is useless without its `registry_dir'."
                                     before))
                        nil (format "the %s arm to be reported" wire-key))
                       (let ((arguments
-                             (apply #'append
-                                    (mapcar (lambda (record)
-                                              (alist-get 'arguments
-                                                         (alist-get 'context record)))
-                                            (nthcdr before
-                                                    (agent-repl-itest--log-entries
-                                                     primary "elisp.host.adopt-refused"
-                                                     "error"))))))
+                             (agent-repl-itest--context-strings
+                              (nthcdr before
+                                      (agent-repl-itest--log-entries
+                                       primary "elisp.host.adopt-refused"
+                                       "error")))))
                         (should (seq-some (lambda (s) (string-match-p
                                                        (regexp-quote keyword-string) s))
                                           arguments))

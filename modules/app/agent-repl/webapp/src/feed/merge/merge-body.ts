@@ -21,13 +21,15 @@
  * drawn in (❓, tab-strip.ts); the ask itself is answered where every ask is,
  * never in the bubble.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import type { Handle } from "../../failure/local.js";
 import { drawBreadcrumbTrail, type BubbleBodyRenderer, type SubfeedView } from "../renderers.js";
 import { childTabsOf, mergeTabIdsOf } from "./tab-strip.js";
 import { createTabSet } from "./tab-set.js";
 import { mergeTabPanel } from "./tab-panels.js";
 import { replaceTicking, stopTicking } from "../ticking.js";
+
+const log = createLogger("webapp.feed.merge.merge-body");
 
 /** The merge bubble's body renderer. */
 export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => {

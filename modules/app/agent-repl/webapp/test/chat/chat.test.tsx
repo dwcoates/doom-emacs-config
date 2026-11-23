@@ -17,7 +17,7 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { mountChat, pathSwapped, pendingQuestionOf, shownPathOf, SIGHTING_BATCH_MS, type ChatHandle } from "../../src/chat/chat.js";
 import { HIGHLIGHT_CLASS, QUOTE_MARK_CLASS } from "../../src/chat/chat-view.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { fakeTicker, SINK } from "../sidebar/harness.js";
@@ -383,7 +383,7 @@ describe("the chat's end after a question is asked", () => {
     Object.defineProperty(scroll, "clientHeight", { configurable: true, get: () => 100 });
     Object.defineProperty(scroll, "scrollTop", { configurable: true, get: () => top, set: (v: number) => (top = v) });
     moves = [];
-    vi.spyOn(log, "info").mockImplementation((message, fields) => {
+    spyLog("info").mockImplementation((message, fields) => {
       if (fields?.operation === "scroll.chat-moved") moves.push(fields.context);
     });
   });
@@ -484,7 +484,7 @@ describe("the chat's scroll across a sibling switch", () => {
     Object.defineProperty(scroll, "scrollTop", { configurable: true, get: () => top, set: (v: number) => (top = v) });
     Object.defineProperty(host, "offsetHeight", { configurable: true, get: () => 800 });
     moves = [];
-    vi.spyOn(log, "info").mockImplementation((_message, fields) => {
+    spyLog("info").mockImplementation((_message, fields) => {
       if (fields?.operation === "scroll.chat-moved") moves.push(fields.context);
     });
   });
@@ -542,7 +542,7 @@ describe("the chat's reveal of an asked-for node", () => {
   beforeEach(() => {
     moved = recorded<unknown>();
     moves = moved.calls;
-    vi.spyOn(log, "info").mockImplementation((_message, fields) => {
+    spyLog("info").mockImplementation((_message, fields) => {
       if (fields?.operation === "scroll.chat-moved") moved.record((fields.context as { cause: string }).cause);
     });
   });
@@ -572,7 +572,7 @@ describe("the chat's reveal of an asked-for node", () => {
 
   it("records a reveal of a node it did not draw as the defect it is", async () => {
     const failed = recorded<unknown>();
-    vi.spyOn(log, "error").mockImplementation((_message, fields) => void failed.record(fields?.operation));
+    spyLog("error").mockImplementation((_message, fields) => void failed.record(fields?.operation));
     const d = daemon();
     mount(d);
     d.push(revealing());

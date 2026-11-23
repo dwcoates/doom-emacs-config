@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"agent-repld/internal/ids"
+	"agentrepl/logging/logsite"
 )
 
 // This file holds the merge orchestrator's PRE-STATE refusals.
@@ -159,6 +160,6 @@ func Refused(err error) (*RefusalError, bool) {
 // `-version-part`, or picking another merge name, put a warning in the logs
 // for every ordinary answer (2026-10-25). An invariant a request breaks is
 // not a refusal, and stays an ERROR at its site.
-func logRefusal(log dlog.Logger, op, message string, fields dlog.Context, refusal error) {
-	log.Info(op, message, withField(fields, "error", refusal.Error()))
+func logRefusal(log dlog.Logger, op string, message logsite.Message, fields dlog.Context, refusal error) {
+	log.Log(dlog.LevelInfo, op, message, withField(fields, "error", refusal.Error()))
 }

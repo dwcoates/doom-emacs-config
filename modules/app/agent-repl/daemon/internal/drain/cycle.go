@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // opCycle is the operation a keep-alive cycle's stand-down records under.
@@ -52,7 +53,7 @@ const opVisit = "daemon.drain.settings_visit"
 var visitReason = standDownReason{
 	op:      opVisit,
 	detail:  "stood down on the switch away from a settings pick; the transcript was left as it stood",
-	done:    "stood down the shim a settings pick started",
+	done:    logsite.Msg("stood down the shim a settings pick started"),
 	life:    shimlife.StandDownSettingsVisit,
 	trigger: "settings_visit",
 	remote:  remoteSpares,
@@ -74,7 +75,7 @@ const opCold = "daemon.drain.cold_park"
 var coldReason = standDownReason{
 	op:      opCold,
 	detail:  "parked the moment its cache was known cold; the transcript was left as it stood",
-	done:    "parked an idle session whose cache went cold",
+	done:    logsite.Msg("parked an idle session whose cache went cold"),
 	life:    shimlife.StandDownCacheCold,
 	trigger: "cold_park",
 	remote:  remoteSpares,
@@ -104,7 +105,7 @@ const opMergeQueued = "daemon.drain.merge_queued_park"
 var mergeQueuedReason = standDownReason{
 	op:      opMergeQueued,
 	detail:  "parked the moment its own branch's merge was put in line; the transcript was left as it stood",
-	done:    "parked a finished workspace whose merge waits in line",
+	done:    logsite.Msg("parked a finished workspace whose merge waits in line"),
 	life:    shimlife.StandDownMergeQueued,
 	trigger: "merge_queued",
 	remote:  remoteSpares,
@@ -153,7 +154,7 @@ type CycleOutcome struct {
 var cycleReason = standDownReason{
 	op:      opCycle,
 	detail:  "stood down between keep-alives with its cache warm; the transcript was left as it stood",
-	done:    "stood an idle session down until its next keep-alive",
+	done:    logsite.Msg("stood an idle session down until its next keep-alive"),
 	life:    shimlife.StandDownKeepaliveCycle,
 	trigger: "keepalive_cycle",
 	remote:  remoteSpares,
@@ -395,7 +396,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	// ask parks at the next beat as usual.
 	switch c.park(ctx, log, ws, fields, reason) {
 	case parkDone:
-		return withheldSettled, CycleOutcome{Down: true, Why: reason.done}
+		return withheldSettled, CycleOutcome{Down: true, Why: reason.done.Template()}
 	case parkSpared:
 		return withheldSettled, CycleOutcome{Why: remoteSpared}
 	case parkDeferred:

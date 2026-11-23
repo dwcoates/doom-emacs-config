@@ -51,7 +51,7 @@ import { columnHeader, COLUMNS_ROW_CLASS } from "../../columns.js";
 import { pressToDrag, type DragSpec } from "../../drag.js";
 import { liveElapsedClock } from "../../elapsed-clock.js";
 import { createDrawingHold, type DrawingHold } from "../../hold.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { moveToAction, waitingMergeDrag } from "../../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
@@ -74,6 +74,8 @@ import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { jumpToWorkspace, type JumpSite } from "./jump.js";
 import { drawPausedMark } from "./paused.js";
+
+const log = createLogger("webapp.feed.merge.queue");
 
 const PATH = "FeedMergeQueue";
 
@@ -388,10 +390,10 @@ export async function moveInQueue(
           result.value.cause,
           UPDATE_MERGE_QUEUE_SENTENCES,
         );
-        log.warn(`UpdateMergeQueue refused a move request: ${arm}`, {
+        log.warn("UpdateMergeQueue refused a move request: {arm}", {
           operation: "merge.queue-move-refused",
-          context: { arm, ...context },
-        });
+          context: { ...context },
+        }, { arm });
         return;
       }
       default:
@@ -400,10 +402,10 @@ export async function moveInQueue(
   } catch (err) {
     if (drawMalformedRefusal(rc.ctx, arrange.status, "merge.queue-move-unreadable", err)) return;
     drawTransportRefusal(arrange.status, err);
-    log.error(`UpdateMergeQueue failed for a move request: ${String(err)}`, {
+    log.error("UpdateMergeQueue failed for a move request: {err}", {
       operation: "merge.queue-move-failed",
       context: { ...context, cause: err },
-    });
+    }, { err: String(err) });
   } finally {
     // EVERY ANSWER LETS GO: the drop rearranged the table's DOM, which only
     // the newest snapshot may stand in for.

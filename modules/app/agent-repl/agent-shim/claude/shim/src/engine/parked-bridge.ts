@@ -23,7 +23,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 
-const LOGGER = bindLog({ component: "shim-engine-parked-bridge", operation: "shim.engine.parked-bridge" });
+const LOGGER = bindLog("shim.engine.parked-bridge", { component: "shim-engine-parked-bridge", operation: "shim.engine.parked-bridge" });
 
 /** The prompt typed on claude.ai that reached the parked process. */
 export interface ParkedRemotePrompt {

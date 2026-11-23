@@ -58,7 +58,7 @@ import { isNetworkResumePrompt } from "../engine/network-resume-prompt.js";
 import { TASK_SCENARIOS } from "./scenarios/tasks.js";
 import { WEB_SCENARIOS } from "./scenarios/web.js";
 
-const LOGGER = bindLog({ component: "shim-fake", operation: "shim.fake.registry" });
+const LOGGER = bindLog("shim.fake.registry", { component: "shim-fake", operation: "shim.fake.registry" });
 
 /** Every registered scenario. The default (`name: ""`) is first. */
 export const SCENARIOS: readonly Scenario[] = [

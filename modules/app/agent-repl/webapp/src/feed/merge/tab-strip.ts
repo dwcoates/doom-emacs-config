@@ -33,7 +33,7 @@ import { createControl, type Control } from "../../control.js";
 import { repaintMark } from "../../dom.js";
 import type { Ticker } from "../../clock.js";
 import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { stopTicking } from "../ticking.js";
 import { drawFeedMergeTestsRunTally, updateFeedMergeTestsRunTally } from "./tests-tab.js";
@@ -47,6 +47,8 @@ import type {
   FeedMergeTabTestsRun,
   FeedRow,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+
+const log = createLogger("webapp.feed.merge.tab-strip");
 
 const PATH = "FeedMergeTab";
 
@@ -396,10 +398,10 @@ function tabGlyphOf(tab: MergeTab): [string | null, string] {
         : ["is-succeeded", STATE_GLYPHS.succeeded];
     default:
       // Unreachable through `readMergeTab`, which validates the arm first.
-      log.warn(`a merge tab reports a state this build has no glyph for: ${tab.state}`, {
+      log.warn("a merge tab reports a state this build has no glyph for: {state}", {
         operation: "merge.unknown-tab-state",
-        context: { state: tab.state, kind: tab.kind },
-      });
+        context: { kind: tab.kind },
+      }, { state: tab.state });
       return [null, ""];
   }
 }

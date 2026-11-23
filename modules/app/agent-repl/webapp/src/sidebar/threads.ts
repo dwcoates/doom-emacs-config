@@ -34,7 +34,7 @@ import type {
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb.js";
 import type { NodeId } from "../../../proto/gen/ts/zettel/v1/zettel_pb.js";
 import { createControl } from "../control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
 import { sendGesture } from "../rpc/gesture.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -43,6 +43,8 @@ import { openScope, type DrawScope } from "./scope.js";
 import type { Dropdowns } from "./dropdowns.js";
 import { drawMenuControl } from "./row.js";
 import { buildSelectInEditorRequest, drawThreadMenu, type VerbTarget } from "./verbs.js";
+
+const log = createLogger("webapp.sidebar.threads");
 
 /** The switcher drawn in the rail's head. */
 export interface AppSwitcher {
@@ -103,7 +105,7 @@ export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): App
 
   const show = (app: SidebarApp, label: string): void => {
     close();
-    log.info(`showing the ${label} app`, { operation: "sidebar.show-app", context: { app: app.app.case } });
+    log.info("showing the {label} app", { operation: "sidebar.show-app", context: { app: app.app.case } }, { label });
     void sendGesture(ctx, "ShowSidebarApp", GESTURE_REFUSED, (client) => client.showSidebarApp({ app }), ShowSidebarAppResponseSchema);
   };
 

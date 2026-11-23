@@ -20,7 +20,7 @@ import { existsSync } from "node:fs";
 import { bindLog } from "../log.js";
 import type { ProbeAnswer, ReachabilityProbe } from "./network-resume.js";
 
-const LOGGER = bindLog({ component: "shim-engine-api-reachability", operation: "shim.engine.api_reachability" });
+const LOGGER = bindLog("shim.engine.api-reachability", { component: "shim-engine-api-reachability", operation: "shim.engine.api_reachability" });
 
 /** The public API, when nothing configures another. */
 export const DEFAULT_API_BASE_URL = "https://api.anthropic.com";

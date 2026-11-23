@@ -360,6 +360,8 @@ var migrations = []migration{
 	// IT IS ADDITIVE: a new column the previous build never names, filled
 	// from what the file records (seedVisibility).
 	{To: 192, Name: "visibility", Kind: MigrationAdditive, DDL: visibilityDDL, Rewrite: seedVisibility},
+	// IT IS ADDITIVE: three tables the previous build never names.
+	{To: 193, Name: "log_sites", Kind: MigrationAdditive, DDL: logSitesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

@@ -93,7 +93,7 @@
                           (cl-pushnew ws agent-repl-test-pu--held-back :test #'equal)))
                        ((symbol-function 'agent-repl-webhost-held-back-p)
                         (lambda (ws) (and (member ws agent-repl-test-pu--held-back) t)))
-                       ((symbol-function 'agent-repl--info)
+                       ((symbol-function 'agent-repl--emit-info)
                         (agent-repl-test--record-into agent-repl-test-pu--logged)))
                ,@body))
          (mapc #'kill-buffer (seq-filter #'buffer-live-p buffers))))))

@@ -57,7 +57,7 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 		// forward path, so this must not flood the strict harvest. The residue
 		// record stays; only the severity drops.
 		c.log.With(at.ctxFor("orphan-tool-result")).With(logging.Context{ActivityID: callID}).
-			LogVerbose("tool result names no call this reader observed; the settle is lost and the record is stored as vendor_specific residue")
+			LogVerbose("tool result names no call this reader observed; the settle is lost and the record is stored as vendor_specific residue", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "orphan_tool_result", record)}
 	}
 	delete(c.openCalls, callID)
@@ -71,7 +71,7 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 		// own uuid — so the copy is durable, moves no one's row, and re-ingests
 		// idempotently across every fork that quotes it.
 		c.log.With(at.ctxFor("quoted-tool-result")).With(logging.Context{ActivityID: callID}).
-			LogVerbose("tool result for a quoted (inherited) call name=%q kept as residue, not re-settled under this agent", call.name)
+			LogVerbose("tool result for a quoted (inherited) call name=\"{call_name}\" kept as residue, not re-settled under this agent", logging.Values{"call_name": call.name})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "tool_result/quoted_context", record)}
 	}
 
@@ -87,12 +87,12 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 		// the answer only in the vendor's joined form and a settle minted from
 		// it would supersede the shim's structured one.
 		c.log.With(at.ctxFor("stream-owned-drop")).With(logging.Context{ActivityID: callID}).
-			LogVerbose("tool result for stream-owned tool name=%q not converted here", call.name)
+			LogVerbose("tool result for stream-owned tool name=\"{call_name}\" not converted here", logging.Values{"call_name": call.name})
 		return nil
 	}
 	if IsExempt(call.name) {
 		c.log.With(at.ctxFor("exempt-drop")).With(logging.Context{ActivityID: callID}).
-			LogVerbose("tool result for exempt tool name=%q dropped entirely", call.name)
+			LogVerbose("tool result for exempt tool name=\"{call_name}\" dropped entirely", logging.Values{"call_name": call.name})
 		return nil
 	}
 
@@ -102,7 +102,7 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	if kind, _ := classifyTool(call.name); result == nil && kind == kindBash {
 		if launch, ok := backgroundLaunchFromProse(block); ok {
 			c.log.With(at.ctxFor("launch-from-prose")).With(logging.Context{ActivityID: call.activityID, TaskID: str(launch["backgroundTaskId"])}).
-				Log("the shell result carries no structured result; its backgrounding sentence names the launched task")
+				Log("the shell result carries no structured result; its backgrounding sentence names the launched task", nil)
 			result = launch
 		}
 	}
@@ -129,7 +129,7 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 			return nil
 		}
 		c.log.With(at.ctxWarn("tool-return")).With(logging.Context{ActivityID: callID}).
-			Log("tool result name=%q produced no settled unit; stored as vendor_specific residue so the answer is not lost", call.name)
+			Log("tool result name=\"{call_name}\" produced no settled unit; stored as vendor_specific residue so the answer is not lost", logging.Values{"call_name": call.name})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "unsettled_tool_result/"+call.name, record)}
 	}
 	settled.ActivityId = activityID(call.activityID)
@@ -142,7 +142,7 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	}
 
 	c.log.With(at.ctxFor("tool-return")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
-		LogVerbose("tool result name=%q settled failed=%t", call.name, failed)
+		LogVerbose("tool result name=\"{call_name}\" settled failed={failed}", logging.Values{"call_name": call.name, "failed": failed})
 	return []*storev1.StoreEntry{c.settledEntry(at, agent, call.activityID, settled)}
 }
 

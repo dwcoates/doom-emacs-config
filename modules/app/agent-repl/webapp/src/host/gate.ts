@@ -29,9 +29,11 @@ import { drawFeedColdGate, GATE_ANSWERING_EVENT } from "../feed/asks/cold-gate.j
 import type { RowContext } from "../feed/cards/context.js";
 import { DOCKED_CARD_CLASS, DOCK_HEIGHT_PROPERTY } from "../feed/gate-dock.js";
 import { stopTicking } from "../feed/ticking.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { PageSeen } from "../page-seen.js";
 import type { AppContext, DaemonContext } from "../rpc/context.js";
+
+const log = createLogger("webapp.host.gate");
 
 /** The id of the webhost's gate element. */
 export const WEBHOST_GATE_ID = "webhost-gate";

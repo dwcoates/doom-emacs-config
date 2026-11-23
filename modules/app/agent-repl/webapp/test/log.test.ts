@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientLogRecord } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { LevelWindow, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
+import { siteKey } from "../../agent-shim/logging/ts/logsite.js";
+import { spyLog } from "./log-spy.js";
 import {
   CLIENT_LOG_HELD_BOUND,
   ForwardingLogger,
@@ -8,7 +10,8 @@ import {
   bindLogContext,
   buildClientLogRecord,
   clearLogDedup,
-  log,
+  createLogger,
+  logLevelSelection,
   parseClientLogLevel,
   resetLoggingForTests,
   restampRecordIdentity,
@@ -19,6 +22,8 @@ import {
 } from "../src/log.js";
 
 const LEVELS: readonly ClientLogLevel[] = ["debug", "info", "warn", "error"];
+
+const log = createLogger("webapp.test.log");
 
 interface Harness {
   logger: ForwardingLogger;
@@ -58,6 +63,8 @@ function webappRecord(
     level,
     verbosity: "normal",
     operation: "test.op",
+    site: "0123456789ab",
+    template: "m",
     message: "m",
     context: {},
     connection_id: "connection-1",
@@ -83,8 +90,8 @@ beforeEach(() => {
 });
 
 describe("buildClientLogRecord: the level oneof", () => {
-  it("the canonical logger exposes exactly one method per level", () => {
-    expect(Object.keys(log).sort()).toEqual(["debug", "error", "info", "warn"]);
+  it("a module's logger exposes one method per level, beside message and log", () => {
+    expect(Object.keys(log).sort()).toEqual(["debug", "error", "info", "log", "message", "warn"]);
   });
 
   for (const level of LEVELS) {
@@ -466,7 +473,7 @@ describe("a record the daemon could not take is held, then resent", () => {
     const h = install(daemon.sink);
     vi.spyOn(console, "error").mockImplementation(() => {});
     for (let i = 0; i <= CLIENT_LOG_HELD_BOUND; i += 1) {
-      log.error(`while down ${String(i)}`, { operation: `test.held-${String(i)}` });
+      log.error("while down {i}", { operation: `test.held-${String(i)}` }, { i });
       await flushAndSettle(h);
     }
     daemon.down(false);
@@ -801,5 +808,139 @@ describe("a departed workspace stops the forwarder", () => {
     await flushAndSettle(h);
     // ASSERT
     expect(sent).toHaveLength(2);
+  });
+});
+
+describe("log sites", () => {
+  it("forwards each record with its site's key, derived from the runtime, the logger's scope and the template", async () => {
+    // ARRANGE
+    const h = install();
+    // ACT
+    createLogger("webapp.test.sites").info("hello {name}", { operation: "test.site" }, { name: "world" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent.map((r) => [r.site, r.template])).toEqual([[siteKey("webapp", "webapp.test.sites", "hello {name}"), "hello {name}"]]);
+  });
+
+  it("renders the forwarded message from the template's named values", async () => {
+    // ARRANGE
+    const h = install();
+    // ACT
+    log.info("moved {rows} rows to {place}", { operation: "test.site" }, { rows: 3, place: "the tail" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent[0]?.message).toBe("moved 3 rows to the tail");
+  });
+
+  it("records each named value in the context under its placeholder's name", async () => {
+    // ARRANGE
+    const h = install();
+    // ACT
+    log.info("moved {rows} rows", { operation: "test.site", context: { other: "kept" } }, { rows: 3 });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent[0]?.context).toMatchObject({ rows: 3, other: "kept" });
+  });
+
+  it("writes a doubled brace as a literal brace", async () => {
+    // ARRANGE
+    const h = install();
+    // ACT
+    log.info("a {{literal}} beside {value}", { operation: "test.site" }, { value: "x" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent[0]?.message).toBe("a {literal} beside x");
+  });
+
+  it("keys one template differently under two scopes", async () => {
+    // ARRANGE
+    const h = install();
+    // ACT
+    createLogger("webapp.test.one").info("same words", { operation: "test.site" });
+    createLogger("webapp.test.two").info("same words", { operation: "test.site" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(new Set(h.sent.map((r) => r.site)).size).toBe(2);
+  });
+
+  it("refuses a named value the context already states", () => {
+    // ARRANGE
+    install();
+    // ACT / ASSERT
+    expect(() => log.info("moved {rows} rows", { operation: "test.site", context: { rows: 1 } }, { rows: 2 })).toThrow("already states");
+  });
+
+  it("refuses a scope that is not dotted lowercase segments", () => {
+    // ACT / ASSERT
+    expect(() => createLogger("NoDots")).toThrow("dotted lowercase");
+  });
+
+  it("writes a caller's message at the level a helper picks, keyed under the caller's scope", async () => {
+    // ARRANGE
+    const h = install();
+    const message = createLogger("webapp.test.caller").message("the {thing} broke", { thing: "chain" });
+    // ACT
+    createLogger("webapp.test.helper").log("warn", message, { operation: "test.site" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent.map((r) => [r.level.case, r.message, r.site])).toEqual([
+      ["warn", "the chain broke", siteKey("webapp", "webapp.test.caller", "the {thing} broke")],
+    ]);
+  });
+
+  it("words a startup level decision as the shared level window does", async () => {
+    // ARRANGE
+    const h = install();
+    // ACT
+    logLevelSelection(selectLevel("debug", undefined, 1_000_000_000, "log_level"));
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent.map((r) => [r.message, r.operation])).toEqual([
+      ['log level "debug" ignored without AGENT_REPL_LOG_LEVEL_UNTIL; starting at info', "webapp.log.level-window"],
+    ]);
+  });
+
+  it("shows a test's spy each call with its rendered message and named values", () => {
+    // ARRANGE
+    install();
+    const info = spyLog("info");
+    // ACT
+    log.info("moved {rows} rows", { operation: "test.site" }, { rows: 3 });
+    // ASSERT
+    expect(info).toHaveBeenCalledWith("moved 3 rows", { operation: "test.site", context: { rows: 3 } });
+  });
+
+  it("refuses a template that is not a literal, at compile time", () => {
+    // ARRANGE
+    install();
+    const built: string = `built ${String(1)}`;
+    // ACT / ASSERT: the directive fails the typecheck if the call compiles.
+    // @ts-expect-error a template must be a string literal
+    expect(() => log.info(built, { operation: "test.site" })).not.toThrow();
+  });
+
+  it("refuses a template literal with a run-time value in it, at compile time", () => {
+    // ARRANGE
+    install();
+    const rows = 3;
+    // ACT / ASSERT
+    // @ts-expect-error a value goes in a named placeholder, never in the template
+    expect(() => log.info(`moved ${String(rows)} rows`, { operation: "test.site" })).not.toThrow();
+  });
+
+  it("refuses a named value the template does not name, at compile time", () => {
+    // ARRANGE
+    install();
+    // ACT / ASSERT
+    // @ts-expect-error the template names {rows}, not {count}
+    expect(() => log.info("moved {rows} rows", { operation: "test.site" }, { count: 1 })).toThrow("names no {count}");
+  });
+
+  it("refuses a scope that is not a literal, at compile time", () => {
+    // ARRANGE
+    const scope: string = "webapp.test.dynamic";
+    // ACT / ASSERT
+    // @ts-expect-error a scope must be a string literal
+    expect(() => createLogger(scope)).not.toThrow();
   });
 });

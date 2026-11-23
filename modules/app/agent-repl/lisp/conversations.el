@@ -35,13 +35,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 ;; Cross-file forward declarations.  These sources load in the dependency order
 ;; config.el establishes and resolve each other's calls at call time, so the
 ;; declarations below exist for the byte-compiler alone.
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--warn "core")
 (declare-function agent-repl-format-age "core" (at-ms now-ms))
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl-verbs--ref "verbs" (ws))
@@ -161,12 +163,12 @@ this been an asynchronous send."
       (:error
        (let* ((arm (plist-get (plist-get response :value) :cause))
               (keyword (plist-get arm :arm)))
-         (agent-repl--warn ws "elisp.conversations.list-refused ws=%s arm=%S fields=%S"
-                           ws keyword (plist-get arm :value))
+         (agent-repl--warn ws "elisp.conversations.list-refused ws={ws} arm={arm} fields={fields}"
+                           :ws ws :arm (prin1-to-string keyword) :fields (prin1-to-string (plist-get arm :value)))
          (user-error "agent-repl: listing conversations refused: %s"
                      (if keyword (substring (symbol-name keyword) 1) "unstated"))))
       (arm
-       (agent-repl--warn ws "elisp.conversations.unknown-response-arm ws=%s arm=%S" ws arm)
+       (agent-repl--warn ws "elisp.conversations.unknown-response-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm))
        (user-error "agent-repl: the daemon answered an unknown shape")))))
 
 (defconst agent-repl-conversations-bind-timeout-seconds 120
@@ -258,7 +260,7 @@ silently."
            (candidates (agent-repl-conversations--candidates transcripts now-ms)))
       (unless candidates
         (user-error "agent-repl: no conversations are filed under this workspace's directory"))
-      (agent-repl--info ws "elisp.conversations.listed ws=%s count=%d" ws (length candidates))
+      (agent-repl--info ws "elisp.conversations.listed ws={ws} count={count}" :ws ws :count (length candidates))
       (let* ((label (completing-read "Bind workspace to conversation: "
                                      (mapcar #'car candidates) nil t))
              (id (cdr (assoc label candidates))))

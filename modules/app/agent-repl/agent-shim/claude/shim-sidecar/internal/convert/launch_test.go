@@ -273,3 +273,53 @@ func TestASentenceOnlyLaunchIsLogged(t *testing.T) {
 		t.Fatalf("no record of the sentence-read launch naming its task; log:\n%s", file.String())
 	}
 }
+
+// TestALaunchStatesItsOutputPathOnlyWhenItsResultNamesOne pins the launch
+// record's field set: a result that names no output path is stated as such,
+// with no output key, never with the path as an empty value.
+func TestALaunchStatesItsOutputPathOnlyWhenItsResultNamesOne(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		toolUseResult string
+		wantMessage   string
+		wantOutputKey bool
+	}{
+		{
+			name:          "a result naming its output path records the path",
+			toolUseResult: `{"stdout":"","backgroundTaskId":"bnamed","outputFile":"/tmp/bnamed.output"}`,
+			wantMessage:   `detached launch observed with output path \"/tmp/bnamed.output\"`,
+			wantOutputKey: true,
+		},
+		{
+			name:          "a result naming no output path says so and records no output key",
+			toolUseResult: `{"stdout":"","backgroundTaskId":"bunnamed"}`,
+			wantMessage:   "detached launch observed with no output path",
+			wantOutputKey: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			var file bytes.Buffer
+			c := New(logging.New(io.Discard, &file).With(logging.Context{Component: "test"}))
+			call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_bg", "Bash", `{"command":"npm test","run_in_background":true}`))
+			result := toolResultLine("u1", "toolu_bg", ts2, `[{"type":"text","text":"started"}]`, tc.toolUseResult)
+
+			// Act.
+			convertLines(t, c, call, result)
+
+			// Assert.
+			var launch string
+			for _, line := range strings.Split(file.String(), "\n") {
+				if strings.Contains(line, "detached launch observed") {
+					launch = line
+				}
+			}
+			if !strings.Contains(launch, tc.wantMessage) {
+				t.Fatalf("launch record %q, want its message %q; log:\n%s", launch, tc.wantMessage, file.String())
+			}
+			if got := strings.Contains(launch, `"output":`); got != tc.wantOutputKey {
+				t.Errorf("launch record %q carries an output key = %v, want %v", launch, got, tc.wantOutputKey)
+			}
+		})
+	}
+}

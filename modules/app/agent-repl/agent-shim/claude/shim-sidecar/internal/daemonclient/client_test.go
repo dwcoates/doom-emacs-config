@@ -1356,3 +1356,30 @@ func TestForwardAsksTheRegistryForADirTheStreamsDoNotCarry(t *testing.T) {
 		})
 	}
 }
+
+func TestForwardCarriesTheRecordsSiteAndTemplate(t *testing.T) {
+	// Arrange.
+	client, server := serveClientLog(t, &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
+	})
+	record := logging.ForwardRecord{
+		Timestamp: "2026-09-10T12:34:56.789000-04:00", PID: 4242,
+		Level: "info", Operation: "sidecar.tail.read",
+		Message: "read 3 records", Site: "0123456789ab", Template: "read {count} records",
+		WorkspaceDir: server.workspace.GetDir(), WorkspaceID: "deadbeef", ClaudeSessionID: "claude-1",
+		Context: map[string]any{"count": 3.0},
+	}
+
+	// Act.
+	_, err := client.Forward(record)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Forward returned %v", err)
+	}
+	got := server.request.GetRecord()
+	if got.GetSite() != record.Site || got.GetTemplate() != record.Template || got.GetMessage() != record.Message {
+		t.Fatalf("record site, template, message = %q, %q, %q, want %q, %q, %q",
+			got.GetSite(), got.GetTemplate(), got.GetMessage(), record.Site, record.Template, record.Message)
+	}
+}

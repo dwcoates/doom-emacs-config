@@ -15,7 +15,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SlashCommandLike } from "../sdk/types.js";
 
-const LOGGER = bindLog({ component: "shim-convert-command-catalog", operation: "shim.convert.command_catalog" });
+const LOGGER = bindLog("shim.convert.command-catalog", { component: "shim-convert-command-catalog", operation: "shim.convert.command_catalog" });
 
 /** A string the vendor stated, or absence when it stated nothing. */
 function stated(text: string | undefined): string | undefined {

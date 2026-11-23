@@ -11,6 +11,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_list_log_sites.proto";
 import "agentrepl/v1/endpoint_subscribe_pull_request.proto";
 import "agentrepl/v1/endpoint_unsubscribe_pull_request.proto";
 import "agentrepl/v1/endpoint_list_pull_request_subscriptions.proto";
@@ -792,6 +793,14 @@ service AgentRepl {
   // daemon records under the path its own state names. See
   // endpoint_record_direct_landing.proto.
   rpc RecordDirectLanding(RecordDirectLandingRequest) returns (RecordDirectLandingResponse);
+  // Every log site that fired in a window of time, across every runtime, with
+  // how often it fired and one record it wrote, read from the daemon's
+  // per-deploy tallies rather than the logs. `agent-repld logs sites`
+  // answers it. See endpoint_list_log_sites.proto.
+  rpc ListLogSites(ListLogSitesRequest) returns (ListLogSitesResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // The registry's agent workspaces, open or closed, narrowed by repository,
   // activity window, standing, text and whether the sidebar draws them, each
   // with its name, summary and, when drawn, its roster section and live

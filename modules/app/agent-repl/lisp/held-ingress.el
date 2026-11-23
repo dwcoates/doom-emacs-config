@@ -48,12 +48,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--global-state-file "agent-repl-core" (relative))
 (declare-function agent-repl--write-file-atomically "agent-repl-core" (file text))
 (declare-function agent-repl--ws-dir-hash-cached "agent-repl-core" (ws))
@@ -140,19 +141,19 @@ it cannot read, and the page must not draw a guess at it."
     (file-missing
      ;; The daemon ingested it between the listing and the read; its host
      ;; push after the removal hands the page the list without it.
-     (agent-repl--log ws "elisp.held-ingress.entry-gone ws=%s file=%s" ws path)
+     (agent-repl--log ws "elisp.held-ingress.entry-gone ws={ws} file={file}" :ws ws :file path)
      nil)
     (error
-     (agent-repl--error ws "elisp.held-ingress.entry-unreadable ws=%s file=%s cause=%S" ws path err)
+     (agent-repl--error ws "elisp.held-ingress.entry-unreadable ws={ws} file={file} cause={cause}" :ws ws :file path :cause (prin1-to-string err))
      nil)))
 
 (defun agent-repl-held-ingress--push (ws paths)
   "Hand WS's page its entries at PATHS when their keys changed since the last."
   (let ((keys (mapcar #'agent-repl-held-ingress--entry-key paths)))
     (if (equal keys (gethash ws agent-repl--held-ingress-pushed 'unpushed))
-        (agent-repl--log ws "elisp.held-ingress.page-unchanged ws=%s count=%d" ws (length keys))
+        (agent-repl--log ws "elisp.held-ingress.page-unchanged ws={ws} count={count}" :ws ws :count (length keys))
       (puthash ws keys agent-repl--held-ingress-pushed)
-      (agent-repl--info ws "elisp.held-ingress.page-pushed ws=%s keys=%S" ws keys)
+      (agent-repl--info ws "elisp.held-ingress.page-pushed ws={ws} keys={keys}" :ws ws :keys (prin1-to-string keys))
       (agent-repl-webhost-set-held-ingress
        ws (vconcat (delq nil (mapcar (lambda (path) (agent-repl-held-ingress--entry-view ws path))
                                      paths)))))))
@@ -165,8 +166,8 @@ its page the entries when they changed.  Returns the count."
          (text (agent-repl-held-ingress--waiting-text count))
          (shown (agent-repl--input-waiting ws)))
     (if (equal text shown)
-        (agent-repl--log ws "elisp.held-ingress.waiting ws=%s count=%d unchanged" ws count)
-      (agent-repl--info ws "elisp.held-ingress.waiting ws=%s count=%d was=%S" ws count shown)
+        (agent-repl--log ws "elisp.held-ingress.waiting ws={ws} count={count} unchanged" :ws ws :count count)
+      (agent-repl--info ws "elisp.held-ingress.waiting ws={ws} count={count} was={was}" :ws ws :count count :was (prin1-to-string shown))
       (agent-repl--input-set-waiting ws text))
     (agent-repl-held-ingress--push ws paths)
     count))
@@ -211,16 +212,16 @@ owns telling the user their words were not saved."
                               dir t (agent-repl-held-ingress--name-regexp hash key) t)))))
     (if existing
         (progn
-          (agent-repl--info ws "elisp.held-ingress.already-written ws=%s key=%s file=%s"
-                            ws key existing)
+          (agent-repl--info ws "elisp.held-ingress.already-written ws={ws} key={key} file={file}"
+                            :ws ws :key key :file existing)
           existing)
       (let* ((name (format "held_%s_%s_%s.json"
                            (format-time-string "%Y%m%dT%H%M%S.%N" nil t) hash key))
              (path (expand-file-name name dir)))
         (agent-repl--write-file-atomically
          path (agent-repl-held-ingress--body ws said origin key delivery))
-        (agent-repl--info ws "elisp.held-ingress.written ws=%s key=%s origin=%S delivery=%S file=%s"
-                          ws key origin delivery path)
+        (agent-repl--info ws "elisp.held-ingress.written ws={ws} key={key} origin={origin} delivery={delivery} file={file}"
+                          :ws ws :key key :origin (prin1-to-string origin) :delivery (prin1-to-string delivery) :file path)
         (agent-repl-held-ingress-refresh ws)
         path))))
 

@@ -38,12 +38,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'bytecomp)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--now "core" ())
 (declare-function agent-repl--register-timer "core" (key timer))
 (declare-function agent-repl--cancel-timer-key "core" (key))
@@ -113,8 +114,8 @@ loaded by the caller that names it, a broken caller, and is an ERROR."
              (found (agent-repl-bytecode-file-functions file)))
         (if (null found)
             (agent-repl--error agent-repl-bytecode--log-scope
-                               "elisp.bytecode.module-not-loaded module=%s file=%S"
-                               module file)
+                               "elisp.bytecode.module-not-loaded module={module} file={file}"
+                               :module module :file (prin1-to-string file))
           (setq files (1+ files)
                 closures (+ closures (plist-get found :closures)))
           (dolist (symbol (plist-get found :functions))
@@ -124,8 +125,8 @@ loaded by the caller that names it, a broken caller, and is an ERROR."
                                          :compiled 0 :failed 0 :closures closures
                                          :slices 0 :interrupted 0 :cpu 0.0))
     (agent-repl--info agent-repl-bytecode--log-scope
-                      "elisp.bytecode.scheduled functions=%d files=%d closures=%d"
-                      (length agent-repl-bytecode--queue) files closures)
+                      "elisp.bytecode.scheduled functions={functions} files={files} closures={closures}"
+                      :functions (length agent-repl-bytecode--queue) :files files :closures closures)
     (agent-repl--register-timer
      :bytecode
      (run-with-timer 0 agent-repl-bytecode-interval #'agent-repl-bytecode--slice))))
@@ -146,13 +147,13 @@ redefined or advised since it was queued) or `failed' (logged at ERROR)."
             (if (byte-code-function-p (symbol-function symbol))
                 'compiled
               (agent-repl--error agent-repl-bytecode--log-scope
-                                 "elisp.bytecode.compile-failed function=%s file=%S error=%s"
-                                 symbol file "the compile installed no byte-code")
+                                 "elisp.bytecode.compile-failed function={function} file={file} error=the compile installed no byte-code"
+                                 :function symbol :file (prin1-to-string file))
               'failed))
         (error
          (agent-repl--error agent-repl-bytecode--log-scope
-                            "elisp.bytecode.compile-failed function=%s file=%S error=%S"
-                            symbol file err)
+                            "elisp.bytecode.compile-failed function={function} file={file} error={error}"
+                            :function symbol :file (prin1-to-string file) :error (prin1-to-string err))
          'failed)))))
 
 (defun agent-repl-bytecode--slice ()
@@ -181,12 +182,12 @@ run ends, and is recorded, when the queue is empty."
     (unless agent-repl-bytecode--queue
       (agent-repl--cancel-timer-key :bytecode)
       (agent-repl--info agent-repl-bytecode--log-scope
-                        "elisp.bytecode.compiled functions=%d failed=%d closures=%d files=%d slices=%d interrupted=%d cpu-ms=%d wall-ms=%d"
-                        (plist-get run :compiled) (plist-get run :failed)
-                        (plist-get run :closures) (plist-get run :files)
-                        (plist-get run :slices) (plist-get run :interrupted)
-                        (round (* 1000 (plist-get run :cpu)))
-                        (round (* 1000 (- (agent-repl--now) (plist-get run :started)))))
+                        "elisp.bytecode.compiled functions={functions} failed={failed} closures={closures} files={files} slices={slices} interrupted={interrupted} cpu-ms={cpu_ms} wall-ms={wall_ms}"
+                        :functions (plist-get run :compiled) :failed (plist-get run :failed)
+                        :closures (plist-get run :closures) :files (plist-get run :files)
+                        :slices (plist-get run :slices) :interrupted (plist-get run :interrupted)
+                        :cpu_ms (round (* 1000 (plist-get run :cpu)))
+                        :wall_ms (round (* 1000 (- (agent-repl--now) (plist-get run :started)))))
       (setq agent-repl-bytecode--run nil))))
 
 (provide 'bytecode)

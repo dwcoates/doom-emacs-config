@@ -49,13 +49,13 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
                   (lambda (_xw script callback) (push (cons script callback) agent-repl-test-sv--calls)))
                  ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                   (lambda (_xw url) (push url agent-repl-test-sv--navigated)))
-                 ((symbol-function 'agent-repl--info)
+                 ((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-leveled-into records 'info))
-                 ((symbol-function 'agent-repl--log)
+                 ((symbol-function 'agent-repl--emit-log)
                   (agent-repl-test--record-leveled-into records 'log))
-                 ((symbol-function 'agent-repl--warn)
+                 ((symbol-function 'agent-repl--emit-warn)
                   (agent-repl-test--record-leveled-into records 'warn))
-                 ((symbol-function 'agent-repl--error)
+                 ((symbol-function 'agent-repl--emit-error)
                   (agent-repl-test--record-leveled-into records 'error)))
          ,@body))))
 
@@ -263,7 +263,7 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
   "The sidebar's boot errors are recorded at ERROR, naming the sidebar's view."
   (agent-repl-test-sv--with-sidebar
     (let (errors)
-      (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+      (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
         (agent-repl--sidebar-view-on-boot "{\"started\":false,\"hooked\":true,\"errors\":[\"error: boom\"]}"))
       (should (equal errors '("elisp.webview.boot-errors view=sidebar started=nil errors=(\"error: boom\")"))))))
 
@@ -357,7 +357,7 @@ Binds `made' to that buffer; it is killed afterwards."
   (let ((logs nil))
     (with-temp-buffer
       (rename-buffer " *test-sv-border*" t)
-      (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl--sidebar-view-draw-bottom-border (current-buffer)))
       ;; Assert
@@ -380,7 +380,7 @@ Binds `made' to that buffer; it is killed afterwards."
   "Only this module kills the sidebar buffer."
   (agent-repl-test-sv--with-created
     (agent-repl-sidebar-view-ensure)
-    (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-warn) #'ignore))
       (should-not (with-current-buffer made (agent-repl--sidebar-view-refuse-kill))))))
 
 (ert-deftest agent-repl-test-sv-a-refused-kill-is-recorded ()
@@ -388,7 +388,7 @@ Binds `made' to that buffer; it is killed afterwards."
   (agent-repl-test-sv--with-created
     (agent-repl-sidebar-view-ensure)
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         (with-current-buffer made (agent-repl--sidebar-view-refuse-kill)))
       (should (string-search "kill-refused" (car warned))))))

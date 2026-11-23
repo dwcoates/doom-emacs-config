@@ -62,6 +62,8 @@ type cliClient struct {
 	interrupted *agentreplv1.InterruptResponse
 	// found answers FindWorkspaces, an empty complete find when nil.
 	found *agentreplv1.FindWorkspacesResponse
+	// logSites answers ListLogSites, an empty whole success when nil.
+	logSites *agentreplv1.ListLogSitesResponse
 	// located answers LocateWorkspace.
 	located *agentreplv1.LocateWorkspaceResponse
 	// arrangement answers GetSidebarArrangement; arrange answers

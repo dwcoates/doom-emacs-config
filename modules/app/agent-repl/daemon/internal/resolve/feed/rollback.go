@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -352,7 +353,7 @@ func (r *resolver) WithholdDrawnTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
 		}
 		snapshot, ok := r.snapshotRow(s, row, unclonable{
 			operation: opRollbackHold,
-			message:   "a drawn row of a turn being rolled back could not be snapshotted; it stays drawn until the rollback settles",
+			message:   logsite.Msg("a drawn row of a turn being rolled back could not be snapshotted; it stays drawn until the rollback settles"),
 			context:   dlog.Context{"feed": f.key, "row": id, "turn": string(turn)},
 		})
 		if !ok {
@@ -437,7 +438,7 @@ func (r *resolver) withheldRollingBack(s *wsState, f *feedState, at placement, r
 	}
 	snapshot, ok := r.snapshotRow(s, row, unclonable{
 		operation: opRollbackHold,
-		message:   "a row of a turn being rolled back could not be snapshotted; it is not drawn even if the rollback is refused",
+		message:   logsite.Msg("a row of a turn being rolled back could not be snapshotted; it is not drawn even if the rollback is refused"),
 		context:   dlog.Context{"feed": f.key, "row": row.GetId().GetValue(), "turn": string(turn)},
 	})
 	if !ok {
@@ -499,9 +500,9 @@ func (r *resolver) restoreRolledBack(s *wsState) {
 	r.restoreTurnSet(s, turnSetRestore{
 		op:      opRollbackRestore,
 		load:    r.deps.RolledBack.RolledBackTurns,
-		failed:  "the workspace's rolled-back turns could not be loaded; their rows may be drawn again",
+		failed:  logsite.Msg("the workspace's rolled-back turns could not be loaded; their rows may be drawn again"),
 		warning: "rolled-back prompts could not be loaded and may be drawn again",
-		loaded:  "the workspace's rolled-back turns were loaded; their rows are not drawn",
+		loaded:  logsite.Msg("the workspace's rolled-back turns were loaded; their rows are not drawn"),
 	}, s.rolledBack)
 }
 

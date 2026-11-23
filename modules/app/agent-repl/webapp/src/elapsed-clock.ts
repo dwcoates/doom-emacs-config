@@ -14,8 +14,10 @@
 import type { Ticker } from "./clock.js";
 import { formatElapsed, formatTickedElapsed } from "./duration.js";
 import { tick } from "./feed/ticking.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { fitsReserve, reserveLabels, reserveLabelsCss } from "./width-reserve.js";
+
+const log = createLogger("webapp.elapsed-clock");
 
 /**
  * A span wearing CLASSNAME that counts up from STARTEDMS, painted now and on

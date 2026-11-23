@@ -24,7 +24,7 @@
  */
 import { bindLog } from "../log.js";
 
-const LOGGER = bindLog({ component: "shim-engine-foreground", operation: "shim.engine.foreground" });
+const LOGGER = bindLog("shim.engine.foreground", { component: "shim-engine-foreground", operation: "shim.engine.foreground" });
 
 /**
  * How many settled calls are remembered, newest first.

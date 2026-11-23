@@ -27,7 +27,9 @@
  */
 import { createControl, type Control } from "../control.js";
 import { pageIntersectionObserver } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.feed.walk-control");
 
 /**
  * What the walk control is called to assistive technology while idle: it

@@ -191,17 +191,17 @@ func validate(r Report) error {
 func Announce(service, op string, log *recordlog.Logger, getenv func(string) string) {
 	r, err := Self()
 	if err != nil {
-		log.Error(op, service+" could not determine its own build", recordlog.Context{"cause": err.Error()})
+		log.Error(op, "{service} could not determine its own build", recordlog.Context{"service": service, "cause": err.Error()})
 		return
 	}
 	dir, err := ResolveDir(getenv)
 	if err != nil {
-		log.Error(op, service+" could not resolve its build report directory", recordlog.Context{"cause": err.Error()})
+		log.Error(op, "{service} could not resolve its build report directory", recordlog.Context{"service": service, "cause": err.Error()})
 		return
 	}
 	if err := Write(dir, service, r); err != nil {
-		log.Error(op, service+" failed to write its build report", recordlog.Context{"cause": err.Error(), "dir": dir})
+		log.Error(op, "{service} failed to write its build report", recordlog.Context{"service": service, "cause": err.Error(), "dir": dir})
 		return
 	}
-	log.Info(op, service+" reported its build", recordlog.Context{"build": r.Build, "path": Path(dir, service)})
+	log.Info(op, "{service} reported its build", recordlog.Context{"service": service, "build": r.Build, "path": Path(dir, service)})
 }

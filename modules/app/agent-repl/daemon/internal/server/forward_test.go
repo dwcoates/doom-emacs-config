@@ -362,7 +362,7 @@ func TestAPageCallIsServedByTheDaemonItsAttachmentNames(t *testing.T) {
 					}
 				}
 				if !recorded {
-					t.Fatalf("the failed lookup was not recorded; got %v", log.records)
+					t.Fatalf("the failed lookup was not recorded; got %v", log.records())
 				}
 			}
 		})
@@ -557,7 +557,7 @@ func TestACallForwardedToADaemonThatNoLongerAcceptsIsAnsweredHere(t *testing.T) 
 			}
 		}
 		if !recorded {
-			t.Fatalf("the refused forward was not recorded; got %v", log.records)
+			t.Fatalf("the refused forward was not recorded; got %v", log.records())
 		}
 	})
 	t.Run("a call for a workspace whose serving daemon is exiting is answered here", func(t *testing.T) {

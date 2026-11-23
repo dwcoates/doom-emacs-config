@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -265,11 +266,11 @@ func (s *server) refuse(log dlog.Logger, rpc string, resp proto.Message, r refus
 		if r.Op != "" {
 			op = r.Op
 		}
+		level := dlog.LevelDebug
 		if r.Info {
-			log.Info(op, "answered a typed refusal", dlog.Context{"arm": r.Arm, "reason": r.Reason})
-		} else {
-			log.Debug(op, "answered a typed refusal", dlog.Context{"arm": r.Arm, "reason": r.Reason})
+			level = dlog.LevelInfo
 		}
+		log.Log(level, op, logsite.Msg("answered a typed refusal"), dlog.Context{"arm": r.Arm, "reason": r.Reason})
 		return nil
 	}
 	err := UnlandedArm(log, rpc, r.Arm, r.Reason, r.NotFound)
@@ -665,11 +666,15 @@ func fail(log dlog.Logger, rpc string, err error) *connect.Error {
 	// refusal is UNAVAILABLE, and restamping it internal would tell the client
 	// the daemon broke rather than that it went away.
 	var coded *connect.Error
-	if errors.As(err, &coded) {
-		log.Error(rpc, "the rpc failed", dlog.Context{"cause": err.Error(), "code": coded.Code().String()})
+	isCoded := errors.As(err, &coded)
+	fields := dlog.Context{"cause": err.Error()}
+	if isCoded {
+		fields["code"] = coded.Code().String()
+	}
+	log.Error(rpc, "the rpc failed", fields)
+	if isCoded {
 		return coded
 	}
-	log.Error(rpc, "the rpc failed", dlog.Context{"cause": err.Error()})
 	return connect.NewError(connect.CodeInternal, err)
 }
 

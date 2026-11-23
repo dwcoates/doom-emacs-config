@@ -14,7 +14,7 @@ import { bindLog } from "../log.js";
 import { classifyAgentFailure } from "./network-resume.js";
 import type { VendorStartCause, VendorStartRetry } from "../service/failures.js";
 
-const LOGGER = bindLog({ component: "shim-engine-start-failure", operation: "shim.engine.start_failure" });
+const LOGGER = bindLog("shim.engine.start-failure", { component: "shim-engine-start-failure", operation: "shim.engine.start_failure" });
 
 /** Which bound a failed start tripped, by name and size. */
 export interface VendorStartBound {

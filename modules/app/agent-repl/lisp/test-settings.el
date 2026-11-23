@@ -57,7 +57,7 @@
           (agent-repl-send-prefix "prefix: ")
           (agent-repl-input-help-topics (list agent-repl-test-settings--topic))
           (agent-repl-test-settings--fatals nil))
-     (cl-letf (((symbol-function 'agent-repl--fatal)
+     (cl-letf (((symbol-function 'agent-repl--emit-fatal)
                 (agent-repl-test--fatal-into agent-repl-test-settings--fatals)))
        (unwind-protect (progn ,@body)
          (remove-hook 'after-load-functions #'agent-repl-settings--apply-pending)
@@ -122,7 +122,7 @@
   "Saving records the file and how much it holds."
   (let (logged)
     (agent-repl-test-settings--with
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         (agent-repl-settings--save)))
     (should (string-match-p "elisp.settings.save: file=.*settings.eld overrides=0 variables=0" (car logged)))))
@@ -552,7 +552,7 @@
   (let (logged)
     (with-temp-buffer
       (agent-repl-test-settings--leaving (current-buffer)
-        (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+        (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logged)))
           (agent-repl-settings--close-when-left 'settings-window))
         (should (equal deleted '(settings-window)))))
     (should (string-match-p "elisp.settings.close-when-left: window=settings-window" (car logged)))))

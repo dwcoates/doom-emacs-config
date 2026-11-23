@@ -21,13 +21,15 @@ import type {
   TopbarPermissionModeOption,
   TopbarPermissionModePicker,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 import type { TopbarContext } from "./context.js";
 import type { SentenceTable } from "../rpc/refuse.js";
 import { drawNoSessionCell } from "./no-session.js";
 import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
+
+const log = createLogger("webapp.topbar.permission-mode");
 
 /** The causes only SetPermissionMode can answer with. */
 export const SET_PERMISSION_MODE_CAUSES = {
@@ -109,10 +111,10 @@ export async function pickPermissionMode(
   button: Control,
   row: Control,
 ): Promise<void> {
-  log.info(`the reader picked the permission mode ${option.mode}`, {
+  log.info("the reader picked the permission mode {mode}", {
     operation: "topbar.permission-mode-picked",
-    context: { mode: option.mode },
-  });
+    context: {},
+  }, { mode: option.mode });
   await sendPick(
     {
       rpc: "SetPermissionMode",

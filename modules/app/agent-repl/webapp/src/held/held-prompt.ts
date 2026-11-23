@@ -110,7 +110,7 @@ import { markdownSlot, unparsedProse } from "../bubble/body.js";
 import { quoteSlot } from "../bubble/quote.js";
 import { expandedOnly } from "../bubble/expanded-only.js";
 import { drawBubble } from "../bubble/draw.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -135,6 +135,8 @@ import {
   classifierRouteOf,
   type ClassifierUpdateForm,
 } from "./classifier-update.js";
+
+const log = createLogger("webapp.held.held-prompt");
 
 /** The class a held card's refusal notes carry. */
 const REFUSAL_KIND = "queued-refusal";
@@ -878,10 +880,10 @@ async function rowCall(
     try {
       const refused = await attempt();
       if (refused === null) {
-        log.info(`${rpc} accepted a ${action}`, {
+        log.info("{rpc} accepted a {action}", {
           operation: "held.held-prompt.action-accepted",
-          context: { turn, action },
-        });
+          context: { turn },
+        }, { rpc, action });
         return true;
       }
       drawRefusalAfter(row, REFUSAL_KIND, refused.arm, refused.say);
@@ -889,10 +891,10 @@ async function rowCall(
       // release while a turn the vendor started runs is refused because such
       // a turn is never joined, and the row says so. Info, so an expected
       // answer never reads as a warning in the shared log.
-      log.info(`${rpc} refused a ${action}`, {
+      log.info("{rpc} refused a {action}", {
         operation: "held.held-prompt.action-refused",
-        context: { turn, action, arm: refused.arm, sentence: refused.say },
-      });
+        context: { turn, arm: refused.arm, sentence: refused.say },
+      }, { rpc, action });
       return false;
     } catch (err) {
       // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
@@ -900,10 +902,10 @@ async function rowCall(
       // than being drawn as "could not be reached", which would be a lie.
       if (isMalformedView(err)) throw err;
       drawRefusalAfter(row, REFUSAL_KIND, "error", "the daemon could not be reached");
-      log.error(`${rpc} failed for a ${action}: ${String(err)}`, {
+      log.error("{rpc} failed for a {action}: {err}", {
         operation: "held.held-prompt.action-failed",
-        context: { turn, action, cause: err },
-      });
+        context: { turn, cause: err },
+      }, { rpc, action, err: String(err) });
       return false;
     }
   });
@@ -1087,10 +1089,10 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
     } catch (err) {
       if (!(err instanceof ConnectError)) throw err;
       const failed = callFailure(err);
-      log.error(`EditHeldPrompt failed for a begin: ${failed.text}`, {
+      log.error("EditHeldPrompt failed for a begin: {text}", {
         operation: "held.held-prompt.edit-failed",
         context: { turn: spec.turn.value, arm: failed.arm },
-      });
+      }, { text: failed.text });
       spec.tc.ctx.failures.report(
         controlPlaneFailed(EDIT_REQUEST, failed.text),
       );
@@ -1113,14 +1115,14 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
           EDIT_REFUSALS,
           "EditHeldPromptError.cause",
         );
-        log.info(`EditHeldPrompt refused a begin: ${said.text}`, {
+        log.info("EditHeldPrompt refused a begin: {text}", {
           operation: "held.held-prompt.edit-refused",
           context: {
             turn: spec.turn.value,
             arm: said.arm,
             sentence: said.text,
           },
-        });
+        }, { text: said.text });
         spec.tc.ctx.failures.report(
           controlPlaneFailed(EDIT_REQUEST, said.text),
         );
@@ -1313,10 +1315,10 @@ export function heldBadgeClasses(status: string): string {
  */
 function heldStatusTone(status: string): HeldBadgeTone {
   if (!Object.hasOwn(HELD_STATUS_BADGES, status)) {
-    log.error(`a held prompt status has no badge: ${status}`, {
+    log.error("a held prompt status has no badge: {status}", {
       operation: "held.held-prompt.badge-unknown-status",
-      context: { status },
-    });
+      context: {},
+    }, { status });
     throw new MalformedView(
       "HeldPrompt.status",
       `status '${status}' has no badge`,
@@ -1518,10 +1520,10 @@ export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
  * whoever would model it, and the card's own words are unaffected.
  */
 export function drawUnsupportedBlock(u: UnsupportedBlock, path: string): null {
-  log.warn(`a held prompt carried an unmodeled ${u.kind} block`, {
+  log.warn("a held prompt carried an unmodeled {kind} block", {
     operation: "held.held-prompt.unsupported-block",
-    context: { path, kind: u.kind },
-  });
+    context: { path },
+  }, { kind: u.kind });
   return null;
 }
 

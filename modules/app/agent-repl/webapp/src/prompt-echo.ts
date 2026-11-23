@@ -18,8 +18,10 @@
  * first; the latest prompt is the one being timed.
  */
 import { ReportedLatencyKind } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { recordWallLatency, type RecordLatency } from "./wall-latency.js";
+
+const log = createLogger("webapp.prompt-echo");
 
 /** How many unpaired draws, and unpaired echoes, are kept. */
 export const PROMPT_ECHO_MEMORY = 64;

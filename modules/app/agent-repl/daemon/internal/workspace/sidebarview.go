@@ -68,10 +68,10 @@ func (v *verbs) foldSingletonSection(ctx context.Context, op, section string, wr
 func (v *verbs) recordView(ctx context.Context, op, what string, fields dlog.Context, write func(context.Context) error) error {
 	log := v.deps.Log.Global().With(fields)
 	if err := write(ctx); err != nil {
-		log.Error(op, "could not record "+what, dlog.Context{"cause": err.Error()})
+		log.Error(op, "could not record {what}", dlog.Context{"what": what, "cause": err.Error()})
 		return fmt.Errorf("record %s: %w", what, err)
 	}
-	log.Info(op, "recorded "+what, nil)
+	log.Info(op, "recorded {what}", dlog.Context{"what": what})
 	v.republishRegistry(ctx, log, op)
 	return nil
 }

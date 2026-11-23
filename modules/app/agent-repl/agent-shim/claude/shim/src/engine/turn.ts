@@ -81,7 +81,7 @@ import type { QueryLike } from "../sdk/types.js";
 import type { TranscriptHolds } from "./rollback.js";
 import { causeOfOrigin } from "./vendor-spend.js";
 
-const LOGGER = bindLog({ component: "shim-engine-turn", operation: "shim.engine.turn" });
+const LOGGER = bindLog("shim.engine.turn", { component: "shim-engine-turn", operation: "shim.engine.turn" });
 
 /** The one turn that may be open. */
 export interface OpenTurn {
@@ -1678,7 +1678,9 @@ export class TurnEngine {
       if (ending === "consumer" || ending === "failed") {
         LOGGER.debug(
           { agent_id: target.value, ending },
-          `the WatchAgent stream ended: ${ending === "failed" ? "it raised, and the route recorded why" : "its consumer stopped consuming it"}`,
+          ending === "failed"
+            ? "the WatchAgent stream ended: it raised, and the route recorded why"
+            : "the WatchAgent stream ended: its consumer stopped consuming it",
         );
       } else if (ending === "concluded") {
         LOGGER.info(

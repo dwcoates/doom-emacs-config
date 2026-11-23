@@ -22,8 +22,10 @@
  * Absent `IntersectionObserver` (a bare jsdom), there is no watch at all.
  */
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createLeftViewWatch } from "./left-view.js";
+
+const log = createLogger("webapp.feed.selection-visibility");
 
 /** What the chip's `request` evidence names a failed left-view report as. */
 export const LEFT_VIEW_REQUEST = "end the selection of a row that left the view";

@@ -30,9 +30,11 @@
  */
 import { observeContainingBlock, type BubbleBody } from "../bubble/body.js";
 import { computedPx } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { domClampGeometry } from "./ellipsis-trim.js";
 import { onDiscard } from "./ticking.js";
+
+const log = createLogger("webapp.feed.collapsed-width");
 
 /** The custom property the stylesheet sizes a fitted collapsed box by. */
 export const COLLAPSED_WIDTH_PROPERTY = "--collapsed-width";

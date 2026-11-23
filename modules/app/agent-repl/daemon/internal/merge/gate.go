@@ -460,8 +460,8 @@ func (g *gateRun) since() float64 { return g.r.o.deps.Now().Sub(g.begun).Seconds
 // cut records a gate cut BY something before its verdict, and THEN, what
 // becomes of the gate.
 func (g *gateRun) cut(ctx context.Context, by, then string) {
-	g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test gate was cut before its verdict by "+by+"; "+then, dlog.Context{
-		"workspace": string(g.r.ws), "round": g.round.n, "by": by, "since_gate_start_seconds": g.since()})
+	g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test gate was cut before its verdict by {by}; {then}", dlog.Context{
+		"workspace": string(g.r.ws), "round": g.round.n, "by": by, "then": then, "since_gate_start_seconds": g.since()})
 }
 
 // suiteEdge reads one line of the script as a suite's edge: starting, passed

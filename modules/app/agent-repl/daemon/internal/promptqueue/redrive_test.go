@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 func TestIsRedriveReadsTheMark(t *testing.T) {
@@ -44,7 +45,7 @@ func TestRefusalLevelRecordsAtTheArmsLevelOrDebugForARedrive(t *testing.T) {
 			log := dlog.NewTestLogger()
 
 			// Act
-			refusalLevel(tc.ctx, log, log.Warn)("daemon.promptqueue.submit", "refused", nil)
+			log.Log(refusalLevel(tc.ctx, dlog.LevelWarn), "daemon.promptqueue.submit", logsite.Msg("refused"), nil)
 
 			// Assert
 			records := log.Records()

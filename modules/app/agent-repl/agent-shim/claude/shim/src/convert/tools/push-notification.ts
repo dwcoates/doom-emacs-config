@@ -28,7 +28,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, failureOf, settle, str } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.push-notification", {
   component: "shim-convert-push-notification",
   operation: "shim.convert.tools.push_notification",
 });

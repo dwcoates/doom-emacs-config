@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -466,7 +467,7 @@ func TestSelectionsErrorIsOneErrorOnTheWorkspacesLog(t *testing.T) {
 	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/Users/dev/.claude"})
 
 	// Act
-	h.r.selectionsError(testWS, "a failed keep", dlog.Context{"cause": "disk full"})
+	h.r.selectionsError(testWS, logsite.Msg("a failed keep"), dlog.Context{"cause": "disk full"})
 
 	// Assert
 	records := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opSelections, Message: "a failed keep"})
@@ -483,7 +484,8 @@ func TestEverySelectionsErrorGoesThroughTheHelper(t *testing.T) {
 	}
 
 	// Act
-	direct := strings.Count(string(src), "log.Error(opSelections")
+	direct := strings.Count(string(src), "log.Error(opSelections") +
+		strings.Count(string(src), "log.Log(dlog.LevelError, opSelections")
 
 	// Assert: the only direct record is the helper's own.
 	if direct != 1 || strings.Count(string(src), "r.selectionsError(ws, ") < 3 {

@@ -23,13 +23,13 @@ one of `debug', `info', `warn' and `error'."
          (records nil))
      (cl-letf (((symbol-function 'agent-repl-host-request-switch-ref)
                 (lambda (ref trigger) (push (cons ref trigger) switches) t))
-               ((symbol-function 'agent-repl--log)
+               ((symbol-function 'agent-repl--emit-log)
                 (agent-repl-test--record-leveled-into records 'debug))
-               ((symbol-function 'agent-repl--info)
+               ((symbol-function 'agent-repl--emit-info)
                 (agent-repl-test--record-leveled-into records 'info))
-               ((symbol-function 'agent-repl--warn)
+               ((symbol-function 'agent-repl--emit-warn)
                 (agent-repl-test--record-leveled-into records 'warn))
-               ((symbol-function 'agent-repl--error)
+               ((symbol-function 'agent-repl--emit-error)
                 (agent-repl-test--record-leveled-into records 'error)))
        ,@body)))
 
@@ -41,10 +41,10 @@ one of `debug', `info', `warn' and `error'."
 (ert-deftest agent-repl-test-notifications-recorder-records-each-level ()
   "The recorder files each log level's formatted line under its level."
   (agent-repl-test-notifications--recording
-   (agent-repl--log 'scope "d %s" 1)
-   (agent-repl--info 'scope "i %s" 2)
-   (agent-repl--warn 'scope "w %s" 3)
-   (agent-repl--error 'scope "e %s" 4)
+   (agent-repl--log 'scope "d {value}" :value 1)
+   (agent-repl--info 'scope "i {value}" :value 2)
+   (agent-repl--warn 'scope "w {value}" :value 3)
+   (agent-repl--error 'scope "e {value}" :value 4)
    (should (equal records '((error . "e 4") (warn . "w 3") (info . "i 2") (debug . "d 1"))))))
 
 (ert-deftest agent-repl-test-notifications-recorder-records-switches ()
@@ -63,7 +63,7 @@ one of `debug', `info', `warn' and `error'."
   "Every log capture in this file goes through the recorder."
   (with-temp-buffer
     (insert-file-contents (expand-file-name "test-notifications.el" agent-repl-test--module-dir))
-    (should (= (how-many (concat "symbol-function '" "agent-repl--\\(info\\|warn\\|error\\|log\\)\\_>")) 4))))
+    (should (= (how-many (concat "symbol-function '" "agent-repl--emit-\\(info\\|warn\\|error\\|log\\)\\_>")) 4))))
 
 ;;;; ---- Tests: reporting the focus ----
 
@@ -352,7 +352,7 @@ attribution at a call site is a defect no directory can supply -- so this
 call site states the central scope instead of leaving one missing."
   ;; Arrange.
   (let ((scopes nil))
-    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+    (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                (lambda (ws &rest _) (push ws scopes))))
       ;; Act.
       (let ((noninteractive t))
@@ -364,7 +364,7 @@ call site states the central scope instead of leaving one missing."
   "With a WS, the focus observation is attributed to that workspace."
   ;; Arrange.
   (let ((scopes nil))
-    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+    (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                (lambda (ws &rest _) (push ws scopes))))
       ;; Act.
       (let ((noninteractive t))

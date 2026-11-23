@@ -30,8 +30,10 @@
  * tree's first line sits beside the control like any other text.
  */
 import { boundCopyControl, type CopyKind } from "../copy-control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { addSlotMark, isMarkdownSlot, reserveSlotFirstLine, type FirstLineRoom } from "./body.js";
+
+const log = createLogger("webapp.bubble.copy-room");
 
 /** The class every bubble's copy control wears, which places it at the bubble's top right. */
 export const BUBBLE_COPY_CLASS = "bubble-copy";

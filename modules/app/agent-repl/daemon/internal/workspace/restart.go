@@ -171,7 +171,7 @@ func (v *verbs) startForRestart(ctx context.Context, log dlog.Logger, ws ids.Wor
 	log.Info(opRestart, "no shim is up; the restart starts the session", nil)
 	if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartRestart), ws); err != nil {
 		if why, notOurs := startNotAgentReplFault(err); notOurs {
-			log.Info(opRestart, "the restart's start "+why, dlog.Context{"cause": err.Error()})
+			log.Info(opRestart, "the restart's start {why}", dlog.Context{"why": why, "cause": err.Error()})
 		} else {
 			log.Error(opRestart, "the restart could not start the session", dlog.Context{"cause": err.Error()})
 		}

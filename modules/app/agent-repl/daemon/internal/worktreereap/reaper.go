@@ -42,6 +42,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sweepguard"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // The records this package writes.
@@ -293,21 +294,21 @@ func (r *Reaper) sweep(ctx context.Context, opts Options) (Report, error) {
 	report := Report{Kept: map[string]int{}, DryRun: opts.DryRun}
 	repos, err := r.deps.Registry.ListRepositories(ctx)
 	if err != nil {
-		return report, r.registryFailure(ctx, "the repositories could not be read; nothing is swept", err)
+		return report, r.registryFailure(ctx, logsite.Msg("the repositories could not be read; nothing is swept"), err)
 	}
 	workspaces, err := r.deps.Registry.ListWorkspaces(ctx)
 	if err != nil {
-		return report, r.registryFailure(ctx, "the workspaces could not be read; nothing is swept", err)
+		return report, r.registryFailure(ctx, logsite.Msg("the workspaces could not be read; nothing is swept"), err)
 	}
 	known := newRegistryView(workspaces, r.deps.LiveSessions())
 
 	// A CLOSED-ONLY SWEEP HAS ITS OWN RECORDS, so a reader counting the
 	// schedule's sweeps never counts a start's pass among them.
-	started, stopped, finished := "sweeping for landed worktrees", "the sweep stopped with the daemon", "the sweep finished"
+	started, stopped, finished := logsite.Msg("sweeping for landed worktrees"), logsite.Msg("the sweep stopped with the daemon"), logsite.Msg("the sweep finished")
 	if opts.ClosedOnly {
-		started, stopped, finished = "sweeping the worktrees of closed workspaces", "the closed-workspace sweep stopped with the daemon", "the closed-workspace sweep finished"
+		started, stopped, finished = logsite.Msg("sweeping the worktrees of closed workspaces"), logsite.Msg("the closed-workspace sweep stopped with the daemon"), logsite.Msg("the closed-workspace sweep finished")
 	}
-	r.deps.Log.Info(opSweep, started, dlog.Context{
+	r.deps.Log.Log(dlog.LevelInfo, opSweep, started, dlog.Context{
 		"repositories": len(repos), "idle_after": r.deps.IdleAfter.String(), "expire_after": r.deps.ExpireAfter.String(),
 		"closed_expire_after": r.deps.ClosedExpireAfter.String(),
 		"dry_run":             opts.DryRun, "force": opts.Force, "closed_only": opts.ClosedOnly,
@@ -319,21 +320,21 @@ func (r *Reaper) sweep(ctx context.Context, opts Options) (Report, error) {
 		(&repoSweep{r: r, opts: opts, repo: repo, known: known, workspaces: workspaces, now: now, report: &report}).run(ctx)
 	}
 	if ctx.Err() != nil {
-		r.deps.Log.Info(opSweep, stopped, summary(report))
+		r.deps.Log.Log(dlog.LevelInfo, opSweep, stopped, summary(report))
 		return report, ctx.Err()
 	}
-	r.deps.Log.Info(opSweep, finished, summary(report))
+	r.deps.Log.Log(dlog.LevelInfo, opSweep, finished, summary(report))
 	return report, nil
 }
 
 // registryFailure records a registry read that ended the sweep: at INFO when
 // the daemon's exit took it away, at ERROR otherwise.
-func (r *Reaper) registryFailure(ctx context.Context, message string, err error) error {
+func (r *Reaper) registryFailure(ctx context.Context, message logsite.Message, err error) error {
 	if ctx.Err() != nil {
 		r.deps.Log.Info(opSweep, "the sweep stopped with the daemon", dlog.Context{"cause": err.Error()})
 		return ctx.Err()
 	}
-	r.deps.Log.Error(opSweep, message, dlog.Context{"cause": err.Error()})
+	r.deps.Log.Log(dlog.LevelError, opSweep, message, dlog.Context{"cause": err.Error()})
 	return err
 }
 
@@ -427,7 +428,7 @@ func (s *repoSweep) run(ctx context.Context) {
 
 	present, err := dirPresent(s.repo.Dir)
 	if err != nil {
-		s.fail(ctx, opRepo, "the repository's main worktree could not be read; it is not swept", repoFields, err)
+		s.fail(ctx, opRepo, logsite.Msg("the repository's main worktree could not be read; it is not swept"), repoFields, err)
 		return
 	}
 	if !present {
@@ -436,22 +437,22 @@ func (s *repoSweep) run(ctx context.Context) {
 	}
 
 	if s.defaultBranch, err = s.r.deps.Git.DefaultBranch(ctx, s.repo.Dir); err != nil {
-		s.fail(ctx, opRepo, "the repository's default branch could not be resolved; it is not swept", repoFields, err)
+		s.fail(ctx, opRepo, logsite.Msg("the repository's default branch could not be resolved; it is not swept"), repoFields, err)
 		return
 	}
 	// ONE BASE FOR THE WHOLE REPOSITORY: every worktree is judged against
 	// the same commit and tree, even if the default branch moves mid-sweep.
 	if s.base, err = s.r.deps.Git.ResolveRef(ctx, s.repo.Dir, "refs/heads/"+s.defaultBranch); err != nil {
-		s.fail(ctx, opRepo, "the default branch could not be resolved to a commit; it is not swept", repoFields, err)
+		s.fail(ctx, opRepo, logsite.Msg("the default branch could not be resolved to a commit; it is not swept"), repoFields, err)
 		return
 	}
 	if s.baseTree, err = s.r.deps.Git.TreeOf(ctx, s.repo.Dir, s.base); err != nil {
-		s.fail(ctx, opRepo, "the default branch's tree could not be resolved; it is not swept", repoFields, err)
+		s.fail(ctx, opRepo, logsite.Msg("the default branch's tree could not be resolved; it is not swept"), repoFields, err)
 		return
 	}
 	worktrees, err := s.r.deps.Git.ListWorktrees(ctx, s.repo.Dir)
 	if err != nil {
-		s.fail(ctx, opRepo, "the repository's worktrees could not be listed; it is not swept", repoFields, err)
+		s.fail(ctx, opRepo, logsite.Msg("the repository's worktrees could not be listed; it is not swept"), repoFields, err)
 		return
 	}
 
@@ -459,13 +460,13 @@ func (s *repoSweep) run(ctx context.Context) {
 	// prune deletes stale worktrees' reflogs, which are history too.
 	commonDir, err := s.r.deps.Git.CommonDir(ctx, s.repo.Dir)
 	if err != nil {
-		s.fail(ctx, opRepo, "the repository's common dir could not be resolved; it is not swept", repoFields, err)
+		s.fail(ctx, opRepo, logsite.Msg("the repository's common dir could not be resolved; it is not swept"), repoFields, err)
 		return
 	}
 	instants, err := repoActivity(commonDir, s.repo.ID, s.workspaces)
 	if err != nil {
 		repoFields["common_dir"] = commonDir
-		s.fail(ctx, opRepo, "the repository's activity could not be read; it is not swept", repoFields, err)
+		s.fail(ctx, opRepo, logsite.Msg("the repository's activity could not be read; it is not swept"), repoFields, err)
 		return
 	}
 	s.activeSince = activeSince(instants, s.now)
@@ -532,7 +533,7 @@ func (s *repoSweep) prune(ctx context.Context, worktrees []gitclient.Worktree) {
 		return
 	}
 	if err := s.r.deps.Git.PruneWorktrees(ctx, s.repo.Dir); err != nil {
-		s.fail(ctx, opPrune, "the stale worktree registrations could not be pruned", fields, err)
+		s.fail(ctx, opPrune, logsite.Msg("the stale worktree registrations could not be pruned"), fields, err)
 		return
 	}
 	s.report.Pruned++
@@ -589,7 +590,7 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 
 	present, err := dirPresent(wt.Dir)
 	if err != nil {
-		s.fail(ctx, opJudge, "the worktree's directory could not be read; it is kept", fields, err)
+		s.fail(ctx, opJudge, logsite.Msg("the worktree's directory could not be read; it is kept"), fields, err)
 		return
 	}
 	if !present {
@@ -618,12 +619,12 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 	}
 	admin, err := s.r.deps.Git.AdminDir(ctx, wt.Dir)
 	if err != nil {
-		s.fail(ctx, opJudge, "the worktree's admin directory could not be resolved; it is kept", fields, err)
+		s.fail(ctx, opJudge, logsite.Msg("the worktree's admin directory could not be resolved; it is kept"), fields, err)
 		return
 	}
 	last, err := lastActivity(ctx, s.r.deps.Git, s.repo.Dir, admin, wt, record)
 	if err != nil {
-		s.fail(ctx, opJudge, "the worktree's last activity could not be read; it is kept", fields, err)
+		s.fail(ctx, opJudge, logsite.Msg("the worktree's last activity could not be read; it is kept"), fields, err)
 		return
 	}
 	fields["last_activity"] = last.At.Format(time.RFC3339)
@@ -637,14 +638,14 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 
 	clean, err := s.r.deps.Git.IsClean(ctx, wt.Dir)
 	if err != nil {
-		s.fail(ctx, opJudge, "the worktree's cleanliness could not be read; it is kept", fields, err)
+		s.fail(ctx, opJudge, logsite.Msg("the worktree's cleanliness could not be read; it is kept"), fields, err)
 		return
 	}
 	unlandedReason := keepDirty
 	if clean {
 		merged, err := s.r.deps.Git.MergeTree(ctx, s.repo.Dir, s.base, wt.Head)
 		if err != nil {
-			s.fail(ctx, opJudge, "the worktree's merge into the default branch could not be computed; it is kept", fields, err)
+			s.fail(ctx, opJudge, logsite.Msg("the worktree's merge into the default branch could not be computed; it is kept"), fields, err)
 			return
 		}
 		switch {
@@ -667,7 +668,7 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 	} else {
 		expired, err := s.expired(admin, fields)
 		if err != nil {
-			s.fail(ctx, opJudge, "the worktree's birth could not be read; it is kept", fields, err)
+			s.fail(ctx, opJudge, logsite.Msg("the worktree's birth could not be read; it is kept"), fields, err)
 			return
 		}
 		switch {
@@ -766,7 +767,7 @@ func (s *repoSweep) expire(ctx context.Context, wt gitclient.Worktree, admin str
 	sha, err := s.r.deps.Git.PreserveWorktree(ctx, s.repo.Dir, wt.Dir, ref, message)
 	if err != nil {
 		s.report.Kept[reasonPreserveFail]++
-		s.fail(ctx, opExpire, "the expired worktree could not be preserved; it is kept", fields, err)
+		s.fail(ctx, opExpire, logsite.Msg("the expired worktree could not be preserved; it is kept"), fields, err)
 		return
 	}
 	fields["preserved_sha"] = sha
@@ -777,7 +778,7 @@ func (s *repoSweep) expire(ctx context.Context, wt gitclient.Worktree, admin str
 	}
 	if err := remove(ctx, s.repo.Dir, wt.Dir); err != nil {
 		s.report.Kept[reasonRemoveFailed]++
-		s.fail(ctx, opExpire, "the expired worktree could not be removed; it is kept, and so is its preservation", fields, err)
+		s.fail(ctx, opExpire, logsite.Msg("the expired worktree could not be removed; it is kept, and so is its preservation"), fields, err)
 		return
 	}
 	*taken = append(*taken, wt.Dir)
@@ -801,7 +802,7 @@ func (s *repoSweep) remove(ctx context.Context, wt gitclient.Worktree, fields dl
 	}
 	if err := s.r.deps.Git.RemoveCleanWorktree(ctx, s.repo.Dir, wt.Dir); err != nil {
 		s.report.Kept[reasonRemoveFailed]++
-		s.fail(ctx, opRemove, "the landed worktree could not be removed; it and its branch are kept", fields, err)
+		s.fail(ctx, opRemove, logsite.Msg("the landed worktree could not be removed; it and its branch are kept"), fields, err)
 		return
 	}
 	s.report.Removed = append(s.report.Removed, wt.Dir)
@@ -815,7 +816,7 @@ func (s *repoSweep) remove(ctx context.Context, wt gitclient.Worktree, fields dl
 		"branch": wt.Branch, "head": wt.Head,
 	}
 	if err := s.r.deps.Git.DeleteBranchAt(ctx, s.repo.Dir, wt.Branch, wt.Head); err != nil {
-		s.fail(ctx, opBranch, "the removed worktree's branch could not be deleted at the judged head; the branch is kept", branchFields, err)
+		s.fail(ctx, opBranch, logsite.Msg("the removed worktree's branch could not be deleted at the judged head; the branch is kept"), branchFields, err)
 		return
 	}
 	s.report.BranchesDeleted++
@@ -831,7 +832,7 @@ func (s *repoSweep) keep(reason string, fields dlog.Context) {
 
 // fail records one failed step. The daemon's own exit cancelling a git is not
 // a failure: it is recorded at INFO and counted nowhere.
-func (s *repoSweep) fail(ctx context.Context, operation, message string, fields dlog.Context, err error) {
+func (s *repoSweep) fail(ctx context.Context, operation string, message logsite.Message, fields dlog.Context, err error) {
 	record := dlog.Context{"cause": err.Error()}
 	for k, v := range fields {
 		record[k] = v
@@ -841,7 +842,7 @@ func (s *repoSweep) fail(ctx context.Context, operation, message string, fields 
 		return
 	}
 	s.report.Failures++
-	s.r.deps.Log.Error(operation, message, record)
+	s.r.deps.Log.Log(dlog.LevelError, operation, message, record)
 }
 
 // isCommit reports whether a porcelain HEAD names a commit: an unborn branch

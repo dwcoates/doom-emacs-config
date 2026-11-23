@@ -1,15 +1,17 @@
 package metrics
 
 import (
-	"fmt"
-
 	"github.com/prometheus/client_golang/prometheus"
+
+	"agentrepl/logging/logsite"
 )
 
 // Record is a launchd service's canonical logger, as its metrics surface
-// records its decisions through it: LEVEL is "debug", "info" or "error", and
-// MESSAGE the whole record text. Each service adapts its own logger to it.
-type Record func(level, message string)
+// records its decisions through it: LEVEL is "debug", "info" or "error",
+// MESSAGE the record's template, keyed here where it is written, and VALUES
+// the named values its placeholders take, which land in the record's context.
+// Each service adapts its own logger's forwarded-message path to it.
+type Record func(level string, message logsite.Message, values map[string]any)
 
 // OpenService opens and advertises a launchd service's metrics surface
 // (OpenSelf) and records the decision either way through record: off (no
@@ -23,17 +25,17 @@ func OpenService(program, root string, record Record, extra ...prometheus.Collec
 
 func openService(program, root string, record Record, open func(program, root string, onError func(op string, err error), extra ...prometheus.Collector) (*Server, error), extra ...prometheus.Collector) (*Server, error) {
 	surface, err := open(program, root, func(op string, err error) {
-		record("error", fmt.Sprintf("the metrics surface failed step=%s: %v", op, err))
+		record("error", logsite.Msg("the metrics surface failed step={step}: {cause}"), map[string]any{"step": op, "cause": err.Error()})
 	}, extra...)
 	if err != nil {
-		record("error", fmt.Sprintf("the metrics surface could not open root=%s: %v", root, err))
+		record("error", logsite.Msg("the metrics surface could not open root={root}: {cause}"), map[string]any{"root": root, "cause": err.Error()})
 		return nil, err
 	}
 	if surface == nil {
-		record("debug", "the metrics surface is off flag=--metrics-root")
+		record("debug", logsite.Msg("the metrics surface is off flag=--metrics-root"), nil)
 		return nil, nil
 	}
-	record("info", fmt.Sprintf("the metrics surface is listening address=%s target=%s", surface.Addr(), surface.TargetPath()))
+	record("info", logsite.Msg("the metrics surface is listening address={address} target={target}"), map[string]any{"address": surface.Addr(), "target": surface.TargetPath()})
 	return surface, nil
 }
 
@@ -44,6 +46,6 @@ func CloseService(surface *Server, record Record) {
 		return
 	}
 	if err := surface.Close(); err != nil {
-		record("error", fmt.Sprintf("the metrics surface did not stop cleanly: %v", err))
+		record("error", logsite.Msg("the metrics surface did not stop cleanly: {cause}"), map[string]any{"cause": err.Error()})
 	}
 }

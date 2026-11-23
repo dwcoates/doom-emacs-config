@@ -19,8 +19,8 @@
 (defmacro agent-repl-test-wire-host--quiet (&rest body)
   "Run BODY with the logging ladder stubbed out."
   (declare (indent 0))
-  `(cl-letf (((symbol-function 'agent-repl--error) (lambda (&rest _) nil))
-             ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+  `(cl-letf (((symbol-function 'agent-repl--emit-error) (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
      ,@body))
 
 (defun agent-repl-test-wire-host--parse (json)
@@ -2675,7 +2675,7 @@ replaces it."
 (ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-stage-is-logged ()
   "An unknown create-stage arm is recorded at ERROR before it is refused."
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into logged)))
       (condition-case nil
           (agent-repl-wire-decode-workspace-create-stage
@@ -2765,7 +2765,7 @@ replaces it."
 (ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-open-stage-is-logged ()
   "An unknown open-stage arm is recorded at ERROR before it is refused."
   (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into logged)))
       (condition-case nil
           (agent-repl-wire-decode-workspace-open-stage

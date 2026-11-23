@@ -19,7 +19,9 @@
  * The decode of a frame happens in the transport, before `watchStream` sees
  * it, and is not in these totals.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.stream-cost");
 
 /** How long one window lasts. */
 export const STREAM_COST_WINDOW_MS = 60_000;

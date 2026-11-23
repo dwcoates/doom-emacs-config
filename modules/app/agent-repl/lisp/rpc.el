@@ -39,14 +39,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-wire-call "wire-common" (direction codec value))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--log-excerpt "core" (text &optional chars))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--capture-log-scope "core" (scope))
 
 (declare-function agent-repl-connect-unary "connect"
@@ -212,12 +212,12 @@ left waiting on a callback that will not come."
     ;; sent now.  So a call is sent here, at the gate's word, on the
     ;; connection the gate names.
     (let ((fail (lambda (detail)
-                  (agent-repl--warn log-scope "elisp.rpc.transport-failure method=%S detail=%S" method detail)
+                  (agent-repl--warn log-scope "elisp.rpc.transport-failure method={method} detail={detail}" :method (prin1-to-string method) :detail (prin1-to-string detail))
                   (when on-failure (funcall on-failure detail)))))
       (agent-repl-host-gate-call
        conn method request
        (lambda (target)
-         (agent-repl--log log-scope "elisp.rpc.send method=%S" method)
+         (agent-repl--log log-scope "elisp.rpc.send method={method}" :method (prin1-to-string method))
          (agent-repl-rpc--send-unary target method json decoder log-scope
                                      on-response on-failure fail timeout))
        fail))))
@@ -237,12 +237,13 @@ ON-FAILURE."
    (lambda (alist)
      (condition-case err
          (let ((decoded (agent-repl-wire-call 'decode decoder alist)))
-           (agent-repl--log log-scope "elisp.rpc.answer method=%S arm=%S"
-                            method (plist-get decoded :arm))
+           (agent-repl--log log-scope "elisp.rpc.answer method={method} arm={arm}"
+                            :method (prin1-to-string method) :arm (prin1-to-string (plist-get decoded :arm)))
            (when on-response (funcall on-response decoded)))
        (error
-        (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%s"
-                           method err (agent-repl-rpc--logged-body alist))
+        (agent-repl--error log-scope "elisp.rpc.response-invalid method={method} error={error} body={body}"
+                           :method (prin1-to-string method) :error (prin1-to-string err)
+                           :body (agent-repl-rpc--logged-body alist))
         (when on-failure
           (funcall on-failure
                    (list :kind :malformed :code nil :status 200
@@ -258,12 +259,12 @@ failure in its own stack, not in a callback."
         (log-scope
          (agent-repl--capture-log-scope
           '(:agent-repl-context "an unscoped RPC exchange is process-wide"))))
-    (agent-repl--log log-scope "elisp.rpc.send-sync method=%S" method)
+    (agent-repl--log log-scope "elisp.rpc.send-sync method={method}" :method (prin1-to-string method))
     (let ((decoded (agent-repl-wire-call
                      'decode decoder
                      (agent-repl-connect-unary-sync conn method json timeout))))
-      (agent-repl--log log-scope "elisp.rpc.answer-sync method=%S arm=%S"
-                       method (plist-get decoded :arm))
+      (agent-repl--log log-scope "elisp.rpc.answer-sync method={method} arm={arm}"
+                       :method (prin1-to-string method) :arm (prin1-to-string (plist-get decoded :arm)))
       decoded)))
 
 (defconst agent-repl-rpc--logged-body-chars 4000
@@ -297,21 +298,21 @@ and so needs no codec."
         (log-scope
          (agent-repl--capture-log-scope
           '(:agent-repl-context "an unscoped RPC exchange is process-wide"))))
-    (agent-repl--info log-scope "elisp.rpc.stream-open method=%S" method)
+    (agent-repl--info log-scope "elisp.rpc.stream-open method={method}" :method (prin1-to-string method))
     (agent-repl-connect-stream
      conn method json
      (lambda (alist)
        (condition-case err
            (funcall on-push (agent-repl-wire-call 'decode decoder alist))
          (error
-          (agent-repl--error log-scope "elisp.rpc.push-invalid method=%S error=%S body=%S"
-                             method err (agent-repl-rpc--logged-body alist)))))
+          (agent-repl--error log-scope "elisp.rpc.push-invalid method={method} error={error} body={body}"
+                             :method (prin1-to-string method) :error (prin1-to-string err) :body (prin1-to-string (agent-repl-rpc--logged-body alist))))))
      (lambda (outcome)
-       (agent-repl--info log-scope "elisp.rpc.stream-close method=%S outcome=%S" method (car outcome))
+       (agent-repl--info log-scope "elisp.rpc.stream-close method={method} outcome={outcome}" :method (prin1-to-string method) :outcome (prin1-to-string (car outcome)))
        (when on-close (funcall on-close outcome)))
      (when on-open
        (lambda ()
-         (agent-repl--info log-scope "elisp.rpc.stream-accepted method=%S" method)
+         (agent-repl--info log-scope "elisp.rpc.stream-accepted method={method}" :method (prin1-to-string method))
          (funcall on-open))))))
 
 ;;;; ---- Unary verbs ----

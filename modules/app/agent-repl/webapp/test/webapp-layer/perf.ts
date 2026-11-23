@@ -46,7 +46,7 @@ import type { JsonObject } from "@bufbuild/protobuf";
 
 import type { MountedApp } from "../integration/harness";
 import { realNow } from "../real-clock";
-import { settleUntil } from "./drive";
+import { layerRecord, settleUntil } from "./drive";
 
 /** The REAL clock (test/real-clock.ts), which every interval here is read off. */
 export { realNow };
@@ -287,11 +287,7 @@ export async function shipSamples(app: MountedApp, recorders: PerfRecorder[]): P
   for (const recorder of recorders) Object.assign(context, recorder.toContext());
   await app.ctx.client.clientLog({
     source: { case: "workspace", value: app.ctx.workspace },
-    record: {
-      level: { case: "info", value: {} },
-      operation: PERF_SAMPLES_OPERATION,
-      message: "the webapp layer's perf phase finished; its percentiles ride this record's context",
-      context: context as unknown as JsonObject,
-    },
+    record: layerRecord(PERF_SAMPLES_OPERATION, "the webapp layer's perf phase finished; its percentiles ride this record's context",
+      context as unknown as JsonObject),
   });
 }

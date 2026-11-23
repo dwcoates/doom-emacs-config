@@ -25,7 +25,7 @@ import { PersistenceError } from "./persistence.js";
 import { answeredLookup, lookupRefused, sendLookup } from "./answered-lookup.js";
 import type { ReadRetryOptions } from "./retry.js";
 
-const LOGGER = bindLog({ component: "shim-store-peer-delivery", operation: "shim.store.peer_delivery" });
+const LOGGER = bindLog("shim.store.peer-delivery", { component: "shim-store-peer-delivery", operation: "shim.store.peer_delivery" });
 
 /**
  * One end of the message: the session that holds its record, or undefined when

@@ -216,7 +216,7 @@ func TestUnsetClientLogLevelIsInvalidArgument(t *testing.T) {
 	_, err := h.Client.ClientLog(context.Background(),
 		connect.NewRequest(&agentreplv1.ClientLogRequest{
 			Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
-			Record: &agentreplv1.ClientLogRecord{Operation: "webapp.x", Message: "m"},
+			Record: &agentreplv1.ClientLogRecord{Site: "0123456789ab", Template: "a test record", Operation: "webapp.x", Message: "m"},
 		}))
 
 	// Assert.
@@ -1040,6 +1040,7 @@ func TestClientLogWithNoSourceIsInvalidArgument(t *testing.T) {
 	_, err := h.Client.ClientLog(context.Background(),
 		connect.NewRequest(&agentreplv1.ClientLogRequest{
 			Record: &agentreplv1.ClientLogRecord{
+				Site: "0123456789ab", Template: "a test record",
 				Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 				Operation: "webapp.x",
 				Message:   "m",
@@ -1253,6 +1254,46 @@ func TestValidateCreationPrompt(t *testing.T) {
 			}
 			if err == nil || err.Code() != connect.CodeInvalidArgument || !strings.HasPrefix(err.Message(), tt.wantField+":") {
 				t.Fatalf("validateCreationPrompt = %v, want invalid argument on %s", err, tt.wantField)
+			}
+		})
+	}
+}
+
+func TestValidateClientLogRecordRefusesARecordWithoutItsSite(t *testing.T) {
+	tests := []struct {
+		name      string
+		site      string
+		template  string
+		wantField string
+	}{
+		{name: "a site and a template", site: "0123456789ab", template: "drew {rows} rows"},
+		{name: "no site", site: "", template: "drew {rows} rows", wantField: "record.site"},
+		{name: "a site too short", site: "0123456789a", template: "drew {rows} rows", wantField: "record.site"},
+		{name: "a site too long", site: "0123456789abc", template: "drew {rows} rows", wantField: "record.site"},
+		{name: "a site in upper case", site: "0123456789AB", template: "drew {rows} rows", wantField: "record.site"},
+		{name: "a site that is not hex", site: "0123456789xy", template: "drew {rows} rows", wantField: "record.site"},
+		{name: "a blank template", site: "0123456789ab", template: "", wantField: "record.template"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			record := &agentreplv1.ClientLogRecord{
+				Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+				Operation: "webapp.x", Message: "drew 3 rows", Site: tc.site, Template: tc.template,
+			}
+
+			// Act.
+			err := validateClientLogRecord("record", record)
+
+			// Assert.
+			if tc.wantField == "" {
+				if err != nil {
+					t.Fatalf("validateClientLogRecord = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Code() != connect.CodeInvalidArgument || !strings.HasPrefix(err.Message(), tc.wantField+":") {
+				t.Fatalf("validateClientLogRecord = %v, want InvalidArgument on %s", err, tc.wantField)
 			}
 		})
 	}

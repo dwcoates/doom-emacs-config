@@ -44,7 +44,7 @@ system does."
   "Run BODY with every `agent-repl--error' record captured, not logged."
   (declare (indent 0))
   `(let ((agent-repl-test-popup--errors nil))
-     (cl-letf (((symbol-function 'agent-repl--error)
+     (cl-letf (((symbol-function 'agent-repl--emit-error)
                 (agent-repl-test--record-into agent-repl-test-popup--errors)))
        ,@body)))
 

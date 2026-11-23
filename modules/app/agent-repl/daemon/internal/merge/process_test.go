@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -2828,7 +2829,7 @@ func TestPromptUntilCommittedPromptsOnlyWhileDirtyAndWithinTheBudget(t *testing.
 				op: "daemon.merge.rebase", brief: BriefRebaseCommit, reading: "before its rebase starts again",
 				origin:   conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
 				vars:     map[string]string{"source_branch": "feature", "worktree_dir": h.sourceD, "target_branch": "master"},
-				prompted: "prompted", committed: "committed",
+				prompted: logsite.Msg("prompted"), committed: logsite.Msg("committed"),
 			}, &used)
 
 			// Assert.

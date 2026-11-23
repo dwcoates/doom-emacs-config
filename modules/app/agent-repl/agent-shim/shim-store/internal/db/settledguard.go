@@ -60,6 +60,6 @@ func (d *DB) concludedAfter(fields logging.Fields, r routed, prior *storedRow) (
 	again.frame = frame
 	again.plane = prior.plane
 	again.writeID = stored.GetWriteId()
-	d.log.LogVerbose(fields, "a write that does not conclude its unit reached a row holding the conclusion; the write lands and the conclusion is re-landed after it entries_index=%d", r.index)
+	d.log.LogVerbose(fields, "a write that does not conclude its unit reached a row holding the conclusion; the write lands and the conclusion is re-landed after it entries_index={entries_index}", logging.Values{"entries_index": r.index})
 	return &again, nil
 }

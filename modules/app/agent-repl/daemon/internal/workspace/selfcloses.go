@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agentrepl/logging/logsite"
 )
 
 const opSelfClose = "daemon.workspace.self_close"
@@ -17,8 +18,8 @@ const opSelfClose = "daemon.workspace.self_close"
 // is over.
 func NewSelfCloses(carry func(ctx context.Context, ws ids.WorkspaceID) error, log dlog.Logger) *TurnEdgeRunner {
 	return newTurnEdgeRunner(turnEnds, opSelfClose,
-		"a turn ended after the self-close carrier stopped, as the daemon stood down; the next daemon carries the close out",
-		"could not carry out the close a workspace asked of itself at its turn's end", carry, log)
+		logsite.Msg("a turn ended after the self-close carrier stopped, as the daemon stood down; the next daemon carries the close out"),
+		logsite.Msg("could not carry out the close a workspace asked of itself at its turn's end"), carry, log)
 }
 
 // CarryOutSelfClose implements Verbs.

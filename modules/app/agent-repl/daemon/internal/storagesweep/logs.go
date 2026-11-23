@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // The logs rule's reasons.
@@ -118,10 +119,10 @@ func (s *Sweeper) sweepLogs(ctx context.Context, now time.Time, report *Report) 
 		if len(discarded.Removed) == 0 {
 			continue
 		}
-		message := "deleted the logs of a workspace nobody touched inside the window"
+		message := logsite.Msg("deleted the logs of a workspace nobody touched inside the window")
 		if report.DryRun {
-			message = "would delete the logs of a workspace nobody touched inside the window"
+			message = logsite.Msg("would delete the logs of a workspace nobody touched inside the window")
 		}
-		s.deps.Log.Info(opLogs, message, fields)
+		s.deps.Log.Log(dlog.LevelInfo, opLogs, message, fields)
 	}
 }

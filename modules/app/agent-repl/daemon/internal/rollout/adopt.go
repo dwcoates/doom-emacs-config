@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/daemonaddr"
@@ -701,6 +702,7 @@ func (c *controller) awaitRendezvous(ctx context.Context, e *entry, run *adoptio
 // continuously across the handover, and a workspace whose lock reads FREE has
 // no surviving shim to adopt.
 func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source string) error {
+	probeUntold := logsite.Msg("the workspace lock probe could not tell; adopting on the WSM facts alone")
 	fields := dlog.Context{"workspace": string(ws), "source": source}
 	// AN ADOPTION IN FLIGHT IS NEVER STARTED AGAIN for the same workspace: the
 	// takeover's straggler pass skips whatever is marked here, so a rendezvous
@@ -758,7 +760,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		fields["lock"] = state.String()
 		switch {
 		case probeErr != nil:
-			c.log.Warn(opAdopt, "the workspace lock probe could not tell; adopting on the WSM facts alone",
+			c.log.Log(dlog.LevelWarn, opAdopt, probeUntold,
 				dlog.WithCause(fields, probeErr))
 		case state == sessionlock.StateFree:
 			c.log.Debug(opAdopt, "no shim holds this workspace's lock; adopting its facts with no session", fields)
@@ -766,7 +768,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		case state == sessionlock.StateUnknown:
 			// "Could not tell" is NEVER read as free, and it is never read as
 			// held either: it is said out loud.
-			c.log.Warn(opAdopt, "the workspace lock probe could not tell; adopting on the WSM facts alone", fields)
+			c.log.Log(dlog.LevelWarn, opAdopt, probeUntold, fields)
 		default:
 			c.log.Debug(opAdopt, "a shim still holds the workspace's lock, as a handover expects", fields)
 		}

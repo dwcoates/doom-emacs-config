@@ -192,24 +192,14 @@ func TestFaultsDecideTheRestoration(t *testing.T) {
 	}
 }
 
-// signalLogger is a TestLogger that also hands every record's message to
-// the test, so a test waits for the canonical record of an edge rather than
-// for time to pass.
-type signalLogger struct {
-	*dlog.TestLogger
-	said chan string
-}
-
-func (l signalLogger) Debug(o, m string, c dlog.Context) { l.TestLogger.Debug(o, m, c); l.said <- m }
-func (l signalLogger) Info(o, m string, c dlog.Context)  { l.TestLogger.Info(o, m, c); l.said <- m }
-func (l signalLogger) Error(o, m string, c dlog.Context) { l.TestLogger.Error(o, m, c); l.said <- m }
-
-// awaitSaid waits for MESSAGE, passing over every other record.
-func awaitSaid(l signalLogger, message string) {
-	for said := range l.said {
-		if said == message {
-			return
-		}
+// awaitSaid waits for the record of MESSAGE, on the logger's own append, so
+// a test waits for the canonical record of an edge rather than for time to
+// pass. The messages each test awaits are distinct, so the first record of
+// one is the one the step made.
+func awaitSaid(t *testing.T, l *dlog.TestLogger, message string) {
+	t.Helper()
+	if _, err := l.Await(context.Background(), dlog.RecordQuery{Message: message}); err != nil {
+		t.Fatalf("await %q: %v", message, err)
 	}
 }
 
@@ -222,11 +212,11 @@ const (
 
 // observedOutage answers a Monitor in an outage it observed through its own
 // probe, whose beat answers BEATS in turn.
-func observedOutage(t *testing.T, beats ...probeStep) (*Monitor, signalLogger, *beat) {
+func observedOutage(t *testing.T, beats ...probeStep) (*Monitor, *dlog.TestLogger, *beat) {
 	t.Helper()
 	life, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	log := signalLogger{TestLogger: dlog.NewTestLogger(), said: make(chan string, 64)}
+	log := dlog.NewTestLogger()
 	clock := newBeat()
 	m := New(life, Deps{Log: log, Probe: &scriptedProbe{answers: append([]probeStep{unreachable}, beats...)}, After: clock.After, Now: clocktest.New(t0).Now})
 	m.Classify(context.Background(), "timeout")
@@ -259,7 +249,7 @@ func TestTheProbeBeat(t *testing.T) {
 			// Act
 			for i := range tc.beats {
 				clock.tick()
-				awaitSaid(log, tc.said[i])
+				awaitSaid(t, log, tc.said[i])
 			}
 			// Assert
 			if isClosed(restored) != tc.wantRestored {
@@ -279,7 +269,7 @@ func TestAFaultStandingPastTheBeatKeepsTheNetworkDown(t *testing.T) {
 	restored := m.Restored()
 	// Act: the beat reaches the API.
 	clock.tick()
-	awaitSaid(log, saidBeatEnded)
+	awaitSaid(t, log, saidBeatEnded)
 	// Assert: the fault still says down.
 	if isClosed(restored) {
 		t.Fatal("the beat restored the network while a network fault stands")
@@ -297,7 +287,7 @@ func TestANewerObservationOutlivesTheAnswerAskedBeforeIt(t *testing.T) {
 	// newer outage is observed while it is being asked.
 	life, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	log := signalLogger{TestLogger: dlog.NewTestLogger(), said: make(chan string, 64)}
+	log := dlog.NewTestLogger()
 	clock := newBeat()
 	gate := &gatedProbe{first: unreachable.answer, asked: make(chan struct{}), release: make(chan ProbeAnswer)}
 	m := New(life, Deps{Log: log, Probe: gate, After: clock.After, Now: clocktest.New(t0).Now})
@@ -308,7 +298,7 @@ func TestANewerObservationOutlivesTheAnswerAskedBeforeIt(t *testing.T) {
 	m.Classify(context.Background(), "ECONNRESET")
 	// Act: the probe asked before that observation answers reachable.
 	gate.release <- reachable.answer
-	awaitSaid(log, saidNewerObserved)
+	awaitSaid(t, log, saidNewerObserved)
 	// Assert: the newer observation still stands.
 	if isClosed(restored) {
 		t.Fatal("an answer asked before a newer observation ended it")
@@ -317,7 +307,7 @@ func TestANewerObservationOutlivesTheAnswerAskedBeforeIt(t *testing.T) {
 	clock.tick()
 	<-gate.asked
 	gate.release <- reachable.answer
-	awaitSaid(log, saidBeatEnded)
+	awaitSaid(t, log, saidBeatEnded)
 	// Assert
 	if !isClosed(restored) {
 		t.Fatal("the beat that followed did not restore the network")
@@ -454,7 +444,7 @@ func TestTheProbeBeatTellsTheObservedOutageThatEnded(t *testing.T) {
 	// Arrange: an outage observed at t0, which the beat ends nine minutes on.
 	life, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	log := signalLogger{TestLogger: dlog.NewTestLogger(), said: make(chan string, 64)}
+	log := dlog.NewTestLogger()
 	clock := newBeat()
 	wall := clocktest.New(t0)
 	m := New(life, Deps{Log: log, Probe: &scriptedProbe{answers: []probeStep{unreachable, reachable}}, After: clock.After, Now: wall.Now})
@@ -464,7 +454,7 @@ func TestTheProbeBeatTellsTheObservedOutageThatEnded(t *testing.T) {
 	wall.Set(t0.Add(9 * time.Minute))
 	// Act
 	clock.tick()
-	awaitSaid(log, saidBeatEnded)
+	awaitSaid(t, log, saidBeatEnded)
 	// Assert
 	want := []Outage{{Since: t0, Restored: t0.Add(9 * time.Minute)}}
 	if got := told.all(); !slices.Equal(got, want) {

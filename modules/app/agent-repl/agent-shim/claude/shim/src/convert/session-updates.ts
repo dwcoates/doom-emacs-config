@@ -31,7 +31,7 @@ import { pageLineEntry, prose } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { residueEntry, residueKind, vendorSpecificResidue } from "./residue.js";
 
-const LOGGER = bindLog({ component: "shim-convert-session", operation: "shim.convert.session" });
+const LOGGER = bindLog("shim.convert.session-updates", { component: "shim-convert-session", operation: "shim.convert.session" });
 
 /** One session fact as a row. */
 function sessionEntry(

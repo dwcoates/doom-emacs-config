@@ -53,11 +53,17 @@ import {
   validateHoldParkedBridgeRequest,
 } from "./validate/requests.js";
 
-const LOGGER = bindLog({ component: "shim-routes", operation: "shim.service.route" });
+const LOGGER = bindLog("shim.service.routes", { component: "shim-routes", operation: "shim.service.route" });
+
+/** Refuse workflow verb RPC, which this wave does not implement: one record, one site, for all three verbs. */
+function refusedWorkflowVerb(rpc: string): Error {
+  LOGGER.debug({ rpc }, "refused a workflow verb: workflow is not implemented in this wave");
+  return unimplemented(rpc);
+}
 
 /** Record that a verb was entered, before anything can refuse it. */
 function entered(rpc: string): void {
-  LOGGER.debug({ rpc, boundary: "entered" }, `serving shim.v1.${rpc}`);
+  LOGGER.debug({ boundary: "entered" }, "serving shim.v1.{rpc}", { rpc });
 }
 
 /**
@@ -71,7 +77,7 @@ function entered(rpc: string): void {
 async function answering<T>(rpc: string, act: () => Promise<T>): Promise<T> {
   try {
     const response = await act();
-    LOGGER.debug({ rpc, boundary: "completed" }, `completed shim.v1.${rpc}`);
+    LOGGER.debug({ boundary: "completed" }, "completed shim.v1.{rpc}", { rpc });
     return response;
   } catch (error) {
     throw reportUnhandled(rpc, error);
@@ -92,7 +98,7 @@ async function* streaming<T>(
 ): AsyncIterable<T> {
   try {
     yield* frames();
-    LOGGER.debug({ rpc, boundary: "completed" }, `completed shim.v1.${rpc} stream`);
+    LOGGER.debug({ boundary: "completed" }, "completed shim.v1.{rpc} stream", { rpc });
   } catch (error) {
     throw reportUnhandled(rpc, error, signal);
   }
@@ -149,21 +155,21 @@ function reportUnhandled(rpc: string, error: unknown, signal?: AbortSignal): unk
     if (peerStreamGone(error, signal)) {
       LOGGER.info(
         {
-          rpc,
+          
           detail: mapped.rawMessage,
           reason: "the peer destroyed the stream before this frame reached it; it had already stopped consuming",
         },
-        `shim.v1.${rpc} was writing to a stream its peer had already destroyed`,
+        "shim.v1.{rpc} was writing to a stream its peer had already destroyed", { rpc },
       );
       return mapped;
     }
     LOGGER.error(
       {
-        rpc,
+        
         detail: mapped.rawMessage,
         stack: error instanceof Error ? error.stack : undefined,
       },
-      `shim.v1.${rpc} threw an exception no handler anticipated`,
+      "shim.v1.{rpc} threw an exception no handler anticipated", { rpc },
     );
   }
   return mapped;
@@ -331,21 +337,18 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
        */
       getWorkflow() {
         entered("GetWorkflow");
-        LOGGER.debug({ rpc: "GetWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
-        throw unimplemented("GetWorkflow");
+        throw refusedWorkflowVerb("GetWorkflow");
       },
 
       // eslint-disable-next-line require-yield
       async *watchWorkflow() {
         entered("WatchWorkflow");
-        LOGGER.debug({ rpc: "WatchWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
-        throw unimplemented("WatchWorkflow");
+        throw refusedWorkflowVerb("WatchWorkflow");
       },
 
       stopWorkflow() {
         entered("StopWorkflow");
-        LOGGER.debug({ rpc: "StopWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
-        throw unimplemented("StopWorkflow");
+        throw refusedWorkflowVerb("StopWorkflow");
       },
 
       // ---- Reads ----

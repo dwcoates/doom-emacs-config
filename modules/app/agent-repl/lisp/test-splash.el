@@ -133,7 +133,7 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
 (ert-deftest agent-repl-test-splash-with-settings-without-a-banner-is-fatal ()
   "Doom's widgets with no banner to follow signal, naming the list."
   (let (fatals)
-    (cl-letf (((symbol-function 'agent-repl--fatal)
+    (cl-letf (((symbol-function 'agent-repl--emit-fatal)
                (agent-repl-test--fatal-into fatals)))
       (should-error (agent-repl-splash--with-settings '(doom-dashboard-widget-footer))))
     (should (equal fatals '("elisp.splash.widgets: no banner widget functions=(doom-dashboard-widget-footer)")))))
@@ -184,7 +184,7 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
   "With no dashboard open, installing redraws nothing, and logs that."
   (let (logged)
     (agent-repl-test-splash--with-dashboard "agent-repl-test-splash-no-such-buffer"
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         (agent-repl-splash-install))
       (should-not reloads))
@@ -211,7 +211,7 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
   (let (logged)
     (agent-repl-test-splash--with-dashboard "agent-repl-test-splash-no-such-buffer"
       (cl-letf (((symbol-function 'agent-repl-splash--dashboard-enabled-p) (lambda () nil))
-                ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+                ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logged)))
         (agent-repl-splash-install-if-enabled))
       (should-not +doom-dashboard-ascii-banner-fn)
       (should-not +doom-dashboard-mode-hook)

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 func TestIsNamesOnlyAContextEnding(t *testing.T) {
@@ -84,30 +85,34 @@ func TestNoSiteHandRollsTheClassification(t *testing.T) {
 
 func TestLogSplitsByWhetherTheContextEnded(t *testing.T) {
 	tests := []struct {
-		name        string
-		err         error
-		wantVia     string
-		wantMessage string
+		name         string
+		err          error
+		cutLevel     string
+		wantLevel    string
+		wantTemplate string
 	}{
-		{name: "cancelled", err: context.Canceled, wantVia: "cut", wantMessage: "the call was cut"},
-		{name: "wrapped deadline", err: fmt.Errorf("read: %w", context.DeadlineExceeded), wantVia: "cut", wantMessage: "the call was cut"},
-		{name: "a failure", err: errors.New("database is locked"), wantVia: "failed", wantMessage: "the call failed"},
+		{name: "cancelled", err: context.Canceled, cutLevel: dlog.LevelInfo, wantLevel: dlog.LevelInfo, wantTemplate: "the call was cut"},
+		{name: "a debug cut", err: context.Canceled, cutLevel: dlog.LevelDebug, wantLevel: dlog.LevelDebug, wantTemplate: "the call was cut"},
+		{name: "wrapped deadline", err: fmt.Errorf("read: %w", context.DeadlineExceeded), cutLevel: dlog.LevelInfo, wantLevel: dlog.LevelInfo, wantTemplate: "the call was cut"},
+		{name: "a failure", err: errors.New("database is locked"), cutLevel: dlog.LevelInfo, wantLevel: dlog.LevelError, wantTemplate: "the call failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			var via, message, operation string
-			var fields dlog.Context
-			recorder := func(name string) func(string, string, dlog.Context) {
-				return func(op, msg string, ctx dlog.Context) { via, operation, message, fields = name, op, msg, ctx }
-			}
+			log := dlog.NewTestLogger()
 
 			// Act.
-			Log(tt.err, recorder("cut"), recorder("failed"), "daemon.test", "the call was cut", "the call failed", dlog.Context{"k": "v"})
+			Log(tt.err, log, tt.cutLevel, "daemon.test", logsite.Msg("the call was cut"), logsite.Msg("the call failed"), dlog.Context{"k": "v"})
 
 			// Assert.
-			if via != tt.wantVia || message != tt.wantMessage || operation != "daemon.test" || fields["k"] != "v" {
-				t.Fatalf("recorded via %q: %q %q %v, want via %q: %q with the fields", via, operation, message, fields, tt.wantVia, tt.wantMessage)
+			records := log.Records()
+			if len(records) != 1 {
+				t.Fatalf("records = %v, want one", records)
+			}
+			got := records[0]
+			wantSite := logsite.Key(dlog.RuntimeDaemon, "agent-repld/internal/ctxend.TestLogSplitsByWhetherTheContextEnded", tt.wantTemplate)
+			if got.Level != tt.wantLevel || got.Template != tt.wantTemplate || got.Operation != "daemon.test" || got.Context["k"] != "v" || got.Site != wantSite {
+				t.Fatalf("recorded %+v, want %s %q with the fields, site %s", got, tt.wantLevel, tt.wantTemplate, wantSite)
 			}
 		})
 	}

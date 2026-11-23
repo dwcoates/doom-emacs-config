@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dirpath"
@@ -320,7 +321,7 @@ func (o *orchestrator) NoteDeployEnding(ctx context.Context, at time.Time, endin
 	defer context.AfterFunc(life, cancel)()
 	queues, err := o.checkedQueues(ctx, opMediation)
 	if err != nil {
-		o.mediationFailed(ctx, nil, "could not list the repositories a deploy's ending is recorded in; its checks are told without it", err)
+		o.mediationFailed(ctx, nil, logsite.Msg("could not list the repositories a deploy's ending is recorded in; its checks are told without it"), err)
 		return err
 	}
 	var errs []error
@@ -362,7 +363,7 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 	defer context.AfterFunc(life, cancel)()
 	queues, err := o.checkedQueues(ctx, opMediation)
 	if err != nil {
-		o.mediationFailed(ctx, nil, "could not list the repositories an unchanged deploy owes checks in; its checks stay owed", err)
+		o.mediationFailed(ctx, nil, logsite.Msg("could not list the repositories an unchanged deploy owes checks in; its checks stay owed"), err)
 		return err
 	}
 	var errs []error
@@ -371,7 +372,7 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
 			errs = append(errs, err)
-			if o.mediationFailed(ctx, fields, "could not read the check an unchanged deploy owes; it stays owed", err) {
+			if o.mediationFailed(ctx, fields, logsite.Msg("could not read the check an unchanged deploy owes; it stays owed"), err) {
 				break
 			}
 			continue
@@ -386,7 +387,7 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 		released, err := o.releaseCheck(ctx, q.key, *m, MediationUnchanged)
 		if err != nil {
 			errs = append(errs, err)
-			if o.mediationFailed(ctx, fields, "could not release the check of a deploy that changed nothing; it stays owed", err) {
+			if o.mediationFailed(ctx, fields, logsite.Msg("could not release the check of a deploy that changed nothing; it stays owed"), err) {
 				break
 			}
 			continue
@@ -394,7 +395,11 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 		if !released {
 			continue
 		}
-		o.releasedCheck(ctx, q.key, "the deploy changed nothing; its check is released unchecked", "the deploy changed nothing; its check is released unchecked and the queue advances", fields)
+		o.releasedCheck(ctx, q.key, checkRelease{
+			unread:   logsite.Msg("the deploy changed nothing; its check is released unchecked; what holds the queue after it could not be read, and the queue is kicked to read it again"),
+			held:     logsite.Msg("the deploy changed nothing; its check is released unchecked; the queue stays held for {holder}"),
+			advances: logsite.Msg("the deploy changed nothing; its check is released unchecked and the queue advances"),
+		}, fields)
 	}
 	return errors.Join(errs...)
 }
@@ -404,6 +409,7 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 // (remediationfinish.go). A daemon that may not advance its queues runs
 // none; its successor's takeover calls this again.
 func (o *orchestrator) Mediate(ctx context.Context) {
+	notRun := logsite.Msg(mediationNotRun)
 	if !o.deps.Standing.ServesQueue() {
 		o.deps.Log.Global().Info(opMediation, "this daemon does not serve the queues; their checks are run by the daemon that does", nil)
 		return
@@ -413,7 +419,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 	// closes; it also ends with the caller's context.
 	life, leave, entered := o.enterMediation()
 	if !entered {
-		o.deps.Log.Global().Info(opMediation, mediationNotRun, nil)
+		o.deps.Log.Global().Log(dlog.LevelInfo, opMediation, notRun, nil)
 		return
 	}
 	defer leave()
@@ -422,7 +428,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 	defer context.AfterFunc(life, cancel)()
 	queues, err := o.checkedQueues(ctx, opMediation)
 	if err != nil {
-		o.mediationFailed(ctx, nil, "could not list the repositories whose checks are owed", err)
+		o.mediationFailed(ctx, nil, logsite.Msg("could not list the repositories whose checks are owed"), err)
 		return
 	}
 	o.releaseUnchecked(ctx, queues)
@@ -430,7 +436,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 	for _, q := range queues {
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
-			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not read a repository's owed check", err) {
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, logsite.Msg("could not read a repository's owed check"), err) {
 				return
 			}
 			continue
@@ -444,7 +450,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		// mediation's lifetime, which only the daemon's exit cuts.
 		round, leaveRound, entered := o.enterMediation()
 		if !entered {
-			o.deps.Log.Global().Info(opMediation, mediationNotRun, dlog.Context{"repo": string(q.key)})
+			o.deps.Log.Global().Log(dlog.LevelInfo, opMediation, notRun, dlog.Context{"repo": string(q.key)})
 			return
 		}
 		if !o.claimMediation(q.key, m.OwedAt) {
@@ -474,7 +480,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQueue) {
 	all, err := o.registeredQueues(ctx, opMediation)
 	if err != nil {
-		o.mediationFailed(ctx, nil, "could not list the repositories to release the checks no intake decides", err)
+		o.mediationFailed(ctx, nil, logsite.Msg("could not list the repositories to release the checks no intake decides"), err)
 		return
 	}
 	on := make(map[wsm.RepoKey]bool, len(checked))
@@ -492,14 +498,14 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 			}
 		}
 		if err := o.endUncheckedDeploys(ctx, q.key); err != nil {
-			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not end the remediation finishes deploying in a repository that checks no deploys; they hold its queue until the next pass", err) {
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, logsite.Msg("could not end the remediation finishes deploying in a repository that checks no deploys; they hold its queue until the next pass"), err) {
 				return
 			}
 			continue
 		}
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
-			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not read whether a repository that checks no deploys owes a check", err) {
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, logsite.Msg("could not read whether a repository that checks no deploys owes a check"), err) {
 				return
 			}
 			continue
@@ -509,15 +515,18 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 		}
 		released, err := o.releaseCheck(ctx, q.key, *m, MediationUnmediated)
 		if err != nil {
-			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not release a check no intake decides; the queue stays held", err) {
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, logsite.Msg("could not release a check no intake decides; the queue stays held"), err) {
 				return
 			}
 			continue
 		}
 		if released {
-			o.releasedCheck(ctx, q.key, "released a check owed by a repository whose lifecycle config checks no deploys now",
-				"released a check owed by a repository whose lifecycle config checks no deploys now; its queue advances", dlog.Context{
-					"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
+			o.releasedCheck(ctx, q.key, checkRelease{
+				unread:   logsite.Msg("released a check owed by a repository whose lifecycle config checks no deploys now; what holds the queue after it could not be read, and the queue is kicked to read it again"),
+				held:     logsite.Msg("released a check owed by a repository whose lifecycle config checks no deploys now; the queue stays held for {holder}"),
+				advances: logsite.Msg("released a check owed by a repository whose lifecycle config checks no deploys now; its queue advances"),
+			}, dlog.Context{
+				"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
 		}
 	}
 }
@@ -696,7 +705,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	// A CHECK THE INTAKE DISPATCHED IS WATCHED BY THIS SAME ROUND: the claim
 	// it holds kept every pass the dispatch ran from starting another.
 	if now, err := o.deps.DB.MediationOf(ctx, q.key); err != nil {
-		o.mediationFailed(ctx, fields, "could not read the check after its intake's turn ended; the next pass waits on its fixer", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("could not read the check after its intake's turn ended; the next pass waits on its fixer"), err)
 	} else if owes(now, m.OwedAt) && now.Dispatched {
 		o.watchFixer(ctx, q, *now, fields)
 	}
@@ -737,8 +746,8 @@ func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Me
 		return
 	}
 	if _, merr := o.mediatorOf(ctx, q, fields); merr != nil {
-		o.deps.Log.Global().Error(opMediation, what+"; no deploy mediator could be found or made to escalate the check to, and the queue stays held for it",
-			withField(withField(fields, "error", err.Error()), "mediator_error", merr.Error()))
+		o.deps.Log.Global().With(withField(withField(fields, "error", err.Error()), "mediator_error", merr.Error())).Error(opMediation,
+			"{what}; no deploy mediator could be found or made to escalate the check to, and the queue stays held for it", dlog.Context{"what": what})
 		return
 	}
 	o.escalateNotRun(ctx, q, m, what, err, fields)
@@ -747,7 +756,7 @@ func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Me
 // escalateNotRun records roundFailed's failure at ERROR and escalates check M
 // of queue Q as one that could not run, WHAT failing with ERR.
 func (o *orchestrator) escalateNotRun(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
-	o.deps.Log.Global().Error(opMediation, what+"; the check is escalated to the user", withField(fields, "error", err.Error()))
+	o.deps.Log.Global().With(withField(fields, "error", err.Error())).Error(opMediation, "{what}; the check is escalated to the user", dlog.Context{"what": what})
 	summary := fmt.Sprintf("the deploy check could not run: %s (%v); the queue waits for you", what, err)
 	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, NotRun: &checkNotRun{What: what, Cause: err.Error(), Told: m.Prompted()}}, wsm.CheckWindow{}, false, fields)
 }
@@ -766,8 +775,11 @@ func (o *orchestrator) releaseQuiet(ctx context.Context, q checkedQueue, m wsm.M
 		o.roundFailed(ctx, q, m, "the quiet check could not be released", err, fields)
 		return
 	}
-	const what = "no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run"
-	o.releasedCheck(ctx, q.key, what, what, withField(fields, "released", released))
+	o.releasedCheck(ctx, q.key, checkRelease{
+		unread:   logsite.Msg("no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run; what holds the queue after it could not be read, and the queue is kicked to read it again"),
+		held:     logsite.Msg("no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run; the queue stays held for {holder}"),
+		advances: logsite.Msg("no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run"),
+	}, withField(fields, "released", released))
 }
 
 // awaitFailed settles a failed await of the mediator's turn on check M. An
@@ -1087,32 +1099,44 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	if released {
 		o.endMediatorRun(q.key, escalatedPhase(m.Escalated(), MediatorPhaseAssessing), MediatorRunApproved)
 	}
-	o.releasedCheck(ctx, q.key, "the mediator approved the deploy", "the mediator approved the deploy; the queue advances", withField(fields, "released", released))
+	o.releasedCheck(ctx, q.key, checkRelease{
+		unread:   logsite.Msg("the mediator approved the deploy; what holds the queue after it could not be read, and the queue is kicked to read it again"),
+		held:     logsite.Msg("the mediator approved the deploy; the queue stays held for {holder}"),
+		advances: logsite.Msg("the mediator approved the deploy; the queue advances"),
+	}, withField(fields, "released", released))
 	return nil
 }
 
-// releasedCheck records the release of REPO's check, WHAT, with what holds
-// the queue after it, and moves the queue on: republished, and kicked, so a
-// queue nothing holds now advances. ADVANCES is the record of a queue nothing
-// holds any more. A release while the mediator's remediation finish stands
+// checkRelease words the records of one release of a check, each its caller's
+// whole sentence: what holds the queue after it could not be read (UNREAD),
+// the queue still held, whose {holder} names what holds it (HELD), and a
+// queue nothing holds any more (ADVANCES).
+type checkRelease struct {
+	unread, held, advances logsite.Message
+}
+
+// releasedCheck records the release of REPO's check, as WHY words it, with
+// what holds the queue after it, and moves the queue on: republished, and
+// kicked, so a queue nothing holds now advances. A release while the mediator's remediation finish stands
 // leaves the queue held for it (deployHold), and so does a newer deploy's
 // check; the record then says so and names the holder (held_by), and the
 // release a caller recorded (FIELDS' released) is named check_released, since
 // the queue was not released.
-func (o *orchestrator) releasedCheck(ctx context.Context, repo wsm.RepoKey, what, advances string, fields dlog.Context) {
+func (o *orchestrator) releasedCheck(ctx context.Context, repo wsm.RepoKey, why checkRelease, fields dlog.Context) {
 	hold, err := o.deployHoldOf(ctx, repo)
 	switch {
 	case err != nil:
-		o.deps.Log.Global().Error(opMediation, what+"; what holds the queue after it could not be read, and the queue is kicked to read it again", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Log(dlog.LevelError, opMediation, why.unread, withField(fields, "error", err.Error()))
 	case hold.holdsQueue():
 		held := withField(fields, "held_by", hold.heldBy())
 		if released, ok := held["released"]; ok {
 			delete(held, "released")
 			held["check_released"] = released
 		}
-		o.deps.Log.Global().Info(opMediation, what+"; the queue stays held for "+heldByWords(hold.heldBy()), held)
+		held["holder"] = heldByWords(hold.heldBy())
+		o.deps.Log.Global().Log(dlog.LevelInfo, opMediation, why.held, held)
 	default:
-		o.deps.Log.Global().Info(opMediation, advances, fields)
+		o.deps.Log.Global().Log(dlog.LevelInfo, opMediation, why.advances, fields)
 	}
 	o.republishMediation(ctx, repo)
 	o.kick(repo)
@@ -1449,7 +1473,7 @@ func (o *orchestrator) holdBrief(ctx context.Context, q checkedQueue, m wsm.Medi
 		// THE USER IS TOLD OF A HOLD NOTHING WILL DECIDE: no escalation stands
 		// for the mediator to approve or the user to release, so the notice
 		// says the check is held as it is, and why.
-		if !o.mediationFailed(ctx, fields, "the check could not be recorded as escalated; nothing is escalated and the queue stays held", err) {
+		if !o.mediationFailed(ctx, fields, logsite.Msg("the check could not be recorded as escalated; nothing is escalated and the queue stays held"), err) {
 			o.notifyHeld(ctx, q, fmt.Sprintf("the deploy check is held and could not be escalated (%v): %s", err, brief.Summary), fields)
 		}
 		return
@@ -1477,7 +1501,7 @@ func (o *orchestrator) holdBrief(ctx context.Context, q checkedQueue, m wsm.Medi
 func (o *orchestrator) notifyHeld(ctx context.Context, q checkedQueue, summary string, fields dlog.Context) {
 	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q.key)
 	if err != nil {
-		o.mediationFailed(ctx, fields, "could not read the deploy mediator to name the held check's notice; the user is not notified of it", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("could not read the deploy mediator to name the held check's notice; the user is not notified of it"), err)
 		return
 	}
 	if !found {
@@ -1503,7 +1527,7 @@ func (o *orchestrator) tellEscalation(ctx context.Context, q checkedQueue, m wsm
 	o.takeOnProblems(ctx, q.key, brief.Problems, escalatedKeys(window), "taken on with the escalation", fields)
 	told, err := o.deps.DB.MarkEscalationTold(ctx, q.key, m.OwedAt)
 	if err != nil {
-		o.mediationFailed(ctx, fields, "the escalation was told but could not be recorded so; the queue stays held, and the next pass tells it again", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("the escalation was told but could not be recorded so; the queue stays held, and the next pass tells it again"), err)
 		return
 	}
 	if !told {

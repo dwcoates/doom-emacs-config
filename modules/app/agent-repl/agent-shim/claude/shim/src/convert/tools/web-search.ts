@@ -20,7 +20,7 @@ import { conversationv1 } from "../../proto.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, failureOf, num, str, strOr, uint } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.web-search", {
   component: "shim-convert-web-search",
   operation: "shim.convert.tools.web_search",
 });

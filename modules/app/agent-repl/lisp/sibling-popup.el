@@ -23,12 +23,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 (declare-function agent-repl-window--panel-window "window")
 (declare-function agent-repl--ws-current-name "workspace")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
 (declare-function +popup-display-buffer-stacked-side-window-fn "ext:popup")
 
 (defun agent-repl-sibling-popup--target-window (&optional frame ws)
@@ -44,15 +46,15 @@ composer, as wide as the column, and never under the sidebar.
 Returns nil when the agent view is not visible, signalling to callers
 that the default frame-wide bottom popup behavior should apply."
   (let ((view-win (agent-repl-window--panel-window :view ws frame)))
-    (agent-repl--log ws "sibling-popup target: frame=%S view-window=%S" frame view-win)
+    (agent-repl--log ws "sibling-popup target: frame={frame} view-window={view_window}" :frame (prin1-to-string frame) :view_window (prin1-to-string view-win))
     (when view-win
       (let* ((input-win (agent-repl-window--panel-window :input ws frame))
              (anchor (or input-win view-win))
              (stacked (window-combined-p anchor))
              (target (if stacked (window-parent anchor) anchor)))
         (agent-repl--log ws
-                         "sibling-popup target: result=%S input-window=%S anchor=%S stacked=%s"
-                         target input-win anchor stacked)
+                         "sibling-popup target: result={result} input-window={input_window} anchor={anchor} stacked={stacked}"
+                         :result (prin1-to-string target) :input_window (prin1-to-string input-win) :anchor (prin1-to-string anchor) :stacked stacked)
         target))))
 
 (defun agent-repl-sibling-popup--popup-height (target alist &optional ws)
@@ -77,9 +79,9 @@ at `window-min-height' so the split is always valid."
            (height-lines (max window-min-height requested-height)))
       (agent-repl--log
        ws
-       "sibling-popup height: target=%S target-height=%s window-height=%S size=%S selected-size=%S kind=%s requested=%s minimum=%s result=%s"
-       target target-height height-entry size-entry size kind requested-height
-       window-min-height height-lines)
+       "sibling-popup height: target={target} target-height={target_height} window-height={window_height} size={size} selected-size={selected_size} kind={kind} requested={requested} minimum={minimum} result={result}"
+       :target (prin1-to-string target) :target_height target-height :window_height (prin1-to-string height-entry) :size (prin1-to-string size-entry) :selected_size (prin1-to-string size) :kind kind :requested requested-height
+       :minimum window-min-height :result height-lines)
       height-lines)))
 
 (defun agent-repl-sibling-popup--fallback (buffer alist &optional ws)
@@ -91,12 +93,12 @@ when the popup module is loaded; otherwise uses the plain
   (cond
    ((fboundp '+popup-display-buffer-stacked-side-window-fn)
     (agent-repl--log ws
-                     "sibling-popup fallback: buffer=%S alist=%S handler=stacked-side-window"
-                     buffer alist)
+                     "sibling-popup fallback: buffer={buffer} alist={alist} handler=stacked-side-window"
+                     :buffer (prin1-to-string buffer) :alist (prin1-to-string alist))
     (+popup-display-buffer-stacked-side-window-fn buffer alist))
    (t (agent-repl--log ws
-                        "sibling-popup fallback: buffer=%S alist=%S handler=side-window side=%S"
-                        buffer alist (cdr (assq 'side alist)))
+                        "sibling-popup fallback: buffer={buffer} alist={alist} handler=side-window side={side}"
+                        :buffer (prin1-to-string buffer) :alist (prin1-to-string alist) :side (prin1-to-string (cdr (assq 'side alist))))
       (display-buffer-in-side-window
        buffer
        (cons (cons 'side (or (cdr (assq 'side alist)) 'bottom))
@@ -119,19 +121,19 @@ vterm popup rule for the canonical caller."
   (let* ((ws (agent-repl--ws-current-name))
          (target (agent-repl-sibling-popup--target-window nil ws)))
     (agent-repl--log ws
-                     "sibling-popup display: buffer=%S alist=%S target=%S target-valid=%s"
-                     buffer alist target (window-valid-p target))
+                     "sibling-popup display: buffer={buffer} alist={alist} target={target} target-valid={target_valid}"
+                     :buffer (prin1-to-string buffer) :alist (prin1-to-string alist) :target (prin1-to-string target) :target_valid (window-valid-p target))
     (if (window-valid-p target)
         (let* ((height-lines (agent-repl-sibling-popup--popup-height target alist ws))
                (new-win (split-window target (- height-lines) 'below)))
           (set-window-buffer new-win buffer)
           (agent-repl--log ws
-                           "sibling-popup display: action=split target=%S height=%s new-window=%S buffer=%S"
-                           target height-lines new-win buffer)
+                           "sibling-popup display: action=split target={target} height={height} new-window={new_window} buffer={buffer}"
+                           :target (prin1-to-string target) :height height-lines :new_window (prin1-to-string new-win) :buffer (prin1-to-string buffer))
           new-win)
       (agent-repl--log ws
-                       "sibling-popup display: action=fallback buffer=%S alist=%S"
-                       buffer alist)
+                       "sibling-popup display: action=fallback buffer={buffer} alist={alist}"
+                       :buffer (prin1-to-string buffer) :alist (prin1-to-string alist))
       (agent-repl-sibling-popup--fallback buffer alist ws))))
 
 (provide 'agent-repl-sibling-popup)

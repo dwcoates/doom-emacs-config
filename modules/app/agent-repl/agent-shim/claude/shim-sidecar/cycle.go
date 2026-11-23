@@ -564,7 +564,8 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 	for {
 		select {
 		case <-ctx.Done():
-			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal=%s; shutting the sidecar down", <-signalled)
+			received := <-signalled
+			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal={signal}; shutting the sidecar down", logging.Values{"signal": received.String()})
 			s.store.Close()
 			return nil
 		case <-attemptT.C:
@@ -629,7 +630,7 @@ func (s *sidecar) attempt() {
 			// The shutdown cancelled the recovery. Nothing was read and nothing
 			// was written, so there is no outage to open and no ladder to climb.
 			s.log.With(logging.Context{Operation: "shutdown"}).Log(
-				"shutdown interrupted a cursor recovery; the next boot recovers it")
+				"shutdown interrupted a cursor recovery; the next boot recovers it", nil)
 			return
 		}
 		s.attempts++
@@ -653,7 +654,7 @@ func (s *sidecar) attempt() {
 		s.log.With(logging.Context{
 			Operation: "recover-cursors", Level: level,
 			Attempt: logging.Attempt(s.attempts), BackoffMs: logging.BackoffMs(delay),
-		}).Log("recovery attempt %d failed, retrying in %s while reading no files: %v", s.attempts, delay, err)
+		}).Log("recovery attempt {attempts} failed, retrying in {delay} while reading no files: {cause}", logging.Values{"attempts": s.attempts, "delay": delay.String(), "cause": err.Error()})
 		s.nextAttemptAt = s.now().Add(delay)
 		return
 	}
@@ -674,7 +675,7 @@ func (s *sidecar) stateSuspension(operation string, cause error) {
 	s.log.With(logging.Context{
 		Operation: "production-suspended", Level: "warn",
 		StoreSocket: s.options.StoreSocket, Attempt: logging.Attempt(s.attempts),
-	}).Log("production suspended after operation=%s; reading no files until a full cursor recovery succeeds: %v", operation, cause)
+	}).Log("production suspended after operation={operation}; reading no files until a full cursor recovery succeeds: {cause}", logging.Values{"operation": operation, "cause": fmt.Sprint(cause)})
 }
 
 // beginCycle is the first act of every production cycle: recover the cursors,
@@ -705,7 +706,7 @@ func (s *sidecar) beginCycle() error {
 		s.tracker.SetProcessStart(s.processStartMs)
 	}
 	s.log.With(logging.Context{Operation: "recover-cursors", StoreSocket: s.options.StoreSocket}).Log(
-		"production cycle begins: recovered %d cursor(s) from the store", len(s.cursors))
+		"production cycle begins: recovered {cursors_length} cursor(s) from the store", logging.Values{"cursors_length": len(s.cursors)})
 
 	// Reading may begin now, and not one statement earlier.
 	s.rescan()
@@ -802,8 +803,7 @@ func (s *sidecar) park(path string, w *watched, result tail.PollResult, field st
 		WriteIDs:    writeIDsOf(result.Entries),
 		Repeat:      logging.Repeat(count),
 	}).Log(
-		"the store refused %d record(s) from this file as an invalid_request; a retry of the same bytes cannot help, so THIS FILE is parked for the life of the process (its cursor stays where the store has it) while every other file keeps being read (observed %d time(s) for this file): %v",
-		len(result.Entries), count, cause)
+		"the store refused {entries_length} record(s) from this file as an invalid_request; a retry of the same bytes cannot help, so THIS FILE is parked for the life of the process (its cursor stays where the store has it) while every other file keeps being read (observed {count} time(s) for this file): {cause}", logging.Values{"entries_length": len(result.Entries), "count": count, "cause": cause.Error()})
 }
 
 // fileDefect is one file's running defect tally.
@@ -866,8 +866,7 @@ func (s *sidecar) reportResumed() {
 		Operation: "production-resumed", StoreSocket: s.options.StoreSocket,
 		Attempt: logging.Attempt(s.attempts),
 	}).Log(
-		"production resumed: the store was unreachable for %dms across %d failed recovery attempt(s), during which no file was read",
-		downMs, s.attempts)
+		"production resumed: the store was unreachable for {down_ms}ms across {attempts} failed recovery attempt(s), during which no file was read", logging.Values{"down_ms": downMs, "attempts": s.attempts})
 	s.attempts = 0
 }
 
@@ -982,7 +981,7 @@ func (s *sidecar) discoverChanged() {
 			// discoverer itself.
 			s.log.With(logging.Context{
 				Operation: "discover-change", Path: dir.Dir, Repeat: logging.Repeat(watched),
-			}).Log("a watched directory changed since the last poll: %d newly discovered file(s) under it are being read from this tick rather than at the next rescan", watched)
+			}).Log("a watched directory changed since the last poll: {watched} newly discovered file(s) under it are being read from this tick rather than at the next rescan", logging.Values{"watched": watched})
 		}
 		if !ok {
 			// The store could not answer for a file's cursor, so production is
@@ -1028,7 +1027,7 @@ func (s *sidecar) watchTargets(targets []discover.Target, now time.Time) (int, b
 			// drops back to dormant once that is done and it has drained.
 			s.log.With(logging.Context{
 				Operation: "watch-admit", Path: target.Path, VendorSessionID: target.SessionID,
-			}).LogVerbose("admitted for its conversion re-derivation; no active workspace owns it")
+			}).LogVerbose("admitted for its conversion re-derivation; no active workspace owns it", nil)
 		}
 		resolved, ok := s.resolveTarget(target, now)
 		if !ok {
@@ -1053,7 +1052,7 @@ func (s *sidecar) watchTargets(targets []discover.Target, now time.Time) (int, b
 			// rescan.
 			s.log.With(logging.Context{
 				Operation: "watch", Path: resolved.Path, TaskID: resolved.TaskID, Level: "warn",
-			}).Log("not watching this file yet: its identity could not be read, and a tailer may only be built from the cursor that identity keys: %v", err)
+			}).Log("not watching this file yet: its identity could not be read, and a tailer may only be built from the cursor that identity keys: {cause}", logging.Values{"cause": err.Error()})
 			continue
 		}
 		cursor, reached := s.cursorFor(resolved, identity)
@@ -1090,8 +1089,7 @@ func (s *sidecar) reportRescan() {
 	}
 	s.log.With(logging.Context{
 		Operation: "rescan", Repeat: logging.Repeat(s.watchedThisPass),
-	}).Log("this rescan started watching %d newly discovered file(s); %d file(s) are now watched",
-		s.watchedThisPass, len(s.watchers))
+	}).Log("this rescan started watching {watched_this_pass} newly discovered file(s); {watchers_length} file(s) are now watched", logging.Values{"watched_this_pass": s.watchedThisPass, "watchers_length": len(s.watchers)})
 }
 
 // refreshSpawnFacts re-reads, for every watched file, the one attribution fact
@@ -1118,7 +1116,7 @@ func (s *sidecar) refreshSpawnFacts() {
 		w.ctx.SpawnBackgrounded = true
 		s.log.With(logging.Context{
 			Operation: "spawn-backgrounded", Path: path, TaskID: w.target.TaskID, AgentID: w.target.AgentID,
-		}).Log("the spawn behind this file is now known to have been backgrounded; its frames name the subagent itself as top_level")
+		}).Log("the spawn behind this file is now known to have been backgrounded; its frames name the subagent itself as top_level", nil)
 	}
 }
 
@@ -1157,13 +1155,13 @@ func (s *sidecar) cursorFor(target discover.Target, identity string) (*storev1.C
 			// path and this is the same rule on the cursor path.
 			s.log.With(logging.Context{
 				Operation: "shutdown", Path: target.Path, TaskID: target.TaskID, FileID: identity,
-			}).Log("shutdown withdrew this file's cursor recovery; it is not watched and the next boot recovers its position")
+			}).Log("shutdown withdrew this file's cursor recovery; it is not watched and the next boot recovers its position", nil)
 			return nil, false
 		}
 		s.log.With(logging.Context{
 			Operation: "recover-cursors", Path: target.Path, TaskID: target.TaskID,
 			FileID: identity, Level: "warn",
-		}).Log("not watching this file: the store could not say what position it holds for it, and a tailer may only be built from a position the store handed us: %v", err)
+		}).Log("not watching this file: the store could not say what position it holds for it, and a tailer may only be built from a position the store handed us: {cause}", logging.Values{"cause": err.Error()})
 		return nil, false
 	}
 	for _, cursor := range cursors {
@@ -1176,12 +1174,12 @@ func (s *sidecar) cursorFor(target discover.Target, identity string) (*storev1.C
 		s.log.With(logging.Context{
 			Operation: "recover-cursors", Path: target.Path, FileID: identity,
 			Offset: logging.Off(cursor.GetOffset()),
-		}).Log("a file discovered after this cycle began has a stored position; it resumes there rather than from zero")
+		}).Log("a file discovered after this cycle began has a stored position; it resumes there rather than from zero", nil)
 		return cursor, true
 	}
 	s.log.With(logging.Context{
 		Operation: "recover-cursors", Path: target.Path, FileID: identity,
-	}).LogVerbose("the store holds no cursor for this file; it is read from zero")
+	}).LogVerbose("the store holds no cursor for this file; it is read from zero", nil)
 	return nil, true
 }
 
@@ -1227,8 +1225,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	case cursor != nil:
 		if cursor.GetConversion().GetVersion() > convert.ConversionVersion {
 			bound.With(logging.Context{Operation: "conversion-heal", FileID: identity}).Log(
-				"this file's cursor was written by conversion version %d, newer than this binary's %d; nothing is re-derived and its rows are left as that conversion wrote them",
-				cursor.GetConversion().GetVersion(), convert.ConversionVersion)
+				"this file's cursor was written by conversion version {cursor_conversion_version}, newer than this binary's {converter_version}; nothing is re-derived and its rows are left as that conversion wrote them", logging.Values{"cursor_conversion_version": cursor.GetConversion().GetVersion(), "converter_version": convert.ConversionVersion})
 		}
 		tailer.Restore(cursor)
 		s.rewindOnce(target, identity, tailer, now)
@@ -1242,7 +1239,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	// every boot cost megabytes of log that said nothing but "still here".
 	// The COUNTS are the lifecycle fact and rescan states those; WHICH file,
 	// and of what kind, is per-record detail.
-	bound.With(logging.Context{Operation: "watch"}).LogVerbose("watching %s", target.Kind)
+	bound.With(logging.Context{Operation: "watch"}).LogVerbose("watching {target_kind}", logging.Values{"target_kind": target.Kind.String()})
 	s.watchedThisPass++
 	// A stop that arrived while this spool was held is NOT applied here, even
 	// though the spool now has a reader.
@@ -1258,7 +1255,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	if target.TaskID != "" {
 		if _, pending := s.stopped[target.TaskID]; pending {
 			bound.With(logging.Context{Operation: "cancel-terminal"}).LogVerbose(
-				"the stopped task's spool is now being read; its terminal is minted once the spool's first batch is durable and can state the output")
+				"the stopped task's spool is now being read; its terminal is minted once the spool's first batch is durable and can state the output", nil)
 		}
 	}
 }
@@ -1288,14 +1285,13 @@ func (s *sidecar) mainAgentFor(target discover.Target) string {
 			Operation: "identity-resolve", Path: target.Path,
 			VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
 		}).Log(
-			"this transcript's vendor session id is a ROTATED one: the shim's link file (workspace %s) names %s as the conversation's original id, so its records are booked there and not under the id the file is named by",
-			resolved.WorkspaceKey, resolved.Original)
+			"this transcript's vendor session id is a ROTATED one: the shim's link file (workspace {resolved_workspace_key}) names {resolved_original} as the conversation's original id, so its records are booked there and not under the id the file is named by", logging.Values{"resolved_workspace_key": resolved.WorkspaceKey, "resolved_original": resolved.Original})
 		return resolved.Original
 	}
 	s.log.With(logging.Context{
 		Operation: "identity-resolve", Path: target.Path,
 		VendorSessionID: observed, BookAgentID: observed, AgentID: observed,
-	}).LogVerbose("this transcript's book is its own vendor session id (source=%s)", resolved.Source)
+	}).LogVerbose("this transcript's book is its own vendor session id (source={resolved_source})", logging.Values{"resolved_source": string(resolved.Source)})
 	return observed
 }
 
@@ -1370,8 +1366,7 @@ func (s *sidecar) rekeyRotations() {
 				Operation: "identity-rekey", Path: path,
 				VendorSessionID: observed, BookAgentID: previous, AgentID: previous,
 			}).LogVerbose(
-				"no identity record names %s, so its book stays %s; the resume default never moves a file off a book that evidence gave it",
-				observed, previous)
+				"no identity record names {observed}, so its book stays {previous}; the resume default never moves a file off a book that evidence gave it", logging.Values{"observed": observed, "previous": previous})
 			continue
 		}
 		w.ctx.MainAgentID = resolved.Original
@@ -1395,16 +1390,14 @@ func (s *sidecar) rekeyRotations() {
 					Operation: "identity-rekey", Path: path,
 					VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
 				}).Log(
-					"this file was watched before anything named its owner, and is now booked under %s for the first time (resolution source=%s); no records move, because none had a book to move from",
-					resolved.Original, resolved.Source)
+					"this file was watched before anything named its owner, and is now booked under {resolved_original} for the first time (resolution source={resolved_source}); no records move, because none had a book to move from", logging.Values{"resolved_original": resolved.Original, "resolved_source": string(resolved.Source)})
 				continue
 			}
 			s.log.With(logging.Context{
 				Operation: "identity-rekey", Path: path, Level: "warn",
 				VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
 			}).Log(
-				"%s is now named as this transcript's original vendor session id (resolution source=%s); its records move from book %s to that one, and nothing already written is duplicated because their write ids are digested from file positions that did not move",
-				resolved.Original, resolved.Source, previous)
+				"{resolved_original} is now named as this transcript's original vendor session id (resolution source={resolved_source}); its records move from book {previous} to that one, and nothing already written is duplicated because their write ids are digested from file positions that did not move", logging.Values{"resolved_original": resolved.Original, "resolved_source": string(resolved.Source), "previous": previous})
 			continue
 		}
 		delete(s.parked, path)
@@ -1414,8 +1407,7 @@ func (s *sidecar) rekeyRotations() {
 			RefusalKind: string(storeclient.RefusalInvalidRequest), RefusalSite: storeclient.WriteBatchSite,
 			Field: "entries.upsert_key",
 		}).Log(
-			"the refusal that parked this file was a BOOK MOVE, and the shim's link file has since named %s as the conversation's original vendor session id: the file is un-parked and re-read from the cursor the store still holds, so the same bytes are now written to the book they belong to instead of to %s",
-			resolved.Original, previous)
+			"the refusal that parked this file was a BOOK MOVE, and the shim's link file has since named {resolved_original} as the conversation's original vendor session id: the file is un-parked and re-read from the cursor the store still holds, so the same bytes are now written to the book they belong to instead of to {previous}", logging.Values{"resolved_original": resolved.Original, "previous": previous})
 	}
 }
 
@@ -1446,12 +1438,12 @@ func (s *sidecar) bookFor(target discover.Target) string {
 		// reaching here without one is a reader defect and is stated as one.
 		s.log.With(logging.Context{
 			Operation: "spool-book", Level: "error", Path: target.Path, TaskID: target.TaskID,
-		}).Log("an agent spool is being tailed with no spawning call resolved; its records would name no book")
+		}).Log("an agent spool is being tailed with no spawning call resolved; its records would name no book", nil)
 		return ""
 	}
 	s.log.With(logging.Context{
 		Operation: "spool-book", Path: target.Path, TaskID: target.TaskID, AgentID: run,
-	}).LogVerbose("the agent spool's book is its spawning call")
+	}).LogVerbose("the agent spool's book is its spawning call", nil)
 	return run
 }
 
@@ -1485,13 +1477,13 @@ func (s *sidecar) rewindOnce(target discover.Target, identity string, tailer *ta
 	case tail.KindSessionTranscript, tail.KindAgentTranscript:
 	default:
 		s.log.With(logging.Context{Operation: "boot-rewind", Path: target.Path}).
-			LogVerbose("no rewind for kind=%s: it carries no turns", target.Kind)
+			LogVerbose("no rewind for kind={target_kind}: it carries no turns", logging.Values{"target_kind": target.Kind.String()})
 		return
 	}
 	if reason, atRest := s.atRest(target.Path, tailer.Offset(), now); atRest {
 		s.rewindSkipped++
 		s.log.With(logging.Context{Operation: "boot-rewind", Path: target.Path}).LogVerbose(
-			"no rewind: %s, so no turn of it can be in flight; it is watched from its cursor and not re-read", reason)
+			"no rewind: {reason}, so no turn of it can be in flight; it is watched from its cursor and not re-read", logging.Values{"reason": reason})
 		return
 	}
 	s.rewindWalked++
@@ -1516,7 +1508,7 @@ func (s *sidecar) atRest(path string, offset int64, now time.Time) (string, bool
 		// was before this test existed. The read path states the failure again
 		// with its own context; this states why the rewind ran unconditionally.
 		s.log.With(logging.Context{Operation: "boot-rewind", Path: path, Level: "warn"}).Log(
-			"rewinding without the at-rest test: this file's mtime and size could not be read: %v", err)
+			"rewinding without the at-rest test: this file's mtime and size could not be read: {cause}", logging.Values{"cause": err.Error()})
 		return "", false
 	}
 	silence := s.tracker.Windows().AgentSilence
@@ -1572,8 +1564,7 @@ func (s *sidecar) pollAll() {
 			s.log.With(logging.Context{
 				Operation: "poll-slice", Repeat: logging.Repeat(polled),
 			}).LogVerbose(
-				"this tick's %s slice is spent after %d watcher(s); %d remain and the pass resumes at them on the next tick",
-				slice, polled, len(s.pass.pending))
+				"this tick's {slice} slice is spent after {polled} watcher(s); {pending_length} remain and the pass resumes at them on the next tick", logging.Values{"slice": slice.String(), "polled": polled, "pending_length": len(s.pass.pending)})
 			return
 		}
 		path := s.pass.pending[0]
@@ -1606,7 +1597,7 @@ func (s *sidecar) pollAll() {
 			s.log.With(logging.Context{
 				Operation: "tail-bounded", Path: path, TaskID: w.target.TaskID,
 				Offset: logging.Off(w.tailer.Offset()),
-			}).LogVerbose("the batch stopped at its bound with bytes unread past it; the file is read again at once")
+			}).LogVerbose("the batch stopped at its bound with bytes unread past it; the file is read again at once", nil)
 		}
 	}
 	if s.pass == nil {
@@ -1645,7 +1636,7 @@ func (s *sidecar) recordPassSet(walked map[string]bool) {
 	}
 	s.lastPassSet = key
 	s.log.With(logging.Context{Operation: "poll-pass"}).LogVerbose(
-		"a poll pass walked %d file(s), unlike the last pass: %s", len(paths), strings.Join(paths, ", "))
+		"a poll pass walked {paths_length} file(s), unlike the last pass: {paths}", logging.Values{"paths_length": len(paths), "paths": strings.Join(paths, ", ")})
 }
 
 // pollOnce reads one bounded batch of one watched file, writes it, and commits
@@ -1694,7 +1685,7 @@ func (s *sidecar) pollOnce(path string, w *watched, nowMs int64) (more, abandon 
 		s.log.With(logging.Context{
 			Operation: "store-write", Path: path, TaskID: w.target.TaskID,
 			Offset: logging.Off(result.Next.GetOffset()), Level: "error",
-		}).Log("cursor not advanced after %d record(s): %v", len(result.Entries), err)
+		}).Log("cursor not advanced after {entries_length} record(s): {cause}", logging.Values{"entries_length": len(result.Entries), "cause": err.Error()})
 		// The write did not merely fail, it suspended production. Abandon
 		// the walk rather than reading the rest with nowhere to put it.
 		return false, true
@@ -1734,7 +1725,7 @@ func (s *sidecar) pollOnce(path string, w *watched, nowMs int64) (more, abandon 
 	s.log.With(logging.Context{
 		Operation: "tail-pickup", Path: path, TaskID: w.target.TaskID,
 		FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
-	}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
+	}).Log("picked up {entries_length} record(s) kind={kind}", logging.Values{"entries_length": len(result.Entries), "kind": w.target.Kind.String()})
 	return result.More, false
 }
 
@@ -1818,7 +1809,7 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	// stated per item. It is also the one edge a test can wait on to be inside
 	// steady state rather than racing the boot walk.
 	s.log.With(logging.Context{Operation: "catchup-end"}).Log(
-		"startup catch-up is over: the first poll pass drained the corpus, and every catch-up operation is stated per record from here")
+		"startup catch-up is over: the first poll pass drained the corpus, and every catch-up operation is stated per record from here", nil)
 }
 
 // stateBootRewindSummary states, once at the catch-up edge, HOW MUCH OF THE
@@ -1837,8 +1828,7 @@ func (s *sidecar) stateBootRewindSummary() {
 	s.log.With(logging.Context{
 		Operation: "boot-rewind-summary", Repeat: logging.Repeat(s.rewindWalked + s.rewindSkipped),
 	}).Log(
-		"the boot rewind scanned %d transcript(s) that could still be carrying a turn in flight; %d more were at rest — last grown beyond the %s agent-silence window with the cursor already at their end — and were watched from their cursor without a backward scan or a re-read",
-		s.rewindWalked, s.rewindSkipped, s.tracker.Windows().AgentSilence)
+		"the boot rewind scanned {rewind_walked} transcript(s) that could still be carrying a turn in flight; {rewind_skipped} more were at rest — last grown beyond the {agent_silence} agent-silence window with the cursor already at their end — and were watched from their cursor without a backward scan or a re-read", logging.Values{"rewind_walked": s.rewindWalked, "rewind_skipped": s.rewindSkipped, "agent_silence": s.tracker.Windows().AgentSilence.String()})
 }
 
 // summarizeWithheldResidue states ONE INFO record per file for the residue the
@@ -1880,8 +1870,7 @@ func (s *sidecar) stateWithheld(path, taskID string, tally map[string]int, newSh
 	s.log.With(logging.Context{
 		Operation: "residue-drop-summary", Path: path, TaskID: taskID,
 		Repeat: logging.Repeat(total),
-	}).Log("startup catch-up read and classified %d residue record(s) %s and stored none of them, cataloguing %d shape(s) this process had not seen before: %s",
-		total, where, newShapes, residueCounts(tally))
+	}).Log("startup catch-up read and classified {total} residue record(s) {where} and stored none of them, cataloguing {new_shapes} shape(s) this process had not seen before: {residue_counts}", logging.Values{"total": total, "where": where, "new_shapes": newShapes, "residue_counts": residueCounts(tally)})
 }
 
 // residueCounts renders a tally in label order, so two summaries of the same
@@ -1929,7 +1918,7 @@ func (s *sidecar) applySettled() {
 			continue
 		}
 		s.log.With(logging.Context{Operation: "run-settled", Path: path, ActivityID: run}).
-			Log("the run's own terminal was read from its file and is durable; it can no longer be concluded LOST")
+			Log("the run's own terminal was read from its file and is durable; it can no longer be concluded LOST", nil)
 	}
 }
 
@@ -2017,7 +2006,7 @@ func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 		s.tracker.MarkVanished(path, nowMs, reason)
 		if w.vanished {
 			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID}).
-				LogVerbose("the vanished file is still absent; its grace window has not decided yet")
+				LogVerbose("the vanished file is still absent; its grace window has not decided yet", nil)
 			return
 		}
 		w.vanished = true
@@ -2031,15 +2020,15 @@ func (s *sidecar) pollFailed(path string, w *watched, err error, nowMs int64) {
 			// `reason` carries the discriminator so the cases are filterable
 			// apart without reading prose.
 			s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Reason: reason}).
-				Log("the watched file vanished with nothing outstanding (%s); the committed offset is the last thing it had", reason)
+				Log("the watched file vanished with nothing outstanding ({reason}); the committed offset is the last thing it had", logging.Values{"reason": reason})
 			return
 		}
 		s.log.With(logging.Context{Operation: "file-vanished", Path: path, TaskID: w.target.TaskID, Level: "warn"}).
-			Log("the watched file vanished; any bytes appended past the committed offset went with it")
+			Log("the watched file vanished; any bytes appended past the committed offset went with it", nil)
 		return
 	}
 	s.log.With(logging.Context{Operation: "poll", Path: path, TaskID: w.target.TaskID, Level: "error"}).
-		Log("tail poll failed: %v", err)
+		Log("tail poll failed: {cause}", logging.Values{"cause": err.Error()})
 }
 
 // writeBatch sends one tailer batch — the records plus the cursor advance that
@@ -2147,11 +2136,11 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) bool {
 				RefusalKind: string(storeclient.RefusalInvalidRequest),
 				RefusalSite: storeclient.WriteBatchSite,
 				Field:       field, WriteIDs: writeIDsOf(entries),
-			}).Log("the store refused %d inferred %s record(s) as an invalid_request; a retry of the same records cannot help: %v", len(entries), what, err)
+			}).Log("the store refused {entries_length} inferred {what} record(s) as an invalid_request; a retry of the same records cannot help: {cause}", logging.Values{"entries_length": len(entries), "what": what, "cause": err.Error()})
 			return false
 		}
 		s.log.With(logging.Context{Operation: "store-write", Level: "error"}).
-			Log("%s write failed for %d record(s); production is suspended and the conclusions are restated on the next cycle: %v", what, len(entries), err)
+			Log("{what} write failed for {entries_length} record(s); production is suspended and the conclusions are restated on the next cycle: {cause}", logging.Values{"what": what, "entries_length": len(entries), "cause": err.Error()})
 		return false
 	}
 	// The write was durable. Inferred records name no file, so a skip here is
@@ -2263,7 +2252,7 @@ func (s *sidecar) withholdResidue(batch *storev1.EntryBatch) ([]*storev1.StoreEn
 		// is the untraceable announcement the field-set contract forbids.
 		s.log.With(logging.Context{
 			Operation: "residue-drop", FileID: fileID, Reason: label,
-		}).LogVerbose("residue %s is never persisted; the record was read and classified and is not stored", label)
+		}).LogVerbose("residue {label} is never persisted; the record was read and classified and is not stored", logging.Values{"label": label})
 	}
 	return kept, shapes
 }
@@ -2297,8 +2286,7 @@ func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) ([]storecli
 		// listening — and either way the next boot resumes from the cursor the
 		// store holds and re-reads the durable bytes past it.
 		s.log.With(logging.Context{Operation: "shutdown"}).Log(
-			"shutdown interrupted a write that had not answered within %s of the signal; whether the store committed it is UNKNOWN and nothing is lost either way, because records and cursor ride one transaction: the next boot resumes from whichever cursor the store holds (%s, %d record(s))",
-			shutdownSettle, what, len(batch.GetEntries()))
+			"shutdown interrupted a write that had not answered within {shutdown_settle} of the signal; whether the store committed it is UNKNOWN and nothing is lost either way, because records and cursor ride one transaction: the next boot resumes from whichever cursor the store holds ({what}, {batch_entries_length} record(s))", logging.Values{"shutdown_settle": shutdownSettle.String(), "what": what, "batch_entries_length": len(batch.GetEntries())})
 		return nil, err
 	}
 	s.noteStoreErr(what, err)
@@ -2322,7 +2310,7 @@ func (s *sidecar) noteSkips(path string, skips []storeclient.SkippedEntry, nowMs
 		}
 		s.log.With(logging.Context{
 			Operation: "book-conflict-skip", Path: path, Reason: "legacy_book_conflict", Level: "debug",
-		}).LogVerbose("store skipped %d legacy book-conflict entrie(s) during startup catch-up; the stored rows are kept and this is summarized rather than stated one by one", len(skips))
+		}).LogVerbose("store skipped {skips_length} legacy book-conflict entrie(s) during startup catch-up; the stored rows are kept and this is summarized rather than stated one by one", logging.Values{"skips_length": len(skips)})
 		return
 	}
 	s.warnUnexpectedSkips("tailer batch from "+path, skips)
@@ -2336,8 +2324,7 @@ func (s *sidecar) warnUnexpectedSkips(what string, skips []storeclient.SkippedEn
 	for _, skip := range skips {
 		s.log.With(logging.Context{
 			Operation: "book-conflict-skip", Reason: "legacy_book_conflict", Level: "warn",
-		}).Log("store skipped a legacy book-conflict entry in steady state (%s): upsert_key=%q is stored under book %q and this write would have moved it to %q; the stored row is kept -- nothing should re-book a live row",
-			what, skip.UpsertKey, skip.FromBook, skip.ToBook)
+		}).Log("store skipped a legacy book-conflict entry in steady state ({what}): upsert_key=\"{skip_upsert_key}\" is stored under book \"{skip_from_book}\" and this write would have moved it to \"{skip_to_book}\"; the stored row is kept -- nothing should re-book a live row", logging.Values{"what": what, "skip_upsert_key": skip.UpsertKey, "skip_from_book": skip.FromBook, "skip_to_book": skip.ToBook})
 	}
 }
 
@@ -2382,7 +2369,7 @@ func (s *sidecar) rekeyCursors() {
 		if err != nil {
 			s.log.With(logging.Context{
 				Operation: "recover-cursors", Path: cursor.GetPath(), FileID: fileID, Level: "warn",
-			}).Log("whether this stored cursor's file is still at its path could not be read, so its position is not carried to the file's current identity: %v", err)
+			}).Log("whether this stored cursor's file is still at its path could not be read, so its position is not carried to the file's current identity: {cause}", logging.Values{"cause": err.Error()})
 			continue
 		}
 		if !ok {
@@ -2403,11 +2390,11 @@ func (s *sidecar) rekeyCursors() {
 		s.log.With(logging.Context{
 			Operation: "recover-cursors", Path: cursor.GetPath(), FileID: current,
 			Offset: logging.Off(cursor.GetOffset()),
-		}).LogVerbose("this file's stored cursor was written under an earlier spelling of its identity; it resumes from that position")
+		}).LogVerbose("this file's stored cursor was written under an earlier spelling of its identity; it resumes from that position", nil)
 	}
 	if len(rekeyed) > 0 {
 		s.log.With(logging.Context{Operation: "recover-cursors", Repeat: logging.Repeat(len(rekeyed))}).
-			Log("carried %d stored cursor(s) written under an earlier spelling of their file's identity to the identity the file holds now", len(rekeyed))
+			Log("carried {rekeyed_length} stored cursor(s) written under an earlier spelling of their file's identity to the identity the file holds now", logging.Values{"rekeyed_length": len(rekeyed)})
 	}
 }
 

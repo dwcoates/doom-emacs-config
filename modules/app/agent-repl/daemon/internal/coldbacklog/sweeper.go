@@ -23,6 +23,7 @@ import (
 	"errors"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/cachelapse"
@@ -122,9 +123,9 @@ func (s *Sweeper) backlog(ctx context.Context, ws ids.WorkspaceID, lapsedAt, sta
 		log.Debug(opSweep, "the workspace behind a stale cold gate is no longer registered; nothing is moved", nil)
 		return
 	case err != nil:
-		ctxend.Log(err, log.Info, log.Error, opSweep,
-			"the daemon is leaving; the sweep ended with it",
-			"could not read the workspace behind a stale cold gate; it is not moved this sweep",
+		ctxend.Log(err, log, dlog.LevelInfo, opSweep,
+			logsite.Msg("the daemon is leaving; the sweep ended with it"),
+			logsite.Msg("could not read the workspace behind a stale cold gate; it is not moved this sweep"),
 			dlog.Context{"cause": err.Error()})
 		return
 	}

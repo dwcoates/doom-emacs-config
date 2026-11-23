@@ -6,7 +6,7 @@
 import { create } from "@bufbuild/protobuf";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SearchChatsResponseSchema, type SearchChatsResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_search_chats_pb";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { CHAT_SNIPPET_CLASS, createChatSearch } from "../../src/sidebar/chat-search.js";
 import { SEARCH_MISS_CLASS } from "../../src/sidebar/search.js";
 import { appContext, fakeTimers } from "./harness.js";
@@ -157,7 +157,7 @@ describe("createChatSearch", () => {
 
   it("records a refused search at info and draws nothing", async () => {
     // Arrange
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
     const root = drawnSection("t-1");
     const s = searchOver(root, [
       () => create(SearchChatsResponseSchema, { result: { case: "error", value: { cause: { case: "graphFailed", value: { detail: "disk" } } } } }),

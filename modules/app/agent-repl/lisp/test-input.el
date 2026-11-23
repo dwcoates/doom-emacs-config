@@ -557,7 +557,7 @@ The notices it hands its page are captured in
     (let (seen)
       (cl-letf (((symbol-function 'agent-repl--emit-log-record)
                  (lambda (_ws _level _verbosity fmt _args &rest _)
-                   (push (list fmt
+                   (push (list (agent-repl-log-site-template fmt)
                                agent-repl--log-context-workspace
                                agent-repl--log-context-request-id)
                          seen))))
@@ -1330,7 +1330,7 @@ ring (owner ruling overrides the old keep-the-text contract)."
   ;; Arrange.
   (agent-repl-test-input--with
     (let (logged-workspace)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (lambda (ws &rest _args) (setq logged-workspace ws))))
         ;; Act.
         (with-current-buffer agent-repl-test-input--buffer
@@ -1476,7 +1476,7 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (setq agent-repl-test-input--gone '("/tmp/gone.png"))
     (agent-repl-test-input--compose '("/tmp/a.png") '("/tmp/gone.png"))
     (let (recorded)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into recorded)))
         ;; Act
         (ignore-errors (agent-repl--send :user-sent)))
@@ -1691,7 +1691,7 @@ workspace from the working directory, so no source tag rides it."
   (let ((sent nil) (infos nil))
     (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice)
                (lambda (ws text) (push (list ws text) sent) t))
-              ((symbol-function 'agent-repl--info)
+              ((symbol-function 'agent-repl--emit-info)
                (agent-repl-test--record-into infos)))
       ;; Act.
       (agent-repl--input-notify "ws" "send: no daemon connection")
@@ -1704,7 +1704,7 @@ workspace from the working directory, so no source tag rides it."
   ;; Arrange.
   (let ((infos nil))
     (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice) (lambda (_ws _text) nil))
-              ((symbol-function 'agent-repl--info)
+              ((symbol-function 'agent-repl--emit-info)
                (agent-repl-test--record-into infos)))
       ;; Act.
       (agent-repl--input-notify "ws" "refused: merge in flight")
@@ -1718,8 +1718,8 @@ workspace from the working directory, so no source tag rides it."
         (sent nil))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) buffer))
-                  ((symbol-function 'agent-repl--log) #'ignore)
-                  ((symbol-function 'agent-repl--info) #'ignore)
+                  ((symbol-function 'agent-repl--emit-log) #'ignore)
+                  ((symbol-function 'agent-repl--emit-info) #'ignore)
                   ((symbol-function 'agent-repl-webhost-show-editor-notice)
                    (lambda (_ws text) (push text sent) t)))
           ;; Act.
@@ -1737,7 +1737,7 @@ workspace from the working directory, so no source tag rides it."
         (sent nil))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) buffer))
-                  ((symbol-function 'agent-repl--log) #'ignore)
+                  ((symbol-function 'agent-repl--emit-log) #'ignore)
                   ((symbol-function 'agent-repl-webhost-show-editor-notice)
                    (lambda (_ws text) (push text sent) t)))
           ;; Act.
@@ -1874,7 +1874,7 @@ workspace from the working directory, so no source tag rides it."
   ;; Arrange.
   (let ((agent-repl-input-background "#171717")
         (logs nil))
-    (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+    (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
       (with-temp-buffer
         ;; Act.
         (agent-repl-input-mode)))
@@ -1894,7 +1894,7 @@ workspace from the working directory, so no source tag rides it."
   ;; Arrange
   (let ((agent-repl-input-background "#171717")
         (agent-repl-input-background-painters nil))
-    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
       ;; Act
       (agent-repl--input-background-set 'agent-repl-input-background "#000000")
       ;; Assert
@@ -1908,7 +1908,7 @@ workspace from the working directory, so no source tag rides it."
          (agent-repl-input-background-painters
           (list (lambda () (push agent-repl-input-background seen))
                 (lambda () (push agent-repl-input-background seen)))))
-    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
       ;; Act
       (agent-repl--input-background-set 'agent-repl-input-background "#000000"))
     ;; Assert
@@ -1920,7 +1920,7 @@ workspace from the working directory, so no source tag rides it."
   (let ((logs nil)
         (agent-repl-input-background "#171717")
         (agent-repl-input-background-painters (list #'ignore)))
-    (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into logs)))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logs)))
       ;; Act
       (agent-repl--input-background-set 'agent-repl-input-background "#000000"))
     ;; Assert
@@ -1933,7 +1933,7 @@ workspace from the working directory, so no source tag rides it."
   (let* ((ran 0)
          (agent-repl-input-background "#1a1a1a")
          (agent-repl-input-background-painters (list (lambda () (cl-incf ran)))))
-    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
       ;; Act
       (custom-reevaluate-setting 'agent-repl-input-background)
       ;; Assert
@@ -1957,7 +1957,7 @@ workspace from the working directory, so no source tag rides it."
   ;; Arrange
   (let ((agent-repl-input-background "#171717")
         (agent-repl-input-background-painters (list #'agent-repl--input-paint-all)))
-    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
       (with-temp-buffer
         (agent-repl-input-mode)
         ;; Act
@@ -1987,7 +1987,7 @@ workspace from the working directory, so no source tag rides it."
   ;; Arrange
   (let ((agent-repl-input-background "#171717")
         (logs nil))
-    (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+    (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
       (with-temp-buffer
         (agent-repl-input-mode)
         (let ((before (copy-tree face-remapping-alist)))
@@ -2003,7 +2003,7 @@ workspace from the working directory, so no source tag rides it."
   ;; Arrange
   (let ((agent-repl-input-background "#171717")
         (logs nil))
-    (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+    (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
       (with-temp-buffer
         (rename-buffer " *test-input-paint*" t)
         (agent-repl-input-mode)
@@ -2019,7 +2019,7 @@ workspace from the working directory, so no source tag rides it."
   "Only composer buffers are repainted: another buffer gains no remap."
   ;; Arrange
   (let ((agent-repl-input-background "#000000"))
-    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
       (with-temp-buffer
         ;; Act
         (agent-repl--input-paint-all)
@@ -2030,7 +2030,7 @@ workspace from the working directory, so no source tag rides it."
   "A composer made before the border (no header or mode line, frame fringes) gets the border."
   ;; Arrange
   (let ((agent-repl-input-background "#171717"))
-    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore)
               ((symbol-function 'agent-repl-dividers-fix-fringes) #'ignore))
       (with-temp-buffer
         (agent-repl-input-mode)
@@ -2051,7 +2051,7 @@ workspace from the working directory, so no source tag rides it."
   "Drawing a composer that already wears its border again adds no remap."
   ;; Arrange
   (let ((agent-repl-input-background "#171717"))
-    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore)
               ((symbol-function 'agent-repl-dividers-fix-fringes) #'ignore))
       (with-temp-buffer
         (agent-repl-input-mode)
@@ -2064,7 +2064,7 @@ workspace from the working directory, so no source tag rides it."
 (ert-deftest agent-repl-input-draw-border-all-leaves-other-buffers ()
   "Only composers are drawn: another buffer keeps its header line."
   ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+  (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
     (with-temp-buffer
       (setq-local header-line-format "mine")
       ;; Act
@@ -2366,13 +2366,13 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
          (agent-repl-test-input--debug nil)
          (agent-repl-test-input--warn nil)
          (agent-repl-test-input--error nil))
-     (cl-letf (((symbol-function 'agent-repl--info)
+     (cl-letf (((symbol-function 'agent-repl--emit-info)
                 (agent-repl-test--record-into agent-repl-test-input--info))
-               ((symbol-function 'agent-repl--log)
+               ((symbol-function 'agent-repl--emit-log)
                 (agent-repl-test--record-into agent-repl-test-input--debug))
-               ((symbol-function 'agent-repl--warn)
+               ((symbol-function 'agent-repl--emit-warn)
                 (agent-repl-test--record-into agent-repl-test-input--warn))
-               ((symbol-function 'agent-repl--error)
+               ((symbol-function 'agent-repl--emit-error)
                 (agent-repl-test--record-into agent-repl-test-input--error)))
        ,@body)))
 
@@ -3098,7 +3098,7 @@ stubbed rpc received is pushed onto `requests'."
   "An opened image is recorded at INFO, naming its path."
   (agent-repl-test-input--with-open-image '(:response (:arm :success :value nil))
     (let ((infos nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--input-open-feed-image "ws-one" '(:path "/w/clip.png" :media-type "image/png")))
@@ -3241,7 +3241,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
                       (and (eq kind :input) (equal ws "ws-one") composer-window)))
                    ((symbol-function 'evil-insert-state)
                     (lambda (&optional _arg) (push (current-buffer) insert-buffers)))
-                   ((symbol-function 'agent-repl--info)
+                   ((symbol-function 'agent-repl--emit-info)
                     (agent-repl-test--record-into infos)))
            ,@body)))))
 
@@ -3300,7 +3300,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
   (agent-repl-test-input--with-select agent-repl-test-input--select-refused
     ;; Arrange
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-prev))
@@ -3321,7 +3321,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
   (agent-repl-test-input--with-select '(:failure (:kind :transport :message "down"))
     ;; Arrange
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-next))
@@ -3334,7 +3334,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
   (agent-repl-test-input--with-select '(:response (:arm :accepted :value nil))
     ;; Arrange
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-turn-boundary-select-next))
@@ -3649,7 +3649,7 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
                                          (cadr agent-repl-test-input--roll-back-answer))))))
                  ((symbol-function 'y-or-n-p)
                   (lambda (prompt) (setq agent-repl-test-input--asked prompt) confirm))
-                 ((symbol-function 'agent-repl--warn)
+                 ((symbol-function 'agent-repl--emit-warn)
                   (agent-repl-test--record-into agent-repl-test-input--warned)))
          ,@body))))
 
@@ -4138,7 +4138,7 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
       '(:response (:arm :accepted :value nil)) t nil
     ;; Arrange
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-rollback-keep-files))
@@ -4218,7 +4218,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   "An offer arm the composer does not know is logged at ERROR."
   (agent-repl-test-input--with-rollback nil nil nil
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--input-rollback-offer "ws-one" '(:arm :later :value nil)))
@@ -4321,7 +4321,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   (agent-repl-test-input--with-rollback nil nil nil
     (let ((agent-repl-test-input--list-answer '(:response (:arm :accepted :value nil)))
           (errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--input-rollback-choose "ws-one"))
@@ -4554,7 +4554,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
       (agent-repl-test-input--refusal :not-yet-adopted)
     ;; Arrange
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-prev))
@@ -4663,7 +4663,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     ;; Arrange
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--input-selection-changed "ws-one"))
@@ -4983,7 +4983,7 @@ holds it until the condition clears."
     (setq agent-repl-test-input--answer
           '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-test-input--submit-deferred))
@@ -5278,15 +5278,15 @@ its requests onto `agent-repl-test-input--select-requests'."
   `(agent-repl-test-input--with
      (let ((agent-repl-test-input--select-requests nil)
            (agent-repl-test-input--call-log nil))
-       (cl-letf (((symbol-function 'agent-repl--warn)
+       (cl-letf (((symbol-function 'agent-repl--emit-warn)
                   (lambda (_ws fmt &rest args)
-                    (push (cons :warn (apply #'format fmt args)) agent-repl-test-input--call-log)))
-                 ((symbol-function 'agent-repl--error)
+                    (push (cons :warn (agent-repl-log-site-render fmt args)) agent-repl-test-input--call-log)))
+                 ((symbol-function 'agent-repl--emit-error)
                   (lambda (_ws fmt &rest args)
-                    (push (cons :error (apply #'format fmt args)) agent-repl-test-input--call-log)))
-                 ((symbol-function 'agent-repl--info)
+                    (push (cons :error (agent-repl-log-site-render fmt args)) agent-repl-test-input--call-log)))
+                 ((symbol-function 'agent-repl--emit-info)
                   (lambda (_ws fmt &rest args)
-                    (push (cons :info (apply #'format fmt args)) agent-repl-test-input--call-log))))
+                    (push (cons :info (agent-repl-log-site-render fmt args)) agent-repl-test-input--call-log))))
          ,@body))))
 
 (defun agent-repl-test-input--stub-verb (conn request &rest keys)
@@ -5650,7 +5650,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
             (agent-repl--input-remember-sent-turn (agent-repl--ws-current-name) '(:value "t1"))
             (let ((said nil) (logged nil))
               (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) said)))
-                        ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged)))
+                        ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
                 (agent-repl-send-held-now))
               (should (cl-some (lambda (m) (string-match-p text m)) said))
               (should (cl-some (lambda (m) (string-match-p "send-held-now-refused .*t1" m)) logged)))))))))
@@ -5665,7 +5665,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
 (ert-deftest agent-repl-test-input-release-refused-text-fails-on-an-unknown-cause ()
   "A cause the editor does not know is logged and signalled, never a generic sentence."
   (let ((logged nil))
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into logged)))
       (should-error (agent-repl--input-release-refused-text (list :arm :mystery :value nil))))
     (should (cl-some (lambda (m) (string-match-p "release-refused-unknown-cause .*mystery" m)) logged))))
 
@@ -5719,7 +5719,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (let ((agent-repl-test-input--verb-answer
            '(:response (:arm :error :value (:cause (:arm :ask-not-standing :value nil)))))
           (warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         (agent-repl-test-input--type-digit ?1))
       (should (cl-some (lambda (m) (string-match-p "elisp.input.answer-question-refused .*:label \"a\".*ask-not-standing" m))
@@ -5815,7 +5815,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (agent-repl-test-input--with-edit-stubs
       (let (warned)
         (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
-                  ((symbol-function 'agent-repl--warn)
+                  ((symbol-function 'agent-repl--emit-warn)
                    (agent-repl-test--record-into warned)))
           ;; Act
           (agent-repl-input-compose-entry "ws-one" "3.1"))
@@ -5861,7 +5861,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (setq agent-repl-test-input--gone '("/tmp/gone.png"))
     (agent-repl-test-input--compose "look " '("/tmp/gone.png"))
     (let (recorded)
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into recorded)))
         ;; Act / Assert
         (should-error (agent-repl--input-resend "ws-one") :type 'user-error))
@@ -6070,7 +6070,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
   "A highlight over an empty composer keeps no draft and records it."
   (agent-repl-test-input--with-question
     (let (infos)
-      (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-input-text-highlighted "ws-q"))
       ;; Assert
@@ -6095,7 +6095,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
   "A workspace with no composer records the highlight and edits nothing."
   (let (infos)
     (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+              ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
       ;; Act
       (agent-repl-input-text-highlighted "ws-none"))
     ;; Assert
@@ -6171,7 +6171,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (with-current-buffer buf (insert "my draft"))
     (agent-repl-input-text-highlighted "ws-q")
     (let (infos)
-      (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--input-restore-highlight-draft "ws-q"))
       ;; Assert
@@ -6284,7 +6284,7 @@ the composer took the keyboard for."
   "A workspace with no composer records the change and edits nothing."
   (let (warns)
     (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl--warn) (agent-repl-test--record-into warns)))
+              ((symbol-function 'agent-repl--emit-warn) (agent-repl-test--record-into warns)))
       ;; Act
       (agent-repl-input-response-question "ws-none" :asked))
     ;; Assert
@@ -6293,8 +6293,8 @@ the composer took the keyboard for."
 (ert-deftest agent-repl-input-an-unknown-question-change-is-fatal ()
   "A change this composer does not know is a broken decoder."
   (let (fatals)
-    (cl-letf (((symbol-function 'agent-repl--fatal)
-               (lambda (ws fmt &rest args) (push (apply #'format fmt args) fatals)
+    (cl-letf (((symbol-function 'agent-repl--emit-fatal)
+               (lambda (ws fmt &rest args) (push (agent-repl-log-site-render fmt args) fatals)
                  (error "fatal %s" ws))))
       ;; Act / Assert
       (should-error (agent-repl-input-response-question "ws-q" :sideways))

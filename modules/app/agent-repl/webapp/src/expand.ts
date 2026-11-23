@@ -22,9 +22,11 @@ import { perDocument } from "./per-document.js";
 import { createPresence, pagePresence, type Presence } from "./presence.js";
 import { CONTROL_SELECTOR } from "./control.js";
 import { ancestorMatching, queryAll } from "./dom.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { selectedText } from "./selection.js";
 import { collapseClicked } from "./scroll.js";
+
+const log = createLogger("webapp.expand");
 
 /**
  * Classes that mark a click-to-expand section — the thing the feed-wide click
@@ -480,10 +482,10 @@ export class AutoCollapse {
       for (const section of expandedSectionsOf(host)) {
         if (inside !== null && section.contains(inside)) continue;
         if (owned(section)) continue;
-        log.debug(`auto-collapsing an open ${primaryClass(section)} on ${trigger}`, {
+        log.debug("auto-collapsing an open {primary_class} on {trigger}", {
           operation: "expand.auto-collapse",
-          context: { trigger, kind: primaryClass(section), role: roleOf(section) },
-        });
+          context: { kind: primaryClass(section), role: roleOf(section) },
+        }, { primary_class: primaryClass(section), trigger });
         collapseSection(section, afterToggle);
         closed += 1;
       }

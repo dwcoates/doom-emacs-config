@@ -59,13 +59,13 @@ func TestListSlashCommandsAnswersUnstatedBeforeAnyStatement(t *testing.T) {
 		t.Fatalf("result = %v, want success.unstated", resp.Msg.GetResult())
 	}
 	found := false
-	for _, rec := range log.records {
+	for _, rec := range log.records() {
 		if rec.Operation == "daemon.server.list_slash_commands" && rec.Context["branch"] == "unstated" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("records = %v, want the unstated answer recorded", log.records)
+		t.Fatalf("records = %v, want the unstated answer recorded", log.records())
 	}
 }
 

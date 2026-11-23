@@ -23,13 +23,15 @@ import type {
   HeldIngressPromptBadge,
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { USER_PROMPT_CAP_LINES, drawBubble } from "../bubble/draw.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage } from "../rpc/strict.js";
 import type { HeldContext } from "./context.js";
 import type { EditorIngressEntry } from "./editor-ingress.js";
 import { drawHeldBadgePill, drawQueuedAge, drawUserSaid, type HeldBadgeTone } from "./held-prompt.js";
 import { userPromptLook, type HeldPromptLook } from "../feed/rows/user-prompt.js";
+
+const log = createLogger("webapp.held.ingress-prompt");
 
 /** The attribute an ingress card carries: who drew it, `daemon` or `editor`. */
 export const INGRESS_SOURCE_ATTRIBUTE = "data-held-ingress";

@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // Teardown is the SLOW HALF of a kill or a nuke: the session's death, and for
@@ -109,6 +110,7 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, b
 // terminal recorded. It closes nothing: Kill closes the workspace after it,
 // and a deploy check workspace standing by keeps its workspace open.
 func (v *verbs) endSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (wsm.OrphanReport, error) {
+	killUnanswered := logsite.Msg("the forced KillSession did not answer")
 	if shim, live := v.deps.Shim(ws); live {
 		// THE LATCH IS ARMED BEFORE THE ASK, and therefore before the
 		// unconditional process stop the ask's failure leads to: the stop is a
@@ -124,9 +126,9 @@ func (v *verbs) endSession(ctx context.Context, log dlog.Logger, ws ids.Workspac
 			// process belongs to the successor daemon.
 			evidence := dlog.Context{"cause": err.Error()}
 			if ordered {
-				log.Info(opKill, "the forced KillSession did not answer", evidence)
+				log.Log(dlog.LevelInfo, opKill, killUnanswered, evidence)
 			} else {
-				log.Warn(opKill, "the forced KillSession did not answer", evidence)
+				log.Log(dlog.LevelWarn, opKill, killUnanswered, evidence)
 			}
 		} else {
 			log.Debug(opKill, "the session was killed forcefully", nil)

@@ -521,7 +521,7 @@ func TestSubmitRefusalIsRecordedAtInfo(t *testing.T) {
 		t.Fatalf("refuse = %v, want the refusal encoded onto the response", cerr)
 	}
 	if got := log.at("INFO"); len(got) != 1 || got[0].Context["arm"] != "no_session" {
-		t.Fatalf("INFO records = %v, want exactly one naming the arm", log.records)
+		t.Fatalf("INFO records = %v, want exactly one naming the arm", log.records())
 	}
 }
 
@@ -537,7 +537,7 @@ func TestSubmitRefusalIsRecordedUnderThePromptHandlersOperation(t *testing.T) {
 
 	// Assert.
 	if got := log.at("INFO"); len(got) != 1 || got[0].Operation != opSubmit {
-		t.Fatalf("INFO records = %v, want one filed under %q", log.records, opSubmit)
+		t.Fatalf("INFO records = %v, want one filed under %q", log.records(), opSubmit)
 	}
 }
 
@@ -553,7 +553,7 @@ func TestAnUnmarkedRefusalStaysAtDebugUnderItsRpc(t *testing.T) {
 	// Assert.
 	debug := log.at("DEBUG")
 	if len(debug) != 1 || debug[0].Operation != "SubmitPrompt" {
-		t.Fatalf("DEBUG records = %v, want one under the rpc's own name", log.records)
+		t.Fatalf("DEBUG records = %v, want one under the rpc's own name", log.records())
 	}
 }
 

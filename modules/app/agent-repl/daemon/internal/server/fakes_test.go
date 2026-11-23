@@ -76,16 +76,6 @@ const testWorkspaceID = ids.WorkspaceID("ws-1")
 // testWorkspaceDir is that workspace's registry directory.
 const testWorkspaceDir = "/tmp/agent-repl-test-workspace"
 
-// fakeLogger records nothing and never fails; the log's CONTENT is asserted by
-// dlog's own tests, not here.
-type fakeLogger struct{}
-
-func (fakeLogger) Debug(string, string, dlog.Context) {}
-func (fakeLogger) Info(string, string, dlog.Context)  {}
-func (fakeLogger) Warn(string, string, dlog.Context)  {}
-func (fakeLogger) Error(string, string, dlog.Context) {}
-func (f fakeLogger) With(dlog.Context) dlog.Logger    { return f }
-
 // fakeSurfaces answers one logger for everything and records client records.
 type fakeSurfaces struct {
 	dlog.Surfaces
@@ -103,7 +93,7 @@ func (f *fakeSurfaces) Global() dlog.Logger {
 	if f.global != nil {
 		return f.global
 	}
-	return fakeLogger{}
+	return dlog.Nowhere()
 }
 
 func (f *fakeSurfaces) Workspace(string) (dlog.Logger, error) {
@@ -113,7 +103,7 @@ func (f *fakeSurfaces) Workspace(string) (dlog.Logger, error) {
 	if f.workspace != nil {
 		return f.workspace, nil
 	}
-	return fakeLogger{}, nil
+	return dlog.Nowhere(), nil
 }
 
 // WorkspaceOrCentral implements dlog.Surfaces: the workspace's logger when it
@@ -2604,6 +2594,7 @@ type harness struct {
 	// HotReload records the web streams' builds the server tells the
 	// deploy's hot reload card.
 	HotReload *fakeHotReload
+	LogSites  *fakeLogSites
 	// Latencies records what ReportLatencies accepts.
 	Latencies *fakeLatencies
 	// VendorSpend is what ReportVendorSpend recorded.
@@ -2771,6 +2762,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		OpenWorld:        newFakeOpenWorld(),
 		ChessBoards:      &fakeChessSquares{},
 		HotReload:        &fakeHotReload{},
+		LogSites:         &fakeLogSites{},
 		SlashCommands:    commandcatalog.New(),
 		SlackChannels:    &fakeSlackChannels{},
 		Mentions:         &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
@@ -2864,6 +2856,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Reconnects:        h.reconnects(),
 		HotReload:         h.HotReload,
 		ChessWidgetBundle: http.NotFoundHandler(),
+		LogSites:          h.LogSites,
 		Log:               h.Surfaces,
 	}
 	for _, apply := range opts {
@@ -2976,31 +2969,27 @@ type logRecord struct {
 }
 
 // recordingLogger captures every record so a test can assert BOTH the shape of
-// what was logged and that nothing was logged at a level it forbids.
+// what was logged and that nothing was logged at a level it forbids: a
+// dlog.TestLogger (usable as its zero value), read as logRecords whose
+// levels are spelled upper case.
 type recordingLogger struct {
-	// mu guards records: a stream handler records on its own goroutine.
-	mu      sync.Mutex
-	records []logRecord
+	dlog.TestLogger
 }
 
-func (l *recordingLogger) Debug(op, msg string, c dlog.Context) { l.record("DEBUG", op, msg, c) }
-func (l *recordingLogger) Info(op, msg string, c dlog.Context)  { l.record("INFO", op, msg, c) }
-func (l *recordingLogger) Warn(op, msg string, c dlog.Context)  { l.record("WARN", op, msg, c) }
-func (l *recordingLogger) Error(op, msg string, c dlog.Context) { l.record("ERROR", op, msg, c) }
-func (l *recordingLogger) With(dlog.Context) dlog.Logger        { return l }
-
-func (l *recordingLogger) record(level, op, msg string, c dlog.Context) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.records = append(l.records, logRecord{Level: level, Operation: op, Message: msg, Context: c})
+// records answers every captured record, in order.
+func (l *recordingLogger) records() []logRecord {
+	captured := l.Records()
+	out := make([]logRecord, len(captured))
+	for i, r := range captured {
+		out[i] = logRecord{Level: strings.ToUpper(r.Level), Operation: r.Operation, Message: r.Message, Context: r.Context}
+	}
+	return out
 }
 
 // at answers the records captured at one level.
 func (l *recordingLogger) at(level string) []logRecord {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	var out []logRecord
-	for _, rec := range l.records {
+	for _, rec := range l.records() {
 		if rec.Level == level {
 			out = append(out, rec)
 		}

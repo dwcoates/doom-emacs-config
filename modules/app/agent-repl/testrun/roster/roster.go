@@ -346,6 +346,7 @@ var Suites = []Suite{
 		"test-threads.el":      {"lisp/open-chats.agent-repl-chats"},
 		"test-spell.el":        {"lisp/requirements.json"},
 		"test-test-helpers.el": {"lisp/"},
+		"test-log-site.el":     {"lisp/"},
 	}, Inputs: []string{
 		// The Doom module files and the data the Emacs layer reads.
 		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
@@ -418,16 +419,21 @@ var Suites = []Suite{
 		// internal/history renders the stored-line cases the shim's reader
 		// renders too.
 		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/", "testdata/history-golden/"}}},
-	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
+	// Its root package's log site scan walks the lock holder's own tree.
+	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{Units: map[string][]string{".": {"agent-shim/shim-lock/"}}}},
 	// THE SOCKET HOLDER, which keeps the store's and the daemon's listening
 	// sockets open across every restart of the servers on them.
-	{Name: "sockethold", Kind: GoModule, Path: "agent-shim/sockethold", Reuse: &Reuse{Inputs: []string{"agent-shim/logging/go/sockethold/"}}},
+	// Its root package's log site scan walks the holder's own tree.
+	{Name: "sockethold", Kind: GoModule, Path: "agent-shim/sockethold", Reuse: &Reuse{Inputs: []string{"agent-shim/logging/go/sockethold/"},
+		Units: map[string][]string{".": {"agent-shim/sockethold/"}}}},
 	{Name: "zettel", Kind: GoModule, Path: "zettel", Programs: map[string][]string{"integration": {"zettel"}},
 		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
 	// THE TEST SERVICE, which owns every merge gate's run so a daemon deploy
 	// never cuts one. Its tests start real child processes of its own.
 	{Name: "testservice", Kind: GoModule, Path: "testservice", Reuse: &Reuse{Inputs: []string{"testservice/"}}},
-	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
+	// Its root package's log site scan walks the module's own tree.
+	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"},
+		Units: map[string][]string{".": {"agent-shim/logging/go/"}}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{Units: map[string][]string{
 		// The elisp codec's guard reads every codec file it holds to the
 		// proto.

@@ -22,8 +22,10 @@
  *   baseline (`reset`), so a reconnect restating `current` fires nothing.
  */
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
+
+const log = createLogger("webapp.sidebar.selection-edge");
 
 /** What the roster stream feeds the edge. */
 export interface SelectionEdge {

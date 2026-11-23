@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"agentrepl/logging/logsite"
 )
 
 // TestRefusedReportsTheArm covers the seam the server maps: a refusal carries
@@ -77,7 +79,7 @@ func TestLogRefusalRecordsAtInfoWithTheRefusal(t *testing.T) {
 	refusal := refuse(ArmNameTaken, theWorkspace, "the name is taken")
 
 	// Act
-	logRefusal(log, "daemon.merge.enqueue", "refused an async merge whose name is taken", dlog.Context{"workspace": "w1"}, refusal)
+	logRefusal(log, "daemon.merge.enqueue", logsite.Msg("refused an async merge whose name is taken"), dlog.Context{"workspace": "w1"}, refusal)
 
 	// Assert
 	record, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.enqueue"})

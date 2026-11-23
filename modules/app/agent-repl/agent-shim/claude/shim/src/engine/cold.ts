@@ -43,7 +43,7 @@ import {
   type PromptRecord,
 } from "../convert/transcript-prompt.js";
 
-const LOGGER = bindLog({ component: "shim-engine-cold", operation: "shim.engine.cold" });
+const LOGGER = bindLog("shim.engine.cold", { component: "shim-engine-cold", operation: "shim.engine.cold" });
 
 /** The 5-minute ephemeral cache tier, in milliseconds. */
 export const CACHE_TTL_5M_MS = 5 * 60 * 1000;

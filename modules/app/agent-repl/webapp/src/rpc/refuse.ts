@@ -30,13 +30,15 @@
  */
 import { Code, ConnectError } from "@connectrpc/connect";
 import { frameUndecodable } from "../failure/sink.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "./context.js";
 import { isMalformedView } from "./malformed.js";
 import { workspaceMoved } from "./moved.js";
 import { refusalSentence } from "./refusal.js";
 import { requireCase, unreachableArm } from "./strict.js";
 import { queryAll } from "../dom.js";
+
+const log = createLogger("webapp.rpc.refuse");
 
 /** How a caller words the arms that are its own verb's alone. */
 export type SentenceTable = Record<string, (value: never) => string>;
@@ -192,10 +194,10 @@ export function drawTypedRefusal(
   const said = refusalOf(cause, own, path);
   clearRefusals(host);
   host.append(refusal(said.arm, said.text));
-  log.debug(`a ${rpcName} click was refused: ${said.arm}`, {
+  log.debug("a {rpc_name} click was refused: {arm}", {
     operation: "rpc.refused",
-    context: { rpc: rpcName, arm: said.arm },
-  });
+    context: { rpc: rpcName },
+  }, { rpc_name: rpcName, arm: said.arm });
   return said.arm;
 }
 
@@ -240,10 +242,10 @@ export function drawMalformedRefusal(
   err: unknown,
 ): boolean {
   if (!isMalformedView(err)) return false;
-  log.error(`a refusal could not be read: ${err.message}`, {
+  log.error("a refusal could not be read: {message}", {
     operation,
     context: { path: err.path, detail: err.detail },
-  });
+  }, { message: err.message });
   ctx.failures.report(frameUndecodable(err.detail, err.path));
   return true;
 }
@@ -273,9 +275,9 @@ function rpcNameOf(path: string): string {
 function raiseMoved(path: string, value: unknown): void {
   const address = (value as { address?: unknown } | undefined)?.address;
   if (typeof address !== "string") return;
-  log.info(`a refusal says this workspace moved to ${address}`, {
+  log.info("a refusal says this workspace moved to {address}", {
     operation: "rpc.refusal-transferring-away",
-    context: { path, address },
-  });
+    context: { path },
+  }, { address });
   workspaceMoved(address);
 }

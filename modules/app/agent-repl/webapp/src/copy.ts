@@ -40,8 +40,10 @@
  * `copy` event the fallback above answers with the selection's text. Every
  * other chord, and either chord with nothing selected, is left untouched.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { selectedText } from "./selection.js";
+
+const log = createLogger("webapp.copy");
 
 /**
  * Write TEXT onto the `copy` EVENT's clipboard in place of what the browser

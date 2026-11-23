@@ -40,6 +40,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
@@ -50,10 +54,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--git-string "agent-repl-core" (&rest args))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
@@ -81,7 +81,7 @@ sibling repo."
 
 (defun agent-repl--open-initial-buffers (ws path)
   "Open the configured initial buffers for workspace WS rooted at PATH."
-  (agent-repl--log ws "elisp.worktree.initial-buffers ws=%s path=%s" ws path)
+  (agent-repl--log ws "elisp.worktree.initial-buffers ws={ws} path={path}" :ws ws :path path)
   (if-let ((persp (agent-repl--ws-resolve-persp ws)))
       (let ((matched nil))
         (dolist (entry agent-repl-workspace-initial-buffers)
@@ -91,12 +91,12 @@ sibling repo."
               (let ((fullpath (expand-file-name relpath path)))
                 (if (file-exists-p fullpath)
                     (progn
-                      (agent-repl--log ws "elisp.worktree.initial-buffer-open file=%s" fullpath)
+                      (agent-repl--log ws "elisp.worktree.initial-buffer-open file={file}" :file fullpath)
                       (agent-repl--ws-add-buffer (find-file-noselect fullpath) persp t))
-                  (agent-repl--log ws "elisp.worktree.initial-buffer-missing file=%s" fullpath))))))
+                  (agent-repl--log ws "elisp.worktree.initial-buffer-missing file={file}" :file fullpath))))))
         (unless matched
-          (agent-repl--log ws "elisp.worktree.initial-buffers-unmatched path=%s" path)))
-    (agent-repl--log ws "elisp.worktree.initial-buffers-no-persp ws=%s path=%s" ws path)))
+          (agent-repl--log ws "elisp.worktree.initial-buffers-unmatched path={path}" :path path)))
+    (agent-repl--log ws "elisp.worktree.initial-buffers-no-persp ws={ws} path={path}" :ws ws :path path)))
 
 (defun agent-repl--remove-doom-dashboard ()
   "Remove the Doom dashboard buffer from the current workspace.
@@ -106,7 +106,7 @@ list."
   (when (boundp '+doom-dashboard-buffer-name)
     (when-let ((dash (get-buffer +doom-dashboard-buffer-name)))
       (agent-repl--log (agent-repl--ws-current-log-name)
-                       "elisp.worktree.remove-dashboard buffer=%s" (buffer-name dash))
+                       "elisp.worktree.remove-dashboard buffer={buffer}" :buffer (buffer-name dash))
       (ignore-errors (agent-repl--ws-remove-buffer dash)))))
 
 ;;;; ---- Thread-safe buffer teardown --------------------------------------
@@ -156,12 +156,12 @@ settle directly."
     (unless log-ws
       (agent-repl--error
        '(:agent-repl-central "a malformed async git process has no captured workspace")
-       "elisp.worktree.async-git-missing-log-scope proc=%s"
-       (process-name proc))
+       "elisp.worktree.async-git-missing-log-scope proc={proc}"
+       :proc (process-name proc))
       (error "agent-repl async git process %S has no log workspace"
              (process-name proc)))
-    (agent-repl--log log-ws "elisp.worktree.async-git-settle proc=%s status=%s exit=%s"
-                     (process-name proc) (process-status proc) (process-exit-status proc))
+    (agent-repl--log log-ws "elisp.worktree.async-git-settle proc={proc} status={status} exit={exit}"
+                     :proc (process-name proc) :status (process-status proc) :exit (process-exit-status proc))
     (agent-repl--kill-buffer-safely (process-buffer proc))
     (funcall callback ok output)))
 
@@ -189,8 +189,8 @@ external-boundary wrapper -- tests mock it via `cl-letf' (see
                    '(:agent-repl-central
                      "a git directory outside the roster has no workspace")))
          (buf (generate-new-buffer (format " *agent-repl-%s*" label))))
-    (agent-repl--log log-ws "elisp.worktree.async-git label=%s git-root=%s args=%S"
-                     label git-root args)
+    (agent-repl--log log-ws "elisp.worktree.async-git label={label} git-root={git_root} args={args}"
+                     :label label :git_root git-root :args (prin1-to-string args))
     (let ((proc (apply #'start-process ;; ALLOW-EXTERNAL-BOUNDARY
                        (format "agent-repl-%s" label)
                        buf
@@ -229,10 +229,10 @@ worktree is on, and \"HEAD\" would not answer it."
                        "-C" path "rev-parse" "--abbrev-ref" "HEAD"))
               (valid (not (or (string-empty-p branch)
                               (string-prefix-p "fatal" branch)))))
-    (agent-repl--log ws "elisp.worktree.branch ws=%s path=%s branch=%s" ws path branch)
+    (agent-repl--log ws "elisp.worktree.branch ws={ws} path={path} branch={branch}" :ws ws :path path :branch branch)
     (if (string= branch "HEAD")
         (let ((sha (agent-repl--git-string "-C" path "rev-parse" "HEAD")))
-          (agent-repl--log ws "elisp.worktree.branch-detached ws=%s sha=%s" ws sha)
+          (agent-repl--log ws "elisp.worktree.branch-detached ws={ws} sha={sha}" :ws ws :sha sha)
           sha)
       branch)))
 
@@ -258,8 +258,8 @@ Tombstoned entries are skipped so a killed workspace's preserved
                  (and wd (string= (agent-repl--path-canonical wd) canon))))
              live-names)))
       (agent-repl--log result
-                       "elisp.worktree.ws-name-for-dir dir=%s canonical=%s live-count=%d result=%s"
-                       dir canon (length live-names) (or result "nil"))
+                       "elisp.worktree.ws-name-for-dir dir={dir} canonical={canonical} live-count={live_count} result={result}"
+                       :dir dir :canonical canon :live_count (length live-names) :result (or result "nil"))
       result)))
 
 (provide 'worktree)

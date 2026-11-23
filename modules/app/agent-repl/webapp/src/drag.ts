@@ -62,8 +62,10 @@
 import { queryAll, windowOf } from "./dom.js";
 import { nextFrame } from "./frame.js";
 import type { DrawingHold } from "./hold.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { dragEdgeScroll } from "./scroll.js";
+
+const log = createLogger("webapp.drag");
 
 /** How far the pointer moves, in px, before a press becomes a drag. */
 export const DRAG_THRESHOLD_PX = 4;

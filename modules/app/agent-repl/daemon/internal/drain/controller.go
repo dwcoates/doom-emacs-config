@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/ctxend"
@@ -560,8 +561,8 @@ func (c *controller) wake() {
 // exit withdrawing the loop, not a read that could not be made: there is
 // nothing to remediate, so it records at debug as cut. A read that fails while
 // serving is an error.
-func readFailed(log dlog.Logger, op, failed, cut string, fields dlog.Context, err error) {
-	ctxend.Log(err, log.Debug, log.Error, op, cut, failed, dlog.WithCause(fields, err))
+func readFailed(log dlog.Logger, op string, failed logsite.Message, cut logsite.Message, fields dlog.Context, err error) {
+	ctxend.Log(err, log, dlog.LevelDebug, op, cut, failed, dlog.WithCause(fields, err))
 }
 
 // Republish re-arms the schedule a previous process left in force: the row is

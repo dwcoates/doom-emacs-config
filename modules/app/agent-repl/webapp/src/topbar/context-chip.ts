@@ -27,12 +27,14 @@ import type {
   TokenBreakdownView,
   TopbarContextChip,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
 import { pressurePercentColor, windowFillPercent } from "../pressure-color.js";
 import type { TopbarContext } from "./context.js";
 import { asAnchor } from "./strip.js";
+
+const log = createLogger("webapp.topbar.context-chip");
 
 /** How deep a nested detail row is indented, per level. */
 const DEPTH_INDENT_REM = 0.75;

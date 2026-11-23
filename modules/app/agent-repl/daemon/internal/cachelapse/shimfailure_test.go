@@ -9,10 +9,11 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/sourcescan"
+	"agentrepl/logging/logsite"
 )
 
 func TestShimCallFailedTriagesTheFailure(t *testing.T) {
-	words := shimFailure{doing: "doing the call", died: "the shim died", stoodDown: "the shim was being stood down", failed: "the call failed"}
+	words := shimFailure{doing: "doing the call", died: logsite.Msg("the shim died"), stoodDown: logsite.Msg("the shim was being stood down"), failed: logsite.Msg("the call failed")}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	tests := []struct {
@@ -57,7 +58,7 @@ func TestShimCallFailedKeepsTheCallersFields(t *testing.T) {
 
 	// Act
 	shimCallFailed(context.Background(), surfaces.Global(), "op.test",
-		shimFailure{doing: "d", died: "died", failed: "failed"}, dlog.Context{"cadence": "hold"}, errors.New("boom"))
+		shimFailure{doing: "d", died: logsite.Msg("died"), failed: logsite.Msg("failed")}, dlog.Context{"cadence": "hold"}, errors.New("boom"))
 
 	// Assert
 	rec, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "error", Operation: "op.test"})

@@ -1,6 +1,7 @@
 package dlog
 
 import (
+	"agentrepl/logging/logsite"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -103,6 +104,9 @@ type surfaces struct {
 	// counter is the bound record counter, read on every Warn and Error
 	// record without taking mu, as tee is.
 	counter atomic.Pointer[counterBox]
+	// beforePrune is what every removal of log files runs first
+	// (BindBeforePrune); nil when unbound.
+	beforePrune atomic.Pointer[func(reason string)]
 
 	scanEvery time.Duration
 	// retainFirst and retainEvery schedule the retention pass (retention.go).
@@ -155,7 +159,7 @@ func OpenSurfaces(runLog string) (Surfaces, *logging.Window, error) {
 		return nil, nil, err
 	}
 	if message, ok := sel.Note(); ok {
-		s.Global().Info(levelWindowOperation, message, Context(sel.Context()))
+		s.Global().Log(LevelInfo, levelWindowOperation, message, Context(sel.Context()))
 	}
 	if err := s.adoptStdio(os.Stderr, []int{1, 2}, unix.Dup2); err != nil {
 		return nil, nil, errors.Join(err, s.Close())
@@ -388,6 +392,23 @@ func (s *surfaces) BindRecordTee(tee RecordTee) {
 // counterBox holds the bound record counter so it can be swapped atomically.
 type counterBox struct{ counter RecordCounter }
 
+// BindBeforePrune implements Surfaces.
+func (s *surfaces) BindBeforePrune(fn func(reason string)) {
+	if fn == nil {
+		s.beforePrune.Store(nil)
+		return
+	}
+	s.beforePrune.Store(&fn)
+}
+
+// runBeforePrune runs the bound before-prune function, if any. It is called
+// with no lock of the surfaces held: the function logs.
+func (s *surfaces) runBeforePrune(reason string) {
+	if fn := s.beforePrune.Load(); fn != nil {
+		(*fn)(reason)
+	}
+}
+
 // BindRecordCounter implements Surfaces.
 func (s *surfaces) BindRecordCounter(counter RecordCounter) {
 	s.counter.Store(&counterBox{counter: counter})
@@ -605,6 +626,7 @@ func (s *surfaces) writeClient(dest destination, p preparedClient, fields Contex
 		verbosity = VerbosityVerbose
 	}
 	out := newRecordWithVerbosity(p.at, p.runtime, p.rec.Level, verbosity, p.rec.Operation, p.rec.Message, ctx, 0)
+	out.Site, out.Template = p.rec.Site, p.rec.Template
 	line := out.marshal()
 	if err := dest.write(p.rec.Level, line); err != nil {
 		return err
@@ -1094,9 +1116,9 @@ func (s *surfaces) enqueueShimRoll(req ShimRollRequest) {
 // permitted exception, because the canonical sink cannot record its own
 // failure.
 func (s *surfaces) reportSinkFailure(ws *workspaceSinks, name string, cause error) {
-	rec := newRecord(s.now(), RuntimeDaemon, LevelError,
+	rec := newSiteRecord(s.now(), RuntimeDaemon, LevelError,
 		"daemon.dlog.sink_poisoned",
-		"a workspace log sink failed cap maintenance and stopped accepting records",
+		logsite.Msg("a workspace log sink failed cap maintenance and stopped accepting records"),
 		Context{
 			KeyWorkspaceDir:     ws.dir,
 			KeyWorkspaceID:      ws.id,

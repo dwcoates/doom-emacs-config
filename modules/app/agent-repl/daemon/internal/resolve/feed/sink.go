@@ -88,46 +88,46 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	)
 	switch item := act.GetItem().(type) {
 	case *conversationv1.AgentActivity_Response:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Response"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Response", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Response"})
 		row, err = r.drawResponse(s, at, agent, act, item.Response)
 	case *conversationv1.AgentActivity_Thinking:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Thinking"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Thinking", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Thinking"})
 		row, err = r.drawThinking(s, at, agent, act, item.Thinking)
 	case *conversationv1.AgentActivity_Read:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Read"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Read", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Read"})
 		row, err = r.drawRead(s, at, act, item.Read)
 	case *conversationv1.AgentActivity_Write:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Write"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Write", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Write"})
 		row, err = r.drawWrite(s, at, act, item.Write)
 	case *conversationv1.AgentActivity_Edit:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Edit"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Edit", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Edit"})
 		row, err = r.drawEdit(s, at, act, item.Edit)
 	case *conversationv1.AgentActivity_Grep:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Grep"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Grep", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Grep"})
 		row, err = r.drawGrep(s, at, act, item.Grep)
 	case *conversationv1.AgentActivity_Glob:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Glob"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Glob", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Glob"})
 		row, err = r.drawGlob(s, at, act, item.Glob)
 	case *conversationv1.AgentActivity_Bash:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Bash"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Bash", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Bash"})
 		row, err = r.drawBash(s, at, act, item.Bash)
 	case *conversationv1.AgentActivity_WebFetch:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_WebFetch"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_WebFetch", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_WebFetch"})
 		row, err = r.drawWebFetch(s, at, act, item.WebFetch)
 	case *conversationv1.AgentActivity_McpToolCall:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_McpToolCall"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_McpToolCall", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_McpToolCall"})
 		row, err = r.drawMcpToolCall(s, at, act, item.McpToolCall)
 	case *conversationv1.AgentActivity_WebSearch:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_WebSearch"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_WebSearch", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_WebSearch"})
 		row, err = r.drawWebSearch(s, at, act, item.WebSearch)
 	case *conversationv1.AgentActivity_ReadNotifications:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ReadNotifications"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_ReadNotifications", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ReadNotifications"})
 		row, err = r.drawReadNotifications(s, at, act, item.ReadNotifications)
 	case *conversationv1.AgentActivity_SkillUse:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SkillUse"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_SkillUse", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SkillUse"})
 		row, err = r.drawSkill(s, at, act, item.SkillUse)
 	case *conversationv1.AgentActivity_Subagent:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Subagent"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Subagent", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Subagent"})
 		row, err = r.drawSubagent(s, at, act, item.Subagent, false)
 		// The bubble is upserted where it LIVES, which a later frame carried
 		// on another book does not move (see drawSubagent).
@@ -135,33 +135,33 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 			at = state.feed
 		}
 	case *conversationv1.AgentActivity_Hook:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Hook"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Hook", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Hook"})
 		row, err = r.drawHook(s, at, act, item.Hook)
 	case *conversationv1.AgentActivity_Artifact:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Artifact"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Artifact", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Artifact"})
 		row, err = r.drawArtifact(s, at, act, item.Artifact)
 	case *conversationv1.AgentActivity_PlanMode:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_PlanMode"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_PlanMode", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_PlanMode"})
 		row, err = r.drawPlan(s, at, agent, act, item.PlanMode)
 	case *conversationv1.AgentActivity_ReportFindings:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ReportFindings"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_ReportFindings", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ReportFindings"})
 		row, err = r.drawFindings(s, at, act, item.ReportFindings)
 	case *conversationv1.AgentActivity_ChessBoard:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ChessBoard"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_ChessBoard", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ChessBoard"})
 		row, err = r.drawChessBoard(s, at, act, item.ChessBoard)
 	case *conversationv1.AgentActivity_Worktree:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Worktree"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Worktree", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Worktree"})
 		row, err = r.drawWorktree(s, at, act, item.Worktree)
 	case *conversationv1.AgentActivity_Monitor:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Monitor"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_Monitor", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Monitor"})
 		row, err = r.drawMonitor(s, at, act, item.Monitor)
 	case *conversationv1.AgentActivity_SendMessage:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SendMessage"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_SendMessage", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SendMessage"})
 		// A send IS an agent-addressed prompt, drawn on the SENDER's feed with
 		// the same component the recipient's delivered prompt is drawn with.
 		row, err = r.drawSendMessage(s, at, act, item.SendMessage)
 	case *conversationv1.AgentActivity_SubagentHandback:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SubagentHandback"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentActivity_SubagentHandback", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SubagentHandback"})
 		// A hand-back IS the subagent's returned result, drawn once on the
 		// subagent's OWN feed (inside its card) and never as a tool card.
 		row, err = r.drawSubagentResult(s, at, act, item.SubagentHandback)
@@ -203,7 +203,7 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		return
 	}
 	if row == nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "row == nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: row == nil", dlog.Context{"function": "feed", "condition": "row == nil"})
 		return
 	}
 	r.stampTurn(s, row, turn)
@@ -239,11 +239,11 @@ func (r *resolver) recordCarrier(s *wsState, unit string, agent *conversationv1.
 // a replay from erasing the stamp the live frame earned.
 func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversationv1.TurnId) {
 	if row.GetTurn() != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "row.GetTurn() != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: row.GetTurn() != nil", dlog.Context{"function": "feed", "condition": "row.GetTurn() != nil"})
 		return
 	}
 	if turn != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "turn != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: turn != nil", dlog.Context{"function": "feed", "condition": "turn != nil"})
 		row.Turn = turn
 		return
 	}
@@ -254,12 +254,12 @@ func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversa
 		return
 	}
 	if prior := r.publishedTurn(s, row.GetId().GetValue()); prior != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "prior := r.publishedTurn(s, row.GetId().GetValue()); prior != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: prior := r.publishedTurn(s, row.GetId().GetValue()); prior != nil", dlog.Context{"function": "feed", "condition": "prior := r.publishedTurn(s, row.GetId().GetValue()); prior != nil"})
 		row.Turn = prior
 		return
 	}
 	if s.turnStamp != nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnStamp != nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: s.turnStamp != nil", dlog.Context{"function": "feed", "condition": "s.turnStamp != nil"})
 		row.Turn = &conversationv1.TurnId{Value: string(*s.turnStamp)}
 	}
 }
@@ -268,12 +268,12 @@ func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversa
 // the row has never been published or was published unstamped.
 func (r *resolver) publishedTurn(s *wsState, id string) *conversationv1.TurnId {
 	if id == "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id == \"\""})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: id == \"\"", dlog.Context{"function": "feed", "condition": "id == \"\""})
 		return nil
 	}
 	for _, f := range s.feeds {
 		if existing, ok := f.rows[id]; ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "existing, ok := f.rows[id]; ok"})
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: existing, ok := f.rows[id]; ok", dlog.Context{"function": "feed", "condition": "existing, ok := f.rows[id]; ok"})
 			return existing.GetTurn()
 		}
 	}
@@ -369,7 +369,7 @@ func apiErrorEvidence(failed *conversationv1.ApiRequestFailed) turnEvidenceLine 
 func (r *resolver) addEvidence(s *wsState, line turnEvidenceLine) {
 	turn := s.evidenceTurn()
 	if turn == nil {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnInFlight == nil"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition: s.turnInFlight == nil", dlog.Context{"function": "feed", "condition": "s.turnInFlight == nil"})
 		return
 	}
 	key := string(*turn)
@@ -484,7 +484,7 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 		log.Debug("daemon.feed.session_update_model", "the feed took the session's model change",
 			dlog.Context{"model": s.model})
 	case *conversationv1.SessionUpdate_QueryDied:
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "OnSessionUpdate", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
+		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.SessionUpdate_QueryDied", dlog.Context{"function": "OnSessionUpdate", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
 		// The query died out from under the turn. A consumer with no stream
 		// open still needs the turn's terminal, so the feed draws it here.
 		r.drawQueryDied(s, update.GetQueryDied())

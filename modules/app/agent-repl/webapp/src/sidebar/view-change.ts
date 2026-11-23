@@ -13,11 +13,13 @@ import {
   UpdateSidebarViewResponseSchema,
   type UpdateSidebarViewError,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import type { ViewValue } from "./view.js";
 import { fireVerb } from "./verbs.js";
+
+const log = createLogger("webapp.sidebar.view-change");
 
 /** One view change: the held piece, its asked value, and the request. */
 export interface ViewChange<T extends ViewValue> {

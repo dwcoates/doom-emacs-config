@@ -1289,7 +1289,7 @@ func TestAGivenUpFixOfADispatchedCheckEndsItsFinishSoTheUsersReleaseFreesTheQueu
 	}
 
 	// Act: the user releases the escalation.
-	if err := h.o.releaseEscalated(ctx, mediationKey(h), *owedCheck(t, h), "the user released the escalation's hold", dlog.Context{}); err != nil {
+	if err := h.o.releaseEscalated(ctx, mediationKey(h), *owedCheck(t, h), userEscalationRelease, dlog.Context{}); err != nil {
 		t.Fatalf("releaseEscalated: %v", err)
 	}
 

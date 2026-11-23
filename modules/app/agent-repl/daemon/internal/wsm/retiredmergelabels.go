@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -39,7 +40,7 @@ const retiredMergeLabelArrow = " → "
 
 // carryRetiredMergeHeadLabelRows is layout 175's row rewrite.
 func carryRetiredMergeHeadLabelRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
-	return rewriteDurableRows(ctx, tx, log, "carried the stored merge heads' retired labels onto their branch lines", CarryRetiredMergeHeadLabel)
+	return rewriteDurableRows(ctx, tx, log, logsite.Msg("carried the stored merge heads' retired labels onto their branch lines"), CarryRetiredMergeHeadLabel)
 }
 
 // CarryRetiredMergeHeadLabel re-encodes one stored frontend.v1.FeedRow whose

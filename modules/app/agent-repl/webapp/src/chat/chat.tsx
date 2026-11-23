@@ -21,7 +21,7 @@ import { SwitchChatSiblingResponseSchema } from "../../../proto/gen/ts/agentrepl
 import { SelectChatTextResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_chat_text_pb.js";
 import { ReportChatSightingsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_chat_sightings_pb.js";
 import type { ChatReveal, ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { chatEndTop, landChatAtEnd, revealChatExchange } from "../scroll.js";
 import { installChatOverscroll } from "./overscroll.js";
 import type { AppContext } from "../rpc/context.js";
@@ -30,6 +30,8 @@ import { requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { ChatStream, type ChatActions } from "./chat-view.js";
 import { markConversationDrawn } from "../feed/conversation-drawn.js";
+
+const log = createLogger("webapp.chat.chat");
 
 /** How long sightings gather before they are reported together. */
 export const SIGHTING_BATCH_MS = 1000;

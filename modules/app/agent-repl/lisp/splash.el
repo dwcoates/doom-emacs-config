@@ -35,10 +35,12 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'seq)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function +doom-dashboard--center "ext:doom-dashboard" (len s))
 (declare-function +doom-dashboard-reload "ext:doom-dashboard" (&optional force))
 (declare-function nerd-icons-octicon "ext:nerd-icons" (name &rest args))
@@ -132,7 +134,7 @@ Doom shows each with the key that runs its `:action'.")
     (let ((banner (memq 'doom-dashboard-widget-banner functions)))
       (unless banner
         (agent-repl--fatal agent-repl-splash--log-scope
-                           "elisp.splash.widgets: no banner widget functions=%S" functions))
+                           "elisp.splash.widgets: no banner widget functions={functions}" :functions (prin1-to-string functions)))
       (append (seq-take functions (1+ (- (length functions) (length banner))))
               (list #'agent-repl-splash-widget-settings)
               (cdr banner)))))
@@ -172,8 +174,8 @@ An `:eval', so the release appears once the roster brings it."
   (add-hook '+doom-dashboard-mode-hook #'agent-repl-splash-install-mode-name)
   (add-hook 'agent-repl-roster-update-functions #'agent-repl-splash--roster-updated)
   (let ((dashboard (agent-repl-splash--dashboard)))
-    (agent-repl--log agent-repl-splash--log-scope "elisp.splash.install: width=%d dashboard=%s"
-                     +doom-dashboard--width (and dashboard t))
+    (agent-repl--log agent-repl-splash--log-scope "elisp.splash.install: width={width} dashboard={dashboard}"
+                     :width +doom-dashboard--width :dashboard (and dashboard t))
     (when dashboard
       (with-current-buffer dashboard
         (agent-repl-splash-install-mode-name))

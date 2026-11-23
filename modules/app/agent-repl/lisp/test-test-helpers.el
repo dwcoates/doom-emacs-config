@@ -138,7 +138,7 @@ clean; BODY runs after the load with the same bindings still active."
   "Interactive load must not re-load the production module (config.el)."
   ;; Arrange: any module file logging during the load proves a reload.
   (let ((log-calls nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (lambda (&rest args) (push args log-calls))))
       ;; Act
       (agent-repl-test-helpers--with-interactive-reload))
@@ -716,14 +716,14 @@ signatures this looks for."
 (ert-deftest agent-repl-test-helpers-said-drops-an-echoed-record ()
   "A record the logger built is the log's echo, not something the user was told."
   ;; Arrange
-  (let ((record (agent-repl--build-log-text nil "elisp.verbs.send op=%s" '("restart"))))
+  (let ((record (agent-repl--build-log-text nil "elisp.verbs.send op=restart")))
     ;; Act / Assert
     (should-not (agent-repl-test--said (list record)))))
 
 (ert-deftest agent-repl-test-helpers-said-drops-an-echoed-warning ()
   "A warning's level follows the prefix, so its echo is dropped too."
   ;; Arrange
-  (let ((record (agent-repl--build-log-text nil "WARNING: elisp.verbs.%s" '("refused"))))
+  (let ((record (agent-repl--build-log-text nil "WARNING: elisp.verbs.refused")))
     ;; Act / Assert
     (should-not (agent-repl-test--said (list record)))))
 
@@ -738,7 +738,7 @@ signatures this looks for."
 (ert-deftest agent-repl-test-helpers-said-keeps-the-order ()
   "What the user was told keeps the order it was recorded in."
   ;; Arrange
-  (let ((record (agent-repl--build-log-text nil "elisp.verbs.send" nil)))
+  (let ((record (agent-repl--build-log-text nil "elisp.verbs.send")))
     ;; Act / Assert
     (should (equal (agent-repl-test--said (list "second" record "first"))
                    '("second" "first")))))
@@ -834,10 +834,10 @@ signatures this looks for."
   "A rung stubbed with the recorder keeps each record's text, newest first."
   ;; Arrange
   (let ((records nil))
-    (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into records)))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into records)))
       ;; Act
-      (agent-repl--info "ws-1" "first n=%d" 1)
-      (agent-repl--info nil "second s=%s" "x"))
+      (agent-repl--info "ws-1" "first n={n}" :n 1)
+      (agent-repl--info nil "second s={s}" :s "x"))
     ;; Assert
     (should (equal records '("second s=x" "first n=1")))))
 
@@ -845,9 +845,9 @@ signatures this looks for."
   "The fatal stand-in keeps the record's text, then signals it."
   ;; Arrange
   (let ((records nil))
-    (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into records)))
+    (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into records)))
       ;; Act
-      (let ((err (should-error (agent-repl--fatal "ws-1" "broken n=%d" 1))))
+      (let ((err (should-error (agent-repl--fatal "ws-1" "broken n={n}" :n 1))))
         ;; Assert
         (should (equal (cadr err) "broken n=1"))))
     (should (equal records '("broken n=1")))))
@@ -864,7 +864,7 @@ stubs every rung alike."
       (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
         (with-temp-buffer
           (insert-file-contents file)
-          (when (re-search-forward "(symbol-function 'agent-repl--fatal)[ \t\n]*(lambda (_" nil t)
+          (when (re-search-forward "(symbol-function 'agent-repl--emit-fatal)[ \t\n]*(lambda (_" nil t)
             (push (file-name-nondirectory file) hand-rolled)))))
     ;; Assert
     (should-not hand-rolled)))
@@ -960,11 +960,11 @@ stubs every rung alike."
   "A rung stubbed with the leveled recorder keeps each record as (LEVEL . TEXT), newest first."
   ;; Arrange
   (let ((records nil))
-    (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-leveled-into records 'info))
-              ((symbol-function 'agent-repl--error) (agent-repl-test--record-leveled-into records 'error)))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-leveled-into records 'info))
+              ((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-leveled-into records 'error)))
       ;; Act
-      (agent-repl--info "ws-1" "first n=%d" 1)
-      (agent-repl--error nil "second s=%s" "x"))
+      (agent-repl--info "ws-1" "first n={n}" :n 1)
+      (agent-repl--error nil "second s={s}" :s "x"))
     ;; Assert
     (should (equal records '((error . "second s=x") (info . "first n=1"))))))
 

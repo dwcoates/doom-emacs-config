@@ -18,8 +18,8 @@
 (defmacro agent-repl-test-wire-chat--quiet (&rest body)
   "Run BODY with the logging ladder stubbed out."
   (declare (indent 0))
-  `(cl-letf (((symbol-function 'agent-repl--error) (lambda (&rest _) nil))
-             ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+  `(cl-letf (((symbol-function 'agent-repl--emit-error) (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
      ,@body))
 
 (defun agent-repl-test-wire-chat--decode (decoder json)

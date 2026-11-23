@@ -3,6 +3,7 @@ package feed
 import (
 	"google.golang.org/protobuf/proto"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -259,7 +260,7 @@ func (r *resolver) restampResponseRow(s *wsState, fold *proseState, unit string)
 	}
 	r.restateRow(s, placement{feed: fold.feed}, row, true, unclonable{
 		operation: "daemon.feed.row_not_clonable",
-		message:   "a response bubble could not be snapshotted to re-stamp its fresh input",
+		message:   logsite.Msg("a response bubble could not be snapshotted to re-stamp its fresh input"),
 		context:   dlog.Context{"feed": f.key, "row": fold.row.GetValue(), "unit": unit},
 	}, func(restamped *frontendv1.FeedRow) {
 		bubble := restamped.GetActivity().GetResponse()
@@ -311,7 +312,7 @@ func (r *resolver) restampSubagentCard(s *wsState, agent *conversationv1.AgentId
 		}
 		r.restateRow(s, state.feed, row, true, unclonable{
 			operation: "daemon.feed.row_not_clonable",
-			message:   "a subagent card could not be snapshotted to re-stamp what its responses state",
+			message:   logsite.Msg("a subagent card could not be snapshotted to re-stamp what its responses state"),
 			context:   dlog.Context{"feed": f.key, "row": state.row.GetValue(), "unit": unit},
 		}, func(restamped *frontendv1.FeedRow) {
 			switch arm := restamped.GetRow().(type) {

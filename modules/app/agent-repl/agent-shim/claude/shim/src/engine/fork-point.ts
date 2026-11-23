@@ -20,7 +20,7 @@
  */
 import { bindLog } from "../log.js";
 
-const LOGGER = bindLog({ component: "shim-engine-fork-point", operation: "shim.engine.fork_point" });
+const LOGGER = bindLog("shim.engine.fork-point", { component: "shim-engine-fork-point", operation: "shim.engine.fork_point" });
 
 /** A turn open at the moment a fork point is asked for. */
 export interface OpenForkTurn {

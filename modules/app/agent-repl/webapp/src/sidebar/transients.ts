@@ -34,12 +34,14 @@
  * there would be the same stuck `:hover`, but closes nothing: a "⋯" menu stays
  * open while the pointer travels.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createPointerRest } from "../pointer-rest.js";
 import { FOCUS_LEFT_BLUR, type FocusLeft } from "../focus-left.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./context.js";
+
+const log = createLogger("webapp.sidebar.transients");
 
 /** The class the rail wears while it draws no hover highlight. */
 export const HOVER_SUSPENDED_CLASS = "sb-hover-suspended";

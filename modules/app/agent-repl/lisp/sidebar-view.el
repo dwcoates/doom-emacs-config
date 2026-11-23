@@ -36,13 +36,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 
 (declare-function agent-repl-persistent-wifi-quiet-p "persistent-wifi" ())
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--frontend-webview-live-widget "frontend" (buf))
 (declare-function agent-repl--frontend-webview-execute-script-value "frontend" (xw script callback))
@@ -133,7 +133,7 @@ On `kill-buffer-query-functions' in the sidebar buffer only."
   (or agent-repl--sidebar-view-killing
       (progn
         (agent-repl--warn agent-repl--sidebar-view-central
-                          "elisp.sidebar-view.kill-refused command=%S" this-command)
+                          "elisp.sidebar-view.kill-refused command={command}" :command (prin1-to-string this-command))
         nil)))
 
 (defun agent-repl--sidebar-view-kill-buffer (buf)
@@ -157,7 +157,7 @@ kept for the session.  No window is touched."
               agent-repl--sidebar-view-daemon-origin nil)
         (agent-repl--sidebar-view-draw-bottom-border buf)
         (agent-repl--sidebar-view-watch-load xw)
-        (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.created url=%s" url)
+        (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.created url={url}" :url url)
         xw)))
 
 (defun agent-repl--sidebar-view-draw-bottom-border (buf)
@@ -170,7 +170,7 @@ composer's mode line falls, both windows ending at the echo area.  Set
 on the buffer, never the window, so a window configuration restored
 without its parameters keeps it."
   (agent-repl--log agent-repl--sidebar-view-central
-                   "elisp.sidebar-view.bottom-border buffer=%s" (buffer-name buf))
+                   "elisp.sidebar-view.bottom-border buffer={buffer}" :buffer (buffer-name buf))
   (with-current-buffer buf
     (setq-local mode-line-format agent-repl--input-border-line-format)))
 
@@ -205,7 +205,7 @@ origin is taken back instead."
   (when (eq event-type 'load-changed)
     (let ((status (nth 3 last-input-event))
           (uri (when-let ((xw (agent-repl-sidebar-view-xwidget))) (xwidget-webkit-uri xw))))
-      (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.load-changed status=%s" status)
+      (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.load-changed status={status}" :status status)
       (agent-repl--webview-on-commit status agent-repl--sidebar-view-url uri
                                      #'agent-repl--sidebar-view-take-back
                                      #'agent-repl--sidebar-view-replay)
@@ -223,8 +223,8 @@ Called BY SYMBOL from the read channel
 An outward link never opens in a web view (owner ruling, 2026-10-26); one
 that reached the sidebar is a defect in the page, recorded at ERROR."
   (agent-repl--error agent-repl--sidebar-view-central
-                     "elisp.sidebar-view.navigated-away uri=%s: an outward link escaped the sidebar's routing; the sidebar is taken back and the link was not opened"
-                     uri)
+                     "elisp.sidebar-view.navigated-away uri={uri}: an outward link escaped the sidebar's routing; the sidebar is taken back and the link was not opened"
+                     :uri uri)
   (agent-repl--frontend-webview-navigate-widget
    (agent-repl-sidebar-view-xwidget) (agent-repl-webhost-document-url agent-repl--sidebar-view-url)))
 
@@ -240,8 +240,8 @@ that reached the sidebar is a defect in the page, recorded at ERROR."
                                    (cdr agent-repl--webhost-log-level)))
   (when (agent-repl-persistent-wifi-quiet-p)
     (agent-repl--sidebar-view-call "setQuiet" t))
-  (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.replayed shown=%s daemon=%s"
-                    agent-repl--sidebar-view-shown agent-repl--sidebar-view-daemon-origin))
+  (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.replayed shown={shown} daemon={daemon}"
+                    :shown agent-repl--sidebar-view-shown :daemon agent-repl--sidebar-view-daemon-origin))
 
 (defun agent-repl-sidebar-view-navigate (conn)
   "Load the sidebar again at its URL on CONN's daemon; its load replays the rest.
@@ -253,8 +253,8 @@ two documents always run the webapp build the daemon serves."
               agent-repl--sidebar-view-daemon-origin nil)
         (agent-repl--frontend-webview-navigate-widget
          xw (agent-repl-webhost-document-url agent-repl--sidebar-view-url))
-        (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.reloaded url=%s"
-                          agent-repl--sidebar-view-url))
+        (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.reloaded url={url}"
+                          :url agent-repl--sidebar-view-url))
     (agent-repl--log agent-repl--sidebar-view-central "elisp.sidebar-view.reload-skipped reason=no-sidebar")))
 
 ;;;; ---- Calls -----------------------------------------------------------------
@@ -274,7 +274,7 @@ served is recorded by the caller and replayed when the sidebar loads."
          xw (apply #'agent-repl--sidebar-view-script method args) 'agent-repl--sidebar-view-answered)
         t)
     (agent-repl--log agent-repl--sidebar-view-central
-                     "elisp.sidebar-view.call-skipped method=%s reason=no-sidebar" method)
+                     "elisp.sidebar-view.call-skipped method={method} reason=no-sidebar" :method method)
     nil))
 
 (defun agent-repl--sidebar-view-answered (raw)
@@ -292,11 +292,11 @@ elisp, an ERROR no reload heals."
   (let ((url agent-repl--sidebar-view-url))
     (if (equal url agent-repl--sidebar-view-reloaded-for-call)
         (agent-repl--error agent-repl--sidebar-view-central
-                           "elisp.sidebar-view.predates-call op=%s action=none reason=served-webapp-predates-elisp url=%s"
-                           op url)
+                           "elisp.sidebar-view.predates-call op={op} action=none reason=served-webapp-predates-elisp url={url}"
+                           :op op :url url)
       (setq agent-repl--sidebar-view-reloaded-for-call url)
       (agent-repl--info agent-repl--sidebar-view-central
-                        "elisp.sidebar-view.predates-call op=%s action=reload url=%s" op url)
+                        "elisp.sidebar-view.predates-call op={op} action=reload url={url}" :op op :url url)
       (when-let ((xw (agent-repl-sidebar-view-xwidget)))
         (agent-repl--frontend-webview-navigate-widget xw (agent-repl-webhost-document-url url))))))
 
@@ -310,7 +310,7 @@ elisp, an ERROR no reload heals."
   "Point the sidebar's calls at the daemon at ORIGIN; kept for its reloads."
   (unless (equal origin agent-repl--sidebar-view-daemon-origin)
     (setq agent-repl--sidebar-view-daemon-origin origin)
-    (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.follows-daemon to=%s" origin)
+    (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.follows-daemon to={to}" :to origin)
     (agent-repl--sidebar-view-call "setDaemon" origin)))
 
 (defun agent-repl-sidebar-view-set-log-level (level until-ms)
@@ -365,7 +365,7 @@ when it already stands.  Returns the window."
         (unless (window-live-p win)
           (error "agent-repl: the sidebar's window could not be made (buffer=%S)" buf))
         (window-preserve-size win t t)
-        (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.shown window=%S width=%d" win width)
+        (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.shown window={window} width={width}" :window (prin1-to-string win) :width width)
         (agent-repl-sidebar-view-tell-offset)
         win)))
 
@@ -394,7 +394,7 @@ from `window-size-change-functions' too, so a layout change is told at once."
 Non-nil when a window was removed."
   (when-let ((win (agent-repl-sidebar-view-window)))
     (delete-window win)
-    (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.hidden window=%S" win)
+    (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.hidden window={window}" :window (prin1-to-string win))
     t))
 
 ;; A reload finds the sidebar already made, by code that drew no border.

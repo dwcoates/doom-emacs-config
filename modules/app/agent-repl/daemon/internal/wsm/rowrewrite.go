@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -83,7 +84,7 @@ func editDurableRows(ctx context.Context, tx *sql.Tx, edit func(raw []byte) (row
 
 // rewriteDurableRows hands every stored row to REWRITE and writes back each
 // row it changed, recording how many under DONE.
-func rewriteDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done string, rewrite func(raw []byte) ([]byte, bool, error)) error {
+func rewriteDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done logsite.Message, rewrite func(raw []byte) ([]byte, bool, error)) error {
 	rewritten, _, err := editDurableRows(ctx, tx, func(raw []byte) (rowEdit, error) {
 		out, changed, err := rewrite(raw)
 		return rowEdit{rewrite: changed, row: out}, err
@@ -91,7 +92,7 @@ func rewriteDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done s
 	if err != nil {
 		return err
 	}
-	log.Info("daemon.wsm.open", done, dlog.Context{"rows": rewritten})
+	log.Log(dlog.LevelInfo, "daemon.wsm.open", done, dlog.Context{"rows": rewritten})
 	return nil
 }
 
@@ -121,7 +122,7 @@ func editFeedRow(raw []byte, edit func(row *frontendv1.FeedRow) (bool, error)) (
 
 // dropDurableRows deletes every stored row DROP answers true for, recording
 // how many under DONE.
-func dropDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done string, drop func(raw []byte) (bool, error)) error {
+func dropDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done logsite.Message, drop func(raw []byte) (bool, error)) error {
 	_, dropped, err := editDurableRows(ctx, tx, func(raw []byte) (rowEdit, error) {
 		gone, err := drop(raw)
 		return rowEdit{drop: gone}, err
@@ -129,7 +130,7 @@ func dropDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done stri
 	if err != nil {
 		return err
 	}
-	log.Info("daemon.wsm.open", done, dlog.Context{"rows": dropped})
+	log.Log(dlog.LevelInfo, "daemon.wsm.open", done, dlog.Context{"rows": dropped})
 	return nil
 }
 

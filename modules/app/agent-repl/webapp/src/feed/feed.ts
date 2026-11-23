@@ -15,7 +15,7 @@ import { markConversationDrawn } from "./conversation-drawn.js";
 import { installUnshownTrim } from "./unshown-trim.js";
 import { mountJumpToTail } from "./jump-to-tail.js";
 import { pagePresence, type Presence } from "../presence.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createComposerEntryHighlight } from "./composer-entry.js";
 import { create } from "@bufbuild/protobuf";
 import { reportClientFailure } from "../rpc/link.js";
@@ -122,6 +122,8 @@ import { tick, stopTicking } from "./ticking.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import { queryAll } from "../dom.js";
 import { FEED_ROW_SELECTOR } from "./row-id.js";
+
+const log = createLogger("webapp.feed.feed");
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1000;
@@ -410,16 +412,16 @@ export function mountFeed(
    */
   function promptHeld(turn: string): void {
     if (tail === null) {
-      log.debug(`a newly held prompt ${turn} found no scroll box to park`, {
+      log.debug("a newly held prompt {turn} found no scroll box to park", {
         operation: "feed.held-prompt-unparked",
-        context: { turn },
-      });
+        context: {},
+      }, { turn });
       return;
     }
-    log.debug(`a newly held prompt ${turn} parked the feed at its tail`, {
+    log.debug("a newly held prompt {turn} parked the feed at its tail", {
       operation: "feed.held-prompt-parked",
-      context: { turn },
-    });
+      context: {},
+    }, { turn });
     tail.promptHeld();
   }
 
@@ -618,13 +620,11 @@ export function mountFeed(
           // failure: the daemon answered that it no longer serves the
           // workspace, which a deploy's handover does to every page it moves
           // (owner ruling, 2026-10-22). Every other refusal is an error.
-          const record = arm === "transferringAway" ? log.info : log.error;
-          record(
-            arm === "transferringAway"
-              ? "the daemon handed the workspace to its successor, so it refused to open the root feed here"
-              : "the daemon refused to open the workspace's root feed",
-            { operation: "feed.root-open-refused", context: { arm } },
-          );
+          if (arm === "transferringAway") {
+            log.info("the daemon handed the workspace to its successor, so it refused to open the root feed here", { operation: "feed.root-open-refused", context: { arm } });
+          } else {
+            log.error("the daemon refused to open the workspace's root feed", { operation: "feed.root-open-refused", context: { arm } });
+          }
         }
         // THE DAEMON ANSWERED AND REFUSED, so the loop's own card would name a
         // daemon that is plainly reachable (the audit's N3 row 14). The footer

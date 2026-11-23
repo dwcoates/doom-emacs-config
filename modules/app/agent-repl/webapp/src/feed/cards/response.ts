@@ -77,7 +77,7 @@ import type {
   FeedResponseSuccess,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawSignInActions } from "../../login/request.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
@@ -113,6 +113,8 @@ import { markComposerEntry } from "../composer-entry.js";
 import { markRevealedNode } from "../revealed-node.js";
 import { revisedWindow, type RevealWindow } from "../../bubble/text-reveal.js";
 import { clearSelectionIn } from "../../selection.js";
+
+const log = createLogger("webapp.feed.cards.response");
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";

@@ -28,7 +28,7 @@ import { createConnectTransport } from "@connectrpc/connect-node";
 import { bindLog } from "../log.js";
 import { storev1 } from "../proto.js";
 
-const LOGGER = bindLog({ component: "shim-store-client", operation: "shim.store.client" });
+const LOGGER = bindLog("shim.store.client", { component: "shim-store-client", operation: "shim.store.client" });
 
 /**
  * The authority every store request nominally addresses.
@@ -113,17 +113,17 @@ type GeneratedStoreClient = Client<typeof storev1.ShimStore>;
 
 /** Record both sides of one unary store round-trip without owning its failures. */
 async function unaryRoundTrip<T>(rpc: string, act: () => Promise<T>): Promise<T> {
-  LOGGER.debug({ rpc, boundary: "entered" }, `calling store.v1.${rpc}`);
+  LOGGER.debug({ boundary: "entered" }, "calling store.v1.{rpc}", { rpc });
   const response = await act();
-  LOGGER.debug({ rpc, boundary: "completed" }, `completed store.v1.${rpc}`);
+  LOGGER.debug({ boundary: "completed" }, "completed store.v1.{rpc}", { rpc });
   return response;
 }
 
 /** Record both sides of one streaming store round-trip without owning its failures. */
 async function* streamingRoundTrip<T>(rpc: string, frames: () => AsyncIterable<T>): AsyncIterable<T> {
-  LOGGER.debug({ rpc, boundary: "entered" }, `calling store.v1.${rpc}`);
+  LOGGER.debug({ boundary: "entered" }, "calling store.v1.{rpc} stream", { rpc });
   yield* frames();
-  LOGGER.debug({ rpc, boundary: "completed" }, `completed store.v1.${rpc} stream`);
+  LOGGER.debug({ boundary: "completed" }, "completed store.v1.{rpc} stream", { rpc });
 }
 
 /** Build the generated Connect client for a store listening on `socketPath`. */

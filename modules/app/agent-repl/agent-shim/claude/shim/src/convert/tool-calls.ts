@@ -37,7 +37,7 @@ import { activityEntry, agentActivity, toolProgress, type FrameOrigin } from "./
 import { mcpServerNames, type FoldContext } from "./fold-context.js";
 import { toolCallActivityId } from "./ids.js";
 
-const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools" });
+const LOGGER = bindLog("shim.convert.tool-calls", { component: "shim-convert-tools", operation: "shim.convert.tools" });
 
 // ---------------------------------------------------------------------------
 // What a converter is handed

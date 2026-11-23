@@ -27,11 +27,13 @@ import {
   type ArrangeSidebarResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
 import { createDrawingHold } from "../hold.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { ArrangeHold, SidebarContext } from "./context.js";
 import type { RosterStreams } from "./roster-streams.js";
 import { fireVerb, type VerbCall, type VerbResponse } from "./verbs.js";
+
+const log = createLogger("webapp.sidebar.arrange");
 
 /** One ArrangeSidebar change: the request's change arm. */
 export type ArrangeChange = MessageInitShape<typeof ArrangeSidebarRequestSchema>["change"];

@@ -272,8 +272,8 @@ func (r *run) suspend(ctx context.Context, stepErr error) {
 	if stepErr != nil {
 		fields["step_error"] = stepErr.Error()
 	}
-	r.o.deps.Log.Global().Info("daemon.merge.suspend",
-		"a merge stopped at a stopping point for "+why.by+"; "+why.resumes, fields)
+	r.o.deps.Log.Global().With(fields).Info("daemon.merge.suspend",
+		"a merge stopped at a stopping point for {by}; {resumes}", dlog.Context{"by": why.by, "resumes": why.resumes})
 	r.releaseInProcess(ctx)
 }
 

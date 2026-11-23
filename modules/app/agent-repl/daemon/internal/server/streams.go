@@ -6,6 +6,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -421,6 +422,7 @@ func (s *server) serveHost(
 	ws ids.WorkspaceID,
 	out streamSink[agentreplv1.WatchHostWorkspaceResponse],
 ) error {
+	subscriptionClosed := logsite.Msg("the standing stream's subscription closed")
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
@@ -454,7 +456,7 @@ func (s *server) serveHost(
 			return nil
 		case view, ok := <-states:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			if view == nil {
@@ -467,7 +469,7 @@ func (s *server) serveHost(
 			}, ackState
 		case notice, ok := <-notices:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			if notice == nil {
@@ -478,7 +480,7 @@ func (s *server) serveHost(
 			push, ack = notice, ackNotice
 		case event, ok := <-events:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			if event == nil {
@@ -489,7 +491,7 @@ func (s *server) serveHost(
 			push, ack = event, ackEvent
 		case sel, ok := <-selections:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
@@ -497,7 +499,7 @@ func (s *server) serveHost(
 			}, ackSelection
 		case record, ok := <-mentions:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
@@ -505,7 +507,7 @@ func (s *server) serveHost(
 			}, ackMentions
 		case roster, ok := <-rosters:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			set, changed := targets.next(roster)
@@ -593,6 +595,8 @@ func (s *server) serveWeb(
 	ws ids.WorkspaceID,
 	out streamSink[agentreplv1.WatchWebWorkspaceResponse],
 ) error {
+	subscriptionClosed := logsite.Msg("the standing stream's subscription closed")
+	clientGone := logsite.Msg("the standing stream's client went away")
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
@@ -608,7 +612,7 @@ func (s *server) serveWeb(
 	if pending != nil {
 		log.Info(rpc, "sending the row reveal asked before the page attached", dlog.Context{"row": pending.GetValue()})
 		if err := out.Send(revealPush(pending)); err != nil {
-			log.Debug(rpc, "the standing stream's client went away", dlog.Context{"cause": err.Error()})
+			log.Log(dlog.LevelDebug, rpc, clientGone, dlog.Context{"cause": err.Error()})
 			return nil
 		}
 	}
@@ -622,7 +626,7 @@ func (s *server) serveWeb(
 			return nil
 		case identity, ok := <-states:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			if identity == nil {
@@ -637,7 +641,7 @@ func (s *server) serveWeb(
 			}, ackState
 		case event, ok := <-events:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			if event == nil {
@@ -648,19 +652,19 @@ func (s *server) serveWeb(
 			push, ack = event, ackEvent
 		case echo, ok := <-echoes:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			push, ack = echo, ackEcho
 		case row, ok := <-reveals:
 			if !ok {
-				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				log.Log(dlog.LevelDebug, rpc, subscriptionClosed, nil)
 				return nil
 			}
 			push, ack = revealPush(row), ackReveal
 		}
 		if err := out.Send(push); err != nil {
-			log.Debug(rpc, "the standing stream's client went away",
+			log.Log(dlog.LevelDebug, rpc, clientGone,
 				dlog.Context{"cause": err.Error()})
 			return nil
 		}
@@ -701,6 +705,7 @@ func (s *server) watchDaemon(
 	msg *agentreplv1.WatchDaemonRequest,
 	out streamSink[agentreplv1.WatchDaemonResponse],
 ) error {
+	subscriptionClosed := logsite.Msg("the standing stream's subscription closed")
 	if err := validateWatchDaemonRequest(msg); err != nil {
 		return err
 	}
@@ -807,7 +812,7 @@ func (s *server) watchDaemon(
 			return nil
 		case state, ok := <-states:
 			if !ok {
-				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+				s.log.Log(dlog.LevelDebug, "WatchDaemon", subscriptionClosed, nil)
 				return nil
 			}
 			if state == nil {
@@ -818,7 +823,7 @@ func (s *server) watchDaemon(
 			push, fromState, ack = state, true, ackState
 		case event, ok := <-events:
 			if !ok {
-				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
+				s.log.Log(dlog.LevelDebug, "WatchDaemon", subscriptionClosed, nil)
 				return nil
 			}
 			if event == nil {
@@ -934,7 +939,7 @@ func standingPush[T interface {
 		log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
 		return nil, true
 	case v == empty:
-		log.Error("WatchDaemon", "a publisher raised an empty "+what+"; it was not sent", nil)
+		log.Error("WatchDaemon", "a publisher raised an empty {what}; it was not sent", dlog.Context{"what": what})
 		return nil, false
 	}
 	return wrap(v), false
@@ -1038,7 +1043,7 @@ func (s *server) ReportPageUnloading(
 	if done {
 		return answer(resp, cerr)
 	}
-	s.awaitPage(subject.Record.ID, subject.Log, "Emacs is unloading the workspace's page; its web hop is awaited until a page connects again")
+	s.awaitPage(subject.Record.ID, subject.Log, logsite.Msg("Emacs is unloading the workspace's page; its web hop is awaited until a page connects again"))
 	resp.Result = &agentreplv1.ReportPageUnloadingResponse_Success{
 		Success: &agentreplv1.ReportPageUnloadingSuccess{},
 	}
@@ -1048,7 +1053,7 @@ func (s *server) ReportPageUnloading(
 // awaitPage records that WS holds no page on purpose, so its web hop is
 // AWAITED rather than broken until a page connects again, and publishes the
 // hops: Emacs's announcement of an unload. MESSAGE is the record's.
-func (s *server) awaitPage(ws ids.WorkspaceID, log dlog.Logger, message string) {
+func (s *server) awaitPage(ws ids.WorkspaceID, log dlog.Logger, message logsite.Message) {
 	s.mu.Lock()
 	delete(s.webSeen, ws)
 	hops := s.participantHopsLocked(ws)
@@ -1056,7 +1061,7 @@ func (s *server) awaitPage(ws ids.WorkspaceID, log dlog.Logger, message string) 
 	s.mu.Unlock()
 	fields := hops.fields()
 	fields["workspace"], fields["moving"] = string(ws), moving
-	log.Info("daemon.server.participants", message, fields)
+	log.Log(dlog.LevelInfo, "daemon.server.participants", message, fields)
 	if !moving {
 		s.publishParticipants(ws, hops)
 	}

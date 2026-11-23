@@ -25,7 +25,10 @@
 
 ;;; Code:
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (defvar agent-repl-input-background)
 
 (defconst agent-repl--frame-border-log-scope
@@ -48,10 +51,10 @@
   "Set FRAME's internal border to the color its two states decide."
   (let ((color (agent-repl--frame-border-color frame)))
     (agent-repl--log agent-repl--frame-border-log-scope
-                     "elisp.frame-border.sync frame=%S color=%S panels=%S pinned=%S"
-                     frame color
-                     (frame-parameter frame agent-repl--frame-border-panels)
-                     (frame-parameter frame agent-repl--frame-border-pinned))
+                     "elisp.frame-border.sync frame={frame} color={color} panels={panels} pinned={pinned}"
+                     :frame (prin1-to-string frame) :color (prin1-to-string color)
+                     :panels (prin1-to-string (frame-parameter frame agent-repl--frame-border-panels))
+                     :pinned (prin1-to-string (frame-parameter frame agent-repl--frame-border-pinned)))
     (set-face-attribute 'internal-border frame :background color)))
 
 (defun agent-repl--frame-border-record (frame parameter value)

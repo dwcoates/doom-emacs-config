@@ -48,6 +48,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 (require 'seq)
@@ -61,16 +65,12 @@
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
 (declare-function agent-repl--repo-key-for-dir "agent-repl-workspace" (dir))
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--global-state-file "agent-repl-core" (relative))
 (declare-function agent-repl--read-sexp-file-if-exists "history" (file))
 (declare-function agent-repl--write-sexp-file "history" (file data))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-plural-noun "agent-repl-core" (n one &optional many))
 (declare-function agent-repl-count-noun "agent-repl-core" (n one &optional many))
 (declare-function agent-repl--webview-window "agent-repl-panels" (ws))
-(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--next-log-request-id "agent-repl-core" ())
 (declare-function agent-repl--with-log-context "agent-repl-core"
                   (workspace request-id function))
@@ -189,7 +189,7 @@ so a workspace without one cannot be addressed at all."
       ;; an ordinary act (a close leaves the session running).
       (agent-repl-verbs--roster-ref ws)
       (progn
-        (agent-repl--warn ws "elisp.verbs.no-ref ws=%s" ws)
+        (agent-repl--warn ws "elisp.verbs.no-ref ws={ws}" :ws ws)
         (user-error "agent-repl: workspace %s has no daemon identity yet" ws))))
 
 (defun agent-repl-verbs--roster-ref (ws)
@@ -237,7 +237,7 @@ with the picker's own message before any wire call is made."
       (let ((current (agent-repl--ws-current-name))
             (known (agent-repl-verbs--registered-ws-names)))
         (unless known
-          (agent-repl--warn current "elisp.verbs.no-workspaces-registered prompt=%S" prompt)
+          (agent-repl--warn current "elisp.verbs.no-workspaces-registered prompt={prompt}" :prompt (prin1-to-string prompt))
           (user-error "No agent-repl workspaces registered"))
         (if (member current known)
             current
@@ -254,7 +254,7 @@ call must reach the daemon that owns THAT workspace."
       ;; standing -- so the link is stood here rather than refused.
       (agent-repl-link-connect)
       (progn
-        (agent-repl--warn ws "elisp.verbs.no-conn ws=%s" ws)
+        (agent-repl--warn ws "elisp.verbs.no-conn ws={ws}" :ws ws)
         (user-error "agent-repl: no daemon connection"))))
 
 
@@ -404,13 +404,13 @@ keyword, and the fields."
       ;; daemon's own sentence -- which names the directory, the branch and
       ;; the reason -- is what the user reads, not an arm keyword.
       (let ((fields (plist-get arm :value)))
-        (agent-repl--info ws (format "elisp.verbs.%s-unrestorable ws=%%s dir=%%S branch=%%S" op)
-                          ws (plist-get fields :dir) (plist-get fields :branch))
+        (agent-repl--info ws "elisp.verbs.{op}-unrestorable ws={ws} dir={dir} branch={branch}" :op op
+                          :ws ws :dir (prin1-to-string (plist-get fields :dir)) :branch (prin1-to-string (plist-get fields :branch)))
         (message "%s refused: %s" op (plist-get fields :detail))))
      ((memq keyword '(:has-open-children :parent-not-open))
       ;; A FAMILY RULE ANSWERED: recorded at INFO, said in words.
-      (agent-repl--info ws (format "elisp.verbs.%s-family-refused ws=%%s arm=%%S fields=%%S" op)
-                        ws keyword (plist-get arm :value))
+      (agent-repl--info ws "elisp.verbs.{op}-family-refused ws={ws} arm={arm} fields={fields}" :op op
+                        :ws ws :arm (prin1-to-string keyword) :fields (prin1-to-string (plist-get arm :value)))
       (message "agent-repl: %s" (agent-repl-verbs-family-sentence op keyword (plist-get arm :value))))
      ((eq keyword :lock-holder-unavailable)
       ;; THE ONE ARM WHOSE KEYWORD WOULD MISLEAD ON ITS OWN.  Nobody owns
@@ -419,8 +419,8 @@ keyword, and the fields."
       ;; words rather than as a raw plist.
       (let* ((fields (plist-get arm :value))
              (failure (plist-get fields :failure)))
-        (agent-repl--warn ws (format "elisp.verbs.%s-refused ws=%%s arm=%%S fields=%%S" op)
-                          ws keyword fields)
+        (agent-repl--warn ws "elisp.verbs.{op}-refused ws={ws} arm={arm} fields={fields} cause=lock-helper" :op op
+                          :ws ws :arm (prin1-to-string keyword) :fields (prin1-to-string fields))
         (message "%s refused: the shim's lock helper %s %s; no other process owns this conversation"
                  op (plist-get failure :binary)
                  (agent-repl-verbs--lock-holder-how-text (plist-get failure :how)))))
@@ -428,8 +428,8 @@ keyword, and the fields."
       ;; THE SLUG NAMES THE VERB: `elisp.verbs.<op>-refused'.  A refusal
       ;; reader wants every refusal of ONE verb, and a slug shared by all of
       ;; them would make that a full-text search over the context instead.
-      (agent-repl--warn ws (format "elisp.verbs.%s-refused ws=%%s arm=%%S fields=%%S" op)
-                        ws keyword (plist-get arm :value))
+      (agent-repl--warn ws "elisp.verbs.{op}-refused ws={ws} arm={arm} fields={fields}" :op op
+                        :ws ws :arm (prin1-to-string keyword) :fields (prin1-to-string (plist-get arm :value)))
       (message "%s refused: %s%s" op
                (if keyword (substring (symbol-name keyword) 1) "unstated")
                (agent-repl-verbs--refusal-fields arm))))))
@@ -462,7 +462,7 @@ a failure over work that is still running and will succeed."
     (agent-repl--with-log-context
      log-ws request-id
      (lambda ()
-       (agent-repl--info ws "elisp.verbs.send op=%s ws=%s" op ws)
+       (agent-repl--info ws "elisp.verbs.send op={op} ws={ws}" :op op :ws ws)
        (funcall rpc conn request
                 :timeout timeout
                 :on-response
@@ -472,7 +472,7 @@ a failure over work that is still running and will succeed."
                    (lambda ()
                      (pcase (plist-get response :arm)
                        (:success
-                        (agent-repl--info ws "elisp.verbs.ack op=%s ws=%s outcome=success" op ws)
+                        (agent-repl--info ws "elisp.verbs.ack op={op} ws={ws} outcome=success" :op op :ws ws)
                         (when on-success (funcall on-success (plist-get response :value))))
                        (:error
                         ;; ON-ERROR, when given, may CLAIM the arm (answering
@@ -486,23 +486,23 @@ a failure over work that is still running and will succeed."
                         ;; THE OPTION-B ACK: the mutation was accepted and its
                         ;; outcome rides the progress channel, so nothing
                         ;; terminal happens here.
-                        (agent-repl--info ws "elisp.verbs.ack op=%s ws=%s outcome=accepted" op ws)
+                        (agent-repl--info ws "elisp.verbs.ack op={op} ws={ws} outcome=accepted" :op op :ws ws)
                         (if on-accepted
                             (funcall on-accepted (plist-get response :value))
                           (agent-repl--error
-                           ws "elisp.verbs.unexpected-accepted op=%s ws=%s" op ws)))
+                           ws "elisp.verbs.unexpected-accepted op={op} ws={ws}" :op op :ws ws)))
                        (arm
                         (agent-repl--error
-                         ws "elisp.verbs.unknown-response-arm op=%s ws=%s arm=%S"
-                         op ws arm))))))
+                         ws "elisp.verbs.unknown-response-arm op={op} ws={ws} arm={arm}"
+                         :op op :ws ws :arm (prin1-to-string arm)))))))
                 :on-failure
                 (lambda (detail)
                   (agent-repl--with-log-context
                    log-ws request-id
                    (lambda ()
                      (agent-repl--error
-                      ws "elisp.verbs.transport-failure op=%s ws=%s detail=%S"
-                      op ws detail)
+                      ws "elisp.verbs.transport-failure op={op} ws={ws} detail={detail}"
+                      :op op :ws ws :detail (prin1-to-string detail))
                      (when on-transport-failure (funcall on-transport-failure detail))
                      (message "agent-repl: %s failed -- the daemon did not answer" op)))))))))
 
@@ -541,7 +541,7 @@ way.  RPC, CONN, REQUEST and the remaining KEYS pass through unchanged."
 Idempotent, and deliberately so: the roster's own reconciliation tears the
 same tab down when the closed row arrives, and whichever gets there first
 must leave the other a no-op."
-  (agent-repl--info ws "elisp.verbs.teardown ws=%s op=%s" ws op)
+  (agent-repl--info ws "elisp.verbs.teardown ws={ws} op={op}" :ws ws :op op)
   (agent-repl--kill-one-workspace ws))
 
 ;;;; ---- Roster reading ---------------------------------------------------
@@ -641,9 +641,9 @@ front of it can still say why."
            (let* ((blocked (plist-get refusal :value))
                   (summary (plist-get blocked :summary)))
              (agent-repl--info
-              ws "elisp.verbs.close-blocked ws=%s turn=%S live=%S held=%S merge=%S"
-              ws (plist-get blocked :turn-in-flight) (plist-get blocked :live-work)
-              (plist-get blocked :held-prompts) (plist-get blocked :merge-queued))
+              ws "elisp.verbs.close-blocked ws={ws} turn={turn} live={live} held={held} merge={merge}"
+              :ws ws :turn (prin1-to-string (plist-get blocked :turn-in-flight)) :live (prin1-to-string (plist-get blocked :live-work))
+              :held (prin1-to-string (plist-get blocked :held-prompts)) :merge (prin1-to-string (plist-get blocked :merge-queued)))
              ;; The daemon composes the sentence; when it sent one it is
              ;; echoed verbatim, so a user with no footer in front of them
              ;; still reads WHY.  Without one the footer stays the answer.
@@ -681,12 +681,12 @@ progress push forgets it."
      :on-succeeded
      (lambda (_)
        (agent-repl--info agent-repl-verbs--teardown-scope
-                         "elisp.verbs.%s-teardown-finished ws=%s op-id=%s" op ws op-id))
+                         "elisp.verbs.{op}-teardown-finished ws={ws} op-id={op_id}" :op op :ws ws :op_id op-id))
      :on-failed
      (lambda (arm value)
        (agent-repl--error agent-repl-verbs--teardown-scope
-                          "elisp.verbs.%s-teardown-failed ws=%s op-id=%s arm=%S value=%S"
-                          op ws op-id arm value)
+                          "elisp.verbs.{op}-teardown-failed ws={ws} op-id={op_id} arm={arm} value={value}"
+                          :op op :ws ws :op_id op-id :arm (prin1-to-string arm) :value (prin1-to-string value))
        (message "agent-repl: %s of %s FAILED after its tab closed: %s"
                 op ws (agent-repl-verbs--teardown-failure-sentence arm value))))
     (agent-repl-verbs--send-op
@@ -781,7 +781,7 @@ its failure is handed back to WS\='s conversation.
 Emacs holds NO deploy state whatsoever: the deploy\='s whole life from the
 queue onward is WS\='s own feed bubble, footer and roster row."
   (let ((ref (agent-repl-verbs--ref ws)))
-    (agent-repl--info ws "elisp.verbs.finish ws=%s" ws)
+    (agent-repl--info ws "elisp.verbs.finish ws={ws}" :ws ws)
     (agent-repl-verbs--send
      #'agent-repl-rpc-finish-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref
@@ -825,7 +825,7 @@ takes; a dropped connection still ends the call (`agent-repl-connect-unary')."
      :timeout :none
      :on-success
      (lambda (_)
-       (agent-repl--info ws "elisp.verbs.restart-done ws=%s" ws))
+       (agent-repl--info ws "elisp.verbs.restart-done ws={ws}" :ws ws))
      :on-error
      (lambda (value)
        ;; Every error arm gives back the hold taken for a bounce that did
@@ -836,7 +836,7 @@ takes; a dropped connection still ends the call (`agent-repl-connect-unary')."
        (let ((arm (agent-repl-verbs--refusal-arm value)))
          (when (eq (plist-get arm :arm) :relaunch-failed)
            (let ((detail (plist-get (plist-get arm :value) :detail)))
-             (agent-repl--error ws "elisp.verbs.restart-failed ws=%s detail=%S" ws detail)
+             (agent-repl--error ws "elisp.verbs.restart-failed ws={ws} detail={detail}" :ws ws :detail (prin1-to-string detail))
              (message "agent-repl: the restart failed: %s" detail)
              t)))))))
 
@@ -891,26 +891,26 @@ surfaced loudly by the shared dispatcher."
           (let ((refused (plist-get (plist-get value :value) :not-rolled-back)))
             (if (null refused)
                 (progn
-                  (agent-repl--info ws "elisp.verbs.interrupt-stopped ws=%s" ws)
+                  (agent-repl--info ws "elisp.verbs.interrupt-stopped ws={ws}" :ws ws)
                   (message "agent-repl: turn stopped"))
               ;; THE STOP HAPPENED, THE ROLLBACK DID NOT: the prompt stays in
               ;; the feed, and the reason is said beside the stop.
-              (agent-repl--info ws "elisp.verbs.interrupt-stopped-not-rolled-back ws=%s cause=%S"
-                                ws (plist-get refused :cause))
+              (agent-repl--info ws "elisp.verbs.interrupt-stopped-not-rolled-back ws={ws} cause={cause}"
+                                :ws ws :cause (prin1-to-string (plist-get refused :cause)))
               (message "agent-repl: turn stopped, prompt kept (%s)"
                        (agent-repl--input-rollback-refusal-text (plist-get refused :cause))))))
          (:rolled-back-unanswered
           ;; NOTHING HAD ANSWERED THE PROMPT: the stop rolled it back, and its
           ;; words return to the composer as after any rollback.
-          (agent-repl--info ws "elisp.verbs.interrupt-rolled-back ws=%s" ws)
+          (agent-repl--info ws "elisp.verbs.interrupt-rolled-back ws={ws}" :ws ws)
           (agent-repl--input-rollback-done ws (plist-get value :value)))
          (:nothing-running
           ;; NOTHING RUNNING IS THE STOP KEY'S SECOND PRESS: the daemon says
           ;; what rolling the latest prompt back offers, and input.el acts
           ;; on it.  No offer means there is no prompt to roll back.
           (let ((offer (plist-get (plist-get value :value) :rollback)))
-            (agent-repl--info ws "elisp.verbs.interrupt-nothing-running ws=%s offer=%S"
-                              ws (plist-get offer :arm))
+            (agent-repl--info ws "elisp.verbs.interrupt-nothing-running ws={ws} offer={offer}"
+                              :ws ws :offer (prin1-to-string (plist-get offer :arm)))
             ;; THE OFFER'S PICKER AND CONFIRMATION ARE READ IN THE COMMAND
             ;; LOOP, never in this response callback: a minibuffer read
             ;; inside a process sentinel turns the reader's escape into
@@ -929,18 +929,18 @@ surfaced loudly by the shared dispatcher."
           ;; THE STOP REACHED THE RESPONSE REWRITES FIRST: each rewritten
           ;; response stands as it was, and a running turn runs on.
           (let ((count (plist-get (plist-get value :value) :count)))
-            (agent-repl--info ws "elisp.verbs.interrupt-revisions ws=%s count=%S" ws count)
+            (agent-repl--info ws "elisp.verbs.interrupt-revisions ws={ws} count={count}" :ws ws :count (prin1-to-string count))
             (message "agent-repl: %s stopped" (agent-repl-plural-noun count "response update"))))
          (:interrupted-detached
           ;; A turn stop confirmed with live agents also ends them; the
           ;; daemon may answer with the fan-wide count rather than the bare
           ;; turn arm, so the count is stated when it comes.
           (let ((count (plist-get (plist-get value :value) :count)))
-            (agent-repl--info ws "elisp.verbs.interrupt-detached ws=%s count=%S" ws count)
+            (agent-repl--info ws "elisp.verbs.interrupt-detached ws={ws} count={count}" :ws ws :count (prin1-to-string count))
             (message "agent-repl: turn stopped, %s also ended"
                      (agent-repl-count-noun (or count 0) "agent"))))
          (arm
-          (agent-repl--error ws "elisp.verbs.interrupt-unknown-outcome ws=%s arm=%S" ws arm)
+          (agent-repl--error ws "elisp.verbs.interrupt-unknown-outcome ws={ws} arm={arm}" :ws ws :arm (prin1-to-string arm))
           (message "agent-repl: the interrupt answer could not be read"))))
      :on-error
      (lambda (value)
@@ -953,12 +953,12 @@ surfaced loudly by the shared dispatcher."
        (let ((refusal (agent-repl-verbs--refusal-arm value)))
          (when (eq (plist-get refusal :arm) :confirm-required)
            (let ((count (plist-get (plist-get refusal :value) :live-agent-count)))
-             (agent-repl--warn ws "elisp.verbs.interrupt-confirm-required ws=%s count=%S" ws count)
+             (agent-repl--warn ws "elisp.verbs.interrupt-confirm-required ws={ws} count={count}" :ws ws :count (prin1-to-string count))
              (if (yes-or-no-p
                   (format "Also stop %s the turn started? "
                           (agent-repl-count-noun (or count 0) "live agent")))
                  (agent-repl-verb-interrupt ws t)
-               (agent-repl--info ws "elisp.verbs.interrupt-confirm-declined ws=%s" ws)
+               (agent-repl--info ws "elisp.verbs.interrupt-confirm-declined ws={ws}" :ws ws)
                (message "agent-repl: turn left running")))
            t))))))
 
@@ -969,8 +969,8 @@ webview window is what makes the next key reach it.  With no window
 showing the webview the question still stands in the bubble, and the
 message says where to answer it."
   (let ((win (agent-repl--webview-window ws)))
-    (agent-repl--info ws "elisp.verbs.interrupt-merge-queue-offered ws=%s webview-window=%s"
-                      ws (and win t))
+    (agent-repl--info ws "elisp.verbs.interrupt-merge-queue-offered ws={ws} webview-window={webview_window}"
+                      :ws ws :webview_window (and win t))
     (when win (select-window win))
     (message "agent-repl: the merge is queued -- Evict, Prioritize or Cancel in its bubble")))
 
@@ -1047,8 +1047,8 @@ shim did; a retry that was not scheduled is logged and says nothing."
    (lambda (success)
      (let* ((outcome (plist-get success :outcome))
             (text (agent-repl-verbs--retry-outcome-text outcome)))
-       (agent-repl--info ws "elisp.verbs.retry-vendor-error ws=%s outcome=%S"
-                         ws (plist-get outcome :arm))
+       (agent-repl--info ws "elisp.verbs.retry-vendor-error ws={ws} outcome={outcome}"
+                         :ws ws :outcome (prin1-to-string (plist-get outcome :arm)))
        (when text (message "%s" text))))))
 
 ;;;; ---- UpdateRemoteControlMode (`SPC j C') -----------------------------
@@ -1096,7 +1096,7 @@ echo names the mode the request left, or why it was refused."
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (when (or (null ws) (agent-repl--pseudo-workspace-name-p ws))
       (agent-repl--info '(:agent-repl-central "the command found no workspace to address")
-                        "elisp.verbs.remote-control-no-workspace ws=%S" ws)
+                        "elisp.verbs.remote-control-no-workspace ws={ws}" :ws (prin1-to-string ws))
       (user-error "agent-repl: no current workspace to turn remote control over for"))
     (agent-repl-verbs--send
      #'agent-repl-rpc-update-remote-control-mode (agent-repl-verbs--conn ws)
@@ -1106,15 +1106,15 @@ echo names the mode the request left, or why it was refused."
      :on-success
      (lambda (success)
        (let ((on (plist-get success :on)))
-         (agent-repl--info ws "elisp.verbs.remote-control ws=%s on=%S" ws on)
+         (agent-repl--info ws "elisp.verbs.remote-control ws={ws} on={on}" :ws ws :on (prin1-to-string on))
          (message "agent-repl: remote control %s for %s" (if on "on" "off") ws)))
      :on-error
      (lambda (value)
        (let* ((arm (agent-repl-verbs--refusal-arm value))
               (text (agent-repl-verbs--remote-control-refusal-text ws arm)))
          (when text
-           (agent-repl--warn ws "elisp.verbs.remote-control-refused ws=%s arm=%S fields=%S"
-                             ws (plist-get arm :arm) (plist-get arm :value))
+           (agent-repl--warn ws "elisp.verbs.remote-control-refused ws={ws} arm={arm} fields={fields}"
+                             :ws ws :arm (prin1-to-string (plist-get arm :arm)) :fields (prin1-to-string (plist-get arm :value)))
            (message "agent-repl: %s" text)
            t))))))
 
@@ -1169,7 +1169,7 @@ roster stream.  The echo says how each one went."
    (lambda (value)
      (let ((workspaces (plist-get value :workspaces)))
        (agent-repl--info agent-repl--global-log-scope
-                         "elisp.verbs.hidden-keepalives workspaces=%S" workspaces)
+                         "elisp.verbs.hidden-keepalives workspaces={workspaces}" :workspaces (prin1-to-string workspaces))
        (message "agent-repl: %s" (agent-repl-verbs-describe-hidden-keepalives workspaces))))))
 
 (defconst agent-repl-verbs-fold-hidden-request
@@ -1198,7 +1198,7 @@ frame follows that selection off the roster push
 raced the daemon's and won, so a hide always ended on the first tab --
 and hiding a workspace the user did NOT stand on moved them too."
   (if hidden
-      (agent-repl--info ws "elisp.verbs.hide-landing ws=%s owner=daemon" ws)
+      (agent-repl--info ws "elisp.verbs.hide-landing ws={ws} owner=daemon" :ws ws)
     (agent-repl-host-request-switch ws 'show)))
 
 (defun agent-repl-verb-swap (ws target)
@@ -1229,7 +1229,7 @@ Recorded at INFO and said in words, answering non-nil; every other arm is
 left to the arm-generic report."
   (let ((arm (plist-get (agent-repl-verbs--refusal-arm value) :arm)))
     (when (memq arm '(:other-repository :not-siblings))
-      (agent-repl--info ws (format "elisp.verbs.%s-no-tab ws=%%s target=%%s arm=%%S" op) ws target arm)
+      (agent-repl--info ws "elisp.verbs.{op}-no-tab ws={ws} target={target} arm={arm}" :op op :ws ws :target target :arm (prin1-to-string arm))
       (if (eq arm :other-repository)
           (message "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
                    ws target ws)
@@ -1340,7 +1340,7 @@ and the new workspace\'s tab arrives through the roster push."
      :on-accepted
      (lambda (accepted)
        (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-                         "elisp.verbs.create-accepted op-id=%s joined=%S" op-id (plist-get accepted :joined))
+                         "elisp.verbs.create-accepted op-id={op_id} joined={joined}" :op_id op-id :joined (prin1-to-string (plist-get accepted :joined)))
        ;; THE WHOLE SEQUENCE IS SHOWN (owner ruling, 2026-09-27): accepted,
        ;; then every stage the daemon pushes, then created or FAILED.  An ack
        ;; that JOINED an identical pending create says so instead.
@@ -1387,14 +1387,14 @@ failure."
       (let ((address (plist-get (plist-get refusal :value) :address)))
         (if (or (null address) (string-empty-p address))
             (progn
-              (agent-repl--error scope "elisp.verbs.create-handed-over-without-address address=%S" address)
+              (agent-repl--error scope "elisp.verbs.create-handed-over-without-address address={address}" :address (prin1-to-string address))
               (agent-repl-workspace-progress-report
                :create :failed "the daemon refused it as handing over but named no successor"))
-          (agent-repl--info scope "elisp.verbs.create-handed-over address=%S" address)
+          (agent-repl--info scope "elisp.verbs.create-handed-over address={address}" :address (prin1-to-string address))
           (let ((successor (agent-repl-link-successor-at address)))
             (if successor
                 (funcall resend successor)
-              (agent-repl--info scope "elisp.verbs.create-awaiting-successor address=%S" address)
+              (agent-repl--info scope "elisp.verbs.create-awaiting-successor address={address}" :address (prin1-to-string address))
               (agent-repl-link-on-successor-accepted resend)))))
       t)))
 
@@ -1457,11 +1457,11 @@ the daemon log)."
        (agent-repl-verbs--on-refusal nil "create" detail)))
     (:internal
      (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-                        "elisp.verbs.create-failed-internal detail=%S" detail)
+                        "elisp.verbs.create-failed-internal detail={detail}" :detail (prin1-to-string detail))
      (agent-repl-workspace-progress-report :create :failed detail))
     (_
      (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-                        "elisp.verbs.create-failed-unknown arm=%S detail=%S" arm detail)
+                        "elisp.verbs.create-failed-unknown arm={arm} detail={detail}" :arm (prin1-to-string arm) :detail (prin1-to-string detail))
      (agent-repl-workspace-progress-report :create :failed "the daemon named no cause"))))
 
 (defun agent-repl-verbs--create-refusal (value)
@@ -1657,7 +1657,7 @@ new workspace did not come up."
                ws
              '(:agent-repl-central
                "a minted workspace awaiting its roster row has no sink"))
-           "elisp.verbs.select-minted dir=%s" dir)
+           "elisp.verbs.select-minted dir={dir}" :dir dir)
           ;; Owner ruling 2026-10-11: a registered or reopened workspace is
           ;; landed on when it becomes available, unless the user switched
           ;; in Emacs meanwhile.
@@ -1684,7 +1684,7 @@ new workspace did not come up."
             (agent-repl-verbs--pending-landing-register ref dispatched-at land))))
       (agent-repl--error '(:agent-repl-central
                            "a malformed minted reference owns no workspace sink")
-                         "elisp.verbs.select-minted-no-dir ref=%S" ref)
+                         "elisp.verbs.select-minted-no-dir ref={ref}" :ref (prin1-to-string ref))
       (message "agent-repl: the new workspace carries no directory to switch to"))))
 
 (defvar agent-repl-verbs--pending-landing nil
@@ -1704,8 +1704,8 @@ be invisible.  EDGE names where the landing was judged, for the record."
     (unless (= now dispatched-at)
       (agent-repl--info '(:agent-repl-central
                           "a withdrawn landing moves the user to no workspace")
-                        "elisp.verbs.landing-withdrawn id=%s dir=%s edge=%s reason=user-switched dispatched-at=%d now=%d"
-                        (plist-get ref :id) (plist-get ref :dir) edge dispatched-at now)
+                        "elisp.verbs.landing-withdrawn id={id} dir={dir} edge={edge} reason=user-switched dispatched-at={dispatched_at} now={now}"
+                        :id (plist-get ref :id) :dir (plist-get ref :dir) :edge edge :dispatched_at dispatched-at :now now)
       t)))
 
 (defun agent-repl-verbs--land (ref why ws land)
@@ -1723,15 +1723,15 @@ is recorded rather than made."
    (lambda (released)
      (if (and released (not (equal (agent-repl--ws-by-ref-id (plist-get ref :id)) ws)))
          (agent-repl--info '(:agent-repl-central "a landing whose workspace left owns no sink")
-                           "elisp.verbs.landing-dropped ws=%s id=%s reason=workspace-gone"
-                           ws (plist-get ref :id))
+                           "elisp.verbs.landing-dropped ws={ws} id={id} reason=workspace-gone"
+                           :ws ws :id (plist-get ref :id))
        (let ((agent-repl-host-automatic-switch t))
          (funcall land ref why ws))))))
 
 (defun agent-repl-verbs--land-on (ref why ws)
   "Stand on workspace WS named by REF, recording WHY the landing ran now."
   (let ((dir (plist-get ref :dir)))
-    (agent-repl--info ws "elisp.verbs.land-on ws=%s dir=%s why=%s" ws dir why)
+    (agent-repl--info ws "elisp.verbs.land-on ws={ws} dir={dir} why={why}" :ws ws :dir dir :why why)
     (agent-repl-switch-to-project dir)))
 
 (defvar agent-repl-verbs--pending-landing-dispatched-at nil
@@ -1770,16 +1770,16 @@ perspective that already exists and so cannot rename, recycle or
 re-point the one being left.  The tab is guaranteed to be there: this
 lander is only ever reached with WS resolved from the ref id, which is
 the roster row itself."
-  (agent-repl--info ws "elisp.verbs.land-on-tab ws=%s dir=%s why=%s"
-                    ws (plist-get ref :dir) why)
+  (agent-repl--info ws "elisp.verbs.land-on-tab ws={ws} dir={dir} why={why}"
+                    :ws ws :dir (plist-get ref :dir) :why why)
   (agent-repl--ws-switch ws))
 
 (defun agent-repl-verbs--pending-landing-register (ref dispatched-at &optional lander)
   "Record REF as the landing waiting for its tab to reach the roster.
 DISPATCHED-AT and LANDER are as `agent-repl-verbs-select-minted\='
 documents."
-  (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.pending-landing-registered dir=%s id=%s"
-                    (plist-get ref :dir) (plist-get ref :id))
+  (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.pending-landing-registered dir={dir} id={id}"
+                    :dir (plist-get ref :dir) :id (plist-get ref :id))
   (setq agent-repl-verbs--pending-landing-lander
         (or lander #'agent-repl-verbs--land-on))
   (setq agent-repl-verbs--pending-landing-dispatched-at dispatched-at)
@@ -1802,7 +1802,7 @@ pending ref is cleared before the landing runs or is withdrawn."
             (setq agent-repl-verbs--pending-landing nil
                   agent-repl-verbs--pending-landing-dispatched-at nil
                   agent-repl-verbs--pending-landing-lander nil)
-            (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws=%s id=%s" ws id)
+            (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws={ws} id={id}" :ws ws :id id)
             (unless (agent-repl-verbs--landing-withdrawn-p ref dispatched-at "tab-arrived")
               (agent-repl-verbs--land ref "tab-arrived" ws land)))
         ;; A LANDING THAT IS STILL WAITING SAYS SO.  Nothing here polls or
@@ -1814,8 +1814,8 @@ pending ref is cleared before the landing runs or is withdrawn."
         ;; per push, which is why it is DEBUG.
         (agent-repl--log '(:agent-repl-central
                            "a landing whose tab has not arrived owns no workspace sink")
-                         "elisp.verbs.pending-landing-waiting id=%s dir=%s"
-                         id (plist-get ref :dir))))))
+                         "elisp.verbs.pending-landing-waiting id={id} dir={dir}"
+                         :id id :dir (plist-get ref :dir))))))
 
 ;; `agent-repl-roster-update-functions' is roster.el's, and roster.el loads
 ;; AFTER this file (config.el); `add-hook' binds the symbol itself, and a
@@ -1886,8 +1886,8 @@ arm-generic reporting by answering nil."
   (let* ((arm (agent-repl-verbs--refusal-arm value))
          (keyword (plist-get arm :arm)))
     (when (eq keyword :unknown-repository)
-      (agent-repl--warn '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.merge-queue-unknown-repository action=%S repository=%S"
-                        (plist-get action :arm) (plist-get action :repository))
+      (agent-repl--warn '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.merge-queue-unknown-repository action={action} repository={repository}"
+                        :action (prin1-to-string (plist-get action :arm)) :repository (prin1-to-string (plist-get action :repository)))
       (message "merge-queue refused: the daemon's registry does not hold repository %S"
                (plist-get action :repository))
       t)))
@@ -1963,11 +1963,11 @@ One log record per component outcome, then one echo-area line naming every
 component's decision."
   (let ((components (plist-get value :components)))
     (dolist (outcome components)
-      (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-component component=%s build=%s decision=%S detail=%S"
-                        (agent-repl-verbs--deploy-component-name (plist-get outcome :component))
-                        (plist-get outcome :build)
-                        (plist-get (plist-get outcome :outcome) :arm)
-                        (plist-get (plist-get outcome :outcome) :value)))
+      (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-component component={component} build={build} decision={decision} detail={detail}"
+                        :component (agent-repl-verbs--deploy-component-name (plist-get outcome :component))
+                        :build (plist-get outcome :build)
+                        :decision (prin1-to-string (plist-get (plist-get outcome :outcome) :arm))
+                        :detail (prin1-to-string (plist-get (plist-get outcome :outcome) :value))))
     (message "agent-repl: deploy%s: %s"
              (if force " (forced)" "")
              (if components
@@ -2025,11 +2025,11 @@ detail."
   (let* ((cause (plist-get value :cause))
          (arm (plist-get cause :arm))
          (central '(:agent-repl-central "a deploy is daemon administration spanning every workspace")))
-    (agent-repl--error central "elisp.verbs.deploy-refused arm=%S fields=%S"
-                       arm (plist-get cause :value))
+    (agent-repl--error central "elisp.verbs.deploy-refused arm={arm} fields={fields}"
+                       :arm (prin1-to-string arm) :fields (prin1-to-string (plist-get cause :value)))
     (if (memq arm agent-repl-verbs--deploy-fault-arms)
-        (agent-repl--log central "elisp.verbs.deploy-refusal-echoed-by-its-fault arm=%S sentence=%S"
-                         arm (agent-repl-verbs--deploy-refusal-sentence cause))
+        (agent-repl--log central "elisp.verbs.deploy-refusal-echoed-by-its-fault arm={arm} sentence={sentence}"
+                         :arm (prin1-to-string arm) :sentence (prin1-to-string (agent-repl-verbs--deploy-refusal-sentence cause)))
       (message "agent-repl: deploy refused: %s"
                (agent-repl-verbs--deploy-refusal-sentence cause)))
     t))
@@ -2049,7 +2049,7 @@ component; every refusal is reported loudly with its detail."
                      "A forced deploy ends every running turn in an out-of-date workspace.  Deploy anyway? ")))
       (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-force-declined")
       (user-error "agent-repl: forced deploy cancelled"))
-    (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-requested force=%s" force)
+    (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-requested force={force}" :force force)
     (agent-repl-verbs--send
      #'agent-repl-rpc-deploy (agent-repl-verbs--conn)
      (list :force force)
@@ -2082,7 +2082,7 @@ without one is loud rather than silently detail-only."
         (detail (plist-get fault :detail)))
     (if kind
         (format "%s- %s: %s" indent (substring (symbol-name kind) 1) detail)
-      (agent-repl--error '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.fault-without-kind detail=%S" detail)
+      (agent-repl--error '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.fault-without-kind detail={detail}" :detail (prin1-to-string detail))
       (format "%s- unknown-kind: %s" indent detail))))
 
 (defun agent-repl-verbs--fault-lines (faults)
@@ -2095,18 +2095,18 @@ UNHEALTHY IS AN ANSWER: it arrives inside success carrying its faults, so
 both arms render the same way and neither is treated as a failure."
   (pcase (plist-get verdict :arm)
     (:healthy
-     (agent-repl--info '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health title=%s verdict=healthy" title)
+     (agent-repl--info '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health title={title} verdict=healthy" :title title)
      (agent-repl-verbs--health-insert (append (list "" (format "%s: HEALTHY" title)) extra)))
     (:unhealthy
      (let ((faults (plist-get (plist-get verdict :value) :faults)))
-       (agent-repl--warn '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health title=%s verdict=unhealthy faults=%d"
-                         title (length faults))
+       (agent-repl--warn '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health title={title} verdict=unhealthy faults={faults}"
+                         :title title :faults (length faults))
        (agent-repl-verbs--health-insert
         (append (list "" (format "%s: UNHEALTHY (%d fault(s))" title (length faults)))
                 (agent-repl-verbs--fault-lines faults)
                 extra))))
     (arm
-     (agent-repl--error '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health-unknown-arm title=%s arm=%S" title arm))))
+     (agent-repl--error '(:agent-repl-context "daemon health has no workspace while session health inherits its request workspace") "elisp.verbs.health-unknown-arm title={title} arm={arm}" :title title :arm (prin1-to-string arm)))))
 
 (defun agent-repl-daemon-health ()
   "Pull the daemon's own health verdict into `*agent-repl-health*'."
@@ -2154,7 +2154,7 @@ not do it."
   (let ((ws (agent-repl-verbs--target-ws ws "Kill workspace: ")))
     (if (y-or-n-p (format "Kill workspace %s? " ws))
         (agent-repl-verb-kill ws)
-      (agent-repl--info ws "elisp.verbs.kill-declined ws=%s" ws))))
+      (agent-repl--info ws "elisp.verbs.kill-declined ws={ws}" :ws ws))))
 
 (defun agent-repl-nuke-workspace (&optional ws)
   "Destroy the current workspace, its worktree and its branch.
@@ -2164,7 +2164,7 @@ unrecoverable by design."
   (let ((ws (agent-repl-verbs--target-ws ws "Nuke workspace: ")))
     (if (yes-or-no-p (format "Nuke %s?  Its worktree and branch are DELETED: " ws))
         (agent-repl-verb-nuke ws)
-      (agent-repl--info ws "elisp.verbs.nuke-declined ws=%s" ws))))
+      (agent-repl--info ws "elisp.verbs.nuke-declined ws={ws}" :ws ws))))
 
 (defun agent-repl-open-workspace ()
   "Re-open a closed workspace, chosen from the roster's closed rows."
@@ -2178,7 +2178,7 @@ unrecoverable by design."
       (user-error "agent-repl: the roster lists no closed workspaces"))
     (let* ((choice (completing-read "Open workspace: " (mapcar #'car candidates) nil t))
            (ref (cdr (assoc choice candidates))))
-      (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.open-chosen name=%s" choice)
+      (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.open-chosen name={name}" :name choice)
       (agent-repl-verb-open ref))))
 
 (defun agent-repl-finish-workspace (&optional ws)
@@ -2283,7 +2283,7 @@ and the frame lands on it once the daemon accepts."
     (let* ((choice (completing-read "Show hidden workspace: " (mapcar #'car choices) nil t))
            (ref (cdr (assoc choice choices))))
       (agent-repl--info '(:agent-repl-central "the hidden-workspace picker spans every workspace")
-                        "elisp.verbs.show-hidden-chosen name=%s id=%s" choice (plist-get ref :id))
+                        "elisp.verbs.show-hidden-chosen name={name} id={id}" :name choice :id (plist-get ref :id))
       (agent-repl-verb-show-ref ref))))
 
 (defun agent-repl-set-priority (&optional ws)
@@ -2371,8 +2371,8 @@ the user reads is the progress report's own."
               (format "%s: %s" said path)))))
     (when sentence
       (agent-repl--info agent-repl--global-log-scope
-                        "elisp.verbs.register-repository-refused path=%S arm=%S"
-                        path keyword)
+                        "elisp.verbs.register-repository-refused path={path} arm={arm}"
+                        :path (prin1-to-string path) :arm (prin1-to-string keyword))
       (agent-repl-workspace-progress-report :register-repository :failed sentence)
       t)))
 
@@ -2524,12 +2524,12 @@ request is built."
          (images (agent-repl--input-parts-images parts)))
     (when (and images (string-blank-p (agent-repl--input-parts-text parts)))
       (agent-repl--info agent-repl-verbs--create-log-scope
-                        "elisp.verbs.read-prompt-refused cause=images-without-words images=%d"
-                        (length images))
+                        "elisp.verbs.read-prompt-refused cause=images-without-words images={images}"
+                        :images (length images))
       (user-error "agent-repl: a pasted image rides the words of the prompt, and it has none"))
     (agent-repl--input-refuse-missing-images agent-repl-verbs--create-log-scope parts)
     (agent-repl--info agent-repl-verbs--create-log-scope
-                      "elisp.verbs.read-prompt images=%d" (length images))
+                      "elisp.verbs.read-prompt images={images}" :images (length images))
     (agent-repl--image-prompt-text parts)))
 
 (defun agent-repl-verbs--install-image-prompt-maps ()
@@ -2594,8 +2594,8 @@ with the file and the value, and signalled."
   (let ((entries (agent-repl--read-sexp-file-if-exists file)))
     (unless (and (listp entries) (cl-every #'stringp entries))
       (agent-repl--error agent-repl-verbs--create-log-scope
-                         "elisp.verbs.persisted-history-invalid file=%s value=%S"
-                         file entries)
+                         "elisp.verbs.persisted-history-invalid file={file} value={value}"
+                         :file file :value (prin1-to-string entries))
       (error "agent-repl: prompt history %s holds %S, not a list of strings"
              file entries))
     entries))
@@ -2664,7 +2664,7 @@ A create used to log nothing until its questions were answered, so a
 prompt that was abandoned, hidden or never shown left no trace at all and
 was indistinguishable from the command never running."
   (agent-repl--info agent-repl-verbs--create-log-scope
-                    "elisp.verbs.create-invoked command=%s" command))
+                    "elisp.verbs.create-invoked command={command}" :command command))
 
 (defun agent-repl-verbs--read-for (command read reader)
   "Answer COMMAND's READ question by calling READER, recording a failed read.
@@ -2676,8 +2676,8 @@ says where the create stopped, and the caller still sees it stop."
       (funcall reader)
     ((quit user-error)
      (agent-repl--info agent-repl-verbs--create-log-scope
-                       "elisp.verbs.create-read-abandoned command=%s read=%s signal=%s detail=%S"
-                       command read (car err) (error-message-string err))
+                       "elisp.verbs.create-read-abandoned command={command} read={read} signal={signal} detail={detail}"
+                       :command command :read read :signal (car err) :detail (prin1-to-string (error-message-string err)))
      (signal (car err) (cdr err)))))
 
 (defconst agent-repl-verbs--oneshot-default-model "sonnet"
@@ -2721,15 +2721,15 @@ the cause; the daemon\='s error arm signals FAILED-ANSWER."
              (funcall rpc (agent-repl-verbs--conn) request)
            ((agent-repl-connect-error agent-repl-wire-error)
             (agent-repl--error agent-repl-verbs--create-log-scope
-                               "%s %s=%S cause=%s detail=%S"
-                               event (car subject) (cdr subject) (car err) (cdr err))
+                               "{event} {subject}={subject_2} cause={cause} detail={detail}"
+                               :event event :subject (car subject) :subject_2 (prin1-to-string (cdr subject)) :cause (car err) :detail (prin1-to-string (cdr err)))
             (error "agent-repl: %s: %s" failed-ask (error-message-string err))))))
     (pcase response
       (`(:arm :success :value ,success) success)
       (_
        (agent-repl--error agent-repl-verbs--create-log-scope
-                          "%s %s=%S cause=error-arm response=%S"
-                          event (car subject) (cdr subject) response)
+                          "{event} {subject}={subject_2} cause=error-arm response={response}"
+                          :event event :subject (car subject) :subject_2 (prin1-to-string (cdr subject)) :response (prin1-to-string response))
        (error "agent-repl: %s" failed-answer)))))
 
 (defun agent-repl-verbs--name-refusal (name)
@@ -2751,12 +2751,12 @@ on as a legal one."
                     :verdict)
     (`(:arm :legal . ,_)
      (agent-repl--log agent-repl-verbs--create-log-scope
-                      "elisp.verbs.name-validated name=%S verdict=legal" name)
+                      "elisp.verbs.name-validated name={name} verdict=legal" :name (prin1-to-string name))
      nil)
     (`(:arm :invalid :value ,invalid)
      (agent-repl--info agent-repl-verbs--create-log-scope
-                       "elisp.verbs.name-validated name=%S verdict=invalid component=%S rule=%s"
-                       name (plist-get invalid :component) (plist-get invalid :rule))
+                       "elisp.verbs.name-validated name={name} verdict=invalid component={component} rule={rule}"
+                       :name (prin1-to-string name) :component (prin1-to-string (plist-get invalid :component)) :rule (plist-get invalid :rule))
      (agent-repl-verbs--create-invalid-name-sentence invalid))))
 
 (defun agent-repl-verbs-name-minibuffer-exit ()
@@ -2820,7 +2820,7 @@ recorded before the abandonment propagates."
                                           (agent-repl-verbs--repository-name repository))
                                   nil t)))))
     (agent-repl--info agent-repl-verbs--create-log-scope
-                      "elisp.verbs.create-standard command=%s model=%S" command model)
+                      "elisp.verbs.create-standard command={command} model={model}" :command command :model (prin1-to-string model))
     (agent-repl-verb-create
      repository :standard
      :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
@@ -2933,8 +2933,8 @@ recorded before the abandonment propagates."
                                             (agent-repl-verbs--repository-name repository))
                                     nil t)))))
          (source (agent-repl-verbs--ref (agent-repl--ws-current-name))))
-    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=%s into-primary=%s"
-                      mode (and into-primary t))
+    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode={mode} into-primary={into_primary}"
+                      :mode mode :into_primary (and into-primary t))
     (apply #'agent-repl-verb-create
            repository :standard
            (append
@@ -3011,9 +3011,9 @@ never opened on a guessed one."
                   (format "the daemon could not say which models %s may create with"
                           (agent-repl-verbs--repository-name repository)))))
     (agent-repl--log agent-repl-verbs--create-log-scope
-                     "elisp.verbs.creation-models repository=%S config-dir=%s catalog=%s"
-                     repository (plist-get success :config-dir)
-                     (plist-get (plist-get success :catalog) :arm))
+                     "elisp.verbs.creation-models repository={repository} config-dir={config_dir} catalog={catalog}"
+                     :repository (prin1-to-string repository) :config_dir (plist-get success :config-dir)
+                     :catalog (plist-get (plist-get success :catalog) :arm))
     success))
 
 (defun agent-repl-verbs--model-names (options)
@@ -3069,8 +3069,8 @@ question opens with \"Model\", whatever the catalog holds."
          (options (and known (plist-get (plist-get catalog :value) :options))))
     (unless known
       (agent-repl--info agent-repl-verbs--create-log-scope
-                        "elisp.verbs.read-model-offers-nothing config-dir=%s cause=catalog-unknown"
-                        config-dir))
+                        "elisp.verbs.read-model-offers-nothing config-dir={config_dir} cause=catalog-unknown"
+                        :config_dir config-dir))
     (let* ((default (and agent-repl-verbs--model-default
                          (member agent-repl-verbs--model-default
                                  (agent-repl-verbs--model-names options))
@@ -3168,8 +3168,8 @@ the roster -- registering it (`SPC TAB p\=') is the user\='s act."
       (or (agent-repl-verbs--roster-repository-at main)
           (progn
             (agent-repl--warn agent-repl-verbs--create-log-scope
-                              "elisp.verbs.explanation-engine-repository-unregistered root=%s main=%s"
-                              root main)
+                              "elisp.verbs.explanation-engine-repository-unregistered root={root} main={main}"
+                              :root root :main main)
             (user-error "agent-repl: the explanation-engine repository %s is not on the roster; register it with SPC TAB p"
                         main))))))
 
@@ -3234,8 +3234,8 @@ repository says so before the commission is typed."
                      t))))
          (context (and about (agent-repl-verbs--ref about))))
     (agent-repl--info agent-repl-verbs--create-log-scope
-                      "elisp.verbs.create-one-shot mode=dynamic model=%S context=%S"
-                      model about)
+                      "elisp.verbs.create-one-shot mode=dynamic model={model} context={context}"
+                      :model (prin1-to-string model) :context (prin1-to-string about))
     (agent-repl-verb-create
      repository :one-shot
      :prompt prompt
@@ -3253,8 +3253,8 @@ and fails hard."
   (let ((dir (plist-get repository :dir)))
     (unless (and (stringp dir) (not (string-empty-p dir)))
       (agent-repl--error agent-repl-verbs--create-log-scope
-                         "elisp.verbs.repository-name repository=%S cause=no-directory"
-                         repository)
+                         "elisp.verbs.repository-name repository={repository} cause=no-directory"
+                         :repository (prin1-to-string repository))
       (error "agent-repl: RepositoryRef %S has no directory" repository))
     (file-name-nondirectory (directory-file-name dir))))
 
@@ -3289,14 +3289,14 @@ user\='s act."
          (main (agent-repl--main-worktree-for-dir module-root)))
     (unless main
       (agent-repl--error agent-repl-verbs--create-log-scope
-                         "elisp.verbs.agent-repl-repository-unresolved module-root=%s cause=not-a-git-repository"
-                         module-root)
+                         "elisp.verbs.agent-repl-repository-unresolved module-root={module_root} cause=not-a-git-repository"
+                         :module_root module-root)
       (user-error "agent-repl: agent-repl's source at %s is in no git repository" module-root))
     (or (agent-repl-verbs--roster-repository-at main)
         (progn
           (agent-repl--warn agent-repl-verbs--create-log-scope
-                            "elisp.verbs.agent-repl-repository-unregistered module-root=%s main=%s"
-                            module-root main)
+                            "elisp.verbs.agent-repl-repository-unregistered module-root={module_root} main={main}"
+                            :module_root module-root :main main)
           (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB p"
                       main)))))
 
@@ -3354,7 +3354,7 @@ a caller who asked about one."
          (repository (agent-repl-roster-repository-of (plist-get ref :id))))
     (or repository
         (progn
-          (agent-repl--warn ws "elisp.verbs.no-repository ws=%s" ws)
+          (agent-repl--warn ws "elisp.verbs.no-repository ws={ws}" :ws ws)
           (user-error "agent-repl: no roster repository for workspace %s" ws)))))
 
 (defun agent-repl-merge-queue-pause (&optional daemon-wide)

@@ -8,6 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -128,6 +129,7 @@ func (s *server) watchFeed(
 	msg *agentreplv1.WatchFeedRequest,
 	out streamSink[agentreplv1.WatchFeedResponse],
 ) error {
+	tailGone := logsite.Msg("the feed tail's client went away")
 	const rpc = "WatchFeed"
 	if err := validateWatchFeedRequest(msg); err != nil {
 		return err
@@ -239,7 +241,7 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(frame); err != nil {
-				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				log.Log(dlog.LevelDebug, rpc, tailGone, dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		case sel, ok := <-selections:
@@ -257,7 +259,7 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{Selection: sel.selection}); err != nil {
-				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				log.Log(dlog.LevelDebug, rpc, tailGone, dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		case sc, ok := <-scales:
@@ -274,7 +276,7 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{FeedTextScale: sc}); err != nil {
-				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				log.Log(dlog.LevelDebug, rpc, tailGone, dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		case overlay, ok := <-overlays:
@@ -291,7 +293,7 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ImageOverlay: overlay}); err != nil {
-				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				log.Log(dlog.LevelDebug, rpc, tailGone, dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		case entry, ok := <-composerEntries:
@@ -308,7 +310,7 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ComposerEntry: entry}); err != nil {
-				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				log.Log(dlog.LevelDebug, rpc, tailGone, dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		case question, ok := <-questions:
@@ -325,7 +327,7 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ResponseQuestion: question}); err != nil {
-				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				log.Log(dlog.LevelDebug, rpc, tailGone, dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		case highlight, ok := <-highlights:
@@ -342,7 +344,7 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ResponseHighlight: highlight}); err != nil {
-				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				log.Log(dlog.LevelDebug, rpc, tailGone, dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		}

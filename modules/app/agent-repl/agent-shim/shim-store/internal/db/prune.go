@@ -139,7 +139,7 @@ func (d *DB) PruneWriteLedger(ctx context.Context) (PruneResult, error) {
 	var result PruneResult
 	base := logging.Fields{Operation: "store.db.ledger-sweep", Table: "write_ledger"}
 	if d.ledgerRetention <= 0 {
-		d.log.LogVerbose(base, "ledger sweep disabled: the retention window is not positive")
+		d.log.LogVerbose(base, "ledger sweep disabled: the retention window is not positive", nil)
 		return result, nil
 	}
 	started := d.mono()
@@ -168,14 +168,14 @@ func (d *DB) PruneWriteLedger(ctx context.Context) (PruneResult, error) {
 	}
 	elapsed := d.mono().Sub(started)
 	if result.Deleted == 0 {
-		d.log.LogVerbose(base, "ledger sweep found nothing past the retention window retention_bytes=%d duration_ms=%d",
-			d.ledgerRetention, elapsed.Milliseconds())
+		d.log.LogVerbose(base, "ledger sweep found nothing past the retention window retention_bytes={retention_bytes} duration_ms={duration_ms}",
+			logging.Values{"retention_bytes": d.ledgerRetention, "duration_ms": elapsed.Milliseconds()})
 		return result, nil
 	}
 	// A SWEEP THAT REMOVED SOMETHING IS A STATE CHANGE, so it is a normal-level
 	// info record; one that removed nothing is the steady state and is verbose.
-	d.log.Log(base, "ledger sweep removed %d write_ledger rows past the retention window batches=%d retention_bytes=%d duration_ms=%d",
-		result.Deleted, result.Batches, d.ledgerRetention, elapsed.Milliseconds())
+	d.log.Log(base, "ledger sweep removed {deleted} write_ledger rows past the retention window batches={batches} retention_bytes={retention_bytes} duration_ms={duration_ms}",
+		logging.Values{"deleted": result.Deleted, "batches": result.Batches, "retention_bytes": d.ledgerRetention, "duration_ms": elapsed.Milliseconds()})
 	return result, nil
 }
 
@@ -336,8 +336,8 @@ func (d *DB) pruneLedgerBatch(ctx context.Context, after string, transaction int
 		return sweptBatch{}, d.refuse(base, storagef(err, "commit ledger sweep transaction"))
 	}
 	batch = swept
-	d.log.LogVerbose(base, "ledger sweep transaction %d committed deleted=%d files=%d ended_by=%s",
-		transaction, batch.deleted, batch.files, batch.ended)
+	d.log.LogVerbose(base, "ledger sweep transaction {transaction} committed deleted={deleted} files={files} ended_by={ended_by}",
+		logging.Values{"transaction": transaction, "deleted": batch.deleted, "files": batch.files, "ended_by": batch.ended})
 	return batch, nil
 }
 

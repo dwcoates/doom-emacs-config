@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
+	"agentrepl/logging/logsite"
 )
 
 // ErrWatcherClosed is what a wait answers when the watcher was torn down under
@@ -217,7 +218,7 @@ func (w *watcher) turnEndedLocked(turn ids.TurnID, how TurnClose) {
 			w.adopted = nil
 		}
 		w.standNextWaitingLocked(turn)
-	} else if !w.dropWaitingLocked(turn, "a turn waiting behind the adopted turn ended") {
+	} else if !w.dropWaitingLocked(turn, logsite.Msg("a turn waiting behind the adopted turn ended")) {
 		w.turn = nil
 	}
 	// THE LIFECYCLE SINK IS TOLD OFF THE LOCK. It is the prompt queue, and a
@@ -274,13 +275,13 @@ func (w *watcher) standNextWaitingLocked(ended ids.TurnID) {
 
 // dropWaitingLocked takes `turn` out of the waiting stack, reporting whether
 // it was there.
-func (w *watcher) dropWaitingLocked(turn ids.TurnID, why string) bool {
+func (w *watcher) dropWaitingLocked(turn ids.TurnID, why logsite.Message) bool {
 	for i := range w.waiting {
 		if w.waiting[i].turn != turn {
 			continue
 		}
 		w.waiting = append(w.waiting[:i], w.waiting[i+1:]...)
-		w.log.Debug("daemon.sessionwatcher.turn_waiting_dropped", why, dlog.Context{
+		w.log.Log(dlog.LevelDebug, "daemon.sessionwatcher.turn_waiting_dropped", why, dlog.Context{
 			"turn_id": string(turn), "turn_in_flight": ids.Optional(w.turn), "still_waiting": len(w.waiting),
 		})
 		return true

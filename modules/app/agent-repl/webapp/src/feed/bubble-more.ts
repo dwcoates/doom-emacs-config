@@ -37,10 +37,12 @@
 import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
 import { EXPANDED_CLASS } from "../expand.js";
 import { pageMutationObserver, pageResizeObserver } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { applyCollapsedWidth, clearCollapsedWidth, collapsedWidthOf } from "./collapsed-width.js";
 import { applyEllipsisTrim, clearEllipsisTrim } from "./ellipsis-trim.js";
 import { onDiscard } from "./ticking.js";
+
+const log = createLogger("webapp.feed.bubble-more");
 
 /** The class the stylesheet turns into the bottom fade. */
 export const HAS_MORE_CLASS = "has-more";

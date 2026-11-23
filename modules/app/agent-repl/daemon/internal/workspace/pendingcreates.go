@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
@@ -391,7 +392,7 @@ type holdReason struct {
 	// tell says to one reporter that the create waits.
 	tell func(r CreateProgress, id PendingCreateID)
 	// waits is the record a hold is announced with.
-	waits string
+	waits logsite.Message
 }
 
 // networkHold is the wait for the network a naming call failed on.
@@ -406,7 +407,7 @@ func (v *verbs) networkHold(network *namingNetworkError) holdReason {
 			return &NetworkWaitError{ID: id, Evidence: network.verdict.Evidence}
 		},
 		tell:  func(r CreateProgress, id PendingCreateID) { r.WaitingForNetwork(id) },
-		waits: "the create waits for the network; it resumes from the naming call when the network is restored",
+		waits: logsite.Msg("the create waits for the network; it resumes from the naming call when the network is restored"),
 	}
 }
 
@@ -434,7 +435,7 @@ func (v *verbs) requesterTurnHold(turn *requesterTurnInFlight) holdReason {
 			return &RequesterTurnWaitError{ID: id, Requester: turn.requester}
 		},
 		tell:  func(r CreateProgress, id PendingCreateID) { r.WaitingForRequesterTurn(id) },
-		waits: "the create waits for its requester's turn to end; it resumes from the start once that turn has ended",
+		waits: logsite.Msg("the create waits for its requester's turn to end; it resumes from the start once that turn has ended"),
 	}
 }
 
@@ -530,7 +531,7 @@ func (v *verbs) hold(ctx context.Context, log dlog.Logger, entry *pendingCreate,
 	attempt := entry.attempt
 	entry.attempt = nil
 	v.pending.mu.Unlock()
-	log.Info(opPendingCreate, why.waits, dlog.Merge(why.fields, dlog.Context{
+	log.Log(dlog.LevelInfo, opPendingCreate, why.waits, dlog.Merge(why.fields, dlog.Context{
 		"cause": why.cause, "subscribers": len(reporters),
 	}))
 	for _, r := range reporters {

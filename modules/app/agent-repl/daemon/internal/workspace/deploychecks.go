@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -102,15 +103,17 @@ func (v *verbs) SetDeployMediatorEffort(ctx context.Context, ws wsm.WorkspaceID)
 		v.deps.Log.Global().Info(opDeployChecks, "picked the deploy mediator's effort; its session starts at it", fields)
 		return nil
 	}
-	if !slices.Contains(served, mediatorEffort) {
-		err := fmt.Errorf("the selector served %v and never offered %v", served, mediatorEffort)
+	// unset records the effort's failure, ERR, once for every way it fails.
+	unset := func(err error) error {
 		v.deps.Log.Global().Error(opDeployChecks, "the deploy mediator's effort could not be set", dlog.WithCause(fields, err))
 		return fmt.Errorf("set the deploy mediator %s's effort: %w", ws, err)
 	}
+	if !slices.Contains(served, mediatorEffort) {
+		return unset(fmt.Errorf("the selector served %v and never offered %v", served, mediatorEffort))
+	}
 	_, log, err := v.owned(ctx, "SetDeployMediatorEffort", ws)
 	if err != nil {
-		v.deps.Log.Global().Error(opDeployChecks, "the deploy mediator's effort could not be set", dlog.WithCause(fields, err))
-		return fmt.Errorf("set the deploy mediator %s's effort: %w", ws, err)
+		return unset(err)
 	}
 	v.deps.Topbar.SetPickedEffort(ws, mediatorEffort)
 	v.deps.Sessions.SwitchEffort(log, ws, mediatorEffort)
@@ -227,7 +230,7 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 		return err
 	}
 	_, err := v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,
-		"a cold gate stands on the standing deploy check; it is answered compact-and-resume at once", nil)
+		logsite.Msg("a cold gate stands on the standing deploy check; it is answered compact-and-resume at once"), nil)
 	return err
 }
 
@@ -251,7 +254,7 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 func (v *verbs) CompactRequeuedMergeColdGate(ctx context.Context, ws wsm.WorkspaceID) (bool, error) {
 	settled := make(chan ColdGateAnswerSettled, 1)
 	answered, err := v.answerColdGateByCompaction(ctx, "CompactRequeuedMergeColdGate", ws, false,
-		"a cold gate stands on the workspace of a requeued merge; it is answered by a compaction at once",
+		logsite.Msg("a cold gate stands on the workspace of a requeued merge; it is answered by a compaction at once"),
 		func(outcome ColdGateAnswerSettled) { settled <- outcome })
 	if err != nil || !answered {
 		return false, err
@@ -279,7 +282,7 @@ func (v *verbs) CompactRequeuedMergeColdGate(ctx context.Context, ws wsm.Workspa
 // SETTLED, when given, is told how the re-open ended (answerColdGate). It
 // answers whether a gate stood to answer: a workspace with no gate standing
 // is left as it is.
-func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws wsm.WorkspaceID, resume bool, why string, settled func(ColdGateAnswerSettled)) (bool, error) {
+func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws wsm.WorkspaceID, resume bool, why logsite.Message, settled func(ColdGateAnswerSettled)) (bool, error) {
 	_, log, err := v.owned(ctx, verb, ws)
 	if err != nil {
 		return false, err
@@ -292,7 +295,7 @@ func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws 
 	if resume {
 		answer.Choice = &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: compact}
 	}
-	log.Info(opDeployChecks, why, dlog.Context{"resume": resume})
+	log.Log(dlog.LevelInfo, opDeployChecks, why, dlog.Context{"resume": resume})
 	if err := v.answerColdGate(ctx, ws, answer, settled); err != nil {
 		return false, err
 	}

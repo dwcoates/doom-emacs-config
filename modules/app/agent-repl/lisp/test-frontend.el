@@ -668,7 +668,7 @@ stands.  BODY sees `buf' (the webview slot), `input-buf', `input-win' and
                (cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                          ((symbol-function 'agent-repl--ensure-input-buffer)
                           (lambda (_ws) input-buf))
-                         ((symbol-function 'agent-repl--info)
+                         ((symbol-function 'agent-repl--emit-info)
                           (agent-repl-test--record-into logged)))
                  ,@body)))
          (dolist (win (window-list nil 'no-minibuffer))
@@ -1132,7 +1132,7 @@ ANSWER is `reported' or `refused'.  `events' collects (report WS) and
   "A report the daemon did not take keeps the webview, and records why."
   (agent-repl-test-frontend--closing-panel 'refused
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-frontend-close-panel)
         ;; Assert
@@ -1987,7 +1987,7 @@ purely daemon-driven."
 (ert-deftest agent-repl-test-rendezvous-rejects-a-non-positive-party-count ()
   "A rendezvous of nobody is a caller bug and fails hard rather than firing."
   ;; Act / Assert
-  (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+  (cl-letf (((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
     (should-error (agent-repl--frontend-make-rendezvous 0 #'ignore) :type 'error)))
 
 ;;;; ---- the rebuild's success routing: gate vs direct bounce --------------
@@ -2260,7 +2260,7 @@ one place where a decoration failing may not cost the user a page."
         errors)
     (unwind-protect
         (agent-repl-test-frontend--with-webview buf "*agent-frontend-old-ws*" "new-ws"
-          (cl-letf (((symbol-function 'agent-repl--error)
+          (cl-letf (((symbol-function 'agent-repl--emit-error)
                      (agent-repl-test--record-into errors)))
             ;; Act
             (should (null (agent-repl--frontend-rename-webview "new-ws"))))
@@ -2278,7 +2278,7 @@ one place where a decoration failing may not cost the user a page."
          (list (lambda () (error "decoration failed"))))
         logged-workspace)
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--warn)
+        (cl-letf (((symbol-function 'agent-repl--emit-warn)
                    (lambda (ws _fmt &rest _args)
                      (setq logged-workspace ws))))
           ;; Act
@@ -2507,7 +2507,7 @@ composer's content may reach its height."
           (agent-repl-test-frontend--mounting
             (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
                        (lambda (_ws) input-buf))
-                      ((symbol-function 'agent-repl--log)
+                      ((symbol-function 'agent-repl--emit-log)
                        (agent-repl-test--record-into records)))
               ;; Act
               (agent-repl--frontend-display-webview "ws1" buf)
@@ -2659,7 +2659,7 @@ Binds `resized' to the resize calls made, newest first."
                      ((symbol-function 'agent-repl--frontend-widget-size) (lambda (_xw) ,size))
                      ((symbol-function 'agent-repl--frontend-resize-widget)
                       (lambda (xw w h) (push (list xw w h) resized)))
-                     ((symbol-function 'agent-repl--log) #'ignore))
+                     ((symbol-function 'agent-repl--emit-log) #'ignore))
              ,@body))
        (kill-buffer buf))))
 
@@ -2867,7 +2867,7 @@ Binds `resized' to the resize calls made, newest first."
   "An unreadable answer reaches the canonical error log."
   ;; Arrange
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into errors)))
       ;; Act
       (ignore-errors (agent-repl--frontend-copy-parse "not json")))
@@ -2880,14 +2880,14 @@ Binds `resized' to the resize calls made, newest first."
 
 (ert-deftest agent-repl-test-copy-null-selection-object-signals ()
   "A page with no selection object is an invariant violation."
-  (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+  (cl-letf (((symbol-function 'agent-repl--emit-error) #'ignore))
     (should-error (agent-repl--frontend-copy-decision '(:id 1 :text nil :focused t)))))
 
 (ert-deftest agent-repl-test-copy-null-selection-object-is-logged ()
   "The missing selection object reaches the canonical error log."
   ;; Arrange
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into errors)))
       ;; Act
       (ignore-errors (agent-repl--frontend-copy-decision '(:id 1 :text nil :focused t))))
@@ -3022,7 +3022,7 @@ page was asked."
   "The copy's decision is recorded."
   (agent-repl-test--with-composer-copy "entropy"
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-frontend-copy-held))
       ;; Assert
@@ -3087,7 +3087,7 @@ page was asked."
   "A refused callback reaches the canonical error log."
   ;; Arrange
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error)
+    (cl-letf (((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-into errors)))
       (with-temp-buffer
         ;; Act

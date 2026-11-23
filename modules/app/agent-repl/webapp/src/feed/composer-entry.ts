@@ -25,13 +25,15 @@
  */
 import type { FeedComposerEntry } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { RevealGeometry, TailFollow } from "../scroll.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { TREE_NODE_ATTRIBUTE, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
 import { revealInBubbles } from "./node-reveal.js";
 import { FEED_ROW_SELECTOR } from "./row-id.js";
 import { boxSubtree, unboxAll, standingBox, type BoxedNode, type SubtreeBox } from "./subtree-box.js";
+
+const log = createLogger("webapp.feed.composer-entry");
 
 /** The class every line inside the box wears. */
 export const COMPOSER_ENTRY_CLASS = "mp-line-composing";

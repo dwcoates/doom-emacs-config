@@ -18,7 +18,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import { rawStruct } from "./residue.js";
 
-const LOGGER = bindLog({ component: "shim-convert-blocks", operation: "shim.convert.blocks" });
+const LOGGER = bindLog("shim.convert.blocks", { component: "shim-convert-blocks", operation: "shim.convert.blocks" });
 
 /** A vendor content block, as loosely as it must be read before it is typed. */
 interface VendorBlock {

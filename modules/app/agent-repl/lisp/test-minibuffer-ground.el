@@ -21,7 +21,7 @@
   (declare (indent 0))
   `(let ((logs nil)
          (agent-repl-input-background "#123456"))
-     (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+     (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
        (with-temp-buffer ,@body))))
 
 ;;;; ---- Painting one buffer ----
@@ -81,7 +81,7 @@
   (let ((original agent-repl-input-background))
     (unwind-protect
         (let ((agent-repl-input-background "#123456"))
-          (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+          (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
             ;; Act
             (agent-repl-minibuffer-ground-paint-all))
           ;; Assert
@@ -90,7 +90,7 @@
                                      (car (agent-repl-test--remapped-backgrounds 'default))))
                                  agent-repl--minibuffer-ground-echo-buffers)
                          '("#123456" "#123456"))))
-      (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
         (let ((agent-repl-input-background original))
           (agent-repl-minibuffer-ground-paint-all))))))
 
@@ -99,7 +99,7 @@
   (let ((original agent-repl-input-background))
     (unwind-protect
         (let ((agent-repl-input-background "#123456"))
-          (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+          (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
             ;; Act
             (agent-repl-minibuffer-ground-paint-all))
           ;; Assert
@@ -109,7 +109,7 @@
               (with-current-buffer buf
                 (should (equal (car (agent-repl-test--remapped-backgrounds 'default))
                                "#123456"))))))
-      (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
         (let ((agent-repl-input-background original))
           (agent-repl-minibuffer-ground-paint-all))))))
 
@@ -144,8 +144,8 @@
     (unwind-protect
         (let ((agent-repl-input-background original)
               (agent-repl-input-background-painters (list #'agent-repl-minibuffer-ground-paint-all)))
-          (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
-                    ((symbol-function 'agent-repl--info) #'ignore))
+          (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore)
+                    ((symbol-function 'agent-repl--emit-info) #'ignore))
             ;; Act
             (agent-repl--input-background-set 'agent-repl-input-background "#123456")
             (agent-repl--input-background-set 'agent-repl-input-background "#abcdef"))
@@ -154,7 +154,7 @@
             (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
                                  (agent-repl-test--remapped-backgrounds 'fringe))
                            '(("#abcdef") ("#abcdef"))))))
-      (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
         (let ((agent-repl-input-background original))
           (agent-repl-minibuffer-ground-paint-all))))))
 

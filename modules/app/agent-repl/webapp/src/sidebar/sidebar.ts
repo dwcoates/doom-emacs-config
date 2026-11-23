@@ -28,7 +28,7 @@ import type { LocalFailureView } from "../failure/local.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createSelectionPaint, type RecordSidebarLatency } from "./selection-paint.js";
 import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv, type MarkPhase } from "./draw-timing.js";
 import type { AppContext, DaemonContext } from "../rpc/context.js";
@@ -70,6 +70,8 @@ import { createRailScrollKeep } from "./scroll-keep.js";
 import { createSelectionScroll, RAIL_BODY_CLASS } from "./selection-scroll.js";
 import { createQueueSelectionScroll } from "./queue-selection.js";
 import type { RosterVersion } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+
+const log = createLogger("webapp.sidebar.sidebar");
 
 /** What every mount answers with. */
 export interface Handle {
@@ -141,10 +143,10 @@ export function retireStoredPrefs(storage: Storage | null): void {
       context: { stored },
     });
   } catch (err) {
-    log.warn(`the sidebar could not retire its stored preferences: ${String(err)}`, {
+    log.warn("the sidebar could not retire its stored preferences: {err}", {
       operation: "sidebar.prefs.retire-failed",
       context: { cause: err },
-    });
+    }, { err: String(err) });
   }
 }
 
@@ -153,10 +155,10 @@ function pageStorage(): Storage | null {
   try {
     return globalThis.localStorage;
   } catch (err) {
-    log.warn(`the sidebar has no usable local storage: ${String(err)}`, {
+    log.warn("the sidebar has no usable local storage: {err}", {
       operation: "sidebar.prefs.unavailable",
       context: { cause: err },
-    });
+    }, { err: String(err) });
     return null;
   }
 }

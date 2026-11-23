@@ -95,9 +95,9 @@
   (declare (indent 0))
   `(let ((agent-repl-test-ps--info nil)
          (agent-repl-test-ps--warn nil))
-     (cl-letf (((symbol-function 'agent-repl--info)
+     (cl-letf (((symbol-function 'agent-repl--emit-info)
                 (agent-repl-test--record-into agent-repl-test-ps--info))
-               ((symbol-function 'agent-repl--warn)
+               ((symbol-function 'agent-repl--emit-warn)
                 (agent-repl-test--record-into agent-repl-test-ps--warn)))
        ,@body)))
 
@@ -232,7 +232,7 @@ cost up to seven cores per summary."
       (agent-repl-test-ps--unguarded
         (cl-letf (((symbol-function 'make-directory)
                    (lambda (&rest _) (error "Permission denied")))
-                  ((symbol-function 'agent-repl--warn)
+                  ((symbol-function 'agent-repl--emit-warn)
                    (agent-repl-test--record-into warned)))
           (should-not (agent-repl--prompt-summary-spawn "ws-one" "a reasonably long prompt to summarize"))
           (should-not agent-repl-test-ps--started))))
@@ -394,18 +394,18 @@ cost up to seven cores per summary."
     (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil))
               ((symbol-function 'agent-repl-link-newest) (lambda () 'conn))
               ((symbol-function 'agent-repl-rpc-report-vendor-spend) (lambda (&rest _) (setq sent t)))
-              ((symbol-function 'agent-repl--info) (lambda (&rest args) (push args infos))))
+              ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
       (agent-repl--prompt-summary-report-spend "ws" '((:model "m" :tokens nil)))
       (should-not sent)
-      (should (string-match-p "reason=no-ref" (cadr (car infos)))))))
+      (should (string-match-p "reason=no-ref" (car infos))))))
 
 (ert-deftest agent-repl-ps-a-refused-spend-report-is-recorded-at-error ()
   "A report the daemon refused is a defect, recorded at ERROR with its detail."
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error) (lambda (&rest args) (push args errors))))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
       (agent-repl--prompt-summary-spend-answered
        "ws" '((:model "m")) '(:arm :error :value (:arm :invalid :value (:detail "names no model"))))
-      (should (equal (car errors) '("ws" "elisp.prompt-summary.spend-refused calls=%d detail=%S" 1 "names no model"))))))
+      (should (equal (car errors) "elisp.prompt-summary.spend-refused calls=1 detail=\"names no model\"")))))
 
 (ert-deftest agent-repl-ps-the-command-reads-the-event-stream ()
   "The summary run asks the CLI for its event stream."
@@ -420,12 +420,13 @@ cost up to seven cores per summary."
       (cl-letf (((symbol-function 'agent-repl--prompt-summary-apply)
                  (lambda (&rest _) (setq applied t)))
                 ((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) "raw"))
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (&rest args) (push args warned))))
+                ((symbol-function 'agent-repl--emit-warn)
+                 (lambda (ws site &rest values)
+                   (push (cons ws (cons (agent-repl-log-site-render site values) values)) warned))))
         (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") nil "auth failed\n")
         (should-not applied)
         (should (equal (car warned)
-                       '("ws" "prompt-summary: run rejected result; clearing pending ok=%s output=%S current-raw-len=%d"
+                       '("ws" "prompt-summary: run rejected result; clearing pending ok=nil output=\"auth failed\" current-raw-len=3"
                          nil "auth failed" 3)))
         (should (member '(:last-prompt-summary-pending) agent-repl-test-ps--state))))))
 
@@ -436,13 +437,15 @@ cost up to seven cores per summary."
       (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) "raw"))
                 ((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :network-fault))
-                ((symbol-function 'agent-repl--warn)
-                 (lambda (&rest args) (push args warned)))
-                ((symbol-function 'agent-repl--log)
-                 (lambda (&rest args) (push args logged))))
+                ((symbol-function 'agent-repl--emit-warn)
+                 (lambda (ws site &rest values)
+                   (push (cons ws (cons (agent-repl-log-site-render site values) values)) warned)))
+                ((symbol-function 'agent-repl--emit-log)
+                 (lambda (ws site &rest values)
+                   (push (cons ws (cons (agent-repl-log-site-render site values) values)) logged))))
         (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") nil "getaddrinfo ENOTFOUND api.anthropic.com\n")
         (should-not warned)
-        (should (member '("ws" "prompt-summary: run rejected result while the network fault stands; clearing pending cause=network-fault ok=%s output=%S current-raw-len=%d"
+        (should (member '("ws" "prompt-summary: run rejected result while the network fault stands; clearing pending cause=network-fault ok=nil output=\"getaddrinfo ENOTFOUND api.anthropic.com\" current-raw-len=3"
                           nil "getaddrinfo ENOTFOUND api.anthropic.com" 3)
                         logged))
         (should (member '(:last-prompt-summary-pending) agent-repl-test-ps--state))))))
@@ -467,7 +470,7 @@ cost up to seven cores per summary."
     (let ((applied nil))
       (cl-letf (((symbol-function 'agent-repl--prompt-summary-apply)
                  (lambda (&rest _) (setq applied t)))
-                ((symbol-function 'agent-repl--warn) #'ignore))
+                ((symbol-function 'agent-repl--emit-warn) #'ignore))
         (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") t "  \n")
         (should-not applied)))))
 
@@ -476,7 +479,7 @@ cost up to seven cores per summary."
   (agent-repl-test-ps--with
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) "newer"))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (lambda (&rest args) (push args warned))))
         (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") nil "")
         (should-not warned)

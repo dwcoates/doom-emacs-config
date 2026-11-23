@@ -23,7 +23,7 @@ import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, failureOf, str } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-skill", operation: "shim.convert.skill" });
+const LOGGER = bindLog("shim.convert.tools.skill-use", { component: "shim-convert-skill", operation: "shim.convert.skill" });
 
 /**
  * The skill's name as the agent named it.

@@ -29,12 +29,14 @@ import type {
   FeedArtifactUrl,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderExternalLink } from "../../link.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import type { AppContext } from "../../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { agenticBubble } from "./controls.js";
+
+const log = createLogger("webapp.feed.cards.artifact");
 
 const PATH = "FeedArtifact";
 

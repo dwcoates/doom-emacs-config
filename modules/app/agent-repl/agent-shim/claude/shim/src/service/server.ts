@@ -59,7 +59,7 @@ import http from "node:http";
 import http2 from "node:http2";
 import { bindLog } from "../log.js";
 
-const LOGGER = bindLog({ component: "shim-server", operation: "shim.service.server" });
+const LOGGER = bindLog("shim.service.server", { component: "shim-server", operation: "shim.service.server" });
 
 /**
  * The HTTP/2 connection preface (RFC 9113 §3.4), which every h2c client sends
@@ -307,7 +307,7 @@ export function bindingPathOf(socketPath: string): string {
 function unlinkSocketFile(socketPath: string, why: string): void {
   try {
     unlinkSync(socketPath);
-    LOGGER.debug({ socket_path: socketPath, why }, `removed the shim socket file (${why})`);
+    LOGGER.debug({ socket_path: socketPath }, "removed the shim socket file ({why})", { why });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
     LOGGER.error(

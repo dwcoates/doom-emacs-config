@@ -11,7 +11,7 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { FOCUS_LEFT_COMPOSER, FOCUS_LEFT_EMACS, type FocusLeftSource } from "../../src/focus-left.js";
 import { SIDEBAR_ID, SIDEBAR_ROOT_CLASS, startSidebarPage, type StartSidebarPageDeps } from "../../src/host/sidebar-page.js";
 import type { LatencyReporter } from "../../src/latency-report.js";
-import { log, setLogger, type ForwardingLogger } from "../../src/log.js";
+import { createLogger, setLogger, type ForwardingLogger } from "../../src/log.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { createSidebarNotices } from "../../src/sidebar/notices.js";
 import { fakePopupChannel, quietPopupChannel } from "./popup-channel.js";
@@ -21,6 +21,8 @@ import { quietWebhostRuntime } from "./webhost-runtime.js";
 import type { WebhostRuntime } from "../../src/host/document.js";
 import { beginPage, tearDownPage } from "../../src/page-teardown.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
+
+const log = createLogger("webapp.test.host.sidebar-page");
 
 afterEach(() => {
   document.documentElement.classList.remove(SIDEBAR_ROOT_CLASS);

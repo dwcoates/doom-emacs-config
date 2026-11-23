@@ -37,6 +37,10 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'json)
 (require 'url-parse)
@@ -46,10 +50,6 @@
 (defvar agent-repl-persistent-wifi-quiet-functions)
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
@@ -212,8 +212,8 @@ the generation it was loaded at."
 (defun agent-repl--webhost-load (xw)
   "Load the host XW at its URL again, one reload generation later."
   (setq agent-repl--webhost-reload-generation (1+ agent-repl--webhost-reload-generation))
-  (agent-repl--info agent-repl--webhost-central "elisp.webhost.load generation=%d"
-                    agent-repl--webhost-reload-generation)
+  (agent-repl--info agent-repl--webhost-central "elisp.webhost.load generation={generation}"
+                    :generation agent-repl--webhost-reload-generation)
   (agent-repl--frontend-webview-navigate-widget xw (agent-repl-webhost-document-url agent-repl--webhost-url)))
 
 (defun agent-repl-webhost-daemon-conn ()
@@ -237,7 +237,7 @@ kills its buffers would otherwise take every workspace's page with it."
   (or agent-repl--webhost-killing
       (progn
         (agent-repl--warn agent-repl--webhost-central
-                          "elisp.webhost.kill-refused command=%S" this-command)
+                          "elisp.webhost.kill-refused command={command}" :command (prin1-to-string this-command))
         nil)))
 
 (defun agent-repl--webhost-on-load (event-type)
@@ -254,8 +254,8 @@ The stage rides only the event itself, as `xwidget-webkit-callback'
 reads it, so it is read here off `last-input-event' rather than passed."
   (when (eq event-type 'load-changed)
     (let ((status (nth 3 last-input-event)))
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
-                        status (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status={status} pages={pages} shown={shown}"
+                        :status status :pages (hash-table-count agent-repl--webhost-pages) :shown agent-repl--webhost-shown)
       (agent-repl--webview-on-commit
        status agent-repl--webhost-url (agent-repl--webhost-current-uri)
        #'agent-repl--webhost-take-back
@@ -322,12 +322,12 @@ names the web view in the record (`host', `sidebar')."
       (let* ((state (agent-repl-webhost-parse-answer raw))
              (errors (plist-get state :errors)))
         (if errors
-            (agent-repl--error scope "elisp.webview.boot-errors view=%s started=%s errors=%S"
-                               view (plist-get state :started) errors)
-          (agent-repl--info scope "elisp.webview.boot-state view=%s started=%s hooked=%s"
-                            view (plist-get state :started) (plist-get state :hooked))))
+            (agent-repl--error scope "elisp.webview.boot-errors view={view} started={started} errors={errors}"
+                               :view view :started (plist-get state :started) :errors (prin1-to-string errors))
+          (agent-repl--info scope "elisp.webview.boot-state view={view} started={started} hooked={hooked}"
+                            :view view :started (plist-get state :started) :hooked (plist-get state :hooked))))
     (error
-     (agent-repl--error scope "elisp.webview.boot-unreadable view=%s raw=%S error=%S" view raw err))))
+     (agent-repl--error scope "elisp.webview.boot-unreadable view={view} raw={raw} error={error}" :view view :raw (prin1-to-string raw) :error (prin1-to-string err)))))
 
 (defun agent-repl--webhost-on-boot (raw)
   "Record the host's RAW boot answer (`agent-repl--webview-record-boot').
@@ -377,8 +377,8 @@ every workspace's page with the site (2026-10-26, 17:06), so it is taken back
 at once and recorded at ERROR: the page that let the link through has a
 defect to fix, and the link itself was not opened."
   (agent-repl--error agent-repl--webhost-central
-                     "elisp.webhost.navigated-away uri=%s: an outward link escaped the page's routing; the host is taken back and the link was not opened"
-                     uri)
+                     "elisp.webhost.navigated-away uri={uri}: an outward link escaped the page's routing; the host is taken back and the link was not opened"
+                     :uri uri)
   (agent-repl--webhost-load (agent-repl-webhost-xwidget)))
 
 (defun agent-repl--webhost-callback (xwidget event-type)
@@ -433,8 +433,8 @@ handler is the prior one again."
       (unless (eq installed 'agent-repl--webhost-callback)
         (xwidget-put xw 'agent-repl-prior-callback 'xwidget-webkit-callback)
         (xwidget-put xw 'callback 'agent-repl--webhost-callback)
-        (agent-repl--info agent-repl--webhost-central "elisp.webhost.rewatched replaced=%s"
-                          (if (symbolp installed) installed (type-of installed)))))))
+        (agent-repl--info agent-repl--webhost-central "elisp.webhost.rewatched replaced={replaced}"
+                          :replaced (if (symbolp installed) installed (type-of installed)))))))
 
 (defun agent-repl-webhost-ensure ()
   "Return the host's live xwidget, creating the host if needed.
@@ -458,7 +458,7 @@ slots display it."
         (setq agent-repl--webhost-buffer buf
               agent-repl--webhost-url url)
         (agent-repl--webhost-watch-load xw)
-        (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url=%s" url)
+        (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url={url}" :url url)
         xw)))
 
 (defun agent-repl--webview-make-hidden (url name refuse-kill kill what)
@@ -534,19 +534,19 @@ serving an older webapp than this elisp, an ERROR no reload heals."
     (cond
      (agent-repl--webhost-predates-reload-pending
       (agent-repl--info agent-repl--webhost-central
-                        "elisp.webhost.predates-call op=%s action=none reason=reload-pending" op))
+                        "elisp.webhost.predates-call op={op} action=none reason=reload-pending" :op op))
      ((null conn)
       (agent-repl--warn agent-repl--webhost-central
-                        "elisp.webhost.predates-call op=%s action=none reason=no-link" op))
+                        "elisp.webhost.predates-call op={op} action=none reason=no-link" :op op))
      ((equal url agent-repl--webhost-reloaded-for-call)
       (agent-repl--error agent-repl--webhost-central
-                         "elisp.webhost.predates-call op=%s action=none reason=served-webapp-predates-elisp url=%s"
-                         op url))
+                         "elisp.webhost.predates-call op={op} action=none reason=served-webapp-predates-elisp url={url}"
+                         :op op :url url))
      (t
       (setq agent-repl--webhost-reloaded-for-call url
             agent-repl--webhost-predates-reload-pending t)
       (agent-repl--info agent-repl--webhost-central
-                        "elisp.webhost.predates-call op=%s action=reload url=%s" op url)
+                        "elisp.webhost.predates-call op={op} action=reload url={url}" :op op :url url)
       (agent-repl-webhost-reload)))))
 
 (defun agent-repl--webhost-answer-ws (answer)
@@ -563,15 +563,15 @@ does (a page cooling, a page from another build mid-rollout) and \"warn\"
 for what it should never see.  A bare string is a host from a build before
 notes carried a level, recorded at WARN as that build recorded them all; a
 level this build does not know is an ERROR naming it, never dropped."
-  (cond
-   ((stringp note)
-    (agent-repl--warn scope "elisp.webhost.note op=%s note=%s" op note))
-   ((equal (plist-get note :level) "info")
-    (agent-repl--info scope "elisp.webhost.note op=%s note=%s" op (plist-get note :text)))
-   ((equal (plist-get note :level) "warn")
-    (agent-repl--warn scope "elisp.webhost.note op=%s note=%s" op (plist-get note :text)))
-   (t
-    (agent-repl--error scope "elisp.webhost.note-unknown-level op=%s note=%S" op note))))
+  (let ((level (cond ((stringp note) 'warn)
+                     ((equal (plist-get note :level) "info") 'info)
+                     ((equal (plist-get note :level) "warn") 'warn))))
+    (if level
+        ;; One site for every note: its level tells a host's notes apart.
+        (agent-repl--log-at level scope "elisp.webhost.note op={op} note={note}"
+                            :op op :note (if (stringp note) note (plist-get note :text)))
+      (agent-repl--error scope "elisp.webhost.note-unknown-level op={op} note={note}"
+                         :op op :note (prin1-to-string note)))))
 
 (defun agent-repl-webhost-parse-answer (raw)
   "The host\='s RAW answer to a call or a read, as a plist.
@@ -591,14 +591,14 @@ cannot be read is recorded at ERROR under CENTRAL as PREFIX.answer-unreadable."
       (let* ((answer (agent-repl-webhost-parse-answer raw))
              (scope (funcall scope-of answer))
              (op (plist-get answer :op)))
-        (agent-repl--log scope "%s.answer op=%s id=%s outcome=%s"
-                         prefix op (plist-get answer :id) (plist-get answer :outcome))
+        (agent-repl--log scope "{prefix}.answer op={op} id={id} outcome={outcome}"
+                         :prefix prefix :op op :id (plist-get answer :id) :outcome (plist-get answer :outcome))
         (when (equal (plist-get answer :outcome) "unknown-call")
           (funcall predates op))
         (dolist (note (plist-get answer :notes))
           (agent-repl--webhost-record-note scope op note)))
     (error
-     (agent-repl--error central "%s.answer-unreadable raw=%S error=%S" prefix raw err))))
+     (agent-repl--error central "{prefix}.answer-unreadable raw={raw} error={error}" :prefix prefix :raw (prin1-to-string raw) :error (prin1-to-string err)))))
 
 (defun agent-repl--webhost-answered (raw)
   "Record the host's RAW answer to a call, and every note it carries.
@@ -616,7 +616,7 @@ is recorded by the caller and replayed when the host loads."
         (agent-repl--frontend-webview-execute-script-value
          xw (apply #'agent-repl--webhost-script method args) 'agent-repl--webhost-answered)
         t)
-    (agent-repl--log agent-repl--webhost-central "elisp.webhost.call-skipped method=%s reason=no-host" method)
+    (agent-repl--log agent-repl--webhost-central "elisp.webhost.call-skipped method={method} reason=no-host" :method method)
     nil))
 
 (defun agent-repl-webhost-read (method args callback)
@@ -645,7 +645,7 @@ be built (`agent-repl-frontend-webview-url')."
     (agent-repl-webhost-ensure)
     (unless (equal (gethash id agent-repl--webhost-pages) url)
       (puthash id url agent-repl--webhost-pages)
-      (agent-repl--info ws "elisp.webhost.page-ensured ws=%s id=%s" ws id))
+      (agent-repl--info ws "elisp.webhost.page-ensured ws={ws} id={id}" :ws ws :id id))
     ;; A HELD PAGE IS NO LONGER HELD BACK: the host drops its load button.
     (remhash id agent-repl--webhost-held-back)
     (agent-repl--webhost-call "ensure" id url)
@@ -659,11 +659,11 @@ when WS has no ref: a workspace Emacs shows is always registered."
          (id (plist-get ref :id))
          (dir (plist-get ref :dir)))
     (unless (and id dir)
-      (agent-repl--error ws "elisp.webhost.hold-back-unregistered ws=%s ref=%S" ws ref)
+      (agent-repl--error ws "elisp.webhost.hold-back-unregistered ws={ws} ref={ref}" :ws ws :ref (prin1-to-string ref))
       (error "webhost: %s has no workspace ref to hold its page back under" ws))
     (unless (equal (gethash id agent-repl--webhost-held-back) dir)
       (puthash id dir agent-repl--webhost-held-back)
-      (agent-repl--info ws "elisp.webhost.page-held-back ws=%s id=%s" ws id))
+      (agent-repl--info ws "elisp.webhost.page-held-back ws={ws} id={id}" :ws ws :id id))
     (agent-repl--webhost-call "holdBack" id dir)
     id))
 
@@ -706,8 +706,8 @@ the page measures from it to its conversation drawn
 lands with no load having taken it (`agent-repl-host--measure-downtime')."
   (when (agent-repl-webhost-shown-p ws)
     (let ((started (agent-repl--now-unix-ms)))
-      (agent-repl--info ws "elisp.webhost.downtime-noted ws=%s id=%s"
-                        ws (agent-repl--webhost-id ws))
+      (agent-repl--info ws "elisp.webhost.downtime-noted ws={ws} id={id}"
+                        :ws ws :id (agent-repl--webhost-id ws))
       started)))
 
 (defun agent-repl--webhost-take-downtime (id)
@@ -734,7 +734,7 @@ show, so the page can measure it."
       (agent-repl-page-unload-note-shown ws))
     (when (and id (not (equal id agent-repl--webhost-shown)))
       (setq agent-repl--webhost-shown id)
-      (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
+      (agent-repl--info ws "elisp.webhost.show ws={ws} id={id}" :ws ws :id id)
       (agent-repl--webhost-call "show" id switch-started)
       ;; THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same command:
       ;; the sidebar is a web view of its own (sidebar-view.el).
@@ -752,7 +752,7 @@ unloaded page's workspace still shows its gate at the composer's height
     (remhash id agent-repl--webhost-held-ingress)
     (when (equal id agent-repl--webhost-shown)
       (setq agent-repl--webhost-shown nil))
-    (agent-repl--info ws "elisp.webhost.page-removed ws=%s id=%s" ws id)
+    (agent-repl--info ws "elisp.webhost.page-removed ws={ws} id={id}" :ws ws :id id)
     (agent-repl--webhost-call "remove" id)))
 
 (defun agent-repl-webhost-shown-p (ws)
@@ -784,7 +784,7 @@ NOT MOVE WITH A PAGE: they follow the link (`agent-repl-webhost-follow-daemon').
       (puthash id url agent-repl--webhost-pages)
       (apply #'agent-repl--webhost-call "ensure" id url nil started
                (agent-repl--webhost-downtime-args id)))
-    (agent-repl--info ws "elisp.webhost.page-reloaded ws=%s id=%s" ws id)
+    (agent-repl--info ws "elisp.webhost.page-reloaded ws={ws} id={id}" :ws ws :id id)
     id))
 
 (defun agent-repl-webhost-follow-daemon ()
@@ -801,7 +801,7 @@ restart (on a fresh port) takes the host\='s calls at its link-up."
                               (and agent-repl--webhost-url
                                    (agent-repl--webhost-url-origin agent-repl--webhost-url))))
       (setq agent-repl--webhost-daemon-origin origin)
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.follows-daemon to=%s" origin)
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.follows-daemon to={to}" :to origin)
       (agent-repl--webhost-call "setDaemon" origin)
       (agent-repl-sidebar-view-follow-daemon origin))))
 
@@ -846,7 +846,7 @@ this (webapp/src/host/sidebar-popups.ts).  Nothing is sent when PIXELS is
 the offset already told."
   (unless (equal pixels agent-repl--webhost-sidebar-offset)
     (setq agent-repl--webhost-sidebar-offset pixels)
-    (agent-repl--info agent-repl--webhost-central "elisp.webhost.sidebar-offset pixels=%d" pixels)
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.sidebar-offset pixels={pixels}" :pixels pixels)
     (agent-repl--webhost-call "setSidebarOffset" pixels)))
 
 (defun agent-repl-webhost-set-held-ingress (ws entries)
@@ -1024,9 +1024,9 @@ out (`agent-repl-host-adopting-p')."
         (agent-repl--webhost-replay-page id "after"))
       (dolist (id (cdr lanes))
         (agent-repl--webhost-replay-page id "before"))
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d adopting=%d reload-started-ms=%s"
-                        (length (car lanes)) (length (cdr lanes)) (length adopting)
-                        agent-repl--webhost-reload-started-ms)))
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after={after} before={before} adopting={adopting} reload-started-ms={reload_started_ms}"
+                        :after (length (car lanes)) :before (length (cdr lanes)) :adopting (length adopting)
+                        :reload_started_ms agent-repl--webhost-reload-started-ms)))
   ;; THE RELOAD'S START WAS HANDED WITH THIS REPLAY'S PAGES; a later load is
   ;; not this reload's.
   (setq agent-repl--webhost-reload-started-ms nil)
@@ -1078,14 +1078,14 @@ the deploy's, and a page whose report did not land is recorded."
           (agent-repl-host-report-page-unloading
            ws answered
            (lambda ()
-             (agent-repl--info ws "elisp.webhost.reload-unloading-unreported ws=%s" ws)
+             (agent-repl--info ws "elisp.webhost.reload-unloading-unreported ws={ws}" :ws ws)
              (funcall answered))))))))
 
 (defun agent-repl--webhost-retire ()
   "Ask the host to end every page, navigating it on its answer."
   (if (agent-repl-webhost-read "retireAll" nil 'agent-repl--webhost-on-retired)
-      (agent-repl--log agent-repl--webhost-central "elisp.webhost.retiring pages=%d"
-                       (hash-table-count agent-repl--webhost-pages))
+      (agent-repl--log agent-repl--webhost-central "elisp.webhost.retiring pages={pages}"
+                       :pages (hash-table-count agent-repl--webhost-pages))
     (agent-repl--webhost-navigate)))
 
 (defun agent-repl--webhost-on-retired (raw)
@@ -1104,11 +1104,11 @@ is the reload asked for."
         (let ((answer (agent-repl-webhost-parse-answer raw)))
           (agent-repl--webhost-answered raw)
           (setq outcome (plist-get answer :outcome))
-          (agent-repl--info agent-repl--webhost-central "elisp.webhost.retired outcome=%s pages=%s"
-                            outcome (plist-get answer :pages)))
+          (agent-repl--info agent-repl--webhost-central "elisp.webhost.retired outcome={outcome} pages={pages}"
+                            :outcome outcome :pages (plist-get answer :pages)))
       (error
        (agent-repl--error agent-repl--webhost-central
-                          "elisp.webhost.retire-answer-unreadable raw=%S error=%S" raw err)))
+                          "elisp.webhost.retire-answer-unreadable raw={raw} error={error}" :raw (prin1-to-string raw) :error (prin1-to-string err))))
     (if (equal outcome "unknown-call")
         (agent-repl--info agent-repl--webhost-central
                           "elisp.webhost.retire-predated: the host predates retireAll; its reload is the predates call's")
@@ -1128,8 +1128,8 @@ webapp than it serves."
      ((null xw)
       (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host"))
      ((null conn)
-      (agent-repl--warn agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-link pages=%d"
-                        (hash-table-count agent-repl--webhost-pages)))
+      (agent-repl--warn agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-link pages={pages}"
+                        :pages (hash-table-count agent-repl--webhost-pages)))
      (t
       (setq agent-repl--webhost-url (agent-repl-webhost-url conn)
             agent-repl--webhost-daemon-origin nil
@@ -1138,8 +1138,8 @@ webapp than it serves."
       ;; THE SIDEBAR RELOADS WITH THE HOST, onto the same daemon, so the
       ;; two documents run one build (sidebar-view.el).
       (agent-repl-sidebar-view-navigate conn)
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
-                        (hash-table-count agent-repl--webhost-pages))))))
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages={pages}"
+                        :pages (hash-table-count agent-repl--webhost-pages))))))
 
 (defun agent-repl-webhost-reload ()
   "Reload the host, and so every page, on the daemon it belongs on, once per turn.
@@ -1160,10 +1160,10 @@ replays every page.  The host's reload fetches the build the daemon
 serves, which is BUILD from the first push on, so a push naming the build
 the host was last reloaded onto is already met."
   (if (equal build agent-repl--webhost-build)
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-met build=%s" build)
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-met build={build}" :build build)
     (agent-repl-webhost-reload)
     (setq agent-repl--webhost-build build)
-    (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build=%s" build)))
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build={build}" :build build)))
 
 (agent-repl--webhost-rewatch)
 

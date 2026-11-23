@@ -209,9 +209,12 @@ func (d *Detector) Observe(document string, at time.Time, blockedMS int64) {
 		largest = fmt.Sprintf("the largest document is %s %s at %d elements",
 			documents[0]["kind"], documents[0]["name"], documents[0]["dom_nodes"])
 	}
-	d.log.Error(op, fmt.Sprintf(
-		"%d of the last %s's %d %s web-process stalls fell on one phase of WebKit's %s memory-pressure cycle, where chance puts at most %d: the process is under sustained memory pressure; %d documents are loaded in it, %s",
-		onBeat, Window, len(c.stalls), document, Period, byChance-1, len(documents), largest), ctx)
+	ctx["window"], ctx["period"] = Window.String(), Period.String()
+	ctx["documents_loaded"], ctx["largest"] = len(documents), largest
+	d.log.With(ctx).Error(op,
+		"{stalls_on_beat} of the last {window}'s {stalls_in_window} {document} web-process stalls fell on one phase of WebKit's {period} memory-pressure cycle, where chance puts at most {stalls_by_chance}: the process is under sustained memory pressure; {documents_loaded} documents are loaded in it, {largest}",
+		dlog.Context{"stalls_on_beat": onBeat, "window": Window.String(), "stalls_in_window": len(c.stalls), "document": document,
+			"period": Period.String(), "stalls_by_chance": byChance - 1, "documents_loaded": len(documents), "largest": largest})
 }
 
 // Census records DOC's latest statement of its size, stated AT.

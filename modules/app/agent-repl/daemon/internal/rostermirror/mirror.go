@@ -36,6 +36,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -157,7 +158,7 @@ func (m *Mirror) Run(ctx context.Context) {
 
 	stream, err := m.deps.Dial(ctx, m.deps.Incumbent)
 	if err != nil {
-		m.end(ctx, fields, "the incumbent's roster stream could not be opened; every row is this daemon's own", err)
+		m.end(ctx, fields, logsite.Msg("the incumbent's roster stream could not be opened; every row is this daemon's own"), err)
 		return
 	}
 	defer func() {
@@ -185,13 +186,13 @@ func (m *Mirror) Run(ctx context.Context) {
 	if err == nil {
 		err = errors.New("the stream ended without the incumbent's planned ending")
 	}
-	m.end(ctx, fields, "the incumbent's roster stream failed; every row is this daemon's own", err)
+	m.end(ctx, fields, logsite.Msg("the incumbent's roster stream failed; every row is this daemon's own"), err)
 }
 
 // end withdraws the mirror after its subscription ended with ERR: at DEBUG
 // when the mirror's own context ended it (Stop, or the successor's
 // lifetime), at ERROR otherwise.
-func (m *Mirror) end(ctx context.Context, fields dlog.Context, message string, err error) {
+func (m *Mirror) end(ctx context.Context, fields dlog.Context, message logsite.Message, err error) {
 	switch {
 	case ctx.Err() != nil:
 		m.mu.Lock()
@@ -209,7 +210,7 @@ func (m *Mirror) end(ctx context.Context, fields dlog.Context, message string, e
 		// envelope: unexpected EOF" when only unavailable was judged gone.
 		m.deps.Log.Info(Op, "the incumbent's roster stream ended with the incumbent gone; every row is this daemon's own", dlog.WithCause(fields, err))
 	default:
-		m.deps.Log.Error(Op, message, dlog.WithCause(fields, err))
+		m.deps.Log.Log(dlog.LevelError, Op, message, dlog.WithCause(fields, err))
 	}
 	m.withdraw()
 }

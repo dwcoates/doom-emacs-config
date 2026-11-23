@@ -73,7 +73,7 @@ import { noticeSubjectOf, synthesizedNotice } from "./notice-subject.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
 
-const LOGGER = bindLog({ component: "shim-convert-stream", operation: "shim.convert.stream" });
+const LOGGER = bindLog("shim.convert.stream-events", { component: "shim-convert-stream", operation: "shim.convert.stream" });
 
 // ---------------------------------------------------------------------------
 // The fold's block state — one per stream
@@ -652,7 +652,7 @@ export function convertStreamEvent(
     }
 
     case "message_delta":
-      LOGGER.logVerbose({ event_type: event.type }, "consumed; the assistant message settles blocks");
+      LOGGER.logVerbose({ event_type: event.type }, "consumed a message delta; the assistant message settles blocks");
       return [];
 
     case "message_stop":

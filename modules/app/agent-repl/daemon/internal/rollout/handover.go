@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/bounce"
@@ -598,7 +599,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 				inflight.Standing(func() {
 					ws := byID[out.ws]
 					defer windows.Done()
-					if c.reoffer(ctx, ws, plan, windows, reofferAfterFailedTransfer, wsFields) {
+					if c.reoffer(ctx, ws, plan, windows, logsite.Msg(reofferAfterFailedTransfer), wsFields) {
 						plan.reclaimed.Add(1)
 					}
 				})
@@ -1010,9 +1011,9 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 		}
 		return c.offerAgain(ctx, ws, plan, windows, bounce.GateFreeness, fields)
 	case adoptionRefusedLate:
-		return c.reoffer(ctx, ws, plan, windows, reofferAfterLateFacts, fields)
+		return c.reoffer(ctx, ws, plan, windows, logsite.Msg(reofferAfterLateFacts), fields)
 	case adoptionExpired:
-		return c.reoffer(ctx, ws, plan, windows, reofferAfterExpiry, fields)
+		return c.reoffer(ctx, ws, plan, windows, logsite.Msg(reofferAfterExpiry), fields)
 	case adoptionTakenBack:
 		return true
 	default:
@@ -1044,7 +1045,7 @@ const (
 // would otherwise hold it quiesced for one window in every two; the delay
 // doubles from one adoption window up to the holdout cadence, and every
 // expiry is already recorded at ERROR with the workspace's own fault.
-func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, why string, fields dlog.Context) bool {
+func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, why logsite.Message, fields dlog.Context) bool {
 	plan.mu.Lock()
 	if plan.reoffers == nil {
 		plan.reoffers = map[ids.WorkspaceID]int{}
@@ -1062,7 +1063,7 @@ func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handov
 	if delay > c.deps.HoldoutWarnEvery {
 		delay = c.deps.HoldoutWarnEvery
 	}
-	c.log.Info(opHandover, why, dlog.Merge(fields, dlog.Context{"attempt": attempt, "delay": delay.String()}))
+	c.log.Log(dlog.LevelInfo, opHandover, why, dlog.Merge(fields, dlog.Context{"attempt": attempt, "delay": delay.String()}))
 	select {
 	case <-ctx.Done():
 		c.log.Debug(opHandover, "the daemon's lifetime ended before the workspace was offered again", fields)
@@ -1313,7 +1314,7 @@ func (c *controller) takeBackRefused(ctx context.Context, ws ids.WorkspaceID, le
 		kind = r.Kind
 	}
 	fields = dlog.Merge(fields, dlog.Context{"refusal": string(kind)})
-	c.log.Info(opAdoption, "the successor refused to adopt the workspace mid-work; taking it back, and it "+kind.next(), fields)
+	c.log.With(fields).Info(opAdoption, "the successor refused to adopt the workspace mid-work; taking it back, and it {next}", dlog.Context{"next": kind.next()})
 	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, move, fields)
 	switch {
 	case !reclaimed && err == nil:
@@ -1370,7 +1371,7 @@ func (c *controller) offerAgain(ctx context.Context, ws wsm.Workspace, plan *han
 		case err := <-outcome:
 			if err != nil && errors.Is(err, errServedWhole) {
 				c.log.Error(opTransfer, "the workspace's next transfer failed; the workspace is served here whole and is offered again", dlog.WithCause(fields, err))
-				return c.reoffer(ctx, ws, plan, windows, reofferAfterFailedTransfer, fields)
+				return c.reoffer(ctx, ws, plan, windows, logsite.Msg(reofferAfterFailedTransfer), fields)
 			}
 			if err != nil {
 				c.log.Error(opTransfer, "the workspace's next transfer failed; the workspace stays served here", dlog.WithCause(fields, err))

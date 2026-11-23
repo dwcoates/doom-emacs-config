@@ -64,7 +64,7 @@ import { PlannedReopen } from "./planned-reopen.js";
 // is pinned and an unparseable code is refused rather than defaulted (below).
 import { codeFromString } from "@connectrpc/connect/protocol-connect";
 import { createListeners } from "../listeners.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { SUCCESSOR_HEADER } from "./moved.js";
 import {
   SubscribePageRequestSchema,
@@ -80,6 +80,8 @@ import { reportClientFailure } from "./link.js";
 import { MalformedView } from "./malformed.js";
 import { watchStream, type StreamContext, type StreamHandle } from "./streams.js";
 import { callUnary } from "./unary.js";
+
+const log = createLogger("webapp.rpc.page-streams");
 
 /** The slice of the context this module needs; the whole AppContext fits. */
 export interface PageStreamContext extends StreamContext {
@@ -426,8 +428,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
             const metadata = new Headers();
             if (handedAway !== undefined) metadata.set(SUCCESSOR_HEADER, handedAway.address);
             const failure = new ConnectError(ended.how.value.message, code, metadata);
-            const record = handedAway === undefined ? log.error : log.info;
-            record(`a page subscription failed: ${ended.how.value.message}`, {
+            log.log(handedAway === undefined ? "error" : "info", log.message("a page subscription failed: {message}", { message: ended.how.value.message }), {
               operation: handedAway === undefined ? "rpc.page-subscription-failed" : "rpc.page-subscription-handed-away",
               context: {
                 page,

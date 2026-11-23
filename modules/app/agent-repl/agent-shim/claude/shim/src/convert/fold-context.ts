@@ -18,7 +18,7 @@ import type { conversationv1 } from "../proto.js";
 import type { FoldContext, LastChange } from "../engine/fold-context.js";
 import { subagentId } from "./ids.js";
 
-const LOGGER = bindLog({ component: "shim-convert-context", operation: "shim.convert.context" });
+const LOGGER = bindLog("shim.convert.fold-context", { component: "shim-convert-context", operation: "shim.convert.context" });
 
 export type { FoldContext, LastChange };
 

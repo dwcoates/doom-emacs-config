@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js";
 import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS, createRowHover } from "../../src/sidebar/row-hover.js";
 import type { DrawnRow, RowHover } from "../../src/sidebar/context.js";
 import { drawRosterFamily, drawRosterRow } from "../../src/sidebar/row.js";
 import type { PopupMirror } from "../../src/host/sidebar-popups.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { openRow, row, sidebarContext } from "./harness.js";
 
@@ -29,8 +29,8 @@ const isOpen = (copy: DrawnRow): boolean => copy.ws.classList.contains("open");
  * the worker ever made while this file's fake clock is installed took
  * `setTimeout` away from the tests after it.
  */
-function spyOnDebug(): MockInstance<typeof log.debug> {
-  const debug = vi.spyOn(log, "debug");
+function spyOnDebug(): ReturnType<typeof spyLog> {
+  const debug = spyLog("debug");
   onTestFinished(() => {
     debug.mockRestore();
   });

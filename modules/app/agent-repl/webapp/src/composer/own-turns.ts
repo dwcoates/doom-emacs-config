@@ -18,8 +18,10 @@
  * did not submit, and remembering across one would state authorship this page
  * cannot vouch for.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { TurnId } from "../../../proto/gen/ts/conversation/v1/turn_pb";
+
+const log = createLogger("webapp.composer.own-turns");
 
 /** The turn ids this page submitted, by their verbatim value. */
 const own = new Set<string>();
@@ -27,10 +29,10 @@ const own = new Set<string>();
 /** Remember a turn `SubmitPrompt` minted for this page. */
 export function rememberOwnTurn(turn: TurnId): void {
   own.add(turn.value);
-  log.debug(`this page minted turn ${turn.value}`, {
+  log.debug("this page minted turn {value}", {
     operation: "composer.own-turn",
     context: { turn: turn.value, held: own.size },
-  });
+  }, { value: turn.value });
 }
 
 /** Whether TURN is one this page submitted. */

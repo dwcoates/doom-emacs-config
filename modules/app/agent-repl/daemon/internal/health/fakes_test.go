@@ -119,6 +119,7 @@ func (s *stubSurfaces) BindRecordTee(dlog.RecordTee) {}
 
 func (s *stubSurfaces) BindRecordCounter(dlog.RecordCounter)      {}
 func (s *stubSurfaces) RetainDirectory(string, func(string) bool) {}
+func (s *stubSurfaces) BindBeforePrune(func(string))              {}
 func (s *stubSurfaces) DiscardWorkspace(string, string, bool) (dlog.DiscardReport, error) {
 	return dlog.DiscardReport{}, nil
 }

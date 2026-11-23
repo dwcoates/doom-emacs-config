@@ -19,7 +19,9 @@
  * TRANSIENT, NEVER VIEW STATE. An open dropdown is the page's own gesture in
  * progress; it is never the daemon's shared view (`view.ts`).
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.sidebar.dropdowns");
 
 /** One open dropdown, as the registry holds it. */
 export interface Dropdown {

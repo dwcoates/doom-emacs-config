@@ -34,7 +34,7 @@ import { conversationv1 } from "../../proto.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, obj, str } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-task-act", operation: "shim.convert.task_act" });
+const LOGGER = bindLog("shim.convert.tools.task-act", { component: "shim-convert-task-act", operation: "shim.convert.task_act" });
 
 /** The vendor tool name that CREATES a task; every other name in this unit changes one. */
 const CREATE_TOOL = "TaskCreate";
@@ -224,7 +224,7 @@ function settleUpdate(
   if (id === undefined || id === "") {
     LOGGER.debug(
       { tool_use_id: call.toolUseId },
-      "a task update names no task; no frame is produced",
+      "a task update's result names no task; no frame is produced",
     );
     return undefined;
   }

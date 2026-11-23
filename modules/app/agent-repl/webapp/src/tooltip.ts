@@ -21,8 +21,10 @@
  * The tooltip is drawn on `document.body`, fixed-positioned above its anchor,
  * because the footer dock clips its own overflow.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { queryAll } from "./dom.js";
+
+const log = createLogger("webapp.tooltip");
 
 /** How long the pointer rests on an element before its tooltip shows. */
 export const TOOLTIP_DELAY_MS = 1000;

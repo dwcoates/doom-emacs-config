@@ -16,6 +16,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Session as SyncSession } from "node:inspector";
 import { Session } from "node:inspector/promises";
 import { join } from "node:path";
+import type { ShimLogger } from "./log.js";
 
 import { ACTIVE_FILE, ARMED_DIR, EXIT_PROFILE_ENV, LOG_LEVEL_FILE, MAX_SECONDS, profilesRoot, validSession } from "../../../logging/ts/profile-session.js";
 import { parseWindowLevel, WINDOW_SECONDS, type LevelExpiry, type WindowLevel } from "../../../logging/ts/level-window.js";
@@ -236,11 +237,8 @@ export class RuntimeProfiler {
   }
 }
 
-/** The logger shape the shim records profiling events with. */
-export interface ProfilingLogger {
-  info(fields: Record<string, unknown>, message: string): void;
-  error(fields: Record<string, unknown>, message: string): void;
-}
+/** The logger shape the shim records profiling events with: a shim logger's literal-template methods. */
+export type ProfilingLogger = Pick<ShimLogger, "info" | "error">;
 
 /** Records one profiling event: a start, a stop, or a session's log level window opening or closing at info; a failure at error. */
 export function recordProfilingEvent(log: ProfilingLogger, event: ProfilingEvent): void {

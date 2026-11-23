@@ -20,9 +20,11 @@
  * it shows), and a name's position outlives a draw that does not show it, so
  * returning from Chat finds the workspace sections where they were left.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import { sectionRegions } from "./band-fit.js";
+
+const log = createLogger("webapp.sidebar.scroll-keep");
 
 /** A viewport of the rail, by the name its position is kept under. */
 interface NamedViewport {

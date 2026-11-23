@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -47,7 +48,7 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	fields = withField(fields, "summary", summary)
 	// A TELLING THE DAEMON'S EXIT OR A HANDOVER CUT is no failure: the
 	// next daemon's pass tells it again (mediationFailed records it at INFO).
-	failed := func(message string, err error) (ids.WorkspaceID, error) {
+	failed := func(message logsite.Message, err error) (ids.WorkspaceID, error) {
 		o.mediationFailed(ctx, fields, message, err)
 		return "", err
 	}
@@ -72,7 +73,7 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 		escalation, err = o.readyMediator(ctx, q, fields)
 	}
 	if err != nil {
-		return failed("the deploy mediator could not be readied for the escalation; it is not told, and the next pass tells it", err)
+		return failed(logsite.Msg("the deploy mediator could not be readied for the escalation; it is not told, and the next pass tells it"), err)
 	}
 	fields["workspace"] = string(escalation.ws)
 	// THE MEDIATOR THAT ESCALATED IN ITS OWN TURN TELLS THE USER ITSELF, as
@@ -83,10 +84,10 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	}
 	brief, err := o.escalationBriefText(repoDir, m, told, window)
 	if err != nil {
-		return failed("the escalation's brief could not be composed; the mediator is not briefed, and the next pass tells it", err)
+		return failed(logsite.Msg("the escalation's brief could not be composed; the mediator is not briefed, and the next pass tells it"), err)
 	}
 	if _, err := o.submitCheckPrompt(ctx, escalation.ws, wsm.NewTurnID(), brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
-		return failed("the escalation's brief could not be submitted to the mediator; the next pass tells it", err)
+		return failed(logsite.Msg("the escalation's brief could not be submitted to the mediator; the next pass tells it"), err)
 	}
 	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the deploy mediator", withField(fields, "problems", len(problems)))
 	return escalation.ws, nil

@@ -13,7 +13,7 @@
  * re-wraps only when the containing block's width moves the budget.
  */
 import { createConnectHookElement, type ConnectHookElement } from "../connect-hook.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 import { create } from "@bufbuild/protobuf";
 import { ParsedProseSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
@@ -37,9 +37,11 @@ import { RESPONSE_RUN_CLASS } from "../feed/response-run.js";
 import { applyTextReveal, clearTextReveal, fullTextOf, type RevealWindow } from "./text-reveal.js";
 import { FEED_TEXT_SCALE_PROPERTY, feedTextScaleToMeasure, onFeedTextScaleApplied } from "../feed/feed-text-scale.js";
 
+const log = createLogger("webapp.bubble.body");
+
 /** The webapp surfaces a wrap issue through the client logger. */
 const logTreeIssue: TreeIssue = (message, context) => {
-  log.debug(message, { operation: "bubble.body.tree", context });
+  log.log("debug", message, { operation: "bubble.body.tree", context });
 };
 
 /**
@@ -116,10 +118,10 @@ export const TREE_WIDTH_UNMEASURABLE = "bubble.body.tree-width-unmeasurable";
  * how trees came to wrap at 105 columns inside bubbles with room for 140.
  */
 function unmeasurable(reason: string, context: Record<string, unknown>): never {
-  log.error(`a metaprompt tree's budget could not be measured: ${reason}`, {
+  log.error("a metaprompt tree's budget could not be measured: {reason}", {
     operation: TREE_WIDTH_UNMEASURABLE,
-    context: { reason, ...context },
-  });
+    context: { ...context },
+  }, { reason });
   throw new Error(`metaprompt tree width unmeasurable: ${reason}`);
 }
 
@@ -628,10 +630,10 @@ export const BODY_INVARIANT = "bubble.body.invariant";
 
 /** A body-pipeline invariant broke: record it once, and fail. */
 function invariant(reason: string, context: Record<string, unknown>): never {
-  log.error(`the bubble body pipeline broke an invariant: ${reason}`, {
+  log.error("the bubble body pipeline broke an invariant: {reason}", {
     operation: BODY_INVARIANT,
-    context: { reason, ...context },
-  });
+    context: { ...context },
+  }, { reason });
   throw new Error(`bubble body invariant: ${reason}`);
 }
 

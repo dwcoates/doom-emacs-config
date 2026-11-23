@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
@@ -247,7 +248,7 @@ func (o *orchestrator) remediationTarget(ctx context.Context, ws ids.WorkspaceID
 func (o *orchestrator) resumeRemediationFinishes(ctx context.Context) {
 	finishes, err := o.deps.DB.RemediationFinishes(ctx)
 	if err != nil {
-		o.mediationFailed(ctx, nil, "could not read the remediation finishes to take up", err)
+		o.mediationFailed(ctx, nil, logsite.Msg("could not read the remediation finishes to take up"), err)
 		return
 	}
 	for _, f := range finishes {
@@ -342,7 +343,7 @@ func (o *orchestrator) runRemediationFinish(ctx context.Context, f wsm.Remediati
 		return
 	}
 	if err != nil {
-		o.mediationFailed(ctx, fields, "the remediation's finish could not go on; it is taken up again by the next daemon that serves the queues", err)
+		o.mediationFailed(ctx, fields, logsite.Msg("the remediation's finish could not go on; it is taken up again by the next daemon that serves the queues"), err)
 	}
 }
 
@@ -637,20 +638,38 @@ func (o *orchestrator) ReleaseEscalation(ctx context.Context, scope RepositorySc
 		o.deps.Log.Global().Info(opMediation, "refused a release of an escalation's hold: no escalation holds the queue", fields)
 		return refuse(ArmNoEscalationHeld, "", "no escalation holds the queue of %s", repo)
 	}
-	return o.releaseEscalated(ctx, repo, *m, "the user released the escalation's hold", fields)
+	return o.releaseEscalated(ctx, repo, *m, userEscalationRelease, fields)
 }
 
-// releaseEscalated releases escalated check M of queue REPO, as WHY says,
-// and moves the queue on.
-func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, why string, fields dlog.Context) error {
+// userEscalationRelease words the user's release of an escalation's hold.
+var userEscalationRelease = escalationRelease{
+	released: checkRelease{
+		unread:   logsite.Msg("the user released the escalation's hold; its check is released; what holds the queue after it could not be read, and the queue is kicked to read it again"),
+		held:     logsite.Msg("the user released the escalation's hold; its check is released; the queue stays held for {holder}"),
+		advances: logsite.Msg("the user released the escalation's hold; its check is released and the queue advances"),
+	},
+	unreleased: logsite.Msg("the user released the escalation's hold, but its check could not be released; the queue stays held"),
+}
+
+// escalationRelease words the records of one release of an escalated check,
+// each its caller's whole sentence: the check RELEASED (releasedCheck's
+// records), and the check that could not be (UNRELEASED).
+type escalationRelease struct {
+	released   checkRelease
+	unreleased logsite.Message
+}
+
+// releaseEscalated releases escalated check M of queue REPO, as WHY words
+// it, and moves the queue on.
+func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, why escalationRelease, fields dlog.Context) error {
 	fields = withField(fields, "repo", string(repo))
 	released, err := o.releaseCheck(ctx, repo, m, MediationEscalated)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, why+", but its check could not be released; the queue stays held", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Log(dlog.LevelError, opMediation, why.unreleased, withField(fields, "error", err.Error()))
 		return err
 	}
 	if released {
-		o.releasedCheck(ctx, repo, why+"; its check is released", why+"; its check is released and the queue advances", fields)
+		o.releasedCheck(ctx, repo, why.released, fields)
 	}
 	return nil
 }
@@ -925,6 +944,13 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 	// AN ESCALATION IS RELEASED ONCE NO FINISH OF THE CLOSED MEDIATOR HOLDS
 	// THE QUEUE, so its release's record names what holds the queue after it.
 	if !dispatched && m != nil && m.Escalated() {
-		_ = o.releaseEscalated(ctx, repo, *m, "the user closed the deploy mediator holding the escalation", fields)
+		_ = o.releaseEscalated(ctx, repo, *m, escalationRelease{
+			released: checkRelease{
+				unread:   logsite.Msg("the user closed the deploy mediator holding the escalation; its check is released; what holds the queue after it could not be read, and the queue is kicked to read it again"),
+				held:     logsite.Msg("the user closed the deploy mediator holding the escalation; its check is released; the queue stays held for {holder}"),
+				advances: logsite.Msg("the user closed the deploy mediator holding the escalation; its check is released and the queue advances"),
+			},
+			unreleased: logsite.Msg("the user closed the deploy mediator holding the escalation, but its check could not be released; the queue stays held"),
+		}, fields)
 	}
 }

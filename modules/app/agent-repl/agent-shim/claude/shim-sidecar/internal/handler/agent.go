@@ -43,7 +43,7 @@ type AgentTranscriptHandler struct {
 
 // NewAgentTranscriptHandler builds a handler with its own converter.
 func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
-	log.With(logging.Context{Operation: "agent-handler-new"}).LogVerbose("constructing agent transcript handler")
+	log.With(logging.Context{Operation: "agent-handler-new"}).LogVerbose("constructing agent transcript handler", nil)
 	obs := &seamObserver{}
 	conv := convert.New(log)
 	conv.SetObserver(obs)
@@ -54,7 +54,7 @@ func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.obs.bind(ctx)
 	h.log.With(handleCtx("agent-handle", ctx)).
-		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
+		LogVerbose("handling frames={frames_length} records_observed={records_observed}", logging.Values{"frames_length": len(frames), "records_observed": ctx.RecordsObserved})
 	// WHERE WE READ IS A READER FACT, not a conversion outcome, so it is
 	// remembered before the identity check below: a spool whose book never
 	// resolved was still READ, and a terminal minted for it must say so at a
@@ -68,12 +68,12 @@ func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 		// under the empty id, or under its filename, which the other plane would
 		// never agree with. Refused, loudly, rather than mis-filed.
 		h.log.With(handleErr("agent-handle", ctx)).Log(
-			"subagent transcript reached the handler with no agent identity; its meta file names the spawning call and must be read before it is tailed, so nothing is converted for it")
+			"subagent transcript reached the handler with no agent identity; its meta file names the spawning call and must be read before it is tailed, so nothing is converted for it", nil)
 		return nil
 	}
 	out := convertFrames(h.conv, h.log, frames, ctx)
 	h.log.With(handleCtx("agent-handle", ctx)).
-		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
+		LogVerbose("handled frames={frames_length} entries={out_length}", logging.Values{"frames_length": len(frames), "out_length": len(out)})
 	return out
 }
 

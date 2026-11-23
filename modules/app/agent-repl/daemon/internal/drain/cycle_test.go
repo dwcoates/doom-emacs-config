@@ -569,7 +569,7 @@ func TestCycleDownThenReportsHowTheStandDownSettled(t *testing.T) {
 	}{
 		{name: "an idle visible session is parked", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			return h.workspace(t, instant)
-		}, want: CycleOutcome{Down: true, Why: cycleReason.done}},
+		}, want: CycleOutcome{Down: true, Why: cycleReason.done.Template()}},
 		{name: "the workspace in view is kept up", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
 			if err := h.db.SetCurrent(context.Background(), ws, time.Unix(1_700_000_000, 0)); err != nil {
@@ -663,7 +663,7 @@ func TestAMergeQueuedParkParksTheSessionForItsOwnReason(t *testing.T) {
 	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != mergeQueuedReason.detail {
 		t.Fatalf("terminal = %+v, want the one park with the sync merge's detail", term)
 	}
-	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opMergeQueued, Message: mergeQueuedReason.done})
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opMergeQueued, Message: mergeQueuedReason.done.Template()})
 	if !ok {
 		t.Fatalf("records = %+v, want the park recorded at info", records(h.log, opMergeQueued))
 	}

@@ -12,10 +12,12 @@
  */
 import { markdownSlot, proseCharacters } from "../../bubble/body.js";
 import { BUBBLE_UNCAPPED, drawBubble } from "../../bubble/draw.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { RowContext } from "../renderers.js";
 import type { FeedSubagentResult } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+
+const log = createLogger("webapp.feed.cards.subagent-result");
 
 const PATH = "FeedSubagentResult";
 

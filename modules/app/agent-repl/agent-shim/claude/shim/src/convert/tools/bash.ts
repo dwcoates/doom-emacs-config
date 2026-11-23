@@ -37,7 +37,7 @@ import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, failureOf, num, resultText, settle, str, strOr, uint } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.bash" });
+const LOGGER = bindLog("shim.convert.tools.bash", { component: "shim-convert-tools", operation: "shim.convert.tools.bash" });
 
 /** What was run, restated on every frame so each stands alone. */
 function bashCommand(call: PendingCall, line: string): conversationv1.AgentBashCommand {

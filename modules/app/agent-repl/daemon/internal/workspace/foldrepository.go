@@ -221,7 +221,7 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 	if err != nil {
 		return err
 	}
-	log.Info(spec.op, "recorded the "+spec.what+"'s fold", nil)
+	log.Info(spec.op, "recorded the {what}'s fold", dlog.Context{"what": spec.what})
 	v.republishRegistry(ctx, log, spec.op)
 	if !spec.folded {
 		// EVERY EXPAND IS THE USER'S OWN: only the sidebar's rpcs reach a
@@ -232,7 +232,7 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 		}
 		for _, stamp := range stamps {
 			if err := v.deps.DB.StampUserAttention(ctx, stamp.Kind, stamp.Target, v.now()); err != nil {
-				log.Error(spec.op, "could not stamp the user's open of the "+spec.what, dlog.Context{"cause": err.Error(), "attention": string(stamp.Kind), "stamped": stamp.Target})
+				log.Error(spec.op, "could not stamp the user's open of the {what}", dlog.Context{"what": spec.what, "cause": err.Error(), "attention": string(stamp.Kind), "stamped": stamp.Target})
 				return fmt.Errorf("stamp the open of %s %q: %w", spec.what, stamp.Target, err)
 			}
 		}
@@ -253,8 +253,8 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 		standingDown = append(standingDown, string(ws.ID))
 		v.deps.StandDowns.StandDownFolded(ws.ID)
 	}
-	log.Info(spec.op, "the collapsed "+spec.what+"'s open workspaces are hidden; the spared keep running, the rest stand down once the fold's delay is over and they are free",
-		dlog.Context{"hidden": hidden, "spared": spared, "standing_down": standingDown})
+	log.Info(spec.op, "the collapsed {what}'s open workspaces are hidden; the spared keep running, the rest stand down once the fold's delay is over and they are free",
+		dlog.Context{"what": spec.what, "hidden": hidden, "spared": spared, "standing_down": standingDown})
 	return nil
 }
 
@@ -278,7 +278,7 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 		defer v.selection.Unlock()
 		listed, err := v.deps.DB.ListWorkspaces(ctx)
 		if err != nil {
-			log.Error(spec.op, "could not list the "+spec.what+"'s workspaces; the collapse was not recorded", dlog.Context{"cause": err.Error()})
+			log.Error(spec.op, "could not list the {what}'s workspaces; the collapse was not recorded", dlog.Context{"what": spec.what, "cause": err.Error()})
 			return nil, nil, fmt.Errorf("fold %s %q: list its workspaces: %w", spec.what, spec.target, err)
 		}
 		members = spec.members(listed)
@@ -301,7 +301,7 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 		if refused := spec.unknown(err); refused != nil {
 			return nil, nil, refused
 		}
-		log.Error(spec.op, "could not record the "+spec.what+"'s fold", dlog.Context{"cause": err.Error()})
+		log.Error(spec.op, "could not record the {what}'s fold", dlog.Context{"what": spec.what, "cause": err.Error()})
 		return nil, nil, fmt.Errorf("fold %s %q: %w", spec.what, spec.target, err)
 	}
 	return workspaces, members, nil
@@ -336,7 +336,7 @@ func (v *verbs) landOffFold(ctx context.Context, log dlog.Logger, spec foldTabsS
 		log.Error(spec.op, "the selection moved under the selection lock while a collapse landed off it", dlog.Context{"workspace": string(current)})
 		return fmt.Errorf("fold %s %q: land off %q: the selection moved under the selection lock", spec.what, spec.target, current)
 	}
-	targetLog.Info(spec.op, "the collapse moved the selection off the folded "+spec.what+" to the workspace selected before",
-		dlog.Context{"from": string(current), "place": target.Place, "by": string(by)})
+	targetLog.Info(spec.op, "the collapse moved the selection off the folded {what} to the workspace selected before",
+		dlog.Context{"what": spec.what, "from": string(current), "place": target.Place, "by": string(by)})
 	return nil
 }

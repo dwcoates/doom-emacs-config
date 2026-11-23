@@ -36,16 +36,15 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--live-ws-names "workspace")
-(declare-function agent-repl--log "core")
-(declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--state-save "history")
-(declare-function agent-repl--warn "core")
-(declare-function agent-repl--info "core")
-(declare-function agent-repl--error "core")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl--ws-known-p "workspace" (ws))
@@ -380,23 +379,23 @@ buffer is missing/dead, or no history exists yet."
         (buf (agent-repl--ws-get ws :input-buffer)))
     (cond
      ((not (integerp cap))
-      (agent-repl--log ws "prompt-summary: context unavailable reason=non-integer-cap cap=%S" cap)
+      (agent-repl--log ws "prompt-summary: context unavailable reason=non-integer-cap cap={cap}" :cap (prin1-to-string cap))
       nil)
      ((<= cap 0)
-      (agent-repl--log ws "prompt-summary: context disabled cap=%d" cap)
+      (agent-repl--log ws "prompt-summary: context disabled cap={cap}" :cap cap)
       nil)
      ((not buf)
-      (agent-repl--log ws "prompt-summary: context unavailable reason=no-input-buffer cap=%d" cap)
+      (agent-repl--log ws "prompt-summary: context unavailable reason=no-input-buffer cap={cap}" :cap cap)
       nil)
      ((not (buffer-live-p buf))
-      (agent-repl--log ws "prompt-summary: context unavailable reason=dead-input-buffer cap=%d buffer=%S" cap buf)
+      (agent-repl--log ws "prompt-summary: context unavailable reason=dead-input-buffer cap={cap} buffer={buffer}" :cap cap :buffer (prin1-to-string buf))
       nil)
      (t
       (let* ((hist (buffer-local-value 'agent-repl--input-history buf))
              (recent (seq-take (or hist nil) cap))
              (context (nreverse (copy-sequence recent))))
-        (agent-repl--log ws "prompt-summary: context collected cap=%d history-count=%d context-count=%d"
-                          cap (length (or hist nil)) (length context))
+        (agent-repl--log ws "prompt-summary: context collected cap={cap} history-count={history_count} context-count={context_count}"
+                          :cap cap :history_count (length (or hist nil)) :context_count (length context))
         context)))))
 
 (defun agent-repl--prompt-summary-format-context (context)
@@ -473,21 +472,21 @@ update on the workspace's webview buffer so the new segment paints
 immediately."
   (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
     (if (not (equal current-raw raw))
-        (agent-repl--log ws "prompt-summary: drop stale summary reason=raw-mismatch captured-raw-len=%d current-raw-len=%s summary-len=%d"
-                          (length raw)
-                          (if (stringp current-raw) (length current-raw) "non-string")
-                          (length summary))
-      (agent-repl--log ws "prompt-summary: apply accepted summary raw-len=%d summary-len=%d"
-                        (length raw) (length summary))
+        (agent-repl--log ws "prompt-summary: drop stale summary reason=raw-mismatch captured-raw-len={captured_raw_len} current-raw-len={current_raw_len} summary-len={summary_len}"
+                          :captured_raw_len (length raw)
+                          :current_raw_len (if (stringp current-raw) (length current-raw) "non-string")
+                          :summary_len (length summary))
+      (agent-repl--log ws "prompt-summary: apply accepted summary raw-len={raw_len} summary-len={summary_len}"
+                        :raw_len (length raw) :summary_len (length summary))
       (agent-repl--ws-put ws :last-prompt-summary summary)
       (agent-repl--ws-put ws :last-prompt-summary-pending nil)
       (agent-repl--prompt-summary-redisplay ws)
       ;; Persist so the summary survives Emacs restart — the tabline /
       ;; mode-line hint reads `:last-prompt-summary' to render the "what
       ;; is this ws working on" segment, which is otherwise lost on quit.
-      (agent-repl--log ws "prompt-summary: persist resolved summary begin summary-len=%d" (length summary))
+      (agent-repl--log ws "prompt-summary: persist resolved summary begin summary-len={summary_len}" :summary_len (length summary))
       (agent-repl--state-save ws)
-      (agent-repl--log ws "prompt-summary: persist resolved summary complete summary-len=%d" (length summary)))))
+      (agent-repl--log ws "prompt-summary: persist resolved summary complete summary-len={summary_len}" :summary_len (length summary)))))
 
 (defun agent-repl--prompt-summary-redisplay (ws)
   "Force a mode-line redisplay for WS's webview buffer.
@@ -503,11 +502,11 @@ live buffer instead of always missing one."
      ((not buf)
       (agent-repl--log-verbose ws "prompt-summary: redisplay skipped reason=no-frontend-buffer"))
      ((not (buffer-live-p buf))
-      (agent-repl--log-verbose ws "prompt-summary: redisplay skipped reason=dead-frontend-buffer buffer=%S" buf))
+      (agent-repl--log-verbose ws "prompt-summary: redisplay skipped reason=dead-frontend-buffer buffer={buffer}" :buffer (prin1-to-string buf)))
      (t
       (with-current-buffer buf
         (force-mode-line-update t))
-      (agent-repl--log-verbose ws "prompt-summary: redisplay complete buffer=%S" buf)))))
+      (agent-repl--log-verbose ws "prompt-summary: redisplay complete buffer={buffer}" :buffer (prin1-to-string buf))))))
 
 (defun agent-repl--prompt-summary-network-faulted-p (ws)
   "Return non-nil when WS stands in its network fault.
@@ -527,10 +526,10 @@ run answered the API's ENOTFOUND text during a DNS outage), so it is
 logged with the network fault as its cause rather than warned; any other
 rejection is a defect and warns."
   (if (agent-repl--prompt-summary-network-faulted-p ws)
-      (agent-repl--log ws "prompt-summary: run rejected result while the network fault stands; clearing pending cause=network-fault ok=%s output=%S current-raw-len=%d"
-                       ok (string-trim output) (length current-raw))
-    (agent-repl--warn ws "prompt-summary: run rejected result; clearing pending ok=%s output=%S current-raw-len=%d"
-                      ok (string-trim output) (length current-raw))))
+      (agent-repl--log ws "prompt-summary: run rejected result while the network fault stands; clearing pending cause=network-fault ok={ok} output={output} current-raw-len={current_raw_len}"
+                       :ok ok :output (prin1-to-string (string-trim output)) :current_raw_len (length current-raw))
+    (agent-repl--warn ws "prompt-summary: run rejected result; clearing pending ok={ok} output={output} current-raw-len={current_raw_len}"
+                      :ok ok :output (prin1-to-string (string-trim output)) :current_raw_len (length current-raw))))
 
 (defun agent-repl--prompt-summary-make-callback (ws raw)
   "Build the completion callback that writes the summary for WS/RAW.
@@ -541,11 +540,11 @@ OUTPUT; the runner owns the process and its buffer."
            (cleaned (agent-repl--prompt-summary-clean (or (car stream) ""))))
       ;; EVERY CALL THE RUN MADE IS REPORTED, whether or not it answered.
       (agent-repl--prompt-summary-report-spend ws (cdr stream))
-      (agent-repl--log ws "prompt-summary: run complete ok=%s stdout-len=%d summary-len=%d"
-                        ok (length output) (length cleaned))
+      (agent-repl--log ws "prompt-summary: run complete ok={ok} stdout-len={stdout_len} summary-len={summary_len}"
+                        :ok ok :stdout_len (length output) :summary_len (length cleaned))
       (if (and ok (not (string-empty-p cleaned)))
           (progn
-            (agent-repl--log ws "prompt-summary: run accepted result summary-len=%d" (length cleaned))
+            (agent-repl--log ws "prompt-summary: run accepted result summary-len={summary_len}" :summary_len (length cleaned))
             (agent-repl--prompt-summary-apply ws raw cleaned))
         ;; Failed / empty -- clear pending so the segment goes back to
         ;; whatever summary was there before (or nothing).
@@ -558,9 +557,9 @@ OUTPUT; the runner owns the process and its buffer."
                 (agent-repl--log ws "prompt-summary: persist rejected result begin")
                 (agent-repl--state-save ws)
                 (agent-repl--log ws "prompt-summary: persist rejected result complete"))
-            (agent-repl--log ws "prompt-summary: run rejected stale result; pending unchanged captured-raw-len=%d current-raw-len=%s"
-                              (length raw)
-                              (if (stringp current-raw) (length current-raw) "non-string"))))))))
+            (agent-repl--log ws "prompt-summary: run rejected stale result; pending unchanged captured-raw-len={captured_raw_len} current-raw-len={current_raw_len}"
+                              :captured_raw_len (length raw)
+                              :current_raw_len (if (stringp current-raw) (length current-raw) "non-string"))))))))
 
 (defun agent-repl--prompt-summary-run (dir cmd input callback)
   "Run the headless summary CMD from DIR over INPUT, then CALLBACK.
@@ -593,8 +592,8 @@ absent stays visible in the log."
   (when (getenv agent-repl--prompt-summary-forbid-env)
     (unless agent-repl--prompt-summary-forbid-warned
       (setq agent-repl--prompt-summary-forbid-warned t)
-      (agent-repl--info ws "elisp.prompt-summary.vendor-calls-forbidden env=%s -- prompt summaries are disabled for this process"
-                        agent-repl--prompt-summary-forbid-env))
+      (agent-repl--info ws "elisp.prompt-summary.vendor-calls-forbidden env={env} -- prompt summaries are disabled for this process"
+                        :env agent-repl--prompt-summary-forbid-env))
     t))
 
 (defun agent-repl--prompt-summary-command ()
@@ -671,10 +670,10 @@ recorded and lost, never retried."
     (cond
      ((null calls) nil)
      ((not (and (plist-get ref :id) (plist-get ref :dir)))
-      (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls=%d reason=no-ref; the daemon never named this workspace"
-                        (length calls)))
+      (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls={calls} reason=no-ref; the daemon never named this workspace"
+                        :calls (length calls)))
      ((null conn)
-      (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls=%d reason=no-daemon" (length calls)))
+      (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls={calls} reason=no-daemon" :calls (length calls)))
      (t
       (agent-repl-rpc-report-vendor-spend
        conn
@@ -684,19 +683,18 @@ recorded and lost, never retried."
              :calls calls)
        :on-response (lambda (response) (agent-repl--prompt-summary-spend-answered ws calls response))
        :on-failure (lambda (detail)
-                     (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls=%d reason=transport detail=%S"
-                                       (length calls) detail)))))))
+                     (agent-repl--info ws "elisp.prompt-summary.spend-unreported calls={calls} reason=transport detail={detail}"
+                                       :calls (length calls) :detail (prin1-to-string detail))))))))
 
 (defun agent-repl--prompt-summary-spend-answered (ws calls response)
   "Record the daemon's RESPONSE to WS's spend report of CALLS."
   (pcase (plist-get response :arm)
     (:success
-     (agent-repl--log ws "elisp.prompt-summary.spend-reported calls=%d outcome=%s"
-                      (length calls) (plist-get (plist-get response :value) :arm)))
+     (agent-repl--log ws "elisp.prompt-summary.spend-reported calls={calls} outcome={outcome}"
+                      :calls (length calls) :outcome (plist-get (plist-get response :value) :arm)))
     (_
-     (agent-repl--error ws "elisp.prompt-summary.spend-refused calls=%d detail=%S"
-                        (length calls)
-                        (plist-get (plist-get (plist-get response :value) :value) :detail)))))
+     (agent-repl--error ws "elisp.prompt-summary.spend-refused calls={calls} detail={detail}"
+                        :calls (length calls) :detail (prin1-to-string (plist-get (plist-get (plist-get response :value) :value) :detail))))))
 
 (defun agent-repl--prompt-summary-directory ()
   "Return the empty private directory a headless summary runs from.
@@ -728,14 +726,14 @@ state-mutation entry point."
              (context (agent-repl--prompt-summary-collect-context ws))
              (proc-input (agent-repl--prompt-summary-build-input raw context))
              (dir (agent-repl--prompt-summary-directory)))
-        (agent-repl--log ws "prompt-summary: spawn request raw-len=%d context-count=%d input-len=%d command-argc=%d"
-                          (length raw) (length context) (length proc-input) (length cmd))
+        (agent-repl--log ws "prompt-summary: spawn request raw-len={raw_len} context-count={context_count} input-len={input_len} command-argc={command_argc}"
+                          :raw_len (length raw) :context_count (length context) :input_len (length proc-input) :command_argc (length cmd))
         (let ((proc (agent-repl--prompt-summary-run
                      dir cmd proc-input (agent-repl--prompt-summary-make-callback ws raw))))
-          (agent-repl--log ws "prompt-summary: spawn accepted process=%S" proc)
+          (agent-repl--log ws "prompt-summary: spawn accepted process={process}" :process (prin1-to-string proc))
           proc))
     (error
-     (agent-repl--warn ws "prompt-summary: spawn failed raw-len=%d err=%S" (length raw) err)
+     (agent-repl--warn ws "prompt-summary: spawn failed raw-len={raw_len} err={err}" :raw_len (length raw) :err (prin1-to-string err))
      nil)))
 
 (defun agent-repl--kickoff-prompt-summary (ws raw)
@@ -754,13 +752,13 @@ even if the user has switched perspectives by the time it resolves."
     ;; vendor call or it is nothing.
     (agent-repl--log ws "prompt-summary: kickoff skipped reason=vendor-calls-forbidden"))
    ((not ws)
-    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: kickoff skipped reason=no-workspace raw-type=%S" (type-of raw)))
+    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: kickoff skipped reason=no-workspace raw-type={raw_type}" :raw_type (prin1-to-string (type-of raw))))
    ((not (stringp raw))
-    (agent-repl--log ws "prompt-summary: kickoff skipped reason=non-string-raw raw-type=%S" (type-of raw)))
+    (agent-repl--log ws "prompt-summary: kickoff skipped reason=non-string-raw raw-type={raw_type}" :raw_type (prin1-to-string (type-of raw))))
    ((agent-repl--prompt-summary-skip-p raw)
-    (agent-repl--log ws "prompt-summary: kickoff skipped reason=trivial-input raw-len=%d" (length raw)))
+    (agent-repl--log ws "prompt-summary: kickoff skipped reason=trivial-input raw-len={raw_len}" :raw_len (length raw)))
    (t
-    (agent-repl--log ws "prompt-summary: kickoff accepted raw-len=%d" (length raw))
+    (agent-repl--log ws "prompt-summary: kickoff accepted raw-len={raw_len}" :raw_len (length raw))
     (agent-repl--ws-put ws :last-prompt-text raw)
     (agent-repl--ws-put ws :last-prompt-summary nil)
     (agent-repl--ws-put ws :last-prompt-summary-pending t)
@@ -771,8 +769,8 @@ even if the user has switched perspectives by the time it resolves."
     (agent-repl--ws-put ws :last-prompt-summary-at (float-time))
     (agent-repl--prompt-summary-redisplay ws)
     (if (agent-repl--prompt-summary-spawn ws raw)
-        (agent-repl--log ws "prompt-summary: kickoff process started raw-len=%d" (length raw))
-      (agent-repl--log ws "prompt-summary: kickoff spawn failed; clearing pending raw-len=%d" (length raw))
+        (agent-repl--log ws "prompt-summary: kickoff process started raw-len={raw_len}" :raw_len (length raw))
+      (agent-repl--log ws "prompt-summary: kickoff spawn failed; clearing pending raw-len={raw_len}" :raw_len (length raw))
       (agent-repl--ws-put ws :last-prompt-summary-pending nil)
       (agent-repl--prompt-summary-redisplay ws)
       (agent-repl--log ws "prompt-summary: persist spawn failure begin")
@@ -810,13 +808,13 @@ captured before this file existed).  Also exposed interactively for
 manual recovery."
   (interactive)
   (let ((workspaces (agent-repl--live-ws-names)))
-    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: attach-all start workspace-count=%d" (length workspaces))
+    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: attach-all start workspace-count={workspace_count}" :workspace_count (length workspaces))
     (dolist (ws workspaces)
       (let ((buf (agent-repl--ws-get ws :vterm-buffer)))
         (if (and buf (buffer-live-p buf))
             (agent-repl--prompt-summary-attach-to-mode-line buf)
-          (agent-repl--log ws "prompt-summary: attach-all skipped reason=no-live-vterm-buffer buffer=%S" buf))))
-    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: attach-all complete workspace-count=%d" (length workspaces))))
+          (agent-repl--log ws "prompt-summary: attach-all skipped reason=no-live-vterm-buffer buffer={buffer}" :buffer (prin1-to-string buf)))))
+    (agent-repl--log '(:agent-repl-central "the prompt-summary command spans workspaces") "prompt-summary: attach-all complete workspace-count={workspace_count}" :workspace_count (length workspaces))))
 
 ;; The prompt-summary segment is intentionally NOT wired into the vterm
 ;; mode-line (see `agent-repl--workspace-mode-line'): it was dropped

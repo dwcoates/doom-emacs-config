@@ -330,10 +330,35 @@ func TestEveryMintedTargetIsADaemonLogFamily(t *testing.T) {
 func TestEveryRunLogRetentionFailureGoesThroughRetentionFailed(t *testing.T) {
 	// Act.
 	viaHelper := sourcescan.Count(t, "s.retentionFailed(")
-	byHand := sourcescan.Count(t, `Global().Error("daemon.dlog.retention_failed"`)
+	byHand := sourcescan.Count(t, `Global().Error("daemon.dlog.retention_failed"`) +
+		sourcescan.Count(t, `Global().Log(LevelError, "daemon.dlog.retention_failed"`)
 
 	// Assert: the run log, a directory and the stdio log call the helper, and the only hand-written record is the helper's own.
 	if viaHelper != 3 || byHand != 1 {
 		t.Fatalf("s.retentionFailed( appears %d times and a hand-rolled record %d times; want 3 and 1 (the helper's own record)", viaHelper, byHand)
+	}
+}
+
+func TestRetainOnceRunsTheBeforePruneFunctionWhileItsFilesStillExist(t *testing.T) {
+	// Arrange.
+	f := newRetentionFixture(t)
+	path := f.file(t, "agent-repl-0054899b8c24410e-daemon-1.log", f.stale())
+	var reasons []string
+	existed := false
+	f.s.BindBeforePrune(func(reason string) {
+		reasons = append(reasons, reason)
+		_, err := os.Lstat(path)
+		existed = err == nil
+	})
+
+	// Act.
+	f.s.retainOnce(f.now)
+
+	// Assert.
+	if len(reasons) != 1 || reasons[0] != "retention" || !existed {
+		t.Fatalf("before-prune ran with %v, the file existing %v; want once, for retention, before the file went", reasons, existed)
+	}
+	if _, err := os.Lstat(path); err == nil {
+		t.Fatal("the expired file was kept")
 	}
 }

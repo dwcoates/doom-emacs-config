@@ -24,9 +24,11 @@
  * drawn), and on the page's presence turning seen (the held one is drawn then).
  */
 import type { RosterStreams } from "./roster-streams.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 import type { PageSeen } from "../page-seen.js";
+
+const log = createLogger("webapp.sidebar.unseen");
 
 /** What the gate needs from its environment, injectable for tests. */
 export interface UnseenEnv {
@@ -74,14 +76,14 @@ export function createUnseenGate(own: string, draw: (streams: RosterStreams) => 
     heldCount = 0;
     const started = now();
     draw(roster);
-    log.info(`the rail drew its newest roster, skipping ${skipped} it held while unseen`, {
+    log.info("the rail drew its newest roster, skipping {skipped} it held while unseen", {
       operation: "sidebar.unseen-resumed",
       context: {
         cause,
-        skipped,
+        
         draw_ms: Math.round(now() - started),
       },
-    });
+    }, { skipped });
   };
 
   // A push that makes this workspace current draws itself (`offer`), so only

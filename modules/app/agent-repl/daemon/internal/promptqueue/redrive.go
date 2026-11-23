@@ -29,14 +29,15 @@ func IsRedrive(ctx context.Context) bool {
 // refusalLevel answers the level a refusal about a STANDING CONDITION (a merge
 // in flight, a cold gate, no session, a move sealed away) is recorded at here.
 //
-// A live caller's refusal is recorded at level, the arm's own. A RE-DRIVEN
+// A live caller's refusal is recorded at LEVEL, the arm's own, answered for
+// its caller to log at (dlog.Logger.Log). A RE-DRIVEN
 // submission's is DEBUG: its re-driver retries it on a backoff for as long as
 // the condition stands, and records the refusal itself, once per entry and
 // refusal kind. At level here, one merge produced the same WARN on every retry
 // of every held prompt waiting on it.
-func refusalLevel(ctx context.Context, log dlog.Logger, level func(operation, message string, fields dlog.Context)) func(operation, message string, fields dlog.Context) {
+func refusalLevel(ctx context.Context, level string) string {
 	if IsRedrive(ctx) {
-		return log.Debug
+		return dlog.LevelDebug
 	}
 	return level
 }

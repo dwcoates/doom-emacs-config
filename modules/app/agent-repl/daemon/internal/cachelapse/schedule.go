@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // This file is the daemon's keep-alive drive (owner ruling, 2026-10-26). A
@@ -127,7 +128,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			delete(k.noBeat, ws)
 			return beatPlan{}, false
 		}
-		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace to time its keep-alive", "could not read the workspace; its keep-alive is not armed", nil, err)
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace to time its keep-alive", logsite.Msg("could not read the workspace; its keep-alive is not armed"), nil, err)
 		return beatPlan{}, false
 	}
 	// queued is read below; a reason found before it reads none.
@@ -166,7 +167,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	queuedAt, inQueue, err := bringup.MergeQueuedAt(ctx, k.deps.DB, record)
 	queued = inQueue
 	if err != nil {
-		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace has a merge queued", "could not read whether the workspace has a merge queued; its keep-alive is not armed", nil, err)
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace has a merge queued", logsite.Msg("could not read whether the workspace has a merge queued; its keep-alive is not armed"), nil, err)
 		return beatPlan{}, false
 	}
 	if record.KeepaliveHeld() && !queued {
@@ -184,7 +185,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
-		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace's session to time its keep-alive", "could not read the workspace's session; its keep-alive is not armed", nil, err)
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace's session to time its keep-alive", logsite.Msg("could not read the workspace's session; its keep-alive is not armed"), nil, err)
 		return beatPlan{}, false
 	}
 	if !found {
@@ -248,17 +249,18 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 // carry it (wsm.SetKeepaliveOwing), so a beat due while it stands is no miss
 // to any daemon (missed).
 func (k *Keeper) owesNone(ctx context.Context, log dlog.Logger, record wsm.Workspace, why string) {
+	owesNone := logsite.Msg("the workspace owes no keep-alive")
 	ws := record.ID
 	fields := dlog.Context{"why": why}
 	if record.KeepaliveOwedNoneAt == nil {
 		k.recordOwing(ctx, log, ws, false, fields)
 	}
 	if was, ok := k.noBeat[ws]; ok && was == why {
-		log.Debug(opDrive, "the workspace owes no keep-alive", fields)
+		log.Log(dlog.LevelDebug, opDrive, owesNone, fields)
 		return
 	}
 	k.noBeat[ws] = why
-	log.Info(opDrive, "the workspace owes no keep-alive", fields)
+	log.Log(dlog.LevelInfo, opDrive, owesNone, fields)
 }
 
 // owesAgain records at INFO that RECORD's workspace owes keep-alives again
@@ -387,7 +389,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			return
 		case errors.As(err, &failed):
 			observe(BeatOutcomeSubmitFailed)
-			k.undelivered(ctx, log, opDrive, ws, due, "submitting the keep-alive", "the keep-alive's submission failed; it is asked again shortly",
+			k.undelivered(ctx, log, opDrive, ws, due, "submitting the keep-alive", logsite.Msg("the keep-alive's submission failed; it is asked again shortly"),
 				dlog.Merge(fields, dlog.Context{"retry_in": BeatRetry.String()}), err)
 			k.keepLiveFailed(ws, "beat_failed", beatFailed(failed.Detail), true)
 		default:
@@ -395,9 +397,9 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			const failed = "could not ask the shim for its keep-alive; it is asked again shortly"
 			if shimCallFailed(ctx, log, opDrive, shimFailure{
 				doing:     "asking the shim for its keep-alive",
-				died:      "the shim died under the keep-alive; the death is recorded by daemon.shimclient.exit, and the next session's coming up sends it",
-				stoodDown: "the shim was being stood down by this daemon under the keep-alive; the next session's coming up sends it",
-				failed:    failed,
+				died:      logsite.Msg("the shim died under the keep-alive; the death is recorded by daemon.shimclient.exit, and the next session's coming up sends it"),
+				stoodDown: logsite.Msg("the shim was being stood down by this daemon under the keep-alive; the next session's coming up sends it"),
+				failed:    logsite.Msg(failed),
 			}, fields, err) {
 				k.raiseUndelivered(ctx, log, ws, due, failed+": "+err.Error())
 			}
@@ -609,7 +611,7 @@ func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 		k.retryRestore(ws)
 	default:
 		due := k.beats[ws]
-		k.undelivered(ctx, log, opRestore, ws, due, "restoring the parked session", "the parked session could not be restored for its keep-alive; it is asked again shortly",
+		k.undelivered(ctx, log, opRestore, ws, due, "restoring the parked session", logsite.Msg("the parked session could not be restored for its keep-alive; it is asked again shortly"),
 			dlog.Context{"retry_in": BeatRetry.String()}, err)
 		if ctx.Err() == nil {
 			k.retryRestore(ws)

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -179,12 +180,12 @@ var (
 // The suspensions of a merge stepping aside, one per reason.
 var (
 	suspendAsideForTests = suspension{headExit: HeadExitNeededFixes, op: opRemediate, cause: errAsideForTests,
-		moved:     "the merge's tests failed; it stepped aside to fix them out of line, and the next merge takes its place",
+		moved:     logsite.Msg("the merge's tests failed; it stepped aside to fix them out of line, and the next merge takes its place"),
 		by:        "its step aside to fix its failing tests",
 		resumes:   "it returns to the line once its fixing turn ends, at the first waiting place, next after the merges being worked on",
 		gateRerun: "it runs its whole suite again once it heads the queue again"}
 	suspendAsideForConflicts = suspension{headExit: HeadExitNeededConflictResolution, op: opRemediate, cause: errAsideForConflicts,
-		moved:     "the merge's rebase conflicted; it stepped aside to resolve the conflicts out of line, and the next merge takes its place",
+		moved:     logsite.Msg("the merge's rebase conflicted; it stepped aside to resolve the conflicts out of line, and the next merge takes its place"),
 		by:        "its step aside to resolve its rebase's conflicts",
 		resumes:   "it returns to the line once its resolving turn ends, at the first waiting place, behind the merges being worked on and any merge back from fixing its tests that stands first in line then",
 		gateRerun: "it rebases onto the target's tip and runs its whole suite once it heads the queue again"}
@@ -345,7 +346,7 @@ func (o *orchestrator) takeBackSteppedAside(r *run, aside suspension, fields dlo
 	if !took {
 		return
 	}
-	log.Info(opRemediate, "took back the merge that stepped aside as remediating out of line; "+aside.resumes, fields)
+	log.With(fields).Info(opRemediate, "took back the merge that stepped aside as remediating out of line; {resumes}", dlog.Context{"resumes": aside.resumes})
 	o.kick(r.repo)
 }
 

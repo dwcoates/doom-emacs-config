@@ -41,7 +41,7 @@
 import { drawToolHead } from "./cards/tool-head.js";
 import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
 import { createConnectHookElement } from "../connect-hook.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { announceReaderToggle } from "../expand.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import { reportClientFailure } from "../rpc/link.js";
@@ -81,6 +81,8 @@ import { refreshTitleFolds } from "./title-fold.js";
 import type { TailFollow } from "../scroll.js";
 import { queryAll } from "../dom.js";
 import { FEED_ROW_SELECTOR, feedRowOf } from "./row-id.js";
+
+const log = createLogger("webapp.feed.bubble");
 
 export interface BubbleOptions {
   ctx: AppContext;
@@ -438,10 +440,10 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       });
       return;
     }
-    log.info(`the daemon's fold for a bubble changed to ${next.folded ? "folded" : "open"}; applying it`, {
+    log.info("the daemon's fold for a bubble changed to {fold}; applying it", {
       operation: "feed.bubble-fold-applied",
       context: { row: id.value, folded: next.folded, byReader: next.byReader, expanded },
-    });
+    }, { fold: next.folded ? "folded" : "open" });
     if (next.folded) {
       wantOpen = false;
       if (expanded) collapse();

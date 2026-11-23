@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDropdowns, toggleHiddenDropdown, type Dropdown } from "../../src/sidebar/dropdowns.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { captureLogRecords } from "../log-capture.js";
 
 afterEach(() => {
@@ -143,7 +143,7 @@ describe("dismissAll", () => {
   it("logs each close with its kind and why", () => {
     const dropdowns = createDropdowns();
     dropdowns.opened(dropdown());
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     dropdowns.dismissAll("the page was hidden");
     expect(debug.mock.calls).toEqual([
       ["closing a sidebar dropdown", { operation: "sidebar.dropdowns.close", context: { kind: "test", why: "the page was hidden" } }],
@@ -151,7 +151,7 @@ describe("dismissAll", () => {
   });
 
   it("does nothing, and logs nothing, with none open", () => {
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     createDropdowns().dismissAll("the page lost focus");
     expect(debug).not.toHaveBeenCalled();
   });

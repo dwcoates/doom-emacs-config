@@ -3,6 +3,7 @@ package footer
 import (
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -142,7 +143,7 @@ func verdictOf(status *conversationv1.SessionRateLimitStatus) wsm.AllowanceVerdi
 // root's. A workspace that learned figures while still unbound hands them to
 // a root that has none yet, so nothing it read is lost to the binding.
 func (r *resolver) SetAccount(ws ids.WorkspaceID, root string) {
-	r.mutate(ws, "daemon.footer.set_account", "the footer bound the workspace to its account root",
+	r.mutate(ws, "daemon.footer.set_account", logsite.Msg("the footer bound the workspace to its account root"),
 		dlog.Context{"config_dir": root}, func(s *wsState) {
 			r.bindAccountLocked(ws, s, root)
 		})

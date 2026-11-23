@@ -28,7 +28,7 @@ import type { FoldContext } from "./fold-context.js";
 import type { FoldOutput } from "./fold.js";
 import type { TurnEnding } from "./stream-events.js";
 
-const LOGGER = bindLog({ component: "shim-convert-terminals", operation: "shim.convert.terminals" });
+const LOGGER = bindLog("shim.convert.terminals", { component: "shim-convert-terminals", operation: "shim.convert.terminals" });
 
 // ---------------------------------------------------------------------------
 // The API's own failure taxonomy

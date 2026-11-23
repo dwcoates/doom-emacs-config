@@ -3,6 +3,7 @@ package feed
 import (
 	"strings"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -184,7 +185,7 @@ func (r *resolver) noticeFoldedIntoEnding(s *wsState, f *feedState, at placement
 		r.retire(s, at.feed, id)
 		why := unclonable{
 			operation: opNoticeFoldedAfterEnding,
-			message:   "a fault ending could not be copied to take a late vendor notice",
+			message:   logsite.Msg("a fault ending could not be copied to take a late vendor notice"),
 			context:   dlog.Context{"turn": turn, "notice_row": id, "ending_row": endingID},
 		}
 		r.restateRow(s, placement{feed: at.feed, parent: ending.GetParent()}, ending, !f.nonDurable[endingID], why,

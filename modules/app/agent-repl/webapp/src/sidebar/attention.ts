@@ -24,8 +24,10 @@
  * a marker mid-cadence in one pane and steady in the other. They are driven
  * together, off the one phase.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { WINDOW_TIMERS, type Timers } from "../timers.js";
+
+const log = createLogger("webapp.sidebar.attention");
 
 /** One blink phase, per `frontend.v1.RosterRowAttention`. */
 export const ATTENTION_PHASE_MS = 500;

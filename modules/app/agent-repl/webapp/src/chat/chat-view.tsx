@@ -20,10 +20,12 @@ import type {
   ChatQuestion,
   ChatView,
 } from "../../../proto/gen/ts/frontend/v1/chat_pb.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { renderMarkdown } from "../markdown.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { contextOf, markWords } from "./marks.js";
+
+const log = createLogger("webapp.chat.chat-view");
 
 /** What the person can do to the view; each is the daemon's to act on. */
 export interface ChatActions {

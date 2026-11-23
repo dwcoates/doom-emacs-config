@@ -397,9 +397,9 @@ func (c *controller) replacementAlive(fresh shimclient.Client, ws ids.WorkspaceI
 	if !dead {
 		return nil
 	}
-	c.log.Error(opRelaunch, "the prelaunched replacement shim died "+when, dlog.Merge(fields, dlog.Context{
-		"pid": info.PID, "exit_code": info.Code, "signal": info.Signal,
-	}))
+	c.log.With(fields).Error(opRelaunch, "the prelaunched replacement shim died {when}", dlog.Context{
+		"when": when, "pid": info.PID, "exit_code": info.Code, "signal": info.Signal,
+	})
 	return fmt.Errorf("rollout: relaunch %q: the prelaunched replacement (pid %d) exited with code %d", ws, info.PID, info.Code)
 }
 

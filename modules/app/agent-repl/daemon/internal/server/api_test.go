@@ -246,7 +246,7 @@ func TestPushTransferredRecordsWhoHeldTheStreams(t *testing.T) {
 		}
 		return
 	}
-	t.Fatalf("no daemon.server.transferred record among %v", log.records)
+	t.Fatalf("no daemon.server.transferred record among %v", log.records())
 }
 
 // TestRetractTransferredStopsReplayingTheNoticeToALateWebStream pins the

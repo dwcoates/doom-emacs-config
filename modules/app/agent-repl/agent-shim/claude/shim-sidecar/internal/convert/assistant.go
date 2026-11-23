@@ -51,7 +51,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 	blocks := list(message["content"])
 	if len(blocks) == 0 {
 		c.log.With(at.ctxWarn("assistant-line")).
-			Log("assistant record carries no content blocks; stored as unknown residue")
+			Log("assistant record carries no content blocks; stored as unknown residue", nil)
 		return []*storev1.StoreEntry{UnknownEntry(at, "assistant.empty_content", "message.content", record)}
 	}
 
@@ -65,7 +65,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 		c.currentMessageID = messageID
 		c.nextBlockOrdinal = 0
 		c.log.With(at.ctxFor("assistant-line")).
-			LogVerbose("a new API response opens here; block ordinals restart at 0")
+			LogVerbose("a new API response opens here; block ordinals restart at 0", nil)
 	}
 
 	var out []*storev1.StoreEntry
@@ -82,7 +82,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 		block := obj(raw)
 		if block == nil {
 			c.log.With(at.ctxWarn("assistant-line")).With(logging.Context{ActivityID: BlockActivityID(messageID, index)}).
-				Log("assistant content block is not an object; stored as unknown residue")
+				Log("assistant content block is not an object; stored as unknown residue", nil)
 			out = append(out, UnknownEntry(at, "assistant.block", "message.content[]", record))
 			continue
 		}
@@ -117,7 +117,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 		// flooded a cold re-scan's strict harvest with a false alarm. The record
 		// still stands and names the real cause; only its severity drops.
 		c.log.With(at.ctxFor("assistant-line")).
-			LogVerbose("assistant record produced no units (%s), so this response's usage is not carried", describeNoUnits(reasons))
+			LogVerbose("assistant record produced no units ({reasons}), so this response's usage is not carried", logging.Values{"reasons": describeNoUnits(reasons)})
 	}
 	return out
 }
@@ -176,7 +176,7 @@ func (c *Converter) quotedAssistant(record, message map[string]any, at Attributi
 		}
 	}
 	c.log.With(at.ctxFor("quoted-context")).
-		LogVerbose("assistant record attributed to %q is quoted context, not produced by this %q agent; kept as residue, not re-booked", env.attributionAgent, at.AgentType)
+		LogVerbose("assistant record attributed to \"{attribution_agent}\" is quoted context, not produced by this \"{agent_type}\" agent; kept as residue, not re-booked", logging.Values{"attribution_agent": env.attributionAgent, "agent_type": at.AgentType})
 	return []*storev1.StoreEntry{VendorSpecificEntry(at, "assistant/quoted_context", record)}
 }
 
@@ -221,7 +221,7 @@ func (c *Converter) assistantBlock(block map[string]any, index int, messageID st
 		// object at all stays warn above: that is malformed, not merely
 		// unmodelled.
 		c.log.With(at.ctxFor("assistant-block")).With(logging.Context{ActivityID: BlockActivityID(messageID, index)}).
-			LogVerbose("assistant content block type=%q is not modeled; stored as vendor_specific", kind)
+			LogVerbose("assistant content block type=\"{kind}\" is not modeled; stored as vendor_specific", logging.Values{"kind": kind})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "content_block/"+kind, block)}, ""
 	}
 }
@@ -238,13 +238,13 @@ func (c *Converter) thinkingBlock(block map[string]any, index int, messageID str
 	var success *conversationv1.AgentThinkingSuccess
 	if text == "" {
 		c.log.With(at.ctxFor("thinking")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
-			LogVerbose("reasoning block settled withheld (signature without text)")
+			LogVerbose("reasoning block settled withheld (signature without text)", nil)
 		success = &conversationv1.AgentThinkingSuccess{
 			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
 		}
 	} else {
 		c.log.With(at.ctxFor("thinking")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
-			LogVerbose("reasoning block settled with %d characters", len(text))
+			LogVerbose("reasoning block settled with {text_length} characters", logging.Values{"text_length": len(text)})
 		success = &conversationv1.AgentThinkingSuccess{
 			Reasoning: &conversationv1.AgentThinkingSuccess_Text{Text: &conversationv1.AgentThinkingText{Text: text}},
 		}
@@ -272,7 +272,7 @@ func (c *Converter) textBlock(block map[string]any, index int, messageID string,
 		// The vendor's own placeholder for a turn that produced nothing. No
 		// model wrote these words, so it is withheld rather than drawn.
 		c.log.With(at.ctxFor("withhold")).
-			LogVerbose("synthetic %q assistant record withheld as vendor_specific", synthesizedNoResponse)
+			LogVerbose("synthetic \"{synthesized_no_response}\" assistant record withheld as vendor_specific", logging.Values{"synthesized_no_response": synthesizedNoResponse})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "assistant/no_response_requested", record)}
 	}
 
@@ -288,11 +288,11 @@ func (c *Converter) textBlock(block map[string]any, index int, messageID string,
 	}
 	if notice := synthesizedNotice(record, text); notice != nil {
 		c.log.With(at.ctxFor("response")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
-			Log("assistant prose is a vendor-synthesized notice, not the model's answer")
+			Log("assistant prose is a vendor-synthesized notice, not the model's answer", nil)
 		success.Authorship = &conversationv1.AgentResponseSuccess_SynthesizedNotice{SynthesizedNotice: notice}
 	} else {
 		c.log.With(at.ctxFor("response")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
-			LogVerbose("assistant prose settled with %d characters", len(text))
+			LogVerbose("assistant prose settled with {text_length} characters", logging.Values{"text_length": len(text)})
 		success.Authorship = &conversationv1.AgentResponseSuccess_FromModel{FromModel: &conversationv1.AgentResponseFromModel{}}
 	}
 

@@ -31,11 +31,10 @@
 
 ;;; Code:
 
-(declare-function agent-repl--log "core" (ws format-string &rest args))
-(declare-function agent-repl--log-verbose "core" (ws format-string &rest args))
-(declare-function agent-repl--info "core" (ws format-string &rest args))
-(declare-function agent-repl--warn "core" (ws format-string &rest args))
-(declare-function agent-repl--error "core" (ws format-string &rest args))
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (declare-function agent-repl--path-canonical "core" (path))
 (declare-function magit-refresh "ext:magit" ())
 
@@ -65,13 +64,13 @@ nil.  No-op when DIR is nil or nothing is looking at it."
                        (and (eq major-mode 'magit-status-mode)
                             (equal (agent-repl--path-canonical default-directory)
                                    canonical))))
-            (agent-repl--log ws "elisp.session.magit-refresh: dir=%s buffer=%s"
-                             canonical (buffer-name buf))
+            (agent-repl--log ws "elisp.session.magit-refresh: dir={dir} buffer={buffer}"
+                             :dir canonical :buffer (buffer-name buf))
             (with-current-buffer buf (magit-refresh))
             (setq refreshed (1+ refreshed))))
-        (agent-repl--log ws "elisp.session.magit-refresh: complete dir=%s refreshed=%d"
-                         canonical refreshed))
-    (agent-repl--log ws "elisp.session.magit-refresh: skipped dir=%S reason=no-directory" dir)))
+        (agent-repl--log ws "elisp.session.magit-refresh: complete dir={dir} refreshed={refreshed}"
+                         :dir canonical :refreshed refreshed))
+    (agent-repl--log ws "elisp.session.magit-refresh: skipped dir={dir} reason=no-directory" :dir (prin1-to-string dir))))
 
 (provide 'agent-repl-session)
 ;;; session.el ends here

@@ -25,12 +25,16 @@
         (agent-repl--warn-once-order nil)
         (warnings nil))
     (cl-letf (((symbol-function 'agent-repl--emit-log-record)
-               (lambda (ws _level _verbosity fmt args &rest _)
-                 (push (list ws (apply #'format fmt args)) warnings))))
-      (should (agent-repl--warn-once "ws" "api-message=m payload=abc"
-                                     "response warning api_message_id=%s" "m"))
-      (should-not (agent-repl--warn-once "ws" "api-message=m payload=abc"
-                                         "response warning api_message_id=%s" "m"))
+               (lambda (ws _level _verbosity site values &rest keys)
+                 (push (list ws (concat (plist-get keys :tag)
+                                        (agent-repl-log-site-render site values)))
+                       warnings))))
+      (let ((warn (lambda ()
+                    (agent-repl--warn-once "ws" "api-message=m payload=abc"
+                                           "response warning api_message_id={api_message_id}"
+                                           :api_message_id "m"))))
+        (should (funcall warn))
+        (should-not (funcall warn)))
       (should (equal warnings '(("ws" "WARNING: response warning api_message_id=m")))))))
 
 (ert-deftest agent-repl-test-warn-once-fifo-bound-makes-evicted-key-observable ()
@@ -40,10 +44,12 @@
         (agent-repl--warn-once-order nil)
         (warnings nil))
     (cl-letf (((symbol-function 'agent-repl--emit-log-record)
-               (lambda (_ws _level _verbosity fmt args &rest _)
-                 (push (apply #'format fmt args) warnings))))
+               (lambda (_ws _level _verbosity site values &rest keys)
+                 (push (concat (plist-get keys :tag)
+                               (agent-repl-log-site-render site values))
+                       warnings))))
       (dolist (fingerprint '("first" "second" "third" "first"))
-        (should (agent-repl--warn-once "ws" fingerprint "warning=%s" fingerprint)))
+        (should (agent-repl--warn-once "ws" fingerprint "warning={warning}" :warning fingerprint)))
       (should (= (hash-table-count agent-repl--warn-once-fingerprints) 2))
       (should (equal (nreverse warnings)
                      '("WARNING: warning=first" "WARNING: warning=second"
@@ -53,7 +59,7 @@
   "A missing causal identity signals before warning-state mutation."
   (let ((agent-repl--warn-once-fingerprints (make-hash-table :test 'equal))
         (agent-repl--warn-once-order nil))
-    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+    (cl-letf (((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
       (should-error (agent-repl--warn-once "ws" "" "impossible")))
     (should (= (hash-table-count agent-repl--warn-once-fingerprints) 0))))
 
@@ -236,11 +242,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
         ("core.el" agent-repl--emit-log-record agent-repl--do-log-to-file))))))
 
 (ert-deftest agent-repl-test-every-logging-rung-calls-the-canonical-emitter ()
-  "Every public severity wrapper is a thin call into one emitter."
+  "Every public severity rung's emitter is a thin call into one emitter."
   ;; Arrange / Act
-  (let* ((rungs '(agent-repl--log agent-repl--log-verbose agent-repl--info
-                  agent-repl--warn agent-repl--warn-once agent-repl--error
-                  agent-repl--fatal))
+  (let* ((rungs '(agent-repl--emit-log agent-repl--emit-log-verbose agent-repl--emit-info
+                  agent-repl--emit-warn agent-repl--emit-warn-once agent-repl--emit-error
+                  agent-repl--emit-fatal agent-repl--emit-backend-phase
+                  agent-repl--emit-phase-echo))
          (calls (agent-repl-test--production-source-calls
                  '(agent-repl--emit-log-record)))
          (owners (delete-dups (mapcar #'cadr calls))))
@@ -625,12 +632,12 @@ When t, it should call `message'."
                (lambda (&rest _args) (setq message-called t))))
       ;; debug off: no message
       (let ((agent-repl-debug nil))
-        (agent-repl--log nil "test %s" "hello")
+        (agent-repl--log nil "test {value}" :value "hello")
         (should-not message-called))
       ;; debug on: message called
       (let ((agent-repl-debug t))
         (setq message-called nil)
-        (agent-repl--log nil "test %s" "hello")
+        (agent-repl--log nil "test again {value}" :value "hello")
         (should message-called)))))
 
 ;;;; ---- Tests: Deferred macro ----
@@ -738,7 +745,7 @@ When t, it should call `message'."
   (let ((captured-msg nil))
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (setq captured-msg (apply #'format fmt args)))))
-      (agent-repl--do-log nil "simple message" nil)
+      (agent-repl--info nil "simple message")
       (should (string-match-p "\\[agent-repl\\] simple message" captured-msg)))))
 
 (ert-deftest agent-repl-test-do-log-fmt-multiple-args ()
@@ -746,7 +753,7 @@ When t, it should call `message'."
   (let ((captured-msg nil))
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (setq captured-msg (apply #'format fmt args)))))
-      (agent-repl--do-log nil "hello %s and %d" '("world" 42))
+      (agent-repl--info nil "hello {value} and {value_2}" :value "world" :value_2 42)
       (should (string-match-p "hello world and 42" captured-msg)))))
 
 (ert-deftest agent-repl-test-do-log-nil-args ()
@@ -754,7 +761,7 @@ When t, it should call `message'."
   (let ((captured-msg nil))
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (setq captured-msg (apply #'format fmt args)))))
-      (agent-repl--do-log nil "no args here" nil)
+      (agent-repl--info nil "no args here")
       (should (string-match-p "no args here" captured-msg)))))
 
 (ert-deftest agent-repl-test-do-log-message-has-prefix ()
@@ -762,7 +769,7 @@ When t, it should call `message'."
   (let ((captured-msg nil))
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (setq captured-msg (apply #'format fmt args)))))
-      (agent-repl--do-log nil "test" nil)
+      (agent-repl--info nil "test")
       (should (string-match-p "^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\." captured-msg)))))
 
 (ert-deftest agent-repl-test-do-log-error-p-signals-error ()
@@ -771,7 +778,7 @@ When t, it should call `message'."
     (cl-letf (((symbol-function 'message)
                (lambda (&rest _) (setq message-called t)))
               ((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-      (should-error (agent-repl--do-log nil "boom %s" '("reason") t) :type 'error)
+      (should-error (agent-repl--fatal nil "boom {value}" :value "reason") :type 'error)
       (should-not message-called))))
 
 (ert-deftest agent-repl-test-do-log-error-p-includes-formatted-body ()
@@ -779,7 +786,7 @@ When t, it should call `message'."
   (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
     (condition-case err
         (progn
-          (agent-repl--do-log nil "thing failed: %s" '("why") t)
+          (agent-repl--fatal nil "thing failed: {failed}" :failed "why")
           (should nil))
       (error
        (should (string-match-p "thing failed: why" (error-message-string err)))))))
@@ -791,7 +798,7 @@ When t, it should call `message'."
     (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
                (lambda (&rest _args) (setq file-write-called t))))
       (ignore-errors
-        (agent-repl--do-log nil "boom" nil t))
+        (agent-repl--fatal nil "boom"))
       (should file-write-called))))
 
 ;;;; ---- Tests: log ----
@@ -802,7 +809,7 @@ When t, it should call `message'."
     (cl-letf (((symbol-function 'message)
                (lambda (&rest _args) (setq message-called t))))
       (let ((agent-repl-debug 'verbose))
-        (agent-repl--log nil "test %s" "verbose")
+        (agent-repl--log nil "test {value}" :value "verbose")
         (should message-called)))))
 
 (ert-deftest agent-repl-test-log-multiple-format-args ()
@@ -811,7 +818,7 @@ When t, it should call `message'."
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (setq captured-msg (apply #'format fmt args)))))
       (let ((agent-repl-debug t))
-        (agent-repl--log nil "a=%s b=%d c=%s" "x" 1 "z")
+        (agent-repl--log nil "a={a} b={b} c={c}" :a "x" :b 1 :c "z")
         (should (string-match-p "a=x b=1 c=z" captured-msg))))))
 
 (ert-deftest agent-repl-test-log-bare-string ()
@@ -1038,7 +1045,7 @@ suppressed so the suite never touches the real logfile."
 (ert-deftest agent-repl-test-warn-expands-format-args ()
   "`agent-repl--warn' takes &rest ARGS and expands them into FMT."
   (let ((res (agent-repl-test--capture-emission
-              (lambda () (agent-repl--warn nil "failed %s after %d tries" "sync" 3)))))
+              (lambda () (agent-repl--warn nil "failed {value} after {value_2} tries" :value "sync" :value_2 3)))))
     (should (string-match-p "WARNING: failed sync after 3 tries" (plist-get res :text)))))
 
 (ert-deftest agent-repl-test-warn-non-string-fmt-preserves-args ()
@@ -1047,8 +1054,8 @@ existing bug-capture path WITHOUT dropping ARGS on the floor."
   (let ((res (agent-repl-test--capture-emission
               (lambda ()
                 (cl-letf (((symbol-function 'agent-repl--log-format-capture-bug) #'ignore))
-                  (agent-repl--warn nil 'not-a-string "kept"))))))
-    (should (string-match-p "BUG non-string-fmt" (plist-get res :text)))))
+                  (agent-repl--emit-warn nil 'not-a-string "kept"))))))
+    (should (string-match-p "BUG non-site=not-a-string values=(\"kept\")" (plist-get res :text)))))
 
 (ert-deftest agent-repl-test-warn-writes-to-file ()
   "`agent-repl--warn' always writes to the logfile."
@@ -1149,7 +1156,7 @@ name because the warn rung logged it."
 (ert-deftest agent-repl-test-do-log-non-error-never-reaches-echo-area ()
   "`agent-repl--do-log' non-error path is quiet — it must NOT reach the modeline."
   (let ((res (agent-repl-test--capture-emission
-              (lambda () (agent-repl--do-log nil "invariant violated" nil)))))
+              (lambda () (agent-repl--info nil "invariant violated")))))
     (should (plist-get res :called))
     (should-not (plist-get res :echoed))))
 
@@ -1160,7 +1167,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
     (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
               ((symbol-function 'agent-repl--emit-message)
                (lambda (&rest _) (setq emitted t))))
-      (should-error (agent-repl--do-log nil "fatal boom" nil t) :type 'error)
+      (should-error (agent-repl--fatal nil "fatal boom") :type 'error)
       (should-not emitted))))
 
 (ert-deftest agent-repl-test-log-verbose-includes-timestamp ()
@@ -1177,12 +1184,12 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
 (ert-deftest agent-repl-test-fatal-signals ()
   "`agent-repl--fatal' aborts the caller: it signals, unlike `--error'."
   (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (should-error (agent-repl--fatal nil "bad %s" "thing") :type 'error)))
+    (should-error (agent-repl--fatal nil "bad {value}" :value "thing") :type 'error)))
 
 (ert-deftest agent-repl-test-fatal-formats-fmt-and-args ()
   "`agent-repl--fatal' expands FMT with ARGS in the signalled message."
   (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (let ((err (should-error (agent-repl--fatal nil "ws=%s code=%d" "foo" 7))))
+    (let ((err (should-error (agent-repl--fatal nil "ws={ws} code={code}" :ws "foo" :code 7))))
       (should (string-match-p "ws=foo code=7" (error-message-string err))))))
 
 (ert-deftest agent-repl-test-fatal-includes-agent-repl-tag ()
@@ -1219,14 +1226,14 @@ The error rung exists so a branch can log its own failure and still return
 one to its caller.  A caller that must abort signals for itself."
   (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
             ((symbol-function 'agent-repl--emit-message) #'ignore))
-    (should (equal (progn (agent-repl--error nil "bad %s" "thing") 'returned)
+    (should (equal (progn (agent-repl--error nil "bad {value}" :value "thing") 'returned)
                    'returned))))
 
 (ert-deftest agent-repl-test-error-emits-regardless-of-debug ()
   "`agent-repl--error' emits with `agent-repl-debug' nil — it is ungated."
   (let ((agent-repl-debug nil))
     (let ((res (agent-repl-test--capture-emission
-                (lambda () (agent-repl--error nil "bad %s" "thing")))))
+                (lambda () (agent-repl--error nil "bad {value}" :value "thing")))))
       (should (plist-get res :called)))))
 
 (ert-deftest agent-repl-test-error-emits-quietly ()
@@ -1238,7 +1245,7 @@ one to its caller.  A caller that must abort signals for itself."
 (ert-deftest agent-repl-test-error-formats-fmt-and-args ()
   "`agent-repl--error' expands FMT with ARGS in the emitted line."
   (let ((res (agent-repl-test--capture-emission
-              (lambda () (agent-repl--error nil "ws=%s code=%d" "foo" 7)))))
+              (lambda () (agent-repl--error nil "ws={ws} code={code}" :ws "foo" :code 7)))))
     (should (string-match-p "ws=foo code=7" (plist-get res :text)))))
 
 (ert-deftest agent-repl-test-error-includes-agent-repl-tag ()
@@ -1257,7 +1264,7 @@ one to its caller.  A caller that must abort signals for itself."
   "A non-string FMT is handed through rather than `concat'-ed into a type error."
   (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
             ((symbol-function 'agent-repl--emit-message) #'ignore))
-    (should (equal (progn (agent-repl--error nil 'not-a-string) 'returned)
+    (should (equal (progn (agent-repl--emit-error nil 'not-a-string) 'returned)
                    'returned))))
 
 (ert-deftest agent-repl-test-error-persists-record-at-level-error ()
@@ -1795,7 +1802,7 @@ own run log, never in the OS temporary root the system may sweep."
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl--logfile-path) (lambda () logpath))
                   ((symbol-function 'message) (lambda (&rest _args) nil)))
-          (agent-repl--log nil "hello %s" "world")
+          (agent-repl--log nil "hello {value}" :value "world")
           (let ((contents (with-temp-buffer
                             (insert-file-contents logpath)
                             (buffer-string))))
@@ -1805,6 +1812,45 @@ own run log, never in the OS temporary root the system may sweep."
               (should (numberp (alist-get 'pid record)))
               (should (equal (alist-get 'verbosity record) "normal")))))
       (delete-directory tmpdir t))))
+
+(ert-deftest agent-repl-test-log-record-json-carries-site-template-and-named-values ()
+  "A record names its site and template, and holds each named value in context."
+  ;; Arrange
+  (let* ((message (agent-repl--log-msg "elisp.test.opened ws={ws} rows={rows} dir={dir}"
+                                       :ws "alpha" :rows 3 :dir (prin1-to-string "/a b")))
+         (site (car message)))
+    ;; Act
+    (let ((record (json-parse-string
+                   (agent-repl--log-record nil "info" "normal" site (cdr message))
+                   :object-type 'alist)))
+      ;; Assert
+      (should (equal (list (alist-get 'site record)
+                           (alist-get 'template record)
+                           (alist-get 'message record)
+                           (alist-get 'operation record)
+                           (alist-get 'context record))
+                     (list (agent-repl-log-site-key
+                            "emacs" "agent-repl-test-log-record-json-carries-site-template-and-named-values"
+                            "elisp.test.opened ws={ws} rows={rows} dir={dir}")
+                           "elisp.test.opened ws={ws} rows={rows} dir={dir}"
+                           "elisp.test.opened ws=alpha rows=3 dir=\"/a b\""
+                           "agent-repl.elisp-test-opened-ws-s-rows-s-dir-s"
+                           '((ws . "alpha") (rows . 3) (dir . "\"/a b\""))))))))
+
+(ert-deftest agent-repl-test-log-record-tag-heads-the-message-not-the-template ()
+  "A severity tag heads the message; the template and operation stay the site's."
+  ;; Arrange
+  (let ((message (agent-repl--log-msg "elisp.test.failed n={n}" :n 1)))
+    ;; Act
+    (let ((record (json-parse-string
+                   (agent-repl--log-record nil "warn" "normal" (car message) (cdr message)
+                                           nil "WARNING: ")
+                   :object-type 'alist)))
+      ;; Assert
+      (should (equal (list (alist-get 'message record) (alist-get 'template record)
+                           (alist-get 'operation record))
+                     '("WARNING: elisp.test.failed n=1" "elisp.test.failed n={n}"
+                       "agent-repl.elisp-test-failed-n-s"))))))
 
 (ert-deftest agent-repl-test-log-operation-normalizes-format-template ()
   "Operation names are stable slugs derived from format templates alone."
@@ -1829,7 +1875,8 @@ own run log, never in the OS temporary root the system may sweep."
   "A record within `agent-repl-log-record-max-bytes' keeps its level and text."
   ;; Act
   (let ((record (json-parse-string
-                 (agent-repl--log-record nil "info" "normal" "elisp.test.small value=%s" '("v"))
+                 (let ((message (agent-repl--log-msg "elisp.test.small value={value}" :value "v")))
+                   (agent-repl--log-record nil "info" "normal" (car message) (cdr message)))
                  :object-type 'alist)))
     ;; Assert
     (should (equal (alist-get 'level record) "info"))
@@ -1842,7 +1889,8 @@ own run log, never in the OS temporary root the system may sweep."
   (let ((agent-repl-log-record-max-bytes 16384)
         (big (make-string 100000 ?x)))
     ;; Act
-    (let ((line (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big))))
+    (let ((line (let ((message (agent-repl--log-msg "elisp.test.big body={body}" :body big)))
+                  (agent-repl--log-record nil "info" "normal" (car message) (cdr message)))))
       ;; Assert
       (should (<= (string-bytes line) agent-repl-log-record-max-bytes)))))
 
@@ -1852,10 +1900,11 @@ own run log, never in the OS temporary root the system may sweep."
   (let ((agent-repl-log-record-max-bytes 16384)
         (big (make-string 100000 ?x)))
     ;; Act
-    (let* ((full (string-bytes (let ((agent-repl-log-record-max-bytes most-positive-fixnum))
-                                 (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big)))))
+    (let* ((message (agent-repl--log-msg "elisp.test.big body={body}" :body big))
+           (full (string-bytes (let ((agent-repl-log-record-max-bytes most-positive-fixnum))
+                                 (agent-repl--log-record nil "info" "normal" (car message) (cdr message)))))
            (record (json-parse-string
-                    (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big))
+                    (agent-repl--log-record nil "info" "normal" (car message) (cdr message))
                     :object-type 'alist)))
       ;; Assert
       (should (equal (alist-get 'level record) "error"))
@@ -1863,13 +1912,29 @@ own run log, never in the OS temporary root the system may sweep."
       (should (string-match-p "\\`elisp.test.big body=x+ \\[[0-9]+ more characters not logged\\]\\'"
                               (alist-get 'message record))))))
 
+(ert-deftest agent-repl-test-log-record-past-the-bound-cuts-each-named-value ()
+  "A cut record keeps an excerpt of each string value its context carries, other values whole."
+  ;; Arrange
+  (let* ((agent-repl-log-record-max-bytes 16384)
+         (message (agent-repl--log-msg "elisp.test.big body={body} n={n}"
+                                       :body (make-string 100000 ?x) :n 3)))
+    ;; Act
+    (let ((context (alist-get 'context
+                              (json-parse-string
+                               (agent-repl--log-record nil "info" "normal" (car message) (cdr message))
+                               :object-type 'alist))))
+      ;; Assert
+      (should (equal (alist-get 'body context)
+                     (agent-repl--log-excerpt (make-string 100000 ?x))))
+      (should (equal (alist-get 'n context) 3)))))
+
 (ert-deftest agent-repl-test-log-record-cut-still-past-the-bound-signals ()
   "A record its cut cannot bring within the bound is an invariant breach."
   ;; Arrange: a bound below what a record's fixed fields alone take.
   (let ((agent-repl-log-record-max-bytes 64))
     ;; Act / Assert
-    (should-error (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s"
-                                          (list (make-string 10000 ?x))))))
+    (let ((message (agent-repl--log-msg "elisp.test.big body={body}" :body (make-string 10000 ?x))))
+      (should-error (agent-repl--log-record nil "info" "normal" (car message) (cdr message))))))
 
 (ert-deftest agent-repl-test-log-excerpt-names-what-it-left-out ()
   "An excerpt keeps the head of a long text and names the characters cut."
@@ -1928,7 +1993,7 @@ own run log, never in the OS temporary root the system may sweep."
             (agent-repl--ws-put ws :ref (list :id "0123456789abcdef" :dir project))
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'message) #'ignore))
-                (agent-repl--log ws "started request %s" "r-1")))
+                (agent-repl--log ws "started request {value}" :value "r-1")))
             (let* ((canonical (expand-file-name ".claude/emacs/emacs.log" project))
                    (target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
                    (record (with-temp-buffer
@@ -2554,9 +2619,9 @@ post-mortem breadcrumb."
                (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--wait-for-process-exit)
                (lambda (&rest _) 'timeout))
-              ((symbol-function 'agent-repl--log)
+              ((symbol-function 'agent-repl--emit-log)
                (lambda (_ws fmt &rest args)
-                 (setq logged (apply #'format fmt args)))))
+                 (setq logged (agent-repl-log-site-render fmt args)))))
       (agent-repl--capture-process-output "git" '("fetch" "origin"))
       (should (string-match-p "TIMEOUT" logged))
       (should (string-match-p "git" logged))
@@ -3369,9 +3434,9 @@ format string\" seen when running `agent-repl-reset-sentinel-watchers'."
               ((symbol-function 'message) #'ignore))
       ;; Should complete without signaling a format-string arity error.
       (agent-repl--log nil "plain message, no specifiers")
-      (agent-repl--log nil "one-specifier=%s" "value")
+      (agent-repl--log nil "one-specifier={one_specifier}" :one_specifier "value")
       ;; Non-string fmt path should also be safe.
-      (agent-repl--log nil 'stopped)
+      (agent-repl--emit-log nil 'stopped)
       (should t))))
 
 ;;;; ---- Tests: file-write decoupled from debug gate ----
@@ -3704,7 +3769,7 @@ The master kill-switch overrides the always-on file-write decoupling."
   "Run BODY in a fresh buffer, `logs' collecting every canonical log line."
   (declare (indent 0))
   `(let ((logs nil))
-     (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+     (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logs)))
        (agent-repl-test--with-temp-buffer " *test-ground-swap*" ,@body))))
 
 (ert-deftest agent-repl-test-ground-swap-first-paint-records-color-and-cookies ()
@@ -4379,7 +4444,7 @@ while it stayed open for the deploy, and its records warned stale-registration."
         (agent-repl-test--with-gone-workspace "class-caller-ws"
           (cl-letf (((symbol-function 'display-warning) #'ignore))
             ;; Act
-            (agent-repl--info "class-caller-ws" "elisp.test.caller-site ws=%s" "class-caller-ws")))
+            (agent-repl--info "class-caller-ws" "elisp.test.caller-site ws={ws}" :ws "class-caller-ws")))
         ;; Assert
         (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
           (should (string-search "operation=agent-repl.elisp-test-caller-site-ws-s level=info written=t"
@@ -4638,7 +4703,7 @@ while it stayed open for the deploy, and its records warned stale-registration."
                   ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
                   ((symbol-function 'display-warning) #'ignore))
           ;; Act
-          (agent-repl--log nil "elisp.test.unattributed value=%s" "x"))
+          (agent-repl--log nil "elisp.test.unattributed value={value}" :value "x"))
         ;; Assert
         (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
           (should (string-match-p
@@ -5060,8 +5125,8 @@ survives into the rest of the batch run."
     (let ((agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
-      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
           ;; Assert
@@ -5078,8 +5143,8 @@ survives into the rest of the batch run."
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl--quiet-paused-timer-keys '(:test-heartbeat))
           (agent-repl-test--fake-heartbeat-arm-count 0))
-      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
           ;; Assert
@@ -5095,8 +5160,8 @@ survives into the rest of the batch run."
           (agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
-      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
@@ -5115,8 +5180,8 @@ survives into the rest of the batch run."
           (agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
-      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--emit-info)
                  (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
@@ -5135,9 +5200,9 @@ survives into the rest of the batch run."
           (agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
         ;; Assert
@@ -5150,9 +5215,9 @@ survives into the rest of the batch run."
     (let ((warnings nil)
           (agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fn-that-arms-nothing))))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
           ;; Assert
@@ -5168,9 +5233,9 @@ survives into the rest of the batch run."
     (let ((warnings nil)
           (agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist))))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
         ;; Assert
@@ -5189,7 +5254,7 @@ survives into the rest of the batch run."
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
       (agent-repl--register-timer :test-heartbeat (agent-repl-test--armed-timer))
-      (cl-letf (((symbol-function 'agent-repl--warn)
+      (cl-letf (((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
@@ -5205,7 +5270,7 @@ survives into the rest of the batch run."
   (agent-repl-test--with-timer-registry
     (let ((agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist))))
-      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (lambda (&rest _) nil)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
           ;; Assert
@@ -5238,7 +5303,7 @@ survives into the rest of the batch run."
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0)
           (agent-repl--heartbeat-assert-deferral-timer nil))
-      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (lambda (&rest _) nil)))
         ;; Act
         (let ((outcome (agent-repl--assert-heartbeat-armed-when-owners-load)))
           ;; Assert
@@ -5433,7 +5498,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "Run BODY with every DEBUG record's text collected into VAR, newest first."
   (declare (indent 1))
   `(let ((,var nil))
-     (cl-letf (((symbol-function 'agent-repl--log)
+     (cl-letf (((symbol-function 'agent-repl--emit-log)
                 (agent-repl-test--record-into ,var)))
        ,@body)))
 
@@ -5442,7 +5507,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   (agent-repl-test--with-clean-state
     (agent-repl-test-core--recording-debug logged
       ;; Act
-      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
+      (agent-repl--log-decision '(tab a) :ready nil "decided {value}" :value "ready")
       ;; Assert
       (should (equal logged '("decided ready"))))))
 
@@ -5450,9 +5515,13 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "The same decision again under its key is no change."
   (agent-repl-test--with-clean-state
     (agent-repl-test-core--recording-debug logged
-      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
-      ;; Act
-      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
+      ;; One call site, decided twice.
+      (let ((decide (lambda (decision)
+                      (agent-repl--log-decision '(tab a) decision nil "decided {value}"
+                                                :value (substring (symbol-name decision) 1)))))
+        (funcall decide :ready)
+        ;; Act
+        (funcall decide :ready))
       ;; Assert
       (should (equal logged '("decided ready"))))))
 
@@ -5460,9 +5529,12 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "A decision that comes out differently is recorded."
   (agent-repl-test--with-clean-state
     (agent-repl-test-core--recording-debug logged
-      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
-      ;; Act
-      (agent-repl--log-decision '(tab a) :thinking nil "decided %s" "thinking")
+      (let ((decide (lambda (decision)
+                      (agent-repl--log-decision '(tab a) decision nil "decided {value}"
+                                                :value (substring (symbol-name decision) 1)))))
+        (funcall decide :ready)
+        ;; Act
+        (funcall decide :thinking))
       ;; Assert
       (should (equal logged '("decided thinking" "decided ready"))))))
 
@@ -5470,9 +5542,9 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "One key's decision never silences another's."
   (agent-repl-test--with-clean-state
     (agent-repl-test-core--recording-debug logged
-      (agent-repl--log-decision '(tab a) :ready nil "a %s" "ready")
+      (agent-repl--log-decision '(tab a) :ready nil "a {value}" :value "ready")
       ;; Act
-      (agent-repl--log-decision '(tab b) :ready nil "b %s" "ready")
+      (agent-repl--log-decision '(tab b) :ready nil "b {value}" :value "ready")
       ;; Assert
       (should (equal logged '("b ready" "a ready"))))))
 
@@ -5481,8 +5553,9 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   (agent-repl-test--with-clean-state
     (agent-repl-test-core--recording-debug _logged
       ;; Act / Assert
-      (should (eq t (agent-repl--log-decision '(tab a) :ready nil "x")))
-      (should-not (agent-repl--log-decision '(tab a) :ready nil "x")))))
+      (let ((decide (lambda () (agent-repl--log-decision '(tab a) :ready nil "x"))))
+        (should (eq t (funcall decide)))
+        (should-not (funcall decide))))))
 
 ;;;; ---- Tests: cancelling a keyed timer ----
 
@@ -5533,7 +5606,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "The info threshold drops debug-level verbose records."
   ;; Arrange / Act
   (let ((writes (agent-repl-test--with-captured-file-writes 'info
-                  (agent-repl--log-verbose nil "chatter %s" "x"))))
+                  (agent-repl--log-verbose nil "chatter {value}" :value "x"))))
     ;; Assert
     (should (= writes 0))))
 
@@ -5541,7 +5614,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "The debug threshold records ordinary debug lines."
   ;; Arrange / Act
   (let ((writes (agent-repl-test--with-captured-file-writes 'debug
-                  (agent-repl--log nil "ordinary %s" "x"))))
+                  (agent-repl--log nil "ordinary {value}" :value "x"))))
     ;; Assert
     (should (= writes 1))))
 
@@ -5549,7 +5622,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "Verbose records persist with every other debug record."
   ;; Arrange / Act
   (let ((writes (agent-repl-test--with-captured-file-writes 'debug
-                  (agent-repl--log-verbose nil "chatter %s" "x"))))
+                  (agent-repl--log-verbose nil "chatter {value}" :value "x"))))
     ;; Assert
     (should (= writes 1))))
 
@@ -5557,7 +5630,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "A warn threshold drops the info rung beneath it."
   ;; Arrange / Act
   (let ((writes (agent-repl-test--with-captured-file-writes 'warn
-                  (agent-repl--info nil "notice %s" "x"))))
+                  (agent-repl--info nil "notice {value}" :value "x"))))
     ;; Assert
     (should (= writes 0))))
 
@@ -5565,7 +5638,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   "The most severe threshold still records errors."
   ;; Arrange / Act
   (let ((writes (agent-repl-test--with-captured-file-writes 'error
-                  (ignore-errors (agent-repl--do-log nil "boom" nil t)))))
+                  (ignore-errors (agent-repl--fatal nil "boom")))))
     ;; Assert
     (should (= writes 1))))
 
@@ -5591,7 +5664,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
               ((symbol-function 'message)
                (lambda (&rest _args) (setq messaged t))))
       ;; Act — the record is far below the durable threshold.
-      (agent-repl--log-verbose nil "chatter %s" "x")
+      (agent-repl--log-verbose nil "chatter {value}" :value "x")
       ;; Assert — visibility is the other knob's business, and it still fired.
       (should messaged))))
 
@@ -5756,14 +5829,15 @@ that froze Emacs; this pins the equivalence the bound relies on."
   ;; Arrange
   (let (records)
     (cl-letf (((symbol-function 'agent-repl--emit-log-record)
-               (lambda (ws level verbosity fmt args &rest _options)
-                 (push (list ws level verbosity fmt args) records)))
+               (lambda (ws level verbosity site values &rest _options)
+                 (push (list ws level verbosity (agent-repl-log-site-template site) values)
+                       records)))
               ((symbol-function 'agent-repl--emit-message) #'ignore))
       ;; Act
-      (agent-repl--backend-phase nil "daemon up (pid %s)" 41)
+      (agent-repl--backend-phase nil "daemon up (pid {pid})" :pid 41)
       ;; Assert
       (should (equal (car records)
-                     (list nil "info" "normal" "daemon up (pid %s)" '(41)))))))
+                     (list nil "info" "normal" "daemon up (pid {pid})" '(41)))))))
 
 (ert-deftest agent-repl-test-backend-phase-reaches-the-echo-area ()
   "A phase transition is echoed loudly, not filed quietly like other chatter."
@@ -5773,7 +5847,7 @@ that froze Emacs; this pins the equivalence the bound relies on."
               ((symbol-function 'agent-repl--emit-message)
                (lambda (text &optional echo) (setq emitted (cons text echo)))))
       ;; Act
-      (agent-repl--backend-phase nil "daemon up (pid %s)" 41)
+      (agent-repl--backend-phase nil "daemon up (pid {pid})" :pid 41)
       ;; Assert
       (should (equal emitted (cons "agent-repl: daemon up (pid 41)" t))))))
 
@@ -5810,7 +5884,7 @@ name -- but it never claims the unregistered workspace as its sink."
   (let ((echoed nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message)
                (lambda (text &optional _echo) (setq echoed text)))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl--user-message nil "prompt refused — %s" '("queued for a merge"))
       ;; Assert
@@ -5823,7 +5897,7 @@ name -- but it never claims the unregistered workspace as its sink."
   (let ((echo-flag 'unset))
     (cl-letf (((symbol-function 'agent-repl--emit-message)
                (lambda (_text &optional echo) (setq echo-flag echo)))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl--user-message nil "something happened" nil)
       ;; Assert
@@ -5835,7 +5909,7 @@ name -- but it never claims the unregistered workspace as its sink."
   (let ((echoed nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message)
                (lambda (text &optional _echo) (setq echoed text)))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl--user-message nil "agent-repl: already prefixed" nil)
       ;; Assert
@@ -5892,8 +5966,8 @@ name -- but it never claims the unregistered workspace as its sink."
   ;; Arrange
   (let ((logged nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
-              ((symbol-function 'agent-repl--log)
-               (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) logged))))
+              ((symbol-function 'agent-repl--emit-log)
+               (lambda (ws fmt &rest args) (push (list ws (agent-repl-log-site-render fmt args)) logged))))
       ;; Act
       (agent-repl--user-message "ws" "nothing verbose here" nil)
       ;; Assert
@@ -5904,7 +5978,7 @@ name -- but it never claims the unregistered workspace as its sink."
   ;; Arrange
   (let ((logged nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
-              ((symbol-function 'agent-repl--log)
+              ((symbol-function 'agent-repl--emit-log)
                (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl--user-message nil "terse" nil :detail "")
@@ -5918,7 +5992,7 @@ name -- but it never claims the unregistered workspace as its sink."
         (echoed nil))
     (cl-letf (((symbol-function 'agent-repl--log-format-capture-bug)
                (lambda (fmt) (setq captured fmt)))
-              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl--emit-log) #'ignore)
               ((symbol-function 'agent-repl--emit-message)
                (lambda (text &optional _echo) (setq echoed text))))
       ;; Act
@@ -6155,7 +6229,7 @@ entry per tick for the whole bring-up."
   "A deferred quit is explainable from the canonical log alone."
   ;; Arrange
   (let ((logged nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl-test--quit-deferred-p
@@ -6172,7 +6246,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((quit-flag nil)
         (logged nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl--with-deferred-quit "uds-filter" t))
@@ -6247,7 +6321,7 @@ entry per tick for the whole bring-up."
   "A quit already honoured before the audit is not re-armed by it."
   ;; Arrange
   (let ((quit-flag nil))
-    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl--deferred-quit-audit "webview-precreate-drain"))
     ;; Assert
@@ -6257,7 +6331,7 @@ entry per tick for the whole bring-up."
   "A still-armed quit is explainable from the canonical log alone."
   ;; Arrange
   (let ((logged nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl-test--with-pending-quit
@@ -6272,7 +6346,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((quit-flag nil)
         (logged nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl--deferred-quit-audit "webview-precreate-drain"))
@@ -6286,7 +6360,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((unread-command-events nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act / Assert -- nil is "no quit left armed" from the shared recipe.
       (should-not (agent-repl-test--quit-deferred-p
                     (agent-repl--with-deferred-quit "webview-precreate-drain"
@@ -6297,7 +6371,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((unread-command-events nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl-test--quit-deferred-p
         (agent-repl--with-deferred-quit "webview-precreate-drain"
@@ -6312,7 +6386,7 @@ entry per tick for the whole bring-up."
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
               ((symbol-function 'current-input-mode)
                (lambda () (list nil nil nil ?\C-x)))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl-test--quit-deferred-p
         (agent-repl--with-deferred-quit "webview-precreate-drain"
@@ -6326,7 +6400,7 @@ entry per tick for the whole bring-up."
   (let ((unread-command-events nil)
         (logged nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'agent-repl--log)
+              ((symbol-function 'agent-repl--emit-log)
                (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl-test--quit-deferred-p
@@ -6341,7 +6415,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((unread-command-events nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () nil))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act / Assert
       (should (agent-repl-test--quit-deferred-p
                 (agent-repl--with-deferred-quit "uds-filter"
@@ -6352,7 +6426,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((unread-command-events nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () nil))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl-test--quit-deferred-p
         (agent-repl--with-deferred-quit "uds-filter"
@@ -6366,7 +6440,7 @@ entry per tick for the whole bring-up."
   (let ((quit-flag nil)
         (unread-command-events nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl--with-deferred-quit "webview-precreate-drain" t))
     ;; Assert
@@ -6377,7 +6451,7 @@ entry per tick for the whole bring-up."
   ;; Arrange -- the flag survived the section because no prompt stood then.
   (let ((unread-command-events nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
-              ((symbol-function 'agent-repl--log) #'ignore))
+              ((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (agent-repl-test--with-pending-quit
         (agent-repl--deferred-quit-audit "webview-precreate-drain")))
@@ -6388,7 +6462,7 @@ entry per tick for the whole bring-up."
   "From a timer the audit must not signal: `timer-event-handler' eats errors."
   ;; Arrange -- exactly how a timer runs it: current buffer is NOT a minibuffer.
   (let ((raised nil))
-    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-log) #'ignore))
       ;; Act
       (setq raised (agent-repl-test--with-pending-quit
                      (condition-case err
@@ -7149,7 +7223,7 @@ restores them afterwards."
           (warnings nil))
       (cl-letf (((symbol-function 'delete-file)
                  (lambda (&rest _) (signal 'file-error (list "Removing old name" "permission denied"))))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warnings)))
         ;; Act
         (let ((result (agent-repl--sweep-expired-log-files (list dir))))
@@ -7379,8 +7453,8 @@ Each is a response for `:on-response', or `(:failure D)' for `:on-failure'.
         (agent-repl-test--with-merged-pages
             (list '(:arm :error :value (:cause (:arm :not-ready :value nil)))
                   (agent-repl-test--merged-page nil))
-          (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors))
-                    ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+          (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors))
+                    ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into infos)))
             ;; Act
             (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
             (let ((token-after-failure agent-repl--merged-log-links-token))
@@ -7500,7 +7574,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
                 ((symbol-function 'agent-repl--build-log-text)
                  (agent-repl-test--refuse "the display text")))
         ;; Act / Assert
-        (should-not (agent-repl--log scope "elisp.test.dropped-central x=%s" 1))))))
+        (should-not (agent-repl--log scope "elisp.test.dropped-central x={x}" :x 1))))))
 
 (ert-deftest agent-repl-test-dropped-context-record-in-a-workspace-is-routed ()
   "A context marker that resolves to a workspace is routed, not short-circuited."
@@ -7563,7 +7637,9 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
           (progn
             (agent-repl--ws-put "dropped-format" :project-dir project)
             ;; Act / Assert
-            (should-error (agent-repl--log "dropped-format" "elisp.test.bad-format n=%d")))
+            (should-error (agent-repl--emit-log
+                           "dropped-format"
+                           (car (agent-repl--log-msg "elisp.test.bad-format n={n}" :n 1)))))
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-dropped-workspace-record-still-checks-its-session-identity ()
@@ -7624,7 +7700,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
       (cl-letf (((symbol-function 'message)
                  (lambda (_fmt text) (setq shown text))))
         ;; Act
-        (agent-repl--log '(:agent-repl-central "shown") "elisp.test.shown x=%s" 7)
+        (agent-repl--log '(:agent-repl-central "shown") "elisp.test.shown x={x}" :x 7)
         ;; Assert
         (should (string-match-p "elisp.test.shown x=7" shown))))))
 
@@ -7757,7 +7833,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 (ert-deftest agent-repl-test-log-level-window-reverts-to-info-at-its-end ()
   "At its end the window reverts the level to info."
   (agent-repl-test--with-level-window clock
-    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
       ;; Arrange
       (setcar clock 1000300)
       ;; Act
@@ -7772,8 +7848,8 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
   (agent-repl-test--with-level-window clock
     ;; Arrange
     (let ((recorded nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest _) (push fmt recorded))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (_ws site &rest _) (push (agent-repl-log-site-template site) recorded))))
         (setcar clock 1000400)
         ;; Act
         (agent-repl--log-record-persists-p "debug" "normal")
@@ -7794,7 +7870,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 (ert-deftest agent-repl-test-set-log-file-level-debug-opens-a-window ()
   "Setting debug interactively opens the longest window from now."
   (cl-letf (((symbol-function 'message) #'ignore)
-            ((symbol-function 'agent-repl--info) #'ignore))
+            ((symbol-function 'agent-repl--emit-info) #'ignore))
     ;; Arrange
     (let ((agent-repl-log-file-level 'info)
           (agent-repl--log-level-expires-at nil)
@@ -7807,7 +7883,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 (ert-deftest agent-repl-test-set-log-file-level-info-closes-the-window ()
   "Setting info interactively leaves no window behind."
   (cl-letf (((symbol-function 'message) #'ignore)
-            ((symbol-function 'agent-repl--info) #'ignore))
+            ((symbol-function 'agent-repl--emit-info) #'ignore))
     ;; Arrange
     (let ((agent-repl-log-file-level 'debug)
           (agent-repl--log-level-expires-at 1000300)
@@ -7820,7 +7896,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 (ert-deftest agent-repl-test-toggle-verbose-to-disk-on-opens-a-window ()
   "Turning the verbose rung on is a debug window like any other."
   (cl-letf (((symbol-function 'message) #'ignore)
-            ((symbol-function 'agent-repl--info) #'ignore))
+            ((symbol-function 'agent-repl--emit-info) #'ignore))
     ;; Arrange
     (let ((agent-repl-log-file-level 'info)
           (agent-repl--log-level-expires-at nil)
@@ -7834,7 +7910,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
   "A level asked for without a window is said at info, once."
   ;; Arrange
   (let ((noted nil))
-    (cl-letf (((symbol-function 'agent-repl--info)
+    (cl-letf (((symbol-function 'agent-repl--emit-info)
                (agent-repl-test--record-into noted)))
       ;; Act
       (agent-repl--note-log-level-selection
@@ -7847,7 +7923,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
   "A level started where it was asked to is not noted."
   ;; Arrange
   (let ((noted nil))
-    (cl-letf (((symbol-function 'agent-repl--info)
+    (cl-letf (((symbol-function 'agent-repl--emit-info)
                (lambda (&rest args) (push args noted))))
       ;; Act
       (agent-repl--note-log-level-selection
@@ -8062,7 +8138,7 @@ the page read."
         (sent nil)
         (records nil))
     (cl-letf (((symbol-function 'agent-repl-link-newest) #'ignore)
-              ((symbol-function 'agent-repl--log) (agent-repl-test--record-leveled-into records 'debug)))
+              ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-leveled-into records 'debug)))
       (agent-repl-serial-send-to-newest serial #'ignore 'scope "x.report" (lambda (&rest _) (setq sent t))))
     (should-not sent)
     (should (equal records '((debug . "elisp.x.report skipped reason=no-link"))))))
@@ -8073,7 +8149,7 @@ the page read."
         (sent 0)
         (records nil))
     (cl-letf (((symbol-function 'agent-repl-link-newest) (lambda () 'newest))
-              ((symbol-function 'agent-repl--log) (agent-repl-test--record-leveled-into records 'debug)))
+              ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-leveled-into records 'debug)))
       (agent-repl-serial-send-to-newest serial #'ignore 'scope "x.report" (lambda (&rest _) (cl-incf sent)))
       (agent-repl-serial-send-to-newest serial #'ignore 'scope "x.report" (lambda (&rest _) (cl-incf sent))))
     (should (= sent 1))
@@ -8294,10 +8370,12 @@ Answer every (LEVEL SCOPE FORMAT) the flush logged."
                      :id-scheme "daemon_minted_workspace_id")))
         (logged nil))
     (cl-letf (((symbol-function 'agent-repl--ws-log-routable-p) (lambda (_ws) routable))
-              ((symbol-function 'agent-repl--info)
-               (lambda (scope fmt &rest _) (push (list 'info scope fmt) logged)))
-              ((symbol-function 'agent-repl--warn)
-               (lambda (scope fmt &rest _) (push (list 'warn scope fmt) logged))))
+              ((symbol-function 'agent-repl--emit-info)
+               (lambda (scope site &rest _)
+                 (push (list 'info scope (agent-repl-log-site-template site)) logged)))
+              ((symbol-function 'agent-repl--emit-warn)
+               (lambda (scope site &rest _)
+                 (push (list 'warn scope (agent-repl-log-site-template site)) logged))))
       (agent-repl--flush-sink-opened-records))
     (nreverse logged)))
 
@@ -8336,7 +8414,7 @@ Answer every (LEVEL SCOPE FORMAT) the flush logged."
 (ert-deftest agent-repl-test-core-call-recording-error-answers-the-value ()
   "A body that returns answers its value and records nothing."
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
       ;; Act / Assert
       (should (eq (agent-repl--call-recording-error "ws1" "elisp.test.op" (lambda () 'done))
                   'done))
@@ -8344,7 +8422,7 @@ Answer every (LEVEL SCOPE FORMAT) the flush logged."
 
 (ert-deftest agent-repl-test-core-call-recording-error-re-signals ()
   "A body's error is signalled again unchanged."
-  (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+  (cl-letf (((symbol-function 'agent-repl--emit-error) #'ignore))
     ;; Act / Assert
     (should (equal (should-error (agent-repl--call-recording-error
                                   "ws1" "elisp.test.op"
@@ -8354,7 +8432,7 @@ Answer every (LEVEL SCOPE FORMAT) the flush logged."
 (ert-deftest agent-repl-test-core-call-recording-error-records-the-cause ()
   "A body's error is recorded at ERROR with its operation, workspace and cause."
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
       ;; Act
       (ignore-errors
         (agent-repl--call-recording-error "ws1" "elisp.test.op"

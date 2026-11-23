@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -220,7 +221,7 @@ func (q *queue) decideRelease(ctx context.Context, d *delivery, held wsm.HeldPro
 	// of it yet, and a force-through would deliver into it or interject it.
 	if cut, ok := q.runningCut(ws); ok {
 		keptBehindSessionAct(log, opRelease, cut, held.Turn,
-			"a session act is running; the release waits for the act to end")
+			logsite.Msg("a session act is running; the release waits for the act to end"))
 		return waits(waitsForCut(cut.command))
 	}
 	// A PROMPT ADDRESSED TO AN AGENT IS NOT THE SESSION'S TURN: it goes now

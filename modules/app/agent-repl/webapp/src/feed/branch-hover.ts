@@ -35,7 +35,7 @@
  * stays down until the pointer moves. Only the hover boxes go: the composer's
  * own box and every other highlight stand.
  */
-import { log } from "../log.js";
+import { createLogger, type LogMessage } from "../log.js";
 import { selectionTouches } from "../selection.js";
 import { branchLineAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
@@ -53,6 +53,8 @@ import {
   type LineBox,
   type SubtreeBox,
 } from "./subtree-box.js";
+
+const log = createLogger("webapp.feed.branch-hover");
 
 /** The class every line of the hovered branch's box wears. */
 export const BRANCH_HOVER_CLASS = "mp-line-hovered";
@@ -123,7 +125,7 @@ function boxUnder(
   target: Element,
   clientX: number,
   boxesOf: LineBoxes,
-): (Hovered & { operation: string; record: string }) | null {
+): (Hovered & { operation: string; record: LogMessage }) | null {
   const cited = citationAt(row, target);
   if (cited !== null) {
     return {
@@ -131,7 +133,7 @@ function boxUnder(
       label: cited,
       box: REFERENCE_BOX,
       operation: "feed.branch-hover.reference",
-      record: "boxed the response branch the citation under the pointer cites",
+      record: log.message("boxed the response branch the citation under the pointer cites"),
     };
   }
   const answered = answeredNodeAt(host, row, target);
@@ -140,7 +142,7 @@ function boxUnder(
       ...answered,
       box: REFERENCE_BOX,
       operation: "feed.branch-hover.entry",
-      record: "boxed the response branch the prompt entry under the pointer answers",
+      record: log.message("boxed the response branch the prompt entry under the pointer answers"),
     };
   }
   // A LINK IS NOT A BRANCH (owner request, 2026-10-29): a click on a web link
@@ -151,7 +153,7 @@ function boxUnder(
   if (line === null) return null;
   const label = nodeBoxedAt(boxesOf(line), xInLine(line, clientX));
   if (label === null) return null;
-  return { row, label, box: HOVER_BOX, operation: "feed.branch-hover", record: "boxed the response branch under the pointer" };
+  return { row, label, box: HOVER_BOX, operation: "feed.branch-hover", record: log.message("boxed the response branch under the pointer") };
 }
 
 /** Arm the hover box on the root feed HOST, RESOLVE measuring box edges. Answers the uninstall. */
@@ -218,7 +220,7 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
     clear();
     boxSubtree(under.row, under.label, under.box);
     hovered = { row: under.row, label: under.label, box: under.box };
-    log.debug(under.record, {
+    log.log("debug", under.record, {
       operation: under.operation,
       context: { row: feedRowId(under.row) ?? "unset", label: under.label },
     });

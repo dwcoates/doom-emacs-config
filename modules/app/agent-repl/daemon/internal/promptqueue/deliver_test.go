@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -1298,7 +1299,7 @@ func TestCloseRecordedClosesTheTurnAsWithdrawnAndRecordsTheLostDeliveryAtError(t
 	log := h.log.Global()
 
 	// Act
-	h.q.closeRecorded(context.Background(), theWorkspace, "t1", ErrPromptRecorded, opJoin, "lost", log)
+	h.q.closeRecorded(context.Background(), theWorkspace, "t1", ErrPromptRecorded, opJoin, logsite.Msg("lost"), log)
 
 	// Assert
 	how, closed := h.db.closedTurn("t1")

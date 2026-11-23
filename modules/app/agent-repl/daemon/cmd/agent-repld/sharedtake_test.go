@@ -132,7 +132,7 @@ func TestSharedTakeAdvertisesAndAcceptsOnTheHoldersListenerOnce(t *testing.T) {
 	client.Close()
 	conn.Close()
 	if _, ok := log.message(dlog.LevelInfo); !ok {
-		t.Fatalf("records = %+v, want the take recorded", log.records)
+		t.Fatalf("records = %+v, want the take recorded", log.Records())
 	}
 }
 
@@ -153,7 +153,7 @@ func TestSharedTakeFailsWhenTheHolderCannotGrant(t *testing.T) {
 		t.Fatalf("take = %v, advertised %v; want the failure and nothing advertised", err, claim.advertised)
 	}
 	if msg, ok := log.message(dlog.LevelError); !ok || !strings.Contains(msg, "shared listener") {
-		t.Fatalf("records = %+v, want an ERROR naming the shared listener", log.records)
+		t.Fatalf("records = %+v, want an ERROR naming the shared listener", log.Records())
 	}
 }
 
@@ -295,20 +295,20 @@ func TestYieldBootClaimYieldsUnlessTheStreamGenuinelyFailsToStop(t *testing.T) {
 			if !errors.Is(err, tc.wantErr) || claim.yielded != tc.wantYielded {
 				t.Fatalf("yield = %v, yielded %v; want %v, yielded %v", err, claim.yielded, tc.wantErr, tc.wantYielded)
 			}
-			var holderErrors []spyRecord
-			for _, r := range log.records {
-				if r.level == dlog.LevelError && r.operation == "daemon.cmd.holder" {
+			var holderErrors []dlog.Record
+			for _, r := range log.Records() {
+				if r.Level == dlog.LevelError && r.Operation == "daemon.cmd.holder" {
 					holderErrors = append(holderErrors, r)
 				}
 			}
 			if tc.wantErr == nil {
-				if len(log.records) != 0 {
-					t.Fatalf("records = %+v, want none", log.records)
+				if len(log.Records()) != 0 {
+					t.Fatalf("records = %+v, want none", log.Records())
 				}
 				return
 			}
-			if len(holderErrors) != 1 || !strings.Contains(fmt.Sprint(holderErrors[0].context["error"]), stopErr.Error()) {
-				t.Fatalf("records = %+v, want one daemon.cmd.holder ERROR naming the cause", log.records)
+			if len(holderErrors) != 1 || !strings.Contains(fmt.Sprint(holderErrors[0].Context["error"]), stopErr.Error()) {
+				t.Fatalf("records = %+v, want one daemon.cmd.holder ERROR naming the cause", log.Records())
 			}
 		})
 	}
@@ -545,11 +545,11 @@ func TestTheExitHandsBackAnUnreadSharedConnection(t *testing.T) {
 				t.Fatalf("handed back %d time(s), want once", gave)
 			}
 			if msg, ok := log.message(tc.wantLevel); !ok || msg != tc.wantMsg {
-				t.Fatalf("records = %+v, want %q at %s", log.records, tc.wantMsg, tc.wantLevel)
+				t.Fatalf("records = %+v, want %q at %s", log.Records(), tc.wantMsg, tc.wantLevel)
 			}
 			recorded := false
-			for _, r := range log.records {
-				if r.operation == "daemon.server.conn_requestless" {
+			for _, r := range log.Records() {
+				if r.Operation == "daemon.server.conn_requestless" {
 					recorded = true
 				}
 			}
@@ -616,7 +616,7 @@ func TestTakeFailsWhenTheHoldersStreamCannotBeOpened(t *testing.T) {
 		t.Fatal("take = nil, want the stream's failure")
 	}
 	if msg, ok := log.message(dlog.LevelError); !ok || msg != "the holder's stream of handed-back connections could not be opened" {
-		t.Fatalf("records = %+v, want the failure at ERROR", log.records)
+		t.Fatalf("records = %+v, want the failure at ERROR", log.Records())
 	}
 }
 

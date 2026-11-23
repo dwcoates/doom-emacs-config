@@ -27,7 +27,9 @@ import {
   type FooterActivityTransientOverEnduring,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { createListeners } from "../listeners.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.footer.editor-notice");
 
 /** The one transient window, in milliseconds (frontend.v1.FooterTransientWindow). */
 export const TRANSIENT_WINDOW_MS: number = FooterTransientWindow.MS;

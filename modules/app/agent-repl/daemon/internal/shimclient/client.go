@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 	"agentrepl/proto/shim/v1/shimv1connect"
@@ -606,7 +607,7 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 			// The socket refuses or is absent: the shim the caller asked to
 			// stop is already gone. That is the state they asked for.
 			return c.adoptedAlreadyGone(attr, c.PID(), dlog.Context{"uds": c.udsPath},
-				"the adopted shim's socket is gone; nothing to stop",
+				logsite.Msg("the adopted shim's socket is gone; nothing to stop"),
 				"adopted shim: the socket was already gone when the daemon went to stop it")
 		}
 		c.log.Error("daemon.shimclient.kill", "could not learn the adopted shim's pid; it cannot be stopped", dlog.Context{
@@ -626,7 +627,7 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 		// stopping the merged workspace's adopted shim failed the merge on
 		// "process group of the adopted shim ...: no such process").
 		return c.adoptedAlreadyGone(attr, pid, dlog.Context{"pid": pid},
-			"the adopted shim exited before it could be stopped; nothing to stop",
+			logsite.Msg("the adopted shim exited before it could be stopped; nothing to stop"),
 			"adopted shim: the process had exited when the daemon went to stop it")
 	}
 	if err != nil {
@@ -738,12 +739,12 @@ func (c *client) recordEscalation(pid, pgid int, grace time.Duration) {
 // already gone, whichever observation found it: the stop the caller asked for
 // has happened, so it is recorded at INFO with what was observed, the exit is
 // published as inferred under PID, and the kill succeeds.
-func (c *client) adoptedAlreadyGone(attr KillAttribution, pid int, observed dlog.Context, message, stderr string) error {
+func (c *client) adoptedAlreadyGone(attr KillAttribution, pid int, observed dlog.Context, message logsite.Message, stderr string) error {
 	fields := dlog.Context{"workspace_id": string(c.ws), "actor": attr.Actor}
 	for k, v := range observed {
 		fields[k] = v
 	}
-	c.log.Info("daemon.shimclient.kill", message, fields)
+	c.log.Log(dlog.LevelInfo, "daemon.shimclient.kill", message, fields)
 	c.publishExit(ExitInfo{PID: pid, Code: -1, Inferred: true, Stderr: stderr})
 	return nil
 }
@@ -1518,13 +1519,12 @@ func (c *client) awaitAdoptedExit(ctx context.Context) {
 		return
 	}
 	if err != nil {
-		message := "could not wait on the adopted shim's exit; its exit is left to the socket or a kill"
+		fields := dlog.Context{"workspace_id": string(c.ws), "pid": pid, "error": err.Error()}
 		if group {
-			message = "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill"
+			c.log.Error("daemon.shimclient.exit", "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill", fields)
+			return
 		}
-		c.log.Error("daemon.shimclient.exit", message, dlog.Context{
-			"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
-		})
+		c.log.Error("daemon.shimclient.exit", "could not wait on the adopted shim's exit; its exit is left to the socket or a kill", fields)
 		return
 	}
 	c.log.Debug("daemon.shimclient.exit", "the adopted shim's process is gone after the stand-down it was asked for", dlog.Context{
@@ -1928,12 +1928,14 @@ func unary[Req any, Resp any](
 		// A CALL WHOSE DIAL FAILED NEVER REACHED A SHIM: still a fault of
 		// this client's shim, recorded at ERROR, and typed so a caller can
 		// tell it from any answer (ErrShimUnreachable).
-		if dialFailed(err) {
+		unreachable := dialFailed(err)
+		if unreachable {
 			fields["unreachable"] = true
-			c.log.Error(operation, "shim call failed", fields)
-			return nil, shimUnreachable(err)
 		}
 		c.log.Error(operation, "shim call failed", fields)
+		if unreachable {
+			return nil, shimUnreachable(err)
+		}
 		return nil, err
 	}
 	c.log.Debug(operation, "shim answered", dlog.Context{"workspace_id": string(c.ws)})
@@ -1954,7 +1956,7 @@ func (c *client) callerAbandoned(ctx context.Context, operation, what string, fi
 		return false
 	}
 	fields["cause"] = ctx.Err().Error()
-	c.log.Info(operation, what+" was abandoned: its caller's context ended before the shim answered", fields)
+	c.log.With(fields).Info(operation, "{what} was abandoned: its caller's context ended before the shim answered", dlog.Context{"what": what})
 	return true
 }
 
@@ -1975,11 +1977,12 @@ type quietOpenKey struct{}
 // ordinary branch as a failure. It is recorded at INFO, and the error is still
 // returned whole. Every other code is a failed open and stays at ERROR.
 func (c *client) refusedOpen(ctx context.Context, verb string, err error) error {
+	streamRefused := logsite.Msg("shim stream refused")
 	operation := "daemon.shimclient." + verb
 	fields := dlog.Context{"workspace_id": string(c.ws), "error": err.Error()}
 	refused := &StreamOpenError{Procedure: verb, Err: err}
 	if quiet, _ := ctx.Value(quietOpenKey{}).(bool); quiet {
-		c.log.Debug(operation, "shim stream refused", fields)
+		c.log.Log(dlog.LevelDebug, operation, streamRefused, fields)
 		return refused
 	}
 	// AN OPEN INSIDE A STAND-DOWN THIS DAEMON ORDERED IS NOT A REFUSAL. The
@@ -2020,7 +2023,7 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 		refused.Err = fmt.Errorf("%w: %w", ErrStoreUnreachable, err)
 		return refused
 	}
-	c.log.Error(operation, "shim stream refused", fields)
+	c.log.Log(dlog.LevelError, operation, streamRefused, fields)
 	return refused
 }
 

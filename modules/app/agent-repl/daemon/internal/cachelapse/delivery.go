@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // A KEEPER THAT FAILS A WORKSPACE SAYS SO, LOUDLY (owner request,
@@ -38,12 +39,12 @@ type Faults interface {
 // it could not be timed), that could not be armed or sent: MESSAGE at ERROR
 // under OP with FIELDS and CAUSE, and its fault. A cause the daemon's exit made is no
 // failure (leaving), and records neither.
-func (k *Keeper) undelivered(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID, due time.Time, doing, message string, fields dlog.Context, cause error) {
+func (k *Keeper) undelivered(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID, due time.Time, doing string, message logsite.Message, fields dlog.Context, cause error) {
 	if leaving(ctx, log, op, doing, cause) {
 		return
 	}
-	log.Error(op, message, dlog.WithCause(dlog.Merge(fields, dueField(due)), cause))
-	k.raiseUndelivered(ctx, log, ws, due, message+": "+cause.Error())
+	log.Log(dlog.LevelError, op, message, dlog.WithCause(dlog.Merge(fields, dueField(due)), cause))
+	k.raiseUndelivered(ctx, log, ws, due, message.Template()+": "+cause.Error())
 }
 
 // raiseUndelivered opens WS's `keepalive_undelivered` fault for a failure

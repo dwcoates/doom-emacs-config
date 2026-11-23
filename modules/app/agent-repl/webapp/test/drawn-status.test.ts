@@ -104,7 +104,8 @@ describe("the drawn-status records' one shape", () => {
     const files = filesUnder(root);
     // Act
     const handRolled = files.filter((file) => {
-      const source = readFileSync(file, "utf8");
+      // A logger's scope (createLogger("webapp.drawn-status")) names no operation.
+      const source = readFileSync(file, "utf8").replace(/createLogger\("[^"]*"\)/g, "");
       return /"[a-z-]+\.drawn-status"/.test(source) && !/createDrawnStatusLog\([^)]*"[a-z-]+\.drawn-status"\)/.test(source);
     });
     // Assert

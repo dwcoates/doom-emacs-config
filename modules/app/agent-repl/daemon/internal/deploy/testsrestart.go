@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"agentrepl/logging/logsite"
 	"context"
 	"errors"
 	"fmt"
@@ -48,7 +49,7 @@ func (r *Restarter) restartTests(ctx context.Context, s Standalone) error {
 	}
 	release, err := r.TestRuns.TakeTestRunsOff(ctx)
 	if err != nil {
-		r.failed("the gates' runs could not be taken off the test service; it is NOT restarted", fields, err)
+		r.failed(logsite.Msg("the gates' runs could not be taken off the test service; it is NOT restarted"), fields, err)
 		return fmt.Errorf("deploy: take the gates' runs off %s: %w", s.Label, err)
 	}
 	err = r.restartAndAwaitAnswer(ctx, s, fields)
@@ -61,7 +62,7 @@ func (r *Restarter) restartTests(ctx context.Context, s Standalone) error {
 func (r *Restarter) restartAndAwaitAnswer(ctx context.Context, s Standalone, fields dlog.Context) error {
 	_, before, err := r.Services.Status(ctx, s.Label)
 	if err != nil {
-		r.failed("could not read the test service's service-manager state; it is NOT restarted", fields, err)
+		r.failed(logsite.Msg("could not read the test service's service-manager state; it is NOT restarted"), fields, err)
 		return fmt.Errorf("deploy: read %s: %w", s.Label, err)
 	}
 	if err := r.restartStandalone(ctx, s); err != nil {
@@ -80,7 +81,7 @@ func (r *Restarter) awaitTestsAnswer(ctx context.Context, before int, fields dlo
 	start := r.Clock.Now()
 	if before != 0 {
 		if err := r.awaitExit(ctx, before); err != nil {
-			r.failed("the test service's previous process did not exit after its restart; it is not proven to answer", fields, err)
+			r.failed(logsite.Msg("the test service's previous process did not exit after its restart; it is not proven to answer"), fields, err)
 			return fmt.Errorf("deploy: %s (pid %d) did not exit: %w", TestsLabel, before, err)
 		}
 	}
@@ -100,7 +101,7 @@ func (r *Restarter) awaitTestsAnswer(ctx context.Context, before int, fields dlo
 		}
 		select {
 		case <-ctx.Done():
-			r.failed("the wait for the test service's answer ended with its context", fields, ctx.Err())
+			r.failed(logsite.Msg("the wait for the test service's answer ended with its context"), fields, ctx.Err())
 			return fmt.Errorf("deploy: await the answer of %s: %w", TestsLabel, ctx.Err())
 		case err := <-changed:
 			if err != nil {

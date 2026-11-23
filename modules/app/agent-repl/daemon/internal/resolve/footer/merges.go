@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -113,7 +114,7 @@ func (r *resolver) OnMergeRow(ws ids.WorkspaceID, lease ids.LeaseID, row *fronte
 func (r *resolver) onMergeHead(ws ids.WorkspaceID, lease ids.LeaseID, row *frontendv1.FeedRow, merge *frontendv1.FeedMerge) {
 	async := merge.GetHead().GetMode().GetAsync() != nil
 	inFlight := merge.GetUpdate() != nil
-	r.mutate(ws, "daemon.footer.on_merge_head", "the footer took a merge bubble's head",
+	r.mutate(ws, "daemon.footer.on_merge_head", logsite.Msg("the footer took a merge bubble's head"),
 		dlog.Context{"lease": string(lease), "row": row.GetId().GetValue(), "async": async, "in_flight": inFlight},
 		func(s *wsState) {
 			if !async || !inFlight {
@@ -142,7 +143,7 @@ func (r *resolver) onMergeTab(ws ids.WorkspaceID, lease ids.LeaseID, row *fronte
 	}
 	settled, waiting := mergeTabState(row.GetId().GetValue(), tab)
 	words := mergeTabWords(tab.GetLabel())
-	r.mutate(ws, "daemon.footer.on_merge_tab", "the footer took a merge bubble's top-level tab",
+	r.mutate(ws, "daemon.footer.on_merge_tab", logsite.Msg("the footer took a merge bubble's top-level tab"),
 		dlog.Context{"lease": string(lease), "row": row.GetId().GetValue(), "words": words, "settled": settled, "waiting": waiting},
 		func(s *wsState) {
 			if _, resolved := s.merges.resolved[lease]; resolved {
@@ -166,7 +167,7 @@ func (r *resolver) onMergeTab(ws ids.WorkspaceID, lease ids.LeaseID, row *fronte
 // retired head takes its merge's row away, a retired tab its step. It is the
 // feed resolver's Deps.MergeRowRetired.
 func (r *resolver) OnMergeRowRetired(ws ids.WorkspaceID, lease ids.LeaseID, id string) {
-	r.mutate(ws, "daemon.footer.on_merge_row_retired", "the footer took the feed's retirement of a merge bubble row",
+	r.mutate(ws, "daemon.footer.on_merge_row_retired", logsite.Msg("the footer took the feed's retirement of a merge bubble row"),
 		dlog.Context{"lease": string(lease), "row": id}, func(s *wsState) {
 			if drawn, ok := s.merges.rows[lease]; ok && drawn.entry.GetValue() == id {
 				delete(s.merges.rows, lease)

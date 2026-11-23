@@ -47,7 +47,7 @@ import { ASK_WAITING_WORD } from "./ask-words.js";
 import { drawAskHint } from "./hint.js";
 import { drawChoiceNumeral } from "./choice-number.js";
 import { createControl, type Control } from "../../control.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import {
   AnswerPermissionResponseSchema,
   type AnswerPermissionResponse,
@@ -73,6 +73,8 @@ import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { buildAnswerPermissionRequest, type PermissionAnswer } from "./requests.js";
+
+const log = createLogger("webapp.feed.asks.permission");
 
 const PATH = "FeedPermission";
 
@@ -343,10 +345,10 @@ async function answer(
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearRefusals(actions);
-  log.info(`answering a permission card with ${chosen.kind}`, {
+  log.info("answering a permission card with {kind}", {
     operation: "feed.asks.permission.answer",
     context: { row: id.value, answer: chosen.kind },
-  });
+  }, { kind: chosen.kind });
   const answered = await whileInFlight(buttons, () =>
     callUnary(
       rc.ctx,

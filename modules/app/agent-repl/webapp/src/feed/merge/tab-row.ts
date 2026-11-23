@@ -15,13 +15,15 @@
  * The badge is drawn ACTIVE because a lone tab is the only tab there is; there
  * is nothing to select between.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import type { FeedMergeTab, FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { RowContext, SubfeedView } from "../renderers.js";
 import { drawFeedMergeTab, readMergeTab } from "./tab-strip.js";
 import { drawSummary } from "./tab-set.js";
 import { mergeTabPanel } from "./tab-panels.js";
 import { replaceTicking } from "../ticking.js";
+
+const log = createLogger("webapp.feed.merge.tab-row");
 
 /** One merge tab, as a feed row: its badge, its failure summary, its content. */
 export function drawFeedMergeTabRow(

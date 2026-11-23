@@ -239,7 +239,7 @@ func (b *Boards) resolve(s Session) {
 	widget, err := getWidget(ctx, b.deps.HTTP, srv.baseURL, s)
 	switch {
 	case errors.Is(err, errSessionGone):
-		log.Info(opBoard, "the board's CEE session no longer holds its game; the board is unavailable", dlog.Context{"cause": err.Error()})
+		log.Info(opBoard, "the board's widget read found its CEE session gone; the board is unavailable", dlog.Context{"cause": err.Error()})
 		b.settle(s, unavailable(fmt.Sprintf("CEE session %s no longer holds game %s.", s.ID, s.GameID)))
 	case err != nil:
 		log.Error(opBoard, "cee-webapp did not answer the board's widget request", dlog.Context{"cause": err.Error(), "url": srv.baseURL})

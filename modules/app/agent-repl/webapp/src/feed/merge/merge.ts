@@ -36,7 +36,7 @@
  */
 import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { renderExternalLink, renderMergeCommitLink } from "../../link.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
 import { MERGE_GLYPH, MERGE_GLYPH_NAMES } from "../../merge-glyph.js";
@@ -60,6 +60,8 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { decorativeElement } from "../../dom.js";
 
+const log = createLogger("webapp.feed.merge.merge");
+
 const PATH = "FeedMerge";
 
 /** A live merge's badge word while it waits in line. */
@@ -73,10 +75,10 @@ export const PAUSED_WORD = "paused";
 export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   const result = requireCase(msg.result, `${PATH}.result`);
   const head = requireMessage(msg.head, `${PATH}.head`);
-  log.debug(`drawing a merge head as ${result.case}`, {
+  log.debug("drawing a merge head as {case}", {
     operation: "merge.draw-head",
     context: { arm: result.case },
-  });
+  }, { case: result.case });
 
   const el = document.createElement("div");
   el.className = "merge-head";
@@ -188,11 +190,11 @@ export function drawFeedMergeGlyph(glyph: FeedMergeGlyph): HTMLElement {
   el.setAttribute("data-glyph", glyph.icon);
   const known = MERGE_GLYPH_NAMES[glyph.icon];
   if (known === undefined) {
-    log.warn(`merge glyph '${glyph.icon}' is not one this build draws; using the generic one`, {
+    log.warn("merge glyph '{icon}' is not one this build draws; using the generic one", {
       operation: "merge.unknown-glyph",
-      context: { icon: glyph.icon, known: FEED_MERGE_HEAD_GLYPH },
+      context: { known: FEED_MERGE_HEAD_GLYPH },
       dedupKey: `merge.glyph:${glyph.icon}`,
-    });
+    }, { icon: glyph.icon });
     el.textContent = MERGE_GLYPH;
     return el;
   }

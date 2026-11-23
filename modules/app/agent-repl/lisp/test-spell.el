@@ -28,21 +28,34 @@
 (defvar agent-repl-test-spell--logged nil
   "Records the stubbed logging ladder saw, oldest first, as (LEVEL . ARGS).")
 
+(defun agent-repl-test-spell--note (level lead args)
+  "Record an emitter's ARGS at LEVEL; answer the record's rendered message.
+ARGS is (LEAD-ARGS... SITE VALUES...), LEAD the count of the rung's own
+arguments before the site (the workspace, and a fingerprint for warn-once).
+The record is (LEAD-ARGS... MESSAGE VALUES...): the site's message rendered
+from its values, which follow it as they were passed."
+  (let* ((site (nth lead args))
+         (values (nthcdr (1+ lead) args))
+         (message (agent-repl-log-site-render site values)))
+    (push (cons level (append (seq-take args lead) (list message) values))
+          agent-repl-test-spell--logged)
+    message))
+
 (defmacro agent-repl-test-spell--with-logging (&rest body)
   "Run BODY with the logging ladder recording into `agent-repl-test-spell--logged'.
-`agent-repl--fatal' records and then signals, as the real one does."
+Each record is `agent-repl-test-spell--note''s.  `agent-repl--fatal' records
+and then signals, as the real one does."
   (declare (indent 0))
   `(let ((agent-repl-test-spell--logged nil))
-     (cl-letf (((symbol-function 'agent-repl--log)
-                (lambda (&rest args) (push (cons 'log args) agent-repl-test-spell--logged)))
-               ((symbol-function 'agent-repl--warn-once)
-                (lambda (&rest args) (push (cons 'warn-once args) agent-repl-test-spell--logged) t))
-               ((symbol-function 'agent-repl--error)
-                (lambda (&rest args) (push (cons 'error args) agent-repl-test-spell--logged)))
-               ((symbol-function 'agent-repl--fatal)
+     (cl-letf (((symbol-function 'agent-repl--emit-log)
+                (lambda (&rest args) (agent-repl-test-spell--note 'log 1 args)))
+               ((symbol-function 'agent-repl--emit-warn-once)
+                (lambda (&rest args) (agent-repl-test-spell--note 'warn-once 2 args) t))
+               ((symbol-function 'agent-repl--emit-error)
+                (lambda (&rest args) (agent-repl-test-spell--note 'error 1 args)))
+               ((symbol-function 'agent-repl--emit-fatal)
                 (lambda (&rest args)
-                  (push (cons 'fatal args) agent-repl-test-spell--logged)
-                  (error "fatal: %s" (car (cdr args))))))
+                  (error "fatal: %s" (agent-repl-test-spell--note 'fatal 1 args)))))
        ,@body)))
 
 (defun agent-repl-test-spell--records (level)
@@ -291,8 +304,8 @@ ispell state is bound afresh, so a case never leaks it."
                 (lambda (name) (and (equal name "hunspell") ,program)))
                ((symbol-function 'agent-repl--spell-flyspell-on)
                 (lambda () (setq started (1+ started))))
-               ((symbol-function 'agent-repl--info)
-                (lambda (&rest args) (push (cons 'info args) agent-repl-test-spell--logged))))
+               ((symbol-function 'agent-repl--emit-info)
+                (lambda (&rest args) (agent-repl-test-spell--note 'info 1 args))))
        ,@body)))
 
 (ert-deftest agent-repl-test-spell-enable-off-starts-nothing ()
@@ -689,8 +702,8 @@ Binds `answer' to the sent check's callback, `span' to its markers, and
 (ert-deftest agent-repl-test-spell-a-failed-check-warns-and-marks-nothing ()
   "A hunspell that failed is recorded at WARN with what it said; nothing is marked."
   (agent-repl-test-spell--with-logging
-    (cl-letf (((symbol-function 'agent-repl--warn)
-               (lambda (&rest args) (push (cons 'warn args) agent-repl-test-spell--logged))))
+    (cl-letf (((symbol-function 'agent-repl--emit-warn)
+               (lambda (&rest args) (agent-repl-test-spell--note 'warn 1 args))))
       (agent-repl-test-spell--answering "a wrold"
         (funcall answer nil "Can't open affix or dictionary files\n")
         (should-not (funcall marks))
@@ -698,7 +711,7 @@ Binds `answer' to the sent check's callback, `span' to its markers, and
         (let ((warned (agent-repl-test-spell--records 'warn)))
           (should (= (length warned) 1))
           (should (equal (car warned)
-                         (list "ws-a" "elisp.spell.check-failed ws=%s buffer=%s span-length=%d output=%S"
+                         (list "ws-a" "elisp.spell.check-failed ws=ws-a buffer= *test-spell-composer* span-length=7 output=\"Can't open affix or dictionary files\""
                                "ws-a" " *test-spell-composer*" 7
                                "Can't open affix or dictionary files"))))))))
 

@@ -28,7 +28,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, settle, str, uint } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.grep" });
+const LOGGER = bindLog("shim.convert.tools.grep", { component: "shim-convert-tools", operation: "shim.convert.tools.grep" });
 
 /** The vendor's own default output mode, applied when the result states none. */
 const DEFAULT_MODE = "files_with_matches";

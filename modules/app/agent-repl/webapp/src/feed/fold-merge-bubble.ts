@@ -24,9 +24,11 @@ import {
   FoldMergeBubbleResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { controlCall } from "../rpc/control-call.js";
+
+const log = createLogger("webapp.feed.fold-merge-bubble");
 
 /** The chip's `request` evidence for a fold the reader made, by its arm. */
 export const OPEN_MERGE_BUBBLE_REQUEST = "record that you opened a merge bubble";
@@ -49,10 +51,10 @@ export async function foldMergeBubble(ctx: AppContext, row: FeedId, folded: bool
   const fold = folded
     ? ({ case: "close", value: {} } as const)
     : ({ case: "open", value: {} } as const);
-  log.info(`the reader ${folded ? "closed" : "opened"} a merge bubble; recording the fold`, {
+  log.info("the reader {action} a merge bubble; recording the fold", {
     operation: "feed.merge-fold-sent",
     context: { row: row.value, folded },
-  });
+  }, { action: folded ? "closed" : "opened" });
   const success = await controlCall(ctx, {
     rpc: "FoldMergeBubble",
     what,

@@ -37,11 +37,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'seq)
 
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
 
 (defconst agent-repl-heap-census--central
   '(:agent-repl-central "the editor's heap spans every workspace")
@@ -134,13 +136,13 @@ census was recorded."
                          agent-repl-heap-census-variable-prefix agent-repl-heap-census-top)))
         (agent-repl--info
          agent-repl-heap-census--central
-         (concat "elisp.heap-census: live_bytes=%d by_kind=%S census_gc_ms=%d "
-                 "gcs_done=%d gc_elapsed_s=%.1f gc_cons_threshold=%d gc_cons_percentage=%s "
-                 "rss_kb=%S buffers=%d buffer_bytes=%d largest_buffers=%S largest_variables=%S")
-         (apply #'+ (mapcar #'cdr by-kind)) by-kind gc-ms
-         gcs-done gc-elapsed gc-cons-threshold gc-cons-percentage
-         (alist-get 'rss (process-attributes (emacs-pid)))
-         (nth 0 buffers) (nth 1 buffers) (nth 2 buffers) variables)
+         "elisp.heap-census: live_bytes={live_bytes} by_kind={by_kind} census_gc_ms={census_gc_ms} gcs_done={gcs_done} gc_elapsed_s={gc_elapsed_s} gc_cons_threshold={gc_cons_threshold} gc_cons_percentage={gc_cons_percentage} rss_kb={rss_kb} buffers={buffers} buffer_bytes={buffer_bytes} largest_buffers={largest_buffers} largest_variables={largest_variables}"
+         :live_bytes (apply #'+ (mapcar #'cdr by-kind)) :by_kind (prin1-to-string by-kind)
+         :census_gc_ms gc-ms :gcs_done gcs-done :gc_elapsed_s (format "%.1f" gc-elapsed)
+         :gc_cons_threshold gc-cons-threshold :gc_cons_percentage gc-cons-percentage
+         :rss_kb (prin1-to-string (alist-get 'rss (process-attributes (emacs-pid))))
+         :buffers (nth 0 buffers) :buffer_bytes (nth 1 buffers)
+         :largest_buffers (prin1-to-string (nth 2 buffers)) :largest_variables (prin1-to-string variables))
         t))))
 
 (defun agent-repl-heap-census--on-idle ()
@@ -161,10 +163,10 @@ two running.  Answers the timer."
         (run-with-idle-timer agent-repl-heap-census-idle-seconds t
                              #'agent-repl-heap-census--on-idle))
   (agent-repl--info agent-repl-heap-census--central
-                    "elisp.heap-census.scheduled: idle_s=%d interval_s=%d top=%d"
-                    agent-repl-heap-census-idle-seconds
-                    agent-repl-heap-census-interval-seconds
-                    agent-repl-heap-census-top)
+                    "elisp.heap-census.scheduled: idle_s={idle_s} interval_s={interval_s} top={top}"
+                    :idle_s agent-repl-heap-census-idle-seconds
+                    :interval_s agent-repl-heap-census-interval-seconds
+                    :top agent-repl-heap-census-top)
   agent-repl-heap-census--timer)
 
 (provide 'heap-census)

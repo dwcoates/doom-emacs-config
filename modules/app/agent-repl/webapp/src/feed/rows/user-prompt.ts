@@ -12,7 +12,7 @@
  * oneof, so an unset one is a malformed view here rather than a bubble drawn
  * with no body.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { USER_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -27,6 +27,8 @@ import { drawPromptAddressHeader } from "./agent-prompt.js";
 import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
 import { reserveCopyRoom } from "../../bubble/copy-room.js";
 import { markKnownCommands } from "./known-commands.js";
+
+const log = createLogger("webapp.feed.rows.user-prompt");
 
 /** The path prefix every refusal from this file is reported under. */
 const PATH = "FeedUserPrompt";

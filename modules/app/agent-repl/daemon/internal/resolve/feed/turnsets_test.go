@@ -8,13 +8,14 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agentrepl/logging/logsite"
 )
 
 // DURABLE TURN SETS (turnsets.go): every set loads through restoreTurnSet.
 
 // testRestore is a turnSetRestore over LOAD, with recognizable messages.
 func testRestore(load func(context.Context, ids.WorkspaceID) ([]ids.TurnID, error)) turnSetRestore {
-	return turnSetRestore{op: "daemon.feed.test_restore", load: load, failed: "failed", warning: "warned", loaded: "loaded"}
+	return turnSetRestore{op: "daemon.feed.test_restore", load: load, failed: logsite.Msg("failed"), warning: "warned", loaded: logsite.Msg("loaded")}
 }
 
 func TestRestoreTurnSet(t *testing.T) {
@@ -120,7 +121,7 @@ func testAnswer(s *wsState, store *fakeTurnSet) turnAnswer {
 	return turnAnswer{
 		op: "daemon.feed.test_answer", names: unreachableEnding, retires: unreachableEnding,
 		into: s.reconnected, record: store.RecordReconnectedTurns, fields: dlog.Context{"why": "test"},
-		nothing: "nothing", failed: "failed", warning: "warned", answered: "answered",
+		nothing: logsite.Msg("nothing"), failed: logsite.Msg("failed"), warning: "warned", answered: logsite.Msg("answered"),
 	}
 }
 

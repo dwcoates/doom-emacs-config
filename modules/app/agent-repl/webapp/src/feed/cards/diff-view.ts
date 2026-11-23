@@ -16,7 +16,9 @@
  *     is CONSERVATIVE on purpose, so ordinary command output is never redrawn
  *     as a diff by accident; see its own comment for the exact rule.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
+
+const log = createLogger("webapp.feed.cards.diff-view");
 
 /** What one line of a classic diff is. */
 export type ClassicDiffKind = "added" | "removed" | "context" | "header" | "meta";

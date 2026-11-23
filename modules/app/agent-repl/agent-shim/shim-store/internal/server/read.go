@@ -60,7 +60,7 @@ func NewRead(store ReadStore, log *logging.Logger) *ReadServer {
 	path, handler := storereadv1connect.NewStoreReadHandler(s)
 	mux.Handle(path, handler)
 	s.http = &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
-	log.Log(logging.Fields{Operation: "store.read.new"}, "storeread.v1.StoreRead ready")
+	log.Log(logging.Fields{Operation: "store.read.new"}, "storeread.v1.StoreRead ready", nil)
 	return s
 }
 
@@ -71,13 +71,13 @@ func (s *ReadServer) Handler() http.Handler { return s.http.Handler }
 // Serve runs until Shutdown. It returns http.ErrServerClosed after an orderly
 // stop, exactly as http.Server does.
 func (s *ReadServer) Serve(ln net.Listener) error {
-	s.log.Log(logging.Fields{Operation: "store.read.serve"}, "serving storeread.v1.StoreRead")
+	s.log.Log(logging.Fields{Operation: "store.read.serve"}, "serving storeread.v1.StoreRead", nil)
 	err := s.http.Serve(ln)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		s.log.Log(logging.Fields{Operation: "store.read.serve", Level: "error"}, "serving ended: %v", err)
+		s.log.Log(logging.Fields{Operation: "store.read.serve", Level: "error"}, "serving ended: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
-	s.log.Log(logging.Fields{Operation: "store.read.serve"}, "serving stopped")
+	s.log.Log(logging.Fields{Operation: "store.read.serve"}, "serving stopped", nil)
 	return err
 }
 
@@ -85,10 +85,10 @@ func (s *ReadServer) Serve(ln net.Listener) error {
 // stream, so nothing else needs ending first.
 func (s *ReadServer) Shutdown(ctx context.Context) error {
 	if err := s.http.Shutdown(ctx); err != nil {
-		s.log.Log(logging.Fields{Operation: "store.read.shutdown", Level: "error"}, "draining the HTTP server failed: %v", err)
+		s.log.Log(logging.Fields{Operation: "store.read.shutdown", Level: "error"}, "draining the HTTP server failed: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
-	s.log.Log(logging.Fields{Operation: "store.read.shutdown"}, "storeread.v1.StoreRead stopped")
+	s.log.Log(logging.Fields{Operation: "store.read.shutdown"}, "storeread.v1.StoreRead stopped", nil)
 	return nil
 }
 
@@ -134,7 +134,7 @@ func (s *ReadServer) ReadHistoryPage(ctx context.Context, req *connect.Request[s
 		}
 		return readHistoryPageFailure(ref), nil
 	}
-	log.LogVerbose(logging.Fields{Operation: opReadHistoryPage, AgentID: agentID}, "page served entries=%d heads=%d", len(page.GetEntries()), len(page.GetHeads()))
+	log.LogVerbose(logging.Fields{Operation: opReadHistoryPage, AgentID: agentID}, "page served entries={entries} heads={heads}", logging.Values{"entries": len(page.GetEntries()), "heads": len(page.GetHeads())})
 	return connect.NewResponse(&storereadv1.ReadHistoryPageResponse{
 		Result: &storereadv1.ReadHistoryPageResponse_Success{Success: &storereadv1.ReadHistoryPageSuccess{Page: page}},
 	}), nil

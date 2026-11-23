@@ -40,15 +40,13 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--fatal "core" (ws fmt &rest args))
-
-(declare-function agent-repl--phase-echo "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function agent-repl-roster-refresh-order "roster" ())
@@ -171,36 +169,38 @@ open in the same walk."
     (or (and id (agent-repl--ws-by-ref-id id))
         (file-name-nondirectory (directory-file-name (or (plist-get ref :dir) ""))))))
 
-(defun agent-repl-open-tabs--say (fmt &rest args)
-  "Say one line, FMT with ARGS, in the minibuffer and the log."
-  (apply #'agent-repl--phase-echo agent-repl-open-tabs--central fmt args))
+(defmacro agent-repl-open-tabs--say (template &rest named)
+  "Say one line, TEMPLATE with NAMED, in the minibuffer and the log.
+A log-site macro (`agent-repl--phase-echo' under this file's central
+scope): TEMPLATE is a literal and NAMED its :name VALUE pairs."
+  `(agent-repl--phase-echo agent-repl-open-tabs--central ,template ,@named))
 
 (defun agent-repl-open-tabs--say-step (ws step)
   "Say the line for workspace WS's STEP, a decoded `OpenTabsStep.step' oneof."
   (let ((value (plist-get step :value)))
     (pcase (plist-get step :arm)
-      (:starting-session (agent-repl-open-tabs--say "%s: starting session…" ws))
-      (:waking (agent-repl-open-tabs--say "%s: waking from sleep…" ws))
-      (:resuming (agent-repl-open-tabs--say "%s: resuming the conversation…" ws))
+      (:starting-session (agent-repl-open-tabs--say "{ws}: starting session…" :ws ws))
+      (:waking (agent-repl-open-tabs--say "{ws}: waking from sleep…" :ws ws))
+      (:resuming (agent-repl-open-tabs--say "{ws}: resuming the conversation…" :ws ws))
       (:vendor-retrying
-       (agent-repl-open-tabs--say "%s: Claude did not start, retrying (attempt %d)…"
-                                  ws (plist-get value :attempt)))
+       (agent-repl-open-tabs--say "{ws}: Claude did not start, retrying (attempt {attempt})…"
+                                  :ws ws :attempt (plist-get value :attempt)))
       (:vendor-rejected
-       (agent-repl-open-tabs--say "%s: Claude refused to start: %s." ws (plist-get value :cause)))
-      (:vendor-failed (agent-repl-open-tabs--say "%s: Claude failed to start after 10 minutes." ws))
-      (:cold-gate (agent-repl-open-tabs--say "%s: needs your answer to resume (large context)." ws))
-      (:offline (agent-repl-open-tabs--say "%s: offline, waiting for the network…" ws))
-      (:served (agent-repl-open-tabs--say "%s: session up, waiting for its page…" ws))
-      (:page-connected (agent-repl-open-tabs--say "%s: page connected, drawing the conversation…" ws))
-      (:conversation-read (agent-repl-open-tabs--say "%s: conversation read." ws))
+       (agent-repl-open-tabs--say "{ws}: Claude refused to start: {start}." :ws ws :start (plist-get value :cause)))
+      (:vendor-failed (agent-repl-open-tabs--say "{ws}: Claude failed to start after 10 minutes." :ws ws))
+      (:cold-gate (agent-repl-open-tabs--say "{ws}: needs your answer to resume (large context)." :ws ws))
+      (:offline (agent-repl-open-tabs--say "{ws}: offline, waiting for the network…" :ws ws))
+      (:served (agent-repl-open-tabs--say "{ws}: session up, waiting for its page…" :ws ws))
+      (:page-connected (agent-repl-open-tabs--say "{ws}: page connected, drawing the conversation…" :ws ws))
+      (:conversation-read (agent-repl-open-tabs--say "{ws}: conversation read." :ws ws))
       (:resuming-cut-turn
-       (agent-repl-open-tabs--say "%s: resuming the turn the restart cut…" ws))
+       (agent-repl-open-tabs--say "{ws}: resuming the turn the restart cut…" :ws ws))
       (:page-drawn
-       (agent-repl-open-tabs--say "%s: page drawn." ws)
+       (agent-repl-open-tabs--say "{ws}: page drawn." :ws ws)
        (when (fboundp 'agent-repl-open-progress-note-loaded)
          (agent-repl-open-progress-note-loaded ws)))
       (arm (agent-repl--error agent-repl-open-tabs--central
-                              "elisp.open-tabs.unknown-step arm=%S ws=%s" arm ws)))))
+                              "elisp.open-tabs.unknown-step arm={arm} ws={ws}" :arm (prin1-to-string arm) :ws ws)))))
 
 ;;;; ---- Asking -------------------------------------------------------------
 
@@ -237,8 +237,8 @@ lost."
           (agent-repl--ensure-input-buffer name)
           (agent-repl--frontend-precreate-webview name))
       (error
-       (agent-repl--error name "elisp.open-tabs.page-failed ws=%s error=%s"
-                          name (error-message-string err)))))
+       (agent-repl--error name "elisp.open-tabs.page-failed ws={ws} error={error}"
+                          :ws name :error (error-message-string err)))))
   (list :arm (if (and (not hidden) (agent-repl-webhost-has-page-p name))
                  :loading
                :none)))
@@ -258,15 +258,15 @@ left unasked, and the next link-up or roster walk asks again."
                   rows)))
     (dolist (id ids) (puthash id 'in-flight agent-repl-open-tabs--state))
     (agent-repl--info agent-repl-open-tabs--central
-                      "elisp.open-tabs.ask workspaces=%d startup=%s pages=%S"
-                      (length rows) startup
-                      (cl-mapcar (lambda (row w)
+                      "elisp.open-tabs.ask workspaces={workspaces} startup={startup} pages={pages}"
+                      :workspaces (length rows) :startup startup
+                      :pages (prin1-to-string (cl-mapcar (lambda (row w)
                                    (cons (plist-get row :name)
                                          (plist-get (plist-get w :page) :arm)))
-                                 rows workspaces))
+                                 rows workspaces)))
     (when startup
       (setq agent-repl-open-tabs--startup 'running)
-      (agent-repl-open-tabs--say "opening %d workspaces…" (length rows))
+      (agent-repl-open-tabs--say "opening {rows_count} workspaces…" :rows_count (length rows))
       (agent-repl-open-tabs--show-host-while-starting))
     (unless (apply agent-repl-open-tabs-sender workspaces
                    (lambda (frame) (agent-repl-open-tabs--on-frame frame startup))
@@ -275,8 +275,8 @@ left unasked, and the next link-up or roster walk asks again."
       (dolist (id ids) (remhash id agent-repl-open-tabs--state))
       (when startup (setq agent-repl-open-tabs--startup 'expected))
       (agent-repl--info agent-repl-open-tabs--central
-                        "elisp.open-tabs.unsent workspaces=%d reason=no-connection"
-                        (length rows)))))
+                        "elisp.open-tabs.unsent workspaces={workspaces} reason=no-connection"
+                        :workspaces (length rows)))))
 
 ;;;; ---- The host on screen while the startup chooses -------------------------
 
@@ -302,14 +302,14 @@ frame already stands on a workspace of the user's."
         (current (agent-repl--ws-current-name)))
     (if (not (and xw current (agent-repl--pseudo-workspace-name-p current)))
         (agent-repl--log agent-repl-open-tabs--central
-                         "elisp.open-tabs.startup-view-skipped host=%s current=%s"
-                         (and xw t) current)
+                         "elisp.open-tabs.startup-view-skipped host={host} current={current}"
+                         :host (and xw t) :current current)
       (let ((buf (or (get-buffer agent-repl-open-tabs--startup-view-name)
                      (agent-repl--frontend-make-slot-buffer
                       agent-repl-open-tabs--startup-view-name xw))))
         (set-window-buffer (selected-window) buf)
         (agent-repl--info agent-repl-open-tabs--central
-                          "elisp.open-tabs.startup-view-shown current=%s" current)))))
+                          "elisp.open-tabs.startup-view-shown current={current}" :current current)))))
 
 (defun agent-repl-open-tabs--drop-startup-view ()
   "Drop the buffer that displayed the host while the startup chose."
@@ -342,8 +342,8 @@ numbered, and one it stops drawing is no longer held and is torn down
 a broken contract, and is fatal."
   (unless (plist-get row :hidden)
     (agent-repl--fatal (plist-get row :name)
-                       "elisp.open-tabs.withdraw-not-hidden ws=%s id=%s"
-                       (plist-get row :name) (plist-get row :id)))
+                       "elisp.open-tabs.withdraw-not-hidden ws={ws} id={id}"
+                       :ws (plist-get row :name) :id (plist-get row :id)))
   (agent-repl-open-tabs--hide row))
 
 (defun agent-repl-open-tabs--hide (row)
@@ -356,7 +356,7 @@ while the report was in flight keeps its page."
          (id (plist-get row :id))
          (buf (agent-repl--ws-get name :frontend-buffer)))
     (agent-repl-open-tabs--dormant id)
-    (agent-repl--info name "elisp.open-tabs.hidden ws=%s page=%s" name (buffer-live-p buf))
+    (agent-repl--info name "elisp.open-tabs.hidden ws={ws} page={page}" :ws name :page (buffer-live-p buf))
     (when (buffer-live-p buf)
       (agent-repl-page-drop-announced
        name
@@ -366,9 +366,9 @@ while the report was in flight keeps its page."
               (buffer-live-p buf)))
        (lambda ()
          (agent-repl--frontend-detach-webview name buf)
-         (agent-repl--info name "elisp.open-tabs.page-dropped ws=%s" name))
+         (agent-repl--info name "elisp.open-tabs.page-dropped ws={ws}" :ws name))
        (lambda (why)
-         (agent-repl--info name "elisp.open-tabs.page-kept ws=%s why=%s" name why))))))
+         (agent-repl--info name "elisp.open-tabs.page-kept ws={ws} why={why}" :ws name :why why))))))
 
 (defun agent-repl-open-tabs-reconcile (rows)
   "Bring every open in line with the roster walk's ROWS, then ask for the owed.
@@ -424,7 +424,7 @@ once a daemon is serving."
          (agent-repl-open-tabs--say-finished value)
          (agent-repl-open-tabs--end-startup "finished")))
       (arm (agent-repl--error agent-repl-open-tabs--central
-                              "elisp.open-tabs.unknown-frame arm=%S" arm)))))
+                              "elisp.open-tabs.unknown-frame arm={arm}" :arm (prin1-to-string arm))))))
 
 (defun agent-repl-open-tabs--opened (opened)
   "Take one workspace's OPENED answer: draw its tab, or record why not."
@@ -440,7 +440,7 @@ once a daemon is serving."
        (cond
         ((null row)
          ;; Closed while it opened: the walk already forgot it.
-         (agent-repl--info ws "elisp.open-tabs.opened-gone ws=%s id=%s" ws id))
+         (agent-repl--info ws "elisp.open-tabs.opened-gone ws={ws} id={id}" :ws ws :id id))
         ((plist-get row :collapsed)
          ;; Folded or hidden while it opened: off the bar, and a hidden one
          ;; drops its page (the daemon stands it down once its cache lapses).
@@ -455,12 +455,12 @@ once a daemon is serving."
              (agent-repl-roster-note-row (plist-get listing :value)
                                          (or (plist-get value :roster-revision) 0))))
          (when (eq (plist-get outcome :arm) :failed)
-           (agent-repl-open-tabs--say "%s: could not be opened: %s."
-                                      ws (plist-get (plist-get outcome :value) :reason)))
+           (agent-repl-open-tabs--say "{ws}: could not be opened: {opened}."
+                                      :ws ws :opened (plist-get (plist-get outcome :value) :reason)))
          (agent-repl-open-tabs--show id ws))))
       (:hidden
        (when row (agent-repl-open-tabs--dormant id))
-       (agent-repl--info ws "elisp.open-tabs.opened-hidden ws=%s id=%s" ws id)
+       (agent-repl--info ws "elisp.open-tabs.opened-hidden ws={ws} id={id}" :ws ws :id id)
        (agent-repl-open-tabs--maybe-land-startup))
       ((and :refused
             (guard (memq (agent-repl-open-tabs--cause-arm outcome)
@@ -468,12 +468,12 @@ once a daemon is serving."
        (agent-repl-open-tabs--handed-over row id ws outcome reattached))
       (:refused
        (when row (puthash id 'refused agent-repl-open-tabs--state))
-       (agent-repl--error ws "elisp.open-tabs.refused ws=%s id=%s cause=%S"
-                          ws id (plist-get outcome :value))
-       (agent-repl-open-tabs--say "%s: the daemon refused to open it (%s)."
-                                  ws (agent-repl-open-tabs--cause-word outcome))
+       (agent-repl--error ws "elisp.open-tabs.refused ws={ws} id={id} cause={cause}"
+                          :ws ws :id id :cause (prin1-to-string (plist-get outcome :value)))
+       (agent-repl-open-tabs--say "{ws}: the daemon refused to open it ({cause})."
+                                  :ws ws :cause (agent-repl-open-tabs--cause-word outcome))
        (agent-repl-open-tabs--maybe-land-startup))
-      (arm (agent-repl--error ws "elisp.open-tabs.unknown-outcome arm=%S ws=%s" arm ws)))))
+      (arm (agent-repl--error ws "elisp.open-tabs.unknown-outcome arm={arm} ws={ws}" :arm (prin1-to-string arm) :ws ws)))))
 
 (defun agent-repl-open-tabs--cause-arm (refused)
   "Return REFUSED's cause arm keyword, e.g. `:unknown-workspace'."
@@ -508,8 +508,8 @@ reattach asks for it again on that daemon, or it is asked for there at
 once when WS already stands on it.  Its tab opens without waiting for the
 handover, and the incumbent's `transferred' push moves it on later."
   (let ((address (agent-repl-open-tabs--serving-address refused)))
-    (agent-repl--info ws "elisp.open-tabs.refused-handover ws=%s id=%s cause=%s reattached=%s serving=%S"
-                      ws id (agent-repl-open-tabs--cause-word refused) (and reattached t) address)
+    (agent-repl--info ws "elisp.open-tabs.refused-handover ws={ws} id={id} cause={cause} reattached={reattached} serving={serving}"
+                      :ws ws :id id :cause (agent-repl-open-tabs--cause-word refused) :reattached (and reattached t) :serving (prin1-to-string address))
     (when row
       (puthash id 'handover agent-repl-open-tabs--state)
       (cond
@@ -517,7 +517,7 @@ handover, and the incumbent's `transferred' push moves it on later."
        (address
         (unless (agent-repl-host-view-where-served ws address "open-tabs-not-yet-adopted")
           (agent-repl-open-tabs--ask-again row "served-elsewhere")))
-       (t (agent-repl-open-tabs--say "%s: moving to the new daemon; its tab opens once it has." ws))))
+       (t (agent-repl-open-tabs--say "{ws}: moving to the new daemon; its tab opens once it has." :ws ws))))
     (agent-repl-open-tabs--maybe-land-startup)))
 
 (defun agent-repl-open-tabs--serving-address (refused)
@@ -539,8 +539,8 @@ none."
 
 (defun agent-repl-open-tabs--ask-again (row why)
   "Ask again for ROW, held by a handover refusal; WHY is recorded."
-  (agent-repl--info (plist-get row :name) "elisp.open-tabs.handover-ask-again ws=%s id=%s why=%s"
-                    (plist-get row :name) (plist-get row :id) why)
+  (agent-repl--info (plist-get row :name) "elisp.open-tabs.handover-ask-again ws={ws} id={id} why={why}"
+                    :ws (plist-get row :name) :id (plist-get row :id) :why why)
   (remhash (plist-get row :id) agent-repl-open-tabs--state)
   (agent-repl-open-tabs--ask (list row) (agent-repl-open-tabs--serving-conn (plist-get row :name))))
 
@@ -598,8 +598,8 @@ refused, which may have been the one the startup waited for."
     (pcase-let ((`(,ws . ,source) (agent-repl-open-tabs--startup-landing)))
       (if (null ws)
           (agent-repl--log agent-repl-open-tabs--central
-                           "elisp.open-tabs.startup-landing-waits source=%s" source)
-        (agent-repl--info ws "elisp.open-tabs.startup-lands ws=%s source=%s" ws source)
+                           "elisp.open-tabs.startup-landing-waits source={source}" :source source)
+        (agent-repl--info ws "elisp.open-tabs.startup-lands ws={ws} source={source}" :ws ws :source source)
         (setq agent-repl-open-tabs--startup-selected ws)
         (agent-repl-host-request-switch ws 'startup)))))
 
@@ -612,11 +612,11 @@ no workspace while the rest come up."
   (puthash id 'open agent-repl-open-tabs--state)
   (unless agent-repl-roster--walking
     (agent-repl-roster-refresh-order))
-  (agent-repl--info ws "elisp.open-tabs.tab-opened ws=%s id=%s choosing=%s"
-                    ws id (agent-repl-open-tabs-choosing-p))
+  (agent-repl--info ws "elisp.open-tabs.tab-opened ws={ws} id={id} choosing={choosing}"
+                    :ws ws :id id :choosing (agent-repl-open-tabs-choosing-p))
   (when (agent-repl-open-tabs-starting-p)
     (agent-repl-startup-reach :first-tab))
-  (agent-repl-open-tabs--say "%s: ready." ws)
+  (agent-repl-open-tabs--say "{ws}: ready." :ws ws)
   (agent-repl-open-tabs--maybe-land-startup)
   ;; The selection may name this workspace, and had no tab to land on.
   (unless agent-repl-roster--walking
@@ -627,10 +627,10 @@ no workspace while the rest come up."
   (let ((failed (plist-get finished :failed))
         (total (plist-get finished :total)))
     (if (null failed)
-        (agent-repl-open-tabs--say "all %d workspaces ready." total)
-      (agent-repl-open-tabs--say "%d of %d workspaces ready; %s could not be opened."
-                                 (plist-get finished :ready) total
-                                 (mapconcat (lambda (f) (plist-get f :name)) failed ", ")))))
+        (agent-repl-open-tabs--say "all {total} workspaces ready." :total total)
+      (agent-repl-open-tabs--say "{ready} of {total} workspaces ready; {failed} could not be opened."
+                                 :ready (plist-get finished :ready) :total total
+                                 :failed (mapconcat (lambda (f) (plist-get f :name)) failed ", ")))))
 
 (defun agent-repl-open-tabs--on-close (ids outcome startup)
   "The stream of the open of IDS closed with OUTCOME; STARTUP marks the first.
@@ -647,15 +647,15 @@ dialed in a loop."
         (agent-repl--log agent-repl-open-tabs--central "elisp.open-tabs.closed outcome=ended")
       ;; INFO: the open is not lost, only asked for again.
       (agent-repl--info agent-repl-open-tabs--central
-                        "elisp.open-tabs.closed-unanswered outcome=%S unanswered=%S"
-                        outcome unanswered))
+                        "elisp.open-tabs.closed-unanswered outcome={outcome} unanswered={unanswered}"
+                        :outcome (prin1-to-string outcome) :unanswered (prin1-to-string unanswered)))
     (when (and startup (agent-repl-open-tabs-starting-p))
       (agent-repl-open-tabs--end-startup "stream-ended"))))
 
 (defun agent-repl-open-tabs--end-startup (why)
   "End this process's first open, for WHY, and arm Doom's one-time setup."
   (setq agent-repl-open-tabs--startup 'done)
-  (agent-repl--info agent-repl-open-tabs--central "elisp.open-tabs.startup-ended why=%s" why)
+  (agent-repl--info agent-repl-open-tabs--central "elisp.open-tabs.startup-ended why={why}" :why why)
   (agent-repl-open-tabs--drop-startup-view)
   (agent-repl-roster-apply-current)
   (agent-repl-startup-ended)

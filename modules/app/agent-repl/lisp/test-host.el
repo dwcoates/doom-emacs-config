@@ -408,18 +408,18 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-popup-open)
                 (lambda (path &optional line)
                   (push (list :popup path line) agent-repl-test-host--effects)))
-               ((symbol-function 'agent-repl--log)
+               ((symbol-function 'agent-repl--emit-log)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :log (apply #'format fmt args)) agent-repl-test-host--logs)))
-               ((symbol-function 'agent-repl--info)
+                  (push (cons :log (agent-repl-log-site-render fmt args)) agent-repl-test-host--logs)))
+               ((symbol-function 'agent-repl--emit-info)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :info (apply #'format fmt args)) agent-repl-test-host--logs)))
-               ((symbol-function 'agent-repl--warn)
+                  (push (cons :info (agent-repl-log-site-render fmt args)) agent-repl-test-host--logs)))
+               ((symbol-function 'agent-repl--emit-warn)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :warn (apply #'format fmt args)) agent-repl-test-host--logs)))
-               ((symbol-function 'agent-repl--error)
+                  (push (cons :warn (agent-repl-log-site-render fmt args)) agent-repl-test-host--logs)))
+               ((symbol-function 'agent-repl--emit-error)
                 (lambda (_ws fmt &rest args)
-                  (push (cons :error (apply #'format fmt args)) agent-repl-test-host--logs))))
+                  (push (cons :error (agent-repl-log-site-render fmt args)) agent-repl-test-host--logs))))
        ,@body)))
 
 (defun agent-repl-test-host--subscribe (ws &optional conn ref)
@@ -3677,7 +3677,7 @@ registry rather than a stub: a pseudo perspective cannot reach the walk."
           (logged-workspace nil))
       (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
                 ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (lambda (ws &rest _args) (setq logged-workspace ws))))
         ;; Act
         (agent-repl-host-on-link-up conn))
@@ -5848,7 +5848,7 @@ the walk began, which BODY makes the stubbed links answer."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (let ((fatals nil))
-      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+      (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
         ;; Act
         (should-error (agent-repl-host--promoted-since-p "ws-1" (list :token 1)))
         ;; Assert
@@ -5992,7 +5992,7 @@ workspaces stayed severed."
         (setq agent-repl-test-host--register-all-answer
               (list :response (list :outcomes (list (list :dir "/tmp/ws-1"
                                                           :outcome (list :arm :failed :value nil))))))
-        (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+        (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
           ;; Act / Assert
           (should-error (agent-repl-host-on-link-up conn)))
         (should (string-match-p "elisp.host.register-all-unpaired" (car fatals)))))))
@@ -6161,7 +6161,7 @@ address."
   "An arm the recorder does not know is a caller bug."
   (agent-repl-test-host--with-harness
     (let (fatals)
-      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+      (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
         ;; Act / Assert
         (should-error (agent-repl-host--record-registration nil "/w" :teleported nil))
         (should (string-match-p "record-registration-unknown-arm" (car fatals)))))))
@@ -6636,7 +6636,7 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
     (agent-repl-test-host--adopt-on-retiring "ws-1")
     (agent-repl-host--put "ws-1" :conn new)
     (let ((fatals nil))
-      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+      (cl-letf (((symbol-function 'agent-repl--emit-fatal) (agent-repl-test--fatal-into fatals)))
         ;; Act
         (should-error (agent-repl-host--move-due-streams old new))
         ;; Assert

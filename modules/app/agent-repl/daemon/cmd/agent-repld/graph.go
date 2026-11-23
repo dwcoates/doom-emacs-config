@@ -50,9 +50,11 @@ import (
 	"agent-repld/internal/heldingress"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
+	"agent-repld/internal/logsites"
 	"agent-repld/internal/mainsync"
 	"agent-repld/internal/memorypopup"
 	"agent-repld/internal/merge"
@@ -540,7 +542,22 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the footer resolver: %w", err)
 	}
-	deployEdges := deployprogress.NewEdges(footerResolver, mediation.began, mediation.ended)
+	// EVERY LOG SITE THAT FIRES IS TALLIED PER DEPLOY (internal/logsites):
+	// before every removal of log files, at each deploy's start, and before
+	// every window ListLogSites answers.
+	logSites := logsites.New(logsites.Options{
+		Store: p.DB, Log: log, PassBound: logsites.PassBound,
+		Dirs: []logsites.Dir{logsites.StateLogs(p.Layout.LogsDir()), logsites.CacheLogs(serviceLogsDir(os.Getenv, paths.Home))},
+	})
+	p.Surfaces.BindBeforePrune(func(reason string) {
+		// A failed pass is recorded by Pass; the removal it precedes goes on.
+		_, _ = logSites.Pass(ctx, reason)
+	})
+	deployBegan := func() {
+		mediation.began()
+		logSites.DeployBegan(ctx, inflight.Go)
+	}
+	deployEdges := deployprogress.NewEdges(footerResolver, deployBegan, mediation.ended)
 	// THE DAEMON'S WORKSPACE WARNINGS AND ERRORS REACH THE STRIP through ONE
 	// tee at dlog's workspace-logger emit point, never a hook beside a call
 	// site: every Warn and Error a workspace logger writes is handed to the
@@ -2016,6 +2033,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Server: server.Deps{
 			AccountRootFor: accounts.ConfigDirFor,
 			DeployConfig:   deployConfig,
+			LogSites:       logSites,
 			Notices:        p.Metrics,
 			// THE TEST BARRIER IS SERVED ONLY TO A HARNESS'S DAEMON: the harness
 			// sets the environment, and no real client can come to rely on it.
@@ -2848,12 +2866,12 @@ func (silentOpenProgress) Stage(workspace.OpenStage) {}
 func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent bool, log dlog.Logger) (externalbrowser.Opener, error) {
 	switch {
 	case noBrowser:
-		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+		log.Warn(graphOperation, "no external browser is configured for this daemon: --no-browser was given", dlog.Context{
 			"reason": "--no-browser",
 		})
 		return nil, nil
 	case getenv(externalbrowser.EnvBrowserCmd) == "" && !defaultPresent:
-		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+		log.Warn(graphOperation, "no external browser is configured for this daemon: no launcher is set and the pinned default is absent", dlog.Context{
 			"reason":  "neither $" + externalbrowser.EnvBrowserCmd + " nor the pinned default launcher is present",
 			"default": externalbrowser.Host.Binary,
 		})
@@ -2924,4 +2942,14 @@ func gateEnv(path string) []string {
 		panic("agent-repld: the daemon runs with no PATH, so no merge gate could find its toolchains")
 	}
 	return []string{"PATH=" + path}
+}
+
+// serviceLogsDir is where agent-repl's launchd services write their own logs:
+// the cache root's log directory, as each service resolves it
+// (agent-shim/shim-store main.go defaultCacheDir).
+func serviceLogsDir(getenv func(string) string, home string) string {
+	if d := getenv("XDG_CACHE_HOME"); d != "" {
+		return filepath.Join(d, "agent-repl", "log")
+	}
+	return filepath.Join(home, ".cache", "agent-repl", "log")
 }

@@ -23,9 +23,11 @@
  * interpret. Swallowing either here would hide a fault behind a card that names
  * the wrong thing.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { frameUndecodable, type FailureSink } from "../failure/sink.js";
 import { isMalformedView } from "./malformed.js";
+
+const log = createLogger("webapp.rpc.guard");
 
 /** The slice of the context this guard needs; the whole AppContext fits. */
 export interface GuardContext {
@@ -72,10 +74,10 @@ export function guardMalformedNow(ctx: GuardContext, operation: string, work: ()
 /** Log and file ERR when it is a `MalformedView`, answering true; rethrow anything else. */
 function absorbMalformed(ctx: GuardContext, operation: string, err: unknown): true {
   if (!isMalformedView(err)) throw err;
-  log.error(`the daemon's answer could not be read: ${err.message}`, {
+  log.error("the daemon's answer could not be read: {message}", {
     operation: `${operation}-undecodable`,
     context: { path: err.path, cause: err.detail },
-  });
+  }, { message: err.message });
   ctx.failures.report(frameUndecodable(err.detail, err.path));
   return true;
 }

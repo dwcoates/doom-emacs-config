@@ -25,12 +25,14 @@
 import { createControl, type Control } from "../control.js";
 import { UpdatePersistentWifiModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import type { TopbarPersistentWifi } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { sendChipToggle } from "./chip-toggle.js";
 import type { TopbarContext } from "./context.js";
 import { drawDiscGlyph, type DiscGlyph } from "./disc-glyph.js";
+
+const log = createLogger("webapp.topbar.persistent-wifi");
 
 /**
  * The wifi glyph: three arcs and a dot, stroked in the current color, drawn

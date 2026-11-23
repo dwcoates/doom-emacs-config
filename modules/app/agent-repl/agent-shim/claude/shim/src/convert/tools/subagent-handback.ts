@@ -26,7 +26,7 @@ import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { failureOf, str } from "./support.js";
 
-const LOGGER = bindLog({
+const LOGGER = bindLog("shim.convert.tools.subagent-handback", {
   component: "shim-convert-subagent-handback",
   operation: "shim.convert.subagent_handback",
 });

@@ -37,7 +37,7 @@ func (k *Keeper) withheldWhileJoining(log dlog.Logger, what string, fields dlog.
 	if !k.deps.DB.ReadOnly() {
 		return false
 	}
-	log.Debug(opDrive, "the state handle is not promoted yet; "+what+" is recorded once it writes", fields)
+	log.With(fields).Debug(opDrive, "the state handle is not promoted yet; {what} is recorded once it writes", dlog.Context{"what": what})
 	hold()
 	return true
 }

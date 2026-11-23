@@ -28,7 +28,9 @@
  * through here.
  */
 import { FOLDED_CLASS } from "./folded-class.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.sidebar.view");
 
 /**
  * A piece of view state's value: a fold, collapsed or not; the merge queues,

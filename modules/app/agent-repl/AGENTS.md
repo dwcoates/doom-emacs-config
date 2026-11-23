@@ -2418,6 +2418,14 @@ its log (`X.log`'s is `X.warn.log`, a workspace link `N.log`'s is `N.warn.log`),
 so `bin/logs.sh --level warn` opens those alone; logging-contract.md
 "Warnings files" holds the rule.
 
+Every record names the log call that wrote it (`site`, a stable key, and
+`template`, its unrendered message): `logging-contract.md` "Log sites" holds
+the rule. Which sites fired in a window, how often, and one record each, is
+answered from the daemon's per-deploy tallies rather than the logs, so it
+holds for windows whose files have aged out:
+`agent-repld logs sites -since WHEN [-until WHEN] [-level warn]`
+(`agentrepl.v1.ListLogSites`). Read the records themselves with `bin/logs.sh`.
+
 `bin/logs.sh` is the one reader for persisted agent-repl records. It resolves a
 workspace by daemon ID, absolute directory, or daemon display name; reads the
 current file plus rotation generations `.1` (newest) through `.5` (oldest);

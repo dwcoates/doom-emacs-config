@@ -28,18 +28,18 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
 (require 'treesit)
 
-(declare-function agent-repl--info "core" (ws fmt &rest args))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--async-command "core" (label dir command callback &optional input))
 (declare-function agent-repl-serial-create "core" (&rest slots))
 (declare-function agent-repl-serial-send "core" (serial report send))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl--ws-of-composer "workspace" (buffer))
 (declare-function agent-repl-host-conn-or-primary "host" (ws))
@@ -157,7 +157,7 @@ program that is not git."
                           (mapcar (lambda (name) (expand-file-name name dir))
                                   agent-repl-prompt-entries--sources))))
     (make-directory agent-repl-prompt-entries--library-dir t)
-    (agent-repl--info agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.build-started library=%s source=%s" library hash)
+    (agent-repl--info agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.build-started library={library} source={source}" :library library :source hash)
     (setq agent-repl-prompt-entries--building t)
     (agent-repl--async-command
      "prompt-grammar" dir command
@@ -173,11 +173,11 @@ and nothing waiting is called."
   (let ((waiting (nreverse agent-repl-prompt-entries--waiting)))
     (setq agent-repl-prompt-entries--waiting nil)
     (if (not ok)
-        (agent-repl--error agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.build-failed library=%s output=%S"
-                           library (string-trim output))
+        (agent-repl--error agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.build-failed library={library} output={output}"
+                           :library library :output (prin1-to-string (string-trim output)))
       (with-temp-file (agent-repl-prompt-entries--stamp) (insert hash "\n"))
       (agent-repl-prompt-entries--on-load-path)
-      (agent-repl--info agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.built library=%s waiting=%d" library (length waiting))
+      (agent-repl--info agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.built library={library} waiting={waiting}" :library library :waiting (length waiting))
       (mapc #'funcall waiting))))
 
 ;;;; ---- Marking the composer ----
@@ -205,7 +205,7 @@ and so does reporting them to the daemon after each command
 \(`agent-repl-prompt-entries--report').  Off when
 `agent-repl-input-entry-marking' is nil."
   (if (not agent-repl-input-entry-marking)
-      (agent-repl--info ws "elisp.prompt-entries.enable ws=%s outcome=off reason=agent-repl-input-entry-marking-nil" ws)
+      (agent-repl--info ws "elisp.prompt-entries.enable ws={ws} outcome=off reason=agent-repl-input-entry-marking-nil" :ws ws)
     (let ((buf (current-buffer)))
       (agent-repl-prompt-entries-ensure
        (lambda ()
@@ -217,7 +217,7 @@ and so does reporting them to the daemon after each command
              (add-hook 'after-change-functions #'agent-repl-prompt-entries--on-change nil t)
              (add-hook 'post-command-hook #'agent-repl-prompt-entries--report nil t)
              (agent-repl-prompt-entries-mark)
-             (agent-repl--info ws "elisp.prompt-entries.enabled ws=%s" ws))))))))
+             (agent-repl--info ws "elisp.prompt-entries.enabled ws={ws}" :ws ws))))))))
 
 (defun agent-repl-prompt-entries--on-change (_beg _end _len)
   "Re-mark the composer's entries after an edit.
@@ -323,10 +323,10 @@ marked reported, so the next command tries again."
          (conn (agent-repl-host-conn-or-primary ws)))
     (if (not (and ref conn))
         (progn
-          (agent-repl--log ws "elisp.prompt-entries.report-skipped ws=%s ref=%s conn=%s" ws (and ref t) (and conn t))
+          (agent-repl--log ws "elisp.prompt-entries.report-skipped ws={ws} ref={ref} conn={conn}" :ws ws :ref (and ref t) :conn (and conn t))
           (funcall done))
       (setq agent-repl-prompt-entries--reported state)
-      (agent-repl--log ws "elisp.prompt-entries.report ws=%s labels=%S at=%S" ws (car state) (cadr state))
+      (agent-repl--log ws "elisp.prompt-entries.report ws={ws} labels={labels} at={at}" :ws ws :labels (prin1-to-string (car state)) :at (prin1-to-string (cadr state)))
       (agent-repl-rpc-report-composer-entries
        conn (list :workspace ref :labels (car state)
                   :at-point (if (cadr state) (list :arm :entry :value (list :label (cadr state))) (list :arm :none))
@@ -338,16 +338,16 @@ marked reported, so the next command tries again."
   "Record the daemon's RESPONSE to WS's report of STATE, then end it with DONE."
   (pcase (plist-get response :arm)
     (:success nil)
-    (:error (agent-repl--info ws "elisp.prompt-entries.report-refused ws=%s labels=%S cause=%S"
-                              ws (car state) (plist-get (plist-get response :value) :cause)))
-    (other (agent-repl--error ws "elisp.prompt-entries.report-unknown-arm ws=%s arm=%S" ws other)))
+    (:error (agent-repl--info ws "elisp.prompt-entries.report-refused ws={ws} labels={labels} cause={cause}"
+                              :ws ws :labels (prin1-to-string (car state)) :cause (prin1-to-string (plist-get (plist-get response :value) :cause))))
+    (other (agent-repl--error ws "elisp.prompt-entries.report-unknown-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string other))))
   (funcall done))
 
 (defun agent-repl-prompt-entries--failed (buf ws state detail done)
   "Record BUF's report of STATE for WS, which the daemon never answered.
 DETAIL is the transport's failure.  Nothing is marked reported, so the next
 command sends it again; DONE ends the report."
-  (agent-repl--warn ws "elisp.prompt-entries.report-failure ws=%s labels=%S detail=%S" ws (car state) detail)
+  (agent-repl--warn ws "elisp.prompt-entries.report-failure ws={ws} labels={labels} detail={detail}" :ws ws :labels (prin1-to-string (car state)) :detail (prin1-to-string detail))
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (setq agent-repl-prompt-entries--reported nil)))
@@ -373,7 +373,7 @@ connection stands, the daemon refused, or it never answered."
          (ref (and ws (agent-repl-host-ref ws)))
          (conn (and ws (agent-repl-host-conn-or-primary ws))))
     (if (not (and ref conn))
-        (progn (agent-repl--log ws "elisp.prompt-entries.neighbor-skipped ws=%s label=%s way=%s" ws label way) nil)
+        (progn (agent-repl--log ws "elisp.prompt-entries.neighbor-skipped ws={ws} label={label} way={way}" :ws ws :label label :way way) nil)
       (condition-case err
           (let ((response (agent-repl-rpc-find-entry-neighbor-sync
                            conn (list :workspace ref :label label
@@ -382,19 +382,19 @@ connection stands, the daemon refused, or it never answered."
             (pcase (plist-get response :arm)
               (:success
                (let ((neighbor (plist-get (plist-get response :value) :neighbor)))
-                 (agent-repl--log ws "elisp.prompt-entries.neighbor ws=%s label=%s way=%s neighbor=%S"
-                                  ws label way neighbor)
+                 (agent-repl--log ws "elisp.prompt-entries.neighbor ws={ws} label={label} way={way} neighbor={neighbor}"
+                                  :ws ws :label label :way way :neighbor (prin1-to-string neighbor))
                  (when (eq (plist-get neighbor :arm) :found)
                    (plist-get (plist-get neighbor :value) :label))))
               (:error
-               (agent-repl--info ws "elisp.prompt-entries.neighbor-refused ws=%s label=%s cause=%S"
-                                 ws label (plist-get (plist-get response :value) :cause))
+               (agent-repl--info ws "elisp.prompt-entries.neighbor-refused ws={ws} label={label} cause={cause}"
+                                 :ws ws :label label :cause (prin1-to-string (plist-get (plist-get response :value) :cause)))
                nil)
               (other
-               (agent-repl--error ws "elisp.prompt-entries.neighbor-unknown-arm ws=%s arm=%S" ws other)
+               (agent-repl--error ws "elisp.prompt-entries.neighbor-unknown-arm ws={ws} arm={arm}" :ws ws :arm (prin1-to-string other))
                nil)))
         (agent-repl-connect-error
-         (agent-repl--warn ws "elisp.prompt-entries.neighbor-failure ws=%s label=%s error=%S" ws label err)
+         (agent-repl--warn ws "elisp.prompt-entries.neighbor-failure ws={ws} label={label} error={error}" :ws ws :label label :error (prin1-to-string err))
          nil)))))
 
 (defun agent-repl-prompt-entries-opening (label)
@@ -432,8 +432,8 @@ to the end of that entry's line, in insert mode."
           (end-of-line)
           (evil-insert-state)
           (let ((ws (agent-repl-prompt-entries--ws)))
-            (agent-repl--log ws "elisp.prompt-entries.open-existing ws=%s label=%s neighbor=%s at=%d"
-                             ws label neighbor existing)))
+            (agent-repl--log ws "elisp.prompt-entries.open-existing ws={ws} label={label} neighbor={neighbor} at={at}"
+                             :ws ws :label label :neighbor neighbor :at existing)))
       (if next (evil-open-below 1) (evil-open-above 1))
       (when neighbor (insert (agent-repl-prompt-entries-opening neighbor))))))
 
@@ -473,10 +473,10 @@ WAY, a direction keyword."
          (to (and label (funcall target label))))
     (cond
      ((null label)
-      (agent-repl--info ws "elisp.prompt-entries.%s-off-entry ws=%s way=%s point=%d" kind ws way (point))
+      (agent-repl--info ws "elisp.prompt-entries.{kind}-off-entry ws={ws} way={way} point={point}" :kind kind :ws ws :way way :point (point))
       (user-error "Point is on no entry line"))
      ((null to)
-      (agent-repl--info ws "elisp.prompt-entries.%s-none ws=%s label=%s way=%s" kind ws label way)
+      (agent-repl--info ws "elisp.prompt-entries.{kind}-none ws={ws} label={label} way={way}" :kind kind :ws ws :label label :way way)
       (agent-repl--input-flash ws (format none label)))
      (t (funcall act label to)))))
 
@@ -490,8 +490,8 @@ A first sibling has none above: nothing opens, and the composer says so."
      "%s is the first sibling"
      (lambda (label sibling)
        (let ((ws (agent-repl-prompt-entries--ws)))
-         (agent-repl--info ws "elisp.prompt-entries.sibling ws=%s label=%s way=%s sibling=%s"
-                           ws label way sibling))
+         (agent-repl--info ws "elisp.prompt-entries.sibling ws={ws} label={label} way={way} sibling={sibling}"
+                           :ws ws :label label :way way :sibling sibling))
        (agent-repl-prompt-entries--open-on label sibling next)))))
 
 (defun agent-repl-prompt-entries-open-sibling-above ()
@@ -549,8 +549,8 @@ format of the label."
    (lambda (label to)
      (agent-repl-prompt-entries--relabel label to)
      (let ((ws (agent-repl-prompt-entries--ws)))
-       (agent-repl--info ws "elisp.prompt-entries.stepped ws=%s label=%s way=%s to=%s"
-                         ws label way to)))))
+       (agent-repl--info ws "elisp.prompt-entries.stepped ws={ws} label={label} way={way} to={to}"
+                         :ws ws :label label :way way :to to)))))
 
 (defun agent-repl-prompt-entries-step-on ()
   "Relabel point's entry to answer the node read after its own.
@@ -597,8 +597,8 @@ entry's label."
        none
        (lambda (label to)
          (let ((ws (agent-repl-prompt-entries--ws)))
-           (agent-repl--info ws "elisp.prompt-entries.advance-open ws=%s label=%s way=%s to=%s"
-                             ws label way to))
+           (agent-repl--info ws "elisp.prompt-entries.advance-open ws={ws} label={label} way={way} to={to}"
+                             :ws ws :label label :way way :to to))
          (agent-repl-prompt-entries--open-on label to next))))))
 
 (defun agent-repl-prompt-entries-advance-or-open-sibling ()

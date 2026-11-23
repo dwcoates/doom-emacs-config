@@ -29,6 +29,7 @@ import { ProseTreeSchema, type ProseTree } from "../../proto/gen/ts/frontend/v1/
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { inline } from "../src/markdown.js";
 import { treeProse } from "./prose.js";
+import { renderMessage } from "../src/log.js";
 
 /** The root every wrap case hangs its branches under: nine columns wide. */
 const R = "1 🎯 Root";
@@ -488,7 +489,7 @@ describe("renderTreeHtml", () => {
     const issues: string[] = [];
     // Act
     const html = renderTreeHtml(tree(`${R}\n└── 1.1 a\n    └── 1.1.1 text`), identity, columnMeasure(10), (message) =>
-      issues.push(message),
+      issues.push(renderMessage(message)),
     );
     // Assert — the tree is still drawn, and the refusal was surfaced, not swallowed.
     expect(html).toContain("text");
@@ -974,7 +975,7 @@ describe("renderTreeHtml fits the tree's first line to its first-line budget", (
     // Arrange
     const issues: string[] = [];
     // Act
-    renderTreeHtml(graph([{ label: "1", text: "WWWWW aaa" }]), identity, pxMeasure(160, [], 100), (message) => issues.push(message));
+    renderTreeHtml(graph([{ label: "1", text: "WWWWW aaa" }]), identity, pxMeasure(160, [], 100), (message) => issues.push(renderMessage(message)));
     // Assert
     expect(issues).toEqual([]);
   });

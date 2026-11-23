@@ -125,9 +125,9 @@ Answers the symbol `absent' when the body carries no such member."
   (agent-repl-test-hi--with
     ;; Arrange
     (let (messages)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (lambda (_ws fmt &rest args)
-                   (when (string-prefix-p "elisp.wire.encoded" fmt)
+                   (when (string-prefix-p "elisp.wire.encoded" (agent-repl-log-site-template fmt))
                      (push (symbol-name (nth 2 args)) messages)))))
         ;; Act
         (agent-repl-held-ingress--body "ws-one" (agent-repl-test--user-said "hi")
@@ -368,7 +368,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
           (errors nil))
       (with-temp-file path (insert "not json"))
       (clrhash agent-repl--held-ingress-pushed)
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-held-ingress-refresh "ws-one"))
@@ -381,7 +381,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
   (agent-repl-test-hi--with
     ;; Arrange
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
                  (agent-repl-test--record-into errors)))
         ;; Act
         (let ((view (agent-repl-held-ingress--entry-view

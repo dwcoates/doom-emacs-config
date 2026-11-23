@@ -13,12 +13,14 @@ import {
   type WebhostRuntime,
   type WebhostRuntimeDeps,
 } from "../../src/host/document.js";
-import { ForwardingLogger, log, setLogger } from "../../src/log.js";
+import { ForwardingLogger, createLogger, setLogger } from "../../src/log.js";
 import { captureLogRecords } from "../log-capture.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
 import { quietWebhostRuntime } from "./webhost-runtime.js";
 import { dispatchPageTransition } from "../page-transition.js";
 import { beginPage, pageEnded, pageEnding, tearDownPage } from "../../src/page-teardown.js";
+
+const log = createLogger("webapp.test.host.document");
 
 let started: StartedWebhostDocument | null = null;
 

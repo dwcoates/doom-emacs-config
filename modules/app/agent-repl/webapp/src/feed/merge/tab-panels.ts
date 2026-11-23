@@ -56,13 +56,16 @@ import { drawFeedMergeTabHookScript } from "./hook-tabs.js";
 import { buildInterruptMergeTabRequest } from "../requests.js";
 import { drawStopControl, type StopSite } from "../stop-control.js";
 import { openAtNewest } from "../../scroll.js";
+import { createLogger } from "../../log.js";
+
+const log = createLogger("webapp.feed.merge.tab-panels");
 
 /** The stop a running agent stream offers: its row, stopped as a merge tab. */
 const MERGE_TAB_STOP: StopSite = {
   prefix: "merge-tab-stop",
   operation: "feed.merge-tab-stop",
   refusedOperation: "feed.merge-tab-stop-refused",
-  describe: "stopping a merge tab's agent",
+  describe: log.message("stopping a merge tab's agent"),
   malformedOperation: "feed.merge-tab-stop-malformed",
   request: buildInterruptMergeTabRequest,
 };

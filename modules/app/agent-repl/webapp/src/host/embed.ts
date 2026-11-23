@@ -11,7 +11,7 @@
  * parent, and nothing else may steer it.
  */
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../feed/conversation-drawn.js";
-import { LEVEL_WINDOW_OPERATION, log } from "../log.js";
+import { LEVEL_WINDOW_OPERATION, createLogger } from "../log.js";
 import type { AppliedLevel, LevelWindow, WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { BUBBLE_OVERLAY_ATTRIBUTE, closeStandingBubbleOverlay } from "../bubble/overlay.js";
 import { closeStandingImageOverlay } from "../image-overlay/image-overlay.js";
@@ -30,6 +30,8 @@ import type { HeldIngressWireEntry } from "./protocol.js";
 import type { RestyleTurnsSource } from "./restyle-turn.js";
 import type { WebhostPressSource } from "../webhost-pressed.js";
 import { onResponseHighlightWords } from "../feed/response-highlight.js";
+
+const log = createLogger("webapp.host.embed");
 
 /**
  * The editor's ingress entries, decoded. An entry whose `said` is not a

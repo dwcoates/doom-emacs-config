@@ -1,6 +1,8 @@
 package dlog
 
-import "agentrepl/logging"
+import (
+	"agentrepl/logging"
+)
 
 // LevelEnvironment is the one process switch governing which daemon records
 // reach both durable storage and the terminal mirror. A level other than info
@@ -26,7 +28,7 @@ func parseLevel(raw string) (logging.Level, error) {
 func (s *surfaces) admits(severity string) bool {
 	allowed, ended := s.window.Allows(severity)
 	if ended != nil {
-		s.Global().Info(levelWindowOperation, ended.Message(), Context(ended.Context()))
+		s.Global().Log(LevelInfo, levelWindowOperation, ended.Message(), Context(ended.Context()))
 	}
 	return allowed
 }

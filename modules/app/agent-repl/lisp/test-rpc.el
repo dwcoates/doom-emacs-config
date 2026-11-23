@@ -33,10 +33,9 @@
 (defvar agent-repl-test-rpc--logs nil
   "List of `(LEVEL . TEXT)' entries, newest first, captured from the ladder.")
 
-(defun agent-repl-test-rpc--record-log (level fmt args)
-  "Push a `(LEVEL . TEXT)' entry built from FMT and ARGS onto the log capture."
-  (push (cons level (condition-case nil (apply #'format fmt args)
-                      (error (format "%S %S" fmt args))))
+(defun agent-repl-test-rpc--record-log (level site values)
+  "Push a `(LEVEL . TEXT)' entry rendered from SITE and VALUES onto the log capture."
+  (push (cons level (agent-repl-log-site-render site values))
         agent-repl-test-rpc--logs))
 
 (defun agent-repl-test-rpc--logs-matching (level regexp)
@@ -52,13 +51,13 @@
 would abort the very branch a test is asserting."
   (declare (indent 0))
   `(let ((agent-repl-test-rpc--logs nil))
-     (cl-letf (((symbol-function 'agent-repl--log)
+     (cl-letf (((symbol-function 'agent-repl--emit-log)
                 (lambda (_ws fmt &rest args) (agent-repl-test-rpc--record-log 'debug fmt args)))
-               ((symbol-function 'agent-repl--info)
+               ((symbol-function 'agent-repl--emit-info)
                 (lambda (_ws fmt &rest args) (agent-repl-test-rpc--record-log 'info fmt args)))
-               ((symbol-function 'agent-repl--warn)
+               ((symbol-function 'agent-repl--emit-warn)
                 (lambda (_ws fmt &rest args) (agent-repl-test-rpc--record-log 'warn fmt args)))
-               ((symbol-function 'agent-repl--error)
+               ((symbol-function 'agent-repl--emit-error)
                 (lambda (_ws fmt &rest args) (agent-repl-test-rpc--record-log 'error fmt args))))
        ,@body)))
 
@@ -243,13 +242,13 @@ missing here or there is a broken seam.")
   "Serializing a request is one top-level encode, recorded once."
   ;; Arrange
   (let (formats)
-    (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest _args) (push fmt formats))))
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
+               (lambda (_ws fmt &rest _args) (push (agent-repl-log-site-template fmt) formats))))
       ;; Act
       (agent-repl-rpc--serialize #'agent-repl-wire-encode-turn-id '(:value "t")))
     ;; Assert
     (should (equal formats
-                   '("elisp.wire.encoded message=%s messages=%d codec=%s")))))
+                   '("elisp.wire.encoded message={message} messages={messages} codec={codec}")))))
 
 (ert-deftest agent-repl-test-rpc-stream-push-records-one-decode ()
   "A decoded stream push is one top-level decode, recorded once."
@@ -257,9 +256,9 @@ missing here or there is a broken seam.")
   (let (formats on-message)
     (cl-letf (((symbol-function 'agent-repl--capture-log-scope)
                (lambda (_scope) "stream-ws"))
-              ((symbol-function 'agent-repl--info) #'ignore)
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest _args) (push fmt formats)))
+              ((symbol-function 'agent-repl--emit-info) #'ignore)
+              ((symbol-function 'agent-repl--emit-log)
+               (lambda (_ws fmt &rest _args) (push (agent-repl-log-site-template fmt) formats)))
               ((symbol-function 'agent-repl-connect-stream)
                (lambda (_conn _method _json on-push &rest _)
                  (setq on-message on-push))))
@@ -270,7 +269,7 @@ missing here or there is a broken seam.")
       (funcall on-message '((value . "t"))))
     ;; Assert
     (should (equal formats
-                   '("elisp.wire.decoded message=%s messages=%d codec=%s")))))
+                   '("elisp.wire.decoded message={message} messages={messages} codec={codec}")))))
 
 ;;;; ---- Tests: method naming and codec pairing ----
 
@@ -282,9 +281,9 @@ missing here or there is a broken seam.")
                (lambda (_scope) "request-ws"))
               ;; Only the exchange's own records: the codec's one
               ;; `elisp.wire.*' record per top-level call is the codec's.
-              ((symbol-function 'agent-repl--log)
+              ((symbol-function 'agent-repl--emit-log)
                (lambda (ws fmt &rest _args)
-                 (when (string-prefix-p "elisp.rpc." fmt)
+                 (when (string-prefix-p "elisp.rpc." (agent-repl-log-site-template fmt))
                    (push ws logged-workspaces))))
               ((symbol-function 'agent-repl-connect-unary)
                (lambda (_conn _method _json &rest keys)

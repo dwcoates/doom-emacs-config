@@ -39,7 +39,7 @@ import { askSideQuery } from "./side-query.js";
 import { transcriptPath } from "./vendor-paths.js";
 import type { VendorSpendLedger } from "./vendor-spend.js";
 
-const LOGGER = bindLog({ component: "shim-engine-parked-keepalive", operation: "shim.engine.parked_keepalive" });
+const LOGGER = bindLog("shim.engine.parked-keepalive", { component: "shim-engine-parked-keepalive", operation: "shim.engine.parked_keepalive" });
 
 /** How one parked beat ended. THE KIND IS THE OUTCOME. */
 export type ParkedBeatOutcome =

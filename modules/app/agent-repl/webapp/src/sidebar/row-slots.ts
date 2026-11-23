@@ -5,7 +5,9 @@
  * in, so no painter can resolve a slot's row some other way.
  */
 import { queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.sidebar.row-slots");
 
 /** One painted slot and the `WorkspaceRef.id` of the row it sits in. */
 export interface RowSlot {
@@ -22,7 +24,7 @@ export function rowSlots(root: ParentNode, className: string, operation: string,
   return queryAll<HTMLElement>(root, `.${className}`).map((slot) => {
     const id = slot.closest("[data-roster-row]")?.getAttribute("data-roster-row");
     if (id === undefined || id === null) {
-      log.error(`a ${className} slot sits outside any roster row`, { operation, context });
+      log.error("a {class_name} slot sits outside any roster row", { operation, context }, { class_name: className });
       throw new Error(`sidebar ${className}: a slot outside any roster row`);
     }
     return { slot, id };

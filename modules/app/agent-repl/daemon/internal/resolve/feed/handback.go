@@ -30,11 +30,11 @@ func (r *resolver) drawSubagentResult(s *wsState, at placement, act *conversatio
 
 	switch state := handback.GetResult().(type) {
 	case *conversationv1.AgentSubagentHandback_Start:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Start"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSubagentHandback_Start", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Start"})
 		holdHandbackReport(u, state.Start.GetReport())
 		result.State = &frontendv1.FeedSubagentResult_Delivering{Delivering: &frontendv1.FeedSubagentResultDelivering{}}
 	case *conversationv1.AgentSubagentHandback_Progress:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Progress"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSubagentHandback_Progress", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Progress"})
 		if !u.handbackReportHeld {
 			// A beat restates nothing, and no frame of this unit stated the
 			// report: there is no result to draw, and drawing an empty one would
@@ -46,11 +46,11 @@ func (r *resolver) drawSubagentResult(s *wsState, at placement, act *conversatio
 		}
 		result.State = &frontendv1.FeedSubagentResult_Delivering{Delivering: &frontendv1.FeedSubagentResultDelivering{}}
 	case *conversationv1.AgentSubagentHandback_Success:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Success"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSubagentHandback_Success", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Success"})
 		holdHandbackReport(u, state.Success.GetReport())
 		result.State = &frontendv1.FeedSubagentResult_Delivered{Delivered: &frontendv1.FeedSubagentResultDelivered{}}
 	case *conversationv1.AgentSubagentHandback_Failure:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Failure"})
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSubagentHandback_Failure", dlog.Context{"function": "drawSubagentResult", "branch": "case *conversationv1.AgentSubagentHandback_Failure"})
 		holdHandbackReport(u, state.Failure.GetReport())
 		undelivered := &frontendv1.FeedSubagentResultUndelivered{}
 		if text := failureText(state.Failure.GetError()); text != "" {

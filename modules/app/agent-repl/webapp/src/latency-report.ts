@@ -34,9 +34,11 @@ import {
   type ReportLatenciesResponse,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
 import type { WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import type { DaemonContext } from "./rpc/context.js";
 import { callUnary } from "./rpc/unary.js";
+
+const log = createLogger("webapp.latency-report");
 
 /** How long after a latency is recorded the batch is sent. */
 export const REPORT_DELAY_MS = 2_000;
@@ -88,10 +90,10 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
 
   /** Drop COUNT latencies the quiet page can no longer send, saying why. */
   const dropAtEnd = (count: number, why: string): void => {
-    log.info(`dropped ${count.toString()} latencies ${why}: the page went quiet, so no daemon is left to take them`, {
+    log.info("dropped {count} latencies {why}: the page went quiet, so no daemon is left to take them", {
       operation: "latency.report-ended",
       context: { latencies: count, dropped },
-    });
+    }, { count, why });
   };
 
   const schedule = (): void => {
@@ -121,10 +123,10 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
         dropped = 0;
         return;
       }
-      log.error(`the daemon refused this page's latencies: ${String(result.case === "error" ? result.value.cause.case : result.case)}`, {
+      log.error("the daemon refused this page's latencies: {refusal}", {
         operation: "latency.report-refused",
-        context: { cause, latencies: batch.length, refusal: String(result.case === "error" ? result.value.cause.case : result.case) },
-      });
+        context: { cause, latencies: batch.length },
+      }, { refusal: result.case === "error" ? result.value.cause.case : result.case });
     } catch (err) {
       // A CALL OUT WHEN THE PAGE WENT QUIET has nowhere to wait for.
       if (ended) {
@@ -135,10 +137,10 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
       // recorded by callUnary): the batch goes back, oldest first.
       pending = [...batch, ...pending];
       trim();
-      log.info(`this page's latencies wait for the next report: ${String(err)}`, {
+      log.info("this page's latencies wait for the next report: {err}", {
         operation: "latency.report-deferred",
         context: { cause, latencies: pending.length },
-      });
+      }, { err: String(err) });
     } finally {
       inFlight = false;
       // LATENCIES RECORDED WHILE THE CALL WAS OUT go next, once the daemon has
@@ -152,10 +154,10 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
     if (excess <= 0) return;
     pending = pending.slice(excess);
     dropped += excess;
-    log.warn(`dropped the ${excess.toString()} oldest unsent latencies; the daemon has not taken a report for a while`, {
+    log.warn("dropped the {excess} oldest unsent latencies; the daemon has not taken a report for a while", {
       operation: "latency.report-overflow",
       context: { dropped, held: pending.length },
-    });
+    }, { excess });
   };
 
   const stopAttached = deps.onAttached(() => {

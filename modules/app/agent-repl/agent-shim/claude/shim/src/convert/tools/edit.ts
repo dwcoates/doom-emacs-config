@@ -18,7 +18,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { asRecord, bool, failureOf, hunksOf, settle, str } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.edit" });
+const LOGGER = bindLog("shim.convert.tools.edit", { component: "shim-convert-tools", operation: "shim.convert.tools.edit" });
 
 /** The path an edit acted on. */
 function readPath(path: string): conversationv1.ReadPath {

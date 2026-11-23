@@ -34,7 +34,7 @@ import { pageLineEntry } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { permissionId, toolCallActivityId } from "./ids.js";
 
-const LOGGER = bindLog({ component: "shim-convert-permission", operation: "shim.convert.permission" });
+const LOGGER = bindLog("shim.convert.permission", { component: "shim-convert-permission", operation: "shim.convert.permission" });
 
 /**
  * A policy denial: refused without asking anyone.

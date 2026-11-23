@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -1032,6 +1033,7 @@ func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool)
 // this daemon ordered -- a DETACHED client arms nothing, because that process
 // belongs to the successor daemon and this one is ending nothing of its.
 func (f *Fleet) logKillDidNotAnswer(ctx context.Context, ws ids.WorkspaceID, force, ordered bool, cause error) {
+	killUnanswered := logsite.Msg("the session kill did not answer; stopping the process anyway")
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return
@@ -1042,10 +1044,10 @@ func (f *Fleet) logKillDidNotAnswer(ctx context.Context, ws ids.WorkspaceID, for
 	}
 	evidence := dlog.Context{"workspace": string(ws), "force": force, "cause": cause.Error()}
 	if ordered {
-		log.Info(opBringUp, "the session kill did not answer; stopping the process anyway", evidence)
+		log.Log(dlog.LevelInfo, opBringUp, killUnanswered, evidence)
 		return
 	}
-	log.Warn(opBringUp, "the session kill did not answer; stopping the process anyway", evidence)
+	log.Log(dlog.LevelWarn, opBringUp, killUnanswered, evidence)
 }
 
 // logNoSessionToKill records, at DEBUG, that a stand-down skipped the session

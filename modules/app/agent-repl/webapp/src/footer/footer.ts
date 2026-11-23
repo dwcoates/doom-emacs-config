@@ -60,7 +60,7 @@ import { frameUndecodable } from "../failure/sink.js";
 import { placeChildren, queryAll } from "../dom.js";
 import { stopTicking } from "../feed/ticking.js";
 import { createDrawnStatusLog, type DrawnStatus } from "../drawn-status.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createListeners } from "../listeners.js";
 import type { AppContext } from "../rpc/context.js";
 import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
@@ -89,6 +89,8 @@ import {
 } from "./strip.js";
 import { createStopControls } from "./stop.js";
 import { overlayHoverStamp } from "./hover-stamp.js";
+
+const log = createLogger("webapp.footer.footer");
 
 /** Where the open panel is remembered, per workspace. */
 export function panelStorageKey(workspaceId: string): string {
@@ -321,10 +323,10 @@ export function mountFooter(
     if (arrivalPending) applyArrival(expanded);
     const resolved = shownPanel(expanded, selection, stops);
     if (resolved !== shown) {
-      log.debug(`the footer shows ${resolved ?? "no"} panel for the wanted ${selection ?? "none"}`, {
+      log.debug("the footer shows {resolved} panel for the wanted {selection}", {
         operation: "footer.shown-panel",
         context: { wanted: selection, shown: resolved, previous: shown },
-      });
+      }, { resolved: resolved ?? "no", selection: selection ?? "none" });
     }
     shown = resolved;
     // THE SHEET IS HANDED THE STRIP'S OWN ACTIVITY. The tokens sheet expands
@@ -403,10 +405,10 @@ export function mountFooter(
       draw();
     } catch (err) {
       if (!isMalformedView(err)) throw err;
-      log.error(`the footer's last view could not be redrawn: ${err.detail}`, {
+      log.error("the footer's last view could not be redrawn: {detail}", {
         operation,
         context: { path: err.path, cause: err.detail },
-      });
+      }, { detail: err.detail });
       ctx.failures.report(
         frameUndecodable(err.detail, `FooterView at ${err.path}`),
       );
@@ -432,10 +434,10 @@ export function mountFooter(
    */
   function select(panel: FooterPanel): void {
     selection = shown === panel ? null : panel;
-    log.debug(`the footer panel selection is now ${selection ?? "none"}`, {
+    log.debug("the footer panel selection is now {selection}", {
       operation: "footer.select-panel",
       context: { panel: selection },
-    });
+    }, { selection: selection ?? "none" });
     writeSelection(ctx, selection);
     draw();
   }
@@ -459,10 +461,10 @@ export function mountFooter(
     ).case;
     appliedFocus = focus.generation;
     selection = panel;
-    log.info(`the daemon focused the footer on the ${panel} panel`, {
+    log.info("the daemon focused the footer on the {panel} panel", {
       operation: "footer.focus-applied",
-      context: { panel, generation: String(focus.generation) },
-    });
+      context: { generation: String(focus.generation) },
+    }, { panel });
     writeSelection(ctx, selection);
   }
 
@@ -473,10 +475,10 @@ export function mountFooter(
   function applyArrival(expanded: FooterExpanded): void {
     arrivalPending = false;
     const arrived = arrivalPanel(expanded, selection, stops);
-    log.debug(`the switch to this workspace wants the ${arrived ?? "closed"} footer panel`, {
+    log.debug("the switch to this workspace wants the {arrived} footer panel", {
       operation: "footer.arrival",
       context: { wanted: arrived, previous: selection },
-    });
+    }, { arrived: arrived ?? "closed" });
     selection = arrived;
     writeSelection(ctx, selection);
   }
@@ -577,26 +579,26 @@ export function readSelection(ctx: AppContext): FooterPanel | null {
       // A PANEL THIS BUILD RETIRED is a preference an older build wrote, not
       // a corrupt one: it is forgotten quietly, so a page that last showed it
       // raises no warning after the deploy that removed it.
-      log.debug(`forgetting the retired footer panel ${stored}`, {
+      log.debug("forgetting the retired footer panel {stored}", {
         operation: "footer.selection-retired",
-        context: { stored },
-      });
+        context: {},
+      }, { stored });
       window.localStorage.removeItem(panelStorageKey(ctx.workspace.id));
       return null;
     }
     if (!FOOTER_PANELS.includes(stored as FooterPanel)) {
-      log.warn(`discarding an unrecognized stored footer panel: ${stored}`, {
+      log.warn("discarding an unrecognized stored footer panel: {stored}", {
         operation: "footer.selection-unrecognized",
-        context: { stored },
-      });
+        context: {},
+      }, { stored });
       return null;
     }
     return stored as FooterPanel;
   } catch (err) {
-    log.warn(`could not read the footer's panel preference: ${String(err)}`, {
+    log.warn("could not read the footer's panel preference: {err}", {
       operation: "footer.selection-read-failed",
       context: { cause: err },
-    });
+    }, { err: String(err) });
     return null;
   }
 }
@@ -614,10 +616,10 @@ export function writeSelection(
     }
     window.localStorage.setItem(key, selection);
   } catch (err) {
-    log.warn(`could not store the footer's panel preference: ${String(err)}`, {
+    log.warn("could not store the footer's panel preference: {err}", {
       operation: "footer.selection-write-failed",
       context: { cause: err },
-    });
+    }, { err: String(err) });
   }
 }
 

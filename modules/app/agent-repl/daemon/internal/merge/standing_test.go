@@ -200,7 +200,7 @@ func TestAHandoverSuspendsTheRunningMergeAsTheHandoversNotAPause(t *testing.T) {
 	<-done
 
 	// Assert
-	if !c.recorded("info", suspendHandover.op, suspendHandover.moved) {
+	if !c.recorded("info", suspendHandover.op, suspendHandover.moved.Template()) {
 		t.Fatal("the merge's suspension was not recorded as the handover's")
 	}
 	if _, paused := c.h.recordFor("info", suspendPause.op); paused {

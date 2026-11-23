@@ -38,6 +38,7 @@ import {
   HANDOVER_TEST_MS,
   awaitDrawn,
   bootLayer,
+  layerRecord,
   textOf,
 } from "./drive";
 
@@ -75,11 +76,7 @@ it(
     });
     await app.ctx.client.clientLog({
       source: { case: "workspace", value: app.ctx.workspace },
-      record: {
-        level: { case: "info", value: {} },
-        operation: MOUNTED_MARKER,
-        message: "the webapp layer's handover page is mounted and its streams are standing",
-      },
+      record: layerRecord(MOUNTED_MARKER, "the webapp layer's handover page is mounted and its streams are standing"),
     });
 
     // Act — the Go side, woken by that record, lands a commit on the daemon's

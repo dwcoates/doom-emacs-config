@@ -37,6 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"agentrepl/logging/logsite"
 	"agentrepl/shim-store/internal/logging"
 	_ "modernc.org/sqlite"
 )
@@ -270,7 +271,7 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 	if err != nil {
 		if log != nil {
 			log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
-				"slow-query threshold rejected: %v", err)
+				"slow-query threshold rejected: {cause}", logging.Values{"cause": err.Error()})
 		}
 		return nil, err
 	}
@@ -278,7 +279,7 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 	if err != nil {
 		if log != nil {
 			log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
-				"bulk write budget rejected: %v", err)
+				"bulk write budget rejected: {cause}", logging.Values{"cause": err.Error()})
 		}
 		return nil, err
 	}
@@ -286,7 +287,7 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 	if err != nil {
 		if log != nil {
 			log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
-				"the database's durability could not be settled: %v", err)
+				"the database's durability could not be settled: {cause}", logging.Values{"cause": err.Error()})
 		}
 		return nil, err
 	}
@@ -300,10 +301,10 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	if log == nil {
 		panic("shim-store db: nil logger")
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.db.open", DatabasePath: path}, "opening SQLite database")
+	log.LogVerbose(logging.Fields{Operation: "store.db.open", DatabasePath: path}, "opening SQLite database", nil)
 	if opts.unsynced {
 		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
-			"test run: the database skips SQLite's forced flushes (synchronous=OFF)")
+			"test run: the database skips SQLite's forced flushes (synchronous=OFF)", nil)
 	}
 
 	// THE LAYER THAT OWNS THE FILE OWNS ITS DIRECTORY. Nothing upstream may
@@ -312,7 +313,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// doomed database step stays diagnosable.
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
-			"creating the database directory failed: %v", err)
+			"creating the database directory failed: {cause}", logging.Values{"cause": err.Error()})
 		return nil, storagef(err, "creating the directory for %q", path)
 	}
 
@@ -457,7 +458,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// proves a socket's mode before reclaiming it.
 	if !isRegularFile(path) {
 		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
-			"the database path cannot be opened and is not a regular file, so it will not be replaced: %v", err)
+			"the database path cannot be opened and is not a regular file, so it will not be replaced: {cause}", logging.Values{"cause": err.Error()})
 		return nil, err
 	}
 	// WHAT LEVEL A NUKE IS RECORDED AT DEPENDS ON WHOSE DATABASE IT WAS.
@@ -481,19 +482,19 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	switch {
 	case errors.As(err, &mismatch) && supersededVersion(mismatch.version):
 		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
-			"the on-disk schema is a superseded version (found version=%d tables=%v, want version=%d tables=%v) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
-			mismatch.version, mismatch.tables, SchemaVersion, schemaTables)
+			"the on-disk schema is a superseded version (found version={found_version} tables={found_tables}, want version={want_version} tables={want_tables}) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
+			logging.Values{"found_version": mismatch.version, "found_tables": mismatch.tables, "want_version": SchemaVersion, "want_tables": schemaTables})
 	case errors.As(err, &mismatch):
 		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error"},
-			"on-disk schema was not created by this binary and is not a version it superseded (found version=%d tables=%v, want version=%d tables=%v) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
-			mismatch.version, mismatch.tables, SchemaVersion, schemaTables)
+			"on-disk schema was not created by this binary and is not a version it superseded (found version={found_version} tables={found_tables}, want version={want_version} tables={want_tables}) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
+			logging.Values{"found_version": mismatch.version, "found_tables": mismatch.tables, "want_version": SchemaVersion, "want_tables": schemaTables})
 	default:
 		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
-			"the database file cannot be read by this binary (%v) — removing it and its WAL siblings and recreating; the store is nuked, never migrated", err)
+			"the database file cannot be read by this binary ({cause}) — removing it and its WAL siblings and recreating; the store is nuked, never migrated", logging.Values{"cause": err.Error()})
 	}
 	if removeErr := removeDatabaseFiles(path); removeErr != nil {
 		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: removeErr.Error()},
-			"removing the superseded database failed: %v", removeErr)
+			"removing the superseded database failed: {cause}", logging.Values{"cause": removeErr.Error()})
 		return nil, removeErr
 	}
 	d, err = reopenAfterNuke(dsns, path, log, opts, clock)
@@ -503,7 +504,7 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		// the superseded file has already been unlinked and there is no
 		// database at all.
 		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
-			"the database could not be recreated at version=%d after the superseded file was removed: %v", SchemaVersion, err)
+			"the database could not be recreated at version={version} after the superseded file was removed: {cause}", logging.Values{"version": SchemaVersion, "cause": err.Error()})
 		return nil, err
 	}
 	return finishOpen(d, log, path, opts)
@@ -549,8 +550,8 @@ var reopenAfterNuke = openAt
 func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, error) {
 	d.wal.kick = make(chan struct{}, 1)
 	log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
-		"SQLite database ready schema_version=%d slow_query_threshold_ms=%d bulk_base_ms=%d bulk_per_row_ms=%d",
-		SchemaVersion, opts.SlowQuery.Milliseconds(), d.bulkBase.Milliseconds(), d.bulkPerRow.Milliseconds())
+		"SQLite database ready schema_version={schema_version} slow_query_threshold_ms={slow_query_threshold_ms} bulk_base_ms={bulk_base_ms} bulk_per_row_ms={bulk_per_row_ms}",
+		logging.Values{"schema_version": SchemaVersion, "slow_query_threshold_ms": opts.SlowQuery.Milliseconds(), "bulk_base_ms": d.bulkBase.Milliseconds(), "bulk_per_row_ms": d.bulkPerRow.Milliseconds()})
 	return d, nil
 }
 
@@ -677,7 +678,7 @@ func removeDatabaseFiles(path string) error {
 // write handle is closed even if either fails, so their fault cannot leave
 // the writer's file handle open, and the first error is the one reported.
 func (d *DB) Close() error {
-	d.log.LogVerbose(logging.Fields{Operation: "store.db.close"}, "closing SQLite database")
+	d.log.LogVerbose(logging.Fields{Operation: "store.db.close"}, "closing SQLite database", nil)
 	var firstErr error
 	keep := func(err error) {
 		if firstErr == nil {
@@ -685,18 +686,18 @@ func (d *DB) Close() error {
 		}
 	}
 	if d.read != nil {
-		keep(d.closePool(d.read, "closing the SQLite read pool", "closing the read pool"))
+		keep(d.closePool(d.read, logsite.Msg("closing the SQLite read pool failed: {cause}"), "closing the read pool"))
 	}
 	if d.ckpt != nil {
-		keep(d.closePool(d.ckpt, "closing the SQLite checkpoint connection", "closing the checkpoint connection"))
+		keep(d.closePool(d.ckpt, logsite.Msg("closing the SQLite checkpoint connection failed: {cause}"), "closing the checkpoint connection"))
 	}
-	keep(d.closePool(d.sql, "closing SQLite database", "closing the database"))
+	keep(d.closePool(d.sql, logsite.Msg("closing SQLite database failed: {cause}"), "closing the database"))
 	// THE -shm DESCRIPTOR CLOSES LAST, after every SQLite connection has, so
 	// its close cannot release a lock SQLite still holds (see readWAL).
 	if d.wal.shm != nil {
 		if err := d.wal.shm.Close(); err != nil {
 			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
-				"closing the WAL-index descriptor failed: %v", err)
+				"closing the WAL-index descriptor failed: {cause}", logging.Values{"cause": err.Error()})
 			keep(storagef(err, "closing the WAL-index descriptor"))
 		}
 		d.wal.shm = nil
@@ -704,21 +705,21 @@ func (d *DB) Close() error {
 	if firstErr != nil {
 		return firstErr
 	}
-	d.log.Log(logging.Fields{Operation: "store.db.close"}, "SQLite database closed")
+	d.log.Log(logging.Fields{Operation: "store.db.close"}, "SQLite database closed", nil)
 	return nil
 }
 
 // closePool closes one of the store's handles, recording a failure once at
 // error and returning it as a storage failure. `logged` names the close in the
 // record, `wrapped` in the returned error.
-func (d *DB) closePool(pool *sql.DB, logged, wrapped string) error {
+func (d *DB) closePool(pool *sql.DB, logged logsite.Message, wrapped string) error {
 	closeHandle := d.closeHandle
 	if closeHandle == nil {
 		closeHandle = (*sql.DB).Close
 	}
 	if err := closeHandle(pool); err != nil {
-		d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
-			"%s failed: %v", logged, err)
+		d.log.LogMessage(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
+			logged, logging.Values{"cause": err.Error()})
 		return storagef(err, "%s", wrapped)
 	}
 	return nil
@@ -1133,12 +1134,12 @@ func (d *DB) ensureSchema(ctx context.Context, path string) error {
 	current, tables, err := d.inspectSchema(ctx)
 	if err != nil {
 		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
-			"reading the on-disk schema failed: %v", err)
+			"reading the on-disk schema failed: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
 	if current == SchemaVersion && slicesEqual(shapeTables(tables), shapeTables(schemaTables)) {
 		d.log.LogVerbose(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
-			"schema already current version=%d", current)
+			"schema already current version={version}", logging.Values{"version": current})
 		if err := d.ensureInPlaceTables(ctx, path, tables); err != nil {
 			return err
 		}
@@ -1154,14 +1155,14 @@ func (d *DB) ensureSchema(ctx context.Context, path string) error {
 		return &schemaMismatchError{version: current, tables: tables}
 	}
 	d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
-		"no schema on disk; creating it at version=%d tables=%v", SchemaVersion, schemaTables)
+		"no schema on disk; creating it at version={version} tables={tables}", logging.Values{"version": SchemaVersion, "tables": schemaTables})
 	if err := d.createSchema(ctx); err != nil {
 		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
-			"creating the schema failed: %v", err)
+			"creating the schema failed: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
 	d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
-		"schema created at version=%d", SchemaVersion)
+		"schema created at version={version}", logging.Values{"version": SchemaVersion})
 	return nil
 }
 
@@ -1264,7 +1265,7 @@ func (d *DB) ensureIndexes(ctx context.Context, path string) error {
 		failed := fields
 		failed.Level = "error"
 		failed.ErrorCause = err.Error()
-		d.log.Log(failed, "building the missing lineage indexes in place failed; the database is left as it was and the open fails: %v", err)
+		d.log.Log(failed, "building the missing lineage indexes in place failed; the database is left as it was and the open fails: {cause}", logging.Values{"cause": err.Error()})
 		return &indexMigrationError{err: err}
 	}
 	present, err := d.indexNames(ctx)
@@ -1278,7 +1279,7 @@ func (d *DB) ensureIndexes(ctx context.Context, path string) error {
 		}
 	}
 	if len(missing) == 0 {
-		d.log.LogVerbose(fields, "every lineage index is present count=%d", len(lineageIndexes))
+		d.log.LogVerbose(fields, "every lineage index is present count={count}", logging.Values{"count": len(lineageIndexes)})
 		return nil
 	}
 
@@ -1300,8 +1301,8 @@ func (d *DB) ensureIndexes(ctx context.Context, path string) error {
 	if err := tx.Commit(); err != nil {
 		return fail(storagef(err, "committing the lineage index build"))
 	}
-	d.log.Log(fields, "built the missing lineage indexes in place indexes=%v duration_ms=%d",
-		missing, d.mono().Sub(started).Milliseconds())
+	d.log.Log(fields, "built the missing lineage indexes in place indexes={indexes} duration_ms={duration_ms}",
+		logging.Values{"indexes": missing, "duration_ms": d.mono().Sub(started).Milliseconds()})
 	return nil
 }
 
@@ -1319,14 +1320,14 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 		}
 	}
 	if len(missing) == 0 {
-		d.log.LogVerbose(fields, "every in-place table is present count=%d", len(inPlaceTables))
+		d.log.LogVerbose(fields, "every in-place table is present count={count}", logging.Values{"count": len(inPlaceTables)})
 		return nil
 	}
 	fail := func(err error) error {
 		failed := fields
 		failed.Level = "error"
 		failed.ErrorCause = err.Error()
-		d.log.Log(failed, "building the missing in-place tables failed; the database is left as it was and the open fails: %v", err)
+		d.log.Log(failed, "building the missing in-place tables failed; the database is left as it was and the open fails: {cause}", logging.Values{"cause": err.Error()})
 		return &indexMigrationError{err: err}
 	}
 	started := d.mono()
@@ -1347,8 +1348,8 @@ func (d *DB) ensureInPlaceTables(ctx context.Context, path string, present []str
 	if err := tx.Commit(); err != nil {
 		return fail(storagef(err, "committing the in-place table build"))
 	}
-	d.log.Log(fields, "built the missing in-place tables tables=%v duration_ms=%d",
-		missing, d.mono().Sub(started).Milliseconds())
+	d.log.Log(fields, "built the missing in-place tables tables={tables} duration_ms={duration_ms}",
+		logging.Values{"tables": missing, "duration_ms": d.mono().Sub(started).Milliseconds()})
 	return nil
 }
 
@@ -1423,6 +1424,6 @@ func (d *DB) queryError(operation, table string, fields logging.Fields, err erro
 	fields.Table = table
 	fields.Level = "error"
 	fields.ErrorCause = err.Error()
-	d.log.Log(fields, "database statement failed: %v", err)
+	d.log.Log(fields, "database statement failed: {cause}", logging.Values{"cause": err.Error()})
 	return err
 }

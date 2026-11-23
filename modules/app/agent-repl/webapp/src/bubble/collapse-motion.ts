@@ -14,9 +14,11 @@
  *
  * Under `prefers-reduced-motion` the change is instant, as it was.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { prefersReducedMotion } from "../reduced-motion.js";
 import { nextFrame } from "../frame.js";
+
+const log = createLogger("webapp.bubble.collapse-motion");
 
 /** How long the bubble takes to ease into its interim look. */
 export const COLLAPSE_MS = 220;

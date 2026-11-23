@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -91,7 +92,7 @@ func copyMirror(m *wsm.MirrorAddress) *wsm.MirrorAddress {
 // their mirrored copies wait for the next publication.
 func (r *resolver) recordedMirrors(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]*wsm.MirrorAddress {
 	return readRecorded(r, ws, turns, r.deps.TurnMirrors, "daemon.feed.turn_mirrors_unreadable",
-		"the replayed turns' recorded mirrors could not be read; their rows are drawn in this workspace only")
+		logsite.Msg("the replayed turns' recorded mirrors could not be read; their rows are drawn in this workspace only"))
 }
 
 // mirrorRow draws ROW, just published in S's feed, again at its turn's mirror,
@@ -131,7 +132,7 @@ func (r *resolver) mirrorRow(s *wsState, row *frontendv1.FeedRow) {
 		parent = r.deps.Encode(feedid.Ref{WS: m.Workspace, Feed: m.Feed, Row: nested.Row})
 	}
 	copied, ok := r.snapshotRow(s, row, unclonable{
-		operation: "daemon.feed.mirror_unclonable", message: "a mirrored turn's row could not be cloned; it is not mirrored", context: fields,
+		operation: "daemon.feed.mirror_unclonable", message: logsite.Msg("a mirrored turn's row could not be cloned; it is not mirrored"), context: fields,
 	})
 	if !ok {
 		return

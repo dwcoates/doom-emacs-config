@@ -29,7 +29,7 @@
                   (lambda () agent-repl-test-stall--pending))
                  ((symbol-function 'agent-repl-latency-report-editor)
                   (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
-                 ((symbol-function 'agent-repl--info)
+                 ((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-into agent-repl-test-stall--records)))
          ,@body))))
 
@@ -219,7 +219,7 @@ Each element is what the input check answers on that run."
   `(let ((debug-on-quit nil))
      (let ((agent-repl-stall--debug-on-quit-lisp nil)
            (agent-repl-test-stall--records nil))
-       (cl-letf (((symbol-function 'agent-repl--info)
+       (cl-letf (((symbol-function 'agent-repl--emit-info)
                   (agent-repl-test--record-into agent-repl-test-stall--records)))
          ,@body))))
 

@@ -152,8 +152,7 @@ func (r *RunOutput) Remember(ctx *Context, raw []byte) {
 	// informational, states the counts, and is written ONCE PER RUN: on the
 	// batch that first crosses it.
 	r.log.With(handleCtx("run-output-bound", ctx)).Log(
-		"the run has said more than %d bytes; its tail and terminal state the last %d and report %d omitted rather than claiming to carry the whole",
-		maxRememberedOutput, maxRememberedOutput, r.omitted)
+		"the run has said more than {max_remembered_output} bytes; its tail and terminal state the last {max_remembered_output} and report {omitted} omitted rather than claiming to carry the whole", logging.Values{"max_remembered_output": maxRememberedOutput, "omitted": r.omitted})
 }
 
 // window appends raw to the bounded tail, folding what falls off its head into
@@ -195,7 +194,7 @@ func (r *RunOutput) reseed(ctx *Context, at int64) error {
 	r.seen, r.omitted, r.omittedNewlines, r.omittedEndsLine = nil, 0, 0, false
 	if at == 0 {
 		r.log.With(handleCtx("run-output-reseed", ctx)).
-			LogVerbose("the batch begins the file; the window starts empty (held through=%d)", r.through)
+			LogVerbose("the batch begins the file; the window starts empty (held through={through})", logging.Values{"through": r.through})
 		return nil
 	}
 	if err := r.readPrefix(ctx.Path, at, r.window); err != nil {
@@ -203,8 +202,7 @@ func (r *RunOutput) reseed(ctx *Context, at int64) error {
 		return fmt.Errorf("reseeding the run's tail from the first %d bytes of %s: %w", at, ctx.Path, err)
 	}
 	r.log.With(handleCtx("run-output-reseed", ctx)).
-		LogVerbose("the batch does not continue the window (held through=%d, batch at=%d); reseeded from the file's first %d bytes omitted=%d",
-			r.through, at, at, r.omitted)
+		LogVerbose("the batch does not continue the window (held through={through}, batch at={at}); reseeded from the file's first {at} bytes omitted={omitted}", logging.Values{"through": r.through, "at": at, "omitted": r.omitted})
 	return nil
 }
 
@@ -269,7 +267,7 @@ func (r *RunOutput) TerminalAttribution(taskID, ownerAgentID, run string) conver
 		r.log.With(logging.Context{
 			Operation: "terminal-attribution", TaskID: taskID,
 			AgentID: ownerAgentID, ActivityID: run, Path: r.coords.Path,
-		}).LogVerbose("this handler read no batch of the run's spool, so its terminal is identified by the run and states not_observed for its output")
+		}).LogVerbose("this handler read no batch of the run's spool, so its terminal is identified by the run and states not_observed for its output", nil)
 		return convert.Attribution{
 			VendorSessionID: ownerAgentID,
 			MainAgentID:     ownerAgentID,
@@ -312,7 +310,7 @@ func (r *RunOutput) seamTerminal(
 ) []*storev1.StoreEntry {
 	if run == "" {
 		r.log.With(logging.Context{Operation: operation, Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for %s: no spawning-call activity id was supplied, so the frame would name no unit", which)
+			Log("no terminal minted for {which}: no spawning-call activity id was supplied, so the frame would name no unit", logging.Values{"which": which})
 		return nil
 	}
 	at := r.TerminalAttribution(taskID, ownerAgentID, run)

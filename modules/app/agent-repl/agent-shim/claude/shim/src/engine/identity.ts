@@ -55,7 +55,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import { mainAgentId } from "../convert/ids.js";
 
-const LOGGER = bindLog({ component: "shim-engine-identity", operation: "shim.engine.identity" });
+const LOGGER = bindLog("shim.engine.identity", { component: "shim-engine-identity", operation: "shim.engine.identity" });
 
 /** The persisted identity record; the field names are the on-disk contract. */
 interface AgentIdentityRecord {

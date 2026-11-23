@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // This file is the WAITING MEMBERS' REBASE (owner rulings, 2026-10-12 and
@@ -196,6 +197,7 @@ func (r *run) excludedUnderLease() string {
 
 // rebaseInBackground is a waiting member's rebase proper.
 func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backgroundEnd {
+	notReady := logsite.Msg("a waiting merge's worktree is not ready to rebase; it keeps its base this round")
 	const op = "daemon.merge.rebase_waiting"
 	o, log := r.o, r.o.log(ctx, r.ws)
 	subject, err := o.resolveSubject(ctx, r)
@@ -223,7 +225,7 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	}
 	if resolved == nil {
 		if skip := r.backgroundSkip(ctx); skip != "" {
-			log.Info(op, "a waiting merge's worktree is not ready to rebase; it keeps its base this round", withField(fields, "why", skip))
+			log.Log(dlog.LevelInfo, op, notReady, withField(fields, "why", skip))
 			return backgroundEnd{}
 		}
 	}
@@ -261,7 +263,7 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	// as backgroundSkip's are: the member keeps its base this round.
 	var dirty *worktreeDirty
 	if errors.As(err, &dirty) {
-		log.Info(op, "a waiting merge's worktree is not ready to rebase; it keeps its base this round", withField(fields, "why", dirty.Error()))
+		log.Log(dlog.LevelInfo, op, notReady, withField(fields, "why", dirty.Error()))
 		return backgroundEnd{}
 	}
 	if err == nil && gaveUp == nil {
@@ -358,9 +360,9 @@ func (r *run) stepAsideWaiting(ctx context.Context, conflict *waitingConflict) {
 		settled = "the rebase its own repair resolved is left standing with its resolution"
 	}
 	if slot.Awaiting() {
-		log.Info(op, "the waiting merge's rebase conflicted; "+settled+", and the merge waits out of line for the resolving-conflicts slot, in order", fields)
+		log.With(fields).Info(op, "the waiting merge's rebase conflicted; {settled}, and the merge waits out of line for the resolving-conflicts slot, in order", dlog.Context{"settled": settled})
 	} else {
-		log.Info(op, "the waiting merge's rebase conflicted; "+settled+", and the merge holds the resolving-conflicts slot", fields)
+		log.With(fields).Info(op, "the waiting merge's rebase conflicted; {settled}, and the merge holds the resolving-conflicts slot", dlog.Context{"settled": settled})
 	}
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		log.Error(op, "could not republish the queue", withField(fields, "error", err.Error()))
@@ -380,8 +382,8 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 	log := o.log(ctx, ws)
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
 	settle := context.WithoutCancel(ctx)
-	giveUp := func(message string) {
-		log.Info(op, message, fields)
+	giveUp := func(message logsite.Message) {
+		log.Log(dlog.LevelInfo, op, message, fields)
 		if err := o.returnRemediated(settle, ws, repo); err != nil {
 			log.Error(op, "could not return the merge to the line; it stays out of line, holding its slot, until the next boot", withField(fields, "error", err.Error()))
 		}
@@ -402,7 +404,7 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 	r.resolving = true
 	r.source = entry.Source
 	if !o.registerBackground(r) {
-		giveUp("the merge holding the resolving-conflicts slot has another run in this daemon; it returns to the line")
+		giveUp(logsite.Msg("the merge holding the resolving-conflicts slot has another run in this daemon; it returns to the line"))
 		return
 	}
 	defer close(r.finished)
@@ -410,7 +412,7 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 	if other, held := heldByAnother(err); held {
 		fields["holder"], fields["lease"] = other.Holder.String(), string(other.Lease)
 		o.unregisterBackground(r)
-		giveUp("the merge holding the resolving-conflicts slot has its workspace held by another lease; it returns to the line and meets the conflict at the head")
+		giveUp(logsite.Msg("the merge holding the resolving-conflicts slot has its workspace held by another lease; it returns to the line and meets the conflict at the head"))
 		return
 	}
 	if err != nil {
@@ -430,7 +432,7 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 	if why := r.excludedUnderLease(); why != "" {
 		fields["why"] = why
 		r.giveBack(settle)
-		giveUp("the merge holding the resolving-conflicts slot has a busy workspace; it returns to the line and meets the conflict at the head")
+		giveUp(logsite.Msg("the merge holding the resolving-conflicts slot has a busy workspace; it returns to the line and meets the conflict at the head"))
 		return
 	}
 	r.settleBackground(runCtx, r.rebaseInBackground(runCtx, fields))

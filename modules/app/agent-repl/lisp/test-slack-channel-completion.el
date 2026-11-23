@@ -209,7 +209,7 @@ one."
       (list :response (agent-repl-test-slack-channel-completion--listed
                        agent-repl-test-slack-channel-completion--channels))
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-slack-channel-completion-refresh "ws-1"))
       ;; Assert
@@ -226,7 +226,7 @@ one."
     (setq agent-repl--slack-channel-completion-channels
           agent-repl-test-slack-channel-completion--channels)
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-slack-channel-completion-refresh "ws-1"))
       ;; Assert
@@ -243,7 +243,7 @@ one."
     (setq agent-repl--slack-channel-completion-channels
           agent-repl-test-slack-channel-completion--channels)
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn) (agent-repl-test--record-into warned)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-slack-channel-completion-refresh "ws-1"))
       ;; Assert
@@ -256,7 +256,7 @@ one."
   "A daemon that cannot be reached is logged at WARN and leaves the channels."
   (agent-repl-test-slack-channel-completion--with '(:failure (:reason timeout))
     (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--warn) (agent-repl-test--record-into warned)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-slack-channel-completion-refresh "ws-1"))
       ;; Assert
@@ -269,7 +269,7 @@ one."
   (agent-repl-test-slack-channel-completion--with nil
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+                ((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-slack-channel-completion-refresh "ws-1"))
       ;; Assert
@@ -280,7 +280,7 @@ one."
 (ert-deftest agent-repl-test-slack-channel-completion-unknown-arm-is-an-error ()
   "A response arm this file does not know is logged at ERROR."
   (let ((errors nil))
-    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+    (cl-letf (((symbol-function 'agent-repl--emit-error) (agent-repl-test--record-into errors)))
       ;; Act
       (agent-repl--slack-channel-completion-answered "ws-1" '(:arm :surprise :value nil)))
     ;; Assert

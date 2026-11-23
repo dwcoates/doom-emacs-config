@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging/logsite"
 )
 
 // The bounded rule's record and reason.
@@ -115,11 +116,11 @@ func (s *Sweeper) sweepBounded(b BoundedDir, report *Report) {
 		deleted++
 	}
 	report.Removed = append(report.Removed, Removal{Path: b.Dir, Reason: ReasonOverBound, Bytes: freed})
-	message := "trimmed a bounded cache's least recently used entries back under its bound"
+	message := logsite.Msg("trimmed a bounded cache's least recently used entries back under its bound")
 	if report.DryRun {
-		message = "would trim a bounded cache's least recently used entries back under its bound"
+		message = logsite.Msg("would trim a bounded cache's least recently used entries back under its bound")
 	}
-	s.deps.Log.Info(opBounded, message, dlog.Context{
+	s.deps.Log.Log(dlog.LevelInfo, opBounded, message, dlog.Context{
 		"name": b.Name, "dir": b.Dir, "bytes": total, "bound": b.Bound, "freed": freed, "deleted": deleted,
 		"remaining": total - freed, "dry_run": report.DryRun, "oldest_kept": oldestKept(entries, deleted),
 	})

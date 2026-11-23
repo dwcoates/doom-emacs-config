@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -1432,9 +1433,9 @@ func reorderingFor(do func(wsm.RepoKey) (bool, error)) reordering {
 	return reordering{
 		op:      "daemon.merge.test_reorder",
 		fields:  dlog.Context{"how": "test"},
-		failed:  "could not reorder",
-		unmoved: "stayed",
-		moved:   "moved",
+		failed:  logsite.Msg("could not reorder"),
+		unmoved: logsite.Msg("stayed"),
+		moved:   logsite.Msg("moved"),
 		do:      do,
 	}
 }

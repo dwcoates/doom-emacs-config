@@ -20,9 +20,9 @@ func startRuntimeProfiling(logf *logging.Bound, getenv func(string) string, home
 	return stop, nil
 }
 
-// recordProfilingEvent records one profiling event as profiling.Describe words
-// it.
+// recordProfilingEvent records one profiling event as profiling.Describe
+// words it.
 func recordProfilingEvent(logf *logging.Bound, e profiling.Event) {
 	d := profiling.Describe("sidecar", e)
-	logf.With(logging.Context{Operation: d.Operation, Level: d.Level}).Log("%s", d.Text())
+	logf.With(logging.Context{Operation: d.Operation, Level: d.Level}).LogMessage(d.Message, logging.Values(d.Context()))
 }

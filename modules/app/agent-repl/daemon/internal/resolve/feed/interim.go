@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -147,7 +148,7 @@ func (r *resolver) republishInterim(s *wsState, addr feedid.Feed, id string) {
 	}
 	r.restateRow(s, placement{feed: addr}, existing, !f.nonDurable[id], unclonable{
 		operation: "daemon.feed.interim_row_unclonable",
-		message:   "a response whose interim flag changed could not be cloned; it was not re-pushed",
+		message:   logsite.Msg("a response whose interim flag changed could not be cloned; it was not re-pushed"),
 		context:   dlog.Context{"feed": f.key, "row": id},
 	}, func(*frontendv1.FeedRow) {})
 }

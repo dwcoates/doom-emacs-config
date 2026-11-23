@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
+	"agentrepl/logging/logsite"
 )
 
 // A LEFTOVER is a directory in a repository's worktrees directory that git no
@@ -36,7 +37,7 @@ func (s *repoSweep) sweepLeftovers(ctx context.Context, worktrees []gitclient.Wo
 	fields := dlog.Context{"repo": string(s.repo.ID), "repo_dir": s.repo.Dir}
 	parent, err := s.r.deps.WorktreeParent(s.repo.Dir)
 	if err != nil {
-		s.fail(ctx, opLeftover, "the repository's worktrees directory could not be resolved; no leftover is swept", fields, err)
+		s.fail(ctx, opLeftover, logsite.Msg("the repository's worktrees directory could not be resolved; no leftover is swept"), fields, err)
 		return
 	}
 	fields["worktrees_dir"] = parent
@@ -45,7 +46,7 @@ func (s *repoSweep) sweepLeftovers(ctx context.Context, worktrees []gitclient.Wo
 		return
 	}
 	if err != nil {
-		s.fail(ctx, opLeftover, "the repository's worktrees directory could not be read; no leftover is swept", fields, err)
+		s.fail(ctx, opLeftover, logsite.Msg("the repository's worktrees directory could not be read; no leftover is swept"), fields, err)
 		return
 	}
 	listed := map[string]bool{}
@@ -77,7 +78,7 @@ func (s *repoSweep) judgeLeftover(ctx context.Context, dir string) {
 	}
 	links, err := onlyLogLinks(dir)
 	if err != nil {
-		s.fail(ctx, opLeftover, "a directory beside the worktrees could not be read; it is kept", fields, err)
+		s.fail(ctx, opLeftover, logsite.Msg("a directory beside the worktrees could not be read; it is kept"), fields, err)
 		return
 	}
 	if links == 0 {
@@ -92,7 +93,7 @@ func (s *repoSweep) judgeLeftover(ctx context.Context, dir string) {
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		s.report.Kept[reasonRemoveFailed]++
-		s.fail(ctx, opLeftover, "a leftover directory could not be removed; it is kept", fields, err)
+		s.fail(ctx, opLeftover, logsite.Msg("a leftover directory could not be removed; it is kept"), fields, err)
 		return
 	}
 	s.report.Leftovers = append(s.report.Leftovers, dir)

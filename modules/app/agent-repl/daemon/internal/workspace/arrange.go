@@ -206,10 +206,10 @@ func (v *verbs) arrange(ctx context.Context, log dlog.Logger, op, what string, w
 		if refused := arrangementRefusal(log, err); refused != nil {
 			return refused
 		}
-		log.Error(op, "could not "+what, dlog.Context{"cause": err.Error()})
+		log.Error(op, "could not {what}", dlog.Context{"what": what, "cause": err.Error()})
 		return fmt.Errorf("%s: %w", what, err)
 	}
-	log.Info(op, "arranged the sidebar: "+what, nil)
+	log.Info(op, "arranged the sidebar: {what}", dlog.Context{"what": what})
 	v.republishRegistry(ctx, log, op)
 	return nil
 }

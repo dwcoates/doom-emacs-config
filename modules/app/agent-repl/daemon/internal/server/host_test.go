@@ -12,6 +12,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -889,9 +890,9 @@ func TestComposeHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled(t *testing.
 // awaitingIdentityDebug answers the compose_host_workspace DEBUG record that
 // narrates a withheld view awaiting host identity, or nil when none was logged.
 func awaitingIdentityDebug(log *recordingLogger) *logRecord {
-	for i, rec := range log.records {
+	for i, rec := range log.records() {
 		if rec.Level == "DEBUG" && rec.Context["reason"] == "host session id not yet minted" {
-			return &log.records[i]
+			return &log.records()[i]
 		}
 	}
 	return nil
@@ -918,7 +919,7 @@ func TestAMissingHostIdentityIsATransientOnTheFirstWithholding(t *testing.T) {
 		t.Fatalf("the first withholding was recorded at ERROR: %v", errs)
 	}
 	if awaitingIdentityDebug(log) == nil {
-		t.Fatalf("the first withholding did not narrate the transient at DEBUG: %v", log.records)
+		t.Fatalf("the first withholding did not narrate the transient at DEBUG: %v", log.records())
 	}
 }
 
@@ -946,10 +947,10 @@ func TestAPersistentMissingHostIdentityEscalatesToError(t *testing.T) {
 	}
 	errs := log.at("ERROR")
 	if len(errs) != 1 || errs[0].Context["invariant_violation"] != "a session record exists with no host session id" {
-		t.Fatalf("a persistent missing identity did not escalate to the mint-defect ERROR: %v", log.records)
+		t.Fatalf("a persistent missing identity did not escalate to the mint-defect ERROR: %v", log.records())
 	}
 	if awaitingIdentityDebug(log) != nil {
-		t.Fatalf("an escalated withholding also narrated a transient DEBUG: %v", log.records)
+		t.Fatalf("an escalated withholding also narrated a transient DEBUG: %v", log.records())
 	}
 }
 
@@ -977,7 +978,7 @@ func TestAMissingHostIdentityWithinTheBoundStaysATransient(t *testing.T) {
 		t.Fatalf("a withholding still inside the bound escalated to ERROR: %v", errs)
 	}
 	if awaitingIdentityDebug(log) == nil {
-		t.Fatalf("a withholding inside the bound did not narrate the transient: %v", log.records)
+		t.Fatalf("a withholding inside the bound did not narrate the transient: %v", log.records())
 	}
 }
 
@@ -1011,7 +1012,7 @@ func TestComposingAHostIdentityClearsTheTransientWindow(t *testing.T) {
 		t.Fatalf("a withholding after a clear escalated as if the old window survived: %v", errs)
 	}
 	if awaitingIdentityDebug(log) == nil {
-		t.Fatalf("a withholding after a clear did not narrate a fresh transient: %v", log.records)
+		t.Fatalf("a withholding after a clear did not narrate a fresh transient: %v", log.records())
 	}
 }
 
@@ -1528,14 +1529,14 @@ func TestLogHostStreamReadLevelsByCause(t *testing.T) {
 			log := &recordingLogger{}
 
 			// Act.
-			logHostStreamRead(log, "daemon.server.test", "the view was not composed",
-				"could not read the thing", tc.err, dlog.Context{"workspace": "ws-1"})
+			logHostStreamRead(log, "daemon.server.test", logsite.Msg("the view was not composed; the stream's context was cancelled"),
+				logsite.Msg("could not read the thing"), tc.err, dlog.Context{"workspace": "ws-1"})
 
 			// Assert.
-			if len(log.records) != 1 {
-				t.Fatalf("records = %v, want exactly one", log.records)
+			if len(log.records()) != 1 {
+				t.Fatalf("records = %v, want exactly one", log.records())
 			}
-			got := log.records[0]
+			got := log.records()[0]
 			if got.Level != tc.level || got.Operation != "daemon.server.test" || got.Message != tc.msg {
 				t.Fatalf("record = %+v, want level %s message %q", got, tc.level, tc.msg)
 			}
@@ -1553,7 +1554,7 @@ func TestLogHostStreamReadLeavesTheCallersFieldsAlone(t *testing.T) {
 	fields := dlog.Context{"workspace": "ws-1"}
 
 	// Act.
-	logHostStreamRead(&recordingLogger{}, "op", "skipped", "failed", context.Canceled, fields)
+	logHostStreamRead(&recordingLogger{}, "op", logsite.Msg("skipped; the stream's context was cancelled"), logsite.Msg("failed"), context.Canceled, fields)
 
 	// Assert.
 	if !reflect.DeepEqual(fields, dlog.Context{"workspace": "ws-1"}) {

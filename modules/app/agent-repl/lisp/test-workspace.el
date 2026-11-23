@@ -297,9 +297,9 @@ the workspace selected after it still lands on it."
     (agent-repl--ws-put "child" :project-dir "/child")
     (agent-repl--ws-put "child" :source-ws-dir "/source/old")
     (let (calls)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (lambda (ws fmt &rest args)
-                   (push (list ws (apply #'format fmt args)) calls))))
+                   (push (list ws (agent-repl-log-site-render fmt args)) calls))))
         (agent-repl--ws-rewrite-source-back-refs
          "/source/old" "/source/new"))
       (should
@@ -341,40 +341,43 @@ the workspace selected after it still lands on it."
 
 (ert-deftest agent-repl-test-ws-put-stub-create-emits-noisy-log ()
   "ws-put that creates a fresh entry with a non-:project-dir key should
-emit a noisy unconditional log via `agent-repl--do-log'."
+emit a noisy unconditional log at info."
   (agent-repl-test--with-clean-state
     (let ((log-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls))))
         (agent-repl--ws-put "stub-ws" :priority "p1"))
       (should (= 1 (length log-calls)))
       (should (string-match-p "STUB-CREATE" (nth 1 (car log-calls)))))))
 
 (ert-deftest agent-repl-test-ws-put-stub-create-log-routes-globally ()
-  "The stub-create record is emitted with a nil workspace.
+  "The stub-create record is emitted to the reasoned central scope.
 Its subject IS that the entry has no `:project-dir', which is exactly what
 denies it a durable sink, so the global sink is the record's correct
 destination and the name travels in the message text instead."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((log-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls))))
         ;; Act
         (agent-repl--ws-put "stub-ws" :priority "p1"))
       ;; Assert
-      (should (null (nth 0 (car log-calls)))))))
+      (should (agent-repl--central-log-scope-reason (nth 0 (car log-calls)))))))
 
 (ert-deftest agent-repl-test-ws-put-stub-create-names-the-workspace ()
   "Routing the stub-create record globally must not lose the workspace name."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((log-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls))))
         ;; Act
         (agent-repl--ws-put "stub-ws" :priority "p1"))
       ;; Assert
@@ -386,9 +389,10 @@ destination and the name travels in the message text instead."
 should not emit the stub-create log."
   (agent-repl-test--with-clean-state
     (let ((log-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls))))
         (agent-repl--ws-put "good-ws" :project-dir "/some/dir"))
       (should (null log-calls)))))
 
@@ -400,9 +404,10 @@ has no :project-dir (no new entry is being created)."
     ;; Seed an entry via :project-dir first so it exists.
     (agent-repl--ws-put "ws1" :project-dir "/some/dir")
     (let ((log-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls))))
         (agent-repl--ws-put "ws1" :priority "p1"))
       (should (null log-calls)))))
 
@@ -411,9 +416,10 @@ has no :project-dir (no new entry is being created)."
 producer of the leak can be identified from the message alone."
   (agent-repl-test--with-clean-state
     (let ((log-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls))))
         (agent-repl--ws-put "stub-ws" :priority "p1"))
       (should (= 1 (length log-calls)))
       (let* ((args (nth 2 (car log-calls)))
@@ -457,9 +463,10 @@ producer of the leak can be identified from the message alone."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((log-calls nil) (skips nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls)))
                 ((symbol-function 'agent-repl--ws-caller-trace)
                  (lambda (skip) (push skip skips) "shared-trace")))
         ;; Act
@@ -484,9 +491,9 @@ producer of the leak can be identified from the message alone."
   (declare (indent 1))
   `(let ((,records nil))
      (cl-letf (((symbol-function 'agent-repl--ws-persp-name) (lambda (persp) (car persp)))
-               ((symbol-function 'agent-repl--info)
+               ((symbol-function 'agent-repl--emit-info)
                 (lambda (scope fmt &rest args)
-                  (push (cons scope (apply #'format fmt args)) ,records))))
+                  (push (cons scope (agent-repl-log-site-render fmt args)) ,records))))
        ,@body)))
 
 (ert-deftest agent-repl-test-ws-a-persp-kill-is-recorded-with-its-caller ()
@@ -592,7 +599,7 @@ nil so post-kill passes don't act on stale runtime intent."
                        (append (list :target target) identity)
                        agent-repl--workspace-log-targets))
             (should (agent-repl--workspace-log-target-entry "ws1"))
-            (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+            (cl-letf (((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
               (agent-repl--ws-del "ws1"))
             (should-not (agent-repl--workspace-log-target-entry "ws1"))
             (should (file-exists-p target))
@@ -694,9 +701,9 @@ so a regression that brings remhash back is caught immediately."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (lambda (_ws fmt &rest args)
-                   (setq logged (apply #'format fmt args)))))
+                   (setq logged (agent-repl-log-site-render fmt args)))))
         (agent-repl--ws-del "ws1")
         (should (string-match-p "ws-del:" logged))
         (should (string-match-p "had-entry=t" logged))))))
@@ -705,9 +712,9 @@ so a regression that brings remhash back is caught immediately."
   "ws-del logs `had-entry=nil' when the workspace was not registered."
   (agent-repl-test--with-clean-state
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (lambda (_ws fmt &rest args)
-                   (setq logged (apply #'format fmt args)))))
+                   (setq logged (agent-repl-log-site-render fmt args)))))
         (agent-repl--ws-del "nonexistent")
         (should (string-match-p "ws-del:" logged))
         (should (string-match-p "had-entry=nil" logged))))))
@@ -842,10 +849,10 @@ to avoid surfacing killed workspaces."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "live" :project-dir "/tmp/live")
     (let (captured)
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                  (lambda (ws fmt &rest args)
                    (setq captured
-                         (list ws (apply #'format fmt args))))))
+                         (list ws (agent-repl-log-site-render fmt args))))))
         (agent-repl--ws-registered-names))
       (should (agent-repl--central-log-scope-reason (car captured)))
       (should (string-match-p "count=1" (cadr captured)))
@@ -961,7 +968,7 @@ dead shadow never counts as the owner."
   "--ws-require-known signals user-error when ws is not known."
   (agent-repl-test--with-clean-state
     (let ((logged-workspace nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (lambda (ws &rest _args) (setq logged-workspace ws))))
         (should-error (agent-repl--ws-require-known "missing" "ctx")
                       :type 'user-error))
@@ -1054,7 +1061,7 @@ dead shadow never counts as the owner."
   ;; Arrange.
   (agent-repl-test--with-clean-state
     (let ((logged-workspace nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (lambda (ws &rest _args) (setq logged-workspace ws))))
         ;; Act.
         (should-not (agent-repl--ws-revive "missing")))
@@ -1086,7 +1093,7 @@ switch (2026-10-15)."
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--emit-log-record)
                  (lambda (_ws _level _verbosity fmt args &rest _)
-                   (push (apply #'format fmt args) logged))))
+                   (push (agent-repl-log-site-render fmt args) logged))))
         ;; Act
         (agent-repl--ws-by-ref-id "nobody")
         ;; Assert
@@ -1097,7 +1104,7 @@ switch (2026-10-15)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :ref '(:id "id-1" :dir "/tmp/x"))
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-verbose)
                  (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--ws-by-ref-id "id-1")
@@ -1468,7 +1475,7 @@ gated push would then drop the very repaint this exists for."
                 ;; The contained failure rides the warn rung, so the helper's
                 ;; value is the log emitter's rather than a contract; a signal
                 ;; escaping the containment still fails this test.
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         (agent-repl--ws-repaint-sidebar "doomed" "test")
         (should (cl-some (lambda (l) (string-match-p "push error" l)) warned))))))
@@ -1610,7 +1617,7 @@ gated push would then drop the very repaint this exists for."
       (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'a-persp))
                 ((symbol-function 'persp-rename)
                  (lambda (new persp) (setq captured (list new persp)) t))
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (lambda (ws &rest _args) (setq logged-workspace ws))))
         (should (agent-repl--ws-rename-persp "old" "new"))
         (should (equal captured '("new" a-persp)))
@@ -1787,9 +1794,9 @@ gated push would then drop the very repaint this exists for."
 (ert-deftest agent-repl-test-ws-persp-identity-rejects-nil-with-canonical-log ()
   "A missing perspective identity logs its cause before signalling."
   (let (record)
-    (cl-letf (((symbol-function 'agent-repl--log)
+    (cl-letf (((symbol-function 'agent-repl--emit-log)
                (lambda (ws fmt &rest args)
-                 (setq record (list ws (apply #'format fmt args))))))
+                 (setq record (list ws (agent-repl-log-site-render fmt args))))))
       (should-error (agent-repl--ws-persp-identity nil) :type 'error))
     (should (agent-repl--central-log-scope-reason (car record)))
     (should (equal (cadr record)
@@ -2128,8 +2135,8 @@ transiently activated workspace while eager-open is in progress."
             (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
             (records nil))
         (setq agent-repl-test--clock 112.0)
-        (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
+                   (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
           ;; Act
           (agent-repl--end-visit "c" "activation"))
         ;; Assert
@@ -2145,8 +2152,8 @@ transiently activated workspace while eager-open is in progress."
             (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
             (records nil))
         (setq agent-repl-test--clock 102.5)
-        (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
+                   (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
           ;; Act
           (agent-repl--end-visit "c" "picker"))
         ;; Assert
@@ -2205,8 +2212,8 @@ transiently activated workspace while eager-open is in progress."
             (agent-repl--recency-walk-landing nil)
             (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
             (records nil))
-        (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
+                   (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
           ;; Act
           (agent-repl--keep-visit "a"))
         ;; Assert
@@ -2265,8 +2272,8 @@ behind the visit the switch began."
           (agent-repl--last-ended-visit
            (list :visit (list :name "d" :began 100.0 :ahead nil) :recorded nil))
           (records nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
         ;; Act
         (agent-repl--keep-visit "a"))
       ;; Assert
@@ -2295,7 +2302,7 @@ behind the visit the switch began."
     (let ((agent-repl--workspace-history '("a"))
           (agent-repl--current-visit nil)
           (records nil))
-      (cl-letf (((symbol-function 'agent-repl--info) (lambda (&rest args) (push args records))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (lambda (&rest args) (push args records))))
         ;; Act
         (agent-repl--end-visit "a" "activation"))
       ;; Assert
@@ -2374,7 +2381,7 @@ behind the visit the switch began."
             (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
             (records nil))
         (setq agent-repl-test--clock 101.0)
-        (cl-letf (((symbol-function 'agent-repl--info) (lambda (&rest args) (push args records))))
+        (cl-letf (((symbol-function 'agent-repl--emit-info) (lambda (&rest args) (push args records))))
           ;; Act
           (agent-repl--note-visit-prompted "b"))
         ;; Assert
@@ -2403,8 +2410,8 @@ behind the visit the switch began."
             (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
             (records nil))
         (setq agent-repl-test--clock 101.5)
-        (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
+                   (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
           ;; Act
           (agent-repl--note-visit-prompted "a"))
         ;; Assert
@@ -2439,8 +2446,8 @@ behind the visit the switch began."
       (let ((agent-repl--workspace-history '("new" "b" "a"))
             (records nil))
         (setq agent-repl-test--clock 103.0)
-        (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        (cl-letf (((symbol-function 'agent-repl--emit-info)
+                   (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
           ;; Act
           (agent-repl--record-visit "c" (list :name "a" :began 100.0 :ahead '("new")) "why"))
         ;; Assert
@@ -2481,8 +2488,8 @@ behind the visit the switch began."
           (records nil))
       (cl-letf (((symbol-function 'agent-repl--stamp-workspace-viewed)
                  (lambda (name) (push name stamped)))
-                ((symbol-function 'agent-repl--info)
-                 (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+                ((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
         ;; Act
         (should (equal (agent-repl--clear-recency-walk "c" "why") "b")))
       ;; Assert
@@ -2499,9 +2506,9 @@ behind the visit the switch began."
           (fatals nil))
       (cl-letf (((symbol-function 'agent-repl--stamp-workspace-viewed)
                  (lambda (name) (push name stamped)))
-                ((symbol-function 'agent-repl--fatal)
+                ((symbol-function 'agent-repl--emit-fatal)
                  (lambda (ws fmt &rest args)
-                   (push (cons ws (apply #'format fmt args)) fatals)
+                   (push (cons ws (agent-repl-log-site-render fmt args)) fatals)
                    (error "fatal"))))
         ;; Act
         (should-error (agent-repl--clear-recency-walk "c" "why")))
@@ -2710,8 +2717,8 @@ behind the visit the switch began."
     (let ((agent-repl--workspace-history '("a" "b"))
           (agent-repl--recency-walk-landing "b")
           (records nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws fmt &rest args) (push (cons ws (agent-repl-log-site-render fmt args)) records))))
         ;; Act
         (agent-repl--end-recency-walk "d" 'picker))
       ;; Assert
@@ -2725,7 +2732,7 @@ behind the visit the switch began."
     (let ((agent-repl--workspace-history '("a" "b"))
           (agent-repl--recency-walk-landing nil)
           (records nil))
-      (cl-letf (((symbol-function 'agent-repl--info)
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
                  (lambda (&rest args) (push args records))))
         ;; Act
         (agent-repl--end-recency-walk "a" 'picker))
@@ -3021,7 +3028,7 @@ of the cache (no sentinel head)."
   (agent-repl-test--with-clean-state
     (let* ((persp-names-cache '("main" "ws-a"))
            (logs nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logs)))
         (agent-repl--reorder-workspace-to-front "missing-ws")
         (should (cl-find-if (lambda (l)
@@ -3036,7 +3043,7 @@ of the cache (no sentinel head)."
            (persp-names-cache '("main" "ws-a" "merge-failed-ws"))
            (logs nil))
       (cl-letf (((symbol-function 'persp-update-names-cache) (lambda (_) nil))
-                ((symbol-function 'agent-repl--log)
+                ((symbol-function 'agent-repl--emit-log)
                  (agent-repl-test--record-into logs)))
         (agent-repl--reorder-workspace-to-front "merge-failed-ws")
         (should (cl-find-if (lambda (l)
@@ -3628,11 +3635,11 @@ records which perspective was current when it ran."
          ,@body))))
 
 (defun agent-repl-test-ws--recorder ()
-  "Return (FN . CELL): FN records formatted log lines into CELL's car.
-FN takes the arguments `agent-repl--info' and `agent-repl--warn' take;
-the lines are kept most recent first."
+  "Return (FN . CELL): FN records rendered log lines into CELL's car.
+FN takes the arguments `agent-repl--emit-info' and `agent-repl--emit-warn'
+take; the lines are kept most recent first."
   (let ((cell (list nil)))
-    (cons (lambda (_ws fmt &rest args) (push (apply #'format fmt args) (car cell)))
+    (cons (agent-repl-test--record-into (car cell))
           cell)))
 
 ;;; --- The landing target rule
@@ -3727,7 +3734,7 @@ the first open tab is the landing."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("gone" "second"))
           (info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
           ;; Act
           (agent-repl--teardown-landing-target "gone")
@@ -3744,7 +3751,7 @@ the first open tab is the landing."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history nil)
           (info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "gone" '("first" "gone")
           ;; Act
           (agent-repl--teardown-landing-target "gone")
@@ -3773,7 +3780,7 @@ the survivor the roster's durable instant says was selected most recently."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history nil)
           (info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info))
                 ((symbol-function 'agent-repl-roster-last-selected-ms)
                  (lambda (ws) (and (equal ws "second") 900))))
         (agent-repl-test-ws--with-teardown "gone" '("first" "second" "gone")
@@ -3792,7 +3799,7 @@ the survivor the roster's durable instant says was selected most recently."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history nil)
           (info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info))
                 ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-all-names) (lambda () '("foreign"))))
         ;; Act
@@ -3875,7 +3882,7 @@ that is reported rather than taken for a landing."
     (let ((persp-nil-name "none")
           (warn (agent-repl-test-ws--recorder)))
       (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main"))
-                ((symbol-function 'agent-repl--warn) (car warn)))
+                ((symbol-function 'agent-repl--emit-warn) (car warn)))
         (agent-repl-test-ws--with-teardown "gone" '("none" "main" "gone")
           ;; Act
           (should-not (agent-repl--land-before-teardown "gone"))
@@ -3935,7 +3942,7 @@ another."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((warn (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--warn) (car warn)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (car warn)))
         (agent-repl-test-ws--with-teardown "gone" '("gone")
           ;; Act
           (should-not (agent-repl--land-before-teardown "gone"))
@@ -3971,7 +3978,7 @@ the user still stands on."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "gone" '("gone" "keeper")
           ;; Act
           (agent-repl--land-before-teardown "gone")
@@ -3988,7 +3995,7 @@ the user still stands on."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "mine" '("mine" "other")
           ;; Act
           (agent-repl--land-before-teardown "other")
@@ -4102,7 +4109,7 @@ and the skip is recorded at INFO."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "mine" '("mine")
           ;; Act
           (should-not (agent-repl--ws-land-then-kill "gone"))
@@ -4121,7 +4128,7 @@ before anything moves."
   (agent-repl-test--with-clean-state
     (let ((info (agent-repl-test-ws--recorder))
           (other-frame 'other-frame))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info))
                 ((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
                 ((symbol-function 'persp-frames-with-persp)
                  (lambda (&optional _persp) (list (selected-frame) other-frame))))
@@ -4141,7 +4148,7 @@ before anything moves."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info))
                 ((symbol-function '+workspace--protected-p)
                  (lambda (ws) (equal ws "none"))))
         (agent-repl-test-ws--with-teardown "keeper" '("none" "keeper")
@@ -4162,7 +4169,7 @@ runs, leaving the frame as persp-mode arranges it."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((warn (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--warn) (car warn)))
+      (cl-letf (((symbol-function 'agent-repl--emit-warn) (car warn)))
         (agent-repl-test-ws--with-teardown "gone" '("gone")
           ;; Act
           (agent-repl--ws-land-then-kill "gone")
@@ -4189,7 +4196,7 @@ workspace, and killing it now is exactly the hazard the order exists for."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((info (agent-repl-test-ws--recorder)))
-      (cl-letf (((symbol-function 'agent-repl--info) (car info)))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) (car info)))
         (agent-repl-test-ws--with-teardown "mine" '("mine" "other")
           ;; Act
           (agent-repl--ws-land-then-kill "other")
@@ -4291,7 +4298,7 @@ so no half-torn-down workspace is left behind its surviving tab."
                  (lambda (&rest _) (setq repainted t)))
                 ((symbol-function 'agent-repl--ws-land-then-kill)
                  (lambda (_ws) (error "no frame")))
-                ((symbol-function 'agent-repl--warn)
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl--kill-one-workspace "ws")
@@ -4336,7 +4343,7 @@ made the perspective log-routable and gave it that workspace's durable sink."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((+workspaces-main "main"))
-      (cl-letf (((symbol-function 'agent-repl--do-log) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
         ;; Act
         (agent-repl--ws-put "main" :project-dir "/tmp/some-real-worktree")
         ;; Assert
@@ -4348,9 +4355,10 @@ made the perspective log-routable and gave it that workspace's durable sink."
   (agent-repl-test--with-clean-state
     (let ((+workspaces-main "main")
           (log-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--do-log)
-                 (lambda (ws fmt args &optional _err)
-                   (push (list ws fmt args) log-calls))))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (lambda (ws site &rest values)
+                   (push (list ws (agent-repl-log-site-render site values) values)
+                         log-calls))))
         ;; Act
         (agent-repl--ws-put "main" :project-dir "/tmp/some-real-worktree"))
       ;; Assert
@@ -4362,7 +4370,7 @@ made the perspective log-routable and gave it that workspace's durable sink."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((+workspaces-main "main"))
-      (cl-letf (((symbol-function 'agent-repl--do-log) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
         ;; Act
         (agent-repl--ws-put "main" :priority "p1")
         ;; Assert
@@ -4388,7 +4396,7 @@ resolving an identity that would raise."
     (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (agent-repl--ws-put "gone-ws" :project-dir "/no/such/worktree/at/all")
       ;; Act / Assert
-      (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (cl-letf (((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
         (should-not (agent-repl--ws-forget-emacs-log-target "gone-ws" "probe"))))))
 
 (ert-deftest agent-repl-test-ws-forget-log-target-drops-every-name-for-the-dir ()
@@ -4404,7 +4412,7 @@ resolving an identity that would raise."
                      agent-repl--workspaces)
             (agent-repl--workspace-emacs-log-target "shared-a")
             ;; Act
-            (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+            (cl-letf (((symbol-function 'agent-repl--emit-log) (lambda (&rest _) nil)))
               (agent-repl--ws-forget-emacs-log-target "shared-b" "probe"))
             ;; Assert — forgetting through EITHER name clears the one entry.
             (should (= 0 (hash-table-count agent-repl--workspace-log-targets))))
@@ -4502,9 +4510,9 @@ formatted line, and every `run-at-time' onto `timers' as its function."
          (errors nil)
          (timers nil))
      (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () ,active))
-               ((symbol-function 'agent-repl--info)
+               ((symbol-function 'agent-repl--emit-info)
                 (agent-repl-test--record-into infos))
-               ((symbol-function 'agent-repl--error)
+               ((symbol-function 'agent-repl--emit-error)
                 (agent-repl-test--record-into errors))
                ((symbol-function 'run-at-time)
                 (lambda (_time _repeat fn &rest _) (push fn timers) nil)))
@@ -4900,7 +4908,7 @@ them can take the user out of a minibuffer by a path of its own."
                  (lambda (&rest _) (error "should not switch: already in a real ws")))
                 ((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (ws) (push ws killed)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -4920,7 +4928,7 @@ them can take the user out of a minibuffer by a path of its own."
                 ((symbol-function 'agent-repl--ws-switch)
                  (lambda (&rest _) (setq automatic agent-repl-host-automatic-switch)))
                 ((symbol-function 'agent-repl--ws-persp-kill) #'ignore)
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -4941,7 +4949,7 @@ them can take the user out of a minibuffer by a path of its own."
                 ((symbol-function 'agent-repl-open-tabs-choosing-p) (lambda () t))
                 ((symbol-function 'agent-repl--ws-switch) (lambda (ws &rest _) (push ws switched)))
                 ((symbol-function 'agent-repl--ws-persp-kill) (lambda (ws) (push ws killed)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -4963,7 +4971,7 @@ them can take the user out of a minibuffer by a path of its own."
                 ((symbol-function 'agent-repl--ws-switch)
                  (lambda (&rest _) (error "should not switch: already in a real ws")))
                 ((symbol-function 'agent-repl--ws-persp-kill) (lambda (ws) (push ws killed)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -5019,7 +5027,7 @@ them can take the user out of a minibuffer by a path of its own."
     (let ((agent-repl--eager-open-in-progress t)
           (scopes nil))
       (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
-                ((symbol-function 'agent-repl--log) (lambda (scope &rest _) (push scope scopes))))
+                ((symbol-function 'agent-repl--emit-log) (lambda (scope &rest _) (push scope scopes))))
         ;; Act
         (agent-repl--record-workspace-history)
         ;; Assert
@@ -5039,7 +5047,7 @@ them can take the user out of a minibuffer by a path of its own."
                 ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (ws) (push ws killed)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -5059,7 +5067,7 @@ them can take the user out of a minibuffer by a path of its own."
                 ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (ws) (push ws killed)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert -- nothing killed, one-shot not consumed
@@ -5080,7 +5088,7 @@ them can take the user out of a minibuffer by a path of its own."
                 ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (ws) (push ws killed)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -5098,7 +5106,7 @@ them can take the user out of a minibuffer by a path of its own."
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
                 ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--ws-persp-kill) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -5119,7 +5127,7 @@ them can take the user out of a minibuffer by a path of its own."
                  (lambda (ws &rest _) (push (cons :switch ws) events)))
                 ((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (ws) (push (cons :kill ws) events)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert -- switch to the real "doom" precedes any kill
@@ -5141,7 +5149,7 @@ them can take the user out of a minibuffer by a path of its own."
                 ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (ws) (push ws killed)))
-                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--emit-info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
@@ -5244,8 +5252,8 @@ A hand-rolled `log-ws'-or-global scope there would drift from it."
   (agent-repl-test--with-clean-state
     ;; Arrange.
     (let ((errors nil))
-      (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest _) (push fmt errors))))
+      (cl-letf (((symbol-function 'agent-repl--emit-error)
+                 (lambda (_ws fmt &rest _) (push (agent-repl-log-site-template fmt) errors))))
         ;; Act.
         (agent-repl--ws-install-before-collapse #'ignore))
       ;; Assert.

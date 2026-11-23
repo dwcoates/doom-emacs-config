@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"agentrepl/logging/logsite"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -24,11 +25,11 @@ type turnSetRestore struct {
 	// load reads the workspace's set from the store.
 	load func(context.Context, ids.WorkspaceID) ([]ids.TurnID, error)
 	// failed is the ERROR record's message for a load that failed.
-	failed string
+	failed logsite.Message
 	// warning is the topbar's line for a load that failed.
 	warning string
 	// loaded is the INFO record's message for a set that held turns.
-	loaded string
+	loaded logsite.Message
 }
 
 // restoreTurnSet loads RESTORE's set into INTO. A load that fails is logged at
@@ -37,7 +38,7 @@ type turnSetRestore struct {
 func (r *resolver) restoreTurnSet(s *wsState, restore turnSetRestore, into map[ids.TurnID]bool) {
 	turns, err := restore.load(context.Background(), s.id)
 	if err != nil {
-		r.logger(s.id).Error(restore.op, restore.failed, dlog.Context{"error": err.Error()})
+		r.logger(s.id).Log(dlog.LevelError, restore.op, restore.failed, dlog.Context{"error": err.Error()})
 		r.raiseWarning(s, restore.op, restore.warning)
 		return
 	}
@@ -45,7 +46,7 @@ func (r *resolver) restoreTurnSet(s *wsState, restore turnSetRestore, into map[i
 		into[turn] = true
 	}
 	if len(turns) > 0 {
-		r.logger(s.id).Info(restore.op, restore.loaded, dlog.Context{"turns": len(turns)})
+		r.logger(s.id).Log(dlog.LevelInfo, restore.op, restore.loaded, dlog.Context{"turns": len(turns)})
 	}
 }
 
@@ -69,13 +70,13 @@ type turnAnswer struct {
 	// fields is the context every record of the answer carries.
 	fields dlog.Context
 	// nothing is the DEBUG record's message when no drawn row named a turn.
-	nothing string
+	nothing logsite.Message
 	// failed is the ERROR record's message for a recording that failed.
-	failed string
+	failed logsite.Message
 	// warning prefixes the topbar's line for a recording that failed.
 	warning string
 	// answered is the INFO record's message for an answer recorded.
-	answered string
+	answered logsite.Message
 }
 
 // answerTurns answers every turn a drawn row names: its rows the answer
@@ -96,7 +97,7 @@ func (r *resolver) answerTurns(s *wsState, answer turnAnswer) error {
 		fields[k] = v
 	}
 	if len(turns) == 0 {
-		log.Debug(answer.op, answer.nothing, fields)
+		log.Log(dlog.LevelDebug, answer.op, answer.nothing, fields)
 		return nil
 	}
 	for _, turn := range turns {
@@ -115,11 +116,11 @@ func (r *resolver) answerTurns(s *wsState, answer turnAnswer) error {
 	if answer.record != nil {
 		if err := answer.record(context.Background(), s.id, turns); err != nil {
 			fields["error"] = err.Error()
-			log.Error(answer.op, answer.failed, fields)
+			log.Log(dlog.LevelError, answer.op, answer.failed, fields)
 			r.raiseWarning(s, answer.op, fmt.Sprintf("%s: %v", answer.warning, err))
 			return err
 		}
 	}
-	log.Info(answer.op, answer.answered, fields)
+	log.Log(dlog.LevelInfo, answer.op, answer.answered, fields)
 	return nil
 }

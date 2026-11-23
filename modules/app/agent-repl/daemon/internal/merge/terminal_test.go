@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/logsite"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -2754,7 +2755,7 @@ func TestDrainStep(t *testing.T) {
 			}
 
 			// Act
-			got := drainStep(ctx, log, "daemon.merge.drain", expired, done, "overran", "cancelled", dlog.Context{"bound": "1s"})
+			got := drainStep(ctx, log, "daemon.merge.drain", expired, done, logsite.Msg("overran"), logsite.Msg("cancelled"), dlog.Context{"bound": "1s"})
 
 			// Assert
 			if got != tt.want {

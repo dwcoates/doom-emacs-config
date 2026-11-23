@@ -48,7 +48,7 @@ import { activityEntry, agentActivity, startedAt } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { hookActivityId } from "./ids.js";
 
-const LOGGER = bindLog({ component: "shim-convert-hooks", operation: "shim.convert.hooks" });
+const LOGGER = bindLog("shim.convert.hooks", { component: "shim-convert-hooks", operation: "shim.convert.hooks" });
 
 /** How many hook firings are remembered before the oldest is forgotten. */
 const HOOK_REGISTRY_CAPACITY = 128;

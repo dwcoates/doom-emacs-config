@@ -21,7 +21,7 @@ import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, settle, str, uint } from "./support.js";
 
-const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.glob" });
+const LOGGER = bindLog("shim.convert.tools.glob", { component: "shim-convert-tools", operation: "shim.convert.tools.glob" });
 
 /** What was matched against, as the caller wrote it. */
 function globQuery(call: PendingCall, pattern: string): conversationv1.AgentGlobQuery {

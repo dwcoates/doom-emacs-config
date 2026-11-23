@@ -34,13 +34,14 @@
 
 ;;; Code:
 
+;; Every log call is a log-site macro (log-site.el), needed where this
+;; file is expanded; config.el loads it first.
+(require 'log-site)
+
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--log "core" (ws fmt &rest args))
-(declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--input-notify "input" (ws text))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--input-buffer "input" (ws))
 (declare-function agent-repl--input-restore "input" (ws snapshot))
 (declare-function agent-repl--input-said-parts "input" (said))
@@ -109,11 +110,11 @@ cancelled, said, and logged, rather than left claimed by nobody."
          (turn (plist-get (plist-get edit :turn) :value)))
     (cond
      ((null buf)
-      (agent-repl--info ws "elisp.held-edit.no-composer ws=%s turn=%s edit=%s" ws turn (plist-get edit :edit))
+      (agent-repl--info ws "elisp.held-edit.no-composer ws={ws} turn={turn} edit={edit}" :ws ws :turn turn :edit (plist-get edit :edit))
       (message "agent-repl: no composer is open to edit the held prompt in; the edit is cancelled")
       (agent-repl--held-edit-send ws (plist-get edit :turn) '(:arm :cancel :value nil) "cancel"))
      ((eq parts :unrepresentable)
-      (agent-repl--info ws "elisp.held-edit.unrepresentable ws=%s turn=%s edit=%s" ws turn (plist-get edit :edit))
+      (agent-repl--info ws "elisp.held-edit.unrepresentable ws={ws} turn={turn} edit={edit}" :ws ws :turn turn :edit (plist-get edit :edit))
       (message "agent-repl: the held prompt carries content the composer cannot hold; the edit is cancelled")
       (agent-repl--held-edit-send ws (plist-get edit :turn) '(:arm :cancel :value nil) "cancel"))
      (t
@@ -124,9 +125,9 @@ cancelled, said, and logged, rather than left claimed by nobody."
         ;; The edit beginning is an editor notice: the composer has no mode
         ;; line, so the page's footer draws it as a transient line.
         (agent-repl--input-notify ws agent-repl-held-edit-indicator)
-        (agent-repl--info ws "elisp.held-edit.began ws=%s turn=%s edit=%s draft-saved=%s images=%d"
-                          ws turn (plist-get edit :edit) saved
-                          (length (agent-repl--input-parts-images parts))))))))
+        (agent-repl--info ws "elisp.held-edit.began ws={ws} turn={turn} edit={edit} draft-saved={draft_saved} images={images}"
+                          :ws ws :turn turn :edit (plist-get edit :edit) :draft_saved saved
+                          :images (length (agent-repl--input-parts-images parts))))))))
 
 (defun agent-repl--held-edit-leave (ws buf)
   "End WS's edit mode in BUF: the daemon states no edit stands any more.
@@ -134,8 +135,8 @@ The composer's contents are left exactly as they are."
   (let ((standing (buffer-local-value 'agent-repl--held-edit buf)))
     (with-current-buffer buf
       (setq agent-repl--held-edit nil))
-    (agent-repl--info ws "elisp.held-edit.ended ws=%s turn=%s edit=%s"
-                      ws (plist-get (plist-get standing :turn) :value) (plist-get standing :edit))))
+    (agent-repl--info ws "elisp.held-edit.ended ws={ws} turn={turn} edit={edit}"
+                      :ws ws :turn (plist-get (plist-get standing :turn) :value) :edit (plist-get standing :edit))))
 
 (defun agent-repl-held-edit-on-host-update (ws host)
   "Reconcile WS's composer with HOST's standing held-prompt edit.
@@ -147,7 +148,7 @@ edit mode."
          (standing (and buf (buffer-local-value 'agent-repl--held-edit buf))))
     (cond
      ((and edit (equal (plist-get standing :edit) (plist-get edit :edit)))
-      (agent-repl--log ws "elisp.held-edit.unchanged ws=%s edit=%s" ws (plist-get edit :edit)))
+      (agent-repl--log ws "elisp.held-edit.unchanged ws={ws} edit={edit}" :ws ws :edit (plist-get edit :edit)))
      (edit (agent-repl--held-edit-enter ws edit))
      (standing (agent-repl--held-edit-leave ws buf))
      (t nil))))
@@ -164,8 +165,8 @@ the verbs dispatcher's handover path (answering nil)."
     (agent-repl--input-restore ws snapshot)
     (if (memq keyword agent-repl-verbs--handover-arms)
         nil
-      (agent-repl--info ws "elisp.held-edit.refused ws=%s step=%s arm=%S fields=%S"
-                        ws step keyword (plist-get arm :value))
+      (agent-repl--info ws "elisp.held-edit.refused ws={ws} step={step} arm={arm} fields={fields}"
+                        :ws ws :step step :arm (prin1-to-string keyword) :fields (prin1-to-string (plist-get arm :value)))
       (message "agent-repl: editing the held prompt was refused -- %s"
                (if keyword (substring (symbol-name keyword) 1) "unstated"))
       t)))
@@ -174,16 +175,16 @@ the verbs dispatcher's handover path (answering nil)."
   "Send WS's EditHeldPrompt ACTION on TURN; STEP names it for the log.
 SNAPSHOT is the composer as a commit's clear found it, restored on a
 refusal or a transport failure so the user's words are never lost."
-  (agent-repl--info ws "elisp.held-edit.send ws=%s step=%s turn=%s"
-                    ws step (plist-get turn :value))
+  (agent-repl--info ws "elisp.held-edit.send ws={ws} step={step} turn={turn}"
+                    :ws ws :step step :turn (plist-get turn :value))
   (agent-repl-verbs--send
    #'agent-repl-rpc-edit-held-prompt (agent-repl-verbs--conn ws)
    (list :workspace (agent-repl-host-ref ws) :turn turn :action action)
    :ws ws :op "edit-held-prompt"
    :on-success
    (lambda (_)
-     (agent-repl--info ws "elisp.held-edit.acked ws=%s step=%s turn=%s"
-                       ws step (plist-get turn :value)))
+     (agent-repl--info ws "elisp.held-edit.acked ws={ws} step={step} turn={turn}"
+                       :ws ws :step step :turn (plist-get turn :value)))
    :on-error
    (lambda (value) (agent-repl--held-edit-on-refusal ws step value snapshot))
    :on-transport-failure
@@ -193,9 +194,9 @@ refusal or a transport failure so the user's words are never lost."
   "Commit SAID as the new content of the held prompt WS's composer edits.
 SNAPSHOT is what the send's optimistic clear erased."
   (let ((standing (agent-repl-held-edit-state ws)))
-    (agent-repl--info ws "elisp.held-edit.commit ws=%s turn=%s edit=%s blocks=%d"
-                      ws (plist-get (plist-get standing :turn) :value) (plist-get standing :edit)
-                      (length (plist-get (plist-get said :content) :blocks)))
+    (agent-repl--info ws "elisp.held-edit.commit ws={ws} turn={turn} edit={edit} blocks={blocks}"
+                      :ws ws :turn (plist-get (plist-get standing :turn) :value) :edit (plist-get standing :edit)
+                      :blocks (length (plist-get (plist-get said :content) :blocks)))
     (agent-repl--held-edit-send ws (plist-get standing :turn)
                                 (list :arm :commit :value (list :said said))
                                 "commit" snapshot)))
@@ -203,8 +204,8 @@ SNAPSHOT is what the send's optimistic clear erased."
 (defun agent-repl-held-edit-cancel (ws)
   "Cancel the held-prompt edit WS's composer stands in; content unchanged."
   (let ((standing (agent-repl-held-edit-state ws)))
-    (agent-repl--info ws "elisp.held-edit.cancel ws=%s turn=%s edit=%s"
-                      ws (plist-get (plist-get standing :turn) :value) (plist-get standing :edit))
+    (agent-repl--info ws "elisp.held-edit.cancel ws={ws} turn={turn} edit={edit}"
+                      :ws ws :turn (plist-get (plist-get standing :turn) :value) :edit (plist-get standing :edit))
     (agent-repl--held-edit-send ws (plist-get standing :turn)
                                 '(:arm :cancel :value nil) "cancel")))
 

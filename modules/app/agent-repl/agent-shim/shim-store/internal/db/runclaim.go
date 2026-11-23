@@ -110,6 +110,6 @@ func (d *DB) ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]Clai
 	}
 	d.observeQuery(StatementShellRunClaims, "shell_run_claim", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementShellRunClaims, "shell_run_claim", base, int64(len(out)))
-	d.log.LogVerbose(base, "answered %d claim(s) for %d vendor task id(s)", len(out), len(args))
+	d.log.LogVerbose(base, "answered {claims} claim(s) for {vendor_task_ids} vendor task id(s)", logging.Values{"claims": len(out), "vendor_task_ids": len(args)})
 	return out, nil
 }

@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { filesUnder } from "../files-under.js";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { ShowChatNodeResponseSchema, type ShowChatNodeResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { sendGesture } from "../../src/rpc/gesture.js";
 import { NOW, SINK, WORKSPACE, fakeTicker } from "../sidebar/harness.js";
@@ -39,7 +39,7 @@ describe("sendGesture", () => {
 
   it("answers a refusal's arm, recorded at info under the site's operation", async () => {
     const infos: unknown[] = [];
-    vi.spyOn(log, "info").mockImplementation((_message, fields) => void infos.push(fields?.operation));
+    spyLog("info").mockImplementation((_message, fields) => void infos.push(fields?.operation));
 
     const arm = await send(() =>
       create(ShowChatNodeResponseSchema, { result: { case: "error", value: { cause: { case: "unknownNode", value: {} } } } }),
@@ -49,8 +49,8 @@ describe("sendGesture", () => {
   });
 
   it("answers null for a call that failed in transport", async () => {
-    vi.spyOn(log, "warn").mockImplementation(() => undefined);
-    vi.spyOn(log, "error").mockImplementation(() => undefined);
+    spyLog("warn").mockImplementation(() => undefined);
+    spyLog("error").mockImplementation(() => undefined);
     await expect(
       send(() => {
         throw new ConnectError("down", Code.Unavailable);
