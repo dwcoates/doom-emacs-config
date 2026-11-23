@@ -554,6 +554,20 @@ describe("drawFeedUserPrompt: a prompt the daemon sent", () => {
     expect(el.querySelector(".prompt-address .peer-name")?.classList.contains("workspace-mention")).toBe(false);
   });
 
+  it("folds a daemon-sent prompt at two lines ended in an ellipsis", () => {
+    // Act
+    const el = drawFeedUserPrompt(daemonPrompt("Merge Queue Monitor"), "row-1");
+    // Assert
+    expect([el.getAttribute("data-cap-lines"), el.getAttribute("data-more")]).toEqual(["2", "ellipsis"]);
+  });
+
+  it("leaves a person's prompt unbounded", () => {
+    // Act
+    const el = drawFeedUserPrompt(daemonPrompt(), "row-1");
+    // Assert
+    expect([el.getAttribute("data-cap-lines"), el.getAttribute("data-more")]).toEqual(["unbounded", "fade"]);
+  });
+
   it("draws no header for a prompt a person said", () => {
     // Act
     const el = drawFeedUserPrompt(daemonPrompt(), "row-1");
