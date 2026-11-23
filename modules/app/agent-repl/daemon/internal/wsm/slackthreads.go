@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/slacklink"
 )
 
 // This file is the durable half of SLACK-THREAD SUBSCRIPTIONS
@@ -175,6 +176,26 @@ type SlackThreadSubscription struct {
 	UntoldMessages []SlackThreadMessage
 }
 
+// FindSlackThreadSubscription answers the subscription of SUBS that follows
+// the thread THREAD names: the one rooted at the link's message, or the one
+// whose own link names that message. The ONE rule every "is this thread
+// subscribed" question answers by, so a verb that finds a subscription and a
+// view that draws one never disagree about which thread a link names.
+func FindSlackThreadSubscription(subs []SlackThreadSubscription, thread slacklink.Thread) (SlackThreadSubscription, bool) {
+	for _, sub := range subs {
+		if sub.Thread.Channel != thread.Channel {
+			continue
+		}
+		if sub.Thread.ThreadTS == thread.TS {
+			return sub, true
+		}
+		if named, err := slacklink.ParseThread(sub.URL); err == nil && named.TS == thread.TS {
+			return sub, true
+		}
+	}
+	return SlackThreadSubscription{}, false
+}
+
 // slackThreadColumns is every subscription column, in scanSlackThread's
 // order, the pending count included.
 const slackThreadColumns = `s.subscriber, s.channel, s.thread_ts, s.thread_url, s.mode, s.origin, s.subscribed_at, s.cursor_seq,
@@ -337,11 +358,17 @@ func (s *store) WorkspaceSlackThreadSubscriptions(ctx context.Context, subscribe
 	var out []SlackThreadSubscription
 	err := s.read(ctx, "daemon.wsm.workspace_slack_thread_subscriptions", dlog.Context{"subscriber": string(subscriber)}, func(ctx context.Context) error {
 		var err error
-		out, err = listRows(ctx, s.q(ctx), `SELECT `+slackThreadColumns+` FROM slack_thread_subscriptions s WHERE s.subscriber = ? ORDER BY s.channel, s.thread_ts`,
-			scanSlackThread, subscriber)
+		out, err = slackThreadsOf(ctx, s.q(ctx), subscriber)
 		return err
 	})
 	return out, err
+}
+
+// slackThreadsOf reads every subscription SUBSCRIBER holds through Q, by
+// channel and thread.
+func slackThreadsOf(ctx context.Context, q querier, subscriber WorkspaceID) ([]SlackThreadSubscription, error) {
+	return listRows(ctx, q, `SELECT `+slackThreadColumns+` FROM slack_thread_subscriptions s WHERE s.subscriber = ? ORDER BY s.channel, s.thread_ts`,
+		scanSlackThread, subscriber)
 }
 
 // ReserveSlackThreadPost records NONCE as a post SUBSCRIBER is about to make

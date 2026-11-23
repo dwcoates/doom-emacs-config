@@ -126,18 +126,8 @@ func (w *Watcher) find(ctx context.Context, ws ids.WorkspaceID, url string) (wsm
 	if err != nil {
 		return wsm.SlackThreadSubscription{}, false, err
 	}
-	for _, sub := range subs {
-		if sub.Thread.Channel != thread.Channel {
-			continue
-		}
-		if sub.Thread.ThreadTS == thread.TS {
-			return sub, true, nil
-		}
-		if named, err := slacklink.ParseThread(sub.URL); err == nil && named.TS == thread.TS {
-			return sub, true, nil
-		}
-	}
-	return wsm.SlackThreadSubscription{}, false, nil
+	sub, found := wsm.FindSlackThreadSubscription(subs, thread)
+	return sub, found, nil
 }
 
 // Subscribe subscribes WS to the thread URL names, in MODE, answering the
