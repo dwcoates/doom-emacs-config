@@ -227,6 +227,10 @@ type fakeDB struct {
 	// workspaceReadErrs fails Workspace once per entry, in order, before any
 	// other answer: the seam for a record that goes away between two reads.
 	workspaceReadErrs []error
+	// rowErr fails the whole-row read (Workspace) and never the head
+	// (WorkspaceHead): the seam for a handler's own whole-row read failing
+	// after its request resolved.
+	rowErr error
 	// turnStarted answers Turn's start by turn; turnStartedErr fails every
 	// read instead (wsm.ErrNotFound for a turn the workspace never recorded).
 	turnStarted    map[ids.TurnID]time.Time
@@ -288,6 +292,9 @@ func (f *fakeDB) WorkspaceHead(ctx context.Context, id ids.WorkspaceID) (wsm.Wor
 
 func (f *fakeDB) Workspace(ctx context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
 	f.rowReads.Add(1)
+	if f.rowErr != nil {
+		return wsm.Workspace{}, f.rowErr
+	}
 	return f.workspace(ctx, id)
 }
 

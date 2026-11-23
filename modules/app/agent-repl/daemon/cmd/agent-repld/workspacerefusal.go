@@ -21,6 +21,17 @@ var errUndescribedWorkspaceRefusal = errors.New("the daemon refused with an arm 
 
 // describeFinishRefusal says in one plain sentence why WS, as the caller named
 // it, was not finished. Every FinishWorkspaceError arm has its own sentence.
+// placementSpelled is P as `-placement` spells it.
+func placementSpelled(p *agentreplv1.MergeQueuePlacement) string {
+	switch {
+	case p.GetFront() != nil:
+		return "front"
+	case p.GetBack() != nil:
+		return "back"
+	}
+	return "behind=" + p.GetBehind().GetMerge()
+}
+
 func describeFinishRefusal(ws string, e *agentreplv1.FinishWorkspaceError) (string, error) {
 	switch r := e.GetCause().(type) {
 	case *agentreplv1.FinishWorkspaceError_UnknownWorkspace:
@@ -57,6 +68,9 @@ func describeFinishRefusal(ws string, e *agentreplv1.FinishWorkspaceError) (stri
 		return sayBehindNotInLine(ws, r.PlacementBehindNotInLine), nil
 	case *agentreplv1.FinishWorkspaceError_MergeOffQueue:
 		return fmt.Sprintf("%s's merge left its queue without landing and its request stands; put it back with `agent-repld merge-queue requeue %s`, or end it with `agent-repld merge-queue discard %s` before finishing again", ws, ws, ws), nil
+	case *agentreplv1.FinishWorkspaceError_PlacementConflictsWithStored:
+		return fmt.Sprintf("%s's create fixed its finish at the %s of the merge queue, and this finish asked for %s; finish again with no -placement",
+			ws, placementSpelled(r.PlacementConflictsWithStored.GetStored()), placementSpelled(r.PlacementConflictsWithStored.GetRequested())), nil
 	}
 	return "", fmt.Errorf("%w: finishing %s: %v", errUndescribedWorkspaceRefusal, ws, e)
 }

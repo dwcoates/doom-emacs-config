@@ -53,6 +53,11 @@ var finishRefusalCases = []refusalCase{
 		want: "the merge other that ws was to go behind is not in its queue"},
 	{name: "merge_off_queue", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_MergeOffQueue{MergeOffQueue: &agentreplv1.FinishWorkspaceMergeOffQueue{}}},
 		want: "ws's merge left its queue without landing and its request stands; put it back with `agent-repld merge-queue requeue ws`, or end it with `agent-repld merge-queue discard ws` before finishing again"},
+	{name: "placement_conflicts_with_stored", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_PlacementConflictsWithStored{PlacementConflictsWithStored: &agentreplv1.FinishWorkspacePlacementConflictsWithStored{
+		Stored:    &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}},
+		Requested: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: "other"}}},
+	}}},
+		want: "ws's create fixed its finish at the front of the merge queue, and this finish asked for behind=other; finish again with no -placement"},
 }
 
 // oneShotRefusalCases holds one case per SetWorkspaceOneShotError arm.

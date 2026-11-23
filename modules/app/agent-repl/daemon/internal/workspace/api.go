@@ -61,6 +61,10 @@ type CreateSpec struct {
 	InitialImages []*conversationv1.ImageBlock
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
+	// FinishPlacement, set only on a one-shot, fixes where its finish joins
+	// the merge queue (agentrepl.v1.CreateWorkspaceOneShot.finish_placement);
+	// the zero value lets its finish name its own.
+	FinishPlacement wsm.FinishPlacement
 	// FromOrigin cuts a workspace landing on the primary branch from origin's
 	// primary branch, fetched as the create runs, rather than from the local
 	// primary branch (agentrepl.v1.WorkspaceLandingTargetPrimary.from_origin).

@@ -160,6 +160,10 @@ type Workspace struct {
 	// as the roster last derived it: what every per-workspace allocation is
 	// gated on.
 	Visibility Visibility
+	// FinishPlacement is where its finish joins the merge queue, fixed at its
+	// create (CreationJob.FinishPlacement); the zero value when its finish
+	// names its own.
+	FinishPlacement FinishPlacement
 	// Mediator is the standing mediator the workspace is, if any: its
 	// repository's deploy mediator (deploy_mediators) or production mediator
 	// (production_mediators). A mediator runs and is kept warm like any open
@@ -507,6 +511,10 @@ type CreationJob struct {
 	Materialized bool
 	// OneShot marks a one-shot workspace (created, prompted, merged, closed).
 	OneShot bool
+	// FinishPlacement is where the one-shot's finish joins the merge queue,
+	// fixed at its create (agentrepl.v1.CreateWorkspaceOneShot
+	// .finish_placement); the zero value lets every finish name its own.
+	FinishPlacement FinishPlacement
 	// InitialPrompt is the prompt the workspace was created with, empty when
 	// created without one.
 	InitialPrompt string
@@ -1760,3 +1768,22 @@ const (
 // IsMediator reports whether the workspace is one of its repository's
 // standing mediators.
 func (w Workspace) IsMediator() bool { return w.Mediator != NotMediator }
+
+// FinishPlacement is where a workspace's finish joins its merge queue when
+// its creator fixed it. The zero value is a workspace whose every finish
+// names its own placement.
+type FinishPlacement string
+
+// The placements a create may fix.
+const (
+	// FinishPlacementAsked is a workspace whose finish names its placement.
+	FinishPlacementAsked FinishPlacement = ""
+	// FinishPlacementFront joins ahead of every ordinary merge waiting.
+	FinishPlacementFront FinishPlacement = "front"
+	// FinishPlacementBack joins behind every merge waiting.
+	FinishPlacementBack FinishPlacement = "back"
+)
+
+func (p FinishPlacement) valid() bool {
+	return p == FinishPlacementAsked || p == FinishPlacementFront || p == FinishPlacementBack
+}

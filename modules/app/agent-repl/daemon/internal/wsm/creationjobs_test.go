@@ -2,6 +2,7 @@ package wsm
 
 import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+	"path/filepath"
 
 	"context"
 	"database/sql"
@@ -272,5 +273,52 @@ func TestBothCreationJobWritersWriteOneShape(t *testing.T) {
 	}
 	if got, restatedRow := row(put.ID), row(restated.ID); got != restatedRow {
 		t.Fatalf("PutCreationJob wrote %q, the restated landing %q; want one shape", got, restatedRow)
+	}
+}
+
+func TestACreationJobFixesAOneShotsFinishPlacement(t *testing.T) {
+	cases := []struct {
+		name      string
+		oneShot   bool
+		placement FinishPlacement
+		// wantRefused is whether the job is refused unwritten.
+		wantRefused bool
+	}{
+		{name: "a one-shot fixed at the front reads it back", oneShot: true, placement: FinishPlacementFront},
+		{name: "a one-shot fixed at the back reads it back", oneShot: true, placement: FinishPlacementBack},
+		{name: "a one-shot with none fixed reads none", oneShot: true},
+		{name: "a placement on a workspace that is no one-shot is refused", placement: FinishPlacementFront, wantRefused: true},
+		{name: "a placement no queue knows is refused", oneShot: true, placement: "sideways", wantRefused: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a linked worktree, since a main workspace is never a
+			// one-shot.
+			s, _ := testStore(t)
+			repo := t.TempDir()
+			registerOpenMain(t, s, repo)
+			ws, _, err := s.RegisterWorkspace(context.Background(), filepath.Join(t.TempDir(), "linked"), RegisterFacts{
+				Name: "linked", Branch: "linked", ParentBranch: "master", RepoDir: repo,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			err = s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, OneShot: tc.oneShot, FinishPlacement: tc.placement, CreatedAt: instant})
+			read, readErr := s.Workspace(context.Background(), ws.ID)
+
+			// Assert
+			if (err != nil) != tc.wantRefused || readErr != nil {
+				t.Fatalf("PutCreationJob = %v (read %v), want refused %v", err, readErr, tc.wantRefused)
+			}
+			want := tc.placement
+			if tc.wantRefused {
+				want = FinishPlacementAsked
+			}
+			if read.FinishPlacement != want {
+				t.Fatalf("the workspace's finish placement = %q, want %q", read.FinishPlacement, want)
+			}
+		})
 	}
 }
