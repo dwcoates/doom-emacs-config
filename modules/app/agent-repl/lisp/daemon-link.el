@@ -1031,10 +1031,10 @@ end, which the reconnect loop takes as any refused dial."
 BUILD is the pushed build.  The redial
 \(`agent-repl-link--redial-after-reload') is the dial\='s only exit, since
 `agent-repl-link--handle-close' ignores its stream\='s end while it
-reloads; elisp-build.el calls this even when the reload signalled.  So a redial that signals still releases
-the dial: its verdict leaves the table, the signal is an ERROR, a dial
-still held is refused as any other (the reconnect loop\='s backoff
-retries it), and the signal propagates.  On 2026-11-23T00:21Z a redial that
+reloads; elisp-build.el calls this even when the reload signalled.  So a
+redial that signals still releases the dial: its verdict leaves the
+table, the signal is an ERROR, a dial still held is refused as any other
+\(the reconnect loop\='s backoff retries it), and the signal propagates.  On 2026-11-23T00:21Z a redial that
 signalled left a pending successor held, its primary already ended, and
 Emacs without a daemon link for 20 minutes with nothing logged."
   (condition-case err
