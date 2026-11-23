@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	workEmail = "dodge@chess.com"
+	workEmail = "worker@example.com"
 	signInURL = "https://gns.example/auth/device?user_code=ABCD-EFGH"
 	startOut  = "Visit: " + signInURL + "\nCode: ABCD-EFGH\n"
 	rejection = "Error: authentication failed for production: credential is invalid or expired (permanently rejected by the server). Run: gns auth login --env production"
@@ -97,7 +97,7 @@ func healthyRenewal() func(string) (string, int, error) {
 			}
 			return "", 0, nil
 		case "gns auth status":
-			return "User: dodge (" + workEmail + ")", 0, nil
+			return "User: worker (" + workEmail + ")", 0, nil
 		}
 		return "", 0, errors.New("unexpected call " + args)
 	}
