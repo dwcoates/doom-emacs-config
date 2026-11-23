@@ -13,7 +13,7 @@
  * with no body.
  */
 import { createLogger } from "../../log.js";
-import { USER_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
+import { AGENT_PROMPT_CAP_LINES, BUBBLE_MORE_ELLIPSIS, USER_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedUserPrompt,
@@ -63,7 +63,12 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, row: string, previous?: 
           // A PROMPT THE DAEMON SENT is headed as an agent-to-agent prompt that
           // came in is: a left arrow, then "Zettel <subsystem>".
           strip: msg.daemonSender === undefined ? undefined : [drawDaemonSenderHeader(msg.daemonSender)],
-          ...look,
+          content: look.content,
+          // A PROMPT THE DAEMON SENT FOLDS AT TWO LINES as an agent-to-agent
+          // prompt does (owner request, 2026-11-23): the header is outside the fold.
+          ...(msg.daemonSender === undefined
+            ? { capLines: USER_PROMPT_CAP_LINES }
+            : { capLines: AGENT_PROMPT_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }),
           corner: [questionControl(row), ...look.corner],
         },
         previous,
