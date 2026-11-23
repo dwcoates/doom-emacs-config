@@ -164,6 +164,14 @@ thing thirty-five times."
     (should-not (string-match-p "--self-certified" prompt))
     (should (string-match-p "--add-to-merge-queue" prompt))))
 
+(ert-deftest agent-repl-test-commands-pr-prompt-never-waits-for-the-merge ()
+  "The prompt enqueues a self-certified PR but never asks the skill to wait.
+The merge is learned from the owned pull request's follow instead."
+  (let ((prompt (agent-repl--build-create-or-update-pr-prompt nil)))
+    (should (string-match-p "--self-certified" prompt))
+    (should (string-match-p "--add-to-merge-queue" prompt))
+    (should-not (string-match-p "--wait-for-merge" prompt))))
+
 (ert-deftest agent-repl-test-commands-pr-prompt-names-the-skill ()
   "The prompt invokes the skill it means."
   (should (string-prefix-p "/create-or-update-pr"
