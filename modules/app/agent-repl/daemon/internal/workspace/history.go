@@ -97,12 +97,15 @@ func emptyHistory() *conversationv1.HistoryPage {
 // with no recorded book, and records it. FOUND false is a workspace whose
 // shim persisted none: it has no conversation yet. A record that cannot be
 // written is an ERROR and the read goes on with the book: the next read
-// adopts it again.
+// adopts it again. A read or record cut because the request ended first is
+// recorded at INFO (ctxend), as historyBook records its own.
 func (f *Fleet) adoptPersistedBook(ctx context.Context, ws ids.WorkspaceID) (string, bool, error) {
 	log := f.logFor(ctx, ws)
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
-		log.Error("daemon.workspace.history_book", "could not read the workspace's record to find the book its shim persisted; its history is not read",
+		ctxend.Log(err, log, dlog.LevelInfo, "daemon.workspace.history_book",
+			logsite.Msg("the workspace's record was not read to find the book its shim persisted: the read's request ended first"),
+			logsite.Msg("could not read the workspace's record to find the book its shim persisted; its history is not read"),
 			dlog.Context{"cause": err.Error()})
 		return "", false, fmt.Errorf("read the record of %q: %w", ws, err)
 	}
@@ -117,7 +120,9 @@ func (f *Fleet) adoptPersistedBook(ctx context.Context, ws ids.WorkspaceID) (str
 		return "", false, nil
 	}
 	if err := f.deps.DB.SetWorkspaceBook(ctx, ws, book); err != nil {
-		log.Error("daemon.workspace.history_book", "could not record the book the workspace's shim persisted; it is read with it, and the next read adopts it again",
+		ctxend.Log(err, log, dlog.LevelInfo, "daemon.workspace.history_book",
+			logsite.Msg("the book the workspace's shim persisted was not recorded: the read's request ended first; the next read adopts it again"),
+			logsite.Msg("could not record the book the workspace's shim persisted; it is read with it, and the next read adopts it again"),
 			dlog.Context{"book": book, "cause": err.Error()})
 		return book, true, nil
 	}
