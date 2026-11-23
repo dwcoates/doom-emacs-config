@@ -160,6 +160,28 @@ export async function openAndJumpToWorkspace(
   }
 }
 
+/** Whether a jump's target is open or closed, as the daemon served it. */
+export type JumpStanding = "open" | "closed";
+
+/**
+ * The jump a click on a target of STANDING makes: an open workspace is
+ * selected, and a closed one is reopened and then selected, as the sidebar's
+ * closed entries are. PATH names the served field the standing came from, for
+ * the loud failure an unknown standing is.
+ */
+export function jumpForStanding(standing: JumpStanding, path: string): typeof jumpToWorkspace {
+  switch (standing) {
+    case "open":
+      return jumpToWorkspace;
+    case "closed":
+      return openAndJumpToWorkspace;
+    default: {
+      const other: string = standing;
+      return unreachableArm(path, other);
+    }
+  }
+}
+
 /** Record RPC's refusal of WORKSPACE under SITE, and draw it inside HOST. */
 function refuse(
   host: HTMLElement,
