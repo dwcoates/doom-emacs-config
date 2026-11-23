@@ -718,7 +718,7 @@ export function createFeedController(
     }
     log.info("resumed a {rows}-row page against the rows held", {
       operation: "feed.page-resumed",
-      context: { feed: feedName(), rows: incoming.length, standing: standing.size, left: left.length },
+      context: { feed: feedName(), standing: standing.size, left: left.length },
     }, { rows: incoming.length });
     if (left.length > 0 || result.value.removed.length > 0) announce();
   }
