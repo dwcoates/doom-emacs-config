@@ -51,6 +51,15 @@ func foldedOne() sidebar.Registry {
 	return reg
 }
 
+// liveRegistry brings every workspace REG registers to a proven, idle session
+// (see live), so none is the not-yet-started one a fold leaves visible.
+func liveRegistry(r sidebar.Resolver, reg sidebar.Registry) {
+	for _, ws := range reg.Workspaces {
+		r.OnLink(ws.ID, shimclient.LinkConnected)
+		r.OnSessionStarted(ws.ID, &conversationv1.SessionStarted{VendorSessionId: "vendor-" + string(ws.ID)})
+	}
+}
+
 // working brings WS to a running turn: its session is live and a prompt's
 // turn runs.
 func working(r sidebarResolver, ws ids.WorkspaceID) {
@@ -70,6 +79,7 @@ func TestAFoldedIdleWorkspaceIsNotVisible(t *testing.T) {
 	// Arrange
 	r := arrange(t, foldedOne().Workspaces...)
 	r.SetRegistry(foldedOne())
+	live(t, r)
 
 	// Act
 	got := visibilities(t, r)
@@ -122,6 +132,19 @@ func TestAFoldedStartingWorkspaceIsVisible(t *testing.T) {
 	}
 }
 
+func TestAFoldedWorkspaceWithNoSessionYetIsVisible(t *testing.T) {
+	// Arrange: just created, before its session's first dial.
+	r := arrange(t, foldedOne().Workspaces...)
+
+	// Act
+	r.SetRegistry(foldedOne())
+
+	// Assert
+	if got := visibilities(t, r)[string(theWS)]; got != "unselected_visible" {
+		t.Fatalf("visibility = %s, want unselected_visible: a workspace not yet started is visible under a fold", got)
+	}
+}
+
 func TestAFoldedWorkspaceOfTopPriorityIsVisible(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -142,6 +165,7 @@ func TestAFoldedWorkspaceOfTopPriorityIsVisible(t *testing.T) {
 
 			// Act
 			r.SetRegistry(reg)
+			liveRegistry(r, reg)
 
 			// Assert
 			if got := visibilities(t, r)[string(theWS)]; got != tt.want {
@@ -223,6 +247,7 @@ func TestASiblingOfAVisibleWorkspaceUnderAFoldStaysNotVisible(t *testing.T) {
 	reg.Repositories[0].Folded = true
 	r := arrange(t)
 	r.SetRegistry(reg)
+	liveRegistry(r, reg)
 
 	// Act
 	working(r, "w-a1")
@@ -322,7 +347,9 @@ func TestEveryVisibilityChangeIsHandedToTheSink(t *testing.T) {
 
 	// Act: drawn first, then folded away.
 	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	liveRegistry(r, registry(workspace(string(theWS), "one")))
 	r.SetRegistry(foldedOne())
+	liveRegistry(r, foldedOne())
 
 	// Assert
 	got := sink.all()

@@ -424,6 +424,7 @@ func TestTheTabBarWithholdsAWorkspaceOfACollapsedRepository(t *testing.T) {
 
 	// Act.
 	r.SetRegistry(reg)
+	liveRegistry(r, reg)
 
 	// Assert.
 	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-a:collapsed"}) {
@@ -515,6 +516,7 @@ func TestTheTabBarIsDrawnFromTabs(t *testing.T) {
 
 	// Act
 	r.SetRegistry(reg)
+	liveRegistry(r, reg)
 
 	// Assert
 	if got := tabIDsOf(latest(t, r)); !equal(got, want) {

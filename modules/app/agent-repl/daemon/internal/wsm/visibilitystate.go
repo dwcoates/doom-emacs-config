@@ -86,8 +86,8 @@ type VisibilityInput struct {
 	// Unviewed reports whether its last turn ended with a result the user has
 	// not read: its name is still drawn full.
 	Unviewed bool
-	// Starting reports whether its session is booting: the grey initializing
-	// mark (roster arm `init`).
+	// Starting reports whether its session is booting or not yet created: the
+	// grey initializing mark (roster arm `init`) or the gap before it (`none`).
 	Starting bool
 	// TopPriority reports whether it has priority P0.5 or P1
 	// (Workspace.TopPriority).

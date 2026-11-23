@@ -535,6 +535,7 @@ func TestAFoldedParentsBlockRowsCarryFoldedTabs(t *testing.T) {
 
 	// Act
 	r.SetRegistry(foldedBlockFamily())
+	liveRegistry(r, foldedBlockFamily())
 
 	// Assert
 	parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]

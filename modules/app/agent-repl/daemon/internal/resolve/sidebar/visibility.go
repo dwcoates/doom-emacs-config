@@ -20,6 +20,12 @@ import (
 // grey initializing mark. A fold leaves such a workspace visible.
 const startingArm = "init"
 
+// noSessionYetArm is the status arm of a workspace registered with no session
+// created yet: the gap between its creation and its session's first dial. It
+// is initializing too, and as unviewed as a workspace can be, so a fold leaves
+// it visible (owner request, 2026-11-23).
+const noSessionYetArm = "none"
+
 // workingArms are the status arms of a workspace that WORKS: a turn or
 // detached work runs, or it asks the user something. A fold leaves such a
 // workspace visible.
@@ -99,7 +105,7 @@ func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[id
 			ID:          id,
 			Working:     workingArms[arm],
 			Unviewed:    isTurnEndArm(arm) && !s.viewedOn(arm),
-			Starting:    arm == startingArm,
+			Starting:    arm == startingArm || arm == noSessionYetArm,
 			TopPriority: topPriority[id],
 			Selected:    rc.selected != nil && *rc.selected == id,
 		}
