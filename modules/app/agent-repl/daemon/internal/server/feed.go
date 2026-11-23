@@ -81,6 +81,10 @@ func (s *server) OpenFeed(
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
+	var resumed *agentreplv1.OpenFeedResumed
+	if req.Msg.Resume != nil {
+		resumed = resumePage(page, req.Msg.GetResume())
+	}
 	s.rememberToken(token.GetValue(), subject.Record.ID, target)
 	// INFO: an open is a page's first paint waiting on the daemon, once per
 	// page load; its duration is half of what the page's own feed.open-answered
@@ -89,9 +93,10 @@ func (s *server) OpenFeed(
 	subject.Log.Info("daemon.server.open_feed", "opened a feed and minted its watch token",
 		dlog.Context{"token": token.GetValue(), "rows": len(page.GetSuccess().GetRows()),
 			"root": target.Root, "held": len(held.GetItems()),
+			"resumed": resumed != nil, "standing": len(resumed.GetStanding()),
 			"ms": time.Since(started).Milliseconds(), "resolve_ms": started.Sub(began).Milliseconds()})
 	resp.Result = &agentreplv1.OpenFeedResponse_Success{
-		Success: &agentreplv1.OpenFeedSuccess{Page: page, Watch: token, Held: held},
+		Success: &agentreplv1.OpenFeedSuccess{Page: page, Watch: token, Held: held, Resumed: resumed},
 	}
 	return connect.NewResponse(resp), nil
 }
