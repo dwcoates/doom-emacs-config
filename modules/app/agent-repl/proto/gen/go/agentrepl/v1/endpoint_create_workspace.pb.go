@@ -632,18 +632,24 @@ func (*WorkspaceOriginatorUserOrWorkspace) Descriptor() ([]byte, []int) {
 
 // THE ORIGINATING THREAD. A workspace created for a Slack message records the
 // message's link and stores it among its links as a reference
-// (WorkspaceLinkReference), labelled "Originating Slack thread". The daemon
-// itself never posts there: what the thread is told is the repository's hooks'
-// to say (repoconfig.v1.LifecycleConfig), and every script hook of the
-// workspace sees the link as AGENT_REPL_SLACK_THREAD and every prompt hook as
-// `{{slack_thread}}`.
+// (WorkspaceLinkReference), labelled "Originating Slack thread". What the
+// thread is told of the workspace's lifecycle is the repository's hooks' to
+// say (repoconfig.v1.LifecycleConfig), and every script hook of the workspace
+// sees the link as AGENT_REPL_SLACK_THREAD and every prompt hook as
+// `{{slack_thread}}`. A create that asks for a subscription is also
+// subscribed to the thread (SubscribeSlackThread), in the same create: a
+// subscription Slack refuses fails the create, which is undone.
 type CreateWorkspaceSlackOrigin struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The message's Slack link, as Slack's "Copy link" gives it: an https
 	// `<workspace>.slack.com/archives/<channel>/p<timestamp>` link, with
 	// `thread_ts` when the message is a reply. A link that is not one is a
 	// malformed request (Connect InvalidArgument).
-	ThreadUrl     string `protobuf:"bytes,1,opt,name=thread_url,json=threadUrl,proto3" json:"thread_url,omitempty"`
+	ThreadUrl string `protobuf:"bytes,1,opt,name=thread_url,json=threadUrl,proto3" json:"thread_url,omitempty"`
+	// Subscribe the new workspace to the thread in this mode, as a
+	// SlackThreadSubscriptionOriginCreation subscription. UNSET = no
+	// subscription. Set with its mode unset is a malformed request.
+	Subscribe     *SlackThreadMode `protobuf:"bytes,2,opt,name=subscribe,proto3,oneof" json:"subscribe,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -683,6 +689,13 @@ func (x *CreateWorkspaceSlackOrigin) GetThreadUrl() string {
 		return x.ThreadUrl
 	}
 	return ""
+}
+
+func (x *CreateWorkspaceSlackOrigin) GetSubscribe() *SlackThreadMode {
+	if x != nil {
+		return x.Subscribe
+	}
+	return nil
 }
 
 // The ordinary workspace create.
@@ -5628,7 +5641,7 @@ var File_agentrepl_v1_endpoint_create_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1aconversation/v1/user.proto\x1a$repoconfig/v1/lifecycle_config.proto\x1a\x1cworkspace/v1/workspace.proto\"\x87\b\n" +
+	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/slack_thread.proto\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1aconversation/v1/user.proto\x1a$repoconfig/v1/lifecycle_config.proto\x1a\x1cworkspace/v1/workspace.proto\"\x87\b\n" +
 	"\x16CreateWorkspaceRequest\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
@@ -5675,10 +5688,13 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\n" +
 	"originator\"\x1d\n" +
 	"\x1bWorkspaceOriginatorEmojiAck\"$\n" +
-	"\"WorkspaceOriginatorUserOrWorkspace\";\n" +
+	"\"WorkspaceOriginatorUserOrWorkspace\"\x8b\x01\n" +
 	"\x1aCreateWorkspaceSlackOrigin\x12\x1d\n" +
 	"\n" +
-	"thread_url\x18\x01 \x01(\tR\tthreadUrl\"\xef\x03\n" +
+	"thread_url\x18\x01 \x01(\tR\tthreadUrl\x12@\n" +
+	"\tsubscribe\x18\x02 \x01(\v2\x1d.agentrepl.v1.SlackThreadModeH\x00R\tsubscribe\x88\x01\x01B\f\n" +
+	"\n" +
+	"_subscribe\"\xef\x03\n" +
 	"\x17CreateWorkspaceStandard\x12E\n" +
 	"\x0einitial_prompt\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\rinitialPrompt\x88\x01\x01\x12G\n" +
 	"\frelationship\x18\a \x01(\v2#.agentrepl.v1.WorkspaceRelationshipR\frelationship\x12P\n" +
@@ -6035,21 +6051,22 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*WorkspaceRequester)(nil),                               // 79: agentrepl.v1.WorkspaceRequester
 	(*WorkspaceContextOrigin)(nil),                           // 80: agentrepl.v1.WorkspaceContextOrigin
 	(*WorkspacePriority)(nil),                                // 81: agentrepl.v1.WorkspacePriority
-	(*v11.UserSaid)(nil),                                     // 82: conversation.v1.UserSaid
-	(*WorkspaceRelationship)(nil),                            // 83: agentrepl.v1.WorkspaceRelationship
-	(*WorkspaceLandingTarget)(nil),                           // 84: agentrepl.v1.WorkspaceLandingTarget
-	(*v1.WorkspaceRef)(nil),                                  // 85: workspace.v1.WorkspaceRef
-	(*MergeQueuePlacement)(nil),                              // 86: agentrepl.v1.MergeQueuePlacement
-	(*MergeWorkspaceVersionIncrement)(nil),                   // 87: agentrepl.v1.MergeWorkspaceVersionIncrement
-	(*v12.Hook)(nil),                                         // 88: repoconfig.v1.Hook
-	(*WorkspaceParentNotOpen)(nil),                           // 89: agentrepl.v1.WorkspaceParentNotOpen
-	(*MergeQueuePlacementBehindNotInLine)(nil),               // 90: agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	(*MergeWorkspaceVersionIncrementRequired)(nil),           // 91: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	(*MergeWorkspaceVersionIncrementUnexpected)(nil),         // 92: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	(*LifecycleConfigMissing)(nil),                           // 93: agentrepl.v1.LifecycleConfigMissing
-	(*LifecycleConfigInvalid)(nil),                           // 94: agentrepl.v1.LifecycleConfigInvalid
-	(*v11.ModelOption)(nil),                                  // 95: conversation.v1.ModelOption
-	(*MergeQueueStatusOffQueueCause)(nil),                    // 96: agentrepl.v1.MergeQueueStatusOffQueueCause
+	(*SlackThreadMode)(nil),                                  // 82: agentrepl.v1.SlackThreadMode
+	(*v11.UserSaid)(nil),                                     // 83: conversation.v1.UserSaid
+	(*WorkspaceRelationship)(nil),                            // 84: agentrepl.v1.WorkspaceRelationship
+	(*WorkspaceLandingTarget)(nil),                           // 85: agentrepl.v1.WorkspaceLandingTarget
+	(*v1.WorkspaceRef)(nil),                                  // 86: workspace.v1.WorkspaceRef
+	(*MergeQueuePlacement)(nil),                              // 87: agentrepl.v1.MergeQueuePlacement
+	(*MergeWorkspaceVersionIncrement)(nil),                   // 88: agentrepl.v1.MergeWorkspaceVersionIncrement
+	(*v12.Hook)(nil),                                         // 89: repoconfig.v1.Hook
+	(*WorkspaceParentNotOpen)(nil),                           // 90: agentrepl.v1.WorkspaceParentNotOpen
+	(*MergeQueuePlacementBehindNotInLine)(nil),               // 91: agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	(*MergeWorkspaceVersionIncrementRequired)(nil),           // 92: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	(*MergeWorkspaceVersionIncrementUnexpected)(nil),         // 93: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	(*LifecycleConfigMissing)(nil),                           // 94: agentrepl.v1.LifecycleConfigMissing
+	(*LifecycleConfigInvalid)(nil),                           // 95: agentrepl.v1.LifecycleConfigInvalid
+	(*v11.ModelOption)(nil),                                  // 96: conversation.v1.ModelOption
+	(*MergeQueueStatusOffQueueCause)(nil),                    // 97: agentrepl.v1.MergeQueueStatusOffQueueCause
 }
 var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	78,  // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
@@ -6066,117 +6083,118 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	2,   // 11: agentrepl.v1.CreateWorkspacePlacement.new_subsection:type_name -> agentrepl.v1.CreateWorkspaceNewSubsection
 	4,   // 12: agentrepl.v1.WorkspaceOriginator.emoji_ack:type_name -> agentrepl.v1.WorkspaceOriginatorEmojiAck
 	5,   // 13: agentrepl.v1.WorkspaceOriginator.user_or_workspace:type_name -> agentrepl.v1.WorkspaceOriginatorUserOrWorkspace
-	82,  // 14: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
-	83,  // 15: agentrepl.v1.CreateWorkspaceStandard.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
-	84,  // 16: agentrepl.v1.CreateWorkspaceStandard.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
-	20,  // 17: agentrepl.v1.CreateWorkspaceStandard.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
-	82,  // 18: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
-	83,  // 19: agentrepl.v1.CreateWorkspaceOneShot.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
-	84,  // 20: agentrepl.v1.CreateWorkspaceOneShot.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
-	9,   // 21: agentrepl.v1.CreateWorkspaceOneShot.context:type_name -> agentrepl.v1.CreateWorkspaceOneShotContext
-	85,  // 22: agentrepl.v1.CreateWorkspaceOneShotContext.workspace:type_name -> workspace.v1.WorkspaceRef
-	12,  // 23: agentrepl.v1.CreateWorkspaceAsyncMerge.source:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeSource
-	16,  // 24: agentrepl.v1.CreateWorkspaceAsyncMerge.target:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTarget
-	19,  // 25: agentrepl.v1.CreateWorkspaceAsyncMerge.close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter
-	20,  // 26: agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
-	86,  // 27: agentrepl.v1.CreateWorkspaceAsyncMerge.placement:type_name -> agentrepl.v1.MergeQueuePlacement
-	87,  // 28: agentrepl.v1.CreateWorkspaceAsyncMerge.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
-	13,  // 29: agentrepl.v1.CreateWorkspaceAsyncMergeSource.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMaker
-	14,  // 30: agentrepl.v1.CreateWorkspaceAsyncMergeMaker.subagent:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMakerSubagent
-	15,  // 31: agentrepl.v1.CreateWorkspaceAsyncMergeMaker.workspace:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspace
-	85,  // 32: agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	17,  // 33: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.primary:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetPrimary
-	18,  // 34: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetMaker
-	85,  // 35: agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter.workspace:type_name -> workspace.v1.WorkspaceRef
-	88,  // 36: agentrepl.v1.CreateWorkspaceDeployHooks.pre_deploy:type_name -> repoconfig.v1.Hook
-	88,  // 37: agentrepl.v1.CreateWorkspaceDeployHooks.post_deploy:type_name -> repoconfig.v1.Hook
-	28,  // 38: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
-	30,  // 39: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
-	27,  // 40: agentrepl.v1.CreateWorkspaceResponse.accepted:type_name -> agentrepl.v1.CreateWorkspaceAccepted
-	26,  // 41: agentrepl.v1.CreateWorkspaceResponse.async_merge_accepted:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeAccepted
-	24,  // 42: agentrepl.v1.CreateWorkspaceResponse.waiting_for_network:type_name -> agentrepl.v1.CreateWorkspaceWaitingForNetwork
-	22,  // 43: agentrepl.v1.CreateWorkspaceResponse.waiting_for_requester_turn:type_name -> agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
-	23,  // 44: agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn.create:type_name -> agentrepl.v1.PendingCreateRef
-	23,  // 45: agentrepl.v1.CreateWorkspaceWaitingForNetwork.create:type_name -> agentrepl.v1.PendingCreateRef
-	23,  // 46: agentrepl.v1.CreateWorkspaceJoined.create:type_name -> agentrepl.v1.PendingCreateRef
-	25,  // 47: agentrepl.v1.CreateWorkspaceAccepted.joined:type_name -> agentrepl.v1.CreateWorkspaceJoined
-	85,  // 48: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
-	29,  // 49: agentrepl.v1.CreateWorkspaceSuccess.held_at_cold_gate:type_name -> agentrepl.v1.CreateWorkspaceHeldAtColdGate
-	43,  // 50: agentrepl.v1.CreateWorkspaceError.ungated_without_consent:type_name -> agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
-	44,  // 51: agentrepl.v1.CreateWorkspaceError.no_slug:type_name -> agentrepl.v1.CreateWorkspaceNoSlug
-	45,  // 52: agentrepl.v1.CreateWorkspaceError.brief_missing:type_name -> agentrepl.v1.CreateWorkspaceBriefMissing
-	46,  // 53: agentrepl.v1.CreateWorkspaceError.unknown_repository:type_name -> agentrepl.v1.CreateWorkspaceUnknownRepository
-	72,  // 54: agentrepl.v1.CreateWorkspaceError.worktree_creation_failed:type_name -> agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
-	73,  // 55: agentrepl.v1.CreateWorkspaceError.spawn_failed:type_name -> agentrepl.v1.CreateWorkspaceSpawnFailed
-	74,  // 56: agentrepl.v1.CreateWorkspaceError.one_shot_policy_missing:type_name -> agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
-	75,  // 57: agentrepl.v1.CreateWorkspaceError.naming_failed:type_name -> agentrepl.v1.CreateWorkspaceNamingFailed
-	47,  // 58: agentrepl.v1.CreateWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.CreateWorkspaceInsideTemporaryDirectory
-	48,  // 59: agentrepl.v1.CreateWorkspaceError.unknown_fork_source:type_name -> agentrepl.v1.CreateWorkspaceUnknownForkSource
-	49,  // 60: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
-	50,  // 61: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_finished_turn:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn
-	52,  // 62: agentrepl.v1.CreateWorkspaceError.name_reserved:type_name -> agentrepl.v1.CreateWorkspaceNameReserved
-	53,  // 63: agentrepl.v1.CreateWorkspaceError.name_held:type_name -> agentrepl.v1.CreateWorkspaceNameHeld
-	54,  // 64: agentrepl.v1.CreateWorkspaceError.name_branch_exists:type_name -> agentrepl.v1.CreateWorkspaceNameBranchExists
-	55,  // 65: agentrepl.v1.CreateWorkspaceError.invalid_name:type_name -> agentrepl.v1.CreateWorkspaceInvalidName
-	51,  // 66: agentrepl.v1.CreateWorkspaceError.unknown_context_workspace:type_name -> agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
-	89,  // 67: agentrepl.v1.CreateWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
-	59,  // 68: agentrepl.v1.CreateWorkspaceError.unknown_owner:type_name -> agentrepl.v1.CreateWorkspaceUnknownOwner
-	60,  // 69: agentrepl.v1.CreateWorkspaceError.unknown_landing_target:type_name -> agentrepl.v1.CreateWorkspaceUnknownLandingTarget
-	61,  // 70: agentrepl.v1.CreateWorkspaceError.unknown_requester:type_name -> agentrepl.v1.CreateWorkspaceUnknownRequester
-	62,  // 71: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_branch:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownBranch
-	63,  // 72: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_subagent:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownSubagent
-	64,  // 73: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker
-	65,  // 74: agentrepl.v1.CreateWorkspaceError.async_merge_context_not_maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker
-	66,  // 75: agentrepl.v1.CreateWorkspaceError.async_merge_name_taken:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeNameTaken
-	67,  // 76: agentrepl.v1.CreateWorkspaceError.async_merge_name_off_queue:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue
-	90,  // 77: agentrepl.v1.CreateWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	68,  // 78: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownCloseAfter
-	71,  // 79: agentrepl.v1.CreateWorkspaceError.op_id_with_async_merge:type_name -> agentrepl.v1.CreateWorkspaceOpIdWithAsyncMerge
-	91,  // 80: agentrepl.v1.CreateWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	92,  // 81: agentrepl.v1.CreateWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	69,  // 82: agentrepl.v1.CreateWorkspaceError.async_merge_requester_merging:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterMerging
-	70,  // 83: agentrepl.v1.CreateWorkspaceError.async_merge_requester_session_deleted:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterSessionDeleted
-	76,  // 84: agentrepl.v1.CreateWorkspaceError.origin_fetch_failed:type_name -> agentrepl.v1.CreateWorkspaceOriginFetchFailed
-	93,  // 85: agentrepl.v1.CreateWorkspaceError.async_merge_no_deploy_config:type_name -> agentrepl.v1.LifecycleConfigMissing
-	94,  // 86: agentrepl.v1.CreateWorkspaceError.async_merge_deploy_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
-	41,  // 87: agentrepl.v1.CreateWorkspaceError.transferring_away:type_name -> agentrepl.v1.CreateWorkspaceTransferringAway
-	42,  // 88: agentrepl.v1.CreateWorkspaceError.standing_down:type_name -> agentrepl.v1.CreateWorkspaceStandingDown
-	39,  // 89: agentrepl.v1.CreateWorkspaceError.model_not_in_catalog:type_name -> agentrepl.v1.CreateWorkspaceModelNotInCatalog
-	40,  // 90: agentrepl.v1.CreateWorkspaceError.model_catalog_unknown:type_name -> agentrepl.v1.CreateWorkspaceModelCatalogUnknown
-	94,  // 91: agentrepl.v1.CreateWorkspaceError.lifecycle_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
-	77,  // 92: agentrepl.v1.CreateWorkspaceError.creation_hook_failed:type_name -> agentrepl.v1.CreateWorkspaceCreationHookFailed
-	31,  // 93: agentrepl.v1.CreateWorkspaceError.placement_on_child:type_name -> agentrepl.v1.CreateWorkspacePlacementOnChild
-	32,  // 94: agentrepl.v1.CreateWorkspaceError.placement_on_merge_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementOnMergeWorkspace
-	33,  // 95: agentrepl.v1.CreateWorkspaceError.placement_requires_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
-	34,  // 96: agentrepl.v1.CreateWorkspaceError.unknown_placement_subsection:type_name -> agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
-	35,  // 97: agentrepl.v1.CreateWorkspaceError.blank_placement_subsection_name:type_name -> agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
-	36,  // 98: agentrepl.v1.CreateWorkspaceError.gather_unknown_workspace:type_name -> agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
-	37,  // 99: agentrepl.v1.CreateWorkspaceError.gather_not_gatherable:type_name -> agentrepl.v1.CreateWorkspaceGatherNotGatherable
-	38,  // 100: agentrepl.v1.CreateWorkspaceError.requested_by_deploy_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
-	85,  // 101: agentrepl.v1.CreateWorkspaceGatherNotGatherable.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 102: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator.workspace:type_name -> workspace.v1.WorkspaceRef
-	95,  // 103: agentrepl.v1.CreateWorkspaceModelNotInCatalog.options:type_name -> conversation.v1.ModelOption
-	85,  // 104: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 105: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 106: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 107: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 108: agentrepl.v1.CreateWorkspaceNameHeld.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 109: agentrepl.v1.CreateWorkspaceNameBranchExists.landed_workspace:type_name -> workspace.v1.WorkspaceRef
-	56,  // 110: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
-	57,  // 111: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
-	58,  // 112: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
-	85,  // 113: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
-	85,  // 114: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 115: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 116: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 117: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
-	85,  // 118: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.workspace:type_name -> workspace.v1.WorkspaceRef
-	96,  // 119: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
-	120, // [120:120] is the sub-list for method output_type
-	120, // [120:120] is the sub-list for method input_type
-	120, // [120:120] is the sub-list for extension type_name
-	120, // [120:120] is the sub-list for extension extendee
-	0,   // [0:120] is the sub-list for field type_name
+	82,  // 14: agentrepl.v1.CreateWorkspaceSlackOrigin.subscribe:type_name -> agentrepl.v1.SlackThreadMode
+	83,  // 15: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
+	84,  // 16: agentrepl.v1.CreateWorkspaceStandard.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
+	85,  // 17: agentrepl.v1.CreateWorkspaceStandard.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
+	20,  // 18: agentrepl.v1.CreateWorkspaceStandard.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
+	83,  // 19: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
+	84,  // 20: agentrepl.v1.CreateWorkspaceOneShot.relationship:type_name -> agentrepl.v1.WorkspaceRelationship
+	85,  // 21: agentrepl.v1.CreateWorkspaceOneShot.landing_target:type_name -> agentrepl.v1.WorkspaceLandingTarget
+	9,   // 22: agentrepl.v1.CreateWorkspaceOneShot.context:type_name -> agentrepl.v1.CreateWorkspaceOneShotContext
+	86,  // 23: agentrepl.v1.CreateWorkspaceOneShotContext.workspace:type_name -> workspace.v1.WorkspaceRef
+	12,  // 24: agentrepl.v1.CreateWorkspaceAsyncMerge.source:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeSource
+	16,  // 25: agentrepl.v1.CreateWorkspaceAsyncMerge.target:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTarget
+	19,  // 26: agentrepl.v1.CreateWorkspaceAsyncMerge.close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter
+	20,  // 27: agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
+	87,  // 28: agentrepl.v1.CreateWorkspaceAsyncMerge.placement:type_name -> agentrepl.v1.MergeQueuePlacement
+	88,  // 29: agentrepl.v1.CreateWorkspaceAsyncMerge.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
+	13,  // 30: agentrepl.v1.CreateWorkspaceAsyncMergeSource.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMaker
+	14,  // 31: agentrepl.v1.CreateWorkspaceAsyncMergeMaker.subagent:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMakerSubagent
+	15,  // 32: agentrepl.v1.CreateWorkspaceAsyncMergeMaker.workspace:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspace
+	86,  // 33: agentrepl.v1.CreateWorkspaceAsyncMergeMakerWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	17,  // 34: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.primary:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetPrimary
+	18,  // 35: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetMaker
+	86,  // 36: agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter.workspace:type_name -> workspace.v1.WorkspaceRef
+	89,  // 37: agentrepl.v1.CreateWorkspaceDeployHooks.pre_deploy:type_name -> repoconfig.v1.Hook
+	89,  // 38: agentrepl.v1.CreateWorkspaceDeployHooks.post_deploy:type_name -> repoconfig.v1.Hook
+	28,  // 39: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
+	30,  // 40: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
+	27,  // 41: agentrepl.v1.CreateWorkspaceResponse.accepted:type_name -> agentrepl.v1.CreateWorkspaceAccepted
+	26,  // 42: agentrepl.v1.CreateWorkspaceResponse.async_merge_accepted:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeAccepted
+	24,  // 43: agentrepl.v1.CreateWorkspaceResponse.waiting_for_network:type_name -> agentrepl.v1.CreateWorkspaceWaitingForNetwork
+	22,  // 44: agentrepl.v1.CreateWorkspaceResponse.waiting_for_requester_turn:type_name -> agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
+	23,  // 45: agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn.create:type_name -> agentrepl.v1.PendingCreateRef
+	23,  // 46: agentrepl.v1.CreateWorkspaceWaitingForNetwork.create:type_name -> agentrepl.v1.PendingCreateRef
+	23,  // 47: agentrepl.v1.CreateWorkspaceJoined.create:type_name -> agentrepl.v1.PendingCreateRef
+	25,  // 48: agentrepl.v1.CreateWorkspaceAccepted.joined:type_name -> agentrepl.v1.CreateWorkspaceJoined
+	86,  // 49: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	29,  // 50: agentrepl.v1.CreateWorkspaceSuccess.held_at_cold_gate:type_name -> agentrepl.v1.CreateWorkspaceHeldAtColdGate
+	43,  // 51: agentrepl.v1.CreateWorkspaceError.ungated_without_consent:type_name -> agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
+	44,  // 52: agentrepl.v1.CreateWorkspaceError.no_slug:type_name -> agentrepl.v1.CreateWorkspaceNoSlug
+	45,  // 53: agentrepl.v1.CreateWorkspaceError.brief_missing:type_name -> agentrepl.v1.CreateWorkspaceBriefMissing
+	46,  // 54: agentrepl.v1.CreateWorkspaceError.unknown_repository:type_name -> agentrepl.v1.CreateWorkspaceUnknownRepository
+	72,  // 55: agentrepl.v1.CreateWorkspaceError.worktree_creation_failed:type_name -> agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
+	73,  // 56: agentrepl.v1.CreateWorkspaceError.spawn_failed:type_name -> agentrepl.v1.CreateWorkspaceSpawnFailed
+	74,  // 57: agentrepl.v1.CreateWorkspaceError.one_shot_policy_missing:type_name -> agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
+	75,  // 58: agentrepl.v1.CreateWorkspaceError.naming_failed:type_name -> agentrepl.v1.CreateWorkspaceNamingFailed
+	47,  // 59: agentrepl.v1.CreateWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.CreateWorkspaceInsideTemporaryDirectory
+	48,  // 60: agentrepl.v1.CreateWorkspaceError.unknown_fork_source:type_name -> agentrepl.v1.CreateWorkspaceUnknownForkSource
+	49,  // 61: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
+	50,  // 62: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_finished_turn:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn
+	52,  // 63: agentrepl.v1.CreateWorkspaceError.name_reserved:type_name -> agentrepl.v1.CreateWorkspaceNameReserved
+	53,  // 64: agentrepl.v1.CreateWorkspaceError.name_held:type_name -> agentrepl.v1.CreateWorkspaceNameHeld
+	54,  // 65: agentrepl.v1.CreateWorkspaceError.name_branch_exists:type_name -> agentrepl.v1.CreateWorkspaceNameBranchExists
+	55,  // 66: agentrepl.v1.CreateWorkspaceError.invalid_name:type_name -> agentrepl.v1.CreateWorkspaceInvalidName
+	51,  // 67: agentrepl.v1.CreateWorkspaceError.unknown_context_workspace:type_name -> agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
+	90,  // 68: agentrepl.v1.CreateWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	59,  // 69: agentrepl.v1.CreateWorkspaceError.unknown_owner:type_name -> agentrepl.v1.CreateWorkspaceUnknownOwner
+	60,  // 70: agentrepl.v1.CreateWorkspaceError.unknown_landing_target:type_name -> agentrepl.v1.CreateWorkspaceUnknownLandingTarget
+	61,  // 71: agentrepl.v1.CreateWorkspaceError.unknown_requester:type_name -> agentrepl.v1.CreateWorkspaceUnknownRequester
+	62,  // 72: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_branch:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownBranch
+	63,  // 73: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_subagent:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownSubagent
+	64,  // 74: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker
+	65,  // 75: agentrepl.v1.CreateWorkspaceError.async_merge_context_not_maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker
+	66,  // 76: agentrepl.v1.CreateWorkspaceError.async_merge_name_taken:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeNameTaken
+	67,  // 77: agentrepl.v1.CreateWorkspaceError.async_merge_name_off_queue:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue
+	91,  // 78: agentrepl.v1.CreateWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	68,  // 79: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownCloseAfter
+	71,  // 80: agentrepl.v1.CreateWorkspaceError.op_id_with_async_merge:type_name -> agentrepl.v1.CreateWorkspaceOpIdWithAsyncMerge
+	92,  // 81: agentrepl.v1.CreateWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	93,  // 82: agentrepl.v1.CreateWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	69,  // 83: agentrepl.v1.CreateWorkspaceError.async_merge_requester_merging:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterMerging
+	70,  // 84: agentrepl.v1.CreateWorkspaceError.async_merge_requester_session_deleted:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterSessionDeleted
+	76,  // 85: agentrepl.v1.CreateWorkspaceError.origin_fetch_failed:type_name -> agentrepl.v1.CreateWorkspaceOriginFetchFailed
+	94,  // 86: agentrepl.v1.CreateWorkspaceError.async_merge_no_deploy_config:type_name -> agentrepl.v1.LifecycleConfigMissing
+	95,  // 87: agentrepl.v1.CreateWorkspaceError.async_merge_deploy_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
+	41,  // 88: agentrepl.v1.CreateWorkspaceError.transferring_away:type_name -> agentrepl.v1.CreateWorkspaceTransferringAway
+	42,  // 89: agentrepl.v1.CreateWorkspaceError.standing_down:type_name -> agentrepl.v1.CreateWorkspaceStandingDown
+	39,  // 90: agentrepl.v1.CreateWorkspaceError.model_not_in_catalog:type_name -> agentrepl.v1.CreateWorkspaceModelNotInCatalog
+	40,  // 91: agentrepl.v1.CreateWorkspaceError.model_catalog_unknown:type_name -> agentrepl.v1.CreateWorkspaceModelCatalogUnknown
+	95,  // 92: agentrepl.v1.CreateWorkspaceError.lifecycle_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
+	77,  // 93: agentrepl.v1.CreateWorkspaceError.creation_hook_failed:type_name -> agentrepl.v1.CreateWorkspaceCreationHookFailed
+	31,  // 94: agentrepl.v1.CreateWorkspaceError.placement_on_child:type_name -> agentrepl.v1.CreateWorkspacePlacementOnChild
+	32,  // 95: agentrepl.v1.CreateWorkspaceError.placement_on_merge_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementOnMergeWorkspace
+	33,  // 96: agentrepl.v1.CreateWorkspaceError.placement_requires_workspace:type_name -> agentrepl.v1.CreateWorkspacePlacementRequiresWorkspace
+	34,  // 97: agentrepl.v1.CreateWorkspaceError.unknown_placement_subsection:type_name -> agentrepl.v1.CreateWorkspaceUnknownPlacementSubsection
+	35,  // 98: agentrepl.v1.CreateWorkspaceError.blank_placement_subsection_name:type_name -> agentrepl.v1.CreateWorkspaceBlankPlacementSubsectionName
+	36,  // 99: agentrepl.v1.CreateWorkspaceError.gather_unknown_workspace:type_name -> agentrepl.v1.CreateWorkspaceGatherUnknownWorkspace
+	37,  // 100: agentrepl.v1.CreateWorkspaceError.gather_not_gatherable:type_name -> agentrepl.v1.CreateWorkspaceGatherNotGatherable
+	38,  // 101: agentrepl.v1.CreateWorkspaceError.requested_by_deploy_mediator:type_name -> agentrepl.v1.CreateWorkspaceRequestedByDeployMediator
+	86,  // 102: agentrepl.v1.CreateWorkspaceGatherNotGatherable.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 103: agentrepl.v1.CreateWorkspaceRequestedByDeployMediator.workspace:type_name -> workspace.v1.WorkspaceRef
+	96,  // 104: agentrepl.v1.CreateWorkspaceModelNotInCatalog.options:type_name -> conversation.v1.ModelOption
+	86,  // 105: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 106: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 107: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 108: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 109: agentrepl.v1.CreateWorkspaceNameHeld.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 110: agentrepl.v1.CreateWorkspaceNameBranchExists.landed_workspace:type_name -> workspace.v1.WorkspaceRef
+	56,  // 111: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
+	57,  // 112: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
+	58,  // 113: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
+	86,  // 114: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
+	86,  // 115: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 116: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 117: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
+	86,  // 118: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
+	86,  // 119: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.workspace:type_name -> workspace.v1.WorkspaceRef
+	97,  // 120: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
+	121, // [121:121] is the sub-list for method output_type
+	121, // [121:121] is the sub-list for method input_type
+	121, // [121:121] is the sub-list for extension type_name
+	121, // [121:121] is the sub-list for extension extendee
+	0,   // [0:121] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
@@ -6184,6 +6202,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_create_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_slack_thread_proto_init()
 	file_agentrepl_v1_lifecycle_config_refusal_proto_init()
 	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_merge_queue_status_proto_init()
@@ -6203,6 +6222,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*WorkspaceOriginator_EmojiAck)(nil),
 		(*WorkspaceOriginator_UserOrWorkspace)(nil),
 	}
+	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[6].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[7].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[8].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11].OneofWrappers = []any{}

@@ -621,6 +621,11 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if _, err := slacklink.ParseThread(req.GetSlackOrigin().GetThreadUrl()); err != nil {
 			return invalid("slack_origin.thread_url", err.Error())
 		}
+		if req.GetSlackOrigin().Subscribe != nil {
+			if err := validateSlackThreadMode("slack_origin.subscribe", req.GetSlackOrigin().GetSubscribe()); err != nil {
+				return err
+			}
+		}
 	}
 	// WHO CREATED IT IS STATED, never inferred (agentrepl.v1.WorkspaceOriginator).
 	switch req.GetOriginator().GetOriginator().(type) {

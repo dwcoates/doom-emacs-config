@@ -1,0 +1,58 @@
+// endpoint_read_slack_thread.proto — ReadSlackThread: a Slack thread's latest
+// messages, read from Slack at once, for catching up. AGENT API section. A read
+// tells the workspace nothing later and needs no subscription.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_thread.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReadSlackThreadRequest {
+  // The workspace reading: its own posts in the thread are marked
+  // (SlackThreadMessage.own_post).
+  workspace.v1.WorkspaceRef reader = 1;
+  // The thread (Connect InvalidArgument when no Slack link).
+  string thread_url = 2;
+  // At most how many of the newest messages. UNSET = the daemon's default
+  // of 25; between 1 and 200 (Connect InvalidArgument otherwise).
+  optional uint32 limit = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReadSlackThreadResponse {
+  oneof result {
+    ReadSlackThreadSuccess success = 1;
+    ReadSlackThreadError error = 2;
+  }
+}
+
+// The request was served.
+message ReadSlackThreadSuccess {
+  // The thread, its root resolved.
+  SlackThreadRef thread = 1;
+  // The messages, oldest first, the root included when it is among the
+  // newest.
+  repeated SlackThreadMessage messages = 2;
+}
+
+message ReadSlackThreadError {
+  oneof cause {
+    // The reader is not in the daemon's registry.
+    ReadSlackThreadUnknownReader unknown_reader = 1;
+    // Slack could not be read through `gns`.
+    ReadSlackThreadUnreachable unreachable = 2;
+  }
+}
+
+// The reader id is not in the daemon's registry. DELIBERATELY EMPTY.
+message ReadSlackThreadUnknownReader {}
+
+// Slack could not be read.
+message ReadSlackThreadUnreachable {
+  // What `gns` said.
+  string detail = 1;
+}

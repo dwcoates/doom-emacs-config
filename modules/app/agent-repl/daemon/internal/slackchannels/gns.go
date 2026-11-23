@@ -2,71 +2,37 @@ package slackchannels
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"agent-repld/internal/outputtext"
+	"agent-repld/internal/gnsclient"
 )
 
-// Runner runs argv in dir and answers its combined output and exit code; an
-// error means the run could not be classified (scriptrunner.Runner).
-type Runner interface {
-	Run(ctx context.Context, dir string, argv []string) (string, int, error)
+// ChannelLister reads the GNS login's channels (gnsclient.Client), the
+// daemon's one way to Slack.
+type ChannelLister interface {
+	ListMyChannels(ctx context.Context) ([]gnsclient.Channel, error)
 }
 
-// gnsArgv is the read: every public and private channel the GNS login's user
-// is a member of, every page, as JSON.
-var gnsArgv = []string{"gns", "slack", "channel", "list-mine", "--all", "--json"}
-
-// gnsChannel is one entry of `gns slack channel list-mine --json`'s answer,
-// as far as the read needs it.
-type gnsChannel struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	IsPrivate  bool   `json:"is_private"`
-	IsArchived bool   `json:"is_archived"`
-	IsIM       bool   `json:"is_im"`
-	IsMPIM     bool   `json:"is_mpim"`
-	Purpose    string `json:"purpose"`
-}
-
-// GNSReader reads the channels through the GNS CLI, run in dir (any
-// directory; the read does not depend on it).
-func GNSReader(run Runner, dir string) Reader {
+// GNSReader reads the channels through LISTER. Its failures are recorded by
+// gnsclient, and the read's by the Directory.
+func GNSReader(lister ChannelLister) Reader {
 	return func(ctx context.Context) ([]*agentreplv1.SlackChannel, error) {
-		output, code, err := run.Run(ctx, dir, gnsArgv)
-		if ctxErr := ctx.Err(); errors.Is(ctxErr, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("gns ran past its %s bound (a healthy read takes 13-15s)", ReadBound)
-		}
+		channels, err := lister.ListMyChannels(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("gns could not be run: %w", err)
+			return nil, fmt.Errorf("gns could not list the channels: %w", err)
 		}
-		if code != 0 {
-			return nil, fmt.Errorf("gns exited %d: %s", code, outputtext.LastLine(output))
-		}
-		return parseGNSChannels(output)
+		return completable(channels)
 	}
 }
 
-// parseGNSChannels reads `list-mine --json`'s answer into the channels a
-// composer completes: archived channels, direct messages and group DMs are
-// dropped, Slack's order is kept.
-func parseGNSChannels(output string) ([]*agentreplv1.SlackChannel, error) {
-	var answer struct {
-		Channels *[]gnsChannel `json:"channels"`
-	}
-	if err := json.Unmarshal([]byte(output), &answer); err != nil {
-		return nil, fmt.Errorf("gns answered something that is not its channel list: %w", err)
-	}
-	if answer.Channels == nil {
-		return nil, fmt.Errorf("gns answered no `channels` list")
-	}
-	channels := make([]*agentreplv1.SlackChannel, 0, len(*answer.Channels))
-	for _, c := range *answer.Channels {
+// completable answers the channels a composer completes: archived channels,
+// direct messages and group DMs are dropped, Slack's order is kept.
+func completable(all []gnsclient.Channel) ([]*agentreplv1.SlackChannel, error) {
+	channels := make([]*agentreplv1.SlackChannel, 0, len(all))
+	for _, c := range all {
 		if c.IsArchived || c.IsIM || c.IsMPIM {
 			continue
 		}

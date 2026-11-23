@@ -1,0 +1,105 @@
+// slack_reactions.proto — the REACTION INITIATOR's settings, which the
+// Slack-reaction endpoints share. AGENT API section.
+//
+// WHAT IT WATCHES. Every message the watch user writes, in any channel, whose
+// text carries a bound emoji's `:shortcode:`, and every bound emoji the watch
+// user adds as a reaction onto any message. The daemon polls both through the
+// user's `gns` (`gns slack search from:@<name>` and
+// `gns slack reactions list --user <id>`), only while the settings are
+// complete: a watch user, a repository, and at least one binding.
+//
+// WHAT FIRES. Each (channel, message, emoji) fires at most once, ever: its
+// sha256 is recorded in the daemon's durable ledger BEFORE the binding's
+// workspace is created. Slack gives no time for a reaction, so the first
+// reactions read after the settings become complete records every bound
+// reaction standing then as fired without firing it (the baseline); only a
+// reaction added after it fires. A typed shortcode fires only within the
+// poll's lookback window.
+//
+// WHAT A FIRE DOES. It creates a hidden INTAKE workspace in the settings'
+// repository whose one turn reads the thread, names the task, and forks
+// itself into the workspace that does the work, with the binding's flags
+// (SlackReactionAction), then closes.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_thread.proto";
+import "agentrepl/v1/workspace_priority.proto";
+import "google/protobuf/timestamp.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The reaction initiator's settings as they stand.
+message SlackReactionSettings {
+  // The Slack user whose messages and reactions trigger. UNSET until set.
+  optional SlackReactionWatchUser watch_user = 1;
+  // The repository a fired binding's intake workspace is created in. UNSET
+  // until set.
+  optional workspace.v1.RepositoryRef repository = 2;
+  // Every binding, by emoji.
+  repeated SlackReactionBinding bindings = 3;
+  // Whether the standing reactions were recorded. THE ARM IS WHICH.
+  oneof baseline {
+    // Not yet: the next reactions read records every bound reaction
+    // standing then as fired, and fires none of them.
+    SlackReactionBaselinePending pending = 4;
+    // Recorded at `at`; only reactions added since fire.
+    SlackReactionBaselineRecorded recorded = 5;
+  }
+}
+
+// The watch user.
+message SlackReactionWatchUser {
+  // The Slack user id (`U…`), as Slack's profile "Copy member ID" gives it.
+  string user_id = 1;
+}
+
+// The baseline is owed. DELIBERATELY EMPTY.
+message SlackReactionBaselinePending {}
+
+// The baseline was recorded.
+message SlackReactionBaselineRecorded {
+  // When.
+  google.protobuf.Timestamp at = 1;
+}
+
+// One emoji bound to the workspace it creates.
+message SlackReactionBinding {
+  // The emoji's name, without colons (`agent-ack`, `p1-one-shot`).
+  string emoji = 1;
+  // What firing it creates.
+  SlackReactionAction action = 2;
+}
+
+// The workspace a fired binding forks its intake into: a peer of the
+// settings' repository, landing into its main branch, cut from its origin's
+// main branch, with the intake's turn as its context. Every such workspace
+// records the triggering message as its originating Slack thread.
+message SlackReactionAction {
+  // How the workspace relates to the thread. THE ARM IS WHICH.
+  oneof thread {
+    // The workspace is an emoji-ack workspace (WorkspaceOriginatorEmojiAck):
+    // the repository's lifecycle hooks tell the thread that work started and
+    // where its pull request is, and the workspace itself posts nothing.
+    SlackReactionActionAnnounced announced = 1;
+    // The workspace is created subscribed to the thread
+    // (CreateWorkspaceSlackOrigin.subscribe) and converses there itself.
+    SlackReactionActionSubscribed subscribed = 2;
+  }
+  // Whether the workspace is a one-shot, which lands its own work when done.
+  bool one_shot = 3;
+  // The workspace's roster priority. UNSET = none.
+  optional WorkspacePriority priority = 4;
+}
+
+// Announced by the lifecycle hooks. DELIBERATELY EMPTY.
+message SlackReactionActionAnnounced {}
+
+// Subscribed at creation.
+message SlackReactionActionSubscribed {
+  // The subscription's mode.
+  SlackThreadMode mode = 1;
+}

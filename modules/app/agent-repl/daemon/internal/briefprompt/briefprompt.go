@@ -84,6 +84,14 @@ func StepOf(err error) Step {
 // of ORIGIN, its key minted under KEY_PREFIX, answering the turn it was
 // submitted as. A failure is an *Error naming its step.
 func (c Composer) Submit(ctx context.Context, prompts prompthandler.Submitter, ws ids.WorkspaceID, brief string, values map[string]string, keyPrefix string, origin conversationv1.PromptOrigin) (ids.TurnID, error) {
+	return c.SubmitAs(ctx, prompts, ws, brief, values, keyPrefix, origin, wsm.DeliveryDeferred)
+}
+
+// SubmitAs is Submit with the prompt's DELIVERY named: an ordinary prompt is
+// classified against the running turn, which may interject it, where a
+// deferred one waits for the turn's end. Only a notice whose content may be
+// urgent (a Slack thread's digest) asks for ordinary delivery.
+func (c Composer) SubmitAs(ctx context.Context, prompts prompthandler.Submitter, ws ids.WorkspaceID, brief string, values map[string]string, keyPrefix string, origin conversationv1.PromptOrigin, delivery wsm.Delivery) (ids.TurnID, error) {
 	if c.Meter == nil {
 		panic("briefprompt: a Composer submits with no Meter; every notice is measured")
 	}
@@ -95,7 +103,7 @@ func (c Composer) Submit(ctx context.Context, prompts prompthandler.Submitter, w
 	if err != nil {
 		return "", &Error{Step: StepMint, Err: err}
 	}
-	outcome, err := prompts.Submit(ctx, ws, feed.SaidText(text), key, origin, nil, wsm.DeliveryDeferred, nil)
+	outcome, err := prompts.Submit(ctx, ws, feed.SaidText(text), key, origin, nil, delivery, nil)
 	if err != nil {
 		return "", &Error{Step: StepSubmit, Err: err}
 	}

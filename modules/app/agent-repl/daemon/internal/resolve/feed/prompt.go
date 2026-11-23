@@ -498,6 +498,10 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		return "GitHub merge queue"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE:
 		return "GitHub workflow run"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_SLACK_THREAD_NOTICE:
+		// Drawn as a prompt bubble the daemon sent: what the thread said is
+		// the reader's to see beside the reply.
+		return "Slack thread"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
 		return "Owner notice"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:

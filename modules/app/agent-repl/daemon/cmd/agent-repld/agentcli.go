@@ -31,6 +31,7 @@ import (
 	"agent-repld/internal/agentverbs"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/prioritywire"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/resolve/feed"
@@ -183,7 +184,7 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":                 {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
+		"create":                 {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL [-slack-subscribe " + slackModes + "]] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
 		"async-merge":            {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":                 {usage: "prompt [-as-user] [-slack-forward URL] WS TEXT", run: workspacePrompt},
 		"gather":                 {usage: "gather -workspaces A,B,C -prompt TEXT [-as-user]", run: workspaceGather},
@@ -216,6 +217,13 @@ var cliNouns = map[string]map[string]cliCommand{
 		"run-subscribe":          {usage: "run-subscribe WS -run URL|ID [-repository OWNER/REPO]", run: workspaceGithubRunSubscribe},
 		"run-unsubscribe":        {usage: "run-unsubscribe WS -run URL|ID [-repository OWNER/REPO]", run: workspaceGithubRunUnsubscribe},
 		"run-subscriptions":      {usage: "run-subscriptions WS", run: workspaceGithubRunSubscriptions},
+		"slack-subscribe":        {usage: "slack-subscribe WS -thread URL -mode " + slackModes, run: workspaceSlackSubscribe},
+		"slack-unsubscribe":      {usage: "slack-unsubscribe WS -thread URL", run: workspaceSlackUnsubscribe},
+		"slack-close":            {usage: "slack-close WS -thread URL (slack-unsubscribe)", run: workspaceSlackUnsubscribe},
+		"slack-mode":             {usage: "slack-mode WS -thread URL -mode " + slackModes, run: workspaceSlackMode},
+		"slack-subscriptions":    {usage: "slack-subscriptions WS", run: workspaceSlackSubscriptions},
+		"slack-tail":             {usage: "slack-tail WS -thread URL [-limit N]", run: workspaceSlackTail},
+		"slack-post":             {usage: "slack-post WS -thread URL -text \":emoji: TEXT\" [-force]", run: workspaceSlackPost},
 		"notify":                 {usage: "notify WS TEXT", run: workspaceNotify},
 		"pass-gate":              {usage: "pass-gate WS", run: workspacePassGate},
 		"keep-live":              {usage: "keep-live WS", run: workspaceKeepLive},
@@ -242,6 +250,13 @@ var cliNouns = map[string]map[string]cliCommand{
 	},
 	repositoryNoun: {
 		"register": {usage: "register here|PATH", run: repositoryRegister},
+	},
+	slackNoun: {
+		"status":     {usage: "status", run: slackStatus},
+		"watch-user": {usage: "watch-user USER_ID", run: slackWatchUser},
+		"repository": {usage: "repository here|DIR", run: slackRepository},
+		"bind":       {usage: "bind EMOJI -thread announced|subscribed [-mode " + slackModes + "] [-one-shot] [-priority p05|p1|p2|p3]", run: slackBind},
+		"unbind":     {usage: "unbind EMOJI", run: slackUnbind},
 	},
 	editorNoun: {
 		"eval": {usage: "eval [-workspace WS] TEXT", run: editorEval},
@@ -777,6 +792,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 	priority := fs.String("priority", "", "p05, p1, p2 or p3; unset is unprioritized")
 	pre, post := hookFlags(fs)
 	slackThread := fs.String("slack-thread", "", "the link of the Slack message the workspace acts on; its hooks read it as AGENT_REPL_SLACK_THREAD and {{slack_thread}}")
+	slackSubscribe := fs.String("slack-subscribe", "", "subscribe the workspace to its -slack-thread at creation, in this mode: "+slackModes)
 	originator := fs.String("originator", originatorUserOrWorkspace, "who creates the workspace: emoji-ack (the Slack emoji-ack system, with -slack-thread) or user-or-workspace")
 	hidden := fs.Bool("hidden", false, "born hidden: the workspace is never drawn in the sidebar until it is shown")
 	subsection := fs.String("subsection", "", "file the workspace into this existing subsection of its repository, by name")
@@ -800,6 +816,15 @@ func workspaceCreate(c *cliCall, args []string) int {
 	stated, known := originatorFlag(*originator)
 	if !known {
 		return c.usageFailed("-originator is %s or %s, not %q", originatorEmojiAck, originatorUserOrWorkspace, *originator)
+	}
+	var subscribe *agentreplv1.SlackThreadMode
+	if *slackSubscribe != "" {
+		if *slackThread == "" {
+			return c.usageFailed("-slack-subscribe subscribes the workspace to its -slack-thread, which names none")
+		}
+		if subscribe, ok = c.modeFlag(*slackSubscribe); !ok {
+			return exitFailure
+		}
 	}
 	if !c.dial(*stateDir) {
 		return exitFailure
@@ -875,6 +900,9 @@ func workspaceCreate(c *cliCall, args []string) int {
 	}
 	if *slackThread != "" {
 		req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: *slackThread}
+	}
+	if subscribe != nil {
+		req.SlackOrigin.Subscribe = subscribe
 	}
 	if *hidden {
 		req.Hidden = hidden
@@ -1444,17 +1472,11 @@ func queueBypassContextOf(text string) (*frontendv1.TopbarQueueBypassContext, er
 
 // priorityOf reads a -priority flag: a level, or none to clear it.
 func priorityOf(text string) (*agentreplv1.WorkspacePriority, error) {
-	switch text {
-	case "p05":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P05{P05: &agentreplv1.WorkspacePriorityP05{}}}, nil
-	case "p1":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P1{P1: &agentreplv1.WorkspacePriorityP1{}}}, nil
-	case "p2":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P2{P2: &agentreplv1.WorkspacePriorityP2{}}}, nil
-	case "p3":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P3{P3: &agentreplv1.WorkspacePriorityP3{}}}, nil
-	case "none":
+	if text == "none" {
 		return nil, nil
+	}
+	if level, ok := prioritywire.Parse(text); ok {
+		return prioritywire.Proto(level), nil
 	}
 	return nil, fmt.Errorf("-priority is p05, p1, p2, p3 or none, not %q", text)
 }

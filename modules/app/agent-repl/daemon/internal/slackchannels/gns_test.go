@@ -3,65 +3,40 @@ package slackchannels
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/gnsclient"
 )
 
-// fakeRunner answers one run and records what it was asked to run.
-type fakeRunner struct {
-	output string
-	code   int
-	err    error
-	// block makes the run wait for its context to end, as a hung gns does.
-	block bool
-	dir   string
-	argv  []string
+// fakeLister answers one channel list, as gnsclient would.
+type fakeLister struct {
+	channels []gnsclient.Channel
+	err      error
+	calls    int
 }
 
-func (r *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
-	r.dir, r.argv = dir, argv
-	if r.block {
-		<-ctx.Done()
-		return "", -1, ctx.Err()
-	}
-	return r.output, r.code, r.err
-}
-
-func TestGNSReaderRunsListMine(t *testing.T) {
-	// Arrange.
-	run := &fakeRunner{output: `{"channels": [], "count": 0}`}
-
-	// Act.
-	_, err := GNSReader(run, "/home")(context.Background())
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	want := []string{"gns", "slack", "channel", "list-mine", "--all", "--json"}
-	if run.dir != "/home" || !slices.Equal(run.argv, want) {
-		t.Fatalf("ran %v in %q, want %v in /home", run.argv, run.dir, want)
-	}
+func (l *fakeLister) ListMyChannels(context.Context) ([]gnsclient.Channel, error) {
+	l.calls++
+	return l.channels, l.err
 }
 
 func TestGNSReaderReadsChannels(t *testing.T) {
 	// Arrange.
-	run := &fakeRunner{output: `{"channels": [
-		{"id": "C1", "name": "general", "is_private": false, "purpose": "  Company-wide announcements.  "},
-		{"id": "C2", "name": "team-secret", "is_private": true, "purpose": ""},
-		{"id": "C3", "name": "old", "is_archived": true},
-		{"id": "D4", "name": "someone", "is_im": true},
-		{"id": "G5", "name": "mpdm-a--b", "is_mpim": true}
-	], "count": 5}`}
+	lister := &fakeLister{channels: []gnsclient.Channel{
+		{ID: "C1", Name: "general", Purpose: "  Company-wide announcements.  "},
+		{ID: "C2", Name: "team-secret", IsPrivate: true},
+		{ID: "C3", Name: "old", IsArchived: true},
+		{ID: "D4", Name: "someone", IsIM: true},
+		{ID: "G5", Name: "mpdm-a--b", IsMPIM: true},
+	}}
 
 	// Act.
-	got, err := GNSReader(run, "/home")(context.Background())
+	got, err := GNSReader(lister)(context.Background())
 
 	// Assert.
 	if err != nil {
@@ -72,8 +47,8 @@ func TestGNSReaderReadsChannels(t *testing.T) {
 		{Id: "C1", Name: "general", Purpose: &purpose, Visibility: &agentreplv1.SlackChannel_PublicChannel{PublicChannel: &agentreplv1.SlackChannelPublic{}}},
 		{Id: "C2", Name: "team-secret", Visibility: &agentreplv1.SlackChannel_PrivateChannel{PrivateChannel: &agentreplv1.SlackChannelPrivate{}}},
 	}
-	if len(got) != len(want) {
-		t.Fatalf("channels = %v, want %v", got, want)
+	if lister.calls != 1 || len(got) != len(want) {
+		t.Fatalf("listed %d times; channels = %v, want %v", lister.calls, got, want)
 	}
 	for i := range want {
 		if !proto.Equal(got[i], want[i]) {
@@ -85,19 +60,17 @@ func TestGNSReaderReadsChannels(t *testing.T) {
 func TestGNSReaderFailures(t *testing.T) {
 	cases := []struct {
 		name    string
-		run     *fakeRunner
+		lister  *fakeLister
 		wantErr string
 	}{
-		{"spawn failure", &fakeRunner{err: errors.New("exec: \"gns\": not found")}, `gns could not be run: exec: "gns": not found`},
-		{"non-zero exit", &fakeRunner{code: 1, output: "Error: HTTP 401: Invalid or expired JWT\n"}, "gns exited 1: Error: HTTP 401: Invalid or expired JWT"},
-		{"not json", &fakeRunner{output: "Channels:\n  general\n"}, "gns answered something that is not its channel list"},
-		{"no channels list", &fakeRunner{output: `{"count": 0}`}, "gns answered no `channels` list"},
-		{"nameless channel", &fakeRunner{output: `{"channels": [{"id": "C1"}]}`}, "gns answered a channel without an id or a name"},
+		{"the list fails", &fakeLister{err: &gnsclient.Failure{Call: "gns slack channel list-mine --all --json", Message: "HTTP 401: Invalid or expired JWT"}},
+			"gns could not list the channels: gnsclient: gns slack channel list-mine --all --json: HTTP 401: Invalid or expired JWT"},
+		{"nameless channel", &fakeLister{channels: []gnsclient.Channel{{ID: "C1"}}}, "gns answered a channel without an id or a name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got, err := GNSReader(tc.run, "/home")(context.Background())
+			got, err := GNSReader(tc.lister)(context.Background())
 
 			// Assert.
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
@@ -110,17 +83,22 @@ func TestGNSReaderFailures(t *testing.T) {
 	}
 }
 
-func TestGNSReaderNamesItsBoundWhenItRunsPastIt(t *testing.T) {
+func TestGNSReaderKeepsTheListersFailure(t *testing.T) {
 	// Arrange.
-	run := &fakeRunner{block: true}
-	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
-	defer cancel()
+	failure := &gnsclient.Failure{Call: "gns slack channel list-mine --all --json", Message: "gns did not answer within 40s"}
 
 	// Act.
-	_, err := GNSReader(run, "/home")(ctx)
+	_, err := GNSReader(&fakeLister{err: failure})(context.Background())
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "gns ran past its 40s bound") {
-		t.Fatalf("err = %v, want the bound named", err)
+	var got *gnsclient.Failure
+	if !errors.As(err, &got) || got != failure {
+		t.Fatalf("err = %v, want it to wrap gnsclient's failure", err)
+	}
+}
+
+func TestReadBoundIsGnsOwnChannelsBound(t *testing.T) {
+	if ReadBound != gnsclient.ChannelsBound {
+		t.Fatalf("ReadBound = %s, want gnsclient.ChannelsBound %s", ReadBound, gnsclient.ChannelsBound)
 	}
 }

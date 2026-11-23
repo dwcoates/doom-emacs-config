@@ -1,0 +1,60 @@
+// endpoint_unsubscribe_slack_thread.proto — UnsubscribeSlackThread: end one
+// workspace's subscription to a Slack thread. AGENT API section. The thread is
+// told the workspace detached, and every message still waiting for a digest
+// is dropped with the subscription.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UnsubscribeSlackThreadRequest {
+  // The workspace whose subscription ends.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The thread, as the link it was subscribed by or any link to a message in
+  // it that names its root (Connect InvalidArgument when no Slack link).
+  string thread_url = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message UnsubscribeSlackThreadResponse {
+  oneof result {
+    UnsubscribeSlackThreadSuccess success = 1;
+    UnsubscribeSlackThreadError error = 2;
+  }
+}
+
+// The request was served. Holding no such subscription is an answer, not a
+// failure: either way the subscriber now holds none.
+message UnsubscribeSlackThreadSuccess {
+  // THE ARM IS WHAT WAS FOUND.
+  oneof ended {
+    // The subscription ended.
+    UnsubscribeSlackThreadSuccessUnsubscribed unsubscribed = 1;
+    // There was no subscription to end.
+    UnsubscribeSlackThreadSuccessNotSubscribed not_subscribed = 2;
+  }
+}
+
+// Ended.
+message UnsubscribeSlackThreadSuccessUnsubscribed {
+  // Whether the thread was told the workspace detached; false when the post
+  // failed, which the daemon's log records with its cause.
+  bool announced = 1;
+}
+
+// None held. DELIBERATELY EMPTY.
+message UnsubscribeSlackThreadSuccessNotSubscribed {}
+
+message UnsubscribeSlackThreadError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    UnsubscribeSlackThreadUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message UnsubscribeSlackThreadUnknownSubscriber {}

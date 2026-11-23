@@ -62,6 +62,41 @@ func (c *Capture) Close() error {
 	return errors.Join(c.stdout.Close(), c.stderr.Close())
 }
 
+// StderrCapture holds only a child's standard error in a file, for a child
+// whose standard output its caller reads as it comes (a stream's
+// StdoutPipe): the output is read to its end anyway, but the error stream,
+// read only after Wait, must not be a pipe Wait waits on (Capture).
+type StderrCapture struct {
+	stderr *os.File
+}
+
+// CaptureStderr points cmd's standard error at a fresh unlinked file. The
+// caller runs cmd and calls Finish after Wait, or Close when cmd never
+// started.
+func CaptureStderr(cmd *exec.Cmd) (*StderrCapture, error) {
+	stderr, err := unlinkedFile("stderr")
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stderr = stderr
+	return &StderrCapture{stderr: stderr}, nil
+}
+
+// Finish answers everything the child wrote to its standard error and
+// releases the file. It is called after Wait.
+func (c *StderrCapture) Finish() (string, error) {
+	stderr, err := readAll(c.stderr)
+	if err := errors.Join(err, c.Close()); err != nil {
+		return "", err
+	}
+	return stderr, nil
+}
+
+// Close releases the file, for a child that never started.
+func (c *StderrCapture) Close() error {
+	return c.stderr.Close()
+}
+
 // unlinkedFile makes a temporary file and removes its name at once, leaving
 // only the open descriptor.
 func unlinkedFile(stream string) (*os.File, error) {

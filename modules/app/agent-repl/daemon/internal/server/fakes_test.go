@@ -132,6 +132,10 @@ type fakeDB struct {
 	// workspaceLinksErr fails the read.
 	workspaceLinks    map[ids.WorkspaceID][]wsm.WorkspaceLink
 	workspaceLinksErr error
+	// slackSubs are the Slack-thread subscriptions and slackSettings the
+	// reaction settings (slackthreads_test.go).
+	slackSubs     []wsm.SlackThreadSubscription
+	slackSettings wsm.SlackReactionSettings
 
 	// bypass is each workspace's queue-bypass standing, and bypassErr fails
 	// its read.
@@ -2537,7 +2541,9 @@ type harness struct {
 	Verbs     *fakeVerbs
 	// PRs is the pull-request watcher (pullrequests_test.go); Remotes reads
 	// a workspace's origin.
-	PRs      *fakePullRequests
+	PRs *fakePullRequests
+	// Slack is the Slack watcher (slackthreads_test.go).
+	Slack    *fakeSlack
 	Remotes  *fakeRemotes
 	Creates  *creategate.Gate
 	Retarget *fakeRetarget
@@ -2718,6 +2724,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Ownership:  &fakeOwnership{standing: workspace.StandingOwned},
 		Verbs:      &fakeVerbs{},
 		PRs:        &fakePullRequests{},
+		Slack:      &fakeSlack{},
 		Remotes:    &fakeRemotes{},
 		Creates:    creategate.New(),
 		Retarget:   &fakeRetarget{},
@@ -2792,6 +2799,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		HeldRollback:     h.Queue,
 		Verbs:            h.Verbs,
 		PullRequests:     h.PRs,
+		Slack:            h.Slack,
 		Remotes:          h.Remotes,
 		Retarget:         h.Retarget,
 		Merge:            h.Merge,

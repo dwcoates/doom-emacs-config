@@ -1,0 +1,2 @@
+<!-- used by: daemon/internal/slackwatch (digest.go, the listen-mode contract a digest carries); placeholders: {{thread}} -->
+Listen mode: read the thread and post nothing to it. If a reply would help, draft it for the user and offer to switch the subscription to respond mode (`agent-repld workspace slack-mode here -thread {{thread}} -mode respond`). A post the user explicitly approves goes through `agent-repld workspace slack-post here -thread {{thread}} -force -text ":<emoji>: <message>"`.

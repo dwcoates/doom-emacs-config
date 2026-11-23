@@ -20,8 +20,11 @@
       already be one of this workspace's links, else it is refused
       `unknown_announced_link`. A relabel sets the announcement anew.
       `workspace status here` shows it as `ownership.owned.announces.url`.
-    - The daemon posts nothing to Slack. What a Slack thread is told is the
-      repository's lifecycle hooks'. The emoji-ack finish default stores the
+    - The daemon posts nothing to Slack about a workspace's lifecycle; that
+      is the repository's lifecycle hooks'. The only posts the daemon makes
+      are a subscribed workspace's own (`workspace slack-post`) and the
+      subscription's announcements (attach, mode change, detach, post limit).
+      The emoji-ack finish default stores the
       announcing link, and the emoji-ack post-deploy default reacts on it.
     - The daemon follows an owned github.com pull request: every comment,
       review, line comment, edit, deletion, state change and finished check

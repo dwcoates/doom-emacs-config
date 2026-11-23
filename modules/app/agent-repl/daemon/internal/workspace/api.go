@@ -117,6 +117,10 @@ type CreateSpec struct {
 	// to act on (agentrepl.v1.CreateWorkspaceSlackOrigin), empty for a create
 	// no Slack message started. The request's validation parsed it.
 	SlackThread string
+	// SlackSubscribe subscribes the workspace to SlackThread in this mode at
+	// creation (agentrepl.v1.CreateWorkspaceSlackOrigin.subscribe), empty for
+	// none. It is set only beside SlackThread.
+	SlackSubscribe wsm.SlackThreadMode
 	// originator is who created the workspace (agentrepl.v1.WorkspaceOriginator),
 	// which decides which kind's hooks its stages run. REQUIRED, and settable
 	// only by NewCreateSpec: a builder cannot leave it unstated, and the zero
@@ -935,6 +939,9 @@ type Deps struct {
 	// PullRequests answers the subscription an owned pull-request link takes,
 	// anchored by the watcher's first read (prwatch.Watcher.FollowFromFirstRead).
 	PullRequests PullRequestFollower
+	// SlackThreads subscribes a workspace created subscribed to its Slack
+	// thread (slackwatch.Watcher.Subscribe).
+	SlackThreads SlackThreadSubscriber
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own

@@ -364,6 +364,8 @@ var migrations = []migration{
 	{To: 193, Name: "log_sites", Kind: MigrationAdditive, DDL: logSitesDDL},
 	// IT IS ADDITIVE: a new table the previous build never names.
 	{To: 194, Name: "projected_cold_gate", Kind: MigrationAdditive, DDL: projectedColdGateDDL},
+	// IT IS ADDITIVE: six new tables the previous build never names.
+	{To: 195, Name: "slack_threads", Kind: MigrationAdditive, DDL: slackThreadsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

@@ -780,6 +780,38 @@ func (s *fakeServer) ListGithubWorkflowRunSubscriptions(ctx context.Context, req
 	return handleUnary[v1.ListGithubWorkflowRunSubscriptionsRequest, v1.ListGithubWorkflowRunSubscriptionsResponse](ctx, s, "ListGithubWorkflowRunSubscriptions", req.Msg)
 }
 
+func (s *fakeServer) SubscribeSlackThread(ctx context.Context, req *connect.Request[v1.SubscribeSlackThreadRequest]) (*connect.Response[v1.SubscribeSlackThreadResponse], error) {
+	return handleUnary[v1.SubscribeSlackThreadRequest, v1.SubscribeSlackThreadResponse](ctx, s, "SubscribeSlackThread", req.Msg)
+}
+
+func (s *fakeServer) UnsubscribeSlackThread(ctx context.Context, req *connect.Request[v1.UnsubscribeSlackThreadRequest]) (*connect.Response[v1.UnsubscribeSlackThreadResponse], error) {
+	return handleUnary[v1.UnsubscribeSlackThreadRequest, v1.UnsubscribeSlackThreadResponse](ctx, s, "UnsubscribeSlackThread", req.Msg)
+}
+
+func (s *fakeServer) SetSlackThreadMode(ctx context.Context, req *connect.Request[v1.SetSlackThreadModeRequest]) (*connect.Response[v1.SetSlackThreadModeResponse], error) {
+	return handleUnary[v1.SetSlackThreadModeRequest, v1.SetSlackThreadModeResponse](ctx, s, "SetSlackThreadMode", req.Msg)
+}
+
+func (s *fakeServer) ListSlackThreadSubscriptions(ctx context.Context, req *connect.Request[v1.ListSlackThreadSubscriptionsRequest]) (*connect.Response[v1.ListSlackThreadSubscriptionsResponse], error) {
+	return handleUnary[v1.ListSlackThreadSubscriptionsRequest, v1.ListSlackThreadSubscriptionsResponse](ctx, s, "ListSlackThreadSubscriptions", req.Msg)
+}
+
+func (s *fakeServer) ReadSlackThread(ctx context.Context, req *connect.Request[v1.ReadSlackThreadRequest]) (*connect.Response[v1.ReadSlackThreadResponse], error) {
+	return handleUnary[v1.ReadSlackThreadRequest, v1.ReadSlackThreadResponse](ctx, s, "ReadSlackThread", req.Msg)
+}
+
+func (s *fakeServer) PostToSlackThread(ctx context.Context, req *connect.Request[v1.PostToSlackThreadRequest]) (*connect.Response[v1.PostToSlackThreadResponse], error) {
+	return handleUnary[v1.PostToSlackThreadRequest, v1.PostToSlackThreadResponse](ctx, s, "PostToSlackThread", req.Msg)
+}
+
+func (s *fakeServer) GetSlackStatus(ctx context.Context, req *connect.Request[v1.GetSlackStatusRequest]) (*connect.Response[v1.GetSlackStatusResponse], error) {
+	return handleUnary[v1.GetSlackStatusRequest, v1.GetSlackStatusResponse](ctx, s, "GetSlackStatus", req.Msg)
+}
+
+func (s *fakeServer) UpdateSlackReactionSettings(ctx context.Context, req *connect.Request[v1.UpdateSlackReactionSettingsRequest]) (*connect.Response[v1.UpdateSlackReactionSettingsResponse], error) {
+	return handleUnary[v1.UpdateSlackReactionSettingsRequest, v1.UpdateSlackReactionSettingsResponse](ctx, s, "UpdateSlackReactionSettings", req.Msg)
+}
+
 func (s *fakeServer) CommentOnPullRequest(ctx context.Context, req *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error) {
 	return handleUnary[v1.CommentOnPullRequestRequest, v1.CommentOnPullRequestResponse](ctx, s, "CommentOnPullRequest", req.Msg)
 }

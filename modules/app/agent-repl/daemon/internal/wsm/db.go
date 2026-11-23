@@ -1210,6 +1210,47 @@ type DB interface {
 	// ListUserAttention loads every stamp, all-or-nothing.
 	ListUserAttention(ctx context.Context) ([]UserAttention, error)
 
+	// SubscribeSlackThread records a Slack-thread subscription or sets the
+	// mode of the one held, answering the held one's mode (slackthreads.go).
+	SubscribeSlackThread(ctx context.Context, sub SlackThreadSubscription) (SlackThreadMode, bool, error)
+	// SetSlackThreadMode sets a held subscription's mode, answering its last.
+	SetSlackThreadMode(ctx context.Context, subscriber WorkspaceID, thread SlackThreadKey, mode SlackThreadMode, resetPosts bool) (SlackThreadMode, error)
+	// UnsubscribeSlackThread ends one, answering whether one stood.
+	UnsubscribeSlackThread(ctx context.Context, subscriber WorkspaceID, thread SlackThreadKey) (bool, error)
+	// SlackThreadSubscriptions loads every one.
+	SlackThreadSubscriptions(ctx context.Context) ([]SlackThreadSubscription, error)
+	// WorkspaceSlackThreadSubscriptions loads a workspace's.
+	WorkspaceSlackThreadSubscriptions(ctx context.Context, subscriber WorkspaceID) ([]SlackThreadSubscription, error)
+	// ReserveSlackThreadPost records a post's nonce before it is sent.
+	ReserveSlackThreadPost(ctx context.Context, subscriber WorkspaceID, thread SlackThreadKey, nonce string, at time.Time) error
+	// RecordSlackThreadPost records a reserved post as made.
+	RecordSlackThreadPost(ctx context.Context, subscriber WorkspaceID, thread SlackThreadKey, nonce, ts string, counted bool) (int, error)
+	// SlackThreadPostNonces answers every nonce reserved in a thread.
+	SlackThreadPostNonces(ctx context.Context, subscriber WorkspaceID, thread SlackThreadKey) ([]string, error)
+	// RecordSlackThreadMessages stores a read's messages and its cursor.
+	RecordSlackThreadMessages(ctx context.Context, r SlackThreadRead) ([]SlackThreadMessage, error)
+	// RecordSlackThreadStreamFailure records a failed read of a thread.
+	RecordSlackThreadStreamFailure(ctx context.Context, subscriber WorkspaceID, thread SlackThreadKey, at time.Time, detail string) (bool, error)
+	// SlackThreadPending answers the messages waiting for a digest.
+	SlackThreadPending(ctx context.Context, subscriber WorkspaceID, thread SlackThreadKey) ([]SlackThreadMessage, error)
+	// RecordSlackThreadDigest records a digest and takes its messages.
+	RecordSlackThreadDigest(ctx context.Context, d SlackThreadDigest) error
+	// SlackReactionSettings reads the reaction initiator's settings
+	// (slackreactions.go).
+	SlackReactionSettings(ctx context.Context) (SlackReactionSettings, error)
+	// SetSlackReactionWatchUser sets the watch user.
+	SetSlackReactionWatchUser(ctx context.Context, user string) (SlackReactionSettings, error)
+	// SetSlackReactionRepository sets the repository fired workspaces go in.
+	SetSlackReactionRepository(ctx context.Context, repo string) (SlackReactionSettings, error)
+	// BindSlackReaction stores a binding.
+	BindSlackReaction(ctx context.Context, b SlackReactionBinding) (SlackReactionSettings, error)
+	// UnbindSlackReaction removes a binding.
+	UnbindSlackReaction(ctx context.Context, emoji string) (SlackReactionSettings, error)
+	// MarkSlackReactionFired records a trigger, answering whether it is new.
+	MarkSlackReactionFired(ctx context.Context, t SlackReactionTrigger, at time.Time) (bool, error)
+	// RecordSlackReactionBaseline records the standing triggers unfired.
+	RecordSlackReactionBaseline(ctx context.Context, standing []SlackReactionTrigger, at time.Time) error
+
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)
 	// CloseFault stamps a fault's persisted resolved-at.

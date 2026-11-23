@@ -65,6 +65,40 @@
         "-a powermode 2"
       ],
       "file": "agent-repl-pmset"
+    },
+    {
+      "id": "gh",
+      "kind": "program",
+      "why": "the daemon follows pull requests and GitHub merge queues, and posts pull-request comments, through the user's own gh login (internal/ghclient); without it those verbs answer GitHub unreachable and nothing else is affected",
+      "profile": "run",
+      "optional": true,
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "gh",
+      "install": {
+        "brew": "gh",
+        "apt": "gh",
+        "dnf": "gh",
+        "pacman": "github-cli",
+        "zypper": "gh"
+      }
+    },
+    {
+      "id": "gns",
+      "kind": "program",
+      "why": "the daemon follows and posts in Slack threads, and runs the Slack reaction initiator, through the user's own gns command line (internal/gnsclient); without it those verbs answer unreachable and nothing else is affected",
+      "profile": "run",
+      "optional": true,
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "gns",
+      "install": {
+        "manual": "Install the GNS command line, then sign in with `gns auth login` (the /gns-auth-renew skill signs in through the work account's Chrome profile)."
+      }
     }
   ]
 }

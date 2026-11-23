@@ -758,6 +758,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/prompts":          {"prompts/"},
 	"internal/retarget":         {"prompts/"},
 	"internal/revision":         {"prompts/"},
+	"internal/slackwatch":       {"prompts/"},
 	"internal/wssummary":        {"prompts/"},
 	"internal/resolve/feed":     {"prompts/", "daemon/internal/promptqueue/deliver.go"},
 	"internal/headless":         {"daemon/"},

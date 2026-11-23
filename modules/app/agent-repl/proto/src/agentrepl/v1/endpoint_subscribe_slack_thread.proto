@@ -1,0 +1,89 @@
+// endpoint_subscribe_slack_thread.proto — SubscribeSlackThread: tell one
+// workspace's agent about a Slack thread's new messages, as digests. AGENT API
+// section. How the daemon reads the thread, batches its messages and keeps the
+// workspace's own posts from being told back is slack_thread.proto's header.
+//
+// WHAT A SUBSCRIBE DOES. It resolves the link to the thread's root, makes sure
+// the channel is routed into the user's echo pipe, and starts the cursor at the
+// pipe's head, so only messages written after the subscription are told. A
+// fresh subscription announces itself in the thread, naming the workspace and
+// its mode; subscribing again changes the mode only, keeps the cursor and
+// announces nothing unless the mode changed.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_thread.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SubscribeSlackThreadRequest {
+  // The workspace whose agent is told: the caller's own when an agent
+  // subscribes itself. Must be open (`subscriber_closed`).
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The thread, as a Slack message link: an https
+  // `<workspace>.slack.com/archives/<channel>/p<timestamp>` link, with
+  // `thread_ts` when it links a reply. A link that is not one is a malformed
+  // request (Connect InvalidArgument).
+  string thread_url = 2;
+  // What the workspace may do in the thread. REQUIRED.
+  SlackThreadMode mode = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message SubscribeSlackThreadResponse {
+  oneof result {
+    SubscribeSlackThreadSuccess success = 1;
+    SubscribeSlackThreadError error = 2;
+  }
+}
+
+// The request was served.
+message SubscribeSlackThreadSuccess {
+  // What the request came to. THE ARM IS WHICH.
+  oneof taken {
+    // The subscriber held no subscription to this thread, and now does.
+    SubscribeSlackThreadSuccessSubscribed subscribed = 1;
+    // The subscriber's subscription now has the requested mode.
+    SubscribeSlackThreadSuccessResubscribed resubscribed = 2;
+  }
+}
+
+// A new subscription.
+message SubscribeSlackThreadSuccessSubscribed {
+  // The subscription as taken.
+  SlackThreadSubscription subscription = 1;
+}
+
+// An existing subscription, its mode replaced.
+message SubscribeSlackThreadSuccessResubscribed {
+  // The subscription as it now stands.
+  SlackThreadSubscription subscription = 1;
+}
+
+// The daemon's refusals; nothing was subscribed.
+message SubscribeSlackThreadError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    SubscribeSlackThreadUnknownSubscriber unknown_subscriber = 1;
+    // The subscriber is closed: it runs no agent to tell.
+    SubscribeSlackThreadSubscriberClosed subscriber_closed = 2;
+    // Slack could not be reached through `gns`, or it refused the thread, so
+    // the thread's root and the pipe's head are unknown.
+    SubscribeSlackThreadUnreachable unreachable = 3;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SubscribeSlackThreadUnknownSubscriber {}
+
+// The subscriber is closed. DELIBERATELY EMPTY.
+message SubscribeSlackThreadSubscriberClosed {}
+
+// Slack could not be read.
+message SubscribeSlackThreadUnreachable {
+  // What `gns` said, naming the step that failed.
+  string detail = 1;
+}

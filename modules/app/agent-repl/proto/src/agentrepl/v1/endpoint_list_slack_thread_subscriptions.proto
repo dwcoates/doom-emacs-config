@@ -1,0 +1,42 @@
+// endpoint_list_slack_thread_subscriptions.proto —
+// ListSlackThreadSubscriptions: the Slack threads one workspace follows, or
+// every workspace's. AGENT API section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_thread.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ListSlackThreadSubscriptionsRequest {
+  // The workspace whose subscriptions are listed. UNSET = every open
+  // workspace's.
+  optional workspace.v1.WorkspaceRef subscriber = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ListSlackThreadSubscriptionsResponse {
+  oneof result {
+    ListSlackThreadSubscriptionsSuccess success = 1;
+    ListSlackThreadSubscriptionsError error = 2;
+  }
+}
+
+// The request was served.
+message ListSlackThreadSubscriptionsSuccess {
+  // Every subscription asked for, by subscriber, then channel, then thread.
+  repeated SlackThreadSubscription subscriptions = 1;
+}
+
+message ListSlackThreadSubscriptionsError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    ListSlackThreadSubscriptionsUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message ListSlackThreadSubscriptionsUnknownSubscriber {}

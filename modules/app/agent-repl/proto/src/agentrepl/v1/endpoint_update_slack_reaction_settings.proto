@@ -1,0 +1,63 @@
+// endpoint_update_slack_reaction_settings.proto —
+// UpdateSlackReactionSettings: change one of the reaction initiator's settings
+// (slack_reactions.proto). AGENT API section. The settings are the daemon's,
+// durable in its store; the next poll reads them.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_reactions.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateSlackReactionSettingsRequest {
+  // The one change. THE ARM IS WHICH; unset is a malformed request (Connect
+  // InvalidArgument).
+  oneof change {
+    // Watch this Slack user. A user id that is not `U` and capitals and
+    // digits is malformed. Changing the watch user owes a new baseline.
+    SlackReactionWatchUser watch_user = 1;
+    // Create fired workspaces in this registered repository.
+    workspace.v1.RepositoryRef repository = 2;
+    // Bind an emoji, replacing any binding it had. An emoji name that is not
+    // lowercase letters, digits, `-`, `_` and `+` is malformed, and so is an
+    // action whose thread arm or subscription mode is unset.
+    SlackReactionBinding bind = 3;
+    // Unbind the emoji named, without colons.
+    string unbind = 4;
+  }
+}
+
+// THE ARM IS THE OUTCOME.
+message UpdateSlackReactionSettingsResponse {
+  oneof result {
+    UpdateSlackReactionSettingsSuccess success = 1;
+    UpdateSlackReactionSettingsError error = 2;
+  }
+}
+
+// The change was made.
+message UpdateSlackReactionSettingsSuccess {
+  // The settings as they now stand.
+  SlackReactionSettings settings = 1;
+}
+
+message UpdateSlackReactionSettingsError {
+  oneof cause {
+    // The repository is not in the daemon's roster.
+    UpdateSlackReactionSettingsUnknownRepository unknown_repository = 1;
+    // The emoji to unbind has no binding.
+    UpdateSlackReactionSettingsNotBound not_bound = 2;
+  }
+}
+
+// The repository is unknown. DELIBERATELY EMPTY.
+message UpdateSlackReactionSettingsUnknownRepository {}
+
+// Nothing to unbind.
+message UpdateSlackReactionSettingsNotBound {
+  // The emoji named.
+  string emoji = 1;
+}

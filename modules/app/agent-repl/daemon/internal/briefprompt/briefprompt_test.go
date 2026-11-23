@@ -76,6 +76,30 @@ func TestSubmitSendsTheComposedBriefDeferred(t *testing.T) {
 	}
 }
 
+func TestSubmitAsSendsTheComposedBriefUnderItsDelivery(t *testing.T) {
+	tests := []struct {
+		name     string
+		delivery wsm.Delivery
+	}{
+		{name: "ordinary", delivery: wsm.DeliveryOrdinary},
+		{name: "deferred", delivery: wsm.DeliveryDeferred},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			prompts := &fakePrompts{}
+
+			// Act
+			turn, err := composer(nil, nil).SubmitAs(context.Background(), prompts, "ws-1", "a-brief", map[string]string{"x": "y"}, "a-notice", origin, tt.delivery)
+
+			// Assert
+			if err != nil || turn != "turn-1" || prompts.delivery != tt.delivery || prompts.text != "a-brief:y" {
+				t.Fatalf("SubmitAs = %q, %v; submitted %+v", turn, err, prompts)
+			}
+		})
+	}
+}
+
 func TestSubmitNamesTheStepThatFailed(t *testing.T) {
 	cause := errors.New("cause")
 	tests := []struct {
@@ -112,7 +136,9 @@ func TestStepOfAnErrorNoSubmissionAnsweredIsZero(t *testing.T) {
 
 // TestEveryNotifierSubmitsThroughTheComposer holds the notifiers to the one
 // shape: each submits its brief prompts through Composer, and none calls the
-// prompt handler itself, so a hand-rolled site fails here.
+// prompt handler itself, so a hand-rolled site fails here. Slack's digest is
+// held to the same shape by slackwatch's own TestTheDigestSubmitsThroughTheComposer,
+// since this unit may read only the files the test runner's roster grants it.
 func TestEveryNotifierSubmitsThroughTheComposer(t *testing.T) {
 	for _, file := range []string{
 		"../mergenotice/mergenotice.go",

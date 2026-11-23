@@ -305,6 +305,13 @@ const (
 	// workflow's name, its conclusion, its head commit and its web address.
 	// Delivered on arrival and drawn as a workspace notice is.
 	PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE PromptOrigin = 53
+	// A digest of a subscribed Slack thread's new messages
+	// (agentrepl.v1.SubscribeSlackThread), stating the subscription's mode and
+	// what it lets the workspace do. Submitted deferred, or ordinary when a
+	// message reads as urgent so the running turn's classifier may interject
+	// it, and drawn as an ordinary prompt bubble the daemon sent, so the user
+	// reads in the feed what the thread said.
+	PromptOrigin_PROMPT_ORIGIN_SLACK_THREAD_NOTICE PromptOrigin = 54
 )
 
 // Enum value maps for PromptOrigin.
@@ -363,6 +370,7 @@ var (
 		51: "PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT",
 		52: "PROMPT_ORIGIN_DEPLOY_MEDIATION",
 		53: "PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE",
+		54: "PROMPT_ORIGIN_SLACK_THREAD_NOTICE",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -418,6 +426,7 @@ var (
 		"PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT":     51,
 		"PROMPT_ORIGIN_DEPLOY_MEDIATION":            52,
 		"PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE":  53,
+		"PROMPT_ORIGIN_SLACK_THREAD_NOTICE":         54,
 	}
 )
 
@@ -452,7 +461,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xa0\x12\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xcd\x12\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x1a\x04\x98\xa6\x1d\x02\x12*\n" +
@@ -507,7 +516,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102\x1a\x04\x98\xa6\x1d\x05\x12/\n" +
 	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103\x1a\x04\x98\xa6\x1d\x02\x12(\n" +
 	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104\x1a\x04\x98\xa6\x1d\x05\x122\n" +
-	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105\x1a\x04\x98\xa6\x1d\x06B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105\x1a\x04\x98\xa6\x1d\x06\x12+\n" +
+	"!PROMPT_ORIGIN_SLACK_THREAD_NOTICE\x106\x1a\x04\x98\xa6\x1d\x06B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

@@ -25,7 +25,9 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/prioritywire"
 	"agent-repld/internal/semver"
+	"agent-repld/internal/slackwatch"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -150,6 +152,7 @@ func (s *server) CreateWorkspace(
 	spec.Requester = requesterID(req.Msg.GetRequester())
 	spec.ForkFrom = forkSourceID(req.Msg.GetContextOrigin())
 	spec.SlackThread = req.Msg.GetSlackOrigin().GetThreadUrl()
+	spec.SlackSubscribe = slackSubscribeOf(req.Msg.GetSlackOrigin())
 	spec.Hidden = req.Msg.GetHidden()
 	spec.Placement = createPlacementOf(req.Msg.GetPlacement())
 	if standard := req.Msg.GetStandard(); standard != nil {
@@ -606,18 +609,14 @@ func deployHooksOf(hooks *agentreplv1.CreateWorkspaceDeployHooks) wsm.DeployHook
 	return wsm.DeployHooks{PreDeploy: hooks.GetPreDeploy(), PostDeploy: hooks.GetPostDeploy()}
 }
 
-// priorityOf renders a wire priority as the registry's.
+// priorityOf renders a wire priority as the registry's. The request's
+// validation refused an unset level (validateWorkspacePriority), which reads
+// as p3 here as it always has.
 func priorityOf(p *agentreplv1.WorkspacePriority) wsm.Priority {
-	switch {
-	case p.GetP05() != nil:
-		return wsm.PriorityP05
-	case p.GetP1() != nil:
-		return wsm.PriorityP1
-	case p.GetP2() != nil:
-		return wsm.PriorityP2
-	default:
-		return wsm.PriorityP3
+	if level, ok := prioritywire.Of(p); ok {
+		return level
 	}
+	return wsm.PriorityP3
 }
 
 // RegisterWorkspace records a workspace Emacs announced. It is idempotent by
@@ -1873,4 +1872,18 @@ func createPlacementOf(p *agentreplv1.CreateWorkspacePlacement) *workspace.Creat
 		return &workspace.CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: fresh.GetName(), Gather: fresh.GetGather()}}
 	}
 	return &workspace.CreatePlacement{Subsection: p.GetSubsection()}
+}
+
+// slackSubscribeOf is the mode a create subscribes its workspace to its Slack
+// thread in, empty for none (validateCreateWorkspaceRequest refused a set
+// subscription with no mode).
+func slackSubscribeOf(origin *agentreplv1.CreateWorkspaceSlackOrigin) wsm.SlackThreadMode {
+	if origin.GetSubscribe() == nil {
+		return ""
+	}
+	mode, ok := slackwatch.ModeOf(origin.GetSubscribe())
+	if !ok {
+		panic("server: a validated create's Slack subscription names no mode")
+	}
+	return mode
 }

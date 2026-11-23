@@ -51,6 +51,7 @@ BEFORE running its verb for the first time in a session.
 | replying on, or following, a pull request | `pull-requests` |
 | following a GitHub merge queue | `github-merge-queues` |
 | waiting on a GitHub Actions workflow run | `run-subscribe` |
+| following, reading or posting in a Slack thread, or the Slack emoji initiator's settings | `slack-threads` |
 | waiting on another workspace's or repository's change | `waiting-on-change` |
 | setting the topbar summary | `summary` |
 | renaming this workspace | `rename` |

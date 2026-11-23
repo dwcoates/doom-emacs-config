@@ -417,7 +417,7 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 	// Arrange
 	p2 := wsm.PriorityP2
 	spec := CreateSpec{
-		originator: lifecycleconfig.OriginatorEmojiAck, SlackThread: "https://w.slack.com/archives/C1/p1730000000123456",
+		originator: lifecycleconfig.OriginatorEmojiAck, SlackThread: "https://w.slack.com/archives/C1/p1730000000123456", SlackSubscribe: wsm.SlackThreadModeInteract,
 		RepoDir: "/r", InitialPrompt: "fix it", OneShot: true, FromOrigin: true, Landing: &wsm.LandingChoice{},
 		ContextWorkspace: ptr(ids.WorkspaceID("ctx")), Parent: ptr(ids.WorkspaceID("owner")),
 		ContextSelection: &ContextSelection{Kind: ContextSelectionBubble, Row: "row-1", Markdown: "the text"},
@@ -439,7 +439,7 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if createKey(decoded) != createKey(spec) || *decoded.Requester != *spec.Requester || *decoded.Priority != p2 || decoded.Landing == nil || decoded.Landing.Into != nil ||
-		decoded.ContextSelection == nil || *decoded.ContextSelection != *spec.ContextSelection {
+		decoded.ContextSelection == nil || *decoded.ContextSelection != *spec.ContextSelection || decoded.SlackSubscribe != wsm.SlackThreadModeInteract {
 		t.Fatalf("decoded %+v, want the request encoded", decoded)
 	}
 }

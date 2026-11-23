@@ -817,7 +817,8 @@ no client ever sends them.")
     "PROMPT_ORIGIN_REMOTE_CONTROL" "PROMPT_ORIGIN_MAIN_SYNC_REPAIR"
     "PROMPT_ORIGIN_PULL_REQUEST_NOTICE" "PROMPT_ORIGIN_FINISH_HOOK"
     "PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE" "PROMPT_ORIGIN_DEPLOY_MEDIATION"
-    "PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE")
+    "PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE"
+    "PROMPT_ORIGIN_SLACK_THREAD_NOTICE")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
@@ -849,6 +850,8 @@ movement, and GITHUB_WORKFLOW_RUN_NOTICE its one notice that a GitHub
 Actions run a workspace waited on finished.  FINISH_HOOK is a
 finish-stage prompt hook the daemon sends a finishing workspace before
 its deploy is put in line.
+SLACK_THREAD_NOTICE is its digest of a subscribed Slack thread's new
+messages.
 None has an elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)

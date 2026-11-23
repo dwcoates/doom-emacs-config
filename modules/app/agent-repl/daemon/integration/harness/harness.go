@@ -200,7 +200,7 @@ func mainIn(m *testing.M, module, root string) int {
 		// THE DAEMON RUNS THE MOCKED GIT BY CONSTRUCTION: it is linked in as
 		// the daemon's git binary, so no PATH a test or a child sets can
 		// reach the host's git.
-		{&daemonBinary, daemonProgramName(), "./cmd/agent-repld", "", true, func() []string { return []string{MockedGitLink(gitBinary), NoGitHubLink} }},
+		{&daemonBinary, daemonProgramName(), "./cmd/agent-repld", "", true, func() []string { return []string{MockedGitLink(gitBinary), NoGitHubLink, NoSlackLink} }},
 		// THE TEST SERVICE EVERY DAEMON'S MERGE GATES RUN ON (testservice.go):
 		// a real one, as our own system, never the owner's.
 		{&testsBinary, "agent-repl-tests", ".", filepath.Join(filepath.Dir(module), "testservice"), false, nil},
@@ -462,6 +462,14 @@ const ghBinaryVar = "agent-repld/internal/ghclient.ghBinary"
 // file can hold, so a test daemon cannot reach GitHub by construction: a call
 // fails as the leaf's unreachable failure. Every test build carries it.
 const NoGitHubLink = "-X " + ghBinaryVar + "=/dev/null/no-github-in-tests"
+
+// gnsBinaryVar is the daemon's link-time `gns` binary (internal/gnsclient).
+const gnsBinaryVar = "agent-repld/internal/gnsclient.gnsBinary"
+
+// NoSlackLink is the -X binding that makes a daemon build's `gns` a path no
+// file can hold, so a test daemon cannot reach Slack by construction. Every
+// test build carries it.
+const NoSlackLink = "-X " + gnsBinaryVar + "=/dev/null/no-slack-in-tests"
 
 // MockedGitLink is the -X binding that makes a daemon build run gitPath as its
 // git. Every test build of the daemon carries it.

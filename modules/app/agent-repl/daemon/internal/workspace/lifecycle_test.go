@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/wsm"
 )
 
 // creationThread is the Slack message an emoji-ack create is dispatched for.
@@ -94,6 +96,59 @@ func TestASlackOriginIsRecordedAndStoredAsAReferenceLink(t *testing.T) {
 	}
 }
 
+func TestACreateSubscribedToItsThreadIsSubscribed(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	spec.SlackThread, spec.SlackSubscribe = creationThread, wsm.SlackThreadModeRespond
+
+	// Act
+	record, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if want := []string{string(record.ID) + "|" + record.Name + "|" + creationThread + "|respond"}; !slices.Equal(f.slack.got, want) {
+		t.Fatalf("subscriptions = %v, want %v", f.slack.got, want)
+	}
+}
+
+func TestACreateWithoutASubscriptionSubscribesNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	if _, err := f.verbs.Create(context.Background(), emojiAckSpec(t, f)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert
+	if len(f.slack.got) != 0 {
+		t.Fatalf("subscriptions = %v, want none", f.slack.got)
+	}
+}
+
+func TestACreateWhoseSubscriptionSlackRefusesFails(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.slack.err = errors.New("gns: Invalid or expired JWT")
+	spec := standardSpec(t, f)
+	spec.SlackThread, spec.SlackSubscribe = creationThread, wsm.SlackThreadModeRespond
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "subscribe it to its Slack thread") {
+		t.Fatalf("Create = %v, want the subscription's failure", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate,
+		Message: "could not subscribe the workspace to the Slack thread it was created for"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
 func TestACreateSpecWithNoOriginatorIsRefused(t *testing.T) {
 	tests := []struct {
 		name string
@@ -102,6 +157,8 @@ func TestACreateSpecWithNoOriginatorIsRefused(t *testing.T) {
 	}{
 		{name: "no originator", edit: func(s *CreateSpec) { s.originator = 0 }, want: "names no originator"},
 		{name: "emoji-ack with no Slack message", edit: func(s *CreateSpec) { s.originator = lifecycleconfig.OriginatorEmojiAck }, want: "names the Slack message"},
+		{name: "a subscription with no Slack message", edit: func(s *CreateSpec) { s.SlackSubscribe = wsm.SlackThreadModeRespond }, want: "a subscription at creation names the Slack thread"},
+		{name: "a subscription in no mode", edit: func(s *CreateSpec) { s.SlackThread, s.SlackSubscribe = creationThread, "shout" }, want: "a subscription at creation names the Slack thread"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -309,15 +366,23 @@ func TestACreationPromptNamingTheThreadOfAWorkspaceWithNoneFailsTheCreate(t *tes
 	}
 }
 
-// TestTheDaemonNeverPostsToSlack pins that no production code of the daemon
-// sends to Slack: what a thread is told is its repository's hooks' to say.
-func TestTheDaemonNeverPostsToSlack(t *testing.T) {
+// TestTheDaemonPostsToSlackOnlyWhenAnAgentAsks pins how far the daemon
+// speaks in Slack. What a thread is told of a workspace's LIFECYCLE is its
+// repository's hooks' to say, never the daemon's. The daemon posts only the
+// message an agent hands it for a thread its workspace follows
+// (agentrepl.v1.PostToSlackThread), so:
+//   - every Slack command line is spelled in internal/gnsclient alone, the
+//     daemon's one way to Slack;
+//   - gnsclient's Post is called from slackwatch's post verb alone.
+func TestTheDaemonPostsToSlackOnlyWhenAnAgentAsks(t *testing.T) {
 	// Arrange
 	daemon, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var posting []string
+	gnsclient := filepath.Join(daemon, "internal", "gnsclient")
+	postVerb := filepath.Join(daemon, "internal", "slackwatch", "verbs.go")
+	var spelling, posting []string
 
 	// Act
 	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
@@ -331,11 +396,17 @@ func TestTheDaemonNeverPostsToSlack(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		for _, verb := range []string{`"slack", "send"`, `"slack", "react"`, "slack send", "slack react"} {
-			if strings.Contains(string(raw), verb) && !strings.Contains(path, filepath.Join("internal", "lifecycleconfig")) {
-				posting = append(posting, path)
-				break
+		source := string(raw)
+		if filepath.Dir(path) != gnsclient && !strings.Contains(path, filepath.Join("internal", "lifecycleconfig")) {
+			for _, verb := range []string{`"slack", "send"`, `"slack", "react"`, "slack send", "slack react"} {
+				if strings.Contains(source, verb) {
+					spelling = append(spelling, path)
+					break
+				}
 			}
+		}
+		if path != postVerb && strings.Contains(source, "GNS.Post(") {
+			posting = append(posting, path)
 		}
 		return nil
 	})
@@ -344,7 +415,10 @@ func TestTheDaemonNeverPostsToSlack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(spelling) != 0 {
+		t.Errorf("a Slack command line is spelled in %v, want only in internal/gnsclient", spelling)
+	}
 	if len(posting) != 0 {
-		t.Fatalf("Slack is posted to from %v, want nowhere in the daemon", posting)
+		t.Errorf("Slack is posted to from %v, want only slackwatch's post verb", posting)
 	}
 }

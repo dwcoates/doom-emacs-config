@@ -1,0 +1,161 @@
+// slack_thread.proto — what more than one Slack-thread endpoint shares: the
+// thread a subscription follows, its mode, the subscription itself, and a
+// message read from the thread. AGENT API section.
+//
+// HOW THE DAEMON READS SLACK. Every read and every post runs the user's own
+// `gns` command line (the one way agent-repl reaches Slack): a thread's new
+// messages stream from the channel's echo pipe
+// (`gns pipe read user.<login>.tools.slack.channel.<channel>.echo --follow
+// --tag thread_ts:<root>`), the daemon's cursor into that pipe is durable, and
+// a post is `gns slack send` with the post's blocks on stdin.
+//
+// HOW A WORKSPACE IS TOLD. Messages accumulate per subscription, durably, as
+// they arrive. The daemon submits them as ONE digest, a prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_SLACK_THREAD_NOTICE, once the
+// thread has been quiet for a while: a short quiet period when any pending
+// message reads as urgent (an imperative such as "stop", a direct address such
+// as "@agent", an alarm emoji), a longer one otherwise, and never later than a
+// cap counted from the oldest pending message. An urgent digest is an
+// ordinary prompt, which the running turn's classifier may interject; any
+// other digest is deferred, and runs as its own turn after the running one.
+// A digest not yet delivered when a newer one is owed is superseded by it, so
+// a workspace holds at most one digest per thread.
+//
+// THE WORKSPACE'S OWN POSTS ARE NEVER TOLD BACK TO IT. Every post the daemon
+// makes for a subscription carries a footer naming the workspace and a nonce
+// recorded before the post is sent; a message that carries one of the
+// subscription's nonces is its own and is dropped as it arrives.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "google/protobuf/timestamp.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// One Slack thread, read: the channel and the thread's ROOT message timestamp
+// identify it, and the link is how a person names it.
+message SlackThreadRef {
+  // The Slack channel id (`C…` for a channel, `D…` for a direct message).
+  string channel = 1;
+  // The thread's root message timestamp (`1700000000.123456`). A link to a
+  // reply names its root through `thread_ts`, so a subscription to a reply's
+  // link follows the whole thread.
+  string thread_ts = 2;
+  // The message link the thread was named by, verbatim, as Slack's "Copy
+  // link" gives it.
+  string url = 3;
+}
+
+// How far a subscribed workspace may act in the thread. THE ARM IS THE MODE.
+// The mode rides on every digest, which states what the workspace may do.
+message SlackThreadMode {
+  oneof mode {
+    // The workspace reads the thread and posts nothing: it drafts replies
+    // for the user, who may switch the mode. A post is refused unless it is
+    // forced (PostToSlackThreadRequest.force).
+    SlackThreadModeListen listen = 1;
+    // The workspace replies in the thread on its own, and does what the
+    // thread asks within the context the subscription was opened for.
+    SlackThreadModeRespond respond = 2;
+    // As respond, and the workspace treats in-thread requests as work items:
+    // it does the requested work and reports the result back in the thread.
+    SlackThreadModeInteract interact = 3;
+  }
+}
+
+// Listen mode. DELIBERATELY EMPTY.
+message SlackThreadModeListen {}
+
+// Respond mode. DELIBERATELY EMPTY.
+message SlackThreadModeRespond {}
+
+// Interact mode. DELIBERATELY EMPTY.
+message SlackThreadModeInteract {}
+
+// One workspace's subscription to one Slack thread. A workspace holds at most
+// one per thread. It is DURABLE across a daemon restart and a handover, and
+// it ends when the workspace unsubscribes or closes, however it closes.
+message SlackThreadSubscription {
+  // The workspace whose agent is told.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The thread followed.
+  SlackThreadRef thread = 2;
+  // What the workspace may do in the thread.
+  SlackThreadMode mode = 3;
+  // How the subscription came to be.
+  SlackThreadSubscriptionOrigin origin = 4;
+  // When it was taken.
+  google.protobuf.Timestamp subscribed_at = 5;
+  // How many posts the workspace has made in the thread against its limit.
+  SlackThreadPosts posts = 6;
+  // Whether the daemon's stream of the thread is succeeding.
+  SlackThreadSubscriptionHealth health = 7;
+  // How many of the thread's messages are waiting for the next digest.
+  uint32 pending_messages = 8;
+}
+
+// How a subscription came to be. THE ARM IS WHICH.
+message SlackThreadSubscriptionOrigin {
+  oneof origin {
+    // An agent API call took it (SubscribeSlackThread).
+    SlackThreadSubscriptionOriginRequested requested = 1;
+    // The workspace was created subscribed to the thread it was created for
+    // (CreateWorkspaceSlackOrigin.subscribe).
+    SlackThreadSubscriptionOriginCreation creation = 2;
+  }
+}
+
+// Taken by request. DELIBERATELY EMPTY.
+message SlackThreadSubscriptionOriginRequested {}
+
+// Taken at creation. DELIBERATELY EMPTY.
+message SlackThreadSubscriptionOriginCreation {}
+
+// A subscription's posts against its limit. Reaching the limit switches the
+// subscription to listen mode, says so in the thread, and refuses further
+// unforced posts; switching the mode back to respond or interact
+// (SetSlackThreadMode) is the human approval that resets the count.
+message SlackThreadPosts {
+  // Posts the workspace made since the count was last reset.
+  uint32 made = 1;
+  // The most it may make before the count is reset.
+  uint32 limit = 2;
+}
+
+// Whether the daemon's stream of the thread is succeeding. THE ARM IS WHICH.
+message SlackThreadSubscriptionHealth {
+  oneof health {
+    // The stream's last attempt succeeded, or none has failed yet.
+    SlackThreadSubscriptionHealthy healthy = 1;
+    // The stream's attempts have failed since `since`; the daemon keeps
+    // reading, and the stretch ends at the first attempt that succeeds.
+    SlackThreadSubscriptionFailing failing = 2;
+  }
+}
+
+// Streaming. DELIBERATELY EMPTY.
+message SlackThreadSubscriptionHealthy {}
+
+// Failing.
+message SlackThreadSubscriptionFailing {
+  // When the failing stretch began.
+  google.protobuf.Timestamp since = 1;
+  // What the latest failed attempt said, as `gns` said it.
+  string detail = 2;
+}
+
+// One message read from a thread.
+message SlackThreadMessage {
+  // The message's timestamp, its identity in the channel.
+  string ts = 1;
+  // Who wrote it: the Slack user's name when Slack gave one, else their id.
+  string author = 2;
+  // The message's text, in Slack's mrkdwn.
+  string text = 3;
+  // Whether the message is one of the reading workspace's own posts in the
+  // thread (it carries one of the subscription's nonces).
+  bool own_post = 4;
+}

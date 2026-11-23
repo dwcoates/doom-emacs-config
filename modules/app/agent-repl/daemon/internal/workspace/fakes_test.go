@@ -3944,7 +3944,9 @@ type fixture struct {
 	stateDir   string
 	// anchors anchors an owned pull-request link's subscription.
 	anchors *fakeAnchors
-	fleet   *fakeSessions
+	// slack subscribes a workspace created subscribed to its Slack thread.
+	slack *fakeSlackThreads
+	fleet *fakeSessions
 	// threads is the threads' graphs a nuke deletes.
 	threads  *fakeThreadGraphs
 	shim     *fakeShim
@@ -4046,6 +4048,7 @@ func newFixture(t *testing.T) *fixture {
 		lifecycle:  &fakeLifecycle{},
 		stateDir:   t.TempDir(),
 		anchors:    &fakeAnchors{},
+		slack:      &fakeSlackThreads{},
 		fleet:      newFakeSessions(),
 		threads:    &fakeThreadGraphs{},
 		shim:       &fakeShim{},
@@ -4091,7 +4094,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings, namePrefixes: &f.topbarNamePrefixes}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
-		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers,
+		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SlackThreads: f.slack,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
@@ -5219,4 +5222,15 @@ func (d *fakeDB) HeldPromptByTurn(_ context.Context, turn ids.TurnID) (wsm.HeldP
 	}
 	h, ok := d.holds[turn]
 	return h, ok, nil
+}
+
+// fakeSlackThreads records every subscription at creation, answering err.
+type fakeSlackThreads struct {
+	got []string
+	err error
+}
+
+func (f *fakeSlackThreads) SubscribeAtCreation(_ context.Context, ws ids.WorkspaceID, name, url string, mode wsm.SlackThreadMode) error {
+	f.got = append(f.got, string(ws)+"|"+name+"|"+url+"|"+string(mode))
+	return f.err
 }
