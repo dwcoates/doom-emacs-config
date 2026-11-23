@@ -108,9 +108,8 @@ func (w *Watcher) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 		urgent = urgent || m.Urgent
 	}
 	fields = dlog.Merge(fields, dlog.Context{"messages": len(messages), "carried": carried, "urgent": urgent})
-	turn, failure, err := w.submit(ctx, prompts, sub, messages, urgent)
+	turn, err := w.submit(ctx, prompts, sub, messages, urgent, fields)
 	if err != nil {
-		w.deps.Log.Error(opNotice, failure, dlog.WithCause(fields, err))
 		// What the superseded digest said is kept to be said again; the
 		// pending messages stay pending for the next attempt.
 		if carried > 0 {
@@ -128,16 +127,17 @@ func (w *Watcher) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 	return true
 }
 
-// submit composes and submits one digest, answering its turn, or the record
-// a failure is written with and why.
-func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.SlackThreadSubscription, messages []wsm.SlackThreadMessage, urgent bool) (ids.TurnID, string, error) {
+// submit composes and submits one digest, answering its turn. A failure is
+// recorded here, naming the step that failed, under FIELDS.
+func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.SlackThreadSubscription, messages []wsm.SlackThreadMessage, urgent bool, fields dlog.Context) (ids.TurnID, error) {
 	contractBrief := BriefContractAutonomous
 	if sub.Mode == wsm.SlackThreadModeListen {
 		contractBrief = BriefContractListen
 	}
 	contract, err := w.deps.Briefs(contractBrief, map[string]string{"thread": sub.URL})
 	if err != nil {
-		return "", "could not compose the mode's contract for a Slack digest; it is told later", err
+		w.deps.Log.Error(opNotice, "could not compose the mode's contract for a Slack digest; it is told later", dlog.WithCause(fields, err))
+		return "", err
 	}
 	delivery := wsm.DeliveryDeferred
 	if urgent {
@@ -151,11 +151,14 @@ func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, s
 	}, BriefNotice, Origin, delivery)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
-		return "", "could not compose a Slack digest; it is told later", err
+		w.deps.Log.Error(opNotice, "could not compose a Slack digest; it is told later", dlog.WithCause(fields, err))
+		return "", err
 	case briefprompt.StepMint:
-		return "", "could not mint a Slack digest's idempotency key; it is told later", err
+		w.deps.Log.Error(opNotice, "could not mint a Slack digest's idempotency key; it is told later", dlog.WithCause(fields, err))
+		return "", err
 	case briefprompt.StepSubmit:
-		return "", "could not submit a Slack digest to its subscriber; it is told later", err
+		w.deps.Log.Error(opNotice, "could not submit a Slack digest to its subscriber; it is told later", dlog.WithCause(fields, err))
+		return "", err
 	}
-	return turn, "", nil
+	return turn, nil
 }
