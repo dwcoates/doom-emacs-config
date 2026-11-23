@@ -1635,3 +1635,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-23 deploy-mediator(daemon/internal/workspace/history.go): A history read whose request ended first while adopting the book the workspace's shim persisted (its record read or the book's record) is recorded at INFO, not ERROR, as every layer around it records the same cut; a real failure is still recorded at ERROR.
 - 2026-11-23 deploy-mediator (landed in queue bypass mode): A history read whose request ended first while adopting the shim's persisted book is recorded at INFO, not ERROR.
 - 2026-11-23 feed-blank-census (landed in queue bypass mode): shim: the skill watch proves itself live and reports what changed before it was; webapp: the page census states the feed's geometry and warns feed.blank-view
+- 2026-11-23 feed-blank-census (landed in queue bypass mode): shim: the skill watch's liveness bound is three times the 1.3s a deploy's shim replacements were measured at
