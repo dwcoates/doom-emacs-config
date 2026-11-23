@@ -118,6 +118,25 @@ func TestAFoldedUnviewedWorkspaceIsVisible(t *testing.T) {
 	}
 }
 
+func TestAFoldedUnviewedWorkspaceStaysVisibleWhileItsTabOpens(t *testing.T) {
+	// Arrange: kept visible only by its unread result, which an open in
+	// flight draws as `inactive`.
+	r := arrange(t)
+	r.SetRegistry(foldedOne())
+	turnFinished(r, theWS)
+
+	// Act
+	r.SetOpening(theWS, true)
+
+	// Assert: the open is the editor acting on the visibility, and moves none.
+	if got := visibilities(t, r)[string(theWS)]; got != "unselected_visible" {
+		t.Fatalf("visibility = %s, want unselected_visible while the tab opens", got)
+	}
+	if got := statusName(onlyRow(t, r)); got != "inactive" {
+		t.Fatalf("status = %q, want the opening row drawn inactive", got)
+	}
+}
+
 func TestAFoldedStartingWorkspaceIsVisible(t *testing.T) {
 	// Arrange
 	r := arrange(t)

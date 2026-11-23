@@ -48,7 +48,27 @@ import (
 // workspace's own branch is NO ARM: it is the row's `async_merging` marker
 // beside whatever arm this resolves (`asyncMergingMarker`).
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, now time.Time, log dlog.Logger) string {
-	if s.opening || !s.live(session) && rec.Closed {
+	return openingOver(s, sessionArm(s, rec, session, status, now, log))
+}
+
+// openingOver is ARM as the row draws it: `inactive` while an open of the
+// workspace is in flight (its `opening` marker), ARM otherwise.
+func openingOver(s *wsState, arm string) string {
+	if s.opening {
+		return "inactive"
+	}
+	return arm
+}
+
+// sessionArm is statusArm without the opening marker: the arm the
+// workspace's own state resolves. THE VISIBILITY IS JUDGED BY IT, never by
+// the opening marker (2026-11-23): an open is the editor acting on a
+// visibility already decided, and judged by the marker's `inactive`, a folded
+// workspace kept visible only by its unread turn end lost its visibility the
+// moment its tab began to open, its tab was torn down, the open ended, and
+// it was visible again, hundreds of times a minute.
+func sessionArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, now time.Time, log dlog.Logger) string {
+	if !s.live(session) && rec.Closed {
 		return "inactive"
 	}
 	if hiddenColdGate(rec, now) {
