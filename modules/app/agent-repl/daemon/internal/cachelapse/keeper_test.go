@@ -736,6 +736,27 @@ func TestRecordDropsAProjectionForTheSelectedHiddenWorkspace(t *testing.T) {
 	}
 }
 
+func TestRecordDropsAProjectionForAWorkspaceNoLongerRegistered(t *testing.T) {
+	// Arrange
+	h := newHarness(t, hidden())
+	h.db.setErr = wsm.ErrNotFound
+	h.keeper.deadlines[theWorkspace] = lapseAt
+
+	// Act
+	h.keeper.record(context.Background(), theWorkspace, stated(lapseAt, nil))
+
+	// Assert
+	if _, armed := h.keeper.deadlines[theWorkspace]; armed || h.publishes != 0 {
+		t.Fatalf("armed %v with %d publishes, want no deadline and no publish", armed, h.publishes)
+	}
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "a cache lapse arrived for a workspace that is no longer registered; it is dropped"}) {
+		t.Fatalf("no record of the dropped projection: %v", h.log.Records())
+	}
+	if h.found(dlog.RecordQuery{Level: "error", Operation: opProjection}) {
+		t.Fatalf("an unregistered workspace logged an error: %v", h.log.Records())
+	}
+}
+
 func TestRecordLogsAWriteThatFails(t *testing.T) {
 	// Arrange
 	h := newHarness(t, hidden())
