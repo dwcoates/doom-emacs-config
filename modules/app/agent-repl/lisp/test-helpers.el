@@ -897,6 +897,7 @@ re-routes their frontend resolution instead."
          (agent-repl-open-tabs-sender #'agent-repl-test--open-tabs-answer-ready)
          (agent-repl-roster--walked nil)
          (agent-repl-roster--walked-hidden nil)
+         (agent-repl-roster--reconciled nil)
          (agent-repl-roster--tab-numbers nil))
      (unwind-protect
          (progn ,@body)

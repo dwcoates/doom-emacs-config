@@ -3115,6 +3115,91 @@ record reached no file at all."
                               (string-search "elisp.roster.reconcile:" text))
                             logs)))))
 
+;;;; ---- A push that changes nothing the walk reads walks nothing ----
+
+(defun agent-repl-test-roster--one-row (status &optional name)
+  "A roster of one repository holding row a, named NAME (default fix-login), at STATUS."
+  (agent-repl-test-roster--roster
+   :sections (list (agent-repl-test-roster--section
+                    "repo" (list (agent-repl-test-roster--row "a" (or name "fix-login") status))))))
+
+(defmacro agent-repl-test-roster--counting-walks (var &rest body)
+  "Run BODY with every row the walk reconciles counted into VAR."
+  (declare (indent 1))
+  `(let ((real (symbol-function 'agent-repl-roster--reconcile-row)))
+     (cl-letf (((symbol-function 'agent-repl-roster--reconcile-row)
+                (lambda (&rest args)
+                  (setq ,var (1+ ,var))
+                  (apply real args))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-a-push-that-moved-only-a-status-walks-no-row ()
+  "A push whose desired tabs are the last walk's reconciles no row."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((walked 0))
+      (agent-repl-roster-apply (agent-repl-test-roster--one-row :ready))
+      (agent-repl-test-roster--counting-walks walked
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--one-row :thinking)))
+      ;; Assert
+      (should (equal (list walked (agent-repl-test-roster--tabs)) '(0 ("fix-login")))))))
+
+(ert-deftest agent-repl-test-roster-a-walk-skipped-is-recorded-at-debug ()
+  "The skipped walk says so at DEBUG, with the tab count, and writes no INFO pass."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply (agent-repl-test-roster--one-row :ready))
+    (let (debug info)
+      (cl-letf (((symbol-function 'agent-repl--emit-log) (agent-repl-test--record-into debug))
+                ((symbol-function 'agent-repl--emit-info) (agent-repl-test--record-into info)))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--one-row :thinking)))
+      ;; Assert
+      (should (seq-some (lambda (text) (string-search "elisp.roster.reconcile-unchanged: tabs=1" text)) debug))
+      (should-not (seq-some (lambda (text) (string-search "elisp.roster.reconcile:" text)) info)))))
+
+(ert-deftest agent-repl-test-roster-a-skipped-walk-records-where-its-roster-placed-the-rows ()
+  "A skipped walk still records its roster as the state the next walk reads as before."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply (agent-repl-test-roster--one-row :ready))
+    (let ((next (agent-repl-test-roster--one-row :thinking)))
+      (setq next (plist-put next :revision 7))
+      ;; Act
+      (agent-repl-roster-apply next)
+      ;; Assert
+      (let ((want (agent-repl-roster--placed-of next)))
+        (should (equal (list (plist-get agent-repl-roster--placed :revision)
+                             (hash-table-keys (plist-get agent-repl-roster--placed :rows))
+                             (gethash "a" (plist-get agent-repl-roster--placed :rows)))
+                       (list 7 '("a") (gethash "a" (plist-get want :rows)))))))))
+
+(ert-deftest agent-repl-test-roster-a-renamed-row-is-walked ()
+  "A push that renames a row changes what the walk reads, so the walk runs."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((walked 0))
+      (agent-repl-roster-apply (agent-repl-test-roster--one-row :ready))
+      (agent-repl-test-roster--counting-walks walked
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--one-row :ready "fix-logout")))
+      ;; Assert
+      (should (equal (list walked (agent-repl-test-roster--tabs)) '(1 ("fix-logout")))))))
+
+(ert-deftest agent-repl-test-roster-a-tab-gone-under-an-unchanged-push-is-opened-again ()
+  "A wanted tab no longer standing makes the walk run though the push is unchanged."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((walked 0))
+      (agent-repl-roster-apply (agent-repl-test-roster--one-row :ready))
+      (remhash "fix-login" agent-repl--workspaces)
+      (agent-repl-test-roster--counting-walks walked
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--one-row :ready)))
+      ;; Assert
+      (should (equal (list walked (agent-repl-test-roster--tabs)) '(1 ("fix-login")))))))
+
 (defmacro agent-repl-test-roster--recording-bringup (var &rest body)
   "Run BODY with every bring-up publication appended to VAR, oldest first."
   (declare (indent 1))

@@ -259,6 +259,14 @@ The tab order is these less the tabs still held for their open (open-tabs.el).")
 (defvar agent-repl-roster--walked-hidden nil
   "The last reconcile's collapsed-repository tab names.")
 
+(defvar agent-repl-roster--reconciled nil
+  "The inputs of the last full reconcile walk, as `(DESIRED . LISTED-OPEN)'.
+DESIRED is the walk's desired rows, LISTED-OPEN the sorted ids the roster
+listed open.  A push whose inputs are these, while every tab they want
+stands under its name and no roster-owned tab is owed a teardown, changes
+nothing the walk would do, so the walk is skipped
+(`agent-repl-roster--walk-unchanged-p').")
+
 (defvar agent-repl-roster--tab-order nil
   "Workspace names in roster walk order — every workspace with a tab.
 No local ordering exists: the resolver orders the roster (priority
@@ -1295,18 +1303,60 @@ must never take down the reconciliation it is reporting on."
 A tab answered open meanwhile is ordered and selected by the walk itself,
 which sets the order and applies the selection once it is done.")
 
+(defun agent-repl-roster--walk-unchanged-p (inputs desired)
+  "Non-nil when a walk over INPUTS, whose desired rows are DESIRED, changes nothing.
+INPUTS are the last walk's own (`agent-repl-roster--reconciled'), every
+wanted tab stands under the name it wants, and every roster-owned tab is
+wanted, so the walk would open, rename and tear down nothing."
+  (and (equal inputs agent-repl-roster--reconciled)
+       (cl-every (lambda (want)
+                   (equal (agent-repl--ws-by-ref-id (plist-get want :id)) (plist-get want :name)))
+                 desired)
+       (let ((ids (make-hash-table :test 'equal)))
+         (dolist (want desired) (puthash (plist-get want :id) t ids))
+         (cl-every (lambda (name) (gethash (plist-get (agent-repl--ws-get name :ref) :id) ids))
+                   (agent-repl-roster--roster-owned-names)))))
+
 (defun agent-repl-roster-reconcile (roster)
   "Bring the tab bar in line with ROSTER and return the tab names in order.
 Opens a tab for each `closed = false' row that has none, renames the tab
 whose row's name changed, tears down every roster-owned tab whose row is
 gone or closed, and sets the tab ORDER to the walk order strictly.
 
+A PUSH THAT CHANGES NOTHING THE WALK READS WALKS NOTHING (2026-11-23).  A
+push that moved only statuses hands the walk the same desired rows, and the
+walk used to run whole for each: 92 passes in three minutes of a handover.
+Such a push is recorded at DEBUG and answers the order as it stands
+(`agent-repl-roster--walk-unchanged-p').
+
 A row that fails to reconcile is contained rather than fatal; see
 `agent-repl-roster--reconcile-row'."
   (let* ((desired (append (agent-repl-roster-desired-tabs roster)
                           (agent-repl-roster-desired-threads roster)))
-         (wanted-ids (make-hash-table :test 'equal))
          (listed-open (agent-repl-roster--listed-open-ids roster))
+         (inputs (cons desired (sort (hash-table-keys listed-open) #'string<))))
+    (if (agent-repl-roster--walk-unchanged-p inputs desired)
+        (progn
+          ;; WHERE THIS ROSTER PLACES THE ROWS is still the state the next
+          ;; walk reads as BEFORE, though this one opened and tore down nothing.
+          (setq agent-repl-roster--placed (agent-repl-roster--placed-of roster))
+          (agent-repl--log '(:agent-repl-central "roster reconciliation spans every workspace")
+                           "elisp.roster.reconcile-unchanged: tabs={tabs}"
+                           :tabs (length agent-repl-roster--tab-order))
+          agent-repl-roster--tab-order)
+      (prog1 (agent-repl-roster--walk roster desired listed-open)
+        (setq agent-repl-roster--reconciled inputs)))))
+
+(defun agent-repl-roster--placed-of (roster)
+  "Where ROSTER places every row, as `agent-repl-roster--placed' records it."
+  (list :rows (agent-repl-roster--placements roster)
+        :address agent-repl-roster--view-address
+        :revision (plist-get roster :revision)))
+
+(defun agent-repl-roster--walk (roster desired listed-open)
+  "Walk ROSTER's DESIRED rows into the tab bar; LISTED-OPEN are the ids it lists open.
+The whole of `agent-repl-roster-reconcile' for a push that changed what it reads."
+  (let* ((wanted-ids (make-hash-table :test 'equal))
          ;; Counted BEFORE the walk, because the walk is what makes rows
          ;; stop being tabless: asking the same question afterwards would
          ;; always answer zero.
@@ -1325,9 +1375,7 @@ A row that fails to reconcile is contained rather than fatal; see
          ;; WHERE THE ROWS STOOD BEFORE THIS ROSTER AND WHERE IT PUTS THEM,
          ;; so each tab opened or torn down records what decided it.
          (before agent-repl-roster--placed)
-         (after (list :rows (agent-repl-roster--placements roster)
-                      :address agent-repl-roster--view-address
-                      :revision (plist-get roster :revision))))
+         (after (agent-repl-roster--placed-of roster)))
     (dolist (want desired)
       (let ((fresh (null (agent-repl--ws-by-ref-id (plist-get want :id)))))
         ;; EVERY ROW IS RECONCILED AT ONCE, and its tab stays out of the bar

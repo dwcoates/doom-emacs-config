@@ -1135,6 +1135,7 @@ signals."
                 ;; next reconcile reads as the state before it.
                 (agent-repl-roster--placed nil)
                 (agent-repl-roster--view-address nil)
+                (agent-repl-roster--reconciled nil)
                 (agent-repl-itest--real-ws-put
                  (symbol-function 'agent-repl--ws-put))
                 (process-environment
