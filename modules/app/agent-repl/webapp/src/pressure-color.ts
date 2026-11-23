@@ -12,20 +12,21 @@ import { HUE_GREEN, HUE_ORANGE, HUE_RED, HUE_YELLOW, percentGradientColor, type 
 import { MalformedView } from "./rpc/malformed.js";
 
 /**
- * Where a pressure percentage's colors sit (owner, 2026-09-30): green below
- * 40, yellow by 70, orange by 90, red at 90 and above. Between 40 and 90 the
- * hue runs continuously, so 55 sits halfway between green and yellow and 80
- * halfway between yellow and orange; 90 is a hard step to red.
+ * Where a pressure percentage's colors sit (owner, 2026-11-23): green below
+ * 15, yellow at 30, orange at 50, red at 75 and above. Between 15 and 75 the
+ * hue runs continuously, so 22.5 sits halfway between green and yellow and 40
+ * halfway between yellow and orange. Against the 1M-token window the chip
+ * assumes, yellow starts at 300k, orange at 500k and red at 750k.
  *
  * EMACS COLORS THE ROLLBACK PICKER BY THE SAME RULE: its twin is
  * `agent-repl--input-pressure-percent-stops` (lisp/input.el), and the two
  * tables change together.
  */
 const PRESSURE_PERCENT_STOPS: readonly PercentStop[] = [
-  { at: 40, hue: HUE_GREEN },
-  { at: 70, hue: HUE_YELLOW },
-  { at: 90, hue: HUE_ORANGE },
-  { at: 90, hue: HUE_RED },
+  { at: 15, hue: HUE_GREEN },
+  { at: 30, hue: HUE_YELLOW },
+  { at: 50, hue: HUE_ORANGE },
+  { at: 75, hue: HUE_RED },
 ];
 
 /**
