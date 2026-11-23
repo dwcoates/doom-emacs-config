@@ -59,7 +59,9 @@ func mentionedCommands(text string) []string {
 	return out
 }
 
-// readSkills answers each skill's SKILL.md, by skill name.
+// readSkills answers each skill's text by name: its SKILL.md followed by every
+// runbook under its runbooks/ directory, since a router skill names its
+// commands in the runbooks it routes to.
 func readSkills(t *testing.T) map[string]string {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(moduleDir, "skills", "*", "SKILL.md"))
@@ -72,7 +74,19 @@ func readSkills(t *testing.T) map[string]string {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		skills[filepath.Base(filepath.Dir(path))] = string(raw)
+		text := string(raw)
+		runbooks, err := filepath.Glob(filepath.Join(filepath.Dir(path), "runbooks", "*.md"))
+		if err != nil {
+			t.Fatalf("glob the runbooks of %s: %v", path, err)
+		}
+		for _, runbook := range runbooks {
+			body, err := os.ReadFile(runbook)
+			if err != nil {
+				t.Fatalf("read %s: %v", runbook, err)
+			}
+			text += "\n" + string(body)
+		}
+		skills[filepath.Base(filepath.Dir(path))] = text
 	}
 	return skills
 }
