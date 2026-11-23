@@ -200,29 +200,20 @@ default, in SNAPSHOT order."
             (push symbol applied))))))
     (nreverse applied)))
 
-(defun agent-repl--elisp-with-defaults (load)
-  "Call LOAD, then give each option whose default it changed the new default.
-Returns LOAD's answer."
-  (let* ((snapshot (agent-repl--elisp-defaults-snapshot))
-         (answer (funcall load)))
-    (agent-repl--elisp-defaults-apply snapshot)
-    answer))
-
-(defun agent-repl-elisp-hot-load (files)
-  "Load the elisp sources FILES in order, applying the defaults they changed.
-The runtime\='s `hot-reload' verb asks this, as a deploy\='s reload loads
-the whole set: a default one of FILES changed reaches the running editor
-\=(`agent-repl--elisp-with-defaults').  A file that fails to load signals,
-so the verb fails loudly.  Returns t."
-  (agent-repl--elisp-with-defaults
-   (lambda ()
-     (dolist (file files)
-       (agent-repl--info agent-repl--elisp-build-log-scope
-                         "elisp.elisp-build.hot-load file={file}" :file (prin1-to-string file))
-       (agent-repl--elisp-reload-load-file file))
-     t)))
-
-;;;; ---- The pushed reload ----
+;;;; ---- Loading a build's files ----
+;;
+;; FROM THE FIRST LOAD TO THE LAST, NOTHING OF AGENT-REPL'S IS CALLED BY
+;; NAME.  The code loading the files is the build being replaced, and any
+;; load may redefine any agent-repl symbol, changing its kind or its
+;; signature.  On 2026-11-22 the first module of a deploy's reload
+;; \(log-site.el) turned `agent-repl--log' from a function into a macro; the
+;; replaced loop's next log call signalled `invalid-function', and the reload
+;; died after one module, leaving the editor half-reloaded with its logging
+;; dead.  So everything the loop needs is computed before the first load
+;; \(each file, its hash, the load wrapper's function object), the loop runs
+;; only Emacs primitives and that captured object and answers each file's
+;; outcome as plain data, and everything after the last load is reached by a
+;; call by name, so it is the code of the build just loaded.
 
 (defun agent-repl--elisp-normalize-root (root)
   "Return ROOT as an absolute directory name, for comparing module roots."
@@ -232,6 +223,78 @@ so the verb fails loudly.  Returns t."
   "External-boundary wrapper: `load' the elisp source FILE into this Emacs.
 The exact FILE, never a `.elc' beside it (NOSUFFIX), quietly."
   (load file nil t t))
+
+(defun agent-repl--elisp-load-files (plan)
+  "Load PLAN's files in order, calling nothing of agent-repl's by name.
+PLAN is a list of plists (:module MODULE :file FILE :sha SHA256 :skip
+OUTCOME), only :file required; an item whose :skip is non-nil is not loaded
+and has that outcome.  THE ONE LOOP both a deploy's reload and the
+runtime's hot load run.
+
+The load wrapper `agent-repl--elisp-reload-load-file' is captured as a
+function object once, before the first load, so a load that redefines it
+cannot change what the loop calls; past that, the loop uses Emacs
+primitives alone (see the section's commentary).  A file that signals is
+a `failed' outcome and the rest still load: stopping at the first failure
+would strand every later module's timers.
+
+Returns one plist per item, in PLAN's order: (:module :file :sha :outcome
+OUTCOME :message MESSAGE :error ERROR), OUTCOME `loaded', `failed' or the
+item's :skip, and for `failed' MESSAGE the error's message and ERROR its
+`prin1' text."
+  (let ((load (symbol-function 'agent-repl--elisp-reload-load-file))
+        (outcomes nil))
+    (dolist (item plan)
+      (let ((file (plist-get item :file))
+            (outcome (plist-get item :skip))
+            (message nil)
+            (printed nil))
+        (unless outcome
+          (condition-case err
+              (progn (funcall load file)
+                     (setq outcome 'loaded))
+            (error
+             (setq outcome 'failed
+                   message (error-message-string err)
+                   printed (prin1-to-string err)))))
+        (setq outcomes (cons (list :module (plist-get item :module) :file file
+                                   :sha (plist-get item :sha) :outcome outcome
+                                   :message message :error printed)
+                             outcomes))))
+    (nreverse outcomes)))
+
+(defun agent-repl-elisp-hot-load (files)
+  "Load the elisp sources FILES in order, applying the defaults they changed.
+The runtime\='s `hot-reload' verb asks this, as a deploy\='s reload loads
+the whole set, through the same loop (`agent-repl--elisp-load-files'): a
+default one of FILES changed reaches the running editor.  Each file is
+recorded once every file has been tried; a file that fails to load is an
+ERROR, the files after it still load, and the hot load then signals, so
+the verb fails loudly.  Returns t."
+  (let* ((plan (mapcar (lambda (file) (list :file file)) files))
+         (snapshot (agent-repl--elisp-defaults-snapshot))
+         (outcomes (agent-repl--elisp-load-files plan))
+         (failed nil))
+    (dolist (outcome outcomes)
+      (agent-repl--info agent-repl--elisp-build-log-scope
+                        "elisp.elisp-build.hot-load file={file}" :file (prin1-to-string (plist-get outcome :file)))
+      (pcase-exhaustive (plist-get outcome :outcome)
+        ('loaded nil)
+        ('failed
+         (agent-repl--error agent-repl--elisp-build-log-scope
+                            "elisp.elisp-build.hot-load-failed file={file} error={error}"
+                            :file (prin1-to-string (plist-get outcome :file)) :error (plist-get outcome :error))
+         (push outcome failed))))
+    (agent-repl--elisp-defaults-apply snapshot)
+    (when failed
+      (error "agent-repl: hot load: %d file(s) failed to load: %s"
+             (length failed)
+             (mapconcat (lambda (outcome)
+                          (format "%s: %s" (plist-get outcome :file) (plist-get outcome :message)))
+                        (nreverse failed) "; ")))
+    t))
+
+;;;; ---- The pushed reload ----
 
 (defun agent-repl-elisp-reload-handle (reload &optional on-done)
   "Handle a pushed `DaemonReloadElisp' RELOAD, a plist (:module-root :build).
@@ -270,44 +333,57 @@ signal still propagates."
         (setq loaded (agent-repl--elisp-reload-run root build))
       (when on-done (funcall on-done loaded)))))
 
-(defun agent-repl--elisp-reload-load-modules (root modules)
-  "Load MODULES' sources under ROOT in order, and record what was loaded.
-Returns (ENTRIES . FAILURES): ENTRIES the (MODULE . SHA256) of every source
-found, in order, and FAILURES a list of (MODULE . REASON).  A module that
-fails is logged at ERROR and the rest still load: stopping at the first
-failure would strand every later module's timers too."
+(defun agent-repl--elisp-reload-plan (root modules)
+  "Return the load plan of MODULES' sources under ROOT, for the shared loop.
+One item per module, in order (`agent-repl--elisp-load-files'): its file,
+its SHA-256, and a :skip of `refused-test' for a `test-' module and of
+`absent' for a module whose file is absent.  Reads the files; loads
+nothing."
+  (mapcar (lambda (module)
+            (let* ((file (agent-repl--elisp-module-file root module))
+                   (test-p (string-prefix-p "test-" module))
+                   (sha (and (not test-p) (agent-repl--elisp-file-sha256 file))))
+              (list :module module :file file :sha sha
+                    :skip (cond (test-p 'refused-test)
+                                ((null sha) 'absent)))))
+          modules))
+
+(defun agent-repl--elisp-reload-record-outcomes (outcomes)
+  "Record each module's load OUTCOMES, once every module has been tried.
+OUTCOMES is `agent-repl--elisp-load-files''s answer for a reload's plan.
+A loaded module is recorded at the debug rung; a refused, absent or failed
+one at ERROR.  Returns (ENTRIES . FAILURES): ENTRIES the (MODULE . SHA256)
+of every source found, in order, and FAILURES a list of (MODULE . REASON)."
   (let (entries failures)
-    (dolist (module modules)
-      (let* ((file (agent-repl--elisp-module-file root module))
-             (test-p (string-prefix-p "test-" module))
-             (sha (and (not test-p) (agent-repl--elisp-file-sha256 file))))
-        (cond
-         (test-p
-          ;; A test file is a batch-only harness; loading one into a live
-          ;; Emacs once disarmed its external boundaries and redirected its
-          ;; state.  config.el never names one, so this is a broken loader.
-          (push (cons module "a test file is never loaded into a running Emacs") failures)
-          (agent-repl--error agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.reload-test-module-refused module={module} file={file}"
-                             :module module :file (prin1-to-string file)))
-         ((null sha)
-          (push (cons module "the file is absent") failures)
-          (agent-repl--error agent-repl--elisp-build-log-scope
-                             "elisp.elisp-build.reload-module-absent module={module} file={file}"
-                             :module module :file (prin1-to-string file)))
-         (t
-          (push (cons module sha) entries)
-          (condition-case err
-              (progn
-                (agent-repl--elisp-reload-load-file file)
-                (agent-repl--log agent-repl--elisp-build-log-scope
-                                 "elisp.elisp-build.reload-module-loaded module={module} sha256={sha256}"
-                                 :module module :sha256 sha))
-            (error
-             (push (cons module (error-message-string err)) failures)
-             (agent-repl--error agent-repl--elisp-build-log-scope
-                                "elisp.elisp-build.reload-module-failed module={module} file={file} error={error}"
-                                :module module :file (prin1-to-string file) :error (prin1-to-string err))))))))
+    (dolist (outcome outcomes)
+      (let ((module (plist-get outcome :module))
+            (file (plist-get outcome :file))
+            (sha (plist-get outcome :sha)))
+        (pcase-exhaustive (plist-get outcome :outcome)
+          ('refused-test
+           ;; A test file is a batch-only harness; loading one into a live
+           ;; Emacs once disarmed its external boundaries and redirected its
+           ;; state.  config.el never names one, so this is a broken loader.
+           (push (cons module "a test file is never loaded into a running Emacs") failures)
+           (agent-repl--error agent-repl--elisp-build-log-scope
+                              "elisp.elisp-build.reload-test-module-refused module={module} file={file}"
+                              :module module :file (prin1-to-string file)))
+          ('absent
+           (push (cons module "the file is absent") failures)
+           (agent-repl--error agent-repl--elisp-build-log-scope
+                              "elisp.elisp-build.reload-module-absent module={module} file={file}"
+                              :module module :file (prin1-to-string file)))
+          ('loaded
+           (push (cons module sha) entries)
+           (agent-repl--log agent-repl--elisp-build-log-scope
+                            "elisp.elisp-build.reload-module-loaded module={module} sha256={sha256}"
+                            :module module :sha256 sha))
+          ('failed
+           (push (cons module sha) entries)
+           (push (cons module (plist-get outcome :message)) failures)
+           (agent-repl--error agent-repl--elisp-build-log-scope
+                              "elisp.elisp-build.reload-module-failed module={module} file={file} error={error}"
+                              :module module :file (prin1-to-string file) :error (plist-get outcome :error))))))
     (cons (nreverse entries) (nreverse failures))))
 
 (defun agent-repl--elisp-reload-report-heartbeat (result)
@@ -423,11 +499,14 @@ failure is already recorded at ERROR."
        (message "agent-repl: elisp reload FAILED -- %s could not be read: %s"
                 config (error-message-string err))))
     (when modules
-      (let* ((started (agent-repl--now))
-             (loaded (agent-repl--elisp-with-defaults
-                      (lambda () (agent-repl--elisp-reload-load-modules root modules))))
-             (entries (car loaded))
-             (failures (cdr loaded)))
+      (let* ((plan (agent-repl--elisp-reload-plan root modules))
+             (snapshot (agent-repl--elisp-defaults-snapshot))
+             (started (agent-repl--now))
+             (outcomes (agent-repl--elisp-load-files plan))
+             (recorded (agent-repl--elisp-reload-record-outcomes outcomes))
+             (entries (car recorded))
+             (failures (cdr recorded)))
+        (agent-repl--elisp-defaults-apply snapshot)
         (setq agent-repl--elisp-module-builds entries)
         (agent-repl--elisp-reload-report-heartbeat (agent-repl--assert-heartbeat-armed))
         ;; The load replaced every compiled function with its interpreted

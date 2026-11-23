@@ -860,21 +860,6 @@ Its value and declared default are restored afterwards."
       ;; Assert
       (should (and (custom-variable-p 'fill-column) (null (assq 'fill-column snapshot)))))))
 
-(ert-deftest agent-repl-test-eb-defaults-with-defaults-applies-what-the-load-changed ()
-  "A load that changes an untouched option's default leaves the option on the new one."
-  (agent-repl-test-eb--with-harness
-    (agent-repl-test-eb--with-option "old"
-      ;; Act
-      (agent-repl--elisp-with-defaults (lambda () (agent-repl-test-eb--declare-default "new")))
-      ;; Assert
-      (should (equal agent-repl-test-eb--option "new")))))
-
-(ert-deftest agent-repl-test-eb-defaults-with-defaults-answers-the-loads-answer ()
-  "The wrapped load's answer is the wrapper's."
-  (agent-repl-test-eb--with-harness
-    ;; Act + Assert
-    (should (eq (agent-repl--elisp-with-defaults (lambda () 'loaded)) 'loaded))))
-
 (ert-deftest agent-repl-test-eb-defaults-hot-load-loads-every-file-in-order ()
   "The runtime's hot load loads each file it is handed, in order, and answers t."
   (agent-repl-test-eb--with-harness
@@ -912,6 +897,241 @@ Its value and declared default are restored afterwards."
     (setq agent-repl-test-eb--failing-loads '("a"))
     ;; Act + Assert
     (should-error (agent-repl-elisp-hot-load '("/m/lisp/a.el")))))
+
+(ert-deftest agent-repl-test-eb-defaults-hot-load-continues-past-a-failing-file ()
+  "The files after one that fails to load are still loaded before the hot load signals."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (setq agent-repl-test-eb--failing-loads '("a"))
+    ;; Act
+    (ignore-errors (agent-repl-elisp-hot-load '("/m/lisp/a.el" "/m/lisp/b.el")))
+    ;; Assert
+    (should (equal (reverse agent-repl-test-eb--loaded) '("/m/lisp/a.el" "/m/lisp/b.el")))))
+
+(ert-deftest agent-repl-test-eb-defaults-hot-load-failure-is-recorded-before-the-signal ()
+  "A failing file's records are written before the hot load signals: every file at INFO, the failure at ERROR."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (setq agent-repl-test-eb--failing-loads '("a"))
+    (let ((records-at-signal nil))
+      ;; Act
+      (condition-case nil
+          (agent-repl-elisp-hot-load '("/m/lisp/a.el" "/m/lisp/b.el"))
+        (error (setq records-at-signal (reverse agent-repl-test-eb--logs))))
+      ;; Assert
+      (should (equal (seq-filter (lambda (record) (string-prefix-p "elisp.elisp-build.hot-load" (cdr record)))
+                                 records-at-signal)
+                     '((:info . "elisp.elisp-build.hot-load file=\"/m/lisp/a.el\"")
+                       (:error . "elisp.elisp-build.hot-load-failed file=\"/m/lisp/a.el\" error=(error \"Boom in a\")")
+                       (:info . "elisp.elisp-build.hot-load file=\"/m/lisp/b.el\"")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-hot-load-failure-signal-names-the-file ()
+  "The hot load's signal names each file that failed and its error's message."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (setq agent-repl-test-eb--failing-loads '("a"))
+    ;; Act
+    (let ((err (should-error (agent-repl-elisp-hot-load '("/m/lisp/a.el" "/m/lisp/b.el")))))
+      ;; Assert
+      (should (equal (error-message-string err)
+                     "agent-repl: hot load: 1 file(s) failed to load: /m/lisp/a.el: Boom in a")))))
+
+;;;; ---- The shared load loop ----
+;;
+;; The loop is the replaced build's code, and every load may redefine any
+;; agent-repl symbol, so from the first load to the last it calls none of
+;; them by name.  The breaking load proves it: its first load makes EVERY
+;; fbound agent-repl symbol signal when called, as a build that changed
+;; their kinds or signatures would, and its last load restores them, as the
+;; new build's definitions would stand.
+
+(defun agent-repl-test-eb--break-agent-repl ()
+  "Make every fbound agent-repl symbol signal when called; answer what each held.
+Answers ((SYMBOL . DEFINITION) ...) for restoring them."
+  (let (saved)
+    (mapatoms (lambda (symbol)
+                (when (and (fboundp symbol)
+                           (string-prefix-p "agent-repl" (symbol-name symbol)))
+                  (push (cons symbol (symbol-function symbol)) saved))))
+    (dolist (entry saved)
+      (let ((name (car entry)))
+        (fset name (lambda (&rest _) (error "%s was called by name between loads" name)))))
+    saved))
+
+(defmacro agent-repl-test-eb--with-breaking-load (first last &rest body)
+  "Run BODY with a load stub breaking agent-repl at file FIRST and restoring it at LAST.
+Each load is recorded as the harness's stub records it.  The loop's own
+code must not reach a broken symbol; whatever happens, BODY's end
+restores every symbol still broken."
+  (declare (indent 2))
+  (let ((saved (make-symbol "saved"))
+        (first-file (make-symbol "first-file"))
+        (last-file (make-symbol "last-file")))
+    `(let ((,saved nil)
+           (,first-file ,first)
+           (,last-file ,last))
+       (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                  (lambda (file)
+                    (push file agent-repl-test-eb--loaded)
+                    (when (equal file ,first-file)
+                      (setq ,saved (agent-repl-test-eb--break-agent-repl)))
+                    (when (equal file ,last-file)
+                      (dolist (entry ,saved) (fset (car entry) (cdr entry)))
+                      (setq ,saved nil)))))
+         (unwind-protect
+             (progn ,@body)
+           (dolist (entry ,saved) (fset (car entry) (cdr entry))))))))
+
+(ert-deftest agent-repl-test-eb-reload-calls-nothing-by-name-between-loads ()
+  "A reload whose first load breaks every agent-repl function still loads every module and succeeds."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status" "autosave"))
+      (let ((build (agent-repl-elisp-build-of
+                    (agent-repl-elisp-build-entries root '("core" "status" "autosave"))))
+            (file (lambda (m) (expand-file-name (format "lisp/%s.el" m) root))))
+        (agent-repl-test-eb--with-breaking-load (funcall file "core") (funcall file "autosave")
+          ;; Act
+          (let ((answer (agent-repl--elisp-reload-run root build)))
+            ;; Assert
+            (should (equal (list answer (mapcar #'file-name-base (reverse agent-repl-test-eb--loaded)))
+                           '(t ("core" "status" "autosave"))))))))))
+
+(ert-deftest agent-repl-test-eb-reload-records-each-module-after-a-breaking-load ()
+  "A reload whose first load breaks every agent-repl function still records each module afterwards."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status" "autosave"))
+      (let ((file (lambda (m) (expand-file-name (format "lisp/%s.el" m) root))))
+        (agent-repl-test-eb--with-breaking-load (funcall file "core") (funcall file "autosave")
+          ;; Act
+          (agent-repl--elisp-reload-run root "any")
+          ;; Assert
+          (should (equal (mapcar (lambda (record) (car (split-string (cdr record) " sha256=")))
+                                 (reverse (agent-repl-test-eb--logged :log "elisp.elisp-build.reload-module-loaded")))
+                         '("elisp.elisp-build.reload-module-loaded module=core"
+                           "elisp.elisp-build.reload-module-loaded module=status"
+                           "elisp.elisp-build.reload-module-loaded module=autosave"))))))))
+
+(ert-deftest agent-repl-test-eb-hot-load-calls-nothing-by-name-between-loads ()
+  "A hot load whose first load breaks every agent-repl function still loads every file and records each."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-breaking-load "/m/lisp/a.el" "/m/lisp/c.el"
+      ;; Act
+      (let ((answer (agent-repl-elisp-hot-load '("/m/lisp/a.el" "/m/lisp/b.el" "/m/lisp/c.el"))))
+        ;; Assert
+        (should (equal (list answer
+                             (reverse agent-repl-test-eb--loaded)
+                             (reverse (agent-repl-test-eb--logged :info "elisp.elisp-build.hot-load")))
+                       '(t ("/m/lisp/a.el" "/m/lisp/b.el" "/m/lisp/c.el")
+                           ((:info . "elisp.elisp-build.hot-load file=\"/m/lisp/a.el\"")
+                            (:info . "elisp.elisp-build.hot-load file=\"/m/lisp/b.el\"")
+                            (:info . "elisp.elisp-build.hot-load file=\"/m/lisp/c.el\"")))))))))
+
+(ert-deftest agent-repl-test-eb-reload-failed-module-is-recorded-after-the-loads ()
+  "A failed module's ERROR is written once every module has been tried, and the rest still load."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status" "autosave"))
+      (setq agent-repl-test-eb--failing-loads '("status"))
+      (let ((loads-at-record nil))
+        (cl-letf* ((emit-error (symbol-function 'agent-repl--emit-error))
+                   ((symbol-function 'agent-repl--emit-error)
+                    (lambda (ws site &rest values)
+                      (when (string-prefix-p "elisp.elisp-build.reload-module-failed"
+                                             (agent-repl-log-site-render site values))
+                        (push (length agent-repl-test-eb--loaded) loads-at-record))
+                      (apply emit-error ws site values))))
+          ;; Act
+          (agent-repl--elisp-reload-run root "any"))
+        ;; Assert
+        (should (equal loads-at-record '(3)))))))
+
+(defun agent-repl-test-eb--shared-loop-stub (plans)
+  "Answer a stand-in for the shared loop recording each plan in the cons PLANS.
+It answers every item loaded without loading anything."
+  (lambda (plan)
+    (push plan (car plans))
+    (mapcar (lambda (item)
+              (list :module (plist-get item :module) :file (plist-get item :file)
+                    :sha (plist-get item :sha) :outcome (or (plist-get item :skip) 'loaded)
+                    :message nil :error nil))
+            plan)))
+
+(ert-deftest agent-repl-test-eb-reload-loads-only-through-the-shared-loop ()
+  "A reload hands every module to the shared loop and loads nothing itself."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (let ((plans (list nil)))
+        (cl-letf (((symbol-function 'agent-repl--elisp-load-files)
+                   (agent-repl-test-eb--shared-loop-stub plans)))
+          ;; Act
+          (agent-repl--elisp-reload-run root "any"))
+        ;; Assert
+        (should (equal (list (mapcar (lambda (plan) (mapcar (lambda (item) (plist-get item :module)) plan))
+                                     (car plans))
+                             agent-repl-test-eb--loaded)
+                       '((("core" "status")) nil)))))))
+
+(ert-deftest agent-repl-test-eb-hot-load-loads-only-through-the-shared-loop ()
+  "A hot load hands every file to the shared loop and loads nothing itself."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((plans (list nil)))
+      (cl-letf (((symbol-function 'agent-repl--elisp-load-files)
+                 (agent-repl-test-eb--shared-loop-stub plans)))
+        ;; Act
+        (agent-repl-elisp-hot-load '("/m/lisp/a.el" "/m/lisp/b.el")))
+      ;; Assert
+      (should (equal (list (mapcar (lambda (plan) (mapcar (lambda (item) (plist-get item :file)) plan))
+                                   (car plans))
+                           agent-repl-test-eb--loaded)
+                     '((("/m/lisp/a.el" "/m/lisp/b.el")) nil))))))
+
+(ert-deftest agent-repl-test-eb-load-files-answers-a-skipped-item-unloaded ()
+  "An item with a :skip is not loaded and answers its skip as its outcome."
+  (agent-repl-test-eb--with-harness
+    ;; Act
+    (let ((outcomes (agent-repl--elisp-load-files
+                     '((:module "ghost" :file "/m/lisp/ghost.el" :sha nil :skip absent)))))
+      ;; Assert
+      (should (equal (list outcomes agent-repl-test-eb--loaded)
+                     '(((:module "ghost" :file "/m/lisp/ghost.el" :sha nil :outcome absent
+                         :message nil :error nil))
+                       nil))))))
+
+(ert-deftest agent-repl-test-eb-load-files-answers-a-failed-loads-message-and-error ()
+  "A load that signals answers `failed' with the error's message and its `prin1' text."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (setq agent-repl-test-eb--failing-loads '("a"))
+    ;; Act
+    (let ((outcomes (agent-repl--elisp-load-files '((:module "a" :file "/m/lisp/a.el" :sha "aa")))))
+      ;; Assert
+      (should (equal outcomes
+                     '((:module "a" :file "/m/lisp/a.el" :sha "aa" :outcome failed
+                        :message "Boom in a" :error "(error \"Boom in a\")")))))))
+
+(ert-deftest agent-repl-test-eb-load-files-uses-the-wrapper-captured-before-the-first-load ()
+  "A load that redefines the load wrapper does not change what the loop loads with."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((redefined-calls nil))
+      (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                 (lambda (file)
+                   (push file agent-repl-test-eb--loaded)
+                   (fset 'agent-repl--elisp-reload-load-file
+                         (lambda (other) (push other redefined-calls))))))
+        ;; Act
+        (agent-repl--elisp-load-files '((:file "/m/lisp/a.el") (:file "/m/lisp/b.el"))))
+      ;; Assert
+      (should (equal (list (reverse agent-repl-test-eb--loaded) redefined-calls)
+                     '(("/m/lisp/a.el" "/m/lisp/b.el") nil))))))
 
 (ert-deftest agent-repl-test-eb-defaults-reload-applies-a-changed-default ()
   "A pushed reload that changes an untouched option's default leaves the option on the new one."
