@@ -38,12 +38,14 @@ const (
 	// window with an eight-minute margin against a slow turn. Deps.Interval
 	// carries it, or a test run's compressed cadence (IntervalFromEnv).
 	KeepaliveInterval = 52 * time.Minute
-	// StandDownGrace is how long a session must have been free before a beat
-	// stands it down: the user prompts with no shim start for about an
-	// interval after the work ends (owner ruling, 2026-10-26). It is NOT the
-	// beat cadence (Deps.Interval), so a test run's compressed cadence never
-	// cycles its sessions down.
-	StandDownGrace = KeepaliveInterval
+	// StandDownGrace is how long a session must have been idle before it is
+	// parked: the user prompts with no shim start for twenty minutes after
+	// the work ends (owner ruling, 2026-11-23, which shortens the one
+	// interval of 2026-10-26). The idle park (ownIdle) and the cold park
+	// (ownCold) take it once it runs out, and a beat keeps up a session that
+	// fell free less than it ago. It is NOT the beat cadence (Deps.Interval),
+	// so a test run's compressed cadence never cycles its sessions down.
+	StandDownGrace = 20 * time.Minute
 	// RestoreLead is how long before its beat a parked session is restored.
 	// A shim that takes longer than this to start is a defect of its own
 	// (owner ruling, 2026-10-26).
@@ -137,7 +139,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		// A BEAT THAT IS NOT OWED IS NOT OWED EARLY EITHER.
 		delete(k.early, ws)
 		k.owesNone(ctx, log, record, why)
-		k.own(ctx, log, record, queued, false, nb, why)
+		k.own(ctx, log, record, queued, time.Time{}, nb, why)
 		return beatPlan{}, false
 	}
 	// A WORKSPACE WHOSE DIRECTORY IS GONE OWES NO KEEP-ALIVE: no session can
@@ -239,7 +241,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		return none(noBeatSweep, "it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
 	k.owesAgain(ctx, log, record)
-	k.own(ctx, log, record, queued, true, noBeatCold, "")
+	k.own(ctx, log, record, queued, plan.due, noBeatCold, "")
 	return plan, true
 }
 

@@ -177,6 +177,34 @@ var cycleReason = standDownReason{
 	remote:  remoteSpares,
 }
 
+// AN IDLE SESSION IS PARKED TWENTY MINUTES AFTER ITS WORK (owner ruling,
+// 2026-11-23). The keep-alive cycle stood a session down only once its next
+// beat had gone out, 52 minutes after its last turn, so an idle shim and its
+// vendor child held ~350MB for most of every hour. The cache keeper now asks
+// for this park once the session has been idle cachelapse.StandDownGrace
+// (cachelapse.Keeper.ownIdle), under the keep-alive cycle's rules; the keeper
+// still restores it a minute before each beat it owes, and the beat's own
+// stand-down parks it again after.
+
+// opIdlePark is the operation an idle session's park records under.
+const opIdlePark = "daemon.drain.idle_park"
+
+// idleParkReason is an idle session's park reason.
+var idleParkReason = standDownReason{
+	op:      opIdlePark,
+	detail:  "parked after its idle grace with its cache warm; the transcript was left as it stood",
+	done:    logsite.Msg("parked an idle session until its next keep-alive"),
+	life:    shimlife.StandDownIdle,
+	trigger: "idle_park",
+	remote:  remoteSpares,
+}
+
+// IdleDown asks for the park of WS's session, idle since SINCE. It returns at
+// once.
+func (c *controller) IdleDown(ws ids.WorkspaceID, since time.Time) {
+	c.askDown(ws, since, idleParkReason, nil)
+}
+
 // CycleDown asks for the stand-down of WS's session after the keep-alive asked
 // at BEAT. It returns at once; the attempt runs on the detached lifetime. A
 // later beat's ask replaces the earlier one's instant.

@@ -80,19 +80,20 @@ type standing struct {
 }
 
 // own gives RECORD's session its one stand-down owner and asks the owner's
-// stand-down when the owner is the visit, or the cold park once its grace
-// is out. OWED is a beat owed; NB and WHY are why none is owed
-// otherwise. QUEUED is a merge standing in a queue.
+// stand-down when the owner is the visit, or the cold park or the idle park
+// once its grace is out. BEAT is the next keep-alive owed, zero when none is;
+// NB and WHY are why none is owed otherwise. QUEUED is a merge standing in a
+// queue.
 //
 // THE ASK IS MADE ON EVERY RECONCILE, not only when the owner changes: the
 // drain settles an ask it finds in view without parking, and the next edge
 // must ask again. The drain coalesces repeated asks.
-func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace, queued, owed bool, nb noBeat, why string) {
+func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace, queued bool, beat time.Time, nb noBeat, why string) {
 	ws := record.ID
-	// THE COLD PARK'S INSTANT IS ARMED ONLY WHILE IT OWNS THE SESSION:
-	// ownCold re-arms it from the row.
-	armed, wasArmed := k.coldDue[ws]
-	delete(k.coldDue, ws)
+	// AN IDLE PARK'S INSTANT IS ARMED ONLY WHILE ITS OWNER OWNS THE SESSION:
+	// ownCold and ownIdle re-arm it from the row.
+	armed, wasArmed := k.idleDue[ws]
+	delete(k.idleDue, ws)
 	if _, served := k.deps.Shim(ws); !served {
 		k.endStoodDownVisit(ctx, log, record)
 		k.disown(log, ws)
@@ -124,8 +125,9 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 	}
 	_, lapseArmed := k.deadlines[ws]
 	switch {
-	case owed:
-		k.setStanding(log, ws, standing{owner: ownerCycle}, "it owes keep-alives; it is stood down after the next one")
+	case !beat.IsZero():
+		k.setStanding(log, ws, standing{owner: ownerCycle}, "it owes keep-alives; it is parked once idle, and restored before each beat")
+		k.ownIdle(ctx, log, record, beat, armed, wasArmed)
 	case record.LetsCacheLapse() && !queued && lapseArmed:
 		k.setStanding(log, ws, standing{owner: ownerLapse}, "its cache is left to lapse, and the lapse stands it down")
 	case nb == noBeatSweep:
@@ -133,62 +135,125 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 	case nb == noBeatNoSession:
 		k.disown(log, ws)
 	default:
-		k.ownCold(ctx, log, ws, why, armed, wasArmed)
+		k.ownCold(ctx, log, record, why, armed, wasArmed)
 	}
 }
 
-// ownCold gives WS's session to the cold park, which takes it once the
-// session has been idle StandDownGrace since its last engagement, and arms
-// that instant until then (coldParksDue).
+// ownCold gives RECORD's session to the cold park, which takes it once the
+// session has been idle StandDownGrace (idleSince), and arms that instant
+// until then (idleParksDue).
 //
-// THE SAME GRACE AS THE KEEP-ALIVE CYCLE'S (owner ruling, 2026-10-26): the
-// user prompts with no shim start for about an interval after the work. A
-// session that came up cold for a reason -- a new workspace's first prompt
-// on its way, a cold gate's answer re-opening the session the user asked
-// for -- is not parked under it; one adopted after hours idle is parked at
-// once. The engagement is on the session's row, so a successor arms the same
-// instant. The parks the keeper takes the moment it learns the cache cold
-// (a gate raised, a beat judged lapsed) are not this one, and take no grace.
-// ARMED is the instant armed before this decision, when WASARMED, so its
-// wait is recorded at INFO only when it moves.
-func (k *Keeper) ownCold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, why string, armed time.Time, wasArmed bool) {
+// THE SAME GRACE AS THE IDLE PARK'S (owner rulings, 2026-10-26 and
+// 2026-11-23): the user prompts with no shim start for StandDownGrace after
+// the work. A session that came up cold for a reason -- a new workspace's
+// first prompt on its way, a cold gate's answer re-opening the session the
+// user asked for -- is not parked under it; one adopted after hours idle is
+// parked at once. The engagement and the turn's end are on the rows, so a
+// successor arms the same instant. The parks the keeper takes the moment it
+// learns the cache cold (a gate raised, a beat judged lapsed) are not this
+// one, and take no grace. ARMED is the instant armed before this decision,
+// when WASARMED, so its wait is recorded at INFO only when it moves.
+func (k *Keeper) ownCold(ctx context.Context, log dlog.Logger, record wsm.Workspace, why string, armed time.Time, wasArmed bool) {
+	since, ok := k.idleSince(ctx, log, record)
+	if !ok {
+		return
+	}
+	k.setStanding(log, record.ID, standing{owner: ownerCold}, why)
+	if k.parkWaits(log, record.ID, since, armed, wasArmed) {
+		return
+	}
+	k.parkCold(record.ID, k.deps.Clock.Now(), why, false)
+}
+
+// ownIdle parks RECORD's session, which owes the keep-alive due at BEAT,
+// once it has been idle StandDownGrace (owner ruling, 2026-11-23: "shim
+// parking happens after 20 minutes rather than an hour of inactivity"), and
+// arms that instant until then (idleParksDue). The keeper restores the
+// session a minute before the beat (RestoreLead), and the beat's own
+// stand-down parks it again once the vendor answers (settleAnswer), so:
+//
+//   - a session whose grace runs out only inside the beat's restore lead is
+//     left to the beat's stand-down, never parked a minute before its own
+//     restore;
+//   - a session the keeper restored for its beat, or whose keep-alive's answer
+//     is awaited, is never parked under that beat.
+//
+// ARMED and WASARMED are ownCold's.
+func (k *Keeper) ownIdle(ctx context.Context, log dlog.Logger, record wsm.Workspace, beat time.Time, armed time.Time, wasArmed bool) {
+	ws := record.ID
+	restoreAt := beat.Add(-RestoreLead)
+	if _, awaiting := k.answering[ws]; awaiting {
+		return
+	}
+	since, ok := k.idleSince(ctx, log, record)
+	if !ok || !since.Add(StandDownGrace).Before(restoreAt) {
+		return
+	}
+	if k.parkWaits(log, ws, since, armed, wasArmed) {
+		return
+	}
+	if !k.deps.Clock.Now().Before(restoreAt) {
+		return
+	}
+	log.Debug(opOwner, "the session has been idle past its grace; it is parked until a minute before its next keep-alive", dlog.Context{"idle_since": since, "beat": beat})
+	k.deps.IdleDown(ws, since)
+}
+
+// idleSince answers when RECORD's session last fell idle: the latest of its
+// last engagement (its start, never engaged), its last turn's end, and the
+// instant it last fell free as this keeper saw it. False when the session
+// cannot be read (recorded at ERROR) or is gone (disowned).
+func (k *Keeper) idleSince(ctx context.Context, log dlog.Logger, record wsm.Workspace) (time.Time, bool) {
+	ws := record.ID
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
 		if !leaving(ctx, log, opOwner, "reading the session's engagement", err) {
-			log.Error(opOwner, "could not read the session's engagement; its cold park is not armed", dlog.Context{"cause": err.Error()})
+			log.Error(opOwner, "could not read the session's engagement; its idle park is not armed", dlog.Context{"cause": err.Error()})
 		}
-		return
+		return time.Time{}, false
 	}
 	if !found {
 		k.disown(log, ws)
-		return
+		return time.Time{}, false
 	}
-	engaged := session.LastEngagementAt
-	if engaged.IsZero() {
-		engaged = session.StartedAt
+	since := session.LastEngagementAt
+	if since.IsZero() {
+		since = session.StartedAt
 	}
-	due := engaged.Add(StandDownGrace)
-	k.setStanding(log, ws, standing{owner: ownerCold}, why)
-	if now := k.deps.Clock.Now(); now.Before(due) {
-		if !wasArmed || !armed.Equal(due) {
-			log.Info(opOwner, "the session was engaged less than an interval ago; its cold park waits", dlog.Context{"engaged_at": engaged, "due": due})
-		}
-		k.coldDue[ws] = due
-		return
+	if ended := record.LastTurnEndedAt; ended != nil && ended.After(since) {
+		since = *ended
 	}
-	k.parkCold(ws, k.deps.Clock.Now(), why, false)
+	if free, freed := k.freeSince[ws]; freed && free.After(since) {
+		since = free
+	}
+	return since, true
 }
 
-// coldParksDue decides again every session whose cold park has come due:
-// a turn or an engagement since may have moved it.
-func (k *Keeper) coldParksDue(ctx context.Context) {
+// parkWaits arms WS's idle park at SINCE plus StandDownGrace when that is
+// still to come, answering true; its wait is recorded at INFO only when the
+// instant moved from ARMED (WASARMED).
+func (k *Keeper) parkWaits(log dlog.Logger, ws ids.WorkspaceID, since, armed time.Time, wasArmed bool) bool {
+	due := since.Add(StandDownGrace)
+	if !k.deps.Clock.Now().Before(due) {
+		return false
+	}
+	if !wasArmed || !armed.Equal(due) {
+		log.Info(opOwner, "the session was idle less than its grace ago; its park waits", dlog.Context{"idle_since": since, "due": due})
+	}
+	k.idleDue[ws] = due
+	return true
+}
+
+// idleParksDue decides again every session whose cold or idle park has come
+// due: a turn or an engagement since may have moved it.
+func (k *Keeper) idleParksDue(ctx context.Context) {
 	now := k.deps.Clock.Now()
-	for ws, at := range k.coldDue {
+	for ws, at := range k.idleDue {
 		if now.Before(at) {
 			continue
 		}
-		delete(k.coldDue, ws)
-		k.schedule(ctx, ws, "its cold park came due")
+		delete(k.idleDue, ws)
+		k.schedule(ctx, ws, "its idle park came due")
 	}
 }
 

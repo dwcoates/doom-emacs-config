@@ -90,11 +90,15 @@ one owner (`cachelapse/standdown.go`), logged under
 `daemon.cachelapse.stand_down_owner` whenever it changes:
 
 - `settings_visit` while a pick's visit stands with no turn since;
-- `keepalive_cycle` while a keep-alive is owed;
+- `keepalive_cycle` while a keep-alive is owed: parked once the session has
+  been idle `StandDownGrace` (twenty minutes, owner ruling 2026-11-23; the
+  idle park, `ownIdle`, reason `idle`), restored a minute before each beat,
+  and parked again by the beat's own stand-down;
 - `cache_lapse` while a hidden or closed workspace's lapse is armed;
 - `idle_sweep` when the session goes idle past the cutoff first;
-- `cold_park` otherwise, stood down once the session has been idle one
-  keep-alive interval since its last engagement (`StandDownGrace`); a cold
+- `cold_park` otherwise, stood down once the session has been idle
+  `StandDownGrace` since the latest of its last engagement and its last
+  turn's end (`idleSince`); a cold
   gate raised or a beat judged lapsed parks it at once.
 
 A session is left up, owned by none, while it is in view (`in_view`) or its

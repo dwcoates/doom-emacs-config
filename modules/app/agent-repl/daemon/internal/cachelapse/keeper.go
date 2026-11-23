@@ -213,6 +213,9 @@ type Deps struct {
 	// VisitDown asks for WS's session to be stood down, the settings pick
 	// that started it at SINCE having ended (drain.Controller.VisitDown).
 	VisitDown func(ws ids.WorkspaceID, since time.Time)
+	// IdleDown asks for WS's session to be parked, idle since SINCE for
+	// StandDownGrace between its keep-alives (drain.Controller.IdleDown).
+	IdleDown func(ws ids.WorkspaceID, since time.Time)
 	// Restore brings a session the keep-alive cycle parked back up, calling
 	// DONE once with how its start ended. It returns at once.
 	Restore func(ws ids.WorkspaceID, done func(error))
@@ -374,9 +377,10 @@ type Keeper struct {
 	// as last recorded (standdown.go), so a change is recorded at INFO;
 	// owned by Run alone.
 	owners map[ids.WorkspaceID]standing
-	// coldDue is when each session the cold park owns has been idle
-	// StandDownGrace, armed until then (standdown.go); owned by Run alone.
-	coldDue map[ids.WorkspaceID]time.Time
+	// idleDue is when each session the cold park or the keep-alive cycle
+	// owns has been idle StandDownGrace, armed until then (standdown.go);
+	// owned by Run alone.
+	idleDue map[ids.WorkspaceID]time.Time
 	// early is each workspace's beat a long outage's end pulled forward, with
 	// the instant it was pulled to, until a beat is answered (outage.go);
 	// owned by Run alone.
@@ -412,6 +416,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the projected cold gates' raise")
 	case deps.VisitDown == nil:
 		return nil, errors.New("cachelapse: the keeper needs the settings visit's stand-down")
+	case deps.IdleDown == nil:
+		return nil, errors.New("cachelapse: the keeper needs the idle park")
 	case deps.Restore == nil:
 		return nil, errors.New("cachelapse: the keeper needs the parked sessions' restore")
 	case deps.HandedOver == nil:
@@ -453,7 +459,7 @@ func New(deps Deps) (*Keeper, error) {
 		parkedRetry:  map[ids.WorkspaceID]time.Time{},
 		noBeat:       map[ids.WorkspaceID]string{},
 		owners:       map[ids.WorkspaceID]standing{},
-		coldDue:      map[ids.WorkspaceID]time.Time{},
+		idleDue:      map[ids.WorkspaceID]time.Time{},
 		early:        map[ids.WorkspaceID]time.Time{},
 		runSpendMark: map[ids.WorkspaceID]*conversationv1.VendorTokens{},
 
@@ -586,7 +592,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue(ctx)
-			k.coldParksDue(ctx)
+			k.idleParksDue(ctx)
 			k.keepLivesDue()
 			k.stateNextKeepalives()
 			continue
@@ -613,7 +619,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue(ctx)
-			k.coldParksDue(ctx)
+			k.idleParksDue(ctx)
 			k.keepLivesDue()
 			k.stateNextKeepalives()
 		}
@@ -677,7 +683,7 @@ func (k *Keeper) earliest() (time.Time, bool) {
 			next, armed = run.by, true
 		}
 	}
-	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.gateDue, k.beats, k.restores, k.answerBy, k.coldDue} {
+	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.gateDue, k.beats, k.restores, k.answerBy, k.idleDue} {
 		for _, at := range set {
 			if !armed || at.Before(next) {
 				next, armed = at, true
@@ -830,7 +836,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.freeSince, ws)
 	delete(k.parkedRetry, ws)
 	delete(k.owners, ws)
-	delete(k.coldDue, ws)
+	delete(k.idleDue, ws)
 	delete(k.early, ws)
 }
 
