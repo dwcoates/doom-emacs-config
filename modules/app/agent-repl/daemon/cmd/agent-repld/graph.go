@@ -850,6 +850,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A CONNECTION FAILURE THE NETWORK ANSWERED stays answered too.
 		Reconnected:    p.DB,
 		PullReferences: p.DB,
+		// A WEB LINK A RESPONSE NAMES becomes a reference link of its workspace.
+		ResponseLinks: verbsRef,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
 		Warnings: topbarResolver,

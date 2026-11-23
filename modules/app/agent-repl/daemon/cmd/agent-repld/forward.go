@@ -373,6 +373,16 @@ func (f *verbsForwarder) republishLinks(ctx context.Context, ws ids.WorkspaceID)
 	return verbs.RepublishLinks(ctx, ws)
 }
 
+// AddResponseLinks is the feed's reach into the verbs
+// (feed.ResponseLinkSink), read out of them, which are built after the feed.
+func (f *verbsForwarder) AddResponseLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) error {
+	verbs, err := f.bound("a response named web links")
+	if err != nil {
+		return err
+	}
+	return verbs.AddResponseLinks(ctx, ws, urls)
+}
+
 // letQueueThroughAfterBypassTurn is the turn-end edge's queue resume
 // (workspace.NewBypassTurnEnds), read out of the verbs, which are built after
 // the edges.

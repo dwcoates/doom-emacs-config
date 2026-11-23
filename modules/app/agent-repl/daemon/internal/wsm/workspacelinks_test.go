@@ -605,3 +605,103 @@ func TestWorkspaceLinksRefusalsAreRecordedAtDebug(t *testing.T) {
 		})
 	}
 }
+
+func TestAddWorkspaceLinkIfAbsent(t *testing.T) {
+	tests := []struct {
+		name      string
+		steps     []linkStep
+		wantAdded bool
+		want      []WorkspaceLink
+	}{
+		{name: "a new url is stored as a shown reference", wantAdded: true,
+			want: []WorkspaceLink{{URL: linkURL(1), Label: "auto label", Shown: true}}},
+		{name: "a url held as a reference keeps its label", steps: []linkStep{setLink(linkURL(1), "mine a")},
+			want: []WorkspaceLink{{URL: linkURL(1), Label: "mine a", Shown: true}}},
+		{name: "a url held as owned stays owned", steps: []linkStep{setOwnedLink(linkURL(1), "mine a")},
+			want: []WorkspaceLink{{URL: linkURL(1), Label: "mine a", Shown: true, Owned: true}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			applyLinkSteps(t, s, ws.ID, tt.steps)
+
+			// Act.
+			added, err := s.AddWorkspaceLinkIfAbsent(context.Background(), ws.ID, linkURL(1), "auto label", nil)
+
+			// Assert.
+			if err != nil || added != tt.wantAdded {
+				t.Fatalf("AddWorkspaceLinkIfAbsent = %v, %v; want %v", added, err, tt.wantAdded)
+			}
+			got, err := s.WorkspaceLinks(context.Background(), ws.ID)
+			if err != nil || !slices.EqualFunc(got, tt.want, func(a, b WorkspaceLink) bool {
+				return a.URL == b.URL && a.Label == b.Label && a.Shown == b.Shown && a.Owned == b.Owned
+			}) {
+				t.Fatalf("links = %+v, %v; want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnAutoAddedLinkIsPromotedByAnOwnedSet(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	ctx := context.Background()
+	if _, err := s.AddWorkspaceLinkIfAbsent(ctx, ws.ID, linkURL(1), "auto label", nil); err != nil {
+		t.Fatalf("AddWorkspaceLinkIfAbsent: %v", err)
+	}
+
+	// Act.
+	got, err := s.SetWorkspaceLink(ctx, ws.ID, LinkSet{URL: linkURL(1), Label: "mine a", Owned: true})
+
+	// Assert.
+	if err != nil || len(got) != 1 || !got[0].Owned || got[0].Label != "mine a" || !got[0].Shown {
+		t.Fatalf("links = %+v, %v; want the one link promoted to owned", got, err)
+	}
+}
+
+func TestAnAutoAddedPullRequestLinkNamesItsPullRequestAndIsNotFollowed(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	pr := PullRequestKey{Owner: "o", Repo: "r", Number: 7}
+
+	// Act.
+	_, err := s.AddWorkspaceLinkIfAbsent(context.Background(), ws.ID, "https://github.com/o/r/pull/7", "auto label", &pr)
+
+	// Assert.
+	got, rerr := s.WorkspaceLinks(context.Background(), ws.ID)
+	if err != nil || rerr != nil || len(got) != 1 || got[0].PullRequest == nil || *got[0].PullRequest != pr || got[0].Follow != nil {
+		t.Fatalf("links = %+v, %v, %v; want an unfollowed reference naming the pull request", got, err, rerr)
+	}
+}
+
+func TestAddWorkspaceLinkIfAbsentRefusals(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws         func(s *store) WorkspaceID
+		url, label string
+		notFound   bool
+	}{
+		{name: "an unregistered workspace is not found", ws: func(*store) WorkspaceID { return "nope" }, url: linkURL(1), label: "auto label", notFound: true},
+		{name: "no url is a defect", ws: func(s *store) WorkspaceID { return testWorkspace(t, s).ID }, url: "", label: "auto label"},
+		{name: "no label is a defect", ws: func(s *store) WorkspaceID { return testWorkspace(t, s).ID }, url: linkURL(1), label: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testStore(t)
+			id := tt.ws(s)
+
+			// Act.
+			added, err := s.AddWorkspaceLinkIfAbsent(context.Background(), id, tt.url, tt.label, nil)
+
+			// Assert.
+			if added || err == nil || (tt.notFound && !errors.Is(err, ErrNotFound)) {
+				t.Fatalf("AddWorkspaceLinkIfAbsent = %v, %v; want a refusal and nothing stored", added, err)
+			}
+		})
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
 
 	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -200,6 +201,51 @@ func (v *verbs) RepublishLinks(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	v.publishLinks(ws, links)
 	log.Debug(opRepublishLinks, "republished the workspace's links", dlog.Context{"links": len(links), "open_owned_pull_request": wsm.OwnedPullRequestOpen(links)})
+	return nil
+}
+
+// responseLinkLabel is the label a link read out of a response is stored
+// under: two to eight words, naming the host it points at.
+func responseLinkLabel(rawURL string) string {
+	host := rawURL
+	if parsed, err := neturl.Parse(rawURL); err == nil && parsed.Host != "" {
+		host = parsed.Host
+	}
+	return "Response link " + host
+}
+
+// AddResponseLinks stores each of URLS as a reference link of WS unless WS
+// already holds a link to it, whatever its label or ownership, so a link the
+// workspace stored itself is never touched, and a later owned set of the url
+// takes the stored one over (SetLink relabels it and sets its ownership). The
+// links are republished when any was stored.
+func (v *verbs) AddResponseLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) error {
+	_, log, err := v.record(ctx, rpcChangeWorkspaceLinks, ws)
+	if err != nil {
+		return err
+	}
+	stored := 0
+	for _, url := range urls {
+		var pr *wsm.PullRequestKey
+		if key, ok := prwatch.ParseURL(url); ok {
+			pr = &key
+		}
+		added, err := v.deps.DB.AddWorkspaceLinkIfAbsent(ctx, ws, url, responseLinkLabel(url), pr)
+		if err != nil {
+			log.Error(opAddResponseLinks, "could not store a link a response named", dlog.Context{"url": url, "cause": err.Error()})
+			return fmt.Errorf("store the response link %q of %q: %w", url, ws, err)
+		}
+		if added {
+			stored++
+		}
+	}
+	if stored == 0 {
+		return nil
+	}
+	if err := v.RepublishLinks(ctx, ws); err != nil {
+		return err
+	}
+	log.Info(opAddResponseLinks, "stored the web links a response named as the workspace's reference links", dlog.Context{"urls": urls, "stored": stored})
 	return nil
 }
 

@@ -526,6 +526,10 @@ type Verbs interface {
 	// sidebar what each draws of them, for a change to their pull requests'
 	// subscriptions no links verb made (workspacelinks.go).
 	RepublishLinks(ctx context.Context, ws ids.WorkspaceID) error
+	// AddResponseLinks stores each of URLS, web links WS's responses named,
+	// as a reference link of WS unless WS already holds it, and republishes
+	// the links when it stored any (workspacelinks.go).
+	AddResponseLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) error
 	// PullRequestEnded takes the end of a pull request WS follows, merged or
 	// closed: its links are republished, and a merge may tell it its owned
 	// pull requests all merged (TellOwnedPullRequestsMerged). The pull request

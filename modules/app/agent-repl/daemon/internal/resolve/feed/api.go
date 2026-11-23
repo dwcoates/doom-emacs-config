@@ -622,6 +622,10 @@ type Deps struct {
 	// `#<number>` as the one before it did. nil records and loads nothing,
 	// which is what a test that is not about surviving a restart wants.
 	PullReferences PullReferenceStore
+	// ResponseLinks stores the web links a settled response named as the
+	// workspace's reference links (responselinks.go). nil stores none, which
+	// is what a test that is not about the links wants.
+	ResponseLinks ResponseLinkSink
 	// History reads the store pages a reader's request needs (book.go). nil
 	// pages nothing: every feed serves exactly what it holds, which is what a
 	// test that is not about loading history wants. Production always wires

@@ -247,6 +247,8 @@ type durableStores struct {
 	// pullReferences is the durable record of the pull requests each
 	// workspace's text named.
 	pullReferences PullReferenceStore
+	// responseLinks takes the web links a settled response names.
+	responseLinks ResponseLinkSink
 }
 
 // newDurableHarness is newHarness whose durable turn sets live in STORES; two
@@ -328,6 +330,7 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 		SignedIn:       stores.signedIn,
 		Reconnected:    stores.reconnected,
 		PullReferences: stores.pullReferences,
+		ResponseLinks:  stores.responseLinks,
 		ChessBoards:    h.boards,
 		WorkspaceName: func(ws ids.WorkspaceID) (string, error) {
 			if h.nameErr != nil {

@@ -178,7 +178,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		r.settlePacing(s, fold, pace)
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-			Prose:      &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},
+			Prose:      &frontendv1.FeedResponseProse{Prose: r.responseProse(s, fold.markdown, prose.Settled)},
 			RevealPace: r.revealPace(pace),
 		}}
 	case *conversationv1.AgentResponse_Failure:
@@ -203,7 +203,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		s.landStamp(fold)
 		resetPacing(fold)
 		broken := &frontendv1.FeedResponseError{
-			Prose: &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},
+			Prose: &frontendv1.FeedResponseProse{Prose: r.responseProse(s, fold.markdown, prose.Settled)},
 		}
 		// A TURN WHOSE ENDING OFFERS THE SIGN-IN ACTION offers it inside its
 		// broken bubble too (signin.go). A bubble drawn before that ending is

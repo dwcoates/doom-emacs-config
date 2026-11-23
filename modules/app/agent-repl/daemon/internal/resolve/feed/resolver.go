@@ -76,6 +76,9 @@ type resolver struct {
 	// its bare references resolve against (pullrefs.go, knownPulls). It lives
 	// here for the reason pullTargets does.
 	pullKnown map[ids.WorkspaceID]*pullrefs.Known
+	// responseLinksSeen is the web links each workspace's responses named
+	// that the response link sink took (responselinks.go).
+	responseLinksSeen map[ids.WorkspaceID]map[string]bool
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -703,15 +706,16 @@ func newResolver(deps Deps) (*resolver, error) {
 		deps.Go = inflight.Go
 	}
 	r := &resolver{
-		deps:        deps,
-		workspaces:  map[ids.WorkspaceID]*wsState{},
-		tokens:      map[string]*watchToken{},
-		loggers:     map[ids.WorkspaceID]dlog.Logger{},
-		held:        map[ids.WorkspaceID]*heldState{},
-		hostAsks:    map[ids.WorkspaceID]*agentreplv1.HostAsk{},
-		deliveries:  map[string]*peerDelivery{},
-		pullTargets: map[ids.WorkspaceID]pullrefs.Target{},
-		pullKnown:   map[ids.WorkspaceID]*pullrefs.Known{},
+		deps:              deps,
+		workspaces:        map[ids.WorkspaceID]*wsState{},
+		tokens:            map[string]*watchToken{},
+		loggers:           map[ids.WorkspaceID]dlog.Logger{},
+		held:              map[ids.WorkspaceID]*heldState{},
+		hostAsks:          map[ids.WorkspaceID]*agentreplv1.HostAsk{},
+		deliveries:        map[string]*peerDelivery{},
+		pullTargets:       map[ids.WorkspaceID]pullrefs.Target{},
+		pullKnown:         map[ids.WorkspaceID]*pullrefs.Known{},
+		responseLinksSeen: map[ids.WorkspaceID]map[string]bool{},
 	}
 	deps.Quiet.Follow(QuietViewName, r.followQuiet)
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
