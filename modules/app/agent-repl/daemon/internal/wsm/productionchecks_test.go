@@ -386,3 +386,60 @@ func TestAProductionMediatorIsItsWorkspacesRole(t *testing.T) {
 		t.Fatalf("production mediator = (%+v, %v), deploy found %v, workspace role %q; want only the production role", recorded, found, deployFound, read.Mediator)
 	}
 }
+
+func TestACrashsSpanIsDroppedSoTheSpanRunsOn(t *testing.T) {
+	// Arrange: a span owed by a deploy that turned out to be a crash's.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo, key := productionRepo(t)
+	readThrough(t, s, key, instant)
+	crash := instant.Add(time.Hour)
+	if _, owed, err := s.OweProductionCheck(ctx, repo, crash, ""); err != nil || !owed {
+		t.Fatalf("OweProductionCheck = (%v, %v)", owed, err)
+	}
+
+	// Act
+	dropped, err := s.DropProductionCheck(ctx, repo, crash)
+	next, owed, err2 := s.OweProductionCheck(ctx, repo, instant.Add(2*time.Hour), "")
+
+	// Assert: the next span starts where the dropped one did.
+	if err != nil || err2 != nil || !dropped || !owed || !next.Since.Equal(instant) {
+		t.Fatalf("dropped %v (%v), next %+v owed %v (%v); want the next span from %v", dropped, err, next, owed, err2, instant)
+	}
+}
+
+func TestAnUnansweredCheckIsRecordedOnlyAfterItsResumption(t *testing.T) {
+	cases := []struct {
+		name    string
+		resumed bool
+		wantErr bool
+	}{
+		{name: "a resumed check is recorded unanswered", resumed: true},
+		{name: "a check never resumed is not", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo, key := productionRepo(t)
+			readThrough(t, s, key, instant)
+			until := instant.Add(time.Hour)
+			toldCheck(t, s, repo, until)
+			if tc.resumed {
+				if _, err := s.MarkProductionCheckResumed(ctx, repo, until, "turn-2"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			err := s.DecideProductionCheck(ctx, repo, until, until.Add(time.Hour), ProductionUnanswered, "decided nothing", nil)
+
+			// Assert
+			next, _ := s.ProductionCheckOf(ctx, repo)
+			if (err != nil) != tc.wantErr || (next == nil) == tc.wantErr {
+				t.Fatalf("DecideProductionCheck = %v, still to decide %+v; want error %v", err, next, tc.wantErr)
+			}
+		})
+	}
+}

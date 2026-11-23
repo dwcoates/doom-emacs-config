@@ -43,13 +43,14 @@ CREATE TABLE production_checks (
   repo_key    TEXT NOT NULL CHECK (repo_key <> ''),
   span_until  INTEGER NOT NULL,
   span_since  INTEGER NOT NULL,
+  deploy_at   INTEGER NOT NULL,
   version     TEXT NOT NULL DEFAULT '',
   due_at      INTEGER,
   prompted_at INTEGER,
   turn        TEXT NOT NULL DEFAULT '',
   resumed     INTEGER NOT NULL DEFAULT 0,
   decided_at  INTEGER,
-  decision    TEXT NOT NULL DEFAULT '' CHECK (decision IN ('', 'nothing_to_do', 'dispatched')),
+  decision    TEXT NOT NULL DEFAULT '' CHECK (decision IN ('', 'nothing_to_do', 'dispatched', 'unanswered')),
   summary     TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (repo_key, span_until),
   CHECK (span_since < span_until)
@@ -61,6 +62,7 @@ CREATE TABLE production_children (
   span_until    INTEGER NOT NULL,
   kind          TEXT NOT NULL CHECK (kind IN ('remediation', 'investigation')),
   dispatched_at INTEGER NOT NULL,
+  ordinal       INTEGER NOT NULL,
   ended_at      INTEGER,
   ending        TEXT NOT NULL DEFAULT '' CHECK (ending IN ('', 'landed', 'closed', 'folded'))
 );
@@ -112,6 +114,10 @@ type ProductionDecision string
 const (
 	ProductionNothingToDo ProductionDecision = "nothing_to_do"
 	ProductionDispatched  ProductionDecision = "dispatched"
+	// ProductionUnanswered is a check whose mediator ended its turn deciding
+	// nothing, again after it was resumed to decide: recorded so the next
+	// span is told, and the failure stands at ERROR.
+	ProductionUnanswered ProductionDecision = "unanswered"
 )
 
 // ProductionChildKind is the work a production child does.
@@ -182,21 +188,22 @@ var ErrNoProductionCheckOwed = errors.New("wsm: no production check is owed")
 var ErrNotFoldable = errors.New("wsm: the workspace is not an open production child of the repository")
 
 // OweProductionCheck owes REPO's production mediator the span that closed
-// when the landing that began LANDING started, installing VERSION. The span
+// when the landing of the deploy that began AT started (the landing's start
+// as Mediation.LandingStartedAt reads it), installing VERSION. The span
 // starts where the repository's last deploy check read to, or where the last
 // production span ended when that is later, so no two checks read the same
 // record. It answers the check owed and true, or false when the span is
 // empty (overlapping landings) or the repository has no read to start from.
-func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, landing time.Time, version string) (ProductionCheck, bool, error) {
+func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, at time.Time, version string) (ProductionCheck, bool, error) {
 	const op = "daemon.wsm.owe_production_check"
-	fields := dlog.Context{"repo": string(repo), "landing_started": nanos(landing)}
+	fields := dlog.Context{"repo": string(repo), "deploy_at": nanos(at)}
 	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
 		return ProductionCheck{}, false, err
 	}
-	if landing.IsZero() {
-		err := fmt.Errorf("wsm: a production check of %s names no landing", key)
-		s.log.Error(op, "refused a production check that names no landing", withError(fields, err))
+	if at.IsZero() {
+		err := fmt.Errorf("wsm: a production check of %s names no deploy", key)
+		s.log.Error(op, "refused a production check that names no deploy", withError(fields, err))
 		return ProductionCheck{}, false, err
 	}
 	var (
@@ -204,6 +211,10 @@ func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, landing ti
 		owed bool
 	)
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		landing, err := landingStartedIn(ctx, tx, key, at)
+		if err != nil {
+			return err
+		}
 		var through, lastUntil sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT checked_through FROM merge_queue_repos WHERE repo_key = ?`, string(key)).Scan(&through); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -219,8 +230,8 @@ func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, landing ti
 			return nil
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO production_checks (repo_key, span_until, span_since, version) VALUES (?, ?, ?, ?)`,
-			string(key), nanos(landing), since.Int64, version); err != nil {
+			`INSERT INTO production_checks (repo_key, span_until, span_since, deploy_at, version) VALUES (?, ?, ?, ?, ?)`,
+			string(key), nanos(landing), since.Int64, nanos(at), version); err != nil {
 			return err
 		}
 		out = ProductionCheck{Since: fromNanos(since.Int64), Until: landing, Version: version}
@@ -228,6 +239,28 @@ func (s *store) OweProductionCheck(ctx context.Context, repo RepoKey, landing ti
 		return nil
 	})
 	return out, owed, err
+}
+
+// DropProductionCheck forgets the span REPO owed for the deploy that began
+// AT and is not yet due: the deploy was a crash's, which closes no span, so
+// the span runs on into the next. It answers whether it dropped one.
+func (s *store) DropProductionCheck(ctx context.Context, repo RepoKey, at time.Time) (bool, error) {
+	const op = "daemon.wsm.drop_production_check"
+	fields := dlog.Context{"repo": string(repo), "deploy_at": nanos(at)}
+	key, err := s.normalizedRepoKey(op, repo, fields)
+	if err != nil {
+		return false, err
+	}
+	var n int64
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM production_checks WHERE repo_key = ? AND deploy_at = ? AND due_at IS NULL AND decided_at IS NULL`, string(key), nanos(at))
+		if err != nil {
+			return err
+		}
+		n, err = res.RowsAffected()
+		return err
+	})
+	return n > 0, err
 }
 
 // MarkProductionChecksDue records that the landing's deploy ended AT: every
@@ -374,6 +407,9 @@ func (s *store) DecideProductionCheck(ctx context.Context, repo RepoKey, until, 
 	if err != nil {
 		return err
 	}
+	if decision == ProductionUnanswered {
+		return s.recordUnanswered(ctx, op, key, until, at, summary, fields)
+	}
 	if (decision == ProductionDispatched) != (len(children) > 0) {
 		err := fmt.Errorf("wsm: a %s decision with %d children", decision, len(children))
 		s.log.Error(op, "refused a production decision whose children disagree with it", withError(fields, err))
@@ -394,8 +430,8 @@ func (s *store) DecideProductionCheck(ctx context.Context, repo RepoKey, until, 
 		named := map[string]bool{}
 		for i, child := range children {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO production_children (workspace_id, repo_key, span_until, kind, dispatched_at) VALUES (?, ?, ?, ?, ?)`,
-				string(child.Workspace), string(key), nanos(until), string(child.Kind), nanos(at)); err != nil {
+				`INSERT INTO production_children (workspace_id, repo_key, span_until, kind, dispatched_at, ordinal) VALUES (?, ?, ?, ?, ?, ?)`,
+				string(child.Workspace), string(key), nanos(until), string(child.Kind), nanos(at), i); err != nil {
 				return err
 			}
 			for _, site := range child.Sites {
@@ -407,6 +443,25 @@ func (s *store) DecideProductionCheck(ctx context.Context, repo RepoKey, until, 
 					return err
 				}
 			}
+		}
+		return nil
+	})
+}
+
+// recordUnanswered records the check of KEY ending UNTIL decided as
+// unanswered at AT: its mediator, told and resumed, decided nothing.
+func (s *store) recordUnanswered(ctx context.Context, op string, key RepoKey, until, at time.Time, summary string, fields dlog.Context) error {
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE production_checks SET decided_at = ?, decision = 'unanswered', summary = ? WHERE repo_key = ? AND span_until = ? AND decided_at IS NULL AND resumed = 1`,
+			nanos(at), summary, string(key), nanos(until))
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n != 1 {
+			return ErrNoProductionCheckOwed
 		}
 		return nil
 	})
@@ -531,7 +586,7 @@ func (s *store) ProductionChildOf(ctx context.Context, ws WorkspaceID) (Producti
 }
 
 // ProductionChildrenOf answers REPO's open production children, oldest
-// first, each with the sites it owns.
+// first and in their dispatch's order, each with the sites it owns.
 func (s *store) ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]ProductionChild, error) {
 	const op = "daemon.wsm.production_children_of"
 	fields := dlog.Context{"repo": string(repo)}
@@ -542,7 +597,7 @@ func (s *store) ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]Produ
 	var out []ProductionChild
 	err = s.read(ctx, op, fields, func(ctx context.Context) error {
 		rows, err := s.q(ctx).QueryContext(ctx,
-			`SELECT `+productionChildColumns+` FROM production_children WHERE repo_key = ? AND ending = '' ORDER BY dispatched_at, workspace_id`, string(key))
+			`SELECT `+productionChildColumns+` FROM production_children WHERE repo_key = ? AND ending = '' ORDER BY dispatched_at, ordinal`, string(key))
 		if err != nil {
 			return err
 		}
