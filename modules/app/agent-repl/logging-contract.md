@@ -366,6 +366,13 @@ log.Warn("daemon.shimclient.dial", "timed out connecting to shim {shim} after {e
 - A placeholder with no named value, or a template whose braces do not
   parse, is a defect of the call: the helper fails loudly. Every runtime's
   static scan test enumerates every call in source and fails on it first.
+- An Emacs record's `operation` is derived from its template, which leads
+  with the slug (`elisp.<module>.<operation>`). A placeholder inside that
+  leading slug, its text before the first space (`elisp.verbs.{op}-refused`),
+  is spelled with its value, so a reader asks for one verb's records by
+  their operation. Every other placeholder is spelled `%s`. The site and
+  its key stay those of the template. Go and TypeScript records name their
+  operation explicitly.
 
 ### How a site's key is derived
 
