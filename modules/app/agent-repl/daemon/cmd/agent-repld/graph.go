@@ -625,10 +625,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// its availability and the footer as the bring-up window of a route never
 	// seen (ladder.AwaitingBringUp), which the roster then projects; telling
 	// them from one closure keeps the two from standing on different facts.
-	bringingUp := func(ws ids.WorkspaceID, up bool) {
-		footerResolver.SetBringingUp(ws, up)
-		sidebarResolver.SetBringingUp(ws, up)
-	}
+	bringingUp := onBothStatusSurfaces(footerResolver.SetBringingUp, sidebarResolver.SetBringingUp)
+
 	faultSurfaces := newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults)
 	// THE NETWORK'S STATE HANGS OFF THE SAME DOOR: a shim's network fault
 	// opening and closing is what says the network is down and restored
@@ -3091,3 +3089,13 @@ const opGNSAuth = "daemon.gnsauth.compose"
 
 // gnsEnv is the GNS environment the daemon keeps signed in.
 const gnsEnv = "production"
+
+// onBothStatusSurfaces answers one setter of a per-workspace fact that tells
+// the footer's SET first and then the roster's, so the two status surfaces
+// never stand on different facts: the roster projects the footer's status.
+func onBothStatusSurfaces(footerSet, rosterSet func(ids.WorkspaceID, bool)) func(ids.WorkspaceID, bool) {
+	return func(ws ids.WorkspaceID, on bool) {
+		footerSet(ws, on)
+		rosterSet(ws, on)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"agent-repld/internal/dlog"
@@ -1041,6 +1042,37 @@ func TestServiceLogsDirIsWhereTheServicesWriteTheirLogs(t *testing.T) {
 			// Assert
 			if got != tt.want {
 				t.Fatalf("serviceLogsDir = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// onBothStatusSurfaces tells the footer first, then the roster, with the same
+// workspace and value: the roster projects the footer's status.
+func TestOnBothStatusSurfacesTellsTheFooterThenTheRoster(t *testing.T) {
+	cases := []struct {
+		name string
+		on   bool
+	}{
+		{name: "a raise", on: true},
+		{name: "a lowering", on: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var calls []string
+			record := func(surface string) func(ids.WorkspaceID, bool) {
+				return func(ws ids.WorkspaceID, on bool) { calls = append(calls, surface+":"+string(ws)+":"+strconv.FormatBool(on)) }
+			}
+			set := onBothStatusSurfaces(record("footer"), record("roster"))
+
+			// Act
+			set("ws-1", tc.on)
+
+			// Assert
+			want := []string{"footer:ws-1:" + strconv.FormatBool(tc.on), "roster:ws-1:" + strconv.FormatBool(tc.on)}
+			if !slices.Equal(calls, want) {
+				t.Fatalf("calls = %v, want %v", calls, want)
 			}
 		})
 	}
