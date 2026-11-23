@@ -248,15 +248,20 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("merge-queue-stall-triage");
   });
 
-  it("has the deploy mediator address only what the deploy broke, and approve past what was there before", () => {
+  it("has the deploy mediator address what the last three deploys broke and this deploy still shows, and approve past the rest", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("deploy_mediator", home);
-    // Assert — owner ruling 2026-11-19: every fix is a landing whose own
-    // deploy surfaces the next old warning, so a pre-existing problem is
-    // named on the approval and never remediated by the mediator.
-    expect(text).toContain("### Only what this deploy broke is addressed, never anything that was there before");
+    // Assert — owner rulings 2026-11-19 and 2026-11-23: every fix is a
+    // landing whose own deploy surfaces the next old warning, so a
+    // pre-existing problem is named on the approval and never remediated by
+    // the mediator; a problem one of the three most recent deploys brought
+    // in, and this deploy still shows, is not pre-existing.
+    expect(text).toContain("### What the last three deploys broke and this deploy still shows is addressed, never anything older or gone");
+    expect(text).toContain("Its record first appeared with one of the three most recent deploys, this one included.");
+    expect(text).toContain("Its record appears again since this deploy began, so a problem no longer seen is never fixed.");
+    expect(text).toContain("An error drawn there with no record in the shared log is a logging defect of this deploy's window");
     expect(text).toContain("A pre-existing problem is never dispatched, never fixed and never escalated by the deploy mediator.");
     expect(text).toContain("A deploy whose findings are all pre-existing is approved.");
     expect(text).toContain("`approve`: the deploy broke nothing, or everything found is pre-existing, transient or ignorable");

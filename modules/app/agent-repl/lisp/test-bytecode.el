@@ -329,6 +329,34 @@
                        (list (format "elisp.bytecode.compile-failed function=agent-repl-test-bc-one file=%S error=(error \"Boom\")"
                                      alpha))))))))
 
+(ert-deftest agent-repl-test-bc-compile-keys-log-sites-by-the-function-compiled ()
+  "A log macro the compile expands is keyed by the function being compiled."
+  (agent-repl-test-bc--with
+    (agent-repl-test-bc--with-root root
+      ;; Arrange
+      (let ((alpha (agent-repl-test-bc--load-module root "alpha" agent-repl-test-bc--source))
+            (seen nil))
+        (cl-letf (((symbol-function 'byte-compile)
+                   (lambda (_) (setq seen agent-repl-log-site-function))))
+          ;; Act
+          (agent-repl-bytecode--compile 'agent-repl-test-bc-one alpha))
+        ;; Assert
+        (should (equal seen "agent-repl-test-bc-one"))))))
+
+(ert-deftest agent-repl-test-bc-compile-has-the-compiler-signal-its-error ()
+  "The compiler signals its error instead of drawing it on screen only."
+  (agent-repl-test-bc--with
+    (agent-repl-test-bc--with-root root
+      ;; Arrange
+      (let ((alpha (agent-repl-test-bc--load-module root "alpha" agent-repl-test-bc--source))
+            (seen nil))
+        (cl-letf (((symbol-function 'byte-compile)
+                   (lambda (_) (setq seen byte-compile-debug))))
+          ;; Act
+          (agent-repl-bytecode--compile 'agent-repl-test-bc-one alpha))
+        ;; Assert
+        (should (eq seen t))))))
+
 (ert-deftest agent-repl-test-bc-compile-failure-leaves-the-definition-working ()
   "A failed compile leaves the interpreted definition installed."
   (agent-repl-test-bc--with

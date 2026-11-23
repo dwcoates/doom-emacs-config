@@ -142,7 +142,14 @@ redefined or advised since it was queued) or `failed' (logged at ERROR)."
       (condition-case err
           (let ((byte-compile-warnings nil)
                 (inhibit-message t)
-                (message-log-max nil))
+                (message-log-max nil)
+                ;; A macro the definition still holds unexpanded expands
+                ;; here, outside any file load: a log macro keys its site by
+                ;; the function being compiled.
+                (agent-repl-log-site-function (symbol-name symbol))
+                ;; The compiler signals its error rather than drawing it in
+                ;; `*Compile-Log*', so the ERROR below names the cause.
+                (byte-compile-debug t))
             (byte-compile symbol)
             (if (byte-code-function-p (symbol-function symbol))
                 'compiled

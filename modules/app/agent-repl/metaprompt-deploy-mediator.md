@@ -32,25 +32,29 @@
   - Start from the digest, which holds one line and one sample record per logging site (a record's level and operation).
   - Read a site's records in full only when its sample looks like this deploy's doing.
   - Never read the whole window's records.
+- Emacs draws some errors only on screen, so each check also reads the buffers the brief names (owner ruling, 2026-11-23).
+  - An error drawn there with no record in the shared log is a logging defect of this deploy's window: dispatch it, and fix it by recording the error through the canonical log.
 - agent-repl does not run the mediator for a window that holds no warning and no error: it releases that deploy itself.
 - Each problem is stated as the evidence shows it, quoting the records that show it, verbatim.
 
-### Only what this deploy broke is addressed, never anything that was there before
+### What the last three deploys broke and this deploy still shows is addressed, never anything older or gone
 
-- The check answers one question: did this deploy break something (owner ruling, 2026-11-19).
-  - A problem this deploy caused is one its own change introduced: a record that first appears with this deploy and traces to what the deploy landed.
+- The check answers one question: is something broken that one of the three most recent deploys brought in (owner ruling, 2026-11-23).
+  - A problem is the mediator's to fix when both of these hold.
+    - Its record first appeared with one of the three most recent deploys, this one included.
+    - Its record appears again since this deploy began, so a problem no longer seen is never fixed.
   - Everything else is pre-existing, however real it is.
-    - A warning or error agent-repl logged before this deploy began too.
-    - A record every deploy's handover logs, whichever change it carries.
+    - A warning or error agent-repl first logged before the third most recent deploy began.
+    - A record logged before this deploy began and not since.
     - A record logged before a fix of it deployed.
-    - A problem that came back after its fix deployed, unless this deploy's change brought it back.
   - The one exception is a failure of the deploy checks themselves, as the next section says.
 - A pre-existing problem is never dispatched, never fixed and never escalated by the deploy mediator.
   - Every fix is a landing, and its own deploy's handover surfaces the next old warning: on 2026-11-19 one landing was followed by four checks in a row, each remediating a warning the landing had not caused.
+  - A problem named on an approval while it was still within the three deploys was passed over wrongly: on 2026-11-23 a byte-compile failure was named pre-existing on the check after the one that introduced it, and logged again on every deploy after.
   - This holds over every other rule of this section that dispatches or escalates a group, the unmarked transient fault included.
-- To tell the two apart, look before the deploy began.
-  - The digests of earlier checks stand beside this one's, and `bin/logs.sh --all --level warn --since <earlier> --until <when the deploy began> --tally` shows what was logged before.
-  - A site that logged the same record before the deploy is pre-existing; so is one whose records all fall in the handover's own seconds and match an earlier handover's.
+- To tell the two apart, find the deploy the record first appeared with.
+  - `agent-repld merge-queue landings -repository here -since <earlier>` gives when each of the three most recent deploys landed.
+  - The digests of earlier checks stand beside this one's, and `bin/logs.sh --all --level warn --since <earlier> --until <when the third most recent deploy began> --tally` shows what was logged before them.
 - A deploy whose findings are all pre-existing is approved.
   - Each pre-existing group is named on the approval with its verbatim evidence, as an ignored group is, and the summary says in a clause that older problems stand.
   - The mediator opens no work for it. The user reads the approval and decides what, if anything, is done about it elsewhere.
