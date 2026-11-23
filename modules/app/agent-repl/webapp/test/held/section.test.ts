@@ -616,6 +616,27 @@ describe("mountHeldSection: who draws a prompt waiting in the ingress", () => {
     expect(drawnIds(host)).toEqual(["ingress:k-1"]);
   });
 
+  it("draws nothing when the feed reopens with the section as drawn", () => {
+    // Arrange
+    const { host, held } = mounted({ editorIngress: createEditorIngressView() });
+    held.opened(section([promptItem("t1")]));
+    const before = host.firstElementChild;
+    // Act
+    held.opened(section([promptItem("t1")]));
+    // Assert: the region drawn at the first open still stands, not redrawn.
+    expect(host.firstElementChild).toBe(before);
+  });
+
+  it("draws the section again when the feed reopens with it changed", () => {
+    // Arrange
+    const { host, held } = mounted({ editorIngress: createEditorIngressView() });
+    held.opened(section([promptItem("t1")]));
+    // Act
+    held.opened(section([promptItem("t1"), promptItem("t2")]));
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt:t1", "prompt:t2"]);
+  });
+
   it("parks the feed when an editor entry is first drawn", () => {
     // Arrange
     const editorIngress = createEditorIngressView();

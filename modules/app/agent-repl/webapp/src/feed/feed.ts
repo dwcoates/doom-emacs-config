@@ -22,7 +22,7 @@ import { reportClientFailure } from "../rpc/link.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
-import { watchStream, type StreamHandle } from "../rpc/streams.js";
+import { isPlannedEnd, watchStream, type StreamHandle } from "../rpc/streams.js";
 import {
   READER_TOGGLE_EVENT,
   autoCollapseFor,
@@ -491,7 +491,9 @@ export function mountFeed(
       // answers, so the held section draws the editor's own ingress entries
       // meanwhile (held/section.ts). Our own cancel is no outage.
       onEnd: (end) => {
-        if (end.kind !== "cancelled") held?.unreachable();
+        // A PLANNED END IS NO OUTAGE: the daemon handed the tail on, and the
+        // held section stands as the daemon drew it until the resume.
+        if (end.kind !== "cancelled" && !isPlannedEnd(end)) held?.unreachable();
       },
       onPush: (response) => {
         // A frame carries EXACTLY ONE of a row upsert, a response-selection
@@ -575,15 +577,20 @@ export function mountFeed(
     // its conversation and holding the answer is the first paint's critical
     // path, and the daemon's own record (daemon.server.open_feed) says how
     // much of it the daemon spent.
+    // A PAGE NOBODY SEES ASKS NOTHING (page-streams.ts `awake`): its reopen
+    // waits until a reader sees it, and then resumes from what it holds.
+    await ctx.streams.awake(signal);
+    if (disposed || signal.aborted) return;
+    const resume = root.resume();
     const askedAt = performance.now();
     log.info("asked for the root feed's newest page", {
       operation: "feed.open-asked",
-      context: {},
+      context: { resume: resume !== undefined, held: resume?.held.length ?? 0 },
     });
     const response: OpenFeedResponse = await callUnary(
       ctx,
       "OpenFeed",
-      (c) => c.openFeed(buildOpenFeedRequest(ctx.workspace)),
+      (c) => c.openFeed(buildOpenFeedRequest(ctx.workspace, undefined, resume)),
       OpenFeedResponseSchema,
     );
     log.info("the root feed's newest page arrived", {
@@ -594,10 +601,9 @@ export function mountFeed(
     const result = requireCase(response.result, "OpenFeedResponse.result");
     switch (result.case) {
       case "success": {
-        root.applyPage(
-          requireMessage(result.value.page, "OpenFeedSuccess.page"),
-          "replace",
-        );
+        const page = requireMessage(result.value.page, "OpenFeedSuccess.page");
+        if (result.value.resumed === undefined) root.applyPage(page, "replace");
+        else root.applyResumed(page, result.value.resumed);
         // THE ROOT FEED'S OPEN STATES ITS HELD SECTION, as of the same pin as
         // the page: the tail then carries every later change of it.
         const section = requireMessage(result.value.held, "OpenFeedSuccess.held");
