@@ -7,7 +7,6 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -119,10 +118,10 @@ func (o *orchestrator) endBubblesOffQueue(ctx context.Context, why string) error
 	if err != nil {
 		// A READ CUT OFF BY ITS CONTEXT is the daemon stopping, no failure:
 		// the bubbles stand for the next daemon's seed to settle.
-		ctxend.Log(err, o.deps.Log.Global(), dlog.LevelInfo, opLiveBubbles,
-			logsite.Msg("the merge queues were not read, the daemon stopping first; no live bubble is ended"),
+		recordFailed(o.deps.Log.Global(), opLiveBubbles,
 			logsite.Msg("could not read the merge queues; no live bubble is ended"),
-			dlog.WithCause(dlog.Context{"why": why}, err))
+			logsite.Msg("the merge queues were not read, the daemon stopping first; no live bubble is ended"),
+			dlog.WithCause(dlog.Context{"why": why}, err), err)
 		return err
 	}
 	named := o.queuedLedgers(queues)
