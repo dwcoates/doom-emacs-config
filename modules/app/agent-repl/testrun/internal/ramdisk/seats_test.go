@@ -57,6 +57,7 @@ func TestAdmitsKeepsTheFloorAfterEverySeatedDiskFills(t *testing.T) {
 		wired     uint64
 		want      bool
 	}{
+		{name: "20 GiB free seats a third disk beside two that can still take 4 GiB", available: 20480, wired: 4096, want: true},
 		{name: "30 GiB free seats the first disk", available: 30720, wired: 0, want: true},
 		{name: "30 GiB free seats a fifth disk to exactly the 10 GiB floor", available: 30720, wired: 16384, want: true},
 		{name: "one MiB short of the floor is refused", available: 30719, wired: 16384, want: false},
@@ -405,5 +406,29 @@ func TestASeatWaitTheRunCutAttachesNothing(t *testing.T) {
 	}
 	if !log.has("INFO RAM disk seat: the run was cut after waiting") {
 		t.Fatalf("log = %q, want the cut wait said", log.lines)
+	}
+}
+
+func TestUnfilledCountsEachHeldDiskForWhatItCanStillTake(t *testing.T) {
+	cases := []struct {
+		name string
+		held []seats.Holder
+		want uint64
+	}{
+		{name: "nothing held", held: nil, want: 0},
+		{name: "a disk that published nothing counts whole", held: []seats.Holder{{Size: 4096}}, want: 4096},
+		{name: "a disk less its published use", held: []seats.Holder{{Size: 4096, Used: 1000}, {Size: 4096, Used: 96}}, want: 3096 + 4000},
+		{name: "a disk past its size counts nothing", held: []seats.Holder{{Size: 4096, Used: 5000}}, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := unfilledMiB(tc.held)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("unfilledMiB(%+v) = %d, want %d", tc.held, got, tc.want)
+			}
+		})
 	}
 }

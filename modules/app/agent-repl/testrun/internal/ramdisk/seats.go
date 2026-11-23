@@ -79,15 +79,22 @@ func MemorySeats(totalBytes uint64, sizeMiB int) int {
 }
 
 // Admits reports whether a disk of sizeMiB may be seated while the seated
-// disks may wire wiredMiB and availableMiB is available: whether FloorMiB
-// stays available once every seated disk, this one included, has filled.
+// disks may still wire unfilledMiB and availableMiB is available: whether
+// FloorMiB stays available once every seated disk, this one included, has
+// filled.
 //
-// A seated disk is counted at its whole size, though the reading already
-// lacks what it wrote so far: a disk's memory is wired as its blocks are first
-// written, so the reading less every seated disk's whole size is a lower bound
-// on what stays available once they fill, and the floor holds then too.
-func Admits(availableMiB, wiredMiB uint64, sizeMiB int) bool {
-	return availableMiB >= wiredMiB+uint64(sizeMiB)+FloorMiB
+// A SEATED DISK IS COUNTED FOR WHAT IT CAN STILL TAKE, never its whole size
+// (owner ruling, 2026-11-23). A disk's memory is wired as its blocks are first
+// written, so the reading already lacks what each seated disk wrote; counted
+// at its whole size as well, a disk's written blocks were reserved twice, and
+// a gate waited behind two near-empty disks with 20 GiB available. What a
+// disk can still take is its size less the peak use it published
+// (unfilledMiB), and its peak use is never more than the blocks it wrote,
+// since a block in use was written: so the reading less every seated disk's
+// unfilled part is still a lower bound on what stays available once they
+// fill, and the floor holds then too.
+func Admits(availableMiB, unfilledMiB uint64, sizeMiB int) bool {
+	return availableMiB >= unfilledMiB+uint64(sizeMiB)+FloorMiB
 }
 
 // seatPool is the registry's n memory seats: their lock files live in the
@@ -97,6 +104,16 @@ func Admits(availableMiB, wiredMiB uint64, sizeMiB int) bool {
 // before 2026-11-09 did not, so the two never share a file.
 func seatPool(registry string, n int) seats.Pool {
 	return seats.Pool{Dir: filepath.Join(registry, "seats"), Prefix: "ram", N: n, What: "RAM disk"}
+}
+
+// unfilledMiB is what the held seats' disks may still wire together: each
+// one's size less the peak use it published (seats.Seat.Publish).
+func unfilledMiB(held []seats.Holder) uint64 {
+	var sum uint64
+	for _, h := range held {
+		sum += uint64(max(h.Size-h.Used, 0))
+	}
+	return sum
 }
 
 // wiredMiB is what the held seats' disks may wire together.
@@ -153,7 +170,7 @@ func (m Manager) seat(sizeMiB int) (*seats.Seat, error) {
 			if latest, err = m.Memory(); err != nil {
 				return false, fmt.Errorf("read the host's memory to admit a RAM disk seat: %w", err)
 			}
-			return Admits(latest.AvailableBytes>>20, wiredMiB(held), sizeMiB), nil
+			return Admits(latest.AvailableBytes>>20, unfilledMiB(held), sizeMiB), nil
 		},
 		Waiting: func(w seats.Wait) error {
 			if w.Why != seats.Refused {

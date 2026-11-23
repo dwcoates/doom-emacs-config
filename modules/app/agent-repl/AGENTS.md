@@ -488,6 +488,9 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
   disks, on a 48 GiB host), and a seat is granted only while
   `ramdisk.FloorMiB` (10 GiB) stays available once every seated disk has
   filled (`ramdisk.Admits`, reading the kernel's `kern.memorystatus_level`).
+  A seated disk counts for what it can still take, its size less the peak
+  use it publishes in its seat (`seats.Seat.Publish`), since the kernel's
+  reading already lacks what it wrote (owner ruling 2026-11-23).
   Seats go to waiting runs in rank order, the merge queue's head first, as
   core seats do. A waiting run blocks on the held seats' locks, rereads the
   memory every `ramdisk.MemoryRecheck`, and states every wait and grant in the

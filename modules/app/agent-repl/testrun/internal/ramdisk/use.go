@@ -27,6 +27,12 @@ type use struct {
 	samples  int
 	failures int
 	firstErr error
+	// published is the peak, in MiB, the disk's seat last published
+	// (seats.Seat.Publish), so the next run's admission counts only what
+	// the disk can still take; publishFailures counts the publishes that
+	// failed, the first recorded at ERROR when it happens.
+	published       int
+	publishFailures int
 	stop     chan struct{}
 	done     chan struct{}
 }
@@ -67,6 +73,28 @@ func (v *Volume) sampleUse() {
 	}
 	v.use.samples++
 	v.use.peak = max(v.use.peak, used)
+	v.publishPeak()
+}
+
+// publishPeak states the disk's peak use in its memory seat when it grew by a
+// MiB or more since the last publish. A publish that fails leaves the last
+// one standing, which counts the disk as able to take more than it can: the
+// next run's admission is stricter, never looser. The first failure is
+// recorded at ERROR at once, and their count at the release. Called with
+// v.use.mu held.
+func (v *Volume) publishPeak() {
+	peak := int(v.use.peak >> 20)
+	if v.seat == nil || peak <= v.use.published {
+		return
+	}
+	if err := v.seat.Publish(peak); err != nil {
+		v.use.publishFailures++
+		if v.use.publishFailures == 1 {
+			v.m.Log.Errorf("RAM disk use: could not publish the peak %d MiB of %s in its memory seat, so the next run's admission counts it at %d MiB: %v", peak, v.Device, v.use.published, err)
+		}
+		return
+	}
+	v.use.published = peak
 }
 
 // stopUse ends the sampling and logs the peak: at INFO, and at ERROR as well
@@ -85,6 +113,9 @@ func (v *Volume) stopUse() {
 	v.use.mu.Lock()
 	defer v.use.mu.Unlock()
 	v.m.Log.Infof("RAM disk use: peak %d MiB of %d MiB on %s (%d samples)", v.use.peak>>20, v.SizeMiB, v.Device, v.use.samples)
+	if v.use.publishFailures > 0 {
+		v.m.Log.Errorf("RAM disk use: %d publishes of the peak of %s in its memory seat failed", v.use.publishFailures, v.Device)
+	}
 	if v.use.failures > 0 {
 		v.m.Log.Errorf("RAM disk use: %d of %d samples of %s failed, so the peak may be low; the first: %v", v.use.failures, v.use.failures+v.use.samples, v.Mount, v.use.firstErr)
 	}
