@@ -394,8 +394,9 @@ func TestWatchFeedPushesTheClearedSelection(t *testing.T) {
 }
 
 // TestOpenFeedRecordsTheOpenAtInfoWithItsDuration pins that every open is one
-// INFO record naming how long the daemon spent on it: a page's first paint
-// waits on it, and the page's own feed.open-answered says how long it waited.
+// INFO record naming how long the daemon spent on it, and on resolving its
+// workspace before it: a page's first paint waits on both, and the page's own
+// feed.open-answered says how long it waited.
 func TestOpenFeedRecordsTheOpenAtInfoWithItsDuration(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
@@ -412,8 +413,10 @@ func TestOpenFeedRecordsTheOpenAtInfoWithItsDuration(t *testing.T) {
 	// Assert.
 	for _, rec := range log.Records() {
 		if rec.Operation == "daemon.server.open_feed" && rec.Message == "opened a feed and minted its watch token" {
-			if _, ok := rec.Context["ms"]; rec.Level != "info" || !ok {
-				t.Fatalf("open_feed record = %+v, want info carrying ms", rec)
+			_, hasMs := rec.Context["ms"]
+			_, hasResolve := rec.Context["resolve_ms"]
+			if rec.Level != "info" || !hasMs || !hasResolve {
+				t.Fatalf("open_feed record = %+v, want info carrying ms and resolve_ms", rec)
 			}
 			return
 		}

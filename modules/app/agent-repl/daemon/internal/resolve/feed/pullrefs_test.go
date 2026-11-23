@@ -298,6 +298,8 @@ type fakePullReferences struct {
 	loadErr   error
 	recordErr error
 	loads     int
+	// inLoad, when set, runs at every load, before it answers.
+	inLoad func()
 }
 
 func newFakePullReferences() *fakePullReferences {
@@ -315,6 +317,9 @@ func (f *fakePullReferences) RecordPullReference(_ context.Context, ws ids.Works
 
 func (f *fakePullReferences) PullReferences(_ context.Context, ws ids.WorkspaceID) ([]pullrefs.Ref, error) {
 	f.loads++
+	if f.inLoad != nil {
+		f.inLoad()
+	}
 	if f.loadErr != nil {
 		return nil, f.loadErr
 	}
@@ -444,6 +449,36 @@ func TestARestartedDaemonLinksThePullRequestsTheOneBeforeLearned(t *testing.T) {
 	}
 	if !after.hasRecordWith("info", opPullReferencesRestore, "pull_requests", 1) {
 		t.Fatalf("records = %+v, want the load recorded", after.records())
+	}
+}
+
+func TestTheKnownPullRequestsLoadRecordsHowLongItsReadTook(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		known bool
+	}{
+		{name: "a load that found pull requests records its read at INFO", level: "info", known: true},
+		{name: "a load that found none records its read at DEBUG", level: "debug"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the read takes 300ms on the harness clock.
+			store := newFakePullReferences()
+			if tt.known {
+				store.refs[testWorkspace] = []pullrefs.Ref{gns613}
+			}
+			h := newDurableHarness(t, durableStores{pullReferences: store})
+			store.inLoad = func() { h.nowMs += 300 }
+
+			// Act.
+			settleResponseAs(h, "unit-1", "a response")
+
+			// Assert.
+			if !h.hasRecordWith(tt.level, opPullReferencesRestore, "read_ms", int64(300)) {
+				t.Fatalf("records = %+v, want the load's 300ms read recorded at %s", h.records(), tt.level)
+			}
+		})
 	}
 }
 

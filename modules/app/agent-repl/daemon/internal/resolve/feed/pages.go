@@ -47,15 +47,21 @@ func (r *resolver) OlderPage(ctx context.Context, ws ids.WorkspaceID, feed feedi
 // resolver's mutex; the page itself is composed, and an opening's token
 // minted, under it, so no row falls between the page and its tail.
 func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, w *walk, open bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
+	step := pageStep{open: open}
+	if open {
+		step.phases = &openingPhases{}
+	}
 	mu := r.loadMu(ws)
+	asked := r.deps.Now()
 	mu.Lock()
 	defer mu.Unlock()
-	step := pageStep{open: open}
+	r.since(phase(step.phases, loadLockWaitOf), asked)
 	for {
-		r.mu.Lock()
+		r.lockTimed(phase(step.phases, lockWaitOf))
 		page, token, plan, err := r.stepPage(ws, feed, w, &step)
 		if plan != nil {
 			plan.sourceUps = plan.state.sourceUps
+			plan.phases = step.phases
 		}
 		// THE HELD SECTION IS READ UNDER THE LOCK THAT PINNED THE TOKEN, so it is
 		// the section as of the pin, and the tail delivers every change after it.
@@ -68,7 +74,7 @@ func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 			if err == nil {
 				carryRetired(page, &step)
 				if open {
-					r.reportOpeningReads(ws, feed, step.reads)
+					r.reportOpeningReads(ws, feed, step.reads, step.phases)
 				}
 			}
 			return page, token, held, err
@@ -107,6 +113,8 @@ type pageStep struct {
 	unsourced bool
 	// reads counts the store pages the walk read.
 	reads int
+	// phases is where an opening's time went, nil for any other walk.
+	phases *openingPhases
 	// retired are the rows the step's loads retired, carried by the next page
 	// it serves (carryRetired).
 	retired []string
@@ -129,10 +137,11 @@ func carryRetired(page *frontendv1.FeedPage, step *pageStep) {
 // reportOpeningReads says how many store pages an opening read before it was
 // served: none (served from memory), ONE (a page whose turn heads completed
 // it, or one that drew whole), or more (a page without heads whose rows waited
-// on an older page's prompts, read the old way).
-func (r *resolver) reportOpeningReads(ws ids.WorkspaceID, feed feedid.Feed, reads int) {
+// on an older page's prompts, read the old way). It says where the opening's
+// time went too (openingPhases).
+func (r *resolver) reportOpeningReads(ws ids.WorkspaceID, feed feedid.Feed, reads int, phases *openingPhases) {
 	log := r.lockedLogger(ws)
-	fields := dlog.Context{"feed": r.feedKey(ws, feed), "reads": reads}
+	fields := dlog.Merge(dlog.Context{"feed": r.feedKey(ws, feed), "reads": reads}, phases.fields())
 	switch {
 	case reads == 0:
 		log.Debug("daemon.feed.opening_reads", "an opening was served from memory without reading a store page", fields)

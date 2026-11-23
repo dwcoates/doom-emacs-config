@@ -69,17 +69,23 @@ func (r *resolver) knownPulls(ws ids.WorkspaceID) *pullrefs.Known {
 	}
 	var refs []pullrefs.Ref
 	if r.deps.PullReferences != nil {
+		asked := r.deps.Now()
 		loaded, err := r.deps.PullReferences.PullReferences(context.Background(), ws)
+		// THE READ IS TIMED: it is made under the resolver's mutex.
+		readMs := r.deps.Now().Sub(asked).Milliseconds()
 		switch {
 		case err != nil:
 			r.logger(ws).Error(opPullReferencesRestore,
 				"the pull requests the workspace's text named could not be loaded; its bare references link into its own repository",
-				dlog.Context{"error": err.Error()})
+				dlog.Context{"error": err.Error(), "read_ms": readMs})
 			r.raiseWarningFor(ws, opPullReferencesRestore,
 				fmt.Sprintf("the pull requests this workspace named could not be loaded, so its references may link to the wrong repository: %v", err))
 		case len(loaded) > 0:
 			r.logger(ws).Info(opPullReferencesRestore, "loaded the pull requests the workspace's text named",
-				dlog.Context{"pull_requests": len(loaded)})
+				dlog.Context{"pull_requests": len(loaded), "read_ms": readMs})
+		default:
+			r.logger(ws).Debug(opPullReferencesRestore, "the workspace's text has named no pull requests yet",
+				dlog.Context{"read_ms": readMs})
 		}
 		refs = loaded
 	}

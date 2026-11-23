@@ -181,6 +181,9 @@ type pageLoad struct {
 	// (the newest, nothing after it): the page the fork-point divider stands
 	// under (forkdivider.go).
 	segmentStart bool
+	// phases is where the opening this load serves spent its time, nil for a
+	// load no opening asked for.
+	phases *openingPhases
 }
 
 // noteDrawn records one row a load drew in its feed, and reports whether it is
@@ -270,6 +273,9 @@ type loadPlan struct {
 	// generation when it is a fork's inherited past.
 	segment   int
 	inherited *LineageSegment
+	// phases is where the opening this load serves spent its time, nil for a
+	// load no opening asked for.
+	phases *openingPhases
 }
 
 // planLoad decides the next page FEED's book would read: its newest page when
@@ -351,7 +357,9 @@ type loaded struct {
 func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	ws, addr := plan.state.id, plan.addr
 	log := r.lockedLogger(ws)
+	read := r.deps.Now()
 	page, err := r.readPlanned(ctx, plan)
+	r.since(phase(plan.phases, readOf), read)
 	if errors.Is(err, ErrNoHistorySource) {
 		log.Info("daemon.feed.history_load_no_source",
 			"a reader's page could not be loaded: no shim is up to read history from; the feed serves what it holds and loads the page when one comes up",
@@ -395,9 +403,10 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 		}
 	}
 
-	r.mu.Lock()
+	r.lockTimed(phase(plan.phases, lockWaitOf))
 	f := r.feed(plan.state, addr)
 	l := &pageLoad{
+		phases:    plan.phases,
 		state:     plan.state,
 		feedKey:   f.key,
 		book:      &f.book,
@@ -418,7 +427,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 	}
 	r.replayPage(ws, agent, page, l)
 
-	r.mu.Lock()
+	r.lockTimed(phase(plan.phases, lockWaitOf))
 	defer r.mu.Unlock()
 	if r.workspaces[ws] != plan.state {
 		return loaded{}, nil

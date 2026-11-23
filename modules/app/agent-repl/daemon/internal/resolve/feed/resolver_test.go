@@ -158,6 +158,10 @@ type harness struct {
 	// replay; sendersErr fails that read.
 	senders    map[ids.TurnID]ids.WorkspaceID
 	sendersErr error
+	// inRecords, when set, runs at every read of the turns' senders, one of
+	// the durable reads a replay makes before it takes the mutex: a test
+	// acts while the records are being read.
+	inRecords func()
 	// chat records every edge the resolver told its chat sink (Deps.Chat).
 	chat *fakeChatSink
 	// faults is the fake fault record every raise in this resolver lands in.
@@ -299,6 +303,9 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 			return out, nil
 		},
 		TurnSenders: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]ids.WorkspaceID, error) {
+			if h.inRecords != nil {
+				h.inRecords()
+			}
 			if h.sendersErr != nil {
 				return nil, h.sendersErr
 			}
@@ -614,7 +621,7 @@ func TestNewWatchesTheResolverMutex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newResolver: %v", err)
 	}
-	if len(stalls.locks) != 1 || stalls.locks[0] != &r.mu || stalls.names[0] != "feed.resolver" {
+	if len(stalls.locks) != 1 || stalls.locks[0] != &r.mu.Mutex || stalls.names[0] != "feed.resolver" {
 		t.Fatalf("watched %v %v, want the resolver's mutex as feed.resolver", stalls.locks, stalls.names)
 	}
 }

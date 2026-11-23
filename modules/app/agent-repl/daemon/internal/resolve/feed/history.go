@@ -43,6 +43,11 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	if load != nil && load.inherited != nil {
 		records, plane = load.inherited.Workspace, planeInherited
 	}
+	var phases *openingPhases
+	if load != nil {
+		phases = load.phases
+	}
+	records0 := r.deps.Now()
 	all, own := withHeads(page, load)
 	whole := headsPage(page, all)
 	closes := r.recordedCloses(records, whole)
@@ -59,9 +64,12 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 		addresses = r.recordedAddresses(ws, turns)
 		mirrors = r.recordedMirrors(ws, turns)
 	}
+	r.since(phase(phases, recordsOf), records0)
 
-	r.mu.Lock()
+	r.lockTimed(phase(phases, replayLockWaitOf))
+	replayed := r.deps.Now()
 	defer r.mu.Unlock()
+	defer r.since(phase(phases, replayOf), replayed)
 	s := r.state(ws)
 	log := r.logger(ws)
 	if load != nil && s != load.state {
