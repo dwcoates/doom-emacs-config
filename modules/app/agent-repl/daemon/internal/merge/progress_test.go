@@ -1,10 +1,14 @@
 package merge
 
 import (
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 )
@@ -198,6 +202,80 @@ func TestARestoredRunTakesBackItsOwnQueueRound(t *testing.T) {
 			}
 			if _, open := restored.openRounds[restored.queueRound.key()]; open != tc.wantOpen {
 				t.Fatalf("queue round open = %v, want %v", open, tc.wantOpen)
+			}
+		})
+	}
+}
+
+func TestACheckpointWhoseWriteFails(t *testing.T) {
+	tests := []struct {
+		name string
+		// during runs inside the write, before it fails.
+		during    func(h *harness, r *run)
+		writeErr  error
+		wantErr   func(error) bool
+		wantLevel string
+		wantMsg   string
+	}{
+		{
+			name: "an exit that lands during the write stops the run as the exit",
+			during: func(h *harness, r *run) {
+				h.o.mu.Lock()
+				r.suspendLocked(suspendExit)
+				h.o.mu.Unlock()
+			},
+			writeErr:  fmt.Errorf("wsm: begin transaction: %w", context.Canceled),
+			wantErr:   func(err error) bool { return errors.Is(err, errMergeStopping) },
+			wantLevel: dlog.LevelInfo,
+			wantMsg:   "the daemon's exit cut the merge's progress write; the record stays at the stopping point the next boot resumes from",
+		},
+		{
+			name: "the run's own end cutting the write is no fault, and its end records why",
+			during: func(_ *harness, r *run) {
+				r.cancel(&abandonment{cause: CauseUserDrop})
+			},
+			writeErr:  fmt.Errorf("wsm: begin transaction: %w", context.Canceled),
+			wantErr:   func(err error) bool { return errors.Is(err, context.Canceled) && !errors.Is(err, errMergeStopping) },
+			wantLevel: dlog.LevelInfo,
+			wantMsg:   "the run's own end cut the merge's progress write; the record stays at its last stopping point, and the run's end records why",
+		},
+		{
+			name:     "a failed write with no exit stops the merge as a fault",
+			writeErr: errors.New("disk I/O error"),
+			wantErr: func(err error) bool {
+				return err != nil && !errors.Is(err, errMergeStopping) && strings.Contains(err.Error(), "disk I/O error")
+			},
+			wantLevel: dlog.LevelError,
+			wantMsg:   "could not record the merge's progress; the merge stops rather than take a step a restart could not resume",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			r := liveRun(t, h, theWorkspace)
+			h.db.mu.Lock()
+			h.db.progressErr = tt.writeErr
+			if tt.during != nil {
+				h.db.duringProgressPut = func() { tt.during(h, r) }
+			}
+			h.db.mu.Unlock()
+
+			// Act
+			err := r.checkpoint(r.ctx, "tests", nil)
+
+			// Assert
+			if !tt.wantErr(err) {
+				t.Fatalf("checkpoint = %v, want the error its cause classifies", err)
+			}
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.progress", Message: tt.wantMsg})
+			if !ok || record.Level != tt.wantLevel || record.Context["step"] != "tests" || record.Context["workspace"] != string(theWorkspace) {
+				t.Fatalf("record = %+v, %v; want %q at %s naming the step and the workspace", record, ok, tt.wantMsg, tt.wantLevel)
+			}
+			if tt.wantLevel != dlog.LevelError {
+				if failure, failed := h.recordFor(dlog.LevelError, "daemon.merge.progress"); failed {
+					t.Fatalf("a cut write was recorded as a fault: %+v", failure)
+				}
 			}
 		})
 	}

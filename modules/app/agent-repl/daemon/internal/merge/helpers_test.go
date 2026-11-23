@@ -296,6 +296,9 @@ type fakeDB struct {
 	progress      map[ids.WorkspaceID]wsm.MergeProgress
 	progressSteps []string
 	progressErr   error
+	// duringProgressPut, when set, runs inside each PutMergeProgress before
+	// it answers: what happens to the run while its record is written.
+	duringProgressPut func()
 	// progressReadErr, when set, fails every MergeProgressOf read.
 	progressReadErr error
 	adopted         []wsm.LeaseID
@@ -695,6 +698,12 @@ func (f *fakeDB) ClearQueueDrainOwed(_ context.Context, repo wsm.RepoKey) error 
 }
 
 func (f *fakeDB) PutMergeProgress(_ context.Context, p wsm.MergeProgress) error {
+	f.mu.Lock()
+	during := f.duringProgressPut
+	f.mu.Unlock()
+	if during != nil {
+		during()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.shut {

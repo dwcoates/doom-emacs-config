@@ -408,8 +408,25 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	if err := r.o.deps.DB.PutMergeProgress(ctx, wsm.MergeProgress{
 		Workspace: r.ws, Lease: r.lease.ID, UpdatedAt: r.o.deps.Now(), Document: encoded,
 	}); err != nil {
-		r.o.log(ctx, r.ws).Error(op, "could not record the merge's progress; the merge stops rather than take a step a restart could not resume",
-			dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "step": step, "error": err.Error()})
+		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "step": step, "previous": previous, "error": err.Error()}
+		switch {
+		// THE DAEMON'S EXIT CUT THE WRITE: the entry guard's check above ran
+		// before the exit landed, and the write it let through was cut by it
+		// (2026-11-23 11:39:54, an orderly exit suspending a merge in its test
+		// gate was recorded as a fault). It stops the run as the entry guard
+		// does, and the stored record stays at the stopping point the resume
+		// continues from.
+		case r.exiting():
+			r.o.log(ctx, r.ws).Info(op, "the daemon's exit cut the merge's progress write; the record stays at the stopping point the next boot resumes from", fields)
+			return errMergeStopping
+		// THE RUN'S OWN END CUT THE WRITE (an abandon, or an exit not yet
+		// marked on the run): the run's end records why (run.end), so the cut
+		// is no fault of the record's.
+		case r.cut(err):
+			r.o.log(ctx, r.ws).Info(op, "the run's own end cut the merge's progress write; the record stays at its last stopping point, and the run's end records why", fields)
+			return fmt.Errorf("merge: recording the merge's progress at %s: %w", step, err)
+		}
+		r.o.log(ctx, r.ws).Error(op, "could not record the merge's progress; the merge stops rather than take a step a restart could not resume", fields)
 		return fmt.Errorf("merge: recording the merge's progress at %s: %w", step, err)
 	}
 	r.o.log(ctx, r.ws).Debug(op, "recorded the merge's progress", dlog.Context{
