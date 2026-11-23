@@ -221,12 +221,17 @@ type ClientLogRecord struct {
 	//	*ClientLogRecord_Webapp
 	//	*ClientLogRecord_Sidecar
 	Runtime isClientLogRecord_Runtime `protobuf_oneof:"runtime"`
-	// The key of the log call that wrote the record, which the client derives
-	// from its runtime, the call's scope and its template (logging-contract.md
-	// "Log sites"). Required: a record with no key, or one not 12 lowercase
-	// hex, is malformed (Connect InvalidArgument), since a record the
-	// production checks cannot count is a record they miss.
-	SiteKey *LogSiteKey `protobuf:"bytes,14,opt,name=site_key,json=siteKey,proto3" json:"site_key,omitempty"`
+	// The key of the log call that wrote the record: 12 lowercase hex, which
+	// the client derives from its runtime, the call's scope and its template
+	// (logging-contract.md "Log sites"). Required: a record with no site, or
+	// one not 12 lowercase hex, is malformed (Connect InvalidArgument), since a
+	// record the production checks cannot count is a record they miss.
+	//
+	// A BARE STRING, NOT agentrepl.v1.LogSiteKey: a deploy restarts the sidecar
+	// before the daemon hands over and reloads the webapp beside it, so a
+	// changed wire type here would have the old daemon refuse the new
+	// clients' records for the length of every handover.
+	Site string `protobuf:"bytes,12,opt,name=site,proto3" json:"site,omitempty"`
 	// The call's unrendered message, its placeholders ({name}) unfilled: the
 	// site's summary. Required (a blank one is malformed). `message` is this
 	// template rendered from the record's context.
@@ -368,11 +373,11 @@ func (x *ClientLogRecord) GetSidecar() *ClientLogRuntimeSidecar {
 	return nil
 }
 
-func (x *ClientLogRecord) GetSiteKey() *LogSiteKey {
+func (x *ClientLogRecord) GetSite() string {
 	if x != nil {
-		return x.SiteKey
+		return x.Site
 	}
-	return nil
+	return ""
 }
 
 func (x *ClientLogRecord) GetTemplate() string {
@@ -732,13 +737,13 @@ var File_agentrepl_v1_endpoint_client_log_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_client_log_proto_rawDesc = "" +
 	"\n" +
-	"&agentrepl/v1/endpoint_client_log.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1cagentrepl/v1/log_level.proto\x1a\x1fagentrepl/v1/log_site_key.proto\"\xcb\x01\n" +
+	"&agentrepl/v1/endpoint_client_log.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1cagentrepl/v1/log_level.proto\"\xcb\x01\n" +
 	"\x10ClientLogRequest\x12:\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\tworkspace\x12:\n" +
 	"\awebhost\x18\x03 \x01(\v2\x1e.agentrepl.v1.ClientLogWebhostH\x00R\awebhost\x125\n" +
 	"\x06record\x18\x02 \x01(\v2\x1d.agentrepl.v1.ClientLogRecordR\x06recordB\b\n" +
 	"\x06source\"\x12\n" +
-	"\x10ClientLogWebhost\"\x8e\x05\n" +
+	"\x10ClientLogWebhost\"\xe1\x04\n" +
 	"\x0fClientLogRecord\x129\n" +
 	"\x05debug\x18\x01 \x01(\v2!.agentrepl.v1.ClientLogLevelDebugH\x00R\x05debug\x126\n" +
 	"\x04info\x18\x02 \x01(\v2 .agentrepl.v1.ClientLogLevelInfoH\x00R\x04info\x126\n" +
@@ -751,11 +756,11 @@ const file_agentrepl_v1_endpoint_client_log_proto_rawDesc = "" +
 	"\averbose\x18\t \x01(\bR\averbose\x12>\n" +
 	"\x06webapp\x18\n" +
 	" \x01(\v2$.agentrepl.v1.ClientLogRuntimeWebappH\x01R\x06webapp\x12A\n" +
-	"\asidecar\x18\v \x01(\v2%.agentrepl.v1.ClientLogRuntimeSidecarH\x01R\asidecar\x123\n" +
-	"\bsite_key\x18\x0e \x01(\v2\x18.agentrepl.v1.LogSiteKeyR\asiteKey\x12\x1a\n" +
+	"\asidecar\x18\v \x01(\v2%.agentrepl.v1.ClientLogRuntimeSidecarH\x01R\asidecar\x12\x12\n" +
+	"\x04site\x18\f \x01(\tR\x04site\x12\x1a\n" +
 	"\btemplate\x18\r \x01(\tR\btemplateB\a\n" +
 	"\x05levelB\t\n" +
-	"\aruntimeJ\x04\b\f\x10\rR\x04site\"\x18\n" +
+	"\aruntime\"\x18\n" +
 	"\x16ClientLogRuntimeWebapp\"\x19\n" +
 	"\x17ClientLogRuntimeSidecar\"\x8f\x01\n" +
 	"\x11ClientLogResponse\x12:\n" +
@@ -797,7 +802,6 @@ var file_agentrepl_v1_endpoint_client_log_proto_goTypes = []any{
 	(*ClientLogLevelWarn)(nil),        // 12: agentrepl.v1.ClientLogLevelWarn
 	(*ClientLogLevelError)(nil),       // 13: agentrepl.v1.ClientLogLevelError
 	(*structpb.Struct)(nil),           // 14: google.protobuf.Struct
-	(*LogSiteKey)(nil),                // 15: agentrepl.v1.LogSiteKey
 }
 var file_agentrepl_v1_endpoint_client_log_proto_depIdxs = []int32{
 	9,  // 0: agentrepl.v1.ClientLogRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -810,15 +814,14 @@ var file_agentrepl_v1_endpoint_client_log_proto_depIdxs = []int32{
 	14, // 7: agentrepl.v1.ClientLogRecord.context:type_name -> google.protobuf.Struct
 	3,  // 8: agentrepl.v1.ClientLogRecord.webapp:type_name -> agentrepl.v1.ClientLogRuntimeWebapp
 	4,  // 9: agentrepl.v1.ClientLogRecord.sidecar:type_name -> agentrepl.v1.ClientLogRuntimeSidecar
-	15, // 10: agentrepl.v1.ClientLogRecord.site_key:type_name -> agentrepl.v1.LogSiteKey
-	6,  // 11: agentrepl.v1.ClientLogResponse.success:type_name -> agentrepl.v1.ClientLogSuccess
-	7,  // 12: agentrepl.v1.ClientLogResponse.error:type_name -> agentrepl.v1.ClientLogError
-	8,  // 13: agentrepl.v1.ClientLogError.unknown_workspace:type_name -> agentrepl.v1.ClientLogUnknownWorkspace
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	6,  // 10: agentrepl.v1.ClientLogResponse.success:type_name -> agentrepl.v1.ClientLogSuccess
+	7,  // 11: agentrepl.v1.ClientLogResponse.error:type_name -> agentrepl.v1.ClientLogError
+	8,  // 12: agentrepl.v1.ClientLogError.unknown_workspace:type_name -> agentrepl.v1.ClientLogUnknownWorkspace
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_client_log_proto_init() }
@@ -827,7 +830,6 @@ func file_agentrepl_v1_endpoint_client_log_proto_init() {
 		return
 	}
 	file_agentrepl_v1_log_level_proto_init()
-	file_agentrepl_v1_log_site_key_proto_init()
 	file_agentrepl_v1_endpoint_client_log_proto_msgTypes[0].OneofWrappers = []any{
 		(*ClientLogRequest_Workspace)(nil),
 		(*ClientLogRequest_Webhost)(nil),

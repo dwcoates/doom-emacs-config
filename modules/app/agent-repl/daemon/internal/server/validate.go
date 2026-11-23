@@ -1965,8 +1965,8 @@ func validateClientLogRecord(field string, record *agentreplv1.ClientLogRecord) 
 	if record.GetMessage() == "" {
 		return invalid(field+".message", "a message is required")
 	}
-	if !logsite.ValidKey(record.GetSiteKey().GetHex()) {
-		return invalid(field+".site_key", "a site key of 12 lowercase hex characters is required")
+	if !logsite.ValidKey(record.GetSite()) {
+		return invalid(field+".site", "a site key of 12 lowercase hex characters is required")
 	}
 	if record.GetTemplate() == "" {
 		return invalid(field+".template", "a template is required")

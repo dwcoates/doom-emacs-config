@@ -9,10 +9,9 @@ The production mediator is a sibling of the deploy mediator. After each deploy i
 - **Systems.**
   - The daemon serves the new rpc and reads the new config.
   - The shim gains one landing arm and one metaprompt.
-  - The sidecar and the webapp forward log records, so they adopt the typed site key.
   - `agent-repld` gains the `production-mediation` verbs.
 - **Non-additive changes.**
-  - `agentrepl.v1.ClientLogRecord.site` and `agentrepl.v1.LogSite.key` were bare strings. Both become `agentrepl.v1.LogSiteKey`, and their old tags are reserved.
+  - `agentrepl.v1.LogSite.key` was a bare string. It becomes `agentrepl.v1.LogSite.site`, an `agentrepl.v1.LogSiteKey`, and its old tag is reserved. `agentrepl.v1.ClientLogRecord.site` stays a string (correction under 3).
   - `agentrepl.v1.FinishWorkspaceRequest.placement` becomes `optional`.
 
 ## Iteration sequence
@@ -55,21 +54,20 @@ Autonomous mode uses the default order: concerns first, top-down by containment.
 
 - **What.**
   - `agentrepl/v1/log_site_key.proto` declares `agentrepl.v1.LogSiteKey { string hex = 1; }`.
-  - `agentrepl.v1.ClientLogRecord.site_key` (tag 14) replaces `site` (tag 12, now reserved).
   - `agentrepl.v1.LogSite.site` (tag 10) replaces `key` (tag 1, now reserved).
+  - The production messages name sites by it (`agentrepl.v1.ProductionFinding.sites`, `agentrepl.v1.UpdateProductionMediationSiteOwned.site`).
 - **Why.**
   - The mediator names sites back to the daemon in its findings, and the daemon records which child owns each one. That makes the key a join key.
-  - Under the typed-identity rule, a join key is one message that every user of it imports. It is never a bare string respelled at each site.
-- **Why the tags are reserved instead of reused.** The sidecar is a separate launchd service, so it can run a build older than the daemon's. A string read as a message at the same tag would fail to decode instead of being refused cleanly.
+  - Under the typed-identity rule, a join key is one message that every user of it imports.
+- **Correction (2026-11-23): `agentrepl.v1.ClientLogRecord.site` stays a string.**
+  - This entry first moved it to `LogSiteKey site_key = 14` as well. That was wrong.
+  - A deploy restarts the sidecar before the daemon hands over, and reloads the webapp beside it. With a changed wire type, the old daemon would refuse every record the new sidecar and webapp forward, for the length of each handover.
+  - The root cause was judging the change by the schema alone, without the order in which a deploy replaces the record's producers and its consumer.
+  - So the forwarded record keeps its key as a bare string, and its comment says why. It is the one place the key is not `LogSiteKey`. Converting it needs a change that ships the new field beside the old one before it removes the old one.
 - **Consequences (implementation).**
-  - Daemon:
-    - `daemon/internal/server/admin.go` `clientRecord` reads `GetSiteKey().GetHex()`.
-    - `daemon/internal/server/validate.go` validates `record.site_key`, and the refusal's field path reads `record.site_key`.
-    - `daemon/internal/server/listlogsites.go` serves `Site: &LogSiteKey{Hex: …}`.
-  - Sidecar: `agent-shim/claude/shim-sidecar/internal/daemonclient/client.go` forwards `SiteKey`.
-  - Webapp: `webapp/src/log.ts` `buildClientLogRecord` sets `siteKey: { hex }`.
+  - `daemon/internal/server/listlogsites.go` serves `Site: &LogSiteKey{Hex: …}`.
   - The `agent-repld logs sites` JSON output now prints `site: {hex}` instead of `key`.
-  - Tests that built records by the old field were adapted mechanically. The adaptation was a pure rename of the field, and no expected behavior changed.
+  - Until the main checkout's front door is rebuilt by the deploy, an older `agent-repld` prints the sites without their key, because it does not know tag 10.
 
 ### 4. The stored finish placement (2026-11-23)
 

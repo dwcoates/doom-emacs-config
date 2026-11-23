@@ -1378,8 +1378,8 @@ func TestForwardCarriesTheRecordsSiteAndTemplate(t *testing.T) {
 		t.Fatalf("Forward returned %v", err)
 	}
 	got := server.request.GetRecord()
-	if got.GetSiteKey().GetHex() != record.Site || got.GetTemplate() != record.Template || got.GetMessage() != record.Message {
+	if got.GetSite() != record.Site || got.GetTemplate() != record.Template || got.GetMessage() != record.Message {
 		t.Fatalf("record site, template, message = %q, %q, %q, want %q, %q, %q",
-			got.GetSiteKey().GetHex(), got.GetTemplate(), got.GetMessage(), record.Site, record.Template, record.Message)
+			got.GetSite(), got.GetTemplate(), got.GetMessage(), record.Site, record.Template, record.Message)
 	}
 }

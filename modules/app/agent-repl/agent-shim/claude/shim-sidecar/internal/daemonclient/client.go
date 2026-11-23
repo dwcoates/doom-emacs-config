@@ -213,7 +213,7 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	requestRecord := &agentreplv1.ClientLogRecord{
 		Operation: record.Operation,
 		Message:   record.Message,
-		SiteKey:   &agentreplv1.LogSiteKey{Hex: record.Site},
+		Site:      record.Site,
 		Template:  record.Template,
 		Context:   contextValue,
 		Timestamp: record.Timestamp,

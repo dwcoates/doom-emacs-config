@@ -387,7 +387,7 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
-			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
+			Site: "0123456789ab", Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "command-dispatch.deferred",
 			Message:   "the webview deferred a command",
@@ -439,7 +439,7 @@ func TestClientLogWritesASidecarRecordIntoTheSidecarSink(t *testing.T) {
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
-			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
+			Site: "0123456789ab", Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "sidecar.transcript.read",
 			Message:   "the sidecar read a transcript",
@@ -484,7 +484,7 @@ func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
-			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
+			Site: "0123456789ab", Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}},
 			Operation: "webapp.render.slow",
 			Message:   "a render took too long",
@@ -516,7 +516,7 @@ func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
-			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
+			Site: "0123456789ab", Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
 			Operation: "webapp.crash",
 			Message:   "the webview threw uncaught",
@@ -550,7 +550,7 @@ func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T
 	_, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
-			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
+			Site: "0123456789ab", Template: "a test record",
 			Operation: "webapp.something",
 			Message:   "a message with no level",
 		},
@@ -580,7 +580,7 @@ func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
 	if _, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 		Record: &agentreplv1.ClientLogRecord{
-			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
+			Site: "0123456789ab", Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
 			Operation: "webapp.crash",
 			Message:   "a fatal client error",
