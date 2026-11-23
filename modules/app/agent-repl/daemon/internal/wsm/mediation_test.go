@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -728,4 +729,67 @@ func TestTheEscalationWritesRefuseWhatTheyCannotRecord(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAnOwedCheckRecordsWhenItsLandingBegan(t *testing.T) {
+	cases := []struct {
+		name string
+		// merges are the queue's merges: whether each is running, and how
+		// long before the deploy its ledger opened.
+		merges []runningMerge
+		// want is how long before the deploy the landing began.
+		want time.Duration
+	}{
+		{name: "a deploy no merge is running for began its own landing"},
+		{name: "a landing began when its running merge began", merges: []runningMerge{{state: MergeAdmitted, opened: 20 * time.Minute}}, want: 20 * time.Minute},
+		{name: "a merge being repaired is running", merges: []runningMerge{{state: MergeRemediating, opened: 30 * time.Minute}}, want: 30 * time.Minute},
+		{
+			name:   "two running merges began the landing at the earlier",
+			merges: []runningMerge{{state: MergeAdmitted, opened: 10 * time.Minute}, {state: MergeAdmitted, opened: 40 * time.Minute}},
+			want:   40 * time.Minute,
+		},
+		{name: "a merge only waiting in line began nothing", merges: []runningMerge{{state: MergeQueued, opened: 50 * time.Minute}}},
+		{name: "a merge whose ledger opened after the deploy began nothing", merges: []runningMerge{{state: MergeAdmitted, opened: -time.Minute}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+			key, err := normalizeRepoKey(repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, merge := range tc.merges {
+				ws := testWorkspace(t, s)
+				lease := fmt.Sprintf("lease-%d", i)
+				if _, err := s.db().ExecContext(ctx, `INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES (?, ?, ?)`,
+					lease, string(ws.ID), nanos(instant.Add(-merge.opened))); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.db().ExecContext(ctx, `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, ledger_id, source_pre_deploy_hooks, source_post_deploy_hooks)
+					VALUES (?, ?, ?, ?, 1, ?, '[]', '[]')`, string(key), string(ws.ID), i+1, int(merge.state), lease); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			if _, err := s.OweMediation(ctx, repo, instant, ""); err != nil {
+				t.Fatalf("OweMediation: %v", err)
+			}
+			m, err := s.MediationOf(ctx, repo)
+
+			// Assert
+			if err != nil || m == nil || !m.LandingStartedAt.Equal(instant.Add(-tc.want)) {
+				t.Fatalf("MediationOf = (%+v, %v), want the landing begun %v before the deploy", m, err, tc.want)
+			}
+		})
+	}
+}
+
+// runningMerge is one merge of a queue a landing's start is read from.
+type runningMerge struct {
+	state  MergeQueueState
+	opened time.Duration
 }

@@ -80,20 +80,29 @@ name.
 
 ### The windows
 
-Each landing records two instants: when it started and when it finished.
-The deploy mediator's window becomes that landing's start through its
-finish; it reads from where its last check read to today
-(`windowStart`, `daemon/internal/merge/intakefacts.go:427`), so this changes
-the deploy mediator as well.
+A landing begins when its merge begins running, since a landing logs from
+its merge on (owner ruling, 2026-11-16), and ends when its deploy ends. Each
+owed check records when its landing began (`wsm.Mediation.LandingStartedAt`):
+the earliest opening of the ledger of a merge of the queue still running as
+the deploy began, or the deploy's own start when none was (a direct landing).
 
-When landing N finishes, the production mediator is owed a check of the
-window that closed when landing N started: from landing N-1's finish to
-landing N's start, which is the time version N-1 served on its own. The
-check compares that window's sites against the window before it, so a site
-is new when it fired in this window and not in the previous one.
+- The deploy mediator reads its landing: from when the landing began to when
+  it is told. A window never starts before where the repository's last check
+  read to (`checked_through`), so two landings whose merges overlapped are
+  never read twice.
+- The production mediator reads the span between landings: from where the
+  last check read to, to when the next landing began. When landings overlap
+  the span is empty, and that deploy owes no production check.
+- A check of a crash has no landing. It reads from where the last check read
+  to, which holds the death, and the production span runs on through it.
+- Two production checks never share a span, because each starts no earlier
+  than where the previous one ended.
 
-A daemon crash with no landing closes no window. The crash is the deploy
-mediator's, as today, and the production window runs on through it.
+So every record is read by exactly one mediator. When landing N's deploy
+ends, the production mediator is owed the span that closed when landing N
+began: the time version N-1 served on its own. The check compares that
+span's sites against the span before it, so a site is new when it fired in
+this span and not in the previous one.
 
 ### The store
 

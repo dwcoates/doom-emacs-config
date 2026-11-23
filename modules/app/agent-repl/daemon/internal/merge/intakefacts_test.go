@@ -311,6 +311,72 @@ func TestAQuietReleaseRecordsWhereTheCheckReadTo(t *testing.T) {
 	}
 }
 
+func TestACheckWindowIsItsLanding(t *testing.T) {
+	cases := []struct {
+		name string
+		// mergeOpened is how long before the second deploy its merge began
+		// running; zero for a deploy no running merge landed.
+		mergeOpened time.Duration
+		// ending is how the second deploy ended.
+		ending wsm.DeployEnding
+		// want answers where the second check reads from, given where the
+		// first read to and when the second deploy began.
+		want func(firstRead, second time.Time) time.Time
+	}{
+		{
+			name: "a landing reads from when its merge began", mergeOpened: 20 * time.Minute, ending: wsm.DeployFinished,
+			want: func(_, second time.Time) time.Time { return second.Add(-20 * time.Minute) },
+		},
+		{
+			name: "a deploy no merge landed reads from its own start", ending: wsm.DeployFinished,
+			want: func(_, second time.Time) time.Time { return second },
+		},
+		{
+			name: "a landing whose merge began before the last read starts where it read to", mergeOpened: 2 * time.Hour, ending: wsm.DeployFinished,
+			want: func(firstRead, _ time.Time) time.Time { return firstRead },
+		},
+		{
+			name: "a crash reads from where the last check read to", mergeOpened: 20 * time.Minute, ending: wsm.DaemonCrashed,
+			want: func(firstRead, _ time.Time) time.Time { return firstRead },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a first check read through its clock, and a second
+			// deploy began an hour later.
+			h := checked(t)
+			owe(t, h)
+			h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, nil }
+			h.o.Mediate(context.Background())
+			firstRead, _, err := h.db.CheckedThrough(context.Background(), mediationKey(h))
+			if err != nil {
+				t.Fatal(err)
+			}
+			second := deployStarted.Add(time.Hour)
+			if tc.mergeOpened != 0 {
+				h.runningMergeOpenedAt(t, second.Add(-tc.mergeOpened))
+			}
+			h.now = second.Add(time.Minute)
+			oweAt(t, h, second)
+			if err := h.o.NoteDeployEnding(context.Background(), second, tc.ending); err != nil {
+				t.Fatal(err)
+			}
+			var reads []time.Time
+			h.logRecords = func(from, _ time.Time) ([]LogRecord, error) { reads = append(reads, from); return nil, nil }
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert: the window is the first read; the second is the span
+			// before it.
+			want := tc.want(firstRead, second)
+			if len(reads) == 0 || !reads[0].Equal(want) {
+				t.Fatalf("the second check read from %v, want %v", reads, want)
+			}
+		})
+	}
+}
+
 func TestACheckDigestIsOneOfTheQueuesLogs(t *testing.T) {
 	// Arrange
 	path := DigestPath("/state/merge-logs", time.Unix(1795121928, 0))

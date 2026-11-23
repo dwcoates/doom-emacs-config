@@ -123,6 +123,11 @@ type fakeDB struct {
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
 	checks wsm.DB
+	// landingOpened, when set, is when the landing of every owed check
+	// began, standing in for a running merge the real store would find
+	// (wsm.Mediation.LandingStartedAt): the harness's queue is this fake's,
+	// not the checks store's.
+	landingOpened time.Time
 	// endingErr fails RecordMediationEnding.
 	endingErr error
 	// mediatorRecordErr fails RecordDeployMediator.
@@ -487,7 +492,25 @@ func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediat
 	if err != nil {
 		return nil, err
 	}
-	return f.checks.MediationOf(ctx, repo)
+	m, err := f.checks.MediationOf(ctx, repo)
+	if m == nil || err != nil {
+		return m, err
+	}
+	f.mu.Lock()
+	if !f.landingOpened.IsZero() {
+		m.LandingStartedAt = f.landingOpened
+	}
+	f.mu.Unlock()
+	return m, nil
+}
+
+// runningMergeOpenedAt makes every owed check's landing begin AT, as a merge
+// of the queue that began running then would.
+func (h *harness) runningMergeOpenedAt(t *testing.T, at time.Time) {
+	t.Helper()
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.landingOpened = at
 }
 
 func (f *fakeDB) RecordMergeLanding(ctx context.Context, landing wsm.MergeLanding) (bool, error) {

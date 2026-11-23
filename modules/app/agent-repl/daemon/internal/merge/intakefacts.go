@@ -357,12 +357,12 @@ func (o *orchestrator) writeDigest(window []LogRecord, left []LeftOut, owed, sin
 // records are still read and sorted here, for the window the store keeps
 // (CheckWindow.Groups), which a decision is judged against.
 //
-// THE WINDOW STARTS WHERE THE REPOSITORY'S LAST CHECK READ TO, never at the
-// deploy's start (owner ruling, 2026-11-16): a landing logs between its
-// merge and its deploy, and a window from the deploy's start left those
-// records unread by every check (the durable log sink warning, whose
-// landing removed the worktree just before the deploy began). An intake told
-// before, whose turn is reattached, is told the window it was told then.
+// THE WINDOW IS THE LANDING (windowStart): from when its merge began, never
+// from the deploy's start (owner ruling, 2026-11-16: a landing logs between
+// its merge and its deploy, and a window from the deploy's start left those
+// records unread by every check), to now. The span between landings is the
+// production checks' (owner ruling, 2026-11-23). An intake told before,
+// whose turn is reattached, is told the window it was told then.
 func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, wsm.CheckWindow, error) {
 	now := o.deps.Now()
 	since, err := o.windowStart(ctx, q.key, m)
@@ -421,9 +421,14 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 }
 
 // windowStart is where check M's window starts: the start of the window its
-// intake was told, when it was told one; otherwise where REPO's last check
-// read to; the deploy's start for a repository never checked, or a check a
-// previous build told, which recorded no window.
+// intake was told, when it was told one. Otherwise the deploy mediator reads
+// its LANDING (owner ruling, 2026-11-23): from when the landing began
+// (wsm.Mediation.LandingStartedAt), so its merge's own records are read
+// (owner ruling, 2026-11-16), and the production checks read the span
+// between landings. A window never starts before where REPO's last check
+// read to, so two landings that overlap are never read twice. A check of a
+// crash has no landing, and reads from where the last check read to, which
+// holds the death; its deploy's start when the repository was never checked.
 func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation) (time.Time, error) {
 	if m.Prompted() {
 		told, found, err := o.deps.DB.MediationWindowOf(ctx, repo)
@@ -435,14 +440,20 @@ func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.
 		}
 		return m.OwedAt, nil
 	}
-	through, found, err := o.deps.DB.CheckedThrough(ctx, repo)
+	through, read, err := o.deps.DB.CheckedThrough(ctx, repo)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("merge: read where the last check read to: %w", err)
 	}
-	if found {
+	if m.DeployEnding == wsm.DaemonCrashed {
+		if read {
+			return through, nil
+		}
+		return m.OwedAt, nil
+	}
+	if read && through.After(m.LandingStartedAt) {
 		return through, nil
 	}
-	return m.OwedAt, nil
+	return m.LandingStartedAt, nil
 }
 
 // RenderOccasion is the brief's first sentence: what the check owed at OWED
