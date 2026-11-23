@@ -63,7 +63,7 @@ type EdgeScope struct {
 func CloseOnEdge(ctx context.Context, store FaultStore, log dlog.Logger, edge Edge, scope EdgeScope, at time.Time) (int, error) {
 	fields := dlog.Context{"edge": string(edge)}
 	if scope.Workspace != nil {
-		fields["workspace"] = string(*scope.Workspace)
+		fields[dlog.KeyWorkspaceID] = string(*scope.Workspace)
 	}
 	open, err := store.OpenFaults(ctx, wsm.FaultScope{Workspace: scope.Workspace})
 	if err != nil {
@@ -95,7 +95,7 @@ func CloseOnEdge(ctx context.Context, store FaultStore, log dlog.Logger, edge Ed
 func CloseFaultOn(ctx context.Context, closer FaultCloser, log dlog.Logger, edge Edge, f wsm.Fault, at time.Time) bool {
 	fields := dlog.Context{"kind": f.Kind, "fault": string(f.ID), "edge": string(edge)}
 	if f.Workspace != nil {
-		fields["workspace"] = string(*f.Workspace)
+		fields[dlog.KeyWorkspaceID] = string(*f.Workspace)
 	}
 	if !ClosesOn(f.Kind, edge) {
 		log.Error(opCloseOnEdge, "refused to close a fault on an edge its kind does not declare; it stands", fields)

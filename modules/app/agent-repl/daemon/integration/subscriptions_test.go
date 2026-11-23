@@ -602,7 +602,7 @@ func assertTransportClosed(t *testing.T, d *harness.Daemon, rpcName, wantCause s
 	t.Helper()
 	// THE RECORD IS FOUND BY ITS OWN RPC AND CAUSE: on a shared daemon the
 	// other rpcs' refusals, and other cases', are in the run log beside it.
-	rec := d.AwaitLogRecord(d.RunLogPath(), "the "+rpcName+" transport-closed record", func(r harness.LogRecord) bool {
+	rec := d.AwaitUnscopedRunLogRecord("the "+rpcName+" transport-closed record", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.refusal.transport_closed" && r.Context["rpc"] == rpcName && r.Context["cause"] == wantCause
 	})
 	if !strings.EqualFold(rec.Level, "info") {

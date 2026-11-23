@@ -94,6 +94,14 @@ func (d *Daemon) WorkspaceLog(workspaceDir, sink string) []LogRecord {
 // cannot satisfy an await with its predecessor's record.
 func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
+	d.refuseSharedRunLog(path, what)
+	return d.awaitLogRecordIn(path, what, pred)
+}
+
+// awaitLogRecordIn is AwaitLogRecord without the shared-run-log refusal, for
+// the waiters that scope the run log themselves.
+func (d *Daemon) awaitLogRecordIn(path, what string, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
 	own := filepath.Clean(path) == filepath.Clean(d.RunLogPath())
@@ -108,6 +116,7 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 // bound. It is still a child of the daemon's whole-run budget.
 func (d *Daemon) AwaitLogRecordWithin(path, what string, bound time.Duration, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
+	d.refuseSharedRunLog(path, what)
 	wait, cancelWait := grantedclock.WithBound(d.ctx, bound)
 	defer cancelWait()
 	own := filepath.Clean(path) == filepath.Clean(d.RunLogPath())
@@ -124,6 +133,7 @@ func (d *Daemon) AwaitLogRecordWithin(path, what string, bound time.Duration, pr
 // whose pid scoping AwaitLogRecord owns.
 func (d *Daemon) AwaitLogRecordAfter(path, what string, after, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
+	d.refuseSharedRunLog(path, what)
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
 	return awaitLogRecordAfter(d.t, wait, path, what, after, pred)
@@ -134,9 +144,44 @@ func (d *Daemon) AwaitLogRecordAfter(path, what string, after, pred func(LogReco
 // which AwaitLogRecord's own-pid filter skips.
 func (d *Daemon) AwaitRunLogRecordFromAnyProcess(what string, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
+	d.refuseSharedRunLog(d.RunLogPath(), what)
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
 	return awaitLogRecord(d.t, wait, d.RunLogPath(), what, pred)
+}
+
+// A VIEW'S RUN LOG IS EVERY PARALLEL TEST'S. A view shares its owner's
+// process, so the run log holds the records of every test on that process,
+// and a wait whose predicate names an operation and context fields but not
+// the test's own workspace is satisfied by another test's record, early.
+// Observed 2026-11-22: a canonical-daemon case matched another case's
+// daemon.health.close_on_edge record 8s before its own and read the health
+// before its link was restored. A view therefore never waits on the run log
+// through the path-taking waiters; it waits through AwaitOwnRunLogRecord,
+// which offers pred only the records the view Owns, or through
+// AwaitUnscopedRunLogRecord for a record that names no workspace at all.
+
+// refuseSharedRunLog fails the test of a view that asks a path-taking waiter
+// to read the shared run log.
+func (d *Daemon) refuseSharedRunLog(path, what string) {
+	d.t.Helper()
+	if d.view && filepath.Clean(path) == filepath.Clean(d.RunLogPath()) {
+		d.t.Fatalf("harness: waiting for %s in the run log of a shared daemon; it holds every parallel test's records, so wait through AwaitOwnRunLogRecord (a record naming this test's workspace) or AwaitUnscopedRunLogRecord (a record naming none)", what)
+	}
+}
+
+// AwaitUnscopedRunLogRecord waits for a run-log record that names no
+// workspace, among this daemon process's records: a daemon-wide act (a
+// refused stream open, a boot record, a registration refusal). A record that
+// does name a workspace is never offered to pred, so no case's
+// workspace-bound record can end the wait. A sibling case on a shared daemon
+// may write a daemon-wide record of the same shape, so a case asserts only
+// what holds of every such record.
+func (d *Daemon) AwaitUnscopedRunLogRecord(what string, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
+	return d.awaitLogRecordIn(d.RunLogPath(), what, func(r LogRecord) bool {
+		return recordKey(r) == "" && pred(r)
+	})
 }
 
 // awaitLogRecord waits for the first record pred accepts in path, failing t
@@ -272,7 +317,7 @@ func logTail(records []LogRecord, n int) string {
 // AwaitRunLogOperation waits for a run-log record with an exact operation.
 func (d *Daemon) AwaitRunLogOperation(operation string) LogRecord {
 	d.t.Helper()
-	return d.AwaitLogRecord(d.RunLogPath(), "operation "+operation, func(r LogRecord) bool {
+	return d.awaitLogRecordIn(d.RunLogPath(), "operation "+operation, func(r LogRecord) bool {
 		return r.PID == d.PID() && r.Operation == operation
 	})
 }
@@ -282,7 +327,7 @@ func (d *Daemon) AwaitRunLogOperation(operation string) LogRecord {
 // claimed, so another case's record on the shared daemon never ends the wait.
 func (d *Daemon) AwaitOwnRunLogRecord(what string, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
-	return d.AwaitLogRecord(d.RunLogPath(), what, func(r LogRecord) bool { return d.Owns(r) && pred(r) })
+	return d.awaitLogRecordIn(d.RunLogPath(), what, func(r LogRecord) bool { return d.Owns(r) && pred(r) })
 }
 
 // OwnRunLog is every run-log record of this process this Daemon answers for

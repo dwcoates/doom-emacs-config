@@ -797,3 +797,86 @@ func TestLogFilesNamesALogAndItsWarningsFile(t *testing.T) {
 		})
 	}
 }
+
+func TestAViewRefusesEveryPathTakingWaiterOnTheSharedRunLog(t *testing.T) {
+	always := func(LogRecord) bool { return true }
+	tests := []struct {
+		name string
+		act  func(view *Daemon)
+	}{
+		{"AwaitLogRecord", func(v *Daemon) { v.AwaitLogRecord(v.RunLogPath(), "x", always) }},
+		{"AwaitLogRecordWithin", func(v *Daemon) { v.AwaitLogRecordWithin(v.RunLogPath(), "x", time.Second, always) }},
+		{"AwaitLogRecordAfter", func(v *Daemon) { v.AwaitLogRecordAfter(v.RunLogPath(), "x", always, always) }},
+		{"AwaitRunLogRecordFromAnyProcess", func(v *Daemon) { v.AwaitRunLogRecordFromAnyProcess("x", always) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			owner := newOwnerForViews(t, t)
+			viewTB := NewRecordingTB(t, "TestMine")
+			view := owner.View(viewTB)
+
+			// Act
+			completed := Within(func() { tt.act(view) })
+
+			// Assert
+			if completed || !strings.Contains(viewTB.Failures(), "AwaitOwnRunLogRecord") {
+				t.Fatalf("completed=%v failures=%q, want a fatal naming AwaitOwnRunLogRecord", completed, viewTB.Failures())
+			}
+		})
+	}
+}
+
+func TestAnOwnerMayStillWaitOnItsOwnRunLogByPath(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+	appendRecords(t, owner, LogRecord{Operation: "daemon.a", Message: "own"})
+
+	// Act
+	got := owner.AwaitLogRecord(owner.RunLogPath(), "its record", func(r LogRecord) bool { return r.Operation == "daemon.a" })
+
+	// Assert
+	if got.Message != "own" {
+		t.Fatalf("record = %+v, want the owner's own", got)
+	}
+}
+
+// TestAViewsOwnRunLogWaitSkipsAnotherCasesMatch is the 2026-11-22 failure:
+// another case's record of the same shape is in the shared run log first, and
+// the wait must wait for the record naming its own workspace.
+func TestAViewsOwnRunLogWaitSkipsAnotherCasesMatch(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+	view := owner.View(NewRecordingTB(t, "TestMine"))
+	mine, theirs := t.TempDir(), t.TempDir()
+	view.Claim(mine)
+	appendRecords(t, owner,
+		LogRecord{Operation: "daemon.health.close_on_edge", Message: "theirs", WorkspaceDir: theirs},
+		LogRecord{Operation: "daemon.health.close_on_edge", Message: "mine", WorkspaceDir: mine})
+
+	// Act
+	got := view.AwaitOwnRunLogRecord("its own close", func(r LogRecord) bool { return r.Operation == "daemon.health.close_on_edge" })
+
+	// Assert
+	if got.Message != "mine" {
+		t.Fatalf("record = %+v, want the one naming the view's workspace", got)
+	}
+}
+
+func TestAwaitUnscopedRunLogRecordNeverOffersAWorkspacesRecord(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+	view := owner.View(NewRecordingTB(t, "TestMine"))
+	appendRecords(t, owner,
+		LogRecord{Operation: "daemon.cmd.boot", Message: "bound to a dir", WorkspaceDir: t.TempDir()},
+		LogRecord{Operation: "daemon.cmd.boot", Message: "bound to an id", WorkspaceID: "ws-theirs"},
+		LogRecord{Operation: "daemon.cmd.boot", Message: "daemon-wide"})
+
+	// Act
+	got := view.AwaitUnscopedRunLogRecord("the boot record", func(r LogRecord) bool { return r.Operation == "daemon.cmd.boot" })
+
+	// Assert
+	if got.Message != "daemon-wide" {
+		t.Fatalf("record = %+v, want the record naming no workspace", got)
+	}
+}
