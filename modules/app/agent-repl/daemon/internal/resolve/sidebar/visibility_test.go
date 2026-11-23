@@ -8,6 +8,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
@@ -450,5 +451,117 @@ func TestVisibilityBeforeAnyRenderIsTheStoredOne(t *testing.T) {
 				t.Fatalf("Visibility(%s) = %v, want %v", tc.ws, got, tc.want)
 			}
 		})
+	}
+}
+
+// visibilityRecords answers every visibility change record of WS.
+func visibilityRecords(surfaces *dlog.TestSurfaces, ws ids.WorkspaceID) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range dlog.FilterRecords(surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.visibility_changed"}) {
+		if rec.Context[dlog.KeyWorkspaceID] == string(ws) {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestAVisibilityChangeIsRecordedWithItsCauseInputsAndRevision(t *testing.T) {
+	// Arrange
+	r, surfaces := newResolver(t)
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	liveRegistry(r, registry(workspace(string(theWS), "one")))
+
+	// Act: folded away.
+	r.SetRegistry(foldedOne())
+
+	// Assert
+	recs := visibilityRecords(surfaces, theWS)
+	if len(recs) == 0 {
+		t.Fatalf("no visibility change record: %v", surfaces.Records())
+	}
+	got := recs[len(recs)-1]
+	want := dlog.Context{
+		"visibility": "not_visible", "previous": "unselected_visible", "cause": "daemon.sidebar.set_registry",
+		"arm": "ready", "open": true, "covered": true, "working": false, "unviewed": false, "starting": false,
+		"top_priority": false, "selected": false, "published": true, "revision": latestPush(t, r).GetRevision(),
+	}
+	for key, value := range want {
+		if got.Context[key] != value {
+			t.Fatalf("context[%q] = %v, want %v (record %v)", key, got.Context[key], value, got.Context)
+		}
+	}
+	if got.Level != dlog.LevelInfo {
+		t.Fatalf("level = %q, want info", got.Level)
+	}
+}
+
+func TestAFoldedWorkspaceWithNoSessionYetIsRecordedVisibleForStarting(t *testing.T) {
+	// Arrange
+	r, surfaces := newResolver(t)
+
+	// Act
+	r.SetRegistry(foldedOne())
+
+	// Assert
+	recs := visibilityRecords(surfaces, theWS)
+	if len(recs) != 1 {
+		t.Fatalf("visibility records = %v, want the one change", recs)
+	}
+	ctx := recs[0].Context
+	if ctx["visibility"] != "unselected_visible" || ctx["starting"] != true || ctx["covered"] != true || ctx["arm"] != "none" {
+		t.Fatalf("context = %v, want visible under the fold because it is starting", ctx)
+	}
+}
+
+func TestAVisibilityChangeAQuietRosterHoldsBackIsRecordedUnpublished(t *testing.T) {
+	// Arrange
+	r, gate, _, _, surfaces := quietResolver(t)
+	gate.Set(true)
+
+	// Act
+	r.SetRegistry(foldedOne())
+
+	// Assert
+	recs := visibilityRecords(surfaces, theWS)
+	got := recs[len(recs)-1]
+	if got.Context["visibility"] != "not_visible" || got.Context["published"] != false {
+		t.Fatalf("context = %v, want the change recorded unpublished", got.Context)
+	}
+	if _, ok := got.Context["revision"]; ok {
+		t.Fatalf("context = %v, want no revision for a roster not published", got.Context)
+	}
+}
+
+func TestTheNextPublicationIsToldItsRevisionOnce(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	var told []uint64
+	r.NotifyNextPublication(func(revision uint64) { told = append(told, revision) })
+
+	// Act
+	r.SetSummary(theWS, "a first summary")
+	first := latestPush(t, r).GetRevision()
+	r.SetSummary(theWS, "a second summary")
+
+	// Assert
+	if len(told) != 1 || told[0] != first {
+		t.Fatalf("told = %v, want once, the revision %d", told, first)
+	}
+}
+
+func TestACommitThatPublishesNothingTellsNoNextPublication(t *testing.T) {
+	// Arrange
+	r, gate, _, _, _ := quietResolver(t)
+	var told []uint64
+	r.NotifyNextPublication(func(revision uint64) { told = append(told, revision) })
+	gate.Set(true)
+
+	// Act
+	r.SetSummary(theWS, "a summary while the lid is closed")
+
+	// Assert
+	if len(told) != 0 {
+		t.Fatalf("told = %v, want nothing for a roster not published", told)
 	}
 }

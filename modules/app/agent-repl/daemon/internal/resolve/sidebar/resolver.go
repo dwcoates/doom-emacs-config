@@ -81,6 +81,13 @@ type resolver struct {
 	// pendingVisibilities are the visibility changes a render found, reported
 	// after the lock is released.
 	pendingVisibilities map[ids.WorkspaceID]wsm.Visibility
+	// visibilityMoves are the visibility changes the commit's renders found,
+	// recorded once the commit knows the roster that carries them
+	// (recordVisibilityMoves).
+	visibilityMoves []visibilityMove
+	// nextPublication are told the revision of the next roster this resolver
+	// publishes, each once (NotifyNextPublication).
+	nextPublication []func(revision uint64)
 
 	// now is the clock a status change is stamped by (WithClock).
 	now func() time.Time
@@ -326,8 +333,20 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 	}
 	r.departures = nil
 	var push *frontendv1.RosterPush
+	published := false
 	if ready && !quiet {
+		before := r.revision
 		push = r.resolvePush(last.log, last.operation)
+		published = r.revision != before
+	}
+	r.recordVisibilityMoves(push.GetRevision(), push != nil)
+	if published {
+		// TOLD UNDER THE LOCK THAT RESOLVED IT, so a callback names exactly
+		// the revision this commit publishes and never a later one.
+		for _, told := range r.nextPublication {
+			told(push.GetRevision())
+		}
+		r.nextPublication = nil
 	}
 	out := batchOutcome{
 		applied:       true,
@@ -1037,6 +1056,13 @@ func (r *resolver) SetIncumbentArms(arms map[ids.WorkspaceID]string) {
 			r.state.incumbentArms = copied
 			return true
 		})
+}
+
+// NotifyNextPublication implements Resolver.
+func (r *resolver) NotifyNextPublication(fn func(revision uint64)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextPublication = append(r.nextPublication, fn)
 }
 
 // SetOpening raises or lowers the workspace's open-in-flight fact, which

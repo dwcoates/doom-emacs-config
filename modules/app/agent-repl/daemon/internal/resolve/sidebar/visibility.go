@@ -138,11 +138,17 @@ func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[id
 }
 
 // resolveVisibility derives every workspace's visibility for this render,
-// keeps it for the rows and for Visibility, and records each change since the
+// keeps it for the rows and for Visibility, and collects each change since the
 // value last handed to the sink (seeded from the registry's persisted one),
-// so only a real change is written. The caller holds r.mu.
+// so only a real change is written. Each change is recorded once the commit
+// knows the roster it reaches (recordVisibilityMoves). The caller holds r.mu.
 func (r *resolver) resolveVisibility(repos []openRepo, rc rowContext, arms map[ids.WorkspaceID]string) {
-	derived := wsm.Visibilities(r.visibilityInputs(repos, rc, arms))
+	inputs := r.visibilityInputs(repos, rc, arms)
+	derived := wsm.Visibilities(inputs)
+	inputOf := make(map[ids.WorkspaceID]wsm.VisibilityInput, len(inputs))
+	for _, in := range inputs {
+		inputOf[in.ID] = in
+	}
 	r.state.visibility = derived
 	if r.state.visibilityKept == nil {
 		r.state.visibilityKept = map[ids.WorkspaceID]wsm.Visibility{}
@@ -158,8 +164,9 @@ func (r *resolver) resolveVisibility(repos []openRepo, rc rowContext, arms map[i
 			continue
 		}
 		r.state.visibilityKept[rec.ID] = v
-		r.logFor(rec.ID).Info("daemon.sidebar.visibility_changed", "the roster derived a new visibility for the workspace",
-			dlog.Context{"visibility": v.String(), "previous": kept.String()})
+		r.visibilityMoves = append(r.visibilityMoves, visibilityMove{
+			ws: rec.ID, to: v, from: kept, in: inputOf[rec.ID], arm: arms[rec.ID], cause: rc.causeOf(rec.ID),
+		})
 		if r.visibilities == nil {
 			continue
 		}
@@ -168,6 +175,53 @@ func (r *resolver) resolveVisibility(repos []openRepo, rc rowContext, arms map[i
 		}
 		r.pendingVisibilities[rec.ID] = v
 	}
+}
+
+// visibilityMove is one workspace's visibility change a render found, with
+// everything that decided it: the derivation's inputs, the status arm they
+// were read off, and the operation whose fact was being rendered.
+type visibilityMove struct {
+	ws       ids.WorkspaceID
+	to, from wsm.Visibility
+	in       wsm.VisibilityInput
+	arm      string
+	cause    string
+}
+
+// recordVisibilityMoves records every visibility change the commit's renders
+// found, each with its cause and the inputs that decided it, and with the
+// REVISION of the roster that carries it when PUBLISHED; a commit the quiet
+// state held back publishes none, and its changes reach the roster the lid's
+// opening publishes. Every editor opens and tears down a workspace's tab by
+// its row's visibility, so these records are what says why a tab came or
+// went (2026-11-23: six tabless workspaces opened and torn down within 3.5s
+// of a handover, and no record said what made them visible). The caller
+// holds r.mu.
+func (r *resolver) recordVisibilityMoves(revision uint64, published bool) {
+	for _, m := range r.visibilityMoves {
+		ctx := dlog.Context{
+			"visibility":   m.to.String(),
+			"previous":     m.from.String(),
+			"cause":        m.cause,
+			"arm":          m.arm,
+			"open":         m.in.Open,
+			"covered":      m.in.Covered,
+			"working":      m.in.Working,
+			"unviewed":     m.in.Unviewed,
+			"starting":     m.in.Starting,
+			"top_priority": m.in.TopPriority,
+			"selected":     m.in.Selected,
+			"published":    published,
+		}
+		if m.in.Parent != nil {
+			ctx["parent"] = string(*m.in.Parent)
+		}
+		if published {
+			ctx["revision"] = revision
+		}
+		r.logFor(m.ws).Info("daemon.sidebar.visibility_changed", "the roster derived a new visibility for the workspace", ctx)
+	}
+	r.visibilityMoves = nil
 }
 
 // visibilityOf answers V on the wire.
