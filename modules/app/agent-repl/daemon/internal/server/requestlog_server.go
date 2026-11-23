@@ -719,6 +719,13 @@ func (s *requestLoggingServer) SelectInEditor(
 	return serveUnary(s, ctx, "SelectInEditor", req, s.server.SelectInEditor)
 }
 
+func (s *requestLoggingServer) FindPullRequestOwner(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.FindPullRequestOwnerRequest],
+) (*connect.Response[agentreplv1.FindPullRequestOwnerResponse], error) {
+	return serveUnary(s, ctx, "FindPullRequestOwner", req, s.server.FindPullRequestOwner)
+}
+
 func (s *requestLoggingServer) LoadPageInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.LoadPageInEditorRequest],

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 const ownedURL = "https://github.com/ChessCom/explanation-engine/pull/42"
@@ -179,5 +180,80 @@ func TestTheOnePullRequestOwnerStepSpellsEveryEvent(t *testing.T) {
 	// Assert: the step's literal is every event's bits.
 	if all != 126 {
 		t.Fatalf("AllPullRequestEvents() = %d, but onePullRequestOwnerDDL spells 126; update the step", all)
+	}
+}
+
+func TestPullRequestOwnerOfAnswersTheCanonicalOwnedLinksWorkspace(t *testing.T) {
+	closeAt := func(t *testing.T, s *store, ws WorkspaceID, at time.Time) {
+		t.Helper()
+		if err := s.MarkClosed(context.Background(), ws, Closure{At: at, By: CloseByUser}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name string
+		// arrange stores links on FIRST and SECOND and answers the owner
+		// wanted, nil for none.
+		arrange func(t *testing.T, s *store, first, second WorkspaceID) *PullRequestOwner
+	}{
+		{name: "no workspace stored the pull request", arrange: func(*testing.T, *store, WorkspaceID, WorkspaceID) *PullRequestOwner {
+			return nil
+		}},
+		{name: "a reference to the pull request owns nothing", arrange: func(t *testing.T, s *store, first, _ WorkspaceID) *PullRequestOwner {
+			mustSetLink(t, s, first, LinkSet{URL: ownedURL, Label: "the pull request", PullRequest: &prKey})
+			return nil
+		}},
+		{name: "an open workspace's owned link answers it open", arrange: func(t *testing.T, s *store, first, _ WorkspaceID) *PullRequestOwner {
+			mustSetLink(t, s, first, ownedSet(first, ownedURL, prKey))
+			return &PullRequestOwner{Workspace: first}
+		}},
+		{name: "a closed workspace's owned link answers it closed", arrange: func(t *testing.T, s *store, first, _ WorkspaceID) *PullRequestOwner {
+			mustSetLink(t, s, first, ownedSet(first, ownedURL, prKey))
+			closeAt(t, s, first, instant)
+			return &PullRequestOwner{Workspace: first, Closed: true}
+		}},
+		{name: "an open owner wins over a closed one", arrange: func(t *testing.T, s *store, first, second WorkspaceID) *PullRequestOwner {
+			mustSetLink(t, s, first, ownedSet(first, ownedURL, prKey))
+			closeAt(t, s, first, instant)
+			mustSetLink(t, s, second, ownedSet(second, ownedURL, prKey))
+			return &PullRequestOwner{Workspace: second}
+		}},
+		{name: "the most recently closed owner answers", arrange: func(t *testing.T, s *store, first, second WorkspaceID) *PullRequestOwner {
+			mustSetLink(t, s, first, ownedSet(first, ownedURL, prKey))
+			closeAt(t, s, first, instant.Add(time.Hour))
+			mustSetLink(t, s, second, ownedSet(second, ownedURL, prKey))
+			closeAt(t, s, second, instant)
+			return &PullRequestOwner{Workspace: first, Closed: true}
+		}},
+		{name: "another pull request's owner is not this one's", arrange: func(t *testing.T, s *store, first, _ WorkspaceID) *PullRequestOwner {
+			other := PullRequestKey{Owner: prKey.Owner, Repo: prKey.Repo, Number: prKey.Number + 1}
+			mustSetLink(t, s, first, ownedSet(first, "https://github.com/ChessCom/explanation-engine/pull/43", other))
+			return nil
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			first, second := testWorkspace(t, s).ID, testWorkspaceNamed(t, s, "other").ID
+			want := tt.arrange(t, s, first, second)
+
+			// Act
+			got, found, err := s.PullRequestOwnerOf(context.Background(), prKey)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("PullRequestOwnerOf: %v", err)
+			}
+			if want == nil {
+				if found {
+					t.Fatalf("PullRequestOwnerOf = %+v, want no owner", got)
+				}
+				return
+			}
+			if !found || got != *want {
+				t.Fatalf("PullRequestOwnerOf = %+v, %v; want %+v", got, found, *want)
+			}
+		})
 	}
 }

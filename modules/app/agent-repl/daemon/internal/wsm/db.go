@@ -1077,6 +1077,9 @@ type DB interface {
 	ShowWorkspaceLinks(ctx context.Context, id WorkspaceID, urls []string) ([]WorkspaceLink, error)
 	// ClearWorkspaceLinks removes every link a workspace holds.
 	ClearWorkspaceLinks(ctx context.Context, id WorkspaceID) error
+	// PullRequestOwnerOf answers the workspace whose canonical owned link a
+	// pull request is, false when none (pullrequestowner.go).
+	PullRequestOwnerOf(ctx context.Context, pr PullRequestKey) (PullRequestOwner, bool, error)
 	// SetWorkspaceSlackOrigin records the Slack thread a workspace was
 	// created for, once (slackorigin.go).
 	SetWorkspaceSlackOrigin(ctx context.Context, id WorkspaceID, url string) error
