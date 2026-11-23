@@ -44,6 +44,12 @@
 `reported' answers success at once, `refused' answers failure at once, and
 `pending' holds the answer in `agent-repl-test-pu--pending'.")
 
+(defvar agent-repl-test-pu--viewed nil
+  "Workspaces whose roster row carries the viewed marker.")
+
+(defvar agent-repl-test-pu--timers nil
+  "Every timer the harness armed, newest first, each (SECONDS FN ARG).")
+
 (defvar agent-repl-test-pu--pending nil
   "The held reports, newest first, each (WS ON-REPORTED ON-NOT-REPORTED).")
 
@@ -57,6 +63,11 @@
      (let ((agent-repl-test-pu--dropped nil)
            (agent-repl-test-pu--status nil)
            (agent-repl-test-pu--dormant nil)
+           (agent-repl-test-pu--viewed nil)
+           (agent-repl-test-pu--timers nil)
+           (agent-repl-page-unload--visits (make-hash-table :test #'equal))
+           (agent-repl-page-unload--timers (make-hash-table :test #'equal))
+           (agent-repl-page-unload--dormant-seen (make-hash-table :test #'equal))
            (agent-repl-test-pu--logged nil)
            (agent-repl-test-pu--report 'reported)
            (agent-repl-test-pu--pending nil)
@@ -76,6 +87,15 @@
                         (lambda (ws) (alist-get ws agent-repl-test-pu--status :ready nil #'equal)))
                        ((symbol-function 'agent-repl-roster-dormant-p)
                         (lambda (ws) (and (member ws agent-repl-test-pu--dormant) t)))
+                       ((symbol-function 'agent-repl-roster-viewed-for-ws)
+                        (lambda (ws) (and (member ws agent-repl-test-pu--viewed) t)))
+                       ((symbol-function 'run-at-time)
+                        (lambda (secs _repeat fn &rest args)
+                          (let ((timer (list 'timer secs fn (car args))))
+                            (push timer agent-repl-test-pu--timers)
+                            timer)))
+                       ((symbol-function 'cancel-timer)
+                        (lambda (timer) (setcar timer 'cancelled)))
                        ((symbol-function 'agent-repl-host-report-page-unloading)
                         (agent-repl-test--page-unloading-reporter
                          (lambda () agent-repl-test-pu--report)
@@ -508,6 +528,7 @@ module defines no pass, no hold and no grace."
   "A push that parks a workspace the host does not show unloads its page, announced."
   (agent-repl-test-pu--with '("alpha" "beta")
     (agent-repl-page-unload-note-shown "beta")
+    (agent-repl-page-unload-on-roster-update)
     (setq agent-repl-test-pu--dormant '("alpha"))
     (agent-repl-page-unload-on-roster-update)
     (should (equal (reverse agent-repl-test-pu--events)
@@ -522,14 +543,125 @@ module defines no pass, no hold and no grace."
     (agent-repl-page-unload-on-roster-update)
     (should-not agent-repl-test-pu--events)))
 
-(ert-deftest agent-repl-test-page-unload-a-switch-away-from-a-parked-workspace-unloads-it ()
-  "Showing another workspace unloads the parked one shown before it."
+(defun agent-repl-test-pu--visit-alpha ()
+  "Show dormant alpha, then switch to beta: one visit to alpha, ended."
+  (setq agent-repl-test-pu--dormant '("alpha"))
+  (agent-repl-page-unload-note-shown "alpha")
+  (agent-repl-page-unload-note-shown "beta"))
+
+(defun agent-repl-test-pu--fire-armed ()
+  "Fire every armed timer not cancelled, as Emacs would once it is due."
+  (dolist (timer (reverse agent-repl-test-pu--timers))
+    (when (eq (car timer) 'timer)
+      (setcar timer 'fired)
+      (funcall (nth 2 timer) (nth 3 timer)))))
+
+(ert-deftest agent-repl-test-page-unload-an-unviewed-idle-visit-unloads-after-the-grace ()
+  "A dormant workspace left unviewed and idle unloads `agent-repl-page-unload-visit-grace' seconds on."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--visit-alpha)
+    (should-not agent-repl-test-pu--events)
+    (should (equal (mapcar (lambda (timer) (nth 1 timer)) agent-repl-test-pu--timers)
+                   (list agent-repl-page-unload-visit-grace)))
+    (agent-repl-test-pu--fire-armed)
+    (should (equal (reverse agent-repl-test-pu--events)
+                   '((report "alpha") (drop "alpha"))))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.visit-ended" "ws=alpha" "outcome=unload-armed"))))
+
+(ert-deftest agent-repl-test-page-unload-a-switch-back-within-the-grace-cancels-the-unload ()
+  "Showing the workspace again before the grace runs out keeps its page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--visit-alpha)
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-test-pu--fire-armed)
+    (should-not agent-repl-test-pu--events)
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.unload-cancelled" "ws=alpha" "why=switched-back"))))
+
+(ert-deftest agent-repl-test-page-unload-a-viewed-visit-keeps-its-page ()
+  "A visit during which the workspace became viewed keeps its page."
   (agent-repl-test-pu--with '("alpha" "beta")
     (setq agent-repl-test-pu--dormant '("alpha"))
     (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--viewed '("alpha"))
     (agent-repl-page-unload-note-shown "beta")
+    (agent-repl-test-pu--fire-armed)
+    (should-not agent-repl-test-pu--timers)
+    (should-not agent-repl-test-pu--events)
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.visit-kept" "ws=alpha" "why=viewed"))))
+
+(ert-deftest agent-repl-test-page-unload-a-visit-begun-viewed-is-not-kept-by-it ()
+  "A viewed marker the visit began with is no viewing during the visit."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--viewed '("alpha"))
+    (agent-repl-test-pu--visit-alpha)
+    (agent-repl-test-pu--fire-armed)
     (should (equal (reverse agent-repl-test-pu--events)
                    '((report "alpha") (drop "alpha"))))))
+
+(ert-deftest agent-repl-test-page-unload-a-working-visit-keeps-its-page ()
+  "A visit during which the workspace started working keeps its page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
+    (agent-repl-page-unload-note-shown "beta")
+    (should-not agent-repl-test-pu--timers)
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.visit-kept" "ws=alpha" "why=working"))))
+
+(ert-deftest agent-repl-test-page-unload-working-within-the-grace-cancels-the-unload ()
+  "A push that finds the workspace working before the grace runs out keeps its page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--visit-alpha)
+    (setq agent-repl-test-pu--dormant nil)
+    (agent-repl-page-unload-on-roster-update)
+    (agent-repl-test-pu--fire-armed)
+    (should-not agent-repl-test-pu--events)
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.unload-cancelled" "ws=alpha" "why=working"))))
+
+(ert-deftest agent-repl-test-page-unload-a-kept-page-is-not-released-by-a-push ()
+  "A push that finds a kept visit's workspace still dormant leaves its page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-on-roster-update)
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--viewed '("alpha"))
+    (agent-repl-page-unload-note-shown "beta")
+    (agent-repl-page-unload-on-roster-update)
+    (should-not agent-repl-test-pu--events)))
+
+(ert-deftest agent-repl-test-page-unload-a-kept-page-is-released-when-its-session-next-goes-dormant ()
+  "A kept page unloads once its session works and then goes dormant off screen."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-on-roster-update)
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--viewed '("alpha"))
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--dormant nil)
+    (agent-repl-page-unload-on-roster-update)
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-on-roster-update)
+    (should (equal (reverse agent-repl-test-pu--events)
+                   '((report "alpha") (drop "alpha"))))))
+
+(ert-deftest agent-repl-test-page-unload-a-grace-unload-whose-report-fails-keeps-the-page ()
+  "The grace's unload goes through the announced drop, and a failed report keeps the page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--report 'refused)
+    (agent-repl-test-pu--visit-alpha)
+    (agent-repl-test-pu--fire-armed)
+    (should (equal agent-repl-test-pu--events '((report "alpha"))))
+    (should (member "alpha" agent-repl-test-pu--pages))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.release-kept" "alpha" "not-reported"))))
+
+(ert-deftest agent-repl-test-page-unload-a-drop-cancels-the-armed-unload ()
+  "Any announced drop of the page cancels the grace's unload and forgets the visit."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--visit-alpha)
+    (agent-repl-page-drop-announced "alpha" (lambda () t) (lambda () (agent-repl-webhost-remove "alpha")) #'ignore)
+    (should (eq (car (car agent-repl-test-pu--timers)) 'cancelled))
+    (should-not (gethash "alpha" agent-repl-page-unload--visits))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.unload-cancelled" "ws=alpha" "why=dropped"))))
 
 (ert-deftest agent-repl-test-page-unload-a-switch-away-from-a-live-workspace-keeps-it ()
   "Showing another workspace leaves a live one's page loaded."
@@ -610,6 +742,7 @@ A second caller would load a page at a moment the page rule does not name."
   "A session that came up while the unload was reported keeps its page."
   (agent-repl-test-pu--with '("alpha" "beta")
     (agent-repl-page-unload-note-shown "beta")
+    (agent-repl-page-unload-on-roster-update)
     (setq agent-repl-test-pu--dormant '("alpha")
           agent-repl-test-pu--report 'pending)
     (agent-repl-page-unload-on-roster-update)
@@ -622,6 +755,7 @@ A second caller would load a page at a moment the page rule does not name."
   "A second push while the unload is reported asks for no second report."
   (agent-repl-test-pu--with '("alpha" "beta")
     (agent-repl-page-unload-note-shown "beta")
+    (agent-repl-page-unload-on-roster-update)
     (setq agent-repl-test-pu--dormant '("alpha")
           agent-repl-test-pu--report 'pending)
     (agent-repl-page-unload-on-roster-update)
@@ -632,6 +766,7 @@ A second caller would load a page at a moment the page rule does not name."
   "An unload whose report fails keeps the page, and says why."
   (agent-repl-test-pu--with '("alpha" "beta")
     (agent-repl-page-unload-note-shown "beta")
+    (agent-repl-page-unload-on-roster-update)
     (setq agent-repl-test-pu--dormant '("alpha")
           agent-repl-test-pu--report 'refused)
     (agent-repl-page-unload-on-roster-update)

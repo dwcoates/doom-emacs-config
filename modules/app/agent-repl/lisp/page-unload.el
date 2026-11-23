@@ -20,8 +20,22 @@
 ;; ELIGIBLE, it does not hold it).  A session is dormant while it runs no
 ;; work: parked, or up only for a keep-alive (frontend.v1.RosterRowDormant,
 ;; the daemon's, so nothing here weighs a clock).  A page is unloaded when
-;; its workspace goes dormant while the host does not show it, or when the
-;; user switches away from a dormant workspace.
+;; its workspace goes dormant while the host does not show it, or after a
+;; visit to a dormant workspace that left nothing to keep.
+;;
+;; A VISIT TO A DORMANT WORKSPACE KEEPS ITS PAGE ONLY IF SOMETHING HAPPENED
+;; (owner ruling, 2026-11-23).  Showing a dormant workspace loads its page
+;; and leaves its shim parked; that begins a VISIT.  The visit is KEPT when
+;; the workspace becomes viewed during it (the daemon's viewed marker,
+;; frontend.v1.RosterRowViewed, appears where the visit began without it)
+;; or works (it is no longer dormant, or its status arm runs a turn or
+;; background work).  On the switch away a visit not kept arms an unload
+;; `agent-repl-page-unload-visit-grace' seconds later, through the
+;; announced drop; switching back, the page's drop, and the visit becoming
+;; kept each cancel it.  A kept page stays loaded until its session next
+;; GOES dormant while it is off screen: the park rule above, taken on the
+;; edge into dormancy (`agent-repl-page-unload--dormant-seen'), so a roster
+;; push that finds a kept page still dormant leaves it loaded.
 ;;
 ;; A PAGE IS LOADED AT EXACTLY THREE MOMENTS, all through
 ;; `agent-repl-page-unload-load', the one caller of
@@ -73,6 +87,8 @@
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
 (declare-function agent-repl-roster-dormant-p "roster" (ws))
+(declare-function agent-repl-roster-viewed-for-ws "roster" (ws))
+(defvar agent-repl-roster-running-statuses)
 (declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-page-report-loaded "page-report" (ws why))
 (declare-function agent-repl-page-report-check-load-reason "page-report" (ws why))
@@ -81,6 +97,24 @@
 
 (defvar agent-repl-page-unload--shown nil
   "The workspace whose page the host shows, or nil.")
+
+(defconst agent-repl-page-unload-visit-grace 10
+  "Seconds after the switch away from an unkept visit that its page unloads.
+An owner-ruled UX delay (2026-11-23), not a timeout: switching back
+within it keeps the page, so a glance away and back costs no reload.")
+
+(defvar agent-repl-page-unload--visits (make-hash-table :test #'equal)
+  "Each workspace's last visit while dormant: (:viewed-at-start V :kept K).
+Begun by its show (`agent-repl-page-unload--visit-begin'), it outlives
+the switch away until the page is dropped, so a kept visit keeps its page.")
+
+(defvar agent-repl-page-unload--timers (make-hash-table :test #'equal)
+  "Each workspace's armed visit unload timer (`agent-repl-page-unload-visit-grace').")
+
+(defvar agent-repl-page-unload--dormant-seen (make-hash-table :test #'equal)
+  "Each workspace's dormancy as the last roster push stated it.
+A push that finds a workspace dormant where this says it was not is the
+edge into dormancy that unloads a page off screen.")
 
 (defun agent-repl-page-unload--gated-p (ws)
   "Non-nil when WS stands at its cold gate, so its page is held back."
@@ -115,15 +149,80 @@ unless WS is cold-gated: its page is then held back, and the host draws a
 load button in its place (`agent-repl-webhost-hold-back').  The workspace
 shown before WS has its page unloaded when its session is dormant
 \(`agent-repl-page-unload--release')."
+  (agent-repl-page-unload--cancel ws 'switched-back)
   (when (agent-repl-page-unloaded-p ws)
     (if (agent-repl-page-unload--gated-p ws)
         (agent-repl-page-unload--hold-back ws)
       (agent-repl-page-unload-load ws 'shown)))
   (let ((was agent-repl-page-unload--shown))
     (setq agent-repl-page-unload--shown ws)
-    (when (and was (not (equal was ws))
-               (agent-repl-page-unload--releasable-p was))
-      (agent-repl-page-unload--release was))))
+    (unless (equal was ws)
+      (agent-repl-page-unload--visit-begin ws)
+      (when was (agent-repl-page-unload--visit-end was)))))
+
+(defun agent-repl-page-unload--working-p (ws)
+  "Non-nil when WS works: no longer dormant, or its arm runs a turn or background work."
+  (or (not (agent-repl-roster-dormant-p ws))
+      (let ((status (agent-repl-roster-status-for-ws ws)))
+        (or (memq status agent-repl-roster-running-statuses)
+            (eq status :idle-async)))))
+
+(defun agent-repl-page-unload--visit-begin (ws)
+  "Begin a visit to WS, now shown: kept at once unless WS is dormant."
+  (puthash ws (list :viewed-at-start (and (agent-repl-roster-viewed-for-ws ws) t)
+                    :kept (not (agent-repl-roster-dormant-p ws)))
+           agent-repl-page-unload--visits))
+
+(defun agent-repl-page-unload--visit-kept-p (ws)
+  "Non-nil when WS\='s last visit is kept, deciding it now if it became so.
+A visit becomes kept when WS works, or when its viewed marker appears
+where the visit began without one; the unload it armed is cancelled then."
+  (let ((visit (gethash ws agent-repl-page-unload--visits)))
+    (cond
+     ((null visit) nil)
+     ((plist-get visit :kept) t)
+     ((let ((why (cond ((agent-repl-page-unload--working-p ws) 'working)
+                       ((and (not (plist-get visit :viewed-at-start))
+                             (agent-repl-roster-viewed-for-ws ws))
+                        'viewed))))
+        (when why
+          (puthash ws (plist-put visit :kept t) agent-repl-page-unload--visits)
+          (agent-repl--info ws "elisp.page-unload.visit-kept ws={ws} why={why}" :ws ws :why why)
+          (agent-repl-page-unload--cancel ws why)
+          t))))))
+
+(defun agent-repl-page-unload--visit-end (ws)
+  "End the visit to WS, the user having switched away from it.
+A kept visit keeps WS\='s page; an unkept one arms its unload
+`agent-repl-page-unload-visit-grace' seconds on."
+  (cond
+   ((agent-repl-page-unload--visit-kept-p ws)
+    (agent-repl--info ws "elisp.page-unload.visit-ended ws={ws} outcome=kept" :ws ws))
+   ((agent-repl-page-unload--releasable-p ws)
+    (agent-repl--info ws "elisp.page-unload.visit-ended ws={ws} outcome=unload-armed" :ws ws)
+    (puthash ws (run-at-time agent-repl-page-unload-visit-grace nil
+                             #'agent-repl-page-unload--visit-grace-ended ws)
+             agent-repl-page-unload--timers))))
+
+(defun agent-repl-page-unload--visit-grace-ended (ws)
+  "Unload WS\='s page, its unkept visit\='s grace having run out."
+  (remhash ws agent-repl-page-unload--timers)
+  (if (and (not (agent-repl-page-unload--visit-kept-p ws))
+           (agent-repl-page-unload--releasable-p ws))
+      (agent-repl-page-unload--release ws)
+    (agent-repl--info ws "elisp.page-unload.visit-grace-ended ws={ws} outcome=kept" :ws ws)))
+
+(defun agent-repl-page-unload--cancel (ws why)
+  "Cancel WS\='s armed visit unload, for WHY, if one is armed."
+  (when-let ((timer (gethash ws agent-repl-page-unload--timers)))
+    (cancel-timer timer)
+    (remhash ws agent-repl-page-unload--timers)
+    (agent-repl--info ws "elisp.page-unload.unload-cancelled ws={ws} why={why}" :ws ws :why why)))
+
+(defun agent-repl-page-unload--forget (ws)
+  "Forget WS\='s visit and its armed unload: its page was dropped."
+  (agent-repl-page-unload--cancel ws 'dropped)
+  (remhash ws agent-repl-page-unload--visits))
 
 (defun agent-repl-page-unload--releasable-p (ws)
   "Non-nil when WS\='s page is loaded and goes, its session dormant off screen.
@@ -218,7 +317,9 @@ the daemon ended it first, so its stream\='s end draws nothing."
    (lambda ()
      (agent-repl--ws-put ws :page-unloading nil)
      (if (funcall still-p)
-         (funcall drop)
+         (progn
+           (agent-repl-page-unload--forget ws)
+           (funcall drop))
        (funcall on-kept 'changed)))
    (lambda ()
      (agent-repl--ws-put ws :page-unloading nil)
@@ -226,16 +327,24 @@ the daemon ended it first, so its stream\='s end draws nothing."
 
 (defun agent-repl-page-unload-on-roster-update (&optional _roster)
   "Load every page held back on screen whose gate a roster push answered,
-and every page whose session the push brought up for work, and unload
-every page whose session it left dormant off screen
-\(`agent-repl-page-unload--release').  Answers how many were loaded."
+and every page whose session the push brought up for work; decide every
+visit that became kept (`agent-repl-page-unload--visit-kept-p'); and
+unload every page whose session the push found GONE dormant off screen
+\(`agent-repl-page-unload--release'): a page found dormant as it was
+before, a kept visit\='s included, is left loaded.  Answers how many were
+loaded."
   (let ((loaded 0))
     (dolist (ws (agent-repl--live-ws-names))
       (when (or (agent-repl-page-unload--load-ungated ws)
                 (agent-repl-page-unload--load-awake ws))
         (setq loaded (1+ loaded)))
-      (when (agent-repl-page-unload--releasable-p ws)
-        (agent-repl-page-unload--release ws)))
+      (agent-repl-page-unload--visit-kept-p ws)
+      (let* ((dormant (and (agent-repl-roster-dormant-p ws) t))
+             (seen (gethash ws agent-repl-page-unload--dormant-seen 'unseen)))
+        (puthash ws dormant agent-repl-page-unload--dormant-seen)
+        (when (and dormant (null seen)
+                   (agent-repl-page-unload--releasable-p ws))
+          (agent-repl-page-unload--release ws))))
     loaded))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)
