@@ -262,13 +262,18 @@ A malformed final line is skipped, exactly like
    nil (format "the production log to carry %s%s" operation
                (if level (format " at %s" level) ""))))
 
-(defun agent-repl-itest-composer--log-names-arm-p (daemon operation arm-string)
-  "Return non-nil when DAEMON's OPERATION log entry's context names ARM-STRING."
+(defun agent-repl-itest-composer--log-names-arm-p (daemon operation arm-string &optional level)
+  "Return non-nil when DAEMON's OPERATION log entry's context names ARM-STRING.
+LEVEL is the entry's level, \"info\" when nil.  The context holds each of
+the record's named values under its own name, so any string value naming
+ARM-STRING answers."
   (seq-some
    (lambda (entry)
-     (seq-some (lambda (arg) (string-match-p (regexp-quote arm-string) arg))
-               (agent-repl-itest--body-field entry 'context 'arguments)))
-   (agent-repl-itest-composer--log-entries daemon operation "info")))
+     (seq-some (lambda (field)
+                 (and (stringp (cdr field))
+                      (string-match-p (regexp-quote arm-string) (cdr field))))
+               (agent-repl-itest--body-field entry 'context)))
+   (agent-repl-itest-composer--log-entries daemon operation (or level "info"))))
 
 ;;;; ---- The three REQUIRED request facts ----
 
@@ -1318,12 +1323,8 @@ is the only thing that tells a reader which refusal happened."
       (agent-repl-itest-composer--await-log
        daemon "elisp.input.unknown-error-arm" "error")
       ;; Assert.
-      (should (seq-some
-               (lambda (entry)
-                 (seq-some (lambda (arg) (string-match-p ":feed-undecodable" arg))
-                           (agent-repl-itest--body-field entry 'context 'arguments)))
-               (agent-repl-itest-composer--log-entries
-                daemon "elisp.input.unknown-error-arm" "error"))))))
+      (should (agent-repl-itest-composer--log-names-arm-p
+               daemon "elisp.input.unknown-error-arm" ":feed-undecodable" "error")))))
 
 ;; audit-2 #32
 (ert-deftest agent-repl-itest-composer-submit-transferring-away-routes-to-the-handover ()
