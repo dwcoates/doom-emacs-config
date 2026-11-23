@@ -366,7 +366,17 @@ var migrations = []migration{
 	{To: 194, Name: "projected_cold_gate", Kind: MigrationAdditive, DDL: projectedColdGateDDL},
 	// IT IS ADDITIVE: six new tables the previous build never names.
 	{To: 195, Name: "slack_threads", Kind: MigrationAdditive, DDL: slackThreadsDDL},
+	// IT IS ADDITIVE: a new nullable column the previous build never names.
+	{To: 196, Name: "sessions_keepalive_restored_at", Kind: MigrationAdditive, DDL: sessionsKeepaliveRestoredAtDDL},
 }
+
+// sessionsKeepaliveRestoredAtDDL is the layout-196 addition: when a
+// keep-alive's restore last brought a session up (Session.KeepaliveRestoredAt),
+// so a successor still tells a session up only for its keep-alive from one up
+// for work.
+const sessionsKeepaliveRestoredAtDDL = `
+ALTER TABLE sessions ADD COLUMN keepalive_restored_at INTEGER;
+`
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
 // for its "in a merge queue" column: a queue row by its workspace, and a

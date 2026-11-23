@@ -437,6 +437,8 @@ type harness struct {
 	cycleDones []func(drain.CycleOutcome)
 	// visitDowns are the settings visits' stand-downs asked for.
 	visitDowns []cycleCall
+	// idleDowns are the idle parks asked for.
+	idleDowns []cycleCall
 	// restoring are the restores asked for, each with the done that ends it.
 	restoring []restoreCall
 	// nextKeepalives are the next keep-alives stated to the views, in order.
@@ -546,6 +548,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		VisitDown: func(ws ids.WorkspaceID, since time.Time) {
 			h.visitDowns = append(h.visitDowns, cycleCall{ws: ws, beat: since})
 		},
+		IdleDown: func(ws ids.WorkspaceID, since time.Time) {
+			h.idleDowns = append(h.idleDowns, cycleCall{ws: ws, beat: since})
+		},
 		Restore: func(ws ids.WorkspaceID, done func(error)) {
 			h.restoring = append(h.restoring, restoreCall{ws: ws, done: done})
 		},
@@ -646,6 +651,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "cold cache's stand-down", strip: func(d *Deps) { d.ColdDown = nil }},
 		{name: "projected cold gates' raise", strip: func(d *Deps) { d.RaiseGate = nil }},
 		{name: "settings visit's stand-down", strip: func(d *Deps) { d.VisitDown = nil }},
+		{name: "idle park", strip: func(d *Deps) { d.IdleDown = nil }},
 		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
 		{name: "handover classifier", strip: func(d *Deps) { d.HandedOver = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},

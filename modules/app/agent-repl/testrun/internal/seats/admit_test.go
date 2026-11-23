@@ -384,3 +384,106 @@ func TestACutTakerStopsWaitingAndTakesNoSeat(t *testing.T) {
 		})
 	}
 }
+
+// surveyHeld is every held seat's holder as a taker's admission check reads it.
+func surveyHeld(t *testing.T, p Pool) []Holder {
+	t.Helper()
+	free, held, err := p.survey()
+	if err != nil {
+		t.Fatalf("survey: %v", err)
+	}
+	if free != nil {
+		free.f.Close()
+	}
+	out, _ := holders(held)
+	return out
+}
+
+func TestAHolderReadsAsHavingTakenWhatItPublished(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: t.TempDir(), Prefix: "ram", N: 2, What: "test"}
+	s := admitted(t, p, runA)
+	defer s.Release()
+
+	// Act
+	err := s.Publish(1536)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := surveyHeld(t, p); len(got) != 1 || got[0].Used != 1536 {
+		t.Fatalf("held = %+v, want runA having taken 1536", got)
+	}
+}
+
+func TestAHolderThatPublishedNothingReadsAsHavingTakenNothing(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: t.TempDir(), Prefix: "ram", N: 1, What: "test"}
+	s := admitted(t, p, runA)
+	defer s.Release()
+
+	// Act
+	got := surveyHeld(t, p)
+
+	// Assert
+	if len(got) != 1 || got[0].Used != 0 {
+		t.Fatalf("held = %+v, want runA having taken nothing", got)
+	}
+}
+
+func TestALastHoldersUsedFileIsNotReadAsTheNewHolders(t *testing.T) {
+	// Arrange: a last holder's used file the kernel's release left behind.
+	p := Pool{Dir: t.TempDir(), Prefix: "ram", N: 1, What: "test"}
+	if err := os.WriteFile(p.usedPath(0), []byte("pid=999\nused=4000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := admitted(t, p, runA)
+	defer s.Release()
+
+	// Act
+	got := surveyHeld(t, p)
+
+	// Assert
+	if len(got) != 1 || got[0].Used != 0 {
+		t.Fatalf("held = %+v, want runA having taken nothing", got)
+	}
+}
+
+func TestAUsedFileThatDoesNotReadFailsTheSurvey(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: t.TempDir(), Prefix: "ram", N: 1, What: "test"}
+	s := admitted(t, p, runA)
+	defer s.Release()
+	if err := os.WriteFile(p.usedPath(0), []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, _, err := p.survey()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "used file") {
+		t.Fatalf("survey err = %v, want the unreadable used file named", err)
+	}
+}
+
+func TestReleaseRemovesTheSeatsUsedFile(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: t.TempDir(), Prefix: "ram", N: 1, What: "test"}
+	s := admitted(t, p, runA)
+	if err := s.Publish(10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := s.Release()
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.usedPath(0)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("used file stat = %v, want it removed", err)
+	}
+}

@@ -578,6 +578,11 @@ type Session struct {
 	StartedAt time.Time
 	// LastEngagementAt is the idle sweep's input.
 	LastEngagementAt time.Time
+	// KeepaliveRestoredAt is when a keep-alive's restore last brought the
+	// session up (shimlife.StartKeepalive), nil when the bring-up that last
+	// recorded the session had another cause. A session up only for its
+	// keep-alive is dormant (Dormant): the editor holds no page for it.
+	KeepaliveRestoredAt *time.Time
 	// ShimPID is the pid of the shim process serving this session, nil when no
 	// shim is up. It exists because the ROLLOUT's stand-down INTENT MANIFEST
 	// names a pid per session, and the incoming daemon reconciles that pid
@@ -610,6 +615,22 @@ type Session struct {
 // read it to know a workspace they must bring back. One authority, on the
 // type that carries it.
 const TerminalParked = "parked"
+
+// Dormant reports whether the session runs no work of anyone's: it is parked,
+// or a keep-alive's restore brought it up and no turn has started since
+// (TURNSTARTED, the workspace's latest turn start, nil for none, and RUNNING,
+// a turn running now). The editor holds a dormant workspace's page only while
+// the user shows it (owner ruling, 2026-11-23: "the temporary unparking for
+// keepalives should not reload the pages"; frontend.v1.RosterRowDormant).
+func (s Session) Dormant(turnStarted *time.Time, running bool) bool {
+	if s.Parked() {
+		return true
+	}
+	if s.Terminal != nil || s.KeepaliveRestoredAt == nil || running {
+		return false
+	}
+	return turnStarted == nil || !turnStarted.After(*s.KeepaliveRestoredAt)
+}
 
 // Parked reports whether this session was stood down ON PURPOSE while idle
 // and comes back on the next prompt, settings pick or keep-alive restore. It

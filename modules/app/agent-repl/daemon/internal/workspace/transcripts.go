@@ -330,7 +330,7 @@ func (v *verbs) swapConversation(
 		// which after a swap would replay the conversation just replaced.
 		err = v.deps.Sessions.StartRebound(shimlife.WithStart(ctx, shimlife.StartRebind), ws)
 	} else {
-		err = v.deps.Sessions.Start(ctx, ws)
+		err = v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartSwap), ws)
 	}
 	if err != nil {
 		return failed(swapStarting, err)

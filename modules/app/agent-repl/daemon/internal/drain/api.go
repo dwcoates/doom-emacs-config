@@ -95,6 +95,13 @@ type Controller interface {
 	// settled (the cache keeper's keep-alive subroutine, which reports it).
 	// A stand-down still pending has not settled, so DONE waits with it.
 	CycleDownThen(ws ids.WorkspaceID, beat time.Time, done func(CycleOutcome))
+	// IdleDown parks WS's session once it has been idle since SINCE, the
+	// later of its last turn's end and its last engagement, for the idle
+	// park's grace (owner ruling, 2026-11-23; cycle.go), under CycleDown's
+	// rules: never under a turn or live detached work, never for the
+	// workspace in view, never in remote control, and never once a real turn
+	// has run since SINCE. It returns at once.
+	IdleDown(ws ids.WorkspaceID, since time.Time)
 	// VisitDown stands down the shim a settings pick started at SINCE, on the
 	// user's switch away (owner request, 2026-10-29; cycle.go), under
 	// CycleDown's rules: never under a turn, never for the workspace in view,

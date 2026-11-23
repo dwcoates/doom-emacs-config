@@ -23,6 +23,15 @@ func warm() wsm.Workspace {
 	return rec
 }
 
+// idleWarm is warm() with its last turn ended two hours ago, past the idle
+// grace, so a park its owner takes is taken at once.
+func idleWarm() wsm.Workspace {
+	rec := visible()
+	ended := now.Add(-2 * time.Hour)
+	rec.LastTurnEndedAt = &ended
+	return rec
+}
+
 // knownCold is a visible workspace whose cache was marked cold at its last
 // turn's end, so no beat is owed: a held keep-alive cadence's lapse.
 func knownCold() wsm.Workspace {
@@ -38,12 +47,21 @@ func visited(rec wsm.Workspace) wsm.Workspace {
 	return rec
 }
 
-// idle makes the harness session engaged two hours ago, past the cold
-// park's grace.
+// idle makes the harness session engaged, and its last turn end, two hours
+// ago, past the idle grace; a cache marked cold at that turn stays so.
 func (h *harness) idle() *harness {
+	ago := now.Add(-2 * time.Hour)
 	session := liveSession(theWorkspace)
-	session.LastEngagementAt = now.Add(-2 * time.Hour)
+	session.LastEngagementAt = ago
 	h.db.sessions[theWorkspace] = session
+	rec := h.db.records[theWorkspace]
+	if ended := rec.LastTurnEndedAt; ended != nil {
+		if cold := rec.CacheColdTurnAt; cold != nil && cold.Equal(*ended) {
+			rec.CacheColdTurnAt = &ago
+		}
+		rec.LastTurnEndedAt = &ago
+	}
+	h.db.records[theWorkspace] = rec
 	return h
 }
 
@@ -92,7 +110,7 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 		{name: "a warm cache owes a beat", arrange: func(h *harness) { h.db.records[theWorkspace] = warm() }, want: ownerCycle},
 		{name: "a cache with nothing warm to keep", arrange: func(h *harness) {}, want: ownerCold},
 		{name: "a run at its break-even", arrange: func(h *harness) {
-			rec := warm()
+			rec := idleWarm()
 			rec.KeepaliveRunBeats = KeepaliveRunCap
 			h.db.records[theWorkspace] = rec
 		}, want: ownerCold},
@@ -102,9 +120,9 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 		}, want: ownerLapse},
 		{name: "a hidden workspace with no lapse armed", arrange: func(h *harness) { h.db.records[theWorkspace] = hidden() }, want: ownerCold},
 		{name: "a closed workspace whose last beat is spent", arrange: func(h *harness) {
-			rec := warm()
+			rec := idleWarm()
 			rec.Closed = true
-			rec.Closure = &wsm.Closure{At: now.Add(-time.Hour)}
+			rec.Closure = &wsm.Closure{At: now.Add(-3 * time.Hour)}
 			h.db.records[theWorkspace] = rec
 		}, want: ownerCold},
 		{name: "a session idle past the cutoff before its beat", arrange: func(h *harness) {
@@ -423,24 +441,24 @@ func TestTheColdParkWaitsOutTheGraceAfterAnEngagement(t *testing.T) {
 		t.Fatalf("cold parks = %+v, want none inside the grace", h.coldDowns)
 	}
 	due := liveSession(theWorkspace).LastEngagementAt.Add(StandDownGrace)
-	if got := h.keeper.coldDue[theWorkspace]; !got.Equal(due) {
+	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) {
 		t.Fatalf("cold park armed at %v, want %v", got, due)
 	}
 	h.clock.Set(due)
 
 	// Act
-	h.keeper.coldParksDue(context.Background())
+	h.keeper.idleParksDue(context.Background())
 
 	// Assert
 	if len(h.coldDowns) != 1 || !h.coldDowns[0].beat.Equal(due) {
 		t.Fatalf("cold parks = %+v, want one at %v", h.coldDowns, due)
 	}
-	if _, armed := h.keeper.coldDue[theWorkspace]; armed {
+	if _, armed := h.keeper.idleDue[theWorkspace]; armed {
 		t.Fatal("a cold park taken stayed armed")
 	}
 }
 
-func TestATurnDuringTheGraceDisarmsTheColdPark(t *testing.T) {
+func TestATurnDuringTheGraceHandsTheParkToTheIdlePark(t *testing.T) {
 	// Arrange
 	h := newHarness(t, knownCold())
 	h.reconcile("a session came up")
@@ -453,9 +471,9 @@ func TestATurnDuringTheGraceDisarmsTheColdPark(t *testing.T) {
 	// Act
 	h.reconcile("a turn's close was recorded")
 
-	// Assert
-	if _, armed := h.keeper.coldDue[theWorkspace]; armed {
-		t.Fatal("the cold park stayed armed after a turn warmed the cache")
+	// Assert: the idle park, timed from the turn, takes the cold park's place.
+	if got, want := h.keeper.idleDue[theWorkspace], ended.Add(StandDownGrace); !got.Equal(want) {
+		t.Fatalf("idle park armed at %v, want the turn's grace %v", got, want)
 	}
 	if got := h.keeper.owners[theWorkspace].owner; got != ownerCycle {
 		t.Fatalf("owner = %q, want %s", got, ownerCycle)
@@ -469,7 +487,7 @@ func TestAColdParkWhoseEngagementCannotBeReadIsAnError(t *testing.T) {
 	h.db.sessionErr = errors.New("store unreachable")
 
 	// Act
-	h.keeper.ownCold(context.Background(), h.log.Global(), theWorkspace, "a test", time.Time{}, false)
+	h.keeper.ownCold(context.Background(), h.log.Global(), h.db.records[theWorkspace], "a test", time.Time{}, false)
 
 	// Assert
 	if len(h.coldDowns) != 0 {
@@ -477,5 +495,153 @@ func TestAColdParkWhoseEngagementCannotBeReadIsAnError(t *testing.T) {
 	}
 	if !h.found(dlog.RecordQuery{Level: "error", Operation: opOwner}) {
 		t.Fatal("the unread engagement was not recorded at error")
+	}
+}
+
+// idleFor makes the harness workspace's last turn, and its session's
+// engagement, end AGO before now, its cache warm.
+func (h *harness) idleFor(ago time.Duration) *harness {
+	at := now.Add(-ago)
+	rec := h.db.records[theWorkspace]
+	rec.LastTurnEndedAt = &at
+	h.db.records[theWorkspace] = rec
+	session := liveSession(theWorkspace)
+	session.LastEngagementAt = at
+	h.db.sessions[theWorkspace] = session
+	return h
+}
+
+// keptAliveAgo makes the harness workspace's last keep-alive AGO before now.
+func (h *harness) keptAliveAgo(ago time.Duration) *harness {
+	at := now.Add(-ago)
+	rec := h.db.records[theWorkspace]
+	rec.LastKeepaliveAt = &at
+	h.db.records[theWorkspace] = rec
+	return h
+}
+
+func TestAnIdleSessionIsParkedOnceItsGraceRunsOut(t *testing.T) {
+	// Arrange: the last turn ended 30 minutes ago, so the beat is 22 minutes off.
+	h := newHarness(t, visible()).idleFor(30 * time.Minute)
+
+	// Act
+	h.reconcile("a session came up")
+
+	// Assert
+	want := now.Add(-30 * time.Minute)
+	if len(h.idleDowns) != 1 || !h.idleDowns[0].beat.Equal(want) {
+		t.Fatalf("idle parks = %+v, want one idle since %v", h.idleDowns, want)
+	}
+	if got := h.keeper.owners[theWorkspace].owner; got != ownerCycle {
+		t.Fatalf("owner = %q, want %s", got, ownerCycle)
+	}
+}
+
+func TestAnIdleParkWaitsOutTheGraceAfterTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t, visible()).idleFor(5 * time.Minute)
+	h.reconcile("a turn's close was recorded")
+	due := now.Add(-5 * time.Minute).Add(StandDownGrace)
+	if got := h.keeper.idleDue[theWorkspace]; !got.Equal(due) {
+		t.Fatalf("idle park armed at %v, want %v", got, due)
+	}
+	if len(h.idleDowns) != 0 {
+		t.Fatalf("idle parks = %+v, want none inside the grace", h.idleDowns)
+	}
+	h.clock.Set(due)
+
+	// Act
+	h.keeper.idleParksDue(context.Background())
+
+	// Assert
+	if len(h.idleDowns) != 1 {
+		t.Fatalf("idle parks = %+v, want one once the grace ran out", h.idleDowns)
+	}
+	if _, armed := h.keeper.idleDue[theWorkspace]; armed {
+		t.Fatal("an idle park taken stayed armed")
+	}
+}
+
+func TestAnIdleParkIsMeasuredFromTheLatestOfTheEngagementAndTheTurnsEnd(t *testing.T) {
+	// Arrange: engaged 30 minutes ago, its turn ending 5 minutes ago.
+	h := newHarness(t, visible()).idleFor(30 * time.Minute)
+	ended := now.Add(-5 * time.Minute)
+	rec := h.db.records[theWorkspace]
+	rec.LastTurnEndedAt = &ended
+	h.db.records[theWorkspace] = rec
+
+	// Act
+	h.reconcile("a turn's close was recorded")
+
+	// Assert
+	if len(h.idleDowns) != 0 {
+		t.Fatalf("idle parks = %+v, want none 5 minutes after the turn", h.idleDowns)
+	}
+	if got, want := h.keeper.idleDue[theWorkspace], ended.Add(StandDownGrace); !got.Equal(want) {
+		t.Fatalf("idle park armed at %v, want %v", got, want)
+	}
+}
+
+func TestAnIdleParkWhoseGraceRunsIntoTheRestoreLeadIsLeftToTheBeat(t *testing.T) {
+	// Arrange: a keep-alive 45 minutes ago puts the beat 7 minutes off, and
+	// an engagement 5 minutes ago puts the grace 15 minutes off.
+	h := newHarness(t, visible()).idleFor(2 * time.Hour).keptAliveAgo(45 * time.Minute)
+	session := h.db.sessions[theWorkspace]
+	session.LastEngagementAt = now.Add(-5 * time.Minute)
+	h.db.sessions[theWorkspace] = session
+
+	// Act
+	h.reconcile("a session came up")
+
+	// Assert
+	if len(h.idleDowns) != 0 {
+		t.Fatalf("idle parks = %+v, want none: the beat's stand-down parks it", h.idleDowns)
+	}
+	if _, armed := h.keeper.idleDue[theWorkspace]; armed {
+		t.Fatal("an idle park past the restore was armed")
+	}
+}
+
+func TestASessionRestoredForItsBeatIsNotParkedBeforeTheBeat(t *testing.T) {
+	// Arrange: idle two hours, its beat 30 seconds off, inside the restore lead.
+	h := newHarness(t, visible()).idleFor(2 * time.Hour).keptAliveAgo(KeepaliveInterval - 30*time.Second)
+
+	// Act
+	h.reconcile("a session came up")
+
+	// Assert
+	if len(h.idleDowns) != 0 {
+		t.Fatalf("idle parks = %+v, want none inside the restore lead", h.idleDowns)
+	}
+}
+
+func TestASessionAwaitingItsKeepalivesAnswerIsNotIdleParked(t *testing.T) {
+	// Arrange
+	h := newHarness(t, visible()).idleFor(30 * time.Minute)
+	h.keeper.answering[theWorkspace] = now.Add(-time.Second)
+
+	// Act
+	h.reconcile("a session came up")
+
+	// Assert
+	if len(h.idleDowns) != 0 {
+		t.Fatalf("idle parks = %+v, want none while the keep-alive's answer is awaited", h.idleDowns)
+	}
+}
+
+func TestAnIdleParkWhoseSessionCannotBeReadIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t, visible()).idleFor(30 * time.Minute)
+	h.db.sessionErr = errors.New("store unreachable")
+
+	// Act
+	h.keeper.ownIdle(context.Background(), h.log.Global(), h.db.records[theWorkspace], now.Add(time.Hour), time.Time{}, false)
+
+	// Assert
+	if len(h.idleDowns) != 0 {
+		t.Fatalf("idle parks = %+v, want none on an unread session", h.idleDowns)
+	}
+	if !h.found(dlog.RecordQuery{Level: "error", Operation: opOwner, Message: "could not read the session's engagement; its idle park is not armed"}) {
+		t.Fatal("the unread session was not recorded at error")
 	}
 }

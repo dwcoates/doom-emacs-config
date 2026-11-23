@@ -2403,3 +2403,59 @@ func TestContextHeatUnchangedPublishesNothing(t *testing.T) {
 		t.Fatalf("next delivery carried %q, want the change: an unchanged marker published a push", got)
 	}
 }
+
+// ---- The DORMANT marker: the session runs no work ------------------------
+//
+// PRESENT exactly while the session is dormant (wsm.Session.Dormant), which
+// the editor reads to hold no page of a dormant workspace off screen.
+
+func TestDormantMarkerFollowsTheSession(t *testing.T) {
+	restored := epoch.Add(time.Minute)
+	before, after := epoch, epoch.Add(2*time.Minute)
+	cases := []struct {
+		name        string
+		session     wsm.Session
+		turnStarted *time.Time
+		want        bool
+	}{
+		{name: "a live session", session: wsm.Session{Workspace: theWS}, want: false},
+		{name: "a parked session", session: wsm.Session{Workspace: theWS, Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}, want: true},
+		{name: "a killed session", session: wsm.Session{Workspace: theWS, Terminal: &wsm.SessionTerminal{Kind: "killed", At: epoch}}, want: false},
+		{name: "a keep-alive's restore with no turn since", session: wsm.Session{Workspace: theWS, KeepaliveRestoredAt: &restored}, turnStarted: &before, want: true},
+		{name: "a keep-alive's restore a turn has started since", session: wsm.Session{Workspace: theWS, KeepaliveRestoredAt: &restored}, turnStarted: &after, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := arrange(t)
+			rec := workspace(string(theWS), "one")
+			rec.LastTurnStartedAt = tc.turnStarted
+
+			// Act.
+			r.SetRegistry(sidebar.Registry{
+				View:         wsm.DefaultSidebarView,
+				Workspaces:   []wsm.Workspace{rec},
+				Repositories: []wsm.Repository{repo},
+				Sessions:     []wsm.Session{tc.session},
+			})
+
+			// Assert: presence is the fact.
+			if got := onlyRow(t, r).GetDormant() != nil; got != tc.want {
+				t.Fatalf("dormant present = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAWorkspaceWithNoSessionIsNotMarkedDormant(t *testing.T) {
+	// Arrange.
+	r := arrange(t)
+
+	// Act.
+	row := onlyRow(t, r)
+
+	// Assert.
+	if got := row.GetDormant(); got != nil {
+		t.Fatalf("dormant = %v, want none for a workspace with no session", got)
+	}
+}

@@ -2,9 +2,9 @@
 
 ;;; Commentary:
 
-;; A page is loaded exactly while its workspace is visible, which is every
-;; workspace this editor holds; a cold-gated page is held back until the
-;; user asks for it; and every drop of a page whose workspace stays open is
+;; A page is loaded only while its workspace is visible, which is every
+;; workspace this editor holds, and while its session runs or it is shown;
+;; a cold-gated page is held back until the user asks for it; and every drop of a page whose workspace stays open is
 ;; announced first.  The harness's host holds `agent-repl-test-pu--pages',
 ;; and its roster `agent-repl-test-pu--status'.
 ;;
@@ -33,6 +33,9 @@
   "Each workspace's roster status arm, (WS . ARM); a workspace absent is `:ready'.
 \(WS . nil) is a workspace with no roster row yet.")
 
+(defvar agent-repl-test-pu--dormant nil
+  "Workspaces whose roster row carries the parked marker.")
+
 (defvar agent-repl-test-pu--logged nil
   "Every INFO record's text, newest first.")
 
@@ -53,6 +56,7 @@
   `(agent-repl-test--with-clean-state
      (let ((agent-repl-test-pu--dropped nil)
            (agent-repl-test-pu--status nil)
+           (agent-repl-test-pu--dormant nil)
            (agent-repl-test-pu--logged nil)
            (agent-repl-test-pu--report 'reported)
            (agent-repl-test-pu--pending nil)
@@ -70,6 +74,8 @@
              (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () ,names))
                        ((symbol-function 'agent-repl-roster-status-for-ws)
                         (lambda (ws) (alist-get ws agent-repl-test-pu--status :ready nil #'equal)))
+                       ((symbol-function 'agent-repl-roster-dormant-p)
+                        (lambda (ws) (and (member ws agent-repl-test-pu--dormant) t)))
                        ((symbol-function 'agent-repl-host-report-page-unloading)
                         (agent-repl-test--page-unloading-reporter
                          (lambda () agent-repl-test-pu--report)
@@ -299,7 +305,7 @@ module defines no pass, no hold and no grace."
     ;; Assert
     (should (equal (list agent-repl-test-pu--events (agent-repl-page-unloaded-p "alpha"))
                    '(((ensure "alpha")) nil)))
-    (should (agent-repl-test-pu--said-p "elisp.page-unload.returned" "ws=alpha"))))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.loaded" "ws=alpha" "reason=shown"))))
 
 (ert-deftest agent-repl-test-pu-showing-an-unloaded-cold-gated-page-holds-it-back ()
   "Showing a cold-gated workspace's unloaded page holds it back instead of loading it."
@@ -406,7 +412,7 @@ module defines no pass, no hold and no grace."
     (should-not agent-repl-test-pu--events)))
 
 (ert-deftest agent-repl-test-pu-a-roster-push-loads-no-page-held-back-off-screen ()
-  "A page held back and left is loaded only at its next show, not by a push."
+  "A page held back and left, its session dormant, is loaded only at its next show."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
     (setq agent-repl-test-pu--pages '("beta")
@@ -414,7 +420,8 @@ module defines no pass, no hold and no grace."
     (agent-repl-page-unload-note-shown "alpha")
     (agent-repl-page-unload-note-shown "beta")
     (setq agent-repl-test-pu--events nil
-          agent-repl-test-pu--status nil)
+          agent-repl-test-pu--status nil
+          agent-repl-test-pu--dormant '("alpha"))
     ;; Act
     (agent-repl-page-unload-on-roster-update)
     ;; Assert
@@ -426,3 +433,150 @@ module defines no pass, no hold and no grace."
 
 (provide 'test-page-unload)
 ;;; test-page-unload.el ends here
+
+;;;; ---- A parked workspace holds no page unless it is shown ----
+
+(ert-deftest agent-repl-test-page-unload-a-parked-workspaces-page-is-not-wanted ()
+  "A parked workspace's slot is made with no page; its show loads it."
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-page-unload-a-live-workspaces-page-is-wanted ()
+  "A workspace whose session runs on a shim has its page loaded at once."
+  (agent-repl-test-pu--with '("alpha")
+    (should (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-page-unload-a-park-off-screen-unloads-the-page ()
+  "A push that parks a workspace the host does not show unloads its page, announced."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-on-roster-update)
+    (should (equal (reverse agent-repl-test-pu--events)
+                   '((report "alpha") (drop "alpha"))))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.released" "alpha"))))
+
+(ert-deftest agent-repl-test-page-unload-a-park-on-screen-keeps-the-page ()
+  "The workspace the host shows keeps its page when its session parks."
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-on-roster-update)
+    (should-not agent-repl-test-pu--events)))
+
+(ert-deftest agent-repl-test-page-unload-a-switch-away-from-a-parked-workspace-unloads-it ()
+  "Showing another workspace unloads the parked one shown before it."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (should (equal (reverse agent-repl-test-pu--events)
+                   '((report "alpha") (drop "alpha"))))))
+
+(ert-deftest agent-repl-test-page-unload-a-switch-away-from-a-live-workspace-keeps-it ()
+  "Showing another workspace leaves a live one's page loaded."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (should-not agent-repl-test-pu--events)))
+
+(ert-deftest agent-repl-test-page-unload-showing-a-parked-workspace-loads-its-page ()
+  "A parked workspace's unloaded page comes back when the user shows it."
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--dormant '("alpha")
+          agent-repl-test-pu--pages nil)
+    (agent-repl-page-unload-note-shown "alpha")
+    (should (equal agent-repl-test-pu--events '((ensure "alpha"))))))
+
+(ert-deftest agent-repl-test-page-unload-a-keepalive-restore-off-screen-loads-nothing ()
+  "A session up only for its keep-alive stays dormant, and loads no page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--pages '("beta")
+          agent-repl-test-pu--dormant '("alpha"))
+    (agent-repl-page-unload-on-roster-update)
+    (should-not agent-repl-test-pu--events)))
+
+(ert-deftest agent-repl-test-page-unload-a-session-up-for-work-off-screen-loads-its-page ()
+  "A session that comes up for work while visible loads its unloaded page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--pages '("beta"))
+    (should (= (agent-repl-page-unload-on-roster-update) 1))
+    (should (equal agent-repl-test-pu--events '((ensure "alpha"))))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.loaded" "ws=alpha" "reason=awake"))))
+
+(ert-deftest agent-repl-test-page-unload-a-gated-session-up-off-screen-loads-nothing ()
+  "A session standing at its cold gate loads no page when it comes up."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--pages '("beta")
+          agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    (agent-repl-page-unload-on-roster-update)
+    (should-not agent-repl-test-pu--events)))
+
+(defun agent-repl-test-pu--calls-p (form fn)
+  "Non-nil when FORM calls FN anywhere inside it, quoted forms aside."
+  (cond
+   ((not (consp form)) nil)
+   ((eq (car form) 'quote) nil)
+   ((eq (car form) fn) t)
+   (t (let ((found nil) (rest form))
+        (while (and (consp rest) (not found))
+          (setq found (agent-repl-test-pu--calls-p (car rest) fn)
+                rest (cdr rest)))
+        found))))
+
+(ert-deftest agent-repl-test-page-unload-only-the-one-loader-loads-a-page ()
+  "`agent-repl-page-unload-load' is the one caller of the host's page load.
+A second caller would load a page at a moment the page rule does not name."
+  ;; Act
+  (let (callers)
+    (dolist (form agent-repl-test-pu--source-forms)
+      (when (and (consp form) (memq (car form) '(defun defmacro cl-defun))
+                 (agent-repl-test-pu--calls-p (cdddr form) 'agent-repl-webhost-ensure-page))
+        (push (cadr form) callers)))
+    ;; Assert
+    (should (equal callers '(agent-repl-page-unload-load)))))
+
+(ert-deftest agent-repl-test-page-unload-the-loader-scan-catches-a-second-caller ()
+  "The scan finds a call to the host's page load nested anywhere in a body."
+  (should (agent-repl-test-pu--calls-p
+           '(when x (let ((y 1)) (agent-repl-webhost-ensure-page ws)))
+           'agent-repl-webhost-ensure-page))
+  (should-not (agent-repl-test-pu--calls-p
+               '(when x '(agent-repl-webhost-ensure-page ws))
+               'agent-repl-webhost-ensure-page)))
+
+(ert-deftest agent-repl-test-page-unload-a-release-unparked-during-its-report-keeps-the-page ()
+  "A session that came up while the unload was reported keeps its page."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--dormant '("alpha")
+          agent-repl-test-pu--report 'pending)
+    (agent-repl-page-unload-on-roster-update)
+    (setq agent-repl-test-pu--dormant nil)
+    (funcall (nth 1 (car agent-repl-test-pu--pending)))
+    (should (member "alpha" agent-repl-test-pu--pages))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.release-kept" "alpha" "changed"))))
+
+(ert-deftest agent-repl-test-page-unload-a-release-in-flight-is-not-asked-again ()
+  "A second push while the unload is reported asks for no second report."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--dormant '("alpha")
+          agent-repl-test-pu--report 'pending)
+    (agent-repl-page-unload-on-roster-update)
+    (agent-repl-page-unload-on-roster-update)
+    (should (equal agent-repl-test-pu--events '((report "alpha"))))))
+
+(ert-deftest agent-repl-test-page-unload-a-release-the-daemon-was-not-told-of-keeps-the-page ()
+  "An unload whose report fails keeps the page, and says why."
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--dormant '("alpha")
+          agent-repl-test-pu--report 'refused)
+    (agent-repl-page-unload-on-roster-update)
+    (should (member "alpha" agent-repl-test-pu--pages))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.release-kept" "alpha" "not-reported"))))

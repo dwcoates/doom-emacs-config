@@ -48,6 +48,11 @@ type Holder struct {
 	// Size is what the holder's seat costs the host, in the pool's unit (a
 	// RAM disk's MiB).
 	Size int
+	// Used is how much of Size the holder has already taken from the host,
+	// as it last published (Seat.Publish): zero when it published none. It
+	// is no part of the seat's record, which is written once; a survey reads
+	// it from the seat's used file.
+	Used int
 }
 
 // Why is why an admitting taker waits.
@@ -98,12 +103,64 @@ type Seat struct {
 	// Held is every OTHER seat's holder when this one was taken.
 	Held        []Holder
 	lock, watch *os.File
+	pool        Pool
+	pid         int
 }
 
-// Release lets the seat go: its lock first, so a taker woken by the watch
-// finds the seat free, then its watch.
+// A HOLDER PUBLISHES WHAT IT HAS ALREADY TAKEN (2026-11-23). An admission
+// check that reads the host (the available memory) already sees what each
+// holder has taken of its Size, so a check that also counts every held seat's
+// whole Size counts that part twice: a RAM disk's written blocks are gone from
+// the available memory and were reserved again in full. A holder states its
+// Used in the seat's used file (<Prefix>-<i>.used), which names its pid, so a
+// survey reads it as the holder's own and never a last holder's; the file is
+// swapped in whole by a rename, so a survey never reads half of one.
+
+// usedPath is seat i's used file.
+func (p Pool) usedPath(i int) string {
+	return filepath.Join(p.Dir, fmt.Sprintf("%s-%d.used", p.Prefix, i))
+}
+
+// Publish states that the holder has taken USED of its Size from the host.
+func (s *Seat) Publish(used int) error {
+	path := s.pool.usedPath(s.Index)
+	tmp := fmt.Sprintf("%s.%d.tmp", path, s.pid)
+	if err := os.WriteFile(tmp, fmt.Appendf(nil, "pid=%d\nused=%d\n", s.pid, used), 0o644); err != nil {
+		return fmt.Errorf("write what the %s seat %d's holder has taken: %w", s.pool.What, s.Index, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return errors.Join(fmt.Errorf("publish what the %s seat %d's holder has taken: %w", s.pool.What, s.Index, err), os.Remove(tmp))
+	}
+	return nil
+}
+
+// readUsed answers what seat i's holder, PID, published it has taken: zero
+// when it published nothing, or when the file is a last holder's.
+func (p Pool) readUsed(i, pid int) (int, error) {
+	raw, err := os.ReadFile(p.usedPath(i))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read what the holder of the %s seat %d has taken: %w", p.What, i, err)
+	}
+	var owner, used int
+	if _, err := fmt.Sscanf(string(raw), "pid=%d\nused=%d\n", &owner, &used); err != nil {
+		return 0, fmt.Errorf("the %s seat %d's used file %q does not read: %w", p.What, i, raw, err)
+	}
+	if owner != pid {
+		return 0, nil
+	}
+	return used, nil
+}
+
+// Release lets the seat go: its used file first, then its lock, so a taker
+// woken by the watch finds the seat free, then its watch.
 func (s *Seat) Release() error {
 	var errs []error
+	if err := os.Remove(s.pool.usedPath(s.Index)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		errs = append(errs, fmt.Errorf("remove the %s seat %d's used file: %w", s.pool.What, s.Index, err))
+	}
 	if err := s.lock.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("close the seat %s: %w", s.lock.Name(), err))
 	}
@@ -222,7 +279,7 @@ func (p Pool) tryAdmit(a Admission) (*Seat, Wait, int, error) {
 	if err := turnstile.Close(); err != nil {
 		return nil, Wait{}, 0, errors.Join(fmt.Errorf("let the %s seats' turnstile go: %w", p.What, err), free.f.Close(), watch.Close())
 	}
-	return &Seat{Index: free.i, Held: others, lock: free.f, watch: watch}, Wait{}, 0, nil
+	return &Seat{Index: free.i, Held: others, lock: free.f, watch: watch, pool: p, pid: a.Me.Pid}, Wait{}, 0, nil
 }
 
 // freeSeat is the first free seat a survey found, held by the surveyor.
@@ -264,6 +321,9 @@ func (p Pool) survey() (*freeSeat, []Holder, error) {
 		h, err := parseHolder(string(raw))
 		if err != nil {
 			return fail(fmt.Errorf("the %s seat %s is held, and its holder's record %q does not read: %w", p.What, p.Path(i), raw, err))
+		}
+		if h.Used, err = p.readUsed(i, h.Pid); err != nil {
+			return fail(err)
 		}
 		held[i] = h
 	}

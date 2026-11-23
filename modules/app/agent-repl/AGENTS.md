@@ -488,6 +488,9 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
   disks, on a 48 GiB host), and a seat is granted only while
   `ramdisk.FloorMiB` (10 GiB) stays available once every seated disk has
   filled (`ramdisk.Admits`, reading the kernel's `kern.memorystatus_level`).
+  A seated disk counts for what it can still take, its size less the peak
+  use it publishes in its seat (`seats.Seat.Publish`), since the kernel's
+  reading already lacks what it wrote (owner ruling 2026-11-23).
   Seats go to waiting runs in rank order, the merge queue's head first, as
   core seats do. A waiting run blocks on the held seats' locks, rereads the
   memory every `ramdisk.MemoryRecheck`, and states every wait and grant in the
@@ -3520,11 +3523,16 @@ pids, the views told, the roster republished):
   for it (`shim.v1.SendKeepalive`), and once it has gone out an idle session
   is parked (`drain.Controller.CycleDown`) until a minute before its next
   beat, when it is restored, at most three at once, earliest beat first. A
-  shim runs no timer of its own. It is parked only once the session has been
-  free (no turn, no live detached work, an idle vendor) a whole interval, so
-  the user has about an hour after the work ends to prompt with no shim
-  start; never under a turn or live detached work, nor for the selected
-  workspace, nor once a real turn ran since the beat. A CACHE KNOWN COLD IS
+  shim runs no timer of its own.
+- THE IDLE PARK (owner ruling, 2026-11-23). A session that owes keep-alives
+  is parked once it has been idle `cachelapse.StandDownGrace`, twenty
+  minutes after the latest of its last turn's end, its last engagement and
+  the instant it last fell free (`cachelapse.Keeper.ownIdle`,
+  `drain.Controller.IdleDown`, reason `idle`), so the user has twenty
+  minutes after the work ends to prompt with no shim start. It is restored
+  before each beat as above, and the beat's own stand-down parks it again.
+  No park is taken under a turn or live detached work, for the selected
+  workspace, or once a real turn ran since the instant it was measured from. A CACHE KNOWN COLD IS
   NEVER BEATEN (owner ruling, 2026-10-29): a gate's raise and answer, and a
   shim judging a beat's cache lapsed, mark the row (`cache_cold_turn_at`,
   `wsm.Workspace.CacheKnownCold`), and no keep-alive is owed until a real

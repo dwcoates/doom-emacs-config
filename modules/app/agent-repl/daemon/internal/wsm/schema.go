@@ -134,6 +134,10 @@ CREATE TABLE sessions (
   started_at         INTEGER NOT NULL,
   last_engagement_at INTEGER NOT NULL,
   shim_pid           INTEGER,
+  -- When a keep-alive's restore last brought the session up, NULL when the
+  -- bring-up that last recorded it had another cause. See
+  -- sessionsKeepaliveRestoredAtDDL.
+  keepalive_restored_at INTEGER,
   terminal_kind      TEXT,
   terminal_detail    TEXT,
   terminal_at        INTEGER

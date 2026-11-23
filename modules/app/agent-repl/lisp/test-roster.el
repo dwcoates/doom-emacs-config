@@ -4940,3 +4940,20 @@ Each row's tab name is its id, upcased, so a reader that confused the two fails.
     (let ((agent-repl-roster-view (agent-repl-test-roster--family-roster)))
       ;; Act / Assert
       (should (equal (plist-get (agent-repl-roster-family-of "C2") :parent) "P")))))
+
+;;;; ---- The dormant marker ----
+
+(ert-deftest agent-repl-test-roster-dormant-p-reads-the-rows-marker ()
+  "A workspace whose row carries the dormant marker is dormant."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:dormant t))))
+    (should (agent-repl-roster-dormant-p "a"))))
+
+(ert-deftest agent-repl-test-roster-dormant-p-is-nil-for-a-session-at-work ()
+  "A row without the dormant marker runs work on its shim."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:dormant nil))))
+    (should-not (agent-repl-roster-dormant-p "a"))))
+
+(ert-deftest agent-repl-test-roster-dormant-p-is-nil-without-a-row ()
+  "A workspace the roster has no row for is not known dormant."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
+    (should-not (agent-repl-roster-dormant-p "a"))))

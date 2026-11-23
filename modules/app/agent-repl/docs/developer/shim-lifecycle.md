@@ -25,6 +25,9 @@ shim still draws its whole conversation.
 | Turning remote control on for a workspace with no shim | `UpdateRemoteControlMode` (`remote-control.md`) |
 | The restart verb, which starts one at once when none is up | `workspace.verbs.Restart` (`startForRestart`) |
 | A rebind to another transcript | `workspace.Fleet.StartRebound` |
+| A swap onto a conversation with no vendor session yet (queue bypass mode's switch) | `workspace.verbs.swapConversation`, cause `swap` |
+| A deploy check's owed compaction, carried out at once | `workspace.verbs.CompactDeployCheck`, cause `compaction` |
+| A merge's prompt or repair, and a merge workspace's hand-off | `merge.orchestrator.ensureSession`, `workspace.verbs.StartMergeWorkspace`, cause `merge` |
 | A model, permission-mode or effort pick on a workspace with no shim | `promptqueue` settings revival (`SubmitSessionAct`, `ReviveForSettings`) |
 | A boot or a handover, only for a shim that was up when the last daemon stopped | `bringup.OnlyWasUp`, in `boot` and `rollout` |
 
@@ -90,11 +93,15 @@ one owner (`cachelapse/standdown.go`), logged under
 `daemon.cachelapse.stand_down_owner` whenever it changes:
 
 - `settings_visit` while a pick's visit stands with no turn since;
-- `keepalive_cycle` while a keep-alive is owed;
+- `keepalive_cycle` while a keep-alive is owed: parked once the session has
+  been idle `StandDownGrace` (twenty minutes, owner ruling 2026-11-23; the
+  idle park, `ownIdle`, reason `idle`), restored a minute before each beat,
+  and parked again by the beat's own stand-down;
 - `cache_lapse` while a hidden or closed workspace's lapse is armed;
 - `idle_sweep` when the session goes idle past the cutoff first;
-- `cold_park` otherwise, stood down once the session has been idle one
-  keep-alive interval since its last engagement (`StandDownGrace`); a cold
+- `cold_park` otherwise, stood down once the session has been idle
+  `StandDownGrace` since the latest of its last engagement and its last
+  turn's end (`idleSince`); a cold
   gate raised or a beat judged lapsed parks it at once.
 
 A session is left up, owned by none, while it is in view (`in_view`) or its

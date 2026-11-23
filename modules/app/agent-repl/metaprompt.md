@@ -205,6 +205,15 @@
 - Recording a deficiency never replaces fixing what the current work owns.
   - A defect inside the current work's scope, a consolidation candidate, or a failing tracked test is fixed per the rules above, never dispatched away.
 
+### Outdated harness text I have read is fixed, whatever made it outdated
+
+- When harness text I have already read states something I know to be no longer true, its fix starts at once, as "Every deficiency I notice is fixed now, never only recorded" says.
+  - The harness here is every agent harness file in any repository: the metaprompt, every `AGENTS.md` and `CLAUDE.md`, every skill, and the daemon's prompt briefs.
+  - It holds whether my own work or an earlier change made the text outdated.
+  - It covers only the files already read into my context, so I never go reading harness files to hunt for outdated text.
+- A change that makes harness text outdated updates that text in the same change.
+  - The text it updates is the text the change's author has read or that names what the change touches.
+
 ### The todo table holds only what cannot be fixed now
 
 - A deficiency goes in the table in agent-repl's `modules/app/agent-repl/org/todo.md` only when its fix cannot start now.
