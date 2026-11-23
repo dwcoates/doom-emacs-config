@@ -95,10 +95,27 @@ type installer struct {
 // file installs one staged file over a live one, with the stamps that sit
 // beside it (named relative to each directory).
 func (i installer) file(staged, live string, stamps map[string]string) error {
+	if err := i.dropStamps(stamps); err != nil {
+		return err
+	}
 	if err := i.copyInto(staged, live); err != nil {
 		return err
 	}
 	return i.stamps(stamps)
+}
+
+// dropStamps removes the live stamps an install is about to replace, before the
+// artifact beside them changes. A staging run reuses an installed artifact by
+// its stamp, so a stamp must never stand beside bytes it does not describe: an
+// install that stops between the artifact and its stamps leaves none, which
+// reads as "build", never as the old source tree.
+func (i installer) dropStamps(stamps map[string]string) error {
+	for _, to := range stamps {
+		if err := removeIfPresent(to); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // stamps installs the staged build stamps over the live ones (named relative
@@ -109,7 +126,7 @@ func (i installer) stamps(stamps map[string]string) error {
 			if errors.Is(err, fs.ErrNotExist) {
 				// A STAMP THE BUILD DID NOT WRITE is the readiness report's to
 				// notice, not a reason to refuse the artifact it describes.
-				i.log.Warn(opInstall, "a build stamp was not staged; the installed stamp is left as it was",
+				i.log.Warn(opInstall, "a build stamp was not staged; the artifact is installed without it",
 					dlog.Context{"stamp": from, "cause": err.Error()})
 				continue
 			}

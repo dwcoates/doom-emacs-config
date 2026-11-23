@@ -142,6 +142,7 @@ func (a artifacts) stageInto(t *testing.T, staging string) {
 	if a.launcher != "" {
 		writeFile(t, filepath.Join(s.CacheBin(LauncherBundle), LauncherExecutable), a.launcher)
 		writeFile(t, filepath.Join(s.CacheBin(LauncherBundle), "Contents", "Info.plist"), "plist "+a.launcher)
+		writeFile(t, filepath.Join(filepath.Dir(s.CacheBin(LauncherBundle)), ".Zettel.app.source-tree"), "tree-"+a.launcher)
 	}
 }
 

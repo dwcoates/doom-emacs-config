@@ -144,3 +144,46 @@ func TestLiveNamesWhereTheDaemonRunsFrom(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallingAFileLeavesNoStampOfTheReplacedBuild(t *testing.T) {
+	// Arrange: the build staged the artifact but not its source-tree stamp.
+	staged, live := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(staged, "agent-repld"), "new")
+	writeFile(t, filepath.Join(staged, ".built-sha"), "sha-new")
+	writeFile(t, filepath.Join(live, "agent-repld"), "old")
+	writeFile(t, filepath.Join(live, ".source-tree"), "tree-old")
+	in := installer{nonce: "n1", log: dlog.NewTestLogger()}
+
+	// Act
+	err := in.file(filepath.Join(staged, "agent-repld"), filepath.Join(live, "agent-repld"), stampsBeside(staged, live, ""))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(live, ".source-tree")); !os.IsNotExist(err) {
+		t.Fatalf("stat the old source-tree stamp = %v, want it gone: it described the replaced build", err)
+	}
+	if got := readFile(t, filepath.Join(live, ".built-sha")); got != "sha-new" {
+		t.Fatalf("built-sha = %q, want the staged stamp", got)
+	}
+}
+
+func TestAFailedInstallLeavesNoStampBesideTheUnchangedArtifact(t *testing.T) {
+	// Arrange: the staged artifact is absent, so the copy fails.
+	staged, live := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(live, "agent-repld"), "old")
+	writeFile(t, filepath.Join(live, ".source-tree"), "tree-old")
+	in := installer{nonce: "n1", log: dlog.NewTestLogger()}
+
+	// Act
+	err := in.file(filepath.Join(staged, "agent-repld"), filepath.Join(live, "agent-repld"), stampsBeside(staged, live, ""))
+
+	// Assert
+	if err == nil {
+		t.Fatal("file succeeded, want the missing staged artifact to fail the install")
+	}
+	if _, err := os.Stat(filepath.Join(live, ".source-tree")); !os.IsNotExist(err) {
+		t.Fatalf("stat the stamp = %v, want none: a reuse must build rather than trust a stamp an interrupted install left", err)
+	}
+}

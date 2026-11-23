@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -167,6 +168,7 @@ func (b *ScriptBuilder) runStep(ctx context.Context, step buildStep, logPath str
 	b.Restarts.ObserveRestart(restarttiming.OfBuildStep(step.name, restarttiming.OutcomeOf(stepErr(code, err)), b.Clock.Now().Sub(began)))
 	if stepErr(code, err) == nil {
 		b.Log.Debug(opBuild, "the step built", fields)
+		b.logOutcomes(step.name, out)
 		b.Observer.BuildStepEnded(step.name, nil)
 		return stepResult{out: out}
 	}
@@ -180,6 +182,19 @@ func (b *ScriptBuilder) runStep(ctx context.Context, step buildStep, logPath str
 	failed := &BuildFailed{Step: step.name, Detail: detail, Log: logPath}
 	b.Observer.BuildStepEnded(step.name, failed)
 	return stepResult{out: out, failed: failed}
+}
+
+// outcomeLine is the line build-frontend.sh ends each target with: the target,
+// the source-tree id standing at that moment, and what became of it (reused
+// from the installed artifact, built, or fresh in place).
+var outcomeLine = regexp.MustCompile(`(?m)^\[build-frontend\] outcome target=(\S+) source_tree=(\S+) outcome=(\S+)$`)
+
+// logOutcomes logs at INFO what each target of a step's output became, so a
+// deploy's log says which targets were reused and which were built.
+func (b *ScriptBuilder) logOutcomes(step, out string) {
+	for _, m := range outcomeLine.FindAllStringSubmatch(out, -1) {
+		b.Log.Info(opBuild, "a staged target was reused or built", dlog.Context{"step": step, "target": m[1], "source_tree": m[2], "outcome": m[3]})
+	}
 }
 
 // steps are the build's commands, in build order: the protobufs, then every
