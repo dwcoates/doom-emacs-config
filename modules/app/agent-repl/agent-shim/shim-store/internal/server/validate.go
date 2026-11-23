@@ -50,6 +50,9 @@ const (
 	SiteDeliveryEmpty          = "delivery_empty"
 	SiteUnknownBashRun         = "unknown_bash_run"
 	SiteWatchBufferOverflow    = "watch_buffer_overflow"
+	// SiteStoreShuttingDown is a run's watch the store's shutdown ended
+	// before the run's terminal: Unavailable, so the caller re-opens.
+	SiteStoreShuttingDown = "store_shutting_down"
 	// SitePositionUnset is a ReadAgentPage that names no position arm: the
 	// verb has no newest-page arm, so an unset position asks for nothing.
 	SitePositionUnset = "position_unset"

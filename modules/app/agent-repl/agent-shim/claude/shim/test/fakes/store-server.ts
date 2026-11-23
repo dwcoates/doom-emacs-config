@@ -282,6 +282,14 @@ export interface FakeStoreOptions {
   readonly pageSize?: number;
 }
 
+/** How the fake ends a run's watch its close cut before the run's terminal. */
+function bashWatchStopping(run: string): ConnectError {
+  return new ConnectError(
+    `store: the store is shutting down before bash run ${JSON.stringify(run)}'s terminal; re-open to replay the run`,
+    Code.Unavailable,
+  );
+}
+
 /** Start the fake store on `socketPath`. Resolves once it is accepting. */
 export async function startFakeStore(socketPath: string, options: FakeStoreOptions = {}): Promise<FakeStore> {
   const pageSize = options.pageSize ?? FAKE_STORE_PAGE_SIZE;
@@ -915,12 +923,14 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
               if (arm === "success" || arm === "failure") return;
               continue;
             }
-            if (watcher.closed) return;
+            // A CLOSE MID-RUN IS UNAVAILABLE, as the real store's shutdown
+            // ends it: a clean close means the terminal was sent.
+            if (watcher.closed) throw bashWatchStopping(run);
             const awaited = await new Promise<storev1.StoreAgentBash | null>((resolve) => {
               watcher.waiters.push(resolve);
               if (watcher.closed) resolve(null);
             });
-            if (awaited === null) return;
+            if (awaited === null) throw bashWatchStopping(run);
             yield create(storev1.WatchBashRunResponseSchema, { row: awaited });
             const arm = awaited.frame?.result.case;
             if (arm === "success" || arm === "failure") return;

@@ -21,6 +21,12 @@ import (
 // is a row the store can recognize. So the caller needs no cancellation
 // protocol and no timeout to know it has the whole run: the stream closes.
 //
+// A CLEAN CLOSE MEANS THE TERMINAL WAS SENT, and nothing else ends the stream
+// cleanly but the caller leaving. The store shutting down mid-run ends it with
+// CodeUnavailable (errBashStoreStopping): closing it cleanly there made a
+// store restart indistinguishable from a finished run, so every standing
+// shell watch read as a run that ended with no terminal.
+//
 // THERE IS NO TOKEN AND NO FAILURE ARM. A run is addressed by the identity the
 // spawning stream already announced, so there is nothing to mint; and a run the
 // store holds no row for is a REFUSED OPEN at the transport (CodeNotFound), the
@@ -116,7 +122,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 			return s.endBashOverflowed(log, sub)
 		case <-s.done:
 			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the store is shutting down", nil)
-			return nil
+			return errBashStoreStopping()
 		case <-ctx.Done():
 			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-bash-run"}, "bash run watch ended: the caller went away", nil)
 			return nil
@@ -157,6 +163,14 @@ func (s *Server) endBashOverflowed(log *logging.Logger, sub *sink[BashRowWritten
 		"bash run watch ended: this subscriber overflowed its buffer and must re-open dropped={dropped}", logging.Values{"dropped": sub.dropped})
 	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow, "run",
 		"watch: the subscriber fell too far behind its buffer; re-open to replay the run"))
+}
+
+// errBashStoreStopping is how a run's watch the store's shutdown cut before its
+// terminal ends. It is an error, never a clean close: the run has not ended,
+// and the caller re-opens against the next store to replay it.
+func errBashStoreStopping() error {
+	return connect.NewError(connect.CodeUnavailable, refuse(SiteStoreShuttingDown, "run",
+		"watch: the store is shutting down before the run's terminal; re-open to replay the run"))
 }
 
 // publishBashRows fans the committed run rows out and warns for every watcher

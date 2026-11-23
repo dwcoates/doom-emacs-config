@@ -29,11 +29,25 @@ func (m *mappedStream[W, T]) Recv() (T, error) {
 	var zero T
 	if !m.stream.Receive() {
 		if err := m.stream.Err(); err != nil {
-			return zero, err
+			return zero, receiveFailure(err)
 		}
 		return zero, io.EOF
 	}
 	return m.project(m.stream.Msg())
+}
+
+// receiveFailure is the error a mid-run receive failure is returned as. The
+// shim's own unavailable answer means what it means on an open
+// (answeredStoreUnreachable): the shim's read of the store gave up and the
+// shim records it as its own fault. It is marked ErrStoreUnreachable exactly
+// as refusedOpen marks a refused open, so the consumer tells the store's
+// outage apart from any other mid-run end. Every other failure is returned
+// as it came.
+func receiveFailure(err error) error {
+	if answeredStoreUnreachable(err) {
+		return storeUnreachable(err)
+	}
+	return err
 }
 
 // Close ends the stream from this side. Closing twice is harmless: a consumer

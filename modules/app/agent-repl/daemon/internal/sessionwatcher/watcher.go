@@ -2839,6 +2839,13 @@ func (w *watcher) openEndedByDeathLocked(operation, detail string, err error) bo
 // the daemon still needs, and the watch is opened again rather than left dark
 // until the link happens to be redialed. The re-open is bounded, and a
 // re-open that cannot be made severs exactly as before.
+//
+// A STREAM THE STORE'S FAILURE CUT IS RECORDED AT INFO. The shim ends a
+// shell's watch with its own unavailable answer when its read of the store
+// gave up (shimclient.ErrStoreUnreachable), and the shim records that failure
+// as its own fault, so a WARN here would report the same outage twice. Every
+// other early end stays a WARN. Both count toward shellReopenLimit alike: the
+// count is what makes a re-open loop impossible, whatever ended the stream.
 func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
 	key := s.work.GetValue()
 	done := func() bool { return s.done }
@@ -2880,7 +2887,12 @@ func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
 	if err != nil {
 		ctx["error"] = err.Error()
 	}
-	w.log.Warn("daemon.sessionwatcher.watch_bash",
-		"a detached shell's stream ended before the shell settled; re-opening it", ctx)
+	if errors.Is(err, shimclient.ErrStoreUnreachable) {
+		w.log.Info("daemon.sessionwatcher.watch_bash",
+			"a detached shell's stream ended because the shim's read of the store failed; the shim records that failure itself; re-opening it", ctx)
+	} else {
+		w.log.Warn("daemon.sessionwatcher.watch_bash",
+			"a detached shell's stream ended before the shell settled; re-opening it", ctx)
+	}
 	w.openShellStreamLocked(s)
 }

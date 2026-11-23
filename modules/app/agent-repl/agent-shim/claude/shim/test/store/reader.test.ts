@@ -867,7 +867,10 @@ describe("openBashRun", () => {
       watchBashRun: (request) => ({
         async *[Symbol.asyncIterator]() {
           asked.push(request.awaitFirstRow);
-          yield* [];
+          // The store closes a run's watch cleanly only after its terminal.
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashTerminalFrame() }),
+          });
         },
       }),
     });
@@ -959,6 +962,14 @@ function bashStartFrame(): conversationv1.AgentBash {
   const item = bashStartEntry().item;
   if (item.kind !== "bash_run")
     throw new Error("the bash start fixture is no longer a run row");
+  return item.frame;
+}
+
+/** A shell run's terminal frame, exactly as the shared fixture writes it. */
+function bashTerminalFrame(): conversationv1.AgentBash {
+  const item = bashTerminalEntry().item;
+  if (item.kind !== "bash_run")
+    throw new Error("the bash terminal fixture is no longer a run row");
   return item.frame;
 }
 
@@ -1940,6 +1951,9 @@ describe("openBashRun against a store that misbehaves", () => {
           yield create(storev1.WatchBashRunResponseSchema, {
             row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
           });
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashTerminalFrame() }),
+          });
         },
       }),
     });
@@ -1950,7 +1964,109 @@ describe("openBashRun against a store that misbehaves", () => {
 
     // Assert.
     expect(asks).toBe(3);
-    expect(arms).toEqual(["start"]);
+    expect(arms).toEqual(["start", "success"]);
+  });
+
+  it("replays an open the store's shutdown ended Unavailable before the first row, and serves the next open's rows", async () => {
+    // Arrange: the store shuts down while the watch waits for its first row,
+    // and the next store serves the run.
+    let asks = 0;
+    const reader = readerOver({
+      watchBashRun: () => ({
+        async *[Symbol.asyncIterator]() {
+          asks += 1;
+          if (asks === 1) throw new ConnectError("the store is shutting down", Code.Unavailable);
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashTerminalFrame() }),
+          });
+        },
+      }),
+    });
+
+    // Act.
+    const arms: string[] = [];
+    for await (const frame of await reader.openBashRun(WORK, { awaitFirstRow: true })) arms.push(String(frame.result.case));
+
+    // Assert.
+    expect(asks).toBe(2);
+    expect(arms).toEqual(["start", "success"]);
+  });
+
+  it("refuses as store_unavailable a watch the store closed cleanly before the run's terminal", async () => {
+    // Arrange: a clean close short of the terminal breaks the store's contract.
+    let asks = 0;
+    const reader = readerOver({
+      watchBashRun: () => ({
+        async *[Symbol.asyncIterator]() {
+          asks += 1;
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+        },
+      }),
+    });
+
+    // Act.
+    const ended = drain(await reader.openBashRun(WORK, NO_WAIT));
+
+    // Assert.
+    await expect(ended).rejects.toMatchObject({ kind: "store_unavailable" });
+    expect(asks).toBe(1);
+  });
+
+  it("records at error a watch the store closed cleanly before the run's terminal, naming the run and the rows served", async () => {
+    // Arrange.
+    const reader = readerOver({
+      watchBashRun: () => ({
+        async *[Symbol.asyncIterator]() {
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+        },
+      }),
+    });
+    const before = logSinkMark();
+
+    // Act.
+    await drain(await reader.openBashRun(WORK, NO_WAIT)).catch(() => undefined);
+
+    // Assert.
+    expect(logRecordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "the store closed a shell run's watch before its terminal",
+        context: containing({ run: "run-1", rows_served: 1, cause: "the store's stream ended cleanly with no terminal row served" }),
+      }),
+    );
+  });
+
+  it("ends normally when the store closes the watch cleanly after the run's terminal", async () => {
+    // Arrange: the terminal, then a late delta the replay serves after it.
+    const reader = readerOver({
+      watchBashRun: () => ({
+        async *[Symbol.asyncIterator]() {
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashTerminalFrame() }),
+          });
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+        },
+      }),
+    });
+
+    // Act.
+    const arms: string[] = [];
+    for await (const frame of await reader.openBashRun(WORK, NO_WAIT)) arms.push(String(frame.result.case));
+
+    // Assert.
+    expect(arms).toEqual(["start", "success", "start"]);
   });
 
   it("does not replay a run the store cut after its first row", async () => {

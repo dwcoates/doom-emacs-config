@@ -42,6 +42,9 @@ type fakeShim struct {
 	watchAgentRefusal   error
 	watchAgentFrames    []*shimv1.WatchAgentResponse
 	watchBashRefusal    error
+	// watchBashEnd, when set, is the error WatchBash ends its stream with
+	// after its first frame: a mid-run end rather than a refused open.
+	watchBashEnd error
 	// watchBashExpected is each WatchBash open's `expected`, in order.
 	watchBashExpected  chan bool
 	watchSessionRefuse error
@@ -412,7 +415,10 @@ func (f *fakeShim) WatchBash(_ context.Context, req *connect.Request[shimv1.Watc
 	if f.watchBashRefusal != nil {
 		return f.watchBashRefusal
 	}
-	return stream.Send(&shimv1.WatchBashResponse{Bash: &conversationv1.AgentBash{}})
+	if err := stream.Send(&shimv1.WatchBashResponse{Bash: &conversationv1.AgentBash{}}); err != nil {
+		return err
+	}
+	return f.watchBashEnd
 }
 
 func (f *fakeShim) StopBash(_ context.Context, _ *connect.Request[shimv1.StopBashRequest]) (*connect.Response[shimv1.StopBashResponse], error) {
