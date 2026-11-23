@@ -39,6 +39,11 @@ type fixture struct {
 	mu      sync.Mutex
 	adopted map[ids.WorkspaceID]bool
 	dials   int
+	// notices are the callbacks the mirror asked the next roster
+	// publication to tell, in order; events are the notices asked and the
+	// arm maps sunk, in order ("notice", "sink").
+	notices []func(revision uint64)
+	events  []string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -70,7 +75,18 @@ func newFixture(t *testing.T) *fixture {
 			defer f.mu.Unlock()
 			return !f.adopted[ws]
 		},
-		Sink: func(arms map[ids.WorkspaceID]string) { f.sunk <- maps.Clone(arms) },
+		Sink: func(arms map[ids.WorkspaceID]string) {
+			f.mu.Lock()
+			f.events = append(f.events, "sink")
+			f.mu.Unlock()
+			f.sunk <- maps.Clone(arms)
+		},
+		NextPublication: func(fn func(revision uint64)) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.notices = append(f.notices, fn)
+			f.events = append(f.events, "notice")
+		},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -117,6 +133,25 @@ func (f *fixture) awaitEnded(t *testing.T) {
 	case <-time.After(awaitBound):
 		t.Fatal("the mirror never ended")
 	}
+}
+
+// published plays the next roster publication at REVISION: every notice the
+// mirror asked for is told it, as the resolver tells them.
+func (f *fixture) published(revision uint64) {
+	f.mu.Lock()
+	notices := f.notices
+	f.notices = nil
+	f.mu.Unlock()
+	for _, fn := range notices {
+		fn(revision)
+	}
+}
+
+// noticesAsked answers how many notices the mirror has asked for so far.
+func (f *fixture) noticesAsked() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.notices)
 }
 
 func (f *fixture) adopt(ws ids.WorkspaceID) {
@@ -177,9 +212,10 @@ func TestNewRefusesAMissingDependency(t *testing.T) {
 	full := func() Deps {
 		return Deps{
 			Log: dlog.NewTestLogger(), Incumbent: "127.0.0.1:1",
-			Dial:          func(context.Context, string) (Stream, error) { return nil, nil },
-			NotYetAdopted: func(ids.WorkspaceID) bool { return true },
-			Sink:          func(map[ids.WorkspaceID]string) {},
+			Dial:            func(context.Context, string) (Stream, error) { return nil, nil },
+			NotYetAdopted:   func(ids.WorkspaceID) bool { return true },
+			Sink:            func(map[ids.WorkspaceID]string) {},
+			NextPublication: func(func(uint64)) {},
 		}
 	}
 	cases := []struct {
@@ -191,6 +227,7 @@ func TestNewRefusesAMissingDependency(t *testing.T) {
 		{"no dial", func(d *Deps) { d.Dial = nil }},
 		{"no adoption standing", func(d *Deps) { d.NotYetAdopted = nil }},
 		{"no sink", func(d *Deps) { d.Sink = nil }},
+		{"no next publication notice", func(d *Deps) { d.NextPublication = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -591,5 +628,111 @@ func TestStatusOfNamesTheArmOrWhyItCannotBeMirrored(t *testing.T) {
 				t.Fatalf("statusOf = %q, %q; want %q, problem %v", arm, problem, tc.wantArm, tc.wantProblem)
 			}
 		})
+	}
+}
+
+// firstRosterAfter is the message of the mark of the first roster published
+// after the mirror ended.
+const firstRosterAfter = "the first roster this daemon published after the incumbent's roster stream ended"
+
+func TestTheFirstRosterAfterTheMirrorEndsIsMarked(t *testing.T) {
+	cases := []struct {
+		name  string
+		end   func(f *fixture, s *rostermirrortest.Stream)
+		ended string
+	}{
+		{name: "the incumbent's planned ending", end: func(_ *fixture, s *rostermirrortest.Stream) { s.Frames <- endingFrame() }, ended: "ending"},
+		{name: "a stop", end: func(f *fixture, _ *rostermirrortest.Stream) { f.m.Stop("the incumbent exited") }, ended: "stopped"},
+		{name: "a failed stream", end: func(_ *fixture, s *rostermirrortest.Stream) { s.End(errors.New("stream reset")) }, ended: "failed"},
+		{name: "an incumbent that is gone", end: func(_ *fixture, s *rostermirrortest.Stream) {
+			s.End(connect.NewError(connect.CodeUnavailable, errors.New("read: connection reset by peer")))
+		}, ended: "incumbent_gone"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			s := f.run(t, ctx)
+			s.Frames <- rosterFrame(row("ws-a", thinking))
+			f.awaitSunk(t)
+			tc.end(f, s)
+			f.awaitSunk(t)
+			f.awaitEnded(t)
+
+			// Act
+			f.published(7)
+
+			// Assert
+			rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: Op, Message: firstRosterAfter})
+			if !ok {
+				t.Fatalf("no INFO mark of the first roster after the mirror: %v", f.log.Records())
+			}
+			if rec.Context["revision"] != uint64(7) || rec.Context["ended"] != tc.ended || rec.Context["incumbent"] != "127.0.0.1:7777" {
+				t.Fatalf("mark context = %v, want revision 7, ended %q and the incumbent", rec.Context, tc.ended)
+			}
+		})
+	}
+}
+
+func TestNoRosterIsMarkedWhileTheMirrorRuns(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := f.run(t, ctx)
+
+	// Act
+	s.Frames <- rosterFrame(row("ws-a", thinking))
+	f.awaitSunk(t)
+
+	// Assert
+	if n := f.noticesAsked(); n != 0 {
+		t.Fatalf("notices asked = %d, want none while the mirror runs", n)
+	}
+}
+
+func TestOnlyTheMirrorsFirstEndAsksForTheMark(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := f.run(t, ctx)
+	s.Frames <- rosterFrame(row("ws-a", thinking))
+	f.awaitSunk(t)
+
+	// Act: a stop, then the subscription's own end it causes.
+	f.m.Stop("the incumbent exited")
+	f.awaitSunk(t)
+	f.awaitEnded(t)
+
+	// Assert
+	if n := f.noticesAsked(); n != 1 {
+		t.Fatalf("notices asked = %d, want exactly one for the first end", n)
+	}
+}
+
+func TestTheMarkIsAskedForBeforeTheWithdrawalPublishes(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := f.run(t, ctx)
+	s.Frames <- rosterFrame(row("ws-a", thinking))
+	f.awaitSunk(t)
+
+	// Act
+	s.Frames <- endingFrame()
+	f.awaitSunk(t)
+	f.awaitEnded(t)
+
+	// Assert: the withdrawal's own publication is the one marked.
+	f.mu.Lock()
+	events := append([]string(nil), f.events...)
+	f.mu.Unlock()
+	want := []string{"sink", "notice", "sink"}
+	if fmt.Sprint(events) != fmt.Sprint(want) {
+		t.Fatalf("events = %v, want %v", events, want)
 	}
 }

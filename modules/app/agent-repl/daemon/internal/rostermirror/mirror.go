@@ -91,6 +91,11 @@ type Deps struct {
 	// Sink is handed, WHOLE, every mirrored arm by workspace after every
 	// change, and nil once the mirror ends (sidebar.Resolver.SetIncumbentArms).
 	Sink func(arms map[ids.WorkspaceID]string)
+	// NextPublication tells its callback, once, the revision of the next
+	// roster this daemon publishes (sidebar.Resolver.NotifyNextPublication):
+	// the mirror marks with it the first roster published after the
+	// incumbent's roster stream ended.
+	NextPublication func(fn func(revision uint64))
 }
 
 // Mirror is one joining window's subscription.
@@ -136,6 +141,8 @@ func New(deps Deps) (*Mirror, error) {
 		return nil, errors.New("rostermirror: the adoption standing is required; only a row not yet adopted may be mirrored")
 	case deps.Sink == nil:
 		return nil, errors.New("rostermirror: a sink is required")
+	case deps.NextPublication == nil:
+		return nil, errors.New("rostermirror: the next roster publication's notice is required")
 	}
 	return &Mirror{deps: deps}, nil
 }
@@ -173,7 +180,7 @@ func (m *Mirror) Run(ctx context.Context) {
 			m.take(push.Streams, fields)
 		case *agentreplv1.WatchWorkspaceRosterResponse_Ending:
 			m.deps.Log.Info(Op, "the incumbent ended its roster stream; every row is this daemon's own", fields)
-			m.withdraw()
+			m.withdraw("ending")
 			return
 		default:
 			m.deps.Log.Error(Op, "the incumbent pushed a roster frame this build cannot read; it is skipped", dlog.Merge(fields, dlog.Context{
@@ -212,7 +219,20 @@ func (m *Mirror) end(ctx context.Context, fields dlog.Context, message logsite.M
 	default:
 		m.deps.Log.Log(dlog.LevelError, Op, message, dlog.WithCause(fields, err))
 	}
-	m.withdraw()
+	m.withdraw(endedBy(ctx, err))
+}
+
+// endedBy names, for the mark of the first roster after the mirror, how a
+// subscription that ended with ERR ended.
+func endedBy(ctx context.Context, err error) string {
+	switch {
+	case ctx.Err() != nil:
+		return "stopped"
+	case transportcut.Is(err):
+		return "incumbent_gone"
+	default:
+		return "failed"
+	}
 }
 
 // Stop ends the mirror for REASON: the handover it served is over. The
@@ -235,7 +255,7 @@ func (m *Mirror) Stop(reason string) {
 	if cancel != nil {
 		cancel()
 	}
-	m.withdraw()
+	m.withdraw("stopped")
 }
 
 // OwnershipChanged republishes the mirror after a workspace's standing moved
@@ -245,14 +265,26 @@ func (m *Mirror) OwnershipChanged() {
 	m.publish()
 }
 
-// withdraw ends the mirror: nothing it held is drawn any more.
-func (m *Mirror) withdraw() {
+// withdraw ends the mirror, which ENDED names how: nothing it held is drawn
+// any more. The first withdrawal marks the first roster this daemon publishes
+// from here on, which is the first one every editor reads with no row drawn
+// from the incumbent: it is asked for BEFORE the publish below, so the roster
+// that publish produces is the one marked.
+func (m *Mirror) withdraw(ended string) {
 	m.mu.Lock()
+	first := !m.ended
 	m.ended = true
 	m.arms = nil
 	m.undecodable = nil
 	m.held = nil
 	m.mu.Unlock()
+	if first {
+		fields := dlog.Context{"incumbent": m.deps.Incumbent, "ended": ended}
+		m.deps.NextPublication(func(revision uint64) {
+			m.deps.Log.Info(Op, "the first roster this daemon published after the incumbent's roster stream ended",
+				dlog.Merge(fields, dlog.Context{"revision": revision}))
+		})
+	}
 	m.publish()
 }
 

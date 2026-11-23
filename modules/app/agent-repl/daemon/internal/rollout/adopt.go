@@ -1860,7 +1860,8 @@ func (c *controller) startRosterMirror(lifetime context.Context) {
 		NotYetAdopted: func(ws ids.WorkspaceID) bool {
 			return c.Standing(ws) == StandingNotYetAdopted
 		},
-		Sink: c.deps.IncumbentArms,
+		Sink:            c.deps.IncumbentArms,
+		NextPublication: c.deps.NextRosterPublication,
 	})
 	if err != nil {
 		// New validated both deps beside IncumbentAddress, so a mirror that

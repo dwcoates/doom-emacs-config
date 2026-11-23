@@ -338,9 +338,14 @@ type Deps struct {
 	// (rostermirror.DialIncumbent), and IncumbentArms installs the status
 	// arms the mirror reads off it (sidebar.Resolver.SetIncumbentArms). A
 	// JOINING daemon draws each workspace it has not adopted yet from its
-	// incumbent's own row (Join); both are required beside IncumbentAddress.
-	DialIncumbentRoster rostermirror.Dial
-	IncumbentArms       func(arms map[ids.WorkspaceID]string)
+	// incumbent's own row (Join). NextRosterPublication tells its callback
+	// the revision of the next roster this daemon publishes
+	// (sidebar.Resolver.NotifyNextPublication), which the mirror marks as the
+	// first after the incumbent's roster stream ended. All three are required
+	// beside IncumbentAddress.
+	DialIncumbentRoster   rostermirror.Dial
+	IncumbentArms         func(arms map[ids.WorkspaceID]string)
+	NextRosterPublication func(fn func(revision uint64))
 	// Instance identifies this daemon process for serving ownership.
 	Instance ids.InstanceID
 	// StateDir is the state root; the successor reports its address in it.
@@ -907,8 +912,8 @@ func New(deps Deps) (Controller, error) {
 	if deps.Restarts == nil {
 		return nil, errors.New("rollout: a restart recorder is required; every shim replacement and transfer is timed")
 	}
-	if deps.IncumbentAddress != "" && (deps.DialIncumbentRoster == nil || deps.IncumbentArms == nil) {
-		return nil, errors.New("rollout: a joining daemon needs the incumbent's roster dial and the arms sink; a row it has not adopted would draw its frozen footer instead of the incumbent's status")
+	if deps.IncumbentAddress != "" && (deps.DialIncumbentRoster == nil || deps.IncumbentArms == nil || deps.NextRosterPublication == nil) {
+		return nil, errors.New("rollout: a joining daemon needs the incumbent's roster dial, the arms sink and the next roster publication's notice; a row it has not adopted would draw its frozen footer instead of the incumbent's status")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}
