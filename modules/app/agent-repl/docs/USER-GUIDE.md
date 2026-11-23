@@ -980,9 +980,12 @@ The top bar's phone chip, on the left after the account and just left of the wif
     - The top and bottom edges of a row's line still place the dragged row just above or below it.
     - The new child's agent is told its new parent, and its work still lands where it landed before.
   - A top-level workspace's whole family moves with it, its children and theirs.
-  - Dragging a child reorders it among its parent's children, and only there.
-    - The child's own children go with it.
-    - It can be dropped nowhere else: it never changes parent, goes top-level or joins a subsection.
+  - Dragging a child moves only the child, and its own children go with it.
+    - Dropped among its parent's other children, it reorders them.
+    - Dropped on the middle of another workspace's row, it becomes that workspace's child instead.
+    - Dropped among the repository's own rows or into a subsection, it leaves its parent and stands there as a top-level workspace.
+    - A child of another repository than its parent's goes top-level in its own repository's section.
+    - Its agent is told of a new parent or of having none, and its work still lands where it landed before.
 - **Drag a subsection's header to move it among the repository's rows and subsections.**
   - Dropped on a row's line, it stands just above that row, so a subsection can sit between two of the repository's own workspaces.
 - **Drag a repository's header to reorder the repositories.**

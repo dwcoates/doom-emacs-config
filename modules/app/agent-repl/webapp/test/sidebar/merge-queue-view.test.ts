@@ -936,7 +936,7 @@ describe("dragging a waiting merge", () => {
     const { sc } = daemon();
     const { body, lines, refs, rows, section } = drawnQueue(sc, ["w1", "w2"]);
     const spec = queueDrag(sc, body, lines[1].querySelector(".sb-mq-name"), refs as never);
-    expect([spec?.item, spec?.box, spec?.scroller, spec?.lists(), spec?.itemsOf(body)]).toEqual([lines[1], section, rows, [body], lines]);
+    expect([spec?.item, spec?.boxes, spec?.scroller, spec?.lists(), spec?.itemsOf(body)]).toEqual([lines[1], [section], rows, [body], lines]);
   });
 
   it("asks the daemon to move a dropped merge to its place", async () => {

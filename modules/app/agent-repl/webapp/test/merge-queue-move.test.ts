@@ -80,7 +80,7 @@ describe("waitingMergeDrag", () => {
     const spec = waitingMergeDrag({ kind: "q", item: lines[1], list, box: list, refs: refs as never, move: () => {} });
 
     // Assert
-    expect([spec.kind, spec.item, spec.box, spec.scroller, spec.lists(), spec.itemsOf(list)]).toEqual(["q", lines[1], list, undefined, [list], lines]);
+    expect([spec.kind, spec.item, spec.boxes, spec.scroller, spec.lists(), spec.itemsOf(list)]).toEqual(["q", lines[1], [list], undefined, [list], lines]);
   });
 
   it("asks to move the dropped merge beside the waiting merge it now stands next to", () => {

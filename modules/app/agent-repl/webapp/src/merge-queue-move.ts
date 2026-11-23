@@ -47,7 +47,7 @@ export interface WaitingMergeDrag {
   item: HTMLElement;
   /** The element whose children are the queue's merges. */
   list: HTMLElement;
-  /** The drawn box the drag rearranges (`DragSpec.box`). */
+  /** The drawn box the drag rearranges (`DragSpec.boxes`). */
   box: HTMLElement;
   /** The region the queue scrolls in, when it follows the pointer. */
   scroller?: HTMLElement;
@@ -71,7 +71,7 @@ export function waitingMergeDrag(d: WaitingMergeDrag): DragSpec {
   return {
     kind: d.kind,
     item: d.item,
-    box: d.box,
+    boxes: [d.box],
     scroller: d.scroller,
     lists: () => [d.list],
     itemsOf: waiting,

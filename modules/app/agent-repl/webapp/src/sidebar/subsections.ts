@@ -35,9 +35,11 @@
  * WHAT DRAGS. In the open workspaces' repository sections only, which are the
  * ones whose order the tab bar walks:
  *
- *   - a nested row, with its own descendants, among its parent's children
- *     only (`childDrag`): it never leaves its parent, so a drop there only
- *     reorders the siblings;
+ *   - a nested row, with its own descendants (`childDrag`): among its
+ *     parent's children it reorders the siblings; over the middle of another
+ *     row's line it becomes that row's child; anywhere among its own
+ *     repository's top-level rows and subsections it leaves its parent and
+ *     stands there, top-level;
  *   - a top-level workspace row's whole family among its own
  *     repository's lists: the section's list, where
  *     it may stand just above a subsection, and each subsection's rows. Over
@@ -79,12 +81,12 @@ import { childrenMatching, queryAll } from "../dom.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { requireMessage } from "../rpc/strict.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { sendArrangement } from "./arrange.js";
+import { sendArrangement, type ArrangeChange } from "./arrange.js";
 import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawRosterSectionFold, foldOnClick, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec, type Zone } from "../drag.js";
-import { sendNest } from "./nest.js";
+import { sendNest, sendUnnest } from "./nest.js";
 import {
   KIDS_CLASS,
   kidsBoxOf,
@@ -372,7 +374,7 @@ function subsectionDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs):
   return {
     kind: "subsection",
     item: sub,
-    box: section,
+    boxes: [section],
     scroller: openRegion(section),
     lists: () => [list],
     itemsOf: entryItems,
@@ -412,7 +414,7 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
   return {
     kind: "workspace",
     item: row,
-    box: section,
+    boxes: [section],
     scroller: openRegion(section),
     lists: () => [...queryAll<HTMLElement>(section, BUCKET_LIST_SELECTOR), ...nestLists(section, row)],
     itemsOf: (l) => (isNestList(l) ? nestItems(l) : entryItems(l)),
@@ -424,31 +426,53 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
         void sendNest(sc, sc.arrange.status, workspace, refs.workspace(rowId(nestParent(l))));
         return;
       }
-      const bucket = bucketOf(l);
-      void sendArrangement(sc, sc.arrange.status, {
-        case: "placeWorkspace",
-        value: {
-          workspace,
-          into: bucket.case === "none" ? { case: "noSubsection", value: {} } : { case: "subsection", value: { id: bucket.id } },
-          at:
-            before === null
-              ? { case: "end", value: {} }
-              : isSubsection(before)
-                ? { case: "beforeSubsection", value: { id: namedId(before) } }
-                : { case: "before", value: refs.workspace(rowId(before)) },
-        },
-      });
+      void sendArrangement(sc, sc.arrange.status, placement(workspace, l, before, refs));
     },
   };
 }
 
 /**
- * A press on a NESTED row drags that row, with its own descendants, among its
- * parent's children and nowhere else (agentrepl.v1.ArrangeMoveChild): ITS ONE
- * LIST IS THE BOX IT STANDS IN, the parent's `.kids` or, for a child of
- * another repository, that repository's block, and its items are the rows
- * there. It never leaves its parent: no new parent, no bucket's list, no
- * subsection, and its family's top row stays where it is.
+ * THE ONE PLACEMENT A ROW DROPPED INTO A BUCKET'S LIST ASKS FOR, whether it
+ * was top-level already (`rowDrag`) or is made top-level first (`childDrag`):
+ * WORKSPACE into LIST's bucket, just before BEFORE (a row or a subsection),
+ * or after every entry there when BEFORE is null.
+ */
+export function placement(workspace: WorkspaceRef, list: HTMLElement, before: HTMLElement | null, refs: ArrangeRefs): ArrangeChange {
+  const bucket = bucketOf(list);
+  return {
+    case: "placeWorkspace",
+    value: {
+      workspace,
+      into: bucket.case === "none" ? { case: "noSubsection", value: {} } : { case: "subsection", value: { id: bucket.id } },
+      at:
+        before === null
+          ? { case: "end", value: {} }
+          : isSubsection(before)
+            ? { case: "beforeSubsection", value: { id: namedId(before) } }
+            : { case: "before", value: refs.workspace(rowId(before)) },
+    },
+  };
+}
+
+/**
+ * A press on a NESTED row drags that row, with its own descendants, and
+ * offers it three kinds of place (owner request, 2026-11-23):
+ *
+ *   - ITS OWN BOX, the parent's `.kids` or, for a child of another
+ *     repository, that repository's block: a drop there reorders it among its
+ *     siblings (agentrepl.v1.ArrangeMoveChild);
+ *   - every other row's box of nested rows outside its own family and other
+ *     than its parent's (`nestLists`): a drop there makes it that row's child
+ *     (`sendNest`), as a top-level row's drop does;
+ *   - the bucket lists of ITS OWN REPOSITORY's section (`ownBucketLists`): a
+ *     drop there makes it top-level, standing where it was dropped
+ *     (`sendUnnest`). A child of another repository than its section's goes
+ *     top-level only in its own repository's section, so those are the lists
+ *     it is offered, and that section is rearranged too.
+ *
+ * Its own box claims its own span, so over its siblings it reorders; a line's
+ * middle half still nests, and anywhere outside the box (a top-level row's
+ * line, a subsection) frees it from its parent.
  */
 function childDrag(sc: SidebarContext, row: HTMLElement, refs: ArrangeRefs): DragSpec {
   const box = row.parentElement;
@@ -457,20 +481,58 @@ function childDrag(sc: SidebarContext, row: HTMLElement, refs: ArrangeRefs): Dra
   }
   const section = row.closest<HTMLElement>(`[${REPOSITORY_ATTRIBUTE}]`);
   if (section === null) throw new Error("invariant: a nested row sits in its repository's section");
+  const parentRow = box.closest<HTMLElement>("[data-roster-row]");
+  if (parentRow === null) throw new Error("invariant: a nested row's box sits in its parent's row");
+  const parentKids = kidsBoxOf(parentRow);
+  const home = ownSection(section, row);
   const workspace = refs.workspace(rowId(row));
   return {
     kind: "child",
     item: row,
-    box: section,
+    boxes: home === null || home === section ? [section] : [section, home],
     scroller: openRegion(section),
-    lists: () => [box],
-    itemsOf: (l) => childrenMatching<HTMLElement>(l, "[data-roster-row]"),
-    dropped: (_l, before) =>
-      void sendArrangement(sc, sc.arrange.status, {
-        case: "moveChild",
-        value: { workspace, to: before === null ? { case: "end", value: {} } : { case: "before", value: refs.workspace(rowId(before)) } },
-      }),
+    lists: () => [
+      box,
+      ...nestLists(section, row).filter((kids) => kids !== parentKids),
+      ...(home === null ? [] : queryAll<HTMLElement>(home, BUCKET_LIST_SELECTOR)),
+    ],
+    itemsOf: (l) =>
+      l === box ? childrenMatching<HTMLElement>(l, "[data-roster-row]") : isNestList(l) ? nestItems(l) : entryItems(l),
+    zoneOf: (l) =>
+      l === box ? l.getBoundingClientRect() : isNestList(l) ? nestZone(l, row) : (subsectionOf(l) ?? l).getBoundingClientRect(),
+    targetOf: (l) => (l === box ? null : isNestList(l) ? nestParent(l) : subsectionOf(l)),
+    intoUnseen: (target) => !isNestTarget(target) && showsNoRows(target),
+    dropped: (l, before) => {
+      if (l === box) {
+        void sendArrangement(sc, sc.arrange.status, {
+          case: "moveChild",
+          value: { workspace, to: before === null ? { case: "end", value: {} } : { case: "before", value: refs.workspace(rowId(before)) } },
+        });
+        return;
+      }
+      if (isNestList(l)) {
+        void sendNest(sc, sc.arrange.status, workspace, refs.workspace(rowId(nestParent(l))));
+        return;
+      }
+      void sendUnnest(sc, sc.arrange.status, workspace, placement(workspace, l, before, refs));
+    },
   };
+}
+
+/**
+ * The repository section a nested ROW drawn in SECTION would stand in at the
+ * top level: its own repository's. A row in a repository block is of the
+ * block's repository; any other nested row is of its section's, or of the
+ * nearest enclosing block's. Null when that repository draws no section in
+ * the Open grouping, so there is no top level to drop the row at.
+ */
+function ownSection(section: HTMLElement, row: HTMLElement): HTMLElement | null {
+  const block = row.parentElement?.closest<HTMLElement>(`.${REPOSITORY_BLOCK_CLASS}`) ?? null;
+  if (block === null) return section;
+  const grouping = section.parentElement;
+  if (grouping === null) throw new Error("invariant: a repository section sits in the grouping");
+  const id = blockRepositoryId(block);
+  return childrenMatching<HTMLElement>(grouping, `[${REPOSITORY_ATTRIBUTE}]`).find((other) => repositoryId(other) === id) ?? null;
 }
 
 /**
@@ -555,7 +617,7 @@ function repositoryBlockDrag(sc: SidebarContext, target: Element, refs: ArrangeR
   return {
     kind: "repository-block",
     item: block,
-    box: section,
+    boxes: [section],
     scroller: openRegion(section),
     lists: () => [kids],
     itemsOf: repositoryBlocks,
@@ -633,7 +695,7 @@ function repositoryDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs):
   return {
     kind: "repository",
     item: section,
-    box: section,
+    boxes: [section],
     scroller: openRegion(section),
     lists: () => [list],
     itemsOf: (l) => [...l.children].filter((el): el is HTMLElement => el.hasAttribute(REPOSITORY_ATTRIBUTE)),

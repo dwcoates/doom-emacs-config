@@ -90,13 +90,18 @@ export async function sendArrangement(sc: SidebarContext, control: HTMLElement, 
     operation: "sidebar.arrange.send",
     context: { change: change?.case },
   });
-  return sendHeld<ArrangeSidebarResponse>(sc, control, {
+  return sendHeld<ArrangeSidebarResponse>(sc, control, arrangementVerb(change));
+}
+
+/** The held verb asking ArrangeSidebar for CHANGE. */
+export function arrangementVerb(change: ArrangeChange): HeldVerb<ArrangeSidebarResponse> {
+  return {
     rpc: "ArrangeSidebar",
     call: (client) => client.arrangeSidebar(buildArrangeSidebarRequest(change)),
     schema: ArrangeSidebarResponseSchema,
     refusalText: (cause) => arrangeSidebarRefusal(cause as never),
     revision: successRevision,
-  });
+  };
 }
 
 /** A held verb's response whose success names the roster revision carrying its change. */
@@ -137,19 +142,56 @@ export async function sendHeld<Res extends VerbResponse>(
   control: HTMLElement,
   verb: HeldVerb<Res>,
 ): Promise<boolean> {
-  sc.arrange.hold.await();
-  let revision: bigint | null = null;
-  const took = await fireVerb(control, {
-    ...verb,
-    sc,
-    took: (response: Res) => {
-      revision = verb.revision(response);
-    },
-  });
-  sc.arrange.hold.settle(took ? revision : null);
-  return took;
+  return sendHeldSteps(sc, control, [heldStep(verb)]);
 }
 
+/** One ask of a held sequence (`sendHeldSteps`): its verb, typed by its own response. */
+export interface HeldStep {
+  /** Fire the ask with CONTROL the element a refusal is drawn beside; answers whether it took, and the revision it named. */
+  fire(sc: SidebarContext, control: HTMLElement): Promise<{ took: boolean; revision: bigint | null }>;
+}
+
+/** VERB as one step of a held sequence. */
+export function heldStep<Res extends VerbResponse>(verb: HeldVerb<Res>): HeldStep {
+  return {
+    async fire(sc, control) {
+      let revision: bigint | null = null;
+      const took = await fireVerb(control, {
+        ...verb,
+        sc,
+        took: (response: Res) => {
+          revision = verb.revision(response);
+        },
+      });
+      return { took, revision };
+    },
+  };
+}
+
+/**
+ * STEPS asked IN ORDER UNDER ONE HOLD, each only once the one before took: a
+ * gesture whose change is two daemon facts (a nested row dropped at the top
+ * level is a retarget, then a placement) is drawn as one, never through the
+ * roster between them. The hold settles at the revision the last step that
+ * took named, so a later step's refusal still waits for the earlier steps'
+ * change to be drawn rather than drawing the roster from before them.
+ * Answers whether every step took.
+ */
+export async function sendHeldSteps(sc: SidebarContext, control: HTMLElement, steps: readonly HeldStep[]): Promise<boolean> {
+  if (steps.length === 0) throw new Error("invariant: a held sequence asks at least one step");
+  sc.arrange.hold.await();
+  let revision: bigint | null = null;
+  for (const step of steps) {
+    const outcome = await step.fire(sc, control);
+    if (!outcome.took) {
+      sc.arrange.hold.settle(revision);
+      return false;
+    }
+    revision = outcome.revision ?? revision;
+  }
+  sc.arrange.hold.settle(revision);
+  return true;
+}
 
 /**
  * The hold, drawing through DRAW, letting go at the roster revision an
