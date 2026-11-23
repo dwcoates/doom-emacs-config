@@ -7,10 +7,12 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/logsite"
 )
 
 // A MERGE BUBBLE IS LIVE EXACTLY WHILE ITS MERGE IS IN A QUEUE (owner ruling,
@@ -115,7 +117,12 @@ func (o *orchestrator) endBubblesOffQueue(ctx context.Context, why string) error
 	}
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
-		o.deps.Log.Global().Error(opLiveBubbles, "could not read the merge queues; no live bubble is ended", dlog.WithCause(dlog.Context{"why": why}, err))
+		// A READ CUT OFF BY ITS CONTEXT is the daemon stopping, no failure:
+		// the bubbles stand for the next daemon's seed to settle.
+		ctxend.Log(err, o.deps.Log.Global(), dlog.LevelInfo, opLiveBubbles,
+			logsite.Msg("the merge queues were not read, the daemon stopping first; no live bubble is ended"),
+			logsite.Msg("could not read the merge queues; no live bubble is ended"),
+			dlog.WithCause(dlog.Context{"why": why}, err))
 		return err
 	}
 	named := o.queuedLedgers(queues)
