@@ -1081,6 +1081,14 @@ func answeredStoreUnreachable(err error) bool {
 	return connect.CodeOf(err) == connect.CodeUnavailable && connect.IsWireError(err)
 }
 
+// storeUnreachable marks a failure that is the shim's own unavailable answer
+// (answeredStoreUnreachable) with ErrStoreUnreachable, keeping the connect
+// error in its chain so connect.CodeOf still reads it. A stream open and a
+// stream's mid-run receive both wrap it here.
+func storeUnreachable(err error) error {
+	return fmt.Errorf("%w: %w", ErrStoreUnreachable, err)
+}
+
 // shimDied wraps a failure that the shim's death caused.
 func shimDied(err error) error {
 	return fmt.Errorf("%w: %w", ErrShimDied, err)
@@ -2020,7 +2028,7 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 	// here at ERROR beside the shim's own fault for the same outage.
 	if answeredStoreUnreachable(err) {
 		c.log.Info(operation, "the shim answered that the store is unreachable; the shim records the outage as its store_unreachable session fault", fields)
-		refused.Err = fmt.Errorf("%w: %w", ErrStoreUnreachable, err)
+		refused.Err = storeUnreachable(err)
 		return refused
 	}
 	c.log.Log(dlog.LevelError, operation, streamRefused, fields)
