@@ -64,11 +64,18 @@ export function drawRecencyGutterSlot(): HTMLElement {
 
 /**
  * Fill every gutter slot under ROOT from GUTTERS, by the slot's row. A row
- * with no reach leaves its slot bare, which draws nothing.
+ * with no reach leaves its slot bare, which draws nothing. Answers how many
+ * slots it changed, so a draw that changed none is known to have drawn nothing.
  */
-export function paintRecencyGutters(root: ParentNode, gutters: ReadonlyMap<string, RecencyGutter>): void {
+export function paintRecencyGutters(root: ParentNode, gutters: ReadonlyMap<string, RecencyGutter>): number {
+  let painted = 0;
   for (const { slot, id } of rowSlots(root, RECENCY_GUTTER_CLASS, "sidebar.recency-gutters.orphan-slot", { gutters: gutters.size })) {
     const gutter = gutters.get(id);
+    const direction = gutter?.direction ?? null;
+    const presses = gutter === undefined ? null : String(gutter.presses);
+    // A slot already standing as the gutter says is left untouched, and not counted.
+    if (slot.getAttribute(RECENCY_ATTRIBUTE) === direction && slot.getAttribute(RECENCY_PRESSES_ATTRIBUTE) === presses) continue;
+    painted += 1;
     if (gutter === undefined) {
       slot.removeAttribute(RECENCY_ATTRIBUTE);
       slot.removeAttribute(RECENCY_PRESSES_ATTRIBUTE);
@@ -77,4 +84,5 @@ export function paintRecencyGutters(root: ParentNode, gutters: ReadonlyMap<strin
     slot.setAttribute(RECENCY_ATTRIBUTE, gutter.direction);
     slot.setAttribute(RECENCY_PRESSES_ATTRIBUTE, String(gutter.presses));
   }
+  return painted;
 }

@@ -220,6 +220,23 @@ describe("paintTabNumbers", () => {
     expect([a.textContent, a.hasAttribute(TAB_NUMBER_ATTRIBUTE)]).toEqual(["", false]);
   });
 
+  it.each([
+    { name: "counts each slot it changes", first: new Map<string, number>(), next: new Map([["a", 2]]), want: 1 },
+    { name: "counts no slot already holding its number", first: new Map([["a", 2]]), next: new Map([["a", 2]]), want: 0 },
+    { name: "counts a slot it empties", first: new Map([["a", 2]]), next: new Map<string, number>(), want: 1 },
+  ])("$name", ({ first, next, want }) => {
+    // Arrange
+    const root = document.createElement("div");
+    slotFor(root, "a");
+    paintTabNumbers(root, first);
+
+    // Act
+    const painted = paintTabNumbers(root, next);
+
+    // Assert
+    expect(painted).toBe(want);
+  });
+
   it("refuses a slot outside any roster row, logging why", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
@@ -227,7 +244,7 @@ describe("paintTabNumbers", () => {
     root.appendChild(drawTabNumberSlot());
 
     // Act
-    const paint = (): void => paintTabNumbers(root, new Map());
+    const paint = (): number => paintTabNumbers(root, new Map());
 
     // Assert
     expect(paint).toThrow(/outside any roster row/);

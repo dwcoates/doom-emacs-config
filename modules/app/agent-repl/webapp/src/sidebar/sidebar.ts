@@ -30,7 +30,7 @@ import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentr
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { createLogger } from "../log.js";
 import { createSelectionPaint, type RecordSidebarLatency } from "./selection-paint.js";
-import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv, type MarkPhase } from "./draw-timing.js";
+import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv, type MarkPhase, type RosterDrawCounts, type RosterDrawOutcome } from "./draw-timing.js";
 import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { requireMessage } from "../rpc/strict.js";
@@ -51,7 +51,7 @@ import { installTransients } from "./transients.js";
 import { createArrangeHold } from "./arrange.js";
 import { createSidebarView } from "./view.js";
 import type { RailContext } from "./context.js";
-import { disposeWorkspaceRoster, drawWorkspaceRoster } from "./roster.js";
+import { disposeWorkspaceRoster, drawWorkspaceRosterCounted, rosterDrawChanged } from "./roster.js";
 import { nextFrame } from "../frame.js";
 import { guardMalformedNow } from "../rpc/guard.js";
 import { placeOpenRowDetails } from "./row.js";
@@ -69,7 +69,15 @@ import { createFoldFade } from "./fold-fade.js";
 import { createRailScrollKeep } from "./scroll-keep.js";
 import { createSelectionScroll, RAIL_BODY_CLASS } from "./selection-scroll.js";
 import { createQueueSelectionScroll } from "./queue-selection.js";
-import type { RosterVersion } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import {
+  RosterAppSwitcherSchema,
+  RosterCurrentWorkspaceSchema,
+  RosterVersionSchema,
+  type RosterAppSwitcher,
+  type RosterCurrentWorkspace,
+  type RosterVersion,
+} from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { equals, type DescMessage, type MessageShape } from "@bufbuild/protobuf";
 
 const log = createLogger("webapp.sidebar.sidebar");
 
@@ -464,10 +472,20 @@ function mountSidebarIn(
   let latest: RosterStreams | null = null;
   let scheduled = false;
   let disposed = false;
+  /** The pushes offered since the last frame drew, and the local events that asked for it (`RosterDrawCause`). */
+  let pushes = 0;
+  const localCauses = new Set<string>();
+  /**
+   * The app switcher, version and current workspace the rail last drew, so a
+   * push that restates them changes nothing: the current workspace is what
+   * the after-draw selection hooks follow.
+   */
+  let headDrawn: { switcher: RosterAppSwitcher; version: RosterVersion | undefined; current: RosterCurrentWorkspace | undefined } | null = null;
 
   /** Draw STREAMS on the next frame, replacing any streams still waiting for it. */
   function drawRoster(streams: RosterStreams): void {
     latest = streams;
+    pushes += 1;
     schedule();
   }
 
@@ -477,6 +495,7 @@ function mountSidebarIn(
    */
   function redraw(): void {
     if (rail.arrange.hold.holding()) return;
+    localCauses.add("merged_pages");
     schedule();
   }
 
@@ -495,13 +514,26 @@ function mountSidebarIn(
         // draws a workspace both open and merged, nor in neither.
         const chat = showsChat(requireMessage(newest.workspaces.appSwitcher, "WorkspaceRoster.app_switcher"));
         if (rail.mergedPages.agree(chat ? null : newest.recentlyMerged, "RosterPush.recently_merged") === "hold") return;
-        timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming);
+        const cause = { pushes, local: [...localCauses] };
+        pushes = 0;
+        localCauses.clear();
+        timeRosterDraw(body, placement.case, cause, (mark) => drawRosterNow(newest, mark), drawTiming);
       });
     });
   }
 
-  /** Draw every stream of one push into the rail, marking each phase's end. */
-  function drawRosterNow(streams: RosterStreams, mark: MarkPhase): void {
+  /**
+   * Draw every stream of one push into the rail, marking each phase's end;
+   * answers what it changed.
+   *
+   * A PUSH THAT CHANGED NOTHING THE RAIL DRAWS DRAWS NOTHING (2026-11-23):
+   * every push used to run the whole of the rail's after-draw work (the band
+   * fit, the scroll keep, the selection follow, every panel's placement),
+   * which measured 17ms at the median at a handover however little the push
+   * changed. A push whose drawer changed no row, section, slot or placement,
+   * and whose head is the one drawn, runs none of it.
+   */
+  function drawRosterNow(streams: RosterStreams, mark: MarkPhase): RosterDrawOutcome {
     const roster = streams.workspaces;
     // The blink pass brackets the draw: markers are re-attached to the phases
     // already running, and any marker the daemon cleared is forgotten.
@@ -512,13 +544,30 @@ function mountSidebarIn(
     const switcher = requireMessage(roster.appSwitcher, "WorkspaceRoster.app_switcher");
     head.switcher.update(switcher);
     let drawn: HTMLElement;
+    const wasChat = chatShown;
     chatShown = showsChat(switcher);
+    let counts: RosterDrawCounts | "whole" = "whole";
     if (chatShown) {
       drawn = drawThreadList(requireMessage(roster.threads, "WorkspaceRoster.threads"), rail);
     } else {
       disposeThreadList(rail);
-      drawn = drawWorkspaceRoster(streams, rail);
+      const draw = drawWorkspaceRosterCounted(streams, rail);
+      drawn = draw.element;
+      if (!wasChat && !host.hidden && !headChanged(switcher, roster.version, roster.current) && !rosterDrawChanged(draw)) {
+        attention.endPass();
+        mark("build");
+        return "nothing";
+      }
+      counts = {
+        changed_streams: draw.changedStreams,
+        sections_drawn: draw.sectionsDrawn,
+        rows_drawn: draw.rowsDrawn,
+        rows_removed: draw.rowsRemoved,
+        rows_moved: draw.rowsMoved,
+        repainted: draw.repainted,
+      };
     }
+    headDrawn = { switcher, version: roster.version, current: roster.current };
     attention.endPass();
     head.showVersion(roster.version);
     mark("build");
@@ -557,6 +606,13 @@ function mountSidebarIn(
     wallPhase.seek();
     selectionPaint.drawn(roster.current);
     mark("hooks");
+    return { drew: counts };
+  }
+
+  /** Whether SWITCHER, VERSION or CURRENT differ from what the rail last drew. */
+  function headChanged(switcher: RosterAppSwitcher, version: RosterVersion | undefined, current: RosterCurrentWorkspace | undefined): boolean {
+    if (headDrawn === null || !equals(RosterAppSwitcherSchema, headDrawn.switcher, switcher)) return true;
+    return !sameOptional(RosterVersionSchema, headDrawn.version, version) || !sameOptional(RosterCurrentWorkspaceSchema, headDrawn.current, current);
   }
 
   return {
@@ -644,4 +700,10 @@ export function drawRailHead(search: RailSearch, switcher: AppSwitcher): RailHea
       version.textContent = next?.text ?? "";
     },
   };
+}
+
+/** Whether A and B, each a SCHEMA message or unset, are both unset or equal. */
+function sameOptional<D extends DescMessage>(schema: D, a: MessageShape<D> | undefined, b: MessageShape<D> | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return equals(schema, a, b);
 }

@@ -65,6 +65,7 @@ import { withRepositoryBlocks } from "../roster-families.js";
 import type { RosterOpenRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { REPOSITORY_BLOCK_CLASS } from "../../src/sidebar/row.js";
 import { codeOf } from "../source-text.js";
+import { EMPTY_SUBSECTION_ATTRIBUTE } from "../../src/sidebar/band-fit.js";
 
 /**
  * Every ArrangeSidebar and SetWorkspaceParent request the daemon received,
@@ -2010,6 +2011,55 @@ describe("a folded subsection whose workspaces work", () => {
       // Assert
       expect([label.getAttribute(WORKING_TONE_ATTRIBUTE), label.children.length]).toEqual(["tone-red", 1]);
     });
+  });
+
+  // A SUBSECTION'S COUNT IS DRAWN FROM ITS ROWS too (`statusCountOf`), so a
+  // row patch repaints it in place: a row entering a synchronous merge is
+  // counted at once, its section kept.
+  it.each([
+    { name: "repaints a kept subsection's count once a row enters a merge", from: "ready", to: "merging", count: "(1/1)" },
+    { name: "keeps a kept subsection's count while no row merges", from: "ready", to: "thinking", count: "(1)" },
+  ])("$name", ({ from, to, count }) => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const section = drawer.draw(sectionOver([on("a", from)], false)).querySelector(".repo-section");
+
+    // Act
+    const after = drawer.draw(sectionOver([on("a", to)], false));
+
+    // Assert
+    expect([after.querySelector(".repo-section") === section, subOf(after).querySelector(".sb-count")?.textContent]).toEqual([true, count]);
+  });
+
+  it("moves a row from the section's own rows into a subsection, drawing no row", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (inSub: boolean) =>
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: inSub ? [row({ id: "a" })] : [row({ id: "a" }), row({ id: "b" })],
+            subsections: [{ id: "sub-1", label: "later", rows: inSub ? [row({ id: "b" })] : [], collapsed: false }],
+          }),
+        ],
+      });
+    const first = drawer.draw(at(false));
+    const section = first.querySelector(".repo-section");
+    const b = first.querySelector("[data-roster-row='b']");
+
+    // Act
+    const draw = drawer.drawCounted(at(true));
+
+    // Assert
+    expect([
+      draw.element.querySelector(".repo-section") === section,
+      subOf(draw.element).querySelector("[data-roster-row='b']") === b,
+      subOf(draw.element).querySelector(".sb-count")?.textContent,
+      subOf(draw.element).hasAttribute(EMPTY_SUBSECTION_ATTRIBUTE),
+      draw.rowsDrawn,
+      draw.rowsMoved,
+    ]).toEqual([true, true, "(1)", false, 0, 1]);
   });
 
   // A push that changed only rows keeps the section (`roster.ts`'s row

@@ -8,6 +8,7 @@
  * it changed, `roster.ts`) and re-measures its panels and bands; nothing
  * recorded what a draw cost or how big the rail was when it did. A draw that costs a frame or more is recorded at INFO with the rail's
  * size; a cheaper one at DEBUG, so an ordinary push adds nothing at `info`.
+ * Every record names its cause and what the draw changed.
  */
 import { createLogger } from "../log.js";
 import { nextFrame } from "../frame.js";
@@ -44,19 +45,68 @@ export type RosterDrawPhase = (typeof ROSTER_DRAW_PHASES)[number];
 export type MarkPhase = (phase: RosterDrawPhase) => void;
 
 /**
- * Run DRAW, the whole of one roster push into RAIL, and record what it cost,
- * phase by phase: DRAW calls MARK at the end of each phase it runs.
+ * WHY A FRAME DREW (2026-11-23). At a handover the sidebar drew 92 times in
+ * three minutes and 57 of those draws had no cause anyone could name. Every
+ * draw now says what asked for it: how many roster pushes it coalesced, and
+ * which local events (`RosterDrawCause.local`) asked for it besides.
  */
-export function timeRosterDraw(rail: ParentNode, placement: string, draw: (mark: MarkPhase) => void, env: DrawTimingEnv): void {
+export interface RosterDrawCause {
+  /** Roster pushes this frame coalesced: each a stream push the page took. */
+  readonly pushes: number;
+  /** Local events that asked for the frame, such as `merged_pages`, in the order they first asked. */
+  readonly local: readonly string[];
+}
+
+/**
+ * What one draw changed, as the drawer counted it (`roster.ts`
+ * `RosterDraw`), or null for a draw that changed nothing a reader sees, which
+ * ran no layout and no hooks.
+ */
+export interface RosterDrawCounts {
+  /** The roster streams the push replaced, by name. */
+  readonly changed_streams: readonly string[];
+  readonly sections_drawn: number;
+  readonly rows_drawn: number;
+  readonly rows_removed: number;
+  readonly rows_moved: number;
+  readonly repainted: number;
+}
+
+/** What a draw answers: its counts, or `nothing` when it changed nothing and drew nothing. */
+export type RosterDrawOutcome = { readonly drew: RosterDrawCounts | "whole" } | "nothing";
+
+/**
+ * Run DRAW, the whole of one roster push into RAIL, and record what it cost,
+ * phase by phase: DRAW calls MARK at the end of each phase it runs. CAUSE is
+ * what asked for the draw; DRAW answers what it changed.
+ *
+ * A DRAW THAT CHANGED NOTHING is recorded at DEBUG as such
+ * (`sidebar.roster-draw-skipped`), with its cause, and waits for no frame:
+ * it ran no layout and caused no paint.
+ */
+export function timeRosterDraw(
+  rail: ParentNode,
+  placement: string,
+  cause: RosterDrawCause,
+  draw: (mark: MarkPhase) => RosterDrawOutcome,
+  env: DrawTimingEnv,
+): void {
   const started = env.now();
   const phases: Partial<Record<`${RosterDrawPhase}_ms`, number>> = {};
   let last = started;
-  draw((phase) => {
+  const outcome = draw((phase) => {
     const at = env.now();
     phases[`${phase}_ms`] = Math.round(at - last);
     last = at;
   });
   const drawn = env.now();
+  const causeContext = { pushes: cause.pushes, local_causes: [...cause.local] };
+  if (outcome === "nothing") {
+    const skipped = log.message("the roster push changed nothing the rail draws; it drew nothing in {draw_ms}ms", { draw_ms: Math.round(drawn - started) });
+    log.log("debug", skipped, { operation: "sidebar.roster-draw-skipped", context: { placement, ...causeContext } });
+    return;
+  }
+  const counts = outcome.drew === "whole" ? { whole: true } : { ...outcome.drew };
   env.frame(() => {
     const settled = env.now();
     const drawMs = Math.round(drawn - started);
@@ -64,6 +114,8 @@ export function timeRosterDraw(rail: ParentNode, placement: string, draw: (mark:
     // draw_ms and total_ms are the message's named values, recorded under those names.
     const context = {
       placement,
+      ...causeContext,
+      ...counts,
       ...phases,
       frame_ms: Math.round(settled - drawn),
       rows: queryAll(rail, ".row").length,

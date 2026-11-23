@@ -32,6 +32,7 @@ import {
   MERGED_GROUP_CLASS,
   MERGED_TODAY_COUNT_CLASS,
   createRosterDrawer,
+  rosterDrawChanged,
   disposeWorkspaceRoster,
   drawFoldHeader,
   drawGroupedSection,
@@ -2364,7 +2365,9 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     expect([second.querySelector(".repo-section") === section, marks]).toEqual([true, [false, true]]);
   });
 
-  it("redraws a section whose subsection moved past a row, though no list's rows changed order", () => {
+  // A REORDER DRAWS NO ROW (keyed-rows.ts, 2026-11-23): the section is kept
+  // and its entries moved into the wire's order.
+  it("keeps a section whose subsection moved past a row, moving the entries", () => {
     // Arrange -- a, [foo: x], b, then [foo: x], a, b: every list holds the
     // same rows in the same order, only where foo stands changed.
     const drawer = createRosterDrawer(sidebarContext());
@@ -2379,7 +2382,7 @@ describe("the roster drawer: a push redraws only what it changed", () => {
 
     // Assert
     const order = drawnEntries(after!.querySelector(":scope > .rows") as Element);
-    expect([after === section, order]).toEqual([false, ["[foo]", "a", "b"]]);
+    expect([after === section, order]).toEqual([true, ["[foo]", "a", "b"]]);
   });
 
   it("patches a row in place beside a subsection standing between rows", () => {
@@ -2410,7 +2413,7 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     ]);
   });
 
-  it("redraws a section whose rows changed order", () => {
+  it("keeps a section whose rows changed order, moving its rows", () => {
     // Arrange
     const drawer = createRosterDrawer(sidebarContext());
     const at = (ids: string[]) => roster({ repos: [repoSection({ id: "a", rows: ids.map((id) => row({ id })) })] });
@@ -2421,7 +2424,7 @@ describe("the roster drawer: a push redraws only what it changed", () => {
 
     // Assert
     expect([after === section, [...after!.querySelectorAll("[data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))]).toEqual([
-      false,
+      true,
       ["y", "x"],
     ]);
   });
@@ -3033,5 +3036,120 @@ describe("a band section's height", () => {
       return ["height", "margin-top", "margin-bottom"].map((property) => Number.parseFloat(cascadedValue(grip, property)));
     });
     expect(lengths.reduce((sum, px) => sum + px, 0)).toBe(0);
+  });
+});
+
+describe("the roster drawer: what each draw changed", () => {
+  const at = (ids: string, current = "") =>
+    roster({ repos: [repoSection({ id: "a", rows: ids.split("").map((id) => row({ id, current: id === current })) })] });
+  const counts = (draw: ReturnType<ReturnType<typeof createRosterDrawer>["drawCounted"]>) => ({
+    sections: draw.sectionsDrawn,
+    drawn: draw.rowsDrawn,
+    removed: draw.rowsRemoved,
+    moved: draw.rowsMoved,
+  });
+
+  it("counts every row of the first draw, each section drawn", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+
+    // Act
+    const draw = drawer.drawCounted(at("xyz"));
+
+    // Assert
+    expect([draw.rowsDrawn, draw.sectionsDrawn > 0, rosterDrawChanged(draw)]).toEqual([3, true, true]);
+  });
+
+  it("draws nothing for a push that restates the roster drawn", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    drawer.drawCounted(at("xyz", "x"));
+
+    // Act: every stream replaced by an equal snapshot.
+    const draw = drawer.drawCounted(at("xyz", "x"));
+
+    // Assert
+    expect([counts(draw), draw.repainted, rosterDrawChanged(draw)]).toEqual([{ sections: 0, drawn: 0, removed: 0, moved: 0 }, 0, false]);
+  });
+
+  it("draws one row for a push that changed one row", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    drawer.drawCounted(at("xyz"));
+
+    // Act
+    const draw = drawer.drawCounted(at("xyz", "y"));
+
+    // Assert
+    expect(counts(draw)).toEqual({ sections: 0, drawn: 1, removed: 0, moved: 0 });
+  });
+
+  it("moves the rows a push reordered, keeping their section and drawing none", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const first = drawer.draw(at("xyz"));
+    const section = first.querySelector(".repo-section");
+    const before = ["x", "y", "z"].map((id) => first.querySelector(`[data-roster-row='${id}']`));
+
+    // Act
+    const draw = drawer.drawCounted(at("zxy"));
+
+    // Assert
+    const now = ["x", "y", "z"].map((id) => draw.element.querySelector(`[data-roster-row='${id}']`));
+    expect([
+      draw.element.querySelector(".repo-section") === section,
+      now.every((el, i) => el === before[i]),
+      [...draw.element.querySelectorAll(".repo-section [data-roster-row]")].map((el) => el.getAttribute("data-roster-row")),
+      counts(draw),
+    ]).toEqual([true, true, ["z", "x", "y"], { sections: 0, drawn: 0, removed: 0, moved: 3 }]);
+  });
+
+  it("draws only the row that joined a section, repainting its count", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const first = drawer.draw(at("xy"));
+    const section = first.querySelector(".repo-section");
+
+    // Act
+    const draw = drawer.drawCounted(at("xwy"));
+
+    // Assert
+    expect([
+      draw.element.querySelector(".repo-section") === section,
+      draw.element.querySelector(".repo-section [data-section-count]")?.textContent,
+      counts(draw),
+    ]).toEqual([true, "(3/3)", { sections: 0, drawn: 1, removed: 0, moved: 1 }]);
+  });
+
+  it("draws only the hidden row a push changed, keeping the hidden section", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const hiddenAt = (status: string) =>
+      roster({ repos: [], hidden: hiddenSection([row({ id: "h1" }), row({ id: "h2", status: { case: status, value: {} } as Parameters<typeof row>[0]["status"] })]) });
+    const first = drawer.draw(hiddenAt("ready"));
+    const section = first.querySelector(".hidden-section");
+    const h1 = first.querySelector("[data-roster-row='h1']");
+
+    // Act
+    const draw = drawer.drawCounted(hiddenAt("dead"));
+
+    // Assert
+    expect([
+      draw.element.querySelector(".hidden-section") === section,
+      draw.element.querySelector("[data-roster-row='h1']") === h1,
+      counts(draw),
+    ]).toEqual([true, true, { sections: 0, drawn: 1, removed: 0, moved: 0 }]);
+  });
+
+  it("draws the hidden section anew when its last row leaves, so it is left out", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    drawer.draw(roster({ repos: [], hidden: hiddenSection([row({ id: "h1" })]) }));
+
+    // Act
+    const draw = drawer.drawCounted(roster({ repos: [], hidden: hiddenSection([]) }));
+
+    // Assert
+    expect([draw.sectionsDrawn, draw.element.querySelector("[data-roster-row='h1']")]).toEqual([1, null]);
   });
 });

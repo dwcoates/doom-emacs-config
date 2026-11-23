@@ -1561,6 +1561,92 @@ describe("mounting the rail: one draw per frame", () => {
   });
 });
 
+describe("mounting the rail: a push that changes nothing draws nothing", () => {
+  /** The rail on pushed rosters, counting its after-draw passes, its draw records captured. */
+  async function mountPushed(): Promise<{ passes: () => number; push: (next: RosterStreams) => Promise<void>; capture: LogCapture }> {
+    const capture = captureLogRecords("debug");
+    const stream = pushedRosters();
+    let passes = 0;
+    const handle = mountSidebar(document.createElement("nav"), ctxFor([], stream.impl), {
+      storage: null,
+      timers: fakeTimers(),
+      drawTiming: { now: () => 0, frame: frames.frame },
+      wallPhase: {
+        animations: () => {
+          passes += 1;
+          return [];
+        },
+        now: () => NOW,
+      },
+    });
+    onTestFinished(() => handle?.dispose());
+    const push = async (next: RosterStreams): Promise<void> => {
+      stream.push(next);
+      await settle();
+    };
+    await push(twoRows("ws-1"));
+    return { passes: () => passes, push, capture };
+  }
+
+  /** The draw records CAPTURE holds, each as its operation and the context named. */
+  async function drawRecords(capture: LogCapture): Promise<Array<{ operation: string; context: Record<string, unknown> }>> {
+    capture.logger.flush();
+    await Promise.resolve();
+    return capture.sent
+      .filter((record) => record.operation === "sidebar.roster-draw" || record.operation === "sidebar.roster-draw-skipped")
+      .map((record) => ({ operation: record.operation, context: record.context ?? {} }));
+  }
+
+  it("runs no after-draw pass for a push that restates the roster drawn", async () => {
+    // Arrange
+    const { passes, push } = await mountPushed();
+    const before = passes();
+
+    // Act
+    await push(twoRows("ws-1"));
+
+    // Assert
+    expect(passes()).toBe(before);
+  });
+
+  it("records the skipped draw with its cause", async () => {
+    // Arrange
+    const { push, capture } = await mountPushed();
+    await drawRecords(capture);
+    capture.sent.length = 0;
+
+    // Act
+    await push(twoRows("ws-1"));
+
+    // Assert
+    expect(await drawRecords(capture)).toEqual([
+      { operation: "sidebar.roster-draw-skipped", context: expect.objectContaining({ pushes: 1, local_causes: [] }) },
+    ]);
+  });
+
+  it("draws a push that changed rows, naming its cause and the rows it drew", async () => {
+    // Arrange
+    const { passes, push, capture } = await mountPushed();
+    const before = passes();
+    await drawRecords(capture);
+    capture.sent.length = 0;
+
+    // Act
+    await push(twoRows("ws-2"));
+
+    // Assert
+    expect([passes() - before, await drawRecords(capture)]).toEqual([
+      1,
+      [
+        {
+          operation: "sidebar.roster-draw",
+          context: expect.objectContaining({ pushes: 1, changed_streams: expect.arrayContaining(["workspaces"]), rows_drawn: 2, sections_drawn: 0 }),
+        },
+      ],
+    ]);
+  });
+});
+
 describe("mounting the rail: a roster its frame cannot draw", () => {
   /** Mount on PUSHES, its failures recorded. */
   function mountRecording(pushes: RosterStreams[]): { host: HTMLElement; reports: string[] } {
