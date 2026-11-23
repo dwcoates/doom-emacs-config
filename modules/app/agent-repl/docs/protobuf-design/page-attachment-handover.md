@@ -133,6 +133,10 @@ Dropped, with reasons:
   page learned whether the daemon serves its webapp build.
 - Ending every page stream at the claim yield: not needed once page calls are
   routed by attachment, and it strands pages if the yield fails.
+  - Reopened and landed by `feed-resume.md` (2026-11-23): the page streams end
+    only after a yield that SUCCEEDED, so none is stranded, and ending them
+    there is what makes a handover move each page once. The relays this
+    design used for a page adopted before the promotion moved it twice.
 - Holding an early subscribe on the successor until the page attaches: a timer
   in place of a fact the attachment states.
 - Resuming the shared accept after a failed claim yield: after
