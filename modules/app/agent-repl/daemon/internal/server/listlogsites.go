@@ -126,7 +126,7 @@ func listLogSitesSuccess(answer logsites.Answer) (*agentreplv1.ListLogSitesSucce
 			sample.WorkspaceId = &ws
 		}
 		out.Sites = append(out.Sites, &agentreplv1.LogSite{
-			Key: site.Key, Template: site.Template, Runtime: site.Runtime, Level: level,
+			Site: &agentreplv1.LogSiteKey{Hex: site.Key}, Template: site.Template, Runtime: site.Runtime, Level: level,
 			Operation: site.Operation, Count: uint64(site.Count),
 			FirstSeenMs: site.FirstSeen.UnixMilli(), LastSeenMs: site.LastSeen.UnixMilli(),
 			Sample: sample,

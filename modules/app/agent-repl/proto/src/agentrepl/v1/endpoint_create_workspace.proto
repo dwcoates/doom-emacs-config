@@ -317,6 +317,15 @@ message CreateWorkspaceOneShot {
   // often as a standard create's does, and a name the CLI took but the form
   // could not carry was dropped silently (2026-11-03).
   optional string name = 8;
+
+  // Where the one-shot's finish joins the merge queue, fixed now and stored
+  // with the workspace. SET: its finish (agentrepl.v1.FinishWorkspace) may
+  // name no placement and joins the queue here; a finish naming a different
+  // one is refused (`placement_conflicts_with_stored`), so whoever created
+  // the one-shot decides where its work lands in line, not the one-shot.
+  // UNSET: every finish names its own placement, as before. A production
+  // mediator's children are always created with `front`.
+  optional MergeQueuePlacement finish_placement = 9;
 }
 
 // The workspace a one-shot's commission concerns.
@@ -795,6 +804,12 @@ message CreateWorkspaceError {
     // creates a workspace of any kind: it does all of its work in its own
     // session (owner ruling, 2026-11-18).
     CreateWorkspaceRequestedByDeployMediator requested_by_deploy_mediator = 63;
+    // The requester is its repository's production mediator, which creates
+    // its children only by dispatching them
+    // (agentrepl.v1.UpdateProductionMediation), so every child it makes is
+    // recorded with the log sites it owns and lands at the front of the
+    // queue.
+    CreateWorkspaceRequestedByProductionMediator requested_by_production_mediator = 64;
   }
 }
 // A placement on a child workspace.
@@ -841,6 +856,15 @@ message CreateWorkspaceRequestedByDeployMediator {
   workspace.v1.WorkspaceRef workspace = 1;
   // Why the create is refused and where the work belongs, as a sentence the
   // mediator's agent reads: it does the work in its own session.
+  string detail = 2;
+}
+// A create the repository's production mediator asked for directly. Refused
+// before anything is named or built.
+message CreateWorkspaceRequestedByProductionMediator {
+  // The production mediator that asked.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Why the create is refused and how to make the child instead, as a
+  // sentence the mediator's agent reads: dispatch it.
   string detail = 2;
 }
 // A requested model the creating login does not offer.

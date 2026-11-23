@@ -66,7 +66,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_finish_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_finish_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluaXNoX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIqwCChZGaW5pc2hXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSMwoJcmVxdWVzdGVyGAIgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlchJMChF2ZXJzaW9uX2luY3JlbWVudBgDIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRIAIgBARI0CglwbGFjZW1lbnQYBCABKAsyIS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudBIUCgxwcm9maWxlX2dhdGUYBSABKAhCFAoSX3ZlcnNpb25faW5jcmVtZW50IpEBChdGaW5pc2hXb3Jrc3BhY2VSZXNwb25zZRI3CgdzdWNjZXNzGAEgASgLMiQuYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZVN1Y2Nlc3NIABIzCgVlcnJvchgCIAEoCzIiLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCKyAQoWRmluaXNoV29ya3NwYWNlU3VjY2VzcxI8CgZxdWV1ZWQYASABKAsyKi5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlU3VjY2Vzc1F1ZXVlZEgAEk8KEGxhbmRpbmdfZGlyZWN0bHkYAiABKAsyMy5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlU3VjY2Vzc0xhbmRpbmdEaXJlY3RseUgAQgkKB2xhbmRpbmciHgocRmluaXNoV29ya3NwYWNlU3VjY2Vzc1F1ZXVlZCInCiVGaW5pc2hXb3Jrc3BhY2VTdWNjZXNzTGFuZGluZ0RpcmVjdGx5ItgKChRGaW5pc2hXb3Jrc3BhY2VFcnJvchJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkUKD25vX2xheW91dF9mYWN0cxgFIAEoCzIqLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VOb0xheW91dEZhY3RzSAASRgoPc2Vzc2lvbl9kZWxldGVkGAYgASgLMisuYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZVNlc3Npb25EZWxldGVkSAASRAoOYWxyZWFkeV9xdWV1ZWQYByABKAsyKi5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlQWxyZWFkeVF1ZXVlZEgAEkoKEWFscmVhZHlfZGVwbG95aW5nGAggASgLMi0uYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZUFscmVhZHlEZXBsb3lpbmdIABJaChp2ZXJzaW9uX2luY3JlbWVudF9yZXF1aXJlZBgJIAEoCzI0LmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRSZXF1aXJlZEgAEl4KHHZlcnNpb25faW5jcmVtZW50X3VuZXhwZWN0ZWQYCiABKAsyNi5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VWZXJzaW9uSW5jcmVtZW50VW5leHBlY3RlZEgAEkMKEWhhc19vcGVuX2NoaWxkcmVuGAsgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUhhc09wZW5DaGlsZHJlbkgAElIKFnJlcXVlc3Rlcl9tYXlfbm90X2xhbmQYDSABKAsyMC5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlUmVxdWVzdGVyTWF5Tm90TGFuZEgAElAKFW5vX2JyYW5jaF9jaGVja2VkX291dBgOIAEoCzIvLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VOb0JyYW5jaENoZWNrZWRPdXRIABJAChBub19kZXBsb3lfY29uZmlnGA8gASgLMiQuYWdlbnRyZXBsLnYxLkxpZmVjeWNsZUNvbmZpZ01pc3NpbmdIABJFChVkZXBsb3lfY29uZmlnX2ludmFsaWQYECABKAsyJC5hZ2VudHJlcGwudjEuTGlmZWN5Y2xlQ29uZmlnSW52YWxpZEgAElgKHHBsYWNlbWVudF9iZWhpbmRfbm90X2luX2xpbmUYESABKAsyMC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEJlaGluZE5vdEluTGluZUgAEkUKD21lcmdlX29mZl9xdWV1ZRgSIAEoCzIqLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VNZXJnZU9mZlF1ZXVlSABCBwoFY2F1c2VKBAgMEA1SC293bmVyX2xhbmRzIiEKH0ZpbmlzaFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOwojRmluaXNoV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjIKH0ZpbmlzaFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSJAChxGaW5pc2hXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyIeChxGaW5pc2hXb3Jrc3BhY2VOb0xheW91dEZhY3RzIh8KHUZpbmlzaFdvcmtzcGFjZVNlc3Npb25EZWxldGVkIh4KHEZpbmlzaFdvcmtzcGFjZUFscmVhZHlRdWV1ZWQiIQofRmluaXNoV29ya3NwYWNlQWxyZWFkeURlcGxveWluZyIkCiJGaW5pc2hXb3Jrc3BhY2VSZXF1ZXN0ZXJNYXlOb3RMYW5kIloKHEZpbmlzaFdvcmtzcGFjZU1lcmdlT2ZmUXVldWUSOgoFY2F1c2UYASABKAsyKy5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c09mZlF1ZXVlQ2F1c2UiMAohRmluaXNoV29ya3NwYWNlTm9CcmFuY2hDaGVja2VkT3V0EgsKA2RpchgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_lifecycle_config_refusal, file_agentrepl_v1_family, file_agentrepl_v1_merge_queue_status, file_agentrepl_v1_merge_version_increment, file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluaXNoX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIr8CChZGaW5pc2hXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSMwoJcmVxdWVzdGVyGAIgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlchJMChF2ZXJzaW9uX2luY3JlbWVudBgDIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRIAIgBARI5CglwbGFjZW1lbnQYBCABKAsyIS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEgBiAEBEhQKDHByb2ZpbGVfZ2F0ZRgFIAEoCEIUChJfdmVyc2lvbl9pbmNyZW1lbnRCDAoKX3BsYWNlbWVudCKRAQoXRmluaXNoV29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQisgEKFkZpbmlzaFdvcmtzcGFjZVN1Y2Nlc3MSPAoGcXVldWVkGAEgASgLMiouYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZVN1Y2Nlc3NRdWV1ZWRIABJPChBsYW5kaW5nX2RpcmVjdGx5GAIgASgLMjMuYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZVN1Y2Nlc3NMYW5kaW5nRGlyZWN0bHlIAEIJCgdsYW5kaW5nIh4KHEZpbmlzaFdvcmtzcGFjZVN1Y2Nlc3NRdWV1ZWQiJwolRmluaXNoV29ya3NwYWNlU3VjY2Vzc0xhbmRpbmdEaXJlY3RseSK+CwoURmluaXNoV29ya3NwYWNlRXJyb3ISSgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLS5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElMKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMS5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJKChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzItLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASRQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiouYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABJFCg9ub19sYXlvdXRfZmFjdHMYBSABKAsyKi5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlTm9MYXlvdXRGYWN0c0gAEkYKD3Nlc3Npb25fZGVsZXRlZBgGIAEoCzIrLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZEgAEkQKDmFscmVhZHlfcXVldWVkGAcgASgLMiouYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZUFscmVhZHlRdWV1ZWRIABJKChFhbHJlYWR5X2RlcGxveWluZxgIIAEoCzItLmFnZW50cmVwbC52MS5GaW5pc2hXb3Jrc3BhY2VBbHJlYWR5RGVwbG95aW5nSAASWgoadmVyc2lvbl9pbmNyZW1lbnRfcmVxdWlyZWQYCSABKAsyNC5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VWZXJzaW9uSW5jcmVtZW50UmVxdWlyZWRIABJeChx2ZXJzaW9uX2luY3JlbWVudF91bmV4cGVjdGVkGAogASgLMjYuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlVmVyc2lvbkluY3JlbWVudFVuZXhwZWN0ZWRIABJDChFoYXNfb3Blbl9jaGlsZHJlbhgLIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VIYXNPcGVuQ2hpbGRyZW5IABJSChZyZXF1ZXN0ZXJfbWF5X25vdF9sYW5kGA0gASgLMjAuYWdlbnRyZXBsLnYxLkZpbmlzaFdvcmtzcGFjZVJlcXVlc3Rlck1heU5vdExhbmRIABJQChVub19icmFuY2hfY2hlY2tlZF9vdXQYDiABKAsyLy5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlTm9CcmFuY2hDaGVja2VkT3V0SAASQAoQbm9fZGVwbG95X2NvbmZpZxgPIAEoCzIkLmFnZW50cmVwbC52MS5MaWZlY3ljbGVDb25maWdNaXNzaW5nSAASRQoVZGVwbG95X2NvbmZpZ19pbnZhbGlkGBAgASgLMiQuYWdlbnRyZXBsLnYxLkxpZmVjeWNsZUNvbmZpZ0ludmFsaWRIABJYChxwbGFjZW1lbnRfYmVoaW5kX25vdF9pbl9saW5lGBEgASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmROb3RJbkxpbmVIABJFCg9tZXJnZV9vZmZfcXVldWUYEiABKAsyKi5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlTWVyZ2VPZmZRdWV1ZUgAEmQKH3BsYWNlbWVudF9jb25mbGljdHNfd2l0aF9zdG9yZWQYEyABKAsyOS5hZ2VudHJlcGwudjEuRmluaXNoV29ya3NwYWNlUGxhY2VtZW50Q29uZmxpY3RzV2l0aFN0b3JlZEgAQgcKBWNhdXNlSgQIDBANUgtvd25lcl9sYW5kcyKWAQorRmluaXNoV29ya3NwYWNlUGxhY2VtZW50Q29uZmxpY3RzV2l0aFN0b3JlZBIxCgZzdG9yZWQYASABKAsyIS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudBI0CglyZXF1ZXN0ZWQYAiABKAsyIS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudCIhCh9GaW5pc2hXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjsKI0ZpbmlzaFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIyCh9GaW5pc2hXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQAocRmluaXNoV29ya3NwYWNlTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiHgocRmluaXNoV29ya3NwYWNlTm9MYXlvdXRGYWN0cyIfCh1GaW5pc2hXb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZCIeChxGaW5pc2hXb3Jrc3BhY2VBbHJlYWR5UXVldWVkIiEKH0ZpbmlzaFdvcmtzcGFjZUFscmVhZHlEZXBsb3lpbmciJAoiRmluaXNoV29ya3NwYWNlUmVxdWVzdGVyTWF5Tm90TGFuZCJaChxGaW5pc2hXb3Jrc3BhY2VNZXJnZU9mZlF1ZXVlEjoKBWNhdXNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNPZmZRdWV1ZUNhdXNlIjAKIUZpbmlzaFdvcmtzcGFjZU5vQnJhbmNoQ2hlY2tlZE91dBILCgNkaXIYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_lifecycle_config_refusal, file_agentrepl_v1_family, file_agentrepl_v1_merge_queue_status, file_agentrepl_v1_merge_version_increment, file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.FinishWorkspaceRequest
@@ -100,12 +100,16 @@ export type FinishWorkspaceRequest = Message<"agentrepl.v1.FinishWorkspaceReques
   versionIncrement?: MergeWorkspaceVersionIncrement | undefined;
 
   /**
-   * Where the deploy joins its queue. REQUIRED for a finish through the
-   * queue, refused as invalid without it. A deploy remediation or
-   * escalation's finish never joins the queue (FinishWorkspaceSuccess
-   * .landing_directly), so it names none, and one it names is not read.
+   * Where the deploy joins its queue. A one-shot created with a placement
+   * for its finish (CreateWorkspaceOneShot.finish_placement) joins there:
+   * UNSET takes the stored one, and a different one is refused
+   * (`placement_conflicts_with_stored`). Every other finish through the
+   * queue must name one, and is refused as invalid without it. A deploy
+   * remediation or escalation's finish never joins the queue
+   * (FinishWorkspaceSuccess.landing_directly), so it names none, and one it
+   * names is not read.
    *
-   * @generated from field: agentrepl.v1.MergeQueuePlacement placement = 4;
+   * @generated from field: optional agentrepl.v1.MergeQueuePlacement placement = 4;
    */
   placement?: MergeQueuePlacement | undefined;
 
@@ -396,6 +400,16 @@ export type FinishWorkspaceError = Message<"agentrepl.v1.FinishWorkspaceError"> 
      */
     value: FinishWorkspaceMergeOffQueue;
     case: "mergeOffQueue";
+  } | {
+    /**
+     * The finish named a placement other than the one stored when the
+     * one-shot was created (CreateWorkspaceOneShot.finish_placement).
+     * Nothing was recorded.
+     *
+     * @generated from field: agentrepl.v1.FinishWorkspacePlacementConflictsWithStored placement_conflicts_with_stored = 19;
+     */
+    value: FinishWorkspacePlacementConflictsWithStored;
+    case: "placementConflictsWithStored";
   } | { case: undefined; value?: undefined };
 };
 
@@ -405,6 +419,35 @@ export type FinishWorkspaceError = Message<"agentrepl.v1.FinishWorkspaceError"> 
  */
 export const FinishWorkspaceErrorSchema: GenMessage<FinishWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 5);
+
+/**
+ * A finish whose placement differs from its one-shot's stored placement.
+ *
+ * @generated from message agentrepl.v1.FinishWorkspacePlacementConflictsWithStored
+ */
+export type FinishWorkspacePlacementConflictsWithStored = Message<"agentrepl.v1.FinishWorkspacePlacementConflictsWithStored"> & {
+  /**
+   * The placement stored at create, where the finish joins when it names
+   * none.
+   *
+   * @generated from field: agentrepl.v1.MergeQueuePlacement stored = 1;
+   */
+  stored?: MergeQueuePlacement | undefined;
+
+  /**
+   * The placement the finish named.
+   *
+   * @generated from field: agentrepl.v1.MergeQueuePlacement requested = 2;
+   */
+  requested?: MergeQueuePlacement | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.FinishWorkspacePlacementConflictsWithStored.
+ * Use `create(FinishWorkspacePlacementConflictsWithStoredSchema)` to create a new message.
+ */
+export const FinishWorkspacePlacementConflictsWithStoredSchema: GenMessage<FinishWorkspacePlacementConflictsWithStored> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 6);
 
 /**
  * The id names no workspace the daemon holds.
@@ -419,7 +462,7 @@ export type FinishWorkspaceUnknownWorkspace = Message<"agentrepl.v1.FinishWorksp
  * Use `create(FinishWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const FinishWorkspaceUnknownWorkspaceSchema: GenMessage<FinishWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 7);
 
 /**
  * The request's ref disagrees with the registry.
@@ -440,7 +483,7 @@ export type FinishWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.FinishWo
  * Use `create(FinishWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const FinishWorkspaceWorkspaceRefMismatchSchema: GenMessage<FinishWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 8);
 
 /**
  * The workspace moved to a successor daemon.
@@ -461,7 +504,7 @@ export type FinishWorkspaceTransferringAway = Message<"agentrepl.v1.FinishWorksp
  * Use `create(FinishWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const FinishWorkspaceTransferringAwaySchema: GenMessage<FinishWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 9);
 
 /**
  * The workspace is still being adopted. Empty: retry once adopted.
@@ -487,7 +530,7 @@ export type FinishWorkspaceNotYetAdopted = Message<"agentrepl.v1.FinishWorkspace
  * Use `create(FinishWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const FinishWorkspaceNotYetAdoptedSchema: GenMessage<FinishWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 10);
 
 /**
  * No layout facts are recorded for the workspace. Empty.
@@ -502,7 +545,7 @@ export type FinishWorkspaceNoLayoutFacts = Message<"agentrepl.v1.FinishWorkspace
  * Use `create(FinishWorkspaceNoLayoutFactsSchema)` to create a new message.
  */
 export const FinishWorkspaceNoLayoutFactsSchema: GenMessage<FinishWorkspaceNoLayoutFacts> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 11);
 
 /**
  * The workspace's session is deleted. Empty.
@@ -517,7 +560,7 @@ export type FinishWorkspaceSessionDeleted = Message<"agentrepl.v1.FinishWorkspac
  * Use `create(FinishWorkspaceSessionDeletedSchema)` to create a new message.
  */
 export const FinishWorkspaceSessionDeletedSchema: GenMessage<FinishWorkspaceSessionDeleted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 11);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 12);
 
 /**
  * A deploy of this workspace is already waiting in the queue. Empty.
@@ -532,7 +575,7 @@ export type FinishWorkspaceAlreadyQueued = Message<"agentrepl.v1.FinishWorkspace
  * Use `create(FinishWorkspaceAlreadyQueuedSchema)` to create a new message.
  */
 export const FinishWorkspaceAlreadyQueuedSchema: GenMessage<FinishWorkspaceAlreadyQueued> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 12);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 13);
 
 /**
  * A deploy of this workspace is already running. Empty.
@@ -547,7 +590,7 @@ export type FinishWorkspaceAlreadyDeploying = Message<"agentrepl.v1.FinishWorksp
  * Use `create(FinishWorkspaceAlreadyDeployingSchema)` to create a new message.
  */
 export const FinishWorkspaceAlreadyDeployingSchema: GenMessage<FinishWorkspaceAlreadyDeploying> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 13);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 14);
 
 /**
  * The requester may not finish this workspace. Empty: the request's own refs
@@ -563,7 +606,7 @@ export type FinishWorkspaceRequesterMayNotLand = Message<"agentrepl.v1.FinishWor
  * Use `create(FinishWorkspaceRequesterMayNotLandSchema)` to create a new message.
  */
 export const FinishWorkspaceRequesterMayNotLandSchema: GenMessage<FinishWorkspaceRequesterMayNotLand> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 14);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 15);
 
 /**
  * The workspace's merge stands off its queue.
@@ -584,7 +627,7 @@ export type FinishWorkspaceMergeOffQueue = Message<"agentrepl.v1.FinishWorkspace
  * Use `create(FinishWorkspaceMergeOffQueueSchema)` to create a new message.
  */
 export const FinishWorkspaceMergeOffQueueSchema: GenMessage<FinishWorkspaceMergeOffQueue> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 15);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 16);
 
 /**
  * The worktree's HEAD is detached.
@@ -605,5 +648,5 @@ export type FinishWorkspaceNoBranchCheckedOut = Message<"agentrepl.v1.FinishWork
  * Use `create(FinishWorkspaceNoBranchCheckedOutSchema)` to create a new message.
  */
 export const FinishWorkspaceNoBranchCheckedOutSchema: GenMessage<FinishWorkspaceNoBranchCheckedOut> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 16);
+  messageDesc(file_agentrepl_v1_endpoint_finish_workspace, 17);
 

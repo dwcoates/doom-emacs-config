@@ -68,11 +68,15 @@ message FinishWorkspaceRequest {
   // before the landing, so deploys reordered in the queue still produce
   // consecutive versions.
   optional MergeWorkspaceVersionIncrement version_increment = 3;
-  // Where the deploy joins its queue. REQUIRED for a finish through the
-  // queue, refused as invalid without it. A deploy remediation or
-  // escalation's finish never joins the queue (FinishWorkspaceSuccess
-  // .landing_directly), so it names none, and one it names is not read.
-  MergeQueuePlacement placement = 4;
+  // Where the deploy joins its queue. A one-shot created with a placement
+  // for its finish (CreateWorkspaceOneShot.finish_placement) joins there:
+  // UNSET takes the stored one, and a different one is refused
+  // (`placement_conflicts_with_stored`). Every other finish through the
+  // queue must name one, and is refused as invalid without it. A deploy
+  // remediation or escalation's finish never joins the queue
+  // (FinishWorkspaceSuccess.landing_directly), so it names none, and one it
+  // names is not read.
+  optional MergeQueuePlacement placement = 4;
   // Profile the deploy's test gate (testrun.v1.TestRunRequest.profile), as
   // CreateWorkspaceAsyncMerge.profile_gate does. Off by default. A finish
   // that lands directly runs no gate, so it is not read there.
@@ -170,7 +174,19 @@ message FinishWorkspaceError {
     // `agent-repld merge-queue requeue`) or discarded (DiscardMerge) first,
     // never asked for a second time. Nothing was recorded.
     FinishWorkspaceMergeOffQueue merge_off_queue = 18;
+    // The finish named a placement other than the one stored when the
+    // one-shot was created (CreateWorkspaceOneShot.finish_placement).
+    // Nothing was recorded.
+    FinishWorkspacePlacementConflictsWithStored placement_conflicts_with_stored = 19;
   }
+}
+// A finish whose placement differs from its one-shot's stored placement.
+message FinishWorkspacePlacementConflictsWithStored {
+  // The placement stored at create, where the finish joins when it names
+  // none.
+  MergeQueuePlacement stored = 1;
+  // The placement the finish named.
+  MergeQueuePlacement requested = 2;
 }
 // The id names no workspace the daemon holds.
 message FinishWorkspaceUnknownWorkspace {}

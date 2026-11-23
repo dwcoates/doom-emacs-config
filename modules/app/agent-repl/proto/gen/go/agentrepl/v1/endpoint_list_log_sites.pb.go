@@ -625,8 +625,9 @@ func (x *ListLogSitesCoveredPartial) GetUntilMs() int64 {
 // One log site at one level, as it fired in the window.
 type LogSite struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The site's key: 12 lowercase hex characters.
-	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// The site's key. A caller names it back as it was served, such as in the
+	// findings a production mediator dispatches.
+	Site *LogSiteKey `protobuf:"bytes,10,opt,name=site,proto3" json:"site,omitempty"`
 	// The call's unrendered message, its placeholders ({name}) unfilled. It is
 	// the site's summary: what the call reports, without any one record's
 	// values.
@@ -683,11 +684,11 @@ func (*LogSite) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_list_log_sites_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *LogSite) GetKey() string {
+func (x *LogSite) GetSite() *LogSiteKey {
 	if x != nil {
-		return x.Key
+		return x.Site
 	}
-	return ""
+	return nil
 }
 
 func (x *LogSite) GetTemplate() string {
@@ -1063,7 +1064,7 @@ var File_agentrepl_v1_endpoint_list_log_sites_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_list_log_sites_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_list_log_sites.proto\x12\fagentrepl.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1cagentrepl/v1/log_level.proto\"\xb3\x01\n" +
+	"*agentrepl/v1/endpoint_list_log_sites.proto\x12\fagentrepl.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1cagentrepl/v1/log_level.proto\x1a\x1fagentrepl/v1/log_site_key.proto\"\xb3\x01\n" +
 	"\x13ListLogSitesRequest\x128\n" +
 	"\x06window\x18\x01 \x01(\v2 .agentrepl.v1.ListLogSitesWindowR\x06window\x12P\n" +
 	"\rminimum_level\x18\x02 \x01(\v2&.agentrepl.v1.ListLogSitesMinimumLevelH\x00R\fminimumLevel\x88\x01\x01B\x10\n" +
@@ -1094,9 +1095,10 @@ const file_agentrepl_v1_endpoint_list_log_sites_proto_rawDesc = "" +
 	"\buntil_ms\x18\x02 \x01(\x03R\auntilMs\"R\n" +
 	"\x1aListLogSitesCoveredPartial\x12\x19\n" +
 	"\bsince_ms\x18\x01 \x01(\x03R\asinceMs\x12\x19\n" +
-	"\buntil_ms\x18\x02 \x01(\x03R\auntilMs\"\xb2\x02\n" +
-	"\aLogSite\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1a\n" +
+	"\buntil_ms\x18\x02 \x01(\x03R\auntilMs\"\xd9\x02\n" +
+	"\aLogSite\x12,\n" +
+	"\x04site\x18\n" +
+	" \x01(\v2\x18.agentrepl.v1.LogSiteKeyR\x04site\x12\x1a\n" +
 	"\btemplate\x18\x02 \x01(\tR\btemplate\x12\x18\n" +
 	"\aruntime\x18\x03 \x01(\tR\aruntime\x120\n" +
 	"\x05level\x18\x04 \x01(\v2\x1a.agentrepl.v1.LogSiteLevelR\x05level\x12\x1c\n" +
@@ -1105,7 +1107,7 @@ const file_agentrepl_v1_endpoint_list_log_sites_proto_rawDesc = "" +
 	"\rfirst_seen_ms\x18\a \x01(\x03R\vfirstSeenMs\x12 \n" +
 	"\flast_seen_ms\x18\b \x01(\x03R\n" +
 	"lastSeenMs\x123\n" +
-	"\x06sample\x18\t \x01(\v2\x1b.agentrepl.v1.LogSiteSampleR\x06sample\"\xfd\x01\n" +
+	"\x06sample\x18\t \x01(\v2\x1b.agentrepl.v1.LogSiteSampleR\x06sampleJ\x04\b\x01\x10\x02R\x03key\"\xfd\x01\n" +
 	"\fLogSiteLevel\x129\n" +
 	"\x05debug\x18\x01 \x01(\v2!.agentrepl.v1.ClientLogLevelDebugH\x00R\x05debug\x126\n" +
 	"\x04info\x18\x02 \x01(\v2 .agentrepl.v1.ClientLogLevelInfoH\x00R\x04info\x126\n" +
@@ -1155,7 +1157,8 @@ var file_agentrepl_v1_endpoint_list_log_sites_proto_goTypes = []any{
 	(*ClientLogLevelInfo)(nil),           // 14: agentrepl.v1.ClientLogLevelInfo
 	(*ClientLogLevelWarn)(nil),           // 15: agentrepl.v1.ClientLogLevelWarn
 	(*ClientLogLevelError)(nil),          // 16: agentrepl.v1.ClientLogLevelError
-	(*structpb.Struct)(nil),              // 17: google.protobuf.Struct
+	(*LogSiteKey)(nil),                   // 17: agentrepl.v1.LogSiteKey
+	(*structpb.Struct)(nil),              // 18: google.protobuf.Struct
 }
 var file_agentrepl_v1_endpoint_list_log_sites_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.ListLogSitesRequest.window:type_name -> agentrepl.v1.ListLogSitesWindow
@@ -1170,19 +1173,20 @@ var file_agentrepl_v1_endpoint_list_log_sites_proto_depIdxs = []int32{
 	5,  // 9: agentrepl.v1.ListLogSitesSuccess.covered:type_name -> agentrepl.v1.ListLogSitesCovered
 	6,  // 10: agentrepl.v1.ListLogSitesCovered.whole:type_name -> agentrepl.v1.ListLogSitesCoveredWhole
 	7,  // 11: agentrepl.v1.ListLogSitesCovered.partial:type_name -> agentrepl.v1.ListLogSitesCoveredPartial
-	9,  // 12: agentrepl.v1.LogSite.level:type_name -> agentrepl.v1.LogSiteLevel
-	10, // 13: agentrepl.v1.LogSite.sample:type_name -> agentrepl.v1.LogSiteSample
-	13, // 14: agentrepl.v1.LogSiteLevel.debug:type_name -> agentrepl.v1.ClientLogLevelDebug
-	14, // 15: agentrepl.v1.LogSiteLevel.info:type_name -> agentrepl.v1.ClientLogLevelInfo
-	15, // 16: agentrepl.v1.LogSiteLevel.warn:type_name -> agentrepl.v1.ClientLogLevelWarn
-	16, // 17: agentrepl.v1.LogSiteLevel.error:type_name -> agentrepl.v1.ClientLogLevelError
-	17, // 18: agentrepl.v1.LogSiteSample.context:type_name -> google.protobuf.Struct
-	12, // 19: agentrepl.v1.ListLogSitesError.unrecorded_window:type_name -> agentrepl.v1.ListLogSitesUnrecordedWindow
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	17, // 12: agentrepl.v1.LogSite.site:type_name -> agentrepl.v1.LogSiteKey
+	9,  // 13: agentrepl.v1.LogSite.level:type_name -> agentrepl.v1.LogSiteLevel
+	10, // 14: agentrepl.v1.LogSite.sample:type_name -> agentrepl.v1.LogSiteSample
+	13, // 15: agentrepl.v1.LogSiteLevel.debug:type_name -> agentrepl.v1.ClientLogLevelDebug
+	14, // 16: agentrepl.v1.LogSiteLevel.info:type_name -> agentrepl.v1.ClientLogLevelInfo
+	15, // 17: agentrepl.v1.LogSiteLevel.warn:type_name -> agentrepl.v1.ClientLogLevelWarn
+	16, // 18: agentrepl.v1.LogSiteLevel.error:type_name -> agentrepl.v1.ClientLogLevelError
+	18, // 19: agentrepl.v1.LogSiteSample.context:type_name -> google.protobuf.Struct
+	12, // 20: agentrepl.v1.ListLogSitesError.unrecorded_window:type_name -> agentrepl.v1.ListLogSitesUnrecordedWindow
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_list_log_sites_proto_init() }
@@ -1191,6 +1195,7 @@ func file_agentrepl_v1_endpoint_list_log_sites_proto_init() {
 		return
 	}
 	file_agentrepl_v1_log_level_proto_init()
+	file_agentrepl_v1_log_site_key_proto_init()
 	file_agentrepl_v1_endpoint_list_log_sites_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_list_log_sites_proto_msgTypes[1].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_list_log_sites_proto_msgTypes[2].OneofWrappers = []any{

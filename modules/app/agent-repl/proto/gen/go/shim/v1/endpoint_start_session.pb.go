@@ -319,6 +319,7 @@ type SessionProfileAgentLanding struct {
 	//	*SessionProfileAgentLanding_ThroughQueue
 	//	*SessionProfileAgentLanding_BypassingQueue
 	//	*SessionProfileAgentLanding_DeployMediator
+	//	*SessionProfileAgentLanding_ProductionMediator
 	Landing       isSessionProfileAgentLanding_Landing `protobuf_oneof:"landing"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -388,6 +389,15 @@ func (x *SessionProfileAgentLanding) GetDeployMediator() *SessionProfileAgentLan
 	return nil
 }
 
+func (x *SessionProfileAgentLanding) GetProductionMediator() *SessionProfileAgentLandingProductionMediator {
+	if x != nil {
+		if x, ok := x.Landing.(*SessionProfileAgentLanding_ProductionMediator); ok {
+			return x.ProductionMediator
+		}
+	}
+	return nil
+}
+
 type isSessionProfileAgentLanding_Landing interface {
 	isSessionProfileAgentLanding_Landing()
 }
@@ -404,11 +414,17 @@ type SessionProfileAgentLanding_DeployMediator struct {
 	DeployMediator *SessionProfileAgentLandingDeployMediator `protobuf:"bytes,5,opt,name=deploy_mediator,json=deployMediator,proto3,oneof"`
 }
 
+type SessionProfileAgentLanding_ProductionMediator struct {
+	ProductionMediator *SessionProfileAgentLandingProductionMediator `protobuf:"bytes,6,opt,name=production_mediator,json=productionMediator,proto3,oneof"`
+}
+
 func (*SessionProfileAgentLanding_ThroughQueue) isSessionProfileAgentLanding_Landing() {}
 
 func (*SessionProfileAgentLanding_BypassingQueue) isSessionProfileAgentLanding_Landing() {}
 
 func (*SessionProfileAgentLanding_DeployMediator) isSessionProfileAgentLanding_Landing() {}
+
+func (*SessionProfileAgentLanding_ProductionMediator) isSessionProfileAgentLanding_Landing() {}
 
 // The ordinary landing: every change reaches the main branch through the
 // repository's merge queue.
@@ -531,6 +547,50 @@ func (*SessionProfileAgentLandingDeployMediator) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{6}
 }
 
+// The production mediator's landing: the workspace is its repository's
+// standing production mediator (repoconfig.v1.LifecycleConfig
+// .production_checks). After each deploy it reviews what production logged
+// between the two landings before it, and decides through
+// agentrepl.v1.UpdateProductionMediation: nothing to do, or children to
+// dispatch. It changes no code and lands nothing itself; every fix is a
+// one-shot child's, landing at the front of the merge queue. Its metaprompt
+// is its own text (metaprompt-production-mediator.md).
+type SessionProfileAgentLandingProductionMediator struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionProfileAgentLandingProductionMediator) Reset() {
+	*x = SessionProfileAgentLandingProductionMediator{}
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionProfileAgentLandingProductionMediator) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionProfileAgentLandingProductionMediator) ProtoMessage() {}
+
+func (x *SessionProfileAgentLandingProductionMediator) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionProfileAgentLandingProductionMediator.ProtoReflect.Descriptor instead.
+func (*SessionProfileAgentLandingProductionMediator) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{7}
+}
+
 // How the agent's workspace stands within its repository. The set arm IS the
 // standing.
 type SessionProfileAgentStanding struct {
@@ -549,7 +609,7 @@ type SessionProfileAgentStanding struct {
 
 func (x *SessionProfileAgentStanding) Reset() {
 	*x = SessionProfileAgentStanding{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -561,7 +621,7 @@ func (x *SessionProfileAgentStanding) String() string {
 func (*SessionProfileAgentStanding) ProtoMessage() {}
 
 func (x *SessionProfileAgentStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -574,7 +634,7 @@ func (x *SessionProfileAgentStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionProfileAgentStanding.ProtoReflect.Descriptor instead.
 func (*SessionProfileAgentStanding) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{7}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SessionProfileAgentStanding) GetKind() isSessionProfileAgentStanding_Kind {
@@ -629,7 +689,7 @@ type SessionProfileAgentMainWorkspace struct {
 
 func (x *SessionProfileAgentMainWorkspace) Reset() {
 	*x = SessionProfileAgentMainWorkspace{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -641,7 +701,7 @@ func (x *SessionProfileAgentMainWorkspace) String() string {
 func (*SessionProfileAgentMainWorkspace) ProtoMessage() {}
 
 func (x *SessionProfileAgentMainWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -654,7 +714,7 @@ func (x *SessionProfileAgentMainWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionProfileAgentMainWorkspace.ProtoReflect.Descriptor instead.
 func (*SessionProfileAgentMainWorkspace) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{8}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{9}
 }
 
 // The workspace is a linked worktree of its repository: a workspace created
@@ -668,7 +728,7 @@ type SessionProfileAgentLinkedWorkspace struct {
 
 func (x *SessionProfileAgentLinkedWorkspace) Reset() {
 	*x = SessionProfileAgentLinkedWorkspace{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -680,7 +740,7 @@ func (x *SessionProfileAgentLinkedWorkspace) String() string {
 func (*SessionProfileAgentLinkedWorkspace) ProtoMessage() {}
 
 func (x *SessionProfileAgentLinkedWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -693,7 +753,7 @@ func (x *SessionProfileAgentLinkedWorkspace) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SessionProfileAgentLinkedWorkspace.ProtoReflect.Descriptor instead.
 func (*SessionProfileAgentLinkedWorkspace) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{10}
 }
 
 // A chat session, answering questions in a zettel thread: no filesystem
@@ -711,7 +771,7 @@ type SessionProfileChat struct {
 
 func (x *SessionProfileChat) Reset() {
 	*x = SessionProfileChat{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +783,7 @@ func (x *SessionProfileChat) String() string {
 func (*SessionProfileChat) ProtoMessage() {}
 
 func (x *SessionProfileChat) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +796,7 @@ func (x *SessionProfileChat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionProfileChat.ProtoReflect.Descriptor instead.
 func (*SessionProfileChat) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{10}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SessionProfileChat) GetSystemPrompt() *SessionProfileChatSystemPrompt {
@@ -757,7 +817,7 @@ type SessionProfileChatSystemPrompt struct {
 
 func (x *SessionProfileChatSystemPrompt) Reset() {
 	*x = SessionProfileChatSystemPrompt{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -769,7 +829,7 @@ func (x *SessionProfileChatSystemPrompt) String() string {
 func (*SessionProfileChatSystemPrompt) ProtoMessage() {}
 
 func (x *SessionProfileChatSystemPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -782,7 +842,7 @@ func (x *SessionProfileChatSystemPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionProfileChatSystemPrompt.ProtoReflect.Descriptor instead.
 func (*SessionProfileChatSystemPrompt) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{11}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SessionProfileChatSystemPrompt) GetText() string {
@@ -809,7 +869,7 @@ type StartSessionFresh struct {
 
 func (x *StartSessionFresh) Reset() {
 	*x = StartSessionFresh{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[12]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -821,7 +881,7 @@ func (x *StartSessionFresh) String() string {
 func (*StartSessionFresh) ProtoMessage() {}
 
 func (x *StartSessionFresh) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[12]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -834,7 +894,7 @@ func (x *StartSessionFresh) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionFresh.ProtoReflect.Descriptor instead.
 func (*StartSessionFresh) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{12}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StartSessionFresh) GetModel() *v1.AgentModel {
@@ -924,7 +984,7 @@ type StartSessionResume struct {
 
 func (x *StartSessionResume) Reset() {
 	*x = StartSessionResume{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[13]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -936,7 +996,7 @@ func (x *StartSessionResume) String() string {
 func (*StartSessionResume) ProtoMessage() {}
 
 func (x *StartSessionResume) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[13]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -949,7 +1009,7 @@ func (x *StartSessionResume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionResume.ProtoReflect.Descriptor instead.
 func (*StartSessionResume) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{13}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StartSessionResume) GetVendorSessionId() string {
@@ -997,7 +1057,7 @@ type StartSessionRebind struct {
 
 func (x *StartSessionRebind) Reset() {
 	*x = StartSessionRebind{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[14]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +1069,7 @@ func (x *StartSessionRebind) String() string {
 func (*StartSessionRebind) ProtoMessage() {}
 
 func (x *StartSessionRebind) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[14]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +1082,7 @@ func (x *StartSessionRebind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionRebind.ProtoReflect.Descriptor instead.
 func (*StartSessionRebind) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{14}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{15}
 }
 
 // THE ARM IS THE OUTCOME.
@@ -1051,7 +1111,7 @@ type StartSessionResponse struct {
 
 func (x *StartSessionResponse) Reset() {
 	*x = StartSessionResponse{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[15]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1063,7 +1123,7 @@ func (x *StartSessionResponse) String() string {
 func (*StartSessionResponse) ProtoMessage() {}
 
 func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[15]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1076,7 +1136,7 @@ func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionResponse.ProtoReflect.Descriptor instead.
 func (*StartSessionResponse) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{15}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StartSessionResponse) GetResult() isStartSessionResponse_Result {
@@ -1145,7 +1205,7 @@ type StartSessionSuccess struct {
 
 func (x *StartSessionSuccess) Reset() {
 	*x = StartSessionSuccess{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[16]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1157,7 +1217,7 @@ func (x *StartSessionSuccess) String() string {
 func (*StartSessionSuccess) ProtoMessage() {}
 
 func (x *StartSessionSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[16]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1170,7 +1230,7 @@ func (x *StartSessionSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionSuccess.ProtoReflect.Descriptor instead.
 func (*StartSessionSuccess) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{16}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StartSessionSuccess) GetSession() *v1.SessionStarted {
@@ -1200,7 +1260,7 @@ type StartSessionFailure struct {
 
 func (x *StartSessionFailure) Reset() {
 	*x = StartSessionFailure{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[17]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1212,7 +1272,7 @@ func (x *StartSessionFailure) String() string {
 func (*StartSessionFailure) ProtoMessage() {}
 
 func (x *StartSessionFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[17]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1225,7 +1285,7 @@ func (x *StartSessionFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionFailure.ProtoReflect.Descriptor instead.
 func (*StartSessionFailure) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{17}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *StartSessionFailure) GetCause() isStartSessionFailure_Cause {
@@ -1386,7 +1446,7 @@ type StartSessionVendorStartFailed struct {
 
 func (x *StartSessionVendorStartFailed) Reset() {
 	*x = StartSessionVendorStartFailed{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[18]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1398,7 +1458,7 @@ func (x *StartSessionVendorStartFailed) String() string {
 func (*StartSessionVendorStartFailed) ProtoMessage() {}
 
 func (x *StartSessionVendorStartFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[18]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1411,7 +1471,7 @@ func (x *StartSessionVendorStartFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionVendorStartFailed.ProtoReflect.Descriptor instead.
 func (*StartSessionVendorStartFailed) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{18}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *StartSessionVendorStartFailed) GetRetry() isStartSessionVendorStartFailed_Retry {
@@ -1477,7 +1537,7 @@ type StartSessionVendorStartRetryable struct {
 
 func (x *StartSessionVendorStartRetryable) Reset() {
 	*x = StartSessionVendorStartRetryable{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[19]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1489,7 +1549,7 @@ func (x *StartSessionVendorStartRetryable) String() string {
 func (*StartSessionVendorStartRetryable) ProtoMessage() {}
 
 func (x *StartSessionVendorStartRetryable) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[19]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1502,7 +1562,7 @@ func (x *StartSessionVendorStartRetryable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionVendorStartRetryable.ProtoReflect.Descriptor instead.
 func (*StartSessionVendorStartRetryable) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{19}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *StartSessionVendorStartRetryable) GetCause() isStartSessionVendorStartRetryable_Cause {
@@ -1560,7 +1620,7 @@ type StartSessionVendorStartNetwork struct {
 
 func (x *StartSessionVendorStartNetwork) Reset() {
 	*x = StartSessionVendorStartNetwork{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[20]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1572,7 +1632,7 @@ func (x *StartSessionVendorStartNetwork) String() string {
 func (*StartSessionVendorStartNetwork) ProtoMessage() {}
 
 func (x *StartSessionVendorStartNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[20]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1585,7 +1645,7 @@ func (x *StartSessionVendorStartNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionVendorStartNetwork.ProtoReflect.Descriptor instead.
 func (*StartSessionVendorStartNetwork) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{20}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{21}
 }
 
 // The vendor failed transiently.
@@ -1597,7 +1657,7 @@ type StartSessionVendorStartVendor struct {
 
 func (x *StartSessionVendorStartVendor) Reset() {
 	*x = StartSessionVendorStartVendor{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[21]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1609,7 +1669,7 @@ func (x *StartSessionVendorStartVendor) String() string {
 func (*StartSessionVendorStartVendor) ProtoMessage() {}
 
 func (x *StartSessionVendorStartVendor) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[21]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1622,7 +1682,7 @@ func (x *StartSessionVendorStartVendor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionVendorStartVendor.ProtoReflect.Descriptor instead.
 func (*StartSessionVendorStartVendor) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{21}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{22}
 }
 
 // The vendor refused the start for a reason that will not pass on its own: a
@@ -1648,7 +1708,7 @@ type StartSessionVendorStartRejected struct {
 
 func (x *StartSessionVendorStartRejected) Reset() {
 	*x = StartSessionVendorStartRejected{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[22]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1660,7 +1720,7 @@ func (x *StartSessionVendorStartRejected) String() string {
 func (*StartSessionVendorStartRejected) ProtoMessage() {}
 
 func (x *StartSessionVendorStartRejected) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[22]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1673,7 +1733,7 @@ func (x *StartSessionVendorStartRejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionVendorStartRejected.ProtoReflect.Descriptor instead.
 func (*StartSessionVendorStartRejected) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{22}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StartSessionVendorStartRejected) GetApiFailure() *v1.ApiRequestFailed {
@@ -1691,7 +1751,7 @@ type StartSessionUnknownSession struct {
 
 func (x *StartSessionUnknownSession) Reset() {
 	*x = StartSessionUnknownSession{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[23]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1703,7 +1763,7 @@ func (x *StartSessionUnknownSession) String() string {
 func (*StartSessionUnknownSession) ProtoMessage() {}
 
 func (x *StartSessionUnknownSession) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[23]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1716,7 +1776,7 @@ func (x *StartSessionUnknownSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionUnknownSession.ProtoReflect.Descriptor instead.
 func (*StartSessionUnknownSession) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{23}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{24}
 }
 
 type StartSessionAlreadyStarted struct {
@@ -1727,7 +1787,7 @@ type StartSessionAlreadyStarted struct {
 
 func (x *StartSessionAlreadyStarted) Reset() {
 	*x = StartSessionAlreadyStarted{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[24]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1739,7 +1799,7 @@ func (x *StartSessionAlreadyStarted) String() string {
 func (*StartSessionAlreadyStarted) ProtoMessage() {}
 
 func (x *StartSessionAlreadyStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[24]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1752,7 +1812,7 @@ func (x *StartSessionAlreadyStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionAlreadyStarted.ProtoReflect.Descriptor instead.
 func (*StartSessionAlreadyStarted) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{24}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{25}
 }
 
 type StartSessionConversationOwned struct {
@@ -1763,7 +1823,7 @@ type StartSessionConversationOwned struct {
 
 func (x *StartSessionConversationOwned) Reset() {
 	*x = StartSessionConversationOwned{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[25]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1775,7 +1835,7 @@ func (x *StartSessionConversationOwned) String() string {
 func (*StartSessionConversationOwned) ProtoMessage() {}
 
 func (x *StartSessionConversationOwned) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[25]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1788,7 +1848,7 @@ func (x *StartSessionConversationOwned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionConversationOwned.ProtoReflect.Descriptor instead.
 func (*StartSessionConversationOwned) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{25}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{26}
 }
 
 type StartSessionLockHolderUnavailable struct {
@@ -1801,7 +1861,7 @@ type StartSessionLockHolderUnavailable struct {
 
 func (x *StartSessionLockHolderUnavailable) Reset() {
 	*x = StartSessionLockHolderUnavailable{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[26]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1813,7 +1873,7 @@ func (x *StartSessionLockHolderUnavailable) String() string {
 func (*StartSessionLockHolderUnavailable) ProtoMessage() {}
 
 func (x *StartSessionLockHolderUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[26]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1826,7 +1886,7 @@ func (x *StartSessionLockHolderUnavailable) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use StartSessionLockHolderUnavailable.ProtoReflect.Descriptor instead.
 func (*StartSessionLockHolderUnavailable) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{26}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *StartSessionLockHolderUnavailable) GetFailure() *v1.LockHolderFailure {
@@ -1853,15 +1913,17 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x04kind\"\x96\x01\n" +
 	"\x13SessionProfileAgent\x12@\n" +
 	"\bstanding\x18\x01 \x01(\v2$.shim.v1.SessionProfileAgentStandingR\bstanding\x12=\n" +
-	"\alanding\x18\x02 \x01(\v2#.shim.v1.SessionProfileAgentLandingR\alanding\"\xe1\x02\n" +
+	"\alanding\x18\x02 \x01(\v2#.shim.v1.SessionProfileAgentLandingR\alanding\"\xcb\x03\n" +
 	"\x1aSessionProfileAgentLanding\x12V\n" +
 	"\rthrough_queue\x18\x01 \x01(\v2/.shim.v1.SessionProfileAgentLandingThroughQueueH\x00R\fthroughQueue\x12\\\n" +
 	"\x0fbypassing_queue\x18\x02 \x01(\v21.shim.v1.SessionProfileAgentLandingBypassingQueueH\x00R\x0ebypassingQueue\x12\\\n" +
-	"\x0fdeploy_mediator\x18\x05 \x01(\v21.shim.v1.SessionProfileAgentLandingDeployMediatorH\x00R\x0edeployMediatorB\t\n" +
+	"\x0fdeploy_mediator\x18\x05 \x01(\v21.shim.v1.SessionProfileAgentLandingDeployMediatorH\x00R\x0edeployMediator\x12h\n" +
+	"\x13production_mediator\x18\x06 \x01(\v25.shim.v1.SessionProfileAgentLandingProductionMediatorH\x00R\x12productionMediatorB\t\n" +
 	"\alandingJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\tmediatingR\rdeploy_intake\"(\n" +
 	"&SessionProfileAgentLandingThroughQueue\"*\n" +
 	"(SessionProfileAgentLandingBypassingQueue\"*\n" +
-	"(SessionProfileAgentLandingDeployMediator\"\xd3\x01\n" +
+	"(SessionProfileAgentLandingDeployMediator\".\n" +
+	",SessionProfileAgentLandingProductionMediator\"\xd3\x01\n" +
 	"\x1bSessionProfileAgentStanding\x12R\n" +
 	"\x0emain_workspace\x18\x01 \x01(\v2).shim.v1.SessionProfileAgentMainWorkspaceH\x00R\rmainWorkspace\x12X\n" +
 	"\x10linked_workspace\x18\x02 \x01(\v2+.shim.v1.SessionProfileAgentLinkedWorkspaceH\x00R\x0flinkedWorkspaceB\x06\n" +
@@ -1936,86 +1998,88 @@ func file_shim_v1_endpoint_start_session_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_start_session_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
-	(*StartSessionRequest)(nil),                      // 0: shim.v1.StartSessionRequest
-	(*SessionProfile)(nil),                           // 1: shim.v1.SessionProfile
-	(*SessionProfileAgent)(nil),                      // 2: shim.v1.SessionProfileAgent
-	(*SessionProfileAgentLanding)(nil),               // 3: shim.v1.SessionProfileAgentLanding
-	(*SessionProfileAgentLandingThroughQueue)(nil),   // 4: shim.v1.SessionProfileAgentLandingThroughQueue
-	(*SessionProfileAgentLandingBypassingQueue)(nil), // 5: shim.v1.SessionProfileAgentLandingBypassingQueue
-	(*SessionProfileAgentLandingDeployMediator)(nil), // 6: shim.v1.SessionProfileAgentLandingDeployMediator
-	(*SessionProfileAgentStanding)(nil),              // 7: shim.v1.SessionProfileAgentStanding
-	(*SessionProfileAgentMainWorkspace)(nil),         // 8: shim.v1.SessionProfileAgentMainWorkspace
-	(*SessionProfileAgentLinkedWorkspace)(nil),       // 9: shim.v1.SessionProfileAgentLinkedWorkspace
-	(*SessionProfileChat)(nil),                       // 10: shim.v1.SessionProfileChat
-	(*SessionProfileChatSystemPrompt)(nil),           // 11: shim.v1.SessionProfileChatSystemPrompt
-	(*StartSessionFresh)(nil),                        // 12: shim.v1.StartSessionFresh
-	(*StartSessionResume)(nil),                       // 13: shim.v1.StartSessionResume
-	(*StartSessionRebind)(nil),                       // 14: shim.v1.StartSessionRebind
-	(*StartSessionResponse)(nil),                     // 15: shim.v1.StartSessionResponse
-	(*StartSessionSuccess)(nil),                      // 16: shim.v1.StartSessionSuccess
-	(*StartSessionFailure)(nil),                      // 17: shim.v1.StartSessionFailure
-	(*StartSessionVendorStartFailed)(nil),            // 18: shim.v1.StartSessionVendorStartFailed
-	(*StartSessionVendorStartRetryable)(nil),         // 19: shim.v1.StartSessionVendorStartRetryable
-	(*StartSessionVendorStartNetwork)(nil),           // 20: shim.v1.StartSessionVendorStartNetwork
-	(*StartSessionVendorStartVendor)(nil),            // 21: shim.v1.StartSessionVendorStartVendor
-	(*StartSessionVendorStartRejected)(nil),          // 22: shim.v1.StartSessionVendorStartRejected
-	(*StartSessionUnknownSession)(nil),               // 23: shim.v1.StartSessionUnknownSession
-	(*StartSessionAlreadyStarted)(nil),               // 24: shim.v1.StartSessionAlreadyStarted
-	(*StartSessionConversationOwned)(nil),            // 25: shim.v1.StartSessionConversationOwned
-	(*StartSessionLockHolderUnavailable)(nil),        // 26: shim.v1.StartSessionLockHolderUnavailable
-	(*v1.AgentModel)(nil),                            // 27: conversation.v1.AgentModel
-	(*v1.AgentPermissionMode)(nil),                   // 28: conversation.v1.AgentPermissionMode
-	(*v1.SessionColdRemediation)(nil),                // 29: conversation.v1.SessionColdRemediation
-	(*v1.TurnId)(nil),                                // 30: conversation.v1.TurnId
-	(*v1.AgentId)(nil),                               // 31: conversation.v1.AgentId
-	(*v1.SessionStarted)(nil),                        // 32: conversation.v1.SessionStarted
-	(*v1.SessionCold)(nil),                           // 33: conversation.v1.SessionCold
-	(*v1.ApiRequestFailed)(nil),                      // 34: conversation.v1.ApiRequestFailed
-	(*v1.LockHolderFailure)(nil),                     // 35: conversation.v1.LockHolderFailure
+	(*StartSessionRequest)(nil),                          // 0: shim.v1.StartSessionRequest
+	(*SessionProfile)(nil),                               // 1: shim.v1.SessionProfile
+	(*SessionProfileAgent)(nil),                          // 2: shim.v1.SessionProfileAgent
+	(*SessionProfileAgentLanding)(nil),                   // 3: shim.v1.SessionProfileAgentLanding
+	(*SessionProfileAgentLandingThroughQueue)(nil),       // 4: shim.v1.SessionProfileAgentLandingThroughQueue
+	(*SessionProfileAgentLandingBypassingQueue)(nil),     // 5: shim.v1.SessionProfileAgentLandingBypassingQueue
+	(*SessionProfileAgentLandingDeployMediator)(nil),     // 6: shim.v1.SessionProfileAgentLandingDeployMediator
+	(*SessionProfileAgentLandingProductionMediator)(nil), // 7: shim.v1.SessionProfileAgentLandingProductionMediator
+	(*SessionProfileAgentStanding)(nil),                  // 8: shim.v1.SessionProfileAgentStanding
+	(*SessionProfileAgentMainWorkspace)(nil),             // 9: shim.v1.SessionProfileAgentMainWorkspace
+	(*SessionProfileAgentLinkedWorkspace)(nil),           // 10: shim.v1.SessionProfileAgentLinkedWorkspace
+	(*SessionProfileChat)(nil),                           // 11: shim.v1.SessionProfileChat
+	(*SessionProfileChatSystemPrompt)(nil),               // 12: shim.v1.SessionProfileChatSystemPrompt
+	(*StartSessionFresh)(nil),                            // 13: shim.v1.StartSessionFresh
+	(*StartSessionResume)(nil),                           // 14: shim.v1.StartSessionResume
+	(*StartSessionRebind)(nil),                           // 15: shim.v1.StartSessionRebind
+	(*StartSessionResponse)(nil),                         // 16: shim.v1.StartSessionResponse
+	(*StartSessionSuccess)(nil),                          // 17: shim.v1.StartSessionSuccess
+	(*StartSessionFailure)(nil),                          // 18: shim.v1.StartSessionFailure
+	(*StartSessionVendorStartFailed)(nil),                // 19: shim.v1.StartSessionVendorStartFailed
+	(*StartSessionVendorStartRetryable)(nil),             // 20: shim.v1.StartSessionVendorStartRetryable
+	(*StartSessionVendorStartNetwork)(nil),               // 21: shim.v1.StartSessionVendorStartNetwork
+	(*StartSessionVendorStartVendor)(nil),                // 22: shim.v1.StartSessionVendorStartVendor
+	(*StartSessionVendorStartRejected)(nil),              // 23: shim.v1.StartSessionVendorStartRejected
+	(*StartSessionUnknownSession)(nil),                   // 24: shim.v1.StartSessionUnknownSession
+	(*StartSessionAlreadyStarted)(nil),                   // 25: shim.v1.StartSessionAlreadyStarted
+	(*StartSessionConversationOwned)(nil),                // 26: shim.v1.StartSessionConversationOwned
+	(*StartSessionLockHolderUnavailable)(nil),            // 27: shim.v1.StartSessionLockHolderUnavailable
+	(*v1.AgentModel)(nil),                                // 28: conversation.v1.AgentModel
+	(*v1.AgentPermissionMode)(nil),                       // 29: conversation.v1.AgentPermissionMode
+	(*v1.SessionColdRemediation)(nil),                    // 30: conversation.v1.SessionColdRemediation
+	(*v1.TurnId)(nil),                                    // 31: conversation.v1.TurnId
+	(*v1.AgentId)(nil),                                   // 32: conversation.v1.AgentId
+	(*v1.SessionStarted)(nil),                            // 33: conversation.v1.SessionStarted
+	(*v1.SessionCold)(nil),                               // 34: conversation.v1.SessionCold
+	(*v1.ApiRequestFailed)(nil),                          // 35: conversation.v1.ApiRequestFailed
+	(*v1.LockHolderFailure)(nil),                         // 36: conversation.v1.LockHolderFailure
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
-	12, // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
-	13, // 1: shim.v1.StartSessionRequest.resume:type_name -> shim.v1.StartSessionResume
+	13, // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
+	14, // 1: shim.v1.StartSessionRequest.resume:type_name -> shim.v1.StartSessionResume
 	1,  // 2: shim.v1.StartSessionRequest.profile:type_name -> shim.v1.SessionProfile
 	2,  // 3: shim.v1.SessionProfile.agent:type_name -> shim.v1.SessionProfileAgent
-	10, // 4: shim.v1.SessionProfile.chat:type_name -> shim.v1.SessionProfileChat
-	7,  // 5: shim.v1.SessionProfileAgent.standing:type_name -> shim.v1.SessionProfileAgentStanding
+	11, // 4: shim.v1.SessionProfile.chat:type_name -> shim.v1.SessionProfileChat
+	8,  // 5: shim.v1.SessionProfileAgent.standing:type_name -> shim.v1.SessionProfileAgentStanding
 	3,  // 6: shim.v1.SessionProfileAgent.landing:type_name -> shim.v1.SessionProfileAgentLanding
 	4,  // 7: shim.v1.SessionProfileAgentLanding.through_queue:type_name -> shim.v1.SessionProfileAgentLandingThroughQueue
 	5,  // 8: shim.v1.SessionProfileAgentLanding.bypassing_queue:type_name -> shim.v1.SessionProfileAgentLandingBypassingQueue
 	6,  // 9: shim.v1.SessionProfileAgentLanding.deploy_mediator:type_name -> shim.v1.SessionProfileAgentLandingDeployMediator
-	8,  // 10: shim.v1.SessionProfileAgentStanding.main_workspace:type_name -> shim.v1.SessionProfileAgentMainWorkspace
-	9,  // 11: shim.v1.SessionProfileAgentStanding.linked_workspace:type_name -> shim.v1.SessionProfileAgentLinkedWorkspace
-	11, // 12: shim.v1.SessionProfileChat.system_prompt:type_name -> shim.v1.SessionProfileChatSystemPrompt
-	27, // 13: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
-	28, // 14: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	29, // 15: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
-	14, // 16: shim.v1.StartSessionResume.rebind:type_name -> shim.v1.StartSessionRebind
-	30, // 17: shim.v1.StartSessionResume.rolled_back_turns:type_name -> conversation.v1.TurnId
-	27, // 18: shim.v1.StartSessionResume.model:type_name -> conversation.v1.AgentModel
-	16, // 19: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
-	17, // 20: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
-	31, // 21: shim.v1.StartSessionResponse.book:type_name -> conversation.v1.AgentId
-	32, // 22: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
-	33, // 23: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
-	18, // 24: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
-	23, // 25: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
-	24, // 26: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
-	25, // 27: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
-	26, // 28: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
-	19, // 29: shim.v1.StartSessionVendorStartFailed.retryable:type_name -> shim.v1.StartSessionVendorStartRetryable
-	22, // 30: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
-	20, // 31: shim.v1.StartSessionVendorStartRetryable.network:type_name -> shim.v1.StartSessionVendorStartNetwork
-	21, // 32: shim.v1.StartSessionVendorStartRetryable.vendor:type_name -> shim.v1.StartSessionVendorStartVendor
-	34, // 33: shim.v1.StartSessionVendorStartRejected.api_failure:type_name -> conversation.v1.ApiRequestFailed
-	35, // 34: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	7,  // 10: shim.v1.SessionProfileAgentLanding.production_mediator:type_name -> shim.v1.SessionProfileAgentLandingProductionMediator
+	9,  // 11: shim.v1.SessionProfileAgentStanding.main_workspace:type_name -> shim.v1.SessionProfileAgentMainWorkspace
+	10, // 12: shim.v1.SessionProfileAgentStanding.linked_workspace:type_name -> shim.v1.SessionProfileAgentLinkedWorkspace
+	12, // 13: shim.v1.SessionProfileChat.system_prompt:type_name -> shim.v1.SessionProfileChatSystemPrompt
+	28, // 14: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
+	29, // 15: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	30, // 16: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
+	15, // 17: shim.v1.StartSessionResume.rebind:type_name -> shim.v1.StartSessionRebind
+	31, // 18: shim.v1.StartSessionResume.rolled_back_turns:type_name -> conversation.v1.TurnId
+	28, // 19: shim.v1.StartSessionResume.model:type_name -> conversation.v1.AgentModel
+	17, // 20: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
+	18, // 21: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
+	32, // 22: shim.v1.StartSessionResponse.book:type_name -> conversation.v1.AgentId
+	33, // 23: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
+	34, // 24: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
+	19, // 25: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
+	24, // 26: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
+	25, // 27: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
+	26, // 28: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
+	27, // 29: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
+	20, // 30: shim.v1.StartSessionVendorStartFailed.retryable:type_name -> shim.v1.StartSessionVendorStartRetryable
+	23, // 31: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
+	21, // 32: shim.v1.StartSessionVendorStartRetryable.network:type_name -> shim.v1.StartSessionVendorStartNetwork
+	22, // 33: shim.v1.StartSessionVendorStartRetryable.vendor:type_name -> shim.v1.StartSessionVendorStartVendor
+	35, // 34: shim.v1.StartSessionVendorStartRejected.api_failure:type_name -> conversation.v1.ApiRequestFailed
+	36, // 35: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }
@@ -2035,18 +2099,19 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 		(*SessionProfileAgentLanding_ThroughQueue)(nil),
 		(*SessionProfileAgentLanding_BypassingQueue)(nil),
 		(*SessionProfileAgentLanding_DeployMediator)(nil),
+		(*SessionProfileAgentLanding_ProductionMediator)(nil),
 	}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[7].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_msgTypes[8].OneofWrappers = []any{
 		(*SessionProfileAgentStanding_MainWorkspace)(nil),
 		(*SessionProfileAgentStanding_LinkedWorkspace)(nil),
 	}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[12].OneofWrappers = []any{}
 	file_shim_v1_endpoint_start_session_proto_msgTypes[13].OneofWrappers = []any{}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[15].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_msgTypes[14].OneofWrappers = []any{}
+	file_shim_v1_endpoint_start_session_proto_msgTypes[16].OneofWrappers = []any{
 		(*StartSessionResponse_Success)(nil),
 		(*StartSessionResponse_Failure)(nil),
 	}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[17].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_msgTypes[18].OneofWrappers = []any{
 		(*StartSessionFailure_Cold)(nil),
 		(*StartSessionFailure_VendorStartFailed)(nil),
 		(*StartSessionFailure_UnknownSession)(nil),
@@ -2054,22 +2119,22 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 		(*StartSessionFailure_ConversationOwned)(nil),
 		(*StartSessionFailure_LockHolderUnavailable)(nil),
 	}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[18].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_msgTypes[19].OneofWrappers = []any{
 		(*StartSessionVendorStartFailed_Retryable)(nil),
 		(*StartSessionVendorStartFailed_Rejected)(nil),
 	}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[19].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_msgTypes[20].OneofWrappers = []any{
 		(*StartSessionVendorStartRetryable_Network)(nil),
 		(*StartSessionVendorStartRetryable_Vendor)(nil),
 	}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[22].OneofWrappers = []any{}
+	file_shim_v1_endpoint_start_session_proto_msgTypes[23].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_start_session_proto_rawDesc), len(file_shim_v1_endpoint_start_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

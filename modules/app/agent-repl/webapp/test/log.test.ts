@@ -819,7 +819,7 @@ describe("log sites", () => {
     createLogger("webapp.test.sites").info("hello {name}", { operation: "test.site" }, { name: "world" });
     await flushAndSettle(h);
     // ASSERT
-    expect(h.sent.map((r) => [r.site, r.template])).toEqual([[siteKey("webapp", "webapp.test.sites", "hello {name}"), "hello {name}"]]);
+    expect(h.sent.map((r) => [r.siteKey?.hex, r.template])).toEqual([[siteKey("webapp", "webapp.test.sites", "hello {name}"), "hello {name}"]]);
   });
 
   it("renders the forwarded message from the template's named values", async () => {
@@ -860,7 +860,7 @@ describe("log sites", () => {
     createLogger("webapp.test.two").info("same words", { operation: "test.site" });
     await flushAndSettle(h);
     // ASSERT
-    expect(new Set(h.sent.map((r) => r.site)).size).toBe(2);
+    expect(new Set(h.sent.map((r) => r.siteKey?.hex)).size).toBe(2);
   });
 
   it("refuses a named value the context already states", () => {
@@ -883,7 +883,7 @@ describe("log sites", () => {
     createLogger("webapp.test.helper").log("warn", message, { operation: "test.site" });
     await flushAndSettle(h);
     // ASSERT
-    expect(h.sent.map((r) => [r.level.case, r.message, r.site])).toEqual([
+    expect(h.sent.map((r) => [r.level.case, r.message, r.siteKey?.hex])).toEqual([
       ["warn", "the chain broke", siteKey("webapp", "webapp.test.caller", "the {thing} broke")],
     ]);
   });

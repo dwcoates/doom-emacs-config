@@ -366,7 +366,7 @@ export function buildClientLogRecord(record: WebappLogRecord): ClientLogRecord {
   return create(ClientLogRecordSchema, {
     level: { case: LEVEL_ARM[record.level], value: {} },
     operation: record.operation,
-    site: record.site,
+    siteKey: { hex: record.site },
     template: record.template,
     message: record.message,
     context: context as JsonObject,

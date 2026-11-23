@@ -418,6 +418,9 @@ const (
 	AgentReplRecordDirectLandingProcedure = "/agentrepl.v1.AgentRepl/RecordDirectLanding"
 	// AgentReplListLogSitesProcedure is the fully-qualified name of the AgentRepl's ListLogSites RPC.
 	AgentReplListLogSitesProcedure = "/agentrepl.v1.AgentRepl/ListLogSites"
+	// AgentReplUpdateProductionMediationProcedure is the fully-qualified name of the AgentRepl's
+	// UpdateProductionMediation RPC.
+	AgentReplUpdateProductionMediationProcedure = "/agentrepl.v1.AgentRepl/UpdateProductionMediation"
 	// AgentReplFindWorkspacesProcedure is the fully-qualified name of the AgentRepl's FindWorkspaces
 	// RPC.
 	AgentReplFindWorkspacesProcedure = "/agentrepl.v1.AgentRepl/FindWorkspaces"
@@ -662,6 +665,7 @@ var (
 	agentReplListMergeLandingsMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ListMergeLandings")
 	agentReplRecordDirectLandingMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("RecordDirectLanding")
 	agentReplListLogSitesMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("ListLogSites")
+	agentReplUpdateProductionMediationMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("UpdateProductionMediation")
 	agentReplFindWorkspacesMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("FindWorkspaces")
 	agentReplLocateWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("LocateWorkspace")
 	agentReplSubscribeWorkspaceMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
@@ -1153,6 +1157,11 @@ type AgentReplClient interface {
 	// per-deploy tallies rather than the logs. `agent-repld logs sites`
 	// answers it. See endpoint_list_log_sites.proto.
 	ListLogSites(context.Context, *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error)
+	// The production mediator's decisions: end the check it is owed with
+	// nothing to do or with children to dispatch, or fold one of its children
+	// into another. `agent-repld production-mediation` asks it. See
+	// endpoint_update_production_mediation.proto.
+	UpdateProductionMediation(context.Context, *connect.Request[v1.UpdateProductionMediationRequest]) (*connect.Response[v1.UpdateProductionMediationResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
 	// activity window, standing, text and whether the sidebar draws them, each
 	// with its name, summary and, when drawn, its roster section and live
@@ -2136,6 +2145,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		updateProductionMediation: connect.NewClient[v1.UpdateProductionMediationRequest, v1.UpdateProductionMediationResponse](
+			httpClient,
+			baseURL+AgentReplUpdateProductionMediationProcedure,
+			connect.WithSchema(agentReplUpdateProductionMediationMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		findWorkspaces: connect.NewClient[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse](
 			httpClient,
 			baseURL+AgentReplFindWorkspacesProcedure,
@@ -2499,6 +2514,7 @@ type agentReplClient struct {
 	listMergeLandings                  *connect.Client[v1.ListMergeLandingsRequest, v1.ListMergeLandingsResponse]
 	recordDirectLanding                *connect.Client[v1.RecordDirectLandingRequest, v1.RecordDirectLandingResponse]
 	listLogSites                       *connect.Client[v1.ListLogSitesRequest, v1.ListLogSitesResponse]
+	updateProductionMediation          *connect.Client[v1.UpdateProductionMediationRequest, v1.UpdateProductionMediationResponse]
 	findWorkspaces                     *connect.Client[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse]
 	locateWorkspace                    *connect.Client[v1.LocateWorkspaceRequest, v1.LocateWorkspaceResponse]
 	subscribeWorkspace                 *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
@@ -3231,6 +3247,11 @@ func (c *agentReplClient) ListLogSites(ctx context.Context, req *connect.Request
 	return c.listLogSites.CallUnary(ctx, req)
 }
 
+// UpdateProductionMediation calls agentrepl.v1.AgentRepl.UpdateProductionMediation.
+func (c *agentReplClient) UpdateProductionMediation(ctx context.Context, req *connect.Request[v1.UpdateProductionMediationRequest]) (*connect.Response[v1.UpdateProductionMediationResponse], error) {
+	return c.updateProductionMediation.CallUnary(ctx, req)
+}
+
 // FindWorkspaces calls agentrepl.v1.AgentRepl.FindWorkspaces.
 func (c *agentReplClient) FindWorkspaces(ctx context.Context, req *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {
 	return c.findWorkspaces.CallUnary(ctx, req)
@@ -3861,6 +3882,11 @@ type AgentReplHandler interface {
 	// per-deploy tallies rather than the logs. `agent-repld logs sites`
 	// answers it. See endpoint_list_log_sites.proto.
 	ListLogSites(context.Context, *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error)
+	// The production mediator's decisions: end the check it is owed with
+	// nothing to do or with children to dispatch, or fold one of its children
+	// into another. `agent-repld production-mediation` asks it. See
+	// endpoint_update_production_mediation.proto.
+	UpdateProductionMediation(context.Context, *connect.Request[v1.UpdateProductionMediationRequest]) (*connect.Response[v1.UpdateProductionMediationResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
 	// activity window, standing, text and whether the sidebar draws them, each
 	// with its name, summary and, when drawn, its roster section and live
@@ -4840,6 +4866,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplUpdateProductionMediationHandler := connect.NewUnaryHandler(
+		AgentReplUpdateProductionMediationProcedure,
+		svc.UpdateProductionMediation,
+		connect.WithSchema(agentReplUpdateProductionMediationMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplFindWorkspacesHandler := connect.NewUnaryHandler(
 		AgentReplFindWorkspacesProcedure,
 		svc.FindWorkspaces,
@@ -5339,6 +5371,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplRecordDirectLandingHandler.ServeHTTP(w, r)
 		case AgentReplListLogSitesProcedure:
 			agentReplListLogSitesHandler.ServeHTTP(w, r)
+		case AgentReplUpdateProductionMediationProcedure:
+			agentReplUpdateProductionMediationHandler.ServeHTTP(w, r)
 		case AgentReplFindWorkspacesProcedure:
 			agentReplFindWorkspacesHandler.ServeHTTP(w, r)
 		case AgentReplLocateWorkspaceProcedure:
@@ -5972,6 +6006,10 @@ func (UnimplementedAgentReplHandler) RecordDirectLanding(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) ListLogSites(context.Context, *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListLogSites is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdateProductionMediation(context.Context, *connect.Request[v1.UpdateProductionMediationRequest]) (*connect.Response[v1.UpdateProductionMediationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateProductionMediation is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {

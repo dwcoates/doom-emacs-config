@@ -312,6 +312,11 @@ const (
 	// it, and drawn as an ordinary prompt bubble the daemon sent, so the user
 	// reads in the feed what the thread said.
 	PromptOrigin_PROMPT_ORIGIN_SLACK_THREAD_NOTICE PromptOrigin = 54
+	// The production mediator's brief: a deploy finished, and the span the
+	// version before it served alone is ready to review
+	// (repoconfig.v1.LifecycleConfig.production_checks). Nothing waits on it.
+	// Drawn as the daemon's prompt to its own hidden workspace.
+	PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION PromptOrigin = 55
 )
 
 // Enum value maps for PromptOrigin.
@@ -371,6 +376,7 @@ var (
 		52: "PROMPT_ORIGIN_DEPLOY_MEDIATION",
 		53: "PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE",
 		54: "PROMPT_ORIGIN_SLACK_THREAD_NOTICE",
+		55: "PROMPT_ORIGIN_PRODUCTION_MEDIATION",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -427,6 +433,7 @@ var (
 		"PROMPT_ORIGIN_DEPLOY_MEDIATION":            52,
 		"PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE":  53,
 		"PROMPT_ORIGIN_SLACK_THREAD_NOTICE":         54,
+		"PROMPT_ORIGIN_PRODUCTION_MEDIATION":        55,
 	}
 )
 
@@ -461,7 +468,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xcd\x12\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xfb\x12\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x1a\x04\x98\xa6\x1d\x02\x12*\n" +
@@ -517,7 +524,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103\x1a\x04\x98\xa6\x1d\x02\x12(\n" +
 	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104\x1a\x04\x98\xa6\x1d\x05\x122\n" +
 	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105\x1a\x04\x98\xa6\x1d\x06\x12+\n" +
-	"!PROMPT_ORIGIN_SLACK_THREAD_NOTICE\x106\x1a\x04\x98\xa6\x1d\x06B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"!PROMPT_ORIGIN_SLACK_THREAD_NOTICE\x106\x1a\x04\x98\xa6\x1d\x06\x12,\n" +
+	"\"PROMPT_ORIGIN_PRODUCTION_MEDIATION\x107\x1a\x04\x98\xa6\x1d\x06B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

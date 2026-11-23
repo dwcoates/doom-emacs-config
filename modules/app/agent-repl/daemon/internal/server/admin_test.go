@@ -641,7 +641,7 @@ func TestClientLogRoutesEachRuntimeToItsOwningSink(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			record := &agentreplv1.ClientLogRecord{
-				Site: "0123456789ab", Template: "a test record",
+				SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 				Level:     &agentreplv1.ClientLogRecord_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}},
 				Operation: "client.render",
 				Message:   "a render stalled",
@@ -678,7 +678,7 @@ func TestClientLogForwardsTheClientsTimestamp(t *testing.T) {
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
 			Message:   "rendered",
@@ -702,7 +702,7 @@ func TestClientLogForwardsTheClientsVerboseClass(t *testing.T) {
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.trace",
 			Message:   "traced",
@@ -726,7 +726,7 @@ func TestClientLogForwardsTheClientsNormalClass(t *testing.T) {
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
 			Message:   "rendered",
@@ -756,7 +756,7 @@ func TestClientLogRecordsNothingOfItsOwnOnSuccess(t *testing.T) {
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
 			Message:   "rendered",
@@ -787,7 +787,7 @@ func TestClientLogAnswersTheLandedUnknownWorkspaceArm(t *testing.T) {
 	resp, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"}},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
 			Message:   "a late line after the close",
@@ -817,7 +817,7 @@ func TestClientLogRecordsTheUnknownWorkspaceRefusalAtInfo(t *testing.T) {
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: &workspacev1.WorkspaceRef{Id: "ws-forgotten"}},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.render",
 			Message:   "a late line after the close",
@@ -872,7 +872,7 @@ func TestClientLogIsFiledWhateverTheServingStanding(t *testing.T) {
 			resp, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 				Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 				Record: &agentreplv1.ClientLogRecord{
-					Site: "0123456789ab", Template: "a test record",
+					SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 					Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 					Operation: "sidecar.tail.pickup",
 					Message:   "a record forwarded across the handover",
@@ -901,7 +901,7 @@ func clientLogOnce(h *harness) error {
 	_, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "webapp.drain.banner",
 			Message:   "a record forwarded while the daemon goes away",
@@ -1090,7 +1090,7 @@ func TestClientLogFilesAWebhostRecordCentrally(t *testing.T) {
 	if _, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Source: &agentreplv1.ClientLogRequest_Webhost{Webhost: &agentreplv1.ClientLogWebhost{}},
 		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
+			SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
 			Operation: "sidebar.roster",
 			Message:   "drew the roster",

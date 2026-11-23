@@ -104,6 +104,7 @@ message SessionProfileAgentLanding {
     SessionProfileAgentLandingThroughQueue through_queue = 1;
     SessionProfileAgentLandingBypassingQueue bypassing_queue = 2;
     SessionProfileAgentLandingDeployMediator deploy_mediator = 5;
+    SessionProfileAgentLandingProductionMediator production_mediator = 6;
   }
 }
 // The ordinary landing: every change reaches the main branch through the
@@ -122,6 +123,15 @@ message SessionProfileAgentLandingBypassingQueue {}
 // itself, fix them and finish, landing directly on the main branch. (Added
 // 2026-11-17.)
 message SessionProfileAgentLandingDeployMediator {}
+// The production mediator's landing: the workspace is its repository's
+// standing production mediator (repoconfig.v1.LifecycleConfig
+// .production_checks). After each deploy it reviews what production logged
+// between the two landings before it, and decides through
+// agentrepl.v1.UpdateProductionMediation: nothing to do, or children to
+// dispatch. It changes no code and lands nothing itself; every fix is a
+// one-shot child's, landing at the front of the merge queue. Its metaprompt
+// is its own text (metaprompt-production-mediator.md).
+message SessionProfileAgentLandingProductionMediator {}
 
 // How the agent's workspace stands within its repository. The set arm IS the
 // standing.

@@ -113,7 +113,7 @@ func TestListLogSitesAnswersTheTallysSites(t *testing.T) {
 			SinceMs: logSitesAt.UnixMilli(), UntilMs: logSitesAt.Add(time.Hour).UnixMilli(),
 		}}},
 		Sites: []*agentreplv1.LogSite{{
-			Key: "0123456789ab", Template: "said {what}", Runtime: "daemon",
+			Site: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "said {what}", Runtime: "daemon",
 			Level:     &agentreplv1.LogSiteLevel{Level: &agentreplv1.LogSiteLevel_Error{Error: &agentreplv1.ClientLogLevelError{}}},
 			Operation: "daemon.test", Count: 3,
 			FirstSeenMs: logSitesAt.Add(time.Minute).UnixMilli(), LastSeenMs: logSitesAt.Add(2 * time.Minute).UnixMilli(),

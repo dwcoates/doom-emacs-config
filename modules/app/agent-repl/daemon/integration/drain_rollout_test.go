@@ -834,7 +834,7 @@ func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 				if _, err := reader.ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
 					Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
 					Record: &agentreplv1.ClientLogRecord{
-						Site: "0123456789ab", Template: "a test record",
+						SiteKey: &agentreplv1.LogSiteKey{Hex: "0123456789ab"}, Template: "a test record",
 						Level:     &agentreplv1.ClientLogRecord_Debug{Debug: &agentreplv1.ClientLogLevelDebug{}},
 						Operation: "integration.promotion-read",
 						Message:   "a registry read across the promotion",

@@ -16,13 +16,15 @@ import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
 import type { ClientLogLevelDebug, ClientLogLevelError, ClientLogLevelInfo, ClientLogLevelWarn } from "./log_level_pb";
 import { file_agentrepl_v1_log_level } from "./log_level_pb";
+import type { LogSiteKey } from "./log_site_key_pb";
+import { file_agentrepl_v1_log_site_key } from "./log_site_key_pb";
 import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_client_log.proto.
  */
 export const file_agentrepl_v1_endpoint_client_log: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxIq8BChBDbGllbnRMb2dSZXF1ZXN0Ei8KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIxCgd3ZWJob3N0GAMgASgLMh4uYWdlbnRyZXBsLnYxLkNsaWVudExvZ1dlYmhvc3RIABItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkQggKBnNvdXJjZSISChBDbGllbnRMb2dXZWJob3N0IvUDCg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEQoJdGltZXN0YW1wGAggASgJEg8KB3ZlcmJvc2UYCSABKAgSNgoGd2ViYXBwGAogASgLMiQuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVXZWJhcHBIARI4CgdzaWRlY2FyGAsgASgLMiUuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVTaWRlY2FySAESDAoEc2l0ZRgMIAEoCRIQCgh0ZW1wbGF0ZRgNIAEoCUIHCgVsZXZlbEIJCgdydW50aW1lIhgKFkNsaWVudExvZ1J1bnRpbWVXZWJhcHAiGQoXQ2xpZW50TG9nUnVudGltZVNpZGVjYXIifwoRQ2xpZW50TG9nUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLmFnZW50cmVwbC52MS5DbGllbnRMb2dTdWNjZXNzSAASLQoFZXJyb3IYAiABKAsyHC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nRXJyb3JIAEIICgZyZXN1bHQiEgoQQ2xpZW50TG9nU3VjY2VzcyJfCg5DbGllbnRMb2dFcnJvchJEChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzInLmFnZW50cmVwbC52MS5DbGllbnRMb2dVbmtub3duV29ya3NwYWNlSABCBwoFY2F1c2UiGwoZQ2xpZW50TG9nVW5rbm93bldvcmtzcGFjZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_google_protobuf_struct, file_agentrepl_v1_log_level]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxIq8BChBDbGllbnRMb2dSZXF1ZXN0Ei8KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIxCgd3ZWJob3N0GAMgASgLMh4uYWdlbnRyZXBsLnYxLkNsaWVudExvZ1dlYmhvc3RIABItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkQggKBnNvdXJjZSISChBDbGllbnRMb2dXZWJob3N0Ip8ECg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEQoJdGltZXN0YW1wGAggASgJEg8KB3ZlcmJvc2UYCSABKAgSNgoGd2ViYXBwGAogASgLMiQuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVXZWJhcHBIARI4CgdzaWRlY2FyGAsgASgLMiUuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVTaWRlY2FySAESKgoIc2l0ZV9rZXkYDiABKAsyGC5hZ2VudHJlcGwudjEuTG9nU2l0ZUtleRIQCgh0ZW1wbGF0ZRgNIAEoCUIHCgVsZXZlbEIJCgdydW50aW1lSgQIDBANUgRzaXRlIhgKFkNsaWVudExvZ1J1bnRpbWVXZWJhcHAiGQoXQ2xpZW50TG9nUnVudGltZVNpZGVjYXIifwoRQ2xpZW50TG9nUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLmFnZW50cmVwbC52MS5DbGllbnRMb2dTdWNjZXNzSAASLQoFZXJyb3IYAiABKAsyHC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nRXJyb3JIAEIICgZyZXN1bHQiEgoQQ2xpZW50TG9nU3VjY2VzcyJfCg5DbGllbnRMb2dFcnJvchJEChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzInLmFnZW50cmVwbC52MS5DbGllbnRMb2dVbmtub3duV29ya3NwYWNlSABCBwoFY2F1c2UiGwoZQ2xpZW50TG9nVW5rbm93bldvcmtzcGFjZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_google_protobuf_struct, file_agentrepl_v1_log_level, file_agentrepl_v1_log_site_key]);
 
 /**
  * One forwarded record and the sink it is filed in.
@@ -204,15 +206,15 @@ export type ClientLogRecord = Message<"agentrepl.v1.ClientLogRecord"> & {
   } | { case: undefined; value?: undefined };
 
   /**
-   * The key of the log call that wrote the record: 12 lowercase hex, which
-   * the client derives from its runtime, the call's scope and its template
-   * (logging-contract.md "Log sites"). Required: a record with no site, or
-   * one not 12 lowercase hex, is malformed (Connect InvalidArgument), since a
-   * record the production checks cannot count is a record they miss.
+   * The key of the log call that wrote the record, which the client derives
+   * from its runtime, the call's scope and its template (logging-contract.md
+   * "Log sites"). Required: a record with no key, or one not 12 lowercase
+   * hex, is malformed (Connect InvalidArgument), since a record the
+   * production checks cannot count is a record they miss.
    *
-   * @generated from field: string site = 12;
+   * @generated from field: agentrepl.v1.LogSiteKey site_key = 14;
    */
-  site: string;
+  siteKey?: LogSiteKey | undefined;
 
   /**
    * The call's unrendered message, its placeholders ({name}) unfilled: the
