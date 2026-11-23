@@ -55,10 +55,12 @@ func WithVisibilitySink(sink VisibilitySink) Option {
 }
 
 // resolveArms answers every registry workspace's status arm, once per render,
-// so the visibility (which reads it) is known before any row is drawn and
-// every row draws the arm it was judged by. The caller holds r.mu.
-func (r *resolver) resolveArms(rc rowContext) map[ids.WorkspaceID]string {
-	arms := make(map[ids.WorkspaceID]string, len(r.state.reg.Workspaces))
+// so every row draws it, and the session arm the visibility is judged by
+// (sessionArm: the status arm but for the opening marker), known before any
+// row is drawn. The caller holds r.mu.
+func (r *resolver) resolveArms(rc rowContext) (arms, judged map[ids.WorkspaceID]string) {
+	arms = make(map[ids.WorkspaceID]string, len(r.state.reg.Workspaces))
+	judged = make(map[ids.WorkspaceID]string, len(r.state.reg.Workspaces))
 	for _, rec := range r.state.reg.Workspaces {
 		s := r.state.workspace(rec.ID)
 		rowLog := r.logFor(rec.ID)
@@ -77,12 +79,13 @@ func (r *resolver) resolveArms(rc rowContext) map[ids.WorkspaceID]string {
 			// skipped here rather than run against a frozen footer.
 			rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace not yet adopted",
 				dlog.Context{"arm": arm, "source": "incumbent"})
-			arms[rec.ID] = arm
+			arms[rec.ID], judged[rec.ID] = arm, arm
 			continue
 		}
-		arms[rec.ID] = statusArm(s, rec, rc.sessions[rec.ID], r.footer.Status(rec.ID), r.now(), rowLog)
+		judged[rec.ID] = sessionArm(s, rec, rc.sessions[rec.ID], r.footer.Status(rec.ID), r.now(), rowLog)
+		arms[rec.ID] = openingOver(s, judged[rec.ID])
 	}
-	return arms
+	return arms, judged
 }
 
 // visibilityInputs states every registry workspace's visibility inputs. An

@@ -537,8 +537,9 @@ func (r *resolver) render(log dlog.Logger, cause string) (*frontendv1.RosterPush
 	reg := r.state.reg
 	reg.Current = r.state.selected
 	repos, orphans := openTree(reg, log)
-	rc.arms = r.resolveArms(rc)
-	r.resolveVisibility(repos, rc, rc.arms)
+	var judged map[ids.WorkspaceID]string
+	rc.arms, judged = r.resolveArms(rc)
+	r.resolveVisibility(repos, rc, judged)
 
 	workspaces := &frontendv1.WorkspaceRoster{
 		Repository: r.repositoryView(repos, orphans, rc, log),
