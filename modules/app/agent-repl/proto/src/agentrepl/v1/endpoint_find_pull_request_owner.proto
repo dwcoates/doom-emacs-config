@@ -1,0 +1,91 @@
+// endpoint_find_pull_request_owner.proto — FindPullRequestOwner: which
+// workspace owns the pull request a clicked link names. WEB LINK section.
+//
+// A SHIFT-CLICK ON A PULL REQUEST LINK SWITCHES TO ITS WORKSPACE. A page asks
+// this for the link's url and, given an owner, makes the feed's one jump to it
+// (`SelectInEditor`, after `OpenWorkspace` for a closed owner), rather than
+// opening the link in the browser. The daemon alone decides whether a url
+// names a pull request and who owns it, so the page never parses a GitHub
+// address of its own.
+//
+// THE OWNER IS THE CANONICAL OWNED LINK'S WORKSPACE: the workspace that stored
+// the pull request's link owned (agentrepl.v1.WorkspaceLinkOwned). Among open
+// workspaces that is the one holding the pull request's owned-link
+// subscription, which the store admits for one workspace only, so at most one
+// open workspace is ever the answer. A closed workspace's ownership ends with
+// its close, yet its owned link stays stored: when no open workspace owns the
+// pull request, the most recently closed workspace that stored it owned is the
+// owner, so a merged pull request still reaches the workspace that made it.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The clicked link. Validation failures (a blank url) are Connect
+// InvalidArgument, never an arm.
+message FindPullRequestOwnerRequest {
+  // The url exactly as the link carries it. Any address a pull request's page
+  // is reached by names it: `/files`, `/commits`, a fragment or a query on the
+  // pull request's own address names the same pull request.
+  string url = 1;
+}
+
+// THE ARM IS THE OUTCOME. A failure to read the daemon's store is a Connect
+// Internal error, never an arm: every answer below is a domain answer.
+message FindPullRequestOwnerResponse {
+  oneof result {
+    FindPullRequestOwnerSuccess success = 1;
+  }
+}
+
+// What the url names, and who owns it.
+message FindPullRequestOwnerSuccess {
+  // THE ARM IS THE ANSWER, and the three are exclusive: a url either names no
+  // pull request, or names one that some workspace owns or that none does.
+  oneof answer {
+    // A workspace owns the pull request: the page switches to it.
+    FindPullRequestOwnerOwned owned = 1;
+    // The url names a pull request no workspace, open or closed, stored owned.
+    // The page draws that at the link and opens nothing.
+    FindPullRequestOwnerUnowned unowned = 2;
+    // The url names no GitHub pull request, so a shift-click on it is an
+    // ordinary click: the page opens it in the browser as it would without
+    // the shift.
+    FindPullRequestOwnerNotPullRequest not_pull_request = 3;
+  }
+}
+
+// The workspace that owns the pull request, and how a click reaches it.
+message FindPullRequestOwnerOwned {
+  // The owning workspace, echoed verbatim into the page's `SelectInEditor`
+  // (and `OpenWorkspace` for a closed one).
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Whether the owner is open or closed now. THE SET ARM IS WHAT THE CLICK
+  // DOES: an open owner is selected, a closed one is reopened and then
+  // selected, as a workspace mention's click does
+  // (frontend.v1.WorkspaceMentionTarget.standing). Always set.
+  oneof standing {
+    // The owner is open: the click selects it.
+    FindPullRequestOwnerOpen open = 2;
+    // The owner is closed: the click reopens it, then selects it.
+    FindPullRequestOwnerClosed closed = 3;
+  }
+}
+
+// The owner is open. DELIBERATELY EMPTY: the arm is the standing.
+message FindPullRequestOwnerOpen {}
+
+// The owner is closed. DELIBERATELY EMPTY: the arm is the standing.
+message FindPullRequestOwnerClosed {}
+
+// No workspace owns the pull request. DELIBERATELY EMPTY: the arm is the
+// answer.
+message FindPullRequestOwnerUnowned {}
+
+// The url names no GitHub pull request. DELIBERATELY EMPTY: the arm is the
+// answer.
+message FindPullRequestOwnerNotPullRequest {}
