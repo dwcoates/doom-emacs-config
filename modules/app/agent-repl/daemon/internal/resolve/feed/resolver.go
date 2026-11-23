@@ -1184,13 +1184,17 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// THE ROW'S ORDER KEY IS FIXED AT ITS FIRST DRAW and stated on every
 	// publication of it (order.go), so it is settled before the snapshot is
 	// compared with what was published last.
+	// A restatement is judged against the key the row had before this
+	// publication; a first draw has none, so it is judged against its own.
 	rank, how := f.rank[id], "restated"
+	placed := rank.key
 	if !seen {
 		rank, how = r.firstRank(s, f, id, at)
+		placed = rank.key
 	} else {
 		rank, how = r.settleRank(s, f, id, rank, at)
 	}
-	r.stampOrder(s, f, id, snapshot, rank.key)
+	r.stampOrder(s, f, id, snapshot, placed, rank.key)
 	if s.plane != planeLive {
 		s.replayTail[f.key] = rank.key
 	}

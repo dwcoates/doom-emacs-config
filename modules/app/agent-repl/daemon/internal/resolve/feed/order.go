@@ -202,12 +202,15 @@ func (r *resolver) predecessor(s *wsState, f *feedState, class byte) string {
 // condition can never disagree with the key a reader sorts by.
 //
 // A KEY NEVER CHANGES once placed. A family restating a row it copied carries
-// the key that row already had; one carrying any OTHER key is this resolver
-// contradicting itself, recorded at ERROR — and the row keeps its own key, so
-// a reader never sees it move. The one move a row makes, a pinned row
-// settling, is decided by settleRank before this, never by a carried key.
-func (r *resolver) stampOrder(s *wsState, f *feedState, id string, snapshot *frontendv1.FeedRow, key string) {
-	if carried := snapshot.GetOrder().GetKey(); carried != "" && carried != key {
+// the key that row already had, so the carried key is judged against PLACED,
+// the key the row had before this publication, while KEY is the one stamped.
+// One carrying any OTHER key is this resolver contradicting itself, recorded
+// at ERROR — and the row keeps its own key, so a reader never sees it move.
+// The one move a row makes, a pinned row settling, is decided by settleRank
+// before this, never by a carried key: a settling row restated with the pin
+// key it had is no contradiction, and takes its settled key all the same.
+func (r *resolver) stampOrder(s *wsState, f *feedState, id string, snapshot *frontendv1.FeedRow, placed, key string) {
+	if carried := snapshot.GetOrder().GetKey(); carried != "" && carried != placed {
 		r.logger(s.id).Error("daemon.feed.order_changed",
 			"a row was restated with an order key other than the one it was placed with; it keeps its original key",
 			dlog.Context{"feed": f.key, "row": id, "key": key, "restated_key": carried})
