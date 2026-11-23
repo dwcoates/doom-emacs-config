@@ -287,7 +287,14 @@ mechanics (`integration/shareddaemon_test.go`).
   naming a workspace it registered, by `workspace_dir` or, for a central
   record stamped with the id alone, `workspace_id`; another case's record
   never ends its wait. A shared stub's runs are read by what names the
-  workspace in them (a banner's group), never whole.
+  workspace in them (a banner's group), never whole. A view's
+  path-taking waiters (`AwaitLogRecord`, `AwaitLogRecordWithin`,
+  `AwaitLogRecordAfter`, `AwaitRunLogRecordFromAnyProcess`) refuse the run
+  log outright, so an unscoped wait fails the case rather than matching a
+  sibling's record. A record that names no workspace (a refused stream open,
+  a boot record) is awaited through `Daemon.AwaitUnscopedRunLogRecord`. A log
+  site stamps its workspace under `dlog.KeyWorkspaceID`, never a bare
+  `"workspace"` context key, or no view owns the record.
 - **A view's idle barrier is its own slice's** (`ExpectNoPush`,
   `ExpectNoPushMatching`, `ExpectFileUnchanged`, `Daemon.AwaitIdle`): it names
   the view's workspaces (`agentrepl.v1.AwaitIdleRequest.workspaces`) and waits

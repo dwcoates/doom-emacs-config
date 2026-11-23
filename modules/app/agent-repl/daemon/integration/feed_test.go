@@ -132,7 +132,7 @@ func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 	// an unlanded arm.
 	// THE RECORD IS FOUND BY ITS OWN RPC AND CAUSE: on a shared daemon the
 	// other rpcs' refusals, and other cases', are in the run log beside it.
-	rec := f.d.AwaitLogRecord(f.d.RunLogPath(), "the WatchFeed unknown_token transport close", func(r harness.LogRecord) bool {
+	rec := f.d.AwaitUnscopedRunLogRecord("the WatchFeed unknown_token transport close", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.refusal.transport_closed" && r.Context["rpc"] == "WatchFeed" && r.Context["cause"] == "unknown_token"
 	})
 	if !strings.EqualFold(rec.Level, "info") {

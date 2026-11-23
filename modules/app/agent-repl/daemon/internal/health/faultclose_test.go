@@ -193,7 +193,7 @@ func TestACloseIsRecordedAtInfoWithKindFaultEdgeAndHowLongItStood(t *testing.T) 
 	// Assert
 	want := dlog.Context{
 		"kind": KindBounceUnknown, "fault": string(id), "edge": string(EdgeHealthyAttach),
-		"workspace": string(ws), "stood": "1m30s",
+		dlog.KeyWorkspaceID: string(ws), "stood": "1m30s",
 	}
 	for _, r := range log.Records() {
 		if r.Level != "info" || r.Operation != opCloseOnEdge {

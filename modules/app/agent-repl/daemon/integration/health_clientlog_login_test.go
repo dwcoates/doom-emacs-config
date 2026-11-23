@@ -330,11 +330,8 @@ func TestALinkSeveredUnderALiveShimIsReportedUntilItServesAgain(t *testing.T) {
 	awaitFooter(t, f, footer, "disconnected.severed once the link dies", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil
 	})
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the severing closed once the link served again", func(r harness.LogRecord) bool {
-		// The canonical daemon's run log is every parallel test's, so the
-		// record is this test's workspace's own.
-		return r.Operation == "daemon.health.close_on_edge" && r.Context["kind"] == "link_severed" && r.Context["edge"] == "link_restored" &&
-			r.Context["workspace"] == f.ws.GetId()
+	f.d.AwaitOwnRunLogRecord("the severing closed once the link served again", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.health.close_on_edge" && r.Context["kind"] == "link_severed" && r.Context["edge"] == "link_restored"
 	})
 	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
 	if err != nil || resp.Msg.GetSuccess().GetHealthy() == nil {

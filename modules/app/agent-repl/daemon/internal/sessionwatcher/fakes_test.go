@@ -1784,6 +1784,20 @@ func (h *harness) awaitLinkFault(t *testing.T) LinkFault {
 // handed.
 func (h *harness) awaitRefusal(t *testing.T) WatchOpenRefusal {
 	t.Helper()
+	return h.awaitRefusalAfter(t, nil)
+}
+
+// awaitRefusalAfter is awaitRefusal for a refusal that may already be among
+// SEEN, the events a route or sentinel read returned: an open's refusal lands
+// on its own goroutine, so a sentinel read after the frame that provoked the
+// open may have consumed it before the test asks.
+func (h *harness) awaitRefusalAfter(t *testing.T, seenEarlier []event) WatchOpenRefusal {
+	t.Helper()
+	for _, e := range seenEarlier {
+		if e.name() == "lifecycle.OnWatchOpenRefused" {
+			return *e.refusal
+		}
+	}
 	deadline := time.After(waitDeadline)
 	var seen []event
 	for {

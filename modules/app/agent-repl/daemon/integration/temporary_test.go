@@ -41,7 +41,7 @@ func scratchRepo(t *testing.T) (*harness.Repo, string) {
 // the record is matched by its arm.
 func awaitTypedRefusal(t *testing.T, d *harness.Daemon) {
 	t.Helper()
-	d.AwaitLogRecord(d.RunLogPath(), "the typed temporary-directory refusal at INFO", func(r harness.LogRecord) bool {
+	d.AwaitUnscopedRunLogRecord("the typed temporary-directory refusal at INFO", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.refusal.typed" && r.Level == "info" &&
 			r.Context["arm"] == "inside_temporary_directory"
 	})

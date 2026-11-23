@@ -1157,7 +1157,7 @@ func TestATestDaemonRunsTheMockedGitItWasLinkedTo(t *testing.T) {
 	d := canonicalView(t)
 
 	// Assert: the boot record names the mocked git, never the host's.
-	boot := d.AwaitLogRecord(d.RunLogPath(), "the boot record", func(r harness.LogRecord) bool {
+	boot := d.AwaitUnscopedRunLogRecord("the boot record", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.cmd.boot" && r.Message == "the daemon boot started"
 	})
 	// The same file, not the same spelling: the run's programs directory is
