@@ -20,6 +20,14 @@ export function boxRect({ left = 0, top = 0, width = 0, height = 0 }: BoxInit = 
 }
 
 /**
+ * Give EL the box TOP to TOP+HEIGHT, 200 wide, as its `getBoundingClientRect`:
+ * the fixed box a drag test lays one element out at.
+ */
+export function boxAt(el: Element, top: number, height: number): void {
+  Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top, height, width: 200 }) });
+}
+
+/**
  * Give EL a `scrollTop` that keeps what is written to it, starting at
  * INITIAL: jsdom scrolls nothing, so its own reads 0 whatever was set. The
  * value is kept as written, never clamped to a scroll range.

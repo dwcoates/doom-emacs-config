@@ -60,7 +60,7 @@ import {
   settleOwedDragClick,
   sidebarContext,
 } from "./harness.js";
-import { boxRect } from "../dom-rect.js";
+import { boxAt, boxRect } from "../dom-rect.js";
 import { withRepositoryBlocks } from "../roster-families.js";
 import type { RosterOpenRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { REPOSITORY_BLOCK_CLASS } from "../../src/sidebar/row.js";
@@ -850,11 +850,6 @@ describe("dragging a repository block", () => {
     return roster({ repos: [section, repoSection({ id: "repo-2" }), repoSection({ id: "repo-3" })] });
   }
 
-  /** Give EL the box TOP..TOP+HEIGHT. */
-  function boxAt(el: Element, top: number, height: number): void {
-    Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top, height, width: 200 }) });
-  }
-
   /** P's family box and its two blocks, laid out: o at 20, the repo-2 block at 40, the repo-3 block at 70. */
   function layOutP(pane: HTMLElement): { kids: HTMLElement; blocks: HTMLElement[] } {
     const kids = pane.querySelector("[data-roster-row='p'] > .kids") as HTMLElement;
@@ -980,14 +975,12 @@ describe("a nested row", () => {
   /** Lay a's box of nested rows out under a's line at 20: k1 at 20, k2 at 40 (g at 60), k3 at 80. */
   function layOutKids(pane: HTMLElement): HTMLElement {
     const kids = pane.querySelector("[data-roster-row='a'] > .kids") as HTMLElement;
-    const at = (el: Element, top: number, height: number): void =>
-      void Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top, height, width: 200 }) });
-    at(kids, 20, 80);
-    at(pane.querySelector("[data-roster-row='k1']")!, 20, 20);
-    at(pane.querySelector("[data-roster-row='k2']")!, 40, 40);
-    at(pane.querySelector("[data-roster-row='g']")!, 60, 20);
-    at(pane.querySelector("[data-roster-row='k3']")!, 80, 20);
-    for (const id of ["k1", "k2", "g", "k3"]) at(rowLine(pane, id), Number(pane.querySelector(`[data-roster-row='${id}']`)!.getBoundingClientRect().top), 20);
+    boxAt(kids, 20, 80);
+    boxAt(pane.querySelector("[data-roster-row='k1']")!, 20, 20);
+    boxAt(pane.querySelector("[data-roster-row='k2']")!, 40, 40);
+    boxAt(pane.querySelector("[data-roster-row='g']")!, 60, 20);
+    boxAt(pane.querySelector("[data-roster-row='k3']")!, 80, 20);
+    for (const id of ["k1", "k2", "g", "k3"]) boxAt(rowLine(pane, id), Number(pane.querySelector(`[data-roster-row='${id}']`)!.getBoundingClientRect().top), 20);
     return kids;
   }
 
@@ -1216,17 +1209,15 @@ describe("a nested row", () => {
     if (top?.case !== "row") throw new Error("test: a top-level row entry");
     withRepositoryBlocks(top.value, [{ repo: "repo-2", rows: [row({ id: "b1" })] }]);
     const pane = mount(roster({ repos: [section, repoSection({ id: "repo-2", rows: [row({ id: "z" })] })] }), sc);
-    const at = (el: Element, y: number, height: number): void =>
-      void Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top: y, height, width: 200 }) });
-    at(sectionList(pane), 0, 60);
-    at(pane.querySelector("[data-roster-row='p']")!, 0, 60);
-    at(rowLine(pane, "p"), 0, 20);
-    at(pane.querySelector(`.${REPOSITORY_BLOCK_CLASS}`)!, 20, 40);
-    at(pane.querySelector("[data-roster-row='b1']")!, 40, 20);
-    at(rowLine(pane, "b1"), 40, 20);
-    at(sectionList(pane, "repo-2"), 200, 20);
-    at(pane.querySelector("[data-roster-row='z']")!, 200, 20);
-    at(rowLine(pane, "z"), 200, 20);
+    boxAt(sectionList(pane), 0, 60);
+    boxAt(pane.querySelector("[data-roster-row='p']")!, 0, 60);
+    boxAt(rowLine(pane, "p"), 0, 20);
+    boxAt(pane.querySelector(`.${REPOSITORY_BLOCK_CLASS}`)!, 20, 40);
+    boxAt(pane.querySelector("[data-roster-row='b1']")!, 40, 20);
+    boxAt(rowLine(pane, "b1"), 40, 20);
+    boxAt(sectionList(pane, "repo-2"), 200, 20);
+    boxAt(pane.querySelector("[data-roster-row='z']")!, 200, 20);
+    boxAt(rowLine(pane, "z"), 200, 20);
     const sections = ["repo-1", "repo-2"].map((id) => pane.querySelector(`[data-repository='${id}']`) as HTMLElement);
 
     // Act: b1 dropped on z's line's top quarter.
