@@ -76,7 +76,8 @@ import {
   type RosterCurrentWorkspace,
   type RosterVersion,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { equals, type DescMessage, type MessageShape } from "@bufbuild/protobuf";
+import { equals } from "@bufbuild/protobuf";
+import { sameOptional } from "../rpc/optional-equal.js";
 
 const log = createLogger("webapp.sidebar.sidebar");
 
@@ -699,10 +700,4 @@ export function drawRailHead(search: RailSearch, switcher: AppSwitcher): RailHea
       version.textContent = next?.text ?? "";
     },
   };
-}
-
-/** Whether A and B, each a SCHEMA message or unset, are both unset or equal. */
-function sameOptional<D extends DescMessage>(schema: D, a: MessageShape<D> | undefined, b: MessageShape<D> | undefined): boolean {
-  if (a === undefined || b === undefined) return a === b;
-  return equals(schema, a, b);
 }
