@@ -751,12 +751,6 @@ func (k *Keeper) store(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID,
 	fields := dlog.Merge(lapseFields(lapse), dlog.Context{"source": what})
 	recorded, err := k.deps.DB.SetCacheLapse(ctx, ws, lapse)
 	if err != nil {
-		if errors.Is(err, wsm.ErrNotFound) {
-			// A workspace removed while its shim still projects: nothing is kept for it.
-			log.Info(opProjection, "a cache lapse arrived for a workspace that is no longer registered; it is dropped", fields)
-			delete(k.deadlines, ws)
-			return false
-		}
 		if leaving(ctx, log, opProjection, "recording the cache lapse", err) {
 			return false
 		}
