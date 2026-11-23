@@ -452,12 +452,13 @@ func TestAWindowHoldingOnlyIgnoredKindsReleasesTheCheckWithoutTheMediator(t *tes
 	}
 }
 
-func TestOnlyADeployMediatorChangesTheIgnoredRecords(t *testing.T) {
+func TestOnlyAMediatorChangesTheIgnoredRecords(t *testing.T) {
 	kind := wsm.IgnoredRecordKind{Operation: "daemon.shim", MessageContains: "tail lag", Why: "passes on its own"}
 	cases := []struct {
 		name string
-		// mediator is whether the asking workspace is the queue's mediator.
-		mediator bool
+		// mediator is whether the asking workspace is the queue's mediator,
+		// and production whether it is its production mediator.
+		mediator, production bool
 		// change runs one change as workspace ws-fixer.
 		change   func(h *harness) error
 		wantKept int
@@ -471,6 +472,8 @@ func TestOnlyADeployMediatorChangesTheIgnoredRecords(t *testing.T) {
 				}
 				return h.o.UnignoreRecords(context.Background(), "ws-fixer", kind.Operation, kind.MessageContains)
 			}},
+		{name: "the production mediator records a kind", mediator: true, production: true, wantKept: 1,
+			change: func(h *harness) error { return h.o.IgnoreRecords(context.Background(), "ws-prod", kind) }},
 		{name: "a workspace that is no mediator is refused, and nothing is recorded",
 			change: func(h *harness) error { return h.o.IgnoreRecords(context.Background(), "ws-fixer", kind) }},
 		{name: "a workspace that is no mediator cannot withdraw one",
@@ -482,7 +485,12 @@ func TestOnlyADeployMediatorChangesTheIgnoredRecords(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := checked(t)
-			if tc.mediator {
+			switch {
+			case tc.production:
+				if err := h.db.RecordStandingMediator(context.Background(), wsm.MediatorProduction, mediationKey(h), "ws-prod"); err != nil {
+					t.Fatal(err)
+				}
+			case tc.mediator:
 				owe(t, h)
 				withMediator(t, h)
 			}

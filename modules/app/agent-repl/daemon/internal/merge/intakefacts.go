@@ -253,16 +253,20 @@ func (o *orchestrator) UnignoreRecords(ctx context.Context, ws ids.WorkspaceID, 
 
 // mediatorOnly refuses WS unless it is a repository's deploy mediator.
 func (o *orchestrator) mediatorOnly(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
-	_, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read whether the workspace changing the ignored records is a deploy mediator", withField(fields, "error", err.Error()))
-		return err
+	// THE TWO MEDIATORS SHARE THE IGNORED KINDS (owner ruling, 2026-11-23):
+	// either may record or withdraw one.
+	for _, r := range []mediatorRole{deployRole, productionRole} {
+		_, isMediator, err := o.deps.DB.StandingMediatorRepoOf(ctx, r.role, ws)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "could not read whether the workspace changing the ignored records is a {role} mediator", withField(r.roleFields(fields), "error", err.Error()))
+			return err
+		}
+		if isMediator {
+			return nil
+		}
 	}
-	if !isMediator {
-		o.deps.Log.Global().Warn(opMediation, "refused a change to the ignored records from a workspace that is no repository's deploy mediator", fields)
-		return refuse(ArmNotMediator, ws, "this workspace is no repository's deploy mediator")
-	}
-	return nil
+	o.deps.Log.Global().Warn(opMediation, "refused a change to the ignored records from a workspace that is no repository's mediator", fields)
+	return refuse(ArmNotMediator, ws, "this workspace is no repository's deploy or production mediator")
 }
 
 // DigestSite is one logging site's records in a window: every record one
