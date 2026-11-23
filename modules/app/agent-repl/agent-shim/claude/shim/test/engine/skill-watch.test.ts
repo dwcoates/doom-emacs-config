@@ -379,7 +379,39 @@ describe("SkillSetWatch coming live", () => {
       changes,
       records.find((r) => r.level === "error")?.context,
       fsys.probe,
-    ]).toEqual([[ROOT], expect.objectContaining({ bound_ms: LIVE_BOUND_MS, expected_ms: 1293, roots: [ROOT] }), undefined]);
+    ]).toEqual([[ROOT], expect.objectContaining({ bound_ms: LIVE_BOUND_MS, expected_ms: 3542, roots: [ROOT] }), undefined]);
+  });
+
+  it("comes live without complaint when its first probe is seen after the earlier 4000ms bound but before LIVE_BOUND_MS", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    fsys.tick(4_000 + PROBE_EVERY_MS);
+    fsys.goLive();
+
+    // Act
+    const records = logRecordsDuring(() => fsys.tick(PROBE_EVERY_MS));
+
+    // Assert
+    expect([
+      changes,
+      records.some((r) => r.level === "error"),
+      records.some((r) => r.message === "the watch on the vendor's skills is live"),
+    ]).toEqual([[], false, true]);
+  });
+
+  it("names an expected time between a third and a half of its bound in the ERROR record", () => {
+    // Arrange
+    const { fsys, watch } = arrangeInGap();
+    watch.start();
+
+    // Act
+    const records = logRecordsDuring(() => fsys.tick(LIVE_BOUND_MS));
+
+    // Assert
+    const context = records.find((r) => r.level === "error")?.context;
+    const ratio = LIVE_BOUND_MS / Number(context?.["expected_ms"]);
+    expect([ratio >= 2, ratio <= 3]).toEqual([true, true]);
   });
 
   it("reports every root at ERROR when its probe directory cannot be made", () => {

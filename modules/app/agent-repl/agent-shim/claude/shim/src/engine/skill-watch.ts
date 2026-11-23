@@ -29,7 +29,7 @@
  * started (libuv starts the FSEvents stream on a thread of its own), and a
  * change made in that gap is never reported: a file written in the same tick
  * as the watch was lost 20 times in 20, and the stream came live 14ms to
- * 1.3s later, under the load of a deploy too. So the watch proves itself live: it
+ * 3.5s later, the longest under a deploy's load. So the watch proves itself live: it
  * writes probe files into a directory of its own, watched by the same stream,
  * until one is seen (`awaitLive`). Every directory armed before the probe is
  * live then, and a write after it was seen 30 times in 30. What changed in
@@ -101,16 +101,26 @@ export interface SkillWatchFs {
 export const PROBE_EVERY_MS = 10;
 
 /**
+ * The slowest completed time the watch took to come live, which the bound
+ * stands on and its ERROR record names. MEASURED in production on 2026-11-23,
+ * as deploys replaced every shim at a load average of 11: 3542ms (20:10Z).
+ */
+const LIVE_EXPECTED_MS = 3_542;
+
+/**
  * How long the watch may take to come live. MEASURED 2026-11-23 (node 24,
  * macOS): 14-96ms idle and 14-115ms beside one merge gate (load average 12),
- * 30 watches each; up to 660ms inside the full suite itself; and 1046-1293ms
- * in production as a deploy replaced every shim at once (four shims, the
- * 0.543.14 rollout). The bound is three times that worst. Past it, the watch
- * is recorded at ERROR and reported as a change, as a failed watch is.
+ * 30 watches each; up to 660ms inside the full suite itself; 1046-1293ms in
+ * production as a deploy replaced every shim at once (four shims, the
+ * 0.543.14 rollout); then, between 19:45Z and 20:10Z, as deploys replaced
+ * every shim at a load average of 11: 1803ms, 2203ms and 3542ms, and one
+ * watch that had not come live within an earlier bound of 4000ms (361 probes
+ * written, so the shim's event loop was running and the platform stream was
+ * late). The bound is three times the worst completed measurement,
+ * LIVE_EXPECTED_MS, rounded down to the hundred. Past it, the watch is
+ * recorded at ERROR and reported as a change, as a failed watch is.
  */
-export const LIVE_BOUND_MS = 4_000;
-/** The loaded worst the bound stands on, which its ERROR record names. */
-const LIVE_EXPECTED_MS = 1_293;
+export const LIVE_BOUND_MS = 10_600;
 
 /** The platform's own filesystem and notification. */
 export const REAL_SKILL_WATCH_FS: SkillWatchFs = {
