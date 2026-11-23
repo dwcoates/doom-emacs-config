@@ -1014,6 +1014,7 @@ func TestTheOpenCountsUnfoldedIsTheSumOfTheSectionsUnfolded(t *testing.T) {
 
 	// Act.
 	r.SetRegistry(reg)
+	liveRegistry(r, reg)
 
 	// Assert.
 	view := latest(t, r).GetRepository()
@@ -1110,6 +1111,7 @@ func TestAnOpenHeadersUnfoldedCountsTheRowsNoFoldHides(t *testing.T) {
 
 			// Act.
 			r.SetRegistry(tt.reg())
+			liveRegistry(r, tt.reg())
 
 			// Assert.
 			section := latest(t, r).GetRepository().GetSections()[0]

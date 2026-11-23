@@ -58,6 +58,7 @@ func TestNumbersMatchTheOpenRowsDrawnOrder(t *testing.T) {
 
 	// Act.
 	r.SetRegistry(numberingRegistry())
+	liveRegistry(r, numberingRegistry())
 
 	// Assert: read down the Open section, the rows are numbered 1, 2, 3, ...
 	// with no gap, so tab N is the row drawn immediately before tab N+1.
@@ -76,6 +77,7 @@ func TestAFoldedRepositorysOpenRowsHaveAFoldedTab(t *testing.T) {
 
 	// Act.
 	r.SetRegistry(numberingRegistry())
+	liveRegistry(r, numberingRegistry())
 
 	// Assert.
 	for _, open := range rosterwalk.OpenRows(latest(t, r)) {
@@ -143,6 +145,7 @@ func TestAFoldedSubsectionsOpenRowsHaveAFoldedTabAndTheRestRunUnbroken(t *testin
 
 	// Act.
 	r.SetRegistry(foldedSubsectionRegistry())
+	liveRegistry(r, foldedSubsectionRegistry())
 
 	// Assert: a2 (in the folded subsection) is off the bar, and the numbers
 	// still run 1..N with no gap.

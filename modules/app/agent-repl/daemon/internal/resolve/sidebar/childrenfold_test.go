@@ -54,6 +54,7 @@ func TestAFoldedParentsChildRowHasAFoldedTabAndTheRestRunUnbroken(t *testing.T) 
 
 	// Act.
 	r.SetRegistry(childrenFoldedRegistry())
+	liveRegistry(r, childrenFoldedRegistry())
 
 	// Assert: k (the folded parent's child) is off the bar, and the numbers
 	// still run 1..N with no gap.

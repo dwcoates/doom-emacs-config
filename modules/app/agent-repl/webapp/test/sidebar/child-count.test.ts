@@ -10,6 +10,8 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { openKin } from "../../src/sidebar/entries.js";
 import { withRepositoryBlocks } from "../roster-families.js";
 import { appContext, openRow, row, sidebarContext } from "./harness.js";
+import { cascadedValue, inRail } from "../stylesheet.js";
+import { FOLDED_CLASS } from "../../src/sidebar/folded-class.js";
 
 const NUMBERED = create(RosterOpenRowTabSchema, { tab: { case: "numbered", value: { number: 1 } } });
 const FOLDED = create(RosterOpenRowTabSchema, { tab: { case: "folded", value: {} } });
@@ -80,5 +82,44 @@ describe("a drawn row", () => {
   });
   it("wears no count with no children", () => {
     expect(drawnCount(0)).toBeNull();
+  });
+});
+
+describe("a row's child count, painted", () => {
+  const paintedDisplay = (folded: boolean): string => {
+    const drawn = drawRosterFamily(openRow(row({ id: "p", children: kids(3) })), sidebarContext(appContext()), "R");
+    drawn.classList.toggle(FOLDED_CLASS, folded);
+    return inRail(drawn, () => {
+      const count = drawn.querySelector<HTMLElement>(`:scope > .row > .${CHILD_COUNT_CLASS}`);
+      if (count === null) throw new Error("the row draws no child count");
+      return cascadedValue(count, "display");
+    });
+  };
+  it("is not shown while the children are shown", () => {
+    expect(paintedDisplay(false)).toBe("none");
+  });
+  it("is shown while the children are folded", () => {
+    expect(paintedDisplay(true)).toBe("inline");
+  });
+});
+
+describe("a subsection's member count, painted", () => {
+  const paintedDisplay = (folded: boolean): string => {
+    const subsection = document.createElement("div");
+    subsection.className = "sb-subsection";
+    subsection.classList.toggle(FOLDED_CLASS, folded);
+    const head = document.createElement("div");
+    head.className = "sb-subsection-head";
+    const count = document.createElement("span");
+    count.className = "sb-count";
+    head.append(count);
+    subsection.append(head);
+    return inRail(subsection, () => cascadedValue(count, "display"));
+  };
+  it("is not shown while the subsection is open", () => {
+    expect(paintedDisplay(false)).toBe("none");
+  });
+  it("is shown while the subsection is folded", () => {
+    expect(paintedDisplay(true)).toBe("inline");
   });
 });
