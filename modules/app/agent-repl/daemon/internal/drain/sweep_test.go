@@ -1670,7 +1670,7 @@ var sparingPaths = []standDownPath{
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.CycleDown(ws, beatAfter) }},
 	{name: "a cold cache's park", op: opCold, trigger: "cold_park",
 		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
-		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.ColdDown(ws, beatAfter) }},
+		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.ColdDown(ws, beatAfter, false) }},
 	{name: "a settings visit's end", op: opVisit, trigger: "settings_visit",
 		withhold: func(*testing.T, *harness, ids.WorkspaceID) {},
 		ask:      func(_ *testing.T, h *harness, ws ids.WorkspaceID) { h.c.VisitDown(ws, beatAfter) }},
@@ -1881,7 +1881,7 @@ func TestAnUnreadableRemoteControlModeStandsNothingDown(t *testing.T) {
 // allReasons is every stand-down reason the package declares.
 func allReasons(c *controller) []standDownReason {
 	return []standDownReason{
-		c.idleReason(), cycleReason, visitReason, coldReason, mergeQueuedReason,
+		c.idleReason(), cycleReason, visitReason, coldReason, coldGateReason, mergeQueuedReason,
 		withheldReason(WithheldCollapse), withheldReason(WithheldCacheLapse), withheldReason(WithheldMergeEnded),
 	}
 }
@@ -1914,8 +1914,8 @@ func TestEveryStandDownPathGoesThroughTheRemoteControlGate(t *testing.T) {
 	if !slices.Equal(parks, []string{"cycle.go", "sweep.go", "withheld.go"}) {
 		t.Fatalf("park sites = %v, want the cycle's, the sweep's and the withheld path's", parks)
 	}
-	if len(literals) != 6 {
-		t.Fatalf("standDownReason literals = %v, want the six allReasons builds from", literals)
+	if len(literals) != 7 {
+		t.Fatalf("standDownReason literals = %v, want the seven allReasons builds from", literals)
 	}
 	for _, reason := range reasons {
 		if reason.trigger == "" {

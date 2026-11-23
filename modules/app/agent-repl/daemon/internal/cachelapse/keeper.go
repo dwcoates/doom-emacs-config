@@ -103,6 +103,13 @@ type DB interface {
 	ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error)
 	Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error)
 	SetCacheLapse(ctx context.Context, id wsm.WorkspaceID, lapse wsm.CacheLapse) (bool, error)
+	// SetProjectedColdGate, ClearProjectedColdGate, ProjectedColdGate and
+	// ProjectedColdGates keep the cold gate a shim projected, which is raised
+	// the moment its cache lapses (projectedgate.go).
+	SetProjectedColdGate(ctx context.Context, id wsm.WorkspaceID, dueAt time.Time, cold *conversationv1.SessionCold) error
+	ClearProjectedColdGate(ctx context.Context, id wsm.WorkspaceID) (bool, error)
+	ProjectedColdGate(ctx context.Context, id wsm.WorkspaceID) (wsm.ProjectedColdGate, bool, error)
+	ProjectedColdGates(ctx context.Context) ([]wsm.ProjectedColdGate, error)
 	// SetLastKeepalive records when a workspace's keep-alive was sent: the
 	// beat's half of the cache clock (wsm.Workspace.CacheClock).
 	SetLastKeepalive(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
@@ -196,8 +203,13 @@ type Deps struct {
 	CycleDown func(ws ids.WorkspaceID, beat time.Time, done func(drain.CycleOutcome))
 	// ColdDown asks for WS's session to be parked the moment its cache is
 	// known cold at SINCE (drain.Controller.ColdDown): a cold cache owes no
-	// keep-alive, so the keep-alive cycle never parks it.
-	ColdDown func(ws ids.WorkspaceID, since time.Time)
+	// keep-alive, so the keep-alive cycle never parks it. ATGATE is a cold gate
+	// standing over the session, parked for the workspace in view too.
+	ColdDown func(ws ids.WorkspaceID, since time.Time, atGate bool)
+	// RaiseGate raises WS's cold gate from COLD, the facts its shim projected,
+	// with no shim started (workspace.Fleet.RaiseProjectedGate), answering
+	// whether it did: false when a turn runs or no session is held.
+	RaiseGate func(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (bool, error)
 	// VisitDown asks for WS's session to be stood down, the settings pick
 	// that started it at SINCE having ended (drain.Controller.VisitDown).
 	VisitDown func(ws ids.WorkspaceID, since time.Time)
@@ -266,6 +278,9 @@ const (
 	// edgeClosure is a close or a reopen of the workspace recorded: a run
 	// its close ended is recorded (runspend.go).
 	edgeClosure
+	// edgeGateRaised is a cold gate raised on the workspace, by a shim's
+	// judgment or from a projection: the projection is retired.
+	edgeGateRaised
 )
 
 // edge is one queued event.
@@ -309,6 +324,9 @@ type Keeper struct {
 
 	// deadlines is every armed lapse, owned by Run alone.
 	deadlines map[ids.WorkspaceID]time.Time
+	// gateDue is every armed projected cold gate's instant, owned by Run alone
+	// (projectedgate.go).
+	gateDue map[ids.WorkspaceID]time.Time
 	// beats is every armed keep-alive, owned by Run alone (schedule.go).
 	beats map[ids.WorkspaceID]time.Time
 	// restores is every parked session's armed restore, owned by Run alone.
@@ -390,6 +408,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the keep-alive cycle's stand-down")
 	case deps.ColdDown == nil:
 		return nil, errors.New("cachelapse: the keeper needs the cold cache's stand-down")
+	case deps.RaiseGate == nil:
+		return nil, errors.New("cachelapse: the keeper needs the projected cold gates' raise")
 	case deps.VisitDown == nil:
 		return nil, errors.New("cachelapse: the keeper needs the settings visit's stand-down")
 	case deps.Restore == nil:
@@ -416,6 +436,7 @@ func New(deps Deps) (*Keeper, error) {
 	return &Keeper{
 		deps: deps, wake: make(chan struct{}, 1),
 		deadlines: map[ids.WorkspaceID]time.Time{},
+		gateDue:   map[ids.WorkspaceID]time.Time{},
 		beats:     map[ids.WorkspaceID]time.Time{},
 		restores:  map[ids.WorkspaceID]time.Time{},
 		restoring: map[ids.WorkspaceID]bool{},
@@ -503,8 +524,8 @@ func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID, judged bool) {
 	// runs on at the gate owes no beat (beatPlanFor), and nothing else would
 	// stand it down before the idle cutoff. The drain finds nothing to do for
 	// a gate whose shim the fleet already stood down.
-	k.parkCold(ws, k.deps.Clock.Now(), "the session parked at its cold gate")
-	k.enqueue(edge{ws: ws, why: "the session parked at its cold gate"})
+	k.parkCold(ws, k.deps.Clock.Now(), "the session parked at its cold gate", true)
+	k.enqueue(edge{ws: ws, kind: edgeGateRaised, why: "the session parked at its cold gate"})
 }
 
 // MergeLeftQueue is WS's entry leaving its merge queue: a hidden merge
@@ -561,6 +582,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 				return nil
 			}
 			k.lapseDue(ctx)
+			k.gatesDue(ctx)
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue(ctx)
@@ -587,6 +609,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.stateNextKeepalives()
 		case <-due:
 			k.lapseDue(ctx)
+			k.gatesDue(ctx)
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue(ctx)
@@ -615,6 +638,19 @@ func (k *Keeper) restore(ctx context.Context) error {
 		}
 	}
 	log.Info(opLapse, "re-armed the hidden workspaces' recorded cache lapses", dlog.Context{"armed": len(k.deadlines)})
+	projected, err := k.deps.DB.ProjectedColdGates(ctx)
+	if err != nil {
+		if leaving(ctx, log, opGate, "listing the projected cold gates to re-arm them", err) {
+			return nil
+		}
+		log.Error(opGate, "could not list the projected cold gates to re-arm them; the cache keeper stops, and no keep-alive goes out for any workspace until the next daemon runs its own",
+			dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("cachelapse: list the projected cold gates to re-arm them: %w", err)
+	}
+	for _, p := range projected {
+		k.gateDue[p.Workspace] = p.DueAt
+	}
+	log.Info(opGate, "re-armed the workspaces' projected cold gates", dlog.Context{"armed": len(k.gateDue)})
 	for _, ws := range workspaces {
 		k.schedule(ctx, ws.ID, "the daemon started")
 	}
@@ -641,7 +677,7 @@ func (k *Keeper) earliest() (time.Time, bool) {
 			next, armed = run.by, true
 		}
 	}
-	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores, k.answerBy, k.coldDue} {
+	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.gateDue, k.beats, k.restores, k.answerBy, k.coldDue} {
 		for _, at := range set {
 			if !armed || at.Before(next) {
 				next, armed = at, true
@@ -656,6 +692,10 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	case edgeLapse:
 		k.answered(ctx, e.ws, e.lapse)
 		k.record(ctx, e.ws, e.lapse)
+		k.projectGate(ctx, e.ws, e.lapse)
+	case edgeGateRaised:
+		k.retireGateProjection(ctx, k.deps.Log.Global().With(dlog.Context{"workspace": string(e.ws)}), e.ws, "a cold gate was raised")
+		k.reconcile(ctx, e.ws, e.why)
 	case edgeFree:
 		if e.workEnded {
 			k.freeSince[e.ws] = k.deps.Clock.Now()
@@ -775,6 +815,7 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 // forget drops every deadline the Keeper holds for WS.
 func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.deadlines, ws)
+	delete(k.gateDue, ws)
 	delete(k.beats, ws)
 	delete(k.restores, ws)
 	delete(k.sent, ws)

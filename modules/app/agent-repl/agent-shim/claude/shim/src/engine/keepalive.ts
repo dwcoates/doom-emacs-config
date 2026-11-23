@@ -976,7 +976,7 @@ export class KeepaliveCadence {
   constructor(
     private readonly beat: () => void,
     /** States the projected lapse while held: when the cache lapses, and the context it held. */
-    private readonly project: (lapsesAtMs: number, contextTokens: number) => void,
+    private readonly project: (lapsesAtMs: number, contextTokens: number, lastRequestAtMs: number, cacheTtlMs: number) => void,
     /** The detached work live in the session right now: while any is, no beat goes out. */
     private readonly detachedWork: () => readonly DetachedWorkItem[],
     private readonly nowMs: () => number,
@@ -1175,7 +1175,7 @@ export class KeepaliveCadence {
       { ...anchorContext(anchor), lapses_at: new Date(lapsesAtMs).toISOString(), context_tokens: anchor.contextTokens },
       "projected the held cache's lapse",
     );
-    this.project(lapsesAtMs, anchor.contextTokens);
+    this.project(lapsesAtMs, anchor.contextTokens, anchor.atMs, anchor.ttlMs ?? 0);
   }
 
   /**

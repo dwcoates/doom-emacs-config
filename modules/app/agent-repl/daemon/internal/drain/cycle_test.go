@@ -307,7 +307,7 @@ func TestARemoteControlWorkspaceIsNotStoodDown(t *testing.T) {
 		}, ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }},
 		{name: "a mode turned on when its cache went cold", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			return h.remoteControlOn(t)
-		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter) }},
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter, false) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -431,7 +431,7 @@ func TestAColdStandDownParksTheSessionForItsOwnReason(t *testing.T) {
 	ws := h.workspace(t, instant)
 
 	// Act
-	h.c.ColdDown(ws, beatAfter)
+	h.c.ColdDown(ws, beatAfter, false)
 
 	// Assert
 	killed := h.stand.Killed()
@@ -440,6 +440,56 @@ func TestAColdStandDownParksTheSessionForItsOwnReason(t *testing.T) {
 	}
 	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != coldReason.detail {
 		t.Fatalf("terminal = %+v, want the one park with the cold cache's detail", term)
+	}
+}
+
+func TestAColdGateStandDownParksTheSessionForItsOwnReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+
+	// Act
+	h.c.ColdDown(ws, beatAfter, true)
+
+	// Assert
+	killed := h.stand.Killed()
+	if len(killed) != 1 || killed[0].WS != ws || killed[0].Force || killed[0].Life != shimlife.StandDownColdGate {
+		t.Fatalf("kills = %+v, want one graceful cold_gate stand-down", killed)
+	}
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != coldGateReason.detail {
+		t.Fatalf("terminal = %+v, want the one park with the cold gate's detail", term)
+	}
+}
+
+func TestAColdGateStandDownParksTheWorkspaceInView(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	if err := h.db.SetCurrent(context.Background(), ws, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Act
+	h.c.ColdDown(ws, beatAfter, true)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 1 || killed[0].Life != shimlife.StandDownColdGate {
+		t.Fatalf("kills = %+v, want the workspace in view parked behind its gate", killed)
+	}
+}
+
+func TestAColdGateStandDownSkipsASessionARealTurnRanOn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.turnClosed(t, ws, beatAfter.Add(time.Minute))
+
+	// Act
+	h.c.ColdDown(ws, beatAfter, true)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none: a real turn ran since", killed)
 	}
 }
 
@@ -468,7 +518,7 @@ func TestAColdStandDownSkips(t *testing.T) {
 			ws := tt.arrange(t, h)
 
 			// Act
-			h.c.ColdDown(ws, beatAfter)
+			h.c.ColdDown(ws, beatAfter, false)
 
 			// Assert
 			if killed := h.stand.Killed(); len(killed) != 0 {
@@ -486,7 +536,7 @@ func TestAColdStandDownOfABusySessionIsTakenWhenItFallsFree(t *testing.T) {
 	h := newHarness(t)
 	ws := h.workspace(t, instant)
 	h.freeness.SetFree(ws, false)
-	h.c.ColdDown(ws, beatAfter)
+	h.c.ColdDown(ws, beatAfter, false)
 	if killed := h.stand.Killed(); len(killed) != 0 {
 		t.Fatalf("kills = %+v, want none under work", killed)
 	}
@@ -512,7 +562,7 @@ func TestAColdStandDownParksAWorkspaceWithAMergeQueued(t *testing.T) {
 	queuedAt(t, h, ws, instant)
 
 	// Act
-	h.c.ColdDown(ws, beatAfter)
+	h.c.ColdDown(ws, beatAfter, false)
 
 	// Assert
 	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
@@ -530,12 +580,12 @@ func TestAColdParkOrAVisitStandsDownAClosedOrWithheldWorkspace(t *testing.T) {
 		life    shimlife.StandDownReason
 	}{
 		{name: "a cold park of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
-			ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter) }, life: shimlife.StandDownCacheCold},
+			ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter, false) }, life: shimlife.StandDownCacheCold},
 		{name: "a cold park of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
 			h.closedAt(t, ws)
 			return ws
-		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter) }, life: shimlife.StandDownCacheCold},
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter, false) }, life: shimlife.StandDownCacheCold},
 		{name: "a visit of a hidden workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) },
 			ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }, life: shimlife.StandDownSettingsVisit},
 		{name: "a visit of a closed workspace", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {

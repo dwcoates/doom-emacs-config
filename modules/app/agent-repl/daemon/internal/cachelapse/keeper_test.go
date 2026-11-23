@@ -38,6 +38,10 @@ type fakeDB struct {
 	readErr   error
 	setErr    error
 	setLapses []wsm.CacheLapse
+	// projected are the projected cold gates kept; projectedErr fails every
+	// operation on them.
+	projected    map[ids.WorkspaceID]wsm.ProjectedColdGate
+	projectedErr error
 	// keepaliveErr fails SetLastKeepalive.
 	keepaliveErr error
 	// queued are the workspaces with an entry standing in a merge queue;
@@ -420,6 +424,11 @@ type harness struct {
 	spent map[ids.WorkspaceID]*conversationv1.VendorTokens
 	// cycled are the keep-alive cycle stand-downs asked for.
 	cycled []cycleCall
+	// raised are the projected gates the keeper asked to raise; raiseOutcome is
+	// whether the raise answers it raised one, and raiseErr what it fails with.
+	raised       []ids.WorkspaceID
+	raiseOutcome bool
+	raiseErr     error
 	// coldDowns are the cold cache's parks asked for.
 	coldDowns []cycleCall
 	// cycleDones are the reports each keep-alive cycle stand-down in cycled
@@ -447,8 +456,9 @@ type nextKeepaliveCall struct {
 }
 
 type cycleCall struct {
-	ws   ids.WorkspaceID
-	beat time.Time
+	ws     ids.WorkspaceID
+	beat   time.Time
+	atGate bool
 }
 
 type restoreCall struct {
@@ -525,8 +535,12 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 			h.cycled = append(h.cycled, cycleCall{ws: ws, beat: beat})
 			h.cycleDones = append(h.cycleDones, done)
 		},
-		ColdDown: func(ws ids.WorkspaceID, since time.Time) {
-			h.coldDowns = append(h.coldDowns, cycleCall{ws: ws, beat: since})
+		RaiseGate: func(_ context.Context, ws ids.WorkspaceID, _ *conversationv1.SessionCold) (bool, error) {
+			h.raised = append(h.raised, ws)
+			return h.raiseOutcome, h.raiseErr
+		},
+		ColdDown: func(ws ids.WorkspaceID, since time.Time, atGate bool) {
+			h.coldDowns = append(h.coldDowns, cycleCall{ws: ws, beat: since, atGate: atGate})
 		},
 		VisitDown: func(ws ids.WorkspaceID, since time.Time) {
 			h.visitDowns = append(h.visitDowns, cycleCall{ws: ws, beat: since})
@@ -602,7 +616,8 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			PublishRegistry: func(context.Context) error { return nil },
 			Interval:        KeepaliveInterval,
 			CycleDown:       func(ids.WorkspaceID, time.Time, func(drain.CycleOutcome)) {},
-			ColdDown:        func(ids.WorkspaceID, time.Time) {},
+			RaiseGate:       func(context.Context, ids.WorkspaceID, *conversationv1.SessionCold) (bool, error) { return false, nil },
+			ColdDown:        func(ids.WorkspaceID, time.Time, bool) {},
 			VisitDown:       func(ids.WorkspaceID, time.Time) {},
 			Restore:         func(ids.WorkspaceID, func(error)) {},
 			HandedOver:      func(error) bool { return false },
@@ -628,6 +643,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "keep-alive interval", strip: func(d *Deps) { d.Interval = 0 }},
 		{name: "keep-alive cycle's stand-down", strip: func(d *Deps) { d.CycleDown = nil }},
 		{name: "cold cache's stand-down", strip: func(d *Deps) { d.ColdDown = nil }},
+		{name: "projected cold gates' raise", strip: func(d *Deps) { d.RaiseGate = nil }},
 		{name: "settings visit's stand-down", strip: func(d *Deps) { d.VisitDown = nil }},
 		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
 		{name: "handover classifier", strip: func(d *Deps) { d.HandedOver = nil }},

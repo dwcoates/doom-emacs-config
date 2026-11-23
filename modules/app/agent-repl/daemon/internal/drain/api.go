@@ -104,8 +104,10 @@ type Controller interface {
 	// ColdDown parks a session the moment its cache is known cold at SINCE
 	// (owner ruling, 2026-11-15; cycle.go), under CycleDown's rules: never
 	// under a turn, never for the workspace in view, never in remote
-	// control, and never once a real turn has run since. It returns at once.
-	ColdDown(ws ids.WorkspaceID, since time.Time)
+	// control, and never once a real turn has run since. ATGATE is a cold gate
+	// standing over the session: it is parked for the workspace in view too.
+	// It returns at once.
+	ColdDown(ws ids.WorkspaceID, since time.Time, atGate bool)
 	// MergeQueuedDown parks a finished workspace's session the moment its own
 	// branch's merge is put in line in REPO under LEDGER (owner requirement,
 	// 2026-11-21; cycle.go): never under a turn or live detached work, never

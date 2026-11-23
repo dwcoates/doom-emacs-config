@@ -539,7 +539,7 @@ describe("the held cache's projected lapse", () => {
     ["with no context", 0, "ungated"],
   ] as const)("states the gate's verdict %s", (_name, contextTokens, verdict) => {
     // Act
-    const lapse = sessionCacheLapse(1_000, contextTokens);
+    const lapse = sessionCacheLapse(1_000, contextTokens, 400, 600);
 
     // Assert
     expect(lapse.afterLapse.case).toBe(verdict);
@@ -547,7 +547,7 @@ describe("the held cache's projected lapse", () => {
 
   it("states when the cache lapses", () => {
     // Act
-    const lapse = sessionCacheLapse(1_234, 0);
+    const lapse = sessionCacheLapse(1_234, 0, 1_000, 234);
 
     // Assert
     expect(lapse.lapsesAtMs).toBe(1_234n);
@@ -555,10 +555,22 @@ describe("the held cache's projected lapse", () => {
 
   it("states the context a gated resume re-reads", () => {
     // Act
-    const lapse = sessionCacheLapse(1_000, 180_000);
+    const lapse = sessionCacheLapse(1_000, 180_000, 400, 600);
 
     // Assert
     expect(lapse.afterLapse.case === "gated" ? lapse.afterLapse.value.contextTokens : undefined).toBe(180_000n);
+  });
+
+  it("states the last request and the lifetime a gated lapse will report", () => {
+    // Act
+    const lapse = sessionCacheLapse(1_000, 180_000, 400, 600);
+
+    // Assert
+    const gated = lapse.afterLapse.case === "gated" ? lapse.afterLapse.value : undefined;
+    expect({ lastRequestAtMs: gated?.lastRequestAtMs, cacheTtlMs: gated?.cacheTtlMs }).toEqual({
+      lastRequestAtMs: 400n,
+      cacheTtlMs: 600n,
+    });
   });
 });
 

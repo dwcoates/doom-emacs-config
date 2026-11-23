@@ -248,6 +248,11 @@ type standDownReason struct {
 	// remote is what a remote-control mode that is on does to the
 	// stand-down, read at the act (park). Every reason names one.
 	remote remotePolicy
+	// atGate is a stand-down taken because a cold gate stands: it is taken
+	// for the workspace the user is looking at as for any other, since the
+	// gate's answer re-opens through a new shim and refuses while one still
+	// runs the session.
+	atGate bool
 }
 
 // remotePolicy is what a stand-down does with a session whose remote control

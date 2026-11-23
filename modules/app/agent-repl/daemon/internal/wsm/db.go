@@ -967,6 +967,17 @@ type DB interface {
 	ColdGate(ctx context.Context, id WorkspaceID) (ColdGateRecord, bool, error)
 	// ColdGateWorkspaces answers every workspace with a recorded cold gate.
 	ColdGateWorkspaces(ctx context.Context) ([]WorkspaceID, error)
+	// SetProjectedColdGate records the cold gate a workspace's shim projected,
+	// replacing any earlier one (projectedcoldgate.go).
+	SetProjectedColdGate(ctx context.Context, id WorkspaceID, dueAt time.Time, cold *conversationv1.SessionCold) error
+	// ClearProjectedColdGate retires a workspace's projected cold gate,
+	// answering whether one stood.
+	ClearProjectedColdGate(ctx context.Context, id WorkspaceID) (bool, error)
+	// ProjectedColdGate answers a workspace's projected cold gate, false when
+	// none is.
+	ProjectedColdGate(ctx context.Context, id WorkspaceID) (ProjectedColdGate, bool, error)
+	// ProjectedColdGates answers every workspace's projected cold gate.
+	ProjectedColdGates(ctx context.Context) ([]ProjectedColdGate, error)
 	// SetColdGate records a workspace's cold gate, replacing any earlier one.
 	SetColdGate(ctx context.Context, id WorkspaceID, rec ColdGateRecord) error
 	// ClearColdGate retires a workspace's recorded cold gate, answering

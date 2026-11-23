@@ -176,7 +176,7 @@ func (k *Keeper) ownCold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		k.coldDue[ws] = due
 		return
 	}
-	k.parkCold(ws, k.deps.Clock.Now(), why)
+	k.parkCold(ws, k.deps.Clock.Now(), why, false)
 }
 
 // coldParksDue decides again every session whose cold park has come due:
