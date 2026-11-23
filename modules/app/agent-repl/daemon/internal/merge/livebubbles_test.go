@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -419,5 +420,37 @@ func TestBubbleRowOf(t *testing.T) {
 				t.Fatalf("bubbleRowOf(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestEndBubblesOffQueueRecordsACutReadAsNoFailure covers the queue read the
+// daemon's stop cuts off: answered, recorded at INFO rather than ERROR, and
+// nothing ended.
+func TestEndBubblesOffQueueRecordsACutReadAsNoFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	storeLiveBubble(h, theWorkspace, staleLedger)
+	if err := h.o.seedLiveBubbles(context.Background(), nil); err != nil {
+		t.Fatalf("seedLiveBubbles: %v", err)
+	}
+	h.db.allQueuesErr = fmt.Errorf("wsm: read the merge queues: %w", context.Canceled)
+
+	// Act
+	err := h.o.endBubblesOffQueue(context.Background(), "test")
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("endBubblesOffQueue = %v, want the cut read answered", err)
+	}
+	if pushes := headPushesOf(h, staleLedger); len(pushes) != 0 {
+		t.Fatalf("a bubble was ended with no queue read: %v", pushes)
+	}
+	if rec, found := h.recordFor("error", opLiveBubbles); found {
+		t.Fatalf("a cut read was recorded at ERROR: %+v", rec)
+	}
+	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opLiveBubbles,
+		Message: "the merge queues were not read, the daemon stopping first; no live bubble is ended"})
+	if !found || rec.Context["why"] != "test" || rec.Context["cause"] == nil {
+		t.Fatalf("no INFO %s record names why and the cause: %+v", opLiveBubbles, h.logs.Records())
 	}
 }
