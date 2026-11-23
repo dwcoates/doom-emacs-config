@@ -283,6 +283,12 @@ export interface FeedController extends Handle {
    */
   applyResumed(page: FeedPage, resumed: OpenFeedResumed): void;
   /**
+   * Apply an OpenFeed answer, whichever it is: a resumed open's answer
+   * (RESUMED set) is placed among the rows held (`applyResumed`), a first
+   * open's whole page replaces them (`applyPage`).
+   */
+  applyOpened(page: FeedPage, resumed: OpenFeedResumed | undefined): void;
+  /**
    * Apply the daemon's feed selection: mark the selected row (a final response
    * or a prompt), center-scroll it, and suppress tail-follow while a row is
    * selected — returning to the bottom, or staying put, when it ends.
@@ -383,6 +389,10 @@ export function createFeedController(
     upsert,
     resume,
     applyResumed,
+    applyOpened: (page, resumed) => {
+      if (resumed === undefined) applyPage(page, "replace");
+      else applyResumed(page, resumed);
+    },
     applySelection,
     selectionActive: () => selectedRow !== null,
     rows,

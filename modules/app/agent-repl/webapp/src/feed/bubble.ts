@@ -706,9 +706,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     switch (result.case) {
       case "success": {
         const controller = ensureChild();
-        const page = requireMessage(result.value.page, "OpenFeedSuccess.page");
-        if (result.value.resumed === undefined) controller.applyPage(page, "replace");
-        else controller.applyResumed(page, result.value.resumed);
+        controller.applyOpened(requireMessage(result.value.page, "OpenFeedSuccess.page"), result.value.resumed);
         return requireMessage(result.value.watch, "OpenFeedSuccess.watch");
       }
       case "error":

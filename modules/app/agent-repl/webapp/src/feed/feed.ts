@@ -601,9 +601,7 @@ export function mountFeed(
     const result = requireCase(response.result, "OpenFeedResponse.result");
     switch (result.case) {
       case "success": {
-        const page = requireMessage(result.value.page, "OpenFeedSuccess.page");
-        if (result.value.resumed === undefined) root.applyPage(page, "replace");
-        else root.applyResumed(page, result.value.resumed);
+        root.applyOpened(requireMessage(result.value.page, "OpenFeedSuccess.page"), result.value.resumed);
         // THE ROOT FEED'S OPEN STATES ITS HELD SECTION, as of the same pin as
         // the page: the tail then carries every later change of it.
         const section = requireMessage(result.value.held, "OpenFeedSuccess.held");
