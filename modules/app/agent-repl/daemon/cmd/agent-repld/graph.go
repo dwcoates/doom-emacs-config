@@ -692,10 +692,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	gnsRun := gnsauth.Runner(scripts)
 	var gnsRenewer *gnsauth.Renewer
 	switch {
-	case p.Contracts.Fake() || fakeShims():
-		// A daemon with its vendors mocked never reaches the real GNS, so it
-		// has no credential to keep alive.
-		log.Info(opGNSAuth, "the GNS sign-in is not kept alive: the daemon runs with its vendors mocked", dlog.Context{
+	case p.Contracts.Fake() || p.Contracts.ForbidVendorCalls() || fakeShims():
+		// A daemon with its vendors mocked or forbidden (every test sets one)
+		// never reaches the real GNS, so it has no credential to keep alive,
+		// and no test can open a browser page.
+		log.Info(opGNSAuth, "the GNS sign-in is not kept alive: the daemon runs with its vendors mocked or forbidden", dlog.Context{
 			"branch": "mocked",
 		})
 	case browser == nil:
