@@ -10,6 +10,7 @@ import {
   guardAttributes,
   isKeepaliveRecord,
   isPromptRecord,
+  joinsChain,
   liveEnd,
   planCut,
   promptPlace,
@@ -100,6 +101,20 @@ describe("vendorCutRefusal", () => {
   });
 });
 
+describe("joinsChain", () => {
+  it.each([
+    ["a record naming its parent", { uuid: "a0", parentUuid: "p0" }, true],
+    ["the conversation's first record, whose parent is null", { uuid: "p0", parentUuid: null }, true],
+    ["the fork's custom-title line, which names no parent", { type: "custom-title", uuid: "t0" }, false],
+  ])("answers whether %s joins the chain", (_name, record, want) => {
+    // Arrange, Act.
+    const joins = joinsChain(record as Partial<ChainRecord>);
+
+    // Assert.
+    expect(joins).toBe(want);
+  });
+});
+
 describe("readTranscriptChain", () => {
   it("answers no_transcript when the vendor wrote none", () => {
     // Arrange, Act.
@@ -118,6 +133,31 @@ describe("readTranscriptChain", () => {
 
     // Assert.
     expect(uuids(chain)).toEqual(["p0", "a0", "p1"]);
+  });
+
+  it("never ends the chain at the fork's closing custom-title line, which names no parent", () => {
+    // Arrange: the vendor's fork closes the file with a titled line of its own.
+    const title = { type: "custom-title", sessionId: "s1", customTitle: "Some work (fork)", uuid: "t0" };
+    const file = transcript([user("p0", null), assistant("a0", "p0"), title]);
+
+    // Act.
+    const chain = chainOf(file);
+
+    // Assert.
+    expect(uuids(chain)).toEqual(["p0", "a0"]);
+  });
+
+  it("reads a forked conversation's live end as its last turn, so the summarizer has it to render", () => {
+    // Arrange.
+    const title = { type: "custom-title", sessionId: "s1", customTitle: "Some work (fork)", uuid: "t0" };
+    const file = transcript([user("p0", null), assistant("a0", "p0"), title]);
+
+    // Act.
+    const read = readLiveConversation(file, new Set());
+
+    // Assert.
+    if (read.kind !== "ok") throw new Error(`no live conversation: ${read.kind}`);
+    expect(read.transcript.chain.map((record) => record.uuid)).toEqual(["p0", "a0"]);
   });
 
   it("skips a torn line", () => {

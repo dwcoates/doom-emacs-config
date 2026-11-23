@@ -236,6 +236,15 @@ export function chainRecordOf(record: Partial<ChainRecord>): ChainRecord {
   return slice as ChainRecord;
 }
 
+/**
+ * Whether RECORD joins the conversation's chain: it names its parent, null for
+ * the first record. A metadata line that carries a uuid of its own (the fork's
+ * `custom-title`) names none, and is never the chain's newest record.
+ */
+export function joinsChain(record: Partial<ChainRecord>): boolean {
+  return Object.hasOwn(record, "parentUuid");
+}
+
 /** Parse the complete lines of TEXT into INTO, each record as PROJECT keeps it. */
 function ingest(text: string, into: Ingested, project: (record: Partial<ChainRecord>) => ChainRecord): void {
   for (const raw of text.split("\n")) {
@@ -251,7 +260,13 @@ function ingest(text: string, into: Ingested, project: (record: Partial<ChainRec
     const record = parsed as Partial<ChainRecord>;
     if (typeof record.uuid !== "string" || record.uuid === "") continue;
     into.byUuid.set(record.uuid, project(record));
-    if (record.isSidechain !== true) into.last = record.uuid;
+    // ONLY A RECORD THAT JOINS THE CHAIN CAN END IT: one that names its
+    // parent, null for the conversation's first. The vendor's fork closes the
+    // file with a `custom-title` line that carries a uuid and no parent, and
+    // taken as the newest record it made the whole conversation that one
+    // line: the cold gate's compaction of a fresh merge workspace's fork found
+    // "nothing to summarize" (2026-11-22 18:19:38, merge-progress-exit-race-fix).
+    if (record.isSidechain !== true && joinsChain(record)) into.last = record.uuid;
   }
 }
 
