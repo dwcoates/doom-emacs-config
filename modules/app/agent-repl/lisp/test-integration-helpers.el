@@ -1131,6 +1131,10 @@ signals."
                 (agent-repl-roster--hidden-tabs nil)
                 (agent-repl-roster--walked nil)
                 (agent-repl-roster--walked-hidden nil)
+                ;; So is where the last roster placed each row, which the
+                ;; next reconcile reads as the state before it.
+                (agent-repl-roster--placed nil)
+                (agent-repl-roster--view-address nil)
                 (agent-repl-itest--real-ws-put
                  (symbol-function 'agent-repl--ws-put))
                 (process-environment
