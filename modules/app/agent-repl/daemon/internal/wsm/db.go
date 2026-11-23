@@ -1055,6 +1055,9 @@ type DB interface {
 	// relabels a stored one, keeping an owned pull request's subscription in
 	// step, and answers every link the workspace then holds.
 	SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSet) ([]WorkspaceLink, error)
+	// AddWorkspaceLinkIfAbsent stores a reference link only when the
+	// workspace holds none to the url, answering whether it did.
+	AddWorkspaceLinkIfAbsent(ctx context.Context, id WorkspaceID, url, label string, pullRequest *PullRequestKey) (bool, error)
 	// RemoveWorkspaceLink removes a stored link, answering the rest; a url
 	// the workspace does not hold is an *UnknownLinkError.
 	RemoveWorkspaceLink(ctx context.Context, id WorkspaceID, url string) ([]WorkspaceLink, error)

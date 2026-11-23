@@ -708,3 +708,65 @@ func TestRepublishLinksCarriesEachPullRequestsState(t *testing.T) {
 		t.Errorf("topbar links = %+v, want %+v", f.topbarLinks, want)
 	}
 }
+
+func TestAddResponseLinksStoresReferencesAndRepublishes(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": {{URL: docLink.URL, Label: "mine a", Owned: true, Shown: true}}}
+
+	// Act.
+	err := f.verbs.AddResponseLinks(context.Background(), "w1", []string{docLink.URL, "https://example.com/new"})
+
+	// Assert: the held link is untouched, the new one is a reference, and the title is told.
+	if err != nil {
+		t.Fatalf("AddResponseLinks: %v", err)
+	}
+	want := []wsm.WorkspaceLink{
+		{URL: "https://example.com/new", Label: "Response link example.com", Shown: true},
+		{URL: docLink.URL, Label: "mine a", Owned: true, Shown: true},
+	}
+	if got := f.db.links["w1"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("links = %+v, want %+v", got, want)
+	}
+	if len(f.topbarLinks) != 1 {
+		t.Errorf("topbar publications = %d, want 1", len(f.topbarLinks))
+	}
+}
+
+func TestAddResponseLinksPublishesNothingWhenAllAreHeld(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": {docLink}}
+
+	// Act.
+	err := f.verbs.AddResponseLinks(context.Background(), "w1", []string{docLink.URL})
+
+	// Assert.
+	if err != nil || len(f.topbarLinks) != 0 {
+		t.Fatalf("AddResponseLinks = %v with %d publications, want nil and none", err, len(f.topbarLinks))
+	}
+}
+
+func TestAddResponseLinksFailsLoudlyWhenTheStoreWillNotWrite(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.linksErr = errors.New("disk full")
+
+	// Act.
+	err := f.verbs.AddResponseLinks(context.Background(), "w1", []string{docLink.URL})
+
+	// Assert.
+	if !errors.Is(err, f.db.linksErr) {
+		t.Fatalf("AddResponseLinks = %v, want the store's error", err)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAddResponseLinks})
+	if !ok || r.Context["url"] != docLink.URL || r.Context["cause"] == nil {
+		t.Errorf("record = %+v, want an ERROR %s naming the url and the cause", r, opAddResponseLinks)
+	}
+	if len(f.topbarLinks) != 0 {
+		t.Errorf("topbar links = %+v, want none", f.topbarLinks)
+	}
+}

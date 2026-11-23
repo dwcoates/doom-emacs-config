@@ -148,7 +148,7 @@ func (r *resolver) restateRevised(s *wsState, fold *proseState, unit string, rev
 			return
 		}
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-			Prose:      &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, revised.markdown, prose.Settled)},
+			Prose:      &frontendv1.FeedResponseProse{Prose: r.responseProse(s, revised.markdown, prose.Settled)},
 			RevealPace: revised.pace,
 		}}
 	})

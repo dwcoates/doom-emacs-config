@@ -238,6 +238,52 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 	return out, err
 }
 
+// AddWorkspaceLinkIfAbsent stores URL under LABEL as a reference link on ID
+// when ID holds no link to it, and changes nothing when it does, whatever its
+// label or ownership: a link the workspace set itself is never relabeled or
+// demoted by a url the daemon read out of its responses. It is placed as any
+// new reference is (placeLinkInTx), and answers whether it stored the link.
+// PULLREQUEST is the pull request the url names, nil for any other url.
+func (s *store) AddWorkspaceLinkIfAbsent(ctx context.Context, id WorkspaceID, url, label string, pullRequest *PullRequestKey) (bool, error) {
+	const op = "daemon.wsm.add_workspace_link_if_absent"
+	fields := dlog.Context{"workspace": string(id), "url": url, "label": label}
+	if url == "" || label == "" {
+		err := fmt.Errorf("wsm: link of %s: a link names its url and its label", id)
+		s.log.Error(op, "refused a link its caller should never have made: it names no url or no label", withError(fields, err))
+		return false, err
+	}
+	var added bool
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
+			return err
+		}
+		var held int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, url).Scan(&held); err != nil {
+			return err
+		}
+		if held > 0 {
+			return nil
+		}
+		shown, err := placeLinkInTx(ctx, tx, id, LinkSet{URL: url, Label: label})
+		if err != nil {
+			return err
+		}
+		var owner, repo, number any
+		if pullRequest != nil {
+			owner, repo, number = pullRequest.Owner, pullRequest.Repo, pullRequest.Number
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number, announces)
+			 VALUES (?, ?, ?, (SELECT COALESCE(MAX(set_seq), 0) + 1 FROM workspace_links WHERE workspace_id = ?), ?, 0, ?, ?, ?, NULL)`,
+			id, url, label, id, shown, owner, repo, number); err != nil {
+			return err
+		}
+		added = true
+		return nil
+	})
+	return added, err
+}
+
 // RemoveWorkspaceLink removes URL from ID's links, ending the subscription
 // its ownership took, and answers the links ID still holds. A url ID does not
 // hold is an *UnknownLinkError.

@@ -1040,6 +1040,24 @@ func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, set wsm
 	return slices.Clone(d.links[id]), nil
 }
 
+// AddWorkspaceLinkIfAbsent stores a reference at the front, shown while fewer
+// than wsm.ShownLinkLimit are, only when the workspace holds none to the url;
+// linksErr fails it.
+func (d *fakeDB) AddWorkspaceLinkIfAbsent(_ context.Context, id ids.WorkspaceID, url, label string, pr *wsm.PullRequestKey) (bool, error) {
+	if d.linksErr != nil {
+		return false, d.linksErr
+	}
+	links := d.links[id]
+	if slices.ContainsFunc(links, func(l wsm.WorkspaceLink) bool { return l.URL == url }) {
+		return false, nil
+	}
+	if d.links == nil {
+		d.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{}
+	}
+	d.links[id] = append([]wsm.WorkspaceLink{{URL: url, Label: label, PullRequest: pr, Shown: len(links) < wsm.ShownLinkLimit}}, links...)
+	return true, nil
+}
+
 // RemoveWorkspaceLink removes a stored link, answering *wsm.UnknownLinkError
 // for one the workspace does not hold; linksErr fails it.
 func (d *fakeDB) RemoveWorkspaceLink(_ context.Context, id ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error) {
