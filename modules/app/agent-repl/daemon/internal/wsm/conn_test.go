@@ -92,7 +92,7 @@ func TestConnUseRecordsAHoldPastItsBudget(t *testing.T) {
 			var u connUse
 
 			// Act
-			u.note(log, "daemon.wsm.sample", dlog.Context{"workspace": "w1"}, instant, instant.Add(10*time.Millisecond), instant.Add(10*time.Millisecond+tt.held))
+			u.note(log, "daemon.wsm.sample", "server.caller", dlog.Context{"workspace": "w1"}, instant, instant.Add(10*time.Millisecond), instant.Add(10*time.Millisecond+tt.held))
 
 			// Assert
 			rec, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opConnHold})
@@ -102,7 +102,7 @@ func TestConnUseRecordsAHoldPastItsBudget(t *testing.T) {
 			if !found {
 				return
 			}
-			want := dlog.Context{"workspace": "w1", "operation": "daemon.wsm.sample", "held_ms": tt.held.Milliseconds(), "waited_ms": int64(10), "budget_ms": connHoldBudget.Milliseconds()}
+			want := dlog.Context{"workspace": "w1", "operation": "daemon.wsm.sample", "caller": "server.caller", "held_ms": tt.held.Milliseconds(), "waited_ms": int64(10), "budget_ms": connHoldBudget.Milliseconds()}
 			if !reflect.DeepEqual(rec.Context, want) {
 				t.Fatalf("hold record context = %+v, want %+v", rec.Context, want)
 			}
@@ -117,19 +117,19 @@ func TestConnUseNamesWhatHeldTheConnectionDuringALongWait(t *testing.T) {
 	// Arrange: one hold before the wait, three during it.
 	log := dlog.NewTestLogger()
 	var u connUse
-	hold := func(op string, releasedAt, held time.Duration) {
+	hold := func(op, caller string, releasedAt, held time.Duration) {
 		released := instant.Add(releasedAt)
-		u.note(log, op, dlog.Context{}, released.Add(-held), released.Add(-held), released)
+		u.note(log, op, caller, dlog.Context{}, released.Add(-held), released.Add(-held), released)
 	}
-	hold("daemon.wsm.before", 0, 50*time.Millisecond)
-	hold("daemon.wsm.light", 200*time.Millisecond, 10*time.Millisecond)
-	hold("daemon.wsm.heavy", 600*time.Millisecond, 200*time.Millisecond)
-	hold("daemon.wsm.heavy", 900*time.Millisecond, 200*time.Millisecond)
+	hold("daemon.wsm.before", "a.before", 0, 50*time.Millisecond)
+	hold("daemon.wsm.light", "a.light", 200*time.Millisecond, 10*time.Millisecond)
+	hold("daemon.wsm.heavy", "a.one", 600*time.Millisecond, 150*time.Millisecond)
+	hold("daemon.wsm.heavy", "a.two", 900*time.Millisecond, 250*time.Millisecond)
 
 	// Act: a waiter that asked after the first hold and waited the budget.
 	asked := instant.Add(100 * time.Millisecond)
 	taken := asked.Add(connWaitBudget)
-	u.note(log, "daemon.wsm.waiter", dlog.Context{"workspace": "w1"}, asked, taken, taken.Add(time.Millisecond))
+	u.note(log, "daemon.wsm.waiter", "a.waiter", dlog.Context{"workspace": "w1"}, asked, taken, taken.Add(time.Millisecond))
 
 	// Assert
 	rec, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opConnPressure})
@@ -137,9 +137,10 @@ func TestConnUseNamesWhatHeldTheConnectionDuringALongWait(t *testing.T) {
 		t.Fatalf("no pressure record; records = %+v", log.Records())
 	}
 	want := dlog.Context{
-		"workspace": "w1", "operation": "daemon.wsm.waiter", "waited_ms": connWaitBudget.Milliseconds(),
+		"workspace": "w1", "operation": "daemon.wsm.waiter", "caller": "a.waiter", "waited_ms": connWaitBudget.Milliseconds(),
 		"budget_ms": connWaitBudget.Milliseconds(), "holds_meanwhile": 3, "held_meanwhile_ms": int64(410),
 		"holders":                      []string{"daemon.wsm.heavy 2×400ms", "daemon.wsm.light 1×10ms"},
+		"callers":                      []string{"daemon.wsm.heavy<-a.two 1×250ms", "daemon.wsm.heavy<-a.one 1×150ms", "daemon.wsm.light<-a.light 1×10ms"},
 		"waits_past_budget_since_last": 0,
 	}
 	if !reflect.DeepEqual(rec.Context, want) {
@@ -156,7 +157,7 @@ func TestConnUseWritesOnePressureRecordPerInterval(t *testing.T) {
 	var u connUse
 	wait := func(at time.Duration) {
 		taken := instant.Add(at)
-		u.note(log, "daemon.wsm.waiter", dlog.Context{}, taken.Add(-connWaitBudget), taken, taken)
+		u.note(log, "daemon.wsm.waiter", "a.waiter", dlog.Context{}, taken.Add(-connWaitBudget), taken, taken)
 	}
 
 	// Act: three waits inside one interval, then one past it.
@@ -181,7 +182,7 @@ func TestConnUseNamesAtMostTheHeaviestHolders(t *testing.T) {
 	var u connUse
 	for i := range connHoldersNamed + 2 {
 		released := instant.Add(time.Duration(i+1) * time.Millisecond)
-		u.note(log, "daemon.wsm.op"+strings.Repeat("x", i), dlog.Context{}, released, released, released.Add(time.Duration(i+1)*time.Millisecond))
+		u.note(log, "daemon.wsm.op"+strings.Repeat("x", i), "a.caller", dlog.Context{}, released, released, released.Add(time.Duration(i+1)*time.Millisecond))
 	}
 
 	// Act
@@ -196,6 +197,80 @@ func TestConnUseNamesAtMostTheHeaviestHolders(t *testing.T) {
 	}
 	if !strings.HasPrefix(holders[0], "daemon.wsm.op"+strings.Repeat("x", connHoldersNamed+1)+" ") {
 		t.Fatalf("heaviest holder = %q, want the longest hold first", holders[0])
+	}
+}
+
+func TestConnUseNamesAtMostTheHeaviestCallers(t *testing.T) {
+	// Arrange: one operation made by more distinct callers than a record names.
+	log := dlog.NewTestLogger()
+	var u connUse
+	for i := range connCallersNamed + 2 {
+		released := instant.Add(time.Duration(i+1) * time.Millisecond)
+		u.note(log, "daemon.wsm.workspace", "a.caller"+strings.Repeat("x", i), dlog.Context{}, released, released, released.Add(time.Duration(i+1)*time.Millisecond))
+	}
+
+	// Act
+	callers := u.callersBetween(instant, instant.Add(time.Second))
+
+	// Assert
+	if len(callers) != connCallersNamed {
+		t.Fatalf("callers named = %d, want the heaviest %d", len(callers), connCallersNamed)
+	}
+	if want := "daemon.wsm.workspace<-a.caller" + strings.Repeat("x", connCallersNamed+1) + " "; !strings.HasPrefix(callers[0], want) {
+		t.Fatalf("heaviest caller = %q, want it to start %q", callers[0], want)
+	}
+}
+
+// TestFramesPastNamesTheCallersBeyondTheInsideFrames pins framesPast: the
+// leading frames the predicate calls inside are passed over, and the next two
+// are named innermost first.
+func TestFramesPastNamesTheCallersBeyondTheInsideFrames(t *testing.T) {
+	// Arrange: the store side is one helper deep; the caller side is another.
+	// Act
+	got := framesCallerSide()
+
+	// Assert
+	want := "wsm.framesCallerSide<-wsm.TestFramesPastNamesTheCallersBeyondTheInsideFrames"
+	if got != want {
+		t.Fatalf("framesPast = %q, want %q", got, want)
+	}
+}
+
+// framesCallerSide stands for a caller of the store.
+func framesCallerSide() string { return framesStoreSide() }
+
+// framesStoreSide stands for a store frame between the caller and the walk.
+func framesStoreSide() string {
+	return framesPast(func(function string) bool { return strings.HasSuffix(function, ".framesStoreSide") })
+}
+
+// TestAStoreReadIsAttributedPastEveryStoreFrame pins callerOutsideStore
+// through a real read: every frame of the read's own path is inside the
+// store, so in this package's tests the walk passes all of them and the
+// caller is named from beyond the package (the test runner).
+func TestAStoreReadIsAttributedPastEveryStoreFrame(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.now = func() time.Time { return instant }
+
+	// Act
+	err := s.read(ctx, "daemon.wsm.sample", dlog.Context{}, func(ctx context.Context) error {
+		s.now = func() time.Time { return instant.Add(connHoldBudget) }
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("read = %v", err)
+	}
+	rec, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opConnHold})
+	if !found {
+		t.Fatalf("no hold record; records = %+v", log.Records())
+	}
+	if caller, _ := rec.Context["caller"].(string); !strings.HasPrefix(caller, "testing.tRunner") {
+		t.Fatalf("hold caller = %q, want the first frame past the wsm package (testing.tRunner)", caller)
 	}
 }
 
