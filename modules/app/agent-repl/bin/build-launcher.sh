@@ -38,7 +38,9 @@ LSREGISTER="${AGENT_REPL_LSREGISTER:-/System/Library/Frameworks/CoreServices.fra
 LABEL="app.zettel.launcher"
 
 echo "[build-launcher] building the release products..."
-( cd "$LAUNCHER" && swift build -c release --product Zettel && swift build -c release --product ZettelIcon )
+# ONE SwiftPM run for both products: each run resolves and plans the package
+# again (measured 2026-11-23, two runs that compiled nothing cost 10.0s and 7.7s).
+( cd "$LAUNCHER" && swift build -c release --product Zettel --product ZettelIcon )
 BIN="$(cd "$LAUNCHER" && swift build -c release --show-bin-path)"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/zettel-bundle.XXXXXX")"

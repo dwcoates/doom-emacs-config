@@ -95,7 +95,7 @@ for metrics that show where restart time goes and when it regressed):
 |---|---|---|---|
 | `deploy` | `build`, `install`, `restart_services`, `decide`, `total` | | the deploying daemon |
 | `deploy` | `handover`, `total` of a deploy that moved the daemon | | the successor, from the instants the intent manifest carries (judgement call 10) |
-| `deploy_build` | each build step by name: `proto`, a build-frontend target (`shim`, `webapp`, `daemon`, `store`, `sidecar`, `zettel`, `tests`, `lock`), `wifi`, or `build` for a harness's one-command override; `outcome` `failed` for the step that stopped the build | | `deploy.ScriptBuilder`, per step (added 2026-11-20); the deploy's whole build is `deploy`'s `build` |
+| `deploy_build` | each build step by name: `proto`, a build-frontend target (`shim`, `webapp`, `daemon`, `store`, `sidecar`, `zettel`, `tests`, `lock`), `wifi`, or `build` for a harness's one-command override; `outcome` `failed` for the step that stopped the build | | `deploy.ScriptBuilder`, per step (added 2026-11-20); the deploy's whole build is `deploy`'s `build`. Since 2026-11-23 a step whose target's source tree is unchanged since the installed artifact copies that artifact instead of building it, so an unchanged target's time is a copy's (the daemon log's `a staged target was reused or built` record names each target's `outcome`: `reused` or `built`); earlier history is all builds |
 | `daemon_boot` | `claim`, `reconciled`, `serving`, `sessions_up`, each from the process start | `cold`, `successor` | the booting daemon |
 | `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
 | `workspace_start` | `start`, `wake` | `boot`, `takeover` | the bring-up, per workspace |

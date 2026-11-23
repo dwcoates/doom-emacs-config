@@ -1052,12 +1052,22 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 	// the webapp's tree is: swapped in by rename, so a banner's click or an
 	// open by hand never finds a half-copied app.
 	if d.deps.Launcher {
+		// ITS STAMPS STAND BESIDE THE INSTALLED APP, in the Applications
+		// directory, where a staging run looks for the launcher to reuse.
+		launcherStamps := stampsBeside(filepath.Dir(s.CacheBin(LauncherBundle)), live.Applications, LauncherBundle+".")
 		artifacts = append(artifacts, artifact{component: ComponentLauncher, name: LauncherBundle, fresh: fresh.launcher,
 			installed: func() (string, error) {
 				return buildid.File(filepath.Join(live.LauncherApp(), LauncherExecutable))
 			}, install: func() error {
-				return in.dir(s.CacheBin(LauncherBundle), live.LauncherApp())
-			}, writes: []string{live.LauncherApp()}, tree: true})
+				if err := in.dropStamps(launcherStamps); err != nil {
+					return err
+				}
+				if err := in.dir(s.CacheBin(LauncherBundle), live.LauncherApp()); err != nil {
+					return err
+				}
+				return in.stamps(launcherStamps)
+			}, writes: append([]string{live.LauncherApp()}, livePaths("", launcherStamps)[1:]...), tree: true,
+			restamp: func() error { return in.stamps(launcherStamps) }})
 	}
 	for _, a := range artifacts {
 		fields := dlog.Context{"artifact": a.name, "fresh": a.fresh}
@@ -1088,8 +1098,10 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 		}
 		// WHAT STANDS IS KEPT BEFORE IT IS REPLACED, so a later failure can
 		// put it back. A path that cannot be kept is not replaced.
-		for _, path := range a.writes {
-			if err := prev.keep(a.component, a.name, path, a.tree, a.bundle); err != nil {
+		// Only the artifact itself (the first write) is a tree: the stamps
+		// written after it are files.
+		for i, path := range a.writes {
+			if err := prev.keep(a.component, a.name, path, a.tree && i == 0, a.bundle); err != nil {
 				d.log.Error(opInstall, "could not keep the previous build before replacing it; it is not replaced", dlog.WithCause(fields, err))
 				return &InstallFailed{Component: a.component, Detail: err.Error()}
 			}

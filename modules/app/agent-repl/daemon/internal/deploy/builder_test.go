@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -634,6 +635,50 @@ func TestEveryBuildStepIsATrackedTarget(t *testing.T) {
 				if panicked != nil {
 					t.Errorf("build step %q is unknown to the hot reload card: %v", step.name, panicked)
 				}
+			}
+		})
+	}
+}
+
+func TestTheBuildLogsWhatEachTargetBecameAtInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want []map[string]any
+	}{
+		{name: "a reused target is logged with its source tree",
+			out:  "[build-frontend] launcher: reusing the installed artifact (/x)\n[build-frontend] outcome target=launcher source_tree=abc123 outcome=reused\n",
+			want: []map[string]any{{"target": "launcher", "source_tree": "abc123", "outcome": "reused"}}},
+		{name: "a built target and a dirty tree's id are logged as they stand",
+			out:  "[build-frontend] outcome target=shim-store source_tree=abc123-dirty outcome=built\n",
+			want: []map[string]any{{"target": "shim-store", "source_tree": "abc123-dirty", "outcome": "built"}}},
+		{name: "a step that reports no outcome logs none",
+			out:  "[build-frontend] proto: fresh, skipping generation\n",
+			want: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			b, _, log := newScriptBuilder(t, map[string]runAnswer{targetStep + "store": {out: tc.out}})
+
+			// Act
+			err := b.Build(context.Background(), "/staging/1")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			var got []map[string]any
+			for _, r := range log.Records() {
+				if r.Level == "info" && r.Operation == opBuild && r.Message == "a staged target was reused or built" {
+					got = append(got, map[string]any{"target": r.Context["target"], "source_tree": r.Context["source_tree"], "outcome": r.Context["outcome"]})
+					if r.Context["step"] != "store" {
+						t.Fatalf("step = %v, want the step that ran the target", r.Context["step"])
+					}
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("outcome records = %v, want %v", got, tc.want)
 			}
 		})
 	}

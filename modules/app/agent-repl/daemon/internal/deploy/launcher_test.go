@@ -318,3 +318,21 @@ func (k *restartRecorder) Restart(_ context.Context, label string) error {
 	k.restarted = true
 	return k.err
 }
+
+func TestTheLauncherInstallPlacesItsStampsBesideTheInstalledApp(t *testing.T) {
+	// Arrange
+	h := newLauncherHarness(t, hashOf(t, "launcher-1"))
+	writeFile(t, filepath.Join(filepath.Dir(h.live.LauncherApp()), ".Zettel.app.source-tree"), "tree-launcher-1")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	stamp := filepath.Join(h.live.Applications, ".Zettel.app.source-tree")
+	if got := readFile(t, stamp); got != "tree-launcher-2" {
+		t.Fatalf("launcher source-tree stamp = %q, want the fresh build's, which a staging run reuses the app by", got)
+	}
+}

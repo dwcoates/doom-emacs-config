@@ -223,11 +223,14 @@ make_fresh_artifacts_files() {
     local root="$1"
     echo built > "$root/agent-shim/claude/shim/dist/main.js"
     write_webapp_index "$root/webapp/dist/index.html"
-    echo built > "$root/daemon/bin/agent-repld"
+    # The Go binaries are shaped as the go stub builds them (make_stubs): the
+    # toolchain they were linked by and, for the daemon, its link flags.
+    printf 'built\ntoolchain=go1.0\nldflags=-X agent-repld/internal/checkout.builtFrom=%s\n' "$root" > "$root/daemon/bin/agent-repld"
     mkdir -p "$root/home/.cache/agent-repl/bin"
-    echo built > "$root/home/.cache/agent-repl/bin/shim-store"
-    echo built > "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
-    echo built > "$root/home/.cache/agent-repl/bin/shim-lock"
+    local name
+    for name in shim-store shim-claude-sidecar shim-lock; do
+        printf 'built\ntoolchain=go1.0\n' > "$root/home/.cache/agent-repl/bin/$name"
+    done
 }
 
 # PATH stubs for npm/go that log to $STUB_LOG and touch their artifact.
@@ -274,10 +277,24 @@ EOF
     cat > "$bindir/go" <<'EOF'
 #!/usr/bin/env bash
 echo "go $*" >> "$STUB_LOG"
+# `go version` answers the toolchain; `go version -m <binary>` answers the
+# toolchain and link flags recorded in the binary by the stub's own build, which
+# is what the real one reads out of the binary's build info.
+if [ "${1:-}" = version ]; then
+    if [ "${2:-}" = -m ]; then
+        [ -f "$3" ] || exit 1
+        echo "$3: $(sed -n 's/^toolchain=//p' "$3")"
+        sed -n 's/^ldflags=\(.*\)$/\tbuild\t-ldflags="\1"/p' "$3"
+    else
+        echo "go version ${FAKE_GO_TOOLCHAIN:-go1.0} stub/stub"
+    fi
+    exit 0
+fi
 # `go build -o <out> ./cmd/...` — grab the -o target and touch it.
-out=""
+out="" ldflags=""
 while [ $# -gt 0 ]; do
     [ "$1" = "-o" ] && { out="$2"; shift 2; continue; }
+    [ "$1" = "-ldflags" ] && { ldflags="$2"; shift 2; continue; }
     shift
 done
 # The testrun binary build-frontend.sh builds for the seeded typecheck is
@@ -299,7 +316,12 @@ EOT
         exit 0
         ;;
 esac
-[ -n "$out" ] && { mkdir -p "$(dirname "$out")"; echo built > "$out"; }
+[ -n "$out" ] && {
+    mkdir -p "$(dirname "$out")"
+    echo built > "$out"
+    echo "toolchain=${FAKE_GO_TOOLCHAIN:-go1.0}" >> "$out"
+    [ -z "$ldflags" ] || echo "ldflags=$ldflags" >> "$out"
+}
 exit 0
 EOF
     # make: logs, and exits 1 when its target is FAKE_MAKE_FAIL.
@@ -1503,22 +1525,201 @@ t_in_place_fresh_fixture_builds_nothing() {
     rm -rf "$root"
 }
 
-# Fresh by every stamp, live AND staged: the staging dir already holds a
-# complete build of this exact revision from a previous run. Staging never
-# consults a stamp, so every target builds again anyway.
-t_out_builds_fresh_targets_unconditionally() {
-    local root; root="$(new_staging_root)"
+# REUSE. A staging run copies an installed artifact whose stamp is the source
+# tree standing now, and builds anything else. The fixture's live artifacts are
+# fresh by every stamp (make_fresh_artifacts), so every target is reused.
+
+# outcome_of ROOT-OUTPUT TARGET — the `outcome=` the script reported for TARGET.
+outcome_of() {
+    printf '%s\n' "$1" | sed -n "s/^\[build-frontend\] outcome target=$2 source_tree=[^ ]* outcome=\(.*\)\$/\1/p"
+}
+
+t_out_reuses_every_installed_artifact_of_an_unchanged_tree() {
+    local root out log; root="$(new_staging_root)"; STAGING_ROOT="$root"
     make_fresh_artifacts "$root"
-    run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
-    : > "$root/stub.log"
-    run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
-    # 5 go builds: the four services plus the webapp's testrun.
-    if [ "$(grep -c '^npm run build' "$root/stub.log")" -eq 2 ] &&
-           [ "$(grep -c '^go build' "$root/stub.log")" -eq 5 ]; then
-        pass "staging: every selected target builds even when the live and staged ones are fresh"
+    out="$root/staging"
+    log="$(run_script "$root" --out "$out" shim webapp daemon store sidecar lock)"
+    if ! grep -q '^npm run build' "$root/stub.log" && ! grep -q '^go build' "$root/stub.log" &&
+           [ "$(cat "$out/agent-shim/claude/shim/dist/main.js")" = "$(cat "$root/agent-shim/claude/shim/dist/main.js")" ] &&
+           cmp -s "$root/daemon/bin/agent-repld" "$out/daemon/bin/agent-repld" &&
+           cmp -s "$root/home/.cache/agent-repl/bin/shim-lock" "$out/cache-bin/shim-lock" &&
+           [ "$(outcome_of "$log" shim)" = reused ] && [ "$(outcome_of "$log" daemon)" = reused ] &&
+           [ "$(outcome_of "$log" shim-lock)" = reused ]; then
+        pass "reuse: every installed artifact of an unchanged tree is copied, nothing builds"
     else
-        fail "staging: every selected target builds even when the live and staged ones are fresh" \
-             "stub.log: $(cat "$root/stub.log")"
+        fail "reuse: every installed artifact of an unchanged tree is copied, nothing builds" \
+             "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+# The copy's stamps say what a fresh build's would: the source tree standing now,
+# and the revision standing now (not the one the installed artifact recorded).
+t_out_reuse_stamps_the_staged_artifact_like_a_fresh_build() {
+    local root out; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"
+    printf 'oldrevision\n' > "$root/daemon/bin/.built-sha"
+    out="$root/staging"
+    run_script "$root" --out "$out" daemon store >/dev/null
+    if [ "$(cat "$out/daemon/bin/.built-sha")" = "$(staging_head "$root")" ] &&
+           [ "$(cat "$out/daemon/bin/.source-tree")" = "$(fake_source_tree daemon)" ] &&
+           [ "$(cat "$out/cache-bin/.shim-store.built-sha")" = "$(staging_head "$root")" ] &&
+           [ "$(cat "$out/cache-bin/.shim-store.source-tree")" = "$(fake_source_tree shim-store)" ]; then
+        pass "reuse: the staged copy is stamped with the revision and source tree standing now"
+    else
+        fail "reuse: the staged copy is stamped with the revision and source tree standing now" \
+             "files: $(find "$out" -type f | sort | tr '\n' ' ')"
+    fi
+    rm -rf "$root"
+}
+
+t_out_reuse_takes_the_webapp_build_id_from_the_copied_dist() {
+    local root out; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"
+    write_webapp_index "$root/webapp/dist/index.html" InstalledHash9
+    out="$root/staging"
+    run_script "$root" --out "$out" webapp >/dev/null
+    if ! grep -q '^npm run build' "$root/stub.log" &&
+           [ "$(cat "$out/webapp/dist/.build-id")" = InstalledHash9 ] &&
+           [ "$(cat "$out/webapp/dist/.source-tree")" = "$(fake_source_tree webapp)" ]; then
+        pass "reuse: the webapp's build id is read from the copied dist"
+    else
+        fail "reuse: the webapp's build id is read from the copied dist" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# The daemon's lifecycle snapshot is not part of the copied binary.
+t_out_reuse_snapshots_the_lifecycle_config_beside_the_daemon() {
+    local root out; root="$(new_staging_root)"
+    mkdir -p "$root/.agent-repl"; printf 'deploy_checks: {}\n' > "$root/.agent-repl/lifecycle.yaml"
+    git -C "$root" add -A && git -C "$root" commit -qm lifecycle
+    STAGING_ROOT="$root"; make_fresh_artifacts "$root"
+    out="$root/staging"
+    run_script "$root" --out "$out" daemon >/dev/null
+    if ! grep -q '^go build' "$root/stub.log" && cmp -s "$root/.agent-repl/lifecycle.yaml" "$out/daemon/bin/lifecycle.yaml"; then
+        pass "reuse: a reused daemon gets the lifecycle config snapshot beside it"
+    else
+        fail "reuse: a reused daemon gets the lifecycle config snapshot beside it" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# Every reason to build instead. Each one runs the daemon and the store, whose
+# builds the stub log shows.
+reuse_declines_case() {
+    # reuse_declines_case DESCRIPTION SETUP-FUNCTION
+    local what="$1" setup="$2" root log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"
+    "$setup" "$root"
+    log="$(run_script "$root" --out "$root/staging" daemon store 2>&1)"
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 2 ] &&
+           [ "$(outcome_of "$log" daemon)" = built ] && [ "$(outcome_of "$log" shim-store)" = built ]; then
+        pass "reuse: $what builds"
+    else
+        fail "reuse: $what builds" "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+setup_dirty_tree() { echo "// edit" >> "$1/daemon/cmd/agent-repld/main.go"; echo "// edit" >> "$1/agent-shim/shim-store/main.go"; }
+setup_missing_stamp() { rm -f "$1/daemon/bin/.source-tree" "$1/home/.cache/agent-repl/bin/.shim-store.source-tree"; }
+setup_mismatched_stamp() {
+    printf 'deadbeef\n' > "$1/daemon/bin/.source-tree"
+    printf 'deadbeef\n' > "$1/home/.cache/agent-repl/bin/.shim-store.source-tree"
+}
+setup_missing_artifact() { rm -f "$1/daemon/bin/agent-repld" "$1/home/.cache/agent-repl/bin/shim-store"; }
+setup_other_toolchain() { export FAKE_GO_TOOLCHAIN=go2.0; }
+setup_daemon_built_for_another_checkout() {
+    printf 'built\ntoolchain=go1.0\nldflags=-X agent-repld/internal/checkout.builtFrom=/elsewhere\n' > "$1/daemon/bin/agent-repld"
+    printf 'built\ntoolchain=go1.0\n' > "$1/home/.cache/agent-repl/bin/shim-store"
+    rm -f "$1/home/.cache/agent-repl/bin/.shim-store.source-tree"
+}
+
+t_out_reuse_declines_a_dirty_tree() { reuse_declines_case "a dirty tree" setup_dirty_tree; }
+t_out_reuse_declines_a_missing_stamp() { reuse_declines_case "a missing stamp" setup_missing_stamp; }
+t_out_reuse_declines_a_mismatched_stamp() { reuse_declines_case "a stamp of another source tree" setup_mismatched_stamp; }
+t_out_reuse_declines_a_missing_artifact() { reuse_declines_case "a missing installed artifact" setup_missing_artifact; }
+t_out_reuse_declines_a_binary_of_another_toolchain() {
+    ( reuse_declines_case "a binary linked by another Go toolchain" setup_other_toolchain )
+}
+t_out_reuse_declines_a_daemon_built_for_another_checkout() {
+    # The store is reused here, so only the daemon must build.
+    local root log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    make_fresh_artifacts "$root"; setup_daemon_built_for_another_checkout "$root"
+    stamp_fresh_source_trees "$root"
+    log="$(run_script "$root" --out "$root/staging" daemon store 2>&1)"
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 1 ] &&
+           [ "$(outcome_of "$log" daemon)" = built ] && [ "$(outcome_of "$log" shim-store)" = reused ] &&
+           grep -q "builtFrom=$root" "$root/staging/daemon/bin/agent-repld"; then
+        pass "reuse: a daemon linked for another checkout builds, with this checkout's root"
+    else
+        fail "reuse: a daemon linked for another checkout builds, with this checkout's root" \
+             "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+# committed_launcher_case ROOT — launcher_case, with launcher sources the
+# fixture's checkout tracks, so the launcher has a source-tree id to stamp.
+committed_launcher_case() {
+    local root="$1"
+    launcher_case "$root"
+    mkdir -p "$root/launcher"; echo "// swift package" > "$root/launcher/Package.swift"
+    mkdir -p "$root/proto/gen/swift"; echo "// bindings" > "$root/proto/gen/swift/bindings.swift"
+    git -C "$root" add -A && git -C "$root" commit -qm launcher
+}
+
+# The launcher is installed in the Applications directory with its stamps
+# beside it, so that is where a staging run looks.
+t_out_reuse_copies_the_installed_launcher() {
+    if [ "$(uname)" != Darwin ]; then
+        pass "reuse: the launcher is skipped off macOS"
+        return
+    fi
+    local root out apps log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    committed_launcher_case "$root"
+    apps="$root/home/Applications"
+    mkdir -p "$apps/Zettel.app/Contents/MacOS"; printf 'installed\n' > "$apps/Zettel.app/Contents/MacOS/Zettel"
+    printf '%s\n' "$(fake_source_tree launcher)" > "$apps/.Zettel.app.source-tree"
+    out="$root/staging"
+    log="$(run_script "$root" --out "$out" launcher)"
+    if [ ! -s "$root/stub.log" ] &&
+           [ "$(cat "$out/cache-bin/Zettel.app/Contents/MacOS/Zettel")" = installed ] &&
+           [ "$(cat "$out/cache-bin/.Zettel.app.source-tree")" = "$(fake_source_tree launcher)" ] &&
+           [ "$(outcome_of "$log" launcher)" = reused ]; then
+        pass "reuse: the installed launcher is copied, with no build-launcher run"
+    else
+        fail "reuse: the installed launcher is copied, with no build-launcher run" \
+             "stub.log: $(cat "$root/stub.log") | log: $log"
+    fi
+    rm -rf "$root"
+}
+
+# In place, a launcher build stamps the app it installed.
+t_in_place_launcher_stamps_the_installed_app() {
+    if [ "$(uname)" != Darwin ]; then
+        pass "reuse: the launcher is skipped off macOS"
+        return
+    fi
+    local root; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    committed_launcher_case "$root"
+    run_script "$root" --force launcher >/dev/null
+    if [ "$(cat "$root/home/Applications/.Zettel.app.source-tree" 2>/dev/null)" = "$(fake_source_tree launcher)" ]; then
+        pass "reuse: an in-place launcher build stamps the installed app's directory"
+    else
+        fail "reuse: an in-place launcher build stamps the installed app's directory" \
+             "files: $(find "$root/home" -type f 2>/dev/null)"
+    fi
+    rm -rf "$root"
+}
+
+t_out_logs_a_built_target_with_its_source_tree() {
+    local root log; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    log="$(run_script "$root" --out "$root/staging" store)"
+    if grep -qxF "[build-frontend] outcome target=shim-store source_tree=$(fake_source_tree shim-store) outcome=built" <<<"$log"; then
+        pass "reuse: a built target's outcome line names the target and its source tree"
+    else
+        fail "reuse: a built target's outcome line names the target and its source tree" "log: $log"
     fi
     rm -rf "$root"
 }
@@ -2298,7 +2499,19 @@ build_group_staging() {
     t_launcher_stages_without_installing_and_installs_in_place
     t_out_writes_nothing_live
     t_in_place_fresh_fixture_builds_nothing
-    t_out_builds_fresh_targets_unconditionally
+    t_out_reuses_every_installed_artifact_of_an_unchanged_tree
+    t_out_reuse_stamps_the_staged_artifact_like_a_fresh_build
+    t_out_reuse_takes_the_webapp_build_id_from_the_copied_dist
+    t_out_reuse_snapshots_the_lifecycle_config_beside_the_daemon
+    t_out_reuse_declines_a_dirty_tree
+    t_out_reuse_declines_a_missing_stamp
+    t_out_reuse_declines_a_mismatched_stamp
+    t_out_reuse_declines_a_missing_artifact
+    t_out_reuse_declines_a_binary_of_another_toolchain
+    t_out_reuse_declines_a_daemon_built_for_another_checkout
+    t_out_reuse_copies_the_installed_launcher
+    t_in_place_launcher_stamps_the_installed_app
+    t_out_logs_a_built_target_with_its_source_tree
     t_out_go_builds_pass_buildvcs_false
     t_out_go_builds_pass_trimpath
     t_out_refuses_a_relative_dir

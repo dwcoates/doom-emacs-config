@@ -186,6 +186,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   if [ "$(uname)" = Darwin ]; then
     mkdir -p "$out/cache-bin/Zettel.app/Contents/MacOS"
     printf ` + shellword.Quote(strings.TrimSuffix(fakeLauncherExecutable, "\n")+"\n") + ` > "$out/cache-bin/Zettel.app/Contents/MacOS/Zettel"
+    for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.Zettel.app.$f"; done
   fi
   for n in shim-store shim-claude-sidecar zettel agent-repl-tests shim-lock sockethold; do
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.$n.$f"; done

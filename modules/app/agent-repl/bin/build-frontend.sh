@@ -74,9 +74,12 @@
 #
 # STAGING MODE (`--out DIR`). THIS LAYOUT IS A CONTRACT the daemon's deploy
 # (daemon/internal/deploy) depends on; change it only together with that code.
-# Every selected target is BUILT unconditionally (the staging dir is fresh, so
-# the staleness stamps are not consulted), and nothing in the live artifact
-# locations is written. node_modules linking into the shared node store and
+# The staging dir is fresh, so each selected target is either REUSED or BUILT:
+# reused when the INSTALLED artifact (its live location, the one the deploy
+# installs into) carries a source-tree stamp equal to the id standing here now
+# on a clean tree, in which case it is copied into its slot, and built
+# otherwise (see reuse_installed). Nothing in the live artifact locations is
+# written. node_modules linking into the shared node store and
 # the store gc behave exactly as in place. DIR must be absolute; it is created
 # if absent. Layout, per target:
 #   shim    -> DIR/agent-shim/claude/shim/dist/main.js
@@ -98,6 +101,19 @@
 #   proto   -> NOT STAGED: the bindings are sources the other targets compile
 #              from, so they are generated into the checkout's proto/gen in
 #              both modes, and proto/.source-tree is consulted in both.
+#
+# REUSE keeps the staged bytes what a fresh build would make. A Go binary is
+# reused only when it was linked by the Go toolchain on PATH, and the daemon
+# only when it carries this checkout's own `builtFrom` link-time stamp, the
+# one per-checkout identity any artifact embeds. The shim bundle and the
+# webapp's dist embed none: the shim reads its build identity from its spawn
+# env, and the webapp's `.build-id` is taken from the copied artifact's own
+# entry-bundle hash. A reused artifact's `.built-sha` is rewritten to the
+# revision standing now, as a fresh build would write it.
+#
+# Every target ends in one machine-readable line, which the daemon's deploy
+# logs: `[build-frontend] outcome target=T source_tree=ID outcome=O`, with O
+# one of reused, built or fresh (in place: skipped as up to date).
 #
 # Every `go build` passes -buildvcs=false; see GO_BUILD_FLAGS below.
 #
@@ -277,6 +293,15 @@ else
     DAEMON_BIN="$DAEMON_DIR/bin"
     CACHE_BIN="$HOME/.cache/agent-repl/bin"
 fi
+# Where the INSTALLED artifacts stand: a staging run reuses from here. These
+# are the in-place locations whether or not --out is set. The launcher is
+# installed in the Applications directory (AGENT_REPL_APPLICATIONS_DIR, the
+# seam build-launcher.sh has), with its stamps beside it.
+LIVE_SHIM_DIST="$SHIM_DIR/dist"
+LIVE_WEBAPP_DIST="$WEBAPP_DIR/dist"
+LIVE_DAEMON_BIN="$DAEMON_DIR/bin"
+LIVE_CACHE_BIN="$HOME/.cache/agent-repl/bin"
+LIVE_APPLICATIONS="${AGENT_REPL_APPLICATIONS_DIR:-$HOME/Applications}"
 SHIM_ARTIFACT="$SHIM_DIST/main.js"
 WEBAPP_ARTIFACT="$WEBAPP_DIST/index.html"
 DAEMON_ARTIFACT="$DAEMON_BIN/agent-repld"
@@ -342,6 +367,9 @@ PROTO_TREE_STAMP="$PROTO_DIR/.source-tree"
 # every worktree shares one cache entry. The daemon names the checkout it was
 # built from by a link-time stamp instead (agent-repld/internal/checkout).
 GO_BUILD_FLAGS=(-buildvcs=false -trimpath)
+
+# The daemon's one link-time identity: the checkout it was built from.
+DAEMON_LDFLAGS="-X agent-repld/internal/checkout.builtFrom=$ROOT"
 
 # go_build DIR ARTIFACT PACKAGE [LDFLAGS] — the one `go build` here: PACKAGE,
 # built from DIR into ARTIFACT with GO_BUILD_FLAGS, and LDFLAGS, when given, as
@@ -425,6 +453,56 @@ stamp_is_stale() {
 # stale one, which keeps the next run honest: no stamp means stale.
 stamp_source_tree() {
     write_source_tree "$2" "$(system_source_id "$1" || true)"
+}
+
+# report_outcome TARGET OUTCOME — the one line a deploy's log says each target's
+# fate by: the target, the source-tree id standing now and what became of it.
+report_outcome() {
+    echo "[build-frontend] outcome target=$1 source_tree=$(system_source_id "$1" || echo unknown) outcome=$2"
+}
+
+# go_binary_current BINARY [LDFLAGS] — return 0 when a Go binary is what a build
+# here would link: made by the Go toolchain on PATH and, when LDFLAGS is given,
+# carrying exactly those link flags (build info records them). A binary that
+# cannot be read this way is not reusable.
+go_binary_current() {
+    local binary="$1" ldflags="${2:-}" toolchain info
+    command -v go >/dev/null 2>&1 || return 1
+    toolchain="$(go version | awk '{print $3}')" || return 1
+    [ -n "$toolchain" ] || return 1
+    info="$(go version -m "$binary" 2>/dev/null)" || return 1
+    [ "$(printf '%s\n' "$info" | sed -n '1s/^[^:]*: //p')" = "$toolchain" ] || return 1
+    [ -z "$ldflags" ] || grep -qF -- "$ldflags" <<<"$info"
+}
+
+# go_binary_current_for LDFLAGS BINARY — go_binary_current with the arguments in
+# the order reuse_installed hands them (its CHECK COMMAND gets the artifact last).
+go_binary_current_for() { go_binary_current "$2" "$1"; }
+
+# reuse_installed NAME LIVE LIVE_STAMP ARTIFACT [CHECK COMMAND...] — in a staging
+# run, stage a copy of the INSTALLED artifact LIVE as ARTIFACT instead of
+# building it, and return 0; return 1 (nothing staged) when it must be built.
+#
+# THE INSTALLED ARTIFACT IS THE SOURCE, because it is what the host already
+# holds and the deploy already stamps beside it: a cache keyed by source-tree id
+# would be a second store to fill, collect and keep in step with the first. It
+# is reusable exactly when stamp_is_stale says it is fresh against its live
+# stamp (so a dirty tree, a missing artifact, a missing stamp or a different id
+# all build) and CHECK COMMAND, when given, accepts the live artifact: the
+# check that the artifact embeds nothing a fresh build here would not.
+reuse_installed() {
+    local name="$1" live="$2" live_stamp="$3" artifact="$4"; shift 4
+    [ -n "$OUT_DIR" ] || return 1
+    ! stamp_is_stale "$name" "$live" "$live_stamp" || return 1
+    if [ $# -gt 0 ] && ! "$@" "$live"; then
+        echo "[build-frontend] $name: the installed artifact is not what a build here would make, building"
+        return 1
+    fi
+    rm -rf "$artifact"
+    mkdir -p "$(dirname "$artifact")"
+    cp -Rp "$live" "$artifact"
+    echo "[build-frontend] $name: reusing the installed artifact ($live)"
+    report_outcome "$name" reused
 }
 
 # link_node_modules DIR — point DIR/node_modules at its shared store entry
@@ -586,8 +664,16 @@ build_deps() {
 
 build_shim() {
     link_node_modules "$SHIM_DIR"
+    if reuse_installed shim "$LIVE_SHIM_DIST/main.js" "$LIVE_SHIM_DIST/.source-tree" "$SHIM_ARTIFACT"; then
+        # The bundle embeds no revision, so the copy IS a fresh build's bytes;
+        # the stamps say what a fresh build's would.
+        write_built_sha_value "$SHIM_SHA_STAMP" "$(source_revision "$ROOT" || true)"
+        stamp_source_tree shim "$SHIM_TREE_STAMP"
+        return 0
+    fi
     if ! source_is_stale shim "$SHIM_ARTIFACT" "$SHIM_TREE_STAMP"; then
         echo "[build-frontend] shim: fresh, skipping"
+        report_outcome shim fresh
         return 0
     fi
     require_bin npm "install Node.js"
@@ -607,6 +693,7 @@ build_shim() {
     write_built_sha_value "$SHIM_SHA_STAMP" "$shim_sha"
     stamp_source_tree shim "$SHIM_TREE_STAMP"
     echo "[build-frontend] shim: done"
+    report_outcome shim built
 }
 
 # write_webapp_build_id — stamp the built webapp with the identity of the
@@ -658,12 +745,21 @@ seeded_typecheck() {
 
 build_webapp() {
     link_node_modules "$WEBAPP_DIR"
+    if reuse_installed webapp "$LIVE_WEBAPP_DIST" "$LIVE_WEBAPP_DIST/.source-tree" "$WEBAPP_DIST"; then
+        # The build id comes out of the copied artifact itself, as it does
+        # from a fresh build's.
+        write_built_sha "$WEBAPP_SHA_STAMP" "$ROOT"
+        stamp_source_tree webapp "$WEBAPP_TREE_STAMP"
+        write_webapp_build_id
+        return 0
+    fi
     if ! source_is_stale webapp "$WEBAPP_ARTIFACT" "$WEBAPP_TREE_STAMP"; then
         # The build-id describes the ARTIFACT, so a skipped build still owes it:
         # the artifact standing here is the one the webview must address, and a
         # stamp missing beside it would leave that address unbuildable.
         write_webapp_build_id
         echo "[build-frontend] webapp: fresh, skipping"
+        report_outcome webapp fresh
         return 0
     fi
     require_bin npm "install Node.js"
@@ -680,23 +776,34 @@ build_webapp() {
     stamp_source_tree webapp "$WEBAPP_TREE_STAMP"
     write_webapp_build_id
     echo "[build-frontend] webapp: done"
+    report_outcome webapp built
 }
 
 build_daemon() {
     require_go_source_dirs "$DAEMON_DIR"
+    # The daemon embeds this checkout's root, its one per-checkout identity:
+    # an installed binary linked for another root is not what a build here makes.
+    if reuse_installed daemon "$LIVE_DAEMON_BIN/agent-repld" "$LIVE_DAEMON_BIN/.source-tree" "$DAEMON_ARTIFACT" \
+           go_binary_current_for "$DAEMON_LDFLAGS"; then
+        snapshot_lifecycle_config
+        write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
+        stamp_source_tree daemon "$DAEMON_TREE_STAMP"
+        return 0
+    fi
     if ! source_is_stale daemon "$DAEMON_ARTIFACT" "$DAEMON_TREE_STAMP"; then
         echo "[build-frontend] daemon: fresh, skipping"
+        report_outcome daemon fresh
         return 0
     fi
     require_bin go "install the Go toolchain"
     echo "[build-frontend] daemon: building..."
     mkdir -p "$DAEMON_BIN"
-    go_build "$DAEMON_DIR" "$DAEMON_ARTIFACT" ./cmd/agent-repld \
-        "-X agent-repld/internal/checkout.builtFrom=$ROOT"
+    go_build "$DAEMON_DIR" "$DAEMON_ARTIFACT" ./cmd/agent-repld "$DAEMON_LDFLAGS"
     snapshot_lifecycle_config
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     stamp_source_tree daemon "$DAEMON_TREE_STAMP"
     echo "[build-frontend] daemon: done"
+    report_outcome daemon built
 }
 
 # snapshot_lifecycle_config — copy the repository's deploy config beside the
@@ -737,8 +844,15 @@ build_service() {
     # helper prevents their source sets and install semantics from drifting.
     local name="$1" dir="$2" artifact="$3" sha_stamp="$4" tree_stamp="$5"
     require_go_source_dirs "$dir"
+    if reuse_installed "$name" "$LIVE_CACHE_BIN/$(basename "$artifact")" "$LIVE_CACHE_BIN/$(basename "$tree_stamp")" "$artifact" \
+           go_binary_current_for ""; then
+        write_built_sha "$sha_stamp" "$ROOT"
+        stamp_source_tree "$name" "$tree_stamp"
+        return 0
+    fi
     if ! source_is_stale "$name" "$artifact" "$tree_stamp"; then
         echo "[build-frontend] $name: fresh, skipping"
+        report_outcome "$name" fresh
         return 0
     fi
     require_bin go "install the Go toolchain"
@@ -748,6 +862,7 @@ build_service() {
     write_built_sha "$sha_stamp" "$ROOT"
     stamp_source_tree "$name" "$tree_stamp"
     echo "[build-frontend] $name: done"
+    report_outcome "$name" built
 }
 
 # build_launcher — Zettel.app, the launcher (launcher/, Swift), which posts every macOS banner,
@@ -759,8 +874,15 @@ build_launcher() {
         echo "build-frontend.sh: the launcher is macOS's alone" >&2
         exit 1
     fi
+    # The installed launcher is in the Applications directory, its stamps beside it.
+    if reuse_installed launcher "$LIVE_APPLICATIONS/Zettel.app" "$LIVE_APPLICATIONS/.Zettel.app.source-tree" "$LAUNCHER_ARTIFACT"; then
+        write_built_sha "$LAUNCHER_SHA_STAMP" "$ROOT"
+        stamp_source_tree launcher "$LAUNCHER_TREE_STAMP"
+        return 0
+    fi
     if ! source_is_stale launcher "$LAUNCHER_ARTIFACT" "$LAUNCHER_TREE_STAMP"; then
         echo "[build-frontend] launcher: fresh, skipping"
+        report_outcome launcher fresh
         return 0
     fi
     require_bin swift "install Xcode or its command line tools"
@@ -770,7 +892,14 @@ build_launcher() {
     "$THIS_DIR/build-launcher.sh" --out "$LAUNCHER_ARTIFACT" "${install[@]}"
     write_built_sha "$LAUNCHER_SHA_STAMP" "$ROOT"
     stamp_source_tree launcher "$LAUNCHER_TREE_STAMP"
+    if [ -z "$OUT_DIR" ]; then
+        # In place the bundle was installed too: its stamps stand beside it,
+        # where a staging run looks for the installed launcher.
+        write_built_sha "$LIVE_APPLICATIONS/.Zettel.app.built-sha" "$ROOT"
+        write_source_tree "$LIVE_APPLICATIONS/.Zettel.app.source-tree" "$(system_source_id launcher || true)"
+    fi
     echo "[build-frontend] launcher: done"
+    report_outcome launcher built
 }
 
 # build_proto — regenerate the protobuf bindings into proto/gen, but only when
