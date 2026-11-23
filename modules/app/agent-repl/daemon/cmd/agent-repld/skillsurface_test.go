@@ -59,7 +59,6 @@ func mentionedCommands(text string) []string {
 	return out
 }
 
-// readSkills answers each skill's SKILL.md, by skill name.
 // readSkills answers each skill's text by name: its SKILL.md followed by every
 // runbook under its runbooks/ directory, since a router skill names its
 // commands in the runbooks it routes to.
