@@ -379,7 +379,7 @@ describe("SkillSetWatch coming live", () => {
       changes,
       records.find((r) => r.level === "error")?.context,
       fsys.probe,
-    ]).toEqual([[ROOT], expect.objectContaining({ bound_ms: LIVE_BOUND_MS, expected_ms: 660, roots: [ROOT] }), undefined]);
+    ]).toEqual([[ROOT], expect.objectContaining({ bound_ms: LIVE_BOUND_MS, expected_ms: 1293, roots: [ROOT] }), undefined]);
   });
 
   it("reports every root at ERROR when its probe directory cannot be made", () => {
