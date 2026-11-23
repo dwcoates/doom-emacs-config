@@ -56,7 +56,8 @@
 ;; `elisp_current' says this Emacs runs the checkout's elisp, and accepts
 ;; the link; `reload_elisp' says it runs older elisp, and the daemon ends
 ;; the stream after it.  Emacs then reloads and dials the same role again,
-;; stating the build it loaded.  Until a verdict accepts a link, nothing
+;; stating the build it loaded; a redial that signals still releases the
+;; dial into the reconnect loop, at ERROR.  Until a verdict accepts a link, nothing
 ;; opens a stream or makes a call to its daemon, so a daemon whose contract
 ;; is newer than the loaded elisp is never decoded by that elisp: on
 ;; 2026-11-20 a successor's roster was refused as a contract breach for 14
@@ -245,7 +246,7 @@ onto a daemon that has not proven it is listening.")
 link on an `elisp_current' verdict, `:redial' the one that dials the same
 role again after a `reload_elisp' verdict's reload, and `:reloading' is
 non-nil from that verdict until the redial.  An entry leaves the table on
-its verdict, on its stream's close, or at the redial.")
+its verdict, on its stream's close, or at the redial or its signal.")
 
 (defvar agent-repl-link--serving-conns (make-hash-table :test #'equal)
   "Address -> connection to a daemon serving workspaces the link does not.
@@ -793,7 +794,8 @@ the stream\='s last frame was the planned ending
 A dial whose stale verdict is reloading is the exception: the daemon ends
 that stream after its `reload_elisp', and the redial after the reload
 replaces it (`agent-repl-link--redial-after-reload'), so its end changes
-nothing here."
+nothing here.  The redial, or its signal, always ends that dial
+\(`agent-repl-link--after-reload')."
   (let ((kind (car outcome))
         (verdict (gethash conn agent-repl-link--verdicts)))
     (if (plist-get verdict :reloading)
@@ -996,7 +998,8 @@ a contract breach: recorded at ERROR and signalled."
 On a link already accepted it is a deploy\='s, and the elisp is reloaded
 in place.  On a dial awaiting its verdict it IS the verdict: the daemon
 ends the stream after it, so the elisp is reloaded and the same role is
-dialed again (`agent-repl-link--redial-after-reload').  A reload the
+dialed again (`agent-repl-link--redial-after-reload'); the redial, or its
+signal, always ends the dial (`agent-repl-link--after-reload').  A reload the
 elisp refuses (another checkout\='s root) leaves the dial to the daemon\='s
 end, which the reconnect loop takes as any refused dial."
   (let ((verdict (gethash conn agent-repl-link--verdicts))
@@ -1015,13 +1018,36 @@ end, which the reconnect loop takes as any refused dial."
                         :address (prin1-to-string (plist-get verdict :address)) :running (prin1-to-string (agent-repl-elisp-build)) :fresh (prin1-to-string build))
       (puthash conn (plist-put verdict :reloading t) agent-repl-link--verdicts)
       (unless (agent-repl-elisp-reload-handle
-               reload (lambda (_loaded) (agent-repl-link--redial-after-reload conn build)))
+               reload (lambda (_loaded) (agent-repl-link--after-reload conn build)))
         (puthash conn (plist-put verdict :reloading nil) agent-repl-link--verdicts))))))
 
 (defun agent-repl-link--dial-held-p (conn)
   "Return non-nil while CONN is the link\='s pending primary or successor dial."
   (or (eq conn agent-repl-link--pending)
       (eq conn agent-repl-link--pending-successor)))
+
+(defun agent-repl-link--after-reload (conn build)
+  "End CONN\='s reloading dial once the reload its stale verdict pushed ran.
+BUILD is the pushed build.  The redial
+\(`agent-repl-link--redial-after-reload') is the dial\='s only exit, since
+`agent-repl-link--handle-close' ignores its stream\='s end while it
+reloads; elisp-build.el calls this even when the reload signalled.  So a
+redial that signals still releases the dial: its verdict leaves the
+table, the signal is an ERROR, a dial still held is refused as any other
+\(the reconnect loop\='s backoff retries it), and the signal propagates.  On 2026-11-23T00:21Z a redial that
+signalled left a pending successor held, its primary already ended, and
+Emacs without a daemon link for 20 minutes with nothing logged."
+  (condition-case err
+      (agent-repl-link--redial-after-reload conn build)
+    (error
+     (remhash conn agent-repl-link--verdicts)
+     (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
+                        "elisp.link.reload-redial-signalled address={address} build={build} error={error}"
+                        :address (prin1-to-string (agent-repl-connect-connection-address conn)) :build (prin1-to-string build) :error (prin1-to-string (error-message-string err)))
+     (when (agent-repl-link--dial-held-p conn)
+       (agent-repl-link--handle-dial-close
+        conn :error (list :error "the redial after the elisp reload signalled")))
+     (signal (car err) (cdr err)))))
 
 (defun agent-repl-link--redial-after-reload (conn build)
   "Dial CONN\='s role again: the reload its stale verdict pushed, to BUILD, ran.
