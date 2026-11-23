@@ -525,7 +525,7 @@ func (d *Daemon) WatchEmacsDaemonStream(focus *agentreplv1.EditorFocus) *Stream[
 	d.t.Helper()
 	stream := d.watchEmacsDaemonStream(d.Client(), focus)
 	want := focus.GetFocused() != nil
-	d.AwaitLogRecord(d.RunLogPath(), "the Emacs stream's focus attached", func(r LogRecord) bool {
+	d.AwaitUnscopedRunLogRecord("the Emacs stream's focus attached", func(r LogRecord) bool {
 		return r.Operation == "daemon.desktopnotify.focus" && r.Message == "an Emacs stream attached its focus" &&
 			r.Context["focused"] == want
 	})
