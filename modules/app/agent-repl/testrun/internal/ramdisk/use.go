@@ -33,8 +33,8 @@ type use struct {
 	// failed, the first recorded at ERROR when it happens.
 	published       int
 	publishFailures int
-	stop     chan struct{}
-	done     chan struct{}
+	stop            chan struct{}
+	done            chan struct{}
 }
 
 // WatchUse samples the volume's space in use every interval until Release,
