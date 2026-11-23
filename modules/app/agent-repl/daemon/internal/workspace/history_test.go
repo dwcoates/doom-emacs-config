@@ -589,6 +589,66 @@ func TestFleetReadHistoryWhoseBookReadWasCutIsRecordedAtInfo(t *testing.T) {
 	}
 }
 
+func TestFleetReadHistoryWhoseRecordReadWasCutIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.workspaceErr = context.Canceled
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) || len(f.store.asked) != 0 {
+		t.Fatalf("err = %v after store reads %v, want the cut surfaced and no store read", err, f.store.asked)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "info"); len(got) != 1 {
+		t.Fatalf("history_book INFO records = %v, want one", got)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "error"); len(got) != 0 {
+		t.Fatalf("history_book ERROR records = %v, want none for a cut read", got)
+	}
+}
+
+func TestFleetReadHistoryWhoseRecordCannotBeReadIsAFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.workspaceErr = errFake
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
+
+	// Assert.
+	if !errors.Is(err, errFake) || len(f.store.asked) != 0 {
+		t.Fatalf("err = %v after store reads %v, want the failed read surfaced and no store read", err, f.store.asked)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "error"); len(got) != 1 {
+		t.Fatalf("history_book records = %v, want one ERROR", got)
+	}
+}
+
+func TestFleetReadHistoryWhosePersistedBookRecordWasCutIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := persistedBook(f, "book-p")
+	f.db.setBookErr = context.Canceled
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
+
+	// Assert.
+	if err != nil || len(f.store.asked) != 1 || f.store.asked[0] != "newest book-p stated=true" {
+		t.Fatalf("ReadHistory = %v after store reads %v, want the persisted book read", err, f.store.asked)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "info"); len(got) != 1 {
+		t.Fatalf("history_book INFO records = %v, want one", got)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "error"); len(got) != 0 {
+		t.Fatalf("history_book ERROR records = %v, want none for a cut record", got)
+	}
+}
+
 func TestFleetReadHistoryOfARecordedBookSurfacesAFailedStoreRead(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
