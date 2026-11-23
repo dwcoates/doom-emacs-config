@@ -578,19 +578,35 @@ describe("drawTopbarTitle with several shown links", () => {
   });
 });
 
+/** One summary-menu row to draw, as the daemon serves it. */
+type MenuItem = {
+  label: string;
+  url: string;
+  owned?: boolean;
+  subscribed?: boolean;
+  icon?: TopbarTitleLinkIcon;
+  badge?: { state: { case: "open" | "draft" | "merged" | "closed"; value: object } };
+};
+
+/**
+ * Draws a heading whose summary drops a menu of ITEMS, opens the menu, and
+ * answers its rows in the order drawn. CTX is the app context the strip opens
+ * links through.
+ */
+function rowsOf(items: MenuItem[], ctx?: AppContext): HTMLElement[] {
+  const { host, tc } = topbarContext(ctx);
+  const heading = drawTopbarHeading(
+    create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
+    workspaceName("w"),
+    tc,
+  );
+  host.append(heading);
+  bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
+  click(heading.querySelector<HTMLElement>(".topbar-title")!);
+  return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+}
+
 describe("a summary menu row's owned tint and service icon", () => {
-  const rowsOf = (items: { label: string; url: string; owned?: boolean; icon?: TopbarTitleLinkIcon }[]) => {
-    const { host, tc } = topbarContext();
-    const heading = drawTopbarHeading(
-      create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
-      workspaceName("w"),
-      tc,
-    );
-    host.append(heading);
-    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
-    click(heading.querySelector<HTMLElement>(".topbar-title")!);
-    return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
-  };
 
   it("marks owned rows and leaves reference rows unmarked", () => {
     const rows = rowsOf([
@@ -627,19 +643,6 @@ describe("a summary menu row's owned tint and service icon", () => {
 });
 
 describe("a summary menu row's pull request badge and owned label", () => {
-  type Item = { label: string; url: string; owned?: boolean; badge?: { state: { case: "open" | "draft" | "merged" | "closed"; value: object } } };
-  const rowsOf = (items: Item[]) => {
-    const { host, tc } = topbarContext();
-    const heading = drawTopbarHeading(
-      create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
-      workspaceName("w"),
-      tc,
-    );
-    host.append(heading);
-    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
-    click(heading.querySelector<HTMLElement>(".topbar-title")!);
-    return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
-  };
   const PR = "https://github.com/o/r/pull/7";
 
   it("draws a pull request's badge after its label and url, and reserves the row's margin", () => {
@@ -708,19 +711,6 @@ describe("a menu row's second line", () => {
 });
 
 describe("a summary menu row's owned and subscribed marks and its untinted icon", () => {
-  type Item = { label: string; url: string; owned?: boolean; subscribed?: boolean; icon?: TopbarTitleLinkIcon };
-  const rowsOf = (items: Item[], ctx?: AppContext) => {
-    const { host, tc } = topbarContext(ctx);
-    const heading = drawTopbarHeading(
-      create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
-      workspaceName("w"),
-      tc,
-    );
-    host.append(heading);
-    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
-    click(heading.querySelector<HTMLElement>(".topbar-title")!);
-    return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
-  };
   const marksOf = (row: HTMLElement) =>
     [...row.querySelectorAll<HTMLElement>(`.${LINK_HEAD_CLASS} > .${LINK_MARK_CLASS}`)].map((el) => el.dataset.mark);
 
