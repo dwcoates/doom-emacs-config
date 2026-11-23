@@ -1671,7 +1671,11 @@ export function createReader(options: ReaderOptions): Reader {
             // unwinds this generator at the `yield*`.)
             if (!served.terminal) {
               LOGGER.error(
-                { run: runValue, rows_served: served.rows },
+                {
+                  run: runValue,
+                  rows_served: served.rows,
+                  cause: "the store's stream ended cleanly with no terminal row served",
+                },
                 "the store closed a shell run's watch before its terminal",
               );
               throw new PersistenceError(

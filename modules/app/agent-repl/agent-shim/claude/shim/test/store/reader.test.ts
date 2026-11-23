@@ -2038,7 +2038,7 @@ describe("openBashRun against a store that misbehaves", () => {
       expect.objectContaining({
         level: "error",
         message: "the store closed a shell run's watch before its terminal",
-        context: containing({ run: "run-1", rows_served: 1 }),
+        context: containing({ run: "run-1", rows_served: 1, cause: "the store's stream ended cleanly with no terminal row served" }),
       }),
     );
   });
