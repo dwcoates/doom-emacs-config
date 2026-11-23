@@ -476,12 +476,13 @@ func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 // its end, and every end's banner is worded by the one bannerLine.
 func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	// Arrange / Act: the package's own production sources.
-	resolved, raised, ordered, handBacks := 0, 0, 0, 0
+	resolved, raised, ordered, handBacks, settles := 0, 0, 0, 0, 0
 	for _, file := range sourcescan.Production(t) {
 		resolved += strings.Count(string(file.Source), "Banners.Resolved(")
 		raised += strings.Count(string(file.Source), "o.raiseResolved(")
 		ordered += strings.Count(string(file.Source), "o.tellThenRaise(")
 		handBacks += strings.Count(string(file.Source), "o.handBack(ctx")
+		settles += strings.Count(string(file.Source), "o.settle(ctx")
 	}
 
 	// Assert
@@ -494,8 +495,11 @@ func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	if ordered != 2 {
 		t.Errorf("tellThenRaise is called at %d sites, want 2: ended and the failed fork", ordered)
 	}
-	if handBacks != 2 {
-		t.Errorf("handBack is called at %d sites, want 2: ended and a merge never put in line", handBacks)
+	if handBacks != 1 {
+		t.Errorf("handBack is called at %d sites, want 1: settle", handBacks)
+	}
+	if settles != 2 {
+		t.Errorf("settle is called at %d sites, want 2: ended and a merge never put in line", settles)
 	}
 }
 

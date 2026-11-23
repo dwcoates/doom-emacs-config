@@ -1133,8 +1133,9 @@ func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id Worksp
 //
 // THE EXIT GOES THROUGH THE ONE TRANSITION (leaveQueueInTx): a landing ends
 // the request, and every other cause keeps it off the queue, to be requeued
-// or discarded. No exit closes the workspace: an async merge's merge
-// workspace stays open under its name while its request stands.
+// or discarded, unless its workspace is closed. No exit closes the
+// workspace: the merge's terminal does (merge.orchestrator.settle), so a
+// closed workspace keeps no request.
 func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error {
 	const op = "daemon.wsm.remove_merge_queue_entry"
 	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})

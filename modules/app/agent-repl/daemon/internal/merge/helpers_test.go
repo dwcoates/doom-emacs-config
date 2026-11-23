@@ -57,6 +57,10 @@ type fakeDB struct {
 	// links are each workspace's stored links, and linksErr fails their read.
 	links    map[ids.WorkspaceID][]wsm.WorkspaceLink
 	linksErr error
+	// markClosedErr fails MarkClosed, and closeCalls counts every
+	// MarkClosed each workspace was handed.
+	markClosedErr error
+	closeCalls    map[ids.WorkspaceID]int
 
 	// holdErr fails every round hold (HoldMergeRound).
 	holdErr error
@@ -937,6 +941,13 @@ func (f *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.C
 	defer f.mu.Unlock()
 	if f.shut {
 		return errStateClientClosed
+	}
+	if f.closeCalls == nil {
+		f.closeCalls = map[ids.WorkspaceID]int{}
+	}
+	f.closeCalls[id]++
+	if f.markClosedErr != nil {
+		return f.markClosedErr
 	}
 	f.closed[id] = true
 	f.closures[id] = closure

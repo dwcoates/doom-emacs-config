@@ -122,6 +122,9 @@ function assistantLine(overrides: Record<string, unknown> = {}): Record<string, 
   return {
     type: "assistant",
     uuid: "u-1",
+    // THE CONVERSATION'S FIRST RECORD names a null parent, as the vendor
+    // writes it: a record naming none never joins the chain (joinsChain).
+    parentUuid: null,
     timestamp: new Date(1_000_000).toISOString(),
     cwd: "/ws",
     sessionId: "resume-1",

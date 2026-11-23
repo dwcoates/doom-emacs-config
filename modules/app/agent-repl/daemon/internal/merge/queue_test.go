@@ -2592,16 +2592,21 @@ func markMergeWorkspace(h *harness, requester ids.WorkspaceID) {
 	h.db.workspaces[theWorkspace] = w
 }
 
-func TestAReleasedQueuedMergeKeepsItsMergeWorkspaceOpenAndItsRequestOffTheQueue(t *testing.T) {
+// An eviction is no end of an async merge: its request stands off the queue
+// to be requeued, so its merge workspace stays open. A dequeue IS its end
+// (2026-11-23), which closes the hidden merge workspace and with it the
+// request.
+func TestAReleasedQueuedMergeKeepsItsMergeWorkspaceOnlyWhenEvicted(t *testing.T) {
 	tests := []struct {
-		name    string
-		release func(h *harness) error
-		cause   AbandonCause
+		name       string
+		release    func(h *harness) error
+		cause      AbandonCause
+		wantClosed bool
 	}{
 		{name: "evicted", release: func(h *harness) error { return h.o.Evict(context.Background(), theMergeWorkspace) }, cause: CauseUserDrop},
 		{name: "dequeued", release: func(h *harness) error {
 			return h.o.dequeue(context.Background(), theMergeWorkspace, CauseUserDequeue)
-		}, cause: CauseUserDequeue},
+		}, cause: CauseUserDequeue, wantClosed: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2614,8 +2619,8 @@ func TestAReleasedQueuedMergeKeepsItsMergeWorkspaceOpenAndItsRequestOffTheQueue(
 			// Act.
 			err := tt.release(h)
 
-			// Assert: off the queue, the request kept under its cause, and
-			// the merge workspace left open under its name.
+			// Assert: off the queue; an eviction keeps the request under its
+			// cause and the workspace open, a dequeue closes both.
 			if err != nil {
 				t.Fatalf("the release: %v", err)
 			}
@@ -2623,14 +2628,14 @@ func TestAReleasedQueuedMergeKeepsItsMergeWorkspaceOpenAndItsRequestOffTheQueue(
 				t.Fatal("the released merge is still queued")
 			}
 			rec, kept, _ := h.db.OffQueueMergeOf(context.Background(), theMergeWorkspace)
-			if !kept || rec.Cause != string(tt.cause) {
-				t.Fatalf("the kept request = %+v (kept %v), want it kept for %q", rec, kept, tt.cause)
+			if kept == tt.wantClosed || (kept && rec.Cause != string(tt.cause)) {
+				t.Fatalf("the kept request = %+v (kept %v), want kept %v for %q", rec, kept, !tt.wantClosed, tt.cause)
 			}
 			h.db.mu.Lock()
 			closed := h.db.closed[theMergeWorkspace]
 			h.db.mu.Unlock()
-			if closed {
-				t.Fatal("the release closed the merge workspace")
+			if closed != tt.wantClosed {
+				t.Fatalf("the merge workspace closed = %v, want %v", closed, tt.wantClosed)
 			}
 		})
 	}
