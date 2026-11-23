@@ -660,7 +660,8 @@ merged since its last load would otherwise not be in force for the very
 stand-down it fixes.  Returns a string the caller prints:
 
   \"current\"     the loaded elisp is ROOT\='s already; nothing loaded;
-  \"reloaded\"    the module set was hot-loaded (`agent-repl--elisp-reload-run');
+  \"reloaded\"    the module set was hot-loaded (`agent-repl--elisp-reload-run'),
+                after a record that the loaded elisp was stale;
   \"failed\"      the hot load recorded a failure at ERROR;
   \"other-root\"  this Emacs runs another checkout\='s elisp, which is not
                 ROOT\='s to replace; nothing loaded."
@@ -679,11 +680,15 @@ stand-down it fixes.  Returns a string the caller prints:
           (agent-repl--info agent-repl--elisp-build-log-scope
                             "elisp.elisp-build.reload-if-stale outcome=current build={build}" :build (prin1-to-string fresh))
           "current")
-         ((agent-repl--elisp-reload-run ours fresh)
+         (t
           (agent-repl--info agent-repl--elisp-build-log-scope
-                            "elisp.elisp-build.reload-if-stale outcome=reloaded build={build}" :build (prin1-to-string fresh))
-          "reloaded")
-         (t "failed"))))))
+                            "elisp.elisp-build.reload-if-stale outcome=stale running={running} fresh={fresh}"
+                            :running (prin1-to-string (agent-repl-elisp-build)) :fresh (prin1-to-string fresh))
+          ;; AFTER THE RELOAD NOTHING OF AGENT-REPL'S IS CALLED BY NAME HERE:
+          ;; this is the replaced build's code (see "Loading a build's
+          ;; files"), and the loaded build's finish already recorded how
+          ;; the reload ended.
+          (if (agent-repl--elisp-reload-run ours fresh) "reloaded" "failed")))))))
 
 (provide 'elisp-build)
 

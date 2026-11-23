@@ -675,6 +675,53 @@ calls are log-site macros."
           ;; Assert
           (should (and (equal outcome "other-root") (null agent-repl-test-eb--loaded))))))))
 
+;; The stale-elisp reload's own code is the replaced build's once the reload
+;; ran, so it records that the elisp is stale BEFORE the reload and calls
+;; nothing of agent-repl's by name after it.
+
+(ert-deftest agent-repl-test-eb-reload-if-stale-records-stale-before-the-reload ()
+  "The stale record is written before the first module loads."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (let ((agent-repl--frontend-root root)
+            (agent-repl--elisp-module-builds '(("core" . "old") ("status" . "old")))
+            (loads-at-record nil))
+        (cl-letf* ((emit-info (symbol-function 'agent-repl--emit-info))
+                   ((symbol-function 'agent-repl--emit-info)
+                    (lambda (ws site &rest values)
+                      (when (string-prefix-p "elisp.elisp-build.reload-if-stale outcome=stale"
+                                             (agent-repl-log-site-render site values))
+                        (push (length agent-repl-test-eb--loaded) loads-at-record))
+                      (apply emit-info ws site values))))
+          ;; Act
+          (agent-repl-elisp-reload-if-stale root))
+        ;; Assert
+        (should (equal loads-at-record '(0)))))))
+
+(ert-deftest agent-repl-test-eb-reload-if-stale-calls-nothing-by-name-after-the-reload ()
+  "A reload that leaves every agent-repl function broken still answers reloaded."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (let ((agent-repl--frontend-root root)
+            (agent-repl--elisp-module-builds '(("core" . "old") ("status" . "old")))
+            (outcome nil)
+            (saved nil))
+        (cl-letf (((symbol-function 'agent-repl--elisp-reload-run)
+                   (lambda (_root _build)
+                     (setq saved (agent-repl-test-eb--break-agent-repl))
+                     t)))
+          (unwind-protect
+              ;; Act
+              (setq outcome (agent-repl-elisp-reload-if-stale root))
+            (dolist (entry saved)
+              (fset (car entry) (cdr entry)))))
+        ;; Assert
+        (should (equal outcome "reloaded"))))))
+
 ;;;; ---- A reload's changed defaults ----
 ;;
 ;; Each case declares its own option: an UNINTERNED symbol for the apply
