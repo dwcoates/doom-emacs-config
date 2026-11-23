@@ -619,6 +619,14 @@ func (d *fakeDB) SetColdGate(ctx context.Context, id ids.WorkspaceID, rec wsm.Co
 	return nil
 }
 
+func (d *fakeDB) ColdGateWorkspaces(context.Context) ([]ids.WorkspaceID, error) {
+	gated := make([]ids.WorkspaceID, 0, len(d.gates))
+	for id := range d.gates {
+		gated = append(gated, id)
+	}
+	return gated, nil
+}
+
 func (d *fakeDB) ClearColdGate(_ context.Context, id ids.WorkspaceID) (bool, error) {
 	if d.setGateErr != nil {
 		return false, d.setGateErr

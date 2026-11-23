@@ -101,3 +101,26 @@ func (s *store) ClearColdGate(ctx context.Context, id WorkspaceID) (bool, error)
 	})
 	return cleared, err
 }
+
+// ColdGateWorkspaces answers every workspace with a recorded cold gate, in no
+// particular order: the workspaces a boot raises a gate for, since a gated
+// workspace runs no shim for the bring-up to find.
+func (s *store) ColdGateWorkspaces(ctx context.Context) ([]WorkspaceID, error) {
+	var gated []WorkspaceID
+	err := s.read(ctx, "daemon.wsm.cold_gate_workspaces", nil, func(ctx context.Context) error {
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT workspace_id FROM cold_gate`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id WorkspaceID
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			gated = append(gated, id)
+		}
+		return rows.Err()
+	})
+	return gated, err
+}

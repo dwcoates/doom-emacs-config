@@ -965,6 +965,8 @@ type DB interface {
 	// ColdGate answers the cold gate recorded on a workspace, false when none
 	// is (coldgate.go).
 	ColdGate(ctx context.Context, id WorkspaceID) (ColdGateRecord, bool, error)
+	// ColdGateWorkspaces answers every workspace with a recorded cold gate.
+	ColdGateWorkspaces(ctx context.Context) ([]WorkspaceID, error)
 	// SetColdGate records a workspace's cold gate, replacing any earlier one.
 	SetColdGate(ctx context.Context, id WorkspaceID, rec ColdGateRecord) error
 	// ClearColdGate retires a workspace's recorded cold gate, answering

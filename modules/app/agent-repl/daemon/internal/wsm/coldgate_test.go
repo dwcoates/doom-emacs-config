@@ -87,3 +87,24 @@ func TestSetColdGateRefusesAGateNamingNoConversation(t *testing.T) {
 		t.Fatal("SetColdGate with no conversation succeeded, want a refusal")
 	}
 }
+
+func TestColdGateWorkspaces(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	gated := testWorkspace(t, s).ID
+	_ = testWorkspaceNamed(t, s, "other")
+	if err := s.SetColdGate(context.Background(), gated, gateRecord("vendor-1", 120_000)); err != nil {
+		t.Fatalf("SetColdGate: %v", err)
+	}
+
+	// Act
+	got, err := s.ColdGateWorkspaces(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ColdGateWorkspaces: %v", err)
+	}
+	if len(got) != 1 || got[0] != gated {
+		t.Fatalf("ColdGateWorkspaces = %v, want only the workspace with a recorded gate %s", got, gated)
+	}
+}
