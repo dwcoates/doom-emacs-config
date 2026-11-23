@@ -623,8 +623,9 @@ type Deps struct {
 	// which is what a test that is not about surviving a restart wants.
 	PullReferences PullReferenceStore
 	// ResponseLinks stores the web links a settled response named as the
-	// workspace's reference links (responselinks.go). nil stores none, which
-	// is what a test that is not about the links wants.
+	// workspace's reference links (responselinks.go). It is called off the
+	// resolver's lock, by one drainer started through Go, in draw order. nil
+	// stores none, which is what a test that is not about the links wants.
 	ResponseLinks ResponseLinkSink
 	// History reads the store pages a reader's request needs (book.go). nil
 	// pages nothing: every feed serves exactly what it holds, which is what a
@@ -648,7 +649,8 @@ type Deps struct {
 	// workspace. nil names no workspace, which draws every other end
 	// unresolved. Production always wires it.
 	WorkspaceName func(ids.WorkspaceID) (string, error)
-	// Go runs work the resolver starts OFF its lock (a peer delivery lookup).
+	// Go runs work the resolver starts OFF its lock (a peer delivery lookup,
+	// the response links' drainer).
 	// Defaults to a new goroutine; a test runs the work when it chooses, so
 	// it never waits on a goroutine it cannot see.
 	Go func(func())

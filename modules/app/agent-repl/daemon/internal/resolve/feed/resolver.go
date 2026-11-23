@@ -79,6 +79,9 @@ type resolver struct {
 	// responseLinksSeen is the web links each workspace's responses named
 	// that the response link sink took (responselinks.go).
 	responseLinksSeen map[ids.WorkspaceID]map[string]bool
+	// responseLinkOutbox is the response links handed over and not yet
+	// stored, drained off mu in draw order (responselinks.go).
+	responseLinkOutbox responseLinkOutbox
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
