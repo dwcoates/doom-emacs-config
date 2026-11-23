@@ -213,6 +213,8 @@ export async function boot(): Promise<void> {
       failures: mergeFailureViews(localFailures, webhostFailures),
       focusLeft: pageFocusLeft(),
     });
+    // Its reveal layer listens on the document, which later test files share.
+    stopAtPageTeardown(() => topbar.dispose());
     failures = localFailures;
 
     // Copying is a page-wide affordance, not a component's: it is installed

@@ -9,7 +9,7 @@ import {
   MARGIN_STAMP_CLASS,
   MARGIN_STAMP_SHOWN,
   marginClockTime,
-  marginStampText,
+  marginStampLines,
   mountMarginStamp,
 } from "../../src/feed/margin-stamp.js";
 
@@ -38,12 +38,16 @@ function mounted() {
   return { parent, row, margin, el };
 }
 
-describe("marginStampText", () => {
-  it("reads the clock time and how long ago", () => {
+function lines(el: HTMLElement): string[] {
+  return [...el.children].map((c) => c.textContent ?? "");
+}
+
+describe("marginStampLines", () => {
+  it("reads the clock time, then how long ago", () => {
     // Act
-    const text = marginStampText(NOW - 330_000, NOW);
+    const text = marginStampLines(NOW - 330_000, NOW);
     // Assert
-    expect(text).toBe(`${marginClockTime(NOW - 330_000)} · 5m 30s ago`);
+    expect(text).toEqual([marginClockTime(NOW - 330_000), "5m 30s ago"]);
   });
 });
 
@@ -54,7 +58,7 @@ describe("mountMarginStamp", () => {
     // Act
     margin.show(stamp(NOW - 330_000), row);
     // Assert
-    expect([el.hasAttribute(MARGIN_STAMP_SHOWN), el.textContent]).toEqual([true, marginStampText(NOW - 330_000, NOW)]);
+    expect([el.hasAttribute(MARGIN_STAMP_SHOWN), lines(el)]).toEqual([true, marginStampLines(NOW - 330_000, NOW)]);
   });
 
   it("keeps the age current on the shared clock", () => {
@@ -64,7 +68,7 @@ describe("mountMarginStamp", () => {
     // Act
     vi.advanceTimersByTime(30_000);
     // Assert
-    expect(el.textContent).toBe(marginStampText(NOW - 330_000, NOW + 30_000));
+    expect(lines(el)).toEqual(marginStampLines(NOW - 330_000, NOW + 30_000));
   });
 
   it.each([
@@ -86,11 +90,11 @@ describe("mountMarginStamp", () => {
     const { row, margin, el } = mounted();
     margin.show(stamp(NOW - 5000), row);
     margin.show(null, null);
-    const before = el.textContent;
+    const before = lines(el);
     // Act
     vi.advanceTimersByTime(30_000);
     // Assert
-    expect(el.textContent).toBe(before);
+    expect(lines(el)).toEqual(before);
   });
 
   it("removes its element on dispose", () => {

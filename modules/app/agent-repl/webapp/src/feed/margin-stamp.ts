@@ -4,11 +4,12 @@
  * the daemon stamped (`hover-stamp.ts`), the margin right of the feed column
  * reads when it was sent or settled and how long ago that was, ticking:
  *
- *   "14:03:22 · 5m 30s ago"
+ *   14:03:22
+ *   5m 30s ago
  *
  * It FADES into place and out again: only its opacity moves, never its
- * position or size, so it never slides. It is set in the sans face at the
- * thinking bubble's text size, and it replaces the age the footer's hover line
+ * position or size, so it never slides. It is set on two lines in the response
+ * bubbles' serif face, smaller than the thinking bubble's text, and it replaces the age the footer's hover line
  * used to end on. A row still under way has no instant, so it shows nothing.
  */
 import type { Ticker } from "../clock.js";
@@ -28,9 +29,9 @@ export function marginClockTime(atMs: number): string {
   return new Date(atMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-/** The margin stamp's text for an instant AT_MS read at NOW_MS. */
-export function marginStampText(atMs: number, nowMs: number): string {
-  return `${marginClockTime(atMs)} · ${formatTickedAge(nowMs - atMs)} ago`;
+/** The margin stamp's two lines for an instant AT_MS read at NOW_MS: the clock time, then the age. */
+export function marginStampLines(atMs: number, nowMs: number): [string, string] {
+  return [marginClockTime(atMs), `${formatTickedAge(nowMs - atMs)} ago`];
 }
 
 /** The margin stamp: what the hover tells it, and its removal. */
@@ -60,7 +61,13 @@ export function mountMarginStamp(parent: HTMLElement, ticker: Ticker): MarginSta
       const box = parent.getBoundingClientRect();
       el.style.top = `${row.getBoundingClientRect().top - box.top + parent.scrollTop}px`;
       tickWhileShown(el, ticker, (nowMs) => {
-        el.textContent = marginStampText(atMs, nowMs);
+        const [clock, age] = marginStampLines(atMs, nowMs);
+        const line = (text: string): HTMLElement => {
+          const div = document.createElement("div");
+          div.textContent = text;
+          return div;
+        };
+        el.replaceChildren(line(clock), line(age));
       });
       el.setAttribute(MARGIN_STAMP_SHOWN, "");
     },
