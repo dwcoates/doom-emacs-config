@@ -1,4 +1,4 @@
-;;; page-unload.el --- a page is loaded exactly while its workspace is visible -*- lexical-binding: t; -*-
+;;; page-unload.el --- a visible workspace holds its page while its session runs or it is shown -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; THE WEB PROCESS IS AS SLOW AS IT IS BIG.  Every workspace's page lives in
 ;; the one host web view (webhost.el), so in one web content process with one
@@ -14,6 +14,17 @@
 ;; \(`agent-repl-roster-row-visible-p'), and tears the rest down whole, page
 ;; included.  So nothing here weighs a status or a clock: a workspace held
 ;; here has its page loaded.
+;;
+;; A PARKED WORKSPACE HOLDS NO PAGE UNLESS IT IS SHOWN (owner ruling,
+;; 2026-11-23, which narrows the 2026-11-21 one: visibility makes a page
+;; ELIGIBLE, it does not hold it).  A page is unloaded exactly when its
+;; workspace's session parks while the host does not show it, or when the
+;; user switches away from a parked workspace, and it is loaded again when
+;; the user shows the workspace, with no shim started: a prompt alone starts
+;; one.  The session's park is the daemon's (frontend.v1.RosterRowParked), so
+;; nothing here weighs a clock.  A session coming up loads no page: a
+;; keep-alive's restore brings one up for a minute each beat, and its page
+;; would load and unload with it.
 ;;
 ;; A COLD-GATED PAGE IS HELD BACK UNTIL THE USER ASKS FOR IT (owner request,
 ;; 2026-10-30).  That hold concerns the cold read, not visibility.  The gate
@@ -55,6 +66,8 @@
 (declare-function agent-repl-webhost-held-back-p "webhost" (ws))
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
+(declare-function agent-repl-roster-parked-p "roster" (ws))
+(declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (defvar agent-repl-roster-update-functions)
 
 (defvar agent-repl-page-unload--shown nil
@@ -67,22 +80,55 @@
 (defun agent-repl-page-unload-wanted-p (ws)
   "Non-nil when WS's page should be loaded now, before anyone shows it.
 Every workspace this editor holds is visible (frontend.v1.RosterRowVisibility),
-so its page is wanted, unless WS stands at its cold gate: that page is held
-back until the user asks for it.  A slot made for a workspace that is not
-wanted is made with no page (`agent-repl--frontend-ensure-webview-buffer');
-its show holds it back (`agent-repl-page-unload-note-shown')."
-  (not (agent-repl-page-unload--gated-p ws)))
+which makes its page eligible.  It is wanted unless WS stands at its cold
+gate, whose page is held back until the user asks for it, or WS's session
+is parked (frontend.v1.RosterRowParked), whose page waits for its show.  A
+slot made for a workspace that is not wanted is made with no page
+\(`agent-repl--frontend-ensure-webview-buffer'); its show loads the page, or
+holds it back at a gate (`agent-repl-page-unload-note-shown')."
+  (not (or (agent-repl-page-unload--gated-p ws)
+           (agent-repl-roster-parked-p ws))))
 
 (defun agent-repl-page-unload-note-shown (ws)
   "Record that the host now shows WS's page.
 An unloaded page is put back first (`agent-repl-page-unload--return'),
 unless WS is cold-gated: its page is then held back, and the host draws a
-load button in its place (`agent-repl-webhost-hold-back')."
+load button in its place (`agent-repl-webhost-hold-back').  The workspace
+shown before WS has its page unloaded when its session is parked
+\(`agent-repl-page-unload--release')."
   (when (agent-repl-page-unloaded-p ws)
     (if (agent-repl-page-unload--gated-p ws)
         (agent-repl-page-unload--hold-back ws)
       (agent-repl-page-unload--return ws)))
-  (setq agent-repl-page-unload--shown ws))
+  (let ((was agent-repl-page-unload--shown))
+    (setq agent-repl-page-unload--shown ws)
+    (when (and was (not (equal was ws))
+               (agent-repl-page-unload--releasable-p was))
+      (agent-repl-page-unload--release was))))
+
+(defun agent-repl-page-unload--releasable-p (ws)
+  "Non-nil when WS\='s page is loaded and goes, its session parked off screen.
+WS is not the workspace the host shows, and no drop of its page is in
+flight."
+  (and (agent-repl-webhost-has-page-p ws)
+       (not (equal ws agent-repl-page-unload--shown))
+       (not (agent-repl--ws-get ws :page-unloading))
+       (agent-repl-roster-parked-p ws)))
+
+(defun agent-repl-page-unload--release (ws)
+  "Unload WS\='s page, its session parked while the host does not show it.
+WS stays open, so the daemon is told first (`agent-repl-page-drop-announced'),
+and the page goes only if it is still releasable then; its slot stays, so
+showing WS loads the page again (`agent-repl-page-unload-note-shown')."
+  (agent-repl--info ws "elisp.page-unload.releasing ws={ws}" :ws ws)
+  (agent-repl-page-drop-announced
+   ws
+   (lambda () (agent-repl-page-unload--releasable-p ws))
+   (lambda ()
+     (agent-repl--info ws "elisp.page-unload.released ws={ws}" :ws ws)
+     (agent-repl-webhost-remove ws t))
+   (lambda (why)
+     (agent-repl--info ws "elisp.page-unload.release-kept ws={ws} why={why}" :ws ws :why why))))
 
 (defun agent-repl-page-unloaded-p (ws)
   "Non-nil when WS holds a live slot whose page the host does not hold.
@@ -156,12 +202,15 @@ the daemon ended it first, so its stream\='s end draws nothing."
      (funcall on-kept 'not-reported))))
 
 (defun agent-repl-page-unload-on-roster-update (&optional _roster)
-  "Load every page held back on screen whose gate a roster push answered.
-Answers how many were loaded."
+  "Load every page held back on screen whose gate a roster push answered,
+and unload every page whose session the push parked off screen
+\(`agent-repl-page-unload--release').  Answers how many were loaded."
   (let ((loaded 0))
     (dolist (ws (agent-repl--live-ws-names))
       (when (agent-repl-page-unload--load-ungated ws)
-        (setq loaded (1+ loaded))))
+        (setq loaded (1+ loaded)))
+      (when (agent-repl-page-unload--releasable-p ws)
+        (agent-repl-page-unload--release ws)))
     loaded))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)

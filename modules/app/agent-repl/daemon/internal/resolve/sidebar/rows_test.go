@@ -2403,3 +2403,53 @@ func TestContextHeatUnchangedPublishesNothing(t *testing.T) {
 		t.Fatalf("next delivery carried %q, want the change: an unchanged marker published a push", got)
 	}
 }
+
+// ---- The PARKED marker: no shim runs the session ---------------------------
+//
+// PRESENT exactly while the session record carries a park
+// (wsm.Session.Parked), which the editor reads to unload the page of a parked
+// workspace off screen.
+
+func TestParkedMarkerFollowsTheSessionsPark(t *testing.T) {
+	cases := []struct {
+		name     string
+		terminal *wsm.SessionTerminal
+		want     bool
+	}{
+		{name: "a live session", terminal: nil, want: false},
+		{name: "a parked session", terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}, want: true},
+		{name: "a killed session", terminal: &wsm.SessionTerminal{Kind: "killed", At: epoch}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := arrange(t)
+
+			// Act.
+			r.SetRegistry(sidebar.Registry{
+				View:         wsm.DefaultSidebarView,
+				Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
+				Repositories: []wsm.Repository{repo},
+				Sessions:     []wsm.Session{{Workspace: theWS, Terminal: tc.terminal}},
+			})
+
+			// Assert: presence is the fact.
+			if got := onlyRow(t, r).GetParked() != nil; got != tc.want {
+				t.Fatalf("parked present = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAWorkspaceWithNoSessionIsNotMarkedParked(t *testing.T) {
+	// Arrange.
+	r := arrange(t)
+
+	// Act.
+	row := onlyRow(t, r)
+
+	// Assert.
+	if got := row.GetParked(); got != nil {
+		t.Fatalf("parked = %v, want none for a workspace with no session", got)
+	}
+}

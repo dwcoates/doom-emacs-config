@@ -943,7 +943,7 @@ window's background its page's gate wears.
 
 Either way the host is asked to hold WS's page
 \(`agent-repl-webhost-ensure-page') when it is wanted
-\(`agent-repl-page-unload-wanted-p': unless cold-gated), which is
+\(`agent-repl-page-unload-wanted-p': unless cold-gated or parked), which is
 idempotent: a page already held at WS's URL is left alone, so this is safe
 on every open and show.  A slot that is not wanted is made with no page.
 

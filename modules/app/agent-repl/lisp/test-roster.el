@@ -4940,3 +4940,20 @@ Each row's tab name is its id, upcased, so a reader that confused the two fails.
     (let ((agent-repl-roster-view (agent-repl-test-roster--family-roster)))
       ;; Act / Assert
       (should (equal (plist-get (agent-repl-roster-family-of "C2") :parent) "P")))))
+
+;;;; ---- The parked marker ----
+
+(ert-deftest agent-repl-test-roster-parked-p-reads-the-rows-marker ()
+  "A workspace whose row carries the parked marker is parked."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:parked t))))
+    (should (agent-repl-roster-parked-p "a"))))
+
+(ert-deftest agent-repl-test-roster-parked-p-is-nil-for-a-live-session ()
+  "A row without the parked marker runs its session on a shim."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) '(:parked nil))))
+    (should-not (agent-repl-roster-parked-p "a"))))
+
+(ert-deftest agent-repl-test-roster-parked-p-is-nil-without-a-row ()
+  "A workspace the roster has no row for is not known parked."
+  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
+    (should-not (agent-repl-roster-parked-p "a"))))

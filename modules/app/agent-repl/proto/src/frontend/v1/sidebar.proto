@@ -832,6 +832,18 @@ message RosterRowIdleAsyncUnread {
 // text while it stands.
 message RosterRowReviving {}
 
+// NO SHIM RUNS THE WORKSPACE'S SESSION: it is parked (wsm.Session.Parked),
+// whatever parked it. Empty: presence is the fact.
+//
+// WHAT IT GATES (owner ruling, 2026-11-23): the editor holds a visible
+// workspace's page only while its session runs on a shim or the user is
+// looking at it. So a park unloads the page of a workspace off screen, a
+// switch to a parked workspace loads its page with no shim started (a prompt
+// alone starts one), and a switch away from it unloads the page again. It
+// says nothing of the status: a parked session is drawn as the idle session
+// it stands in for.
+message RosterRowParked {}
+
 // DETACHED WORK RUNS in this workspace: a subagent, a background shell, or
 // any other work that outlives the main thread's turn. PRESENT exactly while
 // the daemon counts such work as live, on ANY status arm, and absent
@@ -895,7 +907,8 @@ message RosterRowOpenOwnedPullRequest {}
 //
 // WHAT IT GATES: the editor holds a perspective, a composer and a host stream
 // (WatchHostWorkspace) for exactly the workspaces that are not `not_visible`,
-// and loads exactly their pages; the daemon serves a web stream
+// and loads no page of any other (RosterRowParked says which of theirs it
+// holds); the daemon serves a web stream
 // (WatchWebWorkspace) for them alone, reloads only their pages in a deploy,
 // and starts their sessions at boot (beside the ones a merge queue, a deploy
 // check or a fold-spared one-shot runs). The sidebar draws nothing for it.
@@ -2539,6 +2552,9 @@ message RosterRow {
   // The row's CONTEXT HEAT: present while the workspace's context holds at
   // least 400,000 tokens. See RosterRowContextHeat.
   optional RosterRowContextHeat context_heat = 79;
+  // The row's PARKED marker: present while no shim runs the workspace's
+  // session. See RosterRowParked, which carries its whole contract.
+  optional RosterRowParked parked = 80;
 
   // The row's display name.
   RosterRowName name = 2;
