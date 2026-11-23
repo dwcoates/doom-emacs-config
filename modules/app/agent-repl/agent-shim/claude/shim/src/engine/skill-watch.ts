@@ -24,6 +24,18 @@
  * not exist yet is watched from its nearest existing ancestor, so its creation
  * is seen too.
  *
+ * A WATCH IS LIVE ONLY ONCE IT HAS SEEN AN EVENT (measured 2026-11-23, node
+ * 24 on macOS). `fs.watch` returns before the platform stream behind it has
+ * started (libuv starts the FSEvents stream on a thread of its own), and a
+ * change made in that gap is never reported: a file written in the same tick
+ * as the watch was lost 20 times in 20, and the stream came live 14-660ms
+ * later, inside the full test suite too. So the watch proves itself live: it
+ * writes probe files into a directory of its own, watched by the same stream,
+ * until one is seen (`awaitLive`). Every directory armed before the probe is
+ * live then, and a write after it was seen 30 times in 30. What changed in
+ * the gap is found by comparing the skills as they stood when the watch armed
+ * with how they stand once it is live, and reported as a change.
+ *
  * A WATCH THAT FAILS IS A CHANGE. A broken watch may have missed one, and the
  * replacement a change costs is cheap next to a session that silently never
  * learns its skills, so the failure is recorded at ERROR and reported as a
@@ -32,6 +44,7 @@
  * persists (no descriptors left) would spin.
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { bindLog } from "../log.js";
 
@@ -52,14 +65,52 @@ export interface DirWatch {
  */
 export type WatchDir = (dir: string, onEvent: (name: string | null) => void, onError: (err: Error) => void) => DirWatch;
 
-/** The filesystem the watch reads; the real one, or a test's. */
+/** A directory of the watch's own, which its liveness probe writes into. */
+export interface ProbeDir {
+  readonly dir: string;
+  /** Write one more probe file. */
+  write(): void;
+  /** Remove the directory and every probe in it. */
+  remove(): void;
+}
+
+/** The filesystem and clock the watch reads; the real ones, or a test's. */
 export interface SkillWatchFs {
   readonly watchDir: WatchDir;
   /** PATH with every link resolved, or undefined when it does not exist. */
   resolve(target: string): string | undefined;
   /** The entries of directory DIR, or undefined when DIR is not a directory. */
   entries(dir: string): readonly string[] | undefined;
+  /** When FILE last changed, in ms, or undefined when it does not exist. */
+  stamp(file: string): number | undefined;
+  /** A fresh directory for the liveness probe. Throws when none can be made. */
+  probeDir(): ProbeDir;
+  /** Run FN every MS until the answered stop. */
+  every(ms: number, fn: () => void): () => void;
+  /** Run FN once after MS; answers the cancel. */
+  after(ms: number, fn: () => void): () => void;
+  /** The clock, in ms. */
+  now(): number;
 }
+
+/**
+ * How often the liveness probe writes another file while it waits. The first
+ * write is always lost to the gap, and each later one is a few microseconds of
+ * I/O into a directory nobody else reads.
+ */
+export const PROBE_EVERY_MS = 10;
+
+/**
+ * How long the watch may take to come live. MEASURED 2026-11-23 (node 24,
+ * macOS): 14-96ms idle and 14-115ms beside one merge gate (load average 12),
+ * 30 watches each; up to 660ms inside the full suite itself, where every shim
+ * under test arms its watch at once. The bound is three times that worst. Past
+ * it, the watch is recorded at ERROR and reported as a change, as a failed
+ * watch is.
+ */
+export const LIVE_BOUND_MS = 2_000;
+/** The loaded worst the bound stands on, which its ERROR record names. */
+const LIVE_EXPECTED_MS = 660;
 
 /** The platform's own filesystem and notification. */
 export const REAL_SKILL_WATCH_FS: SkillWatchFs = {
@@ -84,6 +135,36 @@ export const REAL_SKILL_WATCH_FS: SkillWatchFs = {
       return undefined;
     }
   },
+  stamp(file) {
+    try {
+      return fs.statSync(file).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  },
+  probeDir() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-repl-skill-probe-"));
+    let written = 0;
+    return {
+      dir,
+      write: () => {
+        written += 1;
+        fs.writeFileSync(path.join(dir, `probe-${written}`), "");
+      },
+      remove: () => fs.rmSync(dir, { recursive: true, force: true }),
+    };
+  },
+  every(ms, fn) {
+    const timer = setInterval(fn, ms);
+    timer.unref();
+    return () => clearInterval(timer);
+  },
+  after(ms, fn) {
+    const timer = setTimeout(fn, ms);
+    timer.unref();
+    return () => clearTimeout(timer);
+  },
+  now: () => performance.now(),
 };
 
 /**
@@ -102,26 +183,170 @@ export function skillDirsOf(configDir: string, cwd: string): string[] {
 export class SkillSetWatch {
   private readonly roots: RootWatch[];
   private started = false;
+  /** Ends the liveness probe while it waits; undefined once it has settled. */
+  private endProbe: (() => void) | undefined;
 
-  constructor(roots: readonly string[], fsys: SkillWatchFs, onChange: (changed: string) => void) {
+  constructor(
+    roots: readonly string[],
+    private readonly fsys: SkillWatchFs,
+    private readonly onChange: (changed: string) => void,
+  ) {
     this.roots = roots.map((root) => new RootWatch(root, fsys, onChange));
   }
 
-  /** Arm every watch. A second call does nothing. */
+  /** Arm every watch, then prove it live (`awaitLive`). A second call does nothing. */
   start(): void {
     if (this.started) return;
     this.started = true;
     for (const root of this.roots) root.arm();
+    this.awaitLive(this.roots.map((root) => root.inventory()));
   }
 
   /** End every watch. */
   close(): void {
+    this.endProbe?.();
     for (const root of this.roots) root.close();
   }
+
+  /**
+   * THE WATCH IS LIVE ONCE THE PROBE IS SEEN (see the file header). BEFORE is
+   * every root's inventory as it stood when the watch armed; once live, each
+   * root whose inventory moved is re-armed and its changes reported. Past
+   * LIVE_BOUND_MS, or when the probe cannot run at all, every root is reported
+   * as a change, as a failed watch is.
+   */
+  private awaitLive(before: readonly Inventory[]): void {
+    const startedAt = this.fsys.now();
+    let probe: ProbeDir;
+    let watch: DirWatch | undefined;
+    try {
+      probe = this.fsys.probeDir();
+    } catch (err) {
+      this.probeFailed("making its directory", err);
+      return;
+    }
+    let probes = 0;
+    const write = (): void => {
+      probes += 1;
+      try {
+        probe.write();
+      } catch (err) {
+        settle();
+        this.probeFailed("writing a probe", err);
+      }
+    };
+    const stops: (() => void)[] = [];
+    const settle = (): void => {
+      if (this.endProbe === undefined) return;
+      this.endProbe = undefined;
+      for (const stop of stops) stop();
+      watch?.close();
+      probe.remove();
+    };
+    this.endProbe = settle;
+    try {
+      watch = this.fsys.watchDir(
+        probe.dir,
+        () => {
+          if (this.endProbe === undefined) return;
+          settle();
+          LOGGER.info(
+            { live_ms: Math.round(this.fsys.now() - startedAt), probes },
+            "the watch on the vendor's skills is live",
+          );
+          this.catchUp(before);
+        },
+        (err) => {
+          if (this.endProbe === undefined) return;
+          settle();
+          this.probeFailed("watching its directory", err);
+        },
+      );
+    } catch (err) {
+      settle();
+      this.probeFailed("watching its directory", err);
+      return;
+    }
+    stops.push(this.fsys.after(LIVE_BOUND_MS, () => {
+      if (this.endProbe === undefined) return;
+      settle();
+      LOGGER.error(
+        {
+          cause: `no probe was seen within ${LIVE_BOUND_MS}ms`,
+          bound_ms: LIVE_BOUND_MS,
+          expected_ms: LIVE_EXPECTED_MS,
+          probes,
+          roots: this.roots.map((root) => root.root),
+        },
+        "the watch on the vendor's skills did not come live within its bound; reporting every skills directory as a change, which gets the shim replaced",
+      );
+      for (const root of this.roots) this.onChange(root.root);
+    }));
+    stops.push(this.fsys.every(PROBE_EVERY_MS, write));
+    write();
+  }
+
+  /** Report what changed between BEFORE and now, root by root, re-arming each root that moved. */
+  private catchUp(before: readonly Inventory[]): void {
+    this.roots.forEach((root, i) => {
+      const changed = changedPaths(before[i] ?? new Map(), root.inventory());
+      if (changed.length === 0) return;
+      LOGGER.info(
+        { skills_dir: root.root, changed },
+        "the vendor's skills changed while the watch was coming live; re-arming and reporting it",
+      );
+      root.arm();
+      for (const at of changed) this.onChange(at);
+    });
+  }
+
+  /** The probe could not run while it was WHEN: recorded at ERROR, and every root reported as a change. */
+  private probeFailed(when: string, err: unknown): void {
+    this.endProbe = undefined;
+    LOGGER.error(
+      { when, cause: err instanceof Error ? err.message : String(err), roots: this.roots.map((root) => root.root) },
+      "the watch on the vendor's skills could not prove itself live; reporting every skills directory as a change, which gets the shim replaced",
+    );
+    for (const root of this.roots) this.onChange(root.root);
+  }
+}
+
+/**
+ * A skills directory as the vendor would load it: each path that counts
+ * (the directory itself, each entry, each skill's file), by a stamp that
+ * moves whenever what it names does.
+ */
+type Inventory = ReadonlyMap<string, string>;
+
+/** Every path whose stamp differs between BEFORE and AFTER, either side's alone included. */
+export function changedPaths(before: Inventory, after: Inventory): string[] {
+  const keys = new Set([...before.keys(), ...after.keys()]);
+  return [...keys].filter((key) => before.get(key) !== after.get(key)).sort();
 }
 
 /** The watch on one skills directory, its skills, and its absence. */
 class RootWatch {
+  /**
+   * The directory as it stands: absent, or present with each entry's
+   * resolved target and its skill file's stamp (`Inventory`).
+   */
+  inventory(): Inventory {
+    const held = new Map<string, string>();
+    const entries = this.fsys.entries(this.root);
+    if (entries === undefined) {
+      held.set(this.root, "absent");
+      return held;
+    }
+    held.set(this.root, "present");
+    for (const entry of entries) {
+      const at = path.join(this.root, entry);
+      const target = this.fsys.resolve(at);
+      const stamp = target === undefined ? undefined : this.fsys.stamp(path.join(target, SKILL_FILE));
+      held.set(at, `${target ?? "unresolved"}:${stamp ?? "no-skill-file"}`);
+    }
+    return held;
+  }
+
   /** The watch on the skills directory itself, or on its nearest existing ancestor while it is missing. */
   private anchor: DirWatch | undefined;
   /** Each skill's watch, by its entry name, at its resolved directory. */
@@ -129,7 +354,7 @@ class RootWatch {
   private closed = false;
 
   constructor(
-    private readonly root: string,
+    readonly root: string,
     private readonly fsys: SkillWatchFs,
     private readonly onChange: (changed: string) => void,
   ) {}

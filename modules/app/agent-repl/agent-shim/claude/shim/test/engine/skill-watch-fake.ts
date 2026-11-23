@@ -6,7 +6,7 @@
  * built with an empty one arms its watch against nothing and reads no real
  * directory, and a test that needs a change fires one by hand.
  */
-import type { DirWatch, SkillWatchFs } from "../../src/engine/skill-watch.js";
+import type { DirWatch, ProbeDir, SkillWatchFs } from "../../src/engine/skill-watch.js";
 
 /**
  * An in-memory filesystem of directories and links, and a watch whose events
@@ -82,6 +82,86 @@ export class FakeSkillWatchFs implements SkillWatchFs {
         );
       },
     };
+  }
+
+  /** Each file's stamp, by path; a file not here has none. */
+  readonly stamps = new Map<string, number>();
+  /**
+   * Whether the platform stream is live. While it is not, a probe written is
+   * lost, as a write in the real gap is; once it is, the probe's watch sees
+   * each one at once.
+   */
+  live = true;
+  /** Whether making the probe's directory fails. */
+  probeUnavailable = false;
+  /** The probe directory the watch made, while it stands. */
+  probe: string | undefined;
+  /** How many probes were written. */
+  probesWritten = 0;
+  private clock = 0;
+  private readonly timers: { at: number; every: number | undefined; fn: () => void; stopped: boolean }[] = [];
+
+  /** Bring the stream live: the next probe written is seen. */
+  goLive(): void {
+    this.live = true;
+  }
+
+  /** Move the clock on by MS, running every timer that falls due, in order. */
+  tick(ms: number): void {
+    const end = this.clock + ms;
+    for (;;) {
+      const due = this.timers
+        .filter((t) => !t.stopped && t.at <= end)
+        .sort((a, b) => a.at - b.at)[0];
+      if (due === undefined) break;
+      this.clock = due.at;
+      if (due.every === undefined) due.stopped = true;
+      else due.at += due.every;
+      due.fn();
+    }
+    this.clock = end;
+  }
+
+  stamp(file: string): number | undefined {
+    return this.stamps.get(file);
+  }
+
+  probeDir(): ProbeDir {
+    if (this.probeUnavailable) throw new Error("ENOSPC: no space left on device, mkdtemp");
+    const dir = "/tmp/agent-repl-skill-probe-1";
+    this.mkdir(dir);
+    this.probe = dir;
+    return {
+      dir,
+      write: () => {
+        this.probesWritten += 1;
+        if (this.live) this.fire(dir, `probe-${this.probesWritten}`);
+      },
+      remove: () => {
+        this.remove(dir);
+        this.probe = undefined;
+      },
+    };
+  }
+
+  every(ms: number, fn: () => void): () => void {
+    const timer = { at: this.clock + ms, every: ms, fn, stopped: false };
+    this.timers.push(timer);
+    return () => {
+      timer.stopped = true;
+    };
+  }
+
+  after(ms: number, fn: () => void): () => void {
+    const timer = { at: this.clock + ms, every: undefined, fn, stopped: false };
+    this.timers.push(timer);
+    return () => {
+      timer.stopped = true;
+    };
+  }
+
+  now(): number {
+    return this.clock;
   }
 
   resolve(target: string): string | undefined {

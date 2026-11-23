@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SkillSetWatch, skillDirsOf } from "../../src/engine/skill-watch.js";
+import { changedPaths, LIVE_BOUND_MS, PROBE_EVERY_MS, SkillSetWatch, skillDirsOf } from "../../src/engine/skill-watch.js";
 import { FakeSkillWatchFs as FakeFs } from "./skill-watch-fake.js";
 import { logRecordsDuring } from "../log-records.js";
 
@@ -252,5 +252,195 @@ describe("SkillSetWatch", () => {
     for (const w of held) w.onEvent("late");
 
     expect(changes).toEqual([]);
+  });
+});
+
+/**
+ * THE WATCH PROVES ITSELF LIVE. A platform watch reports nothing until its
+ * stream has started, so the watch probes a directory of its own until a
+ * probe is seen, then reports whatever changed in the gap.
+ */
+describe("SkillSetWatch coming live", () => {
+  /** ARRANGE's filesystem with its stream not yet live. */
+  function arrangeInGap(): ReturnType<typeof arrange> {
+    const arranged = arrange();
+    arranged.fsys.live = false;
+    return arranged;
+  }
+
+  it("records that it is live, and how long it took", () => {
+    // Arrange
+    const { fsys, watch } = arrangeInGap();
+    watch.start();
+    fsys.goLive();
+
+    // Act
+    const records = logRecordsDuring(() => fsys.tick(PROBE_EVERY_MS * 2));
+
+    // Assert
+    expect(
+      records.find((r) => r.message === "the watch on the vendor's skills is live")?.context,
+    ).toMatchObject({ live_ms: PROBE_EVERY_MS, probes: 2 });
+  });
+
+  it("reports a skill installed while it was coming live", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    fsys.mkdir(`${SHARED}/beta`);
+    fsys.link(`${ROOT}/beta`, `${SHARED}/beta`);
+    fsys.goLive();
+
+    // Act
+    fsys.tick(PROBE_EVERY_MS);
+
+    // Assert
+    expect(changes).toEqual([`${ROOT}/beta`]);
+  });
+
+  it("watches a skill installed while it was coming live", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    fsys.mkdir(`${SHARED}/beta`);
+    fsys.link(`${ROOT}/beta`, `${SHARED}/beta`);
+    fsys.goLive();
+    fsys.tick(PROBE_EVERY_MS);
+    changes.length = 0;
+
+    // Act
+    fsys.fire(`${SHARED}/beta`, "SKILL.md");
+
+    // Assert
+    expect(changes).toEqual([`${SHARED}/beta/SKILL.md`]);
+  });
+
+  it("reports a skill file rewritten while it was coming live", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    fsys.stamps.set(`${SHARED}/alpha/SKILL.md`, 2);
+    fsys.goLive();
+
+    // Act
+    fsys.tick(PROBE_EVERY_MS);
+
+    // Assert
+    expect(changes).toEqual([`${ROOT}/alpha`]);
+  });
+
+  it("reports nothing when nothing changed while it was coming live", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    fsys.goLive();
+
+    // Act
+    fsys.tick(PROBE_EVERY_MS);
+
+    // Assert
+    expect(changes).toEqual([]);
+  });
+
+  it("removes its probe directory once live", () => {
+    // Arrange
+    const { fsys, watch } = arrange();
+
+    // Act
+    watch.start();
+
+    // Assert
+    expect([fsys.probe, fsys.watching("/tmp/agent-repl-skill-probe-1")]).toEqual([undefined, false]);
+  });
+
+  it("stops probing once live", () => {
+    // Arrange
+    const { fsys, watch } = arrange();
+    watch.start();
+    const written = fsys.probesWritten;
+
+    // Act
+    fsys.tick(PROBE_EVERY_MS * 5);
+
+    // Assert
+    expect(fsys.probesWritten).toBe(written);
+  });
+
+  it("reports every root at ERROR when it is not live within its bound", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+
+    // Act
+    const records = logRecordsDuring(() => fsys.tick(LIVE_BOUND_MS));
+
+    // Assert
+    expect([
+      changes,
+      records.find((r) => r.level === "error")?.context,
+      fsys.probe,
+    ]).toEqual([[ROOT], expect.objectContaining({ bound_ms: LIVE_BOUND_MS, expected_ms: 660, roots: [ROOT] }), undefined]);
+  });
+
+  it("reports every root at ERROR when its probe directory cannot be made", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrange();
+    fsys.probeUnavailable = true;
+
+    // Act
+    const records = logRecordsDuring(() => watch.start());
+
+    // Assert
+    expect([changes, records.find((r) => r.level === "error")?.context]).toEqual([
+      [ROOT],
+      expect.objectContaining({ when: "making its directory", roots: [ROOT] }),
+    ]);
+  });
+
+  it("reports every root at ERROR when its probe directory cannot be watched", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrange();
+    fsys.unwatchable.add("/tmp/agent-repl-skill-probe-1");
+
+    // Act
+    const records = logRecordsDuring(() => watch.start());
+
+    // Assert
+    expect([changes, records.find((r) => r.level === "error")?.context, fsys.probe]).toEqual([
+      [ROOT],
+      expect.objectContaining({ when: "watching its directory" }),
+      undefined,
+    ]);
+  });
+
+  it("reports nothing once closed while coming live", () => {
+    // Arrange
+    const { fsys, changes, watch } = arrangeInGap();
+    watch.start();
+    watch.close();
+
+    // Act
+    fsys.tick(LIVE_BOUND_MS * 2);
+
+    // Assert
+    expect([changes, fsys.probe]).toEqual([[], undefined]);
+  });
+});
+
+describe("changedPaths", () => {
+  it("names a path only the later inventory holds", () => {
+    expect(changedPaths(new Map(), new Map([["/a", "x"]]))).toEqual(["/a"]);
+  });
+
+  it("names a path only the earlier inventory holds", () => {
+    expect(changedPaths(new Map([["/a", "x"]]), new Map())).toEqual(["/a"]);
+  });
+
+  it("names a path whose stamp moved", () => {
+    expect(changedPaths(new Map([["/a", "x"]]), new Map([["/a", "y"]]))).toEqual(["/a"]);
+  });
+
+  it("names nothing for equal inventories", () => {
+    expect(changedPaths(new Map([["/a", "x"]]), new Map([["/a", "x"]]))).toEqual([]);
   });
 });
